@@ -1,0 +1,768 @@
+# Changelog
+
+All notable changes are listed here. Format: [Keep a Changelog](https://keepachangelog.com/),
+versions follow [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Offline licensing
+
+ARCILOGGER is sold to many organisations under a **perpetual licence plus annual maintenance**
+(owner decisions of 2026-10-20, [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) "Licensing", L1–L8 and
+C-1–C-16; [ADR-0013](docs/adr/0013-offline-licensing.md); customer guide
+[docs/LISANS.md](docs/LISANS.md) / [docs/LICENSING.md](docs/LICENSING.md)). The licence switches
+only paid modules; it never stops a 5651 function and never changes evidence. ARCILOGGER remains
+*designed to support* 5651 obligations; nothing here is a claim of legal compliance.
+
+- **Modules:** `core_5651` (5651 Temel: collection, sealing, retention, 5651 lookups, evidence
+  packages, devices and persons, alerts, audit log — on in every licence and every state),
+  `usage_analytics` (Kullanım analizi), `usage_reports` (Zamanlanmış kullanım raporları, needs
+  usage analytics) and `bulk_import` (Toplu içe aktarma (CSV); manual entry always works). Limits:
+  log sources (a configured device or any sender seen in the last 30 days; soft: logs over the
+  limit are still collected and sealed) and active users (creating or re-enabling a user is
+  refused at the limit; 3 without a valid licence, none during the trial).
+- **Trial:** 14 days with every module and a "Deneme sürümü — N gün kaldı" banner. The start
+  survives a reinstallation with the old data folder (the oldest vault and spool day, the audit
+  log and the licence history pull it back); a trial start ahead of the trusted time makes the
+  trial unavailable (`trial_clock_inconsistent`).
+- **Offline activation, no network call:** a request code (`ARCIREQ1-…`: server id from the
+  Windows MachineGuid and SMBIOS UUID, installation id, version, organisation name, checksum) is
+  shown on the new licence page (Ayarlar → Lisans), by `arcilogger-db license request-code` and at
+  the end of the installation; the licensor (Arman Khadangan, arman@khadangan.com) returns a
+  signed `.lic` (Ed25519 over the RFC 8785 canonical payload, key ids for rotation), installed in
+  the web interface, with `arcilogger-db license install` or the installer's `-LicenseFile`.
+  ARCILOGGER never contacts the licensor; no telemetry.
+- **States and banners:** `trial`, `trial_expired` (Lisanssız), `licensed`, `invalid`,
+  `wrong_server`, `expired` (a time-limited `valid_until` demo licence), `version_not_covered` (a
+  version released after `maintenance_until`); all but `trial` and `licensed` leave 5651 Temel
+  only. Trusted time: the latest of the system clock, the newest verified Kamu SM time stamp, the
+  end of the newest vault day, the version's release day and the licence's issue time, so setting
+  the clock back extends nothing while there are sealed days.
+- **API:** `GET/POST/DELETE /api/v1/license`; the routers `/usage`, `/reports`, `/imports` answer
+  403 `module_not_licensed` while their module is off; `POST /users` and re-enabling a user 409
+  `license_limit` at the users limit; every licence install, removal, refusal, state change and
+  limit crossing is audited (`license.*`). `arcilogger-api create-admin` respects the users limit
+  except for true recovery or with `--deactivate USERNAME`.
+- **Worker:** job `license.check` (every 5 minutes; records state changes and limit crossings,
+  writes `state\license-status.json` for the installer); the paid jobs (`usage.*`,
+  `reports.run_due`) are skipped while their module is off (one `skipped` row a day), an open
+  `R20-report` is resolved when scheduled reports go off; `arcilogger-worker usage rebuild` is the
+  only gated command. Data minimisation jobs and every 5651 job always run.
+- **Database:** revision `0014_license` with the append-only tables `license_installation`,
+  `license_files`, `license_events` (docs/DATA-MODEL.md); the licence is the signed file, verified
+  again on every evaluation.
+- **Installer:** `-LicenseFile` (installed right after the schema migration; a refusal is a
+  warning, exit code 1), the maintenance rule before any change (a bundle whose `release_date` is
+  after the licence's maintenance date stops with exit code 2; `-AllowUncoveredUpgrade` installs it
+  with 5651 Temel only, so a 5651 fix can always be installed), a warning before upgrading an
+  installation without a licence whose vault holds older sealed days, and step 6 of the next
+  steps with the request code. `bundle-manifest.json` and `VERSION.json` carry `release_date`.
+  The services and scheduled tasks run Python isolated (`python.exe -I -X utf8 -u -m …`, tasks
+  `-I -m …`).
+- **No secrets:** the production key set is empty until the owner commits the first public key,
+  so every installation runs in trial or unlicensed mode until then; the issuer tool
+  (`tools/license-issuer`, owner only) is never part of the bundle, and the test helpers are
+  excluded from the wheels.
+- **Lisans Yöneticisi (licence manager, owner only):** the issuer as a Tk window for the owner's
+  offline Windows PC (settings, key generation, issue with the earlier-licence choice, registry
+  with renewal, verify), one implementation with the command line, shipped as one zip built by
+  `.github/workflows/license-manager.yml` (`tools/license-issuer/README.md`); never in the bundle.
+- **Threat model, stated plainly** (ADR-0013, docs/SECURITY.md section 13, LICENSING section 11):
+  identity spoofing on virtual machines, a full fresh install, a database owner disabling triggers,
+  reading already computed usage tables with SQL and a determined administrator patching the
+  checker cannot be prevented offline; the remedies are contractual. Hardening (compiled licence
+  module, signed file manifest, Authenticode) is phase 2.
+- **Existing installations** upgrade into `trial_expired` (their sealed days are older than 14
+  days) unless a licence is installed with or before the upgrade (docs/LISANS.md section 8).
+- **Setup .exe and releases:** `ARCILOGGER-Setup-<version>.exe /LICENSEFILE="<file>"` and
+  `/ALLOWUNCOVEREDUPGRADE` pass `-LicenseFile` and `-AllowUncoveredUpgrade` to the installer (C-6:
+  also possible with only the setup .exe); the upgrade warning for an installation without a
+  licence now sends the operator to Ayarlar → Lisans after the upgrade instead of to
+  `-LicenseFile`, and names `usage.auto_rebuild_days` (default 7) and **Yeniden hesapla** for
+  the usage rollups; the release job
+  stops a tag whose `RELEASE_DATE` was not bumped (`tools/release/check_release_date.py`).
+
+### Product without customer data
+
+ARCILOGGER is a product for many organisations (owner decision 2026-10-20,
+[docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) P1–P8). It remains *designed to support* 5651
+obligations; nothing here is a claim of legal compliance.
+
+- **No data of a particular organisation:** the code, the tests, the documents and the defaults
+  name no organisation, its e-mail addresses, devices, firmware versions, addresses, network plan
+  or guest-network design. Tests and examples use a fictional organisation and network
+  (`Örnek A.Ş.`, `ornek.example`, private and documentation address ranges).
+- **Organisation name:** `site_name` is empty by default (one line, at most 200 characters, no
+  control characters). The installer asks for it (`-SiteName`, required on a first non-interactive
+  installation, kept on an upgrade); `arcilogger-core config-check [--json]` reports what a
+  production configuration still lacks (no organisation name: error, exit code 1; no local time
+  source: warning). Without a name the 5651 report leaves it out of its opening sentence and
+  footer (a dash in the Kurum field), the usage reports out of the mail subject, the summary, the
+  HTML header, the PDF cover and footer and the workbook's "Site" row; evidence packages and the
+  password checks cope with it. `GET /api/v1/auth/me` returns `site_name`; the web sidebar shows it
+  under the product name and nothing when it is empty (the locale key `app.site` is gone).
+- **Time source:** `[clock] ntp_server` is empty by default; the installer asks for it
+  (`-NtpServer`). Without it the hourly clock check asks only `[clock] fallback_server` and records
+  a warning with every sample, `Set-ArciTime.ps1` sets the fallback as the only source and the
+  manifest records the source the server follows; no time server at all is reported and alerted
+  instead of querying an empty host.
+- **Admin address:** `-AdminAddress` of the installer and of `Set-ArciFirewall.ps1` has no default:
+  given, remembered, or typed at the console; otherwise a clear Turkish/English stop with
+  `10.0.0.10` / `10.0.0.0/24` examples. Given on an upgrade, `-SiteName` / `-NtpServer` rewrite only
+  that line of the existing `arcilogger.toml` (the previous file is kept as
+  `arcilogger.toml.before-<time>`). The setup's publisher is `ARCILOGGER`; the example
+  configuration has placeholders and lists the fictional example network's `[[sources]]` as
+  comments only (ADR-0007 amendment 2026-10-20).
+- **No log source on a first installation:** the `arcilogger.toml` a first installation makes
+  from the example configures no device (before, the example network's devices: silent-source
+  alerts for devices that never send, and their parser for a sender at one of their addresses).
+  The commented example sources stay in the file (remove the `#` to use them; `tools/loadgen`
+  sends from them). No source is a valid state: `Set-ArciFirewall.ps1`
+  makes no syslog rule then (514 stays closed) and warns instead of stopping; the installer's
+  preflight warns instead of failing (`preflight.sources`, also with `-SkipFirewall`, where every
+  sender becomes `unknown-<ip>`, and on a new installation over the `arcilogger.toml` a removal
+  kept, read without Python then; an invalid address still stops it before the firewall step), its
+  next steps say to add the `[[sources]]` of the firewall and the core router, and the
+  installation ends with warnings (exit code 1). `arcilogger-core config-check` warns
+  (`sources`); the Panel's "Log alımı" box says "İzlenen kaynak yok" with what to add instead of
+  "0/0 kaynak aktif" and a green badge. An existing `arcilogger.toml` is never replaced, so an
+  upgrade keeps its sources. DEVICE-SETUP §4, KURULUM / INSTALL §7.1 and ILK-ADIMLAR /
+  FIRST-STEPS §5 describe the step.
+- **Licence:** `LICENSE` names the rights holder, Arman Khadangan; every organisation uses the
+  software under its own licence agreement with the rights holder.
+- **No network plan shipped:** the production seed writes only the default settings — no VLANs,
+  no departments, no sources (`lease.server_seconds` now `{}`); `arcilogger-db upgrade` no longer
+  reports VLAN and department counts. Revision `0013_site_data` hands a `lease.server_seconds`
+  row an earlier seed still owned to `:migration`, so an existing site keeps its lease times;
+  VLANs and departments seeded earlier stay. The tests' example site lives in
+  `arcilogger_db.testing` (`seed_example_network`, `EXAMPLE_VLANS`; the test template database has
+  it unless `create_template(example_network=False)`).
+- **Texts name device roles, not host names:** a missing lease points at the main router
+  (MikroTik, the DHCP server), the evidence records read "DHCP kaydı (MikroTik)", the guest-network
+  explanation describes the configuration option (another exit than the FortiGate, e.g. a separate
+  line or a VPN tunnel), the replica alert names `[replica] target`; the fallback link of the alert
+  and report e-mails is `https://arcilogger.internal` (the installer's default server name).
+- **Log format samples** (`tests/fixtures/format/`: `fortigate-sample.log`,
+  `mikrotik-log-print-sample.txt`): synthetic, modelled on FortiOS 7.6 / RouterOS 7 output with
+  their field names, order, quoting and separators; all values fictional, `SHA256SUMS`
+  regenerated. Tests, the load generator and the documents refer to them.
+- **A small example:** the example configuration's commented `[[sources]]` are a firewall, the
+  core router (the DHCP server) and one switch; `tools/loadgen` sends from exactly these. The
+  tests' example network (`arcilogger_db.testing`) is a small fictional plan with generic
+  purposes: static VLANs for network devices and servers, three department VLANs, one staff
+  Wi-Fi, a guest Wi-Fi with 1 h leases and a /30 transit link. The load generator simulates it
+  with documentation MAC addresses (RFC 7042) that follow each device's address, guests that
+  browse through the firewall like everyone else and neutral policy and log-prefix names. The UI
+  kit page shows only placeholders and documentation addresses.
+- **Usage background domains:** the shipped `usage.background_domains` list the operating systems'
+  services, certificate checks and the update hosts of the two supported log sources (FortiGate,
+  MikroTik); administrators add the update and cloud hosts of their own products (IP phone system,
+  antivirus, …).
+- **Documents:** they speak of the organisation; the device guide uses placeholders
+  (`<arcilogger>`, `<firewall>`, `<router>` …) and describes a guest network that bypasses the
+  FortiGate as a configuration option (DEVICE-SETUP §5); KURULUM / INSTALL §7.1 describe the
+  organisation's own values; the legal drafts are templates (`[Şirket unvanı]`, `[adres]`,
+  `[VERBİS kayıt no]`, still "Taslak — hukuk müşaviri onayı gerekir"); the ADRs, ASSUMPTIONS and
+  this changelog keep their decision history without naming an organisation, and ASSUMPTIONS
+  lists the installation-time settings (G1–G10) every organisation enters.
+- **Upgrading an existing installation** changes nothing it relies on: `arcilogger.toml` (with its
+  `site_name` and `[clock] ntp_server`), the remembered admin addresses, the VLANs, departments and
+  lease times in the database are kept.
+
+### VLAN management
+
+- **The organisation enters its network on the web:** the **Departmanlar ve VLAN'lar** tab of
+  Cihazlar ve Kişiler adds, edits and deletes VLANs and subnets (`devices.manage`; other roles
+  with `devices.read` see the list only). A new installation shows "Henüz VLAN yok: ağınızı
+  ekleyin"; the form checks the network (prefix length, host bits zero — the message names the
+  network meant —, no IPv4 network written as IPv6), the VLAN id (1–4094) and the DHCP server
+  name before sending, the server's refusals are shown in the form, and a deletion asks for a
+  confirmation that says what it changes. After a save the focus goes back to the row's menu
+  button, also to the new row of a VLAN moved to another network. The department select of each
+  row stays.
+- **API** (`/api/v1/vlans`, docs/MVP-CONTRACTS.md section 11): `POST` (201), `PATCH` with only the
+  fields sent — the old body `{subnet, department_id}` still changes only the department —,
+  `new_subnet` to correct a VLAN's network (name, department and flags stay) and
+  `DELETE ?subnet=` (204). An IPv4 network written as IPv6 (`::ffff:10.0.20.0/120`) is refused
+  with the IPv4 network meant: no IPv4 address falls into it. Subnet, VLAN id and DHCP server are
+  unique (409 `vlan_exists`, `vlan_id_taken`, `dhcp_server_taken`, Turkish and English texts
+  naming the network that holds them); nested subnets are allowed, the most specific wins as
+  before. `VlanOut` gains `dhcp_server` and `notes`. Audited as `vlan.create`, `vlan.update` (now
+  with `changed`), `vlan.delete`: subnets, VLAN ids, department ids and the guest flag, the texts
+  only as field names (`vlan.create` lists the fields the request sent with a value).
+- **Changes take effect like a department change:** the device list, the department list and
+  the next 5651 lookup use the table at once (stored lookups keep their result); the usage pages
+  read the VLAN's department by VLAN number when they are shown (a deleted VLAN's department goes
+  at once), and a changed VLAN number of an address (a renumbered VLAN, a new one or one with a
+  new network; for addresses leaving a deleted or moved VLAN only the hours without a lease, the
+  leased hours keep the lease's number) is rebuilt by `usage.reattribute` for the last
+  `usage.auto_rebuild_days` days (tested in `worker/tests/test_usage_jobs.py`).
+- **Texts:** the departments' empty-list hint no longer says the installer creates departments;
+  the first-steps guides (ILK-ADIMLAR / FIRST-STEPS sections 5 and 12), KURULUM / INSTALL,
+  roles.md, DATA-MODEL, ARCHITECTURE and ASSUMPTIONS (P4, G6, V1–V4) describe entering the VLANs;
+  the "VLAN list cannot be entered" limitation is gone.
+
+### Usage reports
+
+- **Scheduled usage reports** ([ADR-0012](docs/adr/0012-scheduled-usage-reports.md),
+  [docs/KULLANIM-RAPORLARI.md](docs/KULLANIM-RAPORLARI.md) /
+  [docs/USAGE-REPORTS.md](docs/USAGE-REPORTS.md)): the worker job `reports.run_due` (every
+  minute) runs the schedules of `report_schedules` (revision `0011_reports`) — Gün sonu raporu
+  18:30 (the day so far), Tam gün raporu 07:00 (the previous day), weekly (Monday 07:15, the
+  previous ISO week) and monthly (day 1 07:30, the previous month), shipped disabled until
+  recipients are set, person-level with names (owner decision 2026-10-20). Europe/Istanbul local
+  times; after downtime a schedule runs once for its newest occurrence (`reports.catch_up`).
+- **Three renderings of one document:** an HTML e-mail made for Outlook and Gmail (tables and
+  inline styles, no images, scripts or external resources, the ARCILOGGER address the only link,
+  Turkish first with an English summary line), a PDF (cover, one section per department with its
+  persons, per-person detail with the top 20 sites, categories and blocked attempts, "Sayfa n /
+  N", generation time) and an Excel workbook (Özet, Departmanlar, Kişiler, Kişi-Site, Kişi-Saat,
+  Engellenenler, Cihazlar; durations as time values, bytes as numbers, frozen and filtered
+  headers, no formulas). Every rendering prints the method note: usage times are estimates. The
+  content: company totals, departments, every person, notable changes vs. the 7-day average, the
+  period's security alerts (catalogue texts only, never a log line) and the previous day's
+  sealing status.
+- **Delivery** through the alert e-mail's SMTP client: one e-mail per recipient, PDF and workbook
+  attached up to `reports.max_attachment_mb` (15 MB, else a download link), retries with the
+  alert e-mail's backoff, per-recipient state in `report_runs`, the local alert `R20-report` on
+  giving up. Files in `exports/usage-reports/<run>/` with SHA-256, never in the vault, deleted
+  after `reports.keep_days` (400 days) by `reports.purge`.
+- **API** `/api/v1/reports` (`reports.manage`): schedules (validated recipients, `HH:MM`,
+  weekday / day of month), "run now", run history with deliveries, downloads checked against
+  the SHA-256, preview; every change, run, download and preview audited (addresses only as a
+  count); the KVKK notice for person-level content.
+- The DejaVu fonts, their registration, the PDF styles and the PDF text extraction moved from
+  the API into `arcilogger_worker.pdf` (re-exported under the old names); the official 5651
+  report renders the same bytes. New worker dependencies: reportlab, openpyxl (MIT).
+- Review fixes: an end-of-day schedule at 00:00 (an empty period) is refused by the API (422
+  `time`) and the Raporlar form, and one stored before no longer stops the other schedules; a
+  control character in a host name is written as `\xNN` in the workbook instead of failing the
+  whole report; the PDF matches a person's sites and blocked attempts by the subject, so persons
+  (or a person and a device) with the same name stay apart; reports over several days date the
+  first and last activity; a list of blocked attempts cut at 50 000 says so (workbook, PDF, data
+  quality); a day over `usage.blocked_per_day` gets a data quality note (a whole-day report lists
+  only its stored attempts, a part-day report such as the end-of-day one can count only those);
+  the group without a department is "Bilinmiyor" in every part of a report; editing a
+  schedule's name, recipients or formats keeps an occurrence the worker has not run yet;
+  pseudonyms without the secret `usage.pseudonym_key` are refused with 409
+  `pseudonym_key_missing` (preview, schedule, "run now") and the worker uses its own secret
+  store; the docs explain that `reports.max_attachment_mb` counts the attachments before base64
+  encoding.
+
+### Backups
+
+- **Scheduled database backup** ([ADR-0009](docs/adr/0009-database-backup.md),
+  [docs/YEDEKLEME.md](docs/YEDEKLEME.md) / [docs/BACKUP.md](docs/BACKUP.md)): the new task
+  `\ARCILOGGER\Backup` (daily 01:40, LOCAL SERVICE) runs `arcilogger-db backup run` — `pg_dump -Fc`
+  as the ARCILOGGER role into `D:\ARCILOGGER\backups\scheduled\`, the password only in a temporary
+  password file, written under a temporary name and checked with `pg_restore --list` before it is
+  renamed, a sidecar with SHA-256 and versions, `state\backup\last.json` after every attempt and an
+  `R20-backup` alert on a failure; refused below `[backup] min_free_gb` plus the newest dump's size.
+- Retention: the newest dump of each of the last 14 days, 8 weeks and 12 months
+  (`arcilogger-db backup prune`), deleting only ARCILOGGER's dump names in that folder (never the
+  installer's `backups\db`) and never the dump a run has just made (a clock set back:
+  `R20-backup:clock`, resolved by a later good backup); `backup list` and `backup verify
+  [--deep]`. A failed retention has its own alert key (`R20-backup:prune`, resolved an hour after
+  a later good backup that no longer reports it); a dump whose `last.json` could not be written
+  raises `R20-backup`, resolved only by a backup that succeeds after it.
+- **Restore** only into a new database (`arcilogger-db backup restore --file F --target-db NAME
+  [--sha256 HEX]`, the superuser password read from stdin, locale `C` like the installer's
+  database, one transaction per statement — TimescaleDB's chunks outgrow the lock table of a
+  single transaction —, TimescaleDB pre/post restore) with the steps to switch ARCILOGGER to it;
+  the live database is never dropped or overwritten. The sidecar only detects accidental damage
+  (any LOCAL SERVICE process can replace a dump with its sidecar): the runbook records each
+  copy's SHA-256 off the server and restores with `--sha256`.
+- `[backup]` configuration section; NTFS rights: `backups\scheduled` is written by the scheduled
+  tasks only and readable by no ARCILOGGER service.
+
+### Alerts
+
+- **Alerts in the database** (`arcilogger-worker`, ADR-0010): `alerts.import` copies every
+  `state/alerts.jsonl` line into `alerts` exactly once (byte offset stored with the alerts, torn
+  last lines wait, replaced files are read again; after a power cut `raise_alert` starts on a
+  fresh line and the torn fragment is skipped); one active alert per dedup key, resolved
+  automatically when the problem is gone (`resolved_at`, `details.auto_resolved`).
+- **R15 log source silent** (`alerts.r15`, every minute): enabled, expected, configured sources
+  silent longer than their `[[sources]] heartbeat_minutes` (example configuration: firewall 10, core
+  router 15), judged by what ingest loaded and what the collector received; start-up and never-seen
+  grace periods.
+- **R20 system checks** (`alerts.system`, every 5 minutes): disk (data and system drive),
+  sealing overdue in the morning, verification failed, Kamu SM credit, a sealed day without a
+  replica, parse failure rate, failing worker jobs, database backup (`state/backup/last.json`;
+  retention failures apart; nothing while `[backup] enabled = false`), clock recovery.
+  Thresholds are `alerts.*` database settings with validated ranges.
+- **Sealing configuration errors alert:** no Kamu SM credentials, no pinned roots, no Zamane
+  client or an unusable secret store raise `R20-seal-config` (high, Turkish and English) once per
+  day and cause instead of only exit code 1 and `logs\core.log`.
+- **Alert e-mail** (`alerts.notify`): SMTP from the standard library (`[smtp]` in
+  `arcilogger.toml`, password `arcilogger-core secret set smtp.password`, certificate always
+  verified), policy in the database (`alerts.email_*`, `alerts.web_base_url`); alerts whose
+  problem was seen in the last 24 hours (a check that still finds it records so at most hourly in
+  `details.seen_at`, apart from the rule's own facts such as R15's last message); digest, hourly
+  limit with a summary, retries with backoff, one local `R20-email` alert on giving up, at most
+  one repeated e-mail after a crash (`alert_deliveries`, revision `0009_alert_delivery`). The
+  e-mail is built from a fixed Turkish/English catalogue and shape-checked facts only: never a log
+  line, a person's name or a secret. `arcilogger-worker alerts test-email --to ADDRESS` and
+  `alerts list [--open]`.
+- Docs: docs/UYARILAR.md / docs/ALERTS.md (every rule, its setting and what to do, SMTP set-up),
+  ADR-0010; ILK-ADIMLAR / FIRST-STEPS sections 3, 7 and 9.
+- Docs: every IP address an alert e-mail can carry is listed (UYARILAR / ALERTS sections 5 and 7,
+  ASSUMPTIONS E5, ADR-0010, the information text draft section 6): besides a new sender's and the
+  conflicting one of an IP conflict, the sender address of a message refused for its transport
+  (`wrong-transport`, high, so e-mailed by default) and a source name that holds the sender's
+  address (`ap-<address>`, `unknown-<address>`, on the source line and in the subject). One
+  IP address per alert, and one e-mail can list several alerts: the texts no longer say "one IP
+  address". A docs test fails when a rule's sentence in `alerts/texts.py` can show an address from
+  a detail the docs do not name (every detail is tried with an address while the others hold
+  numbers, flags, days or the words the rule compares with).
+
+### Alerts web API and dashboard
+
+- **Alert state workflow** (ADR-0010 amendment 2026-10-20): Yeni (`open`), İnceleniyor
+  (`acknowledged`), Kapandı (`resolved`), Yanlış alarm (`dismissed`) with a fixed transition
+  table; re-opening is refused (409 `alert_key_active`) while another active alert holds the
+  same dedup key — a check that still sees the problem has opened it. Every change of state and
+  every note is an `alert_events` row (revision `0012_alert_events`, who and when), written only
+  by `arcilogger_worker.alerts.store`; the checks' automatic resolution and the IP-conflict
+  rebuild's re-opening are `system` events with a reason code (the rebuild now also sets
+  `resolved_at`, and also closes an İnceleniyor conflict alert it no longer finds, like every
+  check).
+- **Audit:** `alert.state` (from/to, rule) and `alert.note` with the note's **length** only — a
+  note never enters the sealed audit log or an e-mail.
+- **Alerts API** (`alerts.read` / `alerts.manage`, administrators): `GET /api/v1/alerts`
+  (state, severity, rule, text search over title, rule and source, time range, sorting, paging),
+  `GET /alerts/{id}` (sanitised details, events, step-by-step runbook TR/EN from the catalogue,
+  e-mail deliveries with masked recipients; e-mail addresses are masked also inside texts and in
+  every title and summary), `POST /alerts/{id}/state`, `POST /alerts/{id}/notes`
+  (1–2000 characters), `GET /alerts/summary` (open per severity, acknowledged, the five newest,
+  mean time to close over 30 days).
+- **Dashboard API** `GET /api/v1/dashboard/summary` (`dashboard.view`, every box with its own
+  permission, `null` without it): log intake (sources active/silent, messages per minute and a
+  60-minute sparkline from `messages`), yesterday's seal and the 30-day seal calendar, Kamu SM
+  credit with the days it lasts, clock offset, open alerts. The message count reads the
+  primary key of the month's partition (no new index; a `perf` test keeps it under 1 s on
+  300,000 messages in the hour).
+- Runbooks for every rule in `arcilogger_worker.alerts.texts.RUNBOOKS`; web contract and
+  captured samples `web/e2e/samples/alerts.json` and `dashboard.json`.
+- Docs: UYARILAR / ALERTS section 8 (states, notes, who changes them, closing while a problem
+  persists), ILK-ADIMLAR / FIRST-STEPS sections 7 and 9, MVP-CONTRACTS section 14, roles.md,
+  DATA-MODEL.md, ADR-0010 amendment.
+
+### Installer
+
+- **Desktop Windows 11 Pro** (KURULUM.md / INSTALL.md section 17, ADR-0007 amendment
+  2026-10-19): the setup `.exe` installs on a PC without a data disk (`C:\ARCILOGGER` with a
+  warning when there is no fixed NTFS `D:`); removable, optical, network and RAM drives are
+  refused and a USB disk is warned about; on client Windows `Set-ArciPower.ps1` switches sleep,
+  hibernation, Fast Startup and network adapter power saving off and `-Uninstall` restores the
+  recorded values (`-SkipPower`).
+- **Collector address:** a new `arcilogger.toml` gets the server address as `[collector] bind`;
+  the preflight stops, with the fix, when the bind is not an address of the computer.
+- **Fewer manual steps:** `-ServerAddress` and `-ServerName` are remembered (`install\state.json`)
+  or detected from the only adapter with a default gateway (a DHCP address is warned about); at
+  the end of a first installation the setup token is shown on the console only (never in the log
+  or the plan; the token line bypasses PowerShell's output streams, so a transcript or redirection
+  started outside the installer does not record it either) and the Kamu SM credentials can be
+  stored on stdin; over a kept database with an administrator the installer says so instead of
+  asking to fix a failure (`arcilogger-api setup-token` now exits with 4, not 1, when an
+  administrator exists); the setup `.exe` window waits for Enter; the install log points to `%TEMP%` until the data folder exists.
+- **Operating system policy:** Windows Server 2022/2025 and Windows 11 Pro/Enterprise/Education
+  (25H2 and later) are supported; older Windows 11 builds and ARM64 warn; Windows 10 and Home stop
+  unless `-AllowUnsupportedWindows` (the message states the product policy, no Microsoft support
+  date: those differ by edition, e.g. LTSC); client Windows gets a licence note.
+- **Database:** new databases are created with `LOCALE 'C'`; the docs ask for the locale "C" in
+  the EDB installer (Turkish locale rename, PostgreSQL BUG #18196).
+- **Release build:** a `v*` tag builds `ARCILOGGER-Setup-<version>.exe`, the bundle zip,
+  `SHA256SUMS.txt` and the SBOM on GitHub Actions (artifact, and a draft GitHub release); the admin
+  PC can download instead of building (KURULUM.md section 4).
+- **Smaller fixes:** the auditpol fallback message works on every edition; `Set-ArciVaultAcl.ps1`
+  takes `data_dir` of the configuration; strict outbound mode keeps the SMTP rule of `[smtp]`
+  and remembers `-SmtpServer`.
+- **Folder swaps retry:** upgrade, rollback and the automatic swap-back after a failed upgrade
+  retry renaming the program folders for up to 60 s while Windows still holds a file in them (a
+  virus scanner right after the files were written); before, the swap-back could stop half-way
+  with "Access to the path is denied".
+- Manual acceptance test for Windows 11 Pro 25H2: [docs/KABUL-TESTI-WINDOWS11.md](docs/KABUL-TESTI-WINDOWS11.md).
+
+### Devices and persons
+
+- **Assignment history** (`device_assignments`, revision `0008_device_assignments`, ADR-0008):
+  who held a device when; at most one current assignment per MAC and no overlapping intervals,
+  enforced by the database (`btree_gist` exclusion constraint, a trigger where the extension
+  cannot be created); history is appended to, never rewritten; existing links are backfilled
+  (`backfilled`, start = first sighting); `devices.person_id` stays as the current owner.
+- **5651 person step at T:** a lookup names the person assigned at the requested moment
+  (`PersonInfo.link` `history`, `assigned_from`, `assigned_to` in the outcome and the lookup API);
+  a device unassigned then names nobody; only devices without history fall back to the current
+  owner (`person_link_at_lookup_time`). The official report prints the assignment interval and
+  says the department is the person's current one. Stored outcomes and reports stay readable.
+- **API** for the "Cihazlar ve Kişiler" page: `/devices` (search by MAC/host name/IP/name,
+  "unknown devices", filters, sort, pages; detail with history and recent leases; edit; bulk
+  assign/unassign), `/persons` (create, edit, deactivate, detail), `/departments`, `/vlans`
+  (department link), `/imports/{persons|assignments}` (CSV preview and all-or-nothing apply with
+  per-line Turkish/English errors, templates) and CSV exports (Turkish Excel, formula injection
+  neutralised). Admin only, KVKK notice on person data, every change audited without names
+  (MVP-CONTRACTS.md section 11, roles.md).
+- **Rules in detail:** department changes are audited with ids and field names only (no
+  department names); a persons export imports back as updates through its `id` column, also for persons
+  without an employee number; a start up to two minutes ahead of the server clock is stored as
+  now; an unassign refuses a note instead of dropping it (the dialog no longer offers one); an
+  applied assignment import locks the persons it names (`FOR SHARE`, before the devices) and
+  checks again that they are active.
+
+### Usage analytics
+
+- **Usage rollups** (`arcilogger-worker`, [ADR-0011](docs/adr/0011-usage-analytics.md),
+  [docs/KULLANIM.md](docs/KULLANIM.md) / [docs/USAGE.md](docs/USAGE.md)): per person, device and
+  bare address and site day — online time, **estimated** active time, time and raw time per site
+  (registrable domain, FortiGuard service or address) with host names, categories, applications,
+  download/upload, sessions, blocked attempts (web, DNS, application control), first/last activity,
+  hourly rows, active-minute timeline, URLs the web filter logged, per-device breakdowns (each
+  device's blocked attempts counted in full, `usage_device_daily.blocked`, so the devices add up to
+  the person beyond `usage.blocked_per_day`); every row split into work hours and off hours. The
+  subject is the person the device was assigned to **at that moment** (the 5651 attribution chain),
+  else the device, else the address. Interim deltas and final remainders are spread over 1-minute
+  buckets and never counted twice; destinations by web filter, application control/SSL, DNS answer
+  (600 s), ISDB name, else address; registrable domains from the Public Suffix List bundled with
+  `publicsuffixlist` (MPL-2.0, pinned, never downloaded; optional newer file `usage.psl_file`);
+  background traffic per spec 10.3 (editable patterns, ports, application categories, < 2 KB
+  sessions).
+- Settings `usage.*` (thresholds, background rules, work hours, holidays — only the fixed-date
+  national holidays are shipped, the religious holidays are entered every year —, re-attribution
+  window, retention, URL and blocked limits, optional pseudonyms, report change thresholds), all
+  validated. Tables of revision `0010_usage`: `usage_days`, `usage_daily`, `usage_device_daily`,
+  `usage_domain_daily`, `usage_app_daily`, `usage_hourly`, `usage_blocked`, `usage_urls`,
+  `domain_categories`, `usage_rebuilds`; `persons.usage_excluded`.
+- Jobs `usage.today` (every 5 minutes), `usage.daily` (00:45, final), `usage.reattribute` (the
+  last 7 days are rebuilt automatically when device assignments, leases, late logs or settings
+  change), `usage.requests`, `usage.retention`; `arcilogger-worker usage rebuild --from --to`.
+- **Rules in detail:** a day's inputs fingerprint is taken before its logs are read, so a log the
+  ingest loads while the day is computed makes `usage.reattribute` rebuild it; what the first
+  interim log read holds beyond its deltas is spread from the session start (a lost first interim
+  log keeps its bytes); a session that started before the logs read for the day keeps its host
+  name, kind and background rule after midnight; a device or address with only blocked attempts
+  or URLs that day gets the VLAN (so the department) and address of those events, and so does a
+  device row with only blocked attempts (a person's device breakdown, the report's Cihazlar sheet:
+  every device with traffic or with blocked attempts). With engine version 2 the last
+  `usage.auto_rebuild_days` days are rebuilt once.
+- **API** `/api/v1/usage` (MVP-CONTRACTS.md section 12): company, subjects (persons, devices,
+  departments), one subject (timeline, sites, categories, applications, host names, URLs, blocked
+  attempts, hourly table, per-device breakdown, 30-day heat map), sites, categories, a department
+  filter, CSV and Excel exports (openpyxl, MIT; text cells never formulas), rebuild requests and
+  the pseudonym mapping. A whole list comes in one answer (`limit` up to 100,000: the period is
+  aggregated once, not once per page). The users of a site or category carry only the figures kept
+  per site (no online time of a category — its sites' raw times added up would count a minute once
+  per site —, no blocked attempts, no first/last activity), aggregated in the database; the detail
+  answers show the 200 with the most time with `users_total` (a category's 100 sites with
+  `sites_total`) and the exports every one, with their own columns. Owner decision 2026-10-20: names
+  for every role that may see usage; pseudonyms (HMAC-SHA-256, secret `usage.pseudonym_key`) only
+  with `usage.pseudonymize_anonymous_role`. Viewing a subject, exports, rebuilds and the mapping are
+  audited without names; person-level endpoints need the KVKK notice.
+- **Report data** for the scheduled reports: `arcilogger_worker.usage.report_data.build_report_data`
+  (schema 1, deterministic, with the detail lists of the Excel workbook) and
+  `sample_report_data()`. In a part-day window (the end-of-day report, also when it runs late)
+  the first/last activity are the active minutes inside the window, never the evening's
+  activity or the window's end.
+- Golden usage datasets (spec 17 M4) with every expected number computed by hand
+  (`worker/tests/test_usage_golden.py`); API, report-data, job and performance tests; captured API
+  answers `web/e2e/samples/usage.json`. Measured: 1.7 s for a full day of 100 devices (load
+  generator), 6.0 s at five times the intensity.
+- **The report viewer accepts the KVKK notice too:** it sees names since the owner decision, so
+  `usage.anonymous` joined the permissions that require the notice — all four roles now accept it
+  once per version, the viewer's sign-in asks for it and its person-level usage requests answer
+  403 `privacy_notice_required` until then (the company totals do not). The permission's label
+  says what it shows: "Kullanım raporları (adlarla; takma ad isteğe bağlı)".
+- `from` without `to` now runs to today (it was one day), as the contract says; `to` alone stays
+  one day. `POST /usage/rebuild` refuses a range that starts before the oldest log in the database
+  (422 `usage_rebuild_no_logs`, naming the earliest day) instead of replacing those days' rollups
+  with empty ones. The audit entries `usage.view` and one-subject `usage.export` name the real
+  subject (`usage:person:12`) also for pseudonymous viewers, so a search by person finds them.
+  `GET /audit` shows these targets to a reader who sees pseudonyms (the auditor while
+  `usage.pseudonymize_anonymous_role` is on) as the subject's pseudonym token (`usage:p:…`, new
+  field `target_masked`; `usage:masked` without the key) — its own views no longer tie a
+  pseudonym to a MAC, an IP or a person id. The stored entries are unchanged. As an entry's hash
+  covers the real target and would let a guess be tested, such a reader gets no hashes
+  (`prev_hash`, `hash` and the `last_hash` of `/audit/verify` are `null`; the server still
+  verifies the chain), and evidence packages with the audit log are hidden from it (404). The
+  Denetim Kaydı drawer says why it cannot recompute the hash. The docs say that pseudonyms stay
+  weak for the auditor (`search.read`, `lookup.run`, the hash in the day's seal manifest).
+- Legal drafts (`docs/legal/`): the information text lists the usage data, the scheduled reports
+  that leave the server by e-mail and who sees names; the retention draft lists the usage rollups
+  and their nightly deletion after `usage.retention_days`.
+- Legal drafts and roles.md corrected: the retention draft's measures (section 5) no longer say
+  that nothing leaves the server — e-mail is the exception (named usage reports and alert e-mails
+  through the configured SMTP server), as in the information text, and counsel is asked about the
+  mail provider; on the devices page only administrators see the person registry (e-mail, staff
+  number, title, notes), the device list and the assignment history, while `audit.read` (admin,
+  auditor) sees every assignment change made there in the audit log (`device.assign`: MAC,
+  previous and new person number, start, who made it), every usage role sees each person's
+  devices of the period (name, MAC, IP) on the usage page, report recipients get the devices with
+  their persons and a 5651 result shows the assignment of that moment. ASSUMPTIONS U13 states the
+  users of a site or category as answered: a category's online time is 0, no blocked attempts or
+  first/last activity, 200 in the detail, all in the export.
+
+### Web: devices and persons
+
+- **Cihazlar ve Kişiler** page (`/devices`; `devices.read`, changes `devices.manage`) on the
+  devices and persons API: tabs Cihazlar, Kişiler, Departmanlar ve VLAN'lar, İçe/Dışa aktar
+  (`?tab=`, keyboard accessible). The device table (MAC with the randomised flag, name with host
+  names and vendor, last IP/VLAN, type, owner, first/last seen) is searched, filtered, sorted and
+  paged by the server; the filters, the "Bilinmeyen cihazlar" quick filter and the sort order are
+  kept in the address, the search text never is. **CSV indir** on the device and person tabs
+  exports every page of the filtered list (the API's export filters).
+- Row selection with **Kişiye ata** / **Atamayı kaldır**: a person picker that searches active
+  persons on the server, an optional start of validity (site time; refused in the browser when it
+  is in the future or before a selected device's current assignment) and a note (≤ 500
+  characters). The API's refusals (`assignment_overlap`, `assignment_in_future`,
+  `person_inactive`, `device_not_found`) are shown in the dialog with what to change; devices the
+  person already held are reported as unchanged. The device drawer edits name, type,
+  infrastructure flag, notes and tags (the API's limits checked first) and shows the append-only
+  assignment history and the newest leases; the department falls back to the VLAN's and says when
+  the VLAN has none; randomised MAC addresses carry a warning that one phone may appear as
+  several devices (spec 9.2).
+- Persons: create, edit, deactivate (no delete; an inactive person cannot be given devices, the
+  history is kept), search by name, e-mail, employee number or job title, a drawer with the
+  person's devices and assignment history. Departments: create, rename; the VLAN → department
+  mapping is changed in place.
+- CSV import of persons or assignments: template, dry run with counts, refused lines in the
+  interface language (the server's cut-off after 200 shown as "200+") and a preview of the API's
+  preview rows (actions, changed fields, previous owner, start), then apply after a confirmation.
+  An apply the data no longer allows (all or nothing) returns to the preview with the new errors.
+- Person-level lists wait for the accepted KVKK notice instead of asking the API; without
+  `devices.manage` the page is read-only.
+- **5651 Sorgu**: the person step shows the assignment behind it ("Atama: 01.10.2026 09:00:00
+  itibarıyla", or both ends); lookups stored before the assignment history show nothing new.
+- `DataTable` supports server-side sorting and a custom row counter; the API client sends a
+  `FormData` body as multipart (CSV upload).
+- Tests: the generated contract and the captured answers of the real API
+  (`e2e/samples/devices.json`) drive a stateful devices mock (`e2e/mock-devices.ts`, the API's
+  rules and message tables, strict request bodies); unit tests for the filters, the edit and
+  assignment checks, the import state machine, the filtered export and the permission gating;
+  E2E specs and axe scans in light and dark mode.
+
+### Web: dashboard, security, reports
+
+- **Panel** (`/`; `dashboard.view` or `dashboard.usage`) on `GET /dashboard/summary` and today's
+  `GET /usage/company` (spec 12.3 item 2): Log alımı (active sources, messages per minute over the
+  last hour, silent sources), Dünkü mühür (state, time, serial, verification), Kontör (left, how
+  long it lasts, below-threshold badge), Saat sapması (offset, NTP server; "Bilinmiyor" when the
+  newest sample is older than 3 hours, `ok: null`); Bugünkü kullanım (active users, active time,
+  downloaded and uploaded with an hourly stacked area and its table view), Açık güvenlik
+  uyarıları (open counts per severity, the newest five, each a link to the alert), En çok vakit
+  geçirilen siteler, Kategoriler (donut: the six largest with the API's `share`, "Diğer" the rest
+  of the day's active time — also the categories beyond the ten the API sends —, the active time
+  in the middle) and the last 30 days of sealing. A block the API leaves out (`null`) or the user
+  may not see is not shown — no error; the HR role sees only the usage blocks and never asks the
+  summary. Each block links to its page when the user may open it. Live blocks refresh every
+  30 s, usage every 5 minutes, as background requests (`X-Arci-Background`), and not while the
+  tab is hidden. Usage figures carry the "tahmini" method note.
+- **Güvenlik** (`/security`; `alerts.read`, changes `alerts.manage`): "Güvenlik Özeti" (open
+  alerts per severity, open and being investigated, mean time to close over 30 days) and the alert
+  list (state, severity chips, rule, time range and text search; server-side sorting and paging;
+  the filters and the open alert are in the address, the search text never is). The detail drawer
+  shows the summary, the detector's details, the runbook in the interface language, the history
+  (state changes and notes, `system` for automatic ones) and the e-mails with masked recipients.
+  Spec 11's state names (Yeni, İnceleniyor, Kapandı, Yanlış alarm); only the changes the API
+  allows from the current state are offered, with an optional note (its own history entry), and a
+  hint next to closing that a persisting problem opens a new alert. `alert_state_unchanged` /
+  `alert_transition_not_allowed` are explained and the alert reloaded; a re-open refused with
+  `alert_key_active` links to the active alert; `system` events show their reason code as text
+  (the raw code when unknown). Sorting on time, severity, state and rule. No rule editor yet (a
+  later milestone; the page says so).
+- **Raporlar** (`/reports`; `reports.manage`): the scheduled reports with kind and time,
+  recipients, formats, a person-level badge, an on/off switch (refused without recipients), next
+  run and last run state; a create/edit dialog with the kind's own fields (time, weekday, month
+  day), an e-mail chip input (typed, pasted lists, duplicates and invalid addresses explained),
+  format choices, person-level detail on and pseudonyms off by default (owner decision
+  2026-10-20) and a live preview of the next run and the period it covers; delete with a
+  confirmation (runs and files are kept); "Şimdi çalıştır" over the kind's own period as the API
+  computes it, or a chosen one of at most 92 days (a `custom` run), with or without e-mail;
+  "Önizle" (the PDF in a new tab, the e-mail HTML in a sandboxed frame); the run history (queued
+  time, state — a run that e-mailed nobody is "Tamamlandı (e-posta yok)" —, the deliveries tried
+  so far, a failed one marked for retry while the run is running) and the files (downloaded and
+  checked against their SHA-256; 410 `report_expired`, 409 `report_missing` / `report_damaged` in
+  the API's words). `/reports?run=<id>` opens that run (the report e-mail links there). E-mail
+  switched off on the server (409 `report_smtp_disabled`) points to the SMTP setup;
+  `report_recipients_required` and a missing usage engine (503 `usage_engine_unavailable`, a run
+  failed for it) are said in words.
+- `usePollingQuery` also keeps refreshing a failed answer in the background (before, a widget
+  whose endpoint kept failing sent its retries as user activity and kept the session alive). The
+  seal calendar's day colours are shared with the dashboard's 30-day strip; a small `Switch`
+  (role `switch`) joins the UI kit primitives.
+- Types for the alert, dashboard, report and company-usage schemas of the generated contract
+  (`api-types.ts`, a `Float` alias for fractional numbers checked by the sample test); strict
+  request bodies in the E2E mock (`AlertStateRequest`, `AlertNoteRequest`, `ScheduleCreate`,
+  `ScheduleUpdate`, `RunRequest`); the captured samples (`e2e/samples/alerts.json`,
+  `dashboard.json`, `reports.json`, `usage.json` → `company`) drive stateful mocks
+  (`e2e/mock-alerts.ts`, `e2e/mock-reports.ts`) that follow the API's workflow and refusals.
+- Tests: block visibility by permission, the 30 s / 5 min polling (background, paused while
+  hidden), the alert workflow and the page address, the schedule form checks with the next-run
+  text, periods and the recipients chip input; E2E specs (dashboard for administrator, auditor,
+  viewer and HR; acknowledge → close with a note, a change made meanwhile, a refused re-open
+  linking to the active alert, a check's reason, notes, read-only; create a schedule, run it now,
+  see the run, `?run=`, an expired file, e-mail switched off, no usage engine, preview, edit,
+  switch off, delete; forbidden without `reports.manage`) and axe scans of the three pages in
+  light and dark mode.
+
+### Web: usage
+
+- **Kullanım** page (`/usage`; `usage.person` or `usage.anonymous`) on the usage API of group
+  contract 2 section 2: tabs Şirket, Departman, Kişi, Cihaz, Site, Kategori; the period (Bugün,
+  Dün, Bu hafta, Geçen hafta, Bu ay, Geçen ay or a custom range of site days, Europe/Istanbul,
+  weeks from Monday; previous/next period), the hours filter (Tüm saatler / Mesai içi / Mesai
+  dışı) and the selected department, person, device, site or category are kept in the address
+  (a drill-down is a history entry); a table's search text never is.
+- Şirket: KPI tiles (active users, online and active time, off hours, downloaded, uploaded,
+  sessions, blocked), hourly download/upload (stacked area) and active users (line), top sites,
+  categories (donut; "Diğer" and the middle from the period's active time, not from the ten
+  categories sent), applications, departments ("Bilinmiyor" for subjects without one).
+  Departman: a department's persons, its devices assigned to nobody and bare IP addresses (the
+  VLAN's department) with every metric, its sites and categories (`department=` on the API).
+  Kişi: every person; Cihaz: devices assigned to nobody and IP addresses without a MAC (an
+  assigned device's traffic is its person's); both searched like the API's `q` (name, MAC, IP,
+  host name; a pseudonym only) and sorted by any column. The subject view: header card (MAC, IP
+  and host name of a device), the day timeline (active spans coloured by category, hover with
+  time and top domain), per-day table with totals for a period, hourly charts and table, the
+  30-day hourly heat map (fixed 60-minute scale), sites with background and service/IP badges
+  (drawer with host names and URLs), the searchable URL list (blocked ones marked), categories,
+  applications, every blocked attempt (domain, host name and path, application), the person's
+  devices (the header's device names open this breakdown). Site: host names with sessions and
+  who used it for how long (their figures on that site: time, off hours, volumes, sessions);
+  Kategori: its sites and users; a capped list says how many there are and that the export holds
+  them all.
+- Every duration carries the "tahmini" info icon with the method note (`usage.method_note`);
+  "Veriler 14:35'e kadar işlendi" or "Veriler 12.10.2026 sonuna kadar işlendi" from
+  `computed_until`; empty, loading and error states (a 404 for a period without data is an
+  empty state with the API's sentence). Pseudonyms (only with
+  `usage.pseudonymize_anonymous_role`) carry an "anonim" badge; names are shown by default
+  (owner decision 2026-10-20); a missing pseudonym key is reported with the API's instruction
+  (409 `pseudonym_key_missing`). Every tab but Şirket waits for the KVKK notice.
+- Export (`/usage/export.csv|xlsx?view=…`, audited by the API): the CSV holds a view's main
+  table, the Excel file every section on its own sheet and the sheet "Yöntem"; a table that is
+  not its view's main table offers only the Excel file, and Şirket exports `view=company` (no
+  notice needed). "Yeniden hesapla" for `settings.manage` (`POST /usage/rebuild`, the job polled
+  with its requester and time, every usage view refreshed when done).
+- Names go back to the API as it sent them: a site keeps its spelling in the address and the
+  requests (a FortiGuard service such as `Microsoft-Azure` is matched exactly), the unknown
+  category is `Bilinmiyor` in every UI language (only the text shown is translated: "Unknown" in
+  English in the site and category tables, the Sites filter, the category view, Şirket's
+  categories, the charts and the Panel's Kategoriler card), and a department's persons and devices are the API's scoped lists
+  without a second filter in the browser (the department "Bilinmiyor" lists its subjects, whose
+  own department is empty).
+- Lists are read in full in one request (`limit=100000`); views whose period includes today refresh
+  every 5 minutes in the background (`X-Arci-Background`). New shared pieces: a line chart,
+  `DataTable` `actions`, `KpiCard` with its own estimate text, timeline segments with a detail.
+- Tests: the 22 remaining usage interfaces complete `api-types.ts` (the type test covers every
+  schema again) and `api-samples.test.ts` types every captured usage answer; unit tests for the
+  address state, the period presets, the Turkish dative after a time, the API's search folding,
+  the per-day table, the timeline layout and the heat-map scale. The usage mock
+  (`e2e/mock-usage.ts`) serves the answers captured from the real API for 12.10.2026
+  (`e2e/samples/usage.json`) and derives what the capture lacks from its subjects' details
+  (checked to reproduce every captured list, detail and CSV file); other periods come from a
+  generated dataset of the same company in the real shapes. E2E specs for the drill-down,
+  period and hours, exports, rebuild, pseudonyms (captured tokens, a real key refused, the
+  missing key), the KVKK wait and the forbidden page; axe scans of every tab and detail in light
+  and dark mode.
+
+### Added — MVP, version 0.1.0 (M2/M3 essentials, authentication and audit, Windows installer)
+
+ARCILOGGER is *designed to support* Law 5651 obligations ("5651 yükümlülüklerini desteklemek için
+tasarlanmıştır"); nothing below is a claim of legal compliance.
+
+- **Database package** `arcilogger-db`: SQLAlchemy 2 models, Alembic migrations run
+  programmatically (`upgrade`, `current`, `check`, `partitions`; revisions `0001_baseline`,
+  `0006_lookup_reports`, `0007_evidence_seals`), PostgreSQL 16 with **optional TimescaleDB** and
+  native monthly partitions otherwise, seed data (VLANs, departments, default settings),
+  canonical-JSON settings, bulk `COPY` loading behind one module (ADR-0005, DATA-MODEL.md).
+- **Parsers and ingest**: FortiGate (traffic incl. interim logs, web filter, DNS, application,
+  IPS/antivirus, events) and MikroTik (DHCP, ARP-LOG, firewall, account, interface, config)
+  parsers with real fixtures; `arcilogger-ingest` tails the raw spool (or the sealed vault copy)
+  into PostgreSQL with exactly-once offsets, 2 parse workers by default (INGEST.md, PARSERS.md).
+- **Correlation and 5651 lookup** (`arcilogger-worker`): lease timeline from DHCP and ARP-LOG,
+  devices and IP conflicts, late-evidence rebuilds, the lookup engine (exact, double-NAT
+  candidates, internal) and the worker job loop with `rebuild` (CORRELATION.md).
+- **API** (`arcilogger-api`): sign-in with Argon2id passwords, mandatory TOTP for administrators
+  and auditors, lockout and rate limits, CSRF, re-authentication for sensitive actions, KVKK
+  notice enforced on person-level endpoints, users and roles, hash-chained audit log sealed
+  daily, first administrator via `setup-token` / recovery via `create-admin`; 5651 lookup with
+  the official PDF report (rendered once, stored, optionally time-stamped), raw-line view,
+  evidence packages built in the background with limits, sealing calendar and day detail with
+  on-demand verification, Kamu SM credit history (SECURITY.md, roles.md, RAPOR.md, KANIT-PAKETI.md).
+- **Evidence package and standalone verifier**: self-verifying ZIP with sealed days, extract,
+  roots, the lookup's report and `verify.py` (Python standard library only), plus the OpenSSL
+  method without `verify.py` (ADR-0006, DENETCI-KILAVUZU.md).
+- **Web interface**: sign-in and first-run setup, Kullanıcılar ve Roller, Denetim Kaydı, 5651
+  Sorgu, Kanıt Paketleri, Mühürleme, Cihazlar ve Kişiler. Panel, Kaynaklar, Canlı Akış, Arama,
+  Kullanım, Güvenlik, Raporlar, Uyum Durumu and Sistem are placeholders naming their milestone.
+- **Windows installer**: offline bundle with SHA-256-checked components and wheels, WinSW services
+  under virtual accounts, least-privilege NTFS rights, Caddy with an internal CA, firewall,
+  scheduled tasks, database role, upgrade with rollback, uninstall that never deletes evidence
+  (ADR-0007, KURULUM.md / INSTALL.md).
+- **Load generator** (`tools/loadgen`) and the end-to-end tests (`tests/test_mvp_end_to_end.py`).
+- **Docs**: first steps after the installation (ILK-ADIMLAR.md / FIRST-STEPS.md), draft employee
+  information text and draft retention/deletion policy for legal review (`docs/legal/`), auditor
+  guide for web-created packages and the report checks. The offline bundle carries the whole
+  `docs` folder (ADRs and legal drafts included), and the installer's next steps put the Kamu SM
+  roots before the connection test and point to the first-steps guide.
+
+### Known limitations of the MVP
+
+- No department history: a 5651 result names the person assigned at the moment of the event,
+  with that person's current department; past assignments cannot be corrected in the interface
+  (ADR-0008).
+- No settings page: database settings are changed with `arcilogger-db settings` until M6.
+- Usage analytics are estimates from connection logs (docs/USAGE.md section 3: QUIC/HTTP3 without
+  web logs, DNS over HTTPS, devices not passing the FortiGate); no rule engine, rule editor or
+  webhooks (M5; the R15/R20 checks, the alert e-mail, the alert workflow and the Güvenlik page
+  exist, docs/ALERTS.md), no compliance and system pages (M6), no "Seal now" from the web.
+- Database dumps stay on the server's data disk; copying them off the server (external disk, a NAS)
+  is manual (docs/YEDEKLEME.md section 4).
+- Alerts have no assignee yet (spec 11); only administrators see and change them.
+- No deletion job for the database's log tables, the stored 5651 reports or the lookups yet (the
+  usage rollups are deleted after `usage.retention_days` by the worker job `usage.retention`,
+  docs/DATA-MODEL.md "Retention"); vault retention is off by default
+  (docs/legal/saklama-imha-politikasi-taslak.md).
+- Verify on site: MikroTik wire format, FortiGate interim-log behaviour, Kamu SM `.zd` format and
+  root URLs (kamusm.md K1–K10), TimescaleDB on Windows, the WORM share of the replica target
+  (MVP-CONTRACTS.md §8, KURULUM.md §16).
+- Decisions: [ADR-0001 … ADR-0007](docs/adr/README.md) and the owner decisions in
+  [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
+
+### Added — M1 (collection and sealing)
+
+- Syslog collector (`arcilogger-collector run`): UDP and TCP 514 (RFC 6587 octet counting and LF
+  framing), sender allow-list incl. networks for DHCP access points, unknown senders written to
+  `unknown-<ip>` with a one-time alert (or dropped), reversible raw-line format, receive-day files
+  switched at Istanbul midnight, fsync every second, status file.
+- Daily sealing (`arcilogger-core seal`): deterministic gzip, SHA-256 of compressed and raw bytes,
+  line counts, gaps per expected source, audit log, clock samples, RFC 8785 canonical manifest
+  chained to the previous day, time stamp, independent verification, read-only lock (NTFS deny ACL
+  on Windows), spool cleanup; strict day order, retry schedule, R20 alerts, late-stamp marking,
+  crash recovery without a second stamp.
+- Time-stamp providers: Kamu SM Zamane console client, generic RFC 3161 (development), mock TSA
+  with its own test CA and failure injection; independent RFC 3161/CMS verifier (cross-checked with
+  `openssl ts -verify`).
+- Chain verification (`verify --day/--last/--all [--deep]`), replica to a second location without
+  overwriting, retention with a sealed deletion record and chain anchor (off by default, minimum
+  730 days), SNTP clock probe, Kamu SM credit check, encrypted secret store, `tsa-test`, `status`.
+- Windows Task Scheduler definitions for all evidence jobs (LOCAL SERVICE, run-after-missed-start),
+  `Register-ArciTasks.ps1`, `Set-ArciTime.ps1`, example configuration (since 2026-10-20 a fictional
+  example network).
+- Docs: `kamusm.md` (facts, open questions, connection test, test-user e-mail),
+  `DEVICE-SETUP.md` (FortiGate/MikroTik commands, network flows).
+
+### Added — M0 (repository skeleton)
+
+- Decision: ARCILOGGER runs on a Windows server, users connect only through a browser (ADR-0001);
+  own syslog collector (ADR-0002); integrity on Windows (ADR-0003); web tooling (ADR-0004).
+- uv workspace with five Python packages (`core`, `collector`, `ingest`, `api`, `worker`), ruff,
+  mypy `--strict`, pytest + hypothesis, `poe` task runner.
+- `arcilogger-core` CLI (`version`, `info`), time rules (UTC inside, Europe/Istanbul for people,
+  receive-day partitions) and Turkish/English display formatting.
+- API health endpoint `/api/v1/health`.
+- Web interface skeleton: design tokens (light/dark), Inter and JetBrains Mono bundled, Turkish and
+  English, application shell, 20+ components and the `/ui-kit` page.
+- Real FortiGate and MikroTik log samples as pinned fixtures; shared display-format vectors tested by
+  both Python and TypeScript.
+- CI on GitHub Actions: Python on Windows and Linux, web lint/types/tests/build, Playwright E2E with
+  axe accessibility checks in both themes, gitleaks, SBOM (syft) and vulnerability scan (grype).

@@ -1,0 +1,1858 @@
+ARCILOGGER kullanım raporu — Tam gün raporu
+Tam gün raporu · 19.10.2026 · Örnek A.Ş. / Full-day report
+Tam gün raporu 19.10.2026 (Örnek A.Ş.): 18 aktif kullanıcı, 3 gün 14 sa aktif süre (tahmini), 43 GB indirme,
+8,1 GB yükleme, 30 engellenen deneme, 2 güvenlik uyarısı; önceki gün: Mühürlendi.
+Full-day report 19.10.2026 (Örnek A.Ş.): 18 active users, 3 d 14 h active time (estimated), 43 GB downloaded, 8.1 GB uploaded,
+30 blocked attempts, 2 security alerts; previous day: Sealed.
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Rapor / Report
+Tam gün raporu
+Tür / Kind
+Tam gün raporu
+Dönem / Period
+19.10.2026
+Oluşturma zamanı / Generated
+20.10.2026 07:00
+Hesaplanan son an / Computed until
+20.10.2026 00:00
+Kişi düzeyinde / Person-level
+evet
+Takma adlarla / Pseudonymised
+hayır
+Çalıştırma no / Run
+17
+Şirket geneli / Company totals
+Aktif kullanıcı / Active users
+18
+Çevrimiçi süre (toplam, tahmini) / Online time
+7 gün 1 sa
+Aktif süre (toplam, tahmini) / Active time
+3 gün 14 sa
+Mesai dışı aktif süre (tahmini) / Off-hours active time
+5 sa 8 dk
+İndirilen / Downloaded
+43 GB
+Yüklenen / Uploaded
+8,1 GB
+Oturum / Sessions
+29.745
+Engellenen deneme / Blocked attempts
+30
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+Pay
+İndirilen
+Yüklenen
+outlook.office365.com
+Web-based Email
+13 sa 57 dk
+%16
+5,2 GB
+1,2 GB
+teams.microsoft.com
+Business
+12 sa 12 dk
+%14
+5,7 GB
+1,4 GB
+drive.google.com
+File Sharing and Storage
+8 sa 5 dk
+%9
+3,2 GB
+1,5 GB
+ebeyanname.gib.gov.tr
+Government and Legal
+Organizations
+4 sa 57 dk
+%6
+1,5 GB
+204,7 MB
+internetsubesi.isbank.com.tr
+Finance and Banking
+4 sa 57 dk
+%6
+1,7 GB
+202,1 MB
+stackoverflow.com
+Information Technology
+4 sa 45 dk
+%5
+3,1 GB
+855,1 MB
+www.linkedin.com
+Social Networking
+4 sa 11 dk
+%5
+3 GB
+784,9 MB
+www.sahibinden.com
+Shopping
+4 sa 10 dk
+%5
+1,1 GB
+152,1 MB
+www.hurriyet.com.tr
+News and Media
+3 sa 46 dk
+%4
+1 GB
+139,4 MB
+www.google.com
+Search Engines and Portals
+3 sa 43 dk
+%4
+1,7 GB
+132,6 MB
+www.turkiye.gov.tr
+Government and Legal
+Organizations
+3 sa 20 dk
+%4
+1,7 GB
+145,9 MB
+translate.google.com
+Search Engines and Portals
+3 sa 16 dk
+%4
+2,9 GB
+559,8 MB
+web.whatsapp.com
+Instant Messaging
+2 sa 40 dk
+%3
+886 MB
+87,8 MB
+www.trendyol.com
+Shopping
+2 sa 15 dk
+%3
+639,6 MB
+78,6 MB
+www.youtube.com
+Streaming Media and
+Download
+2 sa 6 dk
+%2
+1,1 GB
+74 MB
+www.instagram.com
+Social Networking
+1 sa 55 dk
+%2
+2 GB
+318 MB
+www.ntv.com.tr
+News and Media
+1 sa 23 dk
+%2
+478,2 MB
+51,4 MB
+open.spotify.com
+Streaming Media and
+Download
+1 sa 8 dk
+%1
+3,2 GB
+213,6 MB
+static.cdn-ornek.net
+Bilinmiyor
+50 dk
+%1
+1,6 GB
+89,9 MB
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 1 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+En çok kullanılan kategoriler / Top categories
+Kategori
+Süre
+Pay
+Web-based Email
+13 sa 57 dk
+%16
+Business
+12 sa 12 dk
+%14
+Government and Legal Organizations
+8 sa 17 dk
+%10
+File Sharing and Storage
+8 sa 5 dk
+%9
+Search Engines and Portals
+6 sa 59 dk
+%8
+Shopping
+6 sa 26 dk
+%7
+Social Networking
+6 sa 7 dk
+%7
+News and Media
+5 sa 10 dk
+%6
+Finance and Banking
+4 sa 57 dk
+%6
+Information Technology
+4 sa 45 dk
+%5
+Streaming Media and Download
+3 sa 15 dk
+%4
+Instant Messaging
+2 sa 40 dk
+%3
+Bilinmiyor
+50 dk
+%1
+Departmanlar / Departments
+Departman
+Aktif kullanıcı
+Aktif süre
+İndirilen
+Yüklenen
+Engel.
+Planlama
+6
+1 gün 11 sa
+23,8 GB
+6,2 GB
+14
+Finans
+6
+23 sa 10 dk
+10,9 GB
+982 MB
+12
+İdari İşler
+5
+22 sa 9 dk
+6,3 GB
+805 MB
+3
+Bilinmiyor
+1
+3 sa 4 dk
+990 MB
+74 MB
+1
+Dikkat çeken değişiklikler / Notable changes vs. the 7-day average
+Değişiklik
+Fark
+Video ve müzik akışı 7 günlük ortalamanın %180 üzerinde. / Streaming is 180 % above the 7-day average.
++%180
+Planlama indirmesi 7 günlük ortalamanın %95 üzerinde. / Planning downloads are 95 % above the 7-day
+average.
++%95
+İdari İşler aktif süresi 7 günlük ortalamanın %62 altında. / Administration active time is 62 % below the 7-day
+average.
+-%62
+Güvenlik uyarıları (2) / Security alerts of the period
+Zaman
+Önem
+Uyarı
+Durum
+19.10.2026 11:58
+Yüksek
+R15 — Log kaynağı sessiz: fortigate 10 dakikadan uzun süredir log göndermiyor.
+Çözüldü
+19.10.2026 03:05
+Orta
+R20-disk — Disk dolmak üzere: D: %83 dolu (eşik %80).
+Açık
+Önceki günün mühürü / Sealing of the previous day
+19.10.2026: Mühürlendi (20.10.2026 00:31, seri 4F2A19)
+19.10.2026: Sealed (20.10.2026 00:31, serial 4F2A19)
+Veri kalitesi / Data quality
+Kişiye bağlanamayan süre (tahmini) / not linked to a person: 1 sa 30 dk
+2 cihaz bir kişiye atanmamış; süreleri kişi tablosunda yok (Cihazlar sayfası).
+1 sa 30 dk arka plan trafiği hiçbir cihaza bağlanamadı.
+2 devices are not assigned to a person; their time is not in the person table.
+1 h 30 min of background traffic could not be linked to any device.
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 2 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Departman: Planlama
+Aktif kullanıcı / Active users
+6
+Aktif süre (tahmini) / Active time
+1 gün 11 sa
+İndirilen / Downloaded
+23,8 GB
+Yüklenen / Uploaded
+6,2 GB
+Engellenen deneme / Blocked attempts
+14
+Kişiler (6) / Persons
+Kişi
+İlk
+Son
+Çevrimiçi
+Aktif
+İndirme
+Yükleme
+Oturum
+Engel.
+Mesai dışı
+Can Öztürk
+07:48
+20:15
+12 sa 27 dk
+7 sa 48 dk
+6 GB
+2,4 GB
+2.990
+0
+1 sa 35 dk
+Selin Aydın
+08:30
+17:59
+9 sa 29 dk
+6 sa 32 dk
+4,3 GB
+1,9 GB
+2.210
+2
+0 sn
+Deniz Koç
+08:20
+18:35
+10 sa 15 dk
+5 sa 55 dk
+2,9 GB
+480 MB
+2.402
+3
+15 dk
+Ece Doğan
+08:44
+17:40
+8 sa 56 dk
+5 sa 31 dk
+3,3 GB
+520 MB
+2.155
+5
+0 sn
+Burak Şahin
+09:12
+18:20
+9 sa 8 dk
+5 sa 1 dk
+2,2 GB
+610 MB
+1.543
+0
+12 dk
+Oğuz Kılıç
+10:05
+21:48
+11 sa 43 dk
+4 sa 36 dk
+5,2 GB
+390 MB
+1.980
+4
+1 sa 58 dk
+Can Öztürk · Planlama
+İlk / son etkinlik / First / last activity
+19.10.2026 07:48 - 20:15
+Çevrimiçi süre (tahmini) / Online time
+12 sa 27 dk
+Aktif süre (tahmini) / Active time
+7 sa 48 dk
+Mesai dışı aktif süre / Off-hours active time
+1 sa 35 dk
+İndirilen / yüklenen / Downloaded / uploaded
+6 GB / 2,4 GB
+Oturum / Sessions
+2.990
+Engellenen deneme / Blocked attempts
+0
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+teams.microsoft.com
+Business
+1 sa 47 dk
+drive.google.com
+File Sharing and Storage
+1 sa 40 dk
+www.linkedin.com
+Social Networking
+55 dk 58 sn
+stackoverflow.com
+Information Technology
+53 dk 44 sn
+translate.google.com
+Search Engines and Portals
+53 dk 44 sn
+outlook.office365.com
+Web-based Email
+47 dk 1 sn
+www.instagram.com
+Social Networking
+20 dk 9 sn
+open.spotify.com
+Streaming Media and Download
+17 dk 54 sn
+static.cdn-ornek.net
+Bilinmiyor
+11 dk 17 sn
+Kategoriler / Categories
+Kategori
+Süre
+Business
+1 sa 47 dk
+File Sharing and Storage
+1 sa 40 dk
+Social Networking
+1 sa 16 dk
+Information Technology
+53 dk 44 sn
+Search Engines and Portals
+53 dk 44 sn
+Web-based Email
+47 dk 1 sn
+Streaming Media and Download
+17 dk 54 sn
+Bilinmiyor
+11 dk 17 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 3 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Selin Aydın · Planlama
+İlk / son etkinlik / First / last activity
+19.10.2026 08:30 - 17:59
+Çevrimiçi süre (tahmini) / Online time
+9 sa 29 dk
+Aktif süre (tahmini) / Active time
+6 sa 32 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+4,3 GB / 1,9 GB
+Oturum / Sessions
+2.210
+Engellenen deneme / Blocked attempts
+2
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+drive.google.com
+File Sharing and Storage
+1 sa 54 dk
+stackoverflow.com
+Information Technology
+59 dk 45 sn
+outlook.office365.com
+Web-based Email
+57 dk 21 sn
+www.linkedin.com
+Social Networking
+57 dk 21 sn
+teams.microsoft.com
+Business
+50 dk 11 sn
+translate.google.com
+Search Engines and Portals
+21 dk 30 sn
+www.instagram.com
+Social Networking
+19 dk 7 sn
+open.spotify.com
+Streaming Media and Download
+12 dk 2 sn
+Kategoriler / Categories
+Kategori
+Süre
+File Sharing and Storage
+1 sa 54 dk
+Social Networking
+1 sa 16 dk
+Information Technology
+59 dk 45 sn
+Web-based Email
+57 dk 21 sn
+Business
+50 dk 11 sn
+Search Engines and Portals
+21 dk 30 sn
+Streaming Media and Download
+12 dk 2 sn
+Engellenen denemeler (2) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 15:02
+thepiratebay.org
+Peer-to-peer File Sharing
+DNS filtresi
+19.10.2026 10:41
+thepiratebay.org
+Peer-to-peer File Sharing
+Web filtresi
+Deniz Koç · Planlama
+İlk / son etkinlik / First / last activity
+19.10.2026 08:20 - 18:35
+Çevrimiçi süre (tahmini) / Online time
+10 sa 15 dk
+Aktif süre (tahmini) / Active time
+5 sa 55 dk
+Mesai dışı aktif süre / Off-hours active time
+15 dk
+İndirilen / yüklenen / Downloaded / uploaded
+2,9 GB / 480 MB
+Oturum / Sessions
+2.402
+Engellenen deneme / Blocked attempts
+3
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+outlook.office365.com
+Web-based Email
+1 sa 13 dk
+teams.microsoft.com
+Business
+1 sa 9 dk
+drive.google.com
+File Sharing and Storage
+1 sa 2 dk
+translate.google.com
+Search Engines and Portals
+34 dk 48 sn
+www.linkedin.com
+Social Networking
+34 dk 48 sn
+stackoverflow.com
+Information Technology
+31 dk 19 sn
+www.instagram.com
+Social Networking
+31 dk 19 sn
+open.spotify.com
+Streaming Media and Download
+10 dk 26 sn
+static.cdn-ornek.net
+Bilinmiyor
+7 dk 1 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 4 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Kategoriler / Categories
+Kategori
+Süre
+Web-based Email
+1 sa 13 dk
+Business
+1 sa 9 dk
+Social Networking
+1 sa 6 dk
+File Sharing and Storage
+1 sa 2 dk
+Search Engines and Portals
+34 dk 48 sn
+Information Technology
+31 dk 19 sn
+Streaming Media and Download
+10 dk 26 sn
+Bilinmiyor
+7 dk 1 sn
+Engellenen denemeler (3) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 16:48
+free-proxy.example.org
+Proxy Avoidance
+Web filtresi
+19.10.2026 12:15
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+19.10.2026 09:30
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+Ece Doğan · Planlama
+İlk / son etkinlik / First / last activity
+19.10.2026 08:44 - 17:40
+Çevrimiçi süre (tahmini) / Online time
+8 sa 56 dk
+Aktif süre (tahmini) / Active time
+5 sa 31 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+3,3 GB / 520 MB
+Oturum / Sessions
+2.155
+Engellenen deneme / Blocked attempts
+5
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+teams.microsoft.com
+Business
+1 sa 22 dk
+drive.google.com
+File Sharing and Storage
+1 sa 18 dk
+stackoverflow.com
+Information Technology
+39 dk 24 sn
+www.linkedin.com
+Social Networking
+39 dk 24 sn
+outlook.office365.com
+Web-based Email
+35 dk 27 sn
+translate.google.com
+Search Engines and Portals
+35 dk 27 sn
+www.instagram.com
+Social Networking
+11 dk 49 sn
+open.spotify.com
+Streaming Media and Download
+7 dk 56 sn
+Kategoriler / Categories
+Kategori
+Süre
+Business
+1 sa 22 dk
+File Sharing and Storage
+1 sa 18 dk
+Social Networking
+51 dk 13 sn
+Information Technology
+39 dk 24 sn
+Search Engines and Portals
+35 dk 27 sn
+Web-based Email
+35 dk 27 sn
+Streaming Media and Download
+7 dk 56 sn
+Engellenen denemeler (5) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 17:01
+torrent.example.net
+Peer-to-peer File Sharing
+DNS filtresi
+19.10.2026 13:22
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+19.10.2026 13:20
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+19.10.2026 11:03
+www.bet365.com
+Gambling
+Web filtresi
+19.10.2026 11:02
+www.bet365.com
+Gambling
+Web filtresi
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 5 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Burak Şahin · Planlama
+İlk / son etkinlik / First / last activity
+19.10.2026 09:12 - 18:20
+Çevrimiçi süre (tahmini) / Online time
+9 sa 8 dk
+Aktif süre (tahmini) / Active time
+5 sa 1 dk
+Mesai dışı aktif süre / Off-hours active time
+12 dk
+İndirilen / yüklenen / Downloaded / uploaded
+2,2 GB / 610 MB
+Oturum / Sessions
+1.543
+Engellenen deneme / Blocked attempts
+0
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+outlook.office365.com
+Web-based Email
+59 dk 24 sn
+stackoverflow.com
+Information Technology
+59 dk 24 sn
+teams.microsoft.com
+Business
+55 dk 26 sn
+drive.google.com
+File Sharing and Storage
+47 dk 31 sn
+translate.google.com
+Search Engines and Portals
+23 dk 45 sn
+www.linkedin.com
+Social Networking
+23 dk 45 sn
+www.instagram.com
+Social Networking
+19 dk 48 sn
+open.spotify.com
+Streaming Media and Download
+11 dk 57 sn
+Kategoriler / Categories
+Kategori
+Süre
+Information Technology
+59 dk 24 sn
+Web-based Email
+59 dk 24 sn
+Business
+55 dk 26 sn
+File Sharing and Storage
+47 dk 31 sn
+Social Networking
+43 dk 33 sn
+Search Engines and Portals
+23 dk 45 sn
+Streaming Media and Download
+11 dk 57 sn
+Oğuz Kılıç · Planlama
+İlk / son etkinlik / First / last activity
+19.10.2026 10:05 - 21:48
+Çevrimiçi süre (tahmini) / Online time
+11 sa 43 dk
+Aktif süre (tahmini) / Active time
+4 sa 36 dk
+Mesai dışı aktif süre / Off-hours active time
+1 sa 58 dk
+İndirilen / yüklenen / Downloaded / uploaded
+5,2 GB / 390 MB
+Oturum / Sessions
+1.980
+Engellenen deneme / Blocked attempts
+4
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+drive.google.com
+File Sharing and Storage
+1 sa 20 dk
+stackoverflow.com
+Information Technology
+42 dk 4 sn
+outlook.office365.com
+Web-based Email
+40 dk 23 sn
+www.linkedin.com
+Social Networking
+40 dk 23 sn
+teams.microsoft.com
+Business
+35 dk 20 sn
+translate.google.com
+Search Engines and Portals
+15 dk 8 sn
+www.instagram.com
+Social Networking
+13 dk 27 sn
+open.spotify.com
+Streaming Media and Download
+8 dk 29 sn
+Kategoriler / Categories
+Kategori
+Süre
+File Sharing and Storage
+1 sa 20 dk
+Social Networking
+53 dk 50 sn
+Information Technology
+42 dk 4 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 6 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Kategori
+Süre
+Web-based Email
+40 dk 23 sn
+Business
+35 dk 20 sn
+Search Engines and Portals
+15 dk 8 sn
+Streaming Media and Download
+8 dk 29 sn
+Engellenen denemeler (4) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 21:30
+malware-c2.example.com
+Malicious Websites
+DNS filtresi
+19.10.2026 20:44
+free-proxy.example.org
+Proxy Avoidance
+Web filtresi
+19.10.2026 20:05
+www.bet365.com
+Gambling
+Web filtresi
+19.10.2026 19:12
+www.bet365.com
+Gambling
+Web filtresi
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 7 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Departman: Finans
+Aktif kullanıcı / Active users
+6
+Aktif süre (tahmini) / Active time
+23 sa 10 dk
+İndirilen / Downloaded
+10,9 GB
+Yüklenen / Uploaded
+982 MB
+Engellenen deneme / Blocked attempts
+12
+Kişiler (6) / Persons
+Kişi
+İlk
+Son
+Çevrimiçi
+Aktif
+İndirme
+Yükleme
+Oturum
+Engel.
+Mesai dışı
+Elif Kaya
+08:02
+17:31
+9 sa 29 dk
+6 sa 41 dk
+1,2 GB
+330 MB
+2.045
+1
+0 sn
+Ahmet Yıldız
+08:15
+18:47
+10 sa 32 dk
+6 sa 17 dk
+1,1 GB
+288 MB
+1.888
+0
+22 dk
+Gülşen Çetin
+09:03
+17:12
+8 sa 9 dk
+4 sa 15 dk
+610 MB
+95 MB
+1.102
+0
+0 sn
+Mehmet Çelik
+07:05
+16:10
+9 sa 5 dk
+2 sa 22 dk
+3,8 GB
+120 MB
+980
+6
+0 sn
+Ümit Aksoy
+07:12
+15:55
+8 sa 43 dk
+1 sa 58 dk
+2,7 GB
+88 MB
+812
+3
+0 sn
+Ayşe Polat
+07:30
+16:22
+8 sa 52 dk
+1 sa 37 dk
+1,5 GB
+61 MB
+640
+2
+0 sn
+Elif Kaya · Finans
+İlk / son etkinlik / First / last activity
+19.10.2026 08:02 - 17:31
+Çevrimiçi süre (tahmini) / Online time
+9 sa 29 dk
+Aktif süre (tahmini) / Active time
+6 sa 41 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+1,2 GB / 330 MB
+Oturum / Sessions
+2.045
+Engellenen deneme / Blocked attempts
+1
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+outlook.office365.com
+Web-based Email
+1 sa 19 dk
+www.turkiye.gov.tr
+Government and Legal Organizations
+1 sa 19 dk
+internetsubesi.isbank.com.tr
+Finance and Banking
+1 sa 13 dk
+ebeyanname.gib.gov.tr
+Government and Legal Organizations
+1 sa 3 dk
+teams.microsoft.com
+Business
+31 dk 39 sn
+www.google.com
+Search Engines and Portals
+31 dk 39 sn
+www.youtube.com
+Streaming Media and Download
+26 dk 22 sn
+static.cdn-ornek.net
+Bilinmiyor
+15 dk 54 sn
+Kategoriler / Categories
+Kategori
+Süre
+Government and Legal Organizations
+2 sa 22 dk
+Web-based Email
+1 sa 19 dk
+Finance and Banking
+1 sa 13 dk
+Business
+31 dk 39 sn
+Search Engines and Portals
+31 dk 39 sn
+Streaming Media and Download
+26 dk 22 sn
+Bilinmiyor
+15 dk 54 sn
+Engellenen denemeler (1) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 09:14
+www.bet365.com
+Gambling
+Web filtresi
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 8 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Ahmet Yıldız · Finans
+İlk / son etkinlik / First / last activity
+19.10.2026 08:15 - 18:47
+Çevrimiçi süre (tahmini) / Online time
+10 sa 32 dk
+Aktif süre (tahmini) / Active time
+6 sa 17 dk
+Mesai dışı aktif süre / Off-hours active time
+22 dk
+İndirilen / yüklenen / Downloaded / uploaded
+1,1 GB / 288 MB
+Oturum / Sessions
+1.888
+Engellenen deneme / Blocked attempts
+0
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+internetsubesi.isbank.com.tr
+Finance and Banking
+1 sa 28 dk
+outlook.office365.com
+Web-based Email
+1 sa 28 dk
+ebeyanname.gib.gov.tr
+Government and Legal Organizations
+1 sa 22 dk
+teams.microsoft.com
+Business
+35 dk 20 sn
+www.turkiye.gov.tr
+Government and Legal Organizations
+35 dk 20 sn
+www.google.com
+Search Engines and Portals
+29 dk 27 sn
+www.youtube.com
+Streaming Media and Download
+17 dk 43 sn
+Kategoriler / Categories
+Kategori
+Süre
+Government and Legal Organizations
+1 sa 57 dk
+Finance and Banking
+1 sa 28 dk
+Web-based Email
+1 sa 28 dk
+Business
+35 dk 20 sn
+Search Engines and Portals
+29 dk 27 sn
+Streaming Media and Download
+17 dk 43 sn
+Gülşen Çetin · Finans
+İlk / son etkinlik / First / last activity
+19.10.2026 09:03 - 17:12
+Çevrimiçi süre (tahmini) / Online time
+8 sa 9 dk
+Aktif süre (tahmini) / Active time
+4 sa 15 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+610 MB / 95 MB
+Oturum / Sessions
+1.102
+Engellenen deneme / Blocked attempts
+0
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+internetsubesi.isbank.com.tr
+Finance and Banking
+1 sa 9 dk
+ebeyanname.gib.gov.tr
+Government and Legal Organizations
+1 sa 7 dk
+www.turkiye.gov.tr
+Government and Legal Organizations
+30 dk 54 sn
+outlook.office365.com
+Web-based Email
+28 dk 58 sn
+teams.microsoft.com
+Business
+28 dk 58 sn
+www.google.com
+Search Engines and Portals
+23 dk 10 sn
+www.youtube.com
+Streaming Media and Download
+5 dk 52 sn
+Kategoriler / Categories
+Kategori
+Süre
+Government and Legal Organizations
+1 sa 38 dk
+Finance and Banking
+1 sa 9 dk
+Business
+28 dk 58 sn
+Web-based Email
+28 dk 58 sn
+Search Engines and Portals
+23 dk 10 sn
+Streaming Media and Download
+5 dk 52 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 9 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Mehmet Çelik · Finans
+İlk / son etkinlik / First / last activity
+19.10.2026 07:05 - 16:10
+Çevrimiçi süre (tahmini) / Online time
+9 sa 5 dk
+Aktif süre (tahmini) / Active time
+2 sa 22 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+3,8 GB / 120 MB
+Oturum / Sessions
+980
+Engellenen deneme / Blocked attempts
+6
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+ebeyanname.gib.gov.tr
+Government and Legal Organizations
+41 dk 33 sn
+www.turkiye.gov.tr
+Government and Legal Organizations
+21 dk 38 sn
+outlook.office365.com
+Web-based Email
+20 dk 46 sn
+teams.microsoft.com
+Business
+20 dk 46 sn
+internetsubesi.isbank.com.tr
+Finance and Banking
+18 dk 10 sn
+www.google.com
+Search Engines and Portals
+7 dk 47 sn
+www.youtube.com
+Streaming Media and Download
+6 dk 55 sn
+static.cdn-ornek.net
+Bilinmiyor
+4 dk 25 sn
+Kategoriler / Categories
+Kategori
+Süre
+Government and Legal Organizations
+1 sa 3 dk
+Business
+20 dk 46 sn
+Web-based Email
+20 dk 46 sn
+Finance and Banking
+18 dk 10 sn
+Search Engines and Portals
+7 dk 47 sn
+Streaming Media and Download
+6 dk 55 sn
+Bilinmiyor
+4 dk 25 sn
+Engellenen denemeler (6) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 14:58
+malware-c2.example.com
+Malicious Websites
+DNS filtresi
+19.10.2026 12:44
+www.bet365.com
+Gambling
+Web filtresi
+19.10.2026 12:01
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+19.10.2026 10:33
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+19.10.2026 09:17
+torrent.example.net
+Peer-to-peer File Sharing
+DNS filtresi
+19.10.2026 08:02
+torrent.example.net
+Peer-to-peer File Sharing
+DNS filtresi
+Ümit Aksoy · Finans
+İlk / son etkinlik / First / last activity
+19.10.2026 07:12 - 15:55
+Çevrimiçi süre (tahmini) / Online time
+8 sa 43 dk
+Aktif süre (tahmini) / Active time
+1 sa 58 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+2,7 GB / 88 MB
+Oturum / Sessions
+812
+Engellenen deneme / Blocked attempts
+3
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+outlook.office365.com
+Web-based Email
+25 dk 25 sn
+internetsubesi.isbank.com.tr
+Finance and Banking
+24 dk 24 sn
+www.turkiye.gov.tr
+Government and Legal Organizations
+24 dk 24 sn
+ebeyanname.gib.gov.tr
+Government and Legal Organizations
+21 dk 21 sn
+teams.microsoft.com
+Business
+9 dk 9 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 10 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Site
+Kategori
+Süre
+www.google.com
+Search Engines and Portals
+8 dk 8 sn
+www.youtube.com
+Streaming Media and Download
+5 dk 9 sn
+Kategoriler / Categories
+Kategori
+Süre
+Government and Legal Organizations
+45 dk 45 sn
+Web-based Email
+25 dk 25 sn
+Finance and Banking
+24 dk 24 sn
+Business
+9 dk 9 sn
+Search Engines and Portals
+8 dk 8 sn
+Streaming Media and Download
+5 dk 9 sn
+Engellenen denemeler (3) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 13:13
+torrent.example.net
+Peer-to-peer File Sharing
+DNS filtresi
+19.10.2026 11:11
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+19.10.2026 09:05
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+Ayşe Polat · Finans
+İlk / son etkinlik / First / last activity
+19.10.2026 07:30 - 16:22
+Çevrimiçi süre (tahmini) / Online time
+8 sa 52 dk
+Aktif süre (tahmini) / Active time
+1 sa 37 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+1,5 GB / 61 MB
+Oturum / Sessions
+640
+Engellenen deneme / Blocked attempts
+2
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+internetsubesi.isbank.com.tr
+Finance and Banking
+22 dk 44 sn
+outlook.office365.com
+Web-based Email
+22 dk 44 sn
+ebeyanname.gib.gov.tr
+Government and Legal Organizations
+21 dk 13 sn
+teams.microsoft.com
+Business
+9 dk 5 sn
+www.turkiye.gov.tr
+Government and Legal Organizations
+9 dk 5 sn
+www.google.com
+Search Engines and Portals
+7 dk 34 sn
+www.youtube.com
+Streaming Media and Download
+4 dk 35 sn
+Kategoriler / Categories
+Kategori
+Süre
+Government and Legal Organizations
+30 dk 18 sn
+Finance and Banking
+22 dk 44 sn
+Web-based Email
+22 dk 44 sn
+Business
+9 dk 5 sn
+Search Engines and Portals
+7 dk 34 sn
+Streaming Media and Download
+4 dk 35 sn
+Engellenen denemeler (2) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 14:40
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+19.10.2026 10:20
+www.bet365.com
+Gambling
+Web filtresi
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 11 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Departman: İdari İşler
+Aktif kullanıcı / Active users
+5
+Aktif süre (tahmini) / Active time
+22 sa 9 dk
+İndirilen / Downloaded
+6,3 GB
+Yüklenen / Uploaded
+805 MB
+Engellenen deneme / Blocked attempts
+3
+Kişiler (5) / Persons
+Kişi
+İlk
+Son
+Çevrimiçi
+Aktif
+İndirme
+Yükleme
+Oturum
+Engel.
+Mesai dışı
+Murat Ekinci
+08:41
+19:52
+11 sa 11 dk
+5 sa 12 dk
+1,8 GB
+212 MB
+1.630
+0
+46 dk
+Zeynep Arslan
+08:55
+18:04
+9 sa 9 dk
+4 sa 46 dk
+960 MB
+140 MB
+1.210
+0
+0 sn
+Hakan Güneş
+08:10
+17:25
+9 sa 15 dk
+4 sa 28 dk
+1,3 GB
+150 MB
+1.407
+2
+0 sn
+İrem Yalçın
+08:58
+17:05
+8 sa 7 dk
+4 sa 4 dk
+1,5 GB
+205 MB
+1.366
+1
+0 sn
+Şule Erdoğan
+08:33
+16:58
+8 sa 25 dk
+3 sa 39 dk
+870 MB
+98 MB
+1.150
+0
+0 sn
+Murat Ekinci · İdari İşler
+İlk / son etkinlik / First / last activity
+19.10.2026 08:41 - 19:52
+Çevrimiçi süre (tahmini) / Online time
+11 sa 11 dk
+Aktif süre (tahmini) / Active time
+5 sa 12 dk
+Mesai dışı aktif süre / Off-hours active time
+46 dk
+İndirilen / yüklenen / Downloaded / uploaded
+1,8 GB / 212 MB
+Oturum / Sessions
+1.630
+Engellenen deneme / Blocked attempts
+0
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+teams.microsoft.com
+Business
+58 dk 48 sn
+www.hurriyet.com.tr
+News and Media
+57 dk 10 sn
+www.sahibinden.com
+Shopping
+52 dk 16 sn
+outlook.office365.com
+Web-based Email
+44 dk 6 sn
+web.whatsapp.com
+Instant Messaging
+26 dk 8 sn
+www.ntv.com.tr
+News and Media
+24 dk 30 sn
+www.trendyol.com
+Shopping
+24 dk 30 sn
+www.google.com
+Search Engines and Portals
+19 dk 36 sn
+static.cdn-ornek.net
+Bilinmiyor
+4 dk 56 sn
+Kategoriler / Categories
+Kategori
+Süre
+News and Media
+1 sa 21 dk
+Shopping
+1 sa 16 dk
+Business
+58 dk 48 sn
+Web-based Email
+44 dk 6 sn
+Instant Messaging
+26 dk 8 sn
+Search Engines and Portals
+19 dk 36 sn
+Bilinmiyor
+4 dk 56 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 12 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Zeynep Arslan · İdari İşler
+İlk / son etkinlik / First / last activity
+19.10.2026 08:55 - 18:04
+Çevrimiçi süre (tahmini) / Online time
+9 sa 9 dk
+Aktif süre (tahmini) / Active time
+4 sa 46 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+960 MB / 140 MB
+Oturum / Sessions
+1.210
+Engellenen deneme / Blocked attempts
+0
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+www.hurriyet.com.tr
+News and Media
+1 sa 2 dk
+www.sahibinden.com
+Shopping
+1 sa 1 dk
+outlook.office365.com
+Web-based Email
+55 dk 48 sn
+www.trendyol.com
+Shopping
+27 dk 54 sn
+teams.microsoft.com
+Business
+26 dk 9 sn
+web.whatsapp.com
+Instant Messaging
+26 dk 9 sn
+www.ntv.com.tr
+News and Media
+20 dk 55 sn
+www.google.com
+Search Engines and Portals
+5 dk 17 sn
+Kategoriler / Categories
+Kategori
+Süre
+Shopping
+1 sa 28 dk
+News and Media
+1 sa 23 dk
+Web-based Email
+55 dk 48 sn
+Business
+26 dk 9 sn
+Instant Messaging
+26 dk 9 sn
+Search Engines and Portals
+5 dk 17 sn
+Hakan Güneş · İdari İşler
+İlk / son etkinlik / First / last activity
+19.10.2026 08:10 - 17:25
+Çevrimiçi süre (tahmini) / Online time
+9 sa 15 dk
+Aktif süre (tahmini) / Active time
+4 sa 28 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+1,3 GB / 150 MB
+Oturum / Sessions
+1.407
+Engellenen deneme / Blocked attempts
+2
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+www.sahibinden.com
+Shopping
+1 sa 7 dk
+outlook.office365.com
+Web-based Email
+1 sa 3 dk
+teams.microsoft.com
+Business
+31 dk 54 sn
+www.trendyol.com
+Shopping
+31 dk 54 sn
+web.whatsapp.com
+Instant Messaging
+28 dk 42 sn
+www.hurriyet.com.tr
+News and Media
+28 dk 42 sn
+www.ntv.com.tr
+News and Media
+9 dk 34 sn
+www.google.com
+Search Engines and Portals
+6 dk 26 sn
+Kategoriler / Categories
+Kategori
+Süre
+Shopping
+1 sa 38 dk
+Web-based Email
+1 sa 3 dk
+News and Media
+38 dk 16 sn
+Business
+31 dk 54 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 13 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Kategori
+Süre
+Instant Messaging
+28 dk 42 sn
+Search Engines and Portals
+6 dk 26 sn
+Engellenen denemeler (2) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 15:45
+free-proxy.example.org
+Proxy Avoidance
+Web filtresi
+19.10.2026 10:05
+www.bet365.com
+Gambling
+Web filtresi
+İrem Yalçın · İdari İşler
+İlk / son etkinlik / First / last activity
+19.10.2026 08:58 - 17:05
+Çevrimiçi süre (tahmini) / Online time
+8 sa 7 dk
+Aktif süre (tahmini) / Active time
+4 sa 4 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+1,5 GB / 205 MB
+Oturum / Sessions
+1.366
+Engellenen deneme / Blocked attempts
+1
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+teams.microsoft.com
+Business
+48 dk 9 sn
+www.hurriyet.com.tr
+News and Media
+48 dk 9 sn
+www.sahibinden.com
+Shopping
+44 dk 56 sn
+outlook.office365.com
+Web-based Email
+38 dk 31 sn
+web.whatsapp.com
+Instant Messaging
+19 dk 15 sn
+www.trendyol.com
+Shopping
+19 dk 15 sn
+www.ntv.com.tr
+News and Media
+16 dk 3 sn
+www.google.com
+Search Engines and Portals
+9 dk 42 sn
+Kategoriler / Categories
+Kategori
+Süre
+News and Media
+1 sa 4 dk
+Shopping
+1 sa 4 dk
+Business
+48 dk 9 sn
+Web-based Email
+38 dk 31 sn
+Instant Messaging
+19 dk 15 sn
+Search Engines and Portals
+9 dk 42 sn
+Engellenen denemeler (1) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 14:10
+www.tiktok.com
+Social Networking
+Uygulama denetimi
+Şule Erdoğan · İdari İşler
+İlk / son etkinlik / First / last activity
+19.10.2026 08:33 - 16:58
+Çevrimiçi süre (tahmini) / Online time
+8 sa 25 dk
+Aktif süre (tahmini) / Active time
+3 sa 39 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+870 MB / 98 MB
+Oturum / Sessions
+1.150
+Engellenen deneme / Blocked attempts
+0
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+outlook.office365.com
+Web-based Email
+57 dk 24 sn
+teams.microsoft.com
+Business
+31 dk 53 sn
+www.trendyol.com
+Shopping
+31 dk 53 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 14 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Site
+Kategori
+Süre
+www.hurriyet.com.tr
+News and Media
+29 dk 46 sn
+www.sahibinden.com
+Shopping
+25 dk 30 sn
+web.whatsapp.com
+Instant Messaging
+12 dk 45 sn
+www.ntv.com.tr
+News and Media
+12 dk 45 sn
+www.google.com
+Search Engines and Portals
+10 dk 37 sn
+static.cdn-ornek.net
+Bilinmiyor
+6 dk 27 sn
+Kategoriler / Categories
+Kategori
+Süre
+Web-based Email
+57 dk 24 sn
+Shopping
+57 dk 23 sn
+News and Media
+42 dk 31 sn
+Business
+31 dk 53 sn
+Instant Messaging
+12 dk 45 sn
+Search Engines and Portals
+10 dk 37 sn
+Bilinmiyor
+6 dk 27 sn
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 15 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.
+Departman: Bilinmiyor
+Aktif kullanıcı / Active users
+1
+Aktif süre (tahmini) / Active time
+3 sa 4 dk
+İndirilen / Downloaded
+990 MB
+Yüklenen / Uploaded
+74 MB
+Engellenen deneme / Blocked attempts
+1
+Toplamlar departmanı olmayan kişileri, cihazları ve IP adreslerini birlikte sayar. / The totals count the persons, devices and IP
+addresses without a department together.
+Kişiler (1) / Persons
+Kişi
+İlk
+Son
+Çevrimiçi
+Aktif
+İndirme
+Yükleme
+Oturum
+Engel.
+Mesai dışı
+Kerem Tunç
+09:40
+16:30
+6 sa 50 dk
+3 sa 4 dk
+990 MB
+74 MB
+905
+1
+0 sn
+Kerem Tunç · Bilinmiyor
+İlk / son etkinlik / First / last activity
+19.10.2026 09:40 - 16:30
+Çevrimiçi süre (tahmini) / Online time
+6 sa 50 dk
+Aktif süre (tahmini) / Active time
+3 sa 4 dk
+Mesai dışı aktif süre / Off-hours active time
+0 sn
+İndirilen / yüklenen / Downloaded / uploaded
+990 MB / 74 MB
+Oturum / Sessions
+905
+Engellenen deneme / Blocked attempts
+1
+En çok kullanılan siteler / Top sites
+Site
+Kategori
+Süre
+www.google.com
+Search Engines and Portals
+1 sa 4 dk
+www.youtube.com
+Streaming Media and Download
+1 sa
+web.whatsapp.com
+Instant Messaging
+48 dk
+translate.google.com
+Search Engines and Portals
+12 dk
+Kategoriler / Categories
+Kategori
+Süre
+Search Engines and Portals
+1 sa 16 dk
+Streaming Media and Download
+1 sa
+Instant Messaging
+48 dk
+Engellenen denemeler (1) / Blocked attempts
+Zaman
+Site
+Kategori
+Kaynak
+19.10.2026 11:50
+free-proxy.example.org
+Proxy Avoidance
+Web filtresi
+ARCILOGGER kullanım raporu · Tam gün raporu · 19.10.2026
+ARCILOGGER 0.0.0-test · Örnek A.Ş. · Oluşturma 20.10.2026 07:00
+Sayfa 16 / 16
+Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.
+Estimated value: computed from connection logs; tabs left open in the background may count too.

@@ -1,0 +1,21 @@
+# Normalise all text files to LF in the repository and in working copies, including on
+# Windows. ARCILOGGER hashes files byte-for-byte; a silent LF -> CRLF conversion by Git on a
+# Windows checkout would change hashes and break tests and evidence comparisons.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF so cmd.exe / PowerShell 5.1 read them correctly.
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.iss text eol=crlf
+
+# Log fixtures are evidence-like data: never touch line endings or whitespace.
+tests/fixtures/** -text -diff linguist-generated
+
+*.woff2 binary
+*.png binary
+*.ico binary
+*.gz binary
+*.zd binary
+*.der binary

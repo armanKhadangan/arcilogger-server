@@ -1,0 +1,534 @@
+# Denetçi Kılavuzu / Auditor Guide
+
+> Durum: **MVP — kanıt paketi (web arayüzünden ve komut satırından), 5651 raporu ve bağımsız
+> doğrulayıcı**. ARCILOGGER, 5651 sayılı Kanun ve İnternet
+> Toplu Kullanım Sağlayıcıları Hakkında Yönetmelik kapsamındaki yükümlülükleri **desteklemek için
+> tasarlanmıştır**; hukuki uygunluk iddiasında bulunmaz. Kayıtların ve bu kılavuzun hukuki
+> değerlendirmesi için bir hukuk danışmanına başvurun.
+>
+> Status: **MVP — evidence packages (web interface and command line), the 5651 report and the
+> standalone verifier**. ARCILOGGER is *designed to support* the
+> obligations of Law 5651; it does not claim legal compliance. English version: [below](#english).
+
+## İçindekiler
+
+1. [Delil zinciri nasıl çalışır?](#1-delil-zinciri-nasıl-çalışır)
+2. [Ne saklanır, ne kadar süre?](#2-ne-saklanır-ne-kadar-süre)
+3. [Bir günü sunucuda doğrulamak](#3-bir-günü-sunucuda-doğrulamak)
+4. [Kanıt paketi](#4-kanıt-paketi)
+5. [Bağımsız doğrulama adım adım](#5-bağımsız-doğrulama-adım-adım)
+6. [Doğrulama neyi gösterir, neyi göstermez?](#6-doğrulama-neyi-gösterir-neyi-göstermez)
+7. [Doğrulayıcı çıktısını yorumlamak](#7-doğrulayıcı-çıktısını-yorumlamak)
+8. [Sahada netleşecek konular](#8-sahada-netleşecek-konular)
+
+## 1. Delil zinciri nasıl çalışır?
+
+```
+FortiGate / MikroTik ── syslog ──► ArciCollector ──► spool\<kaynak>\<gün>.log      (1) ham kayıt
+                                                          │  gün bitince (00:10)
+                                                          ▼
+                     vault\YYYY\MM\DD\<kaynak>.log.gz  + SHA-256                    (2) mühürlü dosya
+                                                          │
+                     manifest-YYYY-MM-DD.json  (dosya özetleri + önceki günün özeti) (3) manifest, zincir
+                                                          │  yalnızca SHA-256 özeti
+                                                          ▼
+                     Kamu SM zaman damgası ──► manifest-YYYY-MM-DD.json.zd          (4) RFC 3161 damga
+                                                          │
+                     doğrulama → salt okunur + NTFS ACL → WORM ikinci kopya         (5) koruma
+```
+
+1. **Ham kayıt.** Toplayıcı her syslog mesajını alındığı anda, değiştirmeden, tek satır olarak yazar:
+   `<alınma zamanı, +03:00> <gönderen IP> <mesaj>`. Mesajdaki kontrol karakterleri ve `#` işareti
+   geri döndürülebilir biçimde `#` + üç sekizlik rakamla yazılır (satır sonu `#012`, `#` → `#043`);
+   diğer bütün baytlar — UTF-8 olmayanlar dahil — cihazdan geldiği gibidir. Böylece bir mesaj asla
+   iki satıra bölünmez ve orijinal baytlar birebir geri elde edilebilir.
+2. **Mühürleme.** Gün (Türkiye saatiyle 00:00–24:00, alınma zamanına göre) kapandıktan sonra her
+   kaynak dosyası belirlenimci olarak sıkıştırılır (`gzip -n`: dosya adı ve zaman yok), sıkıştırılmış
+   ve açılmış halinin SHA-256 özetleri ve satır sayısı hesaplanır.
+3. **Manifest.** Günün bütün dosyaları, ARCILOGGER denetim kaydı, kesintiler (bir kaynaktan uzun
+   süre kayıt gelmemesi), saat eşitleme bilgisi ve **bir önceki günün manifest ve zaman damgası
+   özetleri** kanonik JSON (RFC 8785) olarak `manifest-YYYY-MM-DD.json` dosyasına yazılır. Her gün
+   bir öncekine bağlandığı için geçmişteki bir günün değiştirilmesi sonraki günlerde fark edilir.
+4. **Zaman damgası.** Manifestin SHA-256 özeti TÜBİTAK BİLGEM Kamu SM'nin zaman damgası
+   sunucusuna gönderilir; dönen RFC 3161 belirteci `.zd` dosyası olarak saklanır. Kamu SM'ye
+   **yalnızca özet** gider. Damga, manifestin o anda var olduğunu ve sonradan değişmediğini gösterir
+   (5070 sayılı Kanun); veriyi kimin oluşturduğunu göstermez.
+5. **Doğrulama ve koruma.** Damga alındıktan hemen sonra ARCILOGGER'ın kendi doğrulayıcısı damgayı,
+   imzayı, sertifika zincirini ve bütün dosya özetlerini kontrol eder; ancak bundan sonra gün
+   "mühürlü" sayılır, dosyalar salt okunur yapılır (NTFS reddetme ACL'si) ve ikinci kopyanın
+   hedefindeki (ör. bir NAS) WORM klasörüne kopyalanır. Bir yönetici dosyayı yine de silebilir ya da
+   değiştirebilir; ancak değişiklik özetler ve damgalar sayesinde **tespit edilir** (ayrıntı:
+   `adr/0003`).
+
+Manifestin alanları:
+
+| Alan | Anlamı |
+|---|---|
+| `schema`, `system` | Biçim sürümü (`arcilogger.manifest/1`), ürün, sürüm, sunucu, kurum |
+| `day`, `tz`, `window` | Gün, saat dilimi (Europe/Istanbul) ve günün `[başlangıç, bitiş)` aralığı |
+| `files[]` | Kaynak başına: `path`, `bytes`, `sha256` (sıkıştırılmış), `sha256_uncompressed`, `lines`, ilk/son alınma zamanı, gönderen IP'ler; çökme ya da dolu disk yüzünden son satırı yarım kalmış dosyada `unterminated_last_line: true` (baytlar olduğu gibi mühürlenir, yarım satır da satır sayısına girer) |
+| `audit_log` | ARCILOGGER denetim kaydının o günkü dosyası ve özeti (dosyanın kendisi kanıt paketine varsayılan olarak alınmaz, bkz. bölüm 4) |
+| `gaps` | Beklenen bir kaynaktan uzun süre kayıt gelmeyen aralıklar (bilgi); `kind: "unsealed_empty_days"` kaydı, hiç log olmadığı için tek tek damgalanmamış uzun bir gün dizisini (`first_day` … `last_day`) listeler — bu günün `previous` bağlantısı o dizinin öncesindeki mühürlü güne gider |
+| `clock` | Saat eşitleme örnekleri ve en büyük sapma |
+| `tsa` | Zaman damgası sağlayıcısı ve `legal_grade`: manifestin kendi beyanı (yapılandırma Kamu SM üretim sunucusunu gösteriyordu). ARCILOGGER bir günü ancak doğrulanan damga zinciri yapılandırmadaki bir Kamu SM köküne (`tsa.legal_root_fingerprints`) ulaşıyorsa "yasal sınıf" gösterir. `require_critical_eku: false` varsa kurum, Kamu SM'nin EKU uzantısını kritik işaretlemeyen sertifika profilini kabul etmiştir (K6) |
+| `previous` | Önceki günün manifest ve damga dosyalarının SHA-256 özetleri |
+| `deletions` | Saklama süresi dolduğu için silinen günlerin damgalı imha tutanakları |
+| `stamped_late`, `created_at` | Geç mühürleme notu, manifestin oluşturulma zamanı |
+
+## 2. Ne saklanır, ne kadar süre?
+
+| Veri | Yer | Süre |
+|---|---|---|
+| Günün ham kayıtları (yazılmakta olan) | `D:\ARCILOGGER\spool\` | Gün mühürlenip kasadaki kopya doğrulanınca silinir |
+| Mühürlü günler (ham kayıt, denetim kaydı, manifest, damga) | `D:\ARCILOGGER\vault\YYYY\MM\DD\` | Varsayılan **760 gün**; ayar 730 günün (2 yıl) altına indirilemez |
+| İmha tutanakları ve zincir çapası | `vault\deletions\` | Süresiz (silinen günlerin özetlerini ve zinciri korur) |
+| Yenileme damgaları (TSA sertifikası bitmeden yeniden damgalama) | `vault\renewals\` | Süresiz (M6'da etkinleşir) |
+| İkinci kopya | Replika hedefindeki WORM klasörü (`[replica] target`, ör. bir NAS) | Kasa ile aynı |
+| Kanıt paketleri | `D:\ARCILOGGER\exports\` | **30 gün** (`evidence.keep_days`; worker her gece siler, elle: `arcilogger-core evidence purge`) |
+| Resmi 5651 raporları (PDF ve `.zd` damgası) | `D:\ARCILOGGER\exports\reports\` | Sorguyla birlikte kalır; **henüz süre sınırı ve silme işi yok** |
+| 5651 sorguları (talep bilgileri, sorgu, sonuç) | PostgreSQL `lookups` | **Henüz süre sınırı yok** |
+| ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
+| Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Hedef 400 gün (`db.retention_days`), ancak bu sürümde bu tabloların **imha işi yoktur**: ayrıştırılmış kayıtlardan hiçbir şey silinmez |
+| Kullanım özetleri (kişi, cihaz ve departman bazında, adlarla: siteler, URL'ler, engellenen denemeler, saatlik satırlar) | PostgreSQL `usage_*` tabloları, `domain_categories` | **400 gün** (`usage.retention_days`): worker işi `usage.retention` her gece 03:30'dan sonra daha eski günleri siler; biten yeniden hesaplama istekleri (`usage_rebuilds`) 90 gün sonra silinir. İmha tutanağı tutulmaz, silinen satır sayıları işin çalışma kaydına (`job_runs`) yazılır. Ayrıştırılmış kayıtlar veritabanında durdukça yeniden hesaplanabilir |
+| Kullanım raporları (HTML, PDF, Excel; kişi adlarıyla) | `D:\ARCILOGGER\exports\usage-reports\` | **400 gün** (`reports.keep_days`; worker her gece 03:20'den sonra siler). E-postayla gönderilen kopyalar alıcılarda kalır |
+
+Saklama ve imha kararları için hukuk müşavirine verilecek taslaklar:
+[legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md),
+[legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md).
+
+Kasadan silme yalnızca saklama görevi (`retention`, varsayılan **kapalı**) tarafından yapılır:
+süresi dolan gün önce yeniden doğrulanır, silinen günlerin listesi ve özetleri bir **imha
+tutanağına** yazılır, tutanak zaman damgasıyla mühürlenir, son silinen günün özetleri **zincir
+çapası** olarak saklanır ve tutanak ertesi günün manifestine eklenir. Böylece zincir, kalan en eski
+günden itibaren doğrulanabilir kalır.
+
+## 3. Bir günü sunucuda doğrulamak
+
+Sunucuda, yönetici olarak açılmış PowerShell'de (program `PATH` üzerinde değildir):
+
+```powershell
+$core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
+& $core verify --day 2026-10-12 --deep    # bir gün, açılmış içerik dahil
+& $core verify --last 90                   # son 90 gün
+& $core verify --all                       # bütün zincir (her ayın 1'inde otomatik)
+```
+
+Web arayüzünde **Mühürleme** sayfasındaki "Doğrula" düğmesi aynı kontrolü bir gün için yapar.
+
+Doğrulama her gün, her hafta (son 90 gün) ve her ay (bütün zincir) Görev Zamanlayıcı ile otomatik
+çalışır; aylık sonuç bir sonraki manifeste `chain_check` olarak mühürlenir.
+
+## 4. Kanıt paketi
+
+Bir 5651 talebi ya da denetim için seçilen günlerin **kendi başına doğrulanabilen** bir kopyası.
+Paket iki yoldan oluşturulur: web arayüzünde **Kanıt Paketleri** sayfasından ya da bir 5651
+sorgusundan (bölüm 4.1; olağan yol) veya sunucuda komut satırından:
+
+```powershell
+$core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
+& $core evidence build --from 2026-10-10 --to 2026-10-12 `
+    [--source fortigate --source core-r1] [--extract satirlar.json] [--pdf rapor.pdf] `
+    [--password] [--lookup-id L-42] [--reference "Savcılık 2026/123"] [--out KLASÖR] `
+    [--include-audit-log]
+```
+
+| Paket içeriği | Açıklama |
+|---|---|
+| `paket.json` | Paket dizini (kanonik JSON): her dosyanın boyutu ve SHA-256 özeti, kapsam (günler, kaynaklar, alıntılanan satırlar, sorgu no, oluşturan, zaman), kök sertifika parmak izleri, ARCILOGGER sürümü |
+| `vault/YYYY/MM/DD/…` | Mühürlü günler, sunucudaki yapıyla aynı: kaynak dosyaları (**her zaman dosyanın tamamı**: 5651 sorgusundan oluşturulan pakette varsayılan olarak alıntılanan günlerin **bütün** kaynakları — bölüm 4.1; aksi hâlde seçilen kaynaklar), manifest, `.zd` damga; günün ARCILOGGER denetim kaydı (`audit.jsonl.gz`) yalnızca yönetici açıkça istediyse (`--include-audit-log`; web arayüzünde yalnızca yöneticinin işaretleyebildiği, varsayılan olarak boş kutu) — yoksa `paket.json`'da `excluded` altında nedeni ve SHA-256 değeriyle listelenir |
+| `vault/deletions/`, `vault/renewals/` | Gerektiğinde imha tutanakları, zincir çapası, yenileme damgaları |
+| `extract/GÜN/<kaynak>.txt` | İsteğe bağlı: sorguyla ilgili ham satırlar, her biri `<satır no><TAB><ham satır>` biçiminde, bayt bayt aynı |
+| `sertifikalar/kokler/`, `sertifikalar/kokler.pem` | Paketteki damgaların gerçekten bağlandığı kök sertifikalar (yalnızca onlar; `tsa.roots_dir`'dan) |
+| `sertifikalar/tsa/` | Damgalardan çıkarılan TSA sertifikaları |
+| `sil/` | Varsa sertifika iptal listeleri (SİL); yoksa `paket.json` bunu belirtir |
+| `verify.py`, `verify.ps1`, `verify.sh` | Bağımsız doğrulayıcı ve çalıştırma betikleri |
+| `DOGRULAMA.txt`, `VERIFY-EN.txt` | Bu paketin dosya adlarıyla hazırlanmış adım adım doğrulama talimatı (dosya adı bilinçli olarak ASCII: her ZIP aracı aynı adla açar; içerik Türkçe) |
+| `rapor/…pdf`, `rapor/….pdf.zd` | 5651 sorgusundan oluşturulan pakette sorgunun saklanan resmi raporu ve (varsa) raporun zaman damgası (bölüm 4.1); komut satırında `--pdf` ile verilen isteğe bağlı rapor |
+
+- **Parola:** `--password` paketi AES-256 ile şifreler (WinZip AES, 7-Zip ile açılır). Parola
+  rastgele üretilir, **yalnızca bir kez gösterilir ve hiçbir yerde saklanmaz**. Dosya adları
+  ZIP'te şifrelenmez, içerikler şifrelenir. Windows'un yerleşik ZIP açıcısı AES şifreli paketleri
+  açamayabilir.
+- **Tekrarlanabilirlik:** aynı girdilerle iki kez üretilen paket, oluşturma zamanı dışında bayt
+  bayt aynıdır (ZIP içi tarihler bilinçli olarak 01.01.1980).
+- **Kasaya dokunulmaz:** paket oluşturulurken kasadaki dosyalar yalnızca okunur. Damgası
+  doğrulanmayan, özeti manifestle uyuşmayan bir dosya ya da pakete alınan ardışık günler arasında
+  kırık bir zincir bağlantısı varsa paket **oluşturulmaz**.
+- **Kendi doğrulayıcısından geçmeyen paket verilmez:** bitmiş ZIP, `verify.py`'nin kendi koduyla
+  (ZIP'ten geri okunarak) kontrol edilir; tek bir HATA bulunursa paket silinir ve verilmez.
+- **Doğrulayıcının özeti:** `evidence build`, paketteki `verify.py`'nin SHA-256 özetini de yazar
+  (`PackageInfo.verifier_sha256`). Bu değeri alıcıya **paketten ayrı bir kanaldan** (teslim
+  tutanağı, resmî yazı) iletin; paketin içindeki `verify.py` kendi kendine kefil olamaz.
+- **Denetim kaydı:** web arayüzünden (API'den) oluşturulan paketler denetim kaydına yazılır:
+  istek `evidence.request`, bitmiş paket `evidence.create` (ZIP'in, `paket.json`'ın ve
+  `verify.py`'nin SHA-256 özetleriyle), her indirme `evidence.download`, süresi dolup silinme
+  `evidence.purge`. `paket.json`'ın SHA-256 değeri (doğrulayıcının `index-hash` satırı) denetim
+  kaydındaki değerle karşılaştırılabilir. Komut satırındaki `evidence build` denetim kaydına
+  **yazmaz** (veritabanı kullanmaz); bu yol sunucu yöneticisi içindir.
+
+### 4.1 Web arayüzünden ve 5651 sorgusundan oluşturulan paket
+
+Ayrıntı: [KANIT-PAKETI.md](KANIT-PAKETI.md).
+
+- Paketleri yalnızca **yönetici** oluşturur (`POST /api/v1/evidence`, son 5 dakika içinde parola
+  onayıyla); denetçi görebildiği paketleri indirir. Yönetici olmayan bir kullanıcı başka bir
+  kullanıcının sorgusunu ve ondan oluşturulan paketleri görmez.
+- **Kapsam:** bir 5651 sorgusundan oluşturulan paket varsayılan olarak (`content: "full_days"`)
+  alıntılanan günlerin **bütün kaynaklarının** mühürlü dosyalarını tam olarak içerir — yalnızca
+  sorgunun dayandığı kaynakları değil; alıntılanan satırlar ayrıca `extract/` altındadır.
+  `content: "extract"` ile yalnızca alıntılanan satırların geldiği kaynakların tam dosyaları girer.
+  Hangi günlerin ve kaynakların pakette olduğu `paket.json`'ın kapsamında (`index-scope`) yazılıdır
+  (ayrıntı: [KANIT-PAKETI.md](KANIT-PAKETI.md)).
+- Bir 5651 sorgusundan (`lookup_id`) oluşturulan paket, sorgunun **saklanan resmi raporunu**
+  `rapor/ARCILOGGER-5651-rapor-<id>.pdf` olarak içerir. Bu, sorgu sırasında üretilip saklanan
+  **aynı baytlardır** (paket için yeniden üretilmez); bu yüzden SHA-256 özeti şu değerlerle aynı
+  olmalıdır: ARCILOGGER'daki sorgu kaydı (`lookup_reports.sha256`), raporu indirirken gelen
+  `X-Arci-Sha256` başlığı ve denetim kaydındaki `lookup.report`, `evidence.request` ve
+  `evidence.create` girişleri (`details.report.sha256`). `verify.py` bu özeti `report-hash`
+  satırında yazar.
+- Raporun zaman damgası (`….pdf.zd`) pakete yalnızca rapor saklanırken doğrulanmışsa **ve**
+  paketteki köklerle hâlâ doğrulanıyorsa girer. Girmezse `paket.json`'daki `report_note` nedenini
+  söyler ve doğrulayıcı `report-token-omitted` uyarısı verir (paket yine doğrulanır). Rapora damga
+  hiç alınmadıysa (isteğe bağlı ayar) `report-not-stamped` bilgisi çıkar.
+- `paket.json` raporu `report`, damgasını `report_token` alanında adlandırır; `rapor/` klasöründe
+  bunlardan başka bir dosya ya da adı geçip olmayan bir dosya HATA'dır.
+- Raporun damgası OpenSSL ile de doğrulanabilir (Yöntem C gibi):
+
+  ```bash
+  openssl ts -verify -in rapor/ARCILOGGER-5651-rapor-<id>.pdf.zd \
+      -data rapor/ARCILOGGER-5651-rapor-<id>.pdf -CAfile sertifikalar/kokler.pem
+  ```
+
+  (`.zd` yalın belirteçse `-token_in` eklenir; [kamusm.md](kamusm.md) K1.)
+- Paketin kapsamı ve ARCILOGGER'ın kendi denetim kaydının pakete girip girmediği `paket.json`'da
+  yazılıdır; denetim kaydı varsayılan olarak pakete **girmez** (kişisel verinin en aza
+  indirilmesi) ve doğrulayıcı bunu hata saymaz.
+- **Lisans kanıtı değiştirmez** ([LISANS.md](LISANS.md) bölüm 12): ham kayıtlarda, mühürlü
+  günlerde, manifestlerde, damgalarda, kanıt paketinde, doğrulayıcıda ve 5651 raporunda lisans
+  işareti yoktur; 5651 sorgusu, rapor ve kanıt paketleri her lisans durumunda çalışır. Denetim
+  kaydındaki `license.*` girişleri lisans işlemleridir (deneme başlangıcı, yükleme, kaldırma, ret,
+  sınır, durum değişikliği); lisans sahibinin adını ve sunucu kimliklerini taşımazlar.
+
+## 5. Bağımsız doğrulama adım adım
+
+Paketi alan kişi ARCILOGGER'a ya da şirketin sunucusuna ihtiyaç duymaz. Üç bağımsız yöntem vardır;
+en az ikisinin kullanılması önerilir.
+
+> **`verify.py`'ye ne zaman güvenilir?** `verify.py` paketin içinde gelir; paketi değiştirebilen
+> biri onu da değiştirip her zaman "DOĞRULANDI" yazdırabilir. Sonucuna ancak (a) özetini paketten
+> ayrı bir kanaldan aldığınız değerle karşılaştırdıysanız ya da (b) kendi edindiğiniz bir kopyayı
+> pakete karşı çalıştırdıysanız (`python -I -S <kendi kopyanız>/verify.py <paket klasörü>`)
+> güvenin. İkisi de mümkün değilse **Yöntem C**'yi uygulayın: C yalnızca OpenSSL'e ve standart özet
+> araçlarına dayanır ve damgaları, dosyaları, zinciri ve alıntıyı `verify.py` olmadan kontrol eder.
+
+### A — `verify.py` (önerilen)
+
+1. Python 3.9 veya üstünü kurun (<https://www.python.org/downloads/>). Ek paket gerekmez.
+2. Paketi bir klasöre açın (şifreliyse parolayla, örneğin 7-Zip ile).
+3. Klasörde çalıştırın:
+   - Windows: `py -3 -I -S verify.py` ya da `powershell -ExecutionPolicy Bypass -File .\verify.ps1`
+   - Linux/macOS: `python3 -I -S verify.py` ya da `sh verify.sh`
+4. Son satır `SONUÇ: DOĞRULANDI` ise bütün kontroller geçmiştir; `DOĞRULANDI — N uyarıyı okuyun`
+   ise [UYARI] satırları ayrıca incelenmelidir (örneğin geç damga, eksik gün); `DOĞRULANAMADI` ise
+   `[HATA]` satırları sorunun yerini gösterir. Çıkış kodu: `0` doğrulandı, `1` hata, `2` paket
+   okunamadı (güvenli olmayan ya da çakışan dosya adları dahil).
+
+`-I -S` Python'u yalıtır: bilgisayardaki ek paketler ve ortam değişkenleri kullanılmaz; sonuç
+yalnızca `verify.py` dosyasındaki koda dayanır. `verify.py` ağa bağlanmaz ve dosya yazmaz.
+
+Seçenekler: `--kokler KLASÖR` (yalnızca bu klasördeki köklere güven — örneğin Kamu SM'den kendi
+indirdikleriniz; paketteki kökler kullanılmaz), `--hizli` (gzip dosyalarını açmadan yalnızca
+özetler), `--json` (makine tarafından okunabilir çıktı). `verify.py`, paket olmadan **kasanın bir
+kopyasını** (örneğin bir NAS'taki replika) da doğrulayabilir:
+`python -I -S verify.py \\<NAS>\arcilogger-worm --kokler KLASÖR`. Klasörde `paket.json`, `verify.py` ya da `vault/` yoksa
+"kasa kopyası" kipinde çalışır: mühürlü günler ve kayıtlar doğrulanır; gün klasörlerinin dışındaki
+bilinmeyen dosyalar yalnızca uyarıdır. Bir **kanıt paketinde** (ZIP, `vault/` klasörü, `paket.json`
+ya da `verify.py` içeren klasör) `paket.json`'ın olmaması, listede olmayan ya da paketin bilinen bir
+parçası olmayan her dosya HATA'dır.
+
+`verify.py` şunları kontrol eder:
+
+| # | Kontrol |
+|---|---|
+| 0 | Dosya adları: Windows'ta değişmeden açılabilir ve büyük/küçük harf farkı gözetilmeden birbirinden farklı mı (`..`, mutlak yol, sonda nokta/boşluk, `CON` gibi aygıt adları, denetim karakterleri, `x.txt` / `X.TXT` çakışması → çıkış kodu 2) |
+| 1 | `paket.json` var mı ve kanonik mi; listedeki her dosya var mı, boyutu ve SHA-256 özeti doğru mu; listede olmayan dosya var mı; kapsamdaki (`scope.days`) her gün pakette mi |
+| 2 | Kök sertifikalar ve SHA-256 / SHA-1 parmak izleri (ekrana ve özete yazılır) |
+| 3 | Her gün: manifest kanonik JSON mu (yinelenen anahtar yok); manifestteki her dosyanın boyutu ve SHA-256 özeti; açılmış içeriğin özeti ve satır sayısı |
+| 4 | Zaman damgası: `TimeStampResp` ya da yalın `TimeStampToken`; durum; manifest özeti (messageImprint, en az SHA-256); `content-type` ve `message-digest` öznitelikleri; CMS imzası (RSA PKCS#1 v1.5, RSA-PSS, ECDSA P-256/P-384/P-521; SHA-256/384/512; ECDSA imzası yalnızca tek DER biçimiyle); ESSCertID / ESSCertIDv2 bağı; TSA sertifikasında kritik ve tek amaçlı `id-kp-timeStamping` ve (varsa) imzalamaya izin veren keyUsage; damga anında geçerli sertifikalarla köke kadar zincir (veren CA'larda keyCertSign ve pathLenConstraint); paketteki SİL'ler; gelecekteki tarih |
+| 5 | Damganın zamanı damganın kendisinden hesaplanır: gün bitiminden 48 saatten sonra ise geç damga (manifest bunu söylemese bile); gün bitmeden önce ya da manifestin yazılma zamanından (`created_at`) çok farklı ise uyarı |
+| 6 | Günler arası zincir (`previous`); önceki gün pakette yoksa "zincir bu pakette başlıyor"; pakette daha önceki bir gün varken aradaki gün eksikse ya da zincir yeniden başlıyorsa uyarı; silinmiş günler için zincir çapası ve imha tutanağı; manifestin `unsealed_empty_days` olarak listelediği boş günler atlanarak bağlantı, o dizinin öncesindeki güne |
+| 7 | İmha tutanakları ve yenileme damgaları (varsa) |
+| 7b | Resmi rapor (varsa, bölüm 4.1): `paket.json`'ın `report` / `report_token` alanlarında adı geçen dosyalar var mı; `rapor/` klasöründe başka dosya var mı; raporun SHA-256 özeti ARCILOGGER kayıtlarıyla karşılaştırılmak üzere yazılır; raporun damgası, imha tutanaklarının damgası gibi paketteki köklere karşı doğrulanır |
+| 8 | `extract` satırlarının mühürlü dosyadaki aynı numaralı satırlarla bayt bayt aynılığı |
+| 9 | Paketin içeriği: gün klasöründe olup manifestte olmayan dosya hiç mühürlenmemiştir (HATA, kasa kopyasında da); kanıt paketinde bilinen bir parça olmayan her dosya HATA |
+| 10 | Manifestteki `legal_grade` ve damga politikası: test (mock) damgaları açıkça uyarılır; yasal damga diyen bir gün ARCILOGGER'ın test köküne ya da test politikasına bağlanıyorsa HATA; damgalar birden çok köke bağlanıyorsa uyarı |
+
+### B — Kamu SM'nin resmî Zamane istemcisi
+
+Kamu SM'nin "Ücretsiz Zaman Damgası İstemci Yazılımı" sayfasından konsol istemcisini
+(`tss-client-console-3.1.33.jar`, Java 1.8 gerekir) indirin ve SHA-256 değerini sayfada yayımlanan
+değerle karşılaştırın. Kamu SM'nin belgelediği kullanım (bkz. [kamusm.md](kamusm.md)):
+
+```text
+java -jar tss-client-console-3.1.33.jar -c  manifest-2026-10-12.json manifest-2026-10-12.json.zd
+java -jar tss-client-console-3.1.33.jar -CC manifest-2026-10-12.json manifest-2026-10-12.json.zd
+```
+
+`-c` damgayı kontrol eder, `-CC` ayrıca sunucu sertifikasını kontrol eder. İstemcinin ekran
+çıktısının biçimi belgelenmemiştir. Bu yöntem yalnızca Kamu SM damgalı günler için anlamlıdır ve
+yalnızca damgayı kontrol eder (dosyalar, zincir ve alıntı için Yöntem C'nin C2–C4 adımları).
+`DOGRULAMA.txt` her gün için tam komutları içerir.
+
+### C — OpenSSL ve özet araçlarıyla, `verify.py` olmadan
+
+`DOGRULAMA.txt` aşağıdaki adımların komutlarını bu paketin dosya adlarıyla verir:
+
+1. **C1 — damga:** her gün için
+   ```bash
+   openssl ts -verify -in vault/2026/10/12/manifest-2026-10-12.json.zd \
+       -data vault/2026/10/12/manifest-2026-10-12.json -CAfile sertifikalar/kokler.pem -attime <genTime>
+   ```
+   Beklenen çıktı `Verification: OK`. `-attime` sertifikaları damga anında kontrol ettirir (TSA
+   sertifikasının süresi sonradan dolsa da çalışır). `.zd` dosyası yalın belirteçse `-token_in`
+   eklenir. Bu adım manifestin damga anından beri değişmediğini gösterir.
+2. **C2 — dosyalar:** `sha256sum vault/2026/10/12/*.gz` (PowerShell: `Get-FileHash -Algorithm SHA256
+   vault\2026\10\12\*.gz`, cmd: `certutil -hashfile <dosya> SHA256`); her değer, aynı günün
+   manifestindeki `files[].sha256` ya da `audit_log.sha256` ile aynı olmalı. Manifestte olup klasörde
+   olmayan ya da klasörde olup manifestte olmayan dosya, paketin eksik ya da eklenmiş olduğunu gösterir
+   — ARCILOGGER denetim kaydı (`audit_log`) hariç: varsayılan olarak pakete alınmaz ve `paket.json`
+   `excluded` altında listelenir.
+3. **C3 — zincir:** önceki günün `manifest-…json` ve `.zd` dosyalarının SHA-256 özetleri, sonraki
+   günün manifestindeki `previous.manifest_sha256` ve `previous.token_sha256` ile aynı olmalı.
+4. **C4 — alıntı:** `gzip -dc vault/2026/10/12/<kaynak>.log.gz | sed -n 'Np'` çıktısı, alıntı
+   dosyasındaki `N<TAB>…` satırıyla bayt bayt aynı olmalı (Windows'ta Git Bash ya da WSL ile).
+
+### Kök sertifikalar
+
+Zaman damgasına duyulan güven, zincirin ulaştığı kök sertifikaya dayanır. Hiçbir yazılım paketteki
+bir kökün gerçekten Kamu SM'ye ait olduğunu kendi başına kanıtlayamaz: `verify.py`'nin ve
+`DOGRULAMA.txt`'nin gösterdiği **SHA-256 parmak izlerini**, Kamu SM'nin `sertifikalar.kamusm.gov.tr`
+adresinde yayımladığı değerlerle karşılaştırın ya da kökleri oradan kendiniz indirip
+`verify.py --kokler KLASÖR` ile verin.
+
+## 6. Doğrulama neyi gösterir, neyi göstermez?
+
+**Gösterir:** manifestin zaman damgasındaki anda var olduğunu ve o andan beri değişmediğini;
+pakette bulunan her kayıt dosyasının mühürlendiği andan beri bayt bayt aynı olduğunu ve pakette
+mühürlenmemiş bir kayıt dosyası bulunmadığını; pakette art arda bulunan günler arasında zincirin
+kopmadığını (eksik günler uyarı olarak gösterilir); alıntı satırlarının mühürlü dosyadaki satırlarla
+aynı olduğunu; her günün gün bitiminden ne kadar sonra damgalandığını.
+
+**Göstermez:**
+- kayıtları kimin ürettiğini ya da cihazların doğru kayıt ürettiğini (zaman damgası verinin kimin
+  tarafından oluşturulduğunu kanıtlamaz); gönderen IP adresi doğrulanmaz (UDP syslog), bu yüzden
+  bir satırın gerçekten o cihazdan geldiğini de göstermez (cihaz ayarları, DEVICE-SETUP 1.1);
+- gün içinde, mühürlemeden önce bir değişiklik yapılmadığını (bunun için sunucunun işletim ve
+  güvenlik kayıtları değerlendirilmelidir; geç damgalanan günler bu yüzden uyarı olarak gösterilir:
+  bir gün sonradan değiştirilip yeniden mühürlenirse geriye kalan tek iz geç damga zamanıdır);
+- satırlardaki alınma zamanlarının doğruluğunu (sunucu saatine dayanır; eşitleme bilgisi manifestin
+  `clock` bölümündedir);
+- bir IP adresinin belirli bir kişiye ait olduğunu (bu bir analizdir; raporda yöntemiyle verilir);
+- paketteki kök sertifikanın Kamu SM'ye ait olduğunu (parmak izi karşılaştırması gerekir);
+- paketin içindeki `verify.py`'nin değiştirilmediğini (özetini ayrı bir kanaldan doğrulayın ya da
+  Yöntem C'yi kullanın);
+- sertifikaların iptal durumunu **çevrim içi** (SİL indirme, OCSP yapılmaz; paketteki SİL'ler
+  kontrol edilir);
+- kapsam dışı bırakılan kaynakların dosyalarını (pakette yoktur);
+- test (mock) damgalı günlerin yasal geçerliliğini — bunların yasal geçerliliği **yoktur**.
+
+## 7. Doğrulayıcı çıktısını yorumlamak
+
+Tablo, `verify.py`'nin yazabileceği **bütün** kodları listeler (`--json` çıktısındaki `code`
+alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını taşır. Bir HATA paketi
+"DOĞRULANAMADI" yapar; UYARI incelenmelidir; BİLGİ ve OK yalnızca bilgi verir.
+
+| Kod | Düzey | Anlamı |
+|---|---|---|
+| (çıkış kodu 2) | — | Paket okunamadı: şifreli, bozuk ZIP, güvenli olmayan ya da (büyük/küçük harf farkıyla) çakışan dosya adları |
+| `file-hash-mismatch`, `file-size-mismatch`, `file-content-mismatch` | HATA | Kayıt dosyası mühürlendikten sonra değiştirilmiş |
+| `file-not-sealed` | HATA | Gün klasöründe manifestte olmayan, yani hiç mühürlenmemiş bir dosya var |
+| `file-unexpected` | HATA (kasa kopyasında UYARI) | Paketin bilinen bir parçası olmayan dosya |
+| `file-missing`, `index-file-missing`, `manifest-missing` | HATA | Dosya ya da (kapsamdaki) bir gün eksik |
+| `index-missing`, `index-unlisted-file` | HATA (kasa kopyasında UYARI) | `paket.json` yok ya da bir dosyayı listelemiyor |
+| `manifest-not-canonical`, `manifest-invalid` | HATA | Manifesti ARCILOGGER yazmamış (kanonik değil, yinelenen anahtar) ya da okunamıyor |
+| `nothing-verified` | HATA | Pakette mühürlü gün yok |
+| `token-weak-digest` | HATA | Damga SHA-1 gibi zayıf bir özetle alınmış |
+| `token-key-usage`, `token-path-length` | HATA | Sertifikaların anahtar kullanımı ya da zincir uzunluğu sınırı damgaya izin vermiyor |
+| `token-imprint` | HATA | Damga bu manifeste ait değil ya da manifest değiştirilmiş |
+| `token-swapped` | HATA | Damga dosyaları günler arasında yer değiştirmiş |
+| `token-signature`, `token-message-digest`, `token-content-type`, `token-ess` | HATA | Damganın imzası ya da imzalı öznitelikleri geçersiz |
+| `token-eku` | HATA | TSA sertifikası zaman damgası için yetkili değil |
+| `token-eku-not-critical` | UYARI | EKU uzantısı kritik değil; kurum bunu mühürlü manifestte kabul etmiş (`tsa.require_critical_eku = false`, K6). OpenSSL `ts -verify` böyle bir damgayı "unsuitable certificate purpose" diyerek reddeder |
+| `chain-skip-invalid` | HATA | Manifestteki boş gün dizisi geçersiz ya da bu günden hemen önce bitmiyor |
+| `summary-several-roots` | UYARI | Paketteki damgalar birden çok köke bağlanıyor; her kökün parmak izini ayrı karşılaştırın |
+| `token-chain`, `token-not-ca` | HATA | Sertifika zinciri güvenilen bir köke ulaşmıyor |
+| `token-cert-validity` | HATA | Bir sertifika damga anında geçerli değil |
+| `crl-revoked` | HATA | Bir sertifika damgadan önce iptal edilmiş |
+| `chain-broken`, `chain-not-previous-day` | HATA | Önceki gün sonradan değiştirilmiş ya da bağlantı yanlış |
+| `index-hash-mismatch`, `index-not-canonical` | HATA | `paket.json` ya da listelediği bir dosya değiştirilmiş |
+| `extract-mismatch`, `extract-unknown` | HATA | Alıntı satırı mühürlü dosyadakiyle aynı değil; alıntı klasöründe beklenmeyen dosya |
+| `legal-claim-mismatch` | HATA | Manifest yasal damga diyor, damga test TSA'sından |
+| `manifest-day-mismatch`, `manifest-misplaced` | HATA | Manifest başka bir güne ait ya da yanlış gün klasöründe |
+| `file-unreadable`, `file-path-invalid` | HATA | Dosya okunamadı; manifestteki yol geçersiz (`..`, mutlak yol vb.) |
+| `file-excluded-in-scope` | HATA | `paket.json` dosyayı kapsam dışı sayıyor ama kaynağı kapsamda: dosya eksik |
+| `index-invalid`, `index-path-invalid`, `index-size-mismatch` | HATA | `paket.json` okunamıyor, geçersiz ya da yinelenen bir yol içeriyor, ya da bir dosyanın boyutu dizindekinden farklı |
+| `root-invalid`, `root-none` | HATA | Bir kök sertifika okunamadı; güvenilecek hiç kök yok (damgalar doğrulanamaz) |
+| `token-format`, `token-status` | HATA | Damga dosyası çözümlenemedi (bozuk ya da damga değil); damga sunucusu isteği reddetmiş |
+| `token-signers`, `token-signed-attrs`, `token-no-cert` | HATA | Damgada tam bir imzacı yok, imzalı öznitelikler yok ya da TSA sertifikası damganın içinde değil (`certReq`) |
+| `token-future` | HATA | Damganın zamanı gelecekte (saat hatası ya da sahte damga) |
+| `token-index-mismatch` | HATA | `paket.json`'daki damga bilgisi (seri no, zaman) damga dosyasıyla uyuşmuyor |
+| `algorithm`, `signature` | HATA | Desteklenmeyen özet/imza algoritması; bir imza (sertifika zincirinde ya da SİL'de) geçersiz |
+| `anchor-invalid` | HATA | Zincir çapası okunamadı |
+| `deletion-hash-mismatch`, `deletion-token-mismatch` | HATA | İmha tutanağı ya da damgası manifestteki özetle uyuşmuyor |
+| `extract-format`, `extract-index-mismatch` | HATA | Alıntı dosyasının biçimi hatalı; satır numaraları `paket.json`'dakilerle aynı değil |
+| `extract-no-source`, `extract-source-unverified` | HATA | Alıntının alındığı mühürlü dosya pakette yok ya da doğrulanamadı (alıntıya da güvenilemez) |
+| `report-missing`, `report-token-missing` | HATA | `paket.json`'ın `report` / `report_token` alanında adı geçen rapor ya da damgası pakette yok (bölüm 4.1) |
+| `report-unlisted`, `report-token-unlisted` | HATA | `rapor/` klasöründeki dosya, `paket.json`'ın raporu ya da rapor damgası olarak adlandırdığı dosya değil |
+| `report-token-orphan` | HATA | Rapor damgası var ama ait olduğu rapor pakette yok |
+| `legal-test-stamp` | UYARI | Gün test (mock) damgasıyla mühürlenmiş; yasal geçerliliği yok |
+| `stamped-late` | UYARI | Gün, bitiminden 48 saatten sonra damgalanmış (manifest de bunu söylüyor) |
+| `stamped-late-computed` | UYARI | Gün geç damgalanmış ama manifest bunu söylemiyor: gün sonradan yeniden mühürlenmiş olabilir; sunucu kayıtlarıyla karşılaştırın |
+| `stamped-before-day-end`, `stamp-time-differs` | UYARI | Damga zamanı gün bitiminden önce ya da manifestin yazılma zamanından çok farklı (saat hatası ya da sonradan damgalama) |
+| `chain-gap`, `chain-restart` | UYARI | Pakette daha önceki bir gün varken aradaki gün(ler) eksik ya da zincir yeniden başlıyor |
+| `crl-revoked-later`, `crl-hold` | UYARI | Sertifika damgadan sonra iptal edilmiş ya da askıya alınmış; incelenmeli |
+| `crl-invalid` | UYARI | Paketteki bir SİL okunamadı |
+| `index-schema` | UYARI | `paket.json` bilinmeyen bir biçim sürümü bildiriyor (daha yeni bir ARCILOGGER) |
+| `summary-test-days` | UYARI | Özet: yasal geçerliliği olmayan test damgalı günler var |
+| `report-token-omitted` | UYARI | Raporun zaman damgası pakete konmamış; nedeni `paket.json`'daki `report_note` alanında (bölüm 4.1) |
+| `chain-start` | BİLGİ | Önceki gün pakette yok; zincir bu pakette başlıyor |
+| `crl-none`, `crl-stale` | BİLGİ | Paketteki SİL'ler bu sertifikayı ya da damga anını kapsamıyor; iptal durumu bilinmiyor |
+| `vault-copy` | BİLGİ | Paket dizini yok: kasa kopyası olarak doğrulandı |
+| `os-metadata` | BİLGİ | İşletim sisteminin eklediği dosyalar (`.DS_Store`, `._*`, `Thumbs.db`, `desktop.ini`) okunmadan yok sayıldı |
+| `file-excluded` | BİLGİ | Kaynak kapsam dışı bırakılmış; dosya pakette yok, doğrulanmadı |
+| `audit-log-excluded` | BİLGİ | ARCILOGGER denetim kaydı pakete alınmamış (varsayılan, KVKK); hata değil |
+| `file-torn-last-line` | BİLGİ | Dosyanın son satırı yarım (çökme ya da dolu disk); olduğu gibi mühürlenmiş |
+| `chain-skipped-days` | BİLGİ | Önceki günlerde hiç log yoktu; tek tek damgalanmadılar, bu manifest onları listeliyor |
+| `gaps` | BİLGİ | Manifestte kayıt gelmeyen süreler var |
+| `chain-first` | BİLGİ | Bu gün ARCILOGGER zincirinin ilk günü (önceki gün bağlantısı yok) |
+| `audit-log-absent` | BİLGİ | Günün ARCILOGGER denetim kaydı pakette yok ve `paket.json` okunamadığı için kapsam bilinmiyor; denetim kaydı varsayılan olarak pakete alınmadığından tek başına hata sayılmaz |
+| `crl-absent`, `crl-loaded` | BİLGİ | Pakette SİL yok (iptal durumu kontrol edilmez); yüklenen SİL sayısı |
+| `deletion-absent` | BİLGİ | Manifestte adı geçen imha tutanağı pakette yok |
+| `index-hash`, `index-scope` | BİLGİ | `paket.json`'ın SHA-256 özeti (denetim kaydıyla karşılaştırın); paket no, oluşturan, zaman, günler, kaynaklar, sorgu |
+| `manifest`, `root`, `root-trust`, `roots-external` | BİLGİ | Manifest dosyası ve özeti; kök sertifika ve parmak izleri; parmak izlerini Kamu SM'nin yayımladığı değerlerle karşılaştırma hatırlatması; yalnızca `--kokler` ile verilen köklere güveniliyor |
+| `renewal-covers` | BİLGİ | Yenileme damgasının kapsadığı günler |
+| `report-hash` | BİLGİ | Raporun SHA-256 özeti: ARCILOGGER'daki sorgu kaydı ve denetim kaydıyla (`lookup.report`) aynı olmalı |
+| `report-not-stamped` | BİLGİ | Rapora ayrıca zaman damgası alınmamış (isteğe bağlı ayar) |
+| `summary-days`, `summary-root` | BİLGİ | Özet: incelenen günler; damgaların bağlandığı kök (Kamu SM'nin yayımladığı parmak iziyle karşılaştırın) |
+| `file-ok`, `token-ok`, `chain-ok`, `chain-anchor`, `contents-ok`, `crl-ok`, `extract-ok`, `index-files`, `deletion-ok`, `renewal-ok`, `report-ok` | OK | İlgili kontrol geçti (dosya, damga, zincir bağlantısı, imha edilmiş önceki gün için zincir çapası, paket içeriği, SİL, alıntı, paket dizini, imha tutanağı, yenileme ve rapor damgası) |
+
+## 8. Sahada netleşecek konular
+
+- Kamu SM `.zd` dosyasının biçimi (`TimeStampResp` ya da yalın belirteç), `certReq`'in karşılanıp
+  karşılanmadığı, EKU'nun kritik olup olmadığı ve imza algoritmaları test sunucusunda
+  doğrulanacak ([kamusm.md](kamusm.md) K1, K5, K6). `verify.py` ikisini de kabul eder. EKU kritik
+  değilse kurum `tsa.require_critical_eku = false` ayarını kullanabilir; bu seçim her manifeste
+  mühürlenir ve `verify.py` o günler için hata yerine uyarı verir.
+- Kamu SM kök sertifikalarının ve SİL'lerin kesin adresleri (K10); SİL indirme henüz yok.
+- Kamu SM sertifika profili (K6): TSA sertifikasında keyUsage (digitalSignature / nonRepudiation),
+  ara ve kök sertifikalarda keyCertSign ve pathLenConstraint; tamsayıların en kısa DER biçimiyle
+  kodlanması. `verify.py` bunları zorunlu tutar; gerçek Kamu SM damgalarıyla denenmeli.
+- `verify.ps1`'in denetçi bilgisayarlarında (Windows PowerShell 5.1, yürütme ilkesi) denenmesi.
+- `verify.py` özetinin alıcıya paketten ayrı iletileceği kanal (teslim tutanağı, indirme sayfası,
+  sürüm notları) ve `verify.py`'nin lisansı: işletme sahibinin kararı.
+
+---
+
+<a id="english"></a>
+
+## English
+
+**How the evidence chain works.** The collector writes every received syslog message unchanged as
+one line (`<receive time> <sender IP> <message>`, control bytes and `#` reversibly escaped as `#ooo`)
+into the day's spool file. After the day closes (Europe/Istanbul, by receive time) each file is
+compressed deterministically into the vault, hashed (SHA-256 of the compressed and uncompressed
+bytes), and listed in the daily **manifest** (canonical JSON, RFC 8785) together with the audit log,
+gaps, clock data and the **hashes of the previous day's manifest and token** (the chain). Only the
+manifest's SHA-256 is sent to TÜBİTAK BİLGEM Kamu SM, which returns an RFC 3161 time-stamp token
+(`.zd`). ARCILOGGER verifies the token and all hashes before it marks a day sealed, makes the files
+read-only and copies them to the WORM share of the replica (e.g. on a NAS).
+
+**Retention.** Spool: until the day is sealed. Vault: 760 days by default, never below 730; the
+retention job is off by default. Vault days are deleted only by the retention job, with a
+time-stamped deletion record and a chain anchor. Evidence packages in `exports/`: 30 days. Stored
+official 5651 reports (`exports\reports\`) and the 5651 lookups: no expiry yet. ARCILOGGER's audit
+log: no expiry in the database; its daily file is sealed with the day. Parsed records in the
+database: derived and rebuildable from the vault; intended 400 days, but no deletion job exists yet
+for them. Usage rollups in the database (per person, device and department with names: sites,
+URLs, blocked attempts, hourly rows; `usage_*` tables, `domain_categories`): 400 days
+(`usage.retention_days`), deleted every night after 03:30 by the worker job `usage.retention`,
+finished rebuild requests (`usage_rebuilds`) after 90 days; no deletion record is kept, the job's
+run (`job_runs`) holds the deleted row counts. Usage report files (`exports\usage-reports\`, with
+names): 400 days (`reports.keep_days`); copies sent by e-mail stay with the recipients. Drafts for
+the lawyer: `docs/legal/`.
+
+**Evidence package.** `arcilogger-core.exe evidence build --from D --to D [--source S] [--extract F]
+[--password] [--pdf F] [--include-audit-log]` (on the server, by its full path) creates a ZIP with
+the sealed files (whole files of the chosen sources), manifests, tokens, deletion/renewal records
+when relevant, the roots the tokens chain to (only those) and the TSA certificates, CRLs when a
+CRL folder exists, an optional byte-exact extract of raw lines, the standalone verifier, the
+guides (`DOGRULAMA.txt`, `VERIFY-EN.txt`) and `paket.json` (canonical index with size and SHA-256
+of every file). Optional AES-256 encryption with a random password shown once and never stored.
+Building twice from the same inputs gives the same bytes except the creation time. The vault is
+only read; a day whose token or hashes do not verify, or a broken chain link between included
+days, is refused, and the finished ZIP is checked with the standalone verifier's own code before
+it is handed out. The build also prints the SHA-256 of `verify.py`: give it to the recipient
+through a channel separate from the package. ARCILOGGER's own audit log (`audit.jsonl.gz`) is left
+out unless asked for (it holds other requests and staff data); `paket.json` lists it under
+`excluded` with its sealed SHA-256 and `verify.py` reports `audit-log-excluded` (information, not a
+failure; `audit-log-absent` when the package has no readable `paket.json`). A torn last line
+(crash, full disk) is sealed as it is and reported as `file-torn-last-line`; a run of days without
+any log may be listed in the next manifest (`unsealed_empty_days`) instead of being stamped day by
+day, and the chain links past it (`chain-skipped-days`; an invalid run is `chain-skip-invalid`).
+Stamps chaining to more than one root give `summary-several-roots`; a TSA certificate whose
+extended key usage is not critical gives `token-eku-not-critical` (a warning) only where the site
+accepted that profile (`tsa.require_critical_eku = false`, K6), otherwise `token-eku`. A day is
+shown as legal grade only when its manifest claims the Kamu SM production server and the verified
+chain reaches a root listed in `tsa.legal_root_fingerprints`.
+
+**Packages from the web interface and the 5651 report (section 4.1).** Administrators create
+packages in the web interface (re-authentication); auditors download those they may see. Web
+packages are audited (`evidence.request`, `evidence.create` with the SHA-256 of the ZIP,
+`paket.json` and `verify.py`, every `evidence.download`, `evidence.purge`); the command-line
+`evidence build` is not. A package built from a 5651 lookup contains, by default (`content:
+"full_days"`), the whole sealed files of **all** sources of the cited days (not only the cited
+sources) plus the cited lines under `extract/`; with `content: "extract"` only the sources of the
+cited lines. It carries the lookup's stored official
+report `rapor/ARCILOGGER-5651-rapor-<id>.pdf` — the same bytes, so its SHA-256 (`report-hash`)
+equals `lookup_reports.sha256`, the `X-Arci-Sha256` header and the audit entries `lookup.report`,
+`evidence.request` and `evidence.create` — and its `.pdf.zd` only when that token verified when
+stored and still verifies against the package's roots (otherwise `report_note` in `paket.json`
+and the warning `report-token-omitted`). `paket.json` names them in `report` / `report_token`;
+any other file under `rapor/` is an error. Check the token with `openssl ts -verify -in
+rapor/<x>.pdf.zd -data rapor/<x>.pdf -CAfile sertifikalar/kokler.pem`. ARCILOGGER's own audit
+log is not in a package by default (data minimisation). Section 7 lists every code the verifier
+prints. The licence never changes evidence ([LICENSING.md](LICENSING.md) section 12): no licence
+mark in raw logs, sealed days, manifests, time stamps, packages, the verifier or the 5651 report,
+and lookups, reports and packages work in every licence state; the audit log's `license.*`
+entries are licence actions (trial start, installation, removal, refusal, limits, state changes)
+without the licensee name or server ids.
+
+**Independent verification.**
+- A) `python -I -S verify.py` in the extracted folder (Python 3.9+, standard library only, no
+  network, writes nothing). Exit code 0 = verified (read the warnings), 1 = a check failed, 2 = the
+  package cannot be read (including unsafe or case-colliding file names). `--kokler DIR` trusts
+  only roots you bring. The verify.py inside a package cannot vouch for itself: trust its result
+  only if its SHA-256 matches a value received separately, or run your own copy against the package;
+  otherwise use C.
+- B) Kamu SM's official console client: `java -jar tss-client-console-3.1.33.jar -c|-CC <file>
+  <file>.zd` (usage as documented by Kamu SM; see [kamusm.md](kamusm.md)); it checks the stamps only.
+- C) Without verify.py: C1 `openssl ts -verify -in <manifest>.zd -data <manifest> -CAfile
+  sertifikalar/kokler.pem -attime <genTime>`; C2 the SHA-256 of every file of a day folder equals
+  its value in the manifest; C3 the SHA-256 of the previous day's manifest and `.zd` equal
+  `previous` in the next manifest; C4 line N of an extract equals line N of the decompressed sealed
+  file. `DOGRULAMA.txt` lists the exact commands.
+- Compare the root fingerprints with the values Kamu SM publishes at `sertifikalar.kamusm.gov.tr`;
+  no software can prove on its own that a root in the package is Kamu SM's.
+
+**What verification shows and what it does not.** It shows that each manifest existed at its stamp
+time and is unchanged, that the packaged log files match their sealed hashes and that no unsealed
+log file is in the package, that consecutive days are chained (missing days are warnings), that
+the extract equals the sealed lines, and how long after the end of the day each day was stamped
+(more than 48 hours is a warning, whatever the manifest says: re-sealing a rewritten day leaves only
+this trace). It does not show who produced the logs, that nothing changed before sealing, that
+receive times were correct, that an IP belonged to a person, that the verify.py inside the package
+is genuine, or the online revocation status; test (mock) stamps have no legal validity.

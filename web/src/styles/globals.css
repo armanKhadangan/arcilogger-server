@@ -1,0 +1,311 @@
+/*
+ * ARCILOGGER design tokens — flat design, Turkish first.
+ *
+ * Colours follow the build specification (section 12.1). Additions, each checked for
+ * WCAG 2.1 AA contrast (see docs/DESIGN-TOKENS.md):
+ *   - "muted-strong": secondary text on the tinted "subtle" background (muted is 4.3:1
+ *     there, below AA).
+ *   - "*-ink" tokens: text colour used on the matching "*-soft" background (the base status
+ *     colours are too light for small text on soft fills).
+ *   - "danger-solid": background of destructive buttons in both themes (white text 4.8:1).
+ *   - chart-1 is teal-600, not teal-700: teal-700 is too grey to work as a series colour.
+ *   - heat-1..5: sequential ramp for heatmaps (validated monotone, light end >= 2:1).
+ */
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --subtle: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --muted-strong: #475569;
+
+  --primary: #0f766e;
+  --primary-hover: #115e59;
+  --primary-soft: #ccfbf1;
+  --primary-ink: #115e59;
+  --primary-foreground: #ffffff;
+
+  --accent: #2563eb;
+  --accent-soft: #dbeafe;
+  --accent-ink: #1e40af;
+
+  --success: #16a34a;
+  --success-soft: #dcfce7;
+  --success-ink: #166534;
+  --warning: #d97706;
+  --warning-soft: #fef3c7;
+  --warning-ink: #92400e;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+  --danger-ink: #991b1b;
+  --danger-solid: #dc2626;
+  --danger-solid-hover: #b91c1c;
+  --info: #0284c7;
+  --info-soft: #e0f2fe;
+  --info-ink: #075985;
+
+  --focus: #2563eb;
+
+  --sidebar: #0f172a;
+  --sidebar-text: #cbd5e1;
+  --sidebar-muted: #94a3b8;
+  --sidebar-hover: #1e293b;
+  --sidebar-active: #134e4a;
+  --sidebar-bar: #14b8a6;
+
+  --chart-1: #0d9488;
+  --chart-2: #2563eb;
+  --chart-3: #d97706;
+  --chart-4: #7c3aed;
+  --chart-5: #db2777;
+  --chart-6: #0891b2;
+  --chart-7: #65a30d;
+  --chart-other: #64748b;
+
+  --heat-0: #f1f5f9;
+  --heat-1: #14b8a6;
+  --heat-2: #0d9488;
+  --heat-3: #0f766e;
+  --heat-4: #115e59;
+  --heat-5: #042f2e;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: #0b1220;
+  --surface: #111827;
+  --subtle: #1a2332;
+  --border: #1f2937;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --muted-strong: #94a3b8;
+
+  --primary: #14b8a6;
+  --primary-hover: #2dd4bf;
+  --primary-soft: #123b3a;
+  --primary-ink: #5eead4;
+  --primary-foreground: #042f2e;
+
+  --accent: #60a5fa;
+  --accent-soft: #172554;
+  --accent-ink: #93c5fd;
+
+  --success: #22c55e;
+  --success-soft: #052e16;
+  --success-ink: #86efac;
+  --warning: #f59e0b;
+  --warning-soft: #451a03;
+  --warning-ink: #fcd34d;
+  --danger: #f87171;
+  --danger-soft: #450a0a;
+  --danger-ink: #fca5a5;
+  --danger-solid: #dc2626;
+  --danger-solid-hover: #b91c1c;
+  --info: #38bdf8;
+  --info-soft: #082f49;
+  --info-ink: #7dd3fc;
+
+  --focus: #60a5fa;
+
+  --sidebar: #080d18;
+  --sidebar-text: #cbd5e1;
+  --sidebar-muted: #94a3b8;
+  --sidebar-hover: #162032;
+  --sidebar-active: #134e4a;
+  --sidebar-bar: #14b8a6;
+
+  --heat-0: #1a2332;
+  --heat-1: #0f766e;
+  --heat-2: #0d9488;
+  --heat-3: #14b8a6;
+  --heat-4: #2dd4bf;
+  --heat-5: #5eead4;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-subtle: var(--subtle);
+  --color-border: var(--border);
+  --color-foreground: var(--text);
+  --color-muted: var(--muted);
+  --color-muted-strong: var(--muted-strong);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-ink: var(--primary-ink);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-ink: var(--warning-ink);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-ink: var(--danger-ink);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-solid-hover: var(--danger-solid-hover);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-ink: var(--info-ink);
+  --color-focus: var(--focus);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-bar: var(--sidebar-bar);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-other: var(--chart-other);
+
+  --color-heat-0: var(--heat-0);
+  --color-heat-1: var(--heat-1);
+  --color-heat-2: var(--heat-2);
+  --color-heat-3: var(--heat-3);
+  --color-heat-4: var(--heat-4);
+  --color-heat-5: var(--heat-5);
+}
+
+@theme {
+  --font-sans: 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', Consolas, ui-monospace, monospace;
+
+  /* Type scale 12 / 13 / 14 (body) / 16 / 20 / 24 / 30 */
+  --text-13: 0.8125rem;
+  --text-13--line-height: 1.25rem;
+
+  /* Radii: 8 px for cards, inputs, buttons; 6 px for badges */
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --animate-fade-in: arci-fade-in 120ms ease-out;
+  --animate-slide-in-right: arci-slide-in-right 180ms ease-out;
+  --animate-pop-in: arci-pop-in 120ms ease-out;
+}
+
+@keyframes arci-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes arci-slide-in-right {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes arci-pop-in {
+  from {
+    transform: scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--text);
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+    }
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* react-day-picker (bundled locally) restyled to the ARCILOGGER tokens. */
+.rdp-root.arci-day-picker {
+  --rdp-accent-color: var(--primary);
+  --rdp-accent-background-color: var(--primary-soft);
+  --rdp-day-height: 2.25rem;
+  --rdp-day-width: 2.25rem;
+  --rdp-day_button-height: 2.125rem;
+  --rdp-day_button-width: 2.125rem;
+  --rdp-day_button-border-radius: 6px;
+  --rdp-selected-border: 2px solid var(--primary);
+  --rdp-range_middle-background-color: var(--primary-soft);
+  --rdp-range_middle-color: var(--primary-ink);
+  --rdp-range_start-color: var(--primary-foreground);
+  --rdp-range_end-color: var(--primary-foreground);
+  --rdp-today-color: var(--accent);
+  --rdp-nav_button-height: 2rem;
+  --rdp-nav_button-width: 2rem;
+  --rdp-months-gap: 1.5rem;
+  font-size: 0.8125rem;
+}
+
+.rdp-root.arci-day-picker .rdp-chevron {
+  fill: var(--muted);
+}

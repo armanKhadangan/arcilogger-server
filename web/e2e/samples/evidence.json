@@ -1,0 +1,952 @@
+{
+  "created": {
+    "package": {
+      "created_at": "2026-10-13T04:00:06.940273Z",
+      "created_by": "tolga",
+      "download_count": 0,
+      "downloadable": false,
+      "error": null,
+      "expires_at": "2026-11-12T04:00:06.912190Z",
+      "file": null,
+      "finished_at": null,
+      "id": 1,
+      "index_sha256": null,
+      "legal_grade": null,
+      "lookup_id": null,
+      "package_name": null,
+      "password_protected": false,
+      "scope": {
+        "content": "full_days",
+        "days": [
+          "2026-10-04",
+          "2026-10-05"
+        ],
+        "estimated_bytes": 4201860,
+        "extract_lines": 0,
+        "include_audit_log": false,
+        "lookup_id": null,
+        "reference": null,
+        "sources": null
+      },
+      "sha256": null,
+      "size": null,
+      "status": "queued",
+      "status_label_en": "Queued",
+      "status_label_tr": "Sırada",
+      "user_id": 1,
+      "verifier_sha256": null
+    },
+    "password": null,
+    "password_notice_en": null,
+    "password_notice_tr": null
+  },
+  "created_password": {
+    "package": {
+      "created_at": "2026-10-13T04:00:07.320310Z",
+      "created_by": "tolga",
+      "download_count": 0,
+      "downloadable": false,
+      "error": null,
+      "expires_at": "2026-11-12T04:00:07.277625Z",
+      "file": null,
+      "finished_at": null,
+      "id": 2,
+      "index_sha256": null,
+      "legal_grade": null,
+      "lookup_id": 1,
+      "package_name": null,
+      "password_protected": true,
+      "scope": {
+        "content": "extract",
+        "days": [
+          "2026-10-09"
+        ],
+        "estimated_bytes": 4211966,
+        "extract_lines": 3,
+        "include_audit_log": false,
+        "lookup_id": 1,
+        "reference": "İzmir Cumhuriyet Başsavcılığı — 2026/48213 Soruşturma",
+        "sources": [
+          "core-r1",
+          "fortigate"
+        ]
+      },
+      "sha256": null,
+      "size": null,
+      "status": "queued",
+      "status_label_en": "Queued",
+      "status_label_tr": "Sırada",
+      "user_id": 1,
+      "verifier_sha256": null
+    },
+    "password": "ornek-parola-yalnizca-test",
+    "password_notice_en": "The password is shown only now and is not stored anywhere. Write it down and give it to the recipient apart from the package; without it the package cannot be opened.",
+    "password_notice_tr": "Parola yalnızca şimdi gösteriliyor ve hiçbir yerde saklanmıyor. Not alın ve paketi alan kişiye paketten ayrı bir yoldan iletin; kaybolursa paket açılamaz."
+  },
+  "created_queued": {
+    "package": {
+      "created_at": "2026-10-13T04:00:11.187893Z",
+      "created_by": "tolga",
+      "download_count": 0,
+      "downloadable": false,
+      "error": null,
+      "expires_at": "2026-11-12T04:00:11.162995Z",
+      "file": null,
+      "finished_at": null,
+      "id": 5,
+      "index_sha256": null,
+      "legal_grade": null,
+      "lookup_id": null,
+      "package_name": null,
+      "password_protected": true,
+      "scope": {
+        "content": "full_days",
+        "days": [
+          "2026-10-10"
+        ],
+        "estimated_bytes": 4198169,
+        "extract_lines": 0,
+        "include_audit_log": false,
+        "lookup_id": null,
+        "reference": null,
+        "sources": null
+      },
+      "sha256": null,
+      "size": null,
+      "status": "queued",
+      "status_label_en": "Queued",
+      "status_label_tr": "Sırada",
+      "user_id": 1,
+      "verifier_sha256": null
+    },
+    "password": "ornek-parola-yalnizca-test",
+    "password_notice_en": "The password is shown only now and is not stored anywhere. Write it down and give it to the recipient apart from the package; without it the package cannot be opened.",
+    "password_notice_tr": "Parola yalnızca şimdi gösteriliyor ve hiçbir yerde saklanmıyor. Not alın ve paketi alan kişiye paketten ayrı bir yoldan iletin; kaybolursa paket açılamaz."
+  },
+  "details": {
+    "1": {
+      "created_at": "2026-10-13T04:00:06.940273Z",
+      "created_by": "tolga",
+      "download_count": 2,
+      "downloadable": true,
+      "downloads": [
+        {
+          "ip": null,
+          "time": "2026-10-13T04:00:11.606044Z",
+          "username": "ayse.yilmaz"
+        },
+        {
+          "ip": null,
+          "time": "2026-10-13T04:00:11.499241Z",
+          "username": "tolga"
+        }
+      ],
+      "error": null,
+      "expires_at": "2026-11-12T04:00:07.189930Z",
+      "extract": [],
+      "file": "ARCILOGGER-kanit-KP-20261013-070007-35406f6b.zip",
+      "finished_at": "2026-10-13T04:00:07.189930Z",
+      "id": 1,
+      "index_sha256": "1b00705c08b3c0406ff782802d3d230fa02054e1fe141944a4bda61db8222a76",
+      "legal_grade": false,
+      "lookup_id": null,
+      "package_name": "KP-20261013-070007-35406f6b",
+      "password_protected": false,
+      "scope": {
+        "content": "full_days",
+        "days": [
+          "2026-10-04",
+          "2026-10-05"
+        ],
+        "estimated_bytes": 4201860,
+        "extract_lines": 0,
+        "include_audit_log": false,
+        "lookup_id": null,
+        "reference": null,
+        "sources": null
+      },
+      "sha256": "50c27b468f9c785d9b8ecc2ba60b63e3cb2f387f020347796993419240a97522",
+      "size": 61937,
+      "status": "ready",
+      "status_label_en": "Ready",
+      "status_label_tr": "Hazır",
+      "user_id": 1,
+      "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+    },
+    "2": {
+      "created_at": "2026-10-13T04:00:07.320310Z",
+      "created_by": "tolga",
+      "download_count": 0,
+      "downloadable": true,
+      "downloads": [],
+      "error": null,
+      "expires_at": "2026-11-12T04:00:08.124161Z",
+      "extract": [
+        {
+          "day": "2026-10-09",
+          "line": 5,
+          "source": "core-r1"
+        },
+        {
+          "day": "2026-10-09",
+          "line": 2,
+          "source": "fortigate"
+        },
+        {
+          "day": "2026-10-09",
+          "line": 27,
+          "source": "fortigate"
+        }
+      ],
+      "file": "ARCILOGGER-kanit-KP-20261013-070008-d1a63c1d.zip",
+      "finished_at": "2026-10-13T04:00:08.124161Z",
+      "id": 2,
+      "index_sha256": "8ccd013e921dbe4e84cbd1fb45641effe304ad214d8b4cebf96b86dfde8d696e",
+      "legal_grade": false,
+      "lookup_id": 1,
+      "package_name": "KP-20261013-070008-d1a63c1d",
+      "password_protected": true,
+      "scope": {
+        "content": "extract",
+        "days": [
+          "2026-10-09"
+        ],
+        "estimated_bytes": 4211966,
+        "extract_lines": 3,
+        "include_audit_log": false,
+        "lookup_id": 1,
+        "reference": "İzmir Cumhuriyet Başsavcılığı — 2026/48213 Soruşturma",
+        "sources": [
+          "core-r1",
+          "fortigate"
+        ]
+      },
+      "sha256": "c67bc8d3361b3de7988512858f607620d46bc0a09ffe0497708d64085c7dc290",
+      "size": 142248,
+      "status": "ready",
+      "status_label_en": "Ready",
+      "status_label_tr": "Hazır",
+      "user_id": 1,
+      "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+    },
+    "3": {
+      "created_at": "2026-10-13T04:00:08.209805Z",
+      "created_by": "tolga",
+      "download_count": 0,
+      "downloadable": false,
+      "downloads": [],
+      "error": null,
+      "expires_at": "2026-10-13T03:00:11.054445Z",
+      "extract": [],
+      "file": "ARCILOGGER-kanit-KP-20261013-070009-7584fbe9.zip",
+      "finished_at": "2026-10-13T04:00:09.109451Z",
+      "id": 3,
+      "index_sha256": "d00bab73f6d67f0d85677577249735f4724b4a0f7ac65c4161491a6f4959d5f5",
+      "legal_grade": false,
+      "lookup_id": null,
+      "package_name": "KP-20261013-070009-7584fbe9",
+      "password_protected": false,
+      "scope": {
+        "content": "full_days",
+        "days": [
+          "2026-10-07"
+        ],
+        "estimated_bytes": 4197874,
+        "extract_lines": 0,
+        "include_audit_log": false,
+        "lookup_id": null,
+        "reference": "Savcılık 2026/301",
+        "sources": [
+          "fortigate"
+        ]
+      },
+      "sha256": "9bc7593c7bff8a5ff678b5b3d6801f6ceb111504216a33e3f6ba65741797214b",
+      "size": 57978,
+      "status": "expired",
+      "status_label_en": "Expired",
+      "status_label_tr": "Süresi doldu",
+      "user_id": 1,
+      "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+    },
+    "4": {
+      "created_at": "2026-10-13T04:00:09.196653Z",
+      "created_by": "tolga",
+      "download_count": 0,
+      "downloadable": false,
+      "downloads": [],
+      "error": "2026/10/08/fortigate.log.gz: dosya boyutu manifesttekinden farklı (değişmiş olabilir) / 2026/10/08/fortigate.log.gz: size differs from the manifest (changed?)",
+      "expires_at": "2026-11-12T04:00:09.170621Z",
+      "extract": [],
+      "file": null,
+      "finished_at": "2026-10-13T04:00:10.081551Z",
+      "id": 4,
+      "index_sha256": null,
+      "legal_grade": null,
+      "lookup_id": null,
+      "package_name": null,
+      "password_protected": false,
+      "scope": {
+        "content": "full_days",
+        "days": [
+          "2026-10-08"
+        ],
+        "estimated_bytes": 4198174,
+        "extract_lines": 0,
+        "include_audit_log": false,
+        "lookup_id": null,
+        "reference": null,
+        "sources": null
+      },
+      "sha256": null,
+      "size": null,
+      "status": "failed",
+      "status_label_en": "Failed",
+      "status_label_tr": "Oluşturulamadı",
+      "user_id": 1,
+      "verifier_sha256": null
+    },
+    "5": {
+      "created_at": "2026-10-13T04:00:11.187893Z",
+      "created_by": "tolga",
+      "download_count": 0,
+      "downloadable": false,
+      "downloads": [],
+      "error": null,
+      "expires_at": "2026-11-12T04:00:11.162995Z",
+      "extract": [],
+      "file": null,
+      "finished_at": null,
+      "id": 5,
+      "index_sha256": null,
+      "legal_grade": null,
+      "lookup_id": null,
+      "package_name": null,
+      "password_protected": true,
+      "scope": {
+        "content": "full_days",
+        "days": [
+          "2026-10-10"
+        ],
+        "estimated_bytes": 4198169,
+        "extract_lines": 0,
+        "include_audit_log": false,
+        "lookup_id": null,
+        "reference": null,
+        "sources": null
+      },
+      "sha256": null,
+      "size": null,
+      "status": "queued",
+      "status_label_en": "Queued",
+      "status_label_tr": "Sırada",
+      "user_id": 1,
+      "verifier_sha256": null
+    }
+  },
+  "download": {
+    "headers": {
+      "accept-ranges": "none",
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-kanit-KP-20261013-070007-35406f6b.zip\"",
+      "content-type": "application/zip",
+      "repr-digest": "sha-256=:UMJ7Ro+ceF2bjswrpgtj48svOH8CA0d5aZNBkkCpdSI=:"
+    },
+    "sha256": "50c27b468f9c785d9b8ecc2ba60b63e3cb2f387f020347796993419240a97522",
+    "size": 61937
+  },
+  "errors": {
+    "create_forbidden_auditor": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "create_reauth_required": {
+      "body": {
+        "error": {
+          "code": "reauth_required",
+          "message_en": "Please confirm your password to continue with this action.",
+          "message_tr": "Bu işlem için parolanızı yeniden girmeniz gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "days_not_sealed": {
+      "body": {
+        "error": {
+          "code": "days_not_sealed",
+          "details": {
+            "days": [
+              "2026-10-11",
+              "2026-10-12"
+            ]
+          },
+          "message_en": "Some of the chosen days are not sealed (or were deleted); only sealed days can be packaged.",
+          "message_tr": "Seçilen günlerin bazıları henüz mühürlenmedi (ya da silindi); yalnızca mühürlü günler pakete alınabilir."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "disk_space_low": {
+      "body": {
+        "error": {
+          "code": "disk_space_low",
+          "details": {
+            "estimated_bytes": 4197991,
+            "free_bytes": 32212254720,
+            "pending_bytes": 4198169,
+            "reserve_bytes": 107374182400
+          },
+          "message_en": "Not enough space on the data disk: the package needs about 4 MB, 30 GB is available, and at least 100 GB must stay free for the raw logs and the sealing. Choose fewer days or sources, or wait until old packages are deleted.",
+          "message_tr": "Veri diskinde yer yetersiz: paket yaklaşık 4 MB tutacak, kullanılabilir 30 GB; ham kayıtlar ve mühürleme için en az 100 GB boş kalmalıdır. Daha az gün ya da kaynak seçin veya eski paketlerin silinmesini bekleyin."
+        }
+      },
+      "headers": {},
+      "status": 507
+    },
+    "download_failed_package": {
+      "body": {
+        "error": {
+          "code": "evidence_failed",
+          "message_en": "This package could not be built; see the package details.",
+          "message_tr": "Bu paket oluşturulamadı; ayrıntı paket bilgisinde."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "download_gone": {
+      "body": {
+        "error": {
+          "code": "evidence_gone",
+          "message_en": "The package expired and was deleted; create it again if needed.",
+          "message_tr": "Paketin saklama süresi doldu ve silindi; gerekirse yeniden oluşturun."
+        }
+      },
+      "headers": {},
+      "status": 410
+    },
+    "download_reauth_required": {
+      "body": {
+        "error": {
+          "code": "reauth_required",
+          "message_en": "Please confirm your password to continue with this action.",
+          "message_tr": "Bu işlem için parolanızı yeniden girmeniz gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "duplicate": {
+      "body": {
+        "error": {
+          "code": "evidence_duplicate",
+          "details": {
+            "package_id": 5
+          },
+          "message_en": "A package of the same scope (#5) is already being built; wait for it.",
+          "message_tr": "Aynı kapsamdaki paket (#5) zaten hazırlanıyor; onu bekleyin."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "rate_limited": {
+      "body": {
+        "error": {
+          "code": "rate_limited",
+          "details": {
+            "limit": 1,
+            "reason": "unfinished_per_user",
+            "unfinished": 1
+          },
+          "message_en": "You already have 1 packages being built (at most 1); try again when one has finished.",
+          "message_tr": "Hazırlanmakta olan 1 paketiniz var (en fazla 1); biri bitince tekrar deneyin."
+        }
+      },
+      "headers": {
+        "retry-after": "60"
+      },
+      "status": 429
+    },
+    "scope_invalid": {
+      "body": {
+        "error": {
+          "code": "scope_invalid",
+          "message_en": "The last day is before the first.",
+          "message_tr": "Bitiş günü başlangıçtan önce."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "list": {
+    "items": [
+      {
+        "created_at": "2026-10-13T04:00:11.187893Z",
+        "created_by": "tolga",
+        "download_count": 0,
+        "downloadable": false,
+        "error": null,
+        "expires_at": "2026-11-12T04:00:11.162995Z",
+        "file": null,
+        "finished_at": null,
+        "id": 5,
+        "index_sha256": null,
+        "legal_grade": null,
+        "lookup_id": null,
+        "package_name": null,
+        "password_protected": true,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-10"
+          ],
+          "estimated_bytes": 4198169,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": null,
+          "sources": null
+        },
+        "sha256": null,
+        "size": null,
+        "status": "queued",
+        "status_label_en": "Queued",
+        "status_label_tr": "Sırada",
+        "user_id": 1,
+        "verifier_sha256": null
+      },
+      {
+        "created_at": "2026-10-13T04:00:09.196653Z",
+        "created_by": "tolga",
+        "download_count": 0,
+        "downloadable": false,
+        "error": "2026/10/08/fortigate.log.gz: dosya boyutu manifesttekinden farklı (değişmiş olabilir) / 2026/10/08/fortigate.log.gz: size differs from the manifest (changed?)",
+        "expires_at": "2026-11-12T04:00:09.170621Z",
+        "file": null,
+        "finished_at": "2026-10-13T04:00:10.081551Z",
+        "id": 4,
+        "index_sha256": null,
+        "legal_grade": null,
+        "lookup_id": null,
+        "package_name": null,
+        "password_protected": false,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-08"
+          ],
+          "estimated_bytes": 4198174,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": null,
+          "sources": null
+        },
+        "sha256": null,
+        "size": null,
+        "status": "failed",
+        "status_label_en": "Failed",
+        "status_label_tr": "Oluşturulamadı",
+        "user_id": 1,
+        "verifier_sha256": null
+      },
+      {
+        "created_at": "2026-10-13T04:00:08.209805Z",
+        "created_by": "tolga",
+        "download_count": 0,
+        "downloadable": false,
+        "error": null,
+        "expires_at": "2026-10-13T03:00:11.054445Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070009-7584fbe9.zip",
+        "finished_at": "2026-10-13T04:00:09.109451Z",
+        "id": 3,
+        "index_sha256": "d00bab73f6d67f0d85677577249735f4724b4a0f7ac65c4161491a6f4959d5f5",
+        "legal_grade": false,
+        "lookup_id": null,
+        "package_name": "KP-20261013-070009-7584fbe9",
+        "password_protected": false,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-07"
+          ],
+          "estimated_bytes": 4197874,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": "Savcılık 2026/301",
+          "sources": [
+            "fortigate"
+          ]
+        },
+        "sha256": "9bc7593c7bff8a5ff678b5b3d6801f6ceb111504216a33e3f6ba65741797214b",
+        "size": 57978,
+        "status": "expired",
+        "status_label_en": "Expired",
+        "status_label_tr": "Süresi doldu",
+        "user_id": 1,
+        "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+      },
+      {
+        "created_at": "2026-10-13T04:00:07.320310Z",
+        "created_by": "tolga",
+        "download_count": 0,
+        "downloadable": true,
+        "error": null,
+        "expires_at": "2026-11-12T04:00:08.124161Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070008-d1a63c1d.zip",
+        "finished_at": "2026-10-13T04:00:08.124161Z",
+        "id": 2,
+        "index_sha256": "8ccd013e921dbe4e84cbd1fb45641effe304ad214d8b4cebf96b86dfde8d696e",
+        "legal_grade": false,
+        "lookup_id": 1,
+        "package_name": "KP-20261013-070008-d1a63c1d",
+        "password_protected": true,
+        "scope": {
+          "content": "extract",
+          "days": [
+            "2026-10-09"
+          ],
+          "estimated_bytes": 4211966,
+          "extract_lines": 3,
+          "include_audit_log": false,
+          "lookup_id": 1,
+          "reference": "İzmir Cumhuriyet Başsavcılığı — 2026/48213 Soruşturma",
+          "sources": [
+            "core-r1",
+            "fortigate"
+          ]
+        },
+        "sha256": "c67bc8d3361b3de7988512858f607620d46bc0a09ffe0497708d64085c7dc290",
+        "size": 142248,
+        "status": "ready",
+        "status_label_en": "Ready",
+        "status_label_tr": "Hazır",
+        "user_id": 1,
+        "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+      },
+      {
+        "created_at": "2026-10-13T04:00:06.940273Z",
+        "created_by": "tolga",
+        "download_count": 2,
+        "downloadable": true,
+        "error": null,
+        "expires_at": "2026-11-12T04:00:07.189930Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070007-35406f6b.zip",
+        "finished_at": "2026-10-13T04:00:07.189930Z",
+        "id": 1,
+        "index_sha256": "1b00705c08b3c0406ff782802d3d230fa02054e1fe141944a4bda61db8222a76",
+        "legal_grade": false,
+        "lookup_id": null,
+        "package_name": "KP-20261013-070007-35406f6b",
+        "password_protected": false,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-04",
+            "2026-10-05"
+          ],
+          "estimated_bytes": 4201860,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": null,
+          "sources": null
+        },
+        "sha256": "50c27b468f9c785d9b8ecc2ba60b63e3cb2f387f020347796993419240a97522",
+        "size": 61937,
+        "status": "ready",
+        "status_label_en": "Ready",
+        "status_label_tr": "Hazır",
+        "user_id": 1,
+        "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+      }
+    ],
+    "next_cursor": null
+  },
+  "list_auditor": {
+    "items": [
+      {
+        "created_at": "2026-10-13T04:00:11.187893Z",
+        "created_by": "tolga",
+        "download_count": 0,
+        "downloadable": false,
+        "error": null,
+        "expires_at": "2026-11-12T04:00:11.162995Z",
+        "file": null,
+        "finished_at": null,
+        "id": 5,
+        "index_sha256": null,
+        "legal_grade": null,
+        "lookup_id": null,
+        "package_name": null,
+        "password_protected": true,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-10"
+          ],
+          "estimated_bytes": 4198169,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": null,
+          "sources": null
+        },
+        "sha256": null,
+        "size": null,
+        "status": "queued",
+        "status_label_en": "Queued",
+        "status_label_tr": "Sırada",
+        "user_id": 1,
+        "verifier_sha256": null
+      },
+      {
+        "created_at": "2026-10-13T04:00:09.196653Z",
+        "created_by": "tolga",
+        "download_count": 0,
+        "downloadable": false,
+        "error": "2026/10/08/fortigate.log.gz: dosya boyutu manifesttekinden farklı (değişmiş olabilir) / 2026/10/08/fortigate.log.gz: size differs from the manifest (changed?)",
+        "expires_at": "2026-11-12T04:00:09.170621Z",
+        "file": null,
+        "finished_at": "2026-10-13T04:00:10.081551Z",
+        "id": 4,
+        "index_sha256": null,
+        "legal_grade": null,
+        "lookup_id": null,
+        "package_name": null,
+        "password_protected": false,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-08"
+          ],
+          "estimated_bytes": 4198174,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": null,
+          "sources": null
+        },
+        "sha256": null,
+        "size": null,
+        "status": "failed",
+        "status_label_en": "Failed",
+        "status_label_tr": "Oluşturulamadı",
+        "user_id": 1,
+        "verifier_sha256": null
+      },
+      {
+        "created_at": "2026-10-13T04:00:08.209805Z",
+        "created_by": "tolga",
+        "download_count": 0,
+        "downloadable": false,
+        "error": null,
+        "expires_at": "2026-10-13T03:00:11.054445Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070009-7584fbe9.zip",
+        "finished_at": "2026-10-13T04:00:09.109451Z",
+        "id": 3,
+        "index_sha256": "d00bab73f6d67f0d85677577249735f4724b4a0f7ac65c4161491a6f4959d5f5",
+        "legal_grade": false,
+        "lookup_id": null,
+        "package_name": "KP-20261013-070009-7584fbe9",
+        "password_protected": false,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-07"
+          ],
+          "estimated_bytes": 4197874,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": "Savcılık 2026/301",
+          "sources": [
+            "fortigate"
+          ]
+        },
+        "sha256": "9bc7593c7bff8a5ff678b5b3d6801f6ceb111504216a33e3f6ba65741797214b",
+        "size": 57978,
+        "status": "expired",
+        "status_label_en": "Expired",
+        "status_label_tr": "Süresi doldu",
+        "user_id": 1,
+        "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+      },
+      {
+        "created_at": "2026-10-13T04:00:06.940273Z",
+        "created_by": "tolga",
+        "download_count": 2,
+        "downloadable": true,
+        "error": null,
+        "expires_at": "2026-11-12T04:00:07.189930Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070007-35406f6b.zip",
+        "finished_at": "2026-10-13T04:00:07.189930Z",
+        "id": 1,
+        "index_sha256": "1b00705c08b3c0406ff782802d3d230fa02054e1fe141944a4bda61db8222a76",
+        "legal_grade": false,
+        "lookup_id": null,
+        "package_name": "KP-20261013-070007-35406f6b",
+        "password_protected": false,
+        "scope": {
+          "content": "full_days",
+          "days": [
+            "2026-10-04",
+            "2026-10-05"
+          ],
+          "estimated_bytes": 4201860,
+          "extract_lines": 0,
+          "include_audit_log": false,
+          "lookup_id": null,
+          "reference": null,
+          "sources": null
+        },
+        "sha256": "50c27b468f9c785d9b8ecc2ba60b63e3cb2f387f020347796993419240a97522",
+        "size": 61937,
+        "status": "ready",
+        "status_label_en": "Ready",
+        "status_label_tr": "Hazır",
+        "user_id": 1,
+        "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+      }
+    ],
+    "next_cursor": null
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:28.539054+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "ready_expired": {
+    "created_at": "2026-10-13T04:00:08.209805Z",
+    "created_by": "tolga",
+    "download_count": 0,
+    "downloadable": false,
+    "downloads": [],
+    "error": null,
+    "expires_at": "2026-10-13T03:00:11.054445Z",
+    "extract": [],
+    "file": "ARCILOGGER-kanit-KP-20261013-070009-7584fbe9.zip",
+    "finished_at": "2026-10-13T04:00:09.109451Z",
+    "id": 3,
+    "index_sha256": "d00bab73f6d67f0d85677577249735f4724b4a0f7ac65c4161491a6f4959d5f5",
+    "legal_grade": false,
+    "lookup_id": null,
+    "package_name": "KP-20261013-070009-7584fbe9",
+    "password_protected": false,
+    "scope": {
+      "content": "full_days",
+      "days": [
+        "2026-10-07"
+      ],
+      "estimated_bytes": 4197874,
+      "extract_lines": 0,
+      "include_audit_log": false,
+      "lookup_id": null,
+      "reference": "Savcılık 2026/301",
+      "sources": [
+        "fortigate"
+      ]
+    },
+    "sha256": "9bc7593c7bff8a5ff678b5b3d6801f6ceb111504216a33e3f6ba65741797214b",
+    "size": 57978,
+    "status": "ready",
+    "status_label_en": "Ready",
+    "status_label_tr": "Hazır",
+    "user_id": 1,
+    "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
+  },
+  "status_labels": {
+    "building": {
+      "en": "Building",
+      "tr": "Hazırlanıyor"
+    },
+    "deleted": {
+      "en": "File missing",
+      "tr": "Dosya yok"
+    },
+    "expired": {
+      "en": "Expired",
+      "tr": "Süresi doldu"
+    },
+    "failed": {
+      "en": "Failed",
+      "tr": "Oluşturulamadı"
+    },
+    "queued": {
+      "en": "Queued",
+      "tr": "Sırada"
+    },
+    "ready": {
+      "en": "Ready",
+      "tr": "Hazır"
+    }
+  },
+  "verify_restored": {
+    "day": "2026-10-08",
+    "deep": true,
+    "details": {
+      "duration_ms": 343,
+      "gen_time": "2026-10-08T22:30:05+00:00",
+      "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
+      "serial": "7498A3A171F50288"
+    },
+    "duration_ms": 343,
+    "errors": [],
+    "errors_tr": [],
+    "finished_at": "2026-10-13T04:00:11.005422Z",
+    "message_en": "08.10.2026 verified.",
+    "message_tr": "08.10.2026 günü doğrulandı.",
+    "ok": true,
+    "outcome": "ok",
+    "started_at": "2026-10-13T04:00:10.662044Z",
+    "warnings": [
+      "2026/10/08/fortigate.log.gz: not read-only"
+    ],
+    "warnings_tr": [
+      "2026/10/08/fortigate.log.gz: salt okunur değil"
+    ]
+  },
+  "verify_tampered": {
+    "day": "2026-10-08",
+    "deep": true,
+    "details": {
+      "duration_ms": 416,
+      "gen_time": "2026-10-08T22:30:05+00:00",
+      "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
+      "serial": "7498A3A171F50288"
+    },
+    "duration_ms": 416,
+    "errors": [
+      "2026/10/08/fortigate.log.gz: SHA-256 mismatch (file changed)"
+    ],
+    "errors_tr": [
+      "2026/10/08/fortigate.log.gz: SHA-256 özeti tutmuyor (dosya değişmiş)"
+    ],
+    "finished_at": "2026-10-13T04:00:10.591792Z",
+    "message_en": "08.10.2026 does not verify: 2026/10/08/fortigate.log.gz: SHA-256 mismatch (file changed)",
+    "message_tr": "08.10.2026 günü doğrulanamadı: 2026/10/08/fortigate.log.gz: SHA-256 özeti tutmuyor (dosya değişmiş)",
+    "ok": false,
+    "outcome": "failed",
+    "started_at": "2026-10-13T04:00:10.174759Z",
+    "warnings": [
+      "2026/10/08/fortigate.log.gz: not read-only"
+    ],
+    "warnings_tr": [
+      "2026/10/08/fortigate.log.gz: salt okunur değil"
+    ]
+  }
+}

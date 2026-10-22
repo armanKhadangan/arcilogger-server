@@ -1,0 +1,41 @@
+[project]
+name = "arcilogger-api"
+dynamic = ["version"]
+description = "ARCILOGGER HTTP API (FastAPI) behind the web interface."
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "arcilogger-core",
+  "arcilogger-db",
+  # 5651 lookup types and engine (stored in lookups.query/outcome, rendered in the PDF report).
+  "arcilogger-worker",
+  # The ingest parsers: the official report re-parses every cited raw line and compares it with
+  # the database rows the result rests on (reports/consistency.py); spool files are opened with
+  # Windows delete sharing (ingest.files.open_shared) so a read never blocks the sealer.
+  "arcilogger-ingest",
+  "fastapi>=0.143.0",
+  "uvicorn>=0.54.0",
+  # Password hashing (Argon2id), spec 13.
+  "argon2-cffi>=25.1.0",
+  # TOTP two-factor authentication (RFC 6238).
+  "pyotp>=2.10.0",
+  # QR code for TOTP enrolment, rendered as SVG (no image libraries, no external service).
+  "segno>=1.6.6",
+  # PDF reports (5651 lookup report, usage reports).
+  "reportlab>=5.0.1",
+  # Excel exports of the usage reports (MIT; et-xmlfile MIT).
+  "openpyxl>=3.1.5",
+]
+
+[project.scripts]
+arcilogger-api = "arcilogger_api.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arcilogger_api"]
+
+[tool.hatch.version]
+path = "src/arcilogger_api/__init__.py"

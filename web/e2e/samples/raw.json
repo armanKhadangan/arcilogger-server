@@ -1,0 +1,314 @@
+{
+  "errors": {
+    "raw_access_denied": {
+      "body": {
+        "error": {
+          "code": "raw_access_denied",
+          "message_en": "The ARCILOGGER API service may not read this raw log file (folder permissions of the installation). The file is not damaged; tell the administrator.",
+          "message_tr": "ARCILOGGER API hizmetinin bu ham kayıt dosyasını okuma izni yok (kurulumdaki klasör izinleri). Dosya bozuk değildir; sistem yöneticisine bildirin."
+        }
+      },
+      "headers": {},
+      "status": 503
+    },
+    "raw_io_error": {
+      "body": {
+        "error": {
+          "code": "raw_io_error",
+          "message_en": "The raw log file cannot be read right now (disk or file system error); try again later and tell the administrator if it persists.",
+          "message_tr": "Ham kayıt dosyası şu anda okunamadı (disk veya dosya sistemi hatası); biraz sonra tekrar deneyin, sürerse sistem yöneticisine bildirin."
+        }
+      },
+      "headers": {},
+      "status": 503
+    },
+    "raw_not_found": {
+      "body": {
+        "error": {
+          "code": "raw_not_found",
+          "message_en": "This raw log line was not found (wrong source, day or line number, or the file was deleted after the retention period).",
+          "message_tr": "Bu ham kayıt satırı bulunamadı (kaynak, gün veya satır numarası hatalı ya da dosya saklama süresi dolduğu için silinmiş olabilir)."
+        }
+      },
+      "headers": {},
+      "status": 404
+    }
+  },
+  "lines": {
+    "core-r1|2026-10-09|1": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/core-r1.log.gz",
+      "length": 158,
+      "line": 1,
+      "offset": 0,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MiBhc3NpZ25lZCAxNzIuMjAuNDIuMTY1IGZvciAzQzo1Mjo4MjowMDowMDowNSBQTE4tUEMtMDU=",
+      "received": "2026-10-09T08:12:00.003000+03:00",
+      "sender": "172.20.10.1",
+      "sha256": "3ebeaba5f55f4355c3ed84b173eeb09989de3fa0e2656372a3ce853c2deb44cd",
+      "source": "core-r1",
+      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.165 for 3C:52:82:00:00:05 PLN-PC-05"
+    },
+    "core-r1|2026-10-09|2": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/core-r1.log.gz",
+      "length": 157,
+      "line": 2,
+      "offset": 159,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MSBhc3NpZ25lZCAxNzIuMjAuNDEuMTUgZm9yIDAwOjE1OjVEOjAwOjAwOjIwIEZJTi1QQy0wMQ==",
+      "received": "2026-10-09T08:12:00.003000+03:00",
+      "sender": "172.20.10.1",
+      "sha256": "fc211669c354fbd103cf243921a56ebff73c6106819b6841142590768fb553b8",
+      "source": "core-r1",
+      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp41 assigned 172.20.41.15 for 00:15:5D:00:00:20 FIN-PC-01"
+    },
+    "core-r1|2026-10-09|3": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/core-r1.log.gz",
+      "length": 157,
+      "line": 3,
+      "offset": 317,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQwODoxMjowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDg6MTI6MDAuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MyBhc3NpZ25lZCAxNzIuMjAuNDMuNDQgZm9yIEE0OjgzOkU3OjAwOjAwOjQ0IElEUi1QQy0wNA==",
+      "received": "2026-10-09T08:12:00.003000+03:00",
+      "sender": "172.20.10.1",
+      "sha256": "9b3baeae282e2d2cb1ef61a0606bff6d170beb535f27f7fde0ca9d3af77b6d28",
+      "source": "core-r1",
+      "text": "2026-10-09T08:12:00.003000+03:00 172.20.10.1 <30>2026-10-09T08:12:00.000+03:00 CORE-R1 dhcp,info dhcp43 assigned 172.20.43.44 for A4:83:E7:00:00:44 IDR-PC-04"
+    },
+    "core-r1|2026-10-09|4": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/core-r1.log.gz",
+      "length": 159,
+      "line": 4,
+      "offset": 475,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQwOTozNzo1Mi4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMDk6Mzc6NTIuMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A2MCBhc3NpZ25lZCAxNzIuMjAuNjAuMTQyIGZvciAwMjowMDo1RTowMDo1Mzo2NCBUZWxlZm9uLTEy",
+      "received": "2026-10-09T09:37:52.003000+03:00",
+      "sender": "172.20.10.1",
+      "sha256": "0c09824f6c4ae17fddfc62de66fcdecd0a4748ad6d7cd0f4aaa13a88417eec0d",
+      "source": "core-r1",
+      "text": "2026-10-09T09:37:52.003000+03:00 172.20.10.1 <30>2026-10-09T09:37:52.000+03:00 CORE-R1 dhcp,info dhcp60 assigned 172.20.60.142 for 02:00:5E:00:53:64 Telefon-12"
+    },
+    "core-r1|2026-10-09|5": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/core-r1.log.gz",
+      "length": 156,
+      "line": 5,
+      "offset": 635,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMDo0MjoxOC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMTA6NDI6MTguMDAwKzAzOjAwIENPUkUtUjEgZGhjcCxpbmZvIGRoY3A0MiBhc3NpZ25lZCAxNzIuMjAuNDIuNTcgZm9yIDAwOjAwOjVFOjAwOjUzOjU3IFBMTi1QQzE0",
+      "received": "2026-10-09T10:42:18.003000+03:00",
+      "sender": "172.20.10.1",
+      "sha256": "cf06e71554152a7d9bf70f7fdb8b6c9b04ce69d93d5d70c5e1a61f5e8a72ffaa",
+      "source": "core-r1",
+      "text": "2026-10-09T10:42:18.003000+03:00 172.20.10.1 <30>2026-10-09T10:42:18.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14"
+    },
+    "core-r1|2026-10-09|6": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/core-r1.log.gz",
+      "length": 144,
+      "line": 6,
+      "offset": 792,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMzowMDowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMTM6MDA6MDAuMDAwKzAzOjAwIENPUkUtUjEgc2NyaXB0LGluZm8gQVJQLUxPRyAxNzIuMjAuNDIuNTcgMDA6MEM6Mjk6MDA6MDA6OTkgdmxhbjQy",
+      "received": "2026-10-09T13:00:00.003000+03:00",
+      "sender": "172.20.10.1",
+      "sha256": "d804cc073f12dc3c64a96c6132b0a30e4db3cbeeaa56a2d137838ce9d51dc77d",
+      "source": "core-r1",
+      "text": "2026-10-09T13:00:00.003000+03:00 172.20.10.1 <30>2026-10-09T13:00:00.000+03:00 CORE-R1 script,info ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42"
+    },
+    "core-r1|2026-10-09|7": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/core-r1.log.gz",
+      "length": 144,
+      "line": 7,
+      "offset": 937,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxNDowMDowMC4wMDMwMDArMDM6MDAgMTcyLjIwLjEwLjEgPDMwPjIwMjYtMTAtMDlUMTQ6MDA6MDAuMDAwKzAzOjAwIENPUkUtUjEgc2NyaXB0LGluZm8gQVJQLUxPRyAxNzIuMjAuNDIuNTcgMDA6MEM6Mjk6MDA6MDA6OTkgdmxhbjQy",
+      "received": "2026-10-09T14:00:00.003000+03:00",
+      "sender": "172.20.10.1",
+      "sha256": "317acb85d7ec40800d0ceffd6e2a45499726b77dcef000d817f2d1cb91ee1548",
+      "source": "core-r1",
+      "text": "2026-10-09T14:00:00.003000+03:00 172.20.10.1 <30>2026-10-09T14:00:00.000+03:00 CORE-R1 script,info ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42"
+    },
+    "fortigate|2026-10-09|1": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 159,
+      "line": 1,
+      "offset": 0,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToxNDo1Ni4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+bG9naWQ9IjE1MDEwNTQ4MDIiIHR5cGU9InV0bSIgc3VidHlwZT0iZG5zIiBzcmNpcD0xNzIuMjAuNjAuMTQyIHFuYW1lPSJ3d3cuZ29vZ2xlLmNvbSIgaXBhZGRyPSIyMDMuMC4xMTMuMjAi",
+      "received": "2026-10-09T11:14:56.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "d9bb55c07cdb03551f139081bda9ca25d508a48706064dc5821fc10df83fc659",
+      "source": "fortigate",
+      "text": "2026-10-09T11:14:56.003000+03:00 172.31.255.1 <189>logid=\"1501054802\" type=\"utm\" subtype=\"dns\" srcip=172.20.60.142 qname=\"www.google.com\" ipaddr=\"203.0.113.20\""
+    },
+    "fortigate|2026-10-09|18": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 412,
+      "line": 18,
+      "offset": 6547,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzoxMS4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6MTEgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDE5MTAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQxLjE1IHNyY3BvcnQ9NTAxMTAgZHN0aXA9MjAzLjAuMTEzLjEwIGRzdHBvcnQ9NDQzIHNlc3Npb25pZD01MDExMCBwcm90bz02IGFjdGlvbj0iYWNjZXB0IiB0cmFuZGlzcD0ic25hdCIgdHJhbnNpcD0xMDAuNjQuMTIuOSB0cmFuc3BvcnQ9NTAxMTAgZHVyYXRpb249NQ==",
+      "received": "2026-10-09T11:23:11.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "38aac148f9546f5faa4264d2099b8f26256d4d11dd40d2ef715f36cf8b7dd7dc",
+      "source": "fortigate",
+      "text": "2026-10-09T11:23:11.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:11 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534191000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50110 dstip=203.0.113.10 dstport=443 sessionid=50110 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50110 duration=5"
+    },
+    "fortigate|2026-10-09|2": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 413,
+      "line": 2,
+      "offset": 160,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzo0MS4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6NDEgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIyMTAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQyLjU3IHNyY3BvcnQ9NTEwMDEgZHN0aXA9MjAzLjAuMTEzLjEwIGRzdHBvcnQ9NDQzIHNlc3Npb25pZD01MTAwMSBwcm90bz02IGFjdGlvbj0iYWNjZXB0IiB0cmFuZGlzcD0ic25hdCIgdHJhbnNpcD0xMDAuNjQuMTIuOSB0cmFuc3BvcnQ9NTEwMDEgZHVyYXRpb249MTA=",
+      "received": "2026-10-09T11:23:41.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "8f65165c6609300a785ca69824f2f8357fc99e4044f76d305485fdc3fc521fef",
+      "source": "fortigate",
+      "text": "2026-10-09T11:23:41.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:41 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534221000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51001 dstip=203.0.113.10 dstport=443 sessionid=51001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51001 duration=10"
+    },
+    "fortigate|2026-10-09|21": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 407,
+      "line": 21,
+      "offset": 7786,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzozMi4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6MzIgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIxMjAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQxLjE1IHNyY3BvcnQ9NTAxMTMgZHN0aXA9OC44LjguOCBkc3Rwb3J0PTUzIHNlc3Npb25pZD01MDExMyBwcm90bz0xNyBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUwMTEzIGR1cmF0aW9uPTQ=",
+      "received": "2026-10-09T11:23:32.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "2c06849a7751636a095df4a08496db87da71b15996dd116cec00b16f6a65408d",
+      "source": "fortigate",
+      "text": "2026-10-09T11:23:32.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:32 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534212000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50113 dstip=8.8.8.8 dstport=53 sessionid=50113 proto=17 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50113 duration=4"
+    },
+    "fortigate|2026-10-09|22": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 413,
+      "line": 22,
+      "offset": 8194,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzozOS4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6MzkgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIxOTAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQzLjQ0IHNyY3BvcnQ9NTAxMTQgZHN0aXA9MjAuMTkwLjE2MC4yMCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NTAxMTQgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUwMTE0IGR1cmF0aW9uPTU=",
+      "received": "2026-10-09T11:23:39.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "503c9a3f263fdc4816ccc7c93c4d1eef89a504c6180ac98b5c8621c8ce92d4d7",
+      "source": "fortigate",
+      "text": "2026-10-09T11:23:39.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:39 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534219000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.43.44 srcport=50114 dstip=20.190.160.20 dstport=443 sessionid=50114 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50114 duration=5"
+    },
+    "fortigate|2026-10-09|23": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 413,
+      "line": 23,
+      "offset": 8608,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzo0Ni4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6NDYgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIyNjAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQyLjE2NSBzcmNwb3J0PTUwMTE1IGRzdGlwPTIwMy4wLjExMy4xMCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NTAxMTUgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUwMTE1IGR1cmF0aW9uPTY=",
+      "received": "2026-10-09T11:23:46.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "90c2ea4358479b2465f0ff9591e071694ec82049fdb23933d2050380e365f256",
+      "source": "fortigate",
+      "text": "2026-10-09T11:23:46.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:46 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534226000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.165 srcport=50115 dstip=203.0.113.10 dstport=443 sessionid=50115 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50115 duration=6"
+    },
+    "fortigate|2026-10-09|24": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 412,
+      "line": 24,
+      "offset": 9022,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMzo1My4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjM6NTMgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDIzMzAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQxLjE1IHNyY3BvcnQ9NTAxMTYgZHN0aXA9MTUxLjEwMS4xLjY5IGRzdHBvcnQ9NDQzIHNlc3Npb25pZD01MDExNiBwcm90bz02IGFjdGlvbj0iYWNjZXB0IiB0cmFuZGlzcD0ic25hdCIgdHJhbnNpcD0xMDAuNjQuMTIuOSB0cmFuc3BvcnQ9NTAxMTYgZHVyYXRpb249Mw==",
+      "received": "2026-10-09T11:23:53.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "47ebebe4d141ceb5bce764b3307465a70a65d8444a7b62ea5257a75793723e30",
+      "source": "fortigate",
+      "text": "2026-10-09T11:23:53.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:23:53 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534233000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50116 dstip=151.101.1.69 dstport=443 sessionid=50116 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50116 duration=3"
+    },
+    "fortigate|2026-10-09|25": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 411,
+      "line": 25,
+      "offset": 9435,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyNDowMC4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjQ6MDAgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDI0MDAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQzLjQ0IHNyY3BvcnQ9NTAxMTcgZHN0aXA9MTA0LjE4LjMyLjcgZHN0cG9ydD00NDMgc2Vzc2lvbmlkPTUwMTE3IHByb3RvPTYgYWN0aW9uPSJhY2NlcHQiIHRyYW5kaXNwPSJzbmF0IiB0cmFuc2lwPTEwMC42NC4xMi45IHRyYW5zcG9ydD01MDExNyBkdXJhdGlvbj00",
+      "received": "2026-10-09T11:24:00.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "00f7255279d57943763438aaf0ab35e24a373967b3fc1dbc9b046ba8f14182ba",
+      "source": "fortigate",
+      "text": "2026-10-09T11:24:00.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:24:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534240000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.43.44 srcport=50117 dstip=104.18.32.7 dstport=443 sessionid=50117 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50117 duration=4"
+    },
+    "fortigate|2026-10-09|27": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 414,
+      "line": 27,
+      "offset": 10260,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMzozMDowMC4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTM6MzA6MDAgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTU0MTgwMDAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjQyLjU3IHNyY3BvcnQ9NjEwMDEgZHN0aXA9OTMuMTg0LjIxNi4zNCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NjEwMDEgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTYxMDAxIGR1cmF0aW9uPTEy",
+      "received": "2026-10-09T13:30:00.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "4a59ecd3791d7188becacc985756575781f2dd9ca823c96f1d2795e464a5a61e",
+      "source": "fortigate",
+      "text": "2026-10-09T13:30:00.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12"
+    },
+    "fortigate|2026-10-09|4": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 415,
+      "line": 4,
+      "offset": 990,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyMjo1Ni4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjI6NTYgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDE3NjAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDIwIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjYwLjE0MiBzcmNwb3J0PTUxMDAyIGRzdGlwPTIwMy4wLjExMy4yMCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NTEwMDIgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUxMDAyIGR1cmF0aW9uPTIyMA==",
+      "received": "2026-10-09T11:22:56.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "1fde9f651218b6c6a21eaef70c980ced5716873a1f8cbc28d6ff014916e2983e",
+      "source": "fortigate",
+      "text": "2026-10-09T11:22:56.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:22:56 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534176000000000 tz=\"+0300\" logid=\"0000000020\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.60.142 srcport=51002 dstip=203.0.113.20 dstport=443 sessionid=51002 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51002 duration=220"
+    },
+    "fortigate|2026-10-09|5": {
+      "day": "2026-10-09",
+      "file": "vault/2026/10/09/fortigate.log.gz",
+      "length": 415,
+      "line": 5,
+      "offset": 1406,
+      "origin": "vault",
+      "raw_base64": "MjAyNi0xMC0wOVQxMToyNToyNi4wMDMwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxODk+ZGF0ZT0yMDI2LTEwLTA5IHRpbWU9MTE6MjU6MjYgZGV2bmFtZT0iRklSRVdBTEwtMDEiIGRldmlkPSJGR1QwMDAwMDAwMDAwMDAwIiBldmVudHRpbWU9MTc5MTUzNDMyNjAwMDAwMDAwMCB0ej0iKzAzMDAiIGxvZ2lkPSIwMDAwMDAwMDEzIiB0eXBlPSJ0cmFmZmljIiBzdWJ0eXBlPSJmb3J3YXJkIiBsZXZlbD0ibm90aWNlIiB2ZD0icm9vdCIgc3JjaXA9MTcyLjIwLjYwLjE0MiBzcmNwb3J0PTUxMDAyIGRzdGlwPTIwMy4wLjExMy4yMCBkc3Rwb3J0PTQ0MyBzZXNzaW9uaWQ9NTEwMDIgcHJvdG89NiBhY3Rpb249ImFjY2VwdCIgdHJhbmRpc3A9InNuYXQiIHRyYW5zaXA9MTAwLjY0LjEyLjkgdHJhbnNwb3J0PTUxMDAyIGR1cmF0aW9uPTM3MA==",
+      "received": "2026-10-09T11:25:26.003000+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "1b8f2d844e2a2102a6c222922d3ac68a298145148fa839251c513639eef0e74f",
+      "source": "fortigate",
+      "text": "2026-10-09T11:25:26.003000+03:00 172.31.255.1 <189>date=2026-10-09 time=11:25:26 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534326000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.60.142 srcport=51002 dstip=203.0.113.20 dstport=443 sessionid=51002 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51002 duration=370"
+    },
+    "fortigate|2026-10-12|49": {
+      "day": "2026-10-12",
+      "file": "spool/fortigate/2026-10-12.log",
+      "length": 192,
+      "line": 49,
+      "offset": 13392,
+      "origin": "spool",
+      "raw_base64": "MjAyNi0xMC0xMlQxNDowMjowMy4wMDAwMDArMDM6MDAgMTcyLjMxLjI1NS4xIDwxOTA+bG9naWQ9IjAzMTYwMTMwNTYiIHR5cGU9InV0bSIgc3VidHlwZT0id2ViZmlsdGVyIiBzcmNpcD0xNzIuMjAuNDIuMTY1IGRzdGlwPTEwNC4xOC4zMi43IGhvc3RuYW1lPSJmYXR1cmHigK54Y29kLmV4ZSIgbXNnPSJ0YWIjMDExaGVyZSIgIzAwMSD/",
+      "received": "2026-10-12T14:02:03+03:00",
+      "sender": "172.31.255.1",
+      "sha256": "e6df6067f936f11e51097e014bc489841ce5a58f666f662c31fb0e0ce41f224f",
+      "source": "fortigate",
+      "text": "2026-10-12T14:02:03.000000+03:00 172.31.255.1 <190>logid=\"0316013056\" type=\"utm\" subtype=\"webfilter\" srcip=172.20.42.165 dstip=104.18.32.7 hostname=\"fatura\\u202excod.exe\" msg=\"tab#011here\" #001 \\xff"
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:28.539054+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "odd_line": "fortigate|2026-10-12|49"
+}

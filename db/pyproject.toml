@@ -1,0 +1,33 @@
+[project]
+name = "arcilogger-db"
+dynamic = ["version"]
+description = "ARCILOGGER database: SQLAlchemy models, Alembic migrations (PostgreSQL 16, optional TimescaleDB), seed data, test support and the arcilogger-db command."
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "arcilogger-core",
+  # ORM and SQL toolkit (typed declarative models).
+  "sqlalchemy>=2.1.4",
+  # PostgreSQL driver; the binary extra ships libpq inside the wheel (Windows and Linux).
+  "psycopg[binary]>=3.3.6",
+  # Schema migrations (run programmatically by `arcilogger-db upgrade`).
+  "alembic>=1.20.0",
+]
+
+[project.scripts]
+arcilogger-db = "arcilogger_db.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# The migrations (env.py, script.py.mako, versions/*.py) live inside the package, so they are
+# part of the wheel and `arcilogger-db upgrade` works on the server without a source checkout.
+packages = ["src/arcilogger_db"]
+# The pytest fixtures (with the licence test default, licensing contract 5.5) never ship: the
+# bundle's wheels carry no test helper (Build-ArciBundle checks it).
+exclude = ["src/arcilogger_db/pytest_plugin.py"]
+
+[tool.hatch.version]
+path = "src/arcilogger_db/__init__.py"

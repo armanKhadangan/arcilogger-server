@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python:
+        patterns: ['*']
+    ignore:
+      # Major upgrades are deliberate decisions, reviewed by hand.
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      web-runtime:
+        dependency-type: production
+      web-tooling:
+        dependency-type: development
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']

@@ -1,0 +1,10 @@
+/// <reference types="vite/client" />
+
+/** Product version, injected by Vite from package.json at build time. */
+declare const __APP_VERSION__: string;
+
+/**
+ * The API's `EvidenceCreate` accepts `include_audit_log` (from src/generated/api-schemas.json at
+ * build time; read through `evidenceAuditLogAccepted` in src/lib/api-features.ts).
+ */
+declare const __API_EVIDENCE_AUDIT_LOG__: boolean;

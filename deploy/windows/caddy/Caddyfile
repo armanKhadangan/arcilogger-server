@@ -1,0 +1,72 @@
+# ARCILOGGER web server (Windows service "ArciWeb", Caddy).
+#
+# - HTTPS only, certificates from Caddy's own internal CA ("tls internal"); the root certificate
+#   must be installed once on the admin PC (docs/KURULUM.md, "Kök sertifika").
+# - Serves the pre-built web interface (single-page app: unknown paths fall back to index.html).
+# - Proxies /api/* to the ARCILOGGER API at ARCILOGGER_API_UPSTREAM, which the installer sets to
+#   [api] host:port of arcilogger.toml (default 127.0.0.1:8000; the API never listens on the network).
+# - Security headers from the build specification, section 13.
+#
+# Values come from environment variables set in deploy/windows/services/ArciWeb.xml, so this file
+# is installed unchanged. Defaults are for a local test run.
+{
+	# No admin API on localhost:2019: configuration changes need a service restart, nothing else
+	# on the server can reconfigure the web server.
+	admin off
+	persist_config off
+	# The server's trust store is not changed; the root certificate is installed on the admin PC.
+	skip_install_trust
+	# Only port 443: no plain-HTTP listener on port 80 (the firewall allows 443 only).
+	auto_https disable_redirects
+	log {
+		output file "{$ARCILOGGER_LOG_DIR:./logs}/caddy.log" {
+			roll_size 10MiB
+			roll_keep 10
+		}
+		format json
+	}
+}
+
+{$ARCILOGGER_SITE_ADDRESSES:https://localhost} {
+	tls internal {
+		protocols tls1.2 tls1.3
+	}
+
+	log {
+		output file "{$ARCILOGGER_LOG_DIR:./logs}/caddy-access.log" {
+			roll_size 10MiB
+			roll_keep 14
+		}
+		format json
+	}
+
+	encode zstd gzip
+
+	# Deferred (because of "-Server"), so these values also win over headers sent by the API.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy {$ARCILOGGER_API_UPSTREAM:127.0.0.1:8000}
+	}
+
+	handle {
+		root * "{$ARCILOGGER_WEB_ROOT:./web}"
+		# File names under /assets/ contain a content hash (Vite); index.html must always be fresh.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@spa not path /assets/*
+		header @spa Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -1,0 +1,299 @@
+name: Windows installer
+
+# The installer scripts are checked on the production platform: Windows PowerShell 5.1 and
+# PowerShell 7 parse every script, the installer runs in dry-run mode against a fake bundle and its
+# recovery code against simulated services, the NTFS rights and the vault auditing are applied to
+# temporary folders and read back, and the Caddyfile is served by the pinned Caddy release
+# (downloaded here and checked against components.json).
+#
+# The end-to-end job builds a real offline bundle with Build-ArciBundle.ps1 (Windows PowerShell
+# 5.1, as on the admin PC) and then installs, upgrades, rolls back, survives a broken upgrade and
+# uninstalls ARCILOGGER on the throw-away runner (as Administrator), with the PostgreSQL of the
+# runner image: ingest, API and worker run under their virtual accounts, the API is called through
+# Caddy (today's raw line from the spool, the sealing calendar) and the Seal task runs through
+# Task Scheduler as LOCAL SERVICE under the installed NTFS rights.
+#
+# The end-to-end job checks what the Python services and tasks do under the installed rights, so
+# it also runs when their code or their locked dependencies change: a change in api/, core/,
+# collector/, ingest/, worker/ or db/ may need an NTFS right the installer does not grant yet
+# (tests/test_ci_workflows.py keeps this list in step with the uv workspace members).
+#
+# The release job runs only for a pushed tag v<version> or a manual run, and only once both jobs
+# above have passed: it builds the offline
+# bundle and ARCILOGGER-Setup-<version>.exe with Inno Setup (preinstalled on the runner image),
+# keeps them with SHA256SUMS.txt and the SBOM as a workflow artifact and, for a tag, creates a
+# DRAFT GitHub release with the same files (docs/adr/0007, amendment 2026-10-19). Someone checks
+# the draft and publishes it; nothing is published automatically.
+on:
+  push:
+    paths:
+      - 'deploy/windows/**'
+      - 'tests/test_installer_scripts.py'
+      - 'tests/test_windows_tasks.py'
+      - '.github/workflows/installer.yml'
+      - 'api/**'
+      - 'collector/**'
+      - 'core/**'
+      - 'db/**'
+      - 'ingest/**'
+      - 'worker/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+    # The paths above filter branch pushes only (GitHub does not evaluate path filters for tag
+    # pushes): a pushed v* tag always runs, for the release job.
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned by commit SHA, the same versions as ci.yml. Only the release job uploads
+# artifacts, and only the release job may write to the repository (its draft release).
+jobs:
+  installer:
+    name: Installer scripts (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - name: Install workspace
+        run: uv sync --locked --all-packages
+      - name: Download the pinned Caddy (SHA-256 from components.json)
+        shell: pwsh
+        run: |
+          $components = (Get-Content -Raw deploy/windows/installer/components.json | ConvertFrom-Json).components
+          $caddy = $components | Where-Object { $_.name -eq 'caddy' }
+          $zip = Join-Path $env:RUNNER_TEMP $caddy.file
+          Invoke-WebRequest -Uri $caddy.url -OutFile $zip
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $caddy.sha256) { throw "Caddy SHA-256 mismatch: $actual" }
+          $folder = Join-Path $env:RUNNER_TEMP 'caddy'
+          Expand-Archive -LiteralPath $zip -DestinationPath $folder
+          "ARCILOGGER_CADDY=$(Join-Path $folder 'caddy.exe')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Installer and task tests (PowerShell required)
+        env:
+          ARCILOGGER_REQUIRE_PWSH: '1'
+          POWERSHELL_TELEMETRY_OPTOUT: '1'
+        run: uv run pytest tests/test_installer_scripts.py tests/test_windows_tasks.py -v
+
+  installer-e2e:
+    name: Installer end to end (Windows, real bundle)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Use npm 11 (npm 10 cannot resolve Vitest 4's peer set)
+        run: npm install --global npm@11.21.0
+      - name: Install workspace
+        run: uv sync --locked --all-packages
+      - name: Start the PostgreSQL preinstalled on the runner image
+        # As in ci.yml (python-windows). The installer creates its role and database with this
+        # throw-away superuser (runner image defaults, not a secret); the test passes it to the
+        # installer as a PSCredential, never on a command line.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false  # exit codes are checked below
+          Write-Host "PGBIN=$env:PGBIN PGROOT=$env:PGROOT PGDATA=$env:PGDATA PGUSER=$env:PGUSER"
+          $service = Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $service -or -not $env:PGBIN) {
+            Get-ChildItem 'C:\Program Files\PostgreSQL' -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Write-Host
+            Write-Host '::error::No preinstalled PostgreSQL service/PGBIN found on this runner image.'
+            exit 1
+          }
+          Write-Host "Service $($service.Name): status=$($service.Status) start=$($service.StartType)"
+          Set-Service -Name $service.Name -StartupType Manual
+          Start-Service -Name $service.Name
+          $ready = $false
+          for ($i = 0; $i -lt 30 -and -not $ready; $i++) {
+            & (Join-Path $env:PGBIN 'pg_isready.exe') -h 127.0.0.1 -p 5432
+            $ready = ($LASTEXITCODE -eq 0)
+            if (-not $ready) { Start-Sleep -Seconds 2 }
+          }
+          if (-not $ready) {
+            Write-Host '::error::PostgreSQL did not become ready on 127.0.0.1:5432.'
+            exit 1
+          }
+          $user = if ($env:PGUSER) { $env:PGUSER } else { 'postgres' }
+          $password = if ($env:PGPASSWORD) { $env:PGPASSWORD } else { 'root' }
+          $env:PGPASSWORD = $password
+          & (Join-Path $env:PGBIN 'psql.exe') -h 127.0.0.1 -U $user -d postgres -w -c 'SELECT version();'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Cannot log in to PostgreSQL as $user (PGUSER/PGPASSWORD of the runner image)."
+            exit 1
+          }
+          "ARCILOGGER_E2E_PGUSER=$user" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ARCILOGGER_E2E_PGPASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ARCILOGGER_E2E_PGBIN=$env:PGBIN" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build the offline bundle (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'dist'
+          & .\deploy\windows\installer\Build-ArciBundle.ps1 -SkipOperatorInstallers -NoInno -OutputRoot $out
+          $bundle = Get-ChildItem -LiteralPath $out -Directory -Filter 'ARCILOGGER-*' | Select-Object -First 1
+          if (-not $bundle) { throw 'no bundle was built' }
+          # UTF-8 without BOM (Out-File -Encoding utf8 of Windows PowerShell 5.1 writes one).
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "ARCILOGGER_E2E_BUNDLE=$($bundle.FullName)`n")
+      # -rA: the output of every installer run is printed even when the test passes (warnings,
+      # exit code 1); a failing test prints it anyway.
+      - name: Install, upgrade, roll back and remove on this runner
+        env:
+          ARCILOGGER_REQUIRE_PWSH: '1'
+          POWERSHELL_TELEMETRY_OPTOUT: '1'
+          # With the database: services, API through Caddy and the Seal task under real accounts.
+          ARCILOGGER_E2E_DB: '1'
+        run: uv run pytest tests/test_installer_scripts.py -v -rA -k test_real_install_upgrade_rollback_and_uninstall
+
+  # The setup .exe, built here so the admin PC needs no build tools (docs/KURULUM.md section 4).
+  # Trust moves to this job: the bundle is what GitHub's runner built from the tagged commit, and
+  # the operator checks it against SHA256SUMS.txt and the fingerprint the installer prints.
+  release:
+    name: Release build (setup .exe, bundle, SBOM)
+    # Only from a commit whose installer tests and end-to-end installation pass in this run.
+    needs: [installer, installer-e2e]
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 90
+    # The only job that may write: the draft release of a tag (gh with GITHUB_TOKEN).
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Version (a tag must be v<version>)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $init = Get-Content -Raw -LiteralPath core/src/arcilogger_core/__init__.py
+          if ($init -notmatch '(?m)^__version__\s*=\s*"(?<v>[^"]+)"') { throw '__version__ not found' }
+          $version = $Matches['v']
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not name the version of the code (v$version)."
+          }
+          $out = Join-Path $env:RUNNER_TEMP 'release'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          "ARCILOGGER_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ARCILOGGER_RELEASE=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # RELEASE_DATE drives the licence's maintenance rule and nothing bumps it by itself: a tag
+      # is built only when it is at most 14 days before the tagged commit's day and not after it
+      # (tools/release/check_release_date.py, standard library only; docs/adr/0007, A1).
+      - name: Release date (a tag must bump RELEASE_DATE)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          python -I tools/release/check_release_date.py --tag "$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw "RELEASE_DATE check failed ($LASTEXITCODE): bump __version__ and RELEASE_DATE together." }
+      # Before the build, which adds node_modules and build tools to the checkout: the SBOM lists
+      # the locked dependencies of the released source (uv.lock, web/package-lock.json).
+      - name: SBOM (syft, SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: spdx-json
+          output-file: ${{ runner.temp }}/release/ARCILOGGER-${{ env.ARCILOGGER_VERSION }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Use npm 11 (npm 10 cannot resolve Vitest 4's peer set)
+        run: npm install --global npm@11.21.0
+      # The same build as on the admin PC (docs/KURULUM.md section 4), with Inno Setup required.
+      - name: Build the offline bundle and the setup .exe (Windows PowerShell 5.1, Inno Setup)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:ARCILOGGER_VERSION
+          $dist = Join-Path $env:RUNNER_TEMP 'dist'
+          & .\deploy\windows\installer\Build-ArciBundle.ps1 -RequireInno -OutputRoot $dist
+          $bundle = Join-Path $dist "ARCILOGGER-$version"
+          $setup = Join-Path $dist "ARCILOGGER-Setup-$version.exe"
+          $fingerprint = Join-Path $dist "ARCILOGGER-$version.fingerprint.txt"
+          foreach ($path in @($bundle, $setup, $fingerprint)) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "missing: $path" }
+          }
+          $out = $env:ARCILOGGER_RELEASE
+          Copy-Item -LiteralPath $setup, $fingerprint -Destination $out
+          # The folder bundle as one zip (ARCILOGGER-<version>\ inside), for the script path.
+          Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+          $zip = Join-Path $out "ARCILOGGER-$version.zip"
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($bundle, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+      - name: SHA256SUMS.txt and the job summary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = $env:ARCILOGGER_RELEASE
+          $files = @(Get-ChildItem -LiteralPath $out -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object Name)
+          $lines = @($files | ForEach-Object {
+              '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+            })
+          # The format of sha256sum (two spaces), so "sha256sum -c SHA256SUMS.txt" checks it.
+          [System.IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), (($lines -join "`n") + "`n"))
+          $fingerprint = (Get-Content -Raw -LiteralPath (Join-Path $out "ARCILOGGER-$env:ARCILOGGER_VERSION.fingerprint.txt")).Trim()
+          $summary = @("## ARCILOGGER $env:ARCILOGGER_VERSION ($env:GITHUB_SHA)", '', '```text') + $lines + @('```', '', "Bundle fingerprint (SHA-256 of SHA256SUMS): ``$fingerprint``")
+          ($summary -join "`n") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Keep the release files as a workflow artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ARCILOGGER-${{ env.ARCILOGGER_VERSION }}-release
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Draft GitHub release (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = $env:ARCILOGGER_RELEASE
+          $version = $env:ARCILOGGER_VERSION
+          $files = @(Get-ChildItem -LiteralPath $out -File | Sort-Object Name | ForEach-Object { $_.FullName })
+          $sums = (Get-Content -Raw -LiteralPath (Join-Path $out 'SHA256SUMS.txt')).Trim()
+          $fingerprint = (Get-Content -Raw -LiteralPath (Join-Path $out "ARCILOGGER-$version.fingerprint.txt")).Trim()
+          $notes = @(
+            "ARCILOGGER $version, built by the release job of this workflow from $env:GITHUB_SHA.",
+            '',
+            'Check before installing (docs/KURULUM.md / docs/INSTALL.md section 4):',
+            '',
+            '```text', $sums, '```',
+            '',
+            "Bundle fingerprint, printed again by the installer on the server: ``$fingerprint``",
+            '',
+            'Draft: review the job log and these values, then publish.'
+          ) -join "`n"
+          $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [System.IO.File]::WriteAllText($notesFile, $notes + "`n")
+          gh release create $env:GITHUB_REF_NAME @files --draft --verify-tag --title "ARCILOGGER $version" --notes-file $notesFile --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed: $LASTEXITCODE" }

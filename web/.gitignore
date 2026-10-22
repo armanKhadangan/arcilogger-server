@@ -1,0 +1,2 @@
+# Output of the local full-stack smoke test (npm run e2e:live)
+test-results-live/

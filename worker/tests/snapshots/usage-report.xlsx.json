@@ -1,0 +1,1824 @@
+{
+ "Özet": {
+  "freeze": "A2",
+  "filter": null,
+  "rows": 87,
+  "cells": [
+   [
+    "ARCILOGGER kullanım raporu — Tam gün raporu",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Tam gün raporu 19.10.2026 (Örnek A.Ş.): 18 aktif kullanıcı, 3 gün 14 sa aktif süre (tahmini), 43 GB indirme, 8,1 GB yükleme, 30 engellenen deneme, 2 güvenlik uyarısı; önceki gün: Mühürlendi.",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Full-day report 19.10.2026 (Örnek A.Ş.): 18 active users, 3 d 14 h active time (estimated), 43 GB downloaded, 8.1 GB uploaded, 30 blocked attempts, 2 security alerts; previous day: Sealed.",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Tahmini değer: bağlantı kayıtlarından hesaplanır; arka planda açık sekmeler de sayılabilir.",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Estimated value: computed from connection logs; tabs left open in the background may count too.",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Rapor / Report",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Rapor",
+    "Tam gün raporu",
+    null,
+    null,
+    null
+   ],
+   [
+    "Tür",
+    "Tam gün raporu",
+    null,
+    null,
+    null
+   ],
+   [
+    "Dönem başlangıcı",
+    [
+     "datetime:2026-10-19T00:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Dönem sonu (hariç)",
+    [
+     "datetime:2026-10-20T00:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Oluşturma zamanı",
+    [
+     "datetime:2026-10-20T07:00:04",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Hesaplanan son an",
+    [
+     "datetime:2026-10-20T00:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Kişi düzeyinde",
+    "evet",
+    null,
+    null,
+    null
+   ],
+   [
+    "Takma adlarla",
+    "hayır",
+    null,
+    null,
+    null
+   ],
+   [
+    "Site",
+    "Örnek A.Ş.",
+    null,
+    null,
+    null
+   ],
+   [
+    "Saat dilimi",
+    "Europe/Istanbul (UTC+3)",
+    null,
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Şirket geneli / Company totals (süreler tahmini)",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Aktif kullanıcı",
+    [
+     18,
+     "#,##0"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Çevrimiçi süre (toplam)",
+    [
+     "timedelta:611100",
+     "[h]:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Aktif süre (toplam)",
+    [
+     "timedelta:312360",
+     "[h]:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Mesai dışı aktif süre",
+    [
+     "timedelta:18480",
+     "[h]:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "İndirilen (bayt)",
+    [
+     46157266944,
+     "#,##0"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Yüklenen (bayt)",
+    [
+     8659140608,
+     "#,##0"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Oturum",
+    [
+     29745,
+     "#,##0"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "Engellenen deneme",
+    [
+     30,
+     "#,##0"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "En çok kullanılan siteler / Top sites",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Site",
+    "Kategori",
+    "Süre",
+    "Pay",
+    "İndirilen (bayt)"
+   ],
+   [
+    "outlook.office365.com",
+    "Web-based Email",
+    [
+     "timedelta:50260",
+     "[h]:mm:ss"
+    ],
+    [
+     0.1609,
+     "0%"
+    ],
+    [
+     5577677203,
+     "#,##0"
+    ]
+   ],
+   [
+    "teams.microsoft.com",
+    "Business",
+    [
+     "timedelta:43956",
+     "[h]:mm:ss"
+    ],
+    [
+     0.1407,
+     "0%"
+    ],
+    [
+     6158707360,
+     "#,##0"
+    ]
+   ],
+   [
+    "drive.google.com",
+    "File Sharing and Storage",
+    [
+     "timedelta:29111",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0932,
+     "0%"
+    ],
+    [
+     3452820713,
+     "#,##0"
+    ]
+   ],
+   [
+    "ebeyanname.gib.gov.tr",
+    "Government and Legal Organizations",
+    [
+     "timedelta:17849",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0571,
+     "0%"
+    ],
+    [
+     1631310135,
+     "#,##0"
+    ]
+   ],
+   [
+    "internetsubesi.isbank.com.tr",
+    "Finance and Banking",
+    [
+     "timedelta:17823",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0571,
+     "0%"
+    ],
+    [
+     1863429519,
+     "#,##0"
+    ]
+   ],
+   [
+    "stackoverflow.com",
+    "Information Technology",
+    [
+     "timedelta:17140",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0549,
+     "0%"
+    ],
+    [
+     3374189137,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.linkedin.com",
+    "Social Networking",
+    [
+     "timedelta:15099",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0483,
+     "0%"
+    ],
+    [
+     3223181489,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.sahibinden.com",
+    "Shopping",
+    [
+     "timedelta:15044",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0482,
+     "0%"
+    ],
+    [
+     1216198205,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.hurriyet.com.tr",
+    "News and Media",
+    [
+     "timedelta:13593",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0435,
+     "0%"
+    ],
+    [
+     1084323644,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.google.com",
+    "Search Engines and Portals",
+    [
+     "timedelta:13403",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0429,
+     "0%"
+    ],
+    [
+     1876352159,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.turkiye.gov.tr",
+    "Government and Legal Organizations",
+    [
+     "timedelta:12029",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0385,
+     "0%"
+    ],
+    [
+     1791835707,
+     "#,##0"
+    ]
+   ],
+   [
+    "translate.google.com",
+    "Search Engines and Portals",
+    [
+     "timedelta:11782",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0377,
+     "0%"
+    ],
+    [
+     3155847438,
+     "#,##0"
+    ]
+   ],
+   [
+    "web.whatsapp.com",
+    "Instant Messaging",
+    [
+     "timedelta:9659",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0309,
+     "0%"
+    ],
+    [
+     928997494,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.trendyol.com",
+    "Shopping",
+    [
+     "timedelta:8126",
+     "[h]:mm:ss"
+    ],
+    [
+     0.026,
+     "0%"
+    ],
+    [
+     670705508,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.youtube.com",
+    "Streaming Media and Download",
+    [
+     "timedelta:7596",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0243,
+     "0%"
+    ],
+    [
+     1216284556,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.instagram.com",
+    "Social Networking",
+    [
+     "timedelta:6939",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0222,
+     "0%"
+    ],
+    [
+     2126132028,
+     "#,##0"
+    ]
+   ],
+   [
+    "www.ntv.com.tr",
+    "News and Media",
+    [
+     "timedelta:5027",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0161,
+     "0%"
+    ],
+    [
+     501395613,
+     "#,##0"
+    ]
+   ],
+   [
+    "open.spotify.com",
+    "Streaming Media and Download",
+    [
+     "timedelta:4124",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0132,
+     "0%"
+    ],
+    [
+     3477675827,
+     "#,##0"
+    ]
+   ],
+   [
+    "static.cdn-ornek.net",
+    "Bilinmiyor",
+    [
+     "timedelta:3000",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0096,
+     "0%"
+    ],
+    [
+     1729198409,
+     "#,##0"
+    ]
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "En çok kullanılan kategoriler / Top categories",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Kategori",
+    "Süre",
+    "Pay",
+    null,
+    null
+   ],
+   [
+    "Web-based Email",
+    [
+     "timedelta:50260",
+     "[h]:mm:ss"
+    ],
+    [
+     0.1609,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Business",
+    [
+     "timedelta:43956",
+     "[h]:mm:ss"
+    ],
+    [
+     0.1407,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Government and Legal Organizations",
+    [
+     "timedelta:29878",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0957,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "File Sharing and Storage",
+    [
+     "timedelta:29111",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0932,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Search Engines and Portals",
+    [
+     "timedelta:25185",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0806,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Shopping",
+    [
+     "timedelta:23170",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0742,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Social Networking",
+    [
+     "timedelta:22038",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0706,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "News and Media",
+    [
+     "timedelta:18620",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0596,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Finance and Banking",
+    [
+     "timedelta:17823",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0571,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Information Technology",
+    [
+     "timedelta:17140",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0549,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Streaming Media and Download",
+    [
+     "timedelta:11720",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0375,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Instant Messaging",
+    [
+     "timedelta:9659",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0309,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Bilinmiyor",
+    [
+     "timedelta:3000",
+     "[h]:mm:ss"
+    ],
+    [
+     0.0096,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Dikkat çeken değişiklikler / Notable changes (7 günlük ortalamaya göre)",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Değişiklik",
+    "Kapsam",
+    "Değişim",
+    null,
+    null
+   ],
+   [
+    "Video ve müzik akışı 7 günlük ortalamanın %180 üzerinde.",
+    "company",
+    [
+     1.8,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "Planlama indirmesi 7 günlük ortalamanın %95 üzerinde.",
+    "department:Planlama",
+    [
+     0.95,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    "İdari İşler aktif süresi 7 günlük ortalamanın %62 altında.",
+    "department:İdari İşler",
+    [
+     -0.62,
+     "0%"
+    ],
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Güvenlik uyarıları / Security alerts (2)",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Zaman",
+    "Önem",
+    "Kural",
+    "Uyarı",
+    "Durum"
+   ],
+   [
+    [
+     "datetime:2026-10-19T11:58:01",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Yüksek",
+    "R15",
+    "Log kaynağı sessiz: fortigate 10 dakikadan uzun süredir log göndermiyor.",
+    "Çözüldü"
+   ],
+   [
+    [
+     "datetime:2026-10-19T03:05:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Orta",
+    "R20-disk",
+    "Disk dolmak üzere: D: %83 dolu (eşik %80).",
+    "Açık"
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Önceki günün mühürü / Sealing of the previous day",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "19.10.2026: Mühürlendi (20.10.2026 00:31, seri 4F2A19)",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "19.10.2026: Sealed (20.10.2026 00:31, serial 4F2A19)",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Veri kalitesi / Data quality",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "Kişiye bağlanamayan süre",
+    [
+     "timedelta:5400",
+     "[h]:mm:ss"
+    ],
+    null,
+    null,
+    null
+   ],
+   [
+    "2 cihaz bir kişiye atanmamış; süreleri kişi tablosunda yok (Cihazlar sayfası).",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "1 sa 30 dk arka plan trafiği hiçbir cihaza bağlanamadı.",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "2 devices are not assigned to a person; their time is not in the person table.",
+    null,
+    null,
+    null,
+    null
+   ],
+   [
+    "1 h 30 min of background traffic could not be linked to any device.",
+    null,
+    null,
+    null,
+    null
+   ]
+  ]
+ },
+ "Departmanlar": {
+  "freeze": "A2",
+  "filter": "A1:F5",
+  "rows": 5,
+  "cells": [
+   [
+    "Departman",
+    "Aktif kullanıcı",
+    "Aktif süre",
+    "İndirilen (bayt)",
+    "Yüklenen (bayt)",
+    "Engellenen"
+   ],
+   [
+    "Planlama",
+    [
+     6,
+     "#,##0"
+    ],
+    [
+     "timedelta:127380",
+     "[h]:mm:ss"
+    ],
+    [
+     25527582720,
+     "#,##0"
+    ],
+    [
+     6647971840,
+     "#,##0"
+    ],
+    [
+     14,
+     "#,##0"
+    ]
+   ],
+   [
+    "Finans",
+    [
+     6,
+     "#,##0"
+    ],
+    [
+     "timedelta:83400",
+     "[h]:mm:ss"
+    ],
+    [
+     11695816704,
+     "#,##0"
+    ],
+    [
+     1029701632,
+     "#,##0"
+    ],
+    [
+     12,
+     "#,##0"
+    ]
+   ],
+   [
+    "İdari İşler",
+    [
+     5,
+     "#,##0"
+    ],
+    [
+     "timedelta:79740",
+     "[h]:mm:ss"
+    ],
+    [
+     6794772480,
+     "#,##0"
+    ],
+    [
+     844103680,
+     "#,##0"
+    ],
+    [
+     3,
+     "#,##0"
+    ]
+   ],
+   [
+    "Bilinmiyor",
+    [
+     1,
+     "#,##0"
+    ],
+    [
+     "timedelta:11040",
+     "[h]:mm:ss"
+    ],
+    [
+     1038090240,
+     "#,##0"
+    ],
+    [
+     77594624,
+     "#,##0"
+    ],
+    [
+     1,
+     "#,##0"
+    ]
+   ]
+  ]
+ },
+ "Kişiler": {
+  "freeze": "A2",
+  "filter": "A1:M19",
+  "rows": 19,
+  "cells": [
+   [
+    "Kişi",
+    "Departman",
+    "İlk etkinlik",
+    "Son etkinlik",
+    "Çevrimiçi süre",
+    "Aktif süre",
+    "Mesai dışı aktif süre",
+    "İndirilen (bayt)",
+    "Yüklenen (bayt)",
+    "Oturum",
+    "Engellenen",
+    "En çok kullanılan siteler",
+    "En çok kategoriler"
+   ],
+   [
+    "Can Öztürk",
+    "Planlama",
+    [
+     "datetime:2026-10-19T07:48:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "datetime:2026-10-19T20:15:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:44820",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:28080",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:5700",
+     "[h]:mm:ss"
+    ],
+    [
+     6417285120,
+     "#,##0"
+    ],
+    [
+     2527068160,
+     "#,##0"
+    ],
+    [
+     2990,
+     "#,##0"
+    ],
+    [
+     0,
+     "#,##0"
+    ],
+    "teams.microsoft.com (1 sa 47 dk), drive.google.com (1 sa 40 dk), www.linkedin.com (55 dk 58 sn), stackoverflow.com (53 dk 44 sn), translate.google.com (53 dk 44 sn), outlook.office365.com (47 dk 1 sn), www.instagram.com (20 dk 9 sn), open.spotify.com (17 dk 54 sn), static.cdn-ornek.net (11 dk 17 sn)",
+    "Business (1 sa 47 dk), File Sharing and Storage (1 sa 40 dk), Social Networking (1 sa 16 dk), Information Technology (53 dk 44 sn), Search Engines and Portals (53 dk 44 sn), Web-based Email (47 dk 1 sn), Streaming Media and Download (17 dk 54 sn), Bilinmiyor (11 dk 17 sn)"
+   ],
+   [
+    "Elif Kaya",
+    "Finans",
+    [
+     "datetime:2026-10-19T08:02:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "datetime:2026-10-19T17:31:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:34140",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:24060",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:0",
+     "[h]:mm:ss"
+    ],
+    [
+     1310720000,
+     "#,##0"
+    ],
+    [
+     346030080,
+     "#,##0"
+    ],
+    [
+     2045,
+     "#,##0"
+    ],
+    [
+     1,
+     "#,##0"
+    ],
+    "outlook.office365.com (1 sa 19 dk), www.turkiye.gov.tr (1 sa 19 dk), internetsubesi.isbank.com.tr (1 sa 13 dk), ebeyanname.gib.gov.tr (1 sa 3 dk), teams.microsoft.com (31 dk 39 sn), www.google.com (31 dk 39 sn), www.youtube.com (26 dk 22 sn), static.cdn-ornek.net (15 dk 54 sn)",
+    "Government and Legal Organizations (2 sa 22 dk), Web-based Email (1 sa 19 dk), Finance and Banking (1 sa 13 dk), Business (31 dk 39 sn), Search Engines and Portals (31 dk 39 sn), Streaming Media and Download (26 dk 22 sn), Bilinmiyor (15 dk 54 sn)"
+   ],
+   [
+    "Selin Aydın",
+    "Planlama",
+    [
+     "datetime:2026-10-19T08:30:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "datetime:2026-10-19T17:59:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:34140",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:23520",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:0",
+     "[h]:mm:ss"
+    ],
+    [
+     4592762880,
+     "#,##0"
+    ],
+    [
+     2023751680,
+     "#,##0"
+    ],
+    [
+     2210,
+     "#,##0"
+    ],
+    [
+     2,
+     "#,##0"
+    ],
+    "drive.google.com (1 sa 54 dk), stackoverflow.com (59 dk 45 sn), outlook.office365.com (57 dk 21 sn), www.linkedin.com (57 dk 21 sn), teams.microsoft.com (50 dk 11 sn), translate.google.com (21 dk 30 sn), www.instagram.com (19 dk 7 sn), open.spotify.com (12 dk 2 sn)",
+    "File Sharing and Storage (1 sa 54 dk), Social Networking (1 sa 16 dk), Information Technology (59 dk 45 sn), Web-based Email (57 dk 21 sn), Business (50 dk 11 sn), Search Engines and Portals (21 dk 30 sn), Streaming Media and Download (12 dk 2 sn)"
+   ],
+   [
+    "Ahmet Yıldız",
+    "Finans",
+    [
+     "datetime:2026-10-19T08:15:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "datetime:2026-10-19T18:47:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:37920",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:22620",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:1320",
+     "[h]:mm:ss"
+    ],
+    [
+     1157627904,
+     "#,##0"
+    ],
+    [
+     301989888,
+     "#,##0"
+    ],
+    [
+     1888,
+     "#,##0"
+    ],
+    [
+     0,
+     "#,##0"
+    ],
+    "internetsubesi.isbank.com.tr (1 sa 28 dk), outlook.office365.com (1 sa 28 dk), ebeyanname.gib.gov.tr (1 sa 22 dk), teams.microsoft.com (35 dk 20 sn), www.turkiye.gov.tr (35 dk 20 sn), www.google.com (29 dk 27 sn), www.youtube.com (17 dk 43 sn)",
+    "Government and Legal Organizations (1 sa 57 dk), Finance and Banking (1 sa 28 dk), Web-based Email (1 sa 28 dk), Business (35 dk 20 sn), Search Engines and Portals (29 dk 27 sn), Streaming Media and Download (17 dk 43 sn)"
+   ],
+   [
+    "Deniz Koç",
+    "Planlama",
+    [
+     "datetime:2026-10-19T08:20:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "datetime:2026-10-19T18:35:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:36900",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:21300",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:900",
+     "[h]:mm:ss"
+    ],
+    [
+     3093299200,
+     "#,##0"
+    ],
+    [
+     503316480,
+     "#,##0"
+    ],
+    [
+     2402,
+     "#,##0"
+    ],
+    [
+     3,
+     "#,##0"
+    ],
+    "outlook.office365.com (1 sa 13 dk), teams.microsoft.com (1 sa 9 dk), drive.google.com (1 sa 2 dk), translate.google.com (34 dk 48 sn), www.linkedin.com (34 dk 48 sn), stackoverflow.com (31 dk 19 sn), www.instagram.com (31 dk 19 sn), open.spotify.com (10 dk 26 sn), static.cdn-ornek.net (7 dk 1 sn)",
+    "Web-based Email (1 sa 13 dk), Business (1 sa 9 dk), Social Networking (1 sa 6 dk), File Sharing and Storage (1 sa 2 dk), Search Engines and Portals (34 dk 48 sn), Information Technology (31 dk 19 sn), Streaming Media and Download (10 dk 26 sn), Bilinmiyor (7 dk 1 sn)"
+   ],
+   [
+    "…"
+   ],
+   [
+    "Ayşe Polat",
+    "Finans",
+    [
+     "datetime:2026-10-19T07:30:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "datetime:2026-10-19T16:22:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:31920",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:5820",
+     "[h]:mm:ss"
+    ],
+    [
+     "timedelta:0",
+     "[h]:mm:ss"
+    ],
+    [
+     1614807040,
+     "#,##0"
+    ],
+    [
+     63963136,
+     "#,##0"
+    ],
+    [
+     640,
+     "#,##0"
+    ],
+    [
+     2,
+     "#,##0"
+    ],
+    "internetsubesi.isbank.com.tr (22 dk 44 sn), outlook.office365.com (22 dk 44 sn), ebeyanname.gib.gov.tr (21 dk 13 sn), teams.microsoft.com (9 dk 5 sn), www.turkiye.gov.tr (9 dk 5 sn), www.google.com (7 dk 34 sn), www.youtube.com (4 dk 35 sn)",
+    "Government and Legal Organizations (30 dk 18 sn), Finance and Banking (22 dk 44 sn), Web-based Email (22 dk 44 sn), Business (9 dk 5 sn), Search Engines and Portals (7 dk 34 sn), Streaming Media and Download (4 dk 35 sn)"
+   ]
+  ]
+ },
+ "Kişi-Site": {
+  "freeze": "A2",
+  "filter": "A1:H141",
+  "rows": 141,
+  "cells": [
+   [
+    "Kişi",
+    "Departman",
+    "Site",
+    "Kategori",
+    "Süre",
+    "İndirilen (bayt)",
+    "Yüklenen (bayt)",
+    "Oturum"
+   ],
+   [
+    "Elif Kaya",
+    "Finans",
+    "outlook.office365.com",
+    "Web-based Email",
+    [
+     "timedelta:4748",
+     "[h]:mm:ss"
+    ],
+    [
+     258694736,
+     "#,##0"
+    ],
+    [
+     68295410,
+     "#,##0"
+    ],
+    [
+     403,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    "Finans",
+    "www.turkiye.gov.tr",
+    "Government and Legal Organizations",
+    [
+     "timedelta:4748",
+     "[h]:mm:ss"
+    ],
+    [
+     258694736,
+     "#,##0"
+    ],
+    [
+     68295410,
+     "#,##0"
+    ],
+    [
+     403,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    "Finans",
+    "internetsubesi.isbank.com.tr",
+    "Finance and Banking",
+    [
+     "timedelta:4432",
+     "[h]:mm:ss"
+    ],
+    [
+     241448421,
+     "#,##0"
+    ],
+    [
+     63742383,
+     "#,##0"
+    ],
+    [
+     376,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    "Finans",
+    "ebeyanname.gib.gov.tr",
+    "Government and Legal Organizations",
+    [
+     "timedelta:3798",
+     "[h]:mm:ss"
+    ],
+    [
+     206955789,
+     "#,##0"
+    ],
+    [
+     54636328,
+     "#,##0"
+    ],
+    [
+     322,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    "Finans",
+    "teams.microsoft.com",
+    "Business",
+    [
+     "timedelta:1899",
+     "[h]:mm:ss"
+    ],
+    [
+     103477894,
+     "#,##0"
+    ],
+    [
+     27318164,
+     "#,##0"
+    ],
+    [
+     161,
+     "#,##0"
+    ]
+   ],
+   [
+    "…"
+   ],
+   [
+    "Kerem Tunç",
+    "Bilinmiyor",
+    "translate.google.com",
+    "Search Engines and Portals",
+    [
+     "timedelta:720",
+     "[h]:mm:ss"
+    ],
+    [
+     67701539,
+     "#,##0"
+    ],
+    [
+     5060521,
+     "#,##0"
+    ],
+    [
+     60,
+     "#,##0"
+    ]
+   ]
+  ]
+ },
+ "Kişi-Saat": {
+  "freeze": "A2",
+  "filter": "A1:E187",
+  "rows": 187,
+  "cells": [
+   [
+    "Kişi",
+    "Saat",
+    "Aktif süre",
+    "İndirilen (bayt)",
+    "Yüklenen (bayt)"
+   ],
+   [
+    "Elif Kaya",
+    [
+     "datetime:2026-10-19T08:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:2903",
+     "[h]:mm:ss"
+    ],
+    [
+     158190344,
+     "#,##0"
+    ],
+    [
+     41762251,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    [
+     "datetime:2026-10-19T09:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:2074",
+     "[h]:mm:ss"
+    ],
+    [
+     112993103,
+     "#,##0"
+    ],
+    [
+     29830179,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    [
+     "datetime:2026-10-19T10:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:2488",
+     "[h]:mm:ss"
+    ],
+    [
+     135591724,
+     "#,##0"
+    ],
+    [
+     35796215,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    [
+     "datetime:2026-10-19T11:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:2903",
+     "[h]:mm:ss"
+    ],
+    [
+     158190344,
+     "#,##0"
+    ],
+    [
+     41762251,
+     "#,##0"
+    ]
+   ],
+   [
+    "Elif Kaya",
+    [
+     "datetime:2026-10-19T12:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:829",
+     "[h]:mm:ss"
+    ],
+    [
+     45197241,
+     "#,##0"
+    ],
+    [
+     11932071,
+     "#,##0"
+    ]
+   ],
+   [
+    "…"
+   ],
+   [
+    "Kerem Tunç",
+    [
+     "datetime:2026-10-19T16:00:00",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    [
+     "timedelta:1509",
+     "[h]:mm:ss"
+    ],
+    [
+     141557760,
+     "#,##0"
+    ],
+    [
+     10581088,
+     "#,##0"
+    ]
+   ]
+  ]
+ },
+ "Engellenenler": {
+  "freeze": "A2",
+  "filter": "A1:F31",
+  "rows": 31,
+  "cells": [
+   [
+    "Zaman",
+    "Kişi",
+    "Site",
+    "Kategori",
+    "İşlem",
+    "Kaynak"
+   ],
+   [
+    [
+     "datetime:2026-10-19T21:30:16",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Oğuz Kılıç",
+    "malware-c2.example.com",
+    "Malicious Websites",
+    "blocked",
+    "DNS filtresi"
+   ],
+   [
+    [
+     "datetime:2026-10-19T20:44:58",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Oğuz Kılıç",
+    "free-proxy.example.org",
+    "Proxy Avoidance",
+    "blocked",
+    "Web filtresi"
+   ],
+   [
+    [
+     "datetime:2026-10-19T20:05:11",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Oğuz Kılıç",
+    "www.bet365.com",
+    "Gambling",
+    "blocked",
+    "Web filtresi"
+   ],
+   [
+    [
+     "datetime:2026-10-19T19:12:30",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Oğuz Kılıç",
+    "www.bet365.com",
+    "Gambling",
+    "blocked",
+    "Web filtresi"
+   ],
+   [
+    [
+     "datetime:2026-10-19T17:01:42",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Ece Doğan",
+    "torrent.example.net",
+    "Peer-to-peer File Sharing",
+    "blocked",
+    "DNS filtresi"
+   ],
+   [
+    "…"
+   ],
+   [
+    [
+     "datetime:2026-10-19T08:02:12",
+     "dd.mm.yyyy hh:mm:ss"
+    ],
+    "Mehmet Çelik",
+    "torrent.example.net",
+    "Peer-to-peer File Sharing",
+    "blocked",
+    "DNS filtresi"
+   ]
+  ]
+ },
+ "Cihazlar": {
+  "freeze": "A2",
+  "filter": "A1:H21",
+  "rows": 21,
+  "cells": [
+   [
+    "Cihaz",
+    "MAC",
+    "IP",
+    "VLAN",
+    "Kişi",
+    "Aktif süre",
+    "İndirilen (bayt)",
+    "Yüklenen (bayt)"
+   ],
+   [
+    "PC-07",
+    "f0:1f:af:00:00:01",
+    "172.20.41.120",
+    [
+     41,
+     "0"
+    ],
+    "Elif Kaya",
+    [
+     "timedelta:24060",
+     "[h]:mm:ss"
+    ],
+    [
+     1310720000,
+     "#,##0"
+    ],
+    [
+     346030080,
+     "#,##0"
+    ]
+   ],
+   [
+    "MUHASEBE-02",
+    "f0:1f:af:00:11:02",
+    "172.20.41.121",
+    [
+     41,
+     "0"
+    ],
+    "Ahmet Yıldız",
+    [
+     "timedelta:22620",
+     "[h]:mm:ss"
+    ],
+    [
+     1157627904,
+     "#,##0"
+    ],
+    [
+     301989888,
+     "#,##0"
+    ]
+   ],
+   [
+    "MUHASEBE-03",
+    "f0:1f:af:00:11:03",
+    "172.20.41.122",
+    [
+     41,
+     "0"
+    ],
+    "Gülşen Çetin",
+    [
+     "timedelta:15300",
+     "[h]:mm:ss"
+    ],
+    [
+     639631360,
+     "#,##0"
+    ],
+    [
+     99614720,
+     "#,##0"
+    ]
+   ],
+   [
+    "MUHASEBE-04",
+    "f0:1f:af:00:11:04",
+    "172.20.41.123",
+    [
+     41,
+     "0"
+    ],
+    "Mehmet Çelik",
+    [
+     "timedelta:8520",
+     "[h]:mm:ss"
+    ],
+    [
+     4078960640,
+     "#,##0"
+    ],
+    [
+     125829120,
+     "#,##0"
+    ]
+   ],
+   [
+    "MUHASEBE-05",
+    "f0:1f:af:00:11:05",
+    "172.20.41.124",
+    [
+     41,
+     "0"
+    ],
+    "Ümit Aksoy",
+    [
+     "timedelta:7080",
+     "[h]:mm:ss"
+    ],
+    [
+     2894069760,
+     "#,##0"
+    ],
+    [
+     92274688,
+     "#,##0"
+    ]
+   ],
+   [
+    "…"
+   ],
+   [
+    "02:4b:1e:00:17:02",
+    "02:4b:1e:00:17:02",
+    "172.20.60.77",
+    [
+     60,
+     "0"
+    ],
+    "—",
+    [
+     "timedelta:2280",
+     "[h]:mm:ss"
+    ],
+    [
+     429916160,
+     "#,##0"
+    ],
+    [
+     23068672,
+     "#,##0"
+    ]
+   ]
+  ]
+ }
+}

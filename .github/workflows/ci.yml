@@ -1,0 +1,226 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned by commit SHA (supply-chain hygiene); Dependabot keeps them current.
+jobs:
+  # Database tests really run in both Python jobs: ARCILOGGER_REQUIRE_DB=1 turns a missing
+  # ARCILOGGER_TEST_PG into a failure instead of a skip (see docs/MVP-CONTRACTS.md).
+  python-linux:
+    name: Python (ubuntu-latest, PostgreSQL 16 + TimescaleDB)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Same image as deploy/dev/compose.yaml. Throwaway CI credentials, not a secret.
+        image: timescale/timescaledb:2.30.2-pg16
+        env:
+          POSTGRES_USER: arci_test
+          POSTGRES_PASSWORD: arci_test
+          POSTGRES_DB: postgres
+          TIMESCALEDB_TELEMETRY: 'off'
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arci_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      ARCILOGGER_TEST_PG: postgresql://arci_test:arci_test@127.0.0.1:5432/postgres
+      ARCILOGGER_REQUIRE_DB: '1'
+      # The migration must actually create hypertables here (fails loudly otherwise).
+      ARCILOGGER_EXPECT_TIMESCALE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - name: Install workspace
+        run: uv sync --locked --all-packages
+      - name: Lint (ruff) and types (mypy --strict, Linux and Windows)
+        run: uv run poe lint
+      # The service container's server log is printed after the last step and fills the end of
+      # the job log, where the test summary should be: keep it quiet (the tests provoke many
+      # database errors on purpose).
+      - name: Quiet the database server log
+        run: >-
+          psql "$ARCILOGGER_TEST_PG" -v ON_ERROR_STOP=1
+          -c "ALTER SYSTEM SET log_checkpoints = off"
+          -c "ALTER SYSTEM SET log_min_messages = fatal"
+          -c "ALTER SYSTEM SET log_min_error_statement = panic"
+          -c "SELECT pg_reload_conf()"
+      - name: Tests (incl. database tests on TimescaleDB)
+        run: uv run poe test
+      - name: Web API types match the API (OpenAPI contract)
+        run: uv run python web/scripts/export_api_contract.py --check
+      # The mocked E2E tests answer with web/e2e/samples/*.json: keys, types and enum-like values
+      # (states, statuses, modes, tones, error codes) must still be what the real API sends.
+      - name: E2E samples match the real API
+        run: uv run python web/scripts/capture_api_samples.py --check
+      # Spec 17 coverage gates (each package measured with its own tests).
+      - name: Core coverage gate (>= 90 %)
+        run: uv run poe test-core
+      - name: Ingest coverage gate (>= 85 %)
+        run: uv run poe test-ingest
+      - name: API coverage gate (>= 80 %)
+        run: uv run poe test-api
+      - name: Ingest throughput guard (no coverage tracing)
+        run: uv run poe test-perf
+
+  python-windows:
+    name: Python (windows-latest, PostgreSQL)
+    # Windows is the production platform.
+    runs-on: windows-latest
+    env:
+      ARCILOGGER_REQUIRE_DB: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - name: Start the PostgreSQL preinstalled on the runner image
+        # The runner image documents PGBIN/PGROOT/PGDATA and a disabled postgresql service.
+        # These facts cannot be checked from the repository: print what is there and fail
+        # with a clear message if PostgreSQL cannot be started.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false  # exit codes are checked below
+          Write-Host "PGBIN=$env:PGBIN PGROOT=$env:PGROOT PGDATA=$env:PGDATA PGUSER=$env:PGUSER"
+          $service = Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $service -or -not $env:PGBIN) {
+            Get-ChildItem 'C:\Program Files\PostgreSQL' -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Write-Host
+            Write-Host '::error::No preinstalled PostgreSQL service/PGBIN found on this runner image; database tests cannot run.'
+            exit 1
+          }
+          Write-Host "Service $($service.Name): status=$($service.Status) start=$($service.StartType)"
+          Set-Service -Name $service.Name -StartupType Manual
+          Start-Service -Name $service.Name
+          $ready = $false
+          for ($i = 0; $i -lt 30 -and -not $ready; $i++) {
+            & (Join-Path $env:PGBIN 'pg_isready.exe') -h 127.0.0.1 -p 5432
+            $ready = ($LASTEXITCODE -eq 0)
+            if (-not $ready) { Start-Sleep -Seconds 2 }
+          }
+          if (-not $ready) {
+            Get-ChildItem (Join-Path $env:PGDATA 'log') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 50 | Write-Host
+            Write-Host '::error::PostgreSQL did not become ready on 127.0.0.1:5432.'
+            exit 1
+          }
+          $user = if ($env:PGUSER) { $env:PGUSER } else { 'postgres' }
+          $password = if ($env:PGPASSWORD) { $env:PGPASSWORD } else { 'root' }
+          $env:PGPASSWORD = $password
+          & (Join-Path $env:PGBIN 'psql.exe') -h 127.0.0.1 -U $user -d postgres -w -c 'SELECT version();' -c 'SHOW server_encoding;'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Cannot log in to PostgreSQL as $user (PGUSER/PGPASSWORD of the runner image)."
+            exit 1
+          }
+          "ARCILOGGER_TEST_PG=postgresql://${user}:${password}@127.0.0.1:5432/postgres" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install workspace
+        run: uv sync --locked --all-packages
+      - name: Lint (ruff) and types (mypy --strict, Linux and Windows)
+        run: uv run poe lint
+      - name: Tests (incl. database tests on plain PostgreSQL)
+        run: uv run poe test
+      - name: Core coverage gate (>= 90 %)
+        run: uv run poe test-core
+      - name: Ingest throughput guard (no coverage tracing)
+        run: uv run poe test-perf
+      - name: Build wheels (packaging check)
+        run: uv build --all-packages --out-dir dist/wheels
+      - name: The db wheel ships its migrations
+        shell: pwsh
+        run: >
+          uv run python -c "import glob, zipfile;
+          names = zipfile.ZipFile(glob.glob('dist/wheels/arcilogger_db-*.whl')[0]).namelist();
+          assert any(n.endswith('migrations/versions/v0001_baseline.py') for n in names), names;
+          assert any(n.endswith('migrations/env.py') for n in names), names"
+
+  web:
+    name: Web interface
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Use npm 11 (npm 10 cannot resolve Vitest 4's peer set)
+        run: npm install --global npm@11.21.0
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Format
+        run: npm run format:check
+      - name: Types
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm run test:coverage
+      - name: Build
+        run: npm run build
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end + accessibility (axe, light and dark)
+        run: npm run e2e
+      # Artifacts only when something failed (keeps the account's artifact storage small).
+      # An upload problem (e.g. storage quota) must not hide or replace the real result.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        continue-on-error: true
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  security:
+    name: Secrets, SBOM, vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Secret scan (gitleaks)
+        run: >
+          docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.30.1
+          dir /repo --redact --no-banner --exit-code 1
+      - name: SBOM (syft, SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: spdx-json
+          output-file: arcilogger-sbom.spdx.json
+          # Scanned below; release SBOMs are published with the installer (M7).
+          upload-artifact: false
+      - name: Vulnerability scan (grype) — fail on high and critical
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          sbom: arcilogger-sbom.spdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: table

@@ -1,0 +1,93 @@
+name: Lisans Yöneticisi (Windows zip)
+
+# The owner's licence tool as one zip (tools/license-issuer/Build-LicenseManager.ps1): the
+# python-build-standalone component of deploy/windows/installer/components.json (SHA-256 checked),
+# the arcilogger-core wheel with its pinned win_amd64 dependencies, the issuer and the window.
+# The zip is unpacked into a temporary folder and checked there: the window's --self-test (a full
+# cycle off-screen with a temporary key, registry and request) and the command line's --help.
+# The zip and its .sha256 are kept as the workflow artifact "ARCILOGGER-Lisans-Yoneticisi"; the
+# owner downloads it from the run page (tools/license-issuer/README.md). It is never part of the
+# product bundle. No secret is used. Besides the tool and the licence code, the zip depends on
+# the verified Python (components.json, checked with ArciInstall.psm1) and core's pinned
+# dependencies (uv.lock, core/pyproject.toml): a change there runs this workflow too.
+on:
+  push:
+    paths:
+      - 'tools/license-issuer/**'
+      - 'core/src/arcilogger_core/license/**'
+      - '.github/workflows/license-manager.yml'
+      - 'deploy/windows/installer/components.json'
+      - 'deploy/windows/installer/ArciInstall.psm1'
+      - 'uv.lock'
+      - 'core/pyproject.toml'
+  pull_request:
+    paths:
+      - 'tools/license-issuer/**'
+      - 'core/src/arcilogger_core/license/**'
+      - '.github/workflows/license-manager.yml'
+      - 'deploy/windows/installer/components.json'
+      - 'deploy/windows/installer/ArciInstall.psm1'
+      - 'uv.lock'
+      - 'core/pyproject.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: license-manager-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned by commit SHA, the same versions as ci.yml and installer.yml.
+jobs:
+  license-manager:
+    name: Lisans Yöneticisi zip (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      # Windows PowerShell 5.1, as on the owner's PC.
+      - name: Build the zip
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tools\license-issuer\Build-LicenseManager.ps1 -OutDir (Join-Path $env:RUNNER_TEMP 'license-manager')
+      - name: Unzip into a temporary folder, self-test and --help
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false  # exit codes are checked below
+          $dist = Join-Path $env:RUNNER_TEMP 'license-manager'
+          $zip = Get-ChildItem -LiteralPath $dist -File -Filter 'ARCILOGGER-Lisans-Yoneticisi-*.zip' | Select-Object -First 1
+          if (-not $zip) { throw 'no zip was built' }
+          $expected = ((Get-Content -Raw -LiteralPath ($zip.FullName + '.sha256')) -split '\s+')[0]
+          $actual = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "SHA-256 mismatch: $actual (expected $expected)" }
+          $target = Join-Path $env:RUNNER_TEMP 'license-manager-unzipped'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $target
+          $root = Join-Path $target $zip.BaseName
+          Set-Location -LiteralPath $root
+          foreach ($name in @('BENIOKU.txt', 'kilavuz\README.md', 'python\python.exe', 'python\pythonw.exe')) {
+            if (-not (Test-Path -LiteralPath $name)) { throw "missing in the zip: $name" }
+          }
+          $launchers = @(Get-ChildItem -LiteralPath $root -File -Filter '*.cmd')
+          if ($launchers.Count -ne 2) { throw "expected two launchers, found: $($launchers.Name -join ', ')" }
+          & .\python\python.exe -I -m arcilogger_license_gui --self-test
+          if ($LASTEXITCODE -ne 0) { throw "--self-test failed: exit code $LASTEXITCODE" }
+          & .\python\python.exe -I -m arcilogger_license_issuer --help
+          if ($LASTEXITCODE -ne 0) { throw "--help failed: exit code $LASTEXITCODE" }
+      - name: Keep the zip and its .sha256 as a workflow artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ARCILOGGER-Lisans-Yoneticisi
+          path: |
+            ${{ runner.temp }}/license-manager/ARCILOGGER-Lisans-Yoneticisi-*.zip
+            ${{ runner.temp }}/license-manager/ARCILOGGER-Lisans-Yoneticisi-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 90

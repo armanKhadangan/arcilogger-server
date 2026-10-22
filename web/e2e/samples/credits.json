@@ -1,0 +1,412 @@
+{
+  "kamusm": {
+    "below_threshold": false,
+    "history": [
+      {
+        "credits": 9726,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-14T06:30:00+03:00"
+      },
+      {
+        "credits": 9722,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-15T06:30:00+03:00"
+      },
+      {
+        "credits": 9717,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-16T06:30:00+03:00"
+      },
+      {
+        "credits": 9714,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-17T06:30:00+03:00"
+      },
+      {
+        "credits": 9710,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-18T06:30:00+03:00"
+      },
+      {
+        "credits": 9705,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-19T06:30:00+03:00"
+      },
+      {
+        "credits": 9702,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-20T06:30:00+03:00"
+      },
+      {
+        "credits": 9696,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-21T06:30:00+03:00"
+      },
+      {
+        "credits": 9691,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-22T06:30:00+03:00"
+      },
+      {
+        "credits": 9688,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-23T06:30:00+03:00"
+      },
+      {
+        "credits": 9684,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-24T06:30:00+03:00"
+      },
+      {
+        "credits": 9679,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-25T06:30:00+03:00"
+      },
+      {
+        "credits": 9676,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-26T06:30:00+03:00"
+      },
+      {
+        "credits": 9672,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-27T06:30:00+03:00"
+      },
+      {
+        "credits": 9665,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-28T06:30:00+03:00"
+      },
+      {
+        "credits": 9662,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-29T06:30:00+03:00"
+      },
+      {
+        "credits": 9658,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-30T06:30:00+03:00"
+      },
+      {
+        "credits": 9653,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-01T06:30:00+03:00"
+      },
+      {
+        "credits": 9650,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-02T06:30:00+03:00"
+      },
+      {
+        "credits": null,
+        "error": "Kamu SM sunucusuna ulaşılamadı (zaman aşımı)",
+        "provider": "zamane",
+        "time": "2026-10-03T06:30:00+03:00"
+      },
+      {
+        "credits": 9641,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-04T06:30:00+03:00"
+      },
+      {
+        "credits": 9636,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-05T06:30:00+03:00"
+      },
+      {
+        "credits": 9632,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-06T06:30:00+03:00"
+      },
+      {
+        "credits": 9627,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-07T06:30:00+03:00"
+      },
+      {
+        "credits": 9624,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-08T06:30:00+03:00"
+      },
+      {
+        "credits": 9620,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-09T06:30:00+03:00"
+      },
+      {
+        "credits": 9615,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-10T06:30:00+03:00"
+      },
+      {
+        "credits": 9612,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-11T06:30:00+03:00"
+      }
+    ],
+    "latest": {
+      "credits": 9612,
+      "error": null,
+      "provider": "zamane",
+      "time": "2026-10-11T06:30:00+03:00"
+    },
+    "legal_grade": true,
+    "provider": "zamane",
+    "remaining": 9612,
+    "threshold": 500,
+    "unreadable_lines": 0
+  },
+  "kamusm_low": {
+    "below_threshold": true,
+    "history": [
+      {
+        "credits": 9726,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-14T06:30:00+03:00"
+      },
+      {
+        "credits": 9722,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-15T06:30:00+03:00"
+      },
+      {
+        "credits": 9717,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-16T06:30:00+03:00"
+      },
+      {
+        "credits": 9714,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-17T06:30:00+03:00"
+      },
+      {
+        "credits": 9710,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-18T06:30:00+03:00"
+      },
+      {
+        "credits": 9705,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-19T06:30:00+03:00"
+      },
+      {
+        "credits": 9702,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-20T06:30:00+03:00"
+      },
+      {
+        "credits": 9696,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-21T06:30:00+03:00"
+      },
+      {
+        "credits": 9691,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-22T06:30:00+03:00"
+      },
+      {
+        "credits": 9688,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-23T06:30:00+03:00"
+      },
+      {
+        "credits": 9684,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-24T06:30:00+03:00"
+      },
+      {
+        "credits": 9679,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-25T06:30:00+03:00"
+      },
+      {
+        "credits": 9676,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-26T06:30:00+03:00"
+      },
+      {
+        "credits": 9672,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-27T06:30:00+03:00"
+      },
+      {
+        "credits": 9665,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-28T06:30:00+03:00"
+      },
+      {
+        "credits": 9662,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-29T06:30:00+03:00"
+      },
+      {
+        "credits": 9658,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-09-30T06:30:00+03:00"
+      },
+      {
+        "credits": 9653,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-01T06:30:00+03:00"
+      },
+      {
+        "credits": 9650,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-02T06:30:00+03:00"
+      },
+      {
+        "credits": null,
+        "error": "Kamu SM sunucusuna ulaşılamadı (zaman aşımı)",
+        "provider": "zamane",
+        "time": "2026-10-03T06:30:00+03:00"
+      },
+      {
+        "credits": 9641,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-04T06:30:00+03:00"
+      },
+      {
+        "credits": 9636,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-05T06:30:00+03:00"
+      },
+      {
+        "credits": 9632,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-06T06:30:00+03:00"
+      },
+      {
+        "credits": 9627,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-07T06:30:00+03:00"
+      },
+      {
+        "credits": 9624,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-08T06:30:00+03:00"
+      },
+      {
+        "credits": 9620,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-09T06:30:00+03:00"
+      },
+      {
+        "credits": 9615,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-10T06:30:00+03:00"
+      },
+      {
+        "credits": 9612,
+        "error": null,
+        "provider": "zamane",
+        "time": "2026-10-11T06:30:00+03:00"
+      }
+    ],
+    "latest": {
+      "credits": 9612,
+      "error": null,
+      "provider": "zamane",
+      "time": "2026-10-11T06:30:00+03:00"
+    },
+    "legal_grade": true,
+    "provider": "zamane",
+    "remaining": 9612,
+    "threshold": 10000,
+    "unreadable_lines": 0
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:28.539054+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "mock": {
+    "below_threshold": false,
+    "history": [
+      {
+        "credits": 9992,
+        "error": null,
+        "provider": "mock",
+        "time": "2026-09-14T06:30:00+03:00"
+      },
+      {
+        "credits": 9992,
+        "error": null,
+        "provider": "mock",
+        "time": "2026-09-15T06:30:00+03:00"
+      },
+      {
+        "credits": 9992,
+        "error": null,
+        "provider": "mock",
+        "time": "2026-09-16T06:30:00+03:00"
+      }
+    ],
+    "latest": {
+      "credits": 9992,
+      "error": null,
+      "provider": "mock",
+      "time": "2026-09-16T06:30:00+03:00"
+    },
+    "legal_grade": false,
+    "provider": "mock",
+    "remaining": 9992,
+    "threshold": 500,
+    "unreadable_lines": 0
+  }
+}

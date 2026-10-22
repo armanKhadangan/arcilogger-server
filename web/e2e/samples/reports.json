@@ -1,0 +1,819 @@
+{
+  "errors": {
+    "file_not_found": {
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message_en": "Not found.",
+          "message_tr": "Kayıt bulunamadı."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "preview_invalid": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "query",
+                "from"
+              ],
+              "msg": "a custom report needs from and to",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "privacy_notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "report_expired": {
+      "body": {
+        "error": {
+          "code": "report_expired",
+          "message_en": "The files of this report were deleted after reports.keep_days.",
+          "message_tr": "Bu raporun dosyaları saklama süresi (reports.keep_days) dolduğu için silindi."
+        }
+      },
+      "headers": {},
+      "status": 410
+    },
+    "report_recipients_required": {
+      "body": {
+        "error": {
+          "code": "report_recipients_required",
+          "message_en": "At least one recipient is needed (to enable the schedule or to send the report). Use send=false to make the files only.",
+          "message_tr": "Bu işlem için en az bir alıcı gerekiyor (zamanlamayı açmak ya da raporu göndermek için). Yalnız dosya oluşturmak için send=false kullanın."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "report_smtp_disabled": {
+      "body": {
+        "error": {
+          "code": "report_smtp_disabled",
+          "message_en": "E-mail is switched off ([smtp] enabled = false). Use send=false to make the files only.",
+          "message_tr": "E-posta gönderimi kapalı ([smtp] enabled = false). Raporu yalnız dosya olarak oluşturmak için send=false kullanın."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "run_not_found": {
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message_en": "Not found.",
+          "message_tr": "Kayıt bulunamadı."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "validation_error": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "weekday"
+              ],
+              "msg": "weekday is required for weekly schedules and only for them",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "file_html": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-kullanim-tam-gun-20261012-r3.html\"",
+      "content-type": "text/html; charset=utf-8",
+      "x-arci-sha256": "376f387a5b12a7c49cefc78e94b609126c8a7179c4d9003c85fa6e1f0dddc525"
+    },
+    "sha256": "376f387a5b12a7c49cefc78e94b609126c8a7179c4d9003c85fa6e1f0dddc525",
+    "size": 87411
+  },
+  "file_pdf": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-kullanim-tam-gun-20261012-r3.pdf\"",
+      "content-type": "application/pdf",
+      "x-arci-sha256": "0b95b36eaf61fa248ca5ce017b16fd2ed85efdb9b7bf0b811db027d3f30dbd0b"
+    },
+    "sha256": "0b95b36eaf61fa248ca5ce017b16fd2ed85efdb9b7bf0b811db027d3f30dbd0b",
+    "size": 91785
+  },
+  "file_xlsx": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx\"",
+      "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "x-arci-sha256": "90ec8b74f373c3931ca4bb682d2118b9fb52e0da3e8deaeb6a30c477d77f2e97"
+    },
+    "sha256": "90ec8b74f373c3931ca4bb682d2118b9fb52e0da3e8deaeb6a30c477d77f2e97",
+    "size": 33570
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:28.539054+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "preview_html": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "text/html; charset=utf-8"
+    },
+    "sha256": "8dc5c9017b5cb414582e18856e92a2b6eeba70db4bdbc0a7bb58436a1f8c00cd",
+    "size": 88000
+  },
+  "preview_pdf": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "inline; filename=\"ARCILOGGER-kullanim-onizleme.pdf\"",
+      "content-type": "application/pdf"
+    },
+    "sha256": "f470aa3b74cc9f45af3efa81e7652a07ad062582120d9a1f315bbf7505b21bc8",
+    "size": 92360
+  },
+  "run_files_only": {
+    "deliveries": [],
+    "error": null,
+    "files": [
+      {
+        "format": "html",
+        "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.html",
+        "sha256": "3ae3599eaf0f095644788b855639520c91dd50d202cf87e7d359b45cbed462ad",
+        "size": 86171
+      },
+      {
+        "format": "pdf",
+        "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.pdf",
+        "sha256": "d4247bef0623bf26ca30fced55348d3f968a621bdc1e79a81d4b4943ec42641c",
+        "size": 92137
+      },
+      {
+        "format": "xlsx",
+        "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.xlsx",
+        "sha256": "d8836bd23ac437a986801083e546c2fa949dffa600192086403504e6300402bf",
+        "size": 33491
+      }
+    ],
+    "finished_at": "2026-10-13T04:00:20.274885Z",
+    "id": 1,
+    "kind": "monthly",
+    "period": {
+      "from": "2026-08-31T21:00:00Z",
+      "to": "2026-09-30T21:00:00Z"
+    },
+    "requested_by": "tolga",
+    "schedule_id": 4,
+    "started_at": "2026-10-13T04:00:19.995569Z",
+    "status": "sent",
+    "triggered_by": "manual"
+  },
+  "run_partial": {
+    "deliveries": [
+      {
+        "error": null,
+        "recipient": "yonetim@ornek.example",
+        "sent_at": "2026-10-13T04:00:21.172784Z",
+        "status": "sent"
+      },
+      {
+        "error": "recipient refused: 550 5.1.1 mailbox unavailable",
+        "recipient": "ik@ornek.example",
+        "sent_at": null,
+        "status": "failed"
+      }
+    ],
+    "error": null,
+    "files": [
+      {
+        "format": "html",
+        "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.html",
+        "sha256": "376f387a5b12a7c49cefc78e94b609126c8a7179c4d9003c85fa6e1f0dddc525",
+        "size": 87411
+      },
+      {
+        "format": "pdf",
+        "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.pdf",
+        "sha256": "0b95b36eaf61fa248ca5ce017b16fd2ed85efdb9b7bf0b811db027d3f30dbd0b",
+        "size": 91785
+      },
+      {
+        "format": "xlsx",
+        "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
+        "sha256": "90ec8b74f373c3931ca4bb682d2118b9fb52e0da3e8deaeb6a30c477d77f2e97",
+        "size": 33570
+      }
+    ],
+    "finished_at": "2026-10-13T04:00:21.172784Z",
+    "id": 3,
+    "kind": "full_day",
+    "period": {
+      "from": "2026-10-11T21:00:00Z",
+      "to": "2026-10-12T21:00:00Z"
+    },
+    "requested_by": null,
+    "schedule_id": 2,
+    "started_at": "2026-10-13T04:00:20.274885Z",
+    "status": "partial",
+    "triggered_by": "schedule"
+  },
+  "run_queued": {
+    "deliveries": [],
+    "error": null,
+    "files": [],
+    "finished_at": null,
+    "id": 1,
+    "kind": "monthly",
+    "period": {
+      "from": "2026-08-31T21:00:00Z",
+      "to": "2026-09-30T21:00:00Z"
+    },
+    "requested_by": "tolga",
+    "schedule_id": 4,
+    "started_at": "2026-10-13T04:00:19.995569Z",
+    "status": "queued",
+    "triggered_by": "manual"
+  },
+  "runs": {
+    "items": [
+      {
+        "deliveries": [
+          {
+            "error": null,
+            "recipient": "yonetim@ornek.example",
+            "sent_at": "2026-10-13T04:00:21.172784Z",
+            "status": "sent"
+          },
+          {
+            "error": "recipient refused: 550 5.1.1 mailbox unavailable",
+            "recipient": "ik@ornek.example",
+            "sent_at": null,
+            "status": "failed"
+          }
+        ],
+        "error": null,
+        "files": [
+          {
+            "format": "html",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.html",
+            "sha256": "376f387a5b12a7c49cefc78e94b609126c8a7179c4d9003c85fa6e1f0dddc525",
+            "size": 87411
+          },
+          {
+            "format": "pdf",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.pdf",
+            "sha256": "0b95b36eaf61fa248ca5ce017b16fd2ed85efdb9b7bf0b811db027d3f30dbd0b",
+            "size": 91785
+          },
+          {
+            "format": "xlsx",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
+            "sha256": "90ec8b74f373c3931ca4bb682d2118b9fb52e0da3e8deaeb6a30c477d77f2e97",
+            "size": 33570
+          }
+        ],
+        "finished_at": "2026-10-13T04:00:21.172784Z",
+        "id": 3,
+        "kind": "full_day",
+        "period": {
+          "from": "2026-10-11T21:00:00Z",
+          "to": "2026-10-12T21:00:00Z"
+        },
+        "requested_by": null,
+        "schedule_id": 2,
+        "started_at": "2026-10-13T04:00:20.274885Z",
+        "status": "partial",
+        "triggered_by": "schedule"
+      },
+      {
+        "deliveries": [
+          {
+            "error": null,
+            "recipient": "yonetim@ornek.example",
+            "sent_at": null,
+            "status": "skipped"
+          },
+          {
+            "error": null,
+            "recipient": "ik@ornek.example",
+            "sent_at": null,
+            "status": "skipped"
+          }
+        ],
+        "error": null,
+        "files": [
+          {
+            "format": "html",
+            "name": "ARCILOGGER-kullanim-ozel-20261005-20261011-r2.html",
+            "sha256": "f684212dda22bd08ab87783a2839d589811f4d12c607b58681b3df1f7f657806",
+            "size": 87940
+          },
+          {
+            "format": "pdf",
+            "name": "ARCILOGGER-kullanim-ozel-20261005-20261011-r2.pdf",
+            "sha256": "536cc47cd94ac5422355cb14d8d5bdbb59cfaa9dfc9021da1bde23fed018ec4f",
+            "size": 92447
+          },
+          {
+            "format": "xlsx",
+            "name": "ARCILOGGER-kullanim-ozel-20261005-20261011-r2.xlsx",
+            "sha256": "cdd687083b467609e9f0ae301dccaa43c91c8fa204f56ac6ad26b0a89adc914b",
+            "size": 33594
+          }
+        ],
+        "finished_at": "2026-10-13T04:00:20.274885Z",
+        "id": 2,
+        "kind": "custom",
+        "period": {
+          "from": "2026-10-04T21:00:00Z",
+          "to": "2026-10-11T21:00:00Z"
+        },
+        "requested_by": "tolga",
+        "schedule_id": 2,
+        "started_at": "2026-10-13T04:00:20.080595Z",
+        "status": "sent",
+        "triggered_by": "manual"
+      },
+      {
+        "deliveries": [],
+        "error": null,
+        "files": [
+          {
+            "format": "html",
+            "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.html",
+            "sha256": "3ae3599eaf0f095644788b855639520c91dd50d202cf87e7d359b45cbed462ad",
+            "size": 86171
+          },
+          {
+            "format": "pdf",
+            "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.pdf",
+            "sha256": "d4247bef0623bf26ca30fced55348d3f968a621bdc1e79a81d4b4943ec42641c",
+            "size": 92137
+          },
+          {
+            "format": "xlsx",
+            "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.xlsx",
+            "sha256": "d8836bd23ac437a986801083e546c2fa949dffa600192086403504e6300402bf",
+            "size": 33491
+          }
+        ],
+        "finished_at": "2026-10-13T04:00:20.274885Z",
+        "id": 1,
+        "kind": "monthly",
+        "period": {
+          "from": "2026-08-31T21:00:00Z",
+          "to": "2026-09-30T21:00:00Z"
+        },
+        "requested_by": "tolga",
+        "schedule_id": 4,
+        "started_at": "2026-10-13T04:00:19.995569Z",
+        "status": "sent",
+        "triggered_by": "manual"
+      }
+    ],
+    "limit": 50,
+    "offset": 0,
+    "total": 3
+  },
+  "runs_filtered": {
+    "items": [
+      {
+        "deliveries": [
+          {
+            "error": null,
+            "recipient": "yonetim@ornek.example",
+            "sent_at": "2026-10-13T04:00:21.172784Z",
+            "status": "sent"
+          },
+          {
+            "error": "recipient refused: 550 5.1.1 mailbox unavailable",
+            "recipient": "ik@ornek.example",
+            "sent_at": null,
+            "status": "failed"
+          }
+        ],
+        "error": null,
+        "files": [
+          {
+            "format": "html",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.html",
+            "sha256": "376f387a5b12a7c49cefc78e94b609126c8a7179c4d9003c85fa6e1f0dddc525",
+            "size": 87411
+          },
+          {
+            "format": "pdf",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.pdf",
+            "sha256": "0b95b36eaf61fa248ca5ce017b16fd2ed85efdb9b7bf0b811db027d3f30dbd0b",
+            "size": 91785
+          },
+          {
+            "format": "xlsx",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
+            "sha256": "90ec8b74f373c3931ca4bb682d2118b9fb52e0da3e8deaeb6a30c477d77f2e97",
+            "size": 33570
+          }
+        ],
+        "finished_at": "2026-10-13T04:00:21.172784Z",
+        "id": 3,
+        "kind": "full_day",
+        "period": {
+          "from": "2026-10-11T21:00:00Z",
+          "to": "2026-10-12T21:00:00Z"
+        },
+        "requested_by": null,
+        "schedule_id": 2,
+        "started_at": "2026-10-13T04:00:20.274885Z",
+        "status": "partial",
+        "triggered_by": "schedule"
+      }
+    ],
+    "limit": 1,
+    "offset": 0,
+    "total": 2
+  },
+  "schedule_created": {
+    "created_at": "2026-10-13T04:00:19.789747Z",
+    "enabled": true,
+    "formats": {
+      "email_html": true,
+      "pdf": true,
+      "xlsx": false
+    },
+    "id": 5,
+    "kind": "weekly",
+    "last_run": null,
+    "monthday": null,
+    "name": "Yönetim haftalık özeti",
+    "next_run_at": "2026-10-16T05:10:00Z",
+    "person_level": true,
+    "pseudonymize": false,
+    "recipients": [
+      "mudur@ornek.example"
+    ],
+    "time": "08:10",
+    "updated_at": "2026-10-13T04:00:19.789783Z",
+    "updated_by": "tolga",
+    "weekday": 5
+  },
+  "schedule_deleted": {
+    "status": 204
+  },
+  "schedule_updated": {
+    "created_at": "2026-10-20T17:40:22.467840Z",
+    "enabled": true,
+    "formats": {
+      "email_html": true,
+      "pdf": true,
+      "xlsx": true
+    },
+    "id": 2,
+    "kind": "full_day",
+    "last_run": null,
+    "monthday": null,
+    "name": "Tam gün raporu",
+    "next_run_at": "2026-10-14T04:00:00Z",
+    "person_level": true,
+    "pseudonymize": false,
+    "recipients": [
+      "yonetim@ornek.example",
+      "ik@ornek.example"
+    ],
+    "time": "07:00",
+    "updated_at": "2026-10-20T17:40:43.114912Z",
+    "updated_by": "tolga",
+    "weekday": null
+  },
+  "schedules": [
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": false,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 1,
+      "kind": "end_of_day",
+      "last_run": null,
+      "monthday": null,
+      "name": "Gün sonu raporu",
+      "next_run_at": null,
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [],
+      "time": "18:30",
+      "updated_at": "2026-10-20T17:40:22.467840Z",
+      "updated_by": ":seed",
+      "weekday": null
+    },
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": true,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 2,
+      "kind": "full_day",
+      "last_run": {
+        "deliveries": [
+          {
+            "error": null,
+            "recipient": "yonetim@ornek.example",
+            "sent_at": "2026-10-13T04:00:21.172784Z",
+            "status": "sent"
+          },
+          {
+            "error": "recipient refused: 550 5.1.1 mailbox unavailable",
+            "recipient": "ik@ornek.example",
+            "sent_at": null,
+            "status": "failed"
+          }
+        ],
+        "error": null,
+        "files": [
+          {
+            "format": "html",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.html",
+            "sha256": "376f387a5b12a7c49cefc78e94b609126c8a7179c4d9003c85fa6e1f0dddc525",
+            "size": 87411
+          },
+          {
+            "format": "pdf",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.pdf",
+            "sha256": "0b95b36eaf61fa248ca5ce017b16fd2ed85efdb9b7bf0b811db027d3f30dbd0b",
+            "size": 91785
+          },
+          {
+            "format": "xlsx",
+            "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
+            "sha256": "90ec8b74f373c3931ca4bb682d2118b9fb52e0da3e8deaeb6a30c477d77f2e97",
+            "size": 33570
+          }
+        ],
+        "finished_at": "2026-10-13T04:00:21.172784Z",
+        "id": 3,
+        "kind": "full_day",
+        "period": {
+          "from": "2026-10-11T21:00:00Z",
+          "to": "2026-10-12T21:00:00Z"
+        },
+        "requested_by": null,
+        "schedule_id": 2,
+        "started_at": "2026-10-13T04:00:20.274885Z",
+        "status": "partial",
+        "triggered_by": "schedule"
+      },
+      "monthday": null,
+      "name": "Tam gün raporu",
+      "next_run_at": "2026-10-14T04:00:00Z",
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [
+        "yonetim@ornek.example",
+        "ik@ornek.example"
+      ],
+      "time": "07:00",
+      "updated_at": "2026-10-20T17:40:43.672610Z",
+      "updated_by": "tolga",
+      "weekday": null
+    },
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": false,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 3,
+      "kind": "weekly",
+      "last_run": null,
+      "monthday": null,
+      "name": "Haftalık rapor",
+      "next_run_at": null,
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [],
+      "time": "07:15",
+      "updated_at": "2026-10-20T17:40:22.467840Z",
+      "updated_by": ":seed",
+      "weekday": 1
+    },
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": false,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 4,
+      "kind": "monthly",
+      "last_run": {
+        "deliveries": [],
+        "error": null,
+        "files": [
+          {
+            "format": "html",
+            "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.html",
+            "sha256": "3ae3599eaf0f095644788b855639520c91dd50d202cf87e7d359b45cbed462ad",
+            "size": 86171
+          },
+          {
+            "format": "pdf",
+            "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.pdf",
+            "sha256": "d4247bef0623bf26ca30fced55348d3f968a621bdc1e79a81d4b4943ec42641c",
+            "size": 92137
+          },
+          {
+            "format": "xlsx",
+            "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.xlsx",
+            "sha256": "d8836bd23ac437a986801083e546c2fa949dffa600192086403504e6300402bf",
+            "size": 33491
+          }
+        ],
+        "finished_at": "2026-10-13T04:00:20.274885Z",
+        "id": 1,
+        "kind": "monthly",
+        "period": {
+          "from": "2026-08-31T21:00:00Z",
+          "to": "2026-09-30T21:00:00Z"
+        },
+        "requested_by": "tolga",
+        "schedule_id": 4,
+        "started_at": "2026-10-13T04:00:19.995569Z",
+        "status": "sent",
+        "triggered_by": "manual"
+      },
+      "monthday": 1,
+      "name": "Aylık rapor",
+      "next_run_at": null,
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [],
+      "time": "07:30",
+      "updated_at": "2026-10-20T17:40:22.467840Z",
+      "updated_by": ":seed",
+      "weekday": null
+    },
+    {
+      "created_at": "2026-10-13T04:00:19.789747Z",
+      "enabled": true,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": false
+      },
+      "id": 5,
+      "kind": "weekly",
+      "last_run": null,
+      "monthday": null,
+      "name": "Yönetim haftalık özeti",
+      "next_run_at": "2026-10-16T05:10:00Z",
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [
+        "mudur@ornek.example"
+      ],
+      "time": "08:10",
+      "updated_at": "2026-10-13T04:00:19.789783Z",
+      "updated_by": "tolga",
+      "weekday": 5
+    }
+  ],
+  "schedules_shipped": [
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": false,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 1,
+      "kind": "end_of_day",
+      "last_run": null,
+      "monthday": null,
+      "name": "Gün sonu raporu",
+      "next_run_at": null,
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [],
+      "time": "18:30",
+      "updated_at": "2026-10-20T17:40:22.467840Z",
+      "updated_by": ":seed",
+      "weekday": null
+    },
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": false,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 2,
+      "kind": "full_day",
+      "last_run": null,
+      "monthday": null,
+      "name": "Tam gün raporu",
+      "next_run_at": null,
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [],
+      "time": "07:00",
+      "updated_at": "2026-10-20T17:40:22.467840Z",
+      "updated_by": ":seed",
+      "weekday": null
+    },
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": false,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 3,
+      "kind": "weekly",
+      "last_run": null,
+      "monthday": null,
+      "name": "Haftalık rapor",
+      "next_run_at": null,
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [],
+      "time": "07:15",
+      "updated_at": "2026-10-20T17:40:22.467840Z",
+      "updated_by": ":seed",
+      "weekday": 1
+    },
+    {
+      "created_at": "2026-10-20T17:40:22.467840Z",
+      "enabled": false,
+      "formats": {
+        "email_html": true,
+        "pdf": true,
+        "xlsx": true
+      },
+      "id": 4,
+      "kind": "monthly",
+      "last_run": null,
+      "monthday": 1,
+      "name": "Aylık rapor",
+      "next_run_at": null,
+      "person_level": true,
+      "pseudonymize": false,
+      "recipients": [],
+      "time": "07:30",
+      "updated_at": "2026-10-20T17:40:22.467840Z",
+      "updated_by": ":seed",
+      "weekday": null
+    }
+  ]
+}

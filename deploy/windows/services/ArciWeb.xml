@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows service ArciWeb: Caddy (WinSW 2.12 configuration, see doc/xmlConfigFile.md of v2.12.0).
+  Install-Arcilogger.ps1 fills in the {{...}} values and runs it as NT SERVICE\ArciWeb.
+  The Caddyfile reads the ARCILOGGER_* variables below; API_UPSTREAM is [api] host:port of
+  arcilogger.toml (default 127.0.0.1:8000), so run the installer again after changing it.
+  Caddy keeps its internal CA (private key) under XDG_DATA_HOME, a folder only ArciWeb and
+  administrators can open.
+  Paths handed to Caddy use forward slashes (Go accepts them on Windows; no escaping questions).
+-->
+<service>
+  <id>ArciWeb</id>
+  <name>ARCILOGGER Web (Caddy)</name>
+  <description>HTTPS (443): web arayüzünü sunar, /api isteklerini ArciApi'ye iletir. [Serves the web interface over HTTPS and proxies /api to ArciApi.]</description>
+  <executable>{{INSTALL_DIR}}\caddy\caddy.exe</executable>
+  <arguments>run --config "{{INSTALL_DIR}}\caddy\Caddyfile" --adapter caddyfile</arguments>
+  <env name="XDG_DATA_HOME" value="{{PROGRAM_DATA}}\caddy\data"/>
+  <env name="XDG_CONFIG_HOME" value="{{PROGRAM_DATA}}\caddy\config"/>
+  <env name="ARCILOGGER_SITE_ADDRESSES" value="{{SITE_ADDRESSES}}"/>
+  <env name="ARCILOGGER_WEB_ROOT" value="{{WEB_ROOT}}"/>
+  <env name="ARCILOGGER_LOG_DIR" value="{{LOG_DIR_FORWARD}}"/>
+  <env name="ARCILOGGER_API_UPSTREAM" value="{{API_UPSTREAM}}"/>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>15 sec</stoptimeout>
+  <logpath>{{LOG_DIR}}</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

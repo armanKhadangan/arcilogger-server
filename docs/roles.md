@@ -1,0 +1,278 @@
+# Roller ve yetkiler / Roles and permissions
+
+> Kaynak: yapım şartnamesi bölüm 13. Kodda tek kaynak `api/src/arcilogger_api/security.py`
+> (`ROLE_PERMISSIONS`); `api/tests/test_security.py` tabloyu şartnameden bağımsız olarak yeniden
+> yazar ve karşılaştırır. Açık sorular en altta — ürün sahibi karar verdikçe güncellenir.
+
+## Özet (TR)
+
+- Dört rol vardır: **Yönetici** (admin), **Denetçi** (auditor), **İK Raporları** (hr),
+  **Rapor İzleyici** (viewer). Bir kullanıcının tek rolü olur.
+- Sahibin 2026-10-20 kararıyla kullanım görme yetkisi olan **her rol** (`usage.person` ya da
+  `usage.anonymous`: Yönetici, Denetçi, İK Raporları, Rapor İzleyici) kişi ve cihaz adlarını,
+  MAC/IP adreslerini, ana bilgisayar adlarını ve URL'leri görür; takma adlar yalnızca
+  `usage.pseudonymize_anonymous_role` ayarı açıkken ve yalnızca `usage.person` yetkisi olmayan
+  roller içindir (aşağıda "Kullanım"). Denetçi 5651 sorgusu yapabilir ve mühür/kanıt paketlerini
+  doğrulayıp indirebilir, ama kanıt paketi oluşturamaz ve arama sonuçlarını dışa aktaramaz.
+- **İki adımlı doğrulama (TOTP)** Yönetici ve Denetçi için zorunludur (`auth.totp_required_roles`).
+- Kişisel veri gören roller — bu sürümde **dört rolün hepsi** — ilk girişte ve her yeni sürümde
+  bir kez **KVKK bilgilendirmesini** onaylar; her onay denetim kaydına yazılır. Onay verilmeden
+  kişi düzeyinde veri döndüren uç noktalar 403 `privacy_notice_required` yanıtı verir (sunucu
+  tarafında zorunlu; `require_privacy_notice`).
+- Kullanıcı ekleme, rol değiştirme, parola/TOTP sıfırlama yalnızca Yönetici içindir ve son 5 dakika
+  içinde parolanın yeniden girilmesini ister.
+- **Lisans sayfası** (Ayarlar → Lisans: istek kodu, lisans dosyası yükleme ve kaldırma, geçmiş)
+  `settings.manage` ister, yani yalnızca Yöneticidir; yükleme ve kaldırma parolanın yeniden
+  girilmesini de ister. Lisans durumu (`GET /license`: durum, modüller, sınırlar; ayrıntılar
+  olmadan) **oturum açmış her kullanıcıya** açıktır: bantlar ve kilitli sayfalar herkese görünür
+  ([LISANS.md](LISANS.md)). Lisansta kapalı bir modül, rolü ne olursa olsun kimseye açılmaz;
+  rol, modül açıkken kimin göreceğini belirler.
+
+## Summary (EN)
+
+Four roles, one per user. By the owner decision of 2026-10-20 every role that may see usage
+(`usage.person` or `usage.anonymous`: admin, auditor, hr and viewer) sees person and device
+names, MAC/IP addresses, host names and URLs; pseudonyms only with
+`usage.pseudonymize_anonymous_role`, and only for roles without `usage.person`. TOTP is mandatory
+for admin and auditor. Roles that see person-level data — in this release all four roles —
+accept the KVKK notice once per version; the server refuses person-level endpoints until they
+did (`require_privacy_notice`).
+User management is admin-only and needs a re-authentication within the last five minutes.
+The licence page (Settings → Licence: request code, upload and removal of the licence file,
+history) needs `settings.manage` (administrators; upload and removal also a recent
+re-authentication); the licence state itself (`GET /license` without its details) is open to every
+signed-in user, so everybody sees the banners and the locked pages ([LICENSING.md](LICENSING.md)).
+A module that is off in the licence is locked for every role; the role decides who sees it while it
+is on.
+
+## The spec 13 table
+
+| Rol / Role | Panel | Arama | 5651 Sorgu | Kişi raporları | Anonim raporlar | Mühür/Kanıt | Ayarlar | Kullanıcılar | Denetim |
+|---|---|---|---|---|---|---|---|---|---|
+| Yönetici (admin) | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Denetçi (auditor) | ✔ | ✔ (okuma) | ✔ | — | ✔ | ✔ (doğrula/indir) | — | — | ✔ |
+| İK Raporları (hr) | ✔ (yalnızca kullanım) | — | — | ✔ | ✔ | — | — | — | — |
+| Rapor İzleyici (viewer) | ✔ | — | — | — | ✔ | — | — | — | — |
+
+## Permissions per role (as implemented)
+
+| Permission | admin | auditor | hr | viewer | Meaning / column |
+|---|---|---|---|---|---|
+| `dashboard.view` | ✔ | ✔ | — | ✔ | Panel (all widgets) |
+| `dashboard.usage` | ✔ | ✔ | ✔ | ✔ | Panel, usage widgets only (hr: "usage only") |
+| `search.read` | ✔ | ✔ | — | — | Arama and live tail, read |
+| `search.export` | ✔ | — | — | — | Export search results (auditor: "read") |
+| `lookup.run` | ✔ | ✔ | — | — | 5651 lookup incl. the PDF report |
+| `usage.person` | ✔ | — | ✔ | — | Person-level usage reports (always with names) |
+| `usage.anonymous` | ✔ | ✔ | ✔ | ✔ | Usage reports with names (owner decision 2026-10-20); pseudonyms instead only with `usage.pseudonymize_anonymous_role` for roles without `usage.person` (the spec 13 column "Anonim raporlar") |
+| `seal.read`, `seal.verify` | ✔ | ✔ | — | — | Seal calendar, manifests, tokens, verification |
+| `seal.manage` | ✔ | — | — | — | "Şimdi mühürle" |
+| `evidence.read`, `evidence.download` | ✔ | ✔ | — | — | List and download evidence packages (non-admins: manual packages and those of their own lookups; none with the audit log for a reader who sees usage pseudonyms, "Kullanım" below) |
+| `evidence.create` | ✔ | — | — | — | Create evidence packages (owner decision: not for the auditor) |
+| `settings.manage` | ✔ | — | — | — | Ayarlar |
+| `users.manage` | ✔ | — | — | — | Kullanıcılar (this package: `/api/v1/users`) |
+| `audit.read` | ✔ | ✔ | — | — | Denetim kaydı (`/api/v1/audit`, `/api/v1/audit/verify`) |
+| `sources.*`, `devices.*`, `alerts.*`, `reports.manage`, `compliance.read`, `system.read` | ✔ | — | — | — | Pages the spec table does not list: admin only until decided |
+
+Independent of the role:
+
+| Rule | Where |
+|---|---|
+| Second factor (TOTP) required | roles in `auth.totp_required_roles` (default `admin`, `auditor`); others may enrol voluntarily |
+| KVKK privacy notice required | roles with `usage.person`, `usage.anonymous`, `lookup.run` or `search.read` — all four roles (admin, auditor, hr, viewer); enforced on every person-level endpoint with `arcilogger_api.auth.privacy.require_privacy_notice` (403 `privacy_notice_required`) |
+| Recent re-authentication (5 min) | creating users, changing role/active state/name/e-mail, password and TOTP resets, new recovery codes, voluntary TOTP enrolment, **evidence package creation** (`evidence.create`) and **download** (`evidence.download`, together with the KVKK notice); later: credentials and retention settings (`require_recent_auth`) |
+| Own lookups only | administrators see every 5651 lookup; every other role with `lookup.run` (the auditor) sees only its own — another user's lookup answers 404, and evidence packages built from it are hidden as well (owner decision, ASSUMPTIONS D5; `routers.lookup.sees_all_lookups`) |
+| Everything blocked while `must_change_password` | except `/auth/me`, `/auth/password`, `/auth/logout` |
+
+## Endpoints of the authentication package
+
+| Endpoint | Access |
+|---|---|
+| `POST /auth/login`, `GET /auth/setup/status`, `POST /auth/setup/admin` | no session (rate-limited) |
+| `POST /auth/totp`, `GET /auth/totp/setup`, `POST /auth/totp/confirm`, `GET /auth/me`, `POST /auth/logout` | also a session that still waits for the second factor (TOTP setup/confirm from a full session: recent re-authentication) |
+| `POST /auth/password` | signed in, also while `must_change_password` |
+| `POST /auth/reauth`, `POST /auth/privacy-notice`, `POST /auth/recovery-codes` | signed in (recovery codes: recent re-authentication) |
+| `GET/POST/PATCH /users…` | `users.manage` (changes: recent re-authentication; unlock: no) |
+| `GET /audit` | `audit.read` + accepted KVKK notice (entries hold lookup queries with IP/MAC and result ids) |
+| `GET /audit/verify` | `audit.read` (counts and hashes only) |
+
+`api/tests/test_auth_security.py` lists every route of these routers with its access rule and
+fails when a new route is added without one.
+
+## Lisans / Licence (`/api/v1/license`)
+
+| Endpoint | Access |
+|---|---|
+| `GET /license` | any signed-in user (no KVKK notice: no person data; not audited); `details` (licence id, server ids, request code, time source, history) only with `settings.manage` |
+| `POST /license`, `DELETE /license` | `settings.manage` + recent re-authentication (audited: `license.install`, `license.remove`, `license.refuse`) |
+
+Lisansta kapalı bir modülün uç noktaları (`/usage`, `/reports`, `/imports`) oturum denetiminden
+sonra (oturum yoksa 401), uç noktanın yetki denetiminden önce 403 `module_not_licensed` verir; yetki
+tablosu değişmez. / The endpoints of a module that is off in the licence (`/usage`, `/reports`,
+`/imports`) answer 403 `module_not_licensed` once the user is signed in (401 without a session),
+before the endpoint's own permission check; the permission table does not change
+([LICENSING.md](LICENSING.md) section 2.2).
+
+## Cihazlar ve Kişiler / Devices and persons — who sees persons
+
+Kişi kayıtları (Cihazlar ve Kişiler sayfasının kişi listesi; e-posta, sicil no, unvan, notlar),
+cihaz listesi ve atama geçmişi (kim, hangi tarihten hangi tarihe, atamayı yapan) kişisel veridir.
+Cihazlar ve Kişiler sayfasında bunları bugün yalnızca **Yönetici** görür ve değiştirir
+(`devices.read`, `devices.manage`); kişi adı döndüren her uç nokta ayrıca KVKK bilgilendirmesinin
+onayını ister. Hangi cihazın hangi kişiye bağlandığını başka roller de görür: `audit.read`
+(Yönetici, Denetçi) Denetim Kaydı sayfasında Cihazlar ve Kişiler sayfasından yapılan her atama
+değişikliğini görür (`device.assign`: cihazın MAC adresi, önceki ve yeni kişinin numarası,
+atamanın başlangıcı, değişikliği yapan kullanıcı; CSV ile içe aktarılan atamalar yalnızca
+sayılarla yazılır) ve bu numaraları Kullanım sayfasındaki ve 5651 sorgu sonuçlarındaki kişilerle
+eşleştirebilir (Denetçi, takma ad ayarı açıkken yalnızca 5651 sorgu sonuçlarındakilerle);
+kullanım görme yetkisi olan her rol (`usage.person` ya da `usage.anonymous`: dört rolün hepsi)
+Kullanım sayfasının Kişi sekmesinde dönemde kullanımı olan kişileri (ad, departman) ve her kişinin
+dönemde kullandığı cihazları (cihaz adı, MAC, IP) görür (aşağıda "Kullanım"); kişi düzeyindeki
+(varsayılan) zamanlanmış raporların Excel dosyası (Cihazlar sayfası) alıcılarına her cihazı
+dönemde bağlandığı kişilerle verir; `lookup.run` (Yönetici, Denetçi) bir 5651 sorgusunun
+sonucunda (zincirin kişi adımı) o andaki atamayı görür: kişinin adı, departmanı, unvanı ve
+atamanın başlangıcı ile bitişi.
+
+The person registry (the persons list of the devices page, with e-mail, staff number, title and
+notes), the device list and the assignment history (who, from when to when, assigned by whom) are
+personal data. On the devices page only administrators see and change them today (`devices.read`,
+`devices.manage`, not in the spec 13 table: open question 5 below); every endpoint that returns a
+person's name also needs the accepted KVKK notice. Other roles still see which device was
+attributed to which person: `audit.read` (admin, auditor) sees every assignment change on the audit
+log page that was made on the devices page (`device.assign`: the device's MAC address, the previous
+and the new person's number, the assignment's start, the user who made it; an applied assignment
+CSV is logged with counts only) and can match these numbers with the persons of the usage page and
+of 5651 results (the auditor, with pseudonyms on, only with those of 5651 results); every role
+that may see usage (`usage.person` or `usage.anonymous`: all four roles) sees on the usage page's
+person tab the persons with usage in the period (name, department) and the devices each one used
+in the period (device name, MAC, IP) ("Kullanım / Usage" below); a person-level (the default)
+scheduled report's Excel file (sheet Cihazlar) gives its recipients every device with the persons
+it was attributed to in the period; `lookup.run` (admin, auditor) shows in a 5651 result (the
+chain's person step) the assignment valid at that moment: the person's name, department and title
+and the assignment's start and end.
+
+| Endpoint | Access |
+|---|---|
+| `GET /devices`, `/devices/{mac}`, `/devices/export.csv`, `GET /persons…` | `devices.read` + KVKK notice (they name current owners) |
+| `PATCH /devices/{mac}`, `POST /devices/assign`, `POST/PATCH /persons…`, `POST /imports/{kind}` | `devices.manage` + KVKK notice |
+| `GET /departments`, `GET /vlans`, `GET /imports/{kind}/template.csv` | `devices.read` (no person data) |
+| `POST/PATCH /departments…`, `POST/PATCH/DELETE /vlans` | `devices.manage` |
+
+Changes, applied imports and CSV exports are audited with ids, field names and counts, never
+with names, e-mails or notes — department and VLAN names included (a VLAN's entry keeps its
+subnet, VLAN id, department id and guest flag; docs/MVP-CONTRACTS.md section 11); reading the
+lists is not audited (like the lookup list).
+`api/tests/test_devices_api.py` lists every route of the area with its rule and checks the
+refusal for every other role.
+
+## Kullanım / Usage (`/api/v1/usage`)
+
+Sahibin 2026-10-20 kararı ([ASSUMPTIONS.md](ASSUMPTIONS.md) "Owner 2026-10-20"): kullanım görme
+yetkisi olan her rol (`usage.person` ya da `usage.anonymous`: yönetici, denetçi, İK, rapor
+izleyici) kişi ve cihaz adlarını görür; takma adlar yalnızca `usage.pseudonymize_anonymous_role`
+açıkken, `usage.person` yetkisi olmayan izleyiciler içindir. Bu yüzden bu rollerin hepsi, rapor
+izleyici de, kişi düzeyindeki uç noktalardan önce KVKK bilgilendirmesini onaylar.
+
+Owner decision of 2026-10-20: every role that may see usage sees names; pseudonyms only with
+`usage.pseudonymize_anonymous_role`, for viewers without `usage.person` ([USAGE.md](USAGE.md)
+section 6, docs/MVP-CONTRACTS.md section 12). Therefore all of these roles, the viewer too,
+accept the KVKK notice before the person-level endpoints answer ([ASSUMPTIONS.md](ASSUMPTIONS.md)
+U17).
+
+| Endpoint | Access |
+|---|---|
+| `GET /usage/company` | `dashboard.usage` or `usage.person` or `usage.anonymous` (company and department totals) |
+| `GET /usage/subjects…`, `/usage/sites…`, `/usage/categories…`, `/usage/export.*` | `usage.person` or `usage.anonymous` + KVKK notice (`view=company` exports like `/usage/company`) |
+| `POST /usage/rebuild`, `GET /usage/rebuild/{job_id}` | `settings.manage` |
+| `GET /usage/pseudonyms` | `users.manage` (administrators) + KVKK notice |
+
+Viewing one subject (`usage.view`), exports (`usage.export`), rebuild requests (`usage.rebuild`)
+and the pseudonym mapping (`usage.pseudonyms`) are audited with ids and counts, never names (the
+target is the real subject, e.g. `usage:person:12`, also when the viewer sees pseudonyms).
+
+Bir ayrıntı görüntülemesinin (`usage.view`) ve tek kişinin/cihazın dışa aktarılmasının denetim
+kaydındaki hedefi, görüntüleyen takma ad görse de gerçek kişi ya da cihazdır (`usage:person:12`).
+Kayıt değiştirilmez; ama Kullanım sayfalarında takma ad gören biri (ayar açıkken Denetçi)
+`GET /audit` yanıtında bu hedefi takma ad belirteciyle görür (`usage:p:…`, `target_masked: true`;
+anahtar yokken `usage:masked`); özet gerçek hedefi kapsadığı için ona hiçbir girdinin özeti
+gönderilmez (`prev_hash`, `hash` ve `/audit/verify` yanıtındaki `last_hash` boş). Denetim kaydını
+içeren kanıt paketleri (yalnızca yönetici ekler) girdileri olduğu gibi içerir; bu okuyucunun
+listesinde görünmez ve 404 yanıtı verir. Yönetici ve adları görenler gerçek hedefi ve özetleri
+görür. Takma adlar Denetçi için yine de zayıftır: `search.read` ve `lookup.run` ile ham
+kayıtlardan ve 5651 sorgularından adreslere ve kişilere ulaşabilir; günün mühür manifesti günün
+son girdisinin özetini taşır, az kullanım görüntülemesi olan bir günde bir tahmin onunla
+sınanabilir.
+
+The entry is not changed, but a reader who sees pseudonyms on the Kullanım pages (the auditor
+while the setting is on) gets this target in `GET /audit` as the pseudonym token (`usage:p:…`,
+`target_masked: true`; `usage:masked` without the key); as the hash covers the real target, it
+gets no entry's hashes (`prev_hash`, `hash` and the `last_hash` of `/audit/verify` empty).
+Evidence packages with the audit log (added by an administrator only) hold the entries as they
+are; they are left out of this reader's list and answer 404. Administrators and readers who see
+names get the real target and the hashes. Pseudonyms remain weak for the auditor: with
+`search.read` and `lookup.run` it reaches addresses and persons through the raw logs and 5651
+lookups; the day's seal manifest carries the hash of the day's last entry, so on a day with few
+usage views a guess can be tested against it.
+`api/tests/test_usage_api.py` and `api/tests/test_evidence_report.py` cover the rules.
+
+## Güvenlik ve Panel / Security page and dashboard — who sees what
+
+Uyarıları bugün yalnızca **Yönetici** görür ve durumlarını değiştirir (`alerts.read`,
+`alerts.manage`; şartname 13 tablosunda sütunu yok). Panel (`dashboard.view`) her kutu için ayrıca
+kendi iznini ister; izni olmayanın kutusu boş gelir: Denetçi log alımı, dünkü mühür, kontör ve saat
+kutularını görür, uyarı kutusunu görmez; Rapor İzleyici yalnızca log alımını görür; İK
+Raporları'nın Panel'i yalnızca kullanım kutularıdır (`/usage`).
+
+Alerts are administrator-only today (`alerts.read`, `alerts.manage`; not in the spec 13
+table). The dashboard (`dashboard.view`) needs each box's own permission as well; a box the user
+may not see is `null`:
+
+| Endpoint / box | Access | admin | auditor | hr | viewer |
+|---|---|---|---|---|---|
+| `GET /alerts`, `/alerts/summary`, `/alerts/{id}` | `alerts.read` | ✔ | — | — | — |
+| `POST /alerts/{id}/state`, `/alerts/{id}/notes` | `alerts.manage` | ✔ | — | — | — |
+| `GET /dashboard/summary` | `dashboard.view` | ✔ | ✔ | — (403) | ✔ |
+| box `ingest` (log intake) | `sources.read` or `dashboard.view` | ✔ | ✔ | — | ✔ |
+| boxes `seal`, `credit` | `seal.read` | ✔ | ✔ | — | — |
+| box `clock` | `system.read` or `seal.read` | ✔ | ✔ | — | — |
+| box `alerts` | `alerts.read` | ✔ | — | — | — |
+
+Every change of an alert's state is audited as `alert.state` (from/to, rule), every note as
+`alert.note` with its length only — a note is free text and may name people, so its text never
+enters the sealed audit log (docs/MVP-CONTRACTS.md section 14). `api/tests/test_alerts_api.py`
+lists every route of the area and checks each role against `ROLE_PERMISSIONS`;
+`api/tests/test_dashboard_api.py` checks the boxes per role.
+
+## Kararlar / Decisions
+
+- **Denetçi ve kanıt paketi** (karar 2026-10-12, [ASSUMPTIONS.md](ASSUMPTIONS.md) D4): şartname 13
+  denetçiye "Mühür/Kanıt ✔ (doğrula/indir)" verir, 9.5 ve 12.3 ise "Kanıt Paketi" düğmesini 5651
+  sorgu sayfasına koyar. Denetçi kanıt paketi **oluşturamaz**; web arayüzü düğmeyi yalnızca
+  `evidence.create` ile gösterir. Denetçinin kendi sorguları için oluşturma izni istenirse
+  değiştirilecek.
+- **Sorguların görünürlüğü** (ASSUMPTIONS D5): yönetici olmayan roller yalnızca kendi 5651
+  sorgularını ve bunlardan oluşturulan kanıt paketlerini görür.
+
+## Açık sorular / Open questions (owner decision needed)
+
+1. **Denetçi ve kanıt paketi:** karar verildi (2026-10-12) — yukarıdaki "Kararlar" bölümü
+   ([ASSUMPTIONS.md](ASSUMPTIONS.md) D4).
+2. **İK için TOTP:** İK kişi bazlı tarama raporlarını görür; şartname TOTP'yi yalnızca yönetici ve
+   denetçi için zorunlu tutar. Öneri: `auth.totp_required_roles` ayarına `hr` eklensin
+   (yönetici PowerShell'inde; kurulum programı `venv\Scripts` klasörünü PATH'e eklemediği için tam
+   yol gerekir: `'["admin","auditor","hr"]' | & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" settings set
+   auth.totp_required_roles - --by AD`). Ayar yalnızca rol ekler: `admin` ve `auditor` listeden
+   çıkarılamaz (komut bunu reddeder).
+3. **KVKK bilgilendirmesi kimler için?** Şartname 3.3 "her yönetici kullanıcıya" der. Uygulama,
+   kişi düzeyinde veri gören tüm rollere gösterir; sahibin 2026-10-20 kararından beri rapor
+   izleyici de adları gördüğü için bu dört rolün hepsidir (yönetici, denetçi, İK, rapor izleyici).
+   Metnin kendisi (web arayüzü, i18n) hukuk müşaviri onayından geçmelidir; sürüm
+   `privacy.notice_version` ayarıdır.
+4. **Rapor İzleyici ve tam panel:** şartname panel için ✔ verir; panelde güvenlik uyarıları ve mühür
+   durumu da var. İzleyici bunları görsün mü, yoksa yalnızca kullanım kutularını mı?
+5. **Tabloda olmayan sayfalar** (Kaynaklar, Cihazlar ve Kişiler, Güvenlik, Raporlar, Uyum Durumu,
+   Sistem): şimdilik yalnızca yönetici. Denetçi örneğin "Uyum Durumu"nu görmeli mi?
+6. **Geçici parola süresi:** yöneticinin oluşturduğu geçici parolanın bir son kullanma süresi yok
+   (ilk girişte değiştirilmesi zorunlu). Süre sınırı (ör. 72 saat) istenir mi?
+7. **Denetim kaydını okumak** kendisi denetlenmez (her sayfa açılışında kayıt üretirdi). İstenirse
+   `audit.view` olarak eklenebilir.

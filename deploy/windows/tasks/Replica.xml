@@ -1,0 +1,53 @@
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>ARCILOGGER</Author>
+    <Description>Mühürlü günleri ikinci konuma ([replica] target, örneğin bir NAS paylaşımı) kopyalar ve özetleri doğrular.</Description>
+    <URI>\ARCILOGGER\Replica</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <Repetition>
+        <Interval>PT1H</Interval>
+        <Duration>P1D</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T00:40:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <!-- LOCAL SERVICE: no password to store; gets only the folder rights the installer grants. -->
+    <Principal id="Author">
+      <UserId>S-1-5-19</UserId>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <!-- Run as soon as possible after a missed start (systemd Persistent=true). -->
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{{PYTHON}}</Command>
+      <Arguments>-I -m arcilogger_core replica</Arguments>
+    </Exec>
+  </Actions>
+</Task>

@@ -1,0 +1,451 @@
+/**
+ * The TypeScript types of the lookup, evidence, sealing and credit answers must describe what the
+ * real API sends. `web/e2e/samples/*.json` are answers captured from the real API
+ * (`web/scripts/capture_api_samples.py`, whose `--check` compares them with the API again); here
+ * every sample is checked field by field against the interfaces of `api-types.ts`,
+ * `lookup-types.ts` and `seal-types.ts` — required fields present, no unknown fields, value types
+ * and string literal unions as declared. The untyped parts of the OpenAPI document (`outcome`,
+ * `query`, the seal day detail) are covered only here.
+ */
+
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import ts from 'typescript';
+
+import { LICENSE_DOCUMENT_NAMES, LICENSE_ERROR_NAMES } from '@/test/license-samples';
+
+const LIB = join(process.cwd(), 'src', 'lib');
+const SAMPLES = join(process.cwd(), 'e2e', 'samples');
+
+interface Named<T> {
+  node: T;
+  source: ts.SourceFile;
+}
+
+const interfaces = new Map<string, Named<ts.InterfaceDeclaration>>();
+const aliases = new Map<string, Named<ts.TypeNode>>();
+for (const file of ['api-types.ts', 'lookup-types.ts', 'seal-types.ts']) {
+  const path = join(LIB, file);
+  const source = ts.createSourceFile(
+    path,
+    readFileSync(path, 'utf8'),
+    ts.ScriptTarget.ES2022,
+    true,
+  );
+  source.forEachChild((node) => {
+    if (ts.isInterfaceDeclaration(node)) interfaces.set(node.name.text, { node, source });
+    if (ts.isTypeAliasDeclaration(node)) aliases.set(node.name.text, { node: node.type, source });
+  });
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function describe_(value: unknown): string {
+  return value === undefined ? 'undefined' : JSON.stringify(value).slice(0, 80);
+}
+
+function members(
+  list: ts.NodeArray<ts.TypeElement>,
+  source: ts.SourceFile,
+): Map<string, { optional: boolean; type: ts.TypeNode; source: ts.SourceFile }> {
+  const found = new Map<string, { optional: boolean; type: ts.TypeNode; source: ts.SourceFile }>();
+  for (const member of list) {
+    if (!ts.isPropertySignature(member) || !member.type) continue;
+    found.set(member.name.getText(source), {
+      optional: Boolean(member.questionToken),
+      type: member.type,
+      source,
+    });
+  }
+  return found;
+}
+
+function interfaceMembers(name: string) {
+  const declaration = interfaces.get(name);
+  if (!declaration) throw new Error(`no interface ${name}`);
+  const found = new Map<string, { optional: boolean; type: ts.TypeNode; source: ts.SourceFile }>();
+  for (const clause of declaration.node.heritageClauses ?? []) {
+    for (const parent of clause.types) {
+      for (const [key, value] of interfaceMembers(parent.expression.getText(declaration.source)))
+        found.set(key, value);
+    }
+  }
+  for (const [key, value] of members(declaration.node.members, declaration.source))
+    found.set(key, value);
+  return found;
+}
+
+function checkMembers(
+  value: unknown,
+  fields: Map<string, { optional: boolean; type: ts.TypeNode; source: ts.SourceFile }>,
+  path: string,
+): string[] {
+  if (!isObject(value)) return [`${path}: expected an object, got ${describe_(value)}`];
+  const problems: string[] = [];
+  for (const key of Object.keys(value)) {
+    if (!fields.has(key)) problems.push(`${path}.${key}: not declared in the TypeScript type`);
+  }
+  for (const [key, field] of fields) {
+    if (!(key in value)) {
+      if (!field.optional) problems.push(`${path}.${key}: required, missing in the sample`);
+      continue;
+    }
+    problems.push(...check(value[key], field.type, field.source, `${path}.${key}`));
+  }
+  return problems;
+}
+
+/** Problems of `value` against the type `type` (empty when it conforms). */
+function check(value: unknown, type: ts.TypeNode, source: ts.SourceFile, path: string): string[] {
+  if (ts.isParenthesizedTypeNode(type)) return check(value, type.type, source, path);
+  if (ts.isUnionTypeNode(type)) {
+    const results = type.types.map((member) => check(value, member, source, path));
+    if (results.some((problems) => problems.length === 0)) return [];
+    return [`${path}: ${describe_(value)} matches no member of ${type.getText(source)}`];
+  }
+  if (ts.isLiteralTypeNode(type)) {
+    if (type.literal.kind === ts.SyntaxKind.NullKeyword)
+      return value === null ? [] : [`${path}: expected null`];
+    if (ts.isStringLiteral(type.literal))
+      return value === type.literal.text ? [] : [`${path}: expected "${type.literal.text}"`];
+  }
+  if (ts.isArrayTypeNode(type)) {
+    if (!Array.isArray(value)) return [`${path}: expected an array`];
+    return value.flatMap((item, index) =>
+      check(item, type.elementType, source, `${path}[${index}]`),
+    );
+  }
+  if (ts.isTypeLiteralNode(type)) return checkMembers(value, members(type.members, source), path);
+  switch (type.kind) {
+    case ts.SyntaxKind.StringKeyword:
+      return typeof value === 'string' ? [] : [`${path}: expected a string`];
+    case ts.SyntaxKind.NumberKeyword:
+      return Number.isInteger(value) ? [] : [`${path}: expected an integer (no floats)`];
+    case ts.SyntaxKind.BooleanKeyword:
+      return typeof value === 'boolean' ? [] : [`${path}: expected a boolean`];
+    case ts.SyntaxKind.UnknownKeyword:
+      return [];
+  }
+  if (ts.isTypeReferenceNode(type)) {
+    const name = type.typeName.getText(source);
+    // The one number type that may carry a fraction (`api-types.ts`).
+    if (name === 'Float')
+      return typeof value === 'number' && Number.isFinite(value)
+        ? []
+        : [`${path}: expected a number`];
+    if (name === 'Record') {
+      if (!isObject(value)) return [`${path}: expected an object`];
+      const valueType = type.typeArguments?.[1];
+      return valueType
+        ? Object.entries(value).flatMap(([key, item]) =>
+            check(item, valueType, source, `${path}.${key}`),
+          )
+        : [];
+    }
+    const alias = aliases.get(name);
+    if (alias) return check(value, alias.node, alias.source, path);
+    if (interfaces.has(name)) return checkMembers(value, interfaceMembers(name), path);
+  }
+  throw new Error(`unsupported type: ${type.getText(source)}`);
+}
+
+function conforms(value: unknown, typeName: string, path: string): string[] {
+  const alias = aliases.get(typeName);
+  if (alias) return check(value, alias.node, alias.source, path);
+  return checkMembers(value, interfaceMembers(typeName), path);
+}
+
+function load(name: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(SAMPLES, `${name}.json`), 'utf8')) as Record<string, unknown>;
+}
+
+/** How each top-level sample key is typed. */
+type Rule = string | ((value: unknown, path: string) => string[]) | null;
+
+const each =
+  (typeName: string) =>
+  (value: unknown, path: string): string[] =>
+    isObject(value)
+      ? Object.entries(value).flatMap(([key, item]) => conforms(item, typeName, `${path}.${key}`))
+      : [`${path}: expected an object`];
+
+const errors = each('ErrorSample');
+
+const list =
+  (typeName: string) =>
+  (value: unknown, path: string): string[] =>
+    Array.isArray(value)
+      ? value.flatMap((item, index) => conforms(item, typeName, `${path}[${index}]`))
+      : [`${path}: expected an array`];
+
+/** An import answer whose untyped preview rows are `previewType` (`PersonPreview`, …). */
+const importSample =
+  (previewType: string) =>
+  (value: unknown, path: string): string[] => {
+    const problems = conforms(value, 'ImportResult', path);
+    if (isObject(value)) problems.push(...list(previewType)(value.preview, `${path}.preview`));
+    return problems;
+  };
+
+function lookupSample(value: unknown, path: string): string[] {
+  const problems = conforms(value, 'LookupOut', path);
+  if (!isObject(value)) return problems;
+  problems.push(...conforms(value.query, 'StoredQuery', `${path}.query`));
+  if (value.outcome !== null)
+    problems.push(...conforms(value.outcome, 'LookupOutcome', `${path}.outcome`));
+  const report = value.report as Record<string, unknown> | null;
+  if (report?.timestamp)
+    problems.push(...conforms(report.timestamp, 'ReportTimestamp', `${path}.report.timestamp`));
+  return problems;
+}
+
+const FILE_SAMPLE = null; // downloads: headers, size and hash only
+const RULES: Record<string, Record<string, Rule>> = {
+  lookups: {
+    exact: lookupSample,
+    candidates: lookupSample,
+    conflict: lookupSample,
+    internal: lookupSample,
+    none: lookupSample,
+    vault_only: lookupSample,
+    truncated: lookupSample,
+    auditor_run: lookupSample,
+    exact_with_report: lookupSample,
+    candidates_with_report: lookupSample,
+    list_admin: 'LookupPage',
+    list_admin_mine: 'LookupPage',
+    list_auditor: 'LookupPage',
+    report_pdf: FILE_SAMPLE,
+    report_pdf_stamped: FILE_SAMPLE,
+    report_token: FILE_SAMPLE,
+    errors,
+  },
+  raw: { lines: each('RawLineOut'), odd_line: null, errors },
+  evidence: {
+    created: 'EvidenceCreated',
+    created_password: 'EvidenceCreated',
+    created_queued: 'EvidenceCreated',
+    list: 'EvidencePage',
+    list_auditor: 'EvidencePage',
+    details: each('EvidenceDetail'),
+    ready_expired: 'EvidenceDetail',
+    verify_tampered: 'VerifyResult',
+    verify_restored: 'VerifyResult',
+    download: FILE_SAMPLE,
+    status_labels: null,
+    errors,
+  },
+  seals: {
+    calendars: each('Calendar'),
+    calendar_current: 'Calendar',
+    days: each('SealDayDetail'),
+    verify: 'VerifyResult',
+    verify_quick: 'VerifyResult',
+    manifest_file: FILE_SAMPLE,
+    token_file: FILE_SAMPLE,
+    errors,
+  },
+  credits: { mock: 'Credits', kamusm: 'Credits', kamusm_low: 'Credits' },
+  devices: {
+    list: 'DevicePage',
+    list_unknown: 'DevicePage',
+    list_search: 'DevicePage',
+    list_page: 'DevicePage',
+    detail: 'DeviceDetail',
+    detail_phone: 'DeviceDetail',
+    device_updated: 'DeviceOut',
+    assigned: 'AssignResult',
+    reassigned: 'AssignResult',
+    unassigned: 'AssignResult',
+    persons: 'PersonPage',
+    persons_search: 'PersonPage',
+    person_detail: 'PersonDetail',
+    person_created: 'PersonOut',
+    person_updated: 'PersonOut',
+    departments: list('DepartmentOut'),
+    department_created: 'DepartmentOut',
+    department_updated: 'DepartmentOut',
+    vlans: list('VlanOut'),
+    vlan_updated: 'VlanOut',
+    vlan_created: 'VlanOut',
+    vlan_edited: 'VlanOut',
+    import_persons_preview: importSample('PersonPreview'),
+    import_persons_errors: importSample('PersonPreview'),
+    import_assignments_preview: importSample('AssignmentPreview'),
+    import_assignments_errors: importSample('AssignmentPreview'),
+    import_assignments_applied: importSample('AssignmentPreview'),
+    devices_csv: FILE_SAMPLE,
+    persons_csv: FILE_SAMPLE,
+    template_persons: FILE_SAMPLE,
+    template_assignments: FILE_SAMPLE,
+    errors,
+  },
+  alerts: {
+    list: 'AlertPage',
+    list_active: 'AlertPage',
+    list_page: 'AlertPage',
+    list_search: 'AlertPage',
+    detail: 'AlertDetail',
+    detail_auto_resolved: 'AlertDetail',
+    detail_dismissed: 'AlertDetail',
+    detail_seal: 'AlertDetail',
+    state_acknowledged: 'AlertDetail',
+    state_dismissed: 'AlertDetail',
+    state_reopened: 'AlertDetail',
+    state_resolved: 'AlertDetail',
+    note_created: 'AlertEvent',
+    summary: 'AlertSummary',
+    errors,
+  },
+  dashboard: {
+    admin: 'DashboardSummary',
+    auditor: 'DashboardSummary',
+    viewer: 'DashboardSummary',
+    errors,
+  },
+  reports: {
+    schedules: list('ScheduleOut'),
+    schedules_shipped: list('ScheduleOut'),
+    schedule_created: 'ScheduleOut',
+    schedule_updated: 'ScheduleOut',
+    schedule_deleted: null,
+    runs: 'RunPage',
+    runs_filtered: 'RunPage',
+    run_partial: 'RunOut',
+    run_files_only: 'RunOut',
+    run_queued: 'RunOut',
+    file_html: FILE_SAMPLE,
+    file_pdf: FILE_SAMPLE,
+    file_xlsx: FILE_SAMPLE,
+    preview_html: FILE_SAMPLE,
+    preview_pdf: FILE_SAMPLE,
+    errors,
+  },
+  usage: {
+    company: 'CompanyUsage',
+    company_work_hours: 'CompanyUsage',
+    company_off_hours: 'CompanyUsage',
+    company_today: 'CompanyUsage',
+    company_week: 'CompanyUsage',
+    viewer_company: 'CompanyUsage',
+    subjects_persons: 'SubjectPage',
+    subjects_devices: 'SubjectPage',
+    subjects_page: 'SubjectPage',
+    subjects_search: 'SubjectPage',
+    subjects_department_filter: 'SubjectPage',
+    subjects_departments: 'DepartmentPage',
+    viewer_subjects: 'SubjectPage',
+    viewer_subjects_pseudonymous: 'SubjectPage',
+    hr_subjects_with_pseudonyms_on: 'SubjectPage',
+    subject_person: 'SubjectDetail',
+    subject_device: 'SubjectDetail',
+    subject_ip: 'SubjectDetail',
+    subject_week: 'SubjectDetail',
+    subject_reassigned_before: 'SubjectDetail',
+    subject_reassigned_after: 'SubjectDetail',
+    viewer_subject_pseudonymous: 'SubjectDetail',
+    sites: 'SitePage',
+    sites_search: 'SitePage',
+    sites_category_filter: 'SitePage',
+    sites_department_filter: 'SitePage',
+    site: 'SiteDetail',
+    site_department_filter: 'SiteDetail',
+    viewer_sites_pseudonymous: 'SiteDetail',
+    categories: 'CategoryList',
+    categories_department_filter: 'CategoryList',
+    category: 'CategoryDetail',
+    category_department_filter: 'CategoryDetail',
+    category_unknown: 'CategoryDetail',
+    rebuild_requested: 'RebuildJob',
+    rebuild_queued: 'RebuildJob',
+    rebuild_done: 'RebuildJob',
+    pseudonyms: list('PseudonymRow'),
+    pseudonyms_search: list('PseudonymRow'),
+    export_company_csv: FILE_SAMPLE,
+    export_company_xlsx: FILE_SAMPLE,
+    export_subjects_csv: FILE_SAMPLE,
+    export_subjects_department_csv: FILE_SAMPLE,
+    export_departments_csv: FILE_SAMPLE,
+    export_subject_csv: FILE_SAMPLE,
+    export_subject_xlsx: FILE_SAMPLE,
+    export_sites_xlsx: FILE_SAMPLE,
+    export_site_csv: FILE_SAMPLE,
+    export_categories_xlsx: FILE_SAMPLE,
+    export_category_csv: FILE_SAMPLE,
+    errors,
+  },
+  // Every licence document is `GET /license` (also the answer of `POST /license`), every other
+  // key an error answer (refusals, re-authentication, locked modules, users limit, 503).
+  license: {
+    ...Object.fromEntries(LICENSE_DOCUMENT_NAMES.map((name) => [name, 'LicenseOut'])),
+    ...Object.fromEntries(LICENSE_ERROR_NAMES.map((name) => [name, 'ErrorSample'])),
+  },
+};
+
+// The captured error answers: `{status, headers, body}` with the standard error body.
+interfaces.set(
+  'ErrorSample',
+  (() => {
+    const text =
+      'interface ErrorSample { status: number; headers: Record<string, string>; body: ApiErrorBody }';
+    const source = ts.createSourceFile('sample.ts', text, ts.ScriptTarget.ES2022, true);
+    const node = source.statements[0] as ts.InterfaceDeclaration;
+    return { node, source };
+  })(),
+);
+
+describe('captured API answers match the TypeScript types', () => {
+  it.each(Object.keys(RULES))('%s.json', (name) => {
+    const sample = load(name);
+    const rules = RULES[name] ?? {};
+    const problems: string[] = [];
+    for (const key of Object.keys(sample)) {
+      if (key === 'meta') continue;
+      if (!(key in rules)) problems.push(`${name}.${key}: no type rule (add one here)`);
+    }
+    for (const [key, rule] of Object.entries(rules)) {
+      if (!(key in sample)) {
+        problems.push(`${name}.${key}: missing in the sample`);
+        continue;
+      }
+      const path = `${name}.${key}`;
+      if (typeof rule === 'string') problems.push(...conforms(sample[key], rule, path));
+      else if (rule) problems.push(...rule(sample[key], path));
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('licence: users without settings.manage get the same document without details', () => {
+    // The unit tests and the E2E mock derive the users' form of every state from this rule.
+    const license = load('license');
+    for (const [admin, viewer] of [
+      ['trial', 'trial_viewer'],
+      ['licensed', 'licensed_viewer'],
+    ] as const) {
+      expect(license[viewer]).toEqual({ ...(license[admin] as object), details: null });
+      expect((license[admin] as { details: unknown }).details).not.toBeNull();
+    }
+  });
+
+  it('notices a wrong field (the checker itself works)', () => {
+    const lookups = load('lookups');
+    const broken = structuredClone(lookups.exact) as Record<string, unknown>;
+    (broken.outcome as Record<string, unknown>).mode = 'approximate';
+    delete (broken.outcome as Record<string, unknown>).truncated;
+    (broken.outcome as Record<string, unknown>).surprise = 1;
+    const problems = lookupSample(broken, 'x');
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        'x.outcome.surprise: not declared in the TypeScript type',
+        'x.outcome.truncated: required, missing in the sample',
+        expect.stringContaining('x.outcome.mode'),
+      ]),
+    );
+    expect(conforms({ score: 1.5 }, 'NatMatch', 'm')).toContain(
+      'm.score: expected an integer (no floats)',
+    );
+  });
+});

@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Node / web
+node_modules/
+web/dist/
+web/coverage/
+web/test-results/
+web/playwright-report/
+web/blob-report/
+*.tsbuildinfo
+
+# Local configuration and secrets — never commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secret.key
+secrets.json
+
+# Runtime data created by local runs
+/data/
+/var/
+
+# Third-party binaries are downloaded during setup, never committed
+*.jar
+*.exe
+*.msi
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code agent worktrees and local settings (never committed)
+.claude/

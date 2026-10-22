@@ -1,0 +1,45 @@
+# synthetic, verify on site — RouterOS remote syslog lines built from the /log print format sample (see README.md); the wire format has no format sample yet
+# A: the 11 messages of the /log print format sample in the approximate wire format (ISO time with milliseconds and offset, host name, topics; docs/PARSERS.md §3.1)
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 dhcp,info dhcp41 assigned 172.20.41.142 for 00:00:5E:00:53:48 FIN-PC03
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 script,info ARP-LOG 172.20.10.23 00:00:5E:00:53:43 vlan10
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 system,info,account user netops logged in from 172.20.10.37 via winbox
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 dhcp,info dhcp61 deassigned 172.20.61.204 for 02:00:5E:00:53:53
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 firewall,info DROP-FWD forward: in:vlan61 out:vlan20, connection-state:new src-mac 02:00:5E:00:53:5E, proto TCP (SYN), 172.20.61.118:41822->172.20.20.44:443, len 60
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 dhcp,info dhcp60 assigned 172.20.60.163 for 02:00:5E:00:53:5B NB-17
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 script,info ARP-LOG 172.20.10.31 00:00:5E:00:53:4A vlan10
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 firewall,info DROP-FWD forward: in:vlan42 out:ether2, connection-state:new src-mac 00:00:5E:00:53:4C, proto TCP (SYN), 172.20.42.76:52790->198.51.100.77:443, len 60
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 dhcp,info dhcp43 assigned 172.20.43.159 for 00:00:5E:00:53:52 IDR-PC05
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 script,info ARP-LOG 172.20.20.44 00:00:5E:00:53:61 vlan20
+<30>2026-09-23T09:38:26.380+03:00 CORE-R1 system,info,account user netops logged out from 172.20.10.37 via winbox
+# B: header variants
+<30>2026-09-23T09:38:27+03:00 CORE-R1 dhcp,info dhcp60 assigned 172.20.60.163 for 02:00:5E:00:53:5B NB-17
+<30>2026-09-23T09:38:28.5+03:00 dhcp,info dhcp60 deassigned 172.20.60.163 for 02:00:5E:00:53:5B NB-17
+<30>script,info ARP-LOG 172.20.10.23 00:00:5E:00:53:43 vlan10
+<30>Sep 23 09:38:29 CORE-R1 dhcp,info dhcp61 assigned 172.20.61.118 for 02:00:5E:00:53:5E
+<30>2026-09-23T09:38:30 CORE-R1 dhcp,info dhcp61 assigned 172.20.61.118 for 02:00:5E:00:53:5E
+<30>2026-09-23T09:38:31+03:00 CORE-R1 dhcp60 assigned 172.20.60.214 for 02:00:5E:00:53:5C Ayşe'nin iPhone'u
+<30>2026-09-23T09:38:31.250+03:00 dhcp43 assigned 172.20.43.120 for 3C:52:82:00:00:11 PC-120
+<30>2026-09-23T06:38:32.000Z CORE-R1 system,info,account user netops logged in from 172.20.10.37 via winbox
+<30>2026-09-23T09:38:33+03:00 CORE-R1 dhcp;info dhcp43 assigned 172.20.43.110 for 3C:52:82:00:00:12 MUDUR-PC
+<30>2026-09-23T09:38:34+03:00 CORE-R1 dhcp,info: dhcp42 assigned 172.20.42.76 for 00:00:5E:00:53:4C
+<30>2026-09-23T09:38:35+03:00 CORE-R1 script: ARP-LOG 172.20.42.76 00:00:5E:00:53:4C vlan42
+<30>2026-09-23T09:38:36+03:00 CORE-R1 dhcp dhcp43 deassigned 172.20.43.110 for 3C:52:82:00:00:12 MUDUR-PC
+# C: message families (docs/PARSERS.md §3.2)
+<30>2026-09-23T09:39:00+03:00 CORE-R1 firewall,info DROP-WAN input: in:ether2 out:(unknown 0), connection-state:new, proto ICMP (type 8, code 0), 198.51.100.9->100.64.12.1, len 84
+<30>2026-09-23T09:39:01+03:00 CORE-R1 firewall,info DROP-MGMT forward: in:vlan43 out:vlan10, connection-state:new src-mac 3C:52:82:00:00:11, proto TCP (SYN), 172.20.43.120:51234->172.20.10.1:8291, len 52
+<30>2026-09-23T09:39:02+03:00 CORE-R1 firewall,info DROP-GUEST forward: in:vlan61 out:ether2, connection-state:new src-mac 4E:11:22:00:00:33, proto UDP, 172.20.61.150:40000->203.0.113.53:53, NAT (172.20.61.150:40000->172.31.255.2:40000)->203.0.113.53:53, len 72
+<26>2026-09-23T09:39:03+03:00 CORE-R1 system,error,critical login failure for user admin from 172.20.41.196 via winbox
+<26>2026-09-23T09:39:04+03:00 CORE-R1 system,error,critical login failure for user admin from 00:00:5E:00:53:4E via winbox
+<30>2026-09-23T09:39:05+03:00 SWITCH-1 interface,info ether5 link up (speed 1G, full duplex)
+<30>2026-09-23T09:39:06+03:00 SWITCH-1 interface,info ether5 link down
+<30>2026-09-23T09:39:07+03:00 CORE-R1 system,info filter rule changed by admin
+<30>2026-09-23T09:39:08+03:00 CORE-R1 system,info user operator added by admin
+<30>2026-09-23T09:39:09+03:00 CORE-R1 system,info ip address removed by admin
+<30>2026-09-23T09:39:10+03:00 CORE-R1 script,info ARCI-HEARTBEAT CORE-R1
+<30>2026-09-23T09:39:11+03:00 ap-2 wireless,info 02:00:5E:00:53:5B@cap-wifi1 connected, signal strength -52
+<30>2026-09-23T09:39:12+03:00 ap-2 wireless,info 02:00:5E:00:53:5B@cap-wifi1 disconnected, connection lost, signal strength -80
+<28>2026-09-23T09:39:13+03:00 CORE-R1 dhcp,warning dhcp60 failed to give out IP address: pool <pool60> is empty
+<30>2026-09-23T09:39:14+03:00 CORE-R1 dhcp,info dhcp60 offering lease 172.20.60.120 for 02:00:5E:00:53:5D without success
+<26>2026-09-23T09:39:15+03:00 CORE-R1 system,error,critical router was rebooted without proper shutdown
+<28>2026-09-23T09:39:16+03:00 CORE-R1 system,warning ntp change time Sep/23/2026 09:39:15 => Sep/23/2026 09:39:16
+<30>2026-09-23T09:39:17+03:00 CORE-R1 system,info device changed name

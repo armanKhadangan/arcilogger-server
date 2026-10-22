@@ -1,0 +1,175 @@
+[project]
+name = "arcilogger-workspace"
+version = "0.1.0"
+description = "ARCILOGGER monorepo (uv workspace root, not a distributable package)"
+requires-python = ">=3.12"
+readme = "README.md"
+license = { text = "Proprietary" }
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["core", "db", "collector", "ingest", "api", "worker"]
+
+[tool.uv.sources]
+arcilogger-core = { workspace = true }
+arcilogger-db = { workspace = true }
+arcilogger-collector = { workspace = true }
+arcilogger-ingest = { workspace = true }
+arcilogger-api = { workspace = true }
+arcilogger-worker = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "arcilogger-core",
+  "arcilogger-db",
+  "arcilogger-collector",
+  "arcilogger-ingest",
+  "arcilogger-api",
+  "arcilogger-worker",
+  "ruff>=0.17.0",
+  "mypy>=2.4.0",
+  "pytest>=9.1.1",
+  "pytest-cov>=7.1.0",
+  "hypothesis>=6.169.0",
+  "httpx2>=2.13.1",  # used by fastapi.testclient
+  "poethepoet>=0.48.0",
+  "pytest-xdist>=3.8",
+]
+
+# ---------------------------------------------------------------------------------------------
+# Ruff — lint + format for every Python package
+# ---------------------------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["core/src", "db/src", "collector/src", "ingest/src", "api/src", "worker/src"]
+extend-exclude = ["web", "tests/fixtures"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W", "F",  # pycodestyle, pyflakes
+  "I",            # isort
+  "N",            # pep8-naming
+  "UP",           # pyupgrade
+  "B",            # bugbear
+  "S",            # bandit (security)
+  "SIM",          # simplify
+  "RUF",          # ruff-specific
+  "PT",           # pytest style
+  "DTZ",          # no naive datetimes — times are evidence here
+  "PTH",          # pathlib everywhere (Windows paths)
+  "TID",          # tidy imports
+  "C4",           # comprehensions
+  "RET",          # return statements
+  "ERA",          # commented-out code
+]
+
+# Turkish text (dotless ı) is legitimate in comments, docstrings and strings.
+allowed-confusables = ["ı"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use assert, fixed fake credentials, local URLs and subprocesses on purpose.
+"**/tests/**" = ["S101", "S105", "S106", "S310", "S603", "S607"]
+"tests/**" = ["S101", "S105", "S106", "S310", "S603", "S607"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "arcilogger_core", "arcilogger_db", "arcilogger_collector", "arcilogger_ingest", "arcilogger_api",
+  "arcilogger_worker",
+]
+
+# ---------------------------------------------------------------------------------------------
+# mypy — strict on every package (core is the evidence path and must stay strict)
+# ---------------------------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+files = [
+  "core/src", "core/tests",
+  "db/src", "db/tests",
+  "collector/src", "collector/tests",
+  "ingest/src", "ingest/tests",
+  "api/src", "api/tests",
+  "worker/src", "worker/tests",
+  "tests",
+  "conftest.py",
+  "tools/license-issuer",
+  "tools/release",
+]
+mypy_path = [
+  "core/src", "db/src", "collector/src", "ingest/src", "api/src", "worker/src",
+  "tools/license-issuer",
+]
+explicit_package_bases = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# asn1crypto ships no type information.
+module = ["asn1crypto", "asn1crypto.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# publicsuffixlist (usage reports: registrable domains) has annotations but no py.typed marker.
+module = ["publicsuffixlist", "publicsuffixlist.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# openpyxl (usage Excel exports) ships no type information.
+module = ["openpyxl", "openpyxl.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------------------------
+# pytest + coverage
+# ---------------------------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = [
+  "tests", "core/tests", "db/tests", "collector/tests", "ingest/tests", "api/tests",
+  "worker/tests",
+]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+markers = [
+  "perf: throughput guards; run without coverage tracing (poe test-perf), excluded from poe test",
+  "license_live: real licence evaluation instead of the all-modules test default",
+]
+xfail_strict = true
+
+[tool.coverage.run]
+branch = true
+source = [
+  "arcilogger_core", "arcilogger_db", "arcilogger_collector", "arcilogger_ingest", "arcilogger_api",
+  "arcilogger_worker",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "if __name__ == .__main__.:"]
+
+# ---------------------------------------------------------------------------------------------
+# Task runner (works the same on Windows and Linux):  uv run poe <task>
+# ---------------------------------------------------------------------------------------------
+[tool.poe.tasks]
+lint = ["ruff-check", "ruff-format-check", "typecheck", "typecheck-windows"]
+ruff-check = "ruff check ."
+ruff-format-check = "ruff format --check ."
+format = [{ cmd = "ruff format ." }, { cmd = "ruff check --fix ." }]
+typecheck = "mypy"
+# Production runs on Windows: type-check the Windows code paths from any machine too.
+typecheck-windows = "mypy --platform win32"
+test = "pytest -n auto -m 'not perf' --cov --cov-report=term --cov-report=xml"
+# Tests run in parallel worker processes (pytest-xdist; every test database has a unique name).
+# Throughput guards measure speed, so they run alone and without coverage tracing.
+test-perf = "pytest -m perf --no-cov"
+test-core = "pytest -n auto core/tests tests --cov=arcilogger_core --cov-report=term --cov-fail-under=90"
+# Coverage gates of the specification (17): ingest >= 85 %, api >= 80 % (with test-core >= 90 %);
+# all three run in CI (.github/workflows/ci.yml, Linux job).
+test-ingest = "pytest -n auto ingest/tests -m 'not perf' --cov=arcilogger_ingest --cov-report=term --cov-fail-under=85"
+test-api = "pytest -n auto api/tests --cov=arcilogger_api --cov-report=term --cov-fail-under=80"
+test-db = "pytest -n auto db/tests --cov=arcilogger_db --cov-report=term"
+api-dev = "uvicorn arcilogger_api.app:create_app --factory --reload --host 127.0.0.1 --port 8000"
+check = ["lint", "test"]

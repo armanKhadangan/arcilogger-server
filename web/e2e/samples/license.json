@@ -1,0 +1,4482 @@
+{
+  "expired": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-11T00:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "enabled_to": [
+              "core_5651"
+            ],
+            "from": "licensed",
+            "problem": "license_expired",
+            "to": "expired"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-02T11:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-02T11:00:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261002-TEST0008",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": null,
+              "users": null
+            },
+            "maintenance_until": "2026-12-31",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "b4b71a112945644c6e912d3e3ea7e1a8adfd4e1a2a77cec5177b981c2ae5c9b1",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "72afb59dc049be65cea6beee801d30a23c53c33258685e9d7b50b2680168c40c",
+            "unchanged": false,
+            "valid_until": "2026-10-10"
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261002-TEST0008",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-01T09:03:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-02T11:00:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-10-02T09:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261002-TEST0008",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 0
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 1
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 79,
+      "ends_soon": false,
+      "expired": false,
+      "until": "2026-12-31"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": "license_expired",
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "expired",
+    "trial": null,
+    "valid_until": "2026-10-10"
+  },
+  "invalid": {
+    "checked_at": "2026-10-13T07:07:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:30+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "b3e36d69eb9c7b49ed33292a1ccd6c9d1639cd3cf1d5aa6d674843b2d9b0459f",
+            "unchanged": true,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:04:30+03:00",
+      "installed_by": "tolga",
+      "issued_at": null,
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0001",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": null,
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:07:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:07:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": null,
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": true,
+        "full": true,
+        "max": 3,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": null,
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": false,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": "license_unknown_key",
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "invalid",
+    "trial": null,
+    "valid_until": null
+  },
+  "licensed": {
+    "checked_at": "2026-10-13T07:05:30+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:30+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "b3e36d69eb9c7b49ed33292a1ccd6c9d1639cd3cf1d5aa6d674843b2d9b0459f",
+            "unchanged": true,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:04:30+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-10-01T03:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0001",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:05:30+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:05:30+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 372,
+      "ends_soon": false,
+      "expired": false,
+      "until": "2027-10-20"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "licensed",
+    "trial": null,
+    "valid_until": null
+  },
+  "licensed_limits_exceeded": {
+    "checked_at": "2026-10-13T07:11:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:10:30+03:00",
+          "details": {
+            "exceeded": true,
+            "limit": "users",
+            "max": 3,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:10:30+03:00",
+          "details": {
+            "exceeded": true,
+            "limit": "log_sources",
+            "max": 3,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:10:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0002",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 3,
+              "users": 3
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "ef12fce4d939a3ee842a279f55d0415c982a4a26d3d18a8f4534a768bd0e813f",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "f5c339fc3cb804eea96e1b3cce5047497a62a34c29c3730cc670520e0eb7c59d",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0002",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:30+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "b3e36d69eb9c7b49ed33292a1ccd6c9d1639cd3cf1d5aa6d674843b2d9b0459f",
+            "unchanged": true,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:10:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-10-01T03:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0002",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:11:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:11:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": true,
+        "full": true,
+        "max": 3,
+        "unconfigured": 2,
+        "used": 4
+      },
+      "users": {
+        "exceeded": true,
+        "full": true,
+        "max": 3,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 372,
+      "ends_soon": false,
+      "expired": false,
+      "until": "2027-10-20"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "licensed",
+    "trial": null,
+    "valid_until": null
+  },
+  "licensed_viewer": {
+    "checked_at": "2026-10-13T07:05:30+03:00",
+    "details": null,
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 372,
+      "ends_soon": false,
+      "expired": false,
+      "until": "2027-10-20"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "licensed",
+    "trial": null,
+    "valid_until": null
+  },
+  "maintenance_ends_soon": {
+    "checked_at": "2026-10-13T07:16:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:15:30+03:00",
+          "details": {
+            "exceeded": false,
+            "limit": "users",
+            "max": 25,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:15:30+03:00",
+          "details": {
+            "exceeded": false,
+            "limit": "log_sources",
+            "max": 10,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:15:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0003",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2026-10-25",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "b62d8ddcd1e7f2a8681202d64c7abacc87f73c234e7e0c3ae1787c095a3c3a42",
+            "replaced_license_id": "ARCI-L-20261001-TEST0002",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "5042ee47e557517832e6ec6f4e256bd2b1e2d5d1cbc2e52fddaa405101b49d47",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0003",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:10:30+03:00",
+          "details": {
+            "exceeded": true,
+            "limit": "users",
+            "max": 3,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:10:30+03:00",
+          "details": {
+            "exceeded": true,
+            "limit": "log_sources",
+            "max": 3,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:10:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0002",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 3,
+              "users": 3
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "ef12fce4d939a3ee842a279f55d0415c982a4a26d3d18a8f4534a768bd0e813f",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "f5c339fc3cb804eea96e1b3cce5047497a62a34c29c3730cc670520e0eb7c59d",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0002",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:30+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "b3e36d69eb9c7b49ed33292a1ccd6c9d1639cd3cf1d5aa6d674843b2d9b0459f",
+            "unchanged": true,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:15:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-10-01T03:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0003",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:16:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:16:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 2,
+        "used": 4
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 12,
+      "ends_soon": true,
+      "expired": false,
+      "until": "2026-10-25"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "licensed",
+    "trial": null,
+    "valid_until": null
+  },
+  "maintenance_expired": {
+    "checked_at": "2026-10-13T07:21:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:20:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0004",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2026-10-05",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "d4d0324941be776e992651e4964a9a4d8b546e35d513b66cf8c0042aa78ba075",
+            "replaced_license_id": "ARCI-L-20261001-TEST0003",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "837b5f0fc1816fec8e02147eb674d20b621d4887474aeb2cfebb6171c3489361",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0004",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:15:30+03:00",
+          "details": {
+            "exceeded": false,
+            "limit": "users",
+            "max": 25,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:15:30+03:00",
+          "details": {
+            "exceeded": false,
+            "limit": "log_sources",
+            "max": 10,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:15:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0003",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2026-10-25",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "b62d8ddcd1e7f2a8681202d64c7abacc87f73c234e7e0c3ae1787c095a3c3a42",
+            "replaced_license_id": "ARCI-L-20261001-TEST0002",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "5042ee47e557517832e6ec6f4e256bd2b1e2d5d1cbc2e52fddaa405101b49d47",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0003",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:10:30+03:00",
+          "details": {
+            "exceeded": true,
+            "limit": "users",
+            "max": 3,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:10:30+03:00",
+          "details": {
+            "exceeded": true,
+            "limit": "log_sources",
+            "max": 3,
+            "used": 4
+          },
+          "kind": "limit",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:10:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0002",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 3,
+              "users": 3
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "ef12fce4d939a3ee842a279f55d0415c982a4a26d3d18a8f4534a768bd0e813f",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "f5c339fc3cb804eea96e1b3cce5047497a62a34c29c3730cc670520e0eb7c59d",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0002",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:30+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "b3e36d69eb9c7b49ed33292a1ccd6c9d1639cd3cf1d5aa6d674843b2d9b0459f",
+            "unchanged": true,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:20:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-10-01T03:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0004",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:21:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:21:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 2,
+        "used": 4
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": -8,
+      "ends_soon": false,
+      "expired": true,
+      "until": "2026-10-05"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "licensed",
+    "trial": null,
+    "valid_until": null
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:29.296257+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "module_locked_import": {
+    "body": {
+      "error": {
+        "code": "module_not_licensed",
+        "details": {
+          "license_status": "licensed",
+          "module": "bulk_import"
+        },
+        "message_en": "This feature is not part of your licence: Bulk import (CSV). See Settings → Licence.",
+        "message_tr": "Bu özellik lisansınızda yok: Toplu içe aktarma (CSV). Ayrıntılar Ayarlar → Lisans sayfasında."
+      }
+    },
+    "headers": {},
+    "status": 403
+  },
+  "module_locked_reports": {
+    "body": {
+      "error": {
+        "code": "module_not_licensed",
+        "details": {
+          "license_status": "trial_expired",
+          "module": "usage_reports"
+        },
+        "message_en": "This feature is not part of your licence: Scheduled usage reports. See Settings → Licence.",
+        "message_tr": "Bu özellik lisansınızda yok: Zamanlanmış kullanım raporları. Ayrıntılar Ayarlar → Lisans sayfasında."
+      }
+    },
+    "headers": {},
+    "status": 403
+  },
+  "module_locked_usage": {
+    "body": {
+      "error": {
+        "code": "module_not_licensed",
+        "details": {
+          "license_status": "trial_expired",
+          "module": "usage_analytics"
+        },
+        "message_en": "This feature is not part of your licence: Usage analytics. See Settings → Licence.",
+        "message_tr": "Bu özellik lisansınızda yok: Kullanım analizi. Ayrıntılar Ayarlar → Lisans sayfasında."
+      }
+    },
+    "headers": {},
+    "status": 403
+  },
+  "reauth_required": {
+    "body": {
+      "error": {
+        "code": "reauth_required",
+        "message_en": "Please confirm your password to continue with this action.",
+        "message_tr": "Bu işlem için parolanızı yeniden girmeniz gerekiyor."
+      }
+    },
+    "headers": {},
+    "status": 403
+  },
+  "refuse_expired": {
+    "body": {
+      "error": {
+        "code": "license_expired",
+        "details": {
+          "valid_until": "2026-10-10"
+        },
+        "message_en": "The licence expired on 2026-10-10.",
+        "message_tr": "Lisansın geçerlilik süresi 10.10.2026 tarihinde doldu."
+      }
+    },
+    "headers": {},
+    "status": 409
+  },
+  "refuse_malformed": {
+    "body": {
+      "error": {
+        "code": "license_malformed",
+        "message_en": "The file is not an ARCILOGGER licence file or it is damaged.",
+        "message_tr": "Dosya bir ARCILOGGER lisans dosyası değil ya da bozuk."
+      }
+    },
+    "headers": {},
+    "status": 422
+  },
+  "refuse_other_server": {
+    "body": {
+      "error": {
+        "code": "license_other_server",
+        "details": {
+          "allowed": [
+            "ARDY-FMY4-D3RP-6ZBA"
+          ],
+          "server_id": "XW68-7K1Z-5FGV-AGT8"
+        },
+        "message_en": "The licence was not issued for this server (this server: XW68-7K1Z-5FGV-AGT8). Send the request code for a new licence.",
+        "message_tr": "Lisans bu sunucu için düzenlenmemiş (bu sunucu: XW68-7K1Z-5FGV-AGT8). Yeni lisans için istek kodunu gönderin."
+      }
+    },
+    "headers": {},
+    "status": 409
+  },
+  "refuse_revoked": {
+    "body": {
+      "error": {
+        "code": "license_revoked",
+        "details": {
+          "license_id": "ARCI-L-20261001-TEST0009"
+        },
+        "message_en": "This licence has been revoked (ARCI-L-20261001-TEST0009).",
+        "message_tr": "Bu lisans iptal edilmiş (ARCI-L-20261001-TEST0009)."
+      }
+    },
+    "headers": {},
+    "status": 422
+  },
+  "refuse_signature_invalid": {
+    "body": {
+      "error": {
+        "code": "license_signature_invalid",
+        "message_en": "The licence file's signature is invalid: the file may have been changed.",
+        "message_tr": "Lisans dosyasının imzası geçersiz: dosya değiştirilmiş olabilir."
+      }
+    },
+    "headers": {},
+    "status": 422
+  },
+  "refuse_too_large": {
+    "body": {
+      "error": {
+        "code": "license_too_large",
+        "message_en": "The licence file is too large (at most 64 KiB).",
+        "message_tr": "Lisans dosyası çok büyük (en çok 64 KiB)."
+      }
+    },
+    "headers": {},
+    "status": 413
+  },
+  "refuse_unknown_key": {
+    "body": {
+      "error": {
+        "code": "license_unknown_key",
+        "details": {
+          "key_id": "arci-2027a"
+        },
+        "message_en": "The licence is signed with a key this version does not know (arci-2027a).",
+        "message_tr": "Lisans, bu sürümün tanımadığı bir anahtarla imzalanmış (arci-2027a)."
+      }
+    },
+    "headers": {},
+    "status": 422
+  },
+  "refuse_version_not_covered": {
+    "body": {
+      "error": {
+        "code": "license_version_not_covered",
+        "details": {
+          "maintenance_until": "2026-09-30",
+          "release_date": "2026-10-01",
+          "version": "0.1.0"
+        },
+        "message_en": "This version (0.1.0, released 2026-10-01) was released after the licence's maintenance period (until 2026-09-30).",
+        "message_tr": "Bu sürüm (0.1.0, yayın tarihi 01.10.2026) lisansın bakım süresinden (30.09.2026 tarihine kadar) sonra yayımlandı."
+      }
+    },
+    "headers": {},
+    "status": 409
+  },
+  "remove_not_installed": {
+    "body": {
+      "error": {
+        "code": "license_not_installed",
+        "message_en": "No licence is installed.",
+        "message_tr": "Kurulu bir lisans yok."
+      }
+    },
+    "headers": {},
+    "status": 404
+  },
+  "revoked": {
+    "checked_at": "2026-10-13T07:07:30+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T07:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:30+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "b3e36d69eb9c7b49ed33292a1ccd6c9d1639cd3cf1d5aa6d674843b2d9b0459f",
+            "unchanged": true,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:04:30+03:00",
+      "installed_by": "tolga",
+      "issued_at": null,
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0001",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": null,
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:07:30+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:07:30+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": null,
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": true,
+        "full": true,
+        "max": 3,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": null,
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": false,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": "license_revoked",
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "invalid",
+    "trial": null,
+    "valid_until": null
+  },
+  "trial": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": null,
+      "installed_by": null,
+      "issued_at": null,
+      "key_id": null,
+      "license_id": null,
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": null,
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": null,
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": null,
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": false,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": true,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "trial",
+    "trial": {
+      "days_left": 6,
+      "ends_at": "2026-10-19T03:12:00+03:00",
+      "started_at": "2026-10-05T03:12:00+03:00"
+    },
+    "valid_until": null
+  },
+  "trial_clock_inconsistent": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T06:58:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651"
+            ],
+            "from": "trial",
+            "problem": "trial_clock_inconsistent",
+            "to": "trial_expired"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2029-10-13T07:03:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": null,
+      "installed_by": null,
+      "issued_at": null,
+      "key_id": null,
+      "license_id": null,
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": null,
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": null,
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 0
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 3,
+        "unconfigured": 0,
+        "used": 1
+      }
+    },
+    "maintenance": null,
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": false,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": "trial_clock_inconsistent",
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "trial_expired",
+    "trial": {
+      "days_left": 0,
+      "ends_at": "2026-10-27T06:58:00+03:00",
+      "started_at": "2026-10-13T06:58:00+03:00"
+    },
+    "valid_until": null
+  },
+  "trial_expired": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-04T09:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "trial_expired"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-09-20T09:03:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": null,
+      "installed_by": null,
+      "issued_at": null,
+      "key_id": null,
+      "license_id": null,
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": null,
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": null,
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 0
+      },
+      "users": {
+        "exceeded": false,
+        "full": true,
+        "max": 3,
+        "unconfigured": 0,
+        "used": 3
+      }
+    },
+    "maintenance": null,
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": false,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "trial_expired",
+    "trial": {
+      "days_left": 0,
+      "ends_at": "2026-10-04T09:00:00+03:00",
+      "started_at": "2026-09-20T09:00:00+03:00"
+    },
+    "valid_until": null
+  },
+  "trial_last_day": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-09-29T15:33:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": null,
+      "installed_by": null,
+      "issued_at": null,
+      "key_id": null,
+      "license_id": null,
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": null,
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": null,
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 0
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 1
+      }
+    },
+    "maintenance": null,
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": false,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": true,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "trial",
+    "trial": {
+      "days_left": 1,
+      "ends_at": "2026-10-13T15:30:00+03:00",
+      "started_at": "2026-09-29T15:30:00+03:00"
+    },
+    "valid_until": null
+  },
+  "trial_viewer": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": null,
+    "licensee": null,
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": null,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": null,
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": false,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": true,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "trial",
+    "trial": {
+      "days_left": 6,
+      "ends_at": "2026-10-19T03:12:00+03:00",
+      "started_at": "2026-10-05T03:12:00+03:00"
+    },
+    "valid_until": null
+  },
+  "unavailable": {
+    "body": {
+      "error": {
+        "code": "license_unavailable",
+        "message_en": "The licence component could not be loaded: paid modules are off. The 5651 functions keep working.",
+        "message_tr": "Lisans bileşeni yüklenemedi: ücretli modüller kapalı. 5651 işlevleri çalışmaya devam ediyor."
+      }
+    },
+    "headers": {},
+    "status": 503
+  },
+  "upload_ok": {
+    "checked_at": "2026-10-13T07:04:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:04:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-10-01T03:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0001",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:04:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:04:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 372,
+      "ends_soon": false,
+      "expired": false,
+      "until": "2027-10-20"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "licensed",
+    "trial": null,
+    "valid_until": null
+  },
+  "upload_unchanged": {
+    "checked_at": "2026-10-13T07:04:30+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:30+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": "ARCI-L-20261001-TEST0001",
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "b3e36d69eb9c7b49ed33292a1ccd6c9d1639cd3cf1d5aa6d674843b2d9b0459f",
+            "unchanged": true,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:04:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0001",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "094ea0620c386a6490930c09252dd500b3e73fc4017f8ff05bef8bc3707b02dd",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "d359907ff3e59c61141df33b07c230b5f2e573a1e377a2be320744f5ede90302",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20261001-TEST0001",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:45+03:00",
+          "details": {
+            "code": "license_version_not_covered",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000E",
+            "sha256": "2042af8ad4a71b163de73566c5877fcacd4d59f3dcead499a693615fa20ab272",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000E",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:30+03:00",
+          "details": {
+            "code": "license_expired",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000D",
+            "sha256": "75cf7bc85308350dd7812bc2d0598a27190dc4f3c3f5f2e0b09bb2e37b36151c",
+            "size": 722
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000D",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:15+03:00",
+          "details": {
+            "code": "license_other_server",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000C",
+            "sha256": "23968646621215d3745edfdbd7092b79855a3d9922ef345916d89740613d18ca",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000C",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:03:00+03:00",
+          "details": {
+            "code": "license_revoked",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST0009",
+            "sha256": "3babe834c4428f99cfefacfd6e20de4f8868ba92b34548aeaaa6c677deb94be6",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST0009",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:45+03:00",
+          "details": {
+            "code": "license_signature_invalid",
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20261001-TEST000B",
+            "sha256": "15086f4a82da0c391f724ed3ab49d9a7c42d320745f7ea8a59c60c264b034ab1",
+            "size": 715
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000B",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:30+03:00",
+          "details": {
+            "code": "license_unknown_key",
+            "key_id": "arci-2027a",
+            "license_id": "ARCI-L-20261001-TEST000A",
+            "sha256": "983015f5484d200caf72e823bcab3fff91e12f6594d528c7cad8ff90f9014437",
+            "size": 714
+          },
+          "kind": "refuse",
+          "license_id": "ARCI-L-20261001-TEST000A",
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:15+03:00",
+          "details": {
+            "code": "license_too_large",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "bf6f4319629bfb42ce5c72c08e492df46d78662479396ed9007aaf2b02cce9cb",
+            "size": 70000
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-10-13T07:02:00+03:00",
+          "details": {
+            "code": "license_malformed",
+            "key_id": null,
+            "license_id": null,
+            "sha256": "ce6f908dc78bfa4e6c568b004b92493dcc9b8313ec240211fd2c57463249a0a5",
+            "size": 33
+          },
+          "kind": "refuse",
+          "license_id": null,
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-10-05T03:15:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-10-13T07:04:30+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-10-01T03:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20261001-TEST0001",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:04:30+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:04:30+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 1,
+        "used": 3
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 4
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 372,
+      "ends_soon": false,
+      "expired": false,
+      "until": "2027-10-20"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": true,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": true,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": null,
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "licensed",
+    "trial": null,
+    "valid_until": null
+  },
+  "user_limit": {
+    "body": {
+      "error": {
+        "code": "license_limit",
+        "details": {
+          "limit": "users",
+          "max": 3,
+          "used": 3
+        },
+        "message_en": "The number of users is at the licence limit (3/3): no user can be added or re-enabled. Existing users keep working.",
+        "message_tr": "Kullanıcı sayısı lisans sınırında (3/3): yeni kullanıcı eklenemez ya da yeniden etkinleştirilemez. Var olan kullanıcılar çalışmaya devam eder."
+      }
+    },
+    "headers": {},
+    "status": 409
+  },
+  "version_not_covered": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T06:45:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "enabled_to": [
+              "core_5651"
+            ],
+            "from": "licensed",
+            "problem": "license_version_not_covered",
+            "to": "version_not_covered"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-09-02T14:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-09-02T14:00:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20260902-TEST0005",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2026-09-30",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "6eca0298d2c418234eb96d45288cd8b83ba0cdc914aed317f517e683c1661b0b",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "a59549276d87f1d6d6debb9cebe85b0f68e1e04fb18599711a931e80c5c7e9f1",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20260902-TEST0005",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-09-01T09:03:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-09-02T14:00:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-09-02T11:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20260902-TEST0005",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 0,
+        "used": 0
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 1
+      }
+    },
+    "maintenance": {
+      "covers_version": false,
+      "days_left": -13,
+      "ends_soon": false,
+      "expired": true,
+      "until": "2026-09-30"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": "license_version_not_covered",
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "version_not_covered",
+    "trial": null,
+    "valid_until": null
+  },
+  "version_not_covered_base_only": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T06:45:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651"
+            ],
+            "enabled_to": [
+              "core_5651"
+            ],
+            "from": "licensed",
+            "problem": "license_version_not_covered",
+            "to": "version_not_covered"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-09-02T14:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-09-02T14:00:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20260902-TEST0006",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2026-09-30",
+            "modules": [
+              "core_5651"
+            ],
+            "payload_sha256": "546713b093203f1b872cac12dcd875340dc72a63b9b0ccb8735c5823a6263bd4",
+            "replaced_license_id": null,
+            "server_ids": [
+              "XW68-7K1Z-5FGV-AGT8"
+            ],
+            "sha256": "8e80d58b3c852a971bfef71b783c99aa8e03d0bc6add0ccab84defca7aff76e0",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20260902-TEST0006",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-09-01T09:03:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-09-02T14:00:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-09-02T11:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20260902-TEST0006",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "XW68-7K1Z-5FGV-AGT8"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 0,
+        "used": 0
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 1
+      }
+    },
+    "maintenance": {
+      "covers_version": false,
+      "days_left": -13,
+      "ends_soon": false,
+      "expired": true,
+      "until": "2026-09-30"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": false,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": false,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": "license_version_not_covered",
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "version_not_covered",
+    "trial": null,
+    "valid_until": null
+  },
+  "wrong_server": {
+    "checked_at": "2026-10-13T07:00:00+03:00",
+    "details": {
+      "history": [
+        {
+          "actor": "system",
+          "at": "2026-10-13T06:35:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "enabled_to": [
+              "core_5651"
+            ],
+            "from": "licensed",
+            "problem": "license_other_server",
+            "to": "wrong_server"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "system",
+          "at": "2026-09-16T10:05:00+03:00",
+          "details": {
+            "enabled_from": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "from": "trial",
+            "problem": null,
+            "to": "licensed"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        },
+        {
+          "actor": "tolga",
+          "at": "2026-09-16T10:00:00+03:00",
+          "details": {
+            "key_id": "test-key-1",
+            "license_id": "ARCI-L-20260916-TEST0007",
+            "licensee": "Örnek A.Ş.",
+            "limits": {
+              "log_sources": 10,
+              "users": 25
+            },
+            "maintenance_until": "2027-10-20",
+            "modules": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports"
+            ],
+            "payload_sha256": "601976b061af07bedece01bc1acc1a2529fca712690fbdae4ef794b45c68bbea",
+            "replaced_license_id": null,
+            "server_ids": [
+              "ARDY-FMY4-D3RP-6ZBA"
+            ],
+            "sha256": "ee69ed67132aa8c54954875e5bfb272a4cc67713da4bf3e162a20f19cafe1afd",
+            "unchanged": false,
+            "valid_until": null
+          },
+          "kind": "install",
+          "license_id": "ARCI-L-20260916-TEST0007",
+          "source": "web"
+        },
+        {
+          "actor": "system",
+          "at": "2026-09-15T08:03:00+03:00",
+          "details": {
+            "enabled_from": null,
+            "enabled_to": [
+              "core_5651",
+              "usage_analytics",
+              "usage_reports",
+              "bulk_import"
+            ],
+            "from": null,
+            "problem": null,
+            "to": "trial"
+          },
+          "kind": "state",
+          "license_id": null,
+          "source": "worker"
+        }
+      ],
+      "installation_id": "00000000-0000-4000-8000-000000000001",
+      "installed_at": "2026-09-16T10:00:00+03:00",
+      "installed_by": "tolga",
+      "issued_at": "2026-09-16T09:00:00+03:00",
+      "key_id": "test-key-1",
+      "license_id": "ARCI-L-20260916-TEST0007",
+      "organization": "Örnek A.Ş.",
+      "request_code": "ARCIREQ1-FCH66-WK5C5-T6AS2-ZC5T2-4EH26-8R34D-HD64R-2TC9K-AGR30-EHG60-X30C2-T48P2-4TBEE-DT62V-3CC5T-6JVVE-BXMP8-8HT48-R30C1-G60R3-0C1D6-0R30C-1D6GR-30C1D-70R30-C1D60-R30C1-G60R3-0C1G6-0RJ4B-12DXS-6ERBE-D5X62-X39DX-Q24EH-2REB7-4VK5D-CG42B-P5KRQ-24B12-E1P62-X36DX-S6T8H-T49VP-JVK4D-XVQ68-HC49R-74VV4-ENHQ8-QVPCN-S76TB-FDRH3-M8HG5-RRJWC-125GH-76RV8-CNPP2-8HT49-GQ4RV-9DHQP-ESV5E-8Q6RT-B3CNQ-76S9D-E9JQ2-XB5ED-T2YC9-25GH7-6SBJE-SJQ4Q-V9CGH-3M8JR-AWV3G-B9Q9C-RNMB9-N8S3N-CBA18-XA3G8-HC49S-PTRK9-DXSJ4-EKME9-TPAZE-65RG8-JER",
+      "server_id": "XW68-7K1Z-5FGV-AGT8",
+      "server_id_error": null,
+      "server_ids": [
+        "ARDY-FMY4-D3RP-6ZBA"
+      ],
+      "time": {
+        "clock_behind": false,
+        "now": "2026-10-13T07:00:00+03:00",
+        "source": "system",
+        "system_time": "2026-10-13T07:00:00+03:00",
+        "tsa_time": null,
+        "vault_day_end": null
+      }
+    },
+    "licensee": "Örnek A.Ş.",
+    "licensor": {
+      "email": "arman@khadangan.com",
+      "name": "Arman Khadangan"
+    },
+    "limits": {
+      "log_sources": {
+        "exceeded": false,
+        "full": false,
+        "max": 10,
+        "unconfigured": 0,
+        "used": 0
+      },
+      "users": {
+        "exceeded": false,
+        "full": false,
+        "max": 25,
+        "unconfigured": 0,
+        "used": 1
+      }
+    },
+    "maintenance": {
+      "covers_version": true,
+      "days_left": 372,
+      "ends_soon": false,
+      "expired": false,
+      "until": "2027-10-20"
+    },
+    "modules": [
+      {
+        "always": true,
+        "description_en": "Log collection, sealing, retention, 5651 lookups, evidence packages, devices and persons, alerts, audit log.",
+        "description_tr": "Log toplama, mühürleme, saklama, 5651 sorgusu, kanıt paketleri, cihazlar ve kişiler, uyarılar, denetim kaydı.",
+        "enabled": true,
+        "key": "core_5651",
+        "licensed": true,
+        "name_en": "5651 Core",
+        "name_tr": "5651 Temel"
+      },
+      {
+        "always": false,
+        "description_en": "Estimated usage time per person, device, site and category, with exports.",
+        "description_tr": "Kişi, cihaz, site ve kategori bazında tahmini kullanım süreleri ve dışa aktarma.",
+        "enabled": false,
+        "key": "usage_analytics",
+        "licensed": true,
+        "name_en": "Usage analytics",
+        "name_tr": "Kullanım analizi"
+      },
+      {
+        "always": false,
+        "description_en": "Scheduled usage reports made and e-mailed by the server (needs Usage analytics).",
+        "description_tr": "Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi (Kullanım analizi gerekir).",
+        "enabled": false,
+        "key": "usage_reports",
+        "licensed": true,
+        "name_en": "Scheduled usage reports",
+        "name_tr": "Zamanlanmış kullanım raporları"
+      },
+      {
+        "always": false,
+        "description_en": "Bulk import of persons and device assignments from CSV files (manual entry is always available).",
+        "description_tr": "Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (elle giriş her zaman açıktır).",
+        "enabled": false,
+        "key": "bulk_import",
+        "licensed": false,
+        "name_en": "Bulk import (CSV)",
+        "name_tr": "Toplu içe aktarma (CSV)"
+      }
+    ],
+    "problem": "license_other_server",
+    "product": {
+      "name": "ARCILOGGER",
+      "release_date": "2026-10-01",
+      "version": "0.1.0"
+    },
+    "status": "wrong_server",
+    "trial": null,
+    "valid_until": null
+  }
+}

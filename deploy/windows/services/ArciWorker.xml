@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows service ArciWorker (WinSW 2.12 configuration, see doc/xmlConfigFile.md of v2.12.0).
+  Install-Arcilogger.ps1 fills in the {{...}} values and runs it as NT SERVICE\ArciWorker.
+  The evidence jobs (sealing, verification, retention, replica) are NOT here: they run from Task
+  Scheduler (deploy/windows/tasks) and keep working when this service or the database is down.
+-->
+<service>
+  <id>ArciWorker</id>
+  <name>ARCILOGGER İşler (Worker)</name>
+  <description>Uygulama işleri: kira zaman çizelgesi, NAT dizini, kullanım özetleri, tespitler, raporlar, e-posta. [Application jobs.]</description>
+  <!-- Isolated Python (-I): no PYTHON* variable of the machine or of this service (registry
+       Services\ArciWorker\Environment) can put a module on the path; -X utf8 -u replace
+       PYTHONUTF8 and PYTHONUNBUFFERED, which -I ignores. -->
+  <executable>{{INSTALL_DIR}}\venv\Scripts\python.exe</executable>
+  <arguments>-I -X utf8 -u -m arcilogger_worker run --config "{{CONFIG}}"</arguments>
+  <env name="ARCILOGGER_CONFIG" value="{{CONFIG}}"/>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+  <logpath>{{LOG_DIR}}</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

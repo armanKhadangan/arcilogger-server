@@ -1,0 +1,60 @@
+{
+  "_comment": "Shared display-format vectors. Tested by core/tests/test_fmt.py (Python) and web/src/lib/format.test.ts (TypeScript); both must produce exactly these strings.",
+  "datetime": [
+    { "utc": "2026-09-23T06:44:07Z", "expected": "23.09.2026 09:44:07" },
+    { "utc": "2026-09-23T21:00:00Z", "expected": "24.09.2026 00:00:00" },
+    { "utc": "2026-12-31T20:59:59Z", "expected": "31.12.2026 23:59:59" },
+    { "utc": "2027-01-01T00:00:00Z", "expected": "01.01.2027 03:00:00" },
+    { "utc": "2015-07-01T12:00:00Z", "expected": "01.07.2015 15:00:00" },
+    { "utc": "2015-01-15T12:00:00Z", "expected": "15.01.2015 14:00:00" }
+  ],
+  "date": [
+    { "utc": "2026-09-23T06:44:07Z", "expected": "23.09.2026" },
+    { "utc": "2026-09-23T21:30:00Z", "expected": "24.09.2026" }
+  ],
+  "number": [
+    { "value": 0, "decimals": 0, "lang": "tr", "expected": "0" },
+    { "value": 7, "decimals": 0, "lang": "tr", "expected": "7" },
+    { "value": 1234, "decimals": 0, "lang": "tr", "expected": "1.234" },
+    { "value": 1234567, "decimals": 0, "lang": "tr", "expected": "1.234.567" },
+    { "value": 1234567, "decimals": 0, "lang": "en", "expected": "1,234,567" },
+    { "value": 1.5, "decimals": 1, "lang": "tr", "expected": "1,5" },
+    { "value": 1.5, "decimals": 1, "lang": "en", "expected": "1.5" },
+    { "value": 1234567.891, "decimals": 2, "lang": "tr", "expected": "1.234.567,89" },
+    { "value": 2.5, "decimals": 0, "lang": "tr", "expected": "3" },
+    { "value": 0.125, "decimals": 2, "lang": "tr", "expected": "0,13" },
+    { "value": -1234.5, "decimals": 1, "lang": "tr", "expected": "-1.234,5" },
+    { "value": -0.04, "decimals": 1, "lang": "tr", "expected": "0,0" },
+    { "value": 9634, "decimals": 0, "lang": "tr", "expected": "9.634" }
+  ],
+  "bytes": [
+    { "value": 0, "lang": "tr", "expected": "0 B" },
+    { "value": 512, "lang": "tr", "expected": "512 B" },
+    { "value": 1023, "lang": "tr", "expected": "1.023 B" },
+    { "value": 1024, "lang": "tr", "expected": "1 KB" },
+    { "value": 1536, "lang": "tr", "expected": "1,5 KB" },
+    { "value": 1536, "lang": "en", "expected": "1.5 KB" },
+    { "value": 1048575, "lang": "tr", "expected": "1 MB" },
+    { "value": 6083, "lang": "tr", "expected": "5,9 KB" },
+    { "value": 1610612736, "lang": "tr", "expected": "1,5 GB" },
+    { "value": 41016434278, "lang": "tr", "expected": "38,2 GB" },
+    { "value": 7340032000, "lang": "en", "expected": "6.8 GB" },
+    { "value": 1125899906842624, "lang": "tr", "expected": "1 PB" },
+    { "value": 1152921504606846976, "lang": "tr", "expected": "1.024 PB" }
+  ],
+  "duration": [
+    { "seconds": 0, "lang": "tr", "expected": "0 sn" },
+    { "seconds": 45, "lang": "tr", "expected": "45 sn" },
+    { "seconds": 60, "lang": "tr", "expected": "1 dk" },
+    { "seconds": 930, "lang": "tr", "expected": "15 dk 30 sn" },
+    { "seconds": 7200, "lang": "tr", "expected": "2 sa" },
+    { "seconds": 8100, "lang": "tr", "expected": "2 sa 15 dk" },
+    { "seconds": 8159.9, "lang": "tr", "expected": "2 sa 15 dk" },
+    { "seconds": 7230, "lang": "tr", "expected": "2 sa" },
+    { "seconds": 273600, "lang": "tr", "expected": "3 gün 4 sa" },
+    { "seconds": 669600, "lang": "tr", "expected": "7 gün 18 sa" },
+    { "seconds": 45, "lang": "en", "expected": "45 s" },
+    { "seconds": 8100, "lang": "en", "expected": "2 h 15 min" },
+    { "seconds": 273600, "lang": "en", "expected": "3 d 4 h" }
+  ]
+}

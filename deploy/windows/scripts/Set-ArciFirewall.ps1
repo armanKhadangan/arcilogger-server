@@ -1,0 +1,445 @@
+﻿<#
+.SYNOPSIS
+    ARCILOGGER için Windows Defender Güvenlik Duvarı kuralları [firewall allow-lists].
+
+.DESCRIPTION
+    Inbound (all profiles, default action Block; spec 13 "allow 514 from the senders, 443 and
+    remote administration only from the admin PC, nothing else"):
+      - UDP and TCP 514 (syslog) only from the senders in arcilogger.toml [[sources]]
+        (addresses and networks such as 10.0.1.0/24). Without any (a new installation has none
+        until the organisation adds its devices) there is no syslog rule: 514 stays closed and
+        the script says so. Add the [[sources]] and run it again.
+      - TCP 443 (web interface) and TCP/UDP 3389 (remote desktop) only from the admin PC
+        (-AdminAddress, e.g. 10.0.0.10 or 10.0.0.0/24; no default: asked at the console when
+        neither given nor remembered, otherwise the script stops); with -AllowWinRM also TCP
+        5985 (PowerShell remoting, Server Manager) from the admin PC.
+      - Every OTHER enabled inbound allow rule is disabled, because an allow rule always wins over
+        the default Block action: Windows' own "Remote Desktop", "Windows Remote Management
+        (HTTP-In)" (TCP 5985, enabled by default on Windows Server), "File and Printer Sharing"
+        and any rule another program added. Kept are only the rule groups in -KeepRuleGroup
+        (default: "Core Networking" - DHCP, IPv6 neighbour discovery, ICMP errors) and the rules
+        named in -KeepRule. Every rule disabled here is recorded in the state file; -Remove
+        enables them again. The script stops before changing anything if no rule of the
+        -KeepRuleGroup groups exists (the group name is an assumption: verify on site).
+
+    Outbound (-StrictOutbound, optional; default action becomes Block):
+      NTP (UDP 123) to [clock] ntp_server and fallback_server, DNS (53) to the configured DNS
+      servers, Kamu SM (zd/tzd.kamusm.gov.tr and the host of [tsa] url, on [tsa] port; root
+      certificates and CRLs from sertifikalar.kamusm.gov.tr TCP 80/443, docs/kamusm.md), SMTP (the
+      server of [smtp] in arcilogger.toml when enabled = true and host is set, on [smtp] port,
+      default 587; and the host:port of -SmtpServer, if given, as a rule of its own) and the
+      replica share (TCP 445 to the [replica] target host). Enabled outbound
+      allow rules outside these and -KeepRuleGroup are disabled and recorded like the inbound ones.
+      Windows Defender Firewall rules take IP addresses, so host names are resolved now: run the
+      script again if a provider changes its addresses. Windows Update and Defender signature
+      updates are blocked in strict mode: switch it off for maintenance (-StrictOutbound:$false).
+
+    Choices are remembered in the state file: -StrictOutbound, -AdminAddress, -AllowWinRM,
+    -KeepRule and -SmtpServer given once stay in force for later runs that do not name them (for
+    example the installer during an upgrade, which passes none of them). Name them again to change
+    them (-StrictOutbound:$false, -AllowWinRM:$false, -KeepRule @(), -SmtpServer ''). An empty
+    value does not reach the script through powershell.exe -File (Windows PowerShell 5.1 drops an
+    empty argument to a program, cmd.exe passes '' as two characters): pass it with -Command
+    instead (docs/INSTALL.md section 12):
+        powershell -ExecutionPolicy Bypass -Command "& '<path>\Set-ArciFirewall.ps1' -SmtpServer ''"
+
+    -Remove deletes the ARCILOGGER rules, enables the recorded rules again and restores the
+    profile settings (enabled, default inbound and outbound action) recorded at the first run.
+
+    All ARCILOGGER rules are in the rule group "ARCILOGGER". Safe to run again (idempotent).
+
+.PARAMETER Force
+    Apply the remote desktop restriction even when a session from another address is open
+    (that session would be cut off).
+
+.EXAMPLE
+    .\Set-ArciFirewall.ps1
+.EXAMPLE
+    .\Set-ArciFirewall.ps1 -AdminAddress 10.0.0.10 -StrictOutbound -SmtpServer mail.example.com:587
+.EXAMPLE
+    .\Set-ArciFirewall.ps1 -DryRun -PlanPath plan.json
+#>
+[CmdletBinding()]
+param(
+    [string]$ConfigPath = $(if ($env:ProgramData) { Join-Path $env:ProgramData 'ARCILOGGER\arcilogger.toml' } else { 'C:\ProgramData\ARCILOGGER\arcilogger.toml' }),
+    [string]$Python = $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'ARCILOGGER\venv\Scripts\python.exe' } else { 'C:\Program Files\ARCILOGGER\venv\Scripts\python.exe' }),
+    [string[]]$SourceAddress,
+    [string[]]$AdminAddress,
+    [int]$SyslogPort = 514,
+    [int]$HttpsPort = 443,
+    [int]$RdpPort = 3389,
+    [switch]$AllowWinRM,
+    [int]$WinRMPort = 5985,
+    [string[]]$KeepRuleGroup = @('@FirewallAPI.dll,-25000', 'Core Networking'),
+    [string[]]$KeepRule = @(),
+    [switch]$StrictOutbound,
+    [string[]]$DnsServer,
+    [string]$SmtpServer,
+    [string[]]$KamuSmHost = @('zd.kamusm.gov.tr', 'tzd.kamusm.gov.tr'),
+    [string]$KamuSmCertificateHost = 'sertifikalar.kamusm.gov.tr',
+    [string]$StateFile = $(if ($env:ProgramData) { Join-Path $env:ProgramData 'ARCILOGGER\install\firewall-state.json' } else { 'C:\ProgramData\ARCILOGGER\install\firewall-state.json' }),
+    [switch]$Remove,
+    [switch]$DryRun,
+    [string]$PlanPath,
+    [switch]$Force
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'installer\ArciInstall.psm1') -Force
+Initialize-ArciModulePath
+
+$Group = 'ARCILOGGER'
+
+function Resolve-HostAddresses([string]$HostName) {
+    if (Test-ArciAddressSpec $HostName) { return , @($HostName) }
+    try {
+        $found = [System.Net.Dns]::GetHostAddresses($HostName) | Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork } | ForEach-Object { $_.ToString() }
+        return , @($found)
+    }
+    catch {
+        Write-ArciWarn ("Ad çözümlenemedi [cannot resolve]: {0}" -f $HostName)
+        return , @()
+    }
+}
+
+function Add-Unique([System.Collections.Generic.List[string]]$List, [string[]]$Values) {
+    foreach ($value in $Values) { if ($value -and -not $List.Contains($value)) { $List.Add($value) } }
+}
+
+function New-RuleSpec([string]$Name, [string]$Direction, [string]$Protocol, [string[]]$Ports, [string[]]$RemoteAddresses, [string]$Purpose) {
+    [pscustomobject]@{
+        name           = $Name
+        direction      = $Direction
+        protocol       = $Protocol
+        ports          = @($Ports)
+        remote_address = @($RemoteAddresses)
+        action         = 'Allow'
+        purpose        = $Purpose
+    }
+}
+
+function Read-FirewallState {
+    <# The state file: rules ARCILOGGER disabled, profile settings before ARCILOGGER, strict mode. #>
+    $state = [pscustomobject]@{
+        schema = 1; strict_outbound = $false; admin_address = @(); allow_winrm = $false; keep_rules = @()
+        smtp_server = $null; disabled_rules = @(); previous_profiles = @()
+    }
+    if (-not (Test-Path -LiteralPath $StateFile)) { return $state }
+    # Assign first: Windows PowerShell 5.1 passes a JSON array on as one object.
+    $document = [System.IO.File]::ReadAllText($StateFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($document -is [System.Array]) {
+        # First format: a plain list of the inbound rules that were disabled.
+        $state.disabled_rules = @($document | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ name = [string]$_; display_name = [string]$_; direction = 'Inbound' } })
+        return $state
+    }
+    foreach ($name in @('strict_outbound', 'admin_address', 'allow_winrm', 'keep_rules', 'smtp_server', 'disabled_rules', 'previous_profiles')) {
+        if ($null -ne $document -and $document.PSObject.Properties.Name -contains $name -and $null -ne $document.$name) { $state.$name = $document.$name }
+    }
+    foreach ($name in @('admin_address', 'keep_rules', 'disabled_rules', 'previous_profiles')) {
+        $state.$name = @($state.$name | Where-Object { $_ })
+    }
+    $state
+}
+
+function Write-FirewallState($State) {
+    $State | Add-Member -NotePropertyName 'updated_at' -NotePropertyValue ([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')) -Force
+    Write-ArciUtf8File -Path $StateFile -Text ($State | ConvertTo-Json -Depth 5)
+}
+
+function Test-KeptRule($Rule) {
+    if ($Rule.Group -eq $Group) { return $true }
+    if ($KeepRule -contains [string]$Rule.Name -or $KeepRule -contains [string]$Rule.DisplayName) { return $true }
+    ($KeepRuleGroup -contains [string]$Rule.Group) -or ($KeepRuleGroup -contains [string]$Rule.DisplayGroup)
+}
+
+function Get-KeptGroupRules {
+    <# All rules (enabled or not) of the -KeepRuleGroup groups: none means the group name is wrong. #>
+    @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_ -and (($KeepRuleGroup -contains [string]$_.Group) -or ($KeepRuleGroup -contains [string]$_.DisplayGroup)) })
+}
+
+function Get-OtherAllowRules([string]$Direction) {
+    <# Enabled allow rules of this direction that ARCILOGGER does not keep (local rules only). #>
+    @(Get-NetFirewallRule -Direction $Direction -Action Allow -Enabled True -ErrorAction SilentlyContinue | Where-Object { $_ -and -not (Test-KeptRule $_) })
+}
+
+# --- configuration and mode ------------------------------------------------------------------------
+
+$state = Read-FirewallState
+$strictSource = 'parameter'
+if ($PSBoundParameters.ContainsKey('StrictOutbound')) { $strict = [bool]$StrictOutbound }
+elseif ([bool]$state.strict_outbound) { $strict = $true; $strictSource = 'state file' }
+else { $strict = $false; $strictSource = 'default' }
+# The other operator choices: a parameter wins, then the state file, then the default.
+if (-not $PSBoundParameters.ContainsKey('AdminAddress') -and @($state.admin_address).Count -gt 0) { $AdminAddress = @($state.admin_address) }
+# The admin PC's address has no default: neither given nor remembered, it is asked at the console.
+$AdminAddress = @($AdminAddress | Where-Object { $_ })
+if (-not $Remove -and $AdminAddress.Count -eq 0 -and (Test-ArciInteractiveConsole)) { $AdminAddress = @(Read-ArciAdminAddress) }
+if (-not $PSBoundParameters.ContainsKey('AllowWinRM') -and [bool]$state.allow_winrm) { $AllowWinRM = [switch]$true }
+if (-not $PSBoundParameters.ContainsKey('KeepRule') -and @($state.keep_rules).Count -gt 0) { $KeepRule = @($state.keep_rules) }
+if (-not $PSBoundParameters.ContainsKey('SmtpServer') -and $state.smtp_server) { $SmtpServer = [string]$state.smtp_server }
+
+$config = $null
+if (-not $Remove -and ((-not $SourceAddress) -or $strict)) {
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { throw ("Yapılandırma yok [config missing]: {0}" -f $ConfigPath) }
+    if (-not (Test-Path -LiteralPath $Python)) { throw ("Python yok [python missing]: {0}" -f $Python) }
+    $config = Read-ArciTomlFile -Python $Python -ConfigPath $ConfigPath
+}
+if (-not $SourceAddress -and $null -ne $config) { $SourceAddress = @(Get-ArciSourceAddresses -Config $config) }
+# Assigned through the filter: @($null) would be one (invalid) address.
+$SourceAddress = @($SourceAddress | Where-Object { $_ })
+
+# --- what to allow ---------------------------------------------------------------------------------
+
+$rules = New-Object System.Collections.Generic.List[object]
+if (-not $Remove) {
+    if (@($AdminAddress).Count -eq 0) {
+        throw 'Yönetici PC''sinin adresi yok [no admin PC address]: 443 (web) ve 3389 (uzak masaüstü) yalnızca ondan açılır. -AdminAddress ile verin, örnek -AdminAddress 10.0.0.10 ya da bir ağ: -AdminAddress 10.0.0.0/24; değer hatırlanır [443 and 3389 are opened only for it: give -AdminAddress, e.g. 10.0.0.10 or a network such as 10.0.0.0/24; it is remembered].'
+    }
+    foreach ($value in @($SourceAddress) + @($AdminAddress)) {
+        if (-not (Test-ArciAddressSpec $value)) { throw ("Geçersiz adres [invalid address]: {0} (örnek 10.0.0.10 veya 10.0.0.0/24)" -f $value) }
+    }
+    if ($SourceAddress.Count -gt 0) {
+        $rules.Add((New-RuleSpec 'ARCILOGGER Syslog UDP' 'Inbound' 'UDP' @("$SyslogPort") $SourceAddress 'syslog from configured senders'))
+        $rules.Add((New-RuleSpec 'ARCILOGGER Syslog TCP' 'Inbound' 'TCP' @("$SyslogPort") $SourceAddress 'syslog from configured senders'))
+    }
+    else {
+        # No log source yet (a new installation): a valid state, but no device can send. The
+        # default Block action keeps 514 closed; nothing else is opened in its place.
+        Write-ArciWarn ("Hiç syslog göndericisi yok ([[sources]] boş): {0} kapalı kalır, hiçbir log kaydedilmez. Güvenlik duvarınızın ve ana yönlendiricinizin [[sources]] kayıtlarını {1} dosyasına ekleyip bu betiği yeniden çalıştırın (docs\DEVICE-SETUP.md bölüm 4) [no syslog sender configured: {0} stays closed and no log is recorded; add the [[sources]] of your firewall and core router and run this script again]." -f "UDP/TCP $SyslogPort", $ConfigPath)
+    }
+    $rules.Add((New-RuleSpec 'ARCILOGGER HTTPS' 'Inbound' 'TCP' @("$HttpsPort") $AdminAddress 'web interface from the admin PC'))
+    $rules.Add((New-RuleSpec 'ARCILOGGER RDP' 'Inbound' 'TCP' @("$RdpPort") $AdminAddress 'remote desktop from the admin PC'))
+    $rules.Add((New-RuleSpec 'ARCILOGGER RDP UDP' 'Inbound' 'UDP' @("$RdpPort") $AdminAddress 'remote desktop (UDP transport) from the admin PC'))
+    if ($AllowWinRM) {
+        $rules.Add((New-RuleSpec 'ARCILOGGER WinRM' 'Inbound' 'TCP' @("$WinRMPort") $AdminAddress 'PowerShell remoting / Server Manager from the admin PC'))
+    }
+
+    if ($strict) {
+        $ntp = New-Object System.Collections.Generic.List[string]
+        foreach ($name in @((Get-ArciConfigValue -Config $config -Path 'clock.ntp_server' -Default ''), (Get-ArciConfigValue -Config $config -Path 'clock.fallback_server' -Default 'time.ume.tubitak.gov.tr'))) {
+            if ($name) { Add-Unique $ntp (Resolve-HostAddresses $name) }
+        }
+        if ($ntp.Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out NTP' 'Outbound' 'UDP' @('123') $ntp.ToArray() 'time')) }
+
+        if (-not $DnsServer -and (Get-Command Get-DnsClientServerAddress -ErrorAction SilentlyContinue)) {
+            $DnsServer = Get-DnsClientServerAddress -AddressFamily IPv4 | ForEach-Object { $_.ServerAddresses } | Sort-Object -Unique
+        }
+        if ($DnsServer) {
+            $rules.Add((New-RuleSpec 'ARCILOGGER Out DNS UDP' 'Outbound' 'UDP' @('53') $DnsServer 'name resolution'))
+            $rules.Add((New-RuleSpec 'ARCILOGGER Out DNS TCP' 'Outbound' 'TCP' @('53') $DnsServer 'name resolution'))
+        }
+
+        # Kamu SM: both servers (test and production, so switching [tsa] url needs no firewall
+        # change) plus whatever [tsa] url names, on the port the time-stamp client uses.
+        $tsaHosts = New-Object System.Collections.Generic.List[string]
+        Add-Unique $tsaHosts $KamuSmHost
+        $tsaPorts = New-Object System.Collections.Generic.List[string]
+        $tsaUrl = [string](Get-ArciConfigValue -Config $config -Path 'tsa.url' -Default '')
+        $uri = $null
+        if ($tsaUrl -and [System.Uri]::TryCreate($tsaUrl, [System.UriKind]::Absolute, [ref]$uri) -and $uri.Host) {
+            Add-Unique $tsaHosts @($uri.Host)
+            Add-Unique $tsaPorts @([string]$uri.Port)
+        }
+        Add-Unique $tsaPorts @([string](Get-ArciConfigValue -Config $config -Path 'tsa.port' -Default 80))
+        $kamusm = New-Object System.Collections.Generic.List[string]
+        foreach ($name in $tsaHosts) { Add-Unique $kamusm (Resolve-HostAddresses $name) }
+        if ($kamusm.Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Kamu SM' 'Outbound' 'TCP' $tsaPorts.ToArray() $kamusm.ToArray() 'time stamps (hash only)')) }
+        $certificates = Resolve-HostAddresses $KamuSmCertificateHost
+        if (@($certificates).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Kamu SM certificates' 'Outbound' 'TCP' @('80', '443') $certificates 'roots and CRLs')) }
+
+        # SMTP: the server the alert e-mail uses ([smtp] of arcilogger.toml, read on every run, so
+        # an upgrade keeps the rule) and the host:port of -SmtpServer (remembered). One rule per
+        # distinct server; a host name is resolved now, like the other named hosts.
+        $smtpTargets = New-Object System.Collections.Generic.List[object]
+        $smtpHost = ([string](Get-ArciConfigValue -Config $config -Path 'smtp.host' -Default '')).Trim()
+        if ((Get-ArciConfigValue -Config $config -Path 'smtp.enabled' -Default $false) -eq $true -and $smtpHost) {
+            $smtpTargets.Add([pscustomobject]@{ host = $smtpHost; port = [string](Get-ArciConfigValue -Config $config -Path 'smtp.port' -Default 587); purpose = 'alert e-mail ([smtp])' })
+        }
+        if ($SmtpServer) {
+            $smtpParts = $SmtpServer.Split(':')
+            $smtpPort = if ($smtpParts.Count -gt 1) { $smtpParts[1] } else { '587' }
+            $same = @($smtpTargets | Where-Object { $_.host -eq $smtpParts[0] -and $_.port -eq $smtpPort })
+            if ($same.Count -eq 0) { $smtpTargets.Add([pscustomobject]@{ host = $smtpParts[0]; port = $smtpPort; purpose = 'e-mail (-SmtpServer)' }) }
+        }
+        $smtpRules = 0
+        foreach ($target in $smtpTargets) {
+            $port = 0
+            if (-not [int]::TryParse($target.port, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+                throw ("SMTP portu geçersiz [invalid SMTP port]: {0} ({1})" -f $target.port, $target.purpose)
+            }
+            $smtp = Resolve-HostAddresses $target.host
+            if (@($smtp).Count -eq 0) { continue }
+            $smtpRules++
+            $name = $(if ($smtpRules -eq 1) { 'ARCILOGGER Out SMTP' } else { 'ARCILOGGER Out SMTP {0}' -f $smtpRules })
+            $rules.Add((New-RuleSpec $name 'Outbound' 'TCP' @([string]$port) $smtp $target.purpose))
+        }
+
+        $replicaTarget = Get-ArciConfigValue -Config $config -Path 'replica.target'
+        if ((Get-ArciConfigValue -Config $config -Path 'replica.enabled' -Default $false) -and $replicaTarget) {
+            $target = ([string]$replicaTarget).Replace('\', '/').TrimStart('/')
+            $replicaHost = $target.Split('/')[0]
+            $replica = Resolve-HostAddresses $replicaHost
+            if (@($replica).Count -gt 0) { $rules.Add((New-RuleSpec 'ARCILOGGER Out Replica' 'Outbound' 'TCP' @('445') $replica 'second copy (SMB)')) }
+        }
+    }
+}
+
+# Which existing rules would be switched off, and how many rules the kept groups have (read-only;
+# needs the NetSecurity module, so only on Windows).
+$wouldDisable = $null
+$keptGroupRuleCount = $null
+if (-not $Remove -and (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue)) {
+    try {
+        $directions = @('Inbound') + $(if ($strict) { @('Outbound') } else { @() })
+        $wouldDisable = @(foreach ($direction in $directions) {
+                Get-OtherAllowRules $direction | ForEach-Object {
+                    [pscustomobject]@{ name = $_.Name; display_name = $_.DisplayName; group = $_.Group; direction = $direction }
+                }
+            })
+        $keptGroupRuleCount = @(Get-KeptGroupRules).Count
+    }
+    catch { $wouldDisable = $null }
+}
+
+$plan = [pscustomobject]@{
+    group                  = $Group
+    remove                 = [bool]$Remove
+    strict_outbound        = $strict
+    strict_outbound_source = $strictSource
+    admin_address          = @($AdminAddress)
+    allow_winrm            = [bool]$AllowWinRM
+    default_inbound        = 'Block'
+    default_outbound       = $(if ($strict) { 'Block' } else { 'Allow' })
+    other_inbound_rules    = 'disabled (recorded for -Remove), except -KeepRuleGroup and -KeepRule'
+    other_outbound_rules   = $(if ($strict) { 'disabled (recorded for -Remove), except -KeepRuleGroup and -KeepRule' } else { 'unchanged' })
+    keep_rule_groups       = @($KeepRuleGroup)
+    keep_rules             = @($KeepRule)
+    smtp_server            = $(if ($SmtpServer) { $SmtpServer } else { $null })
+    rules                  = $rules.ToArray()
+    would_disable          = $wouldDisable
+    kept_group_rules       = $keptGroupRuleCount
+    state_file             = $StateFile
+}
+if ($PlanPath) { Write-ArciUtf8File -Path $PlanPath -Text ($plan | ConvertTo-Json -Depth 6) }
+
+foreach ($rule in $rules) {
+    Write-ArciStep ("{0}: {1} {2} {3} <- {4}" -f $rule.name, $rule.direction, $rule.protocol, ($rule.ports -join ','), ($rule.remote_address -join ', '))
+}
+if (-not $Remove) {
+    Write-ArciInfo ("Giden trafik [outbound]: {0} ({1})" -f $(if ($strict) { 'yalnızca izin verilenler [strict]' } else { 'serbest [allowed]' }), $strictSource)
+}
+if ($DryRun) {
+    Write-ArciInfo 'Deneme çalıştırması; güvenlik duvarı değiştirilmedi [dry run, firewall unchanged].'
+    exit 0
+}
+
+if (-not (Test-ArciWindows)) { throw 'Bu betik yalnızca Windows üzerinde çalışır [Windows only].' }
+if (-not (Test-ArciAdministrator)) { throw 'Yönetici olarak çalıştırın [run as Administrator].' }
+
+# --- remove --------------------------------------------------------------------------------------
+
+if ($Remove) {
+    Get-NetFirewallRule -Group $Group -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    foreach ($entry in @($state.disabled_rules)) {
+        $name = if ($entry -is [string]) { $entry } else { [string]$entry.name }
+        $rule = Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
+        if ($rule) { $rule | Enable-NetFirewallRule; Write-ArciInfo ("yeniden açıldı [re-enabled]: {0}" -f $rule.DisplayName) }
+    }
+    foreach ($saved in @($state.previous_profiles)) {
+        Set-NetFirewallProfile -Name $saved.name -Enabled $saved.enabled -DefaultInboundAction $saved.default_inbound -DefaultOutboundAction $saved.default_outbound
+        Write-ArciInfo ("profil geri yüklendi [profile restored]: {0} (inbound {1}, outbound {2})" -f $saved.name, $saved.default_inbound, $saved.default_outbound)
+    }
+    if (Test-Path -LiteralPath $StateFile) { Remove-Item -LiteralPath $StateFile -Force }
+    Write-ArciStep 'ARCILOGGER güvenlik duvarı kuralları kaldırıldı [rules removed].'
+    exit 0
+}
+
+# --- checks before any change ----------------------------------------------------------------------
+
+if (-not $Force) {
+    $foreign = @(Get-ArciForeignRdpSession -AdminAddress $AdminAddress -Port $RdpPort)
+    if ($foreign.Count -gt 0) {
+        throw ("Açık uzak masaüstü oturumu {0} adresinden; bu kural onu keserdi. -AdminAddress'e ekleyin veya -Force kullanın. [An RDP session from {0} would be cut off.]" -f ($foreign -join ', '))
+    }
+}
+if (@(Get-KeptGroupRules).Count -eq 0) {
+    throw ("-KeepRuleGroup hiçbir kurala uymuyor: {0}. 'Core Networking' grubunun adını denetleyin: Get-NetFirewallRule -DisplayGroup '<ad>' | Select-Object -First 1 Group, DisplayGroup [no rule matches the groups to keep; nothing was changed]." -f ($KeepRuleGroup -join ', '))
+}
+
+# --- apply ---------------------------------------------------------------------------------------
+
+if (@($state.previous_profiles).Count -eq 0) {
+    $state.previous_profiles = @(Get-NetFirewallProfile -All | ForEach-Object {
+            [pscustomobject]@{ name = [string]$_.Name; enabled = [string]$_.Enabled; default_inbound = [string]$_.DefaultInboundAction; default_outbound = [string]$_.DefaultOutboundAction }
+        })
+}
+$disabled = New-Object System.Collections.Generic.List[object]
+foreach ($entry in @($state.disabled_rules)) {
+    if ($entry -is [string]) { $disabled.Add([pscustomobject]@{ name = $entry; display_name = $entry; direction = 'Inbound' }) }
+    else { $disabled.Add($entry) }
+}
+$state.strict_outbound = $strict
+$state.admin_address = @($AdminAddress)
+$state.allow_winrm = [bool]$AllowWinRM
+$state.keep_rules = @($KeepRule)
+$state.smtp_server = $(if ($SmtpServer) { $SmtpServer } else { $null })
+# Recorded before the first change, so -Remove can always undo what follows.
+$state.disabled_rules = $disabled.ToArray()
+Write-FirewallState $state
+
+Set-NetFirewallProfile -All -Enabled True -DefaultInboundAction Block
+Get-NetFirewallRule -Group $Group -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+foreach ($rule in $rules) {
+    $arguments = @{
+        DisplayName   = $rule.name
+        Group         = $Group
+        Direction     = $rule.direction
+        Protocol      = $rule.protocol
+        RemoteAddress = $rule.remote_address
+        Action        = 'Allow'
+        Profile       = 'Any'
+        Enabled       = 'True'
+        Description   = ('ARCILOGGER: ' + $rule.purpose)
+    }
+    if ($rule.direction -eq 'Inbound') { $arguments['LocalPort'] = $rule.ports } else { $arguments['RemotePort'] = $rule.ports }
+    New-NetFirewallRule @arguments | Out-Null
+}
+
+function Disable-OtherRules([string]$Direction) {
+    foreach ($other in (Get-OtherAllowRules $Direction)) {
+        $other | Disable-NetFirewallRule
+        if (-not @($disabled | Where-Object { $_.name -eq $other.Name }).Count) {
+            $disabled.Add([pscustomobject]@{ name = [string]$other.Name; display_name = [string]$other.DisplayName; direction = $Direction })
+        }
+        Write-ArciInfo ("kapatıldı [disabled] ({0}): {1}" -f $Direction, $other.DisplayName)
+    }
+    $state.disabled_rules = $disabled.ToArray()
+    Write-FirewallState $state
+}
+
+Disable-OtherRules 'Inbound'
+if ($strict) {
+    Disable-OtherRules 'Outbound'
+    Set-NetFirewallProfile -All -DefaultOutboundAction Block
+}
+else {
+    # Strict mode off: the outbound rules it disabled come back, the default is as before ARCILOGGER.
+    $keep = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in $disabled) {
+        if ($entry.direction -eq 'Outbound') {
+            $rule = Get-NetFirewallRule -Name $entry.name -ErrorAction SilentlyContinue
+            if ($rule) { $rule | Enable-NetFirewallRule; Write-ArciInfo ("yeniden açıldı [re-enabled]: {0}" -f $rule.DisplayName) }
+        }
+        else { $keep.Add($entry) }
+    }
+    $disabled = $keep
+    $state.disabled_rules = $disabled.ToArray()
+    foreach ($saved in @($state.previous_profiles)) {
+        Set-NetFirewallProfile -Name $saved.name -DefaultOutboundAction $saved.default_outbound
+    }
+    Write-FirewallState $state
+}
+
+Write-ArciStep 'Güvenlik duvarı kuralları uygulandı [firewall rules applied].'
+Get-NetFirewallRule -Group $Group | Format-Table DisplayName, Direction, Enabled, Action -AutoSize

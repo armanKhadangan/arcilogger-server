@@ -1,0 +1,34 @@
+[project]
+name = "arcilogger-core"
+dynamic = ["version"]
+description = "ARCILOGGER core: sealing, verification, retention, replica, manifests, time-stamp providers and CLI. Runs standalone, without the database or web app."
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+# Keep this list short: core is the evidence path and runs from Task Scheduler on its own.
+dependencies = [
+  # Windows ships no IANA time zone database; zoneinfo needs this package there.
+  "tzdata>=2026.1",
+  # Hashing, signatures, X.509, Fernet (secret store).
+  "cryptography>=50.0.2",
+  # ASN.1 / CMS / RFC 3161 structures (pure Python).
+  "asn1crypto>=1.5.1",
+  # Configuration validation.
+  "pydantic>=2.14.1",
+  # AES-256 (WinZip AES) password-protected evidence packages (MIT; uses pycryptodomex, BSD).
+  "pyzipper>=0.4.0",
+]
+
+[project.scripts]
+arcilogger-core = "arcilogger_core.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arcilogger_core"]
+# Test helpers (deterministic test key, status override) never ship (licensing contract 9.2).
+exclude = ["src/arcilogger_core/license/testing.py"]
+
+[tool.hatch.version]
+path = "src/arcilogger_core/__init__.py"

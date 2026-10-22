@@ -1,0 +1,9 @@
+dist
+coverage
+playwright-report
+test-results
+node_modules
+package-lock.json
+src/generated
+test-results-live
+e2e/samples

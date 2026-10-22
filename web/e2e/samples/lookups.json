@@ -1,0 +1,3179 @@
+{
+  "auditor_run": {
+    "created_at": "2026-10-13T04:00:02.592159Z",
+    "elapsed_ms": 59,
+    "finished_at": "2026-10-13T04:00:02.591848Z",
+    "id": 8,
+    "mode": "candidates",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "double_nat",
+          "params": {},
+          "text_en": "An exact match needs the ISP router's NAT record; candidates ranked by time and destination are listed below.",
+          "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
+        },
+        {
+          "key": "person_department_current",
+          "params": {},
+          "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
+          "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:02.531350+00:00",
+      "matches": [
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "medium",
+            "department": "Planlama",
+            "department_source": "person",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC14"
+              ],
+              "infrastructure": false,
+              "mac": "00:00:5e:00:53:57",
+              "name": "Planlama-PC-14",
+              "randomized": false,
+              "type": "pc",
+              "vendor": null
+            },
+            "explanations": [],
+            "internal_ip": "172.20.42.57",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 635,
+                    "source": "core-r1"
+                  },
+                  "row_id": 5,
+                  "summary": "dhcp42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T07:42:18+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 27,
+                    "offset": 10260,
+                    "source": "fortigate"
+                  },
+                  "row_id": 25,
+                  "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T10:30:00+00:00"
+                }
+              ],
+              "hostname": "PLN-PC14",
+              "ip": "172.20.42.57",
+              "lease_id": 5,
+              "mac": "00:00:5e:00:53:57",
+              "start": "2026-10-09T07:42:18+00:00",
+              "vlan": 42
+            },
+            "person": {
+              "assigned_from": "2026-10-01T06:00:00+00:00",
+              "assigned_to": null,
+              "confidence": "medium",
+              "department": "Planlama",
+              "evidence": [],
+              "link": "history",
+              "name": "Selin Kaya",
+              "person_id": 1,
+              "title": "Planlama Uzmanı"
+            },
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 90,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:41+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 2,
+                  "offset": 160,
+                  "source": "fortigate"
+                },
+                "row_id": 1,
+                "summary": "172.20.42.57:51001 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:51001",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:41+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 51001,
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "start": "2026-10-09T08:23:31+00:00",
+            "transip": "100.64.12.9",
+            "transport": 51001
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "high",
+            "department": "Planlama",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC-05"
+              ],
+              "infrastructure": false,
+              "mac": "3c:52:82:00:00:05",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.42.165",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 1,
+                    "offset": 0,
+                    "source": "core-r1"
+                  },
+                  "row_id": 1,
+                  "summary": "dhcp42 assigned 172.20.42.165 for 3c:52:82:00:00:05 PLN-PC-05",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 23,
+                    "offset": 8608,
+                    "source": "fortigate"
+                  },
+                  "row_id": 21,
+                  "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:46+00:00"
+                }
+              ],
+              "hostname": "PLN-PC-05",
+              "ip": "172.20.42.165",
+              "lease_id": 2,
+              "mac": "3c:52:82:00:00:05",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 42
+            },
+            "person": null,
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 90,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:46+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 23,
+                  "offset": 8608,
+                  "source": "fortigate"
+                },
+                "row_id": 21,
+                "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:46+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50115,
+            "srcip": "172.20.42.165",
+            "srcport": 50115,
+            "start": "2026-10-09T08:23:40+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50115
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:11+00:00",
+            "confidence": "high",
+            "department": "Finans",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "FIN-PC-01"
+              ],
+              "infrastructure": false,
+              "mac": "00:15:5d:00:00:20",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.41.15",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 2,
+                    "offset": 159,
+                    "source": "core-r1"
+                  },
+                  "row_id": 2,
+                  "summary": "dhcp41 assigned 172.20.41.15 for 00:15:5d:00:00:20 FIN-PC-01",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 24,
+                    "offset": 9022,
+                    "source": "fortigate"
+                  },
+                  "row_id": 22,
+                  "summary": "172.20.41.15:50116 -> 151.101.1.69:443 proto 6 snat 100.64.12.9:50116",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:53+00:00"
+                }
+              ],
+              "hostname": "FIN-PC-01",
+              "ip": "172.20.41.15",
+              "lease_id": 1,
+              "mac": "00:15:5d:00:00:20",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 41
+            },
+            "person": null,
+            "vlan": 41,
+            "vlan_name": "Finans"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 70,
+          "time_distance_ms": 30000,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:11+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 18,
+                  "offset": 6547,
+                  "source": "fortigate"
+                },
+                "row_id": 16,
+                "summary": "172.20.41.15:50110 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50110",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:11+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50110,
+            "srcip": "172.20.41.15",
+            "srcport": 50110,
+            "start": "2026-10-09T08:23:06+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50110
+          }
+        }
+      ],
+      "mode": "candidates",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": "203.0.113.10",
+        "dest_port": 443,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": null,
+        "public_ip": "198.51.100.23",
+        "public_port": null,
+        "tolerance_seconds": 60
+      },
+      "result_count": 3,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": "203.0.113.10",
+      "dest_port": 443,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": null,
+      "public_ip": "198.51.100.23",
+      "public_port": null,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 60
+    },
+    "report": null,
+    "request": {
+      "authority": "Ankara Cumhuriyet Başsavcılığı",
+      "file_no": "2026/9917",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 3,
+    "user_id": 2,
+    "username": "ayse.yilmaz"
+  },
+  "candidates": {
+    "created_at": "2026-10-13T04:00:01.795755Z",
+    "elapsed_ms": 48,
+    "finished_at": "2026-10-13T04:00:01.795462Z",
+    "id": 2,
+    "mode": "candidates",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "double_nat",
+          "params": {},
+          "text_en": "An exact match needs the ISP router's NAT record; candidates ranked by time and destination are listed below.",
+          "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
+        },
+        {
+          "key": "person_department_current",
+          "params": {},
+          "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
+          "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:01.746857+00:00",
+      "matches": [
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "medium",
+            "department": "Planlama",
+            "department_source": "person",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC14"
+              ],
+              "infrastructure": false,
+              "mac": "00:00:5e:00:53:57",
+              "name": "Planlama-PC-14",
+              "randomized": false,
+              "type": "pc",
+              "vendor": null
+            },
+            "explanations": [],
+            "internal_ip": "172.20.42.57",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 635,
+                    "source": "core-r1"
+                  },
+                  "row_id": 5,
+                  "summary": "dhcp42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T07:42:18+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 27,
+                    "offset": 10260,
+                    "source": "fortigate"
+                  },
+                  "row_id": 25,
+                  "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T10:30:00+00:00"
+                }
+              ],
+              "hostname": "PLN-PC14",
+              "ip": "172.20.42.57",
+              "lease_id": 5,
+              "mac": "00:00:5e:00:53:57",
+              "start": "2026-10-09T07:42:18+00:00",
+              "vlan": 42
+            },
+            "person": {
+              "assigned_from": "2026-10-01T06:00:00+00:00",
+              "assigned_to": null,
+              "confidence": "medium",
+              "department": "Planlama",
+              "evidence": [],
+              "link": "history",
+              "name": "Selin Kaya",
+              "person_id": 1,
+              "title": "Planlama Uzmanı"
+            },
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 90,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:41+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 2,
+                  "offset": 160,
+                  "source": "fortigate"
+                },
+                "row_id": 1,
+                "summary": "172.20.42.57:51001 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:51001",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:41+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 51001,
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "start": "2026-10-09T08:23:31+00:00",
+            "transip": "100.64.12.9",
+            "transport": 51001
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "high",
+            "department": "Planlama",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC-05"
+              ],
+              "infrastructure": false,
+              "mac": "3c:52:82:00:00:05",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.42.165",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 1,
+                    "offset": 0,
+                    "source": "core-r1"
+                  },
+                  "row_id": 1,
+                  "summary": "dhcp42 assigned 172.20.42.165 for 3c:52:82:00:00:05 PLN-PC-05",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 23,
+                    "offset": 8608,
+                    "source": "fortigate"
+                  },
+                  "row_id": 21,
+                  "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:46+00:00"
+                }
+              ],
+              "hostname": "PLN-PC-05",
+              "ip": "172.20.42.165",
+              "lease_id": 2,
+              "mac": "3c:52:82:00:00:05",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 42
+            },
+            "person": null,
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 90,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:46+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 23,
+                  "offset": 8608,
+                  "source": "fortigate"
+                },
+                "row_id": 21,
+                "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:46+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50115,
+            "srcip": "172.20.42.165",
+            "srcport": 50115,
+            "start": "2026-10-09T08:23:40+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50115
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:11+00:00",
+            "confidence": "high",
+            "department": "Finans",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "FIN-PC-01"
+              ],
+              "infrastructure": false,
+              "mac": "00:15:5d:00:00:20",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.41.15",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 2,
+                    "offset": 159,
+                    "source": "core-r1"
+                  },
+                  "row_id": 2,
+                  "summary": "dhcp41 assigned 172.20.41.15 for 00:15:5d:00:00:20 FIN-PC-01",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 24,
+                    "offset": 9022,
+                    "source": "fortigate"
+                  },
+                  "row_id": 22,
+                  "summary": "172.20.41.15:50116 -> 151.101.1.69:443 proto 6 snat 100.64.12.9:50116",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:53+00:00"
+                }
+              ],
+              "hostname": "FIN-PC-01",
+              "ip": "172.20.41.15",
+              "lease_id": 1,
+              "mac": "00:15:5d:00:00:20",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 41
+            },
+            "person": null,
+            "vlan": 41,
+            "vlan_name": "Finans"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 70,
+          "time_distance_ms": 30000,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:11+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 18,
+                  "offset": 6547,
+                  "source": "fortigate"
+                },
+                "row_id": 16,
+                "summary": "172.20.41.15:50110 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50110",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:11+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50110,
+            "srcip": "172.20.41.15",
+            "srcport": 50110,
+            "start": "2026-10-09T08:23:06+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50110
+          }
+        }
+      ],
+      "mode": "candidates",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": "203.0.113.10",
+        "dest_port": 443,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": null,
+        "public_ip": "198.51.100.23",
+        "public_port": 41234,
+        "tolerance_seconds": 60
+      },
+      "result_count": 3,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": "203.0.113.10",
+      "dest_port": 443,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": null,
+      "public_ip": "198.51.100.23",
+      "public_port": 41234,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 60
+    },
+    "report": null,
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 3,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "candidates_with_report": {
+    "created_at": "2026-10-13T04:00:01.795755Z",
+    "elapsed_ms": null,
+    "finished_at": "2026-10-13T04:00:01.795462Z",
+    "id": 2,
+    "mode": "candidates",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "double_nat",
+          "params": {},
+          "text_en": "An exact match needs the ISP router's NAT record; candidates ranked by time and destination are listed below.",
+          "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
+        },
+        {
+          "key": "person_department_current",
+          "params": {},
+          "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
+          "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:01.746857+00:00",
+      "matches": [
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "medium",
+            "department": "Planlama",
+            "department_source": "person",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC14"
+              ],
+              "infrastructure": false,
+              "mac": "00:00:5e:00:53:57",
+              "name": "Planlama-PC-14",
+              "randomized": false,
+              "type": "pc",
+              "vendor": null
+            },
+            "explanations": [],
+            "internal_ip": "172.20.42.57",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 635,
+                    "source": "core-r1"
+                  },
+                  "row_id": 5,
+                  "summary": "dhcp42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T07:42:18+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 27,
+                    "offset": 10260,
+                    "source": "fortigate"
+                  },
+                  "row_id": 25,
+                  "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T10:30:00+00:00"
+                }
+              ],
+              "hostname": "PLN-PC14",
+              "ip": "172.20.42.57",
+              "lease_id": 5,
+              "mac": "00:00:5e:00:53:57",
+              "start": "2026-10-09T07:42:18+00:00",
+              "vlan": 42
+            },
+            "person": {
+              "assigned_from": "2026-10-01T06:00:00+00:00",
+              "assigned_to": null,
+              "confidence": "medium",
+              "department": "Planlama",
+              "evidence": [],
+              "link": "history",
+              "name": "Selin Kaya",
+              "person_id": 1,
+              "title": "Planlama Uzmanı"
+            },
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 90,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:41+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 2,
+                  "offset": 160,
+                  "source": "fortigate"
+                },
+                "row_id": 1,
+                "summary": "172.20.42.57:51001 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:51001",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:41+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 51001,
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "start": "2026-10-09T08:23:31+00:00",
+            "transip": "100.64.12.9",
+            "transport": 51001
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "high",
+            "department": "Planlama",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC-05"
+              ],
+              "infrastructure": false,
+              "mac": "3c:52:82:00:00:05",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.42.165",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 1,
+                    "offset": 0,
+                    "source": "core-r1"
+                  },
+                  "row_id": 1,
+                  "summary": "dhcp42 assigned 172.20.42.165 for 3c:52:82:00:00:05 PLN-PC-05",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 23,
+                    "offset": 8608,
+                    "source": "fortigate"
+                  },
+                  "row_id": 21,
+                  "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:46+00:00"
+                }
+              ],
+              "hostname": "PLN-PC-05",
+              "ip": "172.20.42.165",
+              "lease_id": 2,
+              "mac": "3c:52:82:00:00:05",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 42
+            },
+            "person": null,
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 90,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:46+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 23,
+                  "offset": 8608,
+                  "source": "fortigate"
+                },
+                "row_id": 21,
+                "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:46+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50115,
+            "srcip": "172.20.42.165",
+            "srcport": 50115,
+            "start": "2026-10-09T08:23:40+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50115
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:11+00:00",
+            "confidence": "high",
+            "department": "Finans",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "FIN-PC-01"
+              ],
+              "infrastructure": false,
+              "mac": "00:15:5d:00:00:20",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.41.15",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 2,
+                    "offset": 159,
+                    "source": "core-r1"
+                  },
+                  "row_id": 2,
+                  "summary": "dhcp41 assigned 172.20.41.15 for 00:15:5d:00:00:20 FIN-PC-01",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 24,
+                    "offset": 9022,
+                    "source": "fortigate"
+                  },
+                  "row_id": 22,
+                  "summary": "172.20.41.15:50116 -> 151.101.1.69:443 proto 6 snat 100.64.12.9:50116",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:53+00:00"
+                }
+              ],
+              "hostname": "FIN-PC-01",
+              "ip": "172.20.41.15",
+              "lease_id": 1,
+              "mac": "00:15:5d:00:00:20",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 41
+            },
+            "person": null,
+            "vlan": 41,
+            "vlan_name": "Finans"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 70,
+          "time_distance_ms": 30000,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:11+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 18,
+                  "offset": 6547,
+                  "source": "fortigate"
+                },
+                "row_id": 16,
+                "summary": "172.20.41.15:50110 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50110",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:11+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50110,
+            "srcip": "172.20.41.15",
+            "srcport": 50110,
+            "start": "2026-10-09T08:23:06+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50110
+          }
+        }
+      ],
+      "mode": "candidates",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": "203.0.113.10",
+        "dest_port": 443,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": null,
+        "public_ip": "198.51.100.23",
+        "public_port": 41234,
+        "tolerance_seconds": 60
+      },
+      "result_count": 3,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": "203.0.113.10",
+      "dest_port": 443,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": null,
+      "public_ip": "198.51.100.23",
+      "public_port": 41234,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 60
+    },
+    "report": {
+      "created_at": "2026-10-13T04:00:03.209858Z",
+      "download_count": 1,
+      "pages": 7,
+      "sha256": "83514aebd9638c1953a88750a46b9a2b7b235d786650d8de2a1b43fbf2d0f205",
+      "size": 89260,
+      "timestamp": {
+        "errors": [],
+        "gen_time": "2026-10-13T04:00:03+00:00",
+        "legal_grade": false,
+        "policy": "2.999.5651.1",
+        "provider": "mock",
+        "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
+        "serial": "6D7B1D824C54A031",
+        "server": "tzd.kamusm.gov.tr",
+        "token_file": "reports/ARCILOGGER-5651-rapor-2.pdf.zd",
+        "token_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "tsa_name": "CN=ARCILOGGER Mock TSA (TEST ONLY) tsa,O=ARCILOGGER TEST - NOT VALID,C=TR",
+        "verified": true
+      },
+      "timestamp_status": "stamped",
+      "username": "tolga",
+      "version": "0.1.0"
+    },
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 3,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "conflict": {
+    "created_at": "2026-10-13T04:00:01.902055Z",
+    "elapsed_ms": 38,
+    "finished_at": "2026-10-13T04:00:01.901766Z",
+    "id": 3,
+    "mode": "candidates",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "double_nat",
+          "params": {},
+          "text_en": "An exact match needs the ISP router's NAT record; candidates ranked by time and destination are listed below.",
+          "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
+        },
+        {
+          "key": "person_department_current",
+          "params": {},
+          "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
+          "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:01.862622+00:00",
+      "matches": [
+        {
+          "chain": {
+            "alternatives": [
+              {
+                "alternatives": [],
+                "at": "2026-10-09T10:30:00+00:00",
+                "confidence": "low",
+                "department": "Planlama",
+                "department_source": "vlan",
+                "device": {
+                  "confidence": "high",
+                  "evidence": [],
+                  "hostnames": [],
+                  "infrastructure": false,
+                  "mac": "00:0c:29:00:00:99",
+                  "name": null,
+                  "randomized": false,
+                  "type": null,
+                  "vendor": null
+                },
+                "explanations": [
+                  {
+                    "key": "ip_conflict",
+                    "params": {},
+                    "text_en": "This IP address was held by more than one MAC address at this time (IP conflict); all possible devices are listed and no single device can be named with certainty.",
+                    "text_tr": "Bu IP adresi bu zamanda birden fazla MAC adresinde görünüyor (IP çakışması); olası tüm cihazlar listelenmiştir, tek bir cihaza kesin atama yapılamaz."
+                  },
+                  {
+                    "key": "arp_only",
+                    "params": {},
+                    "text_en": "This IP-MAC pairing rests only on the hourly ARP-LOG records (medium confidence).",
+                    "text_tr": "Bu IP-MAC eşleşmesi yalnızca saatlik ARP-LOG kayıtlarına dayanıyor (orta güven)."
+                  },
+                  {
+                    "key": "no_person",
+                    "params": {},
+                    "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                    "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+                  }
+                ],
+                "internal_ip": "172.20.42.57",
+                "lease": {
+                  "confidence": "medium",
+                  "end": "2026-10-09T12:00:00+00:00",
+                  "end_reason": "arp",
+                  "evidence": [
+                    {
+                      "raw": {
+                        "day": "2026-10-09",
+                        "line": 6,
+                        "offset": 792,
+                        "source": "core-r1"
+                      },
+                      "row_id": 1,
+                      "summary": "ARP-LOG 172.20.42.57 00:0c:29:00:00:99 vlan42",
+                      "table": "mt_arp",
+                      "time": "2026-10-09T10:00:00+00:00"
+                    },
+                    {
+                      "raw": {
+                        "day": "2026-10-09",
+                        "line": 7,
+                        "offset": 937,
+                        "source": "core-r1"
+                      },
+                      "row_id": 2,
+                      "summary": "ARP-LOG 172.20.42.57 00:0c:29:00:00:99 vlan42",
+                      "table": "mt_arp",
+                      "time": "2026-10-09T11:00:00+00:00"
+                    }
+                  ],
+                  "hostname": null,
+                  "ip": "172.20.42.57",
+                  "lease_id": 6,
+                  "mac": "00:0c:29:00:00:99",
+                  "start": "2026-10-09T10:00:00+00:00",
+                  "vlan": 42
+                },
+                "person": null,
+                "vlan": 42,
+                "vlan_name": "Planlama"
+              }
+            ],
+            "at": "2026-10-09T10:30:00+00:00",
+            "confidence": "low",
+            "department": "Planlama",
+            "department_source": "person",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC14"
+              ],
+              "infrastructure": false,
+              "mac": "00:00:5e:00:53:57",
+              "name": "Planlama-PC-14",
+              "randomized": false,
+              "type": "pc",
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "ip_conflict",
+                "params": {},
+                "text_en": "This IP address was held by more than one MAC address at this time (IP conflict); all possible devices are listed and no single device can be named with certainty.",
+                "text_tr": "Bu IP adresi bu zamanda birden fazla MAC adresinde görünüyor (IP çakışması); olası tüm cihazlar listelenmiştir, tek bir cihaza kesin atama yapılamaz."
+              }
+            ],
+            "internal_ip": "172.20.42.57",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 635,
+                    "source": "core-r1"
+                  },
+                  "row_id": 5,
+                  "summary": "dhcp42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T07:42:18+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 27,
+                    "offset": 10260,
+                    "source": "fortigate"
+                  },
+                  "row_id": 25,
+                  "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T10:30:00+00:00"
+                }
+              ],
+              "hostname": "PLN-PC14",
+              "ip": "172.20.42.57",
+              "lease_id": 5,
+              "mac": "00:00:5e:00:53:57",
+              "start": "2026-10-09T07:42:18+00:00",
+              "vlan": 42
+            },
+            "person": {
+              "assigned_from": "2026-10-01T06:00:00+00:00",
+              "assigned_to": null,
+              "confidence": "medium",
+              "department": "Planlama",
+              "evidence": [],
+              "link": "history",
+              "name": "Selin Kaya",
+              "person_id": 1,
+              "title": "Planlama Uzmanı"
+            },
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "ip_port",
+          "kind": "candidate",
+          "score": 86,
+          "time_distance_ms": 5000,
+          "traffic": {
+            "dstip": "93.184.216.34",
+            "dstport": 443,
+            "end": "2026-10-09T10:30:00+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 27,
+                  "offset": 10260,
+                  "source": "fortigate"
+                },
+                "row_id": 25,
+                "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                "table": "fg_traffic",
+                "time": "2026-10-09T10:30:00+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 61001,
+            "srcip": "172.20.42.57",
+            "srcport": 61001,
+            "start": "2026-10-09T10:29:48+00:00",
+            "transip": "100.64.12.9",
+            "transport": 61001
+          }
+        }
+      ],
+      "mode": "candidates",
+      "request": {
+        "at": "2026-10-09T10:30:05+00:00",
+        "dest_domain": null,
+        "dest_ip": "93.184.216.34",
+        "dest_port": 443,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": null,
+        "public_ip": "198.51.100.23",
+        "public_port": null,
+        "tolerance_seconds": null
+      },
+      "result_count": 1,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T10:30:05+00:00",
+      "dest_domain": null,
+      "dest_ip": "93.184.216.34",
+      "dest_port": 443,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": null,
+      "public_ip": "198.51.100.23",
+      "public_port": null,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T13:30:05",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": null
+    },
+    "report": null,
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 1,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "errors": {
+    "bad_address": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "query",
+                "public_ip"
+              ],
+              "msg": "Value error, not an IP address",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "blank_authority": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "request",
+                "authority"
+              ],
+              "msg": "String should have at least 1 character",
+              "type": "string_too_short"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "future_request_date": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "request",
+                "request_date"
+              ],
+              "msg": "the request date is in the future",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "lookup_settings_invalid": {
+      "body": {
+        "error": {
+          "code": "lookup_settings_invalid",
+          "message_en": "The 5651 lookup settings are invalid (Settings → NAT); an administrator must fix them.",
+          "message_tr": "5651 sorgu ayarları geçersiz (Ayarlar → NAT); sistem yöneticisi düzeltmelidir."
+        }
+      },
+      "headers": {},
+      "status": 503
+    },
+    "lookup_timeout": {
+      "body": {
+        "error": {
+          "code": "lookup_timeout",
+          "message_en": "The lookup did not finish within 1 seconds and was stopped. Narrow the tolerance or add destination details; tell the administrator if it persists.",
+          "message_tr": "Sorgu 1 saniye içinde tamamlanamadı ve durduruldu. Toleransı daraltın veya hedef bilgisi ekleyin; sorun sürerse sistem yöneticisine bildirin."
+        }
+      },
+      "headers": {},
+      "status": 504
+    },
+    "nothing_to_look_for": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "query"
+              ],
+              "msg": "a lookup needs a public IP, an internal IP, a MAC address or a destination",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "other_users_lookup": {
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message_en": "Not found.",
+          "message_tr": "Kayıt bulunamadı."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "privacy_notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "report_access_denied": {
+      "body": {
+        "error": {
+          "code": "report_access_denied",
+          "message_en": "No report was made: the ARCILOGGER API service may not read a cited file (vault/2026/10/09/manifest-2026-10-09.json; folder permissions of the installation). A report is never made with missing evidence; try again once the permission is fixed. Tell the administrator.",
+          "message_tr": "Rapor oluşturulmadı: ARCILOGGER API hizmetinin kanıt dosyalarından birini (vault/2026/10/09/manifest-2026-10-09.json) okuma izni yok (kurulumdaki klasör izinleri). Rapor eksik kanıtla üretilmez; izin düzeltildikten sonra tekrar deneyin. Sistem yöneticisine bildirin."
+        }
+      },
+      "headers": {},
+      "status": 503
+    },
+    "report_evidence_unreadable": {
+      "body": {
+        "error": {
+          "code": "report_evidence_unreadable",
+          "message_en": "No report was made: a cited file (vault/2026/10/09/manifest-2026-10-09.json) cannot be read right now (disk or file system error). Try again later; tell the administrator if it persists.",
+          "message_tr": "Rapor oluşturulmadı: kanıt dosyalarından biri (vault/2026/10/09/manifest-2026-10-09.json) şu anda okunamıyor (disk veya dosya sistemi hatası). Biraz sonra tekrar deneyin; sürerse sistem yöneticisine bildirin."
+        }
+      },
+      "headers": {},
+      "status": 503
+    }
+  },
+  "exact": {
+    "created_at": "2026-10-13T04:00:01.672745Z",
+    "elapsed_ms": 49,
+    "finished_at": "2026-10-13T04:00:01.672465Z",
+    "id": 1,
+    "mode": "exact",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "exact_nat",
+          "params": {},
+          "text_en": "The public IP is the FortiGate's own address, so the session matched exactly.",
+          "text_tr": "Genel IP adresi FortiGate'in kendi adresi olduğu için oturum kesin olarak eşleşti."
+        },
+        {
+          "key": "person_department_current",
+          "params": {},
+          "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
+          "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:01.622258+00:00",
+      "matches": [
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "medium",
+            "department": "Planlama",
+            "department_source": "person",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC14"
+              ],
+              "infrastructure": false,
+              "mac": "00:00:5e:00:53:57",
+              "name": "Planlama-PC-14",
+              "randomized": false,
+              "type": "pc",
+              "vendor": null
+            },
+            "explanations": [],
+            "internal_ip": "172.20.42.57",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 635,
+                    "source": "core-r1"
+                  },
+                  "row_id": 5,
+                  "summary": "dhcp42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T07:42:18+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 27,
+                    "offset": 10260,
+                    "source": "fortigate"
+                  },
+                  "row_id": 25,
+                  "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T10:30:00+00:00"
+                }
+              ],
+              "hostname": "PLN-PC14",
+              "ip": "172.20.42.57",
+              "lease_id": 5,
+              "mac": "00:00:5e:00:53:57",
+              "start": "2026-10-09T07:42:18+00:00",
+              "vlan": 42
+            },
+            "person": {
+              "assigned_from": "2026-10-01T06:00:00+00:00",
+              "assigned_to": null,
+              "confidence": "medium",
+              "department": "Planlama",
+              "evidence": [],
+              "link": "history",
+              "name": "Selin Kaya",
+              "person_id": 1,
+              "title": "Planlama Uzmanı"
+            },
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "not_requested",
+          "kind": "exact",
+          "score": 100,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:41+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 2,
+                  "offset": 160,
+                  "source": "fortigate"
+                },
+                "row_id": 1,
+                "summary": "172.20.42.57:51001 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:51001",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:41+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 51001,
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "start": "2026-10-09T08:23:31+00:00",
+            "transip": "100.64.12.9",
+            "transport": 51001
+          }
+        }
+      ],
+      "mode": "exact",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": null,
+        "dest_port": null,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": 6,
+        "public_ip": "100.64.12.9",
+        "public_port": 51001,
+        "tolerance_seconds": 60
+      },
+      "result_count": 1,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": null,
+      "dest_port": null,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": 6,
+      "public_ip": "100.64.12.9",
+      "public_port": 51001,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 60
+    },
+    "report": null,
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 1,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "exact_with_report": {
+    "created_at": "2026-10-13T04:00:01.672745Z",
+    "elapsed_ms": null,
+    "finished_at": "2026-10-13T04:00:01.672465Z",
+    "id": 1,
+    "mode": "exact",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "exact_nat",
+          "params": {},
+          "text_en": "The public IP is the FortiGate's own address, so the session matched exactly.",
+          "text_tr": "Genel IP adresi FortiGate'in kendi adresi olduğu için oturum kesin olarak eşleşti."
+        },
+        {
+          "key": "person_department_current",
+          "params": {},
+          "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
+          "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:01.622258+00:00",
+      "matches": [
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "medium",
+            "department": "Planlama",
+            "department_source": "person",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC14"
+              ],
+              "infrastructure": false,
+              "mac": "00:00:5e:00:53:57",
+              "name": "Planlama-PC-14",
+              "randomized": false,
+              "type": "pc",
+              "vendor": null
+            },
+            "explanations": [],
+            "internal_ip": "172.20.42.57",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 635,
+                    "source": "core-r1"
+                  },
+                  "row_id": 5,
+                  "summary": "dhcp42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T07:42:18+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 27,
+                    "offset": 10260,
+                    "source": "fortigate"
+                  },
+                  "row_id": 25,
+                  "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T10:30:00+00:00"
+                }
+              ],
+              "hostname": "PLN-PC14",
+              "ip": "172.20.42.57",
+              "lease_id": 5,
+              "mac": "00:00:5e:00:53:57",
+              "start": "2026-10-09T07:42:18+00:00",
+              "vlan": 42
+            },
+            "person": {
+              "assigned_from": "2026-10-01T06:00:00+00:00",
+              "assigned_to": null,
+              "confidence": "medium",
+              "department": "Planlama",
+              "evidence": [],
+              "link": "history",
+              "name": "Selin Kaya",
+              "person_id": 1,
+              "title": "Planlama Uzmanı"
+            },
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "not_requested",
+          "kind": "exact",
+          "score": 100,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:41+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 2,
+                  "offset": 160,
+                  "source": "fortigate"
+                },
+                "row_id": 1,
+                "summary": "172.20.42.57:51001 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:51001",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:41+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 51001,
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "start": "2026-10-09T08:23:31+00:00",
+            "transip": "100.64.12.9",
+            "transport": 51001
+          }
+        }
+      ],
+      "mode": "exact",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": null,
+        "dest_port": null,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": 6,
+        "public_ip": "100.64.12.9",
+        "public_port": 51001,
+        "tolerance_seconds": 60
+      },
+      "result_count": 1,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": null,
+      "dest_port": null,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": 6,
+      "public_ip": "100.64.12.9",
+      "public_port": 51001,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 60
+    },
+    "report": {
+      "created_at": "2026-10-13T04:00:02.780150Z",
+      "download_count": 1,
+      "pages": 5,
+      "sha256": "44468421742b8f23c300d082f366b1115b78ff881e8e6a77fee524cd39f15d46",
+      "size": 80751,
+      "timestamp": null,
+      "timestamp_status": "not_requested",
+      "username": "tolga",
+      "version": "0.1.0"
+    },
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 1,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "internal": {
+    "created_at": "2026-10-13T04:00:02.015504Z",
+    "elapsed_ms": 34,
+    "finished_at": "2026-10-13T04:00:02.015143Z",
+    "id": 4,
+    "mode": "internal",
+    "outcome": {
+      "attribution": {
+        "alternatives": [],
+        "at": "2026-10-09T08:23:41+00:00",
+        "confidence": "medium",
+        "department": "Wi-Fi Personel",
+        "department_source": "vlan",
+        "device": {
+          "confidence": "medium",
+          "evidence": [],
+          "hostnames": [
+            "Telefon-12"
+          ],
+          "infrastructure": false,
+          "mac": "02:00:5e:00:53:64",
+          "name": null,
+          "randomized": true,
+          "type": null,
+          "vendor": null
+        },
+        "explanations": [
+          {
+            "key": "randomized_mac",
+            "params": {},
+            "text_en": "The device uses a randomised (locally administered) MAC address; the same person may use different MAC addresses on other networks or at other times.",
+            "text_tr": "Cihaz rastgele (yerel yönetilen) bir MAC adresi kullanıyor; aynı kişi farklı ağlarda veya dönemlerde farklı MAC adresleri kullanabilir."
+          },
+          {
+            "key": "no_person",
+            "params": {},
+            "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+            "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+          }
+        ],
+        "internal_ip": "172.20.60.142",
+        "lease": {
+          "confidence": "high",
+          "end": null,
+          "end_reason": "open",
+          "evidence": [
+            {
+              "raw": {
+                "day": "2026-10-09",
+                "line": 4,
+                "offset": 475,
+                "source": "core-r1"
+              },
+              "row_id": 4,
+              "summary": "dhcp60 assigned 172.20.60.142 for 02:00:5e:00:53:64 Telefon-12",
+              "table": "mt_dhcp",
+              "time": "2026-10-09T06:37:52+00:00"
+            },
+            {
+              "raw": {
+                "day": "2026-10-09",
+                "line": 5,
+                "offset": 1406,
+                "source": "fortigate"
+              },
+              "row_id": 4,
+              "summary": "172.20.60.142:51002 -> 203.0.113.20:443 proto 6 snat 100.64.12.9:51002",
+              "table": "fg_traffic",
+              "time": "2026-10-09T08:25:26+00:00"
+            }
+          ],
+          "hostname": "Telefon-12",
+          "ip": "172.20.60.142",
+          "lease_id": 4,
+          "mac": "02:00:5e:00:53:64",
+          "start": "2026-10-09T06:37:52+00:00",
+          "vlan": 60
+        },
+        "person": null,
+        "vlan": 60,
+        "vlan_name": "Wi-Fi Personel"
+      },
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [],
+      "generated_at": "2026-10-13T04:00:01.979799+00:00",
+      "matches": [],
+      "mode": "internal",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": null,
+        "dest_port": null,
+        "internal_ip": "172.20.60.142",
+        "mac": null,
+        "protocol": null,
+        "public_ip": null,
+        "public_port": null,
+        "tolerance_seconds": 60
+      },
+      "result_count": 1,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": null,
+      "dest_port": null,
+      "internal_ip": "172.20.60.142",
+      "mac": null,
+      "protocol": null,
+      "public_ip": null,
+      "public_port": null,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 60
+    },
+    "report": null,
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 1,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "list_admin": {
+    "all_users": true,
+    "items": [
+      {
+        "authority": "Ankara Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.592159Z",
+        "file_no": "2026/9917",
+        "id": 8,
+        "mode": "candidates",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 3,
+        "user_id": 2,
+        "username": "ayse.yilmaz"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.419242Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 7,
+        "mode": "candidates",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 5,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.261569Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 6,
+        "mode": "none",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 0,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.135775Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 5,
+        "mode": "none",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 0,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.015504Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 4,
+        "mode": "internal",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 1,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:01.902055Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 3,
+        "mode": "candidates",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 1,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:01.795755Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 2,
+        "mode": "candidates",
+        "report_sha256": "83514aebd9638c1953a88750a46b9a2b7b235d786650d8de2a1b43fbf2d0f205",
+        "request_date": "2026-10-10",
+        "result_count": 3,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:01.672745Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 1,
+        "mode": "exact",
+        "report_sha256": "44468421742b8f23c300d082f366b1115b78ff881e8e6a77fee524cd39f15d46",
+        "request_date": "2026-10-10",
+        "result_count": 1,
+        "user_id": 1,
+        "username": "tolga"
+      }
+    ],
+    "next_cursor": null
+  },
+  "list_admin_mine": {
+    "all_users": false,
+    "items": [
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.419242Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 7,
+        "mode": "candidates",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 5,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.261569Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 6,
+        "mode": "none",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 0,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.135775Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 5,
+        "mode": "none",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 0,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.015504Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 4,
+        "mode": "internal",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 1,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:01.902055Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 3,
+        "mode": "candidates",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 1,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:01.795755Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 2,
+        "mode": "candidates",
+        "report_sha256": "83514aebd9638c1953a88750a46b9a2b7b235d786650d8de2a1b43fbf2d0f205",
+        "request_date": "2026-10-10",
+        "result_count": 3,
+        "user_id": 1,
+        "username": "tolga"
+      },
+      {
+        "authority": "İzmir Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:01.672745Z",
+        "file_no": "2026/48213 Soruşturma",
+        "id": 1,
+        "mode": "exact",
+        "report_sha256": "44468421742b8f23c300d082f366b1115b78ff881e8e6a77fee524cd39f15d46",
+        "request_date": "2026-10-10",
+        "result_count": 1,
+        "user_id": 1,
+        "username": "tolga"
+      }
+    ],
+    "next_cursor": null
+  },
+  "list_auditor": {
+    "all_users": false,
+    "items": [
+      {
+        "authority": "Ankara Cumhuriyet Başsavcılığı",
+        "created_at": "2026-10-13T04:00:02.592159Z",
+        "file_no": "2026/9917",
+        "id": 8,
+        "mode": "candidates",
+        "report_sha256": null,
+        "request_date": "2026-10-10",
+        "result_count": 3,
+        "user_id": 2,
+        "username": "ayse.yilmaz"
+      }
+    ],
+    "next_cursor": null
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:28.539054+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "none": {
+    "created_at": "2026-10-13T04:00:02.135775Z",
+    "elapsed_ms": 32,
+    "finished_at": "2026-10-13T04:00:02.135389Z",
+    "id": 5,
+    "mode": "none",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "double_nat_no_candidates",
+          "params": {},
+          "text_en": "An exact match needs the ISP router's NAT record; there is also no candidate session to list in this time window.",
+          "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; bu zaman aralığında listelenecek aday oturum da bulunamadı."
+        },
+        {
+          "key": "no_match",
+          "params": {},
+          "text_en": "No matching session was found in this time window.",
+          "text_tr": "Bu zaman aralığında eşleşen oturum bulunamadı."
+        },
+        {
+          "key": "destination_not_found",
+          "params": {
+            "destination": "203.0.113.50:443"
+          },
+          "text_en": "No session to the requested destination (203.0.113.50:443) was found; other sessions are not listed as candidates. Check the destination, the time and the time zone. To see every session of the window regardless of the destination, run the lookup again with the destination fields empty.",
+          "text_tr": "İstenen hedefe (203.0.113.50:443) giden oturum bulunamadı; başka oturumlar aday olarak listelenmez. Hedef bilgisini, saati ve saat dilimini kontrol edin. Hedeften bağımsız olarak aralıktaki tüm oturumları görmek için sorguyu hedef alanlarını boş bırakarak yeniden çalıştırın."
+        },
+        {
+          "key": "no_match_candidates",
+          "params": {},
+          "text_en": "No candidate session in this window. An exact answer needs the ISP router's NAT record (public port → FortiGate port), the requested destination IP/port or domain and the correct time/time zone; a wider tolerance may also help.",
+          "text_tr": "Bu aralıkta aday oturum yok. Sonucu kesinleştirmek için: ISS modeminin NAT kaydı (genel port → FortiGate çıkış portu), talepteki hedef IP/port veya alan adı ve doğru saat/saat dilimi gerekir; toleransı genişletmek de yardımcı olabilir."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:02.102584+00:00",
+      "matches": [],
+      "mode": "none",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": "203.0.113.50",
+        "dest_port": 443,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": null,
+        "public_ip": "198.51.100.23",
+        "public_port": null,
+        "tolerance_seconds": 60
+      },
+      "result_count": 0,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": "203.0.113.50",
+      "dest_port": 443,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": null,
+      "public_ip": "198.51.100.23",
+      "public_port": null,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 60
+    },
+    "report": null,
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 0,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "report_pdf": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-1.pdf\"",
+      "content-type": "application/pdf",
+      "x-arci-sha256": "44468421742b8f23c300d082f366b1115b78ff881e8e6a77fee524cd39f15d46"
+    },
+    "sha256": "44468421742b8f23c300d082f366b1115b78ff881e8e6a77fee524cd39f15d46",
+    "size": 80751
+  },
+  "report_pdf_stamped": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf\"",
+      "content-type": "application/pdf",
+      "x-arci-sha256": "83514aebd9638c1953a88750a46b9a2b7b235d786650d8de2a1b43fbf2d0f205"
+    },
+    "sha256": "83514aebd9638c1953a88750a46b9a2b7b235d786650d8de2a1b43fbf2d0f205",
+    "size": 89260
+  },
+  "report_token": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf.zd\"",
+      "content-type": "application/timestamp-reply"
+    },
+    "sha256": "e4f5f41784caf50d4f54f33117108f2241a78ebf43b30a40772361fe71093172",
+    "size": 1203
+  },
+  "truncated": {
+    "created_at": "2026-10-13T04:00:02.419242Z",
+    "elapsed_ms": 56,
+    "finished_at": "2026-10-13T04:00:02.418948Z",
+    "id": 7,
+    "mode": "candidates",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": true,
+        "in_vault": true,
+        "only_in_vault": false,
+        "requested_day": "2026-10-09"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "double_nat",
+          "params": {},
+          "text_en": "An exact match needs the ISP router's NAT record; candidates ranked by time and destination are listed below.",
+          "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
+        },
+        {
+          "key": "candidates_without_destination",
+          "params": {},
+          "text_en": "The request names no destination IP/port or domain: all sessions in the window are ranked by time only. A destination narrows the candidates considerably.",
+          "text_tr": "Talepte hedef IP/port veya alan adı yok: aralıktaki tüm oturumlar yalnızca zamana göre sıralandı. Hedef bilgisi aday sayısını büyük ölçüde azaltır."
+        },
+        {
+          "key": "truncated",
+          "params": {
+            "shown": 5,
+            "total": 21
+          },
+          "text_en": "21 candidates were found; the best 5 are shown. Add destination details or narrow the tolerance.",
+          "text_tr": "21 aday bulundu; en iyi 5 tanesi gösteriliyor. Hedef bilgisi ekleyerek veya toleransı daraltarak sonucu daraltın."
+        },
+        {
+          "key": "person_department_current",
+          "params": {},
+          "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
+          "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:02.361905+00:00",
+      "matches": [
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "medium",
+            "department": "Wi-Fi Personel",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "medium",
+              "evidence": [],
+              "hostnames": [
+                "Telefon-12"
+              ],
+              "infrastructure": false,
+              "mac": "02:00:5e:00:53:64",
+              "name": null,
+              "randomized": true,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "randomized_mac",
+                "params": {},
+                "text_en": "The device uses a randomised (locally administered) MAC address; the same person may use different MAC addresses on other networks or at other times.",
+                "text_tr": "Cihaz rastgele (yerel yönetilen) bir MAC adresi kullanıyor; aynı kişi farklı ağlarda veya dönemlerde farklı MAC adresleri kullanabilir."
+              },
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.60.142",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 4,
+                    "offset": 475,
+                    "source": "core-r1"
+                  },
+                  "row_id": 4,
+                  "summary": "dhcp60 assigned 172.20.60.142 for 02:00:5e:00:53:64 Telefon-12",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T06:37:52+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 1406,
+                    "source": "fortigate"
+                  },
+                  "row_id": 4,
+                  "summary": "172.20.60.142:51002 -> 203.0.113.20:443 proto 6 snat 100.64.12.9:51002",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:25:26+00:00"
+                }
+              ],
+              "hostname": "Telefon-12",
+              "ip": "172.20.60.142",
+              "lease_id": 4,
+              "mac": "02:00:5e:00:53:64",
+              "start": "2026-10-09T06:37:52+00:00",
+              "vlan": 60
+            },
+            "person": null,
+            "vlan": 60,
+            "vlan_name": "Wi-Fi Personel"
+          },
+          "destination_match": "not_requested",
+          "kind": "candidate",
+          "score": 65,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.20",
+            "dstport": 443,
+            "end": "2026-10-09T08:25:26+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 4,
+                  "offset": 990,
+                  "source": "fortigate"
+                },
+                "row_id": 3,
+                "summary": "172.20.60.142:51002 -> 203.0.113.20:443 proto 6 snat 100.64.12.9:51002 (interim)",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:22:56+00:00"
+              },
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 5,
+                  "offset": 1406,
+                  "source": "fortigate"
+                },
+                "row_id": 4,
+                "summary": "172.20.60.142:51002 -> 203.0.113.20:443 proto 6 snat 100.64.12.9:51002",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:25:26+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 51002,
+            "srcip": "172.20.60.142",
+            "srcport": 51002,
+            "start": "2026-10-09T08:19:16+00:00",
+            "transip": "100.64.12.9",
+            "transport": 51002
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "medium",
+            "department": "Planlama",
+            "department_source": "person",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC14"
+              ],
+              "infrastructure": false,
+              "mac": "00:00:5e:00:53:57",
+              "name": "Planlama-PC-14",
+              "randomized": false,
+              "type": "pc",
+              "vendor": null
+            },
+            "explanations": [],
+            "internal_ip": "172.20.42.57",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 5,
+                    "offset": 635,
+                    "source": "core-r1"
+                  },
+                  "row_id": 5,
+                  "summary": "dhcp42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T07:42:18+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 27,
+                    "offset": 10260,
+                    "source": "fortigate"
+                  },
+                  "row_id": 25,
+                  "summary": "172.20.42.57:61001 -> 93.184.216.34:443 proto 6 snat 100.64.12.9:61001",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T10:30:00+00:00"
+                }
+              ],
+              "hostname": "PLN-PC14",
+              "ip": "172.20.42.57",
+              "lease_id": 5,
+              "mac": "00:00:5e:00:53:57",
+              "start": "2026-10-09T07:42:18+00:00",
+              "vlan": 42
+            },
+            "person": {
+              "assigned_from": "2026-10-01T06:00:00+00:00",
+              "assigned_to": null,
+              "confidence": "medium",
+              "department": "Planlama",
+              "evidence": [],
+              "link": "history",
+              "name": "Selin Kaya",
+              "person_id": 1,
+              "title": "Planlama Uzmanı"
+            },
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "not_requested",
+          "kind": "candidate",
+          "score": 65,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:41+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 2,
+                  "offset": 160,
+                  "source": "fortigate"
+                },
+                "row_id": 1,
+                "summary": "172.20.42.57:51001 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:51001",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:41+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 51001,
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "start": "2026-10-09T08:23:31+00:00",
+            "transip": "100.64.12.9",
+            "transport": 51001
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:41+00:00",
+            "confidence": "high",
+            "department": "Planlama",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "PLN-PC-05"
+              ],
+              "infrastructure": false,
+              "mac": "3c:52:82:00:00:05",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.42.165",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 1,
+                    "offset": 0,
+                    "source": "core-r1"
+                  },
+                  "row_id": 1,
+                  "summary": "dhcp42 assigned 172.20.42.165 for 3c:52:82:00:00:05 PLN-PC-05",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 23,
+                    "offset": 8608,
+                    "source": "fortigate"
+                  },
+                  "row_id": 21,
+                  "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:46+00:00"
+                }
+              ],
+              "hostname": "PLN-PC-05",
+              "ip": "172.20.42.165",
+              "lease_id": 2,
+              "mac": "3c:52:82:00:00:05",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 42
+            },
+            "person": null,
+            "vlan": 42,
+            "vlan_name": "Planlama"
+          },
+          "destination_match": "not_requested",
+          "kind": "candidate",
+          "score": 65,
+          "time_distance_ms": 0,
+          "traffic": {
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:46+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 23,
+                  "offset": 8608,
+                  "source": "fortigate"
+                },
+                "row_id": 21,
+                "summary": "172.20.42.165:50115 -> 203.0.113.10:443 proto 6 snat 100.64.12.9:50115",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:46+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50115,
+            "srcip": "172.20.42.165",
+            "srcport": 50115,
+            "start": "2026-10-09T08:23:40+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50115
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:39+00:00",
+            "confidence": "high",
+            "department": "İdari İşler",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "IDR-PC-04"
+              ],
+              "infrastructure": false,
+              "mac": "a4:83:e7:00:00:44",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.43.44",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 3,
+                    "offset": 317,
+                    "source": "core-r1"
+                  },
+                  "row_id": 3,
+                  "summary": "dhcp43 assigned 172.20.43.44 for a4:83:e7:00:00:44 IDR-PC-04",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 25,
+                    "offset": 9435,
+                    "source": "fortigate"
+                  },
+                  "row_id": 23,
+                  "summary": "172.20.43.44:50117 -> 104.18.32.7:443 proto 6 snat 100.64.12.9:50117",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:24:00+00:00"
+                }
+              ],
+              "hostname": "IDR-PC-04",
+              "ip": "172.20.43.44",
+              "lease_id": 3,
+              "mac": "a4:83:e7:00:00:44",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 43
+            },
+            "person": null,
+            "vlan": 43,
+            "vlan_name": "İdari İşler"
+          },
+          "destination_match": "not_requested",
+          "kind": "candidate",
+          "score": 64,
+          "time_distance_ms": 2000,
+          "traffic": {
+            "dstip": "20.190.160.20",
+            "dstport": 443,
+            "end": "2026-10-09T08:23:39+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 22,
+                  "offset": 8194,
+                  "source": "fortigate"
+                },
+                "row_id": 20,
+                "summary": "172.20.43.44:50114 -> 20.190.160.20:443 proto 6 snat 100.64.12.9:50114",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:39+00:00"
+              }
+            ],
+            "proto": 6,
+            "sessionid": 50114,
+            "srcip": "172.20.43.44",
+            "srcport": 50114,
+            "start": "2026-10-09T08:23:34+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50114
+          }
+        },
+        {
+          "chain": {
+            "alternatives": [],
+            "at": "2026-10-09T08:23:32+00:00",
+            "confidence": "high",
+            "department": "Finans",
+            "department_source": "vlan",
+            "device": {
+              "confidence": "high",
+              "evidence": [],
+              "hostnames": [
+                "FIN-PC-01"
+              ],
+              "infrastructure": false,
+              "mac": "00:15:5d:00:00:20",
+              "name": null,
+              "randomized": false,
+              "type": null,
+              "vendor": null
+            },
+            "explanations": [
+              {
+                "key": "no_person",
+                "params": {},
+                "text_en": "The device is not linked to a person; the department is derived from the VLAN.",
+                "text_tr": "Cihaz bir kişiye bağlanmamış; departman VLAN'dan türetildi."
+              }
+            ],
+            "internal_ip": "172.20.41.15",
+            "lease": {
+              "confidence": "high",
+              "end": null,
+              "end_reason": "open",
+              "evidence": [
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 2,
+                    "offset": 159,
+                    "source": "core-r1"
+                  },
+                  "row_id": 2,
+                  "summary": "dhcp41 assigned 172.20.41.15 for 00:15:5d:00:00:20 FIN-PC-01",
+                  "table": "mt_dhcp",
+                  "time": "2026-10-09T05:12:00+00:00"
+                },
+                {
+                  "raw": {
+                    "day": "2026-10-09",
+                    "line": 24,
+                    "offset": 9022,
+                    "source": "fortigate"
+                  },
+                  "row_id": 22,
+                  "summary": "172.20.41.15:50116 -> 151.101.1.69:443 proto 6 snat 100.64.12.9:50116",
+                  "table": "fg_traffic",
+                  "time": "2026-10-09T08:23:53+00:00"
+                }
+              ],
+              "hostname": "FIN-PC-01",
+              "ip": "172.20.41.15",
+              "lease_id": 1,
+              "mac": "00:15:5d:00:00:20",
+              "start": "2026-10-09T05:12:00+00:00",
+              "vlan": 41
+            },
+            "person": null,
+            "vlan": 41,
+            "vlan_name": "Finans"
+          },
+          "destination_match": "not_requested",
+          "kind": "candidate",
+          "score": 62,
+          "time_distance_ms": 9000,
+          "traffic": {
+            "dstip": "8.8.8.8",
+            "dstport": 53,
+            "end": "2026-10-09T08:23:32+00:00",
+            "evidence": [
+              {
+                "raw": {
+                  "day": "2026-10-09",
+                  "line": 21,
+                  "offset": 7786,
+                  "source": "fortigate"
+                },
+                "row_id": 19,
+                "summary": "172.20.41.15:50113 -> 8.8.8.8:53 proto 17 snat 100.64.12.9:50113",
+                "table": "fg_traffic",
+                "time": "2026-10-09T08:23:32+00:00"
+              }
+            ],
+            "proto": 17,
+            "sessionid": 50113,
+            "srcip": "172.20.41.15",
+            "srcport": 50113,
+            "start": "2026-10-09T08:23:28+00:00",
+            "transip": "100.64.12.9",
+            "transport": 50113
+          }
+        }
+      ],
+      "mode": "candidates",
+      "request": {
+        "at": "2026-10-09T08:23:41+00:00",
+        "dest_domain": null,
+        "dest_ip": null,
+        "dest_port": null,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": null,
+        "public_ip": "198.51.100.23",
+        "public_port": null,
+        "tolerance_seconds": 120
+      },
+      "result_count": 5,
+      "tolerance_seconds": 120,
+      "truncated": true
+    },
+    "query": {
+      "at": "2026-10-09T08:23:41+00:00",
+      "dest_domain": null,
+      "dest_ip": null,
+      "dest_port": null,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": null,
+      "public_ip": "198.51.100.23",
+      "public_port": null,
+      "time_input": {
+        "offset_given": false,
+        "text": "2026-10-09T11:23:41",
+        "time_zone": "Europe/Istanbul"
+      },
+      "tolerance_seconds": 120
+    },
+    "report": null,
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 5,
+    "user_id": 1,
+    "username": "tolga"
+  },
+  "vault_only": {
+    "created_at": "2026-10-13T04:00:02.261569Z",
+    "elapsed_ms": 40,
+    "finished_at": "2026-10-13T04:00:02.261233Z",
+    "id": 6,
+    "mode": "none",
+    "outcome": {
+      "attribution": null,
+      "data_window": {
+        "db_first_day": "2026-10-09",
+        "db_last_day": "2026-10-09",
+        "in_database": false,
+        "in_vault": true,
+        "only_in_vault": true,
+        "requested_day": "2026-10-05"
+      },
+      "double_nat": true,
+      "explanations": [
+        {
+          "key": "only_in_vault",
+          "params": {
+            "day": "2026-10-05"
+          },
+          "text_en": "Records of this date are only in the sealed vault; reload them from the vault first.",
+          "text_tr": "Bu tarihin kayıtları yalnızca mühürlü arşivde; sorgu için arşivden yeniden yükleyin."
+        },
+        {
+          "key": "double_nat_no_candidates",
+          "params": {},
+          "text_en": "An exact match needs the ISP router's NAT record; there is also no candidate session to list in this time window.",
+          "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; bu zaman aralığında listelenecek aday oturum da bulunamadı."
+        },
+        {
+          "key": "no_match",
+          "params": {},
+          "text_en": "No matching session was found in this time window.",
+          "text_tr": "Bu zaman aralığında eşleşen oturum bulunamadı."
+        },
+        {
+          "key": "destination_not_found",
+          "params": {
+            "destination": "203.0.113.10"
+          },
+          "text_en": "No session to the requested destination (203.0.113.10) was found; other sessions are not listed as candidates. Check the destination, the time and the time zone. To see every session of the window regardless of the destination, run the lookup again with the destination fields empty.",
+          "text_tr": "İstenen hedefe (203.0.113.10) giden oturum bulunamadı; başka oturumlar aday olarak listelenmez. Hedef bilgisini, saati ve saat dilimini kontrol edin. Hedeften bağımsız olarak aralıktaki tüm oturumları görmek için sorguyu hedef alanlarını boş bırakarak yeniden çalıştırın."
+        },
+        {
+          "key": "no_match_candidates",
+          "params": {},
+          "text_en": "No candidate session in this window. An exact answer needs the ISP router's NAT record (public port → FortiGate port), the requested destination IP/port or domain and the correct time/time zone; a wider tolerance may also help.",
+          "text_tr": "Bu aralıkta aday oturum yok. Sonucu kesinleştirmek için: ISS modeminin NAT kaydı (genel port → FortiGate çıkış portu), talepteki hedef IP/port veya alan adı ve doğru saat/saat dilimi gerekir; toleransı genişletmek de yardımcı olabilir."
+        }
+      ],
+      "generated_at": "2026-10-13T04:00:02.220142+00:00",
+      "matches": [],
+      "mode": "none",
+      "request": {
+        "at": "2026-10-05T09:00:00+00:00",
+        "dest_domain": null,
+        "dest_ip": "203.0.113.10",
+        "dest_port": null,
+        "internal_ip": null,
+        "mac": null,
+        "protocol": null,
+        "public_ip": "198.51.100.23",
+        "public_port": null,
+        "tolerance_seconds": null
+      },
+      "result_count": 0,
+      "tolerance_seconds": 60,
+      "truncated": false
+    },
+    "query": {
+      "at": "2026-10-05T09:00:00+00:00",
+      "dest_domain": null,
+      "dest_ip": "203.0.113.10",
+      "dest_port": null,
+      "internal_ip": null,
+      "mac": null,
+      "protocol": null,
+      "public_ip": "198.51.100.23",
+      "public_port": null,
+      "time_input": {
+        "offset_given": true,
+        "text": "2026-10-05T12:00:00+03:00",
+        "time_zone": null
+      },
+      "tolerance_seconds": null
+    },
+    "report": null,
+    "request": {
+      "authority": "İzmir Cumhuriyet Başsavcılığı",
+      "file_no": "2026/48213 Soruşturma",
+      "reason": "5651 sayılı Kanun kapsamında, yazıda belirtilen genel IP adresi ve zaman için\nerişim kayıtları ve kullanıcı bilgisi talebi (müzekkere no 2026/771).",
+      "request_date": "2026-10-10"
+    },
+    "result_count": 0,
+    "user_id": 1,
+    "username": "tolga"
+  }
+}

@@ -1,0 +1,11 @@
+dhcp;info            | dhcp41 assigned 172.20.41.142 for 00:00:5E:00:53:48 FIN-PC03
+script;info          | ARP-LOG 172.20.10.23 00:00:5E:00:53:43 vlan10
+system;info;account  | user netops logged in from 172.20.10.37 via winbox
+dhcp;info            | dhcp61 deassigned 172.20.61.204 for 02:00:5E:00:53:53
+firewall;info        | DROP-FWD forward: in:vlan61 out:vlan20, connection-state:new src-mac 02:00:5E:00:53:5E, proto TCP (SYN), 172.20.61.118:41822->172.20.20.44:443, len 60
+dhcp;info            | dhcp60 assigned 172.20.60.163 for 02:00:5E:00:53:5B NB-17
+script;info          | ARP-LOG 172.20.10.31 00:00:5E:00:53:4A vlan10
+firewall;info        | DROP-FWD forward: in:vlan42 out:ether2, connection-state:new src-mac 00:00:5E:00:53:4C, proto TCP (SYN), 172.20.42.76:52790->198.51.100.77:443, len 60
+dhcp;info            | dhcp43 assigned 172.20.43.159 for 00:00:5E:00:53:52 IDR-PC05
+script;info          | ARP-LOG 172.20.20.44 00:00:5E:00:53:61 vlan20
+system;info;account  | user netops logged out from 172.20.10.37 via winbox

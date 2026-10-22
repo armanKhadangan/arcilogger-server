@@ -1,0 +1,1429 @@
+{
+  "assigned": {
+    "devices": [
+      {
+        "assigned_since": "2026-10-10T07:00:00Z",
+        "department": {
+          "id": 1,
+          "name": "Finans"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T06:37:52Z",
+        "hostnames": [
+          "Telefon-12"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.60.142",
+        "last_seen": "2026-10-09T06:37:52Z",
+        "last_vlan": 60,
+        "mac": "02:00:5e:00:53:64",
+        "name": null,
+        "notes": null,
+        "person": {
+          "id": 2,
+          "name": "Can Öztürk"
+        },
+        "randomized": true,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Wi-Fi Personel"
+      },
+      {
+        "assigned_since": "2026-10-10T07:00:00Z",
+        "department": {
+          "id": 1,
+          "name": "Finans"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "PLN-PC-05"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.42.165",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 42,
+        "mac": "3c:52:82:00:00:05",
+        "name": null,
+        "notes": null,
+        "person": {
+          "id": 2,
+          "name": "Can Öztürk"
+        },
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Planlama"
+      }
+    ],
+    "updated": 2
+  },
+  "department_created": {
+    "id": 4,
+    "name": "Ar-Ge",
+    "notes": "Kuruluş 2026",
+    "person_count": 0,
+    "vlan_ids": []
+  },
+  "department_updated": {
+    "id": 4,
+    "name": "Araştırma ve Geliştirme",
+    "notes": "Kuruluş 2026",
+    "person_count": 0,
+    "vlan_ids": []
+  },
+  "departments": [
+    {
+      "id": 1,
+      "name": "Finans",
+      "notes": null,
+      "person_count": 0,
+      "vlan_ids": [
+        41
+      ]
+    },
+    {
+      "id": 3,
+      "name": "İdari İşler",
+      "notes": null,
+      "person_count": 0,
+      "vlan_ids": [
+        43
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Planlama",
+      "notes": null,
+      "person_count": 1,
+      "vlan_ids": [
+        42
+      ]
+    }
+  ],
+  "detail": {
+    "assigned_since": "2026-10-01T06:00:00Z",
+    "assignments": [
+      {
+        "assigned_by": "tolga",
+        "backfilled": false,
+        "id": 1,
+        "mac": "00:00:5e:00:53:57",
+        "note": "Zimmet formu 2026/15",
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "valid_from": "2026-10-01T06:00:00Z",
+        "valid_to": null
+      }
+    ],
+    "department": {
+      "id": 2,
+      "name": "Planlama"
+    },
+    "department_source": "person",
+    "first_seen": "2026-10-09T07:42:18Z",
+    "hostnames": [
+      "PLN-PC14"
+    ],
+    "infrastructure": false,
+    "last_ip": "172.20.42.57",
+    "last_seen": "2026-10-09T07:42:18Z",
+    "last_vlan": 42,
+    "mac": "00:00:5e:00:53:57",
+    "name": "Planlama-PC-14",
+    "notes": null,
+    "person": {
+      "id": 1,
+      "name": "Selin Kaya"
+    },
+    "randomized": false,
+    "recent_leases": [
+      {
+        "confidence": "high",
+        "end": null,
+        "end_reason": "open",
+        "ip": "172.20.42.57",
+        "start": "2026-10-09T07:42:18Z",
+        "vlan": 42
+      }
+    ],
+    "tags": [],
+    "type": "pc",
+    "vendor": null,
+    "vlan_name": "Planlama"
+  },
+  "detail_phone": {
+    "assigned_since": "2026-10-12T06:00:00Z",
+    "assignments": [
+      {
+        "assigned_by": "tolga",
+        "backfilled": false,
+        "id": 4,
+        "mac": "02:00:5e:00:53:64",
+        "note": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "valid_from": "2026-10-12T06:00:00Z",
+        "valid_to": null
+      },
+      {
+        "assigned_by": "tolga",
+        "backfilled": false,
+        "id": 2,
+        "mac": "02:00:5e:00:53:64",
+        "note": "Zimmet formu 2026/21",
+        "person": {
+          "id": 2,
+          "name": "Can Öztürk"
+        },
+        "valid_from": "2026-10-10T07:00:00Z",
+        "valid_to": "2026-10-12T06:00:00Z"
+      }
+    ],
+    "department": {
+      "id": 2,
+      "name": "Planlama"
+    },
+    "department_source": "person",
+    "first_seen": "2026-10-09T06:37:52Z",
+    "hostnames": [
+      "Telefon-12"
+    ],
+    "infrastructure": false,
+    "last_ip": "172.20.60.142",
+    "last_seen": "2026-10-09T06:37:52Z",
+    "last_vlan": 60,
+    "mac": "02:00:5e:00:53:64",
+    "name": null,
+    "notes": null,
+    "person": {
+      "id": 1,
+      "name": "Selin Kaya"
+    },
+    "randomized": true,
+    "recent_leases": [
+      {
+        "confidence": "high",
+        "end": null,
+        "end_reason": "open",
+        "ip": "172.20.60.142",
+        "start": "2026-10-09T06:37:52Z",
+        "vlan": 60
+      }
+    ],
+    "tags": [],
+    "type": null,
+    "vendor": null,
+    "vlan_name": "Wi-Fi Personel"
+  },
+  "device_updated": {
+    "assigned_since": null,
+    "department": {
+      "id": 2,
+      "name": "Planlama"
+    },
+    "department_source": "vlan",
+    "first_seen": "2026-10-09T10:00:00Z",
+    "hostnames": [],
+    "infrastructure": false,
+    "last_ip": "172.20.42.57",
+    "last_seen": "2026-10-09T11:00:00Z",
+    "last_vlan": 42,
+    "mac": "00:0c:29:00:00:99",
+    "name": "Eski yazıcı (statik IP)",
+    "notes": "ARP çakışması: 172.20.42.57 adresini de yanıtlıyor.",
+    "person": null,
+    "randomized": false,
+    "tags": [
+      "statik",
+      "kat-1"
+    ],
+    "type": "printer",
+    "vendor": null,
+    "vlan_name": "Planlama"
+  },
+  "devices_csv": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"arcilogger-cihazlar-20261013-040016.csv\"",
+      "content-type": "text/csv; charset=utf-8"
+    },
+    "sha256": "7bac193db5574d4b97a6aca95bb1a2fdf49c1886748b8ed6a7e47bf13087c449",
+    "size": 1259,
+    "text": "﻿mac;name;type;vendor;randomized;infrastructure;hostnames;last_ip;last_vlan;vlan_name;person_id;person;employee_no;assigned_since;department;department_source;first_seen;last_seen;tags;notes\r\n00:0c:29:00:00:99;Eski yazıcı (statik IP);printer;;hayır;hayır;;172.20.42.57;42;Planlama;;;;;Planlama;vlan;2026-10-09T13:00:00+03:00;2026-10-09T14:00:00+03:00;statik, kat-1;ARP çakışması: 172.20.42.57 adresini de yanıtlıyor.\r\n00:00:5e:00:53:57;Planlama-PC-14;pc;;hayır;hayır;PLN-PC14;172.20.42.57;42;Planlama;1;Selin Kaya;1001;2026-10-01T09:00:00+03:00;Planlama;person;2026-10-09T10:42:18+03:00;2026-10-09T10:42:18+03:00;;\r\n02:00:5e:00:53:64;;;;evet;hayır;Telefon-12;172.20.60.142;60;Wi-Fi Personel;1;Selin Kaya;1001;2026-10-12T09:00:00+03:00;Planlama;person;2026-10-09T09:37:52+03:00;2026-10-09T09:37:52+03:00;;\r\n00:15:5d:00:00:20;;;;hayır;hayır;FIN-PC-01;172.20.41.15;41;Finans;;;;;Finans;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\n3c:52:82:00:00:05;;;;hayır;hayır;PLN-PC-05;172.20.42.165;42;Planlama;;;;;Planlama;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\na4:83:e7:00:00:44;;;;hayır;hayır;IDR-PC-04;172.20.43.44;43;İdari İşler;;;;;İdari İşler;vlan;2026-10-09T08:12:00+03:00;2026-10-09T08:12:00+03:00;;\r\n"
+  },
+  "errors": {
+    "assignment_in_future": {
+      "body": {
+        "error": {
+          "code": "assignment_in_future",
+          "details": [
+            {
+              "earliest": null,
+              "mac": "00:15:5d:00:00:20",
+              "reason": "in_future"
+            }
+          ],
+          "message_en": "The start of an assignment must not be in the future.",
+          "message_tr": "Atama başlangıcı gelecekte olamaz."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "assignment_overlap": {
+      "body": {
+        "error": {
+          "code": "assignment_overlap",
+          "details": [
+            {
+              "earliest": "2026-10-01T06:00:00+00:00",
+              "mac": "00:00:5e:00:53:57",
+              "reason": "overlap"
+            }
+          ],
+          "message_en": "The start of the assignment must not be before 00:00:5e:00:53:57's previous assignment (01.10.2026 09:00:00): the assignment history cannot be rewritten, only extended.",
+          "message_tr": "Atama başlangıcı, 00:00:5e:00:53:57 cihazının önceki atamasından (01.10.2026 09:00:00) önce olamaz: atama geçmişi değiştirilemez, yalnızca ileriye doğru eklenir."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "csv_encoding": {
+      "body": {
+        "error": {
+          "code": "csv_encoding",
+          "message_en": "The file is not UTF-8. Save it in Excel as \"CSV UTF-8 (comma delimited)\".",
+          "message_tr": "Dosya UTF-8 kodlamasında değil. Excel'de \"CSV UTF-8 (virgülle ayrılmış)\" türüyle kaydedin."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "csv_header": {
+      "body": {
+        "error": {
+          "code": "csv_header",
+          "message_en": "The header line is invalid: missing column name. Expected columns: name, department, title, email, employee_no, active, notes.",
+          "message_tr": "Başlık satırı geçersiz: missing column name. Beklenen sütunlar: name, department, title, email, employee_no, active, notes."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "department_exists": {
+      "body": {
+        "error": {
+          "code": "department_exists",
+          "message_en": "A department with this name already exists (İDARİ İŞLER).",
+          "message_tr": "Bu adda bir departman zaten var (İDARİ İŞLER)."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "detail_not_found": {
+      "body": {
+        "error": {
+          "code": "device_not_found",
+          "message_en": "Device not found: 02:00:00:00:00:01.",
+          "message_tr": "Cihaz bulunamadı: 02:00:00:00:00:01."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "device_not_found": {
+      "body": {
+        "error": {
+          "code": "device_not_found",
+          "details": {
+            "macs": [
+              "02:00:00:00:00:01"
+            ]
+          },
+          "message_en": "Device not found: 02:00:00:00:00:01.",
+          "message_tr": "Cihaz bulunamadı: 02:00:00:00:00:01."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "dhcp_server_taken": {
+      "body": {
+        "error": {
+          "code": "dhcp_server_taken",
+          "message_en": "The DHCP server dhcp43 belongs to another network (172.20.43.0/24).",
+          "message_tr": "dhcp43 DHCP sunucusu başka bir ağa bağlı (172.20.43.0/24)."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "employee_no_taken": {
+      "body": {
+        "error": {
+          "code": "employee_no_taken",
+          "message_en": "This employee number (1002) belongs to another person.",
+          "message_tr": "Bu sicil numarası (1002) başka bir kişiye ait."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "person_inactive": {
+      "body": {
+        "error": {
+          "code": "person_inactive",
+          "message_en": "The person is inactive; devices cannot be assigned to an inactive person. Activate the person first.",
+          "message_tr": "Kişi pasif; pasif bir kişiye cihaz atanamaz. Önce kişiyi etkinleştirin."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "privacy_notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "upload_invalid": {
+      "body": {
+        "error": {
+          "code": "upload_invalid",
+          "message_en": "No file was sent: the request must be multipart/form-data with the file in the field \"file\".",
+          "message_tr": "Dosya gönderilmedi: istek \"file\" alanında bir dosya içeren multipart/form-data olmalıdır."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "validation_error": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "macs",
+                0
+              ],
+              "msg": "Value error, not a MAC address (aa:bb:cc:dd:ee:ff)",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "vlan_exists": {
+      "body": {
+        "error": {
+          "code": "vlan_exists",
+          "message_en": "The network 172.20.70.0/24 is already defined.",
+          "message_tr": "172.20.70.0/24 ağı zaten tanımlı."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "vlan_id_taken": {
+      "body": {
+        "error": {
+          "code": "vlan_id_taken",
+          "message_en": "VLAN id 43 is used by another network (172.20.43.0/24).",
+          "message_tr": "VLAN numarası 43 başka bir ağda kullanılıyor (172.20.43.0/24)."
+        }
+      },
+      "headers": {},
+      "status": 409
+    }
+  },
+  "import_assignments_applied": {
+    "created": 2,
+    "dry_run": false,
+    "errors": [],
+    "kind": "assignments",
+    "preview": [
+      {
+        "action": "assign",
+        "line": 2,
+        "mac": "00:15:5d:00:00:20",
+        "person_id": 2,
+        "person_name": "Can Öztürk",
+        "previous_person_id": null,
+        "previous_person_name": null,
+        "valid_from": "2026-10-11T08:00:00+03:00"
+      },
+      {
+        "action": "assign",
+        "line": 3,
+        "mac": "a4:83:e7:00:00:44",
+        "person_id": 1,
+        "person_name": "Selin Kaya",
+        "previous_person_id": null,
+        "previous_person_name": null,
+        "valid_from": "2026-10-13T04:00:17.120744+00:00"
+      }
+    ],
+    "rows": 2,
+    "unchanged": 0,
+    "updated": 0
+  },
+  "import_assignments_errors": {
+    "created": 0,
+    "dry_run": false,
+    "errors": [
+      {
+        "line": 2,
+        "message_en": "Device 02:00:00:00:00:01 has not been seen yet (it is not in the device list); import it again once the device has been on the network.",
+        "message_tr": "02:00:00:00:00:01 cihazı henüz görülmedi (cihaz listesinde yok); cihaz ağa bağlanıp göründükten sonra tekrar içe aktarın."
+      },
+      {
+        "line": 3,
+        "message_en": "valid_from (20.09.2026 09:00:00) is before the previous assignment of 00:00:5e:00:53:57 (01.10.2026 09:00:00); the assignment history cannot be rewritten, only extended.",
+        "message_tr": "valid_from (20.09.2026 09:00:00), 00:00:5e:00:53:57 cihazının önceki atamasından (01.10.2026 09:00:00) önce; atama geçmişi değiştirilemez, yalnızca ileriye doğru eklenir."
+      },
+      {
+        "line": 4,
+        "message_en": "'Deniz Işık' is inactive; devices cannot be assigned to an inactive person.",
+        "message_tr": "'Deniz Işık' pasif; pasif bir kişiye cihaz atanamaz."
+      }
+    ],
+    "kind": "assignments",
+    "preview": [],
+    "rows": 3,
+    "unchanged": 0,
+    "updated": 0
+  },
+  "import_assignments_preview": {
+    "created": 2,
+    "dry_run": true,
+    "errors": [],
+    "kind": "assignments",
+    "preview": [
+      {
+        "action": "assign",
+        "line": 2,
+        "mac": "00:15:5d:00:00:20",
+        "person_id": 2,
+        "person_name": "Can Öztürk",
+        "previous_person_id": null,
+        "previous_person_name": null,
+        "valid_from": "2026-10-11T08:00:00+03:00"
+      },
+      {
+        "action": "assign",
+        "line": 3,
+        "mac": "a4:83:e7:00:00:44",
+        "person_id": 1,
+        "person_name": "Selin Kaya",
+        "previous_person_id": null,
+        "previous_person_name": null,
+        "valid_from": "2026-10-13T04:00:17.066672+00:00"
+      }
+    ],
+    "rows": 2,
+    "unchanged": 0,
+    "updated": 0
+  },
+  "import_persons_errors": {
+    "created": 0,
+    "dry_run": true,
+    "errors": [
+      {
+        "line": 2,
+        "message_en": "There is no department 'Hayali Departman'; add it to the departments first.",
+        "message_tr": "'Hayali Departman' adlı departman yok; önce Departmanlar listesine ekleyin."
+      },
+      {
+        "line": 3,
+        "message_en": "name must not be empty.",
+        "message_tr": "name boş olamaz."
+      },
+      {
+        "line": 4,
+        "message_en": "The e-mail address is invalid (ayse@).",
+        "message_tr": "E-posta adresi geçersiz (ayse@)."
+      }
+    ],
+    "kind": "persons",
+    "preview": [],
+    "rows": 3,
+    "unchanged": 0,
+    "updated": 0
+  },
+  "import_persons_preview": {
+    "created": 1,
+    "dry_run": true,
+    "errors": [],
+    "kind": "persons",
+    "preview": [
+      {
+        "action": "update",
+        "changes": [
+          "title"
+        ],
+        "duplicate_name": false,
+        "employee_no": "1002",
+        "line": 2,
+        "name": "Can Öztürk",
+        "person_id": 2
+      },
+      {
+        "action": "create",
+        "changes": [
+          "active",
+          "department_id",
+          "email",
+          "employee_no",
+          "name",
+          "notes",
+          "title"
+        ],
+        "duplicate_name": false,
+        "employee_no": "1003",
+        "line": 3,
+        "name": "Merve Aydın",
+        "person_id": null
+      }
+    ],
+    "rows": 2,
+    "unchanged": 0,
+    "updated": 1
+  },
+  "list": {
+    "items": [
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T10:00:00Z",
+        "hostnames": [],
+        "infrastructure": false,
+        "last_ip": "172.20.42.57",
+        "last_seen": "2026-10-09T11:00:00Z",
+        "last_vlan": 42,
+        "mac": "00:0c:29:00:00:99",
+        "name": "Eski yazıcı (statik IP)",
+        "notes": "ARP çakışması: 172.20.42.57 adresini de yanıtlıyor.",
+        "person": null,
+        "randomized": false,
+        "tags": [
+          "statik",
+          "kat-1"
+        ],
+        "type": "printer",
+        "vendor": null,
+        "vlan_name": "Planlama"
+      },
+      {
+        "assigned_since": "2026-10-01T06:00:00Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T07:42:18Z",
+        "hostnames": [
+          "PLN-PC14"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.42.57",
+        "last_seen": "2026-10-09T07:42:18Z",
+        "last_vlan": 42,
+        "mac": "00:00:5e:00:53:57",
+        "name": "Planlama-PC-14",
+        "notes": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "randomized": false,
+        "tags": [],
+        "type": "pc",
+        "vendor": null,
+        "vlan_name": "Planlama"
+      },
+      {
+        "assigned_since": "2026-10-12T06:00:00Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T06:37:52Z",
+        "hostnames": [
+          "Telefon-12"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.60.142",
+        "last_seen": "2026-10-09T06:37:52Z",
+        "last_vlan": 60,
+        "mac": "02:00:5e:00:53:64",
+        "name": null,
+        "notes": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "randomized": true,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Wi-Fi Personel"
+      },
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 1,
+          "name": "Finans"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "FIN-PC-01"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.41.15",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 41,
+        "mac": "00:15:5d:00:00:20",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Finans"
+      },
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "PLN-PC-05"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.42.165",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 42,
+        "mac": "3c:52:82:00:00:05",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Planlama"
+      },
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 3,
+          "name": "İdari İşler"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "IDR-PC-04"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.43.44",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 43,
+        "mac": "a4:83:e7:00:00:44",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "İdari İşler"
+      }
+    ],
+    "limit": 50,
+    "offset": 0,
+    "total": 6
+  },
+  "list_page": {
+    "items": [
+      {
+        "assigned_since": "2026-10-12T06:00:00Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T06:37:52Z",
+        "hostnames": [
+          "Telefon-12"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.60.142",
+        "last_seen": "2026-10-09T06:37:52Z",
+        "last_vlan": 60,
+        "mac": "02:00:5e:00:53:64",
+        "name": null,
+        "notes": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "randomized": true,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Wi-Fi Personel"
+      },
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 1,
+          "name": "Finans"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "FIN-PC-01"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.41.15",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 41,
+        "mac": "00:15:5d:00:00:20",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Finans"
+      }
+    ],
+    "limit": 2,
+    "offset": 2,
+    "total": 6
+  },
+  "list_search": {
+    "items": [
+      {
+        "assigned_since": "2026-10-01T06:00:00Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T07:42:18Z",
+        "hostnames": [
+          "PLN-PC14"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.42.57",
+        "last_seen": "2026-10-09T07:42:18Z",
+        "last_vlan": 42,
+        "mac": "00:00:5e:00:53:57",
+        "name": "Planlama-PC-14",
+        "notes": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "randomized": false,
+        "tags": [],
+        "type": "pc",
+        "vendor": null,
+        "vlan_name": "Planlama"
+      }
+    ],
+    "limit": 50,
+    "offset": 0,
+    "total": 1
+  },
+  "list_unknown": {
+    "items": [
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T10:00:00Z",
+        "hostnames": [],
+        "infrastructure": false,
+        "last_ip": "172.20.42.57",
+        "last_seen": "2026-10-09T11:00:00Z",
+        "last_vlan": 42,
+        "mac": "00:0c:29:00:00:99",
+        "name": "Eski yazıcı (statik IP)",
+        "notes": "ARP çakışması: 172.20.42.57 adresini de yanıtlıyor.",
+        "person": null,
+        "randomized": false,
+        "tags": [
+          "statik",
+          "kat-1"
+        ],
+        "type": "printer",
+        "vendor": null,
+        "vlan_name": "Planlama"
+      },
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 1,
+          "name": "Finans"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "FIN-PC-01"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.41.15",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 41,
+        "mac": "00:15:5d:00:00:20",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Finans"
+      },
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "PLN-PC-05"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.42.165",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 42,
+        "mac": "3c:52:82:00:00:05",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Planlama"
+      },
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 3,
+          "name": "İdari İşler"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "IDR-PC-04"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.43.44",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 43,
+        "mac": "a4:83:e7:00:00:44",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "İdari İşler"
+      }
+    ],
+    "limit": 50,
+    "offset": 0,
+    "total": 4
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:28.539054+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "person_created": {
+    "active": true,
+    "created_at": "2026-10-13T04:00:15.164700Z",
+    "department": {
+      "id": 1,
+      "name": "Finans"
+    },
+    "device_count": 0,
+    "email": "can.ozturk@example.com",
+    "employee_no": "1002",
+    "id": 2,
+    "name": "Can Öztürk",
+    "notes": null,
+    "title": "Mali Analist",
+    "updated_at": "2026-10-13T04:00:15.164735Z"
+  },
+  "person_detail": {
+    "active": true,
+    "assignments": [
+      {
+        "assigned_by": "tolga",
+        "backfilled": false,
+        "id": 4,
+        "mac": "02:00:5e:00:53:64",
+        "note": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "valid_from": "2026-10-12T06:00:00Z",
+        "valid_to": null
+      },
+      {
+        "assigned_by": "tolga",
+        "backfilled": false,
+        "id": 1,
+        "mac": "00:00:5e:00:53:57",
+        "note": "Zimmet formu 2026/15",
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "valid_from": "2026-10-01T06:00:00Z",
+        "valid_to": null
+      }
+    ],
+    "created_at": "2026-10-13T04:00:00.200534Z",
+    "department": {
+      "id": 2,
+      "name": "Planlama"
+    },
+    "device_count": 2,
+    "devices": [
+      {
+        "assigned_since": "2026-10-01T06:00:00Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T07:42:18Z",
+        "hostnames": [
+          "PLN-PC14"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.42.57",
+        "last_seen": "2026-10-09T07:42:18Z",
+        "last_vlan": 42,
+        "mac": "00:00:5e:00:53:57",
+        "name": "Planlama-PC-14",
+        "notes": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "randomized": false,
+        "tags": [],
+        "type": "pc",
+        "vendor": null,
+        "vlan_name": "Planlama"
+      },
+      {
+        "assigned_since": "2026-10-12T06:00:00Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T06:37:52Z",
+        "hostnames": [
+          "Telefon-12"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.60.142",
+        "last_seen": "2026-10-09T06:37:52Z",
+        "last_vlan": 60,
+        "mac": "02:00:5e:00:53:64",
+        "name": null,
+        "notes": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "randomized": true,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Wi-Fi Personel"
+      }
+    ],
+    "email": null,
+    "employee_no": "1001",
+    "id": 1,
+    "name": "Selin Kaya",
+    "notes": null,
+    "title": "Planlama Uzmanı",
+    "updated_at": "2026-10-20T17:40:38.619613Z"
+  },
+  "person_updated": {
+    "active": true,
+    "created_at": "2026-10-13T04:00:15.164700Z",
+    "department": {
+      "id": 1,
+      "name": "Finans"
+    },
+    "device_count": 0,
+    "email": "can.ozturk@example.com",
+    "employee_no": "1002",
+    "id": 2,
+    "name": "Can Öztürk",
+    "notes": null,
+    "title": "Finans Müdürü",
+    "updated_at": "2026-10-20T17:40:38.804327Z"
+  },
+  "persons": {
+    "items": [
+      {
+        "active": true,
+        "created_at": "2026-10-13T04:00:15.164700Z",
+        "department": {
+          "id": 1,
+          "name": "Finans"
+        },
+        "device_count": 0,
+        "email": "can.ozturk@example.com",
+        "employee_no": "1002",
+        "id": 2,
+        "name": "Can Öztürk",
+        "notes": null,
+        "title": "Finans Müdürü",
+        "updated_at": "2026-10-20T17:40:38.804327Z"
+      },
+      {
+        "active": false,
+        "created_at": "2026-10-13T04:00:15.317637Z",
+        "department": null,
+        "device_count": 0,
+        "email": null,
+        "employee_no": "0950",
+        "id": 3,
+        "name": "Deniz Işık",
+        "notes": null,
+        "title": null,
+        "updated_at": "2026-10-13T04:00:15.317668Z"
+      },
+      {
+        "active": true,
+        "created_at": "2026-10-13T04:00:00.200534Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "device_count": 2,
+        "email": null,
+        "employee_no": "1001",
+        "id": 1,
+        "name": "Selin Kaya",
+        "notes": null,
+        "title": "Planlama Uzmanı",
+        "updated_at": "2026-10-20T17:40:38.619613Z"
+      }
+    ],
+    "limit": 50,
+    "offset": 0,
+    "total": 3
+  },
+  "persons_csv": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"arcilogger-kisiler-20261013-040016.csv\"",
+      "content-type": "text/csv; charset=utf-8"
+    },
+    "sha256": "22dbc11fb575e2471a3d5711cf9fc464e38213d355316312307d5f8b9404a6e4",
+    "size": 415,
+    "text": "﻿id;name;department;title;email;employee_no;active;notes;device_count;created_at;updated_at\r\n2;Can Öztürk;Finans;Finans Müdürü;can.ozturk@example.com;1002;evet;;0;2026-10-13T07:00:15+03:00;2026-10-20T20:40:38+03:00\r\n3;Deniz Işık;;;;0950;hayır;;0;2026-10-13T07:00:15+03:00;2026-10-13T07:00:15+03:00\r\n1;Selin Kaya;Planlama;Planlama Uzmanı;;1001;evet;;2;2026-10-13T07:00:00+03:00;2026-10-20T20:40:38+03:00\r\n"
+  },
+  "persons_search": {
+    "items": [
+      {
+        "active": true,
+        "created_at": "2026-10-13T04:00:15.164700Z",
+        "department": {
+          "id": 1,
+          "name": "Finans"
+        },
+        "device_count": 0,
+        "email": "can.ozturk@example.com",
+        "employee_no": "1002",
+        "id": 2,
+        "name": "Can Öztürk",
+        "notes": null,
+        "title": "Finans Müdürü",
+        "updated_at": "2026-10-20T17:40:38.804327Z"
+      }
+    ],
+    "limit": 50,
+    "offset": 0,
+    "total": 1
+  },
+  "reassigned": {
+    "devices": [
+      {
+        "assigned_since": "2026-10-12T06:00:00Z",
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "person",
+        "first_seen": "2026-10-09T06:37:52Z",
+        "hostnames": [
+          "Telefon-12"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.60.142",
+        "last_seen": "2026-10-09T06:37:52Z",
+        "last_vlan": 60,
+        "mac": "02:00:5e:00:53:64",
+        "name": null,
+        "notes": null,
+        "person": {
+          "id": 1,
+          "name": "Selin Kaya"
+        },
+        "randomized": true,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Wi-Fi Personel"
+      }
+    ],
+    "updated": 1
+  },
+  "template_assignments": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"arcilogger-atamalar-sablon.csv\"",
+      "content-type": "text/csv; charset=utf-8"
+    },
+    "sha256": "d1170699340911c896ca61c46ab1d0d3ef47e8da7e19ea44ef55d60d6d16fcc0",
+    "size": 125,
+    "text": "﻿mac;employee_no;person_name;valid_from;note\r\nf0:1f:af:00:00:01;1001;Ayşe Yılmaz;2026-10-01T09:00:00+03:00;Zimmet formu\r\n"
+  },
+  "template_persons": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"arcilogger-kisiler-sablon.csv\"",
+      "content-type": "text/csv; charset=utf-8"
+    },
+    "sha256": "5d1584c7724eac75b83cd7f10ad84d9cdb97753cc639e68463ff3d9dd1694552",
+    "size": 131,
+    "text": "﻿name;department;title;email;employee_no;active;notes\r\nAyşe Yılmaz;Finans;Muhasebe Uzmanı;ayse.yilmaz@example.com;1001;evet;\r\n"
+  },
+  "unassigned": {
+    "devices": [
+      {
+        "assigned_since": null,
+        "department": {
+          "id": 2,
+          "name": "Planlama"
+        },
+        "department_source": "vlan",
+        "first_seen": "2026-10-09T05:12:00Z",
+        "hostnames": [
+          "PLN-PC-05"
+        ],
+        "infrastructure": false,
+        "last_ip": "172.20.42.165",
+        "last_seen": "2026-10-09T05:12:00Z",
+        "last_vlan": 42,
+        "mac": "3c:52:82:00:00:05",
+        "name": null,
+        "notes": null,
+        "person": null,
+        "randomized": false,
+        "tags": [],
+        "type": null,
+        "vendor": null,
+        "vlan_name": "Planlama"
+      }
+    ],
+    "updated": 1
+  },
+  "vlan_created": {
+    "department": {
+      "id": 4,
+      "name": "Araştırma ve Geliştirme"
+    },
+    "dhcp_server": "dhcp70",
+    "guest": false,
+    "name_tr": "Laboratuvar",
+    "notes": "Kat 2",
+    "purpose": "Test bench PCs",
+    "subnet": "172.20.70.0/24",
+    "vlan_id": 70
+  },
+  "vlan_edited": {
+    "department": {
+      "id": 4,
+      "name": "Araştırma ve Geliştirme"
+    },
+    "dhcp_server": "dhcp70",
+    "guest": true,
+    "name_tr": "Ar-Ge Laboratuvarı",
+    "notes": "Kat 2",
+    "purpose": "Test bench PCs",
+    "subnet": "172.20.71.0/24",
+    "vlan_id": 70
+  },
+  "vlan_updated": {
+    "department": {
+      "id": 3,
+      "name": "İdari İşler"
+    },
+    "dhcp_server": "dhcp60",
+    "guest": false,
+    "name_tr": "Wi-Fi Personel",
+    "notes": null,
+    "purpose": "Staff Wi-Fi (laptops and phones)",
+    "subnet": "172.20.60.0/24",
+    "vlan_id": 60
+  },
+  "vlans": [
+    {
+      "department": null,
+      "dhcp_server": null,
+      "guest": false,
+      "name_tr": "Ağ Cihazları",
+      "notes": "static",
+      "purpose": "Network devices (switches, access points, printers)",
+      "subnet": "172.20.10.0/24",
+      "vlan_id": 10
+    },
+    {
+      "department": null,
+      "dhcp_server": null,
+      "guest": false,
+      "name_tr": "Sunucular",
+      "notes": "static",
+      "purpose": "Servers",
+      "subnet": "172.20.20.0/24",
+      "vlan_id": 20
+    },
+    {
+      "department": {
+        "id": 1,
+        "name": "Finans"
+      },
+      "dhcp_server": "dhcp41",
+      "guest": false,
+      "name_tr": "Finans",
+      "notes": null,
+      "purpose": "Department PCs",
+      "subnet": "172.20.41.0/24",
+      "vlan_id": 41
+    },
+    {
+      "department": {
+        "id": 2,
+        "name": "Planlama"
+      },
+      "dhcp_server": "dhcp42",
+      "guest": false,
+      "name_tr": "Planlama",
+      "notes": null,
+      "purpose": "Department PCs",
+      "subnet": "172.20.42.0/24",
+      "vlan_id": 42
+    },
+    {
+      "department": {
+        "id": 3,
+        "name": "İdari İşler"
+      },
+      "dhcp_server": "dhcp43",
+      "guest": false,
+      "name_tr": "İdari İşler",
+      "notes": null,
+      "purpose": "Department PCs",
+      "subnet": "172.20.43.0/24",
+      "vlan_id": 43
+    },
+    {
+      "department": null,
+      "dhcp_server": "dhcp60",
+      "guest": false,
+      "name_tr": "Wi-Fi Personel",
+      "notes": null,
+      "purpose": "Staff Wi-Fi (laptops and phones)",
+      "subnet": "172.20.60.0/24",
+      "vlan_id": 60
+    },
+    {
+      "department": null,
+      "dhcp_server": "dhcp61",
+      "guest": true,
+      "name_tr": "Wi-Fi Misafir",
+      "notes": "1 h leases",
+      "purpose": "Guest Wi-Fi",
+      "subnet": "172.20.61.0/24",
+      "vlan_id": 61
+    },
+    {
+      "department": null,
+      "dhcp_server": null,
+      "guest": false,
+      "name_tr": "Transit",
+      "notes": null,
+      "purpose": "Router to firewall link",
+      "subnet": "172.31.255.0/30",
+      "vlan_id": null
+    }
+  ]
+}

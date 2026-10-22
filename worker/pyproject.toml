@@ -1,0 +1,31 @@
+[project]
+name = "arcilogger-worker"
+dynamic = ["version"]
+description = "ARCILOGGER worker: scheduled application jobs (lease timeline, NAT index, usage rollups, detections, reports, e-mail)."
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "arcilogger-core",
+  "arcilogger-db",
+  # Registrable domains for the usage reports (spec 10.2): the Public Suffix List bundled in the
+  # wheel (MPL-2.0, list and code); read from the package, never fetched at run time. Pinned:
+  # a newer list comes with a deliberate upgrade (or the setting usage.psl_file).
+  "publicsuffixlist==1.0.2.20261007",
+  # Scheduled usage reports (ADR-0012): the PDF (reportlab, with the bundled DejaVu fonts of
+  # arcilogger_worker/fonts, shared with the 5651 report of the API) and the Excel workbook.
+  "reportlab>=5.0.1",
+  "openpyxl>=3.1.5",
+]
+
+[project.scripts]
+arcilogger-worker = "arcilogger_worker.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arcilogger_worker"]
+
+[tool.hatch.version]
+path = "src/arcilogger_worker/__init__.py"
