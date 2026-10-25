@@ -258,9 +258,11 @@ gününden (hiç log yoksa bugünden) önce başlayan bir aralığı reddeder (4
   hesaplama gerekmez; önceden oluşturulmuş ve gönderilmiş rapor dosyaları değişmez) ve geri
   alınabilir. Kişi listesinde adın yanında **Kullanım: hariç** işareti görünür. Değişiklik eski ve
   yeni değeriyle denetim kaydına yazılır (`person.update`); toplu değişiklik için kişi CSV'sinin
-  isteğe bağlı `usage_excluded` sütunu (evet/hayır) kullanılır. Yalnızca `devices.manage` yetkisi
-  olan kullanıcı (varsayılan rollerde Yönetici) değiştirebilir. 5651 sorguları, resmi raporları ve
-  kanıt paketleri bu ayardan etkilenmez: kişi orada her zaman görünür.
+  isteğe bağlı `usage_excluded` sütunu (evet/hayır) kullanılır. CSV ile yapılan değişiklik kişi
+  başına değil, `import.persons` olarak (dosyanın SHA-256 değeri, boyutu ve sayılarla) kaydedilir.
+  Yalnızca `devices.manage` yetkisi olan kullanıcı (varsayılan rollerde Yönetici) değiştirebilir.
+  5651 sorguları, resmi raporları ve kanıt paketleri bu ayardan etkilenmez: kişi orada her zaman
+  görünür.
 - Dışa aktarılan dosyalar (CSV, Excel) kişisel veri içerir: yalnızca gerektiği kadar saklayın.
 
 ## 7. Web arayüzü ve API

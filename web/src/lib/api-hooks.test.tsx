@@ -12,8 +12,10 @@ import {
   LICENSE_STALE_MS,
   queryKeys,
   useAuditEntries,
+  useImportCsv,
   useLicense,
   usePollingQuery,
+  useUpdatePerson,
   useUploadLicense,
   useUsers,
 } from './api-hooks';
@@ -214,6 +216,40 @@ describe('licence hooks', () => {
       ).toEqual(['/api/v1/license', '/api/v1/license', '/api/v1/x']);
     });
     expect(result.current.license.data?.status).toBe('licensed');
+    setCsrfCookie(null);
+  });
+});
+
+describe('person changes', () => {
+  it('an edit or a persons import marks the Kullanım answers stale, an assignments import not', async () => {
+    const client = testQueryClient();
+    setCsrfCookie('csrf-1');
+    installFetch(() => jsonResponse(200, { dry_run: false }));
+    const local = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const usageKey = queryKeys.usage('subjects', { kind: 'person' });
+    const stale = () => client.getQueryState(usageKey)?.isInvalidated;
+    const { result } = renderHook(() => ({ update: useUpdatePerson(), csv: useImportCsv() }), {
+      wrapper: local,
+    });
+    const file = new File(['mac\n'], 'a.csv');
+
+    client.setQueryData(usageKey, {});
+    await act(async () => {
+      await result.current.csv.mutateAsync({ kind: 'assignments', file, dryRun: false });
+    });
+    expect(stale()).toBe(false);
+    await act(async () => {
+      await result.current.csv.mutateAsync({ kind: 'persons', file, dryRun: false });
+    });
+    expect(stale()).toBe(true);
+
+    client.setQueryData(usageKey, {});
+    await act(async () => {
+      await result.current.update.mutateAsync({ id: 1, usage_excluded: true });
+    });
+    expect(stale()).toBe(true);
     setCsrfCookie(null);
   });
 });

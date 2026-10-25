@@ -259,9 +259,10 @@ command `usage rebuild` does not check this). The database's log retention is th
   too; no rebuild; report files made and sent before stay as they are) and can be undone. The
   persons list shows **Kullanım: hariç** ("Usage: excluded") next to the name. The change is written
   to the audit log with its old and new value (`person.update`); for many persons use the optional
-  `usage_excluded` column (evet/hayır) of the persons CSV. Only `devices.manage` (the administrator
-  in the default roles) can change it. 5651 lookups, their official reports and evidence packages
-  are not affected: the person always appears there.
+  `usage_excluded` column (evet/hayır) of the persons CSV. A CSV import is recorded as
+  `import.persons` with the file's SHA-256, its size and the counts, not per person. Only
+  `devices.manage` (the administrator in the default roles) can change it. 5651 lookups, their
+  official reports and evidence packages are not affected: the person always appears there.
 - Exported files (CSV, Excel) contain personal data: keep them only as long as needed.
 
 ## 7. Web interface and API
