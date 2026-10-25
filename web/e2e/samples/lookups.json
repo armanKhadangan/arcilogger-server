@@ -1514,6 +1514,28 @@
       "headers": {},
       "status": 422
     },
+    "ipv6_not_supported": {
+      "body": {
+        "error": {
+          "code": "ipv6_not_supported",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "query",
+                "public_ip"
+              ],
+              "msg": "IPv6 lookups are not supported",
+              "type": "value_error"
+            }
+          ],
+          "message_en": "This version does not support 5651 lookups for IPv6 addresses: ARCILOGGER does not collect the records that tie IPv6 addresses to devices (NDP, DHCPv6). The request must be answered by other means. Enter an IPv4 address written as IPv6 (::ffff:…) as IPv4.",
+          "message_tr": "Bu sürümde IPv6 adresleriyle 5651 sorgusu yapılamaz: ARCILOGGER, IPv6 adreslerini cihazlara bağlayan kayıtları (NDP, DHCPv6) toplamaz. Bu talep başka yollarla yanıtlanmalıdır. IPv6 biçiminde yazılmış bir IPv4 adresini (::ffff:…) IPv4 olarak girin."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
     "lookup_settings_invalid": {
       "body": {
         "error": {

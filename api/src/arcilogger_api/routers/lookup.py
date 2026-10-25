@@ -6,6 +6,10 @@
   **with** an offset (``2026-10-12T11:23:41+03:00``, ``…Z``) it is taken as given, **without**
   one it is a local time in ``time_zone`` (default Europe/Istanbul) and the answer says so; a
   local time that is ambiguous or skipped by a clock change in that zone is refused (422).
+  A public or internal **IPv6** address is refused before the lookup runs (422
+  ``ipv6_not_supported``, audited as ``lookup.run_failed``): ARCILOGGER keeps no evidence that
+  ties an IPv6 address to a device (no NDP, no DHCPv6), so such a request must be answered by
+  other means — never with IPv4 sessions as candidates.
   The lookup must finish within ``lookup.timeout_seconds`` (spec 14: < 5 s for ±60 s): each
   statement gets the remaining time as PostgreSQL ``statement_timeout``; past the limit the
   answer is 504 ``lookup_timeout`` (audited as ``lookup.run_failed``) instead of a hanging
@@ -33,6 +37,7 @@ never names, MAC addresses or raw lines.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -100,6 +105,14 @@ MESSAGES: Final = {
     "lookup_settings_invalid": (
         "5651 sorgu ayarları geçersiz (Ayarlar → NAT); sistem yöneticisi düzeltmelidir.",
         "The 5651 lookup settings are invalid (Settings → NAT); an administrator must fix them.",
+    ),
+    "ipv6_not_supported": (
+        "Bu sürümde IPv6 adresleriyle 5651 sorgusu yapılamaz: ARCILOGGER, IPv6 adreslerini "
+        "cihazlara bağlayan kayıtları (NDP, DHCPv6) toplamaz. Bu talep başka yollarla "
+        "yanıtlanmalıdır. IPv6 biçiminde yazılmış bir IPv4 adresini (::ffff:…) IPv4 olarak girin.",
+        "This version does not support 5651 lookups for IPv6 addresses: ARCILOGGER does not "
+        "collect the records that tie IPv6 addresses to devices (NDP, DHCPv6). The request must be "
+        "answered by other means. Enter an IPv4 address written as IPv6 (::ffff:…) as IPv4.",
     ),
     "lookup_unfinished": (
         "Bu sorgunun sonucu yok; rapor oluşturulamaz.",
@@ -371,6 +384,21 @@ def _to_request(query: QueryIn) -> tuple[LookupRequest, dict[str, Any]]:
     return request, time_input
 
 
+def _ipv6_fields(request: LookupRequest) -> list[str]:
+    """The public / internal address fields of ``request`` that hold an IPv6 address.
+
+    Such a lookup is refused (``ipv6_not_supported``): no IPv6 identity evidence (NDP, DHCPv6)
+    is collected. An IPv4 address written as IPv6 (``::ffff:192.0.2.44``) counts as IPv6 — it
+    never equals the IPv4 ``inet`` values of the logs; the message asks for the IPv4 form.
+    """
+    return [
+        field
+        for field in ("public_ip", "internal_ip")
+        if (address := getattr(request, field)) is not None
+        and ipaddress.ip_address(address).version == 6
+    ]
+
+
 # -- statement deadline ---------------------------------------------------------------------------
 
 
@@ -541,7 +569,7 @@ def result_ids(outcome: LookupOutcome) -> list[dict[str, Any]]:
     return results
 
 
-def _request_details(row: Lookup) -> dict[str, Any]:
+def _request_details(row: Lookup | RequestDetails) -> dict[str, Any]:
     return {
         "authority": row.authority,
         "file_no": row.file_no,
@@ -576,13 +604,43 @@ def run_5651(
             ],
         )
     lookup_request, time_input = _to_request(body.query)
+    query = {**lookup_request.to_dict(), "time_input": time_input}
+    ipv6 = _ipv6_fields(lookup_request)
+    if ipv6:
+        # An official request this version cannot answer: refused, the attempt is audited.
+        record_audit(
+            db,
+            actor=user,
+            action="lookup.run_failed",
+            details={
+                "reason": "ipv6_not_supported",
+                "query": query,
+                "request": _request_details(details),
+            },
+            ip=client_ip(request),
+        )
+        db.commit()
+        text_tr, text_en = MESSAGES["ipv6_not_supported"]
+        raise ApiError(
+            422,
+            "ipv6_not_supported",
+            text_tr,
+            text_en,
+            details=[
+                {
+                    "loc": ["body", "query", field],
+                    "type": "value_error",
+                    "msg": "IPv6 lookups are not supported",
+                }
+                for field in ipv6
+            ],
+        )
     values = get_settings(db)
     try:
         settings = LookupSettings.from_settings(values)
         limit = min(max(int(values.get(TIMEOUT_SETTING, DEFAULT_TIMEOUT_SECONDS)), 1), 300)
     except (TypeError, ValueError) as exc:
         raise _error(503, "lookup_settings_invalid") from exc
-    query = {**lookup_request.to_dict(), "time_input": time_input}
     started = monotonic()
     try:
         with statement_deadline(db, limit):
@@ -600,12 +658,7 @@ def run_5651(
                 "limit_seconds": limit,
                 "elapsed_ms": int((monotonic() - started) * 1000),
                 "query": query,
-                "request": {
-                    "authority": details.authority,
-                    "file_no": details.file_no,
-                    "request_date": details.request_date.isoformat(),
-                    "reason_sha256": hashlib.sha256(details.reason.encode("utf-8")).hexdigest(),
-                },
+                "request": _request_details(details),
             },
             ip=client_ip(request),
         )

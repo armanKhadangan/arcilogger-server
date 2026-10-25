@@ -27,6 +27,10 @@
   ham log satırına (`kaynak`, `gün`, `satır`, `bayt konumu`) işaret eder.
 - Talepte hedef (IP/port/alan adı) varsa yalnızca o hedefe giden oturumlar aday olur; o hedefe
   giden oturum yoksa sonuç "bulunamadı" olur ve ilgisiz kişiler listelenmez.
+- **IPv6 desteklenmez:** IPv6 adreslerini cihazlara bağlayan kayıtlar (NDP, DHCPv6) toplanmaz.
+  Genel veya iç adresi IPv6 olan bir sorgu sonuç yerine açık bir retle yanıtlanır
+  (`ipv6_not_supported`); böyle bir talep başka yollarla yanıtlanmalıdır. Hiçbir IPv4 oturumu bir
+  IPv6 adresinin adayı olamaz.
 - Geç gelen kayıtlar (ingest kesintisi sonrası birikmiş günler) otomatik olarak yeniden işlenir.
 - Ölçüm: günde 3.000.000 trafik satırında (iki ardışık gün) ±60 sn aday araması **1,2–1,3 sn**,
   alan adıyla **1,1–1,5 sn**, hedef IP + port ile **0,04 sn** (hedef < 5 sn).
@@ -37,7 +41,8 @@ The worker turns DHCP, ARP and FortiGate traffic records into an IP ↔ MAC time
 (`leases`), keeps a device inventory, raises IP-conflict alerts and answers 5651 requests:
 exact matches when the request names the FortiGate's own address, ranked candidates in the
 double-NAT case, the attribution chain for an internal IP or MAC, or a clear "nothing found"
-with what would help. Every step cites the raw spool line it rests on.
+with what would help. Every step cites the raw spool line it rests on. IPv6 lookups are not
+supported (no NDP or DHCPv6 evidence): they are refused, never answered with IPv4 candidates.
 
 ---
 
@@ -279,7 +284,10 @@ restricted to it: `dest_ip` (index `(dstip, dstport, time)`), `dest_domain`, or 
 contains one"; listing every client of the window would put unrelated persons into an official
 answer — data minimisation, spec 3.3). The deliberate way to see the whole window is a request
 without destination (`candidates_without_destination`); the explanation says so. An internal IP
-or MAC given together with a public IP restricts the candidates to that client.
+or MAC given together with a public IP restricts the candidates to that client. Only sessions
+that left with an address (`transip`, else the source) of the requested public IP's family are
+candidates: no IPv4 session — the FortiGate's IPv4 WAN address included — is ever a candidate
+for an IPv6 address (defence in depth behind the API's refusal, section 7).
 
 **Domains.** Addresses of the name around the moment: DNS answers for the name and `www.` +
 name (`fg_dns`, index `(qname, time)`) and the destinations of web filter / application control
@@ -448,6 +456,12 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
 
 ## 7. Limits
 
+- **IPv6 is not supported.** ARCILOGGER collects no evidence that ties an IPv6 address to a
+  device (no NDP neighbour tables, no DHCPv6 logs; DHCP and `ARP-LOG` are IPv4 only). A lookup
+  whose public or internal address is IPv6 — also an IPv4 address written as IPv6,
+  `::ffff:a.b.c.d` — is refused before it runs (API 422 `ipv6_not_supported`, audited as
+  `lookup.run_failed`; the web form says so before sending): this version cannot answer such a
+  request, it must be answered by other means. A destination may be IPv6 (it only filters).
 - The public port of a double-NAT request cannot be mapped (no ISP router logs): candidates only.
   The fix is the ISP router in bridge mode with the public IP in `nat.public_ips` (network admin).
 - The FortiGate's own outbound sessions (`subtype="local"`, `trandisp="noop"`) are not candidates.

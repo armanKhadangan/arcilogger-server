@@ -648,6 +648,14 @@ def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
         422,
         "validation_error",
     )
+    # No IPv6 identity evidence (NDP, DHCPv6): refused, audited as lookup.run_failed.
+    errors["ipv6_not_supported"] = capture.error(
+        admin.post(
+            f"{API}/lookup/5651", json=lookup_body(public_ip="2001:db8::44", public_port=41234)
+        ),
+        422,
+        "ipv6_not_supported",
+    )
     errors["privacy_notice_required"] = capture.error(
         newcomer.get(f"{API}/lookups"), 403, "privacy_notice_required"
     )
