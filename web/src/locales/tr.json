@@ -1346,6 +1346,9 @@
       "inactive": "Pasif",
       "activeLabel": "Etkin",
       "keepsHistory": "Pasif kişilere cihaz atanamaz; atama geçmişi korunur.",
+      "usageExcluded": "Kullanım raporlarından hariç tut",
+      "usageExcludedHint": "Bu kişi Kullanım sayfalarında ve kullanım raporlarında kişi olarak yer almaz; trafiği şirket ve departman toplamlarında sayılmaya devam eder. 5651 sorguları bundan etkilenmez.",
+      "usageExcludedBadge": "Kullanım: hariç",
       "createTitle": "Kişi ekle",
       "editTitle": "Kişiyi düzenle",
       "formDescription": "Yalnızca ad zorunludur. Değişiklikler denetim kaydına yazılır.",
@@ -1366,6 +1369,7 @@
       "emptyHint": "“Kişi ekle” ile tek tek ya da İçe/Dışa aktar sekmesinden CSV dosyasıyla ekleyin.",
       "emptyFiltered": "Bu filtrelere uyan kişi yok.",
       "inactiveNote": "Bu kişi pasif: cihaz atanamaz, geçmişi korunur.",
+      "usageExcludedNote": "Bu kişi kullanım raporlarından hariç: Kullanım sayfalarında ve kullanım raporlarında kişi olarak yer almaz, trafiği şirket ve departman toplamlarında sayılır. 5651 sorguları bundan etkilenmez.",
       "createdAt": "Eklenme",
       "updatedAt": "Son değişiklik",
       "devices_one": "Şu anki cihazları ({{count}})",
@@ -1461,7 +1465,7 @@
       "kinds": {
         "persons": {
           "title": "Kişiler",
-          "description": "Dışa aktarılan listenin id sütunu olan satır o kişiyi günceller (sicil numarası olmasa da); id'siz, sicil numaralı satır o numaradaki kişiyi günceller (yoksa ekler); ikisi de olmayan satır yeni kişi ekler. Dışa aktarılan kişi listesi olduğu gibi geri yüklenebilir."
+          "description": "Dışa aktarılan listenin id sütunu olan satır o kişiyi günceller (sicil numarası olmasa da); id'siz, sicil numaralı satır o numaradaki kişiyi günceller (yoksa ekler); ikisi de olmayan satır yeni kişi ekler. Dışa aktarılan kişi listesi olduğu gibi geri yüklenebilir. usage_excluded sütunu (evet/hayır) isteğe bağlıdır: evet yazılan kişi kullanım raporlarında kişi olarak yer almaz; boş hücre değiştirmez."
         },
         "assignments": {
           "title": "Cihaz atamaları",
@@ -1532,6 +1536,7 @@
         "employee_no": "Sicil no",
         "active": "Etkin",
         "notes": "Notlar",
+        "usage_excluded": "Kullanım raporlarından hariç",
         "mac": "MAC",
         "person": "Kişi",
         "person_name": "Kişi adı",

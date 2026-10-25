@@ -1346,6 +1346,9 @@
       "inactive": "Inactive",
       "activeLabel": "Active",
       "keepsHistory": "Inactive persons cannot be given devices; the assignment history is kept.",
+      "usageExcluded": "Exclude from usage reports",
+      "usageExcludedHint": "The person is not shown as a person on the usage pages and in usage reports; their traffic still counts in the company and department totals. 5651 lookups are not affected.",
+      "usageExcludedBadge": "Usage: excluded",
       "createTitle": "Add a person",
       "editTitle": "Edit the person",
       "formDescription": "Only the name is required. Changes are written to the audit log.",
@@ -1366,6 +1369,7 @@
       "emptyHint": "Add them one by one with “Add a person” or as a CSV file on the Import/Export tab.",
       "emptyFiltered": "No person matches these filters.",
       "inactiveNote": "This person is inactive: no devices can be assigned; the history is kept.",
+      "usageExcludedNote": "This person is excluded from usage reports: not shown as a person on the usage pages and in usage reports, while their traffic still counts in the company and department totals. 5651 lookups are not affected.",
       "createdAt": "Added",
       "updatedAt": "Last changed",
       "devices_one": "Current devices ({{count}})",
@@ -1461,7 +1465,7 @@
       "kinds": {
         "persons": {
           "title": "Persons",
-          "description": "A line with the id column of an exported list updates that person (also one without an employee number); a line without an id but with an employee number updates the person with that number (or adds one); a line with neither adds a new person. An exported person list imports unchanged."
+          "description": "A line with the id column of an exported list updates that person (also one without an employee number); a line without an id but with an employee number updates the person with that number (or adds one); a line with neither adds a new person. An exported person list imports unchanged. The usage_excluded column (evet/hayır) is optional: a person marked evet is not shown as a person in usage reports; an empty cell changes nothing."
         },
         "assignments": {
           "title": "Device assignments",
@@ -1532,6 +1536,7 @@
         "employee_no": "Employee no.",
         "active": "Active",
         "notes": "Notes",
+        "usage_excluded": "Excluded from usage reports",
         "mac": "MAC",
         "person": "Person",
         "person_name": "Person name",

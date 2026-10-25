@@ -687,6 +687,8 @@ const ALL_DEVICE_KEYS: readonly QueryKey[] = [
   queryKeys.departments,
   queryKeys.vlans,
 ];
+/** And the Kullanım answers: a person's `usage_excluded` applies as soon as it is read. */
+const PERSON_KEYS: readonly QueryKey[] = [...ALL_DEVICE_KEYS, queryKeys.usageAll];
 
 function useDeviceDataMutation<TVariables, TResult>(
   fn: (variables: TVariables) => Promise<TResult>,
@@ -740,7 +742,7 @@ export function usePerson(id: number | null, enabled = true) {
 export function useCreatePerson() {
   return useDeviceDataMutation(
     (body: PersonCreate) => api.post<PersonOut>('/persons', body),
-    ALL_DEVICE_KEYS,
+    PERSON_KEYS,
   );
 }
 
@@ -749,7 +751,7 @@ export function useUpdatePerson() {
   return useDeviceDataMutation(
     ({ id, ...body }: PersonUpdate & { id: number }) =>
       api.patch<PersonOut>(`/persons/${id}`, body),
-    ALL_DEVICE_KEYS,
+    PERSON_KEYS,
   );
 }
 
@@ -824,9 +826,10 @@ export function useImportCsv() {
       form.append('file', file, file.name);
       return api.post<ImportResult>(`/imports/${kind}`, form, { params: { dry_run: dryRun } });
     },
-    onSuccess: async (result) => {
+    onSuccess: async (result, { kind }) => {
       if (result.dry_run) return;
-      await Promise.all(ALL_DEVICE_KEYS.map((queryKey) => client.invalidateQueries({ queryKey })));
+      const keys = kind === 'persons' ? PERSON_KEYS : ALL_DEVICE_KEYS;
+      await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
     },
   });
 }

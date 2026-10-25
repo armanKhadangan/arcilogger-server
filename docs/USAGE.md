@@ -251,9 +251,18 @@ command `usage rebuild` does not check this). The database's log retention is th
   administrator can add it) hold the entries with their real targets and hashes; while the setting
   is on they are left out of the list of a reader who sees pseudonyms on the Kullanım pages, and
   their detail and download answer 404.
-- **Leaving a person out of person-level reports:** `persons.usage_excluded`. The person does not
-  appear in subject lists, details, site/category user lists or the person tables of the reports;
-  the traffic still counts in the company and department totals.
+- **Leaving a person out of person-level reports:** Cihazlar ve Kişiler → Kişiler → the person's
+  actions menu → **Düzenle** → **Kullanım raporlarından hariç tut** ("Exclude from usage reports";
+  also on the "Kişi ekle" form; `persons.usage_excluded`). The person does not appear in subject
+  lists, details, site/category user lists or the person tables of the reports; the traffic still
+  counts in the company and department totals. The setting applies as soon as it is read (past days
+  too; no rebuild; report files made and sent before stay as they are) and can be undone. The
+  persons list shows **Kullanım: hariç** ("Usage: excluded") next to the name. The change is written
+  to the audit log with its old and new value (`person.update`); for many persons use the optional
+  `usage_excluded` column (evet/hayır) of the persons CSV. A CSV import is recorded as
+  `import.persons` with the file's SHA-256, its size and the counts, not per person. Only
+  `devices.manage` (the administrator in the default roles) can change it. 5651 lookups, their
+  official reports and evidence packages are not affected: the person always appears there.
 - Exported files (CSV, Excel) contain personal data: keep them only as long as needed.
 
 ## 7. Web interface and API

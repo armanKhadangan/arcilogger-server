@@ -193,11 +193,12 @@ bölüm 4. Ana yönlendirici (MikroTik; DHCP ve ARP-LOG kayıtları, 5651 erişi
    toplama, mühürleme, 5651 sorgusu ve kullanım çalışır; cihazlar ancak VLAN adı ve VLAN
    departmanı almaz.
 2. Kişileri ekleyin ya da CSV ile içe aktarın: şablonu indirin
-   (`name;department;title;email;employee_no;active;notes`), Excel'de **"CSV UTF-8"** türüyle
-   kaydedin, önce **önizleyin** (hiçbir şey yazılmaz, satır satır hatalar görünür), hata yoksa
-   **uygulayın** (tüm satırlar ya da hiçbiri). CSV içe aktarma Toplu içe aktarma modülü
-   gerektirir; elle giriş her zaman açıktır (atama CSV'si de bu modüldedir; kişi ve cihaz
-   listelerinin CSV dışa aktarması her zaman açıktır, [LISANS.md](LISANS.md)).
+   (`name;department;title;email;employee_no;active;notes;usage_excluded`; yalnızca `name`
+   zorunludur, `usage_excluded` evet/hayır: kişiyi kullanım raporlarının dışında bırakır), Excel'de
+   **"CSV UTF-8"** türüyle kaydedin, önce **önizleyin** (hiçbir şey yazılmaz, satır satır hatalar
+   görünür), hata yoksa **uygulayın** (tüm satırlar ya da hiçbiri). CSV içe aktarma Toplu içe
+   aktarma modülü gerektirir; elle giriş her zaman açıktır (atama CSV'si de bu modüldedir; kişi ve
+   cihaz listelerinin CSV dışa aktarması her zaman açıktır, [LISANS.md](LISANS.md)).
 3. Cihazları atayın: MAC, ana bilgisayar adı, IP ya da VLAN ile arayın ("Bilinmeyen cihazlar"
    süzgeci), bir ya da birçok cihazı seçip kişiye atayın — ya da atama CSV'si
    (`mac;employee_no;person_name;valid_from;note`). Cihaz kişide **daha önceden** beri ise
@@ -445,9 +446,10 @@ Bu sayfalar Kullanım analizi modülünü gerektirir ([LISANS.md](LISANS.md)); m
   sayı kesin değildir.
 - Kullanım, cihazın **o anda** atandığı kişiye yazılır (5651 sorgusuyla aynı kural). Kimseye
   atanmamış cihazlar "cihaz", kira kaydı olmayan adresler "IP" olarak görünür.
-- Adlar varsayılan olarak görünür (sahibin 2026-10-20 kararı); bir kişi `usage_excluded` ile kişi
-  düzeyindeki raporların dışında bırakılabilir. Ayrıntı görüntüleme ve dışa aktarma denetim kaydına
-  yazılır.
+- Adlar varsayılan olarak görünür (sahibin 2026-10-20 kararı); bir kişi, Kişiler sekmesinde
+  kişinin **Kullanım raporlarından hariç tut** kutusuyla (`usage_excluded`) kişi düzeyindeki
+  raporların dışında bırakılabilir; 5651 sorguları bundan etkilenmez. Ayrıntı görüntüleme ve dışa
+  aktarma denetim kaydına yazılır.
 - Dini bayram tarihlerini her yıl `usage.holidays` ayarına girin (yalnızca sabit tarihli resmî
   tatiller hazır gelir; [KULLANIM.md](KULLANIM.md) bölüm 2.5).
 

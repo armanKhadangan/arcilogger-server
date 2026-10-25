@@ -15,9 +15,14 @@ person's current devices — that is a separate, deliberate step (``POST /device
 * ``GET /persons/export.csv`` — the filtered list as CSV; it imports again unchanged
   (``POST /imports/persons``).
 
+``usage_excluded`` (area U, ADR-0011) leaves the person out of every person-level usage view and
+report; their traffic still counts in the company and department totals. 5651 lookups, their
+official reports and evidence packages never read it.
+
 **Audit** (the sealed audit log gets ids and field names, never names, e-mails or notes):
-``person.create`` (``person_id``, ``department_id``, ``active``, the fields given),
-``person.update`` (fields changed; old/new of ``department_id`` and ``active``),
+``person.create`` (``person_id``, ``department_id``, ``active``, ``usage_excluded``, the fields
+given), ``person.update`` (fields changed; old/new of ``department_id``, ``active`` and
+``usage_excluded``),
 ``person.export`` (row count, which filters).
 """
 
@@ -61,7 +66,16 @@ MAX_ID: Final = 2**63 - 1
 MAX_OFFSET: Final = 1_000_000
 PersonId = Annotated[int, Path(ge=1, le=MAX_ID, description="Person number")]
 #: Fields of a person in the order of the API, the CSV and the audit entries.
-FIELDS: Final = ("name", "department_id", "title", "email", "employee_no", "active", "notes")
+FIELDS: Final = (
+    "name",
+    "department_id",
+    "title",
+    "email",
+    "employee_no",
+    "active",
+    "notes",
+    "usage_excluded",
+)
 
 MESSAGES: Final = {
     "employee_no_taken": (
@@ -163,6 +177,7 @@ class PersonCreate(StrictModel):
     employee_no: OptionalEmployeeNo = None
     active: bool = True
     notes: OptionalNotes = None
+    usage_excluded: bool = False
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -184,6 +199,7 @@ def create_person(
             "person_id": person.id,
             "department_id": person.department_id,
             "active": person.active,
+            "usage_excluded": person.usage_excluded,
             "fields": [field for field in FIELDS if values.get(field) is not None],
         },
         ip=client_ip(request),
@@ -201,6 +217,7 @@ PERSON_COLUMNS: Final = (
     "employee_no",
     "active",
     "notes",
+    "usage_excluded",
     "device_count",
     "created_at",
     "updated_at",
@@ -233,6 +250,7 @@ def export_persons(
             out.employee_no,
             out.active,
             out.notes,
+            out.usage_excluded,
             out.device_count,
             out.created_at,
             out.updated_at,
@@ -261,8 +279,8 @@ def get_person(person_id: PersonId, db: DbSession, user: ReaderDep) -> PersonDet
 
 
 class PersonUpdate(StrictModel):
-    """Only the fields sent are changed; ``null`` clears an optional field (not ``name`` or
-    ``active``)."""
+    """Only the fields sent are changed; ``null`` clears an optional field (not ``name``,
+    ``active`` or ``usage_excluded``)."""
 
     name: OptionalName = None
     department_id: Annotated[int | None, Field(ge=1, le=MAX_ID)] = None
@@ -271,6 +289,7 @@ class PersonUpdate(StrictModel):
     employee_no: OptionalEmployeeNo = None
     active: bool | None = None
     notes: OptionalNotes = None
+    usage_excluded: bool | None = None
 
 
 @router.patch("/{person_id}")
@@ -279,7 +298,7 @@ def update_person(
 ) -> PersonOut:
     person = _person(db, person_id, lock=True)
     sent = body.model_fields_set
-    for field in ("name", "active"):
+    for field in ("name", "active", "usage_excluded"):
         if field in sent and getattr(body, field) is None:
             raise _invalid(field, "must not be null")
     values = {field: getattr(body, field) for field in FIELDS if field in sent}
@@ -287,7 +306,7 @@ def update_person(
     if changed:
         _check(db, {field: values[field] for field in changed}, person_id=person.id)
         details: dict[str, Any] = {"changed": changed}
-        for field in ("department_id", "active"):
+        for field in ("department_id", "active", "usage_excluded"):
             if field in changed:
                 details[field] = {"old": getattr(person, field), "new": values[field]}
         for field in changed:

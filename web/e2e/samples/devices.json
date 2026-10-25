@@ -251,7 +251,7 @@
   "devices_csv": {
     "headers": {
       "cache-control": "no-store",
-      "content-disposition": "attachment; filename=\"arcilogger-cihazlar-20261013-040016.csv\"",
+      "content-disposition": "attachment; filename=\"arcilogger-cihazlar-20261013-040015.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
     "sha256": "7bac193db5574d4b97a6aca95bb1a2fdf49c1886748b8ed6a7e47bf13087c449",
@@ -310,8 +310,8 @@
       "body": {
         "error": {
           "code": "csv_header",
-          "message_en": "The header line is invalid: missing column name. Expected columns: name, department, title, email, employee_no, active, notes.",
-          "message_tr": "Başlık satırı geçersiz: missing column name. Beklenen sütunlar: name, department, title, email, employee_no, active, notes."
+          "message_en": "The header line is invalid: missing column name. Expected columns: name, department, title, email, employee_no, active, notes, usage_excluded.",
+          "message_tr": "Başlık satırı geçersiz: missing column name. Beklenen sütunlar: name, department, title, email, employee_no, active, notes, usage_excluded."
         }
       },
       "headers": {},
@@ -490,7 +490,7 @@
         "person_name": "Selin Kaya",
         "previous_person_id": null,
         "previous_person_name": null,
-        "valid_from": "2026-10-13T04:00:17.120744+00:00"
+        "valid_from": "2026-10-13T04:00:15.813259+00:00"
       }
     ],
     "rows": 2,
@@ -547,7 +547,7 @@
         "person_name": "Selin Kaya",
         "previous_person_id": null,
         "previous_person_name": null,
-        "valid_from": "2026-10-13T04:00:17.066672+00:00"
+        "valid_from": "2026-10-13T04:00:15.760362+00:00"
       }
     ],
     "rows": 2,
@@ -987,7 +987,7 @@
     "total": 4
   },
   "meta": {
-    "captured_at": "2026-10-13T04:00:28.539054+00:00",
+    "captured_at": "2026-10-13T04:00:34.811612+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -996,7 +996,7 @@
   },
   "person_created": {
     "active": true,
-    "created_at": "2026-10-13T04:00:15.164700Z",
+    "created_at": "2026-10-13T04:00:14.106927Z",
     "department": {
       "id": 1,
       "name": "Finans"
@@ -1008,7 +1008,8 @@
     "name": "Can Öztürk",
     "notes": null,
     "title": "Mali Analist",
-    "updated_at": "2026-10-13T04:00:15.164735Z"
+    "updated_at": "2026-10-13T04:00:14.106963Z",
+    "usage_excluded": false
   },
   "person_detail": {
     "active": true,
@@ -1040,7 +1041,7 @@
         "valid_to": null
       }
     ],
-    "created_at": "2026-10-13T04:00:00.200534Z",
+    "created_at": "2026-10-13T04:00:00.268916Z",
     "department": {
       "id": 2,
       "name": "Planlama"
@@ -1110,11 +1111,12 @@
     "name": "Selin Kaya",
     "notes": null,
     "title": "Planlama Uzmanı",
-    "updated_at": "2026-10-20T17:40:38.619613Z"
+    "updated_at": "2026-10-25T19:52:12.430658Z",
+    "usage_excluded": false
   },
   "person_updated": {
     "active": true,
-    "created_at": "2026-10-13T04:00:15.164700Z",
+    "created_at": "2026-10-13T04:00:14.106927Z",
     "department": {
       "id": 1,
       "name": "Finans"
@@ -1126,13 +1128,14 @@
     "name": "Can Öztürk",
     "notes": null,
     "title": "Finans Müdürü",
-    "updated_at": "2026-10-20T17:40:38.804327Z"
+    "updated_at": "2026-10-25T19:52:12.618690Z",
+    "usage_excluded": false
   },
   "persons": {
     "items": [
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:15.164700Z",
+        "created_at": "2026-10-13T04:00:14.106927Z",
         "department": {
           "id": 1,
           "name": "Finans"
@@ -1144,11 +1147,12 @@
         "name": "Can Öztürk",
         "notes": null,
         "title": "Finans Müdürü",
-        "updated_at": "2026-10-20T17:40:38.804327Z"
+        "updated_at": "2026-10-25T19:52:12.618690Z",
+        "usage_excluded": false
       },
       {
         "active": false,
-        "created_at": "2026-10-13T04:00:15.317637Z",
+        "created_at": "2026-10-13T04:00:14.249768Z",
         "department": null,
         "device_count": 0,
         "email": null,
@@ -1157,11 +1161,12 @@
         "name": "Deniz Işık",
         "notes": null,
         "title": null,
-        "updated_at": "2026-10-13T04:00:15.317668Z"
+        "updated_at": "2026-10-13T04:00:14.249822Z",
+        "usage_excluded": true
       },
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:00.200534Z",
+        "created_at": "2026-10-13T04:00:00.268916Z",
         "department": {
           "id": 2,
           "name": "Planlama"
@@ -1173,7 +1178,8 @@
         "name": "Selin Kaya",
         "notes": null,
         "title": "Planlama Uzmanı",
-        "updated_at": "2026-10-20T17:40:38.619613Z"
+        "updated_at": "2026-10-25T19:52:12.430658Z",
+        "usage_excluded": false
       }
     ],
     "limit": 50,
@@ -1183,18 +1189,18 @@
   "persons_csv": {
     "headers": {
       "cache-control": "no-store",
-      "content-disposition": "attachment; filename=\"arcilogger-kisiler-20261013-040016.csv\"",
+      "content-disposition": "attachment; filename=\"arcilogger-kisiler-20261013-040015.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "22dbc11fb575e2471a3d5711cf9fc464e38213d355316312307d5f8b9404a6e4",
-    "size": 415,
-    "text": "﻿id;name;department;title;email;employee_no;active;notes;device_count;created_at;updated_at\r\n2;Can Öztürk;Finans;Finans Müdürü;can.ozturk@example.com;1002;evet;;0;2026-10-13T07:00:15+03:00;2026-10-20T20:40:38+03:00\r\n3;Deniz Işık;;;;0950;hayır;;0;2026-10-13T07:00:15+03:00;2026-10-13T07:00:15+03:00\r\n1;Selin Kaya;Planlama;Planlama Uzmanı;;1001;evet;;2;2026-10-13T07:00:00+03:00;2026-10-20T20:40:38+03:00\r\n"
+    "sha256": "d426c0db21544230e044dd421945b5516aa2992ec9cabf16e340e926ed398241",
+    "size": 449,
+    "text": "﻿id;name;department;title;email;employee_no;active;notes;usage_excluded;device_count;created_at;updated_at\r\n2;Can Öztürk;Finans;Finans Müdürü;can.ozturk@example.com;1002;evet;;hayır;0;2026-10-13T07:00:14+03:00;2026-10-25T22:52:12+03:00\r\n3;Deniz Işık;;;;0950;hayır;;evet;0;2026-10-13T07:00:14+03:00;2026-10-13T07:00:14+03:00\r\n1;Selin Kaya;Planlama;Planlama Uzmanı;;1001;evet;;hayır;2;2026-10-13T07:00:00+03:00;2026-10-25T22:52:12+03:00\r\n"
   },
   "persons_search": {
     "items": [
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:15.164700Z",
+        "created_at": "2026-10-13T04:00:14.106927Z",
         "department": {
           "id": 1,
           "name": "Finans"
@@ -1206,7 +1212,8 @@
         "name": "Can Öztürk",
         "notes": null,
         "title": "Finans Müdürü",
-        "updated_at": "2026-10-20T17:40:38.804327Z"
+        "updated_at": "2026-10-25T19:52:12.618690Z",
+        "usage_excluded": false
       }
     ],
     "limit": 50,
@@ -1262,9 +1269,9 @@
       "content-disposition": "attachment; filename=\"arcilogger-kisiler-sablon.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "5d1584c7724eac75b83cd7f10ad84d9cdb97753cc639e68463ff3d9dd1694552",
-    "size": 131,
-    "text": "﻿name;department;title;email;employee_no;active;notes\r\nAyşe Yılmaz;Finans;Muhasebe Uzmanı;ayse.yilmaz@example.com;1001;evet;\r\n"
+    "sha256": "46f5f4a3ac021cb7ef0646a764e73d3ee9c2484be2bf88efebbb44caa9e6647d",
+    "size": 153,
+    "text": "﻿name;department;title;email;employee_no;active;notes;usage_excluded\r\nAyşe Yılmaz;Finans;Muhasebe Uzmanı;ayse.yilmaz@example.com;1001;evet;;hayır\r\n"
   },
   "unassigned": {
     "devices": [

@@ -4905,6 +4905,11 @@
             }
           ],
           "title": "Title"
+        },
+        "usage_excluded": {
+          "default": false,
+          "title": "Usage Excluded",
+          "type": "boolean"
         }
       },
       "required": [
@@ -5008,6 +5013,10 @@
           "format": "date-time",
           "title": "Updated At",
           "type": "string"
+        },
+        "usage_excluded": {
+          "title": "Usage Excluded",
+          "type": "boolean"
         }
       },
       "required": [
@@ -5019,6 +5028,7 @@
         "employee_no",
         "active",
         "notes",
+        "usage_excluded",
         "device_count",
         "created_at",
         "updated_at",
@@ -5109,6 +5119,10 @@
           "format": "date-time",
           "title": "Updated At",
           "type": "string"
+        },
+        "usage_excluded": {
+          "title": "Usage Excluded",
+          "type": "boolean"
         }
       },
       "required": [
@@ -5120,6 +5134,7 @@
         "employee_no",
         "active",
         "notes",
+        "usage_excluded",
         "device_count",
         "created_at",
         "updated_at"
@@ -5178,7 +5193,7 @@
     },
     "PersonUpdate": {
       "additionalProperties": false,
-      "description": "Only the fields sent are changed; ``null`` clears an optional field (not ``name`` or\n``active``).",
+      "description": "Only the fields sent are changed; ``null`` clears an optional field (not ``name``,\n``active`` or ``usage_excluded``).",
       "properties": {
         "active": {
           "anyOf": [
@@ -5267,6 +5282,17 @@
             }
           ],
           "title": "Title"
+        },
+        "usage_excluded": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Usage Excluded"
         }
       },
       "title": "PersonUpdate",

@@ -674,6 +674,11 @@ export interface PersonOut {
   /** Persons are never deleted: a deactivated person keeps the assignment history. */
   active: boolean;
   notes: string | null;
+  /**
+   * Left out of every person-level usage view and report (the company and department totals
+   * still count the traffic); 5651 lookups never read it.
+   */
+  usage_excluded: boolean;
   device_count: number;
   created_at: DateTimeString;
   updated_at: DateTimeString;
@@ -700,11 +705,14 @@ export interface PersonCreate {
   /** Default `true`. */
   active?: boolean;
   notes?: string | null;
+  /** Default `false`. */
+  usage_excluded?: boolean;
 }
 
 /**
- * Only the fields sent are changed (`name` and `active` never `null`; `active: false`
- * deactivates — there is no delete, and the person's current devices stay assigned).
+ * Only the fields sent are changed (`name`, `active` and `usage_excluded` never `null`;
+ * `active: false` deactivates — there is no delete, and the person's current devices stay
+ * assigned).
  */
 export interface PersonUpdate {
   name?: string | null;
@@ -714,6 +722,7 @@ export interface PersonUpdate {
   employee_no?: string | null;
   active?: boolean | null;
   notes?: string | null;
+  usage_excluded?: boolean | null;
 }
 
 export interface DepartmentOut {

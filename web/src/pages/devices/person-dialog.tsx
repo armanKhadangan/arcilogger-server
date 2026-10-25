@@ -42,7 +42,9 @@ import {
 
 /**
  * "Kişi ekle" (`person` null) and "Kişiyi düzenle". Persons are never deleted: the edit form's
- * "Etkin" box deactivates one, and the history stays.
+ * "Etkin" box deactivates one, and the history stays. "Kullanım raporlarından hariç tut" leaves
+ * the person out of the person-level usage views and reports (`usage_excluded`); 5651 lookups
+ * never read it.
  */
 export function PersonDialog({
   open,
@@ -110,6 +112,17 @@ export function PersonDialog({
   const message = (field: PersonField) => errors[field] && t(errors[field]);
   const describedBy = (field: PersonField, hint = false) =>
     message(field) ? `${id}-${field}-error` : hint ? `${id}-${field}-hint` : undefined;
+  // Check boxes: "Etkin" only when editing (a new person starts active).
+  const flags = [
+    ...(person
+      ? [['active', 'devices.persons.activeLabel', 'devices.persons.keepsHistory'] as const]
+      : []),
+    [
+      'usageExcluded',
+      'devices.persons.usageExcluded',
+      'devices.persons.usageExcludedHint',
+    ] as const,
+  ];
   const text = (field: Exclude<PersonField, 'department'>, key: keyof PersonFormValues) => ({
     id: `${id}-${field}`,
     autoComplete: 'off',
@@ -194,27 +207,27 @@ export function PersonDialog({
               }}
             />
           </Field>
-          {person ? (
-            <div className="flex items-start gap-2">
+          {flags.map(([field, label, hint]) => (
+            <div key={field} className="flex items-start gap-2">
               <Checkbox
-                id={`${id}-active`}
-                checked={values.active}
-                aria-describedby={`${id}-active-hint`}
+                id={`${id}-${field}`}
+                checked={values[field]}
+                aria-describedby={`${id}-${field}-hint`}
                 onCheckedChange={(checked) => {
-                  set('active', checked === true);
+                  set(field, checked === true);
                 }}
                 className="mt-0.5"
               />
               <div className="flex flex-col gap-0.5">
-                <Label htmlFor={`${id}-active`} className="font-normal">
-                  {t('devices.persons.activeLabel')}
+                <Label htmlFor={`${id}-${field}`} className="font-normal">
+                  {t(label)}
                 </Label>
-                <p id={`${id}-active-hint`} className="text-xs text-muted">
-                  {t('devices.persons.keepsHistory')}
+                <p id={`${id}-${field}-hint`} className="text-xs text-muted">
+                  {t(hint)}
                 </p>
               </div>
             </div>
-          ) : null}
+          ))}
           <DialogFooter>
             <Button
               variant="secondary"
