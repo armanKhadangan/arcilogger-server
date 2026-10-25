@@ -235,7 +235,7 @@ veritabanından okunur; hizmetleri yeniden başlatmak gerekmez. Sahada belirleni
 
 | Ayar | Ne zaman |
 |---|---|
-| `nat.public_ips`, `nat.wan_transip` | FortiGate'in genel / WAN adresi doğrulandığında (çift NAT, [ASSUMPTIONS.md](ASSUMPTIONS.md) A9) |
+| `nat.public_ips`, `nat.wan_transip` | FortiGate'in genel / WAN adresi doğrulandığında (çift NAT, [ASSUMPTIONS.md](ASSUMPTIONS.md) A9); her biri kendi modeminin arkasındaki birden çok ISS hattında `nat.wan_transip` boş kalır ([KURULUM.md](KURULUM.md) bölüm 0.1) |
 | `devices.infrastructure_macs` | Ana yönlendiricinin, FortiGate'in ve anahtarların MAC adresleri (IP çakışması sayılmasınlar) |
 | `lease.server_seconds` | Kira süresi bir günden (`lease.default_seconds`) farklı olan DHCP sunucuları, ör. misafir ağınınki: `{"<sunucu adı>": <saniye>}` (boruyla) |
 | `devices.oui_file` | İsteğe bağlı üretici adları: dosyayı `C:\ProgramData\ARCILOGGER\oui.csv` olarak koyun ([CORRELATION.md](CORRELATION.md) bölüm 1, "Vendor") |

@@ -77,11 +77,14 @@ Kurmadan önce ağınızın bu sürümün desteklediği yapıya uyduğunu denetl
 mühürlenir; aşağıdakiler, bir 5651 sorgusunun kişiye ve cihaza kadar ilerleyip ilerlemediğini ve
 kullanım analizinin neyi gösterdiğini belirler.
 
-- **Tek yerleşke:** bir kurulum tek bir yerleşkeyi (site) kapsar: internete bir FortiGate
-  üzerinden çıkan, adresleri bir ana MikroTik yönlendiricinin (DHCP sunucusu) dağıttığı IPv4 ağı.
-  Aynı özel adres aralığını kullanan birden çok şube tek kurulumda desteklenmez: aynı ağ VLAN
-  listesine iki kez girilemez ve iki şubedeki aynı adres tek bir adres sayılır (IP çakışması gibi
-  görünür).
+- **Tek yerleşke:** bir kurulum tek bir yerleşkeyi (site) kapsar: internete bir FortiGate üzerinden
+  çıkan, adresleri bir ana MikroTik yönlendiricinin (DHCP sunucusu) dağıttığı IPv4 ağı. Aynı özel
+  adres aralığını kullanan birden çok şube tek kurulumda desteklenmez: aynı ağ VLAN listesine iki
+  kez girilemez ve iki şubedeki aynı adres tek bir adres sayılır (IP çakışması gibi görünür).
+  İnternete başka bir hattan ya da bir VPN tünelinden çıkan bir ağ kesiminin (ör. misafir Wi-Fi)
+  FortiGate kaydı yoktur: o kesimden yalnızca kira kayıtları (DHCP, `ARP-LOG`) gelir; genel IP ve
+  port ile 5651 sorgusu oradaki bir cihazı bulamaz, kullanım analizi de o trafiği görmez
+  ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 5).
 - **Kişi ve cihaz eşleştirmesi:** iç IP adresinden MAC adresine, cihaza ve kişiye giden adım
   MikroTik DHCP sunucusunun kira kayıtlarına (`assigned`/`deassigned`) dayanır; ana
   yönlendiricideki saatlik `ARP-LOG` betiği (isteğe bağlı; [DEVICE-SETUP.md](DEVICE-SETUP.md)
@@ -91,20 +94,24 @@ kullanım analizinin neyi gösterdiğini belirler.
   dağıtıyorsa ve `ARP-LOG` gönderen bir MikroTik yoksa kira kaydı oluşmaz: 5651 sorgusu FortiGate
   oturumunda ve iç IP adresinde biter (MAC, cihaz ve kişi yok), kullanım analizi de IP adresine
   göre sayar.
-- **NAT:** FortiGate'in kaynak NAT'ı desteklenir. Genel adres FortiGate'in kendisindeyse (ISS
-  modemi köprü kipinde; birden çok adres `nat.public_ips` listesine girilir) genel IP + port
-  oturumu **kesin** belirler. FortiGate bir ISS modeminin arkasındaysa (çift NAT) modemin NAT
-  kaydı olmadığından sorgu **aday** oturumları sıralar ([CORRELATION.md](CORRELATION.md) bölüm
-  3). FortiGate'in WAN adresi için tek bir eşleme vardır (`nat.wan_transip`): her biri kendi
-  modeminin arkasındaki birden çok ISS hattı bu sürümde modellenmez (böyle bir ağda
-  `nat.wan_transip` girilirse adaylar yalnızca o hattın oturumlarından seçilir; boş kalırsa bütün
-  hatların kaynak NAT oturumları aday olur). IPv6 adresleriyle 5651 sorgusu desteklenmez: kira
-  kayıtları (DHCP, `ARP-LOG`) yalnızca IPv4 adreslerini kapsar.
+- **NAT:** FortiGate'in kaynak NAT'ı desteklenir. Genel adres FortiGate'in kendisindeyse (ISS modemi
+  köprü kipinde; birden çok adres `nat.public_ips` listesine girilir) genel IP + port oturumu
+  **kesin** belirler. FortiGate bir ISS modeminin arkasındaysa (çift NAT) modemin NAT kaydı
+  olmadığından sorgu **aday** oturumları sıralar ([CORRELATION.md](CORRELATION.md) bölüm 3).
+  FortiGate'in WAN adresi için tek bir eşleme vardır (`nat.wan_transip`): her biri kendi modeminin
+  arkasındaki birden çok ISS hattı bu sürümde modellenmez. Böyle bir ağda `nat.wan_transip` boş
+  bırakılmalıdır: girilirse her aday araması o hatla sınırlanır ve diğer hattın adresiyle gelen bir
+  talepte doğru oturum aday olamaz; boş kalırsa bütün hatların kaynak NAT oturumları aday olur. IPv6
+  adresleriyle 5651 sorgusu desteklenmez: kira kayıtları (DHCP, `ARP-LOG`) yalnızca IPv4 adreslerini
+  kapsar.
 - **Kullanım analizi** (ücretli modül, [LISANS.md](LISANS.md)) yalnızca FortiGate kayıtlarından
   hesaplanır: süreler ve baytlar trafik kayıtlarından (`logtraffic all`; uzun oturumlar için ara
-  kayıtlarla), site adları ve engellenen denemeler web filtresi, DNS filtresi ve uygulama
-  kontrolü kayıtlarından ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2, [KULLANIM.md](KULLANIM.md)).
-  Başka üreticilerin güvenlik duvarlarının kayıtları analiz edilmez.
+  kayıtlarla), site adları web filtresi, DNS filtresi, uygulama kontrolü ve SSL denetimi
+  kayıtlarından, engellenen denemeler bunların ilk üçünden ([DEVICE-SETUP.md](DEVICE-SETUP.md)
+  bölüm 2, [KULLANIM.md](KULLANIM.md)). Yalnızca özel kaynak adreslerinden (RFC 1918 blokları ve
+  IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar (ör. 100.64.0.0/10 ya da içeride
+  kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez. Başka üreticilerin güvenlik
+  duvarlarının kayıtları analiz edilmez.
 - **Başka üreticilerin cihazları** (`[[sources]]` içinde `type = "generic"`): logları toplanır,
   değiştirilmeden saklanır, mühürlenir ve tam gün kanıt paketlerine girer; veritabanına düz log
   satırı olarak (zaman, ana bilgisayar adı, program, ileti metni) yüklenir ama alanlarına
