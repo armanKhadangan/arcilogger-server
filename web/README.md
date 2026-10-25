@@ -159,10 +159,12 @@ npm run e2e        # Playwright against a production build (dist-e2e), API mocke
 installer: no source maps and no developer UI kit. The UI kit (`/ui-kit`, every component in both
 themes, `src/pages/ui-kit`) and its menu entry exist only where `__UI_KIT__` is true
 (`vite.config.ts`): the dev server, the unit tests and `npm run build:e2e` (mode `e2e`, into
-`dist-e2e`), which Playwright builds and serves itself. A build check in `vite.config.ts`
-(`shippedBundleCheck`) fails a build that would ship a source map, or, without the UI kit, any
-module of `src/pages/ui-kit` or a `ui-kit` path; `src/components/layout/shipped-bundle.test.tsx`
-renders the app without it.
+`dist-e2e`), which Playwright builds and serves itself; its texts are in `src/locales/ui-kit/`,
+added by `src/lib/i18n.ts` only there. A build check in `vite.config.ts` (`shippedBundleCheck`)
+fails a build that would ship a source map, or, without the UI kit (always in the production
+build, whatever the flag says), any module of `src/pages/ui-kit` or `src/locales/ui-kit`, a
+`ui-kit` path or the kit's name; `src/components/layout/shipped-bundle.test.tsx` renders the app
+without it.
 
 `e2e/mock-api.ts` answers like the real endpoints (shapes from `api-types.ts`, texts from the
 API's message tables, audit entries from the golden vectors). Like the API (every request model

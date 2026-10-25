@@ -21,7 +21,6 @@
     "audit": "Denetim Kaydı",
     "settings": "Ayarlar",
     "system": "Sistem",
-    "uiKit": "Bileşen Kiti",
     "collapse": "Menüyü daralt",
     "expand": "Menüyü genişlet",
     "skipToContent": "İçeriğe atla",
@@ -45,9 +44,7 @@
     "userMenuFor": "Kullanıcı menüsü: {{name}}"
   },
   "placeholder": {
-    "body": "Bu sayfa sonraki bir sürümde eklenecek.",
-    "hint": "Tüm bileşenleri Bileşen Kiti sayfasında görebilirsiniz.",
-    "openUiKit": "Bileşen Kitini aç"
+    "body": "Bu sayfa sonraki bir sürümde eklenecek."
   },
   "notFound": {
     "title": "Sayfa bulunamadı",
@@ -137,29 +134,6 @@
   },
   "toast": {
     "region": "Bildirimler (F8)"
-  },
-  "uiKit": {
-    "title": "Bileşen Kiti",
-    "intro": "ARCILOGGER arayüzünün bütün yapı taşları, açık ve koyu temada. Sayfalar bu bileşenlerden oluşturulur.",
-    "themeToggle": "Temayı değiştir",
-    "sections": {
-      "colors": "Renkler",
-      "typography": "Tipografi",
-      "buttons": "Düğmeler",
-      "inputs": "Giriş alanları",
-      "badges": "Rozetler",
-      "cards": "Kartlar ve KPI",
-      "charts": "Grafikler",
-      "table": "Veri tablosu",
-      "tabs": "Sekmeler",
-      "overlays": "Diyalog, yan panel, ipucu, bildirim",
-      "feedback": "Boş durum ve iskelet",
-      "timeline": "Zaman çizelgesi",
-      "heatmap": "Isı haritası",
-      "calendar": "Mühür takvimi",
-      "stepper": "Adım göstergesi",
-      "code": "Kod bloğu"
-    }
   },
   "errors": {
     "http": "Sunucu beklenmeyen bir yanıt verdi (HTTP {{status}}).",

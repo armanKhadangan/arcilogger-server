@@ -26,12 +26,18 @@ function accepts(schema: string, field: string): boolean {
 /**
  * Fails a build whose output must not ship (Build-ArciBundle.ps1 copies what `npm run build`
  * writes): never a source map, the app's readable source; without the UI kit, no module of
- * src/pages/ui-kit and no `ui-kit` path (its route, its menu entry) in any chunk.
+ * src/pages/ui-kit or src/locales/ui-kit, no `ui-kit` path (its route, its menu entry) and none
+ * of its names ("Bileşen Kiti", "UI kit") in any chunk. The production build is that bundle, so
+ * it is checked without the UI kit whatever `uiKit` says.
  */
 function shippedBundleCheck(uiKit: boolean): Plugin {
+  let kitAllowed = uiKit;
   return {
     name: 'arci-shipped-bundle-check',
     apply: 'build',
+    configResolved(config) {
+      if (config.mode === 'production') kitAllowed = false;
+    },
     generateBundle(_options, bundle) {
       const problems: string[] = [];
       for (const file of Object.values(bundle)) {
@@ -39,9 +45,11 @@ function shippedBundleCheck(uiKit: boolean): Plugin {
         if (file.type !== 'chunk') continue;
         if (file.code.includes('sourceMappingURL=')) problems.push(`${file.fileName}: source map`);
         const kit =
-          file.code.includes('ui-kit') ||
-          file.moduleIds.some((id) => id.replaceAll('\\', '/').includes('/src/pages/ui-kit/'));
-        if (kit && !uiKit) problems.push(`${file.fileName}: UI kit`);
+          /ui-kit|Bileşen Kit|UI kit/i.test(file.code) ||
+          file.moduleIds.some((id) =>
+            /\/src\/(pages|locales)\/ui-kit\//.test(id.replaceAll('\\', '/')),
+          );
+        if (kit && !kitAllowed) problems.push(`${file.fileName}: UI kit`);
       }
       if (problems.length > 0) this.error(`not for the shipped bundle: ${problems.join('; ')}`);
     },

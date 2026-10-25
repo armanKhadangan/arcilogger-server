@@ -1,0 +1,32 @@
+{
+  "nav": {
+    "uiKit": "UI kit"
+  },
+  "placeholder": {
+    "hint": "All building blocks are on the UI kit page.",
+    "openUiKit": "Open the UI kit"
+  },
+  "uiKit": {
+    "title": "UI kit",
+    "intro": "Every building block of the ARCILOGGER interface, in the light and dark theme. Pages are composed from these components.",
+    "themeToggle": "Switch theme",
+    "sections": {
+      "colors": "Colours",
+      "typography": "Typography",
+      "buttons": "Buttons",
+      "inputs": "Inputs",
+      "badges": "Badges",
+      "cards": "Cards and KPIs",
+      "charts": "Charts",
+      "table": "Data table",
+      "tabs": "Tabs",
+      "overlays": "Dialog, side panel, tooltip, toast",
+      "feedback": "Empty state and skeleton",
+      "timeline": "Timeline",
+      "heatmap": "Heatmap",
+      "calendar": "Sealing calendar",
+      "stepper": "Stepper",
+      "code": "Code block"
+    }
+  }
+}

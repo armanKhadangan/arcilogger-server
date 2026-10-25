@@ -24,7 +24,7 @@
 |---|---|
 | Python | 3.12, typed everywhere, `mypy --strict`, ruff (lint + format, line length 100), no naive datetimes (ruff `DTZ`), `pathlib` only, binary file I/O for log data |
 | TypeScript | strict mode, ESLint (typescript-eslint strict), Prettier, no `any` except the documented TanStack column type |
-| UI | Colours only through tokens in `web/src/styles/globals.css`; every string in `web/src/locales/{tr,en}.json`; status never by colour alone (icon + text); WCAG 2.1 AA |
+| UI | Colours only through tokens in `web/src/styles/globals.css`; every string in `web/src/locales/{tr,en}.json` (the developer UI kit's in `web/src/locales/ui-kit/`, not in the shipped bundle); status never by colour alone (icon + text); WCAG 2.1 AA |
 | Docs | Turkish first, English second; every module has a docstring explaining its job |
 
 ## Checks before pushing

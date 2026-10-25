@@ -29,7 +29,11 @@
   (`npm run build:e2e`, mode `e2e`, which Playwright builds and serves itself, so axe still runs
   on it in both themes). `npm run build` — the bundle `Build-ArciBundle.ps1` ships — has neither
   the page nor its menu entry, and no source maps (`build.sourcemap: false`).
+- The UI kit's texts (its page, its menu entry, the placeholders' pointer to it) are in
+  `web/src/locales/ui-kit/`, which `src/lib/i18n.ts` adds only when `__UI_KIT__` is true.
 - The build checks its own output (`shippedBundleCheck` in `web/vite.config.ts`): a source map,
-  or without the UI kit any module of `src/pages/ui-kit` or a `ui-kit` path, fails the build, so
-  a changed setting cannot ship them. The E2E tests therefore run against the production build
-  plus the UI kit page, not byte for byte the shipped bundle.
+  or without the UI kit any module of `src/pages/ui-kit` or `src/locales/ui-kit`, a `ui-kit` path
+  or the kit's name ("Bileşen Kiti", "UI kit"), fails the build. The production build is checked
+  without the UI kit whatever the flag says, so a changed setting cannot ship them. The E2E tests
+  therefore run against the production build plus the UI kit page, not byte for byte the shipped
+  bundle.
