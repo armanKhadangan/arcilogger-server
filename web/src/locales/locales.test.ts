@@ -38,6 +38,14 @@ describe('locale files', () => {
     }
   });
 
+  it('name no development milestone (M1, M6, …): a later page "arrives in a later version"', () => {
+    for (const [name, tree] of Object.entries({ tr, en })) {
+      const text = JSON.stringify(tree);
+      expect(text.match(/\bM\d{1,2}\b/g), name).toBeNull();
+      expect(text.toLowerCase(), name).not.toContain('milestone');
+    }
+  });
+
   it('give the licensor’s address exactly as the contract does in the licence texts', () => {
     for (const [name, tree] of Object.entries({ tr, en })) {
       const addresses = JSON.stringify(tree.license).match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) ?? [];

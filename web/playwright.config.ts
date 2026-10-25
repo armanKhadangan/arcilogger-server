@@ -3,7 +3,11 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 4173;
 const isCI = Boolean(process.env.CI);
 
-/** E2E tests run against the production build (`npm run build` first), like the server serves it. */
+/**
+ * E2E tests run against a production build, served like the server serves it: `npm run build:e2e`
+ * (into dist-e2e), which is `npm run build` with the developer UI kit (`/ui-kit`) built in. The
+ * bundle the installer ships (`npm run build`, dist) has no UI kit.
+ */
 export default defineConfig({
   testDir: 'e2e',
   outputDir: 'test-results',
@@ -24,9 +28,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run preview',
+    command: 'npm run build:e2e && npm run preview -- --outDir dist-e2e',
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: !isCI,
-    timeout: 60_000,
+    timeout: 180_000, // the build first
   },
 });

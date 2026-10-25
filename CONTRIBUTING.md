@@ -32,7 +32,7 @@
 ```bash
 uv run poe check                 # Python: ruff, mypy, pytest
 cd web && npm run check          # web: eslint, prettier, tsc, vitest, build
-npm run e2e                      # web: Playwright + axe (after npm run build)
+npm run e2e                      # web: Playwright + axe (builds its own bundle first)
 ```
 
 Optional: `uv tool install pre-commit && pre-commit install` runs the fast checks on every commit.

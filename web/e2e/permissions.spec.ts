@@ -72,7 +72,7 @@ for (const [username, uiKit] of [
       grant: { auditor: ['compliance.read'], hr: ['compliance.read'], viewer: ['compliance.read'] },
     });
     await page.goto('/compliance');
-    await expect(page.getByText('Bu modül M6 aşamasında geliştirilecek.')).toBeVisible();
+    await expect(page.getByText('Bu sayfa sonraki bir sürümde eklenecek.')).toBeVisible();
     const link = page.getByRole('link', { name: 'Bileşen Kitini aç' });
     if (uiKit) {
       await link.click();

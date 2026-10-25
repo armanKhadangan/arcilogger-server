@@ -45,7 +45,7 @@
     "userMenuFor": "Kullanıcı menüsü: {{name}}"
   },
   "placeholder": {
-    "body": "Bu modül {{milestone}} aşamasında geliştirilecek.",
+    "body": "Bu sayfa sonraki bir sürümde eklenecek.",
     "hint": "Tüm bileşenleri Bileşen Kiti sayfasında görebilirsiniz.",
     "openUiKit": "Bileşen Kitini aç"
   },
@@ -236,7 +236,11 @@
   "password": {
     "title": "Parolanızı değiştirin",
     "forcedDescription": "Devam etmeden önce yeni bir parola belirlemeniz gerekiyor (ilk giriş veya parola sıfırlaması).",
-    "current": "Mevcut (geçici) parola",
+    "changeTitle": "Parolayı değiştir",
+    "changeDescription": "Mevcut parolanızı ve yeni parolanızı girin. Diğer tarayıcı ve cihazlardaki oturumlarınız kapatılır; bu oturum açık kalır.",
+    "changed": "Parolanız değiştirildi. Diğer oturumlarınız kapatıldı.",
+    "current": "Mevcut parola",
+    "currentTemporary": "Mevcut (geçici) parola",
     "new": "Yeni parola",
     "confirm": "Yeni parola (tekrar)",
     "policy": "En az {{min}} karakter. Uzun bir parola cümlesi önerilir; yaygın parolalar, kullanıcı adınız veya adınızı içeren parolalar kabul edilmez.",
@@ -279,7 +283,7 @@
   },
   "setup": {
     "title": "İlk kurulum",
-    "description": "ARCILOGGER'ın ilk yönetici hesabını oluşturun. Sihirbazın diğer adımları (site ayarları, kaynaklar, Kamu SM, replika, e-posta) sonraki sürümde eklenecek.",
+    "description": "ARCILOGGER'ın ilk yönetici hesabını oluşturun.",
     "doneNotice": "Yönetici hesabı oluşturuldu. Şimdi giriş yapın; iki adımlı doğrulama kurulumu ilk girişte yapılır.",
     "stepAdmin": "Yönetici hesabı",
     "stepTotp": "İki adımlı doğrulama",
@@ -397,8 +401,8 @@
   "settings": {
     "description": "Sistem ayarları ve kullanıcı yönetimi.",
     "usersHint": "Hesaplar, roller, parola ve iki adımlı doğrulama sıfırlama.",
-    "laterTitle": "Sonraki sürümde (M6)",
-    "laterHint": "Bu bölümler ilk kurulum sihirbazıyla birlikte eklenecek.",
+    "laterTitle": "Sonraki sürümde",
+    "laterHint": "Bu bölümler sonraki bir sürümde eklenecek; o zamana kadar bu ayarlar sunucuda yapılır (ILK-ADIMLAR.md, KURULUM.md).",
     "sections": {
       "general": "Genel",
       "sources": "Kaynaklar",
@@ -1967,7 +1971,7 @@
   "security": {
     "description": "Kural tabanlı güvenlik uyarıları: süzün, inceleyin, not ekleyin ve kapatın.",
     "readOnly": "Uyarıları görüntüleyebilirsiniz; durum değiştirmek ve not eklemek için uyarı yönetimi yetkisi gerekir.",
-    "ruleEditorLater": "Kural düzenleyici (YAML, son 24 saatte deneme) sonraki bir aşamada gelecek. Eşikler şimdilik veritabanı ayarlarındadır (alerts.*, UYARILAR.md).",
+    "ruleEditorLater": "Kural düzenleyici (YAML, son 24 saatte deneme) sonraki bir sürümde gelecek. Eşikler şimdilik veritabanı ayarlarındadır (alerts.*, UYARILAR.md).",
     "caption": "Güvenlik uyarıları",
     "empty": "Henüz güvenlik uyarısı yok.",
     "emptyHint": "Kurallar bir sorun bulduğunda uyarılar burada görünür.",

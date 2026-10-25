@@ -8,3 +8,9 @@ declare const __APP_VERSION__: string;
  * build time; read through `evidenceAuditLogAccepted` in src/lib/api-features.ts).
  */
 declare const __API_EVIDENCE_AUDIT_LOG__: boolean;
+
+/**
+ * The developer UI kit (`/ui-kit`) is built in: the dev server, the unit tests and the E2E build,
+ * never the bundle the installer ships (vite.config.ts; read through `UI_KIT_ITEM` in src/nav.ts).
+ */
+declare const __UI_KIT__: boolean;

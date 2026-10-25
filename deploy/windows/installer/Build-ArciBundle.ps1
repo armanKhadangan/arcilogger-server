@@ -15,7 +15,8 @@
          Timescale License) is only added with -IncludeTimescaleDB.
       2. Builds the ARCILOGGER wheels (uv build) and downloads every dependency wheel pinned in
          uv.lock for Windows x64 / CPython 3.12, hash-checked, with the Python that is shipped.
-      3. Builds the web interface (npm ci, npm run build).
+      3. Builds the web interface (npm ci, npm run build; that build fails if it would contain a
+         source map or the developer UI kit, web/vite.config.ts).
       4. Assembles dist\ARCILOGGER-<version>\ with bundle-manifest.json (every file with SHA-256)
          and SHA256SUMS, and prints the bundle fingerprint (SHA-256 of SHA256SUMS): compare it on
          the server before installing.

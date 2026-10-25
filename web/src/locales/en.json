@@ -45,7 +45,7 @@
     "userMenuFor": "User menu: {{name}}"
   },
   "placeholder": {
-    "body": "This module will be built in milestone {{milestone}}.",
+    "body": "This page arrives in a later version.",
     "hint": "All building blocks are on the UI kit page.",
     "openUiKit": "Open the UI kit"
   },
@@ -236,7 +236,11 @@
   "password": {
     "title": "Change your password",
     "forcedDescription": "You need to set a new password before you continue (first sign-in or password reset).",
-    "current": "Current (temporary) password",
+    "changeTitle": "Change password",
+    "changeDescription": "Enter your current password and the new one. Your sessions in other browsers and on other devices are ended; this one stays open.",
+    "changed": "Your password was changed. Your other sessions were ended.",
+    "current": "Current password",
+    "currentTemporary": "Current (temporary) password",
     "new": "New password",
     "confirm": "New password (again)",
     "policy": "At least {{min}} characters. A long passphrase is recommended; common passwords and passwords containing your user name or name are not accepted.",
@@ -279,7 +283,7 @@
   },
   "setup": {
     "title": "Initial setup",
-    "description": "Create the first ARCILOGGER administrator. The other wizard steps (site settings, sources, Kamu SM, replica, e-mail) follow in a later version.",
+    "description": "Create the first ARCILOGGER administrator.",
     "doneNotice": "The administrator account was created. Sign in now; two-factor authentication is set up at the first sign-in.",
     "stepAdmin": "Administrator account",
     "stepTotp": "Two-factor authentication",
@@ -397,8 +401,8 @@
   "settings": {
     "description": "System settings and user management.",
     "usersHint": "Accounts, roles, password and two-factor resets.",
-    "laterTitle": "In a later version (M6)",
-    "laterHint": "These sections arrive together with the setup wizard.",
+    "laterTitle": "In a later version",
+    "laterHint": "These sections arrive in a later version; until then these settings are made on the server (FIRST-STEPS.md, INSTALL.md).",
     "sections": {
       "general": "General",
       "sources": "Sources",
@@ -1967,7 +1971,7 @@
   "security": {
     "description": "Rule-based security alerts: filter, investigate, add notes and close them.",
     "readOnly": "You can view the alerts; changing their state and adding notes needs the alert management permission.",
-    "ruleEditorLater": "The rule editor (YAML, test on the last 24 h) comes in a later milestone. For now the thresholds are database settings (alerts.*, ALERTS.md).",
+    "ruleEditorLater": "The rule editor (YAML, test on the last 24 h) comes in a later version. For now the thresholds are database settings (alerts.*, ALERTS.md).",
     "caption": "Security alerts",
     "empty": "No security alerts yet.",
     "emptyHint": "Alerts appear here when a rule finds a problem.",

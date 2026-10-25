@@ -189,18 +189,23 @@ export const routes: RouteObject[] = [
               },
             ],
           },
-          {
-            element: <PermissionGate anyOf={UI_KIT_ITEM.permissions} />,
-            children: [
-              {
-                path: 'ui-kit',
-                // Charts and demo data load only when the page is opened.
-                lazy: async () => ({
-                  Component: (await import('@/pages/ui-kit/ui-kit-page')).UiKitPage,
-                }),
-              },
-            ],
-          },
+          // Developer page: not in the bundle the installer ships (`UI_KIT_ITEM` is null there).
+          ...(UI_KIT_ITEM
+            ? [
+                {
+                  element: <PermissionGate anyOf={UI_KIT_ITEM.permissions} />,
+                  children: [
+                    {
+                      path: 'ui-kit',
+                      // Charts and demo data load only when the page is opened.
+                      lazy: async () => ({
+                        Component: (await import('@/pages/ui-kit/ui-kit-page')).UiKitPage,
+                      }),
+                    },
+                  ],
+                },
+              ]
+            : []),
           { path: '*', element: <NotFoundPage /> },
         ],
       },

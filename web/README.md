@@ -41,7 +41,9 @@ After any API change run it again; `--check` exits 1 when the files are out of d
 
 `/login` (password → TOTP or recovery code → first TOTP enrolment with recovery codes shown once
 → forced password change), `/setup` (first administrator with the console token), the KVKK
-notice (dialog until accepted), `/settings` → `/settings/users` (users and read-only role matrix),
+notice (dialog until accepted), the user menu (theme, language, "Parolayı değiştir" — the own
+password with the current one, `POST /auth/password`, which ends the other sessions —, new
+recovery codes, sign-out), `/settings` → `/settings/users` (users and read-only role matrix),
 `/audit` (audit log, chain badge, detail drawer), and these pages of the main menu:
 
 - `/` — **Panel** (`dashboard.view` or `dashboard.usage`) on `GET /dashboard/summary` and today's
@@ -92,7 +94,8 @@ notice (dialog until accepted), `/settings` → `/settings/users` (users and rea
 
 Device-provided text (host names, raw lines) goes through `visibleText` (`src/lib/display.ts`):
 bidi overrides and other invisible characters appear as `\uXXXX`. Other menu entries are
-placeholders until their milestone, already permission-filtered (`BUILT_PAGES` in `src/nav.ts`).
+placeholders ("Bu sayfa sonraki bir sürümde eklenecek.", no milestone code), already
+permission-filtered (`BUILT_PAGES` in `src/nav.ts`).
 Two top-bar controls of spec 12.2 come with the pages that use them: the global search box
 appears once "Arama" is built (M2; its term goes to the page as router state, so not into the URL,
 `?next=` or the web server's access log — but router state lives in the tab's session history
@@ -149,8 +152,17 @@ with `api-schemas.json` like every other type.
 
 ```bash
 npm run check      # eslint, prettier, tsc, vitest, build
-npm run e2e        # Playwright against the production build, API mocked (e2e/mock-api.ts)
+npm run e2e        # Playwright against a production build (dist-e2e), API mocked (e2e/mock-api.ts)
 ```
+
+**What ships.** `npm run build` writes `dist`, the bundle `Build-ArciBundle.ps1` copies into the
+installer: no source maps and no developer UI kit. The UI kit (`/ui-kit`, every component in both
+themes, `src/pages/ui-kit`) and its menu entry exist only where `__UI_KIT__` is true
+(`vite.config.ts`): the dev server, the unit tests and `npm run build:e2e` (mode `e2e`, into
+`dist-e2e`), which Playwright builds and serves itself. A build check in `vite.config.ts`
+(`shippedBundleCheck`) fails a build that would ship a source map, or, without the UI kit, any
+module of `src/pages/ui-kit` or a `ui-kit` path; `src/components/layout/shipped-bundle.test.tsx`
+renders the app without it.
 
 `e2e/mock-api.ts` answers like the real endpoints (shapes from `api-types.ts`, texts from the
 API's message tables, audit entries from the golden vectors). Like the API (every request model

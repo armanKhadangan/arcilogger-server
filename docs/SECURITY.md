@@ -132,6 +132,14 @@ characters (`xxxx-xxxx-xxxx-xxxx`, ~92 bits, no look-alike characters) — more 
 be changed at the first sign-in. A generated password must pass the policy; after 100 refused
 candidates (practically impossible) the request fails with 500 instead of looping.
 
+**Own password change** (any signed-in user, web: user menu → "Parolayı değiştir"; the same
+`POST /auth/password` as the forced change): the current password confirms it instead of a
+separate re-authentication. A wrong one is a failed attempt like at sign-in (403
+`credentials_invalid`; the attempt that locks the account ends the session: 401
+`account_locked`, the web app goes to the sign-in page with that reason). On success every other
+session of the user is revoked and this one is rotated without a recent re-authentication
+(audit `auth.password_change` with `other_sessions_revoked`).
+
 ## 3. Two-factor authentication (TOTP)
 
 | Item | Value |

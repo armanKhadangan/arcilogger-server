@@ -107,9 +107,9 @@ uv run python tools/loadgen/arcilogger_loadgen.py --help
 # Web interface
 cd web
 npm install               # npm >= 11
-npm run dev               # http://127.0.0.1:5173  (component kit: /ui-kit)
-npm run check             # eslint + prettier + tsc + vitest + build
-npm run build && npm run e2e   # Playwright + axe accessibility checks
+npm run dev               # http://127.0.0.1:5173  (UI kit: /ui-kit, not in the shipped build)
+npm run check             # eslint + prettier + tsc + vitest + build (no UI kit, no source maps)
+npm run e2e               # Playwright + axe accessibility checks (builds dist-e2e with the UI kit)
 
 # Optional development database and mail catcher (development only)
 docker compose -f deploy/dev/compose.yaml up -d

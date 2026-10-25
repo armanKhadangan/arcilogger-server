@@ -4,7 +4,7 @@ import { fileURLToPath, URL } from 'node:url';
 
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 // The web interface is served by the ARCILOGGER server itself (Caddy on Windows).
 // Everything is bundled locally: no CDN, no external fonts, no telemetry.
@@ -23,56 +23,89 @@ function accepts(schema: string, field: string): boolean {
   return Object.hasOwn(found.properties ?? {}, field);
 }
 
-export default defineConfig({
-  define: {
-    __APP_VERSION__: JSON.stringify(pkg.version),
-    __API_EVIDENCE_AUDIT_LOG__: JSON.stringify(accepts('EvidenceCreate', 'include_audit_log')),
-  },
-  plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
-  },
-  server: {
-    port: 5173,
-    strictPort: true,
-    proxy: { '/api': 'http://127.0.0.1:8000' },
-  },
-  build: {
-    target: 'es2022',
-    sourcemap: true,
-    assetsInlineLimit: 0, // keep fonts/icons as files so the CSP can stay strict
-    chunkSizeWarningLimit: 700,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          ui: [
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-dropdown-menu',
-            '@radix-ui/react-popover',
-            '@radix-ui/react-select',
-            '@radix-ui/react-tabs',
-            '@radix-ui/react-toast',
-            '@radix-ui/react-tooltip',
-          ],
-          charts: ['recharts'],
+/**
+ * Fails a build whose output must not ship (Build-ArciBundle.ps1 copies what `npm run build`
+ * writes): never a source map, the app's readable source; without the UI kit, no module of
+ * src/pages/ui-kit and no `ui-kit` path (its route, its menu entry) in any chunk.
+ */
+function shippedBundleCheck(uiKit: boolean): Plugin {
+  return {
+    name: 'arci-shipped-bundle-check',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const problems: string[] = [];
+      for (const file of Object.values(bundle)) {
+        if (file.fileName.endsWith('.map')) problems.push(`${file.fileName}: source map`);
+        if (file.type !== 'chunk') continue;
+        if (file.code.includes('sourceMappingURL=')) problems.push(`${file.fileName}: source map`);
+        const kit =
+          file.code.includes('ui-kit') ||
+          file.moduleIds.some((id) => id.replaceAll('\\', '/').includes('/src/pages/ui-kit/'));
+        if (kit && !uiKit) problems.push(`${file.fileName}: UI kit`);
+      }
+      if (problems.length > 0) this.error(`not for the shipped bundle: ${problems.join('; ')}`);
+    },
+  };
+}
+
+export default defineConfig(({ command, mode }) => {
+  // The UI kit (`/ui-kit`, every component on one page) is a developer page: the dev server, the
+  // unit tests and the E2E build (`npm run build:e2e`, mode `e2e`) have it; the bundle the
+  // installer ships (`npm run build`) has neither the page nor its menu entry.
+  const uiKit = command === 'serve' || mode === 'e2e';
+  return {
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
+      __API_EVIDENCE_AUDIT_LOG__: JSON.stringify(accepts('EvidenceCreate', 'include_audit_log')),
+      __UI_KIT__: JSON.stringify(uiKit),
+    },
+    plugins: [react(), tailwindcss(), shippedBundleCheck(uiKit)],
+    resolve: {
+      alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    },
+    server: {
+      port: 5173,
+      strictPort: true,
+      proxy: { '/api': 'http://127.0.0.1:8000' },
+    },
+    build: {
+      target: 'es2022',
+      // No source maps in the bundle (the dev server has its own); shippedBundleCheck enforces it.
+      sourcemap: false,
+      assetsInlineLimit: 0, // keep fonts/icons as files so the CSP can stay strict
+      chunkSizeWarningLimit: 700,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom'],
+            ui: [
+              '@radix-ui/react-dialog',
+              '@radix-ui/react-dropdown-menu',
+              '@radix-ui/react-popover',
+              '@radix-ui/react-select',
+              '@radix-ui/react-tabs',
+              '@radix-ui/react-toast',
+              '@radix-ui/react-tooltip',
+            ],
+            charts: ['recharts'],
+          },
         },
       },
     },
-  },
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
-    css: false,
-    // See `asyncUtilTimeout` in src/test/setup.ts (busy machines).
-    testTimeout: 20_000,
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/main.tsx'],
-      reporter: ['text', 'lcov'],
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: ['./src/test/setup.ts'],
+      include: ['src/**/*.test.{ts,tsx}'],
+      css: false,
+      // See `asyncUtilTimeout` in src/test/setup.ts (busy machines).
+      testTimeout: 20_000,
+      coverage: {
+        provider: 'v8',
+        include: ['src/**/*.{ts,tsx}'],
+        exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/main.tsx'],
+        reporter: ['text', 'lcov'],
+      },
     },
-  },
+  };
 });

@@ -796,7 +796,15 @@ export class MockApi {
     const account = this.authenticate(call);
     if (Array.isArray(account)) return account;
     const body = call.body as { current_password: string; new_password: string };
-    if (body.current_password !== account.password) return this.error(403, 'credentials_invalid');
+    if (body.current_password !== account.password) {
+      // Like the API: a wrong current password counts; the one that locks the account also
+      // ends the session.
+      if (this.fail(account)) {
+        this.session = null;
+        return this.error(401, 'account_locked');
+      }
+      return this.error(403, 'credentials_invalid');
+    }
     if (/galatasaray/i.test(body.new_password))
       return this.error(422, 'password_rejected', [
         {

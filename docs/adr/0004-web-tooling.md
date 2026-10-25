@@ -18,3 +18,18 @@
   as a categorical colour. Brand surfaces keep teal-700. See [DESIGN-TOKENS.md](../DESIGN-TOKENS.md).
 - CSV exports use `;`, a UTF-8 BOM and CRLF so they open correctly in Excel with Turkish regional
   settings, and neutralise spreadsheet formulas in text cells (log data is attacker-controlled).
+
+## Amendment 2026-10-25: what the shipped bundle contains
+
+- Status: accepted.
+- Why: the bundle installed at every organisation showed a developer page ("Bileşen Kiti") in
+  the administrators' menu and shipped source maps (the app's readable source).
+- The `/ui-kit` route stays inside the app, but only where the build-time flag `__UI_KIT__`
+  (`web/vite.config.ts`) is true: the dev server, the unit tests and the E2E build
+  (`npm run build:e2e`, mode `e2e`, which Playwright builds and serves itself, so axe still runs
+  on it in both themes). `npm run build` — the bundle `Build-ArciBundle.ps1` ships — has neither
+  the page nor its menu entry, and no source maps (`build.sourcemap: false`).
+- The build checks its own output (`shippedBundleCheck` in `web/vite.config.ts`): a source map,
+  or without the UI kit any module of `src/pages/ui-kit` or a `ui-kit` path, fails the build, so
+  a changed setting cannot ship them. The E2E tests therefore run against the production build
+  plus the UI kit page, not byte for byte the shipped bundle.

@@ -26,8 +26,6 @@ export interface NavItem {
   key: string;
   path: string;
   icon: LucideIcon;
-  /** Milestone in which the page gets its real content. */
-  milestone: string;
   /**
    * The entry (and its page) is shown when the user holds ANY of these permissions
    * (docs/MVP-CONTRACTS.md section 6). The API checks again on every request.
@@ -47,7 +45,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
     key: 'dashboard',
     path: '/',
     icon: LayoutDashboard,
-    milestone: 'M2',
     // hr: "Panel ✔ (usage only)"
     permissions: ['dashboard.view', 'dashboard.usage'],
   },
@@ -55,17 +52,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
     key: 'sources',
     path: '/sources',
     icon: Server,
-    milestone: 'M2',
     permissions: ['sources.read'],
   },
-  { key: 'live', path: '/live', icon: Activity, milestone: 'M2', permissions: ['search.read'] },
-  { key: 'search', path: '/search', icon: Search, milestone: 'M2', permissions: ['search.read'] },
-  { key: 'lookup', path: '/lookup', icon: Scale, milestone: 'M3', permissions: ['lookup.run'] },
+  { key: 'live', path: '/live', icon: Activity, permissions: ['search.read'] },
+  { key: 'search', path: '/search', icon: Search, permissions: ['search.read'] },
+  { key: 'lookup', path: '/lookup', icon: Scale, permissions: ['lookup.run'] },
   {
     key: 'usage',
     path: '/usage',
     icon: Clock3,
-    milestone: 'M4',
     permissions: ['usage.person', 'usage.anonymous'],
     module: 'usage_analytics',
   },
@@ -73,29 +68,25 @@ export const NAV_ITEMS: readonly NavItem[] = [
     key: 'security',
     path: '/security',
     icon: ShieldAlert,
-    milestone: 'M5',
     permissions: ['alerts.read'],
   },
-  { key: 'sealing', path: '/sealing', icon: Stamp, milestone: 'M2', permissions: ['seal.read'] },
+  { key: 'sealing', path: '/sealing', icon: Stamp, permissions: ['seal.read'] },
   {
     key: 'evidence',
     path: '/evidence',
     icon: Package,
-    milestone: 'M3',
     permissions: ['evidence.read'],
   },
   {
     key: 'devices',
     path: '/devices',
     icon: MonitorSmartphone,
-    milestone: 'M3',
     permissions: ['devices.read'],
   },
   {
     key: 'reports',
     path: '/reports',
     icon: FileText,
-    milestone: 'M4',
     permissions: ['reports.manage'],
     module: 'usage_reports',
   },
@@ -103,30 +94,27 @@ export const NAV_ITEMS: readonly NavItem[] = [
     key: 'compliance',
     path: '/compliance',
     icon: ClipboardCheck,
-    milestone: 'M6',
     permissions: ['compliance.read'],
   },
-  { key: 'audit', path: '/audit', icon: ScrollText, milestone: 'M6', permissions: ['audit.read'] },
+  { key: 'audit', path: '/audit', icon: ScrollText, permissions: ['audit.read'] },
   {
     key: 'settings',
     path: '/settings',
     icon: Settings,
-    milestone: 'M6',
     permissions: ['settings.manage', 'users.manage'],
   },
   {
     key: 'system',
     path: '/system',
     icon: HeartPulse,
-    milestone: 'M6',
     permissions: ['system.read'],
   },
 ];
 
 /**
- * Menu entries whose page already has content; the others show their milestone. Features that
- * lead to one of those pages (e.g. the top bar's global search → "Arama") stay hidden until the
- * page is in this set.
+ * Menu entries whose page already has content; the others say it comes in a later version.
+ * Features that lead to one of those pages (e.g. the top bar's global search → "Arama") stay
+ * hidden until the page is in this set.
  */
 export const BUILT_PAGES: ReadonlySet<string> = new Set([
   'dashboard',
@@ -141,14 +129,18 @@ export const BUILT_PAGES: ReadonlySet<string> = new Set([
   'usage',
 ]);
 
-/** Developer page with every component (administrators only). */
-export const UI_KIT_ITEM: NavItem = {
-  key: 'uiKit',
-  path: '/ui-kit',
-  icon: Palette,
-  milestone: 'M0',
-  permissions: ['settings.manage'],
-};
+/**
+ * Developer page with every component (administrators only). `null` in the bundle the installer
+ * ships (`__UI_KIT__`, vite.config.ts), which has neither the page nor this entry.
+ */
+export const UI_KIT_ITEM: NavItem | null = __UI_KIT__
+  ? {
+      key: 'uiKit',
+      path: '/ui-kit',
+      icon: Palette,
+      permissions: ['settings.manage'],
+    }
+  : null;
 
 /** The menu entries a user with `granted` permissions sees. */
 export function visibleNavItems(
