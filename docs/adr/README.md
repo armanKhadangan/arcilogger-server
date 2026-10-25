@@ -5,7 +5,7 @@
 | [0001](0001-windows-server-browser-only.md) | Windows server, browser-only access |
 | [0002](0002-own-syslog-collector.md) | Own syslog collector; the raw spool is the queue |
 | [0003](0003-integrity-on-windows.md) | Evidence integrity and immutability on Windows |
-| [0004](0004-web-tooling.md) | Web interface tooling |
+| [0004](0004-web-tooling.md) | Web interface tooling; amendment 2026-10-25: the shipped bundle has no UI kit page and no source maps |
 | [0005](0005-database-and-mvp-contracts.md) | PostgreSQL 16 (+ optional TimescaleDB), SQLAlchemy 2, Alembic, psycopg 3, reportlab for PDF reports; MVP contracts |
 | [0006](0006-standalone-verifier.md) | Standalone evidence verifier: one file, Python standard library only |
 | [0007](0007-windows-installer.md) | Windows installer: offline bundle, WinSW services, operator-installed PostgreSQL; amendment 2026-10-20: the organisation's values (`-SiteName`, `-NtpServer`, `-AdminAddress`) have no default |

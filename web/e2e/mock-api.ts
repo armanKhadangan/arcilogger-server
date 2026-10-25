@@ -796,7 +796,17 @@ export class MockApi {
     const account = this.authenticate(call);
     if (Array.isArray(account)) return account;
     const body = call.body as { current_password: string; new_password: string };
-    if (body.current_password !== account.password) return this.error(403, 'credentials_invalid');
+    // Like the API: a locked account is refused without counting; a wrong current password
+    // counts, and the one that locks the account also ends the session.
+    if (account.locked_until !== null && account.locked_until > Date.now())
+      return this.error(403, 'credentials_invalid');
+    if (body.current_password !== account.password) {
+      if (this.fail(account)) {
+        this.session = null;
+        return this.error(401, 'account_locked');
+      }
+      return this.error(403, 'credentials_invalid');
+    }
     if (/galatasaray/i.test(body.new_password))
       return this.error(422, 'password_rejected', [
         {
@@ -807,6 +817,9 @@ export class MockApi {
       ]);
     account.password = body.new_password;
     account.must_change_password = false;
+    account.failed_attempts = 0;
+    // The API rotates the session without a recent re-authentication.
+    if (this.session) this.session.reauthAt = null;
     return [200, this.state(account)];
   }
 

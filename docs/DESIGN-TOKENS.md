@@ -1,8 +1,8 @@
 # Tasarım belirteçleri / Design tokens
 
-Source of truth: `web/src/styles/globals.css`. The UI kit page (`/ui-kit`) shows every token and
-component in both themes. All values follow the build specification (section 12.1) except the
-documented additions below.
+Source of truth: `web/src/styles/globals.css`. The UI kit page (`/ui-kit`; dev server and E2E
+build only, never the shipped bundle) shows every token and component in both themes. All values
+follow the build specification (section 12.1) except the documented additions below.
 
 ## Additions and why
 

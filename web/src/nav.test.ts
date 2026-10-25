@@ -34,13 +34,17 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
 
   it('shows nothing without permissions and hides the UI kit from non-admins', () => {
     expect(visibleNavItems(new Set())).toEqual([]);
+    // Built in for the unit tests (`__UI_KIT__`, vite.config.ts); never in the shipped bundle.
+    if (!UI_KIT_ITEM) throw new Error('the unit tests build the UI kit in');
     const auditor = new Set(ROLES.find((item) => item.id === 'auditor')?.permissions);
     expect(hasAny(auditor, UI_KIT_ITEM.permissions)).toBe(false);
   });
 
   it('only uses permissions the server knows', () => {
     const known = new Set(PERMISSIONS.map((permission) => permission.id));
-    const used = [...NAV_ITEMS, UI_KIT_ITEM].flatMap((item) => item.permissions);
+    const used = [...NAV_ITEMS, ...(UI_KIT_ITEM ? [UI_KIT_ITEM] : [])].flatMap(
+      (item) => item.permissions,
+    );
     expect(used.filter((permission) => !known.has(permission))).toEqual([]);
   });
 });

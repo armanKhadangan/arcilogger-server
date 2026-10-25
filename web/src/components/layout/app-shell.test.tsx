@@ -88,13 +88,14 @@ describe('AppShell', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders a placeholder with the milestone for future pages', async () => {
+  it('renders a placeholder without a milestone code for future pages', async () => {
     signedInAs('admin');
     renderApp('/compliance');
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Uyum Durumu' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Bu modül M6 aşamasında geliştirilecek.')).toBeInTheDocument();
+    expect(screen.getByText('Bu sayfa sonraki bir sürümde eklenecek.')).toBeInTheDocument();
+    expect(screen.queryByText(/\bM\d\b/)).not.toBeInTheDocument();
   });
 
   it('switches the interface to English', async () => {

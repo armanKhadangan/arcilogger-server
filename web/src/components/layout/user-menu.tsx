@@ -1,7 +1,8 @@
-import { ChevronDown, KeyRound, LogOut } from 'lucide-react';
+import { ChevronDown, KeyRound, LockKeyhole, LogOut } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { PasswordChangeDialog } from '@/components/auth/password-change-dialog';
 import { RecoveryCodesDialog } from '@/components/auth/recovery-codes-dialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,14 +20,18 @@ import { currentLang, setLanguage } from '@/lib/i18n';
 import { useTheme, type ThemePreference } from '@/lib/theme';
 import { initials } from '@/lib/utils';
 
-/** Name, role, theme, language, session note and "Çıkış yap" (spec 12.2: top right). */
+/**
+ * Name, role, theme, language, "Parolayı değiştir", session note and "Çıkış yap" (spec 12.2: top
+ * right).
+ */
 export function UserMenu() {
   const { t } = useTranslation();
   const { me } = useAuth();
   const signOut = useSignOut();
   const { preference, setPreference } = useTheme();
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [codesOpen, setCodesOpen] = useState(false);
-  /** The dialog opened from the menu gives the focus back to the menu's button. */
+  /** A dialog opened from the menu gives the focus back to the menu's button. */
   const trigger = useRef<HTMLButtonElement>(null);
   const lang = currentLang();
   const roleLabel = lang === 'en' ? me.user.role_label_en : me.user.role_label_tr;
@@ -86,6 +91,14 @@ export function UserMenu() {
             <DropdownMenuRadioItem value="en">English</DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => {
+              setPasswordOpen(true);
+            }}
+          >
+            <LockKeyhole aria-hidden="true" />
+            {t('password.changeTitle')}
+          </DropdownMenuItem>
           {me.mfa.enabled ? (
             <DropdownMenuItem
               onSelect={() => {
@@ -105,6 +118,11 @@ export function UserMenu() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <PasswordChangeDialog
+        open={passwordOpen}
+        onOpenChange={setPasswordOpen}
+        returnFocus={trigger}
+      />
       <RecoveryCodesDialog open={codesOpen} onOpenChange={setCodesOpen} returnFocus={trigger} />
     </>
   );

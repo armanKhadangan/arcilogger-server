@@ -65,6 +65,9 @@ içinde parolanın yeniden girilmesini ister):
 - Rolü seçerek kullanıcı oluşturun (rol tablosu: [roles.md](roles.md)). Örneğin 5651 talepleri
   için bir **Denetçi** hesabı. Ekranda **bir kez** gösterilen geçici parolayı kişiye **yüz yüze**
   verin: ilk girişte değiştirilmesi zorunludur ve iki adımlı doğrulamayı ilk giren kişi kurar.
+- Her kullanıcı parolasını sonradan kendisi değiştirebilir: sağ üstteki kullanıcı menüsü →
+  **Parolayı değiştir** (mevcut parola istenir; diğer tarayıcı ve cihazlardaki oturumları
+  kapanır, hatalı mevcut parolalar girişteki gibi hesabı kilitler).
 - Yönetici ve Denetçi için TOTP zorunludur. Kişisel veri gören roller — bu sürümde dört rolün
   hepsi, rapor izleyici de (kullanımda adları görür) — ilk girişte KVKK bilgilendirmesini onaylar
   (her onay denetim kaydına yazılır).

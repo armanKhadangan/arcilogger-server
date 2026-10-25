@@ -171,6 +171,33 @@ def test_wrong_current_password_counts_towards_lockout(
     ]
 
 
+def test_password_change_is_refused_while_locked(
+    app: FastAPI,
+    client: TestClient,
+    make_user: MakeUser,
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    # The lock ends only the session that locked it: another session of the account must not
+    # go on guessing, so it is refused even with the right password, and that does not count.
+    user = make_user("viewer", password=PASSWORD)
+    other = TestClient(app, base_url="http://testserver")
+    _login(other, user.username)  # e.g. a second browser
+    _login(client, user.username)
+    for _ in range(5):
+        _change(client, "Yanlış mevcut parola", NEW_PASSWORD)
+    assert client.get("/api/v1/auth/me").json()["error"]["code"] == "session_revoked"
+    response = _change(other, PASSWORD, NEW_PASSWORD)
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "credentials_invalid")
+    assert other.get("/api/v1/auth/me").status_code == 200  # refused, not ended
+    stored = _user(app_session_factory, user.id)
+    assert verify_password(stored.password_hash, PASSWORD).ok
+    assert stored.failed_attempts == 5  # not counted
+    failed = _audit(app_session_factory, "auth.password_change_failed")
+    assert [e.details["reason"] for e in failed] == ["bad_password"] * 5 + ["locked"]
+    changes = _audit(app_session_factory, "auth.password_change")
+    assert {e.action for e in changes} == {"auth.password_change_failed"}
+
+
 # -- re-authentication ----------------------------------------------------------------------------
 
 

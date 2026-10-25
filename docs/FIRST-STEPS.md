@@ -64,6 +64,9 @@ the last 5 minutes):
 - Create users by role ([roles.md](roles.md)), e.g. an **auditor** for 5651 requests. Hand the
   temporary password (shown **once**) over **in person**: it must be changed at the first
   sign-in, and whoever signs in first enrols the second factor.
+- Every user can change their own password later: user menu at the top right → **Parolayı
+  değiştir** (it asks for the current password; the user's sessions in other browsers and on
+  other devices end, and wrong current passwords lock the account like at sign-in).
 - TOTP is mandatory for administrators and auditors. Roles that see personal data — in this
   release all four roles, the report viewer too (it sees names in Kullanım) — accept the KVKK
   notice at the first sign-in (audited).

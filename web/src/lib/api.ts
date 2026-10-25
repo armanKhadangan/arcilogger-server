@@ -249,6 +249,15 @@ function react(error: ApiError, silent: boolean): void {
     handlers.moduleNotLicensed?.(error);
 }
 
+/**
+ * The global reaction to an error of a `silent` request, for a caller that handles only some
+ * errors itself: the password change of the user menu sends a 401 (account locked, session
+ * ended) to the sign-in page like any other request of the app would.
+ */
+export function reactGlobally(error: ApiError): void {
+  react(error, false);
+}
+
 /** Send one request; resolves with the parsed JSON (`undefined` for 204), rejects with ApiError. */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET';

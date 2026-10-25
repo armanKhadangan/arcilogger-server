@@ -1,5 +1,7 @@
 import en from './en.json';
 import tr from './tr.json';
+import uiKitEn from './ui-kit/en.json';
+import uiKitTr from './ui-kit/tr.json';
 
 type Tree = { [key: string]: string | Tree };
 
@@ -12,10 +14,18 @@ function keys(tree: Tree, prefix = ''): string[] {
 describe('locale files', () => {
   it('have exactly the same keys in Turkish and English', () => {
     expect(keys(en as Tree).sort()).toEqual(keys(tr as Tree).sort());
+    expect(keys(uiKitEn as Tree).sort()).toEqual(keys(uiKitTr as Tree).sort());
+  });
+
+  it('keep the UI kit’s texts in ui-kit/: they add keys, replace none, and the shipped bundle has none', () => {
+    const shipped = new Set(keys(tr));
+    expect(keys(uiKitTr as Tree).filter((key) => shipped.has(key))).toEqual([]);
+    for (const [name, tree] of Object.entries({ tr, en }))
+      expect(JSON.stringify(tree), name).not.toMatch(/Bileşen Kit|UI kit/i);
   });
 
   it('have no empty strings', () => {
-    for (const [name, tree] of Object.entries({ tr, en })) {
+    for (const [name, tree] of Object.entries({ tr, en, uiKitTr, uiKitEn })) {
       const empty = keys(tree as Tree).filter((key) => {
         const value = key.split('.').reduce<unknown>((node, part) => (node as Tree)[part], tree);
         return typeof value !== 'string' || value.trim() === '';
@@ -35,6 +45,14 @@ describe('locale files', () => {
         'tamper-proof',
       ])
         expect(text, `${name}: ${claim}`).not.toContain(claim);
+    }
+  });
+
+  it('name no development milestone (M1, M6, …): a later page "arrives in a later version"', () => {
+    for (const [name, tree] of Object.entries({ tr, en, uiKitTr, uiKitEn })) {
+      const text = JSON.stringify(tree);
+      expect(text.match(/\bM\d{1,2}\b/g), name).toBeNull();
+      expect(text.toLowerCase(), name).not.toContain('milestone');
     }
   });
 

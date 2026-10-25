@@ -1,0 +1,32 @@
+{
+  "nav": {
+    "uiKit": "Bileşen Kiti"
+  },
+  "placeholder": {
+    "hint": "Tüm bileşenleri Bileşen Kiti sayfasında görebilirsiniz.",
+    "openUiKit": "Bileşen Kitini aç"
+  },
+  "uiKit": {
+    "title": "Bileşen Kiti",
+    "intro": "ARCILOGGER arayüzünün bütün yapı taşları, açık ve koyu temada. Sayfalar bu bileşenlerden oluşturulur.",
+    "themeToggle": "Temayı değiştir",
+    "sections": {
+      "colors": "Renkler",
+      "typography": "Tipografi",
+      "buttons": "Düğmeler",
+      "inputs": "Giriş alanları",
+      "badges": "Rozetler",
+      "cards": "Kartlar ve KPI",
+      "charts": "Grafikler",
+      "table": "Veri tablosu",
+      "tabs": "Sekmeler",
+      "overlays": "Diyalog, yan panel, ipucu, bildirim",
+      "feedback": "Boş durum ve iskelet",
+      "timeline": "Zaman çizelgesi",
+      "heatmap": "Isı haritası",
+      "calendar": "Mühür takvimi",
+      "stepper": "Adım göstergesi",
+      "code": "Kod bloğu"
+    }
+  }
+}
