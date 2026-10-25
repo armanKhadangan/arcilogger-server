@@ -78,7 +78,7 @@ test.describe('5651 Sorgu', () => {
     await page.getByLabel('Talep tarihi').fill('31.12.2026');
     await page.getByLabel('Saat', { exact: true }).fill('11:23 AM');
     await page.getByRole('button', { name: 'Sorgula' }).click();
-    await expect(page.getByText('Geçerli bir IPv4 veya IPv6 adresi girin.')).toBeVisible();
+    await expect(page.getByText('Geçerli bir IPv4 adresi girin.')).toBeVisible();
     await expect(page.getByText('Talep tarihi bugünden sonra olamaz.')).toBeVisible();
     await expect(page.getByText('Saati SS:DD veya SS:DD:ss olarak girin.')).toBeVisible();
     expect(api.callsTo('POST', '/lookup/5651')).toHaveLength(0);

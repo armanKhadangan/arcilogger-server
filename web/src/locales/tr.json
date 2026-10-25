@@ -622,6 +622,7 @@
       "date": "Geçerli bir tarih girin.",
       "futureRequest": "Talep tarihi bugünden sonra olamaz.",
       "ip": "Geçerli bir IPv4 veya IPv6 adresi girin.",
+      "ipv4": "Geçerli bir IPv4 adresi girin.",
       "ipv6": "Bu sürümde IPv6 adresleriyle 5651 sorgusu yapılamaz: ARCILOGGER, IPv6 adreslerini cihazlara bağlayan kayıtları (NDP, DHCPv6) toplamaz. Bu talep başka yollarla yanıtlanmalıdır. IPv6 biçiminde yazılmış bir IPv4 adresini (::ffff:…) IPv4 olarak girin.",
       "port": "Port 0 ile 65535 arasında bir sayı olmalıdır.",
       "domain": "Geçerli bir alan adı girin (boşluk, /, \\, @ ve : olmadan).",

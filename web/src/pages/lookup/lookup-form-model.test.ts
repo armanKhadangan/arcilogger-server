@@ -78,7 +78,7 @@ describe('validateLookup', () => {
     expect(errors).toEqual({
       authority: 'validation.controlCharacters',
       requestDate: 'lookup.validation.futureRequest',
-      publicIp: 'lookup.validation.ip',
+      publicIp: 'lookup.validation.ipv4',
       publicPort: 'lookup.validation.port',
       destIp: 'lookup.validation.ip',
       destDomain: 'lookup.validation.domain',
@@ -120,9 +120,15 @@ describe('validateLookup', () => {
       publicIp: 'lookup.validation.ipv6',
       internalIp: 'lookup.validation.ipv6',
     });
+    // A malformed public or internal address is asked for as IPv4, never as "IPv4 or IPv6".
     expect(validateLookup({ ...VALID, publicIp: '2001:db8::44%eth0' }, TODAY).publicIp).toBe(
-      'lookup.validation.ip',
+      'lookup.validation.ipv4',
     );
+    expect(validateLookup({ ...VALID, internalIp: '172.20.42' }, TODAY).internalIp).toBe(
+      'lookup.validation.ipv4',
+    );
+    expect(tr.lookup.validation.ipv4).not.toContain('IPv6');
+    expect(en.lookup.validation.ipv4).not.toContain('IPv6');
     const refusal = need(LOOKUPS.errors.ipv6_not_supported, 'ipv6_not_supported sample');
     expect(refusal.status).toBe(422);
     expect(tr.lookup.validation.ipv6).toBe(refusal.body.error.message_tr);
