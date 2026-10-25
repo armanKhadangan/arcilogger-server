@@ -132,6 +132,46 @@ test.describe('5651 Sorgu', () => {
     expect(api.callsTo('GET', '/lookup/9')).toHaveLength(0);
   });
 
+  test('an IPv6 public or internal address is refused before sending, in the words of the API', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    const refusal = LOOKUPS.errors.ipv6_not_supported;
+    if (!refusal) throw new Error('no ipv6_not_supported sample');
+    const words = refusal.body.error.message_tr;
+    await page.goto('/lookup');
+    await fillRequest(page);
+    await page.getByLabel('Tarih', { exact: true }).fill('09.10.2026');
+    await page.getByLabel('Saat', { exact: true }).fill('11:23:41');
+    const publicIp = page.getByLabel('Genel / WAN IP');
+    const internalIp = page.getByLabel('İç IP', { exact: true });
+    await publicIp.fill('2001:db8::44');
+    await internalIp.fill('fd00::57');
+    // The destination is only a filter: an IPv6 destination stays allowed.
+    await page.getByLabel('Hedef IP').fill('2001:db8:1::10');
+    await page.getByRole('button', { name: 'Sorgula' }).click();
+    await expect(page.getByText(words, { exact: true })).toHaveCount(2);
+    await expect(publicIp).toHaveAttribute('aria-invalid', 'true');
+    await expect(internalIp).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByLabel('Hedef IP')).not.toHaveAttribute('aria-invalid');
+    await expect(publicIp).toBeFocused();
+    expect(api.callsTo('POST', '/lookup/5651')).toHaveLength(0);
+
+    // Should the server get one all the same (an older page), it answers with the same text.
+    await publicIp.fill('100.64.12.9');
+    await internalIp.fill('');
+    await page.getByLabel('Hedef IP').fill('');
+    api.failNext = {
+      route: 'POST /lookup/5651',
+      status: refusal.status,
+      code: 'ipv6_not_supported',
+    };
+    await page.getByRole('button', { name: 'Sorgula' }).click();
+    await expect(page.getByText(words, { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/lookup$/);
+    expect(api.callsTo('POST', '/lookup/5651')).toHaveLength(1);
+  });
+
   test('every evidence row opens its raw line; the focus comes back', async ({ page }) => {
     const api = await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/lookup/1');

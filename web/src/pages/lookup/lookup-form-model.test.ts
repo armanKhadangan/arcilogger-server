@@ -1,4 +1,6 @@
 import { ApiError } from '@/lib/api';
+import en from '@/locales/en.json';
+import tr from '@/locales/tr.json';
 import { LOOKUPS, need, type ErrorSample } from '@/test/samples';
 
 import {
@@ -101,6 +103,30 @@ describe('validateLookup', () => {
     expect(validateLookup({ ...base, mac: '02-00-5E-00-53-64' }, TODAY)).toEqual({});
     expect(validateLookup({ ...base, internalIp: '172.20.42.57' }, TODAY)).toEqual({});
     expect(validateLookup({ ...base, destDomain: 'example.com.tr' }, TODAY)).toEqual({});
+  });
+
+  it("refuses an IPv6 public or internal address before sending, in the API's own words", () => {
+    const errors = validateLookup(
+      {
+        ...VALID,
+        publicIp: ' 2001:db8::44 ',
+        internalIp: '::ffff:172.20.42.57',
+        destIp: '2001:db8:1::10',
+      },
+      TODAY,
+    );
+    // The destination is only a filter: an IPv6 destination stays allowed.
+    expect(errors).toEqual({
+      publicIp: 'lookup.validation.ipv6',
+      internalIp: 'lookup.validation.ipv6',
+    });
+    expect(validateLookup({ ...VALID, publicIp: '2001:db8::44%eth0' }, TODAY).publicIp).toBe(
+      'lookup.validation.ip',
+    );
+    const refusal = need(LOOKUPS.errors.ipv6_not_supported, 'ipv6_not_supported sample');
+    expect(refusal.status).toBe(422);
+    expect(tr.lookup.validation.ipv6).toBe(refusal.body.error.message_tr);
+    expect(en.lookup.validation.ipv6).toBe(refusal.body.error.message_en);
   });
 });
 

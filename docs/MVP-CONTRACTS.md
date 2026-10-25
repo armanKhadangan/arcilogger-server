@@ -159,7 +159,9 @@ audit entry. Exact = `transip ∈ settings.exact_addresses()`.
   that search. A `nat.wan_transip` not seen then is not used to narrow a double-NAT search
   (`wan_transip_not_seen`). The spec 12.4 text `double_nat`
   ("… aşağıda … adaylar listelenmiştir") appears **only with candidates**; with nothing to list
-  the key is `double_nat_no_candidates`.
+  the key is `double_nat_no_candidates`. Only sessions that left with an address (`transip`,
+  else the source) of the requested public IP's family are candidates: no IPv4 session is ever a
+  candidate for an IPv6 address (the API refuses IPv6 lookups, section 6.1).
 - **Lease ids are stable** across rebuilds (a recomputed interval keeps the id of the stored row
   with the same ip, mac and start), so `LeaseInfo.lease_id` in a stored outcome and in audit
   entries keeps pointing at its row; an id disappears only when its interval disappears.
@@ -317,6 +319,12 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
   is refused with 422 (`loc` `["body", "query", "at"]`): the request must then give the UTC
   offset (Europe/Istanbul has no clock changes; this concerns other zones).
   `lookups.query` = `LookupRequest.to_dict()` + `time_input` (`from_dict` ignores the extra key).
+- **IPv6** (no NDP or DHCPv6 evidence is collected): a `public_ip` or `internal_ip` that is an
+  IPv6 address (also an IPv4 address written as IPv6, `::ffff:a.b.c.d`) is refused before the
+  lookup runs with 422 **`ipv6_not_supported`** (`details[].loc` names the fields; the TR/EN
+  texts say that this version cannot look it up and the request must be answered by other
+  means), audited as `lookup.run_failed` (`reason: ipv6_not_supported`, `query`, `request`); no
+  `lookups` row is stored. `dest_ip` may be IPv6 (it only filters).
 - **Numbers:** `{id}` and `cursor` are 1 … 2^63−1 (PostgreSQL `bigint`) in every router (also
   `/users/{id}` and the `/audit` cursor); larger values answer 422 `validation_error`, never a
   database error.

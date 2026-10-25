@@ -622,6 +622,7 @@
       "date": "Enter a valid date.",
       "futureRequest": "The request date cannot be after today.",
       "ip": "Enter a valid IPv4 or IPv6 address.",
+      "ipv6": "This version does not support 5651 lookups for IPv6 addresses: ARCILOGGER does not collect the records that tie IPv6 addresses to devices (NDP, DHCPv6). The request must be answered by other means. Enter an IPv4 address written as IPv6 (::ffff:…) as IPv4.",
       "port": "The port must be a number from 0 to 65535.",
       "domain": "Enter a valid domain name (no spaces, /, \\, @ or :).",
       "mac": "A MAC address has 12 hexadecimal digits (aa:bb:cc:dd:ee:ff).",

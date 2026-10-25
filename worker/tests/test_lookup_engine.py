@@ -554,6 +554,38 @@ def test_public_ip_with_internal_ip_lists_only_that_client(db_session: Session, 
     assert {m.traffic.srcip for m in by_mac.matches} == {PC}
 
 
+def test_no_ipv4_session_is_a_candidate_for_an_ipv6_address(
+    db_session: Session, evidence: Evidence, site: Site
+) -> None:
+    """Defence in depth behind the API's refusal (``ipv6_not_supported``: no NDP or DHCPv6
+    evidence): the window's IPv4 sessions — also those through the FortiGate's IPv4 WAN address
+    — are never candidates for an IPv6 public address, and a session that left with an IPv6
+    address (NAT66) is never one for an IPv4 address."""
+    evidence.traffic(AT, "fd00:0:0:42::57", 51010, "2001:db8:1::10", 8443, transip="2001:db8::44")
+    db_session.commit()
+    ipv4 = lookup(db_session, public_ip="192.0.2.44")
+    assert {m.traffic.srcport for m in ipv4.matches} == {51001, 51002, 51005}
+    ipv6 = lookup(db_session, public_ip="2001:db8::45")
+    assert [(m.traffic.srcip, m.traffic.transip) for m in ipv6.matches] == [
+        ("fd00:0:0:42::57", "2001:db8::44")
+    ]
+    # Narrowed to the FortiGate's (IPv4) WAN address, the search finds only IPv4 sessions.
+    narrowed = settings_for(db_session, **{"nat.wan_transip": WAN})
+    assert len(lookup(db_session, settings=narrowed, public_ip="192.0.2.44").matches) == 3
+    requests: list[tuple[LookupSettings | None, dict[str, Any]]] = [
+        (narrowed, {}),
+        (narrowed, {"public_port": 51001}),
+        (narrowed, {"dest_ip": "203.0.113.10", "dest_port": 443}),
+        (None, {"dest_ip": "203.0.113.10", "dest_port": 443}),
+        (None, {"dest_domain": "portal.example"}),
+        (None, {"dest_port": 443}),
+    ]
+    for settings, request in requests:
+        outcome = lookup(db_session, settings=settings, public_ip="2001:db8::45", **request)
+        assert (outcome.mode, outcome.matches) == ("none", ()), request
+        assert "double_nat" not in keys(outcome)
+
+
 def test_internal_ip_mac_and_none_modes(db_session: Session, site: Site) -> None:
     internal = lookup(db_session, internal_ip=PC, at=tr(DAY, 12))
     assert internal.mode == "internal"

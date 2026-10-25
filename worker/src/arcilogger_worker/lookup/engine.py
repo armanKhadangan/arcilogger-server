@@ -42,6 +42,11 @@ search is dropped from it (``wan_transip_not_seen``). A search not narrowed to o
 leaves out the sessions translated to another configured public address: they did not leave
 through the requested one.
 
+**Address family** (defence in depth; the API refuses IPv6 lookups, ``ipv6_not_supported``:
+there is no IPv6 identity evidence, no NDP or DHCPv6): only sessions that left with an address
+(``transip``, else the source) of the requested public IP's family are candidates, so no IPv4
+session — the FortiGate's IPv4 WAN address included — is ever a candidate for an IPv6 address.
+
 Every match carries the attribution chain of its source IP at the session moment nearest to the
 requested time; IP conflicts appear as chain alternatives (low confidence). A chain's person is
 the device-person assignment **valid at that moment** (assignment history, ADR-0008) and the
@@ -403,6 +408,7 @@ class _Lookup:
         else:
             fetched = fetch_rows(self.session, self.window, **common)
             groups, capped = group_sessions(fetched.rows), fetched.capped
+        groups = self._same_family(groups)
         if not groups:
             self._explain_no_candidates(wants_destination)
             return []
@@ -447,6 +453,18 @@ class _Lookup:
             if destination_match(group, request, domain)[0] != "none"
         ]
         return groups, capped
+
+    def _same_family(self, groups: list[SessionGroup]) -> list[SessionGroup]:
+        """The sessions that left with an address of the requested public IP's family (module
+        docstring); all of them when no public IP was requested."""
+        if self.request.public_ip is None:
+            return groups
+        version = ipaddress.ip_address(self.request.public_ip).version
+        return [
+            group
+            for group in groups
+            if ipaddress.ip_address(group.first.transip or group.first.srcip).version == version
+        ]
 
     def _search_note(self, *, found: bool) -> Explanation:
         """Why this is a candidate search (the spec 12.4 text only when candidates follow)."""

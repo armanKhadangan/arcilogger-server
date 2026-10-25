@@ -37,6 +37,7 @@ from arcilogger_api.routers.lookup import LookupTimeoutError, parse_moment, stat
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.immutability import is_locked, unlock
+from arcilogger_core.iputil import canonical_ip
 from arcilogger_core.layout import Layout
 from arcilogger_db.models import AuditLog, Department, Lease, Lookup
 from arcilogger_db.settings import set_setting
@@ -467,6 +468,61 @@ def test_invalid_queries_are_refused(
     assert any(field in detail["loc"] for detail in error["details"]), error["details"]
     assert "999.1.1.1" not in response.text
     assert lookup_rows(app_session_factory) == []
+
+
+@pytest.mark.parametrize(
+    ("query", "fields"),
+    [
+        ({"public_ip": "2001:db8::44", "public_port": 41234}, ["public_ip"]),
+        ({"internal_ip": "FD00:0:0:42::57"}, ["internal_ip"]),
+        # An IPv4 address written as IPv6 never equals the logs' IPv4 values: refused as well.
+        (
+            {"public_ip": "::ffff:192.0.2.44", "internal_ip": "fd00::57"},
+            ["public_ip", "internal_ip"],
+        ),
+    ],
+)
+def test_ipv6_lookups_are_refused_and_audited(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    site: Site,
+    query: dict[str, Any],
+    fields: list[str],
+) -> None:
+    """No IPv6 identity evidence (NDP, DHCPv6): a clear refusal instead of a result — never the
+    IPv4 sessions through the FortiGate's WAN address as candidates; the attempt is audited."""
+    setting(app_session_factory, "nat.wan_transip", WAN)
+    who = signed_in(client, login_as, app_session_factory, "auditor")
+    response = client.post("/api/v1/lookup/5651", json=body(**query))
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    text_tr, text_en = lookup_router.MESSAGES["ipv6_not_supported"]
+    assert (error["code"], error["message_tr"], error["message_en"]) == (
+        "ipv6_not_supported",
+        text_tr,
+        text_en,
+    )
+    assert "IPv6 adresleriyle 5651 sorgusu yapılamaz" in text_tr
+    assert "başka yollarla yanıtlanmalıdır" in text_tr
+    assert "must be answered by other means" in text_en
+    assert [detail["loc"] for detail in error["details"]] == [
+        ["body", "query", field] for field in fields
+    ]
+    assert lookup_rows(app_session_factory) == []
+    assert audits(app_session_factory, "lookup.run") == []
+    (failed,) = audits(app_session_factory, "lookup.run_failed")
+    assert (failed.actor_id, failed.details["reason"]) == (who.user_id, "ipv6_not_supported")
+    for field in fields:  # canonical, as stored for any lookup
+        assert failed.details["query"][field] == canonical_ip(query[field])
+    assert failed.details["request"] == {
+        "authority": AUTHORITY,
+        "file_no": FILE_NO,
+        "request_date": "2026-10-12",
+        "reason_sha256": hashlib.sha256(REASON.encode()).hexdigest(),
+    }
+    # The same request with IPv4 addresses runs normally.
+    assert client.post("/api/v1/lookup/5651", json=body(internal_ip=PC)).status_code == 201
 
 
 def test_invalid_nat_settings_are_reported(

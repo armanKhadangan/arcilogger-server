@@ -122,6 +122,11 @@ export function validateLookup(draft: LookupDraft, today: string): FieldErrors<L
   for (const field of ['publicIp', 'destIp', 'internalIp'] as const) {
     if (draft[field].trim() && !isIpAddress(draft[field])) errors[field] = 'lookup.validation.ip';
   }
+  // No IPv6 identity evidence (NDP, DHCPv6): an IPv6 public or internal address (the only kind
+  // with `:`, `::ffff:a.b.c.d` too) is refused by the API (`ipv6_not_supported`).
+  for (const field of ['publicIp', 'internalIp'] as const) {
+    if (!errors[field] && draft[field].includes(':')) errors[field] = 'lookup.validation.ipv6';
+  }
   for (const field of ['publicPort', 'destPort'] as const) {
     if (draft[field].trim() && !isPort(draft[field])) errors[field] = 'lookup.validation.port';
   }
