@@ -45,6 +45,7 @@ import {
   actionOf,
   activeAlertOf,
   alertSummaryText,
+  closeHintKey,
   closesActive,
   detailRows,
   isActive,
@@ -280,7 +281,7 @@ function StateActions({
       </div>
       {isActive(alert.state) ? (
         <p id={`${id}-close-hint`} className="text-xs text-muted" data-testid="close-hint">
-          {t('security.actions.closeHint')}
+          {t(closeHintKey(alert.rule))}
         </p>
       ) : null}
       {target ? (

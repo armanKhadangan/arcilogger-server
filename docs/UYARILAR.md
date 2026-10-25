@@ -18,7 +18,8 @@ anlatır. Kural motoru (YAML kuralları, kural düzenleyici) ve webhook'lar sonr
   Elektrik kesintisinden sonra gelen ilk uyarı yeni bir satırda başlar: yarım kalan parça atlanır
   (işin ayrıntılarında bildirilir), ardındaki uyarı aktarılır.
 - Worker ayrıca kendisi denetler: R15 dakikada bir (`alerts.r15`), R20 sistem denetimleri 5
-  dakikada bir (`alerts.system`).
+  dakikada bir (`alerts.system`); lisans denetimi (`license.check`, 5 dakikada bir) lisans
+  uyarılarını (`R20-license…`, bölüm 2) açar.
 - **Her sorun için tek etkin uyarı:** her kuralın bir tekilleştirme anahtarı vardır
   (`R15:fortigate`, `R20-seal:2026-10-18`, `R20-disk:D:` …). Uyarı `open` (açık) ya da
   `acknowledged` (görüldü) olduğu sürece aynı sorun yeni uyarı açmaz; tekrarı sayılır. Sorun
@@ -37,6 +38,8 @@ anlatır. Kural motoru (YAML kuralları, kural düzenleyici) ve webhook'lar sonr
 
 Bütün uyarılar **5651 Temel**'e aittir ve hiçbir lisans durumunda kapanmaz; tek istisna
 `R20-report`'tur (Zamanlanmış kullanım raporları modülü, [LISANS.md](LISANS.md) bölüm 2.1).
+Lisans uyarıları (`R20-license`, `R20-license-limit`, `R20-license-maintenance`) da 5651
+Temel'e aittir: her lisans durumunda çalışır, yalnızca lisansı bildirir.
 
 | Kod | Anlamı | Önem | Eşik (ayar) | Ne yapılmalı |
 |---|---|---|---|---|
@@ -57,6 +60,9 @@ Bütün uyarılar **5651 Temel**'e aittir ve hiçbir lisans durumunda kapanmaz; 
 | `R20-backup` | Son veritabanı yedeği başarısız, son başarılı yedek `alerts.backup_stale_hours` saatten eski (`state\backup\last.json`) ya da yedek alındı ama durum dosyası yazılamadı; uyarıdan sonra başarılı olan bir yedekle çözülür. `R20-backup:missing`: kurulumdan `alerts.backup_missing_hours` saat sonra hâlâ hiç yedek yok (orta). `R20-backup:prune`: eski yedekler silinemedi (orta); sonraki başarılı bir yedekten bir saat sonra, o yedek bunu yeniden bildirmediyse çözülür. `R20-backup:clock`: yeni yedeğin adı klasördeki bir yedekten eski (saat geri alınmış; yedek saklanır, orta); sonraki başarılı bir yedekle çözülür. `[backup] enabled = false` iken (ArciWorker başlarken okunur) yedek uyarısı açılmaz, açık olanlar çözülür | Yüksek / orta | `alerts.backup_stale_hours` (36), `alerts.backup_missing_hours` (48) | Yedekleme görevi ve yedek klasörü ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 10) |
 | `R20-email` | Uyarı e-postası gönderilemedi (6 denemeden sonra ya da kalıcı 5xx ret). **Tek** yerel uyarıdır, kendisi e-postayla gönderilmez; adı geçen her alıcıya bir e-posta ulaşınca ya da gönderilemeyen adresler `alerts.email_recipients` listesinden çıkarılınca çözülür | Yüksek | — | `[smtp]`, `smtp.password`, güvenlik duvarı; `alerts test-email` |
 | `R20-report` | Zamanlanmış bir kullanım raporu üretilemedi ya da bir alıcıya gönderilemedi (6 denemeden sonra ya da kalıcı 5xx ret; [KULLANIM-RAPORLARI.md](KULLANIM-RAPORLARI.md)). Tek yerel uyarıdır; adı geçen alıcılara sonraki rapor gidince (ya da adres bütün zamanlamalardan çıkarılınca) ve sonraki rapor üretilince çözülür. **Zamanlanmış kullanım raporları** modülüne aittir: modül lisansta kapalıyken açılmaz; modül kapanınca açık olan uyarı "Zamanlanmış raporlar lisansta kapalı / Scheduled reports are off in the licence" notuyla kendiliğinden çözülür | Orta | — | Raporlar sayfasında çalıştırmanın hatası; `[smtp]`, `alerts test-email` |
+| `R20-license` | **Ücretli modüller kapanıyor ya da kapalı** (lisans denetimi, 5 dakikada bir, lisansın güvenilen zamanına göre: [LISANS.md](LISANS.md) bölüm 10): `R20-license:trial-ending` deneme süresinin bitmesine en çok 3 gün kaldı; `R20-license:expiring` süreli bir lisansın bitmesine en çok 14 gün kaldı; `R20-license:off` lisans durumu yüzünden ücretli modüller kapalı (`trial_expired`, `invalid`, `wrong_server`, `expired`, `version_not_covered`) — yalnızca denemenin ya da lisansın verdiği bir modül kapalıyken (yalnızca 5651 Temel içeren bir lisans uyarı açmaz). Uyarı modülleri adlandırır; 5651 işlevleri her durumda çalışır. Lisans geçerli olunca (`licensed`) ya da durum değişince (`license_changed`: ör. deneme bitince denemenin uyarısı çözülür, `R20-license:off` açılır) kendiliğinden çözülür | Yüksek: varsayılan `alerts.email_min_severity` ile ücretli modüller (zamanlanmış kullanım raporları da) kapanmadan önce ve kapandığında e-postayla gider, her uyarı için bir kez | 3 gün (deneme), 14 gün (`valid_until`) | Ayarlar → Lisans: istek kodunu gönderin, yeni `.lic` dosyasını yükleyin ([LISANS.md](LISANS.md) bölüm 4); sunucu değiştiyse yeni lisans (bölüm 9) |
+| `R20-license-limit` | Kullanıcı (`R20-license-limit:users`: yeni kullanıcı eklenemez) ya da log kaynağı (`R20-license-limit:log_sources`: kayıtlar toplanmaya ve mühürlenmeye devam eder) sayısı lisans sınırını aşıyor; aşımın lisans olayından (`license.limit_exceeded`) itibaren. Kullanım sınırın içine dönünce (`limit_ok`) çözülür | Orta | lisansın `limits` değerleri | Kullanılmayan kullanıcıları devre dışı bırakın ya da daha yüksek sınırlı bir lisans isteyin; bir kaynak son logundan 30 gün sonra sayılmaz ([LISANS.md](LISANS.md) bölüm 6) |
+| `R20-license-maintenance` | Geçerli bir lisansın bakım süresi 30 gün içinde bitiyor ya da bitti (bilgi: yalnızca yükseltmeler ve destek; lisans ve kurulu sürüm geçerli kalır). Bakım yenilenince (`maintenance_renewed`) ya da lisans geçerliliğini yitirince (`license_changed`) çözülür | Bilgi | 30 gün | Bakımı yenileyin ([LISANS.md](LISANS.md) bölüm 7) |
 | `new-log-source` | Yapılandırmada olmayan bir gönderici (toplayıcı) | Orta | — | Bilinen bir cihazsa `[[sources]]`'a ekleyin ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 4) |
 | `new_source` | Aynı olayın veritabanı uyarısı (ingest) | Orta | — | Yukarıdaki gibi |
 | `wrong-transport` | Kaynaktan izin verilmeyen taşıma yoluyla mesaj geldi; mesaj kaydedilmedi | Yüksek | `[[sources]] transport` | Cihaz ayarı ya da taklit gönderim ([DEVICE-SETUP.md](DEVICE-SETUP.md) 1.1) |
@@ -151,8 +157,9 @@ boruyla). Ayarlar kullanıldıkları anda okunur; yeniden başlatma gerekmez.
 ve uyarının ayrıntılarından **biçimi denetlenmiş birkaç bilgiden** oluşur:
 
 - kural kodu ve adı, önem, zaman (Europe/Istanbul), kaynak adı (yapılandırmadaki ad ya da aşağıdaki
-  gibi IP adresli bir ad), kısa bir cümle (gün, eşik, sayı, disk harfi, iş adı ya da aşağıdaki IP
-  adreslerinden biri), ne yapılacağı (bir satır), ARCILOGGER web adresi (tek bağlantı);
+  gibi IP adresli bir ad), kısa bir cümle (gün, eşik, sayı, disk harfi, iş adı, lisans durumu ve
+  modül adları ya da aşağıdaki IP adreslerinden biri), ne yapılacağı (bir satır), ARCILOGGER web
+  adresi (tek bağlantı);
 - **IP adresi** yalnızca şu durumlarda: yeni göndericinin IP adresi (`new-log-source`,
   `new_source`); taşıma yolu izin verilmeyen bir mesajın gönderici adresi (`wrong-transport`:
   yapılandırılmış bir kaynağa ait bir adres — kaynağın adresi ya da ağ tanımının içinde —, mesaj bu
@@ -163,7 +170,7 @@ ve uyarının ayrıntılarından **biçimi denetlenmiş birkaç bilgiden** oluş
 - önce Türkçe, sonra İngilizce; düz metin ve basit HTML (satır içi stil, resim ve dış kaynak yok).
 
 E-posta **asla** içermez: ham log satırı, kişi adı, cihaz sahibinin adı, IP–kişi eşleşmesi, MAC
-adresi, hata metni, dosya yolu, parola ya da başka bir gizli bilgi. Uyarının başlığı ve ayrıntıları
+adresi, hata metni, dosya yolu, lisans sahibi, sunucu kimliği, parola ya da başka bir gizli bilgi. Uyarının başlığı ve ayrıntıları
 hiçbir zaman e-postaya kopyalanmaz. Ayrıntılar ARCILOGGER'dadır (`alerts list`).
 
 ## 6. Teslim
@@ -221,7 +228,8 @@ doğrudan İnceleniyor yapılamaz: önce yeniden açın.
   kaydedilir. Denetimlerin kendiliğinden kapatması ve yeniden açması `system` olarak, neden
   koduyla görünür (ör. `messages_again`: kaynak yeniden gönderiyor; `condition_cleared`,
   `below_threshold`, `credit_ok`, `job_ok`, `backup_ok`, `verified_again`, `sealed`,
-  `email_sent`, `lease_rebuild`, `conflict_found_again`).
+  `email_sent`, `lease_rebuild`, `conflict_found_again`; lisans uyarılarında `licensed`,
+  `license_changed`, `limit_ok`, `maintenance_renewed`).
 - **Denetim kaydı:** her durum değişikliği `alert.state` (önceki ve yeni durum), her not
   `alert.note` olarak yazılır. Denetim kaydında notun **yalnızca uzunluğu** vardır, metni yoktur;
   notlar e-postaya da girmez.
@@ -231,7 +239,11 @@ doğrudan İnceleniyor yapılamaz: önce yeniden açın.
   açar; yüksek ve kritik uyarılar için yeni bir e-posta da gider. Kapattığınız uyarı o zaman
   yeniden açılamaz ("Aynı sorun için etkin bir uyarı var (#…)"): yeni uyarıyla devam edin.
   Bu yüzden sorunla uğraşırken uyarıyı **İnceleniyor** yapın; sorun giderilince denetim onu
-  kendisi kapatır.
+  kendisi kapatır. Lisans uyarıları bunun istisnasıdır (`R20-license`, `R20-license-limit`,
+  `R20-license-maintenance`): bir lisans durumu sürekli olabilir (yalnızca 5651 Temel ile çalışan
+  bir kurulum), bu yüzden bir kişinin kapattığı uyarı aynı durum için yeniden açılmaz (e-postası da
+  gitmez), yalnızca bir sonraki için (başka bir lisans durumu, sınırın yeniden aşılması, başka
+  tarihler); Güvenlik sayfası bunu lisans uyarısının düğmelerinin yanında söyler.
 - **Kendiliğinden kapanmayanlar** (`R20-spool`, replika farklı, `R20-seal-skip`,
   `R20-spool-torn`, `R20-retention`, `new-log-source`, `new_source`, `wrong-transport`):
   inceledikten sonra nedeni not olarak ekleyip Kapandı ya da Yanlış alarm yapın. `ip_conflict`

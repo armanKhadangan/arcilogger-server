@@ -6,9 +6,10 @@
  * → İnceleniyor (`acknowledged`), Kapandı (`resolved`) or Yanlış alarm (`dismissed`); İnceleniyor
  * → any other; Kapandı ↔ Yanlış alarm; a closed alert back to Yeni (re-open) only while no other
  * active alert holds the same problem — the check opens a new alert when a problem persists after
- * it was closed (409 `alert_key_active` names it). The API checks every change again: 409
- * `alert_state_unchanged` / `alert_transition_not_allowed` when someone else (or the system)
- * changed the alert since the screen showed it.
+ * it was closed (409 `alert_key_active` names it); for a licence alert only once the situation
+ * changes. The API checks every change again: 409 `alert_state_unchanged` /
+ * `alert_transition_not_allowed` when someone else (or the system) changed the alert since the
+ * screen showed it.
  *
  * The address keeps the filters, the sort order and the open alert (`?alert=17`) so a view can be
  * linked from the dashboard or an e-mail; never the search text (it may hold an IP address or a
@@ -95,6 +96,23 @@ export function closesActive(from: AlertState, to: AlertState): boolean {
   return isActive(from) && (to === 'resolved' || to === 'dismissed');
 }
 
+/**
+ * The licence alerts (`arcilogger_worker.alerts.license`): a licence situation can last for good,
+ * so one a person closed is not raised again for the same situation, only for the next one.
+ */
+export const LICENSE_RULES: readonly string[] = [
+  'R20-license',
+  'R20-license-limit',
+  'R20-license-maintenance',
+];
+
+/** The hint next to the buttons that close an active alert of `rule` (an i18n key). */
+export function closeHintKey(rule: string): string {
+  return LICENSE_RULES.includes(rule)
+    ? 'security.actions.closeHintLicense'
+    : 'security.actions.closeHint';
+}
+
 /** Reason codes of the checks' automatic changes (`by: "system"`) the page has a text for. */
 export const SYSTEM_REASONS: readonly string[] = [
   'messages_again',
@@ -118,6 +136,10 @@ export const SYSTEM_REASONS: readonly string[] = [
   'email_sent',
   'lease_rebuild',
   'conflict_found_again',
+  'licensed',
+  'license_changed',
+  'limit_ok',
+  'maintenance_renewed',
 ];
 
 /** The active alert a refused re-open points to (`details.alert_id` of 409 `alert_key_active`). */

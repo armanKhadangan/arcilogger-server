@@ -327,6 +327,9 @@ Every day:
   | `R20-backup` | Database backup failed, older than 36 hours, or still none 48 hours after the installation |
   | `R20-email` | An alert e-mail could not be sent (`[smtp]`, `smtp.password`, firewall); never e-mailed itself |
   | `R20-report` | A scheduled usage report could not be made or not sent to a recipient (the run history on the Raporlar page, `[smtp]`; sections 14 and 15). Not raised while the Scheduled usage reports module is off in the licence; resolved by itself when the module goes off |
+  | `R20-license` | Paid modules ending or off: the trial ends within 3 days, a time-limited licence within 14 days, or the paid modules are off because of the licence state (trial over, licence invalid or for another server, expired, version not covered); the 5651 functions keep working. Settings → Licence ([LICENSING.md](LICENSING.md)) |
+  | `R20-license-limit` | Users (no new user can be added) or log sources (still collected and sealed) above the licence's limit |
+  | `R20-license-maintenance` | Maintenance ends within 30 days or has ended (`info`: upgrades and support only, the licence stays valid) |
   | `new-log-source` | A sender that is not in the configuration (if the firewall let it through) |
   | `wrong-transport` | A message arrived over a transport its source does not allow (`[[sources]] transport`): a forged UDP message or a wrong device setting; the message was not recorded |
 

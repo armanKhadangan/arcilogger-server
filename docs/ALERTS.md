@@ -19,7 +19,8 @@ and webhooks come later (M5).
   break. After a power cut the next alert starts on a new line: the torn fragment is skipped (and
   reported in the job's details), the alert after it is imported.
 - The worker also checks by itself: R15 every minute (`alerts.r15`), the R20 system checks every
-  5 minutes (`alerts.system`).
+  5 minutes (`alerts.system`), and the licence check (`license.check`, every 5 minutes) raises the
+  licence alerts (`R20-license…`, section 2).
 - **One active alert per problem:** every rule has a dedup key (`R15:fortigate`,
   `R20-seal:2026-10-18`, `R20-disk:D:` …). While an alert is `open` or `acknowledged`, the same
   problem opens no second alert; a repeat is counted. Once the problem is gone, the check
@@ -39,7 +40,8 @@ and webhooks come later (M5).
 
 Every alert belongs to **5651 Temel** (5651 Core) and stays on in every licence state; the one
 exception is `R20-report` (the Scheduled usage reports module, [LICENSING.md](LICENSING.md)
-section 2.1).
+section 2.1). The licence alerts (`R20-license`, `R20-license-limit`, `R20-license-maintenance`)
+are 5651 Temel too: they run in every licence state and only report on the licence.
 
 | Code | Meaning | Severity | Threshold (setting) | What to do |
 |---|---|---|---|---|
@@ -60,6 +62,9 @@ section 2.1).
 | `R20-backup` | The last database backup failed, or the last successful one is older than `alerts.backup_stale_hours` (`state\backup\last.json`), or a dump was made but its state file could not be written; resolved by a backup that succeeds after the alert. `R20-backup:missing`: still no backup `alerts.backup_missing_hours` after the installation (medium). `R20-backup:prune`: old dumps could not be deleted (medium); resolved an hour after a later successful backup that did not report it again. `R20-backup:clock`: a new dump named earlier than one already in the folder (a clock set back; the dump is kept, medium); resolved by a later successful backup. With `[backup] enabled = false` (read when ArciWorker starts) no backup alert opens and the open ones are resolved | High / medium | `alerts.backup_stale_hours` (36), `alerts.backup_missing_hours` (48) | Backup task and backup folder ([FIRST-STEPS.md](FIRST-STEPS.md) section 10) |
 | `R20-email` | An alert e-mail could not be sent (after 6 attempts, or a permanent 5xx refusal). **One** local alert, never e-mailed itself; resolved once an e-mail reached each recipient it names, or the failing addresses were taken out of `alerts.email_recipients` | High | — | `[smtp]`, `smtp.password`, firewall; `alerts test-email` |
 | `R20-report` | A scheduled usage report could not be made, or not sent to a recipient (after 6 attempts, or a permanent 5xx refusal; [USAGE-REPORTS.md](USAGE-REPORTS.md)). One local alert; resolved once a later report reaches the recipients it names (or they are removed from every schedule) and a later report is made. It belongs to the **Scheduled usage reports** module: not raised while the module is off in the licence; when the module goes off an open alert is resolved by itself with the note "Zamanlanmış raporlar lisansta kapalı / Scheduled reports are off in the licence" | Medium | — | The run's error on the Reports page; `[smtp]`, `alerts test-email` |
+| `R20-license` | **Paid modules ending or off** (the licence check, every 5 minutes, on the licence's trusted time: [LICENSING.md](LICENSING.md) section 10): `R20-license:trial-ending` the trial ends within 3 days; `R20-license:expiring` a time-limited licence ends within 14 days; `R20-license:off` the paid modules are off because of the licence state (`trial_expired`, `invalid`, `wrong_server`, `expired`, `version_not_covered`) — only while a module the trial or the licence gave is off (a licence of 5651 Temel only raises nothing). The alert names the modules; the 5651 functions keep working in every state. Resolved by itself once the licence is valid (`licensed`) or the situation changed (`license_changed`: e.g. the trial's warning when the trial is over, which opens `R20-license:off`) | High: with the default `alerts.email_min_severity` it is e-mailed, before and when the paid modules (the scheduled usage reports among them) stop, once per alert | 3 days (trial), 14 days (`valid_until`) | Settings → Licence: send the request code, upload the new `.lic` ([LICENSING.md](LICENSING.md) section 4); after a server change, a new licence (section 9) |
+| `R20-license-limit` | Users (`R20-license-limit:users`: no new user can be added) or log sources (`R20-license-limit:log_sources`: logs are still collected and sealed) above the licence's limit, from the crossing's licence event (`license.limit_exceeded`) on. Resolved once the use is within the limit (`limit_ok`) | Medium | the licence's `limits` | Deactivate unused users or ask for a licence with a higher limit; a source stops counting 30 days after its last log ([LICENSING.md](LICENSING.md) section 6) |
+| `R20-license-maintenance` | A valid licence whose maintenance ends within 30 days, or has ended (information: upgrades and support only; the licence and the installed version stay valid). Resolved by renewed maintenance (`maintenance_renewed`) or once the licence is no longer valid (`license_changed`) | Info | 30 days | Renew maintenance ([LICENSING.md](LICENSING.md) section 7) |
 | `new-log-source` | A sender that is not in the configuration (collector) | Medium | — | If it is a known device, add it to `[[sources]]` ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 4) |
 | `new_source` | The database alert of the same event (ingest) | Medium | — | As above |
 | `wrong-transport` | A message arrived over a transport its source does not allow; it was not recorded | High | `[[sources]] transport` | Device setting or a forged message ([DEVICE-SETUP.md](DEVICE-SETUP.md) 1.1) |
@@ -155,8 +160,8 @@ and English texts and a **few shape-checked facts** from the alert's details:
 
 - rule code and name, severity, time (Europe/Istanbul), source name (the configured name, or a name
   with an IP address in it as below), one short sentence (day, threshold, count, drive letter, job
-  name or one of the IP addresses below), what to do (one line), the ARCILOGGER web address (the
-  only link);
+  name, licence state and module names, or one of the IP addresses below), what to do (one line),
+  the ARCILOGGER web address (the only link);
 - an **IP address** only in these cases: a new sender's IP address (`new-log-source`, `new_source`);
   the sender address of a message refused for its transport (`wrong-transport`: an address of a
   configured source — its address or one inside its network —, though the message may come from a
@@ -168,8 +173,9 @@ and English texts and a **few shape-checked facts** from the alert's details:
   resources).
 
 An e-mail **never** contains a raw log line, a person's name, a device owner's name, an IP-to-person
-link, a MAC address, an error text, a file path, a password or any other secret. An alert's title
-and details are never copied into an e-mail. The details are in ARCILOGGER (`alerts list`).
+link, a MAC address, an error text, a file path, the licensee, the server id, a password or any
+other secret. An alert's title and details are never copied into an e-mail. The details are in
+ARCILOGGER (`alerts list`).
 
 ## 6. Delivery
 
@@ -226,7 +232,8 @@ cannot go straight to İnceleniyor: re-open it first.
   checks' automatic closing and re-opening appear as `system` with a reason code (e.g.
   `messages_again`: the source sends again; `condition_cleared`, `below_threshold`,
   `credit_ok`, `job_ok`, `backup_ok`, `verified_again`, `sealed`, `email_sent`,
-  `lease_rebuild`, `conflict_found_again`).
+  `lease_rebuild`, `conflict_found_again`; the licence alerts: `licensed`, `license_changed`,
+  `limit_ok`, `maintenance_renewed`).
 - **Audit log:** every change of state is written as `alert.state` (previous and new state),
   every note as `alert.note`. The audit log holds **only the length** of a note, never its text;
   notes never go into an e-mail either.
@@ -236,7 +243,11 @@ cannot go straight to İnceleniyor: re-open it first.
   alert**, and high and critical alerts are e-mailed again. The alert you closed can then not be
   re-opened ("An active alert covers the same problem (#…)"): continue with the new one. So set
   an alert to **İnceleniyor** while you work on the problem; the check closes it by itself once
-  the problem is fixed.
+  the problem is fixed. The licence alerts are the exception (`R20-license`, `R20-license-limit`,
+  `R20-license-maintenance`): a licence situation can last for good (a site that runs 5651 Temel
+  only), so an alert a person closed is not raised (or e-mailed) again for the same situation,
+  only for the next one (another licence state, a new crossing of the limit, other dates); the
+  Güvenlik page says so next to the buttons of a licence alert.
 - **Alerts that never close by themselves** (`R20-spool`, replica differs, `R20-seal-skip`,
   `R20-spool-torn`, `R20-retention`, `new-log-source`, `new_source`, `wrong-transport`): after
   looking into them, add the cause as a note and set Kapandı or Yanlış alarm. `ip_conflict`

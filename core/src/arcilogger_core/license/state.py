@@ -138,6 +138,7 @@ class LicenseStatus:
     maintenance_expired: bool
     maintenance_ends_soon: bool
     valid_until: date | None
+    valid_days_left: int | None  # site days to valid_until (0: its last day); None: no limit
     version: str
     release_date: date
 
@@ -329,6 +330,7 @@ def evaluate(inputs: LicenseInputs) -> LicenseStatus:
     maintenance_expired = False
     maintenance_ends_soon = False
     valid_until: date | None = None
+    valid_days_left: int | None = None
     users_max: int | None
     sources_max: int | None
     if document is not None:
@@ -338,6 +340,8 @@ def evaluate(inputs: LicenseInputs) -> LicenseStatus:
         maintenance_expired = _passed(maintenance_until, now)
         maintenance_ends_soon = 0 <= maintenance_days_left <= MAINTENANCE_SOON_DAYS
         valid_until = payload.valid_until
+        if valid_until is not None:
+            valid_days_left = (valid_until - site_day(now)).days
         users_max, sources_max = payload.users, payload.log_sources
     elif state == "trial":
         users_max = sources_max = None
@@ -370,6 +374,7 @@ def evaluate(inputs: LicenseInputs) -> LicenseStatus:
         maintenance_expired=maintenance_expired,
         maintenance_ends_soon=maintenance_ends_soon,
         valid_until=valid_until,
+        valid_days_left=valid_days_left,
         version=inputs.version,
         release_date=inputs.release_date,
     )

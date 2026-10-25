@@ -5,10 +5,10 @@ details. It is built only from this catalogue — the rule's name, one line on w
 from a few **whitelisted facts** of ``details``, each checked for its shape before it is used
 (a source name — a sender inside a configured network or one that is not configured is named with
 its IP address, ``ap-172.20.10.23``, ``unknown-172.20.19.9`` —, a day, a number, a drive letter,
-a job name, the IP address of a new sender, of a message refused for its transport
-(``wrong-transport``) or of an IP conflict). Anything else an alert carries — raw log lines, error
-texts, person or device owner names, MAC addresses, paths — is never put into an e-mail, whatever
-it contains.
+a job name, a licence state and the names of licence modules, the IP address of a new sender, of
+a message refused for its transport (``wrong-transport``) or of an IP conflict). Anything else an
+alert carries — raw log lines, error texts, person or device owner names, MAC addresses, paths,
+the licensee — is never put into an e-mail, whatever it contains.
 """
 
 from __future__ import annotations
@@ -163,6 +163,28 @@ RULES: Final[Mapping[str, RuleText]] = {
         "denetleyin: arcilogger-worker alerts test-email.",
         "See the run's error on the Reports page; for e-mail check [smtp]: arcilogger-worker "
         "alerts test-email.",
+    ),
+    # The licence (license.check): the paid modules only; no licence state locks a 5651 function.
+    "R20-license": RuleText(
+        "Ücretli modüller kapanıyor ya da kapalı (lisans)",
+        "Paid modules ending or off (licence)",
+        "Ayarlar → Lisans sayfasına bakın (LISANS.md); 5651 işlevleri her lisans durumunda "
+        "çalışır.",
+        "See Settings → Licence (LICENSING.md); the 5651 functions work in every licence state.",
+    ),
+    "R20-license-limit": RuleText(
+        "Lisans sınırı aşıldı",
+        "Licence limit exceeded",
+        "Ayarlar → Lisans sayfasında sınırı görün (LISANS.md bölüm 6); 5651 işlevleri etkilenmez.",
+        "See the limit under Settings → Licence (LICENSING.md section 6); the 5651 functions are "
+        "not affected.",
+    ),
+    "R20-license-maintenance": RuleText(
+        "Lisansın bakım süresi",
+        "Licence maintenance",
+        "Yeni sürümler ve destek için bakımı yenileyin (LISANS.md bölüm 7); lisans geçerli kalır.",
+        "Renew maintenance for new versions and support (LICENSING.md section 7); the licence "
+        "stays valid.",
     ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
@@ -372,6 +394,59 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "recipient addresses (USAGE-REPORTS.md).\n"
         "3. The alert closes by itself once the failing recipients get a report or the next "
         "report renders.",
+    ),
+    "R20-license": (
+        "1. Ayarlar → Lisans sayfasında durumu ve tarihleri açın; hangi ücretli modüllerin "
+        "kapandığı ya da kapanacağı ayrıntılardadır.\n"
+        "2. Deneme ya da süreli lisans bitiyorsa, süresi dolduysa ya da bu sürüm bakım süresinden "
+        "sonra yayımlandıysa: sayfadaki istek kodunu lisans verene gönderin, gelen .lic dosyasını "
+        "aynı sayfadan yükleyin (LISANS.md bölüm 4).\n"
+        "3. Lisans doğrulanamıyor ya da bu sunucu için değilse dosyayı yeniden yükleyin; sunucu "
+        "değiştiyse yeni sunucunun istek koduyla yeni lisans isteyin (LISANS.md bölüm 9).\n"
+        "4. 5651 işlevleri (toplama, mühürleme, sorgu, kanıt paketleri, uyarılar) hiçbir lisans "
+        "durumunda durmaz. Lisans geçerli olunca uyarı kendiliğinden kapanır; kapatırsanız aynı "
+        "durum için yeniden açılmaz.",
+        "1. Open the state and the dates under Settings → Licence; the details say which paid "
+        "modules are off or are about to go off.\n"
+        "2. When the trial or a time-limited licence ends, has ended, or this version was "
+        "released after the maintenance period: send the request code of that page to the "
+        "licensor and upload the .lic you receive on the same page (LICENSING.md section 4).\n"
+        "3. When the licence cannot be verified or is not for this server, upload the file "
+        "again; after a server change ask for a new licence with the new server's request code "
+        "(LICENSING.md section 9).\n"
+        "4. The 5651 functions (collection, sealing, lookups, evidence packages, alerts) never "
+        "stop in any licence state. The alert closes by itself once the licence is valid; if you "
+        "close it, it is not raised again for the same situation.",
+    ),
+    "R20-license-limit": (
+        "1. Ayarlar → Lisans sayfasında sınırı ve kullanımı görün.\n"
+        "2. Kullanıcılar: kullanılmayan hesapları devre dışı bırakın ya da daha yüksek sınırlı "
+        "bir lisans isteyin; mevcut kullanıcılar çalışmaya ve oturum açmaya devam eder.\n"
+        "3. Log kaynakları: kayıtlar toplanmaya ve mühürlenmeye devam eder; artık log "
+        "göndermeyen bir kaynak son logundan 30 gün sonra sayılmaz (LISANS.md bölüm 6).\n"
+        "4. Sınırın altına inince uyarı kendiliğinden kapanır; kapatırsanız bu aşım için "
+        "yeniden açılmaz.",
+        "1. See the limit and the use under Settings → Licence.\n"
+        "2. Users: deactivate accounts no longer used or ask for a licence with a higher limit; "
+        "existing users keep working and signing in.\n"
+        "3. Log sources: logs are still collected and sealed; a source that no longer sends stops "
+        "counting 30 days after its last log (LICENSING.md section 6).\n"
+        "4. The alert closes by itself once the use is within the limit; if you close it, it is "
+        "not raised again for this crossing.",
+    ),
+    "R20-license-maintenance": (
+        "1. Ayarlar → Lisans sayfasında bakımın bitiş tarihini görün.\n"
+        "2. Bakımı yenilemek için lisans verenle iletişime geçin ve gelen .lic dosyasını aynı "
+        "sayfadan yükleyin (LISANS.md bölüm 7).\n"
+        "3. Bilgi düzeyindedir: lisans ve kurulu sürüm geçerli kalır; bakım bittikten sonra "
+        "yayımlanan sürümler ücretli modülleri açmaz. Yenilenen bakımla uyarı kendiliğinden "
+        "kapanır.",
+        "1. See the end of maintenance under Settings → Licence.\n"
+        "2. To renew maintenance contact the licensor and upload the .lic you receive on the "
+        "same page (LICENSING.md section 7).\n"
+        "3. Information only: the licence and the installed version stay valid; versions released "
+        "after the end of maintenance do not switch the paid modules on. Renewed maintenance "
+        "closes the alert by itself.",
     ),
     "R20-email": (
         "1. [smtp] ayarlarını ve smtp.password gizli değerini denetleyin.\n"
@@ -642,6 +717,130 @@ def _report(d: Mapping[str, Any]) -> Facts | None:
     )
 
 
+#: Why ``R20-license`` reports the paid modules off (``details.case``: the licence state, or the
+#: trial's clock problem): the start of its sentence; ``{until}`` is ``details.until``.
+LICENSE_OFF: Final[Mapping[str, tuple[str, str]]] = {
+    "trial_expired": ("Deneme süresi doldu", "The trial has ended"),
+    "trial_clock_inconsistent": (
+        "Deneme başlangıcı sistem saatinden ileride, deneme süresi kullanılamıyor",
+        "The trial start lies after the current time, the trial is unavailable",
+    ),
+    "invalid": ("Lisans dosyası doğrulanamadı", "The licence file cannot be verified"),
+    "wrong_server": ("Lisans bu sunucu için değil", "The licence is not for this server"),
+    "expired": ("Lisansın süresi {until} tarihinde doldu", "The licence expired on {until}"),
+    "version_not_covered": (
+        "Bu sürüm bakım süresinden ({until} tarihine kadar) sonra yayımlandı",
+        "This version was released after the maintenance period (until {until})",
+    ),
+}
+
+
+def _modules(value: Any) -> tuple[str, str] | None:
+    """The names of the licence modules ``value`` lists (keys of the registry only)."""
+    if not isinstance(value, list):
+        return None
+    try:  # loaded for a licence alert only: without the licence package there are no names
+        from arcilogger_core.license.modules import module
+    except Exception:
+        return None
+    names = []
+    for key in value:
+        try:
+            item = module(key)
+        except (KeyError, TypeError):
+            continue
+        names.append((item.name_tr, item.name_en))
+    if not names:
+        return None
+    return ", ".join(tr for tr, _ in names), ", ".join(en for _, en in names)
+
+
+def _license(d: Mapping[str, Any]) -> Facts | None:
+    case, days, modules = d.get("case"), _int(d, "days_left"), _modules(d.get("modules"))
+    until = _day(d.get("until")) or _moment(d.get("until"))
+    if modules is None:
+        return None
+    if case == "trial_ending" and days is not None and until:
+        return (
+            f"Deneme süresinin bitmesine {days} gün kaldı ({until}); ardından ücretli modüller "
+            f"kapanır: {modules[0]}. 5651 işlevleri çalışmaya devam eder.",
+            f"{days} day(s) left of the trial ({until}); then the paid modules go off: "
+            f"{modules[1]}. The 5651 functions keep working.",
+        )
+    if case == "expiring" and days is not None and until:
+        left_tr, left_en = (
+            (f"{days} gün kaldı", f"{days} day(s) left")
+            if days
+            else ("bugün son gün", "today is the last day")
+        )
+        return (
+            f"Lisans {until} tarihine kadar geçerli ({left_tr}); ardından ücretli modüller "
+            f"kapanır: {modules[0]}. 5651 işlevleri çalışmaya devam eder.",
+            f"The licence is valid until {until} ({left_en}); then the paid modules go off: "
+            f"{modules[1]}. The 5651 functions keep working.",
+        )
+    texts = LICENSE_OFF.get(case) if isinstance(case, str) else None
+    if texts is None or ("{until}" in texts[0] and not until):
+        return None
+    head_tr, head_en = (text.format(until=until) for text in texts)
+    return (
+        f"{head_tr}: ücretli modüller kapalı ({modules[0]}). 5651 işlevleri çalışmaya devam "
+        "ediyor.",
+        f"{head_en}: the paid modules are off ({modules[1]}). The 5651 functions keep working.",
+    )
+
+
+def _license_limit(d: Mapping[str, Any]) -> Facts | None:
+    limit, used, top = d.get("limit"), _int(d, "used"), _int(d, "max")
+    unconfigured = _int(d, "unconfigured")
+    if used is None or top is None:
+        return None
+    if limit == "users":
+        return (
+            f"Kullanıcı sayısı lisans sınırını aşıyor ({used}/{top}): yeni kullanıcı eklenemez. "
+            "5651 işlevleri etkilenmez.",
+            f"The number of users exceeds the licence limit ({used}/{top}): no new user can be "
+            "added. The 5651 functions are not affected.",
+        )
+    if limit != "log_sources":
+        return None
+    tail_tr, tail_en = (
+        (f"; {unconfigured} yapılandırılmamış", f"; {unconfigured} unconfigured")
+        if unconfigured
+        else ("", "")
+    )
+    return (
+        f"Log kaynağı sayısı lisans sınırını aşıyor ({used}/{top}{tail_tr}). Kayıtlar "
+        "toplanmaya ve mühürlenmeye devam ediyor.",
+        f"The number of log sources exceeds the licence limit ({used}/{top}{tail_en}). Logs are "
+        "still collected and sealed.",
+    )
+
+
+def _license_maintenance(d: Mapping[str, Any]) -> Facts | None:
+    days, until = _int(d, "days_left"), _day(d.get("until"))
+    if days is None or until is None:
+        return None
+    if days < 0:
+        return (
+            f"Bakım süresi doldu ({until}): yeni sürümler ve destek için bakımı yenileyin. "
+            "Lisans ve kurulu sürüm geçerli kalır.",
+            f"Maintenance has ended ({until}): renew it for new versions and support. The "
+            "licence and the installed version stay valid.",
+        )
+    when_tr, when_en = (
+        (f"{days} gün sonra bitiyor", f"ends in {days} day(s)")
+        if days
+        else ("bugün bitiyor", "ends today")
+    )
+    return (
+        f"Bakım süresi {when_tr} ({until}): yeni sürümler ve destek için yenileyin. Lisans "
+        "geçerli kalır.",
+        f"Maintenance {when_en} ({until}): renew it for new versions and support. The licence "
+        "stays valid.",
+    )
+
+
 def _sender(d: Mapping[str, Any]) -> Facts | None:
     address = _ip(d.get("address"))
     if address is None:
@@ -669,6 +868,9 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-job": _job,
     "R20-backup": _backup,
     "R20-report": _report,
+    "R20-license": _license,
+    "R20-license-limit": _license_limit,
+    "R20-license-maintenance": _license_maintenance,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,

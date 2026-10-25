@@ -328,6 +328,9 @@ Her gün:
   | `R20-backup` | Veritabanı yedeği başarısız, 36 saatten eski ya da kurulumdan 48 saat sonra hâlâ yok |
   | `R20-email` | Uyarı e-postası gönderilemedi (`[smtp]`, `smtp.password`, güvenlik duvarı); kendisi e-postayla gitmez |
   | `R20-report` | Zamanlanmış bir kullanım raporu üretilemedi ya da bir alıcıya gönderilemedi (Raporlar sayfasındaki çalıştırma geçmişi, `[smtp]`; bölüm 14 ve 15). Zamanlanmış kullanım raporları modülü lisansta kapalıyken açılmaz; modül kapanınca kendiliğinden çözülür |
+  | `R20-license` | Ücretli modüller kapanıyor ya da kapalı: deneme süresi 3 gün içinde, süreli bir lisans 14 gün içinde bitiyor ya da lisans durumu yüzünden ücretli modüller kapalı (deneme bitti, lisans doğrulanamıyor ya da başka sunucu için, süresi doldu, sürüm bakım kapsamında değil); 5651 işlevleri çalışmaya devam eder. Ayarlar → Lisans ([LISANS.md](LISANS.md)) |
+  | `R20-license-limit` | Kullanıcı (yeni kullanıcı eklenemez) ya da log kaynağı (toplanmaya ve mühürlenmeye devam eder) sayısı lisans sınırını aşıyor |
+  | `R20-license-maintenance` | Bakım süresi 30 gün içinde bitiyor ya da bitti (`info`: yalnızca yükseltmeler ve destek, lisans geçerli kalır) |
   | `new-log-source` | Yapılandırmada olmayan bir gönderici (güvenlik duvarı izin verdiyse) |
   | `wrong-transport` | Bir kaynaktan izin verilmeyen taşıma yoluyla mesaj geldi (`[[sources]] transport`); taklit edilmiş bir UDP gönderimi ya da yanlış cihaz ayarı olabilir, mesaj kaydedilmedi |
 

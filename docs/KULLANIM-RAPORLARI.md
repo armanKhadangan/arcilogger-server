@@ -3,7 +3,7 @@
 > English: [USAGE-REPORTS.md](USAGE-REPORTS.md). Karar:
 > [adr/0012-scheduled-usage-reports.md](adr/0012-scheduled-usage-reports.md).
 >
-> **Lisans:** zamanlanmış raporlar **Zamanlanmış kullanım raporları** modülünü (o da Kullanım analizi modülünü) gerektirir ([LISANS.md](LISANS.md)); modül kapalıyken Raporlar sayfası kilitlidir, raporlar üretilmez ve gönderilmez, `R20-report` açılmaz.
+> **Lisans:** zamanlanmış raporlar **Zamanlanmış kullanım raporları** modülünü (o da Kullanım analizi modülünü) gerektirir ([LISANS.md](LISANS.md)); modül kapalıyken Raporlar sayfası kilitlidir, raporlar üretilmez ve gönderilmez, `R20-report` açılmaz; modül kapanmadan önce ve kapandığında lisans uyarısı `R20-license` yöneticilere haber verir ([UYARILAR.md](UYARILAR.md)).
 >
 > ARCILOGGER, **5651 yükümlülüklerini desteklemek için tasarlanmıştır**; hukuki uygunluk iddiasında
 > bulunmaz. Kişi düzeyindeki raporların kullanımı için hukuk müşavirinin görüşünü alın.

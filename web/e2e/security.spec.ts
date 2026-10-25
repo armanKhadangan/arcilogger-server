@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import { usePreferences, useSampleClock } from './fixtures';
 import { mockApi } from './mock-api';
-import { SAMPLE_TODAY } from './samples';
+import { copy, SAMPLE_TODAY } from './samples';
 
 test.describe('Güvenlik', () => {
   test.beforeEach(async ({ page }) => {
@@ -187,6 +187,70 @@ test.describe('Güvenlik', () => {
     expect(api.callsTo('POST', '/alerts/3/notes')[0]?.body).toEqual({
       text: 'Kontör siparişi onaylandı.',
     });
+  });
+
+  test('a licence alert says closing it sticks; its automatic close is in words', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    const open = api.alerts.alerts.get(4);
+    const resolved = api.alerts.alerts.get(3);
+    if (!open || !resolved) throw new Error('sample alerts 3 and 4 missing');
+    // The samples hold no licence alert: two of the captured shape, as license.check raises them.
+    const licence = {
+      rule: 'R20-license',
+      rule_name_tr: 'Ücretli modüller kapanıyor ya da kapalı (lisans)',
+      rule_name_en: 'Paid modules ending or off (licence)',
+      runbook_tr: '1. Ayarlar → Lisans sayfasında durumu ve tarihleri açın.',
+      runbook_en: '1. Open the state and the dates under Settings → Licence.',
+    };
+    api.alerts.alerts.set(41, {
+      ...copy(open),
+      ...licence,
+      id: 41,
+      title: 'Deneme süresi doldu: ücretli modüller kapalı',
+      summary_tr:
+        'Deneme süresi doldu: ücretli modüller kapalı (Kullanım analizi). 5651 işlevleri ' +
+        'çalışmaya devam ediyor.',
+      summary_en:
+        'The trial has ended: the paid modules are off (Usage analytics). The 5651 functions ' +
+        'keep working.',
+      details: {
+        case: 'trial_expired',
+        state: 'trial_expired',
+        modules: ['usage_analytics'],
+        until: null,
+        occurrence: 'license_events:2',
+        title_en: 'The trial has ended: paid modules are off',
+      },
+    });
+    api.alerts.alerts.set(42, {
+      ...copy(resolved),
+      ...licence,
+      id: 42,
+      title: 'Deneme süresi bitiyor: 3 gün kaldı (13.10.2026 12:00:00)',
+      summary_tr: 'Deneme süresinin bitmesine 3 gün kaldı (13.10.2026 12:00:00).',
+      summary_en: '3 day(s) left of the trial (13.10.2026 12:00:00).',
+      details: { case: 'trial_ending', days_left: 3, modules: ['usage_analytics'] },
+      events: resolved.events.map((event) => ({ ...copy(event), text: 'licensed' })),
+    });
+
+    await page.goto('/security?alert=41');
+    let drawer = page.getByRole('dialog', { name: /Deneme süresi doldu/ });
+    await expect(drawer.getByTestId('close-hint')).toHaveText(
+      'Lisans uyarısı: kapatırsanız aynı durum için yeniden açılmaz ve e-postayla gitmez; yeni ' +
+        'uyarı yalnızca durum değişince açılır. Durum düzelince uyarı kendiliğinden kapanır.',
+    );
+    await drawer.getByRole('button', { name: 'Yanlış alarm' }).click();
+    await drawer.getByRole('button', { name: 'Durumu değiştir' }).click();
+    await expect(page.getByText('Uyarının durumu: Yanlış alarm', { exact: true })).toBeVisible();
+    await expect(drawer.getByTestId('close-hint')).toHaveCount(0);
+
+    await page.goto('/security?alert=42');
+    drawer = page.getByRole('dialog', { name: /Deneme süresinin bitmesine/ });
+    await expect(drawer.getByRole('region', { name: 'Geçmiş' })).toContainText(
+      'Neden: lisans geçerli',
+    );
   });
 
   test('an alert that does not exist is said so', async ({ page }) => {

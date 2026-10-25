@@ -12,8 +12,9 @@ Jobs (``DEFAULT_JOBS``):
 ``partitions.ensure``       daily after 00:15 and at start-up: monthly partitions ahead
                             (``arcilogger_db.partitions``; no-op with TimescaleDB)
 ``license.check``           every 5 minutes: the licence state recomputed; state changes and
-                            limit crossings audited once, ``state/license-status.json``
-                            rewritten (:mod:`.licensing`)
+                            limit crossings audited once, the ``R20-license`` alerts opened
+                            and resolved (:mod:`.alerts.license`),
+                            ``state/license-status.json`` rewritten (:mod:`.licensing`)
 ``evidence.purge``          daily after 03:00: expired evidence packages are deleted from
                             ``exports/`` and their rows marked (``evidence.keep_days``),
                             stale builds failed; audited (:mod:`.evidence_jobs`)
