@@ -129,7 +129,16 @@ export function importReducer(state: ImportState, action: ImportAction): ImportS
 
 /** The CSV columns of each import (`arcilogger_api.csvimport`), in the template's order. */
 export const IMPORT_COLUMNS: Record<ImportKind, readonly string[]> = {
-  persons: ['name', 'department', 'title', 'email', 'employee_no', 'active', 'notes'],
+  persons: [
+    'name',
+    'department',
+    'title',
+    'email',
+    'employee_no',
+    'active',
+    'notes',
+    'usage_excluded',
+  ],
   assignments: ['mac', 'employee_no', 'person_name', 'valid_from', 'note'],
 };
 

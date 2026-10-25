@@ -206,6 +206,9 @@ class PersonOut(BaseModel):
     employee_no: str | None
     active: bool
     notes: str | None
+    #: Left out of every person-level usage view and report (the company and department totals
+    #: still count the traffic); 5651 lookups never read it.
+    usage_excluded: bool
     #: Devices the person holds now.
     device_count: int
     created_at: datetime
@@ -429,6 +432,7 @@ class Directory:
                 employee_no=row.employee_no,
                 active=row.active,
                 notes=row.notes,
+                usage_excluded=row.usage_excluded,
                 device_count=counts.get(row.id, 0),
                 created_at=row.created_at,
                 updated_at=row.updated_at,

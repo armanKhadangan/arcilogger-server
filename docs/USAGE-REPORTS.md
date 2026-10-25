@@ -40,8 +40,8 @@ and enable them:
   (`person_level`, default on: with names) and **pseudonyms** (`pseudonymize`, default off).
   By default (owner decision 2026-10-20) reports are detailed and carry names; the organisation
   decides, with its legal counsel, whether that fits its employees' consent. A person to be left
-  out of person-level reports is excluded with `persons.usage_excluded` (usage
-  engine).
+  out of person-level reports is excluded with the person's **Kullanım raporlarından hariç tut**
+  box on Cihazlar ve Kişiler (`persons.usage_excluded`, [USAGE.md](USAGE.md) section 6).
 - **Reports missed while the server was down:** when the worker starts again each schedule runs
   **once**, for its most recent missed time (after five days down only yesterday's full-day
   report goes out, not five). With `reports.catch_up` set to `false` a report more than 30

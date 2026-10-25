@@ -1,4 +1,4 @@
-import { CircleCheck, CircleSlash, Pencil } from 'lucide-react';
+import { CircleCheck, CircleSlash, EyeOff, Pencil } from 'lucide-react';
 import type { RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -32,6 +32,16 @@ export function PersonStatus({ active }: { active: boolean }) {
   ) : (
     <Badge tone="neutral" icon={CircleSlash}>
       {t('devices.persons.inactive')}
+    </Badge>
+  );
+}
+
+/** The person is left out of the person-level usage views and reports (`usage_excluded`). */
+export function UsageExcludedBadge() {
+  const { t } = useTranslation();
+  return (
+    <Badge tone="neutral" icon={EyeOff} title={t('devices.persons.usageExcludedHint')}>
+      {t('devices.persons.usageExcludedBadge')}
     </Badge>
   );
 }
@@ -89,6 +99,7 @@ export function PersonSheet({
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <PersonStatus active={person.active} />
+                {person.usage_excluded ? <UsageExcludedBadge /> : null}
                 {manage ? (
                   <Button
                     size="sm"
@@ -105,6 +116,11 @@ export function PersonSheet({
               {!person.active ? (
                 <Alert tone="info" assertive={false}>
                   {t('devices.persons.inactiveNote')}
+                </Alert>
+              ) : null}
+              {person.usage_excluded ? (
+                <Alert tone="info" assertive={false}>
+                  {t('devices.persons.usageExcludedNote')}
                 </Alert>
               ) : null}
               <Facts

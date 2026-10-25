@@ -182,6 +182,25 @@ def test_exact_lookup_with_a_configured_public_ip(
         assert personal not in stored  # the sealed audit log keeps ids, not names or text
 
 
+def test_a_person_left_out_of_usage_reports_is_still_named(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
+) -> None:
+    """``usage_excluded`` belongs to the usage reports (area U): the 5651 lookup never reads it."""
+    setting(app_session_factory, "nat.public_ips", [WAN])
+    signed_in(client, login_as, app_session_factory)
+    excluded = client.patch(f"/api/v1/persons/{site.person_id}", json={"usage_excluded": True})
+    assert excluded.status_code == 200, excluded.text
+    response = client.post(
+        "/api/v1/lookup/5651", json=body(public_ip=WAN, public_port=51001, protocol="tcp")
+    )
+    assert response.status_code == 201, response.text
+    (match,) = response.json()["outcome"]["matches"]
+    assert (match["chain"]["lease"]["mac"], match["chain"]["person"]["name"]) == (
+        PC_MAC,
+        PERSON_NAME,
+    )
+
+
 def test_double_nat_answers_ranked_candidates(
     client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
 ) -> None:

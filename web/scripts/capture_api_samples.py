@@ -1144,7 +1144,12 @@ def capture_devices(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
     gone = capture.json(
         admin.post(
             f"{API}/persons",
-            json={"name": "Deniz Işık", "employee_no": "0950", "active": False},
+            json={
+                "name": "Deniz Işık",
+                "employee_no": "0950",
+                "active": False,
+                "usage_excluded": True,
+            },
         ),
         201,
     )

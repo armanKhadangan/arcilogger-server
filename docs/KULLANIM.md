@@ -250,10 +250,17 @@ gününden (hiç log yoksa bugünden) önce başlayan bir aralığı reddeder (4
   (yalnızca yönetici ekleyebilir) girdileri gerçek hedefleri ve özetleriyle içerir; ayar açıkken
   Kullanım sayfalarında takma ad gören bir okuyucunun listesinde görünmez, ayrıntısı ve indirmesi
   404 yanıtı verir.
-- **Kişiyi kişi düzeyindeki raporların dışında bırakmak:** `persons.usage_excluded` (Cihazlar ve
-  Kişiler'deki kişi kaydı). Bu kişi kişi listelerinde, ayrıntılarda, site/kategori kullanıcı
-  listelerinde ve raporların kişi tablolarında görünmez; trafiği şirket ve departman toplamlarında
-  sayılmaya devam eder.
+- **Kişiyi kişi düzeyindeki raporların dışında bırakmak:** Cihazlar ve Kişiler → Kişiler → kişinin
+  İşlemler menüsü → **Düzenle** → **Kullanım raporlarından hariç tut** (yeni kişide "Kişi ekle"
+  formunda da var; `persons.usage_excluded`). Bu kişi kişi listelerinde, ayrıntılarda, site/kategori
+  kullanıcı listelerinde ve raporların kişi tablolarında görünmez; trafiği şirket ve departman
+  toplamlarında sayılmaya devam eder. Ayar okunduğu anda geçerlidir (geçmiş günler de; yeniden
+  hesaplama gerekmez; önceden oluşturulmuş ve gönderilmiş rapor dosyaları değişmez) ve geri
+  alınabilir. Kişi listesinde adın yanında **Kullanım: hariç** işareti görünür. Değişiklik eski ve
+  yeni değeriyle denetim kaydına yazılır (`person.update`); toplu değişiklik için kişi CSV'sinin
+  isteğe bağlı `usage_excluded` sütunu (evet/hayır) kullanılır. Yalnızca `devices.manage` yetkisi
+  olan kullanıcı (varsayılan rollerde Yönetici) değiştirebilir. 5651 sorguları, resmi raporları ve
+  kanıt paketleri bu ayardan etkilenmez: kişi orada her zaman görünür.
 - Dışa aktarılan dosyalar (CSV, Excel) kişisel veri içerir: yalnızca gerektiği kadar saklayın.
 
 ## 7. Web arayüzü ve API

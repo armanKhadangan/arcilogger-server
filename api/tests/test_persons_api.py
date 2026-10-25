@@ -84,17 +84,29 @@ def test_create_and_read_a_person(
         "employee_no",
         "active",
         "notes",
+        "usage_excluded",
         "device_count",
         "created_at",
         "updated_at",
     }
+    assert person["usage_excluded"] is False  # in the usage reports unless excluded
     (entry,) = _audit(factory, "person.create")
     assert entry.target == f"person:{person['id']}"
     assert entry.details == {
         "person_id": person["id"],
         "department_id": finance,
         "active": True,
-        "fields": ["name", "department_id", "title", "email", "employee_no", "active", "notes"],
+        "usage_excluded": False,
+        "fields": [
+            "name",
+            "department_id",
+            "title",
+            "email",
+            "employee_no",
+            "active",
+            "notes",
+            "usage_excluded",
+        ],
     }
     assert "Şükrü" not in str(entry.details)
     assert "example.com" not in str(entry.details)
@@ -198,6 +210,48 @@ def test_update_and_deactivate_keep_the_history(
     assert client.get(f"{API}/persons/999999").status_code == 404
     assert client.patch(f"{API}/persons/999999", json={}).status_code == 404
     assert client.get(f"{API}/persons/0").status_code == 422
+
+
+def test_usage_exclusion_is_set_audited_and_exported(
+    client: TestClient, admin: LoggedIn, factory: sessionmaker[Session]
+) -> None:
+    """``usage_excluded`` (area U) is set like any other person field: on create or edit, the
+    old and new value in the audit entry, in every answer and in the export (evet/hayır)."""
+    created = _create(client, name="Gizli Kişi", employee_no="4001", usage_excluded=True)
+    assert created.status_code == 201, created.text
+    person = created.json()
+    assert person["usage_excluded"] is True
+    (entry,) = _audit(factory, "person.create")
+    assert entry.details["usage_excluded"] is True
+    plain = _create(client, name="Görünen Kişi").json()
+    assert plain["usage_excluded"] is False
+    page = client.get(f"{API}/persons").json()
+    assert [(p["name"], p["usage_excluded"]) for p in page["items"]] == [
+        ("Gizli Kişi", True),
+        ("Görünen Kişi", False),
+    ]
+    assert client.get(f"{API}/persons/{person['id']}").json()["usage_excluded"] is True
+    response = client.patch(f"{API}/persons/{person['id']}", json={"usage_excluded": False})
+    assert response.status_code == 200, response.text
+    assert response.json()["usage_excluded"] is False
+    client.patch(f"{API}/persons/{person['id']}", json={"usage_excluded": False})  # no change
+    both = {"usage_excluded": True, "title": "Uzman"}
+    assert client.patch(f"{API}/persons/{plain['id']}", json=both).status_code == 200
+    assert [e.details for e in _audit(factory, "person.update")] == [
+        {"changed": ["usage_excluded"], "usage_excluded": {"old": True, "new": False}},
+        {"changed": ["title", "usage_excluded"], "usage_excluded": {"old": False, "new": True}},
+    ]
+    for value in (None, "belki"):
+        refused = client.patch(f"{API}/persons/{plain['id']}", json={"usage_excluded": value})
+        assert refused.status_code == 422, value
+        assert refused.json()["error"]["code"] == "validation_error"
+    text = client.get(f"{API}/persons/export.csv").content.decode("utf-8").removeprefix("\ufeff")
+    rows = list(csv.DictReader(io.StringIO(text), delimiter=";"))
+    assert list(rows[0])[6:9] == ["active", "notes", "usage_excluded"]
+    assert [(r["name"], r["usage_excluded"]) for r in rows] == [
+        ("Gizli Kişi", "hayır"),
+        ("Görünen Kişi", "evet"),
+    ]
 
 
 def test_person_list_search_filters_and_pages(

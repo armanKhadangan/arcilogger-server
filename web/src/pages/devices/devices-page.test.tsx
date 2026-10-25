@@ -44,6 +44,10 @@ function serve(me: Me, vlans = DEVICES.vlans): RecordedRequest[] {
     if (detail) return jsonResponse(200, detail);
     const device = DEVICES.list.items.find((item) => item.mac === mac);
     if (device) return jsonResponse(200, { ...device, assignments: [], recent_leases: [] });
+    const personId = Number(/^\/api\/v1\/persons\/(\d+)$/.exec(request.path)?.[1]);
+    const person = DEVICES.persons.items.find((item) => item.id === personId);
+    if (person && request.method === 'PATCH')
+      return jsonResponse(200, { ...person, ...(request.body as object) });
     switch (request.path) {
       case '/api/v1/auth/me':
         return jsonResponse(200, me);
@@ -161,6 +165,33 @@ describe('Cihazlar ve Kişiler — permission gating', () => {
     expect(
       calls.filter((call) => ['/api/v1/devices', '/api/v1/persons'].includes(call.path)),
     ).toEqual([]);
+  });
+
+  it('marks the persons left out of the usage reports; the edit form changes it', async () => {
+    const calls = serve(makeMe('admin'));
+    renderApp('/devices?tab=persons');
+    const user = userEvent.setup();
+    const table = await screen.findByRole('table', { name: 'Kişiler' });
+    // Captured: the inactive Deniz Işık is left out, Can Öztürk is not (this mock lists all).
+    const deniz = await within(table).findByRole('button', { name: 'Deniz Işık' });
+    expect(deniz.closest('tr')).toHaveTextContent('Kullanım: hariç');
+    const can = within(table).getByRole('button', { name: 'Can Öztürk' });
+    expect(can.closest('tr')).not.toHaveTextContent('Kullanım: hariç');
+
+    await user.click(within(table).getByRole('button', { name: 'İşlemler: Can Öztürk' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Düzenle' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Kişiyi düzenle' });
+    const box = within(dialog).getByRole('checkbox', { name: 'Kullanım raporlarından hariç tut' });
+    expect(box).not.toBeChecked();
+    expect(box).toHaveAccessibleDescription(/5651 sorguları bundan etkilenmez/);
+    await user.click(box);
+    await user.click(within(dialog).getByRole('button', { name: 'Kaydet' }));
+    const id = DEVICES.persons.items.find((item) => item.name === 'Can Öztürk')?.id;
+    await waitFor(() => {
+      expect(
+        calls.filter((call) => call.method === 'PATCH').map((call) => [call.path, call.body]),
+      ).toEqual([[`/api/v1/persons/${String(id)}`, { usage_excluded: true }]]);
+    });
   });
 
   it('the tab is in the address', async () => {

@@ -25,6 +25,7 @@ describe('person form', () => {
       employeeNo: '',
       notes: '',
       active: true,
+      usageExcluded: false,
     });
     expect(personFormValues(can)).toMatchObject({
       name: 'Can Öztürk',
@@ -33,7 +34,9 @@ describe('person form', () => {
       email: 'can.ozturk@example.com',
       employeeNo: '1002',
       active: true,
+      usageExcluded: false,
     });
+    expect(personFormValues({ ...can, usage_excluded: true }).usageExcluded).toBe(true);
   });
 
   it('checks the name, e-mail and text fields', () => {
@@ -70,6 +73,10 @@ describe('person form', () => {
         employeeNo: ' 2002 ',
       }),
     ).toEqual({ name: 'Burak Çelik', department_id: 6, employee_no: '2002' });
+    // Left out of the usage reports from the start: sent only when ticked (default false).
+    expect(
+      personCreateBody({ ...personFormValues(null), name: 'Ece', usageExcluded: true }),
+    ).toEqual({ name: 'Ece', usage_excluded: true });
   });
 
   it('changes only what was edited; a cleared field and "no department" are null', () => {
@@ -81,5 +88,13 @@ describe('person form', () => {
     expect(personChanges(can, { ...values, title: 'Fabrika Müdürü' })).toEqual({
       title: 'Fabrika Müdürü',
     });
+    expect(personChanges(can, { ...values, usageExcluded: true })).toEqual({
+      usage_excluded: true,
+    });
+    const excluded = { ...can, usage_excluded: true };
+    expect(personChanges(excluded, personFormValues(excluded))).toEqual({});
+    expect(
+      personChanges(excluded, { ...personFormValues(excluded), usageExcluded: false }),
+    ).toEqual({ usage_excluded: false });
   });
 });

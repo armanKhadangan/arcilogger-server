@@ -312,12 +312,11 @@ def test_sites_and_categories(admin: TestClient, site: GoldenSite) -> None:
     assert admin.get(f"{API}/sites/none.example", params=PERIOD).status_code == 404
 
 
-def test_excluded_persons_leave_person_level_views(
-    admin: TestClient, site: GoldenSite, app_session_factory: sessionmaker[Session]
-) -> None:
-    with app_session_factory() as session:
-        session.execute(update(Person).where(Person.id == site.ayse).values(usage_excluded=True))
-        session.commit()
+def test_excluded_persons_leave_person_level_views(admin: TestClient, site: GoldenSite) -> None:
+    # Set where the administrator sets it (Cihazlar ve Kişiler), read when a view is read: no
+    # rebuild, also for the days already rolled up.
+    excluded = admin.patch(f"/api/v1/persons/{site.ayse}", json={"usage_excluded": True})
+    assert excluded.status_code == 200, excluded.text
     persons = _get(admin, "/subjects", kind="person")
     assert [row["subject"]["label"] for row in persons["items"]] == ["Burak Demir", "Can Öztürk"]
     assert admin.get(f"{API}/subjects/person:{site.ayse}", params=PERIOD).status_code == 404
@@ -325,6 +324,10 @@ def test_excluded_persons_leave_person_level_views(
     assert video["users"] == []
     assert video["totals"]["seconds"] == 210  # the company totals still count the traffic
     assert _get(admin, "/company")["metrics"]["active_seconds"] == 1020
+    included = admin.patch(f"/api/v1/persons/{site.ayse}", json={"usage_excluded": False})
+    assert included.status_code == 200, included.text
+    persons = _get(admin, "/subjects", kind="person")
+    assert persons["items"][0]["subject"]["label"] == "Ayşe Yılmaz"
 
 
 def test_exports_are_audited_files(admin: TestClient, site: GoldenSite) -> None:

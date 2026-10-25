@@ -191,11 +191,12 @@ administrator, on the **Cihazlar ve Kişiler** page:
    The network, the VLAN id and the DHCP server are unique. Collection, sealing, 5651 lookups
    and usage work without VLANs; devices then get no VLAN name and no VLAN department.
 2. Add persons, or import them from CSV: download the template
-   (`name;department;title;email;employee_no;active;notes`), save it in Excel as **"CSV UTF-8"**,
-   **preview** first (nothing is written, errors are shown per line), then **apply** (all lines
-   or none). CSV import needs the Bulk import module; manual entry always works (the assignment
-   CSV belongs to that module too; the CSV exports of the person and device lists always work,
-   [LICENSING.md](LICENSING.md)).
+   (`name;department;title;email;employee_no;active;notes;usage_excluded`; only `name` is required,
+   `usage_excluded` evet/hayır leaves the person out of the usage reports), save it in Excel as
+   **"CSV UTF-8"**, **preview** first (nothing is written, errors are shown per line), then
+   **apply** (all lines or none). CSV import needs the Bulk import module; manual entry always works
+   (the assignment CSV belongs to that module too; the CSV exports of the person and device lists
+   always work, [LICENSING.md](LICENSING.md)).
 3. Assign devices: search by MAC, host name, IP or VLAN (filter "Bilinmeyen cihazlar"), select one
    or many devices and assign them to a person — or import an assignment CSV
    (`mac;employee_no;person_name;valid_from;note`). If the person has had the device for some time,
@@ -445,7 +446,8 @@ refused too.
 - Usage is written to the person the device was assigned to **at that moment** (the same rule as
   the 5651 lookup). Devices assigned to nobody show as "device", addresses without a lease as "IP".
 - Names are shown by default (the owner's decision of 2026-10-20); a person can be left out of the
-  person-level reports with `usage_excluded`. Viewing a detail and exporting are audited.
+  person-level reports with the person's **Kullanım raporlarından hariç tut** box on the Kişiler
+  tab (`usage_excluded`); 5651 lookups are not affected. Viewing a detail and exporting are audited.
 - Enter the religious holiday dates every year in the setting `usage.holidays` (only the fixed-date
   national holidays are shipped; [USAGE.md](USAGE.md) section 2.5).
 

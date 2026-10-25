@@ -12,8 +12,8 @@ import type { LookupOutcome } from '../src/lib/lookup-types';
  * six devices — two of Selin Kaya (her PC "Planlama-PC-14" since 01.10.2026 09:00 and a phone
  * with a randomised MAC address, Can Öztürk's from 10.10. to 12.10.) and four "unknown" ones —,
  * the persons Selin Kaya (Planlama, 1001), Can Öztürk (Finans, 1002) and the inactive Deniz
- * Işık, the three departments and the VLAN plan of the example site. The browser clock and the
- * mock's "now" are 13.10.2026 15:00.
+ * Işık (left out of the usage reports), the three departments and the VLAN plan of the example
+ * site. The browser clock and the mock's "now" are 13.10.2026 15:00.
  */
 
 /** UTF-8 byte order mark of the CSV files (Turkish Excel). */
@@ -357,6 +357,59 @@ test.describe('Cihazlar ve Kişiler', () => {
     await expect(drawer.getByText('10.10.2026 10:00:00 – 12.10.2026 09:00:00')).toBeVisible();
   });
 
+  test('leaves a person out of the usage reports: edit form, new person, list and drawer', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/devices?tab=persons');
+    const table = page.getByRole('table', { name: 'Kişiler' });
+    const can = table.getByRole('row').filter({ hasText: 'Can Öztürk' });
+    await expect(can).toBeVisible();
+    await expect(can.getByText('Kullanım: hariç')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'İşlemler: Can Öztürk' }).click();
+    await page.getByRole('menuitem', { name: 'Düzenle' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Kişiyi düzenle' });
+    const box = dialog.getByRole('checkbox', { name: 'Kullanım raporlarından hariç tut' });
+    await expect(box).not.toBeChecked();
+    await expect(box).toHaveAccessibleDescription(/5651 sorguları bundan etkilenmez/);
+    await box.click();
+    await expect(box).toBeChecked();
+    await dialog.getByRole('button', { name: 'Kaydet' }).click();
+    await expect(dialog).toBeHidden();
+    expect(api.callsTo('PATCH', '/persons/2').at(-1)?.body).toEqual({ usage_excluded: true });
+    await expect(can.getByText('Kullanım: hariç')).toBeVisible();
+    await table.getByRole('button', { name: 'Can Öztürk', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: 'Can Öztürk' });
+    await expect(drawer.getByText('Kullanım: hariç')).toBeVisible();
+    await expect(drawer.getByText(/Bu kişi kullanım raporlarından hariç/)).toContainText(
+      '5651 sorguları bundan etkilenmez',
+    );
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden();
+
+    // A new person can be left out from the start ("Etkin" is not asked: they start active).
+    await page.getByRole('button', { name: 'Kişi ekle' }).click();
+    const create = page.getByRole('dialog', { name: 'Kişi ekle' });
+    await expect(create.getByRole('checkbox')).toHaveCount(1);
+    await create.getByLabel('Ad soyad').fill('Ece Yıldız');
+    await create.getByRole('checkbox', { name: 'Kullanım raporlarından hariç tut' }).click();
+    await create.getByRole('button', { name: 'Kişiyi ekle' }).click();
+    await expect(create).toBeHidden();
+    expect(api.callsTo('POST', '/persons').at(-1)?.body).toEqual({
+      name: 'Ece Yıldız',
+      usage_excluded: true,
+    });
+    const ece = table.getByRole('row').filter({ hasText: 'Ece Yıldız' });
+    await expect(ece.getByText('Kullanım: hariç')).toBeVisible();
+
+    // The captured inactive Deniz Işık is left out as well.
+    await page.getByLabel('Durum').click();
+    await page.getByRole('option', { name: 'Pasif' }).click();
+    const deniz = table.getByRole('row').filter({ hasText: 'Deniz Işık' });
+    await expect(deniz.getByText('Kullanım: hariç')).toBeVisible();
+  });
+
   test('a person with a randomised MAC address: one drawer, every device', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/devices?tab=persons');
@@ -611,9 +664,11 @@ test.describe('Cihazlar ve Kişiler', () => {
     expect(saved.suggestedFilename()).toBe('arcilogger-kisiler-sablon.csv');
     const text = await readFile(await saved.path(), 'utf8');
     expect(text).toBe(DEVICES.template_persons.text);
-    expect(text.startsWith(`${BOM}name;department;title;email;employee_no;active;notes\r\n`)).toBe(
-      true,
-    );
+    expect(
+      text.startsWith(
+        `${BOM}name;department;title;email;employee_no;active;notes;usage_excluded\r\n`,
+      ),
+    ).toBe(true);
 
     const header = 'name;department;title;email;employee_no;active;notes';
     await page
@@ -635,14 +690,15 @@ test.describe('Cihazlar ve Kişiler', () => {
     await expect(result.getByRole('button', { name: 'Uygula' })).toBeDisabled();
     await expect(result.getByText('Önce hatalı satırları düzeltin.')).toBeVisible();
 
-    // Comma-separated works as well.
+    // Comma-separated works as well; the optional usage_excluded column leaves Burak Çelik out of
+    // the usage reports and keeps Can Öztürk in them (unchanged).
     await page
       .getByLabel('CSV dosyası')
       .setInputFiles(
         csvFile('kisiler.csv', [
-          header.replace(/;/g, ','),
-          'Burak Çelik,İdari İşler,Bakım Teknisyeni,,2002,evet,',
-          'Can Öztürk,Finans,Mali Analist,can.ozturk@example.com,1002,evet,',
+          `${header.replace(/;/g, ',')},usage_excluded`,
+          'Burak Çelik,İdari İşler,Bakım Teknisyeni,,2002,evet,,evet',
+          'Can Öztürk,Finans,Mali Analist,can.ozturk@example.com,1002,evet,,hayır',
         ]),
       );
     await expect(result).toHaveCount(0);
@@ -672,9 +728,14 @@ test.describe('Cihazlar ve Kişiler', () => {
     expect(imports.at(-1)?.raw).toContain('filename="kisiler.csv"');
     expect(api.devices.persons.size).toBe(4);
     expect(api.devices.persons.get(2)?.title).toBe('Mali Analist');
+    expect(api.devices.persons.get(2)?.usage_excluded).toBe(false);
 
     await page.getByRole('tab', { name: 'Kişiler' }).click();
-    await expect(page.getByRole('table', { name: 'Kişiler' })).toContainText('Burak Çelik');
+    const burak = page
+      .getByRole('table', { name: 'Kişiler' })
+      .getByRole('row')
+      .filter({ hasText: 'Burak Çelik' });
+    await expect(burak.getByText('Kullanım: hariç')).toBeVisible();
   });
 
   test('imports assignments: an apply the data no longer allows writes nothing', async ({
