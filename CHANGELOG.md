@@ -5,6 +5,40 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixes and smaller additions (Wave 0)
+
+- **Usage analytics counted no 192.168.0.0/16 network.** The private-source filter of the usage
+  engine listed an example range instead of `192.168.0.0/16` (a leftover of the removal of the
+  first installation's data). It now lists the three RFC 1918 blocks and IPv6 ULA; the engine
+  version went from 2 to 3, so the recent days are rebuilt. 5651 lookups were never affected.
+- **IPv6 lookups are refused instead of guessed.** `POST /lookup/5651` answers 422
+  `ipv6_not_supported` (TR/EN) for an IPv6 public or internal address (also `::ffff:a.b.c.d`),
+  audited as `lookup.run_failed`; ARCILOGGER collects no IPv6 identity evidence (NDP, DHCPv6). The
+  engine keeps only sessions of the requested address family, so no IPv4 session can be a candidate
+  for an IPv6 address. The 5651 Sorgu form refuses it before sending (docs/CORRELATION.md §7).
+- **Exclude a person from usage reports in the web interface.** `usage_excluded` in the person API
+  (administrators, audited with old and new value), the persons CSV export and import (optional
+  `usage_excluded` column), the person form ("Kullanım raporlarından hariç tut"), a badge in the
+  list and the drawer. 5651 lookups still name the person.
+- **Licence alerts** (`R20-license`, `R20-license-limit`, `R20-license-maintenance`): the trial
+  ends within 3 days, a time-limited licence ends within 14 days, paid modules are off (trial
+  ended, expired, version not covered; invalid or wrong server as high), a users or log sources
+  limit is crossed, maintenance ends within 30 days or has ended (info). Decided on the trusted
+  time, auto-resolved, one alert per occurrence (a dismissed one stays closed until the situation
+  changes), e-mail facts limited to state, dates, module names and counts. The `license.check` job
+  never fails because of them and no 5651 function depends on them (docs/ALERTS.md, UYARILAR.md).
+- **Web interface without developer traces.** The component kit (`/ui-kit`) and its texts are only
+  in the development and test builds (`npm run build:e2e`), never in the shipped `npm run build`;
+  the build fails if a source map or a kit module would ship. Placeholder pages and the settings
+  page no longer show milestone codes ("Bu sayfa sonraki bir sürümde eklenecek.").
+- **Change your own password** from the user menu ("Parolayı değiştir"), with the current password;
+  other sessions end, wrong attempts count towards the lockout.
+- **Supported network setups** stated before installing (KURULUM / INSTALL §0.1, LISANS /
+  LICENSING §2, README): person attribution needs MikroTik DHCP lease evidence, one WAN mapping,
+  one site per installation, no IPv6 lookups, usage analytics only from FortiGate traffic, web
+  filter, DNS filter and application control logs of private source addresses; other vendors'
+  logs are collected, sealed and stored as plain lines.
+
 ### Offline licensing
 
 ARCILOGGER is sold to many organisations under a **perpetual licence plus annual maintenance**
