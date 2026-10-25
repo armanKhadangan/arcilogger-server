@@ -43,6 +43,14 @@ in every state. Prices are not part of the product.
 | `usage_reports` | Scheduled usage reports | Zamanlanmış kullanım raporları | Scheduled usage reports made and e-mailed by the server: the **Raporlar** page | Usage analytics |
 | `bulk_import` | Bulk import (CSV) | Toplu içe aktarma (CSV) | Bulk import of persons and device assignments from CSV files (Cihazlar ve Kişiler → the import part of the **Aktarım** tab); manual entry and the CSV exports are always available | — |
 
+**Data the usage modules need:** Usage analytics and Scheduled usage reports are computed from
+FortiGate logs only: traffic logs (with interim logs for long sessions), web filter, DNS filter
+and application control logs. Traffic is tied to the device and the person through the leases of
+the MikroTik DHCP server (and `ARP-LOG`); traffic without a lease is counted per IP address. Logs
+of other vendors are stored and sealed but not analysed. Before you buy a licence, check that your
+network fits ([INSTALL.md](INSTALL.md) section 0.1); the trial (section 3) also shows the result on
+your own network.
+
 ### 2.1 What 5651 Temel always does
 
 Whatever the licence state, these work and no licence state switches them off: the syslog

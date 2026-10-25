@@ -67,6 +67,46 @@ run, and the 5651 functions always run. Request code, licence file, modules and 
   maintenance window; the Kamu SM flows (time stamps, certificate host), NTP and DNS stay open
   **permanently** ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 1).
 
+### 0.1 Supported network setups
+
+Before installing, check that your network fits what this version supports. Whatever the
+network, the logs of every device in `[[sources]]` are collected, kept **unchanged** and sealed
+every night; the points below decide whether a 5651 lookup reaches the device and the person, and
+what the usage analytics show.
+
+- **One site:** an installation covers one site: an IPv4 network that reaches the internet
+  through one FortiGate and gets its addresses from one core MikroTik router (the DHCP server).
+  Several branches that use the same private address range are not supported in one
+  installation: the same network cannot be entered twice in the VLAN list, and the same address
+  in two branches counts as one address (it looks like an IP conflict).
+- **Device and person attribution:** the step from an internal IP address to the MAC address,
+  the device and the person rests on the leases of the MikroTik DHCP server
+  (`assigned`/`deassigned`); the hourly `ARP-LOG` script on the core router (optional;
+  [DEVICE-SETUP.md](DEVICE-SETUP.md) section 3) adds static-IP devices and the gaps between
+  leases with **medium confidence**. The logs of the FortiGate's own DHCP server are stored and
+  sealed, but this version does not build leases from them. When only the FortiGate (or another
+  server that is not a MikroTik) hands out addresses and no MikroTik sends `ARP-LOG`, there are
+  no leases: a 5651 lookup ends at the FortiGate session and the internal IP address (no MAC,
+  device or person), and the usage analytics count per IP address.
+- **NAT:** the FortiGate's source NAT is supported. When the public address is on the FortiGate
+  itself (ISP router in bridge mode; several addresses go into the `nat.public_ips` list), public
+  IP + port identify the session **exactly**. When the FortiGate sits behind an ISP router
+  (double NAT), the router's NAT record is missing and the lookup ranks **candidate** sessions
+  ([CORRELATION.md](CORRELATION.md) section 3). There is one mapping for the FortiGate's WAN
+  address (`nat.wan_transip`): several ISP lines, each behind its own router, are not modelled in
+  this version (on such a network a `nat.wan_transip` restricts the candidates to the sessions of
+  that line; left empty, the source-NAT sessions of every line are candidates). 5651 lookups by
+  IPv6 address are not supported: the leases (DHCP, `ARP-LOG`) cover IPv4 addresses only.
+- **Usage analytics** (paid module, [LICENSING.md](LICENSING.md)) are computed from FortiGate
+  logs only: time and bytes from the traffic logs (`logtraffic all`; with interim logs for long
+  sessions), site names and blocked attempts from the web filter, DNS filter and application
+  control logs ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2, [USAGE.md](USAGE.md)). Logs of
+  other vendors' firewalls are not analysed.
+- **Devices of other vendors** (`type = "generic"` in `[[sources]]`): their logs are collected,
+  kept unchanged, sealed and included in full-day evidence packages; they are loaded into the
+  database as plain log lines (time, host name, program, message text) but not parsed into
+  fields, and neither the 5651 lookup nor the usage analytics use them.
+
 ## 1. Prepare the server (elevated PowerShell)
 
 Data disk — **this erases the selected disk**, check the number twice:

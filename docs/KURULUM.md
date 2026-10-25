@@ -70,6 +70,46 @@ Toplam süre: yaklaşık 1–1,5 saat (Windows kurulumu hariç).
   penceresinde açılır; Kamu SM akışları (zaman damgası, sertifika sunucusu), NTP ve DNS ise
   **sürekli açık** kalır ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 1).
 
+### 0.1 Desteklenen ağ yapıları
+
+Kurmadan önce ağınızın bu sürümün desteklediği yapıya uyduğunu denetleyin. Ağ ne olursa olsun
+`[[sources]]` içindeki her cihazın logları toplanır, **değiştirilmeden** saklanır ve her gece
+mühürlenir; aşağıdakiler, bir 5651 sorgusunun kişiye ve cihaza kadar ilerleyip ilerlemediğini ve
+kullanım analizinin neyi gösterdiğini belirler.
+
+- **Tek yerleşke:** bir kurulum tek bir yerleşkeyi (site) kapsar: internete bir FortiGate
+  üzerinden çıkan, adresleri bir ana MikroTik yönlendiricinin (DHCP sunucusu) dağıttığı IPv4 ağı.
+  Aynı özel adres aralığını kullanan birden çok şube tek kurulumda desteklenmez: aynı ağ VLAN
+  listesine iki kez girilemez ve iki şubedeki aynı adres tek bir adres sayılır (IP çakışması gibi
+  görünür).
+- **Kişi ve cihaz eşleştirmesi:** iç IP adresinden MAC adresine, cihaza ve kişiye giden adım
+  MikroTik DHCP sunucusunun kira kayıtlarına (`assigned`/`deassigned`) dayanır; ana
+  yönlendiricideki saatlik `ARP-LOG` betiği (isteğe bağlı; [DEVICE-SETUP.md](DEVICE-SETUP.md)
+  bölüm 3) statik IP'li cihazları ve kira kayıtları arasındaki boşlukları **orta güvenle** ekler.
+  FortiGate'in kendi DHCP sunucusunun kayıtları saklanır ve mühürlenir, ama bu sürümde kira zaman
+  çizelgesine girmez. DHCP'yi yalnızca FortiGate (ya da MikroTik olmayan başka bir sunucu)
+  dağıtıyorsa ve `ARP-LOG` gönderen bir MikroTik yoksa kira kaydı oluşmaz: 5651 sorgusu FortiGate
+  oturumunda ve iç IP adresinde biter (MAC, cihaz ve kişi yok), kullanım analizi de IP adresine
+  göre sayar.
+- **NAT:** FortiGate'in kaynak NAT'ı desteklenir. Genel adres FortiGate'in kendisindeyse (ISS
+  modemi köprü kipinde; birden çok adres `nat.public_ips` listesine girilir) genel IP + port
+  oturumu **kesin** belirler. FortiGate bir ISS modeminin arkasındaysa (çift NAT) modemin NAT
+  kaydı olmadığından sorgu **aday** oturumları sıralar ([CORRELATION.md](CORRELATION.md) bölüm
+  3). FortiGate'in WAN adresi için tek bir eşleme vardır (`nat.wan_transip`): her biri kendi
+  modeminin arkasındaki birden çok ISS hattı bu sürümde modellenmez (böyle bir ağda
+  `nat.wan_transip` girilirse adaylar yalnızca o hattın oturumlarından seçilir; boş kalırsa bütün
+  hatların kaynak NAT oturumları aday olur). IPv6 adresleriyle 5651 sorgusu desteklenmez: kira
+  kayıtları (DHCP, `ARP-LOG`) yalnızca IPv4 adreslerini kapsar.
+- **Kullanım analizi** (ücretli modül, [LISANS.md](LISANS.md)) yalnızca FortiGate kayıtlarından
+  hesaplanır: süreler ve baytlar trafik kayıtlarından (`logtraffic all`; uzun oturumlar için ara
+  kayıtlarla), site adları ve engellenen denemeler web filtresi, DNS filtresi ve uygulama
+  kontrolü kayıtlarından ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2, [KULLANIM.md](KULLANIM.md)).
+  Başka üreticilerin güvenlik duvarlarının kayıtları analiz edilmez.
+- **Başka üreticilerin cihazları** (`[[sources]]` içinde `type = "generic"`): logları toplanır,
+  değiştirilmeden saklanır, mühürlenir ve tam gün kanıt paketlerine girer; veritabanına düz log
+  satırı olarak (zaman, ana bilgisayar adı, program, ileti metni) yüklenir ama alanlarına
+  ayrılmaz, 5651 sorgusunda ve kullanım analizinde kullanılmaz.
+
 ## 1. Sunucuyu hazırlama
 
 Tüm komutlar **yönetici olarak açılmış PowerShell** penceresinde çalıştırılır.
