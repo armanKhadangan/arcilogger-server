@@ -86,7 +86,7 @@ checked in exactly these places:
 | Where | What |
 |---|---|
 | `ArciApi` | `require_module` on the routers `/usage`, `/reports`, `/imports` (403 `module_not_licensed`; status cached 30 s); the users limit on `POST /users` and on re-enabling a user (409 `license_limit`); `GET/POST/DELETE /license` (the licence page) |
-| `ArciWorker` | the gate of the paid jobs (`usage.*` rollups, `reports.run_due`; skipped, status cached 60 s); the job `license.check` every 5 minutes (state changes and limit crossings audited, `state\license-status.json` for the installer) |
+| `ArciWorker` | the gate of the paid jobs (`usage.*` rollups, `reports.run_due`; skipped, status cached 60 s); the job `license.check` every 5 minutes (state changes and limit crossings audited, the licence alerts `R20-license…`, `state\license-status.json` for the installer) |
 | `arcilogger-db license …`, `arcilogger-api create-admin`, `arcilogger-worker usage rebuild` | the licence commands; the users limit of the recovery command; the one gated worker command |
 | Installer | the maintenance rule before any change (advisory: the bundle's `release_date` against `maintenance_until`), `-LicenseFile`, the request code at the end; it gates nothing by module |
 | Web | the licence page (Ayarlar → Lisans), banners, lock marks and locked pages, from `GET /license` (the API decides) |

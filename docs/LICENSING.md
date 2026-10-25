@@ -59,6 +59,12 @@ Only one alert code belongs to a paid module: `R20-report` (a scheduled report c
 belongs to Scheduled usage reports; it is not raised while the module is off, and an open one is
 resolved when the module goes off ([ALERTS.md](ALERTS.md)).
 
+The licence alerts belong to 5651 Temel: the job `license.check` raises them in every state and
+tells the administrators before and when the paid modules go off (`R20-license`: the trial or a
+time-limited licence ends within 3 or 14 days, the modules are off), when a limit is crossed
+(`R20-license-limit`) and when maintenance ends (`R20-license-maintenance`, information)
+([ALERTS.md](ALERTS.md) section 2).
+
 Deleting personal data on time does not depend on the licence either: the retention jobs of the
 usage rollups and the report files (`usage.retention`, `reports.purge`) run in every state.
 
@@ -99,7 +105,7 @@ data of a module that is off is not deleted.
 
 | Job | Module | While the licence is off |
 |---|---|---|
-| `license.check` | — (recomputes the licence state every 5 minutes) | always runs |
+| `license.check` | — (recomputes the licence state every 5 minutes, raises the licence alerts) | always runs |
 | `partitions.ensure` | 5651 Core | always runs |
 | `leases.incremental` | 5651 Core | always runs |
 | `leases.nightly` | 5651 Core | always runs |
@@ -252,6 +258,10 @@ At most two banners show at once. Administrators follow the banner to the licenc
 users see "Contact your administrator." With a licence that holds no paid module (5651 Temel only),
 `expired`, `version_not_covered` and `wrong_server` show users no banner, as no module goes off;
 administrators get an information banner.
+
+The same situations are also alerts on the Güvenlik page, e-mailed by the alert settings
+(`R20-license`, `R20-license-limit`, `R20-license-maintenance`; [ALERTS.md](ALERTS.md)), and the
+trial's end (3 days) and a time-limited licence's end (14 days) are announced before they come.
 
 An unusable licence never falls back to the trial, and a server change has no grace period: a new
 licence file is needed.

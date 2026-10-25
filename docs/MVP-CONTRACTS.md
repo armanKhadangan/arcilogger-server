@@ -539,7 +539,9 @@ Decision: ADR-0010; operator view: docs/ALERTS.md (TR: docs/UYARILAR.md).
   writes through `arcilogger_worker.alerts.store.open_alert` / `resolve` (one active alert per
   dedup key).
 - **Worker jobs.** `alerts.import` (1 min), `alerts.r15` (1 min), `alerts.system` (5 min),
-  `alerts.notify` (1 min); see docs/CORRELATION.md section 4. Commands:
+  `alerts.notify` (1 min); `license.check` (5 min) opens and resolves the licence alerts
+  (`R20-license`, `R20-license-limit`, `R20-license-maintenance`:
+  `arcilogger_worker.alerts.license`, docs/ALERTS.md); see docs/CORRELATION.md section 4. Commands:
   `arcilogger-worker alerts test-email --to ADDRESS` and `arcilogger-worker alerts list [--open]
   [--limit N]` (exit codes as `run`: 0 ok, 1 not sent, 2 configuration, 3 database unreachable).
 - **Tables** (revision `0009_alert_delivery`): `alerts.created_at`, `alerts.resolved_at`;

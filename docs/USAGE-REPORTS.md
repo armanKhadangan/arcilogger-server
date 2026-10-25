@@ -3,7 +3,7 @@
 > Türkçe: [KULLANIM-RAPORLARI.md](KULLANIM-RAPORLARI.md). Decision:
 > [adr/0012-scheduled-usage-reports.md](adr/0012-scheduled-usage-reports.md).
 >
-> **Licence:** scheduled reports need the **Scheduled usage reports** module (Zamanlanmış kullanım raporları, which needs Usage analytics; [LICENSING.md](LICENSING.md)); while it is off the Raporlar page is locked, no report is made or sent and `R20-report` is not raised.
+> **Licence:** scheduled reports need the **Scheduled usage reports** module (Zamanlanmış kullanım raporları, which needs Usage analytics; [LICENSING.md](LICENSING.md)); while it is off the Raporlar page is locked, no report is made or sent and `R20-report` is not raised; the licence alert `R20-license` tells the administrators before and when it goes off ([ALERTS.md](ALERTS.md)).
 >
 > ARCILOGGER is **designed to support 5651 obligations** ("5651 yükümlülüklerini desteklemek için
 > tasarlanmıştır"); it makes no claim of legal compliance. Have the use of person-level reports

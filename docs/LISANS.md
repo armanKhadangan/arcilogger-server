@@ -59,6 +59,12 @@ Yalnızca bir uyarı kodu ücretli bir modüle aittir: `R20-report` (zamanlanmı
 gönderilemedi) Zamanlanmış kullanım raporları modülüne aittir; modül kapalıyken açılmaz, modül
 kapanınca açık olanı kendiliğinden çözülür ([UYARILAR.md](UYARILAR.md)).
 
+Lisans uyarıları 5651 Temel'e aittir: `license.check` işi bunları her durumda açar ve yöneticilere
+ücretli modüller kapanmadan önce ve kapandığında (`R20-license`: deneme ya da süreli lisans 3 ya da
+14 gün içinde bitiyor, modüller kapalı), bir sınır aşıldığında (`R20-license-limit`) ve bakım
+süresi bittiğinde (`R20-license-maintenance`, bilgi) haber verir ([UYARILAR.md](UYARILAR.md)
+bölüm 2).
+
 Kişisel verilerin zamanında silinmesi de lisansa bağlı değildir: kullanım özetlerinin ve rapor
 dosyalarının saklama işleri (`usage.retention`, `reports.purge`) her durumda çalışır.
 
@@ -99,7 +105,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 
 | İş | Modül | Lisans kapalıyken |
 |---|---|---|
-| `license.check` | — (lisans durumunu her 5 dakikada yeniden hesaplar) | her zaman çalışır |
+| `license.check` | — (lisans durumunu her 5 dakikada yeniden hesaplar, lisans uyarılarını açar) | her zaman çalışır |
 | `partitions.ensure` | 5651 Temel | her zaman çalışır |
 | `leases.incremental` | 5651 Temel | her zaman çalışır |
 | `leases.nightly` | 5651 Temel | her zaman çalışır |
@@ -253,6 +259,10 @@ Aynı anda en çok iki bant görünür. Yöneticiler banttan lisans sayfasına g
 "Yöneticinize başvurun." görür. Ücretli modül içermeyen bir lisansta (yalnızca 5651 Temel)
 `expired`, `version_not_covered` ve `wrong_server` kapanan modül olmadığı için kullanıcılara bant
 göstermez; yöneticiler bir bilgi bandı görür.
+
+Aynı durumlar Güvenlik sayfasında uyarı olarak da görünür ve uyarı ayarlarına göre e-postayla
+gider (`R20-license`, `R20-license-limit`, `R20-license-maintenance`; [UYARILAR.md](UYARILAR.md));
+deneme süresinin sonu (3 gün) ve süreli bir lisansın sonu (14 gün) gelmeden önce bildirilir.
 
 Sorunlu bir lisansta deneme süresine geri dönülmez ve sunucu değişikliğinden sonra bir ek süre
 yoktur: yeni lisans dosyası gerekir.

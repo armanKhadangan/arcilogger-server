@@ -14,6 +14,9 @@ Four worker jobs (:mod:`arcilogger_worker.service`):
                     (:mod:`.notify`, content: :mod:`.texts`, SMTP: :mod:`.mail`)
 ==================  ======================================================================
 
+The licence alerts (``R20-license…``: paid modules ending or off, a limit crossed, the
+maintenance) are raised by the job ``license.check`` (:mod:`.license`).
+
 Every check keeps **one active alert per dedup key** (``R15:<source>``, ``R20-disk:<drive>``,
 ``R20-seal:<day>``, …; :mod:`.store`) and resolves it itself once the condition is gone
 (``details.auto_resolved``). A person's changes of state and notes (the Security page, through
