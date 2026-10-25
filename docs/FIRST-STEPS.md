@@ -238,7 +238,7 @@ section 8):
 
 | Setting | When |
 |---|---|
-| `nat.public_ips`, `nat.wan_transip` | once the FortiGate's public / WAN address is confirmed (double NAT, [ASSUMPTIONS.md](ASSUMPTIONS.md) A9) |
+| `nat.public_ips`, `nat.wan_transip` | once the FortiGate's public / WAN address is confirmed (double NAT, [ASSUMPTIONS.md](ASSUMPTIONS.md) A9); with several ISP lines, each behind its own router, `nat.wan_transip` stays empty ([INSTALL.md](INSTALL.md) section 0.1) |
 | `devices.infrastructure_macs` | MAC addresses of the core router, the FortiGate and the switches (no IP-conflict alarms for them) |
 | `lease.server_seconds` | DHCP servers whose lease time differs from one day (`lease.default_seconds`), e.g. the guest network's: `{"<server name>": <seconds>}` (piped in) |
 | `devices.oui_file` | optional vendor names: put the file at `C:\ProgramData\ARCILOGGER\oui.csv` ([CORRELATION.md](CORRELATION.md) section 1, "Vendor") |

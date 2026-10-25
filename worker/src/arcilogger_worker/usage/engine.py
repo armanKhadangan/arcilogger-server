@@ -75,7 +75,7 @@ from arcilogger_worker.usage.subjects import (
 )
 
 #: Raised whenever the meaning of a stored rollup changes: the recent days are rebuilt.
-ENGINE_VERSION: Final = 2
+ENGINE_VERSION: Final = 3
 BUCKET: Final = 60
 #: Source addresses read per query.
 IP_GROUP: Final = 64
@@ -90,10 +90,10 @@ REFUSED_ACTIONS: Final = ("deny", "ip-conn")
 WEB_BLOCKED: Final = frozenset({"blocked", "block"})
 DNS_BLOCKED: Final = frozenset({"block", "blocked"})
 APP_BLOCKED: Final = frozenset({"block", "blocked", "reset"})
-#: Internal source addresses (the usage of the LAN, not inbound traffic).
+#: Internal source addresses (the usage of the LAN, not inbound traffic): RFC 1918 and ULA.
 PRIVATE: Final = (
     "(srcip << inet '10.0.0.0/8' OR srcip << inet '172.16.0.0/12' "
-    "OR srcip << inet '172.20.0.0/16' OR srcip << inet 'fc00::/7')"
+    "OR srcip << inet '192.168.0.0/16' OR srcip << inet 'fc00::/7')"
 )
 #: Most top domains stored per device and day.
 DEVICE_TOP: Final = 20

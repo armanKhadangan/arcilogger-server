@@ -43,6 +43,11 @@ yapılandırmada, departmanlar kurulumdan sonra web arayüzünde tanımlanır
 - **Kullanıcılara istemci kurulmaz.** Herkes tarayıcıdan bağlanır: `https://<sunucu adresi>`
   (ya da `https://arcilogger.internal`). Çalışan bilgisayarlarına ajan kurulmaz; veriler ağ
   cihazlarından gelir.
+- **Desteklenen ağ:** tek yerleşke; internete bir FortiGate üzerinden çıkan, DHCP'yi bir MikroTik
+  yönlendiricinin dağıttığı IPv4 ağı. DHCP'yi yalnızca FortiGate'in dağıttığı ağlar, birden çok
+  şube ya da ISS hattı, IPv6 ve başka üreticilerin cihazları için sınırlar:
+  [docs/KURULUM.md](docs/KURULUM.md) bölüm 0.1 (English: [docs/INSTALL.md](docs/INSTALL.md)
+  section 0.1).
 - Ayrıntılar: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Kurulum ve ilk adımlar

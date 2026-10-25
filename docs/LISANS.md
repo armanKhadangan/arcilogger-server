@@ -43,6 +43,17 @@ Fiyatlar üründe yer almaz.
 | `usage_reports` | Zamanlanmış kullanım raporları | Scheduled usage reports | Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi: **Raporlar** sayfası | Kullanım analizi |
 | `bulk_import` | Toplu içe aktarma (CSV) | Bulk import (CSV) | Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (Cihazlar ve Kişiler → **Aktarım** sekmesinin içe aktarma bölümü); elle giriş ve CSV dışa aktarma her zaman açıktır | — |
 
+**Kullanım modüllerinin veri ön koşulu:** Kullanım analizi ve Zamanlanmış kullanım raporları
+yalnızca FortiGate kayıtlarından hesaplanır: trafik kayıtları (uzun oturumlar için ara kayıtlarla),
+web filtresi, DNS filtresi, uygulama kontrolü ve SSL denetimi kayıtları. Yalnızca özel kaynak
+adreslerinden (RFC 1918 blokları ve IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar
+(ör. 100.64.0.0/10 ya da içeride kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez.
+Trafik cihaza ve kişiye MikroTik DHCP sunucusunun kira kayıtlarıyla (ve `ARP-LOG` ile) bağlanır;
+kira kaydı olmayan trafik IP adresine göre sayılır. Başka üreticilerin kayıtları saklanır ve
+mühürlenir ama analiz edilmez. Lisans almadan önce ağınızın bu yapıya uyduğunu
+[KURULUM.md](KURULUM.md) bölüm 0.1 ile denetleyin; deneme süresi (bölüm 3) sonucu kendi ağınızda
+görmek için de kullanılabilir.
+
 ### 2.1 5651 Temel neyi her zaman yapar?
 
 Lisans durumu ne olursa olsun şunlar çalışır ve hiçbir lisans durumu bunları kapatmaz: syslog
