@@ -2018,6 +2018,7 @@
       "conflictTitle": "Uyarı bu arada değişmiş",
       "conflictBody": "Güncel durum yüklendi; gerekiyorsa yeniden deneyin.",
       "closeHint": "Sorun sürüyorsa yeni bir uyarı açılır; üzerinde çalışırken İnceleniyor'u kullanın.",
+      "closeHintLicense": "Lisans uyarısı: kapatırsanız aynı durum için yeniden açılmaz ve e-postayla gitmez; yeni uyarı yalnızca durum değişince açılır. Durum düzelince uyarı kendiliğinden kapanır.",
       "keyActiveTitle": "Aynı sorun için etkin bir uyarı var",
       "openActive": "Etkin uyarıyı aç (#{{id}})"
     },
@@ -2042,7 +2043,11 @@
       "not_pending": "gün artık mühür beklemiyor",
       "email_sent": "e-posta yeniden gönderilebildi",
       "lease_rebuild": "IP kira kayıtları yeniden hesaplandı",
-      "conflict_found_again": "çakışma yeniden bulundu"
+      "conflict_found_again": "çakışma yeniden bulundu",
+      "licensed": "lisans geçerli",
+      "license_changed": "lisans durumu değişti",
+      "limit_ok": "kullanım lisans sınırının içinde",
+      "maintenance_renewed": "bakım yenilendi"
     },
     "notes": {
       "title": "Notlar",

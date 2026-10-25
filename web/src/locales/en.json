@@ -2018,6 +2018,7 @@
       "conflictTitle": "The alert changed in the meantime",
       "conflictBody": "The current state was loaded; try again if needed.",
       "closeHint": "If the problem persists, a new alert is opened; use Investigating while you work on it.",
+      "closeHintLicense": "Licence alert: if you close it, it is not raised or e-mailed again for the same situation; a new alert opens only when the situation changes. It closes by itself once the situation is put right.",
       "keyActiveTitle": "An active alert covers the same problem",
       "openActive": "Open the active alert (#{{id}})"
     },
@@ -2042,7 +2043,11 @@
       "not_pending": "the day no longer waits for sealing",
       "email_sent": "an e-mail could be sent again",
       "lease_rebuild": "the IP lease records were recomputed",
-      "conflict_found_again": "the conflict was found again"
+      "conflict_found_again": "the conflict was found again",
+      "licensed": "the licence is valid",
+      "license_changed": "the licence situation changed",
+      "limit_ok": "the use is within the licence limit",
+      "maintenance_renewed": "the maintenance was renewed"
     },
     "notes": {
       "title": "Notes",

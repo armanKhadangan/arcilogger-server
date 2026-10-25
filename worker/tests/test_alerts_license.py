@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.license.state import Installation, LicenseInputs, LicenseStatus, evaluate
 from arcilogger_core.license.testing import (
@@ -31,10 +32,19 @@ from arcilogger_core.license.testing import (
 from arcilogger_core.license.trusted_time import TrustedTime, clear_cache, site_day_start
 from arcilogger_core.timeutil import isoformat_site, utc_now
 from arcilogger_db import licensing
-from arcilogger_db.models import Alert, AlertEvent, JobRun, LicenseEvent, LicenseInstallation
+from arcilogger_db.models import (
+    Alert,
+    AlertDelivery,
+    AlertEvent,
+    JobRun,
+    LicenseEvent,
+    LicenseInstallation,
+)
+from arcilogger_db.settings import set_setting
 from arcilogger_worker import licensing as worker_licensing
 from arcilogger_worker.alerts.license import check_license
 from arcilogger_worker.alerts.mail import MailItem, build_message
+from arcilogger_worker.alerts.notify import Policy, enqueue
 from arcilogger_worker.alerts.store import change_state
 from arcilogger_worker.alerts.texts import GENERIC, describe, rule_text
 from arcilogger_worker.service import Worker, default_jobs
@@ -53,6 +63,7 @@ DAY = timedelta(days=1)
 #: A person, a raw FortiGate line and an address: none of it may reach an alert e-mail.
 PERSON = "Ayşe Yılmaztürk"
 RAW = '<189>date=2026-10-19 srcip=172.20.42.57 user="ayse.yilmazturk" dstip=203.0.113.10'
+TO = "bilgi-islem@example.com"
 
 
 @pytest.fixture(autouse=True)
@@ -164,7 +175,7 @@ def test_the_trial_ending_within_three_days(db_session: Session) -> None:
     assert report["opened"] == ["R20-license:trial-ending"]
     alert = active(db_session)["R20-license:trial-ending"]
     ends = isoformat_site(started + 14 * DAY, "seconds")
-    assert (alert.rule, alert.severity) == ("R20-license", "medium")
+    assert (alert.rule, alert.severity) == ("R20-license", "high")
     assert alert.title == "Deneme süresi bitiyor: 3 gün kaldı (24.10.2026 12:00:00)"
     assert alert.details == {
         "case": "trial_ending",
@@ -189,7 +200,7 @@ def test_the_trial_ending_within_three_days(db_session: Session) -> None:
     assert reason(ended) == "license_changed"
     off = active(db_session)["R20-license:off"]
     assert (off.severity, off.details["case"], off.details["modules"]) == (
-        "medium",
+        "high",
         "trial_expired",
         PAID,
     )
@@ -230,7 +241,7 @@ def test_a_time_limited_licence_ending_within_14_days(db_session: Session) -> No
     report = check(db_session, status(at=NOW + DAY, stored=stored), NOW + DAY)
     assert report["opened"] == ["R20-license:expiring"]
     alert = active(db_session)["R20-license:expiring"]
-    assert alert.severity == "medium"
+    assert alert.severity == "high"
     assert alert.title == "Lisansın süresi bitiyor: 04.11.2026 (14 gün kaldı)"
     assert {k: alert.details[k] for k in ("case", "days_left", "until", "modules")} == {
         "case": "expiring",
@@ -265,36 +276,23 @@ def test_an_expiring_licence_that_ran_out_turns_into_paid_modules_off(db_session
 # -- paid modules off -----------------------------------------------------------------------------
 
 
-#: name: (the status, severity, ``details.case``, ``details.until``).
-LOCKED: dict[str, tuple[Callable[[], LicenseStatus], str, str, str | None]] = {
-    "trial_expired": (lambda: status(started=NOW - 30 * DAY), "medium", "trial_expired", None),
+#: name: (the status, ``details.case``, ``details.until``).
+LOCKED: dict[str, tuple[Callable[[], LicenseStatus], str, str | None]] = {
+    "trial_expired": (lambda: status(started=NOW - 30 * DAY), "trial_expired", None),
     "trial_clock_inconsistent": (
         lambda: status(started=NOW + timedelta(hours=1)),
-        "medium",
         "trial_clock_inconsistent",
         None,
     ),
-    "invalid": (
-        lambda: status(stored=tamper(licence(), "licensee", "X")),
-        "high",
-        "invalid",
-        None,
-    ),
-    "wrong_server": (
-        lambda: status(stored=licence(), server_id=OTHER),
-        "high",
-        "wrong_server",
-        None,
-    ),
+    "invalid": (lambda: status(stored=tamper(licence(), "licensee", "X")), "invalid", None),
+    "wrong_server": (lambda: status(stored=licence(), server_id=OTHER), "wrong_server", None),
     "expired": (
         lambda: status(stored=licence(valid_until=date(2026, 10, 19))),
-        "medium",
         "expired",
         "2026-10-19",
     ),
     "version_not_covered": (
         lambda: status(stored=licence(maintenance_until=date(2026, 9, 1))),
-        "medium",
         "version_not_covered",
         "2026-09-01",
     ),
@@ -307,13 +305,13 @@ def locked(name: str) -> LicenseStatus:
 
 @pytest.mark.parametrize("name", sorted(LOCKED))
 def test_paid_modules_off_in_every_locked_state(db_session: Session, name: str) -> None:
-    _, severity, case, until = LOCKED[name]
+    _, case, until = LOCKED[name]
     current = locked(name)
     assert current.state == ("trial_expired" if name.startswith("trial") else name)
     report = check(db_session, current)
     assert report["opened"] == ["R20-license:off"]
     alert = active(db_session)["R20-license:off"]
-    assert alert.severity == severity
+    assert alert.severity == "high"  # e-mailed with the default alerts.email_min_severity
     assert (alert.details["case"], alert.details["until"]) == (case, until)
     assert alert.details["state"] == current.state
     assert alert.details["modules"] == PAID
@@ -348,7 +346,7 @@ def test_nothing_while_licensed_or_when_no_paid_module_goes_off(db_session: Sess
 def test_a_new_occurrence_replaces_the_active_alert(db_session: Session) -> None:
     check(db_session, locked("expired"))
     first = active(db_session)["R20-license:off"]
-    assert first.severity == "medium"
+    assert first.details["case"] == "expired"
     report = check(db_session, locked("invalid"))
     assert report["resolved"] == ["R20-license:off"]
     assert report["opened"] == ["R20-license:off"]
@@ -535,6 +533,47 @@ def test_the_licence_check_never_fails_because_of_its_alerts(
 # -- what the e-mail and the web may say ----------------------------------------------------------
 
 
+def test_the_default_e_mail_policy_mails_the_paid_modules_ending_and_off(
+    db_session: Session, layout: Layout
+) -> None:
+    """An administrator who does not sign in is told before and when the paid modules stop (the
+    default ``alerts.email_min_severity`` is high); a limit and the maintenance are not e-mailed."""
+    set_setting(db_session, "alerts.email_recipients", [TO], updated_by="tolga")
+    db_session.commit()
+    policy = Policy.load(db_session, Config(data_dir=layout.root, secrets_dir=layout.root))
+    assert policy.min_severity == "high"
+
+    def queued(at: datetime) -> list[str]:
+        enqueue(db_session, policy, now=at)
+        db_session.commit()
+        rows = db_session.execute(
+            select(Alert.dedup_key)
+            .join(AlertDelivery, AlertDelivery.alert_id == Alert.id)
+            .where(AlertDelivery.kind == "new")
+            .order_by(AlertDelivery.id)
+        )
+        return [key or "" for key in rows.scalars()]
+
+    started = NOW - 12 * DAY
+    check(db_session, status(started=started))
+    assert queued(NOW) == ["R20-license:trial-ending"]
+    over = NOW + 3 * DAY
+    check(db_session, status(at=over, started=started), over)
+    assert queued(over) == ["R20-license:trial-ending", "R20-license:off"]
+    assert queued(over + timedelta(minutes=5)) == ["R20-license:trial-ending", "R20-license:off"]
+    # Licensed, over the users limit, the maintenance ending: on the Güvenlik page only.
+    over_limit = status(
+        at=over, stored=licence(users=3, maintenance_until=date(2026, 11, 1)), users=5
+    )
+    for minutes in (10, 15):  # the limit's licence event is written one run after the state's
+        check(db_session, over_limit, over + timedelta(minutes=minutes))
+    assert set(active(db_session)) == {"R20-license-limit:users", "R20-license-maintenance"}
+    assert queued(over + timedelta(minutes=15)) == [
+        "R20-license:trial-ending",
+        "R20-license:off",
+    ]
+
+
 def test_the_sentences_of_every_case() -> None:
     trial = {
         "case": "trial_ending",
@@ -611,7 +650,7 @@ def test_an_e_mail_holds_only_whitelisted_facts() -> None:
     message = build_message(
         items,
         sender="arcilogger@example.com",
-        recipient="bilgi-islem@example.com",
+        recipient=TO,
         web_url="https://arcilogger.internal",
         now=NOW,
     )

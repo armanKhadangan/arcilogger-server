@@ -11,20 +11,24 @@ module imports no licence code at module level.
 Key                                Condition (severity)
 =================================  ============================================================
 ``R20-license:trial-ending``       the trial ends within :data:`TRIAL_ENDING_DAYS` (3) days
-                                   (medium)
+                                   (high)
 ``R20-license:expiring``           a time-limited licence (``valid_until``) ends within
                                    :data:`EXPIRING_DAYS` (14) days and paid modules would go off
-                                   with it (medium)
+                                   with it (high)
 ``R20-license:off``                paid modules off because of the state: ``trial_expired``,
-                                   ``expired``, ``version_not_covered`` (medium), ``invalid``,
-                                   ``wrong_server`` (high, the web's red banner); only while a
-                                   module the trial or the licence gave is off
+                                   ``invalid``, ``wrong_server``, ``expired``,
+                                   ``version_not_covered`` (high); only while a module the trial
+                                   or the licence gave is off
 ``R20-license-limit:<limit>``      ``users`` or ``log_sources`` above the licence's limit, from
                                    the crossing's ``limit`` licence event on (medium)
 ``R20-license-maintenance``        licensed, and the maintenance ends within 30 days or has
                                    ended (info: upgrades and support only, the licence stays
                                    valid)
 =================================  ============================================================
+
+``R20-license`` is ``high`` so that the default ``alerts.email_min_severity`` e-mails it: an
+administrator who does not sign in is told before and when the paid modules (the scheduled usage
+reports among them) stop, once per occurrence.
 
 Each condition has one active alert, resolved by itself once the condition is gone (reason
 ``licensed``, ``license_changed``, ``limit_ok`` or ``maintenance_renewed``). A licence situation
@@ -61,12 +65,10 @@ MAINTENANCE_RULE: Final = "R20-license-maintenance"
 TRIAL_ENDING_DAYS: Final = 3
 #: ``R20-license:expiring`` from this many days before the end of ``valid_until``.
 EXPIRING_DAYS: Final = 14
-#: The states that switch the paid modules off (``R20-license:off``) …
+#: The states that switch the paid modules off (``R20-license:off``).
 OFF_STATES: Final = frozenset(
     {"trial_expired", "invalid", "wrong_server", "expired", "version_not_covered"}
 )
-#: … and those of them that mean something is wrong (``high``; the others are foreseen).
-HIGH_STATES: Final = frozenset({"invalid", "wrong_server"})
 #: ``R20-license-limit`` titles per limit (Turkish, English).
 LIMIT_TITLES: Final = {
     "users": ("Kullanıcı sınırı aşıldı", "Users limit exceeded"),
@@ -99,7 +101,7 @@ def _ending(status: LicenseStatus, paid: Sequence[str]) -> list[Finding]:
             Finding(
                 key=f"{RULE}:trial-ending",
                 rule=RULE,
-                severity="medium",
+                severity="high",
                 title=(
                     f"Deneme süresi bitiyor: {days} gün kaldı "
                     f"({format_datetime(status.trial_ends_at)})"
@@ -127,7 +129,7 @@ def _ending(status: LicenseStatus, paid: Sequence[str]) -> list[Finding]:
             Finding(
                 key=f"{RULE}:expiring",
                 rule=RULE,
-                severity="medium",
+                severity="high",
                 title=(
                     f"Lisansın süresi bitiyor: {format_date(status.valid_until)} ({left} gün kaldı)"
                 ),
@@ -172,7 +174,7 @@ def _off(session: Session, status: LicenseStatus, paid: Sequence[str]) -> list[F
         Finding(
             key=f"{RULE}:off",
             rule=RULE,
-            severity="high" if status.state in HIGH_STATES else "medium",
+            severity="high",
             title=f"{head_tr.format(until=shown)}: ücretli modüller kapalı",
             details={
                 "case": case,
