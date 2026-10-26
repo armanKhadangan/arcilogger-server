@@ -278,6 +278,21 @@ def test_an_unknown_zamane_client_is_held_for_its_approval(
     assert [item["request_id"] for item in document["pending"]] == [accepted["request_id"]]
     assert (installed.root / "zamane" / "web" / f"{digest}.jar").is_file()
 
+    # The held client may wait for days: the other steps of the wizard are not kept busy …
+    threshold = client.put(
+        f"{V}/admin/config/tsa", json={"etag": etag(client), "credit_alert_threshold": 750}
+    )
+    assert threshold.status_code == 202, threshold.text
+    agent.process()
+    assert client.get(threshold.json()["status_url"]).json()["state"] == "active"
+    assert installed.config().tsa.credit_alert_threshold == 750
+    assert client.get(accepted["status_url"]).json()["state"] == "pending"
+    # … but a second client waits until the first is approved or cancelled.
+    second = upload(client, "zamane_client", client_jar(b"bir sonraki"), "tss-client.jar").json()
+    again = {"etag": etag(client), "upload_id": second["upload_id"],
+             "expected_sha256": second["zamane"]["jar_sha256"]}  # fmt: skip
+    assert error(client.post(url, json=again)) == (409, "admin_section_busy")
+
 
 def test_the_stamp_test_is_confirmed_limited_and_reports_the_stamp(
     client: TestClient,

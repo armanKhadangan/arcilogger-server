@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_api.admin_channel import manual_steps
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.admin.testing import FakeAgent, Installed
 from arcilogger_core.rawlog import format_line
@@ -224,3 +225,22 @@ def test_only_administrators_see_the_history_tools(client: TestClient, login_as:
         ("POST", f"{REQUESTS}/{'0' * 32}/revert"),
     ):
         assert error(client.request(method, path)) == (403, "forbidden"), path
+
+
+def test_the_manual_steps_run_when_pasted_on_the_server() -> None:
+    """The ARCILOGGER programs are not on PATH: the steps name the installation's interpreter.
+    For ``acl_drift`` the change is in force, so the rights are repaired instead of putting the
+    previous version back."""
+    python = (
+        '& "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin'
+    )
+    for text in manual_steps(4, "rollback_failed"):
+        assert text is not None
+        assert f"{python} versions restore 4" in text
+        assert f"{python} status" in text
+        assert "…" not in text
+    for text in manual_steps(4, "acl_drift"):
+        assert text is not None
+        assert '& "C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVaultAcl.ps1"' in text
+        assert "versions restore" not in text
+    assert manual_steps(None, "rollback_failed") == (None, None)

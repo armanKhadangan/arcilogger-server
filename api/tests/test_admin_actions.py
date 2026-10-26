@@ -310,6 +310,37 @@ def test_a_test_email_is_sent_by_the_worker_to_an_allowed_address(
     assert 3500 <= limited.json()["error"]["details"]["retry_after"] <= 3600
 
 
+def test_a_test_email_the_worker_is_sending_is_not_cancelled(
+    client: TestClient,
+    login_as: Login,
+    installed: Installed,
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    """The job holds the row (``FOR UPDATE SKIP LOCKED``) while it sends: a cancel then is 409
+    and never overwrites what the worker sets; a row nobody holds is cancelled."""
+    login_as(client, "admin", email="tolga@ornek.example")
+    mail_server(installed, 2525)
+    accepted = client.post(f"{V}/admin/actions/test-email", json={"to": "tolga@ornek.example"})
+    assert accepted.status_code == 202, accepted.text
+    request_id = accepted.json()["request_id"]
+    with app_session_factory() as worker:
+        held = worker.scalar(
+            select(AdminRequest).where(AdminRequest.id == request_id).with_for_update()
+        )
+        assert held is not None
+        assert error(client.delete(f"{V}/admin/requests/{request_id}")) == (
+            409,
+            "request_not_cancellable",
+        )
+        held.state, held.terminal = "succeeded", True
+        worker.commit()
+    assert client.get(accepted.json()["status_url"]).json()["state"] == "succeeded"
+    second = client.post(f"{V}/admin/actions/test-email", json={"to": "tolga@ornek.example"})
+    cancelled = client.delete(f"{V}/admin/requests/{second.json()['request_id']}")
+    assert cancelled.status_code == 202, cancelled.text
+    assert cancelled.json()["state"] == "cancelled"
+
+
 def test_a_lease_rebuild_is_worked_day_by_day_within_its_range(
     client: TestClient,
     login_as: Login,

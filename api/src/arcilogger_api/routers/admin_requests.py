@@ -12,14 +12,16 @@ second for 15 s, then every 3 s, ``X-Arci-Background: 1``) until a terminal stat
   one's own ``action.seal`` and ``action.credit``).
 * ``DELETE /admin/requests/{id}`` — cancel (``settings.manage``): a request the agent has not
   taken yet is removed from the inbox by the API (``cancelled`` at once; a queued worker row
-  likewise); a held change (``pending``) gets a signed ``config.cancel`` (re-authentication),
-  after which the agent reports the target ``cancelled``. Anything else is 409
-  ``request_not_cancellable``. Audited ``admin.request_cancel {state_before}``.
+  likewise, unless the worker has taken it meanwhile); a held change (``pending``) gets a
+  signed ``config.cancel`` (re-authentication), after which the agent reports the target
+  ``cancelled``. Anything else is 409 ``request_not_cancellable``. Audited
+  ``admin.request_cancel {state_before}``.
 * ``POST /admin/requests/{id}/revert`` — "Geri al" (``settings.manage``, re-authentication): a
   signed ``config.revert`` of an applied configuration change; the agent builds the inverse from
   the version it saved before the change, restricted to the paths the change touched, and puts
-  it through the same rules. It keeps the target's section busy. 409 ``request_not_revertible``
-  for anything but an applied change with a version.
+  it through the same rules without a connection test (the values were in force before, so an
+  e-mail server's revert needs no trial recipient). It keeps the target's section busy. 409
+  ``request_not_revertible`` for anything but an applied change with a version.
 
 Reading a request brings its ``admin_requests`` row up to date
 (:meth:`arcilogger_api.admin_channel.Channel.view`), so the history outlives the agent's own
@@ -123,6 +125,21 @@ def _cancelled(db: Session, row: AdminRequestRow, now: datetime) -> None:
     db.flush()
 
 
+def _queued_worker_row(db: Session, row: AdminRequestRow) -> AdminRequestRow:
+    """The worker row, locked, while it is still ``queued``: the job ``admin.requests`` holds
+    it (``FOR UPDATE SKIP LOCKED``) while it sends, and a cancel must not overwrite what it
+    sets (409 ``request_not_cancellable``)."""
+    locked = db.scalar(
+        select(AdminRequestRow)
+        .where(AdminRequestRow.id == row.id, AdminRequestRow.state == "queued")
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
+    )
+    if locked is None:
+        raise admin_error("request_not_cancellable")
+    return locked
+
+
 @router.delete("/{request_id}", status_code=status.HTTP_202_ACCEPTED)
 def cancel_request(
     request_id: RequestId, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
@@ -133,7 +150,7 @@ def cancel_request(
     if row.channel == "worker":
         if before != "queued":
             raise admin_error("request_not_cancellable")
-        _cancelled(db, row, channel.now)
+        _cancelled(db, _queued_worker_row(db, row), channel.now)
     elif before in UNCLAIMED and channel.remove_queued(row.id):
         _cancelled(db, row, channel.now)
     elif channel.view(db, row).state == "pending":
@@ -194,6 +211,8 @@ def revert_request(
         request,
         kind="config.revert",
         options={"target": row.id},
+        # The values were in force before: no connection test, so no trial recipient either.
+        probe=False,
         changes=_inverse(params.get("changes")),
         effects=[str(effect) for effect in params.get("effects") or []],
         busy_section=row.section,

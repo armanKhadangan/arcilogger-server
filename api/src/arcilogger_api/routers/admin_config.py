@@ -993,9 +993,17 @@ def put_tsa(
 
 
 def _tsa_file_change(
-    body: Body, request: Request, db: Session, user: CurrentUser, channel: Channel
+    body: Body,
+    request: Request,
+    db: Session,
+    user: CurrentUser,
+    channel: Channel,
+    *,
+    client: bool = False,
 ) -> AdminAccepted:
     channel.require_enabled()
+    if client:  # one Zamane client is held at a time (it leaves the other steps free)
+        channel.check_section_free(db, "tsa", clients=True)
     uploads = _uploaded(channel, user, body)
     check = checked(channel, db, user, "tsa", body, encrypt=True, uploads=uploads)
     return queue(channel, db, user, request, "tsa", check, files=files_of(check.ops))
@@ -1023,8 +1031,9 @@ def stage_zamane(
     body: ZamaneBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
 ) -> AdminAccepted:
     """An uploaded Zamane client: staged by the agent and held (``pending``) until ApplySystem
-    promotes a known release, or an administrator approves another one on the console."""
-    return _tsa_file_change(body, request, db, user, channel)
+    promotes a known release, or an administrator approves another one on the console. While
+    it is held the other changes of the section can be made; another client cannot."""
+    return _tsa_file_change(body, request, db, user, channel, client=True)
 
 
 # -- uploads (contract 2.4.4) ---------------------------------------------------------------------

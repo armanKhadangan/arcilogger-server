@@ -17,7 +17,8 @@ takes itself (``channel = 'worker'``).
    503 ``admin_agent_unavailable``, nothing queued; older than 30 seconds: queued with the
    warning ``agent_stale``); at most 20 requests and 100 MiB wait in the inbox (429
    ``admin_queue_full``) and one configuration request per section is open (409
-   ``admin_section_busy``);
+   ``admin_section_busy``; a Zamane client held for its console approval does not count, it
+   may wait for days and is checked again when it is applied);
 2. the payload is built and signed;
 3. **one transaction** inserts the ``admin_requests`` row and the audit entry ``admin.request``
    (with the changes, secrets only as ``set``/``unset``), and is committed;
@@ -492,21 +493,47 @@ def _changes_dict(items: Any) -> dict[str, dict[str, JsonValue]]:
     return changes
 
 
-def manual_steps(version: int | None) -> tuple[str | None, str | None]:
-    """What an administrator does on the server when a change could not be undone."""
+#: The installation's interpreter: the ARCILOGGER programs are not on PATH (INSTALL 10), and
+#: ``-I`` keeps a system Python's paths out. The console takes the installation's
+#: configuration path by default.
+CONSOLE_PYTHON: Final = '& "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m'
+#: The script that gives ArciAdmin its rights on the configuration files again.
+VAULT_ACL_SCRIPT: Final = '& "C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVaultAcl.ps1"'
+
+
+def manual_steps(version: int | None, code: str | None) -> tuple[str | None, str | None]:
+    """What an administrator does on the server for a change that needs attention. For
+    ``acl_drift`` the change is in force and only the rights are repaired (putting the
+    previous version back would undo it, and the next change would fail again)."""
+    status = f"{CONSOLE_PYTHON} arcilogger_core.admin status"
+    if code == "acl_drift":
+        return (
+            "Değişiklik yürürlükte; yönetim hizmeti ayar dosyalarına yazma iznini kaybetti. "
+            f"Sunucuda yönetici PowerShell'inde izinleri onarın: {VAULT_ACL_SCRIPT} (ya da "
+            f"kurulumu onarım olarak yeniden çalıştırın). Ardından durumu denetleyin: {status}",
+            "The change is in force; the administration service lost its write access to the "
+            "configuration files. On the server, in an administrator PowerShell, repair the "
+            f"rights: {VAULT_ACL_SCRIPT} (or run the installer again as a repair). Then check "
+            f"the state: {status}",
+        )
     if version is None:
         return None, None
-    command = (
-        f"python -I -m arcilogger_core.admin versions restore {version} --config "
-        '"C:\\ProgramData\\ARCILOGGER\\arcilogger.toml"'
-    )
+    command = f"{CONSOLE_PYTHON} arcilogger_core.admin versions restore {version}"
     return (
-        f"Sunucu konsolunda yönetici olarak önceki ayarları geri yükleyin: {command}. Ardından "
-        "durumu denetleyin: python -I -m arcilogger_core.admin status --config … Yedek sürüm: "
-        f"{version}.",
-        f"On the server console, as an administrator, put the previous settings back: "
-        f"{command}. Then check the state: python -I -m arcilogger_core.admin status --config … "
-        f"Backup version: {version}.",
+        "Sunucuda yönetici PowerShell'inde önceki ayarları geri yükleyin: "
+        f"{command}. Ardından durumu denetleyin: {status}. Yedek sürüm: {version}.",
+        "On the server, in an administrator PowerShell, put the previous settings back: "
+        f"{command}. Then check the state: {status}. Backup version: {version}.",
+    )
+
+
+def _held_client(row: AdminRequestRow) -> bool:
+    """A Zamane client held for its console approval (``approve-jar``): it may wait for days,
+    so it does not keep the ``tsa`` section busy; once approved the agent checks it again
+    against the file in force (``tsa_would_break`` and every other rule of the section)."""
+    files = (row.params or {}).get("files") or []
+    return row.state == "pending" and any(
+        isinstance(item, dict) and item.get("kind") == "zamane_client" for item in files
     )
 
 
@@ -823,9 +850,11 @@ class Channel:
             self.view(db, row)
         return [row for row in rows if not row.terminal]
 
-    def check_section_free(self, db: Session, section: str) -> None:
-        """409 ``admin_section_busy``: one open configuration request per section."""
-        if self.open_rows(db, section=section):
+    def check_section_free(self, db: Session, section: str, *, clients: bool = False) -> None:
+        """409 ``admin_section_busy``: one open configuration request per section. A held
+        Zamane client counts only for another client (``clients``)."""
+        rows = self.open_rows(db, section=section)
+        if any(clients or not _held_client(row) for row in rows):
             raise admin_error("admin_section_busy")
 
     def check_rate(
@@ -1342,7 +1371,7 @@ class Channel:
                 code=error, message_tr=message_tr, message_en=message_en, field=field_path
             )
         manual_tr, manual_en = (
-            manual_steps(version.number if version else None)
+            manual_steps(version.number if version else None, error)
             if state == "needs_attention"
             else (None, None)
         )

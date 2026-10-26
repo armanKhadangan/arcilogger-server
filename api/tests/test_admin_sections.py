@@ -98,6 +98,31 @@ def test_the_mail_server_is_probed_with_the_typed_password(
     assert smtp["secrets"]["smtp.password"]["set"] is True
 
 
+def test_a_mail_server_change_is_reverted_without_a_trial_recipient(
+    client: TestClient, admin: LoggedIn, agent: FakeAgent
+) -> None:
+    """The revert ("Geri al") takes no body: it puts back values that were in force before
+    and is not probed, so it needs no recipient while the server is enabled."""
+    body = {"etag": etag(client, "smtp"), **SMTP, "password": "Örnek-Posta-Parola-3"}
+    assert settle(client, agent, client.put(f"{CONFIG}/smtp", json=body))["state"] == "active"
+    moved = {
+        "etag": etag(client, "smtp"),
+        "host": "posta.ornek.example",
+        "password": "Örnek-Posta-Parola-4",
+        "test_to": OWN,
+    }
+    changed = client.put(f"{CONFIG}/smtp", json=moved)
+    assert settle(client, agent, changed)["state"] == "active"
+    tested = len(agent.prober.calls)
+    revert = client.post(f"{V}/admin/requests/{changed.json()['request_id']}/revert")
+    done = settle(client, agent, revert)
+    assert (done["kind"], done["state"]) == ("config.revert", "active"), done
+    steps = {step["step"]: (step["state"], step["code"]) for step in done["steps"]}
+    assert steps["probe"] == ("skipped", "probe_skipped")
+    assert len(agent.prober.calls) == tested
+    assert client.get(CONFIG).json()["sections"]["smtp"]["host"] == "smtp.ornek.example"
+
+
 def test_mail_server_refusals_name_their_fields(
     client: TestClient, admin: LoggedIn, agent: FakeAgent
 ) -> None:

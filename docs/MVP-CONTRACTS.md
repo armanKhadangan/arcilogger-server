@@ -1027,7 +1027,9 @@ the API key readable (503 `admin_channel_key_missing`) and the agent's heartbeat
 120 s (else 503 `admin_agent_unavailable`, nothing queued; older than 30 s: queued with the
 warning `agent_stale`); at most 20 requests and 100 MiB in the inbox (429 `admin_queue_full`);
 one open configuration request per section (409 `admin_section_busy`; a held change keeps its
-section busy until it is applied or cancelled). One transaction then writes the audit entry
+section busy until it is applied or cancelled, except a Zamane client held for the console's
+`approve-jar`: it may wait for days, so it blocks only another client, and the agent checks it
+again against the file in force when it is approved). One transaction then writes the audit entry
 `admin.request` (target `admin-request:<id>`, details `kind`, `section`, `changes` (secrets only
 `{secret, old, new, changed}`), `files [{kind, sha256, size}]`, `guarded`, `effective_at`,
 `reauth_at`, `effects`, plus `day` of a seal request) and the `admin_requests` row (`params`:
@@ -1138,8 +1140,13 @@ requested_by, created_at, updated_at, effective_at, version: RequestVersion {num
 null, steps: [RequestStepOut {step, state, at, code, message_tr, message_en}], changes, result
 (the action's: `{day, status, message, serial, gen_time}`, `{credits, threshold,
 below_threshold}`, …), error: RequestError {code, message_tr, message_en, field} | null,
-rolled_back, warnings, manual_steps_tr, manual_steps_en}` (the manual steps name `versions
-restore <n>` for `needs_attention`).
+rolled_back, warnings, manual_steps_tr, manual_steps_en}` (for `needs_attention` the manual
+steps name `versions restore <n>` with the installation's interpreter,
+`& "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core.admin`, since
+the programs are not on PATH; for `acl_drift` they name `Set-ArciVaultAcl.ps1`, as the change
+is in force). An apply after which ArciAdmin can no longer write a configuration file is
+`applied` with the warning `write_access_lost` (journal `applied`, code `acl_drift`, a critical
+`R20-admin`).
 
 **Uploads** (contract 2.4.4): the file goes to `admin\inbox\uploads\<id>.bin` (`.tmp` then
 rename) with `<id>.json` (`UploadMeta {id, kind, sha256, size, created_at, user_id}`), is
@@ -1199,15 +1206,18 @@ e-mail not sent within 10 minutes is `expired`. The lease rebuild takes at most 
 the future and not before the first DHCP or ARP record (`leases.first_evidence_time`).
 
 **History** (`routers/admin_requests.py`, M4): a request the agent has not taken yet (`queued`,
-`waiting_for_agent`; a queued worker row likewise) is cancelled by the API itself: its inbox file
-is removed (the API's CREATOR OWNER right) and the row is `cancelled` at once. A held change
+`waiting_for_agent`; a queued worker row likewise, taken with `FOR UPDATE SKIP LOCKED` so a row
+the worker is sending is 409) is cancelled by the API itself: its inbox file is removed (the
+API's CREATOR OWNER right) and the row is `cancelled` at once. A held change
 (`pending`) is cancelled by the agent: a signed `config.cancel` (`options.target`) after a
 re-authentication; the target then reports `cancelled` and its staged files are removed.
 Anything else is 409 `request_not_cancellable`; both ways are audited `admin.request_cancel
 {state_before}`. A revert is a signed `config.revert` of an applied `config.apply` or
 `config.revert` with a version: the agent builds the inverse from the version it saved before the
 change (the paths that change touched, secrets as that version's ciphertext while it is one of
-the 5 kept) and puts it through the same rules; it keeps the target's section busy. The versions
+the 5 kept) and puts it through the same rules, without a connection test (the values were in
+force before, so an e-mail server's revert needs no trial recipient); it keeps the target's
+section busy. The versions
 come from the agent's journal (`applied`/`recovered` lines with a version), since only the agent
 reads `admin\versions`; `actor` is the requester's username.
 
