@@ -15,24 +15,32 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select
+from fastapi.testclient import TestClient
+from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_api import live
+from arcilogger_api.errors import MESSAGES as API_MESSAGES
+from arcilogger_api.live import messages as live_messages
 from arcilogger_api.live.hub import Hub, Timing
-from arcilogger_api.live.schemas import LiveHello, LiveLine
+from arcilogger_api.live.schemas import LiveDropped, LiveEnd, LiveGap, LiveHello, LiveLine
 from arcilogger_api.live.testing import Event, LiveServer, read_events, sign_in, spool_line
+from arcilogger_api.routers import sources as sources_router
+from arcilogger_api.search import messages as search_messages
+from arcilogger_api.security import hash_token, session_problem
 from arcilogger_api.testing import EXAMPLE_SITE_NAME, LoggedIn
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day
-from arcilogger_db.models import AuditLog
+from arcilogger_db.models import AuditLog, User, UserSession
+from arcilogger_db.settings import set_setting
 
 FAST = Timing(
     poll=0.05,
@@ -60,7 +68,10 @@ def traffic(srcip: str = "172.20.41.105", action: str = "accept", dstport: int =
 
 
 def dhcp(ip: str = "172.20.42.57", mac: str = "00:00:5E:00:53:57") -> str:
-    return f"<30>2026-10-26T10:00:00.000+03:00 CORE-R1 dhcp,info dhcp42 assigned {ip} for {mac} PLN-PC14"
+    return (
+        "<30>2026-10-26T10:00:00.000+03:00 CORE-R1 dhcp,info dhcp42 "
+        f"assigned {ip} for {mac} PLN-PC14"
+    )
 
 
 @pytest.fixture
@@ -145,7 +156,7 @@ def clients(server: LiveServer, app_session_factory: sessionmaker[Session]) -> I
         client.close()
 
 
-def open_stream(client: httpx.Client, q: str = "", backfill: int | None = None) -> dict[str, Any]:
+def open_stream(client: httpx.Client, q: str = "", backfill: int | None = 0) -> dict[str, Any]:
     body: dict[str, Any] = {"q": q}
     if backfill is not None:
         body["backfill"] = backfill
@@ -308,3 +319,467 @@ def test_a_stream_shows_the_backfill_and_new_lines_with_raw_references(
         "folders": ["fortigate"],
         "backfill": 2,
     }
+
+
+def test_the_stream_filters_like_arama(clients: Clients, spool: Spool) -> None:
+    client, _ = clients()
+    spool.write("fortigate", traffic())  # the folders exist before the streams open
+    spool.write("core-r1", dhcp(), sender=ROUTER)
+    streams = {
+        q: open_stream(client, q)
+        for q in ("srcip:172.20.41.0/24 -action:accept", "type:dhcp mac:00:00:5e:00:53:57")
+    }
+    readers = {q: Reader(client, opened["stream_id"]) for q, opened in streams.items()}
+    try:
+        spool.write(
+            "fortigate",
+            traffic(action="deny"),
+            traffic(),
+            traffic(srcip="172.20.43.9", action="deny"),
+        )
+        spool.write("core-r1", dhcp(mac="00:00:5E:00:53:58"), dhcp(), sender=ROUTER)
+        first, second = readers.values()
+        first.wait(lambda r: len(r.lines()) == 1)
+        second.wait(lambda r: len(r.lines()) == 1)
+        time.sleep(0.3)
+        assert [(line["source"], line["line"]) for line in first.lines()] == [("fortigate", 2)]
+        assert [(line["source"], line["line"]) for line in second.lines()] == [("core-r1", 3)]
+        assert second.lines()[0]["summary"]["mac"].lower() == "00:00:5e:00:53:57"
+        assert second.lines()[0]["kind"] == "dhcp"
+    finally:
+        for reader in readers.values():
+            reader.close()
+
+
+def test_new_unknown_senders_and_network_members_appear(clients: Clients, spool: Spool) -> None:
+    client, _ = clients()
+    opened = open_stream(client, "source:unknown-*,ap")
+    reader = Reader(client, opened["stream_id"])
+    try:
+        reader.wait(lambda r: bool(r.of("hello")))
+        spool.write(
+            "unknown-198.51.100.23",
+            "<13>Oct 26 10:00:00 yeni-cihaz test mesaji",
+            sender="198.51.100.23",
+        )
+        spool.write(
+            "ap-172.20.10.200",
+            "<30>2026-10-26T10:00:00.000+03:00 AP-2 wireless,info deneme",
+            sender="172.20.10.200",
+        )
+        spool.write("fortigate", traffic())
+        reader.wait(lambda r: len(r.lines()) == 2, seconds=5)
+        assert sorted(line["source"] for line in reader.lines()) == [
+            "ap-172.20.10.200",
+            "unknown-198.51.100.23",
+        ]
+        unknown = next(line for line in reader.lines() if line["source"].startswith("unknown-"))
+        # its raw drawer opens before ingest has seen the sender (R26)
+        raw = client.get(
+            "/api/v1/raw",
+            params={"source": unknown["source"], "day": unknown["day"], "line": 1, "offset": 0},
+        )
+        assert raw.status_code == 200, raw.text
+    finally:
+        reader.close()
+
+
+def test_rate_limited_lines_are_reported_as_dropped(
+    clients: Clients, spool: Spool, app_session_factory: sessionmaker[Session]
+) -> None:
+    with app_session_factory() as session:
+        set_setting(session, "live.max_lines_per_second", 10, updated_by="test")
+        session.commit()
+    client, _ = clients()
+    spool.write("fortigate", traffic())
+    opened = open_stream(client)
+    reader = Reader(client, opened["stream_id"])
+    try:
+        reader.wait(lambda r: bool(r.of("hello")))
+        spool.write("fortigate", *(traffic() for _ in range(60)))
+        reader.wait(
+            lambda r: sum(e.data["rate_limited"] for e in r.of("dropped")) + len(r.lines()) == 60
+        )
+        dropped = [LiveDropped.model_validate(event.data) for event in reader.of("dropped")]
+        assert sum(item.rate_limited for item in dropped) >= 40
+        assert "saniyede en fazla 10 satır gösterilir" in dropped[0].message_tr
+        assert "at most 10 lines a second are shown" in dropped[0].message_en
+    finally:
+        reader.close()
+
+
+def test_pause_and_resume_replay_what_was_missed(clients: Clients, spool: Spool) -> None:
+    client, _ = clients()
+    spool.write("fortigate", traffic())
+    opened = open_stream(client, "action:deny", backfill=0)
+    reader = Reader(client, opened["stream_id"])
+    reader.wait(lambda r: bool(r.of("hello")))
+    spool.write("fortigate", traffic(action="deny"))
+    reader.wait(lambda r: len(r.lines()) == 1)
+    last_id = reader.of("line")[-1].id
+    reader.close()  # Duraklat: the connection goes, the stream lingers
+    spool.write("fortigate", traffic(action="deny"), traffic(), traffic(action="deny"))
+    time.sleep(0.4)
+    resumed = Reader(client, opened["stream_id"], last_event_id=last_id)
+    try:
+        resumed.wait(lambda r: len(r.lines()) == 2)
+        assert [line["line"] for line in resumed.lines()] == [3, 5]
+        assert resumed.of("gap") == []
+    finally:
+        resumed.close()
+    # a resume from another hub (the API restarted) cannot replay
+    other = Reader(client, opened["stream_id"], last_event_id="baska-bir-epoch:3")
+    try:
+        other.wait(lambda r: bool(r.of("gap")))
+        gap = LiveGap.model_validate(other.of("gap")[0].data)
+        assert (gap.reason, gap.missed) == ("hub_restarted", None)
+        assert "Arama'da" in gap.message_tr
+    finally:
+        other.close()
+
+
+def test_a_resume_after_the_buffer_moved_on_announces_a_gap(
+    clients: Clients, spool: Spool, app_session_factory: sessionmaker[Session]
+) -> None:
+    with app_session_factory() as session:
+        set_setting(session, "live.buffer_lines", 500, updated_by="test")
+        session.commit()
+    client, _ = clients()
+    spool.write("fortigate", traffic())
+    opened = open_stream(client, "action:deny", backfill=0)
+    reader = Reader(client, opened["stream_id"])
+    reader.wait(lambda r: bool(r.of("hello")))
+    spool.write("fortigate", traffic(action="deny"))
+    reader.wait(lambda r: len(r.lines()) == 1)
+    last_id = reader.of("line")[-1].id
+    reader.close()
+    spool.write("fortigate", *(traffic(action="deny") for _ in range(3)))
+    spool.write("fortigate", *(traffic() for _ in range(600)))  # pushes them out of the buffer
+    time.sleep(0.6)
+    resumed = Reader(client, opened["stream_id"], last_event_id=last_id)
+    try:
+        resumed.wait(lambda r: bool(r.of("gap")))
+        gap = LiveGap.model_validate(resumed.of("gap")[0].data)
+        assert (gap.reason, gap.missed) == ("resume_too_late", 3)
+    finally:
+        resumed.close()
+
+
+def test_closing_audits_the_delivered_ranges(
+    clients: Clients, spool: Spool, app_session_factory: sessionmaker[Session]
+) -> None:
+    client, who = clients("auditor")
+    spool.write("fortigate", traffic())
+    opened = open_stream(client, backfill=1)
+    reader = Reader(client, opened["stream_id"])
+    reader.wait(lambda r: len(r.lines()) == 1)
+    spool.write("fortigate", traffic(), traffic())
+    reader.wait(lambda r: len(r.lines()) == 3)
+    response = client.delete(f"/api/v1/live/streams/{opened['stream_id']}")
+    assert response.status_code == 204
+    reader.done.wait(5)
+    reader.close()
+    closes = audits(app_session_factory, "live.close")
+    assert len(closes) == 1
+    details = closes[0].details
+    assert details["reason"] == "closed"
+    assert details["delivered"] == 3
+    assert details["ranges"] == [
+        {"folder": "fortigate", "day": spool.path("fortigate").stem, "from_line": 1, "to_line": 3}
+    ]
+    assert closes[0].actor_id == who.user_id
+    again = client.get(f"/api/v1/live/streams/{opened['stream_id']}", headers=STREAM_HEADERS)
+    assert (again.status_code, again.json()["error"]["code"]) == (404, "live_stream_not_found")
+
+
+def test_a_stream_belongs_to_its_user_and_session(
+    clients: Clients, spool: Spool, app_session_factory: sessionmaker[Session], server: LiveServer
+) -> None:
+    owner_client, owner = clients()
+    opened = open_stream(owner_client)
+    url = f"/api/v1/live/streams/{opened['stream_id']}"
+    stranger, _ = clients()
+    assert stranger.get(url, headers=STREAM_HEADERS).status_code == 404
+    assert stranger.delete(url).status_code == 404
+    # the same user in another session (another browser)
+    with httpx.Client(base_url=server.url, timeout=10) as other_session:
+        with app_session_factory() as session:
+            from arcilogger_api.security import create_session
+
+            issued = create_session(session, session.get_one(User, owner.user_id), mfa_passed=True)
+            session.commit()
+        other_session.cookies.set("arci_session", issued.token)
+        other_session.cookies.set("arci_csrf", issued.csrf_token)
+        other_session.headers["X-CSRF-Token"] = issued.csrf_token
+        response = other_session.get(url, headers=STREAM_HEADERS)
+        assert (response.status_code, response.json()["error"]["code"]) == (
+            404,
+            "live_stream_not_found",
+        )
+    assert owner_client.delete(url).status_code == 204
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ("revoke", "session_revoked"),
+        ("idle", "session_idle"),
+        ("role", "permission_changed"),
+        ("notice", "privacy_notice_required"),
+        ("inactive", "user_inactive"),
+    ],
+)
+def test_the_session_check_ends_the_stream(
+    clients: Clients,
+    spool: Spool,
+    app_session_factory: sessionmaker[Session],
+    change: str,
+    code: str,
+) -> None:
+    client, who = clients()
+    opened = open_stream(client)
+    reader = Reader(client, opened["stream_id"])
+    reader.wait(lambda r: bool(r.of("hello")))
+    token = hash_token(who.session_token)
+    with app_session_factory() as session:
+        if change == "revoke":
+            session.execute(
+                update(UserSession)
+                .where(UserSession.token_hash == token)
+                .values(revoked_at=datetime.now(UTC))
+            )
+        elif change == "idle":
+            back = datetime.now(UTC) - timedelta(minutes=31)
+            session.execute(
+                update(UserSession).where(UserSession.token_hash == token).values(last_seen_at=back)
+            )
+        elif change == "role":
+            session.execute(update(User).where(User.id == who.user_id).values(role="hr"))
+        elif change == "notice":
+            set_setting(session, "privacy.notice_version", "2", updated_by="test")
+        else:
+            session.execute(update(User).where(User.id == who.user_id).values(active=False))
+        session.commit()
+    try:
+        reader.wait(lambda r: bool(r.of("end")))
+        end = LiveEnd.model_validate(reader.of("end")[0].data)
+        assert end.code == code
+        assert end.message_tr
+        assert end.message_en
+        reader.done.wait(5)
+        assert reader.done.is_set(), "the response ends after the end event"
+    finally:
+        reader.close()
+    eventually(
+        lambda: (
+            [entry.details["reason"] for entry in audits(app_session_factory, "live.close")]
+            == [code]
+        )
+    )
+
+
+def test_keepalives_never_count_as_activity(
+    clients: Clients, spool: Spool, app_session_factory: sessionmaker[Session]
+) -> None:
+    client, who = clients()
+    opened = open_stream(client)
+    token = hash_token(who.session_token)
+    with app_session_factory() as session:
+        seen = session.scalars(
+            select(UserSession.last_seen_at).where(UserSession.token_hash == token)
+        ).one()
+    reader = Reader(client, opened["stream_id"])
+    try:
+        reader.wait(lambda r: r.keepalives >= 3, seconds=5)  # and several session checks
+        status = client.get("/api/v1/live/status", headers={"X-Arci-Background": "1"})
+        assert status.status_code == 200
+        assert status.json()["streams"] == 1
+    finally:
+        reader.close()
+    with app_session_factory() as session:
+        after = session.scalars(
+            select(UserSession.last_seen_at).where(UserSession.token_hash == token)
+        ).one()
+    assert after == seen
+
+
+def test_the_stream_holds_no_database_connection(
+    app: FastAPI, clients: Clients, spool: Spool, hub: Hub
+) -> None:
+    hub.timing = Timing(poll=0.05, listing=0.2, keepalive=0.2, session_check=60.0)
+    engine: Engine = app.state.arci.engine
+    client, _ = clients()
+    spool.write("fortigate", traffic())
+    opened = open_stream(client)
+    reader = Reader(client, opened["stream_id"])
+    try:
+        reader.wait(lambda r: r.keepalives >= 1)
+        for _ in range(5):
+            spool.write("fortigate", traffic())
+            time.sleep(0.1)
+            assert engine.pool.checkedout() == 0  # type: ignore[attr-defined]
+        reader.wait(lambda r: len(r.lines()) == 5)
+        assert reader.headers is not None
+        assert reader.headers["content-type"] == "text/event-stream; charset=utf-8"
+        assert reader.headers["cache-control"] == "no-store"
+        assert reader.headers["x-accel-buffering"] == "no"
+    finally:
+        reader.close()
+
+
+# -- refusals ------------------------------------------------------------------------------------
+
+
+def test_opening_refusals_are_plain_json(
+    clients: Clients, spool: Spool, layout: Layout, app_session_factory: sessionmaker[Session]
+) -> None:
+    client, _ = clients()
+    for q, code in (
+        ("banana:1", "search_unknown_field"),
+        ("vlan:99", "search_vlan_unknown"),
+        ("srcip:1.2.3.4 OR srcip:1.2.3.5", "search_or_unsupported"),
+        ("ab", "search_term_too_short"),
+    ):
+        response = client.post("/api/v1/live/streams", json={"q": q})
+        assert (response.status_code, response.json()["error"]["code"]) == (422, code), q
+        assert "start" in response.json()["error"]["details"]
+    for body in ({"q": "x" * 1001}, {"backfill": 51}, {"backfill": -1}, {"q": "", "since": 1}):
+        response = client.post("/api/v1/live/streams", json=body)
+        assert (response.status_code, response.json()["error"]["code"]) == (
+            422,
+            "validation_error",
+        ), body
+    first, second = open_stream(client, backfill=None), open_stream(client)
+    response = client.post("/api/v1/live/streams", json={})
+    assert (response.status_code, response.json()["error"]["code"]) == (429, "live_stream_limit")
+    assert "en fazla 2 canlı akış" in response.json()["error"]["message_tr"]
+    assert "server total 4" in response.json()["error"]["message_en"]
+    for opened in (first, second):
+        assert client.delete(f"/api/v1/live/streams/{opened['stream_id']}").status_code == 204
+    others = [clients()[0] for _ in range(2)]
+    for other in others:
+        open_stream(other)
+        open_stream(other)
+    response = client.post("/api/v1/live/streams", json={})
+    assert (response.status_code, response.json()["error"]["code"]) == (429, "live_stream_limit")
+    opens = audits(app_session_factory, "live.open")
+    assert len(opens) == 6
+    assert opens[0].details["backfill"] == 50  # the default: live.backfill_lines
+
+
+def test_an_unreadable_spool_folder_is_503(clients: Clients, layout: Layout) -> None:
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.spool.write_text("not a folder", encoding="utf-8")
+    client, _ = clients()
+    response = client.post("/api/v1/live/streams", json={})
+    assert (response.status_code, response.json()["error"]["code"]) == (503, "live_unavailable")
+    assert "Ham kayıt klasörü okunamıyor" in response.json()["error"]["message_tr"]
+
+
+@pytest.mark.parametrize(
+    ("role", "notice", "code"),
+    [
+        ("hr", True, "forbidden"),
+        ("viewer", True, "forbidden"),
+        ("auditor", False, "privacy_notice_required"),
+    ],
+)
+def test_permissions_and_the_kvkk_notice(
+    clients: Clients, spool: Spool, role: str, notice: bool, code: str
+) -> None:
+    client, _ = clients(role, notice=notice)
+    response = client.post("/api/v1/live/streams", json={})
+    assert (response.status_code, response.json()["error"]["code"]) == (403, code)
+    for path in ("/api/v1/live/status",):
+        if role in ("hr", "viewer"):
+            assert client.get(path).status_code == 403
+
+
+def test_csrf_is_required_to_open_and_close(clients: Clients) -> None:
+    client, _ = clients()
+    del client.headers["X-CSRF-Token"]
+    response = client.post("/api/v1/live/streams", json={})
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "csrf_failed")
+
+
+# -- texts and the session check -----------------------------------------------------------------
+
+
+def test_every_text_has_both_languages_with_the_same_placeholders() -> None:
+    """The three catalogues of contract 2.20 (search, live, sources)."""
+    catalogues: list[dict[str, tuple[str, str]]] = [
+        dict(search_messages.MESSAGES),
+        dict(search_messages.NOTICES),
+        dict(live_messages.MESSAGES),
+        dict(live_messages.END_MESSAGES),
+        dict(live_messages.DROPPED_REASONS),
+        {"dropped": live_messages.DROPPED_MESSAGE, "gap": live_messages.GAP_MESSAGE},
+        dict(sources_router.MESSAGES),
+    ]
+    for catalogue in catalogues:
+        for code, (text_tr, text_en) in catalogue.items():
+            assert text_tr.strip(), code
+            assert text_en.strip(), code
+            assert search_messages.placeholders(text_tr) == search_messages.placeholders(text_en), (
+                code
+            )
+    assert set(live_messages.STATUS) == set(live_messages.MESSAGES)
+    for code in live_messages.SESSION_END_CODES:
+        assert all(live_messages.end_texts(code)), code
+    assert live_messages.end_texts("time_limit", minutes=60)[0].startswith("Canlı akış 60 dakika")
+
+
+def test_session_problem_refuses_what_authentication_refuses(
+    client: TestClient,
+    login_as: Callable[..., LoggedIn],
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    """``session_problem`` (the stream's 30 s check) gives the code ``get_current_user`` answers
+    with, for every way a session can end (contract 2.14.6: a behaviour-preserving extraction)."""
+    now = datetime.now(UTC)
+    changes: dict[str, Callable[[Session, LoggedIn], None]] = {
+        "ok": lambda session, who: None,
+        "session_revoked": lambda session, who: _session(session, who, revoked_at=now),
+        "session_expired": lambda session, who: _session(
+            session, who, expires_absolute=now - timedelta(seconds=1)
+        ),
+        "session_idle": lambda session, who: _session(
+            session, who, last_seen_at=now - timedelta(minutes=31)
+        ),
+        "user_inactive": lambda session, who: _user(session, who, active=False),
+        "mfa_required": lambda session, who: _session(session, who, mfa_passed=False),
+    }
+    for expected, change in changes.items():
+        who = login_as(client, "auditor")
+        with app_session_factory() as session:
+            change(session, who)
+            session.commit()
+        with app_session_factory() as session:
+            found = session_problem(session, hash_token(who.session_token), datetime.now(UTC))
+        response = client.get("/api/v1/live/status", headers={"X-Arci-Background": "1"})
+        if expected == "ok":
+            assert found is None
+            assert response.status_code == 200
+        else:
+            assert found == expected
+            assert (response.status_code, response.json()["error"]["code"]) == (401, expected)
+    with app_session_factory() as session:
+        assert session_problem(session, "0" * 64, now) == "session_invalid"
+
+
+def _session(session: Session, who: LoggedIn, **values: Any) -> None:
+    session.execute(
+        update(UserSession)
+        .where(UserSession.token_hash == hash_token(who.session_token))
+        .values(**values)
+    )
+
+
+def _user(session: Session, who: LoggedIn, **values: Any) -> None:
+    session.execute(update(User).where(User.id == who.user_id).values(**values))
+
+
+def test_the_package_documents_its_parts() -> None:
+    assert live.__doc__ is not None
+    assert "hub" in live.__doc__
+    assert API_MESSAGES["session_idle"][0]

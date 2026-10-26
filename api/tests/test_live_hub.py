@@ -13,11 +13,11 @@ from __future__ import annotations
 import asyncio
 import secrets
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import TypeVar
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -35,7 +35,6 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day
 from arcilogger_db.models import AuditLog
 
-T = TypeVar("T")
 FAST = Timing(poll=0.02, listing=0.05, idle_stop=60.0, linger=0.5, slow_client=0.5)
 FIREWALL = "172.31.255.1"
 
@@ -91,8 +90,8 @@ def hub(app: FastAPI, clock: Clock) -> Hub:
     return Hub(app.state.arci, timing=FAST, clock=clock.monotonic, now=clock.now)
 
 
-def run(coroutine: Awaitable[T]) -> T:
-    return asyncio.run(coroutine)  # type: ignore[arg-type]
+def run[T](coroutine: Coroutine[Any, Any, T]) -> T:
+    return asyncio.run(coroutine)
 
 
 class Spool:

@@ -8,6 +8,15 @@ Owner: a later work package. Endpoints are added here only; the router is mounte
 
 from __future__ import annotations
 
+from typing import Final
+
 from fastapi import APIRouter
 
 router = APIRouter(prefix="/sources", tags=["sources"])
+
+MESSAGES: Final = {
+    "source_not_found": (
+        "Bu adla bir log kaynağı tanımlı değil veya hiç görülmedi.",
+        "No log source with this name is configured or has been seen.",
+    ),
+}
