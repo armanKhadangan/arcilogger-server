@@ -160,13 +160,19 @@ def test_up_and_down_on_native_partitions(empty_engine: Engine) -> None:
 
 
 def test_up_and_down_on_timescaledb_with_compressed_chunks(empty_engine: Engine) -> None:
+    """The one place that shows the plain ``CREATE INDEX`` is accepted with compressed chunks
+    present: on the Linux CI job (``ARCILOGGER_EXPECT_TIMESCALE=1``) it fails instead of
+    skipping."""
+    expected = os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
     if not _timescale(empty_engine):
-        if os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1":
+        if expected:
             pytest.fail("TimescaleDB expected but not installed")
         pytest.skip("TimescaleDB is not installed (the Linux CI job runs this)")
     upgrade(empty_engine, revision=BEFORE, timescale="require")
     status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     if not status.get("compression"):
+        if expected:
+            pytest.fail(f"TimescaleDB expected with compression: {status}")
         pytest.skip(f"no compression in this TimescaleDB edition: {status}")
     time = _old_data(empty_engine, 30)
     with empty_engine.begin() as connection:

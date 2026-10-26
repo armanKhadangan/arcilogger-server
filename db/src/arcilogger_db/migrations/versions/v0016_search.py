@@ -21,11 +21,15 @@ ADR-0015 (Arama, Canlı Akış, Kaynaklar):
   clears the value. ``NULL`` (every file of a new installation): counted from its first line.
 * ``ix_fg_web_rhost_time`` on ``fg_web (reverse(lower(hostname)), time)``: "this domain and its
   subdomains" becomes a prefix range of the reversed host name. On native partitions the index of
-  the parent reaches every partition; on TimescaleDB the hypertable's index reaches every chunk,
-  the compressed ones included (a plain ``CREATE INDEX``, inside the upgrade's one transaction:
-  ``timescaledb.transaction_per_chunk`` cannot run in a transaction and is not used). The build
-  reads all of ``fg_web`` once: the installer stops the services for an upgrade and the spool
-  keeps every incoming line meanwhile (docs/INSTALL.md gives the measured time per 10 M rows).
+  the parent reaches every partition. On TimescaleDB it is a plain ``CREATE INDEX`` on the
+  hypertable, inside the upgrade's one transaction (``timescaledb.transaction_per_chunk`` cannot
+  run in a transaction and is not used). TimescaleDB 2.30's source creates such an index on every
+  chunk and checks a compressed chunk apart only for a unique index; on a compressed chunk the
+  index holds just the rows not compressed (compressed rows are read by decompression). That the
+  statement is accepted with compressed chunks present is not yet shown: the Linux
+  TimescaleDB CI job runs ``db/tests/test_migration_0016.py``, and this revision is not released
+  before that job is green. The build reads all of ``fg_web`` once: the installer stops the
+  services for an upgrade and the spool keeps every incoming line meanwhile.
 
 No partition and no hypertable is created: the new tables are small (``search_counts`` about
 450 keys an hour for 150 users, about 4 M rows over 400 days).

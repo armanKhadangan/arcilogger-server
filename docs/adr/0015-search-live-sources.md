@@ -117,9 +117,16 @@ these columns is indexed).
 - Ingest gains one step (`counts`: about 50–200 upserted keys per batch) and one index; the gate
   is at most 5 % slower in `bench_throughput.py --repeat 3` ([INGEST.md](../INGEST.md)).
 - The upgrade to `0016_search` builds the `fg_web` index over the whole table (the services are
-  stopped during an upgrade and the spool keeps every incoming line; the time per 10 M rows is in
-  [INSTALL.md](../INSTALL.md)). On TimescaleDB it is a plain `CREATE INDEX` on the hypertable,
-  which reaches every chunk, compressed ones included, inside the upgrade's one transaction.
+  stopped during an upgrade and the spool keeps every incoming line); the installation guide
+  ([KURULUM.md](../KURULUM.md) / [INSTALL.md](../INSTALL.md)) is to state the build time measured
+  per 10 M rows. On TimescaleDB it is a plain `CREATE INDEX` on the hypertable inside the
+  upgrade's one transaction. TimescaleDB's source creates it on every chunk; on a compressed chunk
+  it holds only the rows not compressed, so `domain:` reads compressed chunks (older than 7 days)
+  by decompression, within the search's time budget. **Pending:** that the statement is accepted
+  with compressed chunks present is checked by the Linux TimescaleDB CI job
+  (`db/tests/test_migration_0016.py`) and not yet shown; the revision is not released before it
+  is green. Should TimescaleDB refuse it, the index is built after the upgrade's transaction
+  instead, and this record is amended.
 - Free text is slow by nature: the answer is honest about a partial scan, and the syntax help
   points to the fast fields (`srcip:`, `domain:`, `mac:`, `qname:`). `ip:` on the UTM tables is a
   scan, because their destination addresses have no index.
