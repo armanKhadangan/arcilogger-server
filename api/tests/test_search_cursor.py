@@ -181,7 +181,7 @@ def test_frontier_cursors_continue_where_the_budget_stopped(
 # -- the cursor itself ----------------------------------------------------------------------------
 
 
-def _raw(data: dict[str, Any]) -> str:
+def _raw(data: Any) -> str:
     return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
 
 
@@ -192,7 +192,13 @@ def test_cursors_round_trip() -> None:
         assert decode(text_, start=START, end=END, ranks={0, 3}) == cursor
 
 
-GOOD = {"v": 1, "k": "last", "t": "2026-10-26T09:30:00.123456+00:00", "b": 2, "i": 7}
+GOOD: dict[str, Any] = {
+    "v": 1,
+    "k": "last",
+    "t": "2026-10-26T09:30:00.123456+00:00",
+    "b": 2,
+    "i": 7,
+}
 
 
 @pytest.mark.parametrize(

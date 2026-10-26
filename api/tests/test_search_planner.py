@@ -14,9 +14,9 @@ from sqlalchemy.dialects import postgresql
 
 from arcilogger_api.search import SearchQueryError, parse_query, sql
 from arcilogger_api.search.cursor import bounds
-from arcilogger_api.search.fields import CLIENT_IP, DepartmentEntry, SiteNetwork
+from arcilogger_api.search.fields import DepartmentEntry, SiteNetwork
 from arcilogger_api.search.planner import Plan, describe_query, plan_query, rank_of
-from arcilogger_db.kinds import KINDS, TYPED_TABLES
+from arcilogger_db.kinds import CLIENT_IP, KINDS, TYPED_TABLES
 from arcilogger_db.models import TIME_SERIES_TABLES
 
 SITE = SiteNetwork(

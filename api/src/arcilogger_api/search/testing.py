@@ -136,6 +136,7 @@ class Lines:
                 subtype = subtype if subtype is not None else default_subtype
             else:
                 type = "syslog"
+        offset = (number - 1) * LINE_BYTES
         common = {
             "time": time,
             "time_received": received,
@@ -143,7 +144,7 @@ class Lines:
             "sender": sender or SENDERS.get(source, "172.20.10.9"),
             "raw_day": day,
             "raw_line": number,
-            "raw_offset": (number - 1) * LINE_BYTES,
+            "raw_offset": offset,
         }
         messages = Base.metadata.tables["messages"]
         message_id = session.execute(
@@ -167,9 +168,7 @@ class Lines:
             row_id = session.execute(
                 insert(found).values(**values).returning(found.c.id)
             ).scalar_one()
-        written = Written(
-            table, row_id, message_id, time, source, day, number, common["raw_offset"]
-        )
+        written = Written(table, row_id, message_id, time, source, day, number, offset)
         self.written.append(written)
         return written
 

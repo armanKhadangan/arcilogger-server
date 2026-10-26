@@ -370,7 +370,7 @@ def as_keys(expected: list[Any]) -> list[str]:
 def stats(oracle: Oracle, search_id: str) -> dict[str, Any]:
     response = oracle.client.post(f"{API}/stats", json={"search_id": search_id})
     assert response.status_code == 200, response.text
-    return response.json()
+    return dict(response.json())
 
 
 def check_stats(answer: dict[str, Any], expected: dict[str, Any]) -> None:
