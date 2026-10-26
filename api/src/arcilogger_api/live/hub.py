@@ -139,6 +139,10 @@ class TokenBucket:
         self.tokens = rate
         self.at = clock()
 
+    def set_rate(self, rate: float) -> None:
+        self.rate = rate
+        self.tokens = min(self.tokens, rate)
+
     def take(self) -> bool:
         now = self.clock()
         self.tokens = min(self.rate, self.tokens + (now - self.at) * self.rate)
@@ -482,7 +486,7 @@ class Hub:
         self.settings, self.site = settings, site
         if self.buffer.maxlen != settings.buffer_lines:
             self.buffer = deque(self.buffer, maxlen=settings.buffer_lines)
-        self._parse.rate = settings.parse_lines_per_second
+        self._parse.set_rate(settings.parse_lines_per_second)
         self.streams[stream.id] = stream
         future: asyncio.Future[list[dict[str, Any]]] = asyncio.get_running_loop().create_future()
         self._opens.append((stream, future))
