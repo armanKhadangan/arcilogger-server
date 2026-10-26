@@ -129,7 +129,10 @@ security directly:
 
 - installation, upgrade, rollback, removal; PostgreSQL; a database restore;
 - `[database]`, `[api]`, `[collector]`, `[ingest]`, `[worker]`, `[seal]`, `data_dir`,
-  `secrets_dir`;
+  `secrets_dir` (`data_dir` must equal the installer's record
+  `C:\ProgramData\ARCILOGGER\data-root.txt`; otherwise the services and tasks refuse the
+  configuration and the installer stops in its preflight; to move the data folder deliberately,
+  run the installer with `-DataRoot`);
 - a provider other than Zamane, a free URL, port, digest, credit pattern, verify flag,
   `roots_dir`, a free `java` path; removing a root or a legal fingerprint;
 - `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore`; the two database settings that name
@@ -155,6 +158,12 @@ The values are chosen with installer parameters and remembered by later runs
 | `-ZamaneHoldHours` | 24 | how long before an unknown Zamane client can be approved (1–168 hours) |
 | `-DisableBrowserAdministration` | off | switches the browser administration off: ArciAdmin refuses every request, ApplySystem does nothing; the 5651 functions (collection, sealing, verification) are not affected at all |
 
+The installer compares every enabled log source of the configuration with these networks: when
+one lies outside them it stops before any change and names the `-SourceNetwork` value to give
+(otherwise ApplySystem would take that sender out of the 514 rule at its first run). Such a
+source added by hand later stays open where the firewall has it open already and is not opened
+otherwise; either way an `R20-admin` alert and the code `source_outside_policy` show it.
+
 Running the installer again with `-Upgrade` and no parameter does not switch the browser
 administration back on (the remembered choice applies); pass `-DisableBrowserAdministration:$false`.
 The file can also be edited by hand: the installer keeps the hand-written values of a valid file;
@@ -177,6 +186,14 @@ has not been loaded yet".
 The first browser change of sources moves every `[[sources]]` table into a marked block; comment
 lines inside those tables are lost then (the previous file stays in `admin\versions`).
 
+**Secrets on the console.** `arcilogger-core secret set` / `secret delete` replace `secrets.json`
+with a new file, which lacks ArciAdmin's write right. Afterwards run
+`& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an administrator PowerShell (or
+run the installer again); otherwise the next change made in the browser ends in "manual action
+needed" with `acl_drift`, and no secret can change from the browser. The installer does this
+itself after the values it stores (the database password, the Kamu SM credentials at the end of
+the first installation).
+
 ## 8. Troubleshooting
 
 ```powershell
@@ -195,6 +212,8 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # bring the f
 - **"Manual action needed":** put the previous version back on the console with the version
   number from the page (`versions restore <N>`), then
   `Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker`.
+- **`acl_drift`:** ArciAdmin cannot write `arcilogger.toml` or `secrets.json` (most often after
+  a console `secret set`, section 7): run `Set-ArciVaultAcl.ps1`, then save the change again.
 - **The firewall could not be updated:** the last result of the ApplySystem task and event 4106;
   after an installation with `-SkipFirewall` the firewall is not ARCILOGGER's
   (`firewall_not_managed`) and its rules are kept by hand.

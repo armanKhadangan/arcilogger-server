@@ -111,6 +111,10 @@ bölüm 4). Aşağıdaki adımlar konsoldaki yoldur.
    oluşturur): `secret set kamusm.customer`, `secret set kamusm.password`. Komutlar yönetici
    PowerShell'inde tam yoluyla çalışır:
    `& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" secret set kamusm.customer`.
+   Sonra `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"`: konsoldan her
+   `secret set` `secrets.json` dosyasını yeniler ve yönetim hizmetinin (ArciAdmin) yazma hakkını
+   düşürür ([AYARLAR.md](AYARLAR.md) bölüm 7). Web arayüzündeki Kamu SM sihirbazıyla kaydedilen
+   değerlerde bu gerekmez.
 5. `arcilogger-core.exe credit` → kontör okunuyor mu? (K4)
 6. `arcilogger-core.exe tsa-test` → 1 KB rastgele dosya damgalanır ve doğrulanır; çıktı genTime,
    seri no, TSA adı ve sertifika geçerliliğini gösterir. Oluşan `.zd` dosyası K1/K5/K6

@@ -540,6 +540,21 @@ powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upg
 The values of a valid hand-edited `policy.json` are kept; an invalid file switches the browser
 administration off and the installer rewrites it, with a warning.
 
+The installer compares the address of every enabled log source of the configuration with these
+networks. When a source lies outside them (a remote site's public or CGNAT address, say, or a
+network wider than /16), it stops before any change and names the `-SourceNetwork` value to
+give: otherwise `ApplySystem` would take that sender out of the 514 rule at its first run, with
+no change in the browser at all. With the browser administration off or with `-SkipFirewall`
+this is a warning.
+
+**The data root record:** the installer writes the data folder into
+`C:\ProgramData\ARCILOGGER\data-root.txt` (only administrators can change it; deleted and created
+anew on every run). The services and tasks refuse a configuration whose `data_dir` differs from
+this record. Every later run takes the data folder from the record: when `data_dir` in
+`arcilogger.toml` differs from it, or the record cannot be read, the installer stops before any
+change and names both values. If you moved the data folder deliberately (after copying the
+data), run the installer with `-DataRoot <new folder>`; only then does the record change.
+
 **The programs the tasks run:** the tasks run programs from trusted places only
 (`C:\Program Files`, `C:\Program Files (x86)`, the `java` on the system `PATH`). The installer
 records a `java` outside Program Files, a `[tsa] java` command with extra arguments and the
@@ -633,7 +648,14 @@ roots it ends with "no pinned root certificates" after spending the credit. The 
    $core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
    & $core secret set kamusm.customer
    & $core secret set kamusm.password
+   & "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"   # then: the administration service's right
    ```
+
+   Every console `secret set` / `secret delete` replaces `secrets.json` with a new file, which
+   lacks the administration service's (`ArciAdmin`) write right. Run `Set-ArciVaultAcl.ps1` (or
+   the installer) again afterwards; otherwise the next change made in the browser ends in
+   "manual action needed" with `acl_drift`. After the values entered at the end of the first
+   installation the installer does this itself.
 3. **Credit:** `& $core credit` (output format: open item K4).
 4. **Connection test:** `& $core tsa-test` (stamps and verifies 1 KB of random data, 1 kontör).
 
@@ -677,8 +699,8 @@ which reaches the network anonymously. For a share open to the replica user only
 on the storage device with read-write on that folder only, then set
 `[replica] target = '\\<NAS>\arcilogger-worm'` and `[replica] user = '<NAS>\arcireplica'` (with
 `enabled`; `<NAS>` is the device's name), store the password with
-`& $core secret set replica.password` and run `& $core replica --test` (connect, write, read and
-delete a probe file). ARCILOGGER connects to the share with that user for each run (no drive
+`& $core secret set replica.password` (then `Set-ArciVaultAcl.ps1`, section 10) and run
+`& $core replica --test` (connect, write, read and delete a probe file). ARCILOGGER connects to the share with that user for each run (no drive
 letter, never remembered in a profile) and disconnects afterwards; the password never appears on
 a command line or in a log. Copies are written to `<target>\.arcilogger-staging\` first and moved
 into the day folder once their hash matches — **verify on site** that the WORM share allows
@@ -829,6 +851,18 @@ sonraki değişiklikler geri alındı; denetim kaydında duruyorlar [later brows
 back; they remain in the audit log]". Without the copy the rollback stops with `3` and asks for
 the file to be fixed by hand. A rollback to a version from before the browser administration
 removes the `ArciAdmin` service; sealing and the other tasks go on.
+
+The `ApplySystem` task leaves with the newer version, but it left the firewall's 514 rule and
+Windows Time set from the newer configuration. So before the services start, a rollback runs the
+restored version's own `Set-ArciFirewall.ps1` (with the choices its state file remembers) and
+`Set-ArciTime.ps1` (step `system.restore`; on the automatic return after a failed upgrade when the
+configuration was put back): a source that is enabled again in the copy from before the upgrade,
+or comes back with it, is let through again. If this step fails the rollback still completes,
+ends with exit code `1` and prints the command to run by hand:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
+```
 
 The pre-upgrade dumps (`backups\db`) are separate from the nightly dumps (`backups\scheduled`,
 [BACKUP.md](BACKUP.md)) and never deleted automatically; delete old ones by hand. An upgrade waits

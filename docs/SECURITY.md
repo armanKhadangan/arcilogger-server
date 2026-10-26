@@ -510,22 +510,33 @@ installation failure) and Event 4120.
 key is refused (`config_key_locked`). Nothing the browser can change moves `data_dir` or
 `secrets_dir` (Day 0 note D0-2): the TOML editor never writes those keys, and the services and
 tasks refuse a configuration whose `secrets_dir` is not the folder of their fixed `--config` path
-or whose `data_dir` is not the data root the installer recorded (`data-root.txt`). The agent keeps
+or whose `data_dir` is not the data root the installer recorded (`data-root.txt`). The installer
+itself takes the data root from that record, never from `data_dir`: a `data_dir` that differs, or
+a record it cannot use, stops the run before any change, and only `-DataRoot` moves the record.
+It deletes and re-creates the record on every run (owner: Administrators; read for the services
+and tasks only), so a record ArciAdmin created while it was missing is never kept. The agent keeps
 every previous version (`admin\versions`) and puts it back when a step fails.
 
 **Programs.** The tasks and the API check every program before they run it
 (`arcilogger_core.execpolicy`): `[tsa] java` is a single element unless the installer recorded the
 whole command, a program lies below `policy.executable_roots` (Program Files) or was recorded with
 its SHA-256 at that very path, and a Zamane client runs only from `zamane\` outside its staging
-folder, with a known, approved or installer-recorded hash. The installer records a program only in
-a folder that nobody but administrators, SYSTEM and TrustedInstaller can write (an upgrade with a
-program elsewhere stops before any change and says how to fix it), and copies a Zamane client from
-outside `zamane\` in. ApplySystem promotes only a known release; any other uploaded client waits
+folder, with a known, approved or installer-recorded hash. The installer records a program only
+where nobody but administrators, SYSTEM and TrustedInstaller can change it, plant a file next to
+it or replace a folder above it (write, delete, permission and owner rights on the file; creating
+or deleting files in its folder; deleting or re-permissioning a folder above; any other owner);
+the stock rights of `C:\` and `C:\Program Files` pass, a folder of its own on `C:\` does not. An
+upgrade with a program elsewhere stops before any change and says how to fix it. A Zamane client
+from outside `zamane\` is copied in (a `..` in its path is resolved first). ApplySystem promotes only a known release; any other uploaded client waits
 for `approve-jar` on the console, at the earliest after `jar_hold_hours`.
 
-**Guard rails.** `admin\policy.json` (administrators only) holds the source networks, the holds
-and the off switch; a missing or invalid file means browser administration **off** for every
-reader (fail closed), never a stopped 5651 function. `-DisableBrowserAdministration` switches it
+**Guard rails.** `admin\policy.json` (administrators only; the worker reads it too, to know
+whether the agent's heartbeat is expected) holds the source networks, the holds and the off
+switch. ApplySystem opens 514 only to the enabled sources inside them; the installer stops when
+the configuration has one outside them (it would lose its opening), and a source added by hand
+later stays open only where the rules hold it already (`source_outside_policy`, `R20-admin`).
+A missing or invalid file means browser administration **off** for every reader (fail closed),
+never a stopped 5651 function. `-DisableBrowserAdministration` switches it
 off; no licence state blocks it or a 5651 function. Guarded changes (retention, replica, unknown
 Zamane clients) are held and alerted (`R20-config-change`, without values or user names).
 
@@ -536,7 +547,10 @@ answer or the database. Application log events of the source `ARCILOGGER-Admin` 
 or tell a person: any local process can write one, the signed request is the authority.
 
 **Residual risks** are in section 12 (from "Compromised ArciApi" on). **Verify on site and in the
-Windows CI job:** that the replace of `arcilogger.toml` keeps the explicit ArciAdmin entry; that
+Windows CI job:** that the replace of `arcilogger.toml` keeps the explicit ArciAdmin entry, and
+that the installer puts it back on `secrets.json` after its own `secret set` (a console
+`secret set` / `secret delete` writes a new file without it: run `Set-ArciVaultAcl.ps1`
+afterwards, SETTINGS.md section 7); that
 CreateFiles with CREATOR OWNER Delete lets ArciAdmin create, write, rename and delete only its own
 files in `kamusm-roots`; that a virtual account can write the Application log; that event
 triggers wake LOCAL SERVICE and SYSTEM tasks; that the in-place firewall update loses no

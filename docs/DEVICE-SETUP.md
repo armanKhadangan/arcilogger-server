@@ -189,12 +189,19 @@ address = "<ap-network>/24"
 Örnek yapılandırmanın satırlarını kullanıyorsanız başlarındaki `#` işaretini silin (`# ` ile
 başlayanlar açıklamadır) ve adları ve adresleri kendi cihazlarınızınkiyle değiştirin. Ardından
 kurulumu yeniden çalıştırın ya da güvenlik duvarını yeniden uygulayıp hizmetleri yeniden başlatın
-(bu bölümün sonundaki komutlar). Kurulumdan sonra kaynaklar web arayüzünde **Ayarlar →
-Kaynaklar** sayfasından eklenir, düzenlenir, kapatılır ya da silinir; toplayıcı, ingest ve
-güvenlik duvarı değişikliği kendiliğinden izler, yeniden başlatma gerekmez
-([AYARLAR.md](AYARLAR.md)). Yeni bir kaynağın adresi kurulumun izin verdiği ağlardan birinde
-olmalıdır (`-SourceNetwork`, varsayılan özel ağlar); elle eklenmiş bir kaynak bu ağların
-dışındaysa `ApplySystem` ona 514'ü açmaz (`source_outside_policy`).
+(bu bölümün sonundaki komutlar). Kaynak yokken `-SkipFirewall` ile kurulmuş bir sunucu her
+göndericiyi `unknown-<ip>` olarak kaydeder ve ayrıştırıcısını içerikten seçer (aşağıda).
+Kurulumdan sonra kaynaklar web arayüzünde **Ayarlar → Kaynaklar** sayfasından eklenir,
+düzenlenir, kapatılır ya da silinir; toplayıcı, ingest ve güvenlik duvarı değişikliği
+kendiliğinden izler, yeniden başlatma gerekmez ([AYARLAR.md](AYARLAR.md)).
+
+Her kaynağın adresi kurulumun izin verdiği ağlardan birinde olmalıdır (`-SourceNetwork`,
+varsayılan özel ağlar; en geniş ağ /16). Bu ağların
+dışında bir kaynağı olan yapılandırmayla kurulum ve yükseltme, hiçbir şeyi değiştirmeden ön
+denetimde durur ve verilecek `-SourceNetwork` değerini yazar (ör. başka bir yerleşkenin genel
+adresi ya da CGNAT adresi). Sonradan elle eklenmiş böyle bir kaynağa `ApplySystem` 514'ü
+açmaz; güvenlik duvarında zaten açık olanı açık bırakır. İkisinde de `R20-admin` uyarısı ve
+`source_outside_policy` kodu görünür.
 
 **Bir kaynağı kapatmak.** `[[sources]] enabled = false` (Ayarlar → Kaynaklar'daki anahtar) bir
 kaynağı silmeden kapatır: güvenlik duvarı o göndericinin 514 iznini kaldırır, sessiz kaynak
@@ -208,8 +215,7 @@ name = "eski-switch"
 type = "generic"
 address = "<switch>"
 enabled = false             # kapalı: 514 izni yok, R15 beklemez
-``` Kaynak yokken `-SkipFirewall` ile kurulmuş bir sunucu her
-göndericiyi `unknown-<ip>` olarak kaydeder ve ayrıştırıcısını içerikten seçer (aşağıda).
+```
 
 Her cihazdan bir test mesajı gönderin:
 

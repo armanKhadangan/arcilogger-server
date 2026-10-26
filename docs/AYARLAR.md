@@ -130,7 +130,9 @@ etkiler:
 
 - kurulum, yükseltme, geri alma, kaldırma; PostgreSQL; veritabanı geri yükleme;
 - `[database]`, `[api]`, `[collector]`, `[ingest]`, `[worker]`, `[seal]`, `data_dir`,
-  `secrets_dir`;
+  `secrets_dir` (`data_dir`, kurulumun `C:\ProgramData\ARCILOGGER\data-root.txt` kaydıyla aynı
+  olmalıdır; farklıysa hizmetler ve görevler yapılandırmayı reddeder ve kurulum ön denetimde
+  durur; veri klasörünü bilerek taşımak için kurulumu `-DataRoot` ile çalıştırın);
 - Zamane dışında bir sağlayıcı, serbest adres, port, özet, kontör ifadesi, doğrulama bayrağı,
   `roots_dir`, serbest bir `java` yolu; kök ya da yasal parmak izi kaldırmak;
 - `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore`; dosya yolu veren iki veritabanı
@@ -157,6 +159,12 @@ parametreleriyle seçilir ve sonraki çalıştırmalarda hatırlanır ([KURULUM.
 | `-ZamaneHoldHours` | 24 | bilinmeyen bir Zamane istemcisinin en erken onaylanabileceği süre (1–168 saat) |
 | `-DisableBrowserAdministration` | kapalı | tarayıcı yönetimini kapatır: ArciAdmin her isteği reddeder, ApplySystem bir şey yapmaz; 5651 işlevleri (toplama, mühürleme, doğrulama) hiç etkilenmez |
 
+Kurulum yapılandırmadaki açık her log kaynağını bu ağlarla karşılaştırır: dışında kalan bir
+kaynak varsa hiçbir şeyi değiştirmeden durur ve verilecek `-SourceNetwork` değerini yazar
+(yoksa ApplySystem o göndericiyi ilk çalışmasında 514 kuralından çıkarırdı). Sonradan elle
+eklenmiş böyle bir kaynak güvenlik duvarında açıksa açık kalır, değilse açılmaz; ikisinde de
+`R20-admin` uyarısı ve `source_outside_policy` kodu görünür.
+
 Tarayıcı yönetimini yeniden açmak için kurulumu `-Upgrade` ile parametresiz yeniden çalıştırmak
 yetmez (hatırlanan seçim geçerlidir); `-DisableBrowserAdministration:$false` verin. Dosya elle de
 düzenlenebilir: kurulum geçerli bir dosyadaki elle yazılmış değerleri korur; geçersiz bir dosya
@@ -180,6 +188,14 @@ Tarayıcı ilk kaynak değişikliğinde bütün `[[sources]]` tablolarını işa
 o tabloların içindeki yorum satırları bu sırada kaybolur (önceki dosya `admin\versions`
 klasöründe kalır).
 
+**Konsoldan gizli değer.** `arcilogger-core secret set` / `secret delete`, `secrets.json`
+dosyasını yeni bir dosyayla değiştirir; yeni dosyada ArciAdmin'in yazma hakkı yoktur. Ardından
+yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"`
+çalıştırın (ya da kurulumu yeniden çalıştırın); yoksa tarayıcıdan yapılan bir sonraki değişiklik
+`acl_drift` ile "Elle müdahale gerekiyor" olur ve hiçbir gizli değer tarayıcıdan değişmez.
+Kurulum kendi sakladığı değerlerden (veritabanı parolası, ilk kurulumun sonundaki Kamu SM
+bilgileri) sonra bunu kendisi yapar.
+
 ## 8. Sorun giderme
 
 ```powershell
@@ -197,6 +213,9 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # güvenlik d
   tarayıcıdan ayar değişmez.
 - **"Elle müdahale gerekiyor":** sayfadaki sürüm numarasıyla önceki sürümü konsolda geri koyun
   (`versions restore <N>`), sonra `Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker`.
+- **`acl_drift`:** ArciAdmin `arcilogger.toml` ya da `secrets.json` dosyasına yazamıyor (çoğu
+  zaman konsoldan bir `secret set` sonrası, bölüm 7): `Set-ArciVaultAcl.ps1` çalıştırın, sonra
+  değişikliği yeniden kaydedin.
 - **Güvenlik duvarı güncellenemedi:** ApplySystem görevinin son sonucu ve olay 4106; kurulum
   `-SkipFirewall` ile yapıldıysa güvenlik duvarı ARCILOGGER'ın değildir (`firewall_not_managed`)
   ve kurallar elle tutulur.

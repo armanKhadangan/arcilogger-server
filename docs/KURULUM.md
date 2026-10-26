@@ -637,6 +637,20 @@ powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upg
 Elle düzenlenmiş geçerli bir `policy.json` dosyasındaki değerler korunur; geçersiz bir dosya
 tarayıcı yönetimini kapatır ve kurulum onu uyararak yeniden yazar.
 
+Kurulum yapılandırmadaki açık her log kaynağının adresini bu ağlarla karşılaştırır. Dışında kalan
+bir kaynak varsa (ör. başka bir yerleşkenin genel ya da CGNAT adresi, /16'dan geniş bir ağ)
+hiçbir şey değiştirmeden durur ve verilecek `-SourceNetwork` değerini yazar: aksi hâlde
+`ApplySystem` ilk çalışmasında, tarayıcıda hiçbir değişiklik yokken, o göndericiyi 514
+kuralından çıkarırdı. Tarayıcı yönetimi kapalıyken ya da `-SkipFirewall` ile bu bir uyarıdır.
+
+**Veri klasörü kaydı:** kurulum veri klasörünü `C:\ProgramData\ARCILOGGER\data-root.txt`
+dosyasına yazar (yalnızca yöneticiler değiştirebilir; her çalıştırmada silinip yeniden
+oluşturulur). Hizmetler ve görevler `data_dir` değeri bu kayıttan farklı bir yapılandırmayı
+reddeder. Sonraki her çalıştırma veri klasörünü bu kayıttan alır: `arcilogger.toml` içindeki
+`data_dir` kayıttan farklıysa ya da kayıt okunamıyorsa kurulum hiçbir şey değiştirmeden durur ve
+iki değeri yazar. Veri klasörünü bilerek taşıdıysanız (veriler kopyalandıktan sonra) kurulumu
+`-DataRoot <yeni klasör>` ile çalıştırın; kayıt yalnızca o zaman değişir.
+
 **Görevlerin çalıştırdığı programlar:** görevler yalnızca güvenilen yerlerdeki programları
 çalıştırır (`C:\Program Files`, `C:\Program Files (x86)`, sistemin `PATH` üzerindeki `java`).
 Kurulum, Program Files dışındaki bir `java`, ek bağımsız değişkenli bir `[tsa] java` komutu ve
@@ -750,7 +764,14 @@ mühürlemesi (`\ARCILOGGER\Seal` görevi) de kökler olmadan hiçbir günü mü
    $core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
    & $core secret set kamusm.customer       # müşteri numarası
    & $core secret set kamusm.password       # parola
+   & "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"   # sonra: yönetim hizmetinin hakkı
    ```
+
+   Konsoldan her `secret set` / `secret delete`, `secrets.json` dosyasını yeni bir dosyayla
+   değiştirir; yeni dosyada yönetim hizmetinin (`ArciAdmin`) yazma hakkı yoktur. Ardından
+   `Set-ArciVaultAcl.ps1` betiğini (ya da kurulumu) yeniden çalıştırın; yoksa tarayıcıdan yapılan
+   bir sonraki değişiklik `acl_drift` ile "Elle müdahale gerekiyor" olur. İlk kurulumun sonunda
+   girilen değerlerden sonra kurulum bunu kendisi yapar.
 3. **Kontör:** `& $core credit` — kontör okunuyor mu? (çıktı biçimi açık konu K4)
 4. **Bağlantı testi:** `& $core tsa-test` — 1 KB rastgele dosyayı damgalar ve doğrular (1 kontör).
 
@@ -799,6 +820,7 @@ kullanıcı oluşturun ve (`<NAS>` yerine cihazın adını yazın):
 # arcilogger.toml: [replica] enabled = true, target = '\\<NAS>\arcilogger-worm',
 #                  user = '<NAS>\arcireplica'
 & $core secret set replica.password      # parola (ekranda görünmez)
+& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"   # ArciAdmin'in secrets.json hakkı (bölüm 10)
 & $core replica --test                   # bağlan, deneme dosyası yaz/oku/sil
 ```
 
@@ -974,6 +996,18 @@ tanımıyorsa yükseltme öncesi kopya geri konur, reddedilen dosya
 değişiklikler geri alındı; denetim kaydında duruyorlar" uyarısını yazar. Kopya yoksa geri alma `3`
 ile durur ve dosyanın elle düzeltilmesini ister. Tarayıcı yönetiminden önceki bir sürüme dönüşte
 `ArciAdmin` hizmeti kaldırılır; mühürleme ve diğer görevler sürer.
+
+`ApplySystem` görevi yeni sürümle birlikte kalkar, ama güvenlik duvarının 514 kuralını ve Windows
+Saati'ni yeni yapılandırmaya göre bırakmıştır. Bu yüzden geri alma, hizmetleri başlatmadan önce
+geri gelen sürümün kendi `Set-ArciFirewall.ps1` (durum dosyasında hatırlanan seçimlerle) ve
+`Set-ArciTime.ps1` betiklerini çalıştırır (`system.restore` adımı; başarısız bir yükseltmenin
+geri dönüşünde, yapılandırma geri konduysa): yükseltme öncesi kopyada yeniden açık görünen ya da
+geri gelen bir kaynağın logları yine kabul edilir. Bu adım başarısız olursa geri alma yine
+tamamlanır, çıkış kodu `1` olur ve betik elle çalıştırılacak komutu yazar:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
+```
 
 ## 14. Kaldırma
 
