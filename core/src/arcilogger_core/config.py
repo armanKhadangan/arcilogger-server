@@ -362,9 +362,12 @@ class Config(_Model):
     @property
     def admin_dir(self) -> Path:
         """The browser administration's folder (ADR-0014): ``admin`` next to the secret store,
-        ``C:\\ProgramData\\ARCILOGGER\\admin`` on the server. Not a key of its own, so the file
-        (which the administration agent writes) cannot point the guard rails it holds
-        (``policy.json``, the channel keys) at another folder by itself."""
+        ``C:\\ProgramData\\ARCILOGGER\\admin`` on the server. Not a key of its own (an older
+        version would refuse the key after a rollback), but it follows ``secrets_dir``, which
+        the administration agent can write. A reader that must not be pointed at other guard
+        rails (``policy.json``, the Zamane records of :mod:`arcilogger_core.execpolicy`) takes
+        them from the folder of its fixed ``--config`` path instead
+        (``execpolicy.TrustAnchors``)."""
         return self.secrets_dir / "admin"
 
     @model_validator(mode="after")

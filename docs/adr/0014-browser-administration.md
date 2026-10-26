@@ -65,24 +65,30 @@ The constraints that shape the design:
    every 5 minutes) re-derives the firewall's syslog addresses, the strict outbound rules and the
    Windows Time peers from the validated configuration and the administrator-only `policy.json`,
    updates rules in place, and widens the syslog rule only after the collector has loaded the new
-   configuration. It also promotes a staged Zamane client after its hold, by hash only.
+   configuration. It also promotes a staged Zamane client that is a known release, by hash only.
 6. **Evidence actions under their own identity.** Seal now runs in the Seal task (LOCAL SERVICE),
    woken by an Event Log entry and authorised by a request file signed by ArciAdmin; `seal_due`
    ignores the retry wait once, for the oldest due day only. Credit query, TSA test and replica
    test run in the new LOCAL SERVICE task `\ARCILOGGER\Requests`. Test e-mail and lease rebuild are
    worker jobs on a database queue that never holds a secret.
-7. **Executable policy at run time.** The tasks accept `tsa.java` (one program, no extra
-   arguments), the Zamane jar and the backup tools only from administrator-only locations, a
-   known release list in code, or hashes recorded by the installer or by ApplySystem. A
-   compromised ArciAdmin can therefore write configuration but cannot get code to run as LOCAL
-   SERVICE or SYSTEM.
+7. **Executable policy at run time.** The tasks, the backup and the API's report stamps accept
+   `tsa.java` (one program, no extra arguments), the Zamane jar and the backup tools only from
+   administrator-only locations (Program Files, `zamane\`), a known release list in code, a
+   console approval, or a SHA-256 the installer recorded for that very path. The trust anchors
+   (`admin\policy.json`, `zamane\`, the installer's jar record, `admin\system\jars.json`) come
+   from the folder of the fixed `--config` path, never from a configuration key such as
+   `secrets_dir`; a checked path may contain no link or junction, and the caller runs exactly
+   the path it checked. A compromised ArciAdmin (or API) can therefore write configuration, or
+   upload a Zamane client, but cannot get code to run as LOCAL SERVICE or SYSTEM.
 8. **Live reload, no restart.** Collector (sources), ingest (sources), worker and API (everything
    except their own process settings) reload a validated configuration within seconds, keep the
    old one on any error and report the SHA-256 they loaded. Tasks read the file on every run.
 9. **Holds for the most consequential changes.** Enabling or lowering retention and disabling or
-   retargeting the replica wait `hold_hours` (installer policy, default 0); an unknown Zamane
-   release waits `jar_hold_hours` (default 24) or a console approval. Holds can be cancelled by any
-   administrator; every hold, application and refusal raises an alert and an Event Log entry.
+   retargeting the replica wait `hold_hours` (installer policy, default 0). A Zamane client that
+   is not a known release becomes runnable only when an administrator approves it on the console
+   (`approve-jar`), at the earliest `jar_hold_hours` (default 24) after it was staged; time alone
+   never approves it. Holds can be cancelled by any administrator; every hold, application and
+   refusal raises an alert and an Event Log entry.
 10. **Database settings through the API**, on top of the existing validator and audit writer, with
     Turkish and English errors and re-authentication for security- and retention-relevant keys.
 11. **Two audit trails.** The API records each request in the audit chain in the same transaction
@@ -100,14 +106,16 @@ The constraints that shape the design:
   threshold, TSA test, credit query), SMTP, replica, retention, backup, log sources with their
   firewall rule, the database settings, Şimdi mühürle and the lease rebuild.
 - What stays on the console: installation, upgrade, PostgreSQL, `[database]`, `[api]`,
-  `[collector]`, `[ingest]`, `[worker]`, `[seal]`, paths and executables, removing roots or legal
-  fingerprints, the admin policy, administrator addresses and strict outbound mode of the
-  firewall, `database.password`, `usage.pseudonym_key`, key rotation, recovery (`create-admin`).
+  `[collector]`, `[ingest]`, `[worker]`, `[seal]`, paths and executables, approving a Zamane
+  client that is not a known release, removing roots or legal fingerprints, the admin policy,
+  administrator addresses and strict outbound mode of the firewall, `database.password`,
+  `usage.pseudonym_key`, key rotation, recovery (`create-admin`).
 - A compromised API can request any change of the allow-list (it already reads every stored
   secret). It cannot lower retention below 730 days, choose an executable, switch to the mock
-  stamp, hide the agent's journal or the Event Log, or make a held change take effect early. A
-  compromised ArciAdmin can write configuration (visible, alerted) but cannot reach LOCAL SERVICE
-  or SYSTEM code execution.
+  stamp, hide the agent's journal or the Event Log, or make a held change take effect early; a
+  Zamane client it uploads stays staged until an administrator approves it. A compromised
+  ArciAdmin can write configuration (visible, alerted) but cannot reach LOCAL SERVICE or SYSTEM
+  code execution.
 - One more service (ArciAdmin), two more tasks (ApplySystem as SYSTEM, Requests as LOCAL SERVICE),
   one Event Log source. Windows behaviour to verify on site and in Windows CI: `ReplaceFileW` keeps
   the explicit ACE, a virtual account writes the Application log, EventTrigger delivery,
@@ -141,6 +149,10 @@ The constraints that shape the design:
 ## Open points (owner decision)
 
 - `hold_hours` (default 0) and the list of held changes; `jar_hold_hours` (default 24).
+- Whether a Zamane client that is not a known release may become runnable after
+  `jar_hold_hours` without a console approval. The developer chose no: an upload by a
+  compromised API or agent would otherwise run as LOCAL SERVICE (sealing, the vault) once the
+  hold ends unless an administrator cancels it in time, which an unattended server makes likely.
 - The content of `arcilogger_core.tsa.zamane_releases.KNOWN_RELEASES` (empty until the owner
   downloads the files from Kamu SM and compares them with the published SHA-256).
 - The default source networks (RFC 1918) and the widest network (/16).

@@ -21,7 +21,8 @@ The folder ``Config.admin_dir`` (``C:\\ProgramData\\ARCILOGGER\\admin``, :class:
     system/status.json, jars.json         SystemStatus, JarsFile (ApplySystem)
     system/journal.jsonl, alerts.jsonl    SystemJournalLine, alert lines (ApplySystem)
 
-and below the data root (:class:`arcilogger_core.layout.Layout`)::
+``system-plan`` prints a :class:`SystemPlan` on its standard output (ApplySystem reads it), and
+below the data root (:class:`arcilogger_core.layout.Layout`)::
 
     state/requests/seal|tasks/<id>.json   signed TaskRequest
     state/requests/results/<id>.json      TaskResult
@@ -46,7 +47,7 @@ import re
 import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import IntEnum
 from pathlib import Path
 from types import MappingProxyType
@@ -83,6 +84,7 @@ SECRET_META_SCHEMA: Final = "arcilogger.admin-secret-meta/1"  # noqa: S105 - a s
 VERSIONS_SCHEMA: Final = "arcilogger.admin-versions/1"
 SYSTEM_STATUS_SCHEMA: Final = "arcilogger.admin-system/1"
 JARS_SCHEMA: Final = "arcilogger.admin-jars/1"
+SYSTEM_PLAN_SCHEMA: Final = "arcilogger.system-plan/1"
 
 # -- names --------------------------------------------------------------------------------------
 
@@ -446,7 +448,8 @@ class TrustedExecutable(_Model):
 
 class AdminPolicy(_Model):
     """The guard rails of the browser administration, written by the installer and only by
-    administrators. A missing or invalid file means ``enabled: false`` (fail closed)."""
+    administrators. A missing or invalid file means :data:`FALLBACK_POLICY`
+    (:func:`load_policy`)."""
 
     schema_: Literal["arcilogger.admin-policy/1"] = Field(default=POLICY_SCHEMA, alias="schema")
     #: ``false`` (``-DisableBrowserAdministration``): the agent refuses every request.
@@ -471,6 +474,28 @@ class AdminPolicy(_Model):
     @classmethod
     def _ipv4_networks(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(str(ipaddress.IPv4Network(value, strict=True)) for value in values)
+
+
+#: What a missing, unreadable or invalid ``policy.json`` means, for every reader alike (before
+#: the installer writes it, on a Linux test machine, after a damaged hand edit): browser
+#: administration off (fail closed: the agent refuses every request, the API answers
+#: ``admin_disabled``) and, for :mod:`arcilogger_core.execpolicy`, the shipped
+#: ``executable_roots`` with nothing else trusted. The default ``java``, a Java below Program
+#: Files and the installer-recorded Zamane jar therefore keep sealing, credit and retention
+#: running (contract 2.16); execpolicy never looks at ``enabled``.
+FALLBACK_POLICY: Final = AdminPolicy(
+    enabled=False, written_at=datetime(1970, 1, 1, tzinfo=UTC), written_by="fallback"
+)
+
+
+def load_policy(path: Path) -> AdminPolicy:
+    """``policy.json`` at ``path`` (``AdminLayout.policy``), or :data:`FALLBACK_POLICY` when it
+    is missing, unreadable or invalid. Never raises, so the API, the agent, ApplySystem's plan,
+    the tasks and the backup give the file one meaning."""
+    try:
+        return parse_document(AdminPolicy, path.read_bytes())
+    except (OSError, DocumentError):
+        return FALLBACK_POLICY
 
 
 # -- 2.4.2 admin\keys\keys.json -------------------------------------------------------------------
@@ -904,11 +929,25 @@ class WarningRef(_Model):
         return code
 
 
+def _check_unverified(state: str, kind: str | None, section: str | None, code: str | None) -> None:
+    """A request rejected before its payload was verified and parsed (``signature_invalid``, a
+    ``schema_invalid`` envelope or payload) is known only by the id of its file name: nothing of
+    an unverified payload is trusted, so its kind, section and requester stay unknown. Every
+    other outcome has them."""
+    if kind is not None:
+        return
+    if state != "rejected" or code is None:
+        raise ValueError("only a rejected request, with its code, may lack its kind")
+    if section is not None:
+        raise ValueError("a request without its kind has no section either")
+
+
 class RequestStatus(_Model):
-    """The agent's view of one request; the API adds the texts and the API-side states."""
+    """The agent's view of one request; the API adds the texts and the API-side states.
+    ``kind`` (and ``section``) are None only for a rejection before verification."""
 
     id: Id
-    kind: RequestKind
+    kind: RequestKind | None = None
     section: Section | None = None
     state: State
     steps: tuple[StepEntry, ...] = ()
@@ -919,6 +958,12 @@ class RequestStatus(_Model):
     warnings: tuple[WarningRef, ...] = ()
     rolled_back: bool = False
     updated_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def _kind_known(self) -> RequestStatus:
+        code = self.error.code if self.error is not None else None
+        _check_unverified(self.state, self.kind, self.section, code)
+        return self
 
 
 # -- status\secret-meta.json ----------------------------------------------------------------------
@@ -978,16 +1023,21 @@ class SecretRecord(_Model):
 
 
 class JournalLine(_Model):
-    """One outcome of a request; the worker imports each line once into the audit chain."""
+    """One outcome of a request; the worker imports each line once into the audit chain.
+
+    ``kind``, ``section`` and ``requested_by`` are None only for a rejection before
+    verification (whoever wrote an unverified file must not name the requester in the audit
+    chain). A console ``versions restore N`` is no request and writes no line: the version
+    store records it (``actor: console``) and the API shows ``config_origin: outside``."""
 
     v: Annotated[int, Field(ge=1, le=1)] = 1
     line: Id
     request: Id
     state: JournalState
     at: AwareDatetime
-    kind: RequestKind
+    kind: RequestKind | None = None
     section: Section | None = None
-    requested_by: Requester
+    requested_by: Requester | None = None
     version: int | None = Field(default=None, ge=1)
     config_sha256: Transition | None = None
     changes: dict[ConfigPath, ValueChange | SecretChange] = Field(default_factory=dict)
@@ -1006,6 +1056,11 @@ class JournalLine(_Model):
         for path, change in self.changes.items():
             if path in BROWSER_SECRETS and not isinstance(change, SecretChange):
                 raise ValueError(f"{path} is a secret: only set/unset may be journaled")
+        _check_unverified(self.state, self.kind, self.section, self.code)
+        if self.kind is not None and self.requested_by is None:
+            raise ValueError("a verified request names its requester")
+        if self.kind is None and self.requested_by is not None:
+            raise ValueError("an unverified request has no requester")
         return self
 
 
@@ -1072,6 +1127,13 @@ class SystemStatus(_Model):
         return _known_code(code, MESSAGES, WARNINGS)
 
 
+#: Who made a staged Zamane client runnable: ``known`` (ApplySystem promoted a release of
+#: ``tsa.zamane_releases``) or ``console:<user>`` (an administrator ran ``approve-jar``, at the
+#: earliest ``policy.jar_hold_hours`` after ``first_seen``). Time alone never approves a client:
+#: an upload from a compromised API or agent must not end up running as LOCAL SERVICE (ADR-0014).
+JarApproval = Annotated[str, StringConstraints(pattern=r"^(known|console:.{1,200})$")]
+
+
 class StagedJar(_Model):
     sha256: Sha256
     first_seen: AwareDatetime
@@ -1079,10 +1141,10 @@ class StagedJar(_Model):
 
 class ApprovedJar(_Model):
     sha256: Sha256
-    #: ``<secrets_dir>\zamane\approved\<sha256>.jar``.
+    #: ``zamane\approved\<sha256>.jar`` of the installation folder.
     path: Text
     approved_at: AwareDatetime
-    approved_by: Annotated[str, StringConstraints(pattern=r"^(known|hold|console:.{1,200})$")]
+    approved_by: JarApproval
 
 
 class JarsFile(_Model):
@@ -1103,7 +1165,7 @@ class TimeChange(_Model):
 
 class JarChange(_Model):
     sha256: Sha256
-    approved_by: Annotated[str, StringConstraints(pattern=r"^(known|hold|console:.{1,200})$")]
+    approved_by: JarApproval
 
 
 class SystemJournalLine(_Model):
@@ -1124,6 +1186,117 @@ class SystemJournalLine(_Model):
         if given != {self.change}:
             raise ValueError(f"a {self.change} line has exactly the {self.change} block")
         return self
+
+
+# -- 2.8.3 the output of system-plan (read by Sync-ArciSystem.ps1 as SYSTEM) -----------------------
+
+#: A host name or IPv4 address, as ``Sync-ArciSystem.ps1`` re-checks it before any change.
+HostName = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
+]
+
+
+def _syslog_sender(value: str) -> str:
+    """An IPv4 address or network in its canonical text (``172.20.20.0/24``, not ``/24`` of a
+    host address), as the firewall rule's ``RemoteAddress`` takes it."""
+    canonical = (
+        str(ipaddress.IPv4Network(value, strict=True))
+        if "/" in value
+        else str(ipaddress.IPv4Address(value))
+    )
+    if canonical != value:
+        raise ValueError(f"{value!r} is not written as {canonical!r}")
+    return value
+
+
+class OutboundRule(_Model):
+    """One host of a strict outbound rule; a rule with several hosts or ports has one entry
+    each (``Set-ArciFirewall.ps1`` names the rules)."""
+
+    rule: Annotated[
+        str, StringConstraints(pattern=r"^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$")
+    ]
+    host: HostName
+    port: int = Field(ge=1, le=65535)
+
+
+class FirewallPlan(_Model):
+    #: False without ``install\firewall-state.json`` (``-SkipFirewall``): the step is skipped.
+    managed: bool
+    strict_outbound: bool
+    #: The senders the syslog rules let in. May be empty: the rules are then removed (an empty
+    #: ``RemoteAddress`` would mean any address).
+    syslog_addresses: tuple[str, ...]
+    #: Strict outbound mode only (empty otherwise).
+    outbound: tuple[OutboundRule, ...] = ()
+
+    @field_validator("syslog_addresses")
+    @classmethod
+    def _senders(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(values)) != len(values):
+            raise ValueError("syslog_addresses must be unique")
+        return tuple(_syslog_sender(value) for value in values)
+
+    @model_validator(mode="after")
+    def _outbound_when_strict(self) -> FirewallPlan:
+        if self.outbound and not self.strict_outbound:
+            raise ValueError("outbound rules are planned in strict outbound mode only")
+        return self
+
+
+class TimePlan(_Model):
+    #: ``clock.ntp_server`` and ``clock.fallback_server``; None when not set.
+    primary: HostName | None
+    fallback: HostName | None
+    #: The peers differ from those applied last: ``Set-ArciTime.ps1`` runs.
+    changed: bool
+
+
+class JarPromotion(_Model):
+    sha256: Sha256
+    #: The full path of ``zamane\web\<sha256>.jar``.
+    staged: Text
+    #: Only a known release is promoted by the plan; another client needs ``approve-jar``.
+    reason: Literal["known"]
+
+    @model_validator(mode="after")
+    def _staged_file(self) -> JarPromotion:
+        found = re.search(r"[\\/]zamane[\\/]web[\\/]([0-9a-f]{64})\.jar$", self.staged)
+        if found is None or found.group(1) != self.sha256:
+            raise ValueError(f"staged must be zamane\\web\\{self.sha256}.jar")
+        return self
+
+
+class JarPlan(_Model):
+    promote: tuple[JarPromotion, ...] = ()
+
+
+class PlanProblem(_Model):
+    """A value the plan left out, e.g. a source address outside ``policy.source_networks``."""
+
+    code: str
+    value: Text
+
+    @field_validator("code")
+    @classmethod
+    def _code(cls, code: str) -> str:
+        _known_code(code, WARNINGS)
+        return code
+
+
+class SystemPlan(_Model):
+    """What ApplySystem applies, derived only from the validated configuration, the policy and
+    ApplySystem's own state (``python -I -m arcilogger_core.admin system-plan --config ...``)."""
+
+    schema_: Literal["arcilogger.system-plan/1"] = Field(default=SYSTEM_PLAN_SCHEMA, alias="schema")
+    config_sha256: Sha256
+    #: ``config.sha256`` of the collector's status file; None when it reports none (an older
+    #: collector): the syslog addresses are then narrowed as for an unknown version.
+    collector_ack_sha256: Sha256 | None
+    firewall: FirewallPlan
+    time: TimePlan
+    jars: JarPlan
+    problems: tuple[PlanProblem, ...] = ()
 
 
 # -- the folder ---------------------------------------------------------------------------------

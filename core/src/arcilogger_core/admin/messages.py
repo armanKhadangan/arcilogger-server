@@ -173,10 +173,11 @@ WARNINGS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "The root certificate has expired; it is still installed so past days can be verified.",
         ),
         "unknown_jar_held": (
-            "Bu Zamane sürümü bilinen sürümler arasında değil: bekletme süresi sonunda ya da "
-            "sunucu konsolunda onaylandığında etkinleşir.",
-            "This Zamane release is not a known release: it becomes active after the hold, or "
-            "when approved on the server console.",
+            "Bu Zamane sürümü bilinen sürümler arasında değil: ancak bir yönetici sunucu "
+            "konsolunda onaylayınca (en erken bekletme süresi sonunda) etkinleşir.",
+            "This Zamane release is not a known release: it becomes active only when an "
+            "administrator approves it on the server console (at the earliest when the hold "
+            "ends).",
         ),
         "probe_skipped": (
             "Bağlantı denemesi atlandı.",
@@ -189,6 +190,12 @@ WARNINGS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
         "restart_required": (
             "Sunucuda elle yapılan bir değişiklik ancak hizmet yeniden başlatılınca etkinleşir.",
             "A change made by hand on the server takes effect only after a service restart.",
+        ),
+        "source_outside_policy": (
+            "Kaynak adresi yönetim politikasındaki ağların dışında ya da izin verilenden geniş; "
+            "güvenlik duvarı kuralına eklenmedi.",
+            "The source address lies outside the networks of the administration policy or is "
+            "wider than allowed; it was not added to the firewall rule.",
         ),
         "ntp_server_empty": (
             "Yerel saat kaynağı yok; saat yalnızca yedek sunucuyla eşitlenir.",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,6 +63,21 @@ def test_private_keys_are_readable_by_their_owner_only(tmp_path: Path) -> None:
     init_keys(folder)
     for name in KEY_FILES.values():
         assert (folder / name).stat().st_mode & 0o077 == 0
+
+
+def icacls(path: Path) -> str:
+    return subprocess.run(["icacls", str(path)], capture_output=True, text=True, check=True).stdout
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
+def test_private_keys_inherit_no_access_on_windows(tmp_path: Path) -> None:
+    """The key file is created with its protected descriptor: none of the folder's inheritable
+    entries (Read for the services and LOCAL SERVICE under ProgramData) ever reaches it."""
+    folder = keys_dir(tmp_path)
+    init_keys(folder)
+    for name in KEY_FILES.values():
+        assert "(I)" not in icacls(folder / name)
+    assert "(I)" in icacls(keys_file(folder)), "keys.json (public keys) inherits as before"
 
 
 def test_init_is_idempotent_and_never_overwrites_a_key(tmp_path: Path) -> None:

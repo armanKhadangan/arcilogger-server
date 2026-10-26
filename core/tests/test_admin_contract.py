@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from arcilogger_core.admin import contract, messages
 from arcilogger_core.admin.contract import (
+    FALLBACK_POLICY,
     AdminLayout,
     AdminPolicy,
     AdminRequest,
@@ -22,6 +23,7 @@ from arcilogger_core.admin.contract import (
     JournalLine,
     RequestStatus,
     SystemJournalLine,
+    SystemPlan,
     SystemStatus,
     TaskResult,
     UploadMeta,
@@ -31,6 +33,7 @@ from arcilogger_core.admin.contract import (
     dump_document,
     dump_line,
     heartbeat_state,
+    load_policy,
     parse_document,
 )
 from arcilogger_core.config import Config
@@ -301,6 +304,24 @@ def test_documents_are_parsed_strictly(data: bytes) -> None:
         parse_document(AdminPolicy, data)
 
 
+def test_a_missing_or_invalid_policy_means_the_fallback(tmp_path: Path) -> None:
+    path = AdminLayout(tmp_path / "admin").policy
+    assert load_policy(path) is FALLBACK_POLICY
+    path.parent.mkdir()
+    for damaged in (b"", b"{", json.dumps({**policy_sample(), "hold_hours": 500}).encode()):
+        path.write_bytes(damaged)
+        assert load_policy(path) is FALLBACK_POLICY
+    unreadable = tmp_path / "other" / "policy.json"
+    unreadable.mkdir(parents=True)  # a folder in its place: an OSError when read
+    assert load_policy(unreadable) is FALLBACK_POLICY
+    assert not FALLBACK_POLICY.enabled
+    assert FALLBACK_POLICY.executable_roots == ("C:\\Program Files", "C:\\Program Files (x86)")
+    assert FALLBACK_POLICY.trusted_executables == ()
+    assert FALLBACK_POLICY.written_by == "fallback"
+    path.write_bytes(json.dumps(policy_sample()).encode("utf-8"))
+    assert load_policy(path) == document(AdminPolicy, policy_sample())
+
+
 def test_base64url_is_decoded_strictly() -> None:
     assert b64url_decode(b64url_encode(b"\x00\xff" * 16), 32) == b"\x00\xff" * 16
     for bad in ("AA==", "A+/A", "AAAAA", "A B", "AB"):  # padding, alphabet, length, bits
@@ -427,6 +448,54 @@ def test_a_request_status_carries_codes_only() -> None:
             document(RequestStatus, bad)
 
 
+def test_a_rejection_before_verification_knows_only_the_file_name() -> None:
+    """signature_invalid (or a schema_invalid envelope): nothing of the unverified payload is
+    trusted, so the status and the journal line carry no kind, section or requester."""
+    status = {
+        "id": "6f1c" * 8,
+        "state": "rejected",
+        "steps": [{"step": "received", "state": "failed", "code": "signature_invalid"}],
+        "error": {"code": "signature_invalid"},
+        "updated_at": "2026-10-25T10:15:01+03:00",
+    }
+    parsed = document(RequestStatus, status)
+    assert (parsed.kind, parsed.section) == (None, None)
+    assert parse_document(RequestStatus, dump_document(parsed)) == parsed
+    line = {
+        "v": 1,
+        "line": "1d" * 16,
+        "request": "6f1c" * 8,
+        "state": "rejected",
+        "at": "2026-10-25T10:15:01+03:00",
+        "code": "schema_invalid",
+    }
+    journaled = document(JournalLine, line)
+    assert (journaled.kind, journaled.section, journaled.requested_by) == (None, None, None)
+    assert parse_document(JournalLine, dump_line(journaled)) == journaled
+    requester = {"user_id": 3, "username": "ayse"}
+    for bad_status in (
+        {**status, "state": "failed", "error": {"code": "write_failed"}},  # only a rejection
+        {**status, "error": None},  # a rejection names its code
+        {**status, "section": "smtp"},  # no section without the kind
+    ):
+        with pytest.raises(DocumentError, match=r"kind|section"):
+            document(RequestStatus, bad_status)
+    for bad_line in (
+        {**line, "state": "failed", "code": "write_failed"},
+        {**line, "code": None},
+        {**line, "section": "smtp"},
+        {**line, "requested_by": requester},  # whoever wrote the file names nobody
+        {**line, "kind": "config.apply", "section": "smtp"},  # a verified request: who asked
+    ):
+        with pytest.raises(DocumentError, match=r"kind|section|requester"):
+            document(JournalLine, bad_line)
+    # A rejection after verification (expired, replayed, …) still names all three.
+    expired = {**line, "code": "request_expired", "kind": "action.credit",
+               "requested_by": requester}  # fmt: skip
+    assert document(JournalLine, expired).requested_by is not None
+    assert document(RequestStatus, {**status, "kind": "action.credit"}).kind == "action.credit"
+
+
 def journal_sample() -> dict[str, Any]:
     """The example of contract 2.4.9."""
     return {
@@ -510,8 +579,10 @@ def test_the_remaining_formats_parse() -> None:
                       "approved_by": "console:bt-yonetici"}],
     }  # fmt: skip
     assert document(JarsFile, jars).approved[0].approved_by == "console:bt-yonetici"
-    with pytest.raises(DocumentError):
-        document(JarsFile, {**jars, "approved": [{**jars["approved"][0], "approved_by": "api"}]})
+    for approved_by in ("api", "hold", "console:"):  # time alone never approves a client
+        approval = {**jars["approved"][0], "approved_by": approved_by}
+        with pytest.raises(DocumentError):
+            document(JarsFile, {**jars, "approved": [approval]})
     firewall = {
         "v": 1,
         "line": "2d" * 16,
@@ -522,3 +593,82 @@ def test_the_remaining_formats_parse() -> None:
     assert document(SystemJournalLine, firewall)
     with pytest.raises(DocumentError, match="exactly"):
         document(SystemJournalLine, {**firewall, "change": "time"})
+
+
+def system_plan_sample() -> dict[str, Any]:
+    """The example of contract 2.8.3 (with real hashes): the fixture of the pwsh dry-run tests
+    of ``Sync-ArciSystem.ps1 -DryRun -PlanPath``."""
+    return {
+        "schema": "arcilogger.system-plan/1",
+        "config_sha256": SHA_A,
+        "collector_ack_sha256": SHA_B,
+        "firewall": {
+            "managed": True,
+            "strict_outbound": True,
+            "syslog_addresses": ["172.20.10.1", "172.20.20.0/24"],
+            "outbound": [
+                {"rule": "ARCILOGGER Out SMTP", "host": "smtp.ornek.example", "port": 587},
+                {"rule": "ARCILOGGER Out NTP", "host": "172.20.10.1", "port": 123},
+            ],
+        },
+        "time": {"primary": "172.20.10.1", "fallback": "time.ume.tubitak.gov.tr",
+                 "changed": False},
+        "jars": {"promote": [{"sha256": SHA_A, "reason": "known",
+                              "staged": f"C:\\ProgramData\\ARCILOGGER\\zamane\\web\\{SHA_A}.jar"}]},
+        "problems": [{"code": "source_outside_policy", "value": "198.51.100.7"}],
+    }  # fmt: skip
+
+
+def test_the_system_plan_example_parses_and_round_trips() -> None:
+    plan = document(SystemPlan, system_plan_sample())
+    assert plan.firewall.syslog_addresses == ("172.20.10.1", "172.20.20.0/24")
+    assert plan.firewall.outbound[0].port == 587
+    assert plan.jars.promote[0].reason == "known"
+    assert parse_document(SystemPlan, dump_document(plan)) == plan
+    quiet = system_plan_sample()
+    quiet["firewall"] = {"managed": False, "strict_outbound": False, "syslog_addresses": []}
+    quiet["time"] = {"primary": None, "fallback": "time.ume.tubitak.gov.tr", "changed": True}
+    quiet["jars"] = {"promote": []}
+    quiet["problems"] = []
+    quiet["collector_ack_sha256"] = None
+    assert document(SystemPlan, quiet).firewall.outbound == ()
+    with pytest.raises(DocumentError, match="schema"):
+        document(SystemPlan, {k: v for k, v in system_plan_sample().items() if k != "schema"})
+
+
+def _plan_with(path: str, value: Any) -> dict[str, Any]:
+    plan = system_plan_sample()
+    *parents, last = path.split(".")
+    target = plan
+    for key in parents:
+        target = target[key][0] if isinstance(target[key], list) else target[key]
+    target[last] = value
+    return plan
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("firewall.syslog_addresses", ["172.20.20.1/24"]),  # a host address with a prefix
+        ("firewall.syslog_addresses", ["172.020.10.1"]),
+        ("firewall.syslog_addresses", ["2001:db8::1"]),
+        ("firewall.syslog_addresses", ["172.20.10.1", "172.20.10.1"]),
+        ("firewall.syslog_addresses", ["any"]),
+        ("firewall.strict_outbound", False),  # outbound rules only in strict mode
+        ("firewall.outbound.rule", "ARCILOGGER HTTPS"),
+        ("firewall.outbound.rule", "ARCILOGGER Out DNS UDP"),
+        ("firewall.outbound.host", "smtp.ornek.example; Remove-NetFirewallRule"),
+        ("firewall.outbound.port", 0),
+        ("firewall.outbound.port", "587"),
+        ("time.primary", "-ntp.ornek.example"),
+        ("jars.promote.reason", "hold"),
+        ("jars.promote.staged", f"C:\\Users\\Public\\{SHA_A}.jar"),
+        ("jars.promote.staged", f"C:\\ProgramData\\ARCILOGGER\\zamane\\web\\{SHA_B}.jar"),
+        ("problems.code", "no_such_code"),
+        ("problems.code", "system_plan_failed"),  # an outcome, not a warning
+        ("config_sha256", "…"),
+    ],
+)
+def test_an_invalid_system_plan_is_refused(path: str, value: Any) -> None:
+    with pytest.raises(DocumentError):
+        document(SystemPlan, _plan_with(path, value))

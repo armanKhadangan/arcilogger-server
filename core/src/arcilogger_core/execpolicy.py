@@ -2,44 +2,53 @@
 
 The browser administration lets the administration agent write ``arcilogger.toml``. The
 programs named in it run as LOCAL SERVICE (the evidence tasks) or with the API's rights, so the
-code that starts a program checks it here first, every time, against the installer-written
-``policy.json`` (:class:`~arcilogger_core.admin.contract.AdminPolicy`) and files only
-administrators and SYSTEM write. A compromised agent can then change the configuration but
-cannot make a task run a program of its choice.
+code that starts a program checks it here first, every time. The checks trust only what
+administrators and SYSTEM write, found through :class:`TrustAnchors`: the folder of the fixed
+``--config`` path (``C:\\ProgramData\\ARCILOGGER``), its ``admin\\policy.json``
+(:func:`~arcilogger_core.admin.contract.load_policy`), ``zamane\\`` and
+``admin\\system\\jars.json``. They never follow a key of the configuration (``secrets_dir`` is
+one the agent can write). A compromised agent can then change the configuration but cannot make
+a task run a program of its choice, as long as the trusted locations are writable by
+administrators and SYSTEM only (the installer records no other, contract 2.16).
 
 * ``tsa.java`` (:func:`check_java`): exactly one element, unless the whole command equals an
   ``argv`` the installer recorded (an extra JVM argument such as ``-XX:OnError=`` would run a
   command). The element is the bare name ``java`` / ``java.exe`` (found through the system
-  ``PATH``, which only administrators set) or an absolute path to ``java.exe`` that resolves
-  (junctions and links followed) inside ``policy.executable_roots``, or whose SHA-256 is in
-  ``policy.trusted_executables``.
+  ``PATH``, which only administrators set) or an absolute path to ``java.exe`` inside
+  ``policy.executable_roots``, or the path the installer recorded in
+  ``policy.trusted_executables`` with the file's SHA-256.
 * ``backup.pg_dump``, ``backup.pg_restore`` when set (:func:`check_executable`): an absolute
-  path inside ``policy.executable_roots`` or with a trusted SHA-256.
-* ``tsa.zamane_jar`` (:func:`check_zamane_jar`): inside ``<secrets_dir>\\zamane\\`` but not in
-  its staging folder ``web\\`` (uploads wait there and never run), and its SHA-256 is a known
-  release (:mod:`arcilogger_core.tsa.zamane_releases`), approved by ApplySystem
-  (``admin\\system\\jars.json``), recorded by the installer (``zamane\\zamane-jar.sha256``) or in
-  ``policy.trusted_executables``.
+  path inside ``policy.executable_roots`` or recorded with its SHA-256.
+* ``tsa.zamane_jar`` (:func:`check_zamane_jar`): inside ``zamane\\`` but not in its staging
+  folder ``web\\`` (uploads wait there and never run), and its SHA-256 is a known release
+  (:mod:`arcilogger_core.tsa.zamane_releases`), approved (``admin\\system\\jars.json``: a known
+  release promoted by ApplySystem, or ``approve-jar`` on the console), recorded by the installer
+  (``zamane\\zamane-jar.sha256``) or recorded with this path in ``policy.trusted_executables``.
 
-A refusal is :class:`ExecutableRefusedError` (code ``executable_refused``).
+A checked path is local (no UNC or device path) and free of links: its resolved form must be its
+absolute form, so no symbolic link or junction lies anywhere on it (an 8.3 short name fails
+closed too) and nobody can re-point it between the check and the start of the program. Every
+check returns what it checked, and the caller runs exactly that. A refusal is
+:class:`ExecutableRefusedError` (code ``executable_refused``).
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 from arcilogger_core.admin.contract import (
     AdminLayout,
     AdminPolicy,
     DocumentError,
     JarsFile,
+    load_policy,
     parse_document,
 )
-from arcilogger_core.config import Config
 
 #: The names ``tsa.java`` may give (a bare name, or the file name of an absolute path).
 JAVA_NAMES: Final = frozenset({"java", "java.exe"})
@@ -60,28 +69,58 @@ class ExecutableRefusedError(RuntimeError):
 
 @dataclass(frozen=True)
 class ZamanePaths:
-    """The Zamane client folders below ``secrets_dir`` (contract 2.2)."""
+    """The Zamane client folders of the installation folder (contract 2.2)."""
 
     root: Path
 
-    @classmethod
-    def of(cls, config: Config) -> ZamanePaths:
-        return cls(config.secrets_dir / "zamane")
-
     @property
     def staging(self) -> Path:
-        """Uploaded clients waiting for their hold (``web\\<sha256>.jar``); never run."""
+        """Uploaded clients waiting for their approval (``web\\<sha256>.jar``); never run."""
         return self.root / "web"
 
     @property
     def approved(self) -> Path:
-        """Clients ApplySystem promoted (``approved\\<sha256>.jar``)."""
+        """Approved clients (``approved\\<sha256>.jar``)."""
         return self.root / "approved"
 
     @property
     def installer_record(self) -> Path:
         """``<sha256>  <file name>`` lines the installer writes for ``-ZamaneJar``."""
         return self.root / "zamane-jar.sha256"
+
+
+@dataclass(frozen=True)
+class TrustAnchors:
+    """What the checks trust: the installation folder and the policy read from it.
+
+    ``root`` is the folder of the configuration file every service and task is started with
+    (``--config``, or ``default_config_path()``), which only administrators set; never a value
+    read from that file. Build it on every run (a task) or every use (the API's report stamps),
+    so a new ``policy.json`` counts at once."""
+
+    root: Path
+    policy: AdminPolicy
+
+    @classmethod
+    def of(cls, config_path: Path) -> TrustAnchors:
+        root = _absolute(config_path).parent
+        return cls(root, load_policy(AdminLayout(root / "admin").policy))
+
+    @property
+    def zamane(self) -> ZamanePaths:
+        return ZamanePaths(self.root / "zamane")
+
+    @property
+    def jars(self) -> Path:
+        """``admin\\system\\jars.json`` (ApplySystem and the console write it)."""
+        return AdminLayout(self.root / "admin").jars
+
+
+class CheckedJar(NamedTuple):
+    """The Zamane client to run (``java -jar <path>``) and its SHA-256."""
+
+    path: Path
+    sha256: str
 
 
 def file_sha256(path: Path) -> str:
@@ -92,18 +131,32 @@ def file_sha256(path: Path) -> str:
     return hasher.hexdigest()
 
 
-def _trusted_hashes(policy: AdminPolicy) -> set[str]:
-    return {entry.sha256 for entry in policy.trusted_executables}
+def _absolute(path: Path) -> Path:
+    """``path`` made absolute without following links (``Path.resolve`` follows them)."""
+    return Path(os.path.abspath(path))  # noqa: PTH100 - lexical on purpose
 
 
-def _resolve(text: str, what: str) -> Path:
+def _key(path: Path) -> str:
+    return os.path.normcase(_absolute(path))
+
+
+def _local_path(text: str, what: str) -> Path:
+    """``text`` as an existing absolute local path without a link on it (the path that is
+    checked is the path that runs)."""
+    if text.startswith(("\\\\", "//")):
+        raise ExecutableRefusedError(what, f"{text!r} is a network or device path")
     path = Path(text)
     if not path.is_absolute():
         raise ExecutableRefusedError(what, f"{text!r} is not an absolute path")
     try:
-        return path.resolve(strict=True)
+        resolved = path.resolve(strict=True)
     except (OSError, RuntimeError) as exc:  # RuntimeError: a link loop
         raise ExecutableRefusedError(what, f"{text!r} does not exist") from exc
+    if _key(resolved) != _key(path):
+        raise ExecutableRefusedError(
+            what, f"{text!r} resolves to {str(resolved)!r} (a link, junction or short name on it)"
+        )
+    return resolved
 
 
 def _inside(path: Path, roots: Collection[str]) -> bool:
@@ -114,10 +167,21 @@ def _inside(path: Path, roots: Collection[str]) -> bool:
     return False
 
 
+def _trusted_here(path: Path, digest: str, policy: AdminPolicy) -> bool:
+    """The installer recorded this SHA-256 for this very path: a copy of a trusted program
+    elsewhere would load its libraries from the folder it was copied to."""
+    for entry in policy.trusted_executables:
+        recorded = Path(entry.path)
+        if entry.sha256 == digest and recorded.is_absolute() and _key(recorded) == _key(path):
+            return True
+    return False
+
+
 def check_executable(
-    path_or_name: str, policy: AdminPolicy, *, names: Collection[str] = (), what: str = "program"
-) -> None:
-    """Refuse a program outside the trusted locations (:class:`ExecutableRefusedError`).
+    path_or_name: str, anchors: TrustAnchors, *, names: Collection[str] = (), what: str = "program"
+) -> str:
+    """The program to run (the bare name, or the checked absolute path); refuse one outside
+    the trusted locations (:class:`ExecutableRefusedError`).
 
     ``names``: the bare names allowed (looked up in the system ``PATH``) and, for an absolute
     path, the file names allowed (case-insensitive); empty: no bare name, any file name."""
@@ -127,35 +191,38 @@ def check_executable(
         raise ExecutableRefusedError(what, "no program given")
     if "/" not in text and "\\" not in text and not Path(text).is_absolute():
         if text.lower() in allowed:
-            return
+            return text
         raise ExecutableRefusedError(what, f"the bare program name {text!r} is not allowed")
-    resolved = _resolve(text, what)
+    resolved = _local_path(text, what)
     if allowed and resolved.name.lower() not in allowed:
         raise ExecutableRefusedError(what, f"{text!r} is not one of {sorted(allowed)}")
     if not resolved.is_file():
         raise ExecutableRefusedError(what, f"{text!r} is not a file")
-    if _inside(resolved, policy.executable_roots):
-        return
-    if file_sha256(resolved) in _trusted_hashes(policy):
-        return
+    if _inside(resolved, anchors.policy.executable_roots):
+        return str(resolved)
+    if _trusted_here(resolved, file_sha256(resolved), anchors.policy):
+        return str(resolved)
     raise ExecutableRefusedError(
-        what, f"{text!r} is neither in policy.executable_roots nor a trusted SHA-256"
+        what, f"{text!r} is neither in policy.executable_roots nor recorded with its SHA-256"
     )
 
 
-def check_java(java: Sequence[str], policy: AdminPolicy) -> None:
-    """``tsa.java``: one trusted program, or a whole command the installer recorded."""
+def check_java(java: Sequence[str], anchors: TrustAnchors) -> tuple[str, ...]:
+    """``tsa.java``: one trusted program, or a whole command the installer recorded. Returns
+    the command to run (the checked program and the recorded arguments)."""
     command = tuple(java)
     if not command:
         raise ExecutableRefusedError("tsa.java", "no program given")
     recorded = any(
-        entry.argv is not None and entry.argv == command for entry in policy.trusted_executables
+        entry.argv is not None and entry.argv == command
+        for entry in anchors.policy.trusted_executables
     )
     if len(command) != 1 and not recorded:
         raise ExecutableRefusedError(
             "tsa.java", "extra arguments are allowed only as a command the installer recorded"
         )
-    check_executable(command[0], policy, names=JAVA_NAMES, what="tsa.java")
+    program = check_executable(command[0], anchors, names=JAVA_NAMES, what="tsa.java")
+    return (program, *command[1:])
 
 
 def _installer_hashes(record: Path) -> set[str]:
@@ -165,29 +232,29 @@ def _installer_hashes(record: Path) -> set[str]:
         return set()
     found = set()
     for line in lines:
-        fields = line.strip().lstrip("﻿").split()
+        fields = line.strip().lstrip("\ufeff").split()
         if fields and not fields[0].startswith("#"):
             found.add(fields[0].lower())
     return found
 
 
-def _approved_hashes(config: Config) -> set[str]:
+def _approved_hashes(anchors: TrustAnchors) -> set[str]:
     try:
-        jars = parse_document(JarsFile, AdminLayout(config.admin_dir).jars.read_bytes())
+        jars = parse_document(JarsFile, anchors.jars.read_bytes())
     except (OSError, DocumentError):
-        return set()  # no promotion yet (or a damaged file: nothing counts as approved)
+        return set()  # nothing approved yet (or a damaged file: nothing counts as approved)
     return {entry.sha256 for entry in jars.approved}
 
 
-def check_zamane_jar(path: Path, config: Config, policy: AdminPolicy) -> str:
-    """``tsa.zamane_jar``: its SHA-256 when it may run, else :class:`ExecutableRefusedError`."""
+def check_zamane_jar(path: Path | str, anchors: TrustAnchors) -> CheckedJar:
+    """``tsa.zamane_jar``: the jar to run and its SHA-256, else :class:`ExecutableRefusedError`."""
     # arcilogger_core.tsa imports this module (make_provider), so the release list is looked
     # up here and not at import time.
     from arcilogger_core.tsa.zamane_releases import KNOWN_RELEASES
 
     what = "tsa.zamane_jar"
-    folders = ZamanePaths.of(config)
-    resolved = _resolve(str(path), what)
+    folders = anchors.zamane
+    resolved = _local_path(str(path), what)
     root = folders.root.resolve()
     if not resolved.is_relative_to(root) or resolved.is_relative_to(folders.staging.resolve()):
         raise ExecutableRefusedError(what, f"{str(path)!r} is not an installed client in {root}")
@@ -196,11 +263,11 @@ def check_zamane_jar(path: Path, config: Config, policy: AdminPolicy) -> str:
     digest = file_sha256(resolved)
     if (
         digest in KNOWN_RELEASES
-        or digest in _approved_hashes(config)
+        or digest in _approved_hashes(anchors)
         or digest in _installer_hashes(folders.installer_record)
-        or digest in _trusted_hashes(policy)
+        or _trusted_here(resolved, digest, anchors.policy)
     ):
-        return digest
+        return CheckedJar(resolved, digest)
     raise ExecutableRefusedError(
         what, f"the client's SHA-256 {digest} is not known, approved or installer-recorded"
     )

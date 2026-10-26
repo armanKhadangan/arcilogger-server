@@ -6,10 +6,17 @@
   the installation's instance id; the API, the agent, the LOCAL SERVICE tasks and SYSTEM read it.
 
 A private key file is the raw 32-byte Ed25519 key in base64 on one line. :func:`init_keys`
-(``python -I -m arcilogger_core.admin keys init``, run by the installer as administrator before
-it sets the rights) creates a missing key with ``O_EXCL`` and never overwrites one; replacing a
-key is a rotation, a console command of its own. A key id is ``<role>-`` and the first 8 hex
-digits of the SHA-256 of the raw public key, so a request names the key that signed it.
+(``python -I -m arcilogger_core.admin keys init``, run by the installer as administrator) creates
+a missing key with ``O_EXCL`` and never overwrites one; replacing a key is a rotation, a console
+command of its own. A key id is ``<role>-`` and the first 8 hex digits of the SHA-256 of the raw
+public key, so a request names the key that signed it.
+
+A new private key file is readable by its owner only from the moment it exists: mode ``0600``
+on POSIX, and on Windows a protected security descriptor given to ``CreateFileW`` (SYSTEM,
+Administrators and the file's owner; nothing inherited from ``ProgramData\\ARCILOGGER``, whose
+inheritable Read for the services and LOCAL SERVICE would otherwise reach the key until the
+installer's ACL step). The installer creates ``admin\\`` and ``admin\\keys\\`` with their
+protected rights before ``keys init`` and then adds each key's one Read entry (contract 2.2).
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +62,95 @@ ROLES: Final[tuple[KeyRole, ...]] = ("api", "agent")
 
 class KeysError(RuntimeError):
     """A key file of the channel is missing, unreadable or does not match keys.json."""
+
+
+if sys.platform == "win32":
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    #: Protected (no inherited entry): SYSTEM, Administrators and the owner (the creator).
+    _KEY_FILE_SDDL: Final = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)"
+    _SDDL_REVISION_1: Final = 1
+    _GENERIC_WRITE: Final = 0x40000000
+    _CREATE_NEW: Final = 1
+    _FILE_ATTRIBUTE_NORMAL: Final = 0x00000080
+    _INVALID_HANDLE_VALUE: Final = ctypes.c_void_p(-1).value
+
+    class _SecurityAttributes(ctypes.Structure):
+        _fields_ = (
+            ("nLength", wintypes.DWORD),
+            ("lpSecurityDescriptor", wintypes.LPVOID),
+            ("bInheritHandle", wintypes.BOOL),
+        )
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    _create_file = _kernel32.CreateFileW
+    _create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(_SecurityAttributes),
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    _create_file.restype = wintypes.HANDLE
+    _close_handle = _kernel32.CloseHandle
+    _close_handle.argtypes = [wintypes.HANDLE]
+    _close_handle.restype = wintypes.BOOL
+    _local_free = _kernel32.LocalFree
+    _local_free.argtypes = [wintypes.HLOCAL]
+    _local_free.restype = wintypes.HLOCAL
+    _sddl_to_descriptor = _advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    _sddl_to_descriptor.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.ULONG),
+    ]
+    _sddl_to_descriptor.restype = wintypes.BOOL
+
+    def _windows_error(code: int, path: Path) -> OSError:
+        # OSError maps the Windows error code to FileExistsError, PermissionError, …
+        return OSError(None, ctypes.FormatError(code).strip(), str(path), code)
+
+    def _open_new_private(path: Path) -> int:
+        """A new file (``CREATE_NEW``, like ``O_EXCL``) whose protected security descriptor is
+        set as it is created, so no other account can open it even for a moment."""
+        descriptor = wintypes.LPVOID()
+        if not _sddl_to_descriptor(
+            _KEY_FILE_SDDL, _SDDL_REVISION_1, ctypes.byref(descriptor), None
+        ):
+            raise _windows_error(ctypes.get_last_error(), path)
+        try:
+            attributes = _SecurityAttributes(ctypes.sizeof(_SecurityAttributes), descriptor, False)
+            handle = _create_file(
+                str(path),
+                _GENERIC_WRITE,
+                0,
+                ctypes.byref(attributes),
+                _CREATE_NEW,
+                _FILE_ATTRIBUTE_NORMAL,
+                None,
+            )
+            code = ctypes.get_last_error()
+        finally:
+            _local_free(descriptor)
+        if handle is None or handle == _INVALID_HANDLE_VALUE:
+            raise _windows_error(code, path)
+        try:
+            return msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_BINARY)
+        except OSError:
+            _close_handle(handle)
+            raise
+
+else:
+
+    def _open_new_private(path: Path) -> int:
+        """A new file (``O_EXCL``) readable by its owner only."""
+        return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 
 
 @dataclass(frozen=True)
@@ -94,8 +191,7 @@ def _create_private(path: Path) -> Ed25519PrivateKey:
     key = Ed25519PrivateKey.generate()
     raw = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
-    with os.fdopen(fd, "wb") as handle:
+    with os.fdopen(_open_new_private(path), "wb") as handle:
         handle.write(base64.b64encode(raw) + b"\n")
         handle.flush()
         os.fsync(handle.fileno())
