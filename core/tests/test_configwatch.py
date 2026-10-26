@@ -122,6 +122,22 @@ def test_a_hot_key_is_taken_after_the_interval(path: Path, clocks: Clocks) -> No
     assert again.config is reloaded.config
 
 
+def test_switching_a_source_off_is_taken_live(path: Path, clocks: Clocks) -> None:
+    """``[[sources]] enabled = false`` (ADR-0014) is part of the hot ``sources``; a source
+    without the key stays on."""
+    watch = watcher(path, clocks)
+    assert watch.poll().config.sources[0].enabled is True
+    rewrite(
+        path, TEXT.replace('address = "172.20.10.1"', 'address = "172.20.10.1"\nenabled = false')
+    )
+    clocks.advance(5)
+    off = watch.poll()
+    assert off.changed
+    assert off.config.sources[0].enabled is False
+    assert off.config.sources[0].model_dump()["enabled"] is False
+    assert off.restart_keys == ()
+
+
 def test_a_broken_file_keeps_the_running_configuration(
     path: Path, clocks: Clocks, caplog: pytest.LogCaptureFixture
 ) -> None:

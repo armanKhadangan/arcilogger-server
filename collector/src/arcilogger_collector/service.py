@@ -28,6 +28,14 @@ the collector does this for every spool file of the current day.
 A maintenance task fsyncs the spool every ``fsync_interval_seconds``, closes the files of
 finished days after midnight and writes ``state/collector-status.json`` for the dashboard and
 the "log source silent" rule.
+
+The collector is never restarted for a configuration change (ADR-0014): the same task watches
+``arcilogger.toml`` (:class:`~arcilogger_core.configwatch.ConfigWatcher`) and takes a changed
+``[[sources]]`` within a few seconds, between two messages (one event loop, no lock). A file
+that does not load keeps the running sources; a change of ``[collector]`` or ``data_dir`` (a
+hand edit) is only reported. The status file's ``config`` block names the SHA-256 of the file
+the sources came from: the browser administration widens the firewall for a new sender only
+once that SHA is reported, so its first datagram already finds its source.
 """
 
 from __future__ import annotations
@@ -40,6 +48,7 @@ import socket
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Final, Literal
 
 from arcilogger_collector import __version__
@@ -47,6 +56,12 @@ from arcilogger_collector.framing import FrameDecoder, FramingError
 from arcilogger_collector.spool import SpoolWriter, TornLine
 from arcilogger_core.alerts import Severity, raise_alert
 from arcilogger_core.config import Config
+from arcilogger_core.configwatch import (
+    COLLECTOR_HOT,
+    COLLECTOR_RESTART,
+    ConfigWatch,
+    ConfigWatcher,
+)
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site, site_day, utc_now
@@ -63,6 +78,9 @@ MAX_TORN_IN_STATUS: Final = 50
 #: A source whose spool writes failed counts as recovered at its first good write this long
 #: after its last failure (until then good writes and failures belong to the same incident).
 RECOVERED_AFTER: Final = timedelta(seconds=60)
+#: ``arcilogger.toml`` is looked at at most this often (a stat; it is read when it changed), so
+#: a new source is taken within this plus ``fsync_interval_seconds`` (contract: 5 s).
+RELOAD_SECONDS: Final = 2.0
 
 
 def unknown_source_name(address: str) -> str:
@@ -205,7 +223,17 @@ class _TcpProtocol(asyncio.Protocol):
 
 
 class Collector:
-    def __init__(self, config: Config, clock: Clock = utc_now) -> None:
+    """``config_path``: the file ``config`` was loaded from, watched for new ``[[sources]]``
+    (None: no live reload, e.g. a test with a configuration of its own)."""
+
+    def __init__(
+        self,
+        config: Config,
+        clock: Clock = utc_now,
+        *,
+        config_path: Path | None = None,
+        reload_seconds: float = RELOAD_SECONDS,
+    ) -> None:
         self.config = config
         self.layout = Layout(config.data_dir)
         self._clock = clock
@@ -217,6 +245,18 @@ class Collector:
         self._udp: asyncio.DatagramTransport | None = None
         self._tcp: asyncio.Server | None = None
         self._maintenance: asyncio.Task[None] | None = None
+        self._watcher = (
+            None
+            if config_path is None
+            else ConfigWatcher(
+                config_path,
+                config,
+                hot=COLLECTOR_HOT,
+                restart=COLLECTOR_RESTART,
+                min_interval=reload_seconds,
+            )
+        )
+        self.config_watch: ConfigWatch | None = None
 
     # -- receive path -------------------------------------------------------------------------
 
@@ -478,10 +518,30 @@ class Collector:
         self._writer.flush()
         self._writer.close_stale(site_day(now))
 
+    def reload_config(self) -> bool:
+        """Take a changed ``[[sources]]`` of the configuration file (never raises). True when
+        the status file should be written now: what the collector reports about its
+        configuration changed (a new file, an error, a key that waits for a restart)."""
+        if self._watcher is None:
+            return False
+        watch = self._watcher.poll()
+        before, self.config_watch = self.config_watch, watch
+        if watch.changed:
+            self.config = watch.config
+            log.info(
+                "sources reloaded (%d configured, configuration %s)",
+                len(watch.config.sources),
+                (watch.sha256 or "?")[:12],
+            )
+        return before is None or before.status_block() != watch.status_block()
+
     def write_status(self) -> None:
+        status = self.stats.as_json()
+        if self.config_watch is not None:
+            status["config"] = self.config_watch.status_block()
         atomic_write_text(
             self.layout.collector_status,
-            json.dumps(self.stats.as_json(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(status, ensure_ascii=False, indent=2) + "\n",
         )
 
     async def _maintain(self) -> None:
@@ -492,7 +552,7 @@ class Collector:
             await asyncio.sleep(settings.fsync_interval_seconds)
             try:
                 self.maintain_once()
-                if loop.time() >= next_status:
+                if self.reload_config() or loop.time() >= next_status:
                     self.write_status()
                     next_status = loop.time() + settings.status_interval_seconds
             except OSError:
@@ -501,9 +561,12 @@ class Collector:
                     log.exception("spool maintenance failed")
 
 
-async def run(config: Config, stop: asyncio.Event | None = None) -> None:
-    """Run until ``stop`` is set (or the task is cancelled, e.g. Ctrl+C / service stop)."""
-    collector = Collector(config)
+async def run(
+    config: Config, stop: asyncio.Event | None = None, *, config_path: Path | None = None
+) -> None:
+    """Run until ``stop`` is set (or the task is cancelled, e.g. Ctrl+C / service stop),
+    reloading ``[[sources]]`` from ``config_path`` when it changes."""
+    collector = Collector(config, config_path=config_path)
     await collector.start()
     try:
         await (stop or asyncio.Event()).wait()

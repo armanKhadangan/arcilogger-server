@@ -19,6 +19,7 @@ from arcilogger_core.rawlog import format_line
 from arcilogger_core.seal import config_alert
 from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
 from arcilogger_core.tsa.base import TsaConfigurationError
+from arcilogger_core.tsa.mock import MockTsa
 
 CONFIG = """
 data_dir = "{data}"
@@ -144,8 +145,41 @@ def test_credit_tsa_test_and_retention(
     result = json.loads(capsys.readouterr().out)
     assert result["verified"] is True
     assert result["legal_grade"] is False
+    assert list(result) == [  # the console output the Requests task shares (run_tsa_test)
+        "provider",
+        "legal_grade_claimed",
+        "legal_grade",
+        "root_sha256",
+        "root",
+        "verified",
+        "errors",
+        "warnings",
+        "gen_time",
+        "serial",
+        "tsa",
+        "tsa_cert_not_after",
+        "container",
+        "token",
+    ]
+    assert Path(result["token"]).is_file()
+    MockTsa(setup["layout"].state / "mock-tsa").credits = 0
+    assert run(setup, "tsa-test") == 1
+    assert capsys.readouterr().out.startswith("Zaman damgası alınamadı: ")
     assert run(setup, "retention", "--dry-run") == 0
     assert "kapalı" in capsys.readouterr().out
+
+
+def test_the_requests_task_command(
+    setup: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``python -I -m arcilogger_core requests run`` (task ``\\ARCILOGGER\\Requests``, every 5
+    minutes and on Event 4111): nothing to do is success, and it does nothing."""
+    assert run(setup, "requests", "run") == 0
+    assert capsys.readouterr().out == ""
+    assert not setup["layout"].requests.exists()
+    with pytest.raises(SystemExit) as caught:
+        main(["--config", setup["config"], "requests"])  # the action is required
+    assert caught.value.code == 2
 
 
 def test_replica_command(setup: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:

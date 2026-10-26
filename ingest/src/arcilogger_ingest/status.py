@@ -28,8 +28,10 @@ the service stops, so a reader never sees half a file. Layout::
           "unfinished_days": ["2026-10-11", "2026-10-12"],
           "last_error": null
         }
-      }
-    }
+      },
+      "config": {"sha256": "…", "loaded_at": "…+03:00",   # the configuration in use
+                 "error": null, "restart_keys": []}       # (configwatch, ADR-0014); absent
+    }                                                     # without a watched file
 
 Times are Europe/Istanbul (like ``collector-status.json``). Rates and lags are estimates over
 the last status interval.
@@ -105,7 +107,7 @@ def build_status(service: IngestService) -> dict[str, Any]:
             entry["lag_seconds"] = round(max((now - last).total_seconds(), 0.0), 1)
         per_source = counters.per_source.get(name)
         entry["lines_per_second"] = round(per_source.rate, 1) if per_source else 0.0
-    return {
+    status: dict[str, Any] = {
         "version": __version__,
         "pid": os.getpid(),
         "state": service.state,
@@ -122,6 +124,9 @@ def build_status(service: IngestService) -> dict[str, Any]:
         },
         "sources": dict(sorted(sources.items())),
     }
+    if service.config_watch is not None:
+        status["config"] = service.config_watch.status_block()
+    return status
 
 
 class StatusWriter:

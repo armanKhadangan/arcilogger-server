@@ -490,6 +490,111 @@ def default_config_path() -> Path:
     return path / "arcilogger.toml"
 
 
+# -- the installation's own folders (ADR-0014, Day 0 note D0-2) -----------------------------------
+
+#: The installer's record of the data root, next to the configuration file
+#: (``C:\\ProgramData\\ARCILOGGER\\data-root.txt``): one line, the absolute path of ``data_dir``.
+#: The installer writes it before the administration agent may create files in that folder;
+#: every service and task reads it.
+DATA_ROOT_RECORD = "data-root.txt"
+
+
+class ConfigLocationError(ValueError):
+    """``secrets_dir`` or ``data_dir`` is not the installation's own folder, or the record that
+    says which folder it is cannot be used: the configuration is not used
+    (:func:`check_fixed_location`). ``key`` is the key, ``configured`` its value, ``expected``
+    the installation's folder (None when the record cannot tell it; ``record_problem`` then
+    says why); ``data_root`` the data root known to be the installation's, where an alert about
+    it may go (None when none is known: the configured ``data_dir`` is not trusted for it)."""
+
+    def __init__(
+        self,
+        key: str,
+        configured: Path,
+        expected: Path | None,
+        *,
+        data_root: Path | None,
+        record_problem: str | None = None,
+    ) -> None:
+        if expected is None:
+            text = (
+                f"{key} ({configured}) denetlenemedi: kurulum kaydı {DATA_ROOT_RECORD} "
+                f"kullanılamıyor ({record_problem}); yapılandırma kullanılmadı [{key} "
+                f"({configured}) cannot be checked: the installation record {DATA_ROOT_RECORD} "
+                f"is unusable ({record_problem}); the configuration was not used]"
+            )
+        else:
+            text = (
+                f"{key} ({configured}) kurulumun klasörü ({expected}) değil; yapılandırma "
+                f"kullanılmadı [{key} ({configured}) is not the installation's folder "
+                f"({expected}); the configuration was not used]"
+            )
+        super().__init__(text)
+        self.key = key
+        self.configured = configured
+        self.expected = expected
+        self.data_root = data_root
+        self.record_problem = record_problem
+
+
+def _absolute(path: Path) -> Path:
+    """``path`` made absolute without following links: the configured text itself must name
+    the installation's folder."""
+    return Path(os.path.abspath(path))  # noqa: PTH100 - lexical on purpose
+
+
+def _same_folder(first: Path, second: Path) -> bool:
+    return os.path.normcase(_absolute(first)) == os.path.normcase(_absolute(second))
+
+
+def recorded_data_root(config_path: Path) -> Path | None:
+    """The data root the installer recorded next to ``config_path`` (:data:`DATA_ROOT_RECORD`),
+    or None without a record (an installation older than ADR-0014, a development machine):
+    then ``data_dir`` is not checked. A record that exists but cannot be read, is not UTF-8 or
+    is not one line with an absolute path raises ``OSError`` or ``ValueError``: it fails
+    closed, never as if it were missing."""
+    try:
+        text = (config_path.parent / DATA_ROOT_RECORD).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except UnicodeDecodeError as exc:  # saved as UTF-16 by Notepad, say
+        raise ValueError("not UTF-8") from exc
+    lines = text.lstrip("\ufeff").strip().splitlines()
+    if len(lines) != 1 or not Path(lines[0].strip()).is_absolute():
+        raise ValueError("not one line with an absolute path")
+    return Path(lines[0].strip())
+
+
+def check_fixed_location(config: Config, config_path: Path) -> None:
+    """Refuse a configuration that moves the installation's folders (Day 0 note D0-2).
+
+    The administration agent can write ``arcilogger.toml``, and ``secrets_dir`` chooses the
+    secret store, ``data_dir`` the spool, the vault and the task requests. The browser never
+    changes either key, so every runner (the evidence tasks, ApplySystem, the API, the worker)
+    calls this right after :func:`load_config` with its own fixed ``--config`` path (or
+    :func:`default_config_path`), never with a value read from the file:
+
+    * ``secrets_dir`` must be the folder of ``config_path`` (its default);
+    * ``data_dir`` must be the data root the installer recorded (:func:`recorded_data_root`),
+      when there is a record; a record that cannot be used refuses the configuration too.
+
+    Raises :class:`ConfigLocationError` (a ``ValueError``). Its ``data_root`` is the recorded
+    root, or None without a usable record: an unchecked ``data_dir`` never receives an alert."""
+    try:
+        root = recorded_data_root(config_path)
+    except (OSError, ValueError) as exc:
+        problem = (exc.strerror or type(exc).__name__) if isinstance(exc, OSError) else str(exc)
+        raise ConfigLocationError(
+            "data_dir", config.data_dir, None, data_root=None, record_problem=problem
+        ) from exc
+    if root is not None and not _same_folder(config.data_dir, root):
+        raise ConfigLocationError("data_dir", config.data_dir, root, data_root=root)
+    if not _same_folder(config.secrets_dir, config_path.parent):
+        raise ConfigLocationError(
+            "secrets_dir", config.secrets_dir, _absolute(config_path.parent), data_root=root
+        )
+
+
 def parse_config(data: bytes, path: Path) -> Config:
     """Validate the bytes of the configuration file at ``path`` (``secrets_dir`` defaults to
     its folder). :func:`load_config` and the live reload (:mod:`arcilogger_core.configwatch`)

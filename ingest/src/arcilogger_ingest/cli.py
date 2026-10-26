@@ -37,7 +37,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from arcilogger_core.config import Config, load_config
+from arcilogger_core.config import Config, default_config_path, load_config
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStoreError
 from arcilogger_db.engine import make_engine
@@ -127,7 +127,10 @@ def run(config_path: Path | None, *, once: bool = False, workers: int | None = N
         log.error("database settings unusable (secret store): %s", exc)
         return EXIT_CONFIG
     service = IngestService(
-        config, engine, workers=config.ingest.workers if workers is None else workers
+        config,
+        engine,
+        workers=config.ingest.workers if workers is None else workers,
+        config_path=config_path or default_config_path(),  # [[sources]] reloaded from it
     )
     uninstall = install_stop_handlers(service.stop, service.stopped)
     try:

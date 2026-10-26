@@ -13,7 +13,7 @@ from pathlib import Path
 
 from arcilogger_collector import __version__
 from arcilogger_collector.service import run
-from arcilogger_core.config import load_config
+from arcilogger_core.config import default_config_path, load_config
 
 
 def _setup_logging(log_dir: Path) -> None:
@@ -29,14 +29,15 @@ def _setup_logging(log_dir: Path) -> None:
 
 
 async def _main(config_path: Path | None) -> None:
-    config = load_config(config_path)
+    path = config_path or default_config_path()
+    config = load_config(path)
     _setup_logging(config.data_dir / "logs")
     stop = asyncio.Event()
     if sys.platform != "win32":  # Windows: the service wrapper sends Ctrl+C (KeyboardInterrupt)
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop.set)
-    await run(config, stop)
+    await run(config, stop, config_path=path)  # [[sources]] are reloaded from the same file
 
 
 def _utf8_console() -> None:
