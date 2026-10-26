@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/lib/auth';
+import { handoff } from '@/lib/handoff';
 import { BUILT_PAGES } from '@/nav';
 
 import { UserMenu } from './user-menu';
@@ -14,11 +15,9 @@ import { UserMenu } from './user-menu';
  * Global search (with `search.read`), alerts (with `alerts.read`), user menu.
  *
  * - The search box appears once the "Arama" page exists (`BUILT_PAGES`): until then it would do
- *   nothing. Its term (IP, MAC, person, domain) goes to the page as router state, not in the URL,
- *   so it stays out of URLs, `?next=` after a time-out and the web server's access log. Router
- *   state is still kept in the tab's session history (`history.state`, which the browser may
- *   write to disk for session restore). M2: if the term must not touch the browser history at
- *   all, hand it over in memory instead (a context or the query cache), not through `navigate`.
+ *   nothing. Its term (IP, MAC, person, domain) is handed to the page in memory (`lib/handoff.ts`),
+ *   so it stays out of URLs, `?next=` after a time-out, the web server's access log and the tab's
+ *   session history (`history.state`, which the browser may write to disk for session restore).
  * - The global time range of spec 12.2 ("[Bugün ▾]") comes with the first page that reads it
  *   (Panel, Arama; M2). A picker that filters nothing would make a page look filtered to
  *   "today" when it is not (e.g. Denetim Kaydı). "Kullanım" has its own period, kept in its
@@ -39,7 +38,8 @@ export function Topbar() {
           onSubmit={(event) => {
             event.preventDefault();
             const q = query.trim();
-            void navigate('/search', { state: q ? { q } : null });
+            if (q) handoff.put('/search', { q });
+            void navigate('/search');
           }}
         >
           <Input

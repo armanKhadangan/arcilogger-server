@@ -117,6 +117,39 @@ describe('useHandoff', () => {
   });
 });
 
+describe('the top bar’s search box', () => {
+  it('hands its term to Arama in memory: not in router state, not in the address', async () => {
+    const user = userEvent.setup();
+    installFetch((request) =>
+      request.path === '/api/v1/auth/me'
+        ? jsonResponse(200, makeMe('admin'))
+        : errorResponse(404, 'not_found'),
+    );
+    const { router } = renderApp('/audit');
+    const box = await screen.findByRole('searchbox', { name: 'Genel arama' });
+    await user.type(box, '172.20.41.23{Enter}');
+    await screen.findByRole('heading', { level: 1, name: 'Arama' });
+    const { location } = router.state;
+    expect([location.pathname, location.search, location.hash]).toEqual(['/search', '', '']);
+    expect(location.state as unknown).toBeNull();
+    expect(handoff.take('/search')).toEqual({ q: '172.20.41.23' });
+  });
+
+  it('opens Arama with nothing handed over for an empty box', async () => {
+    const user = userEvent.setup();
+    installFetch((request) =>
+      request.path === '/api/v1/auth/me'
+        ? jsonResponse(200, makeMe('admin'))
+        : errorResponse(404, 'not_found'),
+    );
+    const { router } = renderApp('/audit');
+    await user.type(await screen.findByRole('searchbox', { name: 'Genel arama' }), '  {Enter}');
+    await screen.findByRole('heading', { level: 1, name: 'Arama' });
+    expect(router.state.location.pathname).toBe('/search');
+    expect(handoff.take('/search')).toBeNull();
+  });
+});
+
 /*
  * Signing out, or a session the server ended, must not leave a query (an IP, a MAC, a name) for
  * whoever signs in next on the same browser.

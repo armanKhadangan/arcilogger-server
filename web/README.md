@@ -97,10 +97,9 @@ bidi overrides and other invisible characters appear as `\uXXXX`. Other menu ent
 placeholders ("Bu sayfa sonraki bir sürümde eklenecek.", no milestone code), already
 permission-filtered (`BUILT_PAGES` in `src/nav.ts`).
 Two top-bar controls of spec 12.2 come with the pages that use them: the global search box
-appears once "Arama" is built (M2; its term goes to the page as router state, so not into the URL,
-`?next=` or the web server's access log — but router state lives in the tab's session history
-(`history.state`), which the browser may keep for session restore: if the term must not reach the
-browser history at all, M2 hands it over in memory, e.g. a context or the query cache), and the
+appears once "Arama" is built (M2; its term is handed to the page in memory, `src/lib/handoff.ts`,
+so not into the URL, `?next=`, the web server's access log or the tab's session history
+(`history.state`), which the browser may keep for session restore), and the
 global time range ("[Bugün ▾]")
 with the first page that reads it (Panel / Arama, M2) — until then a picker that filters nothing
 would make pages such as Denetim Kaydı look limited to "today". "Kullanım" keeps its own period in

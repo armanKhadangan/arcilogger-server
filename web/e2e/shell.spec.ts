@@ -152,6 +152,27 @@ test.describe('global search box', () => {
       await expect(page.locator('header').getByRole('search')).toHaveCount(shown ? 1 : 0);
     });
   }
+
+  test('hands its term to Arama in memory: not in the address, history or storage', async ({
+    page,
+  }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/audit');
+    const box = page.locator('header').getByRole('searchbox', { name: 'Genel arama' });
+    await box.fill('172.20.41.23');
+    await box.press('Enter');
+    await expect(page.getByRole('heading', { level: 1, name: 'Arama' })).toBeVisible();
+    const url = new URL(page.url());
+    expect(url.pathname + url.search + url.hash).toBe('/search');
+    const kept = await page.evaluate(() =>
+      JSON.stringify([
+        window.history.state,
+        Object.entries(localStorage),
+        Object.entries(sessionStorage),
+      ]),
+    );
+    expect(kept).not.toContain('172.20.41.23');
+  });
 });
 
 test.describe('organisation name in the sidebar', () => {
