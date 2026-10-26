@@ -226,7 +226,9 @@ test.describe('Ayarlar → Genel', () => {
     await expect(progress.getByRole('alert')).toContainText(
       'Değişiklik geri alınamadı; elle müdahale gerekiyor.',
     );
-    await expect(progress).toContainText('python -I -m arcilogger_core.admin versions restore 17');
+    await expect(progress).toContainText(
+      '& "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin versions restore 17',
+    );
   });
 
   test('partly applied: the service that has not taken it yet is named', async ({ page }) => {

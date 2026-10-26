@@ -502,28 +502,31 @@ VAULT_ACL_SCRIPT: Final = '& "C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVa
 
 
 def manual_steps(version: int | None, code: str | None) -> tuple[str | None, str | None]:
-    """What an administrator does on the server for a change that needs attention. For
-    ``acl_drift`` the change is in force and only the rights are repaired (putting the
-    previous version back would undo it, and the next change would fail again)."""
+    """What an administrator does on the server for a change that needs attention, one command
+    a line (copied as it is). For ``acl_drift`` the change is in force and only the rights are
+    repaired (putting the previous version back would undo it, and the next change would fail
+    again)."""
     status = f"{CONSOLE_PYTHON} arcilogger_core.admin status"
     if code == "acl_drift":
         return (
-            "Değişiklik yürürlükte; yönetim hizmeti ayar dosyalarına yazma iznini kaybetti. "
-            f"Sunucuda yönetici PowerShell'inde izinleri onarın: {VAULT_ACL_SCRIPT} (ya da "
-            f"kurulumu onarım olarak yeniden çalıştırın). Ardından durumu denetleyin: {status}",
-            "The change is in force; the administration service lost its write access to the "
-            "configuration files. On the server, in an administrator PowerShell, repair the "
-            f"rights: {VAULT_ACL_SCRIPT} (or run the installer again as a repair). Then check "
-            f"the state: {status}",
+            "Değişiklik yürürlükte; yalnızca yönetim hizmetinin ayar dosyalarına yazma izni "
+            "onarılmalı.\n1. Sunucuda yönetici olarak bir PowerShell penceresi açın.\n2. İzinleri "
+            f"onarın (ya da kurulumu onarım olarak yeniden çalıştırın):\n   {VAULT_ACL_SCRIPT}\n"
+            f"3. Durumu denetleyin:\n   {status}",
+            "The change is in force; only the administration service's write access to the "
+            "configuration files needs repair.\n1. Open a PowerShell window as an administrator "
+            "on the server.\n2. Repair the rights (or run the installer again as a repair):\n"
+            f"   {VAULT_ACL_SCRIPT}\n3. Check the state:\n   {status}",
         )
     if version is None:
         return None, None
-    command = f"{CONSOLE_PYTHON} arcilogger_core.admin versions restore {version}"
+    restore = f"{CONSOLE_PYTHON} arcilogger_core.admin versions restore {version}"
     return (
-        "Sunucuda yönetici PowerShell'inde önceki ayarları geri yükleyin: "
-        f"{command}. Ardından durumu denetleyin: {status}. Yedek sürüm: {version}.",
-        "On the server, in an administrator PowerShell, put the previous settings back: "
-        f"{command}. Then check the state: {status}. Backup version: {version}.",
+        "1. Sunucuda yönetici olarak bir PowerShell penceresi açın.\n2. Önceki ayarları geri "
+        f"yükleyin (yedek sürüm {version}):\n   {restore}\n3. Durumu denetleyin:\n   {status}",
+        "1. Open a PowerShell window as an administrator on the server.\n2. Put the previous "
+        f"settings back (backup version {version}):\n   {restore}\n3. Check the state:\n"
+        f"   {status}",
     )
 
 

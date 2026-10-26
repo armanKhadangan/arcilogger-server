@@ -206,6 +206,16 @@ test.describe('Mühürleme', () => {
     await expect(
       page.getByText(/Yönetim hizmeti \(ArciAdmin\) yanıt vermiyor; değişiklik kuyruğa alınmadı\./),
     ).toBeVisible();
+    // The console path is named: the Seal task in Task Scheduler.
+    await expect(
+      page.getByText(/Görev Zamanlayıcısı'ndan \\ARCILOGGER\\Seal görevini çalıştırabilirsiniz/),
+    ).toBeVisible();
+
+    api.admin.agent = 'disabled';
+    await page.getByRole('button', { name: 'Kontör sorgula' }).click();
+    await expect(
+      page.getByText(/Görev Zamanlayıcısı'ndan \\ARCILOGGER\\Credit görevini çalıştırabilirsiniz/),
+    ).toBeVisible();
   });
 
   test('"Kontör sorgula": the task asks Kamu SM once; a second query within a minute is refused', async ({

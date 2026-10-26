@@ -166,9 +166,14 @@ export function ChangeReviewDialog({
               <Alert tone="warning" assertive={false} data-testid="review-held">
                 <span className="flex items-start gap-1.5">
                   <Clock aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                  {check.effective_at
-                    ? t('admin.review.heldUntil', { time: formatDateTime(check.effective_at) })
-                    : t('admin.review.held')}
+                  {check.effective_at &&
+                  check.warnings.some((warning) => warning.code === 'unknown_jar_held')
+                    ? t('admin.review.approvableFrom', {
+                        time: formatDateTime(check.effective_at),
+                      })
+                    : check.effective_at
+                      ? t('admin.review.heldUntil', { time: formatDateTime(check.effective_at) })
+                      : t('admin.review.held')}
                 </span>
               </Alert>
             ) : null}

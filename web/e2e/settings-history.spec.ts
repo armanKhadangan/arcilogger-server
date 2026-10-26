@@ -144,7 +144,9 @@ test.describe('Ayarlar → Değişiklik geçmişi', () => {
     // Restoring the newest version undoes the latest change, and only that one.
     const card = page.getByTestId('settings-versions');
     await expect(card).toContainText('Örneğin son değişikliği geri almak için:');
-    await expect(card).toContainText('python -I -m arcilogger_core.admin versions restore 17');
+    await expect(card).toContainText(
+      '& "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin versions restore 17',
+    );
     await expect(card).not.toContainText('versions restore 16');
     expect(api.admin.versions[0]?.request_id).toBe([...api.admin.requests.keys()][0]);
     await versions.getByRole('button', { name: '17 numaralı sürümün isteğini aç' }).click();

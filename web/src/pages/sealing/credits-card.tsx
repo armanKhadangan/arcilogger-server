@@ -18,6 +18,8 @@ import { formatDate, formatDateTime, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import type { AdminRequestOut, CreditActionResult } from '@/lib/settings-types';
 
+import { AGENT_CODES } from './seal-states';
+
 function CreditOutcome({ request }: { request: AdminRequestOut }) {
   const { t } = useTranslation();
   const lang = currentLang();
@@ -55,7 +57,9 @@ export function CreditQuery() {
       setProblem(
         seconds
           ? `${errorMessage(error)} ${t('sealing.credits.retryAfter', { seconds })}`
-          : errorMessage(error),
+          : isApiError(error, ...AGENT_CODES)
+            ? `${errorMessage(error)} ${t('sealing.credits.console')}`
+            : errorMessage(error),
       );
     }
   }

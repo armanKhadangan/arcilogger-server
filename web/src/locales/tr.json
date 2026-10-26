@@ -1530,7 +1530,8 @@
         "credits": "Kalan",
         "note": "Not"
       },
-      "note": "Kontör, \\ARCILOGGER\\Credit görevi tarafından günde bir kez sorgulanır; \"Kontör sorgula\" sunucudaki görevi hemen bir kez çalıştırır. Web hizmeti Kamu SM'ye kendisi bağlanmaz.",
+      "note": "Kontör, \\ARCILOGGER\\Credit görevi tarafından günde bir kez sorgulanır; \"Kontör sorgula\" sorguyu sunucudaki \\ARCILOGGER\\Requests görevine hemen bir kez yaptırır (dakikada en çok 1). Web hizmeti Kamu SM'ye kendisi bağlanmaz.",
+      "console": "Bu düğme yönetim hizmeti (ArciAdmin) üzerinden çalışır: tarayıcıdan yönetim kapalıyken ya da hizmet çalışmıyorken kullanılamaz. Sunucuda Görev Zamanlayıcısı'ndan \\ARCILOGGER\\Credit görevini çalıştırabilirsiniz.",
       "query": "Kontör sorgula",
       "queryResult": "Kalan kontör: {{credits}} (uyarı eşiği {{threshold}}).",
       "queryLow": "Kalan kontör {{credits}}: uyarı eşiğinin ({{threshold}}) altında.",
@@ -1579,6 +1580,7 @@
         "notApplicable": "Bu gün mühürlenmez (veri yok, atlandı ya da imha edildi).",
         "notOldest": "Şimdi yalnızca sıradaki (en eski) mühürlenmemiş gün mühürlenebilir: önce {{day}}."
       },
+      "console": "Bu düğme yönetim hizmeti (ArciAdmin) üzerinden çalışır: tarayıcıdan yönetim kapalıyken ya da hizmet çalışmıyorken kullanılamaz. Sunucuda Görev Zamanlayıcısı'ndan \\ARCILOGGER\\Seal görevini çalıştırabilirsiniz; görev her çalışmada sıradaki günleri mühürler.",
       "confirmTitle": "{{day}} şimdi mühürlensin mi?",
       "confirmBody": "Sunucudaki \\ARCILOGGER\\Seal görevi bu günü hemen bir kez mühürlemeyi dener ve yapılandırılan sağlayıcıdan bir zaman damgası alır (Kamu SM'de 1 kontör). Gece yarısından sonraki bekleme ve boş gün kuralı atlanmaz.",
       "outcome": {
@@ -3109,7 +3111,7 @@
         "title": "Tarayıcıdan sunucu yönetimi kapalı",
         "body": "Tarayıcıdan sunucu yönetimi bu kurulumda kapatılmış; değerler yalnızca görüntülenir."
       },
-      "console": "Değişikliği sunucu konsolunda yapın: C:\\ProgramData\\ARCILOGGER\\arcilogger.toml dosyası, kayıtlı gizli bilgiler için arcilogger-core secret set.",
+      "console": "Değişikliği sunucu konsolunda yapın: C:\\ProgramData\\ARCILOGGER\\arcilogger.toml dosyası; kayıtlı gizli bilgiler için \"C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\arcilogger-core.exe\" secret set, ardından \"C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVaultAcl.ps1\". Tarayıcıdan yönetim kapalıyken güvenlik duvarı kendiliğinden eşitlenmez: [[sources]] değişikliğinden sonra \"C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciFirewall.ps1\" betiğini çalıştırın.",
       "stale": "Yönetim hizmeti geç yanıt veriyor; değişiklik gecikebilir."
     },
     "restart": {
@@ -3130,6 +3132,7 @@
       "applied": "Yazıldı; hizmetler yeni ayarı yüklüyor.",
       "actionRunning": "Çalışıyor…",
       "heldUntil": "Bu değişiklik bekletiliyor: {{time}} tarihinde uygulanır (kalan {{left}}). O zamana kadar iptal edilebilir.",
+      "approvableFrom": "Bu Zamane istemcisi sunucu konsolundaki onayı bekliyor ve kendiliğinden uygulanmaz: bir yönetici en erken {{time}} itibarıyla onaylayabilir. Onaylanana kadar iptal edilebilir.",
       "held": "Bu değişiklik bekletiliyor; bekletme süresi sonunda uygulanır.",
       "active": "Uygulandı: hizmetler yeni ayarla çalışıyor.",
       "actionDone": "Tamamlandı.",
@@ -3262,6 +3265,7 @@
       "effects": "Etkisi",
       "warnings": "Uyarılar",
       "heldUntil": "Bu değişiklik bekletilir: {{time}} tarihinde uygulanır; o zamana kadar iptal edilebilir.",
+      "approvableFrom": "Bu Zamane istemcisi bekletilir ve kendiliğinden uygulanmaz: bir yönetici en erken {{time}} itibarıyla sunucu konsolunda onaylayabilir; onaylanana kadar iptal edilebilir.",
       "held": "Bu değişiklik bekletilir; bekletme süresi sonunda uygulanır.",
       "reauth": "Kaydederken parolanızı yeniden girmeniz istenecek.",
       "confirm": "Onayla ve kaydet",

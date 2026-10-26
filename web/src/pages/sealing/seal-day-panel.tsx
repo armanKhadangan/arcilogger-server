@@ -24,7 +24,7 @@ import { CodeBlock } from '@/components/ui/code-block';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { apiDownload, errorMessage } from '@/lib/api';
+import { apiDownload, errorMessage, isApiError } from '@/lib/api';
 import { queryKeys, useSealDay, useSealNow, useVerifySeal } from '@/lib/api-hooks';
 import type { Calendar, VerifyResult } from '@/lib/api-types';
 import { useAuth } from '@/lib/auth';
@@ -35,7 +35,7 @@ import { currentLang } from '@/lib/i18n';
 import type { SealDayDetail, SealVerification } from '@/lib/seal-types';
 import type { AdminRequestOut, SealActionResult } from '@/lib/settings-types';
 
-import { gapReason, legalGrade, toneOf } from './seal-states';
+import { AGENT_CODES, gapReason, legalGrade, toneOf } from './seal-states';
 
 const LEGAL_TONE = { legal: 'success', claimed: 'info', test: 'danger' } as const;
 const LEGAL_LABEL = {
@@ -378,7 +378,11 @@ function SealNow({ detail, calendar }: { detail: SealDayDetail; calendar: Calend
       setConfirming(false);
     } catch (error) {
       setConfirming(false);
-      setProblem(errorMessage(error));
+      setProblem(
+        isApiError(error, ...AGENT_CODES)
+          ? `${errorMessage(error)} ${t('sealing.sealNow.console')}`
+          : errorMessage(error),
+      );
     }
   }
 

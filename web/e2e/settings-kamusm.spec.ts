@@ -230,7 +230,9 @@ test.describe('Ayarlar → Kamu SM', () => {
       timeout: 10_000,
     });
     const staged = page.getByTestId('zamane-staged');
-    await expect(staged).toContainText(`python -I -m arcilogger_core.admin approve-jar ${digest}`);
+    await expect(staged).toContainText(
+      `& "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin approve-jar ${digest}`,
+    );
     await expect(staged).toContainText("Kamu SM'den indirdiğiniz istemci .jar dosyasınınki");
     expect(api.callsTo('POST', '/admin/config/tsa/zamane').at(-1)?.body).toMatchObject({
       expected_sha256: digest,
@@ -258,12 +260,25 @@ test.describe('Ayarlar → Kamu SM', () => {
       timeout: 10_000,
     });
 
-    // Another day: the held change is listed with its countdown, on any step of the wizard.
+    // Another day: the held change is listed on any step of the wizard. Time alone never makes
+    // it run: it waits for the console's approval, without a countdown.
     await page.goto('/settings/kamusm?step=credit');
     const held = page.getByTestId('held-change');
     await expect(held.getByTestId('request-state')).toHaveText('Bekletiliyor');
-    await expect(held.getByTestId('hold-countdown')).toContainText('kalan');
+    await expect(held.getByTestId('hold-countdown')).toContainText(
+      'sunucu konsolundaki onayı bekliyor ve kendiliğinden uygulanmaz',
+    );
+    await expect(held.getByTestId('hold-countdown')).not.toContainText('kalan');
     await expect(page.getByTestId('request-progress')).toHaveCount(1);
+    // The other steps are not kept waiting meanwhile.
+    await page.getByLabel('Kontör uyarı eşiği', { exact: true }).fill('300');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await page
+      .getByRole('dialog', { name: 'Değişiklikleri onaylayın' })
+      .getByRole('button', { name: 'Onayla ve kaydet' })
+      .click();
+    await expect.poll(() => api.admin.sections.tsa.credit_alert_threshold).toBe(300);
+    await expect(held.getByTestId('request-state')).toHaveText('Bekletiliyor');
     // The password was confirmed a moment ago, so the cancellation is not asked again.
     await held.getByRole('button', { name: 'İptal et' }).click();
     // Cancelled: the change leaves the configuration's held list, and the client its staging.

@@ -314,8 +314,8 @@ const MESSAGES: Record<string, [string, string]> = {
     'The administration service stopped during the change; the previous settings were restored.',
   ],
   acl_drift: [
-    'Yönetim hizmeti ayar dosyasına yazma iznini kaybetmiş; kurulumu onarın.',
-    'The administration service has lost write access to the configuration; repair the installation.',
+    'Yönetim hizmeti ayar dosyalarına yazma iznini kaybetmiş (çoğunlukla konsoldan bir secret set sonrası); sunucuda yönetici olarak Set-ArciVaultAcl.ps1 betiğini çalıştırın.',
+    'The administration service has lost write access to the configuration files (most often after a console secret set); run Set-ArciVaultAcl.ps1 on the server as an administrator.',
   ],
   system_sync_failed: [
     "Güvenlik duvarı, saat ya da Zamane adımı uygulanamadı; önceki kurallar geçerli. Ayrıntılar Olay Görüntüleyicisi'nde (ARCILOGGER-Admin).",
@@ -379,6 +379,14 @@ const WARNINGS: Record<string, [string, string]> = {
     'This Zamane release is not a known release: it becomes active only when an administrator approves it on the server console (at the earliest when the hold ends).',
   ],
   probe_skipped: ['Bağlantı denemesi atlandı.', 'The connection test was skipped.'],
+  credit_query_skipped: [
+    'Kontör sorgusu yapılmadı: Zamane istemcisi henüz çalıştırılamıyor (onay bekliyor ya da Java veya istemci güvenilir bir konumda değil); istemci etkinleşince "Kontör sorgula" ile deneyin.',
+    'The credit was not queried: the Zamane client cannot run yet (it awaits approval, or Java or the client is not in a trusted location); once the client is active, use "Query credit".',
+  ],
+  write_access_lost: [
+    'Değişiklik uygulandı, ancak yönetim hizmeti ayar dosyalarına artık yazamıyor: sonraki değişiklikten önce sunucuda yönetici olarak Set-ArciVaultAcl.ps1 betiğini çalıştırın.',
+    'The change is applied, but the administration service can no longer write the configuration files: before the next change, run Set-ArciVaultAcl.ps1 on the server as an administrator.',
+  ],
   service_not_reloaded: [
     'Bir hizmet yeni ayarları henüz yüklemedi; ayrıntı adım listesinde.',
     'A service has not loaded the new settings yet; see the step list.',
@@ -970,12 +978,19 @@ export class AdminMock {
     return null;
   }
 
-  private busy(section: AdminSection): boolean {
+  /**
+   * One open configuration request per section; a Zamane client held for the console's
+   * approval counts only for another client (`client`), as `Channel.check_section_free`.
+   */
+  private busy(section: AdminSection, client = false): boolean {
     return [...this.requests.values()].some(
       (item) =>
         item.out.section === section &&
         (item.out.kind === 'config.apply' || item.out.kind === 'config.revert') &&
-        !item.out.terminal,
+        !item.out.terminal &&
+        (client ||
+          item.out.state !== 'pending' ||
+          !item.out.warnings.some((warning) => warning.code === 'unknown_jar_held')),
     );
   }
 
@@ -1161,9 +1176,10 @@ export class AdminMock {
                 verify: { state: 'failed', code: 'verify_failed' },
                 rollback: { state: 'failed', code: 'rollback_failed' },
               },
+              // `admin_channel.manual_steps` of the real API, one command a line.
               manual: [
-                '1. Sunucuda yönetici olarak bir komut istemi açın.\n2. python -I -m arcilogger_core.admin versions list\n3. python -I -m arcilogger_core.admin versions restore 17',
-                '1. Open a command prompt as an administrator on the server.\n2. python -I -m arcilogger_core.admin versions list\n3. python -I -m arcilogger_core.admin versions restore 17',
+                '1. Sunucuda yönetici olarak bir PowerShell penceresi açın.\n2. Önceki ayarları geri yükleyin (yedek sürüm 17):\n   & "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin versions restore 17\n3. Durumu denetleyin:\n   & "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin status',
+                '1. Open a PowerShell window as an administrator on the server.\n2. Put the previous settings back (backup version 17):\n   & "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin versions restore 17\n3. Check the state:\n   & "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin status',
               ],
             };
       apply = false;
@@ -1376,7 +1392,8 @@ export class AdminMock {
       if (Array.isArray(recent)) return recent;
     }
     if (this.agent === 'missing') return this.reject('admin_agent_unavailable');
-    if (this.busy(plan.section)) return this.reject('admin_section_busy');
+    if (this.busy(plan.section, 'tsa.zamane_jar' in plan.changes))
+      return this.reject('admin_section_busy');
     const skipped: RequestStep[] = [
       ...(plan.secrets ? [] : (['write_secrets'] as RequestStep[])),
       ...(plan.installs ? [] : (['install_files'] as RequestStep[])),

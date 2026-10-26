@@ -201,7 +201,12 @@ export function RequestProgress({
   const request = query.data;
   const reported = useRef<string | null>(null);
   const held = useRef<string | null>(null);
-  const seconds = useCountdown(request?.state === 'pending' ? request.effective_at : null);
+  // A Zamane client that is not a known release is never applied on its own (D0-16): its time
+  // is when the console's approve-jar is first allowed, so it gets no countdown.
+  const approval = request?.warnings.some((warning) => warning.code === 'unknown_jar_held');
+  const seconds = useCountdown(
+    request?.state === 'pending' && !approval ? request.effective_at : null,
+  );
 
   // A held change is listed in the configuration (`pending`) from now on.
   useEffect(() => {
@@ -292,12 +297,14 @@ export function RequestProgress({
   if (state === 'pending')
     body.push(
       <p key="pending" data-testid="hold-countdown">
-        {request.effective_at
-          ? t('admin.progress.heldUntil', {
-              time: formatDateTime(request.effective_at),
-              left: countdownText(seconds ?? 0),
-            })
-          : t('admin.progress.held')}
+        {request.effective_at && approval
+          ? t('admin.progress.approvableFrom', { time: formatDateTime(request.effective_at) })
+          : request.effective_at
+            ? t('admin.progress.heldUntil', {
+                time: formatDateTime(request.effective_at),
+                left: countdownText(seconds ?? 0),
+              })
+            : t('admin.progress.held')}
       </p>,
     );
   if (state === 'active')

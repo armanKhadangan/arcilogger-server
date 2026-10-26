@@ -11,7 +11,7 @@ import { makeMe } from '@/test/api-mock';
 import { testQueryClient } from '@/test/render';
 
 import { ConsoleCommand } from './console-command';
-import { approveJarCommand, restoreVersionCommand } from './console-commands';
+import { CONSOLE_ADMIN, approveJarCommand, restoreVersionCommand } from './console-commands';
 
 /*
  * The console commands the administrator runs in an elevated prompt are built only from a value
@@ -82,16 +82,20 @@ function renderZamane(staged: string) {
 }
 
 describe('console commands', () => {
+  it("runs the installation's interpreter by its full path (not on PATH)", () => {
+    expect(CONSOLE_ADMIN).toBe(
+      '& "C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin',
+    );
+  });
+
   it('approve-jar only for 64 lowercase hexadecimal characters', () => {
-    expect(approveJarCommand(SHA)).toBe(`python -I -m arcilogger_core.admin approve-jar ${SHA}`);
+    expect(approveJarCommand(SHA)).toBe(`${CONSOLE_ADMIN} approve-jar ${SHA}`);
     for (const value of [INJECTED, SHA.toUpperCase(), SHA.slice(1), `${SHA}\n`, '', `${SHA}0`])
       expect(approveJarCommand(value), JSON.stringify(value)).toBeNull();
   });
 
   it('versions restore only for a positive integer', () => {
-    expect(restoreVersionCommand(17)).toBe(
-      'python -I -m arcilogger_core.admin versions restore 17',
-    );
+    expect(restoreVersionCommand(17)).toBe(`${CONSOLE_ADMIN} versions restore 17`);
     for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53])
       expect(restoreVersionCommand(value), String(value)).toBeNull();
   });
@@ -115,7 +119,7 @@ describe('console commands', () => {
   it('a staged client with a well-formed SHA-256 renders its command', () => {
     renderZamane(SHA);
     expect(screen.getByTestId('zamane-staged')).toHaveTextContent(
-      `python -I -m arcilogger_core.admin approve-jar ${SHA}`,
+      `${CONSOLE_ADMIN} approve-jar ${SHA}`,
     );
     expect(screen.queryByTestId('console-command-refused')).not.toBeInTheDocument();
   });

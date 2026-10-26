@@ -1530,7 +1530,8 @@
         "credits": "Remaining",
         "note": "Note"
       },
-      "note": "The \\ARCILOGGER\\Credit task queries the credit once a day; \"Query credit\" runs the task on the server once, now. The web service never connects to Kamu SM itself.",
+      "note": "The \\ARCILOGGER\\Credit task queries the credit once a day; \"Query credit\" has the \\ARCILOGGER\\Requests task on the server query once, now (at most once a minute). The web service never connects to Kamu SM itself.",
+      "console": "This button works through the administration service (ArciAdmin): it cannot be used while browser administration is off or the service is not running. On the server, run the \\ARCILOGGER\\Credit task from Task Scheduler.",
       "query": "Query credit",
       "queryResult": "Credit left: {{credits}} (alert threshold {{threshold}}).",
       "queryLow": "Credit left {{credits}}: below the alert threshold ({{threshold}}).",
@@ -1579,6 +1580,7 @@
         "notApplicable": "This day is not sealed (no data, skipped or deleted).",
         "notOldest": "Only the next (oldest) unsealed day can be sealed now: {{day}} first."
       },
+      "console": "This button works through the administration service (ArciAdmin): it cannot be used while browser administration is off or the service is not running. On the server, run the \\ARCILOGGER\\Seal task from Task Scheduler; every run seals the days that are due, in order.",
       "confirmTitle": "Seal {{day}} now?",
       "confirmBody": "The \\ARCILOGGER\\Seal task on the server tries to seal this day once, now, with a time stamp from the configured provider (1 credit with Kamu SM). The wait after midnight and the empty-day rule are not skipped.",
       "outcome": {
@@ -3109,7 +3111,7 @@
         "title": "Browser administration is switched off",
         "body": "Browser administration is switched off on this installation; the values are shown read-only."
       },
-      "console": "Make the change on the server console: the file C:\\ProgramData\\ARCILOGGER\\arcilogger.toml, and arcilogger-core secret set for stored secrets.",
+      "console": "Make the change on the server console: the file C:\\ProgramData\\ARCILOGGER\\arcilogger.toml; for stored secrets \"C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\arcilogger-core.exe\" secret set, then \"C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVaultAcl.ps1\". While browser administration is off the firewall is not synchronised by itself: after a [[sources]] change run \"C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciFirewall.ps1\".",
       "stale": "The administration service is answering late; the change may be delayed."
     },
     "restart": {
@@ -3130,6 +3132,7 @@
       "applied": "Written; the services are loading the new settings.",
       "actionRunning": "Running…",
       "heldUntil": "This change is held: it is applied at {{time}} ({{left}} left). It can be cancelled until then.",
+      "approvableFrom": "This Zamane client waits for its approval on the server console and is never applied on its own: an administrator can approve it from {{time}}. It can be cancelled until it is approved.",
       "held": "This change is held; it is applied when the hold ends.",
       "active": "Applied: the services run with the new settings.",
       "actionDone": "Done.",
@@ -3262,6 +3265,7 @@
       "effects": "Effect",
       "warnings": "Warnings",
       "heldUntil": "This change is held: it is applied at {{time}} and can be cancelled until then.",
+      "approvableFrom": "This Zamane client is held and never applied on its own: an administrator can approve it on the server console from {{time}}; it can be cancelled until it is approved.",
       "held": "This change is held; it is applied when the hold ends.",
       "reauth": "You will be asked for your password again when saving.",
       "confirm": "Confirm and save",
