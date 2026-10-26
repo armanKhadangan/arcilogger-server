@@ -227,7 +227,7 @@ class IngestService:
         self.db_ok = False
         self.db_error: str | None = None
         self.started_at = utc_now()
-        self.status = StatusWriter(self.layout.state / "ingest-status.json")
+        self.status = StatusWriter(self.layout.ingest_status)
         self._next_status = 0.0
 
     # -- entry point --------------------------------------------------------------------------

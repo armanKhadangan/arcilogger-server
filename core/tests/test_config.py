@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from arcilogger_core.config import Config, default_config_path, load_config, setup_problems
+from arcilogger_core.config import (
+    Config,
+    default_config_path,
+    load_config,
+    parse_config,
+    setup_problems,
+)
 
 MINIMAL = """
 data_dir = "D:/ARCILOGGER"
@@ -262,3 +268,34 @@ def test_invalid_organisation_name_or_time_server_is_refused(
 ) -> None:
     with pytest.raises(ValidationError, match=message):
         load_config(_write(tmp_path, top + "\n" + MINIMAL + "\n" + section + "\n"))
+
+
+def test_a_source_is_enabled_unless_switched_off(tmp_path: Path) -> None:
+    """``enabled`` is new (ADR-0014): every existing file stays valid and its sources on."""
+    config = load_config(_write(tmp_path, MINIMAL))
+    assert all(source.enabled for source in config.sources)
+    text = MINIMAL.replace(
+        'address = "172.20.10.1"\n', 'address = "172.20.10.1"\nenabled = false\n'
+    )
+    off = load_config(_write(tmp_path, text))
+    core = off.source_for("172.20.10.1")
+    assert core is not None
+    assert core.enabled is False
+    assert off.source_name_for("172.20.10.1") == "core-r1", "still recorded under its name"
+    assert type(core).model_validate(core.model_dump()) == core
+    with pytest.raises(ValidationError, match="enabled"):
+        load_config(_write(tmp_path, text.replace("enabled = false", 'enabled = "maybe"')))
+
+
+def test_the_admin_folder_lies_next_to_the_secret_store(tmp_path: Path) -> None:
+    config = load_config(_write(tmp_path, MINIMAL))
+    assert config.admin_dir == tmp_path / "admin"
+    with pytest.raises(ValidationError, match="admin_dir"):
+        load_config(_write(tmp_path, 'admin_dir = "D:/elsewhere"\n' + MINIMAL))
+
+
+def test_parse_config_reads_bytes_as_load_config_reads_the_file(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL)
+    assert parse_config(path.read_bytes(), path) == load_config(path)
+    with pytest.raises(ValueError, match="utf-8"):
+        parse_config(MINIMAL.encode("utf-16"), path)

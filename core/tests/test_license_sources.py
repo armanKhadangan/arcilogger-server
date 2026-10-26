@@ -240,11 +240,17 @@ def test_no_second_module_test_outside_the_licence_package() -> None:
     assert offending == []
 
 
+#: Ed25519 also signs the request files of the browser administration (ADR-0014), with keys of
+#: their own; that package never imports the licence code (test_independence.py).
+ADMIN_CHANNEL = ROOT / "core" / "src" / "arcilogger_core" / "admin"
+
+
 def test_no_signature_check_outside_the_licence_package() -> None:
     offending = [
         _relative(path)
         for path in _product_sources()
-        if re.search(r"Ed25519PublicKey|ed25519", path.read_text(encoding="utf-8"))
+        if ADMIN_CHANNEL not in path.parents
+        and re.search(r"Ed25519PublicKey|ed25519", path.read_text(encoding="utf-8"))
     ]
     assert offending == []
 
