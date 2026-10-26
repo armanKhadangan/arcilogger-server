@@ -487,10 +487,10 @@ def test_parsing_while_typing(
     assert good["errors"] == []
     assert good["selective"] is True
     assert [clause["field"] for clause in good["clauses"]] == ["srcip", "action", "text"]
-    bad = client.post(f"{API}/parse", json={"q": "srcip:1.2.3.4 foo:bar"}).json()
+    bad = client.post(f"{API}/parse", json={"q": "srcip:192.0.2.4 foo:bar"}).json()
     assert bad["normalized"] == ""
     (error,) = bad["errors"]
-    assert (error["code"], error["start"], error["end"]) == ("search_unknown_field", 14, 21)
+    assert (error["code"], error["start"], error["end"]) == ("search_unknown_field", 16, 23)
     # binding needs the database: an unknown VLAN is found when the search runs
     assert client.post(f"{API}/parse", json={"q": "vlan:99"}).json()["errors"] == []
     body = {"q": "", "from": START.isoformat(), "to": END.isoformat()}
