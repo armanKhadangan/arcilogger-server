@@ -375,8 +375,8 @@
   "settings": {
     "description": "Sistem ayarları ve kullanıcı yönetimi.",
     "usersHint": "Hesaplar, roller, parola ve iki adımlı doğrulama sıfırlama.",
-    "laterTitle": "Sonraki sürümde",
-    "laterHint": "Bu bölümler sonraki bir sürümde eklenecek; o zamana kadar bu ayarlar sunucuda yapılır (ILK-ADIMLAR.md, KURULUM.md).",
+    "laterTitle": "Sonraki adımlarda",
+    "laterHint": "Bu bölümler tarayıcıdan yönetimin sonraki adımlarıyla gelir.",
     "sections": {
       "general": "Genel",
       "sources": "Kaynaklar",
@@ -389,7 +389,114 @@
       "rules": "Güvenlik kuralları",
       "privacy": "Gizlilik",
       "backup": "Yedekleme",
-      "about": "Hakkında"
+      "about": "Hakkında",
+      "application": "Uygulama ayarları",
+      "history": "Değişiklik geçmişi"
+    },
+    "hints": {
+      "general": "Kuruluş adı; raporlarda, e-postalarda ve kanıt paketlerinde görünür.",
+      "application": "Uyarılar, 5651 sorgu, kullanım (mesai saatleri ve tatiller), raporlar, oturum ve gizlilik.",
+      "history": "Tarayıcıdan yapılan değişiklikler ve işlemler, durumlarıyla."
+    },
+    "general": {
+      "title": "Genel",
+      "description": "Kuruluşun adı. Değişikliği sunucudaki yönetim hizmeti uygular; hiçbir hizmet yeniden başlatılmaz.",
+      "siteTitle": "Kuruluş",
+      "siteDescription": "Raporlarda, e-postalarda ve kanıt paketlerinde görünen ad.",
+      "siteName": "Kuruluş adı",
+      "siteNameHint": "Tek satır, en çok 200 karakter.",
+      "errors": {
+        "siteNameRequired": "Kuruluş adı boş olamaz.",
+        "siteNameTooLong": "Kuruluş adı en çok 200 karakter olabilir.",
+        "clockServersRequired": "En az bir saat sunucusu gerekir (yerel kaynak ya da yedek sunucu)."
+      }
+    },
+    "application": {
+      "title": "Uygulama ayarları",
+      "description": "Veritabanında tutulan ayarlar. Değişiklikler hemen geçerli olur, hiçbir hizmet yeniden başlatılmaz; her değişiklik denetim kaydına yazılır.",
+      "loadFailed": "Ayarlar okunamadı",
+      "groups": "Ayar grupları",
+      "unsaved": "kaydedilmemiş değişiklik var",
+      "on": "Açık",
+      "off": "Kapalı",
+      "reauth": "Parola onayı gerekir",
+      "min": "En az {{min}}.",
+      "range": "{{min}}–{{max}} arası.",
+      "onePerLine": "Her satıra bir değer.",
+      "default": "Varsayılan: {{value}}",
+      "changed": "Son değişiklik: {{by}}, {{time}}",
+      "reset": "Varsayılana dön",
+      "resetDone": "Varsayılan değere dönüldü.",
+      "saved_one": "{{count}} ayar kaydedildi.",
+      "saved_other": "{{count}} ayar kaydedildi.",
+      "changedCount_one": "{{count}} değişiklik",
+      "changedCount_other": "{{count}} değişiklik",
+      "conflictTitle": "Ayar başka biri tarafından değiştirildi",
+      "takeCurrent": "Güncel değerleri al",
+      "workDays": "Mesai günleri",
+      "workStart": "Mesai başlangıcı",
+      "workEnd": "Mesai bitişi",
+      "weekdays": {
+        "1": "Pazartesi",
+        "2": "Salı",
+        "3": "Çarşamba",
+        "4": "Perşembe",
+        "5": "Cuma",
+        "6": "Cumartesi",
+        "7": "Pazar"
+      },
+      "everyYear": "{{day}} (her yıl)",
+      "noHolidays": "Tatil günü yok.",
+      "holidayList": "Tatil günleri",
+      "removeHoliday": "Kaldır: {{day}}",
+      "addHoliday": "Tatil günü ekle",
+      "holidayPlaceholder": "AA-GG ya da YYYY-AA-GG",
+      "holidayHint": "Her yıl aynı gün için AA-GG (ör. 10-29), bir kez için YYYY-AA-GG (ör. 2026-03-20). Dini bayramların tarihi her yıl değişir: o yılın tarihlerini girin.",
+      "add": "Ekle",
+      "noServers": "Özel kira süresi olan DHCP sunucusu yok; hepsi varsayılan süreyi kullanır.",
+      "serverName": "DHCP sunucusu",
+      "serverSeconds": "Kira süresi (saniye)",
+      "removeServer": "Kaldır: {{server}}",
+      "addServer": "Sunucu ekle",
+      "errors": {
+        "workDays": "En az bir mesai günü seçin.",
+        "workTime": "Saatleri SS:DD biçiminde girin (ör. 08:00).",
+        "workOrder": "Mesai başlangıcı bitişten önce olmalı.",
+        "holiday": "Tarihi AA-GG ya da YYYY-AA-GG biçiminde girin.",
+        "totpRoles": "Yönetici ve denetçi rolleri için iki adımlı doğrulama zorunludur.",
+        "serverName": "DHCP sunucusunun adı boş olamaz.",
+        "serverSeconds": "Kira süresi en az 60 saniye olmalı.",
+        "integerList": "Her satıra 0 ya da daha büyük bir tam sayı yazın.",
+        "object": "Geçerli bir JSON nesnesi girin."
+      }
+    },
+    "history": {
+      "title": "Değişiklik geçmişi",
+      "description": "Tarayıcıdan yapılan yapılandırma değişiklikleri ve işlemler (mühürleme, kontör sorgusu, testler), en yeni önce.",
+      "outsideTitle": "Ayar dosyası elle değiştirilmiş",
+      "outside": "arcilogger.toml en son yönetim hizmeti dışında (sunucuda elle) değiştirildi; o değişiklik burada listelenmez.",
+      "listTitle": "İstekler",
+      "kind": "Tür",
+      "allKinds": "Tüm türler",
+      "empty": "Henüz istek yok",
+      "emptyHint": "Tarayıcıdan yapılan değişiklikler ve işlemler burada listelenir.",
+      "caption": "Değişiklik istekleri, en yeni önce",
+      "columns": {
+        "time": "Zaman",
+        "request": "İstek",
+        "state": "Durum",
+        "user": "İsteyen",
+        "number": "İstek no"
+      },
+      "effective": "Uygulanacağı zaman: {{time}}",
+      "requested": "{{user}}, {{time}}",
+      "changes": "Değişiklikler",
+      "changesCaption": "İstekteki değişiklikler",
+      "version": "Önceki ayarlar {{number}} numaralı sürümde saklı.",
+      "audit": "Denetim kaydı",
+      "auditHint": "Bu isteğin denetim kaydı satırları şu hedefle bulunur:",
+      "auditTarget": "Hedef",
+      "openAudit": "Denetim kaydını aç"
     }
   },
   "audit": {
@@ -954,7 +1061,11 @@
         "credits": "Kalan",
         "note": "Not"
       },
-      "note": "Kontör, \\ARCILOGGER\\Credit görevi tarafından günde bir kez sorgulanır; web arayüzü Kamu SM'ye bağlanmaz."
+      "note": "Kontör, \\ARCILOGGER\\Credit görevi tarafından günde bir kez sorgulanır; \"Kontör sorgula\" sunucudaki görevi hemen bir kez çalıştırır. Web hizmeti Kamu SM'ye kendisi bağlanmaz.",
+      "query": "Kontör sorgula",
+      "queryResult": "Kalan kontör: {{credits}} (uyarı eşiği {{threshold}}).",
+      "queryLow": "Kalan kontör {{credits}}: uyarı eşiğinin ({{threshold}}) altında.",
+      "retryAfter": "{{seconds}} saniye sonra tekrar deneyin."
     },
     "day": {
       "title": "{{day}}",
@@ -992,7 +1103,25 @@
     },
     "sealNow": {
       "button": "Şimdi mühürle",
-      "explanation": "Şimdi mühürle bu sürümde web arayüzünden yapılamaz: web hizmetinin kasaya yazma izni yoktur. Mühürleme, zamanlanmış \\ARCILOGGER\\Seal görevi ile her gece 00:10'dan itibaren 5 dakikada bir çalışır ve başarısız denemeleri kendiliğinden tekrarlar. Hemen mühürlemek için sunucuda Görev Zamanlayıcı'dan bu görevi çalıştırın."
+      "explanation": "Şimdi mühürle bu sürümde web arayüzünden yapılamaz: web hizmetinin kasaya yazma izni yoktur. Mühürleme, zamanlanmış \\ARCILOGGER\\Seal görevi ile her gece 00:10'dan itibaren 5 dakikada bir çalışır ve başarısız denemeleri kendiliğinden tekrarlar. Hemen mühürlemek için sunucuda Görev Zamanlayıcı'dan bu görevi çalıştırın.",
+      "hint": "Mühürleme görevi bu günü yeniden deneme zamanını beklemeden bir kez dener; gece yarısından sonraki bekleme, boş gün kuralı ve gün sırası aynen geçerlidir.",
+      "blocked": {
+        "sealed": "Bu gün zaten mühürlü.",
+        "open": "Gün henüz kapanmadı; kapandıktan sonra mühürlenir.",
+        "notApplicable": "Bu gün mühürlenmez (veri yok, atlandı ya da imha edildi).",
+        "notOldest": "Şimdi yalnızca sıradaki (en eski) mühürlenmemiş gün mühürlenebilir: önce {{day}}."
+      },
+      "confirmTitle": "{{day}} şimdi mühürlensin mi?",
+      "confirmBody": "Sunucudaki \\ARCILOGGER\\Seal görevi bu günü hemen bir kez mühürlemeyi dener ve yapılandırılan sağlayıcıdan bir zaman damgası alır (Kamu SM'de 1 kontör). Gece yarısından sonraki bekleme ve boş gün kuralı atlanmaz.",
+      "outcome": {
+        "sealed": "{{day}} mühürlendi.",
+        "pending": "{{day}} henüz mühürlenmedi; görev daha sonra yeniden dener.",
+        "failed": "Mühürleme denemesi başarısız; hata gün ayrıntısında.",
+        "waiting": "{{day}} beklemede; görev daha sonra mühürler.",
+        "skipped": "{{day}} atlandı (veri yok).",
+        "deleted": "{{day}} saklama süresi dolduğu için silinmiş."
+      },
+      "serial": "Seri no: {{serial}}"
     },
     "state": {
       "title": "Mühürleme görevi",
@@ -2490,6 +2619,217 @@
     },
     "errors": {
       "tooLarge": "Lisans dosyası çok büyük (en çok 64 KiB)."
+    }
+  },
+  "admin": {
+    "agent": {
+      "chip": "Yönetim hizmeti: {{state}}",
+      "heartbeat": "Son yanıt: {{time}}",
+      "states": {
+        "ok": "çalışıyor",
+        "stale": "gecikiyor",
+        "missing": "çalışmıyor",
+        "disabled": "kapalı"
+      }
+    },
+    "unavailable": {
+      "missing": {
+        "title": "Yönetim hizmeti çalışmıyor",
+        "body": "Yönetim hizmeti (ArciAdmin) yanıt vermiyor; tarayıcıdan sunucu ayarı şu an kaydedilemez. Değerler yalnızca görüntülenir. Sunucuda \"ARCILOGGER Yönetim\" hizmetini başlatın."
+      },
+      "disabled": {
+        "title": "Tarayıcıdan sunucu yönetimi kapalı",
+        "body": "Tarayıcıdan sunucu yönetimi bu kurulumda kapatılmış; değerler yalnızca görüntülenir."
+      },
+      "console": "Değişikliği sunucu konsolunda yapın: C:\\ProgramData\\ARCILOGGER\\arcilogger.toml dosyası, kayıtlı gizli bilgiler için arcilogger-core secret set.",
+      "stale": "Yönetim hizmeti geç yanıt veriyor; değişiklik gecikebilir."
+    },
+    "restart": {
+      "title": "Yeniden başlatma bekleyen değişiklik",
+      "body": "arcilogger.toml sunucuda elle değiştirilmiş; bu değişiklik ancak ilgili hizmet yeniden başlatılınca etkinleşir."
+    },
+    "progress": {
+      "sending": "Gönderiliyor…",
+      "services": "Yeni ayarı yükleyen hizmetler",
+      "appliedToast": "Uygulandı",
+      "probing": "Yeni değerlerle bağlantı deneniyor…",
+      "queued": "Sırada: yönetim hizmeti isteği birkaç saniye içinde alır.",
+      "waitingForAgent": "Yönetim hizmeti henüz yanıt vermedi; hizmet durmuş olabilir. İsteğin süresi dolana kadar beklenir.",
+      "applying": "Uygulanıyor…",
+      "applied": "Yazıldı; hizmetler yeni ayarı yüklüyor.",
+      "heldUntil": "Bu değişiklik bekletiliyor: {{time}} tarihinde uygulanır (kalan {{left}}). O zamana kadar iptal edilebilir.",
+      "held": "Bu değişiklik bekletiliyor; bekletme süresi sonunda uygulanır.",
+      "active": "Uygulandı: hizmetler yeni ayarla çalışıyor.",
+      "partiallyActive": "Kısmen uygulandı: ayar dosyası yazıldı, ancak her şey yeni ayarı almadı.",
+      "notReloaded": "{{service}} yeni ayarı henüz almadı.",
+      "systemFailed": {
+        "system_firewall": "Güvenlik duvarı güncellenemedi; önceki kurallar geçerli.",
+        "system_time": "Windows saat hizmeti güncellenemedi.",
+        "jar_promotion": "Zamane istemcisi onaylanamadı."
+      },
+      "failed": "Uygulanmadı, önceki ayarlar geçerli.",
+      "conflict": "Başka bir değişiklik yapıldı; sayfayı yenileyin.",
+      "expired": "İsteğin süresi doldu; hiçbir şey değişmedi.",
+      "cancelled": "İptal edildi; hiçbir şey değişmedi.",
+      "rolledBack": "Yazılan değişiklik geri alındı.",
+      "needsAttention": "Elle müdahale gerekiyor.",
+      "needsAttentionVersion": "Elle müdahale gerekiyor. Önceki ayarlar {{version}} numaralı sürümde saklı.",
+      "requestNumber": "İstek no: {{id}}",
+      "warnings": "Uyarılar",
+      "cancel": "İptal et",
+      "retry": "Yeniden dene",
+      "reload": "Sayfayı yenile",
+      "revert": "Geri al",
+      "steps_one": "Adımlar ({{count}})",
+      "steps_other": "Adımlar ({{count}})"
+    },
+    "steps": {
+      "received": "İstek alındı",
+      "validate": "Denetim",
+      "probe": "Bağlantı denemesi",
+      "hold": "Bekletme",
+      "backup": "Önceki sürüm saklandı",
+      "write_secrets": "Gizli bilgiler yazıldı",
+      "write_config": "Ayar dosyası yazıldı",
+      "install_files": "Dosyalar kuruldu",
+      "verify": "Doğrulama",
+      "reload": {
+        "collector": "ArciCollector yeni ayarı yükledi",
+        "ingest": "ArciIngest yeni ayarı yükledi",
+        "worker": "ArciWorker yeni ayarı yükledi",
+        "api": "Web hizmeti yeni ayarı yükledi"
+      },
+      "system": {
+        "firewall": "Güvenlik duvarı",
+        "time": "Windows saat hizmeti"
+      },
+      "jar": {
+        "promotion": "Zamane istemcisi onayı"
+      },
+      "dispatch": "Göreve iletildi",
+      "task": "Görev",
+      "journal": "Kayıt",
+      "rollback": "Geri alma"
+    },
+    "stepStates": {
+      "pending": "bekliyor",
+      "running": "sürüyor",
+      "done": "tamam",
+      "skipped": "gerekmedi",
+      "warning": "uyarı",
+      "failed": "başarısız"
+    },
+    "kinds": {
+      "config": {
+        "apply": "Yapılandırma değişikliği",
+        "revert": "Geri alma",
+        "cancel": "İptal"
+      },
+      "action": {
+        "seal": "Şimdi mühürle",
+        "credit": "Kontör sorgusu",
+        "tsa_test": "Damga testi",
+        "replica_test": "Replika testi"
+      },
+      "worker": {
+        "test_email": "Test e-postası",
+        "lease_rebuild": "Kiraları yeniden oluşturma"
+      }
+    },
+    "sections": {
+      "general": "Genel",
+      "tsa": "Kamu SM",
+      "smtp": "E-posta (SMTP)",
+      "replica": "Replika",
+      "retention": "Saklama",
+      "backup": "Veritabanı yedeği",
+      "sources": "Kaynaklar"
+    },
+    "secret": {
+      "byWeb": "web: {{user}}",
+      "byCli": "sunucu konsolu",
+      "byInstaller": "kurulum",
+      "keep": "Vazgeç",
+      "willDelete": "Kaydedince silinecek",
+      "stored": "Kayıtlı",
+      "changedAt": "son değişiklik {{time}}",
+      "notStored": "Kayıtlı değil",
+      "change": "Değiştir",
+      "enter": "Gir",
+      "delete": "Sil"
+    },
+    "locked": {
+      "hint": "Bu değer güvenlik nedeniyle yalnızca sunucu konsolundan değiştirilebilir.",
+      "reasons": {
+        "security": "güvenlik",
+        "service": "hizmet ayarı",
+        "evidence": "kanıt zinciri",
+        "expert": "uzman ayarı",
+        "collector": "log toplayıcı"
+      }
+    },
+    "review": {
+      "title": "Değişiklikleri onaylayın",
+      "description": "Sunucunun ön denetimi aşağıda. Onayladığınızda değişiklik yönetim hizmetine iletilir.",
+      "caption": "Kaydedilecek değişiklikler",
+      "none": "Değişiklik yok.",
+      "setting": "Ayar",
+      "old": "Önceki",
+      "new": "Yeni",
+      "secret": {
+        "set": "kayıtlı",
+        "unset": "kayıtlı değil",
+        "deleted": "silinecek"
+      },
+      "effects": "Etkisi",
+      "warnings": "Uyarılar",
+      "heldUntil": "Bu değişiklik bekletilir: {{time}} tarihinde uygulanır; o zamana kadar iptal edilebilir.",
+      "held": "Bu değişiklik bekletilir; bekletme süresi sonunda uygulanır.",
+      "reauth": "Kaydederken parolanızı yeniden girmeniz istenecek.",
+      "confirm": "Onayla ve kaydet"
+    },
+    "effects": {
+      "reload": {
+        "collector": "ArciCollector yeni ayarı yükler (yeniden başlatılmaz)",
+        "ingest": "ArciIngest yeni ayarı yükler",
+        "worker": "ArciWorker yeni ayarı yükler",
+        "api": "Web hizmeti yeni ayarı yükler"
+      },
+      "system": {
+        "firewall": "Güvenlik duvarı kuralı güncellenir",
+        "time": "Windows saat hizmeti güncellenir"
+      },
+      "jar": {
+        "promotion": "Zamane istemcisi onaylandıktan sonra kullanılır"
+      },
+      "taskNextRun": "{{task}} görevi bir sonraki çalışmasında kullanır"
+    },
+    "paths": {
+      "site_name": "Kuruluş adı",
+      "clock": {
+        "ntp_server": "Yerel saat kaynağı",
+        "fallback_server": "Yedek saat sunucusu",
+        "alert_offset_ms": "Saat sapması uyarı eşiği (ms)"
+      }
+    },
+    "section": {
+      "readOnly": "Bu bölümü değiştirme yetkiniz yok; değerler yalnızca görüntülenir.",
+      "conflictTitle": "Ayarlar başka yerden değişti",
+      "conflict": "Bu ayarlar siz düzenlerken başka bir yerden değiştirildi; sayfayı yenileyip tekrar deneyin.",
+      "invalid": "Bazı değerler geçersiz; işaretli alanları düzeltin.",
+      "restore": "Değişiklikleri bırak",
+      "agentUnavailable": "Yönetim hizmeti çalışmadığı için kaydedilemez."
+    },
+    "unsaved": {
+      "title": "Kaydedilmemiş değişiklikler",
+      "body": "Bu sayfada kaydedilmemiş değişiklikler var. Sayfadan ayrılırsanız kaybolur.",
+      "leave": "Sayfadan ayrıl"
+    },
+    "errors": {
+      "hostInvalid": "Geçerli bir sunucu adı ya da IPv4 adresi girin.",
+      "integer": "Bir tam sayı girin.",
+      "min": "En az {{min}} olmalı.",
+      "max": "En çok {{max}} olmalı."
     }
   }
 }

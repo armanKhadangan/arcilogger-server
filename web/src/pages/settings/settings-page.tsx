@@ -1,31 +1,47 @@
-import { ChevronRight, KeyRound, Users } from 'lucide-react';
+import { Building2, ChevronRight, History, KeyRound, SlidersHorizontal, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
+import { AgentStatusChip } from '@/components/admin/agent-status';
 import { LicenseStateBadge } from '@/components/license/license-state-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { useLicense } from '@/lib/api-hooks';
+import { useAdminStatus, useLicense } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
 
-/** Sections of spec 12.3 page 15 that arrive with milestone M6 ("Hakkında" is on the licence page). */
+/** Sections of spec 12.3 page 15 that come later ("Gizlilik" is in Uygulama ayarları). */
 const LATER_SECTIONS = [
-  'general',
-  'sources',
   'kamusm',
-  'sealing',
-  'retention',
-  'replica',
+  'sources',
   'email',
-  'usage',
-  'rules',
-  'privacy',
+  'replica',
+  'retention',
   'backup',
+  'rules',
 ] as const;
+
+interface Section {
+  key: string;
+  to: string;
+  icon: LucideIcon;
+  permission: string;
+}
+
+/** The sections of the browser administration (contract 2.17), in the order of the page. */
+const SECTIONS: readonly Section[] = [
+  { key: 'general', to: '/settings/general', icon: Building2, permission: 'settings.manage' },
+  {
+    key: 'application',
+    to: '/settings/application',
+    icon: SlidersHorizontal,
+    permission: 'settings.manage',
+  },
+  { key: 'history', to: '/settings/history', icon: History, permission: 'settings.manage' },
+];
 
 function SectionCard({
   to,
@@ -86,15 +102,22 @@ function LicenseCard() {
 }
 
 /**
- * Ayarlar: the sections. "Lisans" (`settings.manage`) and "Kullanıcılar ve Roller"
- * (`users.manage`) are available now.
+ * Ayarlar: the sections. "Lisans" and the machine configuration (`settings.manage`),
+ * "Kullanıcılar ve Roller" (`users.manage`); the header chip tells whether the administration
+ * service that applies machine changes is running.
  */
 export function SettingsPage() {
   const { t } = useTranslation();
   const { can } = useAuth();
+  const manage = can('settings.manage');
+  const status = useAdminStatus(manage);
   return (
     <div>
-      <PageHeader title={t('nav.settings')} description={t('settings.description')} />
+      <PageHeader
+        title={t('nav.settings')}
+        description={t('settings.description')}
+        actions={manage ? <AgentStatusChip status={status.data} /> : undefined}
+      />
       <div className="grid gap-4 lg:grid-cols-2">
         {can(LICENSE_ADMIN_PERMISSION) ? <LicenseCard /> : null}
         {can('users.manage') ? (
@@ -105,6 +128,16 @@ export function SettingsPage() {
             hint={t('settings.usersHint')}
           />
         ) : null}
+        {SECTIONS.filter((section) => can(section.permission)).map((section) => (
+          <SectionCard
+            key={section.key}
+            to={section.to}
+            icon={section.icon}
+            title={t(`settings.sections.${section.key}`)}
+            hint={t(`settings.hints.${section.key}`)}
+            testId={`settings-${section.key}`}
+          />
+        ))}
         <Card className="p-5">
           <h2 className="text-sm font-semibold text-foreground">{t('settings.laterTitle')}</h2>
           <p className="mt-1 text-13 text-muted">{t('settings.laterHint')}</p>

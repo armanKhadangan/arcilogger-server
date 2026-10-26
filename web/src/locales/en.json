@@ -375,8 +375,8 @@
   "settings": {
     "description": "System settings and user management.",
     "usersHint": "Accounts, roles, password and two-factor resets.",
-    "laterTitle": "In a later version",
-    "laterHint": "These sections arrive in a later version; until then these settings are made on the server (FIRST-STEPS.md, INSTALL.md).",
+    "laterTitle": "In later steps",
+    "laterHint": "These sections come with the next steps of browser administration.",
     "sections": {
       "general": "General",
       "sources": "Sources",
@@ -389,7 +389,114 @@
       "rules": "Security rules",
       "privacy": "Privacy",
       "backup": "Backup",
-      "about": "About"
+      "about": "About",
+      "application": "Application settings",
+      "history": "Change history"
+    },
+    "hints": {
+      "general": "The organisation's name, shown in reports, e-mails and evidence packages.",
+      "application": "Alerts, 5651 lookup, usage (work hours and holidays), reports, sessions and privacy.",
+      "history": "Changes and actions made in the browser, with their state."
+    },
+    "general": {
+      "title": "General",
+      "description": "The organisation's name. The administration service on the server applies the change; no service is restarted.",
+      "siteTitle": "Organisation",
+      "siteDescription": "The name shown in reports, e-mails and evidence packages.",
+      "siteName": "Organisation name",
+      "siteNameHint": "One line, at most 200 characters.",
+      "errors": {
+        "siteNameRequired": "The organisation name cannot be empty.",
+        "siteNameTooLong": "The organisation name can be at most 200 characters.",
+        "clockServersRequired": "At least one time server is required (the local source or the fallback)."
+      }
+    },
+    "application": {
+      "title": "Application settings",
+      "description": "Settings kept in the database. Changes apply at once, no service is restarted; every change is written to the audit log.",
+      "loadFailed": "The settings could not be read",
+      "groups": "Setting groups",
+      "unsaved": "has unsaved changes",
+      "on": "On",
+      "off": "Off",
+      "reauth": "Needs password confirmation",
+      "min": "At least {{min}}.",
+      "range": "Between {{min}} and {{max}}.",
+      "onePerLine": "One value per line.",
+      "default": "Default: {{value}}",
+      "changed": "Last changed: {{by}}, {{time}}",
+      "reset": "Back to the default",
+      "resetDone": "The default value is back.",
+      "saved_one": "{{count}} setting saved.",
+      "saved_other": "{{count}} settings saved.",
+      "changedCount_one": "{{count}} change",
+      "changedCount_other": "{{count}} changes",
+      "conflictTitle": "Someone else changed a setting",
+      "takeCurrent": "Take the current values",
+      "workDays": "Work days",
+      "workStart": "Work starts",
+      "workEnd": "Work ends",
+      "weekdays": {
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday",
+        "7": "Sunday"
+      },
+      "everyYear": "{{day}} (every year)",
+      "noHolidays": "No holidays.",
+      "holidayList": "Holidays",
+      "removeHoliday": "Remove: {{day}}",
+      "addHoliday": "Add a holiday",
+      "holidayPlaceholder": "MM-DD or YYYY-MM-DD",
+      "holidayHint": "MM-DD for the same day every year (e.g. 10-29), YYYY-MM-DD for once (e.g. 2026-03-20). Religious holidays move every year: enter that year's dates.",
+      "add": "Add",
+      "noServers": "No DHCP server with its own lease time; all use the default.",
+      "serverName": "DHCP server",
+      "serverSeconds": "Lease time (seconds)",
+      "removeServer": "Remove: {{server}}",
+      "addServer": "Add a server",
+      "errors": {
+        "workDays": "Choose at least one work day.",
+        "workTime": "Enter the times as HH:MM (e.g. 08:00).",
+        "workOrder": "Work must start before it ends.",
+        "holiday": "Enter the date as MM-DD or YYYY-MM-DD.",
+        "totpRoles": "Two-factor authentication is mandatory for the administrator and auditor roles.",
+        "serverName": "The DHCP server's name cannot be empty.",
+        "serverSeconds": "The lease time must be at least 60 seconds.",
+        "integerList": "Write one whole number of 0 or more per line.",
+        "object": "Enter a valid JSON object."
+      }
+    },
+    "history": {
+      "title": "Change history",
+      "description": "Configuration changes and actions made in the browser (sealing, credit query, tests), newest first.",
+      "outsideTitle": "The configuration was changed by hand",
+      "outside": "arcilogger.toml was last changed outside the administration service (by hand on the server); that change is not listed here.",
+      "listTitle": "Requests",
+      "kind": "Kind",
+      "allKinds": "All kinds",
+      "empty": "No requests yet",
+      "emptyHint": "Changes and actions made in the browser are listed here.",
+      "caption": "Change requests, newest first",
+      "columns": {
+        "time": "Time",
+        "request": "Request",
+        "state": "State",
+        "user": "Requested by",
+        "number": "Request no."
+      },
+      "effective": "To be applied at: {{time}}",
+      "requested": "{{user}}, {{time}}",
+      "changes": "Changes",
+      "changesCaption": "Changes of the request",
+      "version": "The previous settings are kept as version {{number}}.",
+      "audit": "Audit log",
+      "auditHint": "The audit log entries of this request have this target:",
+      "auditTarget": "Target",
+      "openAudit": "Open the audit log"
     }
   },
   "audit": {
@@ -954,7 +1061,11 @@
         "credits": "Remaining",
         "note": "Note"
       },
-      "note": "The credit is checked once a day by the \\ARCILOGGER\\Credit task; the web interface does not connect to Kamu SM."
+      "note": "The \\ARCILOGGER\\Credit task queries the credit once a day; \"Query credit\" runs the task on the server once, now. The web service never connects to Kamu SM itself.",
+      "query": "Query credit",
+      "queryResult": "Credit left: {{credits}} (alert threshold {{threshold}}).",
+      "queryLow": "Credit left {{credits}}: below the alert threshold ({{threshold}}).",
+      "retryAfter": "Try again in {{seconds}} seconds."
     },
     "day": {
       "title": "{{day}}",
@@ -992,7 +1103,25 @@
     },
     "sealNow": {
       "button": "Seal now",
-      "explanation": "Seal now is not available from the web interface in this version: the web service may not write to the vault. Sealing runs as the scheduled task \\ARCILOGGER\\Seal every 5 minutes from 00:10 and retries failed attempts by itself. To seal at once, run that task in Task Scheduler on the server."
+      "explanation": "Seal now is not available from the web interface in this version: the web service may not write to the vault. Sealing runs as the scheduled task \\ARCILOGGER\\Seal every 5 minutes from 00:10 and retries failed attempts by itself. To seal at once, run that task in Task Scheduler on the server.",
+      "hint": "The sealing task tries this day once without waiting for its retry time; the wait after midnight, the empty-day rule and the order of days still apply.",
+      "blocked": {
+        "sealed": "This day is already sealed.",
+        "open": "The day has not ended yet; it is sealed after it ends.",
+        "notApplicable": "This day is not sealed (no data, skipped or deleted).",
+        "notOldest": "Only the next (oldest) unsealed day can be sealed now: {{day}} first."
+      },
+      "confirmTitle": "Seal {{day}} now?",
+      "confirmBody": "The \\ARCILOGGER\\Seal task on the server tries to seal this day once, now, with a time stamp from the configured provider (1 credit with Kamu SM). The wait after midnight and the empty-day rule are not skipped.",
+      "outcome": {
+        "sealed": "{{day}} is sealed.",
+        "pending": "{{day}} is not sealed yet; the task tries again later.",
+        "failed": "The sealing attempt failed; the error is on the day page.",
+        "waiting": "{{day}} is waiting; the task seals it later.",
+        "skipped": "{{day}} was skipped (no data).",
+        "deleted": "{{day}} was deleted after the retention period."
+      },
+      "serial": "Serial: {{serial}}"
     },
     "state": {
       "title": "Sealing task",
@@ -2490,6 +2619,217 @@
     },
     "errors": {
       "tooLarge": "The licence file is too large (at most 64 KiB)."
+    }
+  },
+  "admin": {
+    "agent": {
+      "chip": "Administration service: {{state}}",
+      "heartbeat": "Last answer: {{time}}",
+      "states": {
+        "ok": "running",
+        "stale": "late",
+        "missing": "not running",
+        "disabled": "switched off"
+      }
+    },
+    "unavailable": {
+      "missing": {
+        "title": "The administration service is not running",
+        "body": "The administration service (ArciAdmin) is not responding; server settings cannot be saved from the browser now. The values are shown read-only. Start the \"ARCILOGGER Yönetim\" service on the server."
+      },
+      "disabled": {
+        "title": "Browser administration is switched off",
+        "body": "Browser administration is switched off on this installation; the values are shown read-only."
+      },
+      "console": "Make the change on the server console: the file C:\\ProgramData\\ARCILOGGER\\arcilogger.toml, and arcilogger-core secret set for stored secrets.",
+      "stale": "The administration service is answering late; the change may be delayed."
+    },
+    "restart": {
+      "title": "A change waits for a restart",
+      "body": "arcilogger.toml was changed by hand on the server; that change takes effect only when the service concerned is restarted."
+    },
+    "progress": {
+      "sending": "Sending…",
+      "services": "Services loading the new settings",
+      "appliedToast": "Applied",
+      "probing": "Testing the connection with the new values…",
+      "queued": "Queued: the administration service takes the request within seconds.",
+      "waitingForAgent": "The administration service has not answered yet; it may be stopped. The request waits until it expires.",
+      "applying": "Applying…",
+      "applied": "Written; the services are loading the new settings.",
+      "heldUntil": "This change is held: it is applied at {{time}} ({{left}} left). It can be cancelled until then.",
+      "held": "This change is held; it is applied when the hold ends.",
+      "active": "Applied: the services run with the new settings.",
+      "partiallyActive": "Partly applied: the configuration was written, but not everything has taken it.",
+      "notReloaded": "{{service}} has not loaded the new settings yet.",
+      "systemFailed": {
+        "system_firewall": "The firewall could not be updated; the previous rules are in force.",
+        "system_time": "The Windows Time service could not be updated.",
+        "jar_promotion": "The Zamane client could not be approved."
+      },
+      "failed": "Not applied, the previous settings are in use.",
+      "conflict": "Another change was made; reload the page.",
+      "expired": "The request expired; nothing changed.",
+      "cancelled": "Cancelled; nothing changed.",
+      "rolledBack": "The written change was undone.",
+      "needsAttention": "Manual action is needed.",
+      "needsAttentionVersion": "Manual action is needed. The previous settings are kept as version {{version}}.",
+      "requestNumber": "Request no. {{id}}",
+      "warnings": "Warnings",
+      "cancel": "Cancel",
+      "retry": "Try again",
+      "reload": "Reload the page",
+      "revert": "Revert",
+      "steps_one": "Steps ({{count}})",
+      "steps_other": "Steps ({{count}})"
+    },
+    "steps": {
+      "received": "Request received",
+      "validate": "Check",
+      "probe": "Connection test",
+      "hold": "Hold",
+      "backup": "Previous version kept",
+      "write_secrets": "Secrets written",
+      "write_config": "Configuration written",
+      "install_files": "Files installed",
+      "verify": "Verification",
+      "reload": {
+        "collector": "ArciCollector loaded the new settings",
+        "ingest": "ArciIngest loaded the new settings",
+        "worker": "ArciWorker loaded the new settings",
+        "api": "The web service loaded the new settings"
+      },
+      "system": {
+        "firewall": "Firewall",
+        "time": "Windows Time service"
+      },
+      "jar": {
+        "promotion": "Zamane client approval"
+      },
+      "dispatch": "Passed to the task",
+      "task": "Task",
+      "journal": "Journal",
+      "rollback": "Rollback"
+    },
+    "stepStates": {
+      "pending": "waiting",
+      "running": "running",
+      "done": "done",
+      "skipped": "not needed",
+      "warning": "warning",
+      "failed": "failed"
+    },
+    "kinds": {
+      "config": {
+        "apply": "Configuration change",
+        "revert": "Revert",
+        "cancel": "Cancellation"
+      },
+      "action": {
+        "seal": "Seal now",
+        "credit": "Credit query",
+        "tsa_test": "Stamp test",
+        "replica_test": "Replica test"
+      },
+      "worker": {
+        "test_email": "Test e-mail",
+        "lease_rebuild": "Lease rebuild"
+      }
+    },
+    "sections": {
+      "general": "General",
+      "tsa": "Kamu SM",
+      "smtp": "E-mail (SMTP)",
+      "replica": "Replica",
+      "retention": "Retention",
+      "backup": "Database backup",
+      "sources": "Sources"
+    },
+    "secret": {
+      "byWeb": "web: {{user}}",
+      "byCli": "server console",
+      "byInstaller": "installation",
+      "keep": "Keep",
+      "willDelete": "Deleted when saved",
+      "stored": "Stored",
+      "changedAt": "last changed {{time}}",
+      "notStored": "Not stored",
+      "change": "Change",
+      "enter": "Enter",
+      "delete": "Delete"
+    },
+    "locked": {
+      "hint": "For security reasons this value can only be changed on the server console.",
+      "reasons": {
+        "security": "security",
+        "service": "service setting",
+        "evidence": "evidence chain",
+        "expert": "expert setting",
+        "collector": "log collector"
+      }
+    },
+    "review": {
+      "title": "Confirm the changes",
+      "description": "The server's check is below. When you confirm, the change goes to the administration service.",
+      "caption": "Changes to be saved",
+      "none": "No changes.",
+      "setting": "Setting",
+      "old": "Before",
+      "new": "After",
+      "secret": {
+        "set": "stored",
+        "unset": "not stored",
+        "deleted": "deleted"
+      },
+      "effects": "Effect",
+      "warnings": "Warnings",
+      "heldUntil": "This change is held: it is applied at {{time}} and can be cancelled until then.",
+      "held": "This change is held; it is applied when the hold ends.",
+      "reauth": "You will be asked for your password again when saving.",
+      "confirm": "Confirm and save"
+    },
+    "effects": {
+      "reload": {
+        "collector": "ArciCollector loads the new settings (no restart)",
+        "ingest": "ArciIngest loads the new settings",
+        "worker": "ArciWorker loads the new settings",
+        "api": "The web service loads the new settings"
+      },
+      "system": {
+        "firewall": "The firewall rule is updated",
+        "time": "The Windows Time service is updated"
+      },
+      "jar": {
+        "promotion": "The Zamane client is used once it is approved"
+      },
+      "taskNextRun": "The {{task}} task uses it at its next run"
+    },
+    "paths": {
+      "site_name": "Organisation name",
+      "clock": {
+        "ntp_server": "Local time source",
+        "fallback_server": "Fallback time server",
+        "alert_offset_ms": "Clock offset alert threshold (ms)"
+      }
+    },
+    "section": {
+      "readOnly": "You may not change this section; the values are shown read-only.",
+      "conflictTitle": "The settings changed elsewhere",
+      "conflict": "These settings were changed elsewhere while you were editing; reload the page and try again.",
+      "invalid": "Some values are invalid; correct the marked fields.",
+      "restore": "Discard changes",
+      "agentUnavailable": "Cannot be saved while the administration service is not running."
+    },
+    "unsaved": {
+      "title": "Unsaved changes",
+      "body": "This page has unsaved changes. They are lost if you leave the page.",
+      "leave": "Leave the page"
+    },
+    "errors": {
+      "hostInvalid": "Enter a valid host name or IPv4 address.",
+      "integer": "Enter a whole number.",
+      "min": "Must be at least {{min}}.",
+      "max": "Must be at most {{max}}."
     }
   }
 }

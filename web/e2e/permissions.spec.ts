@@ -90,6 +90,9 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
   for (const path of [
     '/audit',
     '/settings/users',
+    '/settings/general',
+    '/settings/application',
+    '/settings/history',
     '/lookup',
     '/evidence',
     '/sealing',
@@ -115,6 +118,8 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
         '/persons',
         '/departments',
         '/vlans',
+        '/admin',
+        '/settings',
       ].some((prefix) => call.path.startsWith(prefix)),
     ),
   ).toEqual([]);
@@ -140,4 +145,28 @@ test('the auditor reads the audit log but cannot manage users', async ({ page })
   await expect(
     page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
   ).toBeVisible();
+});
+
+test('browser administration is for administrators: the API refuses everyone else too', async ({
+  page,
+}) => {
+  // A user management role without settings.manage sees the settings page without the machine
+  // configuration, and the administration service's status is never asked for.
+  const api = await mockApi(page, {
+    signedInAs: 'ayse.yilmaz',
+    grant: { auditor: ['users.manage'] },
+  });
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { level: 1, name: 'Ayarlar' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /^Kullanıcılar ve Roller/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /^Genel/ })).toHaveCount(0);
+  await expect(page.getByTestId('agent-status')).toHaveCount(0);
+  for (const path of ['/settings/general', '/settings/application', '/settings/history']) {
+    await page.goto(path);
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
+    ).toBeVisible();
+  }
+  expect(api.calls.filter((call) => call.path.startsWith('/admin'))).toEqual([]);
+  expect(api.calls.filter((call) => call.path.startsWith('/settings'))).toEqual([]);
 });

@@ -1,13 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { useSampleClock } from './fixtures';
-import { mockApi } from './mock-api';
+import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
+import { CSRF_TOKEN, mockApi } from './mock-api';
 import { SAMPLE_TODAY, SEALS } from './samples';
 
 const DETAIL = SEALS.days['2026-10-04'];
 const FAILED = SEALS.calendars['2026-10']?.days.find((cell) => cell.day === '2026-10-11');
-const SEAL_NOW = SEALS.errors.seal_now_unavailable?.body.error;
-if (!DETAIL?.token || !DETAIL.manifest || !FAILED?.message_tr || !SEAL_NOW)
+if (!DETAIL?.token || !DETAIL.manifest || !FAILED?.message_tr)
   throw new Error('seal samples missing');
 
 function day(page: Page, name: RegExp) {
@@ -118,20 +117,115 @@ test.describe('Mühürleme', () => {
     await expect(result).not.toContainText('mismatch');
   });
 
-  test('"Şimdi mühürle" is disabled with the reason the API gives; auditors do not see it', async ({
+  test('"Şimdi mühürle" only for the oldest unsealed day, with the reason otherwise; auditors do not see it', async ({
     page,
   }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/sealing?day=2026-10-12');
     const sealNow = page.getByRole('button', { name: 'Şimdi mühürle' });
     await expect(sealNow).toBeDisabled();
-    await expect(page.getByText(SEAL_NOW.message_tr)).toBeVisible();
-    await expect(sealNow).toHaveAccessibleDescription(SEAL_NOW.message_tr);
+    await expect(sealNow).toHaveAccessibleDescription(
+      'Şimdi yalnızca sıradaki (en eski) mühürlenmemiş gün mühürlenebilir: önce 11.10.2026.',
+    );
+    await day(page, /^4 Ekim 2026/).click();
+    await expect(page.getByRole('button', { name: 'Şimdi mühürle' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Şimdi mühürle' })).toHaveAccessibleDescription(
+      'Bu gün zaten mühürlü.',
+    );
+    await day(page, /^13 Ekim 2026/).click();
+    await expect(page.getByRole('button', { name: 'Şimdi mühürle' })).toHaveAccessibleDescription(
+      'Gün henüz kapanmadı; kapandıktan sonra mühürlenir.',
+    );
 
     await mockApi(page, { signedInAs: 'ayse.yilmaz' });
-    await page.goto('/sealing?day=2026-10-04');
-    await expect(page.getByRole('button', { name: 'Doğrula', exact: true })).toBeEnabled();
+    await page.goto('/sealing?day=2026-10-11');
+    await expect(page.getByRole('button', { name: 'Doğrula', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Şimdi mühürle' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Kontör sorgula' })).toHaveCount(0);
+  });
+
+  test('"Şimdi mühürle" on the failed day: confirmation, progress, the calendar refreshes', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/sealing?day=2026-10-11');
+    await expect(day(page, /^11 Ekim 2026: Başarısız/)).toBeVisible();
+    const sealNow = page.getByRole('button', { name: 'Şimdi mühürle' });
+    await expect(sealNow).toBeEnabled();
+    await sealNow.click();
+    const dialog = page.getByRole('dialog', { name: '11.10.2026 şimdi mühürlensin mi?' });
+    await expect(dialog).toContainText(
+      'Gece yarısından sonraki bekleme ve boş gün kuralı atlanmaz.',
+    );
+    await dialog.getByRole('button', { name: 'Şimdi mühürle' }).click();
+    await expect(dialog).toBeHidden();
+
+    const progress = page.getByTestId('request-progress');
+    await expect(progress).toContainText(/İstek no: [0-9a-f]{8}/);
+    await expect(progress.getByTestId('request-state')).toHaveText('Tamamlandı', {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId('seal-now-result')).toContainText('11.10.2026 mühürlendi.');
+    // The calendar and the day were read again: the day is sealed now.
+    await expect(day(page, /^11 Ekim 2026: Mühürlendi, yakın zamanda doğrulanmadı/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Şimdi mühürle' })).toBeDisabled();
+
+    const posts = api.callsTo('POST', '/seals/2026-10-11/seal');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.csrf).toBe(CSRF_TOKEN);
+    expect(posts[0]?.raw).toBeNull();
+    // Following the request is never user activity.
+    const polls = api.calls.filter((call) => call.path.startsWith('/admin/requests/'));
+    expect(polls.length).toBeGreaterThan(0);
+    expect(polls.every((call) => call.background)).toBe(true);
+  });
+
+  test('"Şimdi mühürle": the task fails, the service is not running, another request waits', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    api.admin.nextAction = 'failed';
+    await page.goto('/sealing?day=2026-10-11');
+    await page.getByRole('button', { name: 'Şimdi mühürle' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Şimdi mühürle' }).click();
+    const progress = page.getByTestId('request-progress');
+    await expect(progress.getByTestId('request-state')).toHaveText(
+      'Uygulanmadı, önceki ayarlar geçerli',
+      { timeout: 10_000 },
+    );
+    await expect(progress).toContainText('Mühürleme denemesi başarısız; hata gün ayrıntısında.');
+    await expect(day(page, /^11 Ekim 2026: Başarısız/)).toBeVisible();
+
+    api.admin.agent = 'missing';
+    await page.goto('/sealing?day=2026-10-11');
+    await page.getByRole('button', { name: 'Şimdi mühürle' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Şimdi mühürle' }).click();
+    await expect(
+      page.getByText(/Yönetim hizmeti \(ArciAdmin\) yanıt vermiyor; değişiklik kuyruğa alınmadı\./),
+    ).toBeVisible();
+  });
+
+  test('"Kontör sorgula": the task asks Kamu SM once; a second query within a minute is refused', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/sealing');
+    await expect(page.getByText('9.612', { exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Kontör sorgula' }).click();
+    await expect(page.getByTestId('credit-query-result')).toHaveText(
+      'Kalan kontör: 9.611 (uyarı eşiği 500).',
+      { timeout: 10_000 },
+    );
+    // The history was read again with the new check.
+    await expect(page.getByText('9.611', { exact: true }).first()).toBeVisible();
+    expect(api.callsTo('POST', '/credits/query')).toHaveLength(1);
+
+    await page.getByRole('button', { name: 'Kontör sorgula' }).click();
+    await expect(
+      page.getByText(
+        /Bu işlem kısa süre önce yapıldı; biraz sonra tekrar deneyin\. \d+ saniye sonra tekrar deneyin\./,
+      ),
+    ).toBeVisible();
   });
 
   test('month navigation and the credit widget', async ({ page }) => {
@@ -174,3 +268,20 @@ test.describe('Mühürleme', () => {
     expect(calls.at(-1)?.background).toBe(true);
   });
 });
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`"Şimdi mühürle" and "Kontör sorgula" accessibility — ${theme}`, async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+    await usePreferences(page, { theme });
+    await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/sealing?day=2026-10-11');
+    await page.getByRole('button', { name: 'Şimdi mühürle' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expectNoA11yViolations(page);
+    await page.getByRole('dialog').getByRole('button', { name: 'Şimdi mühürle' }).click();
+    await expect(page.getByTestId('seal-now-result')).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Kontör sorgula' }).click();
+    await expect(page.getByTestId('credit-query-result')).toBeVisible({ timeout: 10_000 });
+    await expectNoA11yViolations(page);
+  });
+}

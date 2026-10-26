@@ -1,6 +1,7 @@
 /**
  * TanStack Query hooks, one per endpoint of the auth, users, audit, 5651 lookup, evidence,
- * sealing, credit, devices/persons, dashboard, security alert, scheduled report and usage API.
+ * sealing, credit, devices/persons, dashboard, security alert, scheduled report, usage, licence,
+ * browser administration (`/admin/*`) and database settings (`/settings`) API.
  *
  * Conventions:
  *  - Sign-in steps pass `silent`: their 401/403 answers are part of the flow (wrong code,
@@ -19,6 +20,11 @@
  *    refresh every 5 minutes in the background; a finished rebuild invalidates `['usage']`.
  *  - Licence: one shared `GET /license` (fresh for 60 s, refreshed every 5 minutes in the
  *    background); installing or removing a licence invalidates every query.
+ *  - Browser administration (ADR-0014): a change is answered with 202 and a request id, which
+ *    `useAdminRequest` follows in the background until a terminal state (`admin-requests.ts`);
+ *    the administration service's status refreshes every 10 s in the background. A secret is
+ *    sent once in its change body and never read back (the configuration names only whether it
+ *    is set).
  */
 
 import {
@@ -30,8 +36,9 @@ import {
   useQueryClient,
   type QueryKey,
 } from '@tanstack/react-query';
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
+import { AGENT_STATUS_POLL_MS, requestPollInterval } from './admin-requests';
 import { api, type QueryValue } from './api';
 import type {
   AlertDetail,
@@ -122,6 +129,32 @@ import type {
 import { siteToday } from './display';
 import type { RawRef } from './lookup-types';
 import type { SealDayDetail } from './seal-types';
+import type {
+  AdminAccepted,
+  AdminCheck,
+  AdminConfig,
+  AdminRequestOut,
+  AdminRequestPage,
+  AdminSection,
+  AdminStatus,
+  ConfigVersion,
+  LeaseRebuildBody,
+  LegalRootBody,
+  RequestKind,
+  RootBody,
+  SectionBodies,
+  SettingOut,
+  SettingsOut,
+  SettingsPatch,
+  SettingsPatchResult,
+  SmtpCaBody,
+  SourceBody,
+  TestEmailBody,
+  TsaTestBody,
+  UploadKind,
+  UploadPreview,
+  ZamaneBody,
+} from './settings-types';
 
 export const AUDIT_PAGE_SIZE = 100;
 export const USER_PAGE_SIZE = 500;
@@ -176,6 +209,13 @@ export const queryKeys = {
   run: (id: number) => ['reports', 'run', id] as const,
   reportsAll: ['reports'] as const,
   license: ['license'] as const,
+  adminStatus: ['admin', 'status'] as const,
+  adminConfig: ['admin', 'config'] as const,
+  adminRequest: (id: string) => ['admin', 'request', id] as const,
+  adminRequests: (kind: RequestKind | null) => ['admin', 'requests', kind] as const,
+  adminRequestsAll: ['admin', 'requests'] as const,
+  adminVersions: ['admin', 'versions'] as const,
+  settings: ['settings'] as const,
 };
 
 // -- auth ---------------------------------------------------------------------------------------
@@ -1224,5 +1264,302 @@ export function useRemoveLicense() {
   return useMutation({
     mutationFn: () => api.delete<undefined>('/license'),
     ...useLicenseChanged(),
+  });
+}
+
+// -- browser administration (ADR-0014; contract 2.10, 2.11) ---------------------------------------
+
+/** Requests per page of the change history. */
+export const ADMIN_REQUEST_PAGE_SIZE = 50;
+/** The history refreshes this often while a request on screen is still under way. */
+export const ADMIN_HISTORY_POLL_MS = 3_000;
+
+/**
+ * `GET /admin/status` (`settings.manage`): the administration service's heartbeat (`ok`,
+ * `stale`, `missing`, `disabled`), the system task and the configuration each service loaded;
+ * refreshed every 10 s in the background.
+ */
+export function useAdminStatus(enabled = true) {
+  return usePollingQuery<AdminStatus>({
+    queryKey: queryKeys.adminStatus,
+    path: '/admin/status',
+    intervalMs: AGENT_STATUS_POLL_MS,
+    enabled,
+  });
+}
+
+/**
+ * `GET /admin/config` (`settings.manage`): what the browser may change, per section with its
+ * `etag`; stored credentials only as set/unset with the time of their last change.
+ */
+export function useAdminConfig(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.adminConfig,
+    queryFn: ({ signal }) => api.get<AdminConfig>('/admin/config', { signal }),
+    enabled,
+  });
+}
+
+/**
+ * One request, followed until it is terminal: every second for 15 s after it was first shown,
+ * then every 3 s, always as a background request (following a change is not user activity).
+ */
+export function useAdminRequest(id: string | null) {
+  const [started, setStarted] = useState(() => ({ id, at: Date.now() }));
+  if (started.id !== id) setStarted({ id, at: Date.now() });
+  return useQuery({
+    queryKey: queryKeys.adminRequest(id ?? ''),
+    queryFn: ({ signal }) =>
+      api.get<AdminRequestOut>(`/admin/requests/${String(id)}`, { signal, background: true }),
+    enabled: id !== null,
+    refetchInterval: (query) => requestPollInterval(query.state.data, started.at),
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * The change history, newest first (`kind`: one kind only). Its first answer is the user's
+ * request; later refreshes (every few seconds while a request on screen is still under way) are
+ * background requests.
+ */
+export function useAdminRequests(kind: RequestKind | null) {
+  const client = useQueryClient();
+  return useInfiniteQuery({
+    queryKey: queryKeys.adminRequests(kind),
+    queryFn: ({ signal, pageParam }) => {
+      const state = client.getQueryState(queryKeys.adminRequests(kind));
+      return api.get<AdminRequestPage>('/admin/requests', {
+        signal,
+        params: { kind, cursor: pageParam, limit: ADMIN_REQUEST_PAGE_SIZE },
+        background: state !== undefined && state.dataUpdatedAt > 0,
+      });
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next_cursor,
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) => page.items.some((item) => !item.terminal))
+        ? ADMIN_HISTORY_POLL_MS
+        : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/** Every request queues a change: the history shows it, the status counts it. */
+function useAdminMutation<TVariables, TResult = AdminAccepted>(
+  fn: (variables: TVariables) => Promise<TResult>,
+) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSettled: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.adminRequestsAll }),
+        client.invalidateQueries({ queryKey: queryKeys.adminStatus }),
+      ]),
+  });
+}
+
+/** A section and the body of its change (the same body for its `/check`). */
+export type SectionChange = {
+  [S in AdminSection]: { section: S; body: SectionBodies[S] };
+}[AdminSection];
+
+/** `POST /admin/config/{section}/check`: the changes, effects and warnings; nothing is queued. */
+export function useCheckSection() {
+  return useMutation({
+    mutationFn: ({ section, body }: SectionChange) =>
+      api.post<AdminCheck>(`/admin/config/${section}/check`, body),
+  });
+}
+
+/** The section changes with one `PUT` each (the sources are added and removed one by one). */
+export type ConfigChange = Exclude<SectionChange, { section: 'sources' }>;
+
+function putSection(change: ConfigChange): Promise<AdminAccepted> {
+  switch (change.section) {
+    case 'general':
+      return api.put<AdminAccepted>('/admin/config/general', change.body);
+    case 'tsa':
+      return api.put<AdminAccepted>('/admin/config/tsa', change.body);
+    case 'smtp':
+      return api.put<AdminAccepted>('/admin/config/smtp', change.body);
+    case 'replica':
+      return api.put<AdminAccepted>('/admin/config/replica', change.body);
+    case 'retention':
+      return api.put<AdminAccepted>('/admin/config/retention', change.body);
+    case 'backup':
+      return api.put<AdminAccepted>('/admin/config/backup', change.body);
+  }
+}
+
+/** `PUT /admin/config/{section}` → 202 with the request to follow (re-auth: `withReauth`). */
+export function useApplySection() {
+  return useAdminMutation(putSection);
+}
+
+/** `POST /admin/config/sources` (`sources.manage`). */
+export function useAddSource() {
+  return useAdminMutation((body: SourceBody) =>
+    api.post<AdminAccepted>('/admin/config/sources', body),
+  );
+}
+
+/** `PUT /admin/config/sources/{name}` (the name never changes; disabling needs a re-auth). */
+export function useUpdateSource() {
+  return useAdminMutation(({ name, body }: { name: string; body: SourceBody }) =>
+    api.put<AdminAccepted>(`/admin/config/sources/${encodeURIComponent(name)}`, body),
+  );
+}
+
+/** `DELETE /admin/config/sources/{name}?etag=…&confirm=<name>` (re-auth, the name typed). */
+export function useRemoveSource() {
+  return useAdminMutation(
+    ({ name, etag, confirm }: { name: string; etag: string; confirm: string }) =>
+      api.delete<AdminAccepted>(`/admin/config/sources/${encodeURIComponent(name)}`, {
+        params: { etag, confirm },
+      }),
+  );
+}
+
+/**
+ * `POST /admin/uploads?kind=…`: a root certificate, a Zamane client or an SMTP CA file, staged
+ * for 30 minutes; the answer is the server's inspection of it (nothing is installed yet).
+ */
+export function useAdminUpload() {
+  return useMutation({
+    mutationFn: ({ kind, file }: { kind: UploadKind; file: File }) => {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      return api.post<UploadPreview>('/admin/uploads', form, { params: { kind } });
+    },
+  });
+}
+
+/** `POST /admin/config/tsa/roots`: install an uploaded root (optionally as a legal root). */
+export function useAddRoot() {
+  return useAdminMutation((body: RootBody) =>
+    api.post<AdminAccepted>('/admin/config/tsa/roots', body),
+  );
+}
+
+/** `POST /admin/config/tsa/legal-roots`: mark an installed root as a legal root. */
+export function useAddLegalRoot() {
+  return useAdminMutation((body: LegalRootBody) =>
+    api.post<AdminAccepted>('/admin/config/tsa/legal-roots', body),
+  );
+}
+
+/** `POST /admin/config/tsa/zamane`: stage an uploaded Zamane client (held until approved). */
+export function useStageZamane() {
+  return useAdminMutation((body: ZamaneBody) =>
+    api.post<AdminAccepted>('/admin/config/tsa/zamane', body),
+  );
+}
+
+/** `POST /admin/config/smtp/ca`: trust an uploaded CA file for the SMTP server. */
+export function useSetSmtpCa() {
+  return useAdminMutation((body: SmtpCaBody) =>
+    api.post<AdminAccepted>('/admin/config/smtp/ca', body),
+  );
+}
+
+/** `DELETE /admin/config/smtp/ca?etag=…`: back to the system's trust store. */
+export function useClearSmtpCa() {
+  return useAdminMutation((etag: string) =>
+    api.delete<AdminAccepted>('/admin/config/smtp/ca', { params: { etag } }),
+  );
+}
+
+/** `DELETE /admin/requests/{id}`: cancel a queued or held change (409 when it has started). */
+export function useCancelRequest() {
+  return useAdminMutation((id: string) => api.delete<AdminAccepted>(`/admin/requests/${id}`));
+}
+
+/** `POST /admin/requests/{id}/revert`: restore the version before an applied change. */
+export function useRevertRequest() {
+  return useAdminMutation((id: string) => api.post<AdminAccepted>(`/admin/requests/${id}/revert`));
+}
+
+/** `GET /admin/config/versions`: the kept configurations, newest first. */
+export function useConfigVersions(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.adminVersions,
+    queryFn: ({ signal }) => api.get<ConfigVersion[]>('/admin/config/versions', { signal }),
+    enabled,
+  });
+}
+
+// -- actions (contract 2.9, 2.11.3) -----------------------------------------------------------------
+
+/**
+ * "Şimdi mühürle" (`seal.manage`): the Seal task seals the oldest closed unsealed day once,
+ * without waiting for its retry time. 409 when the day is not the one due.
+ */
+export function useSealNow() {
+  return useAdminMutation((day: string) => api.post<AdminAccepted>(`/seals/${day}/seal`));
+}
+
+/** "Kontör sorgula" (`seal.manage`): the Requests task asks Kamu SM once (1 per minute). */
+export function useCreditQuery() {
+  return useAdminMutation(() => api.post<AdminAccepted>('/credits/query'));
+}
+
+/** "Damga testi": one time stamp from the configured server (1 credit; limited per day). */
+export function useTsaTest() {
+  return useAdminMutation((body: TsaTestBody) =>
+    api.post<AdminAccepted>('/admin/actions/tsa-test', body),
+  );
+}
+
+/** "Bağlantıyı test et": the saved replica target and user (1 per minute). */
+export function useReplicaTest() {
+  return useAdminMutation(() => api.post<AdminAccepted>('/admin/actions/replica-test', {}));
+}
+
+/** "Test e-postası gönder": the saved SMTP configuration, to an alert recipient or oneself. */
+export function useTestEmail() {
+  return useAdminMutation((body: TestEmailBody) =>
+    api.post<AdminAccepted>('/admin/actions/test-email', body),
+  );
+}
+
+/** "Kiraları yeniden oluştur": the lease timeline of at most 31 past days (worker job). */
+export function useLeaseRebuild() {
+  return useAdminMutation((body: LeaseRebuildBody) =>
+    api.post<AdminAccepted>('/admin/actions/lease-rebuild', body),
+  );
+}
+
+// -- database settings (contract 2.13) ----------------------------------------------------------------
+
+/** `GET /settings` (`settings.manage`): every visible setting by group, with labels and bounds. */
+export function useSettings(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: ({ signal }) => api.get<SettingsOut>('/settings', { signal }),
+    enabled,
+  });
+}
+
+/**
+ * `PATCH /settings`: all changes or none (422 `setting_invalid` with every refused key, 409
+ * `setting_conflict` when a value changed meanwhile); re-auth for the keys that need it.
+ */
+export function usePatchSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SettingsPatch) => api.patch<SettingsPatchResult>('/settings', body),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.settings }),
+  });
+}
+
+/** `POST /settings/{key}/reset`: back to the shipped default (audited). */
+export function useResetSetting() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (key: SettingOut['key']) =>
+      api.post<unknown>(`/settings/${encodeURIComponent(key)}/reset`),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.settings }),
   });
 }

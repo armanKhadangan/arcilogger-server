@@ -103,3 +103,45 @@ describe('the day page in Turkish (spec 12.4)', () => {
     expect(screen.queryByTestId('legal-root-unconfirmed')).not.toBeInTheDocument();
   });
 });
+
+describe('"Şimdi mühürle" (contract 2.9)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function serveAdmin() {
+    return installFetch((request) => {
+      if (request.path === '/api/v1/auth/me') return jsonResponse(200, makeMe('admin'));
+      const day = /^\/api\/v1\/seals\/(\d{4}-\d{2}-\d{2})$/.exec(request.path)?.[1];
+      if (day) return jsonResponse(200, need(SEALS.days[day], `${day} sample`));
+      if (request.path === '/api/v1/seals/calendar') return jsonResponse(200, CALENDAR);
+      return errorResponse(404, 'not_found');
+    });
+  }
+
+  it('is offered for the oldest failed day only; other days say why not', async () => {
+    serveAdmin();
+    const { router } = renderApp('/sealing?day=2026-10-11');
+    const button = await screen.findByRole('button', { name: 'Şimdi mühürle' });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAccessibleDescription(/yeniden deneme zamanını beklemeden bir kez dener/);
+
+    await act(async () => {
+      await router.navigate('/sealing?day=2026-10-12');
+    });
+    expect(
+      await screen.findByText(
+        'Şimdi yalnızca sıradaki (en eski) mühürlenmemiş gün mühürlenebilir: önce 11.10.2026.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Şimdi mühürle' })).toBeDisabled();
+  });
+
+  it('is not shown without seal.manage (the auditor verifies but does not seal)', async () => {
+    serve(SEALED);
+    renderApp(`/sealing?day=${DAY}`);
+    expect(await screen.findByRole('button', { name: 'Doğrula' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Şimdi mühürle' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Kontör sorgula' })).not.toBeInTheDocument();
+  });
+});

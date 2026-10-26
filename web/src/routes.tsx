@@ -189,6 +189,31 @@ export const routes: RouteObject[] = [
               },
             ],
           },
+          // The browser administration (ADR-0014): machine configuration, database settings,
+          // the change history. Each page loads when it is opened.
+          {
+            element: <PermissionGate anyOf={['settings.manage']} />,
+            children: [
+              {
+                path: 'settings/general',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/general-page')).GeneralPage,
+                }),
+              },
+              {
+                path: 'settings/application',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/application-page')).ApplicationPage,
+                }),
+              },
+              {
+                path: 'settings/history',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/history-page')).HistoryPage,
+                }),
+              },
+            ],
+          },
           // Developer page: not in the bundle the installer ships (`UI_KIT_ITEM` is null there).
           ...(UI_KIT_ITEM
             ? [
