@@ -133,30 +133,38 @@ class SiteLabels:
     #: VLAN id → its Turkish name (``vlans.name_tr``).
     vlan_names: Mapping[int, str] = field(default_factory=dict)
 
-    def vlan_of_net(self, net: Any) -> int | str | None:
-        """The VLAN of a /24 (``search_counts.net``), :data:`MULTIPLE` for a /24 holding smaller
-        VLANs, ``None`` for none or a public network."""
+    def _network(self, net: Any) -> ipaddress.IPv4Network | None:
+        """A /24 of the summary table as a network; ``None`` for none or a public one."""
         if net is None:
             return None
         network = ipaddress.ip_network(str(net), strict=False)
-        if (
-            not isinstance(network, ipaddress.IPv4Network)
-            or net_of(network.network_address) is None
-        ):
+        if not isinstance(network, ipaddress.IPv4Network):
             return None
-        holding = [
-            (subnet.prefixlen, vlan)
-            for vlan, subnet in self.site.vlans.items()
-            if isinstance(subnet, ipaddress.IPv4Network) and network.subnet_of(subnet)
-        ]
-        if holding:
-            return max(holding)[1]
-        inside = [
-            vlan
-            for vlan, subnet in self.site.vlans.items()
-            if isinstance(subnet, ipaddress.IPv4Network) and subnet.subnet_of(network)
-        ]
-        return MULTIPLE if inside else None
+        return network if net_of(network.network_address) is not None else None
+
+    def _vlans_of(self, network: ipaddress.IPv4Network) -> tuple[list[int], list[int]]:
+        """The VLANs holding ``network`` (most specific first) and those smaller than it."""
+        holding: list[tuple[int, int]] = []
+        smaller: list[int] = []
+        for vlan, subnet in self.site.vlans.items():
+            if not isinstance(subnet, ipaddress.IPv4Network):
+                continue
+            if network.subnet_of(subnet):
+                holding.append((-subnet.prefixlen, vlan))
+            elif subnet.subnet_of(network):
+                smaller.append(vlan)
+        return [vlan for _, vlan in sorted(holding)], smaller
+
+    def vlan_of_net(self, net: Any) -> int | str | None:
+        """The VLAN of a /24 (``search_counts.net``), :data:`MULTIPLE` for a /24 that holds
+        smaller VLANs, ``None`` for none or a public network."""
+        network = self._network(net)
+        if network is None:
+            return None
+        holding, smaller = self._vlans_of(network)
+        if smaller:
+            return MULTIPLE
+        return holding[0] if holding else None
 
     def department_of_vlans(self, vlans: Sequence[int]) -> str | None:
         names = {
@@ -169,18 +177,14 @@ class SiteLabels:
         return names.pop() if names else None
 
     def department_of_net(self, net: Any) -> str | None:
-        vlan = self.vlan_of_net(net)
-        if vlan is None:
+        """The department of the VLAN of a /24 (:data:`MULTIPLE` when its VLANs have several)."""
+        network = self._network(net)
+        if network is None:
             return None
-        if vlan == MULTIPLE:
-            network = ipaddress.IPv4Network(str(net), strict=False)
-            inside = [
-                vlan_id
-                for vlan_id, subnet in self.site.vlans.items()
-                if isinstance(subnet, ipaddress.IPv4Network) and subnet.subnet_of(network)
-            ]
-            return self.department_of_vlans(inside)
-        return self.department_of_vlans([int(vlan)])
+        holding, smaller = self._vlans_of(network)
+        if smaller:
+            return self.department_of_vlans([*smaller, *holding[:1]])
+        return self.department_of_vlans(holding[:1])
 
     def vlan_labels(self, value: int | str) -> tuple[str, str]:
         if value == MULTIPLE:
