@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -249,7 +250,27 @@ def test_a_failed_requested_attempt_reports_the_failure(site: Site) -> None:
     assert result.result is not None
     facts = result.result.model_dump(mode="json")
     assert facts["status"] == "pending"
-    assert "credit" in facts["message"]
+    assert facts["message"] == (
+        "the sealing attempt failed (tsa_no_credit); the day's details have the error"
+    )
+
+
+def test_a_failed_attempt_names_no_path_in_the_result(site: Site) -> None:
+    """The attempt's error names the vault folder; the day state keeps it, the result does
+    not (contract 2.4.6)."""
+    request = site.request("seal", day=site.days[0])
+    site.layout.vault.write_text("a file where the vault should be", encoding="utf-8")
+    assert site.run("seal") == 1
+    assert site.layout.vault.as_posix() in site.state(site.days[0])["last_error"]
+    result = site.result(request)
+    assert result.code == "seal_failed"
+    assert result.result is not None
+    assert result.result.model_dump(mode="json")["message"] == (
+        "the sealing attempt failed (unknown); the day's details have the error"
+    )
+    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
+    assert str(site.data) not in raw
+    assert site.data.as_posix() not in raw
 
 
 def test_a_request_never_jumps_the_queue(site: Site, capsys: pytest.CaptureFixture[str]) -> None:
@@ -399,6 +420,82 @@ def test_without_the_channel_keys_requests_are_dropped_and_sealing_goes_on(site:
     assert not site.layout.request_results.exists()
     log = (site.layout.logs / "core.log").read_text(encoding="utf-8")
     assert "task requests cannot be verified, 1 deleted" in log
+
+
+def _all_sealed(site: Site) -> bool:
+    return all(site.state(day)["status"] == "sealed" for day in site.days)
+
+
+@pytest.mark.parametrize("blocked", ["seal", "seen", "results"])
+def test_a_request_folder_that_is_not_one_never_stops_sealing(site: Site, blocked: str) -> None:
+    """The administration agent may create files in ``state\\requests``: a file where a folder
+    of the channel should be costs the requests, never a sealed day."""
+    request = site.request("seal", day=site.days[0])
+    folder = site.layout.requests / blocked
+    if folder.is_dir():
+        shutil.rmtree(folder)
+    folder.write_text("not a folder", encoding="utf-8")
+    assert site.run("seal") == 0
+    assert _all_sealed(site)
+    log = (site.layout.logs / "core.log").read_text(encoding="utf-8")
+    assert "Traceback" not in log
+    if blocked == "results":  # it ran; its result is lost, the agent reports task_timeout
+        assert site.state(site.days[0])["requested"] == request.id
+        assert (site.layout.request_seen / request.id).is_file()
+        assert list(site.layout.request_dir("seal").iterdir()) == []
+        return
+    assert "requested" not in site.state(site.days[0])
+    if blocked == "seen":  # the ledger cannot be written: the request waits for it
+        assert (site.layout.request_dir("seal") / f"{request.id}.json").is_file()
+        folder.unlink()
+        assert site.run("seal") == 0
+        assert site.result(request).ok  # its day was sealed by the run before
+
+
+def test_a_request_folder_that_cannot_be_listed_never_stops_sealing(
+    site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = site.request("seal", day=site.days[0])
+    queue = site.layout.request_dir("seal")
+    iterdir = Path.iterdir
+
+    def refused(path: Path) -> Any:
+        if path == queue:
+            raise PermissionError(13, "Access is denied", str(path))
+        return iterdir(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "iterdir", refused)
+        assert site.run("seal") == 0
+    assert _all_sealed(site)
+    assert (queue / f"{request.id}.json").is_file()  # read by the next run
+    assert site.run("seal") == 0
+    assert site.result(request).ok
+
+
+def test_keys_that_cannot_be_read_for_a_moment_keep_the_requests(
+    site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``keys init`` rewrites keys.json during an upgrade: a sharing violation then is no reason
+    to drop "Şimdi mühürle" (a missing or invalid keys.json is, above)."""
+    request = site.request("credit")
+    keys_json = site.programdata / "admin" / "keys" / "keys.json"
+    read_bytes = Path.read_bytes
+
+    def locked(path: Path) -> bytes:
+        if path == keys_json:
+            raise PermissionError(32, "The file is being used by another process", str(path))
+        return read_bytes(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", locked)
+        assert site.run("requests", "run") == 0
+    assert (site.layout.request_dir("tasks") / f"{request.id}.json").is_file()
+    assert "cannot be verified now, 1 kept" in (site.layout.logs / "core.log").read_text(
+        encoding="utf-8"
+    )
+    assert site.run("requests", "run") == 0
+    assert site.result(request).ok
 
 
 def test_the_keys_come_from_the_installation_folder_not_from_secrets_dir(tmp_path: Path) -> None:
@@ -684,7 +781,13 @@ def test_a_configuration_that_moves_secrets_dir_is_refused(
         assert site.run(*command) == 2, command
         assert "secrets_dir" in capsys.readouterr().err
     assert not site.layout.vault.exists()  # nothing was sealed
-    (alert,) = read_alerts(site.layout.alerts)  # once a day, by the Seal task
+    # Without the installer's record data_dir is not known to be the installation's: the
+    # refusal is reported on stderr (the task's result 0x2), no alert is written there.
+    assert read_alerts(site.layout.alerts) == []
+    (site.programdata / DATA_ROOT_RECORD).write_text(f"{site.data}\n", encoding="utf-8")
+    assert site.run("seal") == 2
+    assert site.run("seal") == 2
+    (alert,) = read_alerts(site.layout.alerts)  # once a day, into the recorded data root
     assert alert["rule"] == "R20-seal-config"
     assert alert["details"]["cause"] == "location"
     assert "possible tampering" in alert["message"]
@@ -708,6 +811,31 @@ def test_a_configuration_that_moves_data_dir_is_refused(
     assert alert["details"]["cause"] == "location"
 
 
+@pytest.mark.parametrize(
+    "record",
+    ["", "relative/ARCILOGGER\n", "{data}\n{data}\n", "utf-16", "a folder"],
+)
+def test_an_unusable_record_refuses_the_configuration(
+    site: Site, capsys: pytest.CaptureFixture[str], record: str
+) -> None:
+    """A record that is there but cannot be used fails closed, even when it names the right
+    folder (saved as UTF-16 by Notepad): ArciAdmin could otherwise make it unusable and move
+    data_dir. No alert goes into a data_dir that is not known to be the installation's."""
+    path = site.programdata / DATA_ROOT_RECORD
+    if record == "utf-16":
+        path.write_bytes(f"{site.data}\r\n".encode("utf-16"))
+    elif record == "a folder":
+        path.mkdir()
+    else:
+        path.write_text(record.format(data=site.data), encoding="utf-8")
+    assert site.run("seal") == 2
+    error = capsys.readouterr().err
+    assert DATA_ROOT_RECORD in error
+    assert "cannot be checked" in error
+    assert not site.layout.vault.exists()
+    assert read_alerts(site.layout.alerts) == []
+
+
 def test_check_fixed_location(tmp_path: Path) -> None:
     config_path = tmp_path / "pd" / "arcilogger.toml"
     config_path.parent.mkdir()
@@ -720,13 +848,27 @@ def test_check_fixed_location(tmp_path: Path) -> None:
     with pytest.raises(ConfigLocationError) as caught:
         check_fixed_location(moved, config_path)
     assert caught.value.key == "secrets_dir"
-    assert caught.value.data_root == tmp_path / "data"
+    assert caught.value.data_root is None  # no record: data_dir is not known to be ours
     assert "kurulumun klasörü" in str(caught.value)
     assert "is not the installation's folder" in str(caught.value)
     record = config_path.parent / DATA_ROOT_RECORD
     for unusable in ("", "relative/path\n", f"{tmp_path}\n{tmp_path}\n"):
         record.write_text(unusable, encoding="utf-8")
-        assert recorded_data_root(config_path) is None
+        with pytest.raises(ValueError, match="one line with an absolute path"):
+            recorded_data_root(config_path)
+        with pytest.raises(ConfigLocationError) as caught:
+            check_fixed_location(config, config_path)
+        assert caught.value.key == "data_dir"
+        assert caught.value.expected is None
+        assert caught.value.data_root is None
+        assert "kurulum kaydı data-root.txt kullanılamıyor" in str(caught.value)
+    record.write_bytes(f"{tmp_path / 'data'}\n".encode("utf-16"))
+    with pytest.raises(ConfigLocationError, match="not UTF-8"):
+        check_fixed_location(config, config_path)
+    record.write_text(f"{tmp_path / 'data'}\n", encoding="utf-8")
+    with pytest.raises(ConfigLocationError) as caught:
+        check_fixed_location(moved, config_path)
+    assert caught.value.data_root == tmp_path / "data"  # the recorded root gets the alert
     record.write_text(str(tmp_path / "recorded"), encoding="utf-8")
     with pytest.raises(ConfigLocationError) as caught:
         check_fixed_location(config, config_path)

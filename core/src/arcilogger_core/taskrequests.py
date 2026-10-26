@@ -23,6 +23,12 @@ request that ran (``results\\<id>.json``, :class:`~arcilogger_core.admin.contrac
 codes, texts and facts, never a secret, a token or a file path) and deletes the request;
 :func:`clean` removes ledger entries, results and left-over request files after 7 days, longer
 than any request is valid.
+
+The channel never stops a task: the Seal task seals with or without it. A folder that cannot be
+listed, a ``keys.json`` that cannot be read for a moment or a ledger entry that cannot be written
+is logged, and the request waits for the next run (it expires on its own); a result that cannot
+be written is logged too (the agent reports ``task_timeout``). None of these functions raises an
+``OSError``.
 """
 
 from __future__ import annotations
@@ -69,6 +75,9 @@ def _files(folder: Path) -> list[Path]:
         return sorted(path for path in folder.iterdir() if path.suffix == SUFFIX and path.is_file())
     except FileNotFoundError:
         return []
+    except OSError as exc:  # not a folder, or no access: the task goes on without requests
+        log.error("task requests in %s not readable: %s", folder.name, exc)
+        return []
 
 
 def _read(path: Path) -> bytes:
@@ -114,6 +123,14 @@ def _first_sight(layout: Layout, request_id: str) -> bool:
     return True
 
 
+def _unreadable_for_now(exc: KeysError) -> bool:
+    """``keys.json`` is there but cannot be read at this moment (locked while ``keys init``
+    rewrites it during an upgrade, a sharing violation): unlike a missing or invalid file, the
+    requests can still be verified by a later run."""
+    cause = exc.__cause__
+    return isinstance(cause, OSError) and not isinstance(cause, FileNotFoundError)
+
+
 def take(
     layout: Layout, queue: RequestQueue, keys_dir: Path, *, now: datetime | None = None
 ) -> list[TaskRequest]:
@@ -126,6 +143,9 @@ def take(
     try:
         keys = load_keys(keys_dir)
     except KeysError as exc:
+        if _unreadable_for_now(exc):
+            log.error("task requests cannot be verified now, %d kept: %s", len(files), exc)
+            return []
         log.error("task requests cannot be verified, %d deleted: %s", len(files), exc)
         for path in files:
             _remove(path)
@@ -140,7 +160,12 @@ def take(
         if request is None:
             _remove(path)
             continue
-        if not _first_sight(layout, request.id):
+        try:
+            first = _first_sight(layout, request.id)
+        except OSError as exc:  # the ledger cannot be written: run it only once it can
+            log.error("task request %s kept, its ledger entry not written: %s", request.id, exc)
+            continue
+        if not first:
             log.warning("task request %s was taken before; the repeat is ignored", request.id)
             _remove(path)
             continue
@@ -179,8 +204,12 @@ def task_result(
 
 
 def finish(layout: Layout, request: TaskRequest, result: TaskResult) -> None:
-    """Write ``results\\<id>.json``, then delete the request (the ledger keeps its id)."""
-    atomic_write_bytes(layout.request_results / f"{request.id}{SUFFIX}", dump_document(result))
+    """Write ``results\\<id>.json``, then delete the request (the ledger keeps its id). A result
+    that cannot be written is logged: the request has run, the agent reports ``task_timeout``."""
+    try:
+        atomic_write_bytes(layout.request_results / f"{request.id}{SUFFIX}", dump_document(result))
+    except OSError as exc:
+        log.error("result of task request %s not written: %s", request.id, exc)
     _remove(layout.request_dir(task_queue(request.kind)) / f"{request.id}{SUFFIX}")
 
 
@@ -197,7 +226,7 @@ def _entries(layout: Layout) -> Iterator[tuple[Path, int]]:
             for path in folder.iterdir():
                 if path.is_file():
                     yield path, days
-        except FileNotFoundError:
+        except OSError:  # missing, not a folder or not readable: nothing to clean there
             continue
 
 

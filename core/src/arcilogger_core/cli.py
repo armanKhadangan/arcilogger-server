@@ -229,9 +229,20 @@ def _sealer(app: App) -> Sealer:
     return Sealer(app.config, provider=provider, roots=roots)
 
 
+def _seal_requests(app: App) -> list[TaskRequest]:
+    """The browser's signed seal requests ("Şimdi mühürle"). They are optional for the Seal
+    task: whatever goes wrong with their folders is logged, and the run seals every due day as
+    it would without them (the 5651 pipeline never waits for the administration channel)."""
+    try:
+        return take(app.layout, "seal", app.keys_dir)
+    except Exception:  # take() handles the file errors itself; this is for anything else
+        log.exception("seal requests not taken; sealing goes on without them")
+        return []
+
+
 def cmd_seal(args: argparse.Namespace, app: App) -> int:
     # The browser's seal requests ("Şimdi mühürle"); a run for one --day leaves them waiting.
-    requests = [] if args.day else take(app.layout, "seal", app.keys_dir)
+    requests = [] if args.day else _seal_requests(app)
     started = utc_now()
     try:
         sealer = _sealer(app)
@@ -254,7 +265,12 @@ def cmd_seal(args: argparse.Namespace, app: App) -> int:
         wanted = {request.params.day: request.id for request in requests if request.params.day}
         outcomes = sealer.seal_due(requested=wanted)
         for request in requests:
-            finish(app.layout, request, _seal_result(sealer, request, outcomes, started))
+            try:
+                result = _seal_result(sealer, request, outcomes, started)
+            except (OSError, ValueError) as exc:  # the day state cannot be read back
+                log.error("seal request %s: %s", request.id, exc)
+                result = task_result(request, started_at=started, code="seal_failed")
+            finish(app.layout, request, result)
         clean(app.layout)
     if not outcomes:
         print("Mühürlenecek kapanmış gün yok.")
@@ -282,11 +298,17 @@ def _seal_result(
             else SealOutcome(day, "waiting", "an earlier day is not sealed yet")
         )
     sealed = outcome.status == SEALED
+    message = outcome.message
+    if outcome.status in ("pending", "failed"):
+        # The attempt's error text may name a file (the vault, the Zamane client) and a result
+        # never does (contract 2.4.6): its code instead; the day's page shows the error.
+        code = state.get("last_error_code") or "unknown"
+        message = f"the sealing attempt failed ({code}); the day's details have the error"
     result = SealResult.model_validate(
         {
             "day": day,
             "status": outcome.status,
-            "message": outcome.message,
+            "message": message,
             "serial": state.get("serial") if sealed else None,
             "gen_time": state.get("gen_time") if sealed else None,
         }
@@ -1007,7 +1029,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         app = App(args.config)
     except ConfigLocationError as exc:
         print(f"Hata: {exc}", file=sys.stderr)
-        if args.command == "seal":  # sealing stops: R20-seal-config, once a day
+        # Sealing stops: R20-seal-config once a day, into the recorded data root only (without
+        # a usable record the configured data_dir is not known to be the installation's).
+        if args.command == "seal" and exc.data_root is not None:
             try:
                 config_alert(Layout(exc.data_root), "location", exc)
             except OSError as write_error:
