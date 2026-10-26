@@ -44,6 +44,9 @@ Jobs (``DEFAULT_JOBS``):
                             Excel) and e-mailed per recipient (:mod:`.reports.runner`)
 ``reports.purge``           daily after 03:20: files of report runs older than
                             ``reports.keep_days`` deleted from ``exports/usage-reports``
+``search.counts_backfill``  every 10 minutes, at most 60 s: the finished files loaded before
+                            the search summary table (``ingest_offsets.counts_from_line``)
+                            counted into ``search_counts``, newest first (:mod:`.search_jobs`)
 ==========================  =============================================================
 
 A daily job runs once per site day (Europe/Istanbul) as soon as its time has passed — also
@@ -115,6 +118,7 @@ from arcilogger_worker.correlation.leases import (
 from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
+from arcilogger_worker.search_jobs import backfill_counts
 from arcilogger_worker.usage import jobs as usage_jobs
 
 log = logging.getLogger("arcilogger_worker")
@@ -207,6 +211,8 @@ USAGE_REQUESTS_EVERY: Final = timedelta(seconds=30)
 REPORTS_EVERY: Final = timedelta(minutes=1)
 #: ``license.check`` recomputes the licence state every 5 minutes (contract 7).
 LICENSE_EVERY: Final = timedelta(minutes=5)
+#: ``search.counts_backfill`` looks for finished files still to count every 10 minutes.
+SEARCH_COUNTS_EVERY: Final = timedelta(minutes=10)
 #: The modules of the paid jobs (licensing contract 1.4).
 USAGE_MODULE: Final = "usage_analytics"
 REPORTS_MODULE: Final = "usage_reports"
@@ -356,6 +362,15 @@ def job_reports_purge(ctx: JobContext) -> Mapping[str, Any]:
     return purge_reports(ctx.sessions, ctx.layout, now=ctx.now).details()
 
 
+def job_search_counts_backfill(ctx: JobContext) -> Mapping[str, Any]:
+    """The finished files loaded before ``search_counts`` existed, counted into it."""
+    report = backfill_counts(ctx.engine)
+    details = report.details()
+    if not report.files and not report.more:
+        details[SKIPPED] = True
+    return details
+
+
 def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
     # Order matters when several are due at once (start-up): partitions first, then the
     # incremental job (which catches up and sets the watermark the rebuilds stop at).
@@ -393,6 +408,9 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         # Reports after the alerts: a report lists the alerts imported just before it.
         Job("reports.run_due", job_reports_run_due, every=REPORTS_EVERY, module=REPORTS_MODULE),
         Job("reports.purge", job_reports_purge, daily_after=time(3, 20)),
+        # Last: it may take a minute, and nothing waits for it (statistics count directly until
+        # a file is counted).
+        Job("search.counts_backfill", job_search_counts_backfill, every=SEARCH_COUNTS_EVERY),
     )
 
 
