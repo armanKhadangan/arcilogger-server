@@ -98,6 +98,8 @@ export function SearchPage() {
   /** The range key of the last run: a different range in the address runs the query again. */
   const ranWith = useRef<string | null>(null);
   const waiting = useRef<Waiting | null>(null);
+  /** The range the last search ran on (a refused one runs again on it). */
+  const rangeAt = useRef<TimeRange>(range);
   const names = useMemo(() => fieldNames(fields.data?.fields ?? []), [fields.data]);
 
   useEffect(() => {
@@ -126,6 +128,7 @@ export function SearchPage() {
     (q: string, on: TimeRange) => {
       committed.current = q;
       ranWith.current = rangeKey(on);
+      rangeAt.current = on;
       setSelected(null);
       if (privacyPending) {
         waiting.current = { q, range: on };
@@ -193,6 +196,14 @@ export function SearchPage() {
     if ('saved' in wanted) searchSaved(wanted.saved);
     else search(wanted.q, wanted.range);
   }, [privacyPending, search, searchSaved]);
+
+  // The server asked for the KVKK notice first: the refused search runs once it is accepted.
+  useEffect(() => {
+    const input = state.input;
+    if (!isApiError(state.error, 'privacy_notice_required') || input === null) return;
+    waiting.current =
+      'saved_id' in input ? { saved: input.saved_id } : { q: input.q, range: rangeAt.current };
+  }, [state.error, state.input]);
 
   // Statistics of an expired search: the search runs again (once, `useSearchSession`).
   useEffect(() => {
