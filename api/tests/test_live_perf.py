@@ -129,7 +129,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
             time.sleep(0.05)
         used, elapsed = time.process_time() - cpu, time.monotonic() - wall
         print(
-            f"\nlive tail: {used:.2f} s CPU in {elapsed:.2f} s ({used / elapsed:.2f} s/s), {len(hub.buffer)} buffered"
+            f"\nlive tail: {used:.2f} s CPU in {elapsed:.2f} s ({used / elapsed:.2f} s/s), "
+            f"{len(hub.buffer)} lines buffered"
         )
         for stream_id in streams:
             stream = hub.streams[stream_id]
