@@ -18,12 +18,16 @@ from arcilogger_core.admin.contract import (
     AdminPolicy,
     AgentStatus,
     CreditResult,
+    FirewallChange,
+    JarChange,
     JournalLine,
     Requester,
     SealReady,
     SecretChange,
     SecretRecord,
+    SystemJournalLine,
     SystemTaskCheck,
+    TimeChange,
     Transition,
     ValueChange,
     dump_document,
@@ -234,6 +238,51 @@ def test_an_unreadable_journal_is_reported_not_imported(
     assert report.problems == ["2026-10-25.jsonl line 1: not a journal line"]
     assert entries(db_session) == []
     assert "parola" not in json.dumps([row.details for row in entries(db_session)])
+
+
+def test_applysystem_changes_are_imported_once(
+    admin: AdminLayout, sessions: sessionmaker[Session], db_session: Session
+) -> None:
+    lines = [
+        SystemJournalLine(
+            line=new_id(),
+            at=NOW,
+            change="firewall",
+            firewall=FirewallChange(syslog_addresses_count=2, outbound_rules=0),
+        ),
+        SystemJournalLine(
+            line=new_id(),
+            at=NOW,
+            change="time",
+            time=TimeChange(changed=True, peers="172.20.10.1,0x8 time.ume.tubitak.gov.tr,0xa"),
+        ),
+        SystemJournalLine(
+            line=new_id(),
+            at=NOW,
+            change="jar",
+            jar=JarChange(sha256="c3" * 32, approved_by="console:yonetici"),
+        ),
+    ]
+    admin.system.mkdir(parents=True)
+    admin.system_journal.write_bytes(
+        b"".join(dump_line(line) for line in lines) + b'{"v": 1, "change": "firewall"}\n'
+    )
+    report = import_admin_events(sessions, admin)
+    assert report.problems == ["journal.jsonl line 4: not a system journal line"]
+    rows = entries(db_session, "admin.system")
+    assert [(row.target, row.details["change"]) for row in rows] == [
+        ("system", "firewall"),
+        ("system", "time"),
+        ("system", "jar"),
+    ]
+    assert rows[0].details["firewall"] == {"syslog_addresses_count": 2, "outbound_rules": 0}
+    assert rows[1].details["time"]["changed"] is True
+    assert rows[2].details["jar"] == {"sha256": "c3" * 32, "approved_by": "console:yonetici"}
+    assert rows[2].details["source"] == "admin/system/journal.jsonl line 3"
+    keys = set(db_session.scalars(select(AuditImport.key)))
+    assert {f"admin-system:{line.line}" for line in lines} <= keys
+    assert import_admin_events(sessions, admin).imported == []
+    assert verify_audit_chain(db_session).ok
 
 
 def test_a_seal_now_attempt_names_its_request(

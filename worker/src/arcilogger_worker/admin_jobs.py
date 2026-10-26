@@ -17,6 +17,11 @@ log **once**, actor ``system``:
 * ``settings.secret_change`` — one per stored credential the line changed (``secrets``), target
   ``secret:<name>``, key ``admin-secret:<line>:<name>``, with ``operator: "web:<username>"``: the
   same action as a change made with ``arcilogger-core secret set`` on the console.
+* ``admin.system`` — one per line of ApplySystem's ``admin\\system\\journal.jsonl``
+  (``SystemJournalLine``: a firewall, Windows Time or Zamane client change it applied as
+  SYSTEM), target ``system``, key ``admin-system:<line>``: the number of syslog addresses and
+  outbound rules, whether the time peers changed, the promoted client's SHA-256 and who
+  approved it.
 
 ``audit_imports`` remembers the keys under the audit chain lock, so a restart or a second
 worker never imports a line twice (:func:`.evidence_jobs.import_events`). A line that is not a
@@ -40,6 +45,7 @@ from arcilogger_core.admin.contract import (
     DocumentError,
     JournalLine,
     SealResult,
+    SystemJournalLine,
     TsaTestResult,
     parse_document,
 )
@@ -49,6 +55,8 @@ log = logging.getLogger("arcilogger_worker.admin")
 
 #: Where the imported lines come from (``details.source``), relative to ``ProgramData``.
 JOURNAL_SOURCE: Final = "admin/journal"
+SYSTEM_JOURNAL_SOURCE: Final = "admin/system/journal.jsonl"
+SYSTEM_ACTION: Final = "admin.system"
 
 
 def _lines(path: Path, report: ImportReport) -> list[bytes]:
@@ -157,6 +165,32 @@ def journal_events(admin: AdminLayout, report: ImportReport) -> list[AuditEvent]
     return events
 
 
+def system_events(admin: AdminLayout, report: ImportReport) -> list[AuditEvent]:
+    """Every line of ApplySystem's journal, in file order."""
+    events: list[AuditEvent] = []
+    path = admin.system_journal
+    for number, raw in enumerate(_lines(path, report), 1):
+        if not raw.strip():
+            continue
+        try:
+            line = parse_document(SystemJournalLine, raw)
+        except DocumentError:
+            report.problems.append(f"{path.name} line {number}: not a system journal line")
+            continue
+        block = {"firewall": line.firewall, "time": line.time, "jar": line.jar}[line.change]
+        if block is None:  # never: a line has exactly the block its ``change`` names
+            continue
+        details = {
+            "change": line.change,
+            line.change: block.model_dump(mode="json"),
+            "line": line.line,
+            "at": line.at.isoformat(),
+            "source": f"{SYSTEM_JOURNAL_SOURCE} line {number}",
+        }
+        events.append(AuditEvent(f"admin-system:{line.line}", SYSTEM_ACTION, "system", details))
+    return events
+
+
 def import_admin_events(
     sessions: sessionmaker[Session], admin: AdminLayout, report: ImportReport | None = None
 ) -> ImportReport:
@@ -164,6 +198,7 @@ def import_admin_events(
     report = report if report is not None else ImportReport()
     known = len(report.problems)
     import_events(sessions, journal_events(admin, report), report)
+    import_events(sessions, system_events(admin, report), report)
     if len(report.problems) > known:
         log.warning("admin journal import: %s", "; ".join(report.problems[known:][:10]))
     return report
