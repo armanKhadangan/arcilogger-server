@@ -125,6 +125,12 @@ def _exe(name: str) -> str:
     return f"{name}.exe" if sys.platform == "win32" else name
 
 
+def _tool_names(name: str) -> tuple[str, ...]:
+    """The file names a configured ``pg_dump`` / ``pg_restore`` may have (execpolicy
+    ``names``): no other program of a trusted folder, ``pwsh.exe`` say, runs in its place."""
+    return (_exe(name),)
+
+
 if sys.platform == "win32":
     import winreg
 
@@ -214,12 +220,13 @@ def find_tool(
     """``pg_dump`` / ``pg_restore``: ``[backup] <name>``, else the bin folder of the PostgreSQL
     service, else the newest ``C:\\Program Files\\PostgreSQL\\<version>\\bin``, else ``PATH``.
 
-    A configured path runs only when the executable policy trusts it (ADR-0014, contract 2.8.4:
-    inside ``policy.executable_roots`` or recorded by the installer with its SHA-256), checked
-    against ``anchors`` — the folder of the fixed ``--config`` path, by default
-    :func:`~arcilogger_core.config.default_config_path` — never against a folder the
-    configuration names: the administration agent may write ``arcilogger.toml``, and the Backup
-    task runs the tool as LOCAL SERVICE, a restore as the PostgreSQL superuser."""
+    A configured path runs only when it names the tool itself (``pg_dump.exe``) and the
+    executable policy trusts it (ADR-0014, contract 2.8.4: inside ``policy.executable_roots`` or
+    recorded by the installer with its SHA-256), checked against ``anchors`` — the folder of
+    the fixed ``--config`` path, by default :func:`~arcilogger_core.config.default_config_path`
+    — never against a folder the configuration names: the administration agent may write
+    ``arcilogger.toml``, and the Backup task runs the tool as LOCAL SERVICE, a restore with the
+    PostgreSQL superuser's password."""
     exe = _exe(name)
     if configured.strip():
         path = Path(configured.strip())
@@ -229,6 +236,7 @@ def find_tool(
             checked = check_executable(
                 str(path),
                 anchors or TrustAnchors.of(default_config_path()),
+                names=_tool_names(name),
                 what=f"backup.{name}",
             )
         except ExecutableRefusedError as exc:
