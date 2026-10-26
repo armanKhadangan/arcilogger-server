@@ -751,7 +751,7 @@
       "heartbeat": "Beklenen sinyal aralığı (dk)",
       "heartbeatHint": "1–1440 dakika. Bu süre boyunca kayıt gelmezse sessiz kaynak uyarısı oluşur.",
       "expectedHint": "Sessiz kaynak uyarısı bu kaynağı izler.",
-      "enabledHint": "Kapalı bir kaynağın kayıtları toplanmaz.",
+      "enabledHint": "Kapalı bir kaynağa güvenlik duvarı 514'ü açmaz ve sessiz kaynak uyarısı onu beklemez; yine de gelen kayıtlar saklanır.",
       "minutes_one": "{{count}} dk",
       "minutes_other": "{{count}} dk",
       "yes": "Evet",

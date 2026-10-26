@@ -1035,6 +1035,9 @@ def test_removing_a_source_needs_reauthentication_and_raises_an_alert(
     raised = [a for a in alerts(installed) if a.get("rule") == "R20-config-change"]
     assert raised
     assert raised[-1]["severity"] == "high"
+    # The field names under the key the worker's alert texts read (no value, no user name).
+    assert raised[-1]["details"]["section"] == "sources"
+    assert raised[-1]["details"]["paths"] == ["sources.fw-01"]
 
 
 # -- SMTP and the replica --------------------------------------------------------------------------

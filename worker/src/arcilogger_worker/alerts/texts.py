@@ -195,16 +195,18 @@ RULES: Final[Mapping[str, RuleText]] = {
     "R20-admin": RuleText(
         "Tarayıcıdan yönetim sorunu",
         "Browser administration problem",
-        "Ayarlar → Geçmiş sayfasına ve Olay Görüntüleyicisi'ndeki ARCILOGGER-Admin kayıtlarına "
-        "bakın; hizmeti denetleyin: Get-Service ArciAdmin.",
-        "Look at Settings → History and at the ARCILOGGER-Admin entries in Event Viewer; check "
-        "the service: Get-Service ArciAdmin.",
+        "Ayarlar → Değişiklik geçmişi sayfasına ve Olay Görüntüleyicisi'ndeki ARCILOGGER-Admin "
+        "kayıtlarına bakın; hizmeti denetleyin: Get-Service ArciAdmin.",
+        "Look at Settings → Change history and at the ARCILOGGER-Admin entries in Event Viewer; "
+        "check the service: Get-Service ArciAdmin.",
     ),
     "R20-config-change": RuleText(
         "Önemli yapılandırma değişikliği",
         "Significant configuration change",
-        "Değişikliği bilinen bir yönetici yapmadıysa hemen inceleyin: Ayarlar → Geçmiş.",
-        "If no known administrator made this change, look into it at once: Settings → History.",
+        "Değişikliği bilinen bir yönetici yapmadıysa hemen inceleyin: Ayarlar → Değişiklik "
+        "geçmişi.",
+        "If no known administrator made this change, look into it at once: Settings → Change "
+        "history.",
     ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
@@ -478,9 +480,9 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "elle müdahale gerekiyor ya da güvenlik duvarı, saat veya Zamane adımı uygulanamadı.\n"
         "2. Hizmeti denetleyin (Get-Service ArciAdmin) ve Olay Görüntüleyicisi → Windows "
         "Günlükleri → Uygulama altında ARCILOGGER-Admin kaynağının kayıtlarına bakın.\n"
-        "3. Reddedilen istek için Ayarlar → Geçmiş sayfasında ve denetim kaydında isteği kimin "
-        "hazırladığını inceleyin; beklenmeyen bir imza ya da kurulum hatası varsa sunucuya "
-        "erişimi denetleyin.\n"
+        "3. Reddedilen istek için Ayarlar → Değişiklik geçmişi sayfasında ve denetim kaydında "
+        "isteği kimin hazırladığını inceleyin; beklenmeyen bir imza ya da kurulum hatası varsa "
+        "sunucuya erişimi denetleyin.\n"
         "4. Elle müdahale gerekiyorsa sürüm numarası ve adımlar isteğin ayrıntısındadır "
         "(sunucu konsolunda: python -I -m arcilogger_core.admin versions restore <n>).\n"
         "5. Hizmet yeniden yanıt verince 'yanıt vermiyor' uyarısı kendiliğinden kapanır; "
@@ -491,9 +493,9 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "could not be applied.\n"
         "2. Check the service (Get-Service ArciAdmin) and the entries of the source "
         "ARCILOGGER-Admin under Event Viewer → Windows Logs → Application.\n"
-        "3. For a rejected request, look at who prepared it under Settings → History and in the "
-        "audit log; for an unexpected signature or installation error check who can reach the "
-        "server.\n"
+        "3. For a rejected request, look at who prepared it under Settings → Change history and "
+        "in the audit log; for an unexpected signature or installation error check who can "
+        "reach the server.\n"
         "4. When manual action is needed, the version number and the steps are in the request's "
         "details (on the server console: python -I -m arcilogger_core.admin versions restore "
         "<n>).\n"
@@ -502,13 +504,15 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
     ),
     "R20-config-change": (
         "1. Ayrıntılarda hangi bölümün ve hangi alanların değiştiğini görün.\n"
-        "2. Ayarlar → Geçmiş sayfasında isteği, denetim kaydında kimin yaptığını inceleyin.\n"
+        "2. Ayarlar → Değişiklik geçmişi sayfasında isteği, denetim kaydında kimin yaptığını "
+        "inceleyin.\n"
         "3. Değişikliği bilinen bir yönetici yapmadıysa hemen harekete geçin: bekletilen bir "
         "değişikliği (saklama süresi, replika) süresi dolmadan İptal et ile durdurun ya da Geri "
         "al ile önceki ayarlara dönün; ilgili kullanıcının parolasını değiştirin.\n"
         "4. Bilinen bir yöneticinin değişikliğiyse not ekleyip uyarıyı kapatın.",
         "1. See in the details which section and which fields changed.\n"
-        "2. Look at the request under Settings → History and at who made it in the audit log.\n"
+        "2. Look at the request under Settings → Change history and at who made it in the audit "
+        "log.\n"
         "3. If no known administrator made the change, act at once: stop a held change "
         "(retention, replica) with Cancel before its hold ends, or go back to the previous "
         "settings with Revert; change the password of the user concerned.\n"

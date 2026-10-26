@@ -751,7 +751,7 @@
       "heartbeat": "Expected heartbeat (min)",
       "heartbeatHint": "1–1440 minutes. A silent-source alert is raised when nothing arrives for this long.",
       "expectedHint": "The silent-source alert watches this source.",
-      "enabledHint": "Records of a disabled source are not collected.",
+      "enabledHint": "A disabled source gets no 514 opening in the firewall and no silent-source alert; records that still arrive are kept.",
       "minutes_one": "{{count}} min",
       "minutes_other": "{{count}} min",
       "yes": "Yes",

@@ -1109,14 +1109,15 @@ class Agent:
     def _config_alert(
         self, section: Section | None, fields: Sequence[str], severity: str, request_id: str
     ) -> None:
-        """``R20-config-change``: the section, the field names and the time only (ADR-0010)."""
+        """``R20-config-change``: the section, the field names and the time only (ADR-0010);
+        the worker's texts read ``details.section`` and ``details.paths``."""
         level: Literal["medium", "high"] = "medium" if severity == "medium" else "high"
         names = ", ".join(fields) or "-"
         self._alert(
             "R20-config-change",
             level,
             f"Yapılandırma değişikliği [configuration change]: {section} ({names})",
-            {"section": section, "fields": list(fields), "request": request_id},
+            {"section": section, "paths": list(fields), "request": request_id},
         )
 
     def _stage_jar(self, work: Path, upload: str, sha256: str) -> bool:
