@@ -2,21 +2,38 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
+import zipfile
 from collections.abc import Mapping
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.oid import NameOID
 from hypothesis import given
 from hypothesis import strategies as st
 
 from arcilogger_core.admin import messages, rules
-from arcilogger_core.admin.contract import FALLBACK_POLICY, AdminPolicy, AdminRequest, SetOp
+from arcilogger_core.admin.contract import (
+    FALLBACK_POLICY,
+    AdminPolicy,
+    AdminRequest,
+    SetOp,
+    UploadKind,
+    new_id,
+)
 from arcilogger_core.admin.rules import (
     EDITABLE,
     RuleContext,
     SectionCheck,
+    UploadInfo,
     check_request,
     conflicts,
     locked_paths,
@@ -25,6 +42,8 @@ from arcilogger_core.admin.rules import (
 from arcilogger_core.config import Config, parse_config
 from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.timeutil import SITE_TZ
+from arcilogger_core.tsa import zamane_releases
+from arcilogger_core.tsa.zamane_releases import ZamaneRelease
 
 NOW = datetime(2026, 10, 25, 10, 15, tzinfo=SITE_TZ)
 POLICY = FALLBACK_POLICY.model_copy(update={"enabled": True})
@@ -309,3 +328,693 @@ def test_the_policy_bounds_nothing_of_general(root: Path, config: Config) -> Non
     tight = AdminPolicy(enabled=True, written_at=NOW, written_by="test", max_sources=1)
     check = validate_section("general", config, {"site_name": "X"}, context(root, policy=tight))
     assert check.ok
+
+
+def signed(section: str, ops: list[dict[str, Any]], **options: Any) -> AdminRequest:
+    """A verified request as the agent checks it."""
+    return AdminRequest.model_validate(
+        {
+            "id": "a" * 32, "instance": "b" * 32,
+            "issued_at": NOW, "expires_at": NOW.replace(minute=20),
+            "kind": "config.apply", "section": section,
+            "actor": {"user_id": 3, "username": "ayse", "session": "s", "ip": "172.20.10.37"},
+            "ops": ops, "options": options,
+        }
+    )  # fmt: skip
+
+
+def with_tsa(root: Path, block: str) -> Config:
+    """The configuration of ``root`` with its ``[tsa]`` table replaced by ``block``."""
+    path = root / "arcilogger.toml"
+    text = path.read_text(encoding="utf-8").replace('[tsa]\nprovider = "mock"\n', block)
+    path.write_text(text, encoding="utf-8")
+    return parse_config(path.read_bytes(), path)
+
+
+ZAMANE_TEST = '[tsa]\nprovider = "zamane"\n'
+ZAMANE_PRODUCTION = '[tsa]\nprovider = "zamane"\nurl = "http://zd.kamusm.gov.tr"\n'
+
+
+def root_certificate(
+    *,
+    ca: bool = True,
+    self_signed: bool = True,
+    expired: bool = False,
+    curve: ec.EllipticCurve | None = None,
+) -> bytes:
+    """A fictional root certificate (PEM) for the upload checks."""
+    key = ec.generate_private_key(curve or ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Örnek Test Kök Sertifikası")])
+    issuer = name if self_signed else x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Başka")])
+    signer = key if self_signed else ec.generate_private_key(ec.SECP256R1())
+    start = NOW - timedelta(days=800 if expired else 1)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(start)
+        .not_valid_after(start + timedelta(days=365 if expired else 3650))
+    )
+    if ca:
+        builder = builder.add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+    return builder.sign(signer, hashes.SHA256()).public_bytes(Encoding.PEM)
+
+
+def der_sha256(pem: bytes) -> str:
+    return hashlib.sha256(
+        x509.load_pem_x509_certificate(pem).public_bytes(Encoding.DER)
+    ).hexdigest()
+
+
+def client_jar(content: bytes = b"\xca\xfe\xba\xbe") -> bytes:
+    """A Zamane client stand-in: a jar (a ZIP with a manifest)."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+        archive.writestr("ornek/Client.class", content)
+    return buffer.getvalue()
+
+
+def distribution(jar: bytes, name: str = "tss-client-console-3.1.33.jar") -> bytes:
+    """A distribution ``.zip`` with the client in a folder."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("zamane/BENIOKU.txt", "Örnek dağıtım\n")
+        archive.writestr(f"zamane/{name}", jar)
+    return buffer.getvalue()
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def uploaded(tmp_path: Path, kind: UploadKind, data: bytes) -> UploadInfo:
+    upload_id = new_id()
+    path = tmp_path / f"upload-{upload_id}"
+    path.write_bytes(data)
+    return rules.inspect_upload(upload_id, kind, path, now=NOW)
+
+
+# -- tsa: the server, the threshold, Java ----------------------------------------------------------
+
+
+def test_the_server_is_one_of_the_two_kamu_sm_servers(root: Path, config: Config) -> None:
+    assert codes(validate_section("tsa", config, {"server": "mock"}, context(root))) == [
+        "tsa_mock_refused"
+    ]
+    body = {"server": "http://tsa.ornek.example"}
+    assert codes(validate_section("tsa", config, body, context(root))) == ["tsa_server_invalid"]
+    check = validate_section("tsa", config, {"server": "test"}, context(root))
+    assert check.ok
+    assert check.ops == (
+        {"op": "set", "path": "tsa.provider", "expect": "mock", "value": "zamane"},
+    )
+    assert check.reauth
+    assert {"reload.api", "reload.worker", "task.next_run:Seal"} <= set(check.effects)
+    custom = signed(
+        "tsa",
+        [{"op": "set", "path": "tsa.url", "expect": "http://tzd.kamusm.gov.tr",
+          "value": "http://tsa.ornek.example"}],
+    )  # fmt: skip
+    zamane = with_tsa(root, ZAMANE_TEST)
+    assert codes(check_request(custom, zamane, context(root))) == ["tsa_server_invalid"]
+    back = signed(
+        "tsa", [{"op": "set", "path": "tsa.provider", "expect": "zamane", "value": "mock"}]
+    )
+    assert codes(check_request(back, zamane, context(root))) == ["tsa_mock_refused"]
+
+
+def test_strict_outbound_mode_syncs_the_firewall_for_a_new_server(
+    root: Path, config: Config
+) -> None:
+    open_mode = validate_section("tsa", config, {"server": "test"}, context(root))
+    assert "system.firewall" not in open_mode.effects
+    strict = validate_section(
+        "tsa", config, {"server": "test"}, context(root, strict_outbound=True)
+    )
+    assert "system.firewall" in strict.effects
+    assert strict.system_sync
+
+
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        ({"credit_alert_threshold": -1}, "tsa.credit_alert_threshold"),
+        ({"credit_alert_threshold": 1_000_001}, "tsa.credit_alert_threshold"),
+        ({"credit_alert_threshold": "500"}, "tsa.credit_alert_threshold"),
+        ({"timeout_seconds": 4}, "tsa.timeout_seconds"),
+        ({"timeout_seconds": 601}, "tsa.timeout_seconds"),
+    ],
+)
+def test_tsa_numbers_out_of_range(
+    root: Path, config: Config, body: Mapping[str, Any], field: str
+) -> None:
+    check = validate_section("tsa", config, body, context(root))
+    assert [(p.code, p.field) for p in check.errors] == [("config_invalid", field)]
+
+
+def test_the_credit_threshold_needs_no_reauthentication(root: Path, config: Config) -> None:
+    check = validate_section("tsa", config, {"credit_alert_threshold": 200}, context(root))
+    assert check.ok
+    assert not check.reauth
+    assert check.changes == {"tsa.credit_alert_threshold": {"old": 500, "new": 200}}
+
+
+JRE = "C:/Program Files/Eclipse Adoptium/jre-8.0.412.8-hotspot/bin/java.exe"
+
+
+def test_java_only_from_the_detected_candidates(root: Path, config: Config) -> None:
+    refused = validate_section("tsa", config, {"java": JRE}, context(root))
+    assert [(p.code, p.field) for p in refused.errors] == [("java_not_detected", "tsa.java")]
+    detected = context(root, java_candidates=(JRE,))
+    check = validate_section("tsa", config, {"java": JRE}, detected)
+    assert check.ok
+    assert check.ops == ({"op": "set", "path": "tsa.java", "expect": ["java"], "value": [JRE]},)
+    assert check.reauth
+    extra = validate_section("tsa", config, {"java": [JRE, "-Xmx1g"]}, detected)
+    assert codes(extra) == ["java_not_detected"]
+
+
+# -- tsa: credentials ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"customer": "12 345"},
+        {"customer": ""},
+        {"customer": "1" * 65},
+        {"password": "x" * 129},
+        {"password": "satır\nsonu"},
+        {"password": 12345},
+    ],
+)
+def test_credentials_that_cannot_be_stored(
+    root: Path, config: Config, body: Mapping[str, Any]
+) -> None:
+    check = validate_section("tsa", config, body, context(root))
+    assert codes(check) == ["secret_invalid"]
+    assert check.secret_changes == {}
+    assert all(str(value) not in repr(check.errors) for value in body.values() if value)
+
+
+def test_credentials_are_tokens_and_never_shown(root: Path, config: Config) -> None:
+    body = {"customer": "4812", "password": "kamu-parola-örnek"}
+    check = validate_section(
+        "tsa", config, body, context(root, encrypt=lambda v: f"gAAAAAtoken{len(v)}")
+    )
+    assert check.ok
+    assert [op["op"] for op in check.ops] == ["secret_set", "secret_set"]
+    assert [op["token"] for op in check.ops] == ["gAAAAAtoken4", "gAAAAAtoken17"]
+    assert check.changes["kamusm.password"] == {
+        "secret": True,
+        "old": "unset",
+        "new": "set",
+        "changed": True,
+    }
+    assert "kamu-parola" not in repr(check.changes) + repr(check.ops)
+    assert check.reauth
+    assert check.alert == "high"
+    dry = validate_section("tsa", config, body, context(root))  # no encrypt: a dry run
+    assert {op["token"] for op in dry.ops} == {rules.UNENCRYPTED}
+
+
+def test_clearing_the_credentials(root: Path, config: Config) -> None:
+    stored = frozenset({"kamusm.customer", "kamusm.password"})
+    check = validate_section(
+        "tsa", config, {"clear_credentials": True}, context(root, stored_secrets=stored)
+    )
+    assert check.ok
+    assert [(op["op"], op["name"]) for op in check.ops] == [
+        ("secret_delete", "kamusm.customer"),
+        ("secret_delete", "kamusm.password"),
+    ]
+    assert check.secret_changes == {"kamusm.customer": None, "kamusm.password": None}
+    both = {"clear_credentials": True, "password": "yeni"}
+    assert codes(validate_section("tsa", config, both, context(root, stored_secrets=stored))) == [
+        "config_invalid"
+    ]
+
+
+# -- tsa: readiness, do-not-break, the credit probe ------------------------------------------------
+
+
+@pytest.fixture
+def ready(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Config, RuleContext]:
+    """A Zamane installation on the test server that has everything production needs."""
+    monkeypatch.setenv("PATH", str(tmp_path / "no-java-here"))
+    programs = tmp_path / "Program Files"
+    java = programs / "Java" / "jre1.8.0_412" / "bin" / "java"
+    java.parent.mkdir(parents=True)
+    java.write_bytes(b"#!/bin/sh\n")
+    client = client_jar()
+    jar = root / "zamane" / "tss-client-console-3.1.33.jar"
+    jar.parent.mkdir()
+    jar.write_bytes(client)
+    (root / "zamane" / "zamane-jar.sha256").write_text(
+        f"{sha256(client)}  {jar.name}\n", encoding="utf-8"
+    )
+    pem = root_certificate()
+    policy = POLICY.model_copy(update={"executable_roots": (str(programs),)})
+    config = with_tsa(
+        root, f'{ZAMANE_TEST}java = ["{java.as_posix()}"]\nzamane_jar = "{jar.as_posix()}"\n'
+    )
+    return config, context(
+        root,
+        policy=policy,
+        anchors=TrustAnchors(root, policy),
+        stored_secrets=frozenset({"kamusm.customer", "kamusm.password"}),
+        installed_roots=frozenset({der_sha256(pem)}),
+    )
+
+
+def test_production_needs_credentials_a_client_java_and_a_root(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path / "no-java-here"))
+    config = with_tsa(root, ZAMANE_TEST)
+    check = validate_section("tsa", config, {"server": "production"}, context(root))
+    assert codes(check) == ["tsa_not_ready"]
+    assert check.errors[0].details == {"missing": ["credentials", "zamane_jar", "java", "roots"]}
+    assert check.http_status == 409
+    assert check.edits == ()
+
+
+def test_a_ready_installation_switches_to_production(
+    ready: tuple[Config, RuleContext], root: Path
+) -> None:
+    config, ready_context = ready
+    check = validate_section("tsa", config, {"server": "production"}, ready_context)
+    assert check.ok, check.errors
+    assert check.ops == (
+        {"op": "set", "path": "tsa.url", "expect": "http://tzd.kamusm.gov.tr",
+         "value": "http://zd.kamusm.gov.tr"},
+    )  # fmt: skip
+    assert warnings(check) == ["legal_roots_empty", "production_not_tested"]
+    assert check.probes == (rules.Probe("credit", None),)
+    assert check.reauth
+    tested = replace(ready_context, production_tested=True)
+    assert warnings(validate_section("tsa", config, {"server": "production"}, tested)) == [
+        "legal_roots_empty"
+    ]
+
+
+def test_production_back_to_test_needs_a_confirmation(root: Path) -> None:
+    config = with_tsa(root, ZAMANE_PRODUCTION)
+    unconfirmed = validate_section("tsa", config, {"server": "test"}, context(root))
+    assert codes(unconfirmed) == ["tsa_confirm_required"]
+    check = validate_section("tsa", config, {"server": "test", "confirm": True}, context(root))
+    assert check.ok
+    assert warnings(check) == ["production_stamps_stop"]
+    assert check.alert == "high"
+
+
+def preflight_of(config: Config, stored: frozenset[str]) -> list[str]:
+    """A stand-in for ``seal_preflight``: credentials are all it looks at."""
+    if config.tsa.provider != "zamane":
+        return []
+    return [] if {"kamusm.customer", "kamusm.password"} <= stored else ["credentials"]
+
+
+def test_a_change_that_would_stop_a_working_sealer_is_refused(root: Path) -> None:
+    config = with_tsa(root, ZAMANE_TEST)
+    stored = frozenset({"kamusm.customer", "kamusm.password"})
+    working = context(root, stored_secrets=stored, preflight=preflight_of)
+    check = validate_section("tsa", config, {"clear_credentials": True}, working)
+    assert codes(check) == ["tsa_would_break"]
+    assert check.errors[0].details == {"causes": ["credentials"]}
+    assert check.http_status == 409
+    assert check.secret_changes == {}
+    # A sealer that does not work now cannot be broken: the change is allowed.
+    broken = context(root, stored_secrets=frozenset({"kamusm.customer"}), preflight=preflight_of)
+    assert validate_section("tsa", config, {"customer": "4812"}, broken).ok
+
+
+def test_new_credentials_are_probed_with_the_credit_query(
+    ready: tuple[Config, RuleContext],
+) -> None:
+    config, ready_context = ready
+    check = validate_section("tsa", config, {"password": "yeni-parola"}, ready_context)
+    assert check.ok
+    assert check.probes == (rules.Probe("credit", None),)
+    untrusted = replace(
+        ready_context, anchors=TrustAnchors(ready_context.anchors.root, POLICY)
+    )  # Java is no longer in a trusted folder
+    skipped = validate_section("tsa", config, {"password": "yeni-parola"}, untrusted)
+    assert skipped.ok
+    assert skipped.probes == ()
+    assert warnings(skipped) == ["probe_skipped"]
+
+
+# -- tsa: roots and legal fingerprints -------------------------------------------------------------
+
+
+def test_a_root_is_installed_and_listed_as_legal(
+    root: Path, config: Config, tmp_path: Path
+) -> None:
+    pem = root_certificate()
+    info = uploaded(tmp_path, "kamusm_root", pem)
+    fingerprint = der_sha256(pem)
+    assert info.root is not None
+    assert info.root.certificate is not None
+    assert info.root.certificate.sha256 == fingerprint
+    body = {"root": {"upload_id": info.id, "legal": True, "confirmed": True}}
+    check = validate_section("tsa", config, body, context(root, uploads={info.id: info}))
+    assert check.ok, check.errors
+    assert check.ops == (
+        {"op": "root_add", "upload": info.id, "sha256": info.sha256, "size": info.size,
+         "legal": True},
+    )  # fmt: skip
+    assert [item.target for item in check.installs] == [
+        root / "kamusm-roots" / f"{fingerprint}.pem"
+    ]
+    assert check.installs[0].data.startswith(b"-----BEGIN CERTIFICATE-----")
+    assert check.candidate is not None
+    assert check.candidate.tsa.legal_root_fingerprints == (fingerprint,)
+    assert check.candidate.tsa.roots_dir == root / "kamusm-roots"
+    assert check.changes[f"tsa.roots.{fingerprint}"] == {"old": None, "new": "installed"}
+    assert check.reauth
+    assert check.alert == "high"
+
+
+def test_root_refusals(root: Path, config: Config, tmp_path: Path) -> None:
+    pem = root_certificate()
+    info = uploaded(tmp_path, "kamusm_root", pem)
+    uploads = {info.id: info}
+    again = context(root, uploads=uploads, installed_roots=frozenset({der_sha256(pem)}))
+    body: dict[str, Any] = {"root": {"upload_id": info.id}}
+    assert codes(validate_section("tsa", config, body, again)) == ["root_exists"]
+    unconfirmed = {"root": {"upload_id": info.id, "legal": True}}
+    assert codes(validate_section("tsa", config, unconfirmed, context(root, uploads=uploads))) == [
+        "legal_root_confirm_required"
+    ]
+    assert codes(validate_section("tsa", config, {"root": {"upload_id": "x"}}, context(root))) == [
+        "upload_not_found"
+    ]
+    for bad in (
+        root_certificate(ca=False),
+        root_certificate(self_signed=False),
+        root_certificate(curve=ec.SECP521R1()),
+        pem + root_certificate(),
+        b"not a certificate",
+    ):
+        item = uploaded(tmp_path, "kamusm_root", bad)
+        refused = validate_section(
+            "tsa", config, {"root": {"upload_id": item.id}}, context(root, uploads={item.id: item})
+        )
+        assert [(p.code, p.field) for p in refused.errors] == [
+            ("root_certificate_invalid", "tsa.roots_dir")
+        ]
+
+
+def test_an_expired_root_is_accepted_with_a_warning(
+    root: Path, config: Config, tmp_path: Path
+) -> None:
+    item = uploaded(tmp_path, "kamusm_root", root_certificate(expired=True))
+    check = validate_section(
+        "tsa", config, {"root": {"upload_id": item.id}}, context(root, uploads={item.id: item})
+    )
+    assert check.ok
+    assert warnings(check) == ["root_expired"]
+
+
+def test_roots_are_added_only_to_the_installation_folder(root: Path, tmp_path: Path) -> None:
+    config = with_tsa(root, f'[tsa]\nprovider = "mock"\nroots_dir = "{tmp_path.as_posix()}/x"\n')
+    item = uploaded(tmp_path, "kamusm_root", root_certificate())
+    check = validate_section(
+        "tsa", config, {"root": {"upload_id": item.id}}, context(root, uploads={item.id: item})
+    )
+    assert [(p.code, p.field) for p in check.errors] == [("config_key_locked", "tsa.roots_dir")]
+
+
+def test_a_legal_fingerprint_names_an_installed_root(root: Path, config: Config) -> None:
+    fingerprint = "a" * 64
+    body = {"legal_root": {"sha256": fingerprint.upper(), "confirmed": True}}
+    assert codes(validate_section("tsa", config, body, context(root))) == ["root_not_installed"]
+    installed = context(root, installed_roots=frozenset({fingerprint}))
+    check = validate_section("tsa", config, body, installed)
+    assert check.ok
+    assert check.ops == ({"op": "legal_root_add", "sha256": fingerprint},)
+    assert check.candidate is not None
+    assert check.candidate.tsa.legal_root_fingerprints == (fingerprint,)
+    assert codes(validate_section("tsa", config, {"legal_root": {"sha256": "x"}}, installed)) == [
+        "root_not_installed"
+    ]
+    unconfirmed = {"legal_root": {"sha256": fingerprint}}
+    assert codes(validate_section("tsa", config, unconfirmed, installed)) == [
+        "legal_root_confirm_required"
+    ]
+
+
+# -- tsa: the Zamane client ------------------------------------------------------------------------
+
+
+def test_an_unknown_client_needs_its_published_sha256(
+    root: Path, config: Config, tmp_path: Path
+) -> None:
+    jar = client_jar()
+    item = uploaded(tmp_path, "zamane_client", jar)
+    uploads = context(root, uploads={item.id: item})
+    assert codes(validate_section("tsa", config, {"zamane": {"upload_id": item.id}}, uploads)) == [
+        "zamane_sha256_required"
+    ]
+    wrong = {"zamane": {"upload_id": item.id, "expected_sha256": "0" * 64}}
+    assert codes(validate_section("tsa", config, wrong, uploads)) == ["zamane_sha256_mismatch"]
+    body = {"zamane": {"upload_id": item.id, "expected_sha256": f"  {sha256(jar).upper()} "}}
+    check = validate_section("tsa", config, body, uploads)
+    assert check.ok, check.errors
+    assert check.ops == (
+        {"op": "zamane_stage", "upload": item.id, "sha256": sha256(jar), "size": len(jar),
+         "jar_sha256": sha256(jar), "release": None},
+    )  # fmt: skip
+    assert check.jar_hold == sha256(jar)
+    assert check.stage_jar == (item.id, sha256(jar))
+    assert warnings(check) == ["unknown_jar_held"]
+    assert "jar.promotion" in check.effects
+    approved = (root / "zamane" / "approved" / f"{sha256(jar)}.jar").as_posix()
+    assert check.changes["tsa.zamane_jar"] == {"old": None, "new": approved}
+    assert check.candidate is not None
+    assert check.candidate.tsa.zamane_jar is None  # set once the client is approved
+    assert check.reauth
+    assert check.alert == "high"
+
+
+def test_a_known_release_in_a_distribution_zip(
+    root: Path, config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jar = client_jar(b"known")
+    archive = distribution(jar)
+    monkeypatch.setattr(zamane_releases, "KNOWN_RELEASES", {sha256(jar): ZamaneRelease("3.1.33")})
+    item = uploaded(tmp_path, "zamane_client", archive)
+    assert item.zamane is not None
+    assert (item.zamane.kind, item.zamane.jar_name) == ("zip", "tss-client-console-3.1.33.jar")
+    check = validate_section(
+        "tsa", config, {"zamane": {"upload_id": item.id}}, context(root, uploads={item.id: item})
+    )
+    assert check.ok
+    assert check.ops[0]["release"] == "3.1.33"
+    assert check.ops[0]["sha256"] == sha256(archive)
+    assert check.ops[0]["jar_sha256"] == sha256(jar)
+    assert check.jar_hold == sha256(jar)  # promoted by ApplySystem, then applied
+    assert warnings(check) == []
+    # Unknown, the SHA-256 a user copies may be the archive's as well as the jar's.
+    monkeypatch.setattr(zamane_releases, "KNOWN_RELEASES", {})
+    unknown = uploaded(tmp_path, "zamane_client", archive)
+    for expected in (sha256(archive), sha256(jar)):
+        body = {"zamane": {"upload_id": unknown.id, "expected_sha256": expected}}
+        check = validate_section("tsa", config, body, context(root, uploads={unknown.id: unknown}))
+        assert check.ok
+        assert warnings(check) == ["unknown_jar_held"]
+
+
+def test_an_approved_client_is_applied_at_once(root: Path, config: Config, tmp_path: Path) -> None:
+    jar = client_jar(b"approved")
+    item = uploaded(tmp_path, "zamane_client", jar)
+    approved = context(root, uploads={item.id: item}, approved_jars=frozenset({sha256(jar)}))
+    body = {"zamane": {"upload_id": item.id, "expected_sha256": sha256(jar)}}
+    check = validate_section("tsa", config, body, approved)
+    assert check.ok
+    assert check.jar_hold is None
+    assert check.candidate is not None
+    assert check.candidate.tsa.zamane_jar == root / "zamane" / "approved" / f"{sha256(jar)}.jar"
+
+
+def test_a_file_that_is_not_a_client_is_refused(root: Path, config: Config, tmp_path: Path) -> None:
+    for data in (b"not a zip", distribution(b"no manifest"), distribution(client_jar(), "x.jar")):
+        item = uploaded(tmp_path, "zamane_client", data)
+        check = validate_section(
+            "tsa",
+            config,
+            {"zamane": {"upload_id": item.id}},
+            context(root, uploads={item.id: item}),
+        )
+        assert [(p.code, p.field) for p in check.errors] == [
+            ("zamane_archive_invalid", "tsa.zamane_jar")
+        ]
+
+
+def test_the_agent_refuses_a_client_op_that_does_not_match_its_upload(
+    root: Path, config: Config, tmp_path: Path
+) -> None:
+    jar = client_jar()
+    item = uploaded(tmp_path, "zamane_client", jar)
+    op = {"op": "zamane_stage", "upload": item.id, "sha256": sha256(jar), "size": len(jar),
+          "jar_sha256": "f" * 64, "release": None}  # fmt: skip
+    check = check_request(signed("tsa", [op]), config, context(root, uploads={item.id: item}))
+    assert codes(check) == ["payload_mismatch"]
+    resized = {**op, "jar_sha256": sha256(jar), "size": len(jar) + 1}
+    check = check_request(signed("tsa", [resized]), config, context(root, uploads={item.id: item}))
+    assert codes(check) == ["payload_mismatch"]
+
+
+# -- sources ---------------------------------------------------------------------------------------
+
+
+SOURCE = {"name": "fw-01", "type": "fortigate", "address": "172.20.10.22"}
+
+
+def test_a_source_is_added(root: Path, config: Config) -> None:
+    check = validate_section("sources", config, {"source": SOURCE}, context(root))
+    assert check.ok, check.errors
+    added = {**SOURCE, "heartbeat_minutes": 15, "expected": True, "transport": "any",
+             "enabled": True}  # fmt: skip
+    assert check.ops == ({"op": "source_add", "source": added},)
+    assert check.changes == {"sources.fw-01": {"old": None, "new": added}}
+    assert set(check.effects) == {
+        "reload.collector",
+        "reload.ingest",
+        "reload.api",
+        "system.firewall",
+    }
+    assert check.system_sync
+    assert not check.reauth
+    assert check.candidate is not None
+    assert [s.name for s in check.candidate.sources] == ["core-r1", "aps", "fw-01"]
+
+
+@pytest.mark.parametrize(
+    ("address", "code"),
+    [
+        ("127.0.0.1", "source_reserved_address"),
+        ("224.0.0.5", "source_reserved_address"),
+        ("169.254.10.1", "source_reserved_address"),
+        ("0.0.0.0", "source_reserved_address"),  # noqa: S104
+        ("255.255.255.255", "source_reserved_address"),
+        ("240.0.0.1", "source_reserved_address"),
+        ("172.20.10.5", "source_own_address"),
+        ("172.20.10.5/32", "source_own_address"),
+        ("8.8.8.8", "source_network_not_allowed"),
+        ("100.64.0.1", "source_network_not_allowed"),
+        ("172.16.0.0/15", "source_prefix_too_short"),
+        ("10.0.0.0/8", "source_prefix_too_short"),
+        ("172.20.10.1", "source_address_taken"),
+        ("172.20.10.1/32", "source_address_taken"),
+        ("172.20.20.0/24", "source_address_taken"),
+        ("172.20.20.128/25", "source_overlap"),
+        ("172.20.0.0/16", "source_overlap"),
+        ("fd00::1", "source_ipv6_unsupported"),
+        ("2001:db8::/64", "source_ipv6_unsupported"),
+        ("172.20.10", "source_invalid"),
+    ],
+)
+def test_source_addresses_the_browser_may_not_add(
+    root: Path, config: Config, address: str, code: str
+) -> None:
+    check = validate_section("sources", config, {"source": {**SOURCE, "address": address}},
+                             context(root))  # fmt: skip
+    assert [(p.code, p.field) for p in check.errors] == [(code, "sources.fw-01.address")]
+    assert check.edits == ()
+
+
+@pytest.mark.parametrize("address", ["172.21.0.0/16", "172.20.20.9", "192.168.1.0/24", "10.1.2.3"])
+def test_source_addresses_the_browser_may_add(root: Path, config: Config, address: str) -> None:
+    check = validate_section(
+        "sources", config, {"source": {**SOURCE, "address": address}}, context(root)
+    )
+    assert check.ok, check.errors
+
+
+def test_the_policy_bounds_the_source_networks_and_their_number(root: Path, config: Config) -> None:
+    narrow = POLICY.model_copy(update={"source_networks": ("172.20.10.0/24",), "min_prefix_v4": 24})
+    outside = {"source": {**SOURCE, "address": "172.20.30.1"}}
+    assert codes(validate_section("sources", config, outside, context(root, policy=narrow))) == [
+        "source_network_not_allowed"
+    ]
+    full = POLICY.model_copy(update={"max_sources": 2})
+    assert codes(
+        validate_section("sources", config, {"source": SOURCE}, context(root, policy=full))
+    ) == ["source_limit"]
+
+
+@pytest.mark.parametrize(
+    ("body", "code", "field"),
+    [
+        ({"source": {**SOURCE, "name": "aps"}}, "source_name_taken", "sources.aps.name"),
+        ({"source": {**SOURCE, "name": "unknown-x"}}, "source_invalid", "sources.unknown-x.name"),
+        ({"source": {**SOURCE, "name": "Büyük"}}, "source_invalid", "sources"),
+        ({"source": {**SOURCE, "type": "cisco"}}, "source_invalid", "sources.fw-01.type"),
+        ({"source": {**SOURCE, "heartbeat_minutes": 0}}, "source_invalid",
+         "sources.fw-01.heartbeat_minutes"),
+        ({"source": {**SOURCE, "transport": "quic"}}, "source_invalid", "sources.fw-01.transport"),
+        ({"source": "fw-01"}, "source_invalid", "sources"),
+        ({"name": "nope", "source": SOURCE}, "source_not_found", "sources"),
+        ({"name": "core-r1", "source": {**SOURCE, "name": "core-r2"}},
+         "source_rename_not_allowed", "sources.core-r1.name"),
+        ({"name": "core-r1", "remove": True, "confirm": "core"}, "source_confirm_mismatch",
+         "sources.core-r1"),
+    ],
+)  # fmt: skip
+def test_source_refusals(
+    root: Path, config: Config, body: Mapping[str, Any], code: str, field: str
+) -> None:
+    check = validate_section("sources", config, body, context(root))
+    assert [(p.code, p.field) for p in check.errors] == [(code, field)]
+
+
+def test_a_source_is_edited_in_place(root: Path, config: Config) -> None:
+    edited = {"type": "mikrotik", "address": "172.20.10.1", "heartbeat_minutes": 30}
+    check = validate_section("sources", config, {"name": "core-r1", "source": edited},
+                             context(root))  # fmt: skip
+    assert check.ok, check.errors
+    assert check.ops[0]["op"] == "source_update"
+    expect = check.ops[0]["expect"]
+    assert isinstance(expect, dict)
+    assert expect["heartbeat_minutes"] == 15
+    assert not check.reauth
+    assert check.candidate is not None
+    assert check.candidate.sources[0].heartbeat_minutes == 30
+    same = {"type": "mikrotik", "address": "172.20.10.1"}
+    assert validate_section("sources", config, {"name": "core-r1", "source": same},
+                            context(root)).ops == ()  # fmt: skip
+
+
+def test_disabling_or_removing_a_source_needs_reauthentication(root: Path, config: Config) -> None:
+    off = {"type": "mikrotik", "address": "172.20.10.1", "enabled": False}
+    disabled = validate_section("sources", config, {"name": "core-r1", "source": off},
+                                context(root))  # fmt: skip
+    assert disabled.ok
+    assert disabled.reauth
+    assert disabled.alert == "high"
+    assert warnings(disabled) == ["source_disable_gaps"]  # an expected source
+    removed = validate_section(
+        "sources", config, {"name": "aps", "remove": True, "confirm": "aps"}, context(root)
+    )
+    assert removed.ok
+    assert removed.reauth
+    assert removed.alert == "high"
+    assert warnings(removed) == []  # not expected: no gaps
+    assert removed.changes["sources.aps"]["new"] is None
+    assert removed.candidate is not None
+    assert [s.name for s in removed.candidate.sources] == ["core-r1"]
+
+
+def test_one_source_per_request(root: Path, config: Config) -> None:
+    ops = [
+        {"op": "source_add", "source": SOURCE},
+        {"op": "source_add", "source": {**SOURCE, "name": "fw-02", "address": "172.20.10.23"}},
+    ]
+    assert codes(check_request(signed("sources", ops), config, context(root))) == ["source_invalid"]

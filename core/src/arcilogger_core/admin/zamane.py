@@ -106,9 +106,13 @@ def _read_member(archive: zipfile.ZipFile, member: zipfile.ZipInfo) -> bytes:
 
 
 def _check_jar(data: bytes) -> None:
-    with zipfile.ZipFile(io.BytesIO(data)) as jar:
-        if not _is_jar(jar):
-            raise ValueError(f"the client has no {MANIFEST}")
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as jar:
+            manifest = _is_jar(jar)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        raise ValueError(f"the client is not a jar: {exc}") from exc
+    if not manifest:
+        raise ValueError(f"the client has no {MANIFEST}")
 
 
 def inspect_client(path: Path) -> ZamaneInspection:

@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
+import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from arcilogger_core.admin import __main__ as console
 from arcilogger_core.admin.contract import (
     AgentStatus,
     Event,
+    JarsFile,
     TaskRequest,
     TaskResult,
     new_id,
@@ -20,8 +25,9 @@ from arcilogger_core.admin.contract import (
 )
 from arcilogger_core.admin.envelope import ADMIN_REQUEST, sign_payload
 from arcilogger_core.admin.probe import ProbeResult
-from arcilogger_core.admin.store import read_pending, read_txn, read_waits
+from arcilogger_core.admin.store import Installation, read_pending, read_txn, read_waits
 from arcilogger_core.admin.testing import (
+    DEFAULT_TOML,
     FakeAgent,
     FakeProber,
     FakeTasks,
@@ -31,6 +37,8 @@ from arcilogger_core.admin.testing import (
 from arcilogger_core.alerts import read_alerts
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.timeutil import SITE_TZ, utc_now
+from arcilogger_core.tsa import zamane_releases
+from arcilogger_core.tsa.zamane_releases import ZamaneRelease
 
 SITE = {"op": "set", "path": "site_name", "expect": "Örnek A.Ş.", "value": "Örnek Holding"}
 
@@ -618,3 +626,242 @@ def test_a_request_file_not_named_by_an_id_is_removed(
     stray.write_bytes(b"{}")
     agent.process()
     assert not stray.exists()
+
+
+# -- Kamu SM: credentials and the Zamane client ----------------------------------------------------
+
+
+def client_jar(content: bytes) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+        archive.writestr("ornek/Client.class", content)
+    return buffer.getvalue()
+
+
+def zamane_installation(tmp_path: Path) -> tuple[Installed, Path, Path]:
+    """A Zamane installation with a trusted Java and an installer-recorded client."""
+    root = tmp_path / "ProgramData"
+    java = tmp_path / "Program Files" / "Java" / "jre1.8.0_412" / "bin" / "java"
+    java.parent.mkdir(parents=True)
+    java.write_bytes(b"#!/bin/sh\n")
+    jar = root / "zamane" / "tss-client-console-3.1.33.jar"
+    jar.parent.mkdir(parents=True)
+    client = client_jar(b"installed")
+    jar.write_bytes(client)
+    (jar.parent / "zamane-jar.sha256").write_text(
+        f"{hashlib.sha256(client).hexdigest()}  {jar.name}\n", encoding="utf-8"
+    )
+    toml = DEFAULT_TOML.replace(
+        'provider = "mock"',
+        f'provider = "zamane"\njava = ["{java.as_posix()}"]\nzamane_jar = "{jar.as_posix()}"',
+    )
+    installed = make_installation(root, toml=toml)
+    installed.write_policy(executable_roots=[str(tmp_path / "Program Files")])
+    return installed, java, jar
+
+
+def credentials(installed: Installed, customer: str, password: str) -> list[dict[str, Any]]:
+    store = installed.store
+    return [
+        {"op": "secret_set", "name": "kamusm.customer", "expect": "unset",
+         "token": store.encrypt_value(customer)},
+        {"op": "secret_set", "name": "kamusm.password", "expect": "unset",
+         "token": store.encrypt_value(password)},
+    ]  # fmt: skip
+
+
+def test_new_credentials_are_probed_with_the_candidate_values(tmp_path: Path) -> None:
+    installed, java, jar = zamane_installation(tmp_path)
+    prober = FakeProber()
+    agent = FakeAgent(installed, prober=prober)
+    request = installed.request(section="tsa", ops=credentials(installed, "4812", "örnek-parola"))
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied", status
+    [call] = prober.calls
+    assert call.kind == "credit"
+    assert call.params["java"] == [str(java)]
+    assert call.params["jar"] == str(jar)
+    assert call.params["url"] == "http://tzd.kamusm.gov.tr"
+    assert call.secrets == {"kamusm.customer": "4812", "kamusm.password": "örnek-parola"}
+    assert installed.store.get("kamusm.password") == "örnek-parola"
+    assert Event.SECRET_CHANGED in [event for event, _, _ in agent.events.events]
+    line = installed.journal()[-1]
+    assert "örnek-parola" not in line.model_dump_json()
+
+
+def test_credentials_the_credit_query_refuses_are_not_stored(tmp_path: Path) -> None:
+    installed, _, _ = zamane_installation(tmp_path)
+    refused = ProbeResult(False, "credit_query_failed", "HATA: parola hatalı örnek-parola")
+    agent = FakeAgent(installed, prober=FakeProber({"credit": refused}))
+    request = installed.request(section="tsa", ops=credentials(installed, "4812", "örnek-parola"))
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert (status.state, status.error.code if status.error else None) == (
+        "probe_failed",
+        "credit_query_failed",
+    )
+    assert installed.store.names() == []
+    assert "örnek-parola" not in (installed.layout.status / f"{request.id}.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def stage_client(installed: Installed, data: bytes, release: str | None = None) -> tuple[Any, str]:
+    upload = installed.upload("zamane_client", data)
+    digest = hashlib.sha256(data).hexdigest()
+    op = {"op": "zamane_stage", **upload, "jar_sha256": digest, "release": release}
+    request = installed.request(section="tsa", ops=[op])
+    installed.submit(request)
+    return request, digest
+
+
+def test_an_unknown_client_waits_for_approve_jar(installed: Installed) -> None:
+    agent = FakeAgent(installed, system=True)
+    request, digest = stage_client(installed, client_jar(b"new release"))
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "pending"
+    assert "unknown_jar_held" in [warning.code for warning in status.warnings]
+    staged = installed.root / "zamane" / "web" / f"{digest}.jar"
+    assert staged.is_file()
+    assert [item.jar_sha256 for item in read_pending(installed.layout)] == [digest]
+    agent.advance(timedelta(days=3))
+    agent.process()  # time alone never makes a client runnable (D0-16)
+    assert installed.status(request.id).state == "pending"  # type: ignore[union-attr]
+    location = Installation.of(installed.config_path)
+    approved = console.approve_jar(location, digest, user="ayse", now=agent.now())
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied", status
+    assert installed.config().tsa.zamane_jar == approved
+
+
+def test_a_known_release_is_promoted_by_applysystem(
+    installed: Installed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = client_jar(b"known release")
+    digest = hashlib.sha256(data).hexdigest()
+    monkeypatch.setattr(zamane_releases, "KNOWN_RELEASES", {digest: ZamaneRelease("3.1.33")})
+    agent = FakeAgent(installed, system=True)
+    request, _ = stage_client(installed, data, "3.1.33")
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied", status
+    jars = parse_document(JarsFile, installed.layout.jars.read_bytes())
+    assert [(j.sha256, j.approved_by) for j in jars.approved] == [(digest, "known")]
+    assert installed.config().tsa.zamane_jar == (
+        installed.root / "zamane" / "approved" / f"{digest}.jar"
+    )
+
+
+def test_cancelling_a_held_client_removes_the_staged_file(installed: Installed) -> None:
+    agent = FakeAgent(installed)
+    request, digest = stage_client(installed, client_jar(b"to cancel"))
+    agent.process()
+    staged = installed.root / "zamane" / "web" / f"{digest}.jar"
+    assert staged.is_file()
+    cancel = installed.request("config.cancel", options={"target": request.id})
+    installed.submit(cancel)
+    agent.process()
+    assert installed.status(request.id).state == "cancelled"  # type: ignore[union-attr]
+    assert not staged.exists()
+    assert read_pending(installed.layout) == []
+
+
+# -- sources: the firewall follows the collector ---------------------------------------------------
+
+
+def add_source(installed: Installed, agent: FakeAgent, name: str, address: str) -> str:
+    source = {"name": name, "type": "fortigate", "address": address}
+    request = installed.request(section="sources", ops=[{"op": "source_add", "source": source}])
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied", status
+    return request.id
+
+
+def collector_reports(installed: Installed, sha256: str) -> None:
+    status = installed.data.collector_status
+    status.parent.mkdir(parents=True, exist_ok=True)
+    block: dict[str, Any] = {
+        "sha256": sha256,
+        "loaded_at": "2026-10-25T10:00:00+03:00",
+        "error": None,
+        "restart_keys": [],
+    }
+    status.write_text(json.dumps({"config": block}), encoding="utf-8")
+
+
+def config_sha256(installed: Installed) -> str:
+    return hashlib.sha256(installed.config_path.read_bytes()).hexdigest()
+
+
+def test_a_new_source_reaches_the_firewall_after_the_collector_loads_it(
+    installed: Installed,
+) -> None:
+    agent = FakeAgent(installed, system=True)
+    system = agent.system
+    assert system is not None
+    add_source(installed, agent, "fw-01", "172.20.10.22")
+    assert list(system.syslog_addresses) == ["172.20.10.22"]
+    collector_reports(installed, config_sha256(installed))
+    agent.process()
+    assert read_waits(installed.layout).syncs == ()
+    before = config_sha256(installed)
+    collector_reports(installed, before)
+    second = add_source(installed, agent, "fw-02", "172.20.10.23")
+    assert list(system.syslog_addresses) == ["172.20.10.22"]  # the collector has the old file
+    assert [wait.request for wait in read_waits(installed.layout).syncs] == [second]
+    collector_reports(installed, config_sha256(installed))
+    agent.process()
+    assert read_waits(installed.layout).syncs == ()
+    assert list(system.syslog_addresses) == ["172.20.10.22", "172.20.10.23"]
+
+
+def test_a_silent_collector_ends_the_wait_after_ten_minutes(installed: Installed) -> None:
+    agent = FakeAgent(installed, now=utc_now())
+    request_id = add_source(installed, agent, "fw-01", "172.20.10.22")
+    collector_reports(installed, "0" * 64)  # fresh, but another configuration
+    agent.process()
+    assert [wait.request for wait in read_waits(installed.layout).syncs] == [request_id]
+    agent.advance(timedelta(minutes=11))
+    collector_reports(installed, "0" * 64)
+    stamp = agent.now().timestamp()
+    os.utime(installed.data.collector_status, (stamp, stamp))  # still running, still behind
+    agent.process()
+    assert read_waits(installed.layout).syncs == ()
+
+
+def test_removing_a_source_needs_reauthentication_and_raises_an_alert(
+    installed: Installed,
+) -> None:
+    agent = FakeAgent(installed)
+    add_source(installed, agent, "fw-01", "172.20.10.22")
+    current = installed.config().sources[0].model_dump(mode="json")
+    remove = {"op": "source_remove", "name": "fw-01", "expect": current}
+    stale = installed.request(section="sources", ops=[remove], reauth=False)
+    installed.submit(stale)
+    agent.process()
+    assert installed.status(stale.id).error.code == "reauth_missing"  # type: ignore[union-attr]
+    request = installed.request(section="sources", ops=[remove])
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied"
+    assert "source_disable_gaps" in [warning.code for warning in status.warnings]
+    assert len(installed.config().sources) == 0
+    raised = [a for a in alerts(installed) if a.get("rule") == "R20-config-change"]
+    assert raised
+    assert raised[-1]["severity"] == "high"

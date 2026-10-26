@@ -177,25 +177,35 @@ def run_probe(kind: str, params: Mapping[str, Any], secrets: Mapping[str, str]) 
 
 
 class ChildProber:
-    """Runs each probe in ``python -I -m arcilogger_core.admin.probe`` (contract 2.1)."""
+    """Runs each probe in ``python -I -m arcilogger_core.admin.probe`` (contract 2.1).
+    ``timeouts`` and ``margin``: how long the child may take (tests shorten them)."""
 
-    def __init__(self, python: str = sys.executable) -> None:
+    def __init__(
+        self,
+        python: str = sys.executable,
+        *,
+        timeouts: Mapping[str, float] = TIMEOUTS,
+        margin: float = CHILD_MARGIN,
+    ) -> None:
         self._python = python
+        self._timeouts = timeouts
+        self._margin = margin
 
     def run(
         self, kind: ProbeKind, params: Mapping[str, JsonValue], secrets: Mapping[str, str]
     ) -> ProbeResult:
         request = json.dumps({"kind": kind, "params": params, "secrets": dict(secrets)})
+        limit = self._timeouts[kind] + self._margin
         try:
             completed = subprocess.run(  # noqa: S603 - our own interpreter and module
                 [self._python, "-I", "-m", "arcilogger_core.admin.probe"],
                 input=request.encode("utf-8"),
                 capture_output=True,
-                timeout=TIMEOUTS[kind] + CHILD_MARGIN,
+                timeout=limit,
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            return _failed(kind, f"no answer within {TIMEOUTS[kind] + CHILD_MARGIN:.0f} s", {})
+            return _failed(kind, f"no answer within {limit:.0f} s", {})
         except OSError as exc:
             return _failed(kind, f"the probe could not start: {exc}", secrets)
         output = completed.stdout[:MAX_OUTPUT].decode("utf-8", "replace").strip()

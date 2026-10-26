@@ -920,6 +920,13 @@ def _error_path(location: Sequence[int | str], document: Mapping[str, Any]) -> s
     return path if re.fullmatch(r"[a-z_]+(\.[a-z0-9][a-z0-9_-]*)*", path) else None
 
 
+def _sender_set(address: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network | None:
+    try:
+        return ipaddress.ip_network(address, strict=False)
+    except ValueError:
+        return None
+
+
 def source_address_problem(
     address: str,
     policy: AdminPolicy,
@@ -943,16 +950,15 @@ def source_address_problem(
         or network.network_address == ipaddress.IPv4Address("255.255.255.255")
     ):
         return "source_reserved_address"
-    if host and str(network.network_address) in local_addresses:
+    if network.num_addresses == 1 and str(network.network_address) in local_addresses:
         return "source_own_address"
     allowed = [ipaddress.IPv4Network(item) for item in policy.source_networks]
     if not any(network.subnet_of(item) for item in allowed):
         return "source_network_not_allowed"
     if not host and network.prefixlen < policy.min_prefix_v4:
         return "source_prefix_too_short"
-    canonical = str(network.network_address) if host else str(network)
     for other in others:
-        if other.address == canonical:
+        if _sender_set(other.address) == network:  # 172.20.10.1/32 is 172.20.10.1
             return "source_address_taken"
     if not host:
         for other in others:
