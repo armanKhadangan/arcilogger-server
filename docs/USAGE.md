@@ -282,6 +282,13 @@ are left out. The detail view shows the 200 users with the most time, a category
 a site's 50 host names; a shortened user or site list says how many there are. The exported file
 holds every one.
 
+**Individual records: Arama (Search).** The usage pages are summaries and estimates; the
+individual records (the lines of an IP, a MAC address or a domain, each with its raw line) are on
+the **Arama** page ([SEARCH.md](SEARCH.md)). The department comes from a different place on the
+two pages: in Kullanım from the person's assignment (the VLAN when the person has no department,
+section 2.1), in Arama it is the default department of the client address's VLAN ("Department
+(by VLAN)"; not the person's assignment).
+
 ## 8. Performance
 
 On the development machine (4 shared cores, PostgreSQL 16, no TimescaleDB), one Wednesday of the
