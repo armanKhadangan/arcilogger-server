@@ -162,6 +162,16 @@ TEXTS: Final[Mapping[str, tuple[str, str]]] = {
         "arcilogger.toml cannot be read or is invalid right now (a change made by hand on the "
         "server?); nothing can be changed from the browser until the file is put right.",
     ),
+    "admin_file_unreadable": (
+        "API hizmeti (NT SERVICE\\ArciApi) bu dosyayı ya da klasörü okuyamıyor (izin yok); ona "
+        "bağlı bilgiler bu sayfada eksik görünür. Kurulumun kendi klasörlerinin izinlerini "
+        "kurulumu onarım olarak yeniden çalıştırarak geri getirin (Install-Arcilogger.ps1); elle "
+        "seçilmiş bir klasör için bu hizmete okuma izni verin.",
+        "The API service (NT SERVICE\\ArciApi) cannot read this file or folder (no right on it); "
+        "what depends on it is missing from this page. Run the installer again as a repair to "
+        "restore the rights of the installation's own folders (Install-Arcilogger.ps1); give "
+        "this service read access to a folder chosen by hand.",
+    ),
     "retention_confirm_mismatch": (
         "Onaylamak için önizlemedeki silinecek gün sayısını aynen yazın.",
         "To confirm, type exactly the number of days to be deleted shown in the preview.",
@@ -546,11 +556,18 @@ class Channel:
 
     Every file comes from the folder of the API's fixed configuration path
     (``AppState.config_path``), never from a key of the configuration (contract Day 0 note D0-2).
-    Without that path (a configuration given in memory) browser administration is off."""
+    Without that path (a configuration given in memory) browser administration is off.
+
+    It reads only what NT SERVICE\\ArciApi may read on Windows (contract 2.2): never
+    ``install\\`` (whether ARCILOGGER manages the firewall comes from ApplySystem's report) nor
+    the agent's own folders. A file that exists but cannot be read is never a server error: it is
+    logged and listed in :attr:`unreadable` (``GET /admin/config`` shows it as a problem)."""
 
     state: AppState
     config: Config
     now: datetime = field(default_factory=lambda: to_site(utc_now()))
+    #: The files and folders this request found but could not read (Windows rights).
+    unreadable: list[str] = field(default_factory=list)
 
     # -- the folders ---------------------------------------------------------------------------
 
@@ -572,6 +589,17 @@ class Channel:
             raise admin_error("admin_disabled")
         return self.installation
 
+    def note_unreadable(self, exc: OSError, path: Path | str | None = None) -> None:
+        """The error's file (else ``path``) exists but could not be read, e.g. "access denied"
+        for NT SERVICE\\ArciApi on Windows: logged, and listed in :attr:`unreadable`. A missing
+        file is not unreadable (every caller copes with its absence)."""
+        if isinstance(exc, FileNotFoundError):
+            return
+        name = str(exc.filename or path or "?")
+        if name not in self.unreadable:
+            log.warning("cannot read %s: %s", name, _describe(exc))
+            self.unreadable.append(name)
+
     # -- what is on disk -----------------------------------------------------------------------
 
     @cached_property
@@ -588,7 +616,10 @@ class Channel:
             return None
         try:
             return parse_document(AgentStatus, self.layout.agent_status.read_bytes())
-        except (OSError, DocumentError):
+        except OSError as exc:
+            self.note_unreadable(exc, self.layout.agent_status)
+            return None
+        except DocumentError:
             return None
 
     @property
@@ -606,7 +637,10 @@ class Channel:
             return None
         try:
             return parse_document(SystemStatus, self.layout.system_status.read_bytes())
-        except (OSError, DocumentError):
+        except OSError as exc:
+            self.note_unreadable(exc, self.layout.system_status)
+            return None
+        except DocumentError:
             return None
 
     @cached_property
@@ -615,7 +649,10 @@ class Channel:
             return frozenset()
         try:
             return frozenset(self.installation.secret_store().names())
-        except (OSError, ValueError, SecretStoreError):
+        except OSError as exc:
+            self.note_unreadable(exc, self.installation.secrets)
+            return frozenset()
+        except (ValueError, SecretStoreError):
             return frozenset()
 
     @cached_property
@@ -652,12 +689,17 @@ class Channel:
         return self._installed().anchors()
 
     def roots(self, config: Config | None = None) -> list[Any]:
-        """The roots in ``tsa.roots_dir`` (else the installation's ``kamusm-roots``)."""
+        """The roots in ``tsa.roots_dir`` (else the installation's ``kamusm-roots``); none
+        when the folder cannot be read (:meth:`note_unreadable`)."""
         config = config or self.files.config
         folder = config.tsa.roots_dir
         if folder is None and self.installation is not None:
             folder = self.installation.roots_dir
-        return installed_roots(folder)
+        try:
+            return installed_roots(folder)
+        except OSError as exc:  # Path.is_dir: "access denied" is raised, not False
+            self.note_unreadable(exc, folder)
+            return []
 
     def approved_jars(self) -> frozenset[str]:
         if self.layout is None:
@@ -669,15 +711,25 @@ class Channel:
         return frozenset(entry.sha256 for entry in jars.approved)
 
     @property
-    def firewall_managed(self) -> bool:
-        return self.installation is not None and self.installation.firewall_state.is_file()
+    def firewall_managed(self) -> bool | None:
+        """Whether ApplySystem keeps the Windows firewall's syslog rules: as it last reported it
+        (``admin\\system\\status.json``) while browser administration is on, None before its
+        first report. With administration off (``policy.json`` ``enabled = false``, missing or
+        invalid) ApplySystem changes nothing and never reports (``Sync-ArciSystem.ps1`` step 1),
+        so False, whatever a report from before says. The installer's
+        ``install\\firewall-state.json`` is read by SYSTEM and the agent only: the API has no
+        right on ``install\\`` (contract 2.2), where opening it fails with "access denied"."""
+        if not self.policy.enabled:
+            return False
+        system = self.system
+        return system.firewall.managed if system is not None else None
 
     @property
     def strict_outbound(self) -> bool:
-        if self.installation is None:
-            return False
-        state = _read_json(self.installation.firewall_state)
-        return state is not None and state.get("strict_outbound") is True
+        """Strict outbound mode, as ApplySystem last reported it (off before its first report;
+        the agent checks every change again with the installer's own record)."""
+        system = self.system
+        return system is not None and system.firewall.strict_outbound
 
     def service(self, name: str) -> ServiceView:
         """A service's configuration as its status file reports it (the API: its own)."""

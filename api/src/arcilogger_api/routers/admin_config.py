@@ -225,7 +225,8 @@ class SourceOut(BaseModel):
     transport: Literal["any", "udp", "tcp"]
     enabled: bool
     #: The syslog rule: ``open`` (lets it in), ``closed``, ``pending`` (ApplySystem has not
-    #: caught up yet), ``not_managed`` (the installation does not manage the firewall).
+    #: caught up yet), ``not_managed`` (ApplySystem keeps no firewall rule: ``-SkipFirewall``,
+    #: or browser administration off).
     firewall: Literal["open", "closed", "pending", "not_managed"]
     last_seen: datetime | None
 
@@ -292,7 +293,10 @@ def _secret_meta(channel: Channel) -> dict[str, Any]:
         return {}
     try:
         return dict(parse_document(SecretMetaFile, layout.secret_meta.read_bytes()).secrets)
-    except (OSError, DocumentError):
+    except OSError as exc:
+        channel.note_unreadable(exc, layout.secret_meta)
+        return {}
+    except DocumentError:
         return {}
 
 
@@ -312,12 +316,14 @@ def _secrets(
 
 def _zamane(channel: Channel, config: Config, staged: list[StagedJar]) -> ZamaneClient:
     jar = config.tsa.zamane_jar
-    if jar is None or not jar.is_file():
-        return ZamaneClient(present=False, sha256=None, release=None, trusted=False, staged=staged)
+    absent = ZamaneClient(present=False, sha256=None, release=None, trusted=False, staged=staged)
     try:
+        if jar is None or not jar.is_file():
+            return absent
         digest = file_sha256(jar)
-    except OSError:
-        return ZamaneClient(present=False, sha256=None, release=None, trusted=False, staged=staged)
+    except OSError as exc:  # Path.is_file raises "access denied" (Python 3.12)
+        channel.note_unreadable(exc, jar)
+        return absent
     release = find_release(digest)
     trusted: Literal["installer", "known", "approved", False]
     try:
@@ -372,7 +378,10 @@ def _tsa(
     missing = production_missing(config, anchors=anchors, stored=files.stored, roots=len(roots))
     try:
         causes = seal_preflight(config, anchors=anchors, secrets=channel.store())
-    except (OSError, ValueError, SecretStoreError):
+    except OSError as exc:
+        channel.note_unreadable(exc)
+        causes = ["secret-store"]
+    except (ValueError, SecretStoreError):
         causes = ["secret-store"]
     agent = channel.agent
     return TsaSection(
@@ -399,12 +408,13 @@ def _tsa(
     )
 
 
-def _ca_sha256(config: Config) -> str | None:
+def _ca_sha256(channel: Channel, config: Config) -> str | None:
     if config.smtp.ca_file is None:
         return None
     try:
         return file_sha256(config.smtp.ca_file)
-    except OSError:
+    except OSError as exc:
+        channel.note_unreadable(exc, config.smtp.ca_file)
         return None
 
 
@@ -415,9 +425,14 @@ def _canonical(address: str) -> str:
 
 
 def _sources(channel: Channel, db: Session, config: Config) -> list[SourceOut]:
+    """The configured sources with their syslog rule as ApplySystem last reported it. Before its
+    first report the firewall counts as managed (an installation manages it unless
+    ``-SkipFirewall``, which that report then says): an enabled source is ``pending``. With
+    browser administration off ApplySystem keeps no rule and never reports: ``not_managed``
+    (:attr:`Channel.firewall_managed`)."""
     seen = dict(db.execute(select(Source.name, Source.last_seen)).all())
     system = channel.system
-    managed = channel.firewall_managed and (system is None or system.firewall.managed)
+    managed = channel.firewall_managed is not False
     allowed = set(system.firewall.syslog_addresses) if system is not None else set()
     found = []
     for source in config.sources:
@@ -437,7 +452,10 @@ def _sources(channel: Channel, db: Session, config: Config) -> list[SourceOut]:
     return found
 
 
-def _problems(files: CurrentFiles) -> list[SetupProblem]:
+def _problems(files: CurrentFiles, unreadable: Sequence[str] = ()) -> list[SetupProblem]:
+    """``config.setup_problems`` (its "Türkçe [English]" text split), ``arcilogger.toml`` when
+    the file is not usable, and each file or folder the API found but could not read (its path
+    as the key, ``admin_file_unreadable``)."""
     problems = []
     if files.error is not None:
         message_tr, message_en = texts("config_unreadable")
@@ -445,6 +463,11 @@ def _problems(files: CurrentFiles) -> list[SetupProblem]:
             SetupProblem(
                 level="error", key="arcilogger.toml", message_tr=message_tr, message_en=message_en
             )
+        )
+    for path in unreadable:
+        message_tr, message_en = texts("admin_file_unreadable")
+        problems.append(
+            SetupProblem(level="warning", key=path, message_tr=message_tr, message_en=message_en)
         )
     for problem in setup_problems(files.config):
         match = _BILINGUAL.match(problem.message)
@@ -470,63 +493,65 @@ def restart_required(channel: Channel) -> bool:
 
 @router.get("/config")
 def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminConfig:
-    """The machine configuration (contract 2.11.1, ``AdminConfig``)."""
+    """The machine configuration (contract 2.11.1, ``AdminConfig``). A file the API cannot read
+    is a problem of the answer (``admin_file_unreadable``), never a server error."""
     files = channel.files
     config = files.config
     meta = _secret_meta(channel)
     pending = [row for row in channel.open_rows(db) if row.state == "pending"]
     preview = channel.retention_preview(config)
     policy = channel.policy.policy
+    sections = AdminSections(
+        general=GeneralSection(
+            site_name=config.site_name,
+            clock=ClockSection(
+                ntp_server=config.clock.ntp_server,
+                fallback_server=config.clock.fallback_server,
+                alert_offset_ms=config.clock.alert_offset_ms,
+            ),
+        ),
+        tsa=_tsa(channel, files, meta, _staged(db)),
+        smtp=SmtpSection(
+            enabled=config.smtp.enabled,
+            host=config.smtp.host,
+            port=config.smtp.port,
+            security=config.smtp.security,
+            username=config.smtp.username,
+            from_address=config.smtp.from_address,
+            timeout_seconds=config.smtp.timeout_seconds,
+            ca=SmtpCa(sha256=_ca_sha256(channel, config)),
+            secrets=_secrets(channel, "smtp", files, meta),
+        ),
+        replica=ReplicaSection(
+            enabled=config.replica.enabled,
+            target=config.replica.target_text,
+            user=config.replica.user,
+            secrets=_secrets(channel, "replica", files, meta),
+        ),
+        retention=RetentionSection(
+            enabled=config.retention.enabled,
+            days=config.retention.days,
+            minimum_days=MIN_RETENTION_DAYS,
+            preview=RetentionPreview(
+                cutoff=preview.cutoff,
+                days_to_delete=preview.days_to_delete,
+                oldest=preview.oldest,
+                newest=preview.newest,
+            ),
+        ),
+        backup=BackupSection(
+            enabled=config.backup.enabled,
+            keep_daily=config.backup.keep_daily,
+            keep_weekly=config.backup.keep_weekly,
+            keep_monthly=config.backup.keep_monthly,
+            min_free_gb=config.backup.min_free_gb,
+        ),
+        sources=_sources(channel, db, config),
+    )
     return AdminConfig(
         config_sha256=files.sha256 or "",
         etags={section: rules.etag(section, config, files.stored) for section in rules.SECTIONS},
-        sections=AdminSections(
-            general=GeneralSection(
-                site_name=config.site_name,
-                clock=ClockSection(
-                    ntp_server=config.clock.ntp_server,
-                    fallback_server=config.clock.fallback_server,
-                    alert_offset_ms=config.clock.alert_offset_ms,
-                ),
-            ),
-            tsa=_tsa(channel, files, meta, _staged(db)),
-            smtp=SmtpSection(
-                enabled=config.smtp.enabled,
-                host=config.smtp.host,
-                port=config.smtp.port,
-                security=config.smtp.security,
-                username=config.smtp.username,
-                from_address=config.smtp.from_address,
-                timeout_seconds=config.smtp.timeout_seconds,
-                ca=SmtpCa(sha256=_ca_sha256(config)),
-                secrets=_secrets(channel, "smtp", files, meta),
-            ),
-            replica=ReplicaSection(
-                enabled=config.replica.enabled,
-                target=config.replica.target_text,
-                user=config.replica.user,
-                secrets=_secrets(channel, "replica", files, meta),
-            ),
-            retention=RetentionSection(
-                enabled=config.retention.enabled,
-                days=config.retention.days,
-                minimum_days=MIN_RETENTION_DAYS,
-                preview=RetentionPreview(
-                    cutoff=preview.cutoff,
-                    days_to_delete=preview.days_to_delete,
-                    oldest=preview.oldest,
-                    newest=preview.newest,
-                ),
-            ),
-            backup=BackupSection(
-                enabled=config.backup.enabled,
-                keep_daily=config.backup.keep_daily,
-                keep_weekly=config.backup.keep_weekly,
-                keep_monthly=config.backup.keep_monthly,
-                min_free_gb=config.backup.min_free_gb,
-            ),
-            sources=_sources(channel, db, config),
-        ),
+        sections=sections,
         locked=[LockedPath(path=item.path, reason=item.reason) for item in rules.locked_paths()],
         policy=AdminPolicyOut(
             enabled=policy.enabled,
@@ -541,7 +566,7 @@ def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCo
             PendingChange(request_id=row.id, section=row.section, effective_at=row.effective_at)
             for row in pending
         ],
-        problems=_problems(files),
+        problems=_problems(files, channel.unreadable),
         restart_required=restart_required(channel),
     )
 

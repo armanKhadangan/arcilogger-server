@@ -8,6 +8,7 @@ import io
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography import x509
@@ -194,3 +195,25 @@ def test_roots_present_reads_the_folder(site: Site) -> None:
     assert roots_present(config)
     (site.roots / "bozuk.pem").write_bytes(b"not a certificate")
     assert not roots_present(config)  # the Seal task refuses such a folder too
+
+
+def test_a_roots_folder_that_cannot_be_read_has_no_root(
+    site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows: ``Path.is_dir`` raises "access denied" (Python 3.12) for a folder the account may
+    not look at; the Seal task's own start-up check reports ``roots``, not an OSError (the API
+    used to show such a failure as ``secret-store``)."""
+    site.add_root()
+    site.record_jar()
+    site.store.set(KAMUSM_CUSTOMER, "4812")
+    site.store.set(KAMUSM_PASSWORD, "örnek-parola")
+    real = Path.stat
+
+    def stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == site.roots:
+            raise PermissionError(13, "Access is denied", str(self))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", stat)
+    assert not roots_present(site.zamane())
+    assert site.preflight(site.zamane()) == ["roots"]

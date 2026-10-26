@@ -182,7 +182,7 @@ The values are chosen with installer parameters and remembered by later runs
 | `-SourceNetwork` | `10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16` | a log source's address must lie in one of these networks (at widest a /16) |
 | `-AdminChangeHoldHours` | 0 | the hold of retention and replica changes (0–168 hours) |
 | `-ZamaneHoldHours` | 24 | how long before an unknown Zamane client can be approved (1–168 hours) |
-| `-DisableBrowserAdministration` | off | switches the browser administration off: ArciAdmin refuses every request, ApplySystem does nothing; the 5651 functions (collection, sealing, verification) are not affected at all. **Seal now** and **Query credit** are unavailable then (start the `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler), and after a hand edit of `[[sources]]` run `Set-ArciFirewall.ps1` yourself |
+| `-DisableBrowserAdministration` | off | switches the browser administration off: ArciAdmin refuses every request, ApplySystem does nothing; the 5651 functions (collection, sealing, verification) are not affected at all. **Seal now** and **Query credit** are unavailable then (start the `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler), and after a hand edit of `[[sources]]` run `Set-ArciFirewall.ps1` yourself (the **Sources** table then shows the firewall as **Not managed**) |
 
 The installer compares every enabled log source of the configuration with these networks: when
 one lies outside them it stops before any change and names the `-SourceNetwork` value to give

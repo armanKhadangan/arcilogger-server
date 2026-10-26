@@ -37,7 +37,7 @@ import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -6729,14 +6729,81 @@ def _https_send(
         return error.code, error.read().decode("utf-8", "replace")
 
 
-def _e2e_follow(accepted: str, cafile: Path, cookie: str, timeout: int) -> dict[str, Any]:
+#: The failure text of an end-to-end check, built only when the check fails: the last installer
+#: run and what the server side says then (``_e2e_server_side``).
+Log = Callable[[], str]
+#: The services whose logs a failed end-to-end check prints, and how many of their last lines.
+#: WinSW 2.12 (``roll-by-size``) writes ``<id>.out.log``, ``<id>.err.log`` and
+#: ``<id>.wrapper.log`` into ``{{LOG_DIR}}``, the data root's ``logs`` folder; an unhandled
+#: error of the API (its 500 ``internal_error``) is logged with its traceback in
+#: ``ArciApi.err.log``.
+E2E_SERVICE_LOGS = ("ArciApi", "ArciAdmin", "ArciWorker")
+E2E_LOG_SUFFIXES = (".err.log", ".out.log", ".wrapper.log")
+E2E_LOG_LINES = 200
+#: The newest files of ``admin\status`` (heartbeat, request statuses) a failed check prints.
+E2E_STATUS_FILES = 10
+
+
+def _e2e_tail(path: Path, lines: int = E2E_LOG_LINES) -> str:
+    """The last ``lines`` lines of ``path``; never raises (it builds a failure message)."""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - lines * 1000))
+            data = handle.read()
+    except FileNotFoundError:
+        return "(none)"
+    except OSError as exc:
+        return f"({type(exc).__name__}: {exc})"
+    return "\n".join(data.decode("utf-8", "replace").splitlines()[-lines:])
+
+
+def _e2e_newest(folder: Path, pattern: str, count: int) -> list[Path]:
+    """The ``count`` newest files of ``folder`` (by modification time); never raises."""
+
+    def changed(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    try:
+        found = [path for path in folder.glob(pattern) if path.is_file()]
+    except OSError:
+        return []
+    return sorted(found, key=changed, reverse=True)[:count]
+
+
+def _e2e_server_side(data: Path, program_data: Path) -> str:
+    """What the server side says when an end-to-end check fails, so that the CI log shows its
+    cause: the last lines of the ArciApi, ArciAdmin and ArciWorker service logs, the newest
+    files of ``admin\\status`` (the agent's heartbeat, request statuses, alerts), ApplySystem's
+    status and journal and the newest lines of the agent's journal. Read as the runner's
+    administrator (full control on both folders); a missing file is said so."""
+    admin = program_data / "admin"
+    files = [
+        data / "logs" / f"{name}{suffix}"
+        for name in E2E_SERVICE_LOGS
+        for suffix in E2E_LOG_SUFFIXES
+    ]
+    files += _e2e_newest(admin / "status", "*.json", E2E_STATUS_FILES)
+    files += [admin / "status" / "alerts.jsonl", admin / "system" / "status.json"]
+    files += [admin / "system" / "journal.jsonl"]
+    files += _e2e_newest(admin / "journal", "*.jsonl", 2)
+    parts = ["", "===== server side (service logs, admin\\status, journals) ====="]
+    for path in files:
+        parts.append(f"----- {path} (last {E2E_LOG_LINES} lines) -----\n{_e2e_tail(path)}")
+    return "\n".join(parts) + "\n"
+
+
+def _e2e_follow(accepted: str, cafile: Path, cookie: str, timeout: int, log: Log) -> dict[str, Any]:
     """The request a 202 answered (its ``status_url``) until it ends or ``timeout`` seconds
     passed: the last answer of ``GET /admin/requests/{id}``."""
     status_url = json.loads(accepted)["status_url"]
     deadline = time.monotonic() + timeout
     while True:
         status, body = _https_get(status_url, cafile, cookie)
-        assert status == 200, (status_url, status, body)
+        assert status == 200, (status_url, status, body, log())
         request: dict[str, Any] = json.loads(body)
         if request["terminal"] or time.monotonic() > deadline:
             return request
@@ -6744,20 +6811,20 @@ def _e2e_follow(accepted: str, cafile: Path, cookie: str, timeout: int) -> dict[
 
 
 def _e2e_database_checks(
-    powershell: str, tmp_path: Path, data: Path, program_data: Path, marker: str, last: str
+    powershell: str, tmp_path: Path, data: Path, program_data: Path, marker: str, log: Log
 ) -> str:
     """The database services, the API's rights and the Seal task under their real accounts.
     Returns the Cookie header of the administrator's session."""
     state = _e2e_state(powershell, tmp_path)
     services = {service["name"]: service for service in state["services"]}
     for name in ("ArciIngest", "ArciApi", "ArciWorker"):
-        assert services[name]["state"] == "Running", (name, last)
+        assert services[name]["state"] == "Running", (name, log())
         assert services[name]["account"] == f"NT SERVICE\\{name}", services[name]
     # The installer created the database: UTF8 with the C locale (no Windows locale name).
-    assert _e2e_database_locale() == ("UTF8", "C", "C"), last
+    assert _e2e_database_locale() == ("UTF8", "C", "C"), log()
     cafile = program_data / "caddy-root.crt"
     status, body = _https_get("/api/v1/health", cafile, "")
-    assert status == 200, (status, body)
+    assert status == 200, (status, body, log())
     assert json.loads(body)["status"] == "ok", body
     cookie = _e2e_api_session()
     # Today's raw line, read by NT SERVICE\ArciApi from the spool (the day is not sealed yet).
@@ -6765,12 +6832,12 @@ def _e2e_database_checks(
     today_file = next(f for f in spool.glob("*.log") if marker.encode() in f.read_bytes())
     today = date.fromisoformat(today_file.stem)
     status, body = _https_get(f"/api/v1/raw?source=local&day={today}&line=1", cafile, cookie)
-    assert status == 200, ("raw line of today", status, body)
+    assert status == 200, ("raw line of today", status, body, log())
     assert "arcilogger-e2e-" in body, body
     # The sealing calendar lists the spool for every unsealed day (this month and the last).
     previous_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     for month in (today.strftime("%Y-%m"), previous_month):
-        _e2e_calendar(month, cafile, cookie)
+        _e2e_calendar(month, cafile, cookie, log)
 
     # Yesterday's spool day, sealed by "Şimdi mühürle" (contract 3, Windows CI): its last
     # attempt failed and the next one is hours away, so the Seal task's own 5-minute runs leave
@@ -6799,14 +6866,14 @@ def _e2e_database_checks(
     os.utime(day_file, (quiet.timestamp(), quiet.timestamp()))
     vault_day = data / "vault" / f"{yesterday:%Y}" / f"{yesterday:%m}" / f"{yesterday:%d}"
     sealed = vault_day / "local.log.gz"
-    _e2e_wait_for_agent(cafile, cookie, last)
+    _e2e_wait_for_agent(cafile, cookie, log)
     status, body = _https_send("POST", f"/api/v1/seals/{yesterday}/seal", cafile, cookie)
-    assert status == 202, ("seal now", status, body, last)
+    assert status == 202, ("seal now", status, body, log())
     # The Seal task takes a request at once, or in its next 5-minute run when one was busy.
-    seal_now = _e2e_follow(body, cafile, cookie, timeout=900)
+    seal_now = _e2e_follow(body, cafile, cookie, timeout=900, log=log)
     alerts = data / "state" / "alerts.jsonl"
     detail = alerts.read_text(encoding="utf-8")[-4000:] if alerts.is_file() else "(no alerts)"
-    assert seal_now["state"] == "succeeded", (seal_now, detail)
+    assert seal_now["state"] == "succeeded", (seal_now, detail, log())
     assert seal_now["result"]["status"] == "sealed", seal_now
     script = write_script(tmp_path / "e2e-seal.ps1", _E2E_SEAL_SCRIPT)
     out = tmp_path / "e2e-seal.json"
@@ -6814,7 +6881,7 @@ def _e2e_database_checks(
         powershell, script, "-SealedFile", str(sealed), "-OutputPath", str(out), "-NoStart",
         timeout=900,
     )  # fmt: skip
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, (result.stdout + result.stderr, log())
     report = read_json(out)
     assert report["user_sid"] == "S-1-5-19", report  # LOCAL SERVICE
     assert report["last_result"] == 0, (report, detail)
@@ -6828,17 +6895,17 @@ def _e2e_database_checks(
     assert "S-1-1-0" in report["deny_sids"], "the sealed file carries the Everyone deny entry"
     # The API reads the sealed day from the vault, and its seal state from state\seal.
     status, body = _https_get(f"/api/v1/raw?source=local&day={yesterday}&line=1", cafile, cookie)
-    assert status == 200, ("raw line of the sealed day", status, body)
+    assert status == 200, ("raw line of the sealed day", status, body, log())
     assert "arcilogger-e2e-seal" in body, body
-    cells = _e2e_calendar(yesterday.strftime("%Y-%m"), cafile, cookie)
+    cells = _e2e_calendar(yesterday.strftime("%Y-%m"), cafile, cookie, log)
     assert cells[yesterday.isoformat()]["state"] in {"sealed", "verified", "late"}, cells
     status, body = _https_get(f"/api/v1/seals/{yesterday}", cafile, cookie)
-    assert status == 200, ("sealed day", status, body)
+    assert status == 200, ("sealed day", status, body, log())
     assert json.loads(body)["problems"] == [], body
     return cookie
 
 
-def _e2e_calendar(month: str, cafile: Path, cookie: str) -> dict[str, dict[str, Any]]:
+def _e2e_calendar(month: str, cafile: Path, cookie: str, log: Log) -> dict[str, dict[str, Any]]:
     """The sealing calendar of ``month`` through Caddy, read without a single problem.
 
     The API answers 200 even when NT SERVICE\\ArciApi may not list the spool or read a state
@@ -6846,13 +6913,14 @@ def _e2e_calendar(month: str, cafile: Path, cookie: str) -> dict[str, dict[str, 
     or the check would not notice a missing NTFS right. Returns the days by date.
     """
     status, body = _https_get(f"/api/v1/seals/calendar?month={month}", cafile, cookie)
-    assert status == 200, ("sealing calendar", month, status, body)
+    assert status == 200, ("sealing calendar", month, status, body, log())
     calendar = json.loads(body)
-    assert calendar["problems"] == [], ("sealing calendar", month, calendar["problems"])
+    problems = calendar["problems"]
+    assert problems == [], ("sealing calendar", month, problems, log())
     unreadable = [
         day for day in calendar["days"] if "erişilemiyor" in (day.get("message_tr") or "")
     ]
-    assert not unreadable, ("sealing calendar", month, unreadable)
+    assert not unreadable, ("sealing calendar", month, unreadable, log())
     return {str(day["day"]): day for day in calendar["days"]}
 
 
@@ -6961,7 +7029,7 @@ def _e2e_admin_state(powershell: str, tmp_path: Path, paths: list[Path]) -> dict
 
 
 def _e2e_check_admin_rights(
-    powershell: str, tmp_path: Path, program_data: Path, data: Path, log: str
+    powershell: str, tmp_path: Path, program_data: Path, data: Path, log: Log
 ) -> None:
     """Contract 2.2 on the real NTFS: the API cannot write the configuration, the secrets, the
     Zamane folder or the vault; ArciAdmin writes the configuration and the secret store through
@@ -6980,7 +7048,7 @@ def _e2e_check_admin_rights(
     ]  # fmt: skip
     state = _e2e_admin_state(powershell, tmp_path, paths)
     acl = {Path(path).name: facts for path, facts in state["acl"].items()}
-    assert all(facts is not None for facts in acl.values()), (acl, log)
+    assert all(facts is not None for facts in acl.values()), (acl, log())
     api, agent = service_sid("ArciApi"), service_sid("ArciAdmin")
 
     def writes(name: str, sid: str, *, explicit: bool = False) -> bool:
@@ -6991,31 +7059,31 @@ def _e2e_check_admin_rights(
         )  # fmt: skip
 
     for name in ("arcilogger.toml", "secrets.json", "secret.key", "zamane", "vault"):
-        assert not writes(name, api), (name, acl[name], log)
+        assert not writes(name, api), (name, acl[name], log())
     for name in ("arcilogger.toml", "secrets.json"):
-        assert writes(name, agent, explicit=True), (name, acl[name], log)
-    assert not writes("secret.key", agent), (acl["secret.key"], log)
+        assert writes(name, agent, explicit=True), (name, acl[name], log())
+    assert not writes("secret.key", agent), (acl["secret.key"], log())
     owners = {WELL_KNOWN["system"], WELL_KNOWN["admins"]}
     for name, reader in (("api-ed25519.key", api), ("agent-ed25519.key", agent)):
         sids = {entry["sid"] for entry in acl[name]["entries"] if entry["allow"]}
-        assert sids == owners | {reader}, (name, acl[name], log)
-    assert acl["install"]["protected"] is True, (acl["install"], log)
+        assert sids == owners | {reader}, (name, acl[name], log())
+    assert acl["install"]["protected"] is True, (acl["install"], log())
     worker = service_sid("ArciWorker")
     assert any(
         entry["allow"] and entry["sid"] == worker and entry["rights"] & 0x1
         for entry in acl["policy.json"]["entries"]
-    ), (acl["policy.json"], log)
+    ), (acl["policy.json"], log())
     record = acl["data-root.txt"]
-    assert record["protected"] is True, (record, log)
-    assert record["owner"] in {WELL_KNOWN["system"], WELL_KNOWN["admins"]}, (record, log)
+    assert record["protected"] is True, (record, log())
+    assert record["owner"] in {WELL_KNOWN["system"], WELL_KNOWN["admins"]}, (record, log())
     for sid in (agent, api, worker, WELL_KNOWN["local_service"]):
-        assert not writes("data-root.txt", sid), (sid, record, log)
-    assert state["event_log"] == "Application", (state, log)
+        assert not writes("data-root.txt", sid), (sid, record, log())
+    assert state["event_log"] == "Application", (state, log())
     assert state["principals"] == {
         "Requests": WELL_KNOWN["local_service"],
         "ApplySystem": WELL_KNOWN["system"],
         "Seal": WELL_KNOWN["local_service"],
-    }, (state, log)
+    }, (state, log())
 
 
 #: The organisation's name and the log source the real installation test sets in the browser
@@ -7035,24 +7103,58 @@ E2E_SOURCE = {
 E2E_SOURCE_NETWORKS = "127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
 
-def _e2e_json(path: str, cafile: Path, cookie: str) -> dict[str, Any]:
+def _e2e_json(path: str, cafile: Path, cookie: str, log: Log) -> dict[str, Any]:
     status, body = _https_get(path, cafile, cookie)
-    assert status == 200, (path, status, body)
+    assert status == 200, (path, status, body, log())
     found: dict[str, Any] = json.loads(body)
     return found
 
 
-def _e2e_wait_for_agent(cafile: Path, cookie: str, log: str) -> None:
+def _e2e_config(cafile: Path, cookie: str, log: Log) -> dict[str, Any]:
+    """``GET /admin/config`` through Caddy, read without a file the API could not read.
+
+    The API answers 200 even when NT SERVICE\\ArciApi may not read the roots folder, the Zamane
+    client, the SMTP CA file, the secret names or their meta, the agent's heartbeat or
+    ApplySystem's ``status.json``: each is a warning problem (``admin_file_unreadable``, the path
+    as its key) and what depends on it is left out, a source's firewall column among them. The
+    check looks at the problems, or it would not notice a missing NTFS right."""
+    from arcilogger_api.admin_channel import TEXTS
+
+    document = _e2e_json("/api/v1/admin/config", cafile, cookie, log)
+    message_en = TEXTS["admin_file_unreadable"][1]
+    unreadable = [item for item in document["problems"] if item["message_en"] == message_en]
+    assert not unreadable, ("admin config: NT SERVICE\\ArciApi cannot read", unreadable, log())
+    return document
+
+
+def _e2e_source_open(name: str, cafile: Path, cookie: str, log: Log, timeout: int = 120) -> None:
+    """The settings page shows the source's syslog rule ``open`` within ``timeout`` seconds:
+    ApplySystem's ``admin\\system\\status.json`` lists its sender and NT SERVICE\\ArciApi reads
+    it (``pending`` until then, for ever when the API cannot read the report)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        sources = _e2e_config(cafile, cookie, log)["sections"]["sources"]
+        source = next((source for source in sources if source["name"] == name), None)
+        if source is not None and source["firewall"] == "open":
+            return
+        assert time.monotonic() < deadline, ("source firewall", name, source, log())
+        time.sleep(5)
+
+
+def _e2e_wait_for_agent(cafile: Path, cookie: str, log: Log) -> None:
     """ArciAdmin's heartbeat is fresh (``GET /admin/status``): until then the API answers
     ``admin_agent_unavailable`` (contract 2.16)."""
     deadline = time.monotonic() + 120
-    while (agent := _e2e_json("/api/v1/admin/status", cafile, cookie)["agent"])["state"] != "ok":
-        assert time.monotonic() < deadline, (agent, log)
+    while True:
+        agent = _e2e_json("/api/v1/admin/status", cafile, cookie, log)["agent"]
+        if agent["state"] == "ok":
+            return
+        assert time.monotonic() < deadline, (agent, log())
         time.sleep(5)
 
 
 def _e2e_browser_administration(
-    powershell: str, tmp_path: Path, data: Path, program_data: Path, cookie: str, log: str
+    powershell: str, tmp_path: Path, data: Path, program_data: Path, cookie: str, log: Log
 ) -> None:
     """Contract 3, Windows CI: the browser administration through Caddy and the API, applied
     by ArciAdmin, ApplySystem and the Requests task under their real accounts and rights."""
@@ -7062,11 +7164,11 @@ def _e2e_browser_administration(
 
     def submit(method: str, path: str, body: Any = None) -> str:
         status, text = _https_send(method, path, cafile, cookie, body)
-        assert status == 202, (method, path, status, text, log)
+        assert status == 202, (method, path, status, text, log())
         return text
 
     def etag(section: str) -> str:
-        found: str = _e2e_json("/api/v1/admin/config", cafile, cookie)["etags"][section]
+        found: str = _e2e_config(cafile, cookie, log)["etags"][section]
         return found
 
     # 1. The site name: ArciAdmin replaces arcilogger.toml (ReplaceFileW), the API and the worker
@@ -7076,46 +7178,50 @@ def _e2e_browser_administration(
         "PUT", "/api/v1/admin/config/general",
         {"etag": etag("general"), "site_name": E2E_SITE_NAME},
     )  # fmt: skip
-    done = _e2e_follow(accepted, cafile, cookie, timeout=300)
-    assert done["state"] == "active", (done, log)
+    done = _e2e_follow(accepted, cafile, cookie, timeout=300, log=log)
+    assert done["state"] == "active", (done, log())
     assert tomllib.loads(config.read_text(encoding="utf-8"))["site_name"] == E2E_SITE_NAME
     assert sha256_bytes(config.read_bytes()) != before
-    assert _e2e_json("/api/v1/auth/me", cafile, cookie)["site_name"] == E2E_SITE_NAME
+    assert _e2e_json("/api/v1/auth/me", cafile, cookie, log)["site_name"] == E2E_SITE_NAME
     _e2e_check_admin_rights(powershell, tmp_path, program_data, data, log)
     # NT SERVICE\ArciAdmin writes the Application log: its start and the applied change.
     events = set(_e2e_admin_state(powershell, tmp_path, [])["events"])
-    assert {int(Event.AGENT_STARTED), int(Event.CHANGE_APPLIED)} <= events, (events, log)
+    assert {int(Event.AGENT_STARTED), int(Event.CHANGE_APPLIED)} <= events, (events, log())
 
     # 2. A log source: the collector takes it without a restart (its status reports the new
     #    file), and ApplySystem then adds the sender to both syslog rules, in place, within two
     #    minutes of the request.
     address = str(E2E_SOURCE["address"])
     syslog = _e2e_admin_state(powershell, tmp_path, [])["syslog"]
-    assert all(address not in senders for senders in syslog.values()), (syslog, log)
+    assert all(address not in senders for senders in syslog.values()), (syslog, log())
     started = time.monotonic()
     accepted = submit(
         "POST", "/api/v1/admin/config/sources", {"etag": etag("sources"), "source": E2E_SOURCE}
     )
     while not all(address in senders for senders in syslog.values()):
-        assert time.monotonic() - started < 120, (syslog, log)
+        assert time.monotonic() - started < 120, (syslog, log())
         time.sleep(5)
         syslog = _e2e_admin_state(powershell, tmp_path, [])["syslog"]
-    assert all("127.0.0.1" in senders for senders in syslog.values()), (syslog, log)
+    assert all("127.0.0.1" in senders for senders in syslog.values()), (syslog, log())
     collector = json.loads((data / "state" / "collector-status.json").read_bytes())
     assert collector["config"]["sha256"] == sha256_bytes(config.read_bytes()), collector
-    done = _e2e_follow(accepted, cafile, cookie, timeout=300)
-    assert done["state"] == "active", (done, log)
+    done = _e2e_follow(accepted, cafile, cookie, timeout=300, log=log)
+    assert done["state"] == "active", (done, log())
     steps = {step["step"]: step["state"] for step in done["steps"]}
     assert (steps["reload.collector"], steps["system.firewall"]) == ("done", "done"), steps
+    # The settings page says so too: the API reads the firewall from ApplySystem's report.
+    _e2e_source_open(str(E2E_SOURCE["name"]), cafile, cookie, log)
 
     # 3. "Kontör sorgula": the Requests task (LOCAL SERVICE, Event 4111) asks the mock provider.
-    done = _e2e_follow(submit("POST", "/api/v1/credits/query"), cafile, cookie, timeout=900)
-    assert done["state"] == "succeeded", (done, log)
+    accepted = submit("POST", "/api/v1/credits/query")
+    done = _e2e_follow(accepted, cafile, cookie, timeout=900, log=log)
+    assert done["state"] == "succeeded", (done, log())
     assert done["result"]["credits"] >= 0, done
     state = _e2e_admin_state(powershell, tmp_path, [])
-    assert state["results"]["Requests"] == 0, (state["results"], log)
+    assert state["results"]["Requests"] == 0, (state["results"], log())
     expected = {int(Event.SEAL_REQUESTED), int(Event.TASK_REQUESTED), int(Event.SYSTEM_SYNC_RESULT)}
-    assert expected <= set(state["events"]), (state["events"], log)
+    assert expected <= set(state["events"]), (state["events"], log())
+    _e2e_config(cafile, cookie, log)  # nothing became unreadable for NT SERVICE\ArciApi meanwhile
 
 
 def _e2e_state(powershell: str, tmp_path: Path) -> dict[str, Any]:
@@ -7147,6 +7253,79 @@ def _wait_for_marker(spool: Path, marker: bytes, seconds: int = 60) -> bool:
             return True
         time.sleep(1)
     return False
+
+
+def test_a_failed_end_to_end_check_prints_the_server_side(tmp_path: Path) -> None:
+    """The real installation's 500 of ``GET /admin/config`` came with no server-side cause in
+    the CI log: a failed check now prints the last 200 lines of each service log (the API's
+    traceback is in ``ArciApi.err.log``), the newest files of ``admin\\status`` and the
+    journals, and says which of them are missing."""
+    data, program_data = tmp_path / "data", tmp_path / "ProgramData"
+    logs = data / "logs"
+    logs.mkdir(parents=True)
+    lines = [f"satır {number}" for number in range(250)]
+    traceback = "PermissionError: [WinError 5] Access is denied: 'install\\\\firewall-state.json'"
+    (logs / "ArciApi.err.log").write_text("\n".join([*lines, traceback]) + "\n", "utf-8")
+    (logs / "ArciWorker.wrapper.log").write_bytes(b"\xff not UTF-8\n")
+    status = program_data / "admin" / "status"
+    status.mkdir(parents=True)
+    (status / "agent.json").write_text('{"state": "idle"}', encoding="utf-8")
+    request = status / f"{'a' * 32}.json"
+    request.write_text('{"state": "failed", "error": {"code": "acl_drift"}}', encoding="utf-8")
+    journal = program_data / "admin" / "journal"
+    journal.mkdir()
+    (journal / "2026-10-26.jsonl").write_text('{"state": "applied"}\n', encoding="utf-8")
+
+    text = _e2e_server_side(data, program_data)
+    assert traceback in text
+    assert "satır 51\n" in text  # the last 200 lines of 251
+    assert "satır 50\n" not in text
+    assert f"----- {logs / 'ArciAdmin.err.log'} (last 200 lines) -----\n(none)" in text
+    assert "� not UTF-8" in text
+    for found in ('{"state": "idle"}', '"acl_drift"', '{"state": "applied"}'):
+        assert found in text, found
+    assert f"----- {program_data / 'admin' / 'system' / 'status.json'}" in text
+
+
+def test_the_end_to_end_settings_checks_read_what_the_api_could_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The settings page answers 200 even when NT SERVICE\\ArciApi may not read a file it
+    needs (a warning problem ``admin_file_unreadable``): the Windows job's checks fail on such
+    a problem, and the new source's firewall column must turn ``open``, never stay
+    ``pending``, as when the API cannot read ApplySystem's ``status.json``."""
+    from arcilogger_api.admin_channel import TEXTS
+
+    message_tr, message_en = TEXTS["admin_file_unreadable"]
+    status = r"C:\ProgramData\ARCILOGGER\admin\system\status.json"
+    denied = {"level": "warning", "key": status, "message_tr": message_tr, "message_en": message_en}
+    other = {"level": "warning", "key": "tsa.provider", "message_tr": "Mock", "message_en": "Mock"}
+    answers: list[dict[str, Any]] = []
+
+    def config(firewall: str, *problems: dict[str, str]) -> dict[str, Any]:
+        source = {"name": E2E_SOURCE["name"], "firewall": firewall}
+        return {"etags": {}, "problems": list(problems), "sections": {"sources": [source]}}
+
+    def get(path: str, cafile: Path, cookie: str) -> tuple[int, str]:
+        assert path == "/api/v1/admin/config", path
+        return 200, json.dumps(answers.pop(0))
+
+    def log() -> str:
+        return "server side"
+
+    monkeypatch.setattr(sys.modules[__name__], "_https_get", get)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    name, cafile = str(E2E_SOURCE["name"]), Path("caddy-root.crt")
+    answers[:] = [config("pending", other), config("open", other)]
+    _e2e_source_open(name, cafile, "", log)
+    assert answers == []
+    answers[:] = [config("open", other, denied)]
+    with pytest.raises(AssertionError, match="server side") as failed:
+        _e2e_config(cafile, "", log)
+    assert status.replace("\\", "\\\\") in str(failed.value)
+    answers[:] = [config("pending", other)]
+    with pytest.raises(AssertionError, match="source firewall"):
+        _e2e_source_open(name, cafile, "", log, timeout=0)
 
 
 @pytest.mark.skipif(not E2E_BUNDLE, reason="needs the real bundle the end-to-end job builds")
@@ -7216,7 +7395,10 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         return [w for w in warnings if w.startswith(prefixes) or "[failed to start]" in w]
 
     def last() -> str:
-        return runs[-1] if runs else "(the installer has not run)"
+        """The failure text: the last installer run and what the server side says now (the
+        service logs, admin\\status, the journals: ``_e2e_server_side``)."""
+        installer = runs[-1] if runs else "(the installer has not run)"
+        return installer + _e2e_server_side(data, program_data)
 
     def fingerprint() -> str:
         version = program / "VERSION.json"
@@ -7259,7 +7441,7 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         assert {task["name"] for task in state["tasks"]} >= {
             "Seal", "VerifyDaily", "Replica", "Requests", "ApplySystem",
         }  # fmt: skip
-        _e2e_check_admin_rights(powershell, tmp_path, program_data, data, last())
+        _e2e_check_admin_rights(powershell, tmp_path, program_data, data, last)
         policy = parse_document(AdminPolicy, (program_data / "admin" / "policy.json").read_bytes())
         assert policy.enabled is True, last()
         assert ",".join(policy.source_networks) == E2E_SOURCE_NETWORKS, last()
@@ -7280,8 +7462,8 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         if E2E_DB:
             # With the database every service must be healthy (a version warning is fine).
             assert health_warnings() == [], last()
-            cookie = _e2e_database_checks(powershell, tmp_path, data, program_data, marker, last())
-            _e2e_browser_administration(powershell, tmp_path, data, program_data, cookie, last())
+            cookie = _e2e_database_checks(powershell, tmp_path, data, program_data, marker, last)
+            _e2e_browser_administration(powershell, tmp_path, data, program_data, cookie, last)
 
         # 2. Upgrade to another bundle: the previous version is kept.
         second = _bundle_variant(first, tmp_path / "second", "second")
