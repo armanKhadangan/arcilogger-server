@@ -11,13 +11,17 @@ with their number; a change the installer's policy holds waits as ``pending``.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from arcilogger_api import admin_channel
 from arcilogger_api.testing import LoggedIn
-from arcilogger_core.admin.testing import FakeAgent, Installed
+from arcilogger_core.admin import agent as agent_module
+from arcilogger_core.admin.testing import FakeAgent, Installed, windows_replica_target
+from arcilogger_core.config import Config, parse_config
 
 pytestmark = pytest.mark.usefixtures("installed")
 
@@ -231,6 +235,39 @@ def test_the_replica_share_is_probed_and_a_switch_off_is_held(
     assert held["state"] == "pending", held
     assert installed.config().replica.enabled is True  # nothing changed yet
     assert [item["section"] for item in client.get(CONFIG).json()["pending"]] == ["replica"]
+
+
+def test_the_share_reads_back_as_saved_where_its_root_keeps_a_separator(
+    client: TestClient, admin: LoggedIn, agent: FakeAgent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows keeps a share root's separator in ``str()`` of its path (simulated here for the
+    API and the agent): the page shows the share in the one form it is saved in, and the next
+    change of the section expects it."""
+
+    def as_on_windows(data: bytes, path: Path) -> Config:
+        return windows_replica_target(parse_config(data, path))
+
+    monkeypatch.setattr(admin_channel, "parse_config", as_on_windows)
+    monkeypatch.setattr(agent_module, "parse_config", as_on_windows)
+    body = {
+        "etag": etag(client, "replica"),
+        "enabled": True,
+        "target": "//NAS-01/arcilogger-worm/",
+        "user": "NAS-01\\arcireplica",
+        "password": "Örnek-Paylaşım-Parola-6",
+    }
+    done = settle(client, agent, client.put(f"{CONFIG}/replica", json=body))
+    assert done["state"] == "active", done
+    saved = "\\\\NAS-01\\arcilogger-worm"
+    assert client.get(CONFIG).json()["sections"]["replica"]["target"] == saved
+    unchanged = {"etag": etag(client, "replica"), "target": saved}
+    checked = client.post(f"{CONFIG}/replica/check", json=unchanged)
+    assert checked.status_code == 200, checked.text
+    assert checked.json()["changes"] == {}
+    folder = {"etag": etag(client, "replica"), "target": f"{saved}\\yeni"}  # the same host
+    moved = settle(client, agent, client.put(f"{CONFIG}/replica", json=folder))
+    assert moved["state"] == "active", moved
+    assert client.get(CONFIG).json()["sections"]["replica"]["target"] == f"{saved}\\yeni"
 
 
 def test_retention_shows_and_confirms_the_days_it_deletes(

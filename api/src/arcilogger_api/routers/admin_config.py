@@ -503,7 +503,7 @@ def get_config(db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCo
             ),
             replica=ReplicaSection(
                 enabled=config.replica.enabled,
-                target=str(config.replica.target) if config.replica.target else None,
+                target=config.replica.target_text,
                 user=config.replica.user,
                 secrets=_secrets(channel, "replica", files, meta),
             ),

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from pydantic import ValidationError
 
 from arcilogger_core.config import (
     Config,
+    ReplicaConfig,
     default_config_path,
     load_config,
     parse_config,
+    replica_target_text,
     setup_problems,
 )
 
@@ -56,6 +58,38 @@ def test_retention_below_two_years_is_refused(tmp_path: Path) -> None:
 def test_replica_needs_a_target(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match=r"replica\.target"):
         load_config(_write(tmp_path, MINIMAL + "\n[replica]\nenabled = true\n"))
+
+
+@pytest.mark.parametrize(
+    ("saved", "shown"),
+    [
+        ("\\\\NAS-01\\arcilogger-worm", "\\\\NAS-01\\arcilogger-worm"),
+        ("\\\\NAS-01\\arcilogger-worm\\", "\\\\NAS-01\\arcilogger-worm"),
+        ("//NAS-01/arcilogger-worm", "\\\\NAS-01\\arcilogger-worm"),
+        ("//NAS-01/arcilogger-worm/", "\\\\NAS-01\\arcilogger-worm"),
+        ("\\\\nas.ornek.example\\arci$\\gunluk", "\\\\nas.ornek.example\\arci$\\gunluk"),
+        ("\\\\172.20.10.40\\worm\\a\\b\\", "\\\\172.20.10.40\\worm\\a\\b"),
+    ],
+)
+def test_a_replica_share_reads_back_as_one_text_on_every_platform(saved: str, shown: str) -> None:
+    """On Windows ``str(Path("\\\\NAS-01\\worm"))`` keeps the share root's separator
+    (``\\\\NAS-01\\worm\\``, what ``PureWindowsPath`` gives here), a POSIX path keeps the text as
+    saved: the target the settings page shows and an op expects is the same text either way."""
+    windows = str(PureWindowsPath(saved))  # str(Path(saved)) on Windows
+    assert replica_target_text(saved) == replica_target_text(windows) == shown
+    for parsed in (Path(saved), Path(windows)):
+        replica = ReplicaConfig(enabled=True, target=parsed)
+        assert replica.model_dump(mode="json")["target"] == shown
+        assert replica.target_text == shown
+        assert replica.target == parsed  # the path the Replica task copies to is untouched
+
+
+def test_a_replica_target_that_is_no_share_reads_back_as_its_path(tmp_path: Path) -> None:
+    for target in (tmp_path / "nas", Path("\\\\NAS-01"), Path("\\\\?\\UNC\\NAS-01\\worm")):
+        replica = ReplicaConfig(target=target)
+        assert replica.model_dump(mode="json")["target"] == str(target)
+    assert ReplicaConfig().model_dump(mode="json")["target"] is None
+    assert ReplicaConfig().target_text is None
 
 
 @pytest.mark.parametrize(

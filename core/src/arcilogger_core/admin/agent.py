@@ -1217,7 +1217,7 @@ class Agent:
                     secrets["smtp.password"] = password
             else:
                 params = {
-                    "target": str(candidate.replica.target),
+                    "target": candidate.replica.target_text,
                     "user": candidate.replica.user,
                 }
                 password = secret("replica.password")

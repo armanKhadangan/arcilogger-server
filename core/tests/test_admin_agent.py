@@ -45,9 +45,11 @@ from arcilogger_core.admin.testing import (
     FakeTasks,
     Installed,
     make_installation,
+    windows_replica_target,
 )
 from arcilogger_core.alerts import read_alerts
 from arcilogger_core.canonical import canonical_json
+from arcilogger_core.config import Config, parse_config
 from arcilogger_core.timeutil import SITE_TZ, utc_now
 from arcilogger_core.tsa import zamane_releases
 from arcilogger_core.tsa.zamane_releases import ZamaneRelease
@@ -1320,6 +1322,49 @@ def test_turning_the_replica_off_is_held(installed: Installed) -> None:
     agent.process()
     assert installed.status(off.id).state == "applied"  # type: ignore[union-attr]
     assert not installed.config().replica.enabled
+
+
+def test_a_held_move_of_the_share_expects_the_target_as_saved_on_windows(
+    installed: Installed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent loads the file as Windows does (a share root keeps its separator in ``str()``
+    of its path): the move expects the target the operator saved, is held and then applied —
+    not refused as a ``conflict`` (the canary test on Windows)."""
+
+    def as_on_windows(data: bytes, path: Path) -> Config:
+        return windows_replica_target(parse_config(data, path))
+
+    monkeypatch.setattr(agent_module, "parse_config", as_on_windows)
+    installed.write_policy(hold_hours=1)
+    agent = FakeAgent(installed, now=datetime(2026, 10, 25, 10, 15, tzinfo=SITE_TZ))
+    on = installed.request(
+        section="replica",
+        ops=[
+            {"op": "set", "path": "replica.enabled", "expect": False, "value": True},
+            {"op": "set", "path": "replica.target", "expect": None, "value": "\\\\NAS-01\\worm"},
+        ],
+        now=agent.now(),
+    )
+    installed.submit(on)
+    agent.process()
+    assert installed.status(on.id).state == "applied"  # type: ignore[union-attr]
+    moved = installed.request(
+        section="replica",
+        ops=[
+            {"op": "set", "path": "replica.target", "expect": "\\\\NAS-01\\worm",
+             "value": "\\\\NAS-02\\worm"},
+        ],
+        now=agent.now(),
+    )  # fmt: skip
+    installed.submit(moved)
+    agent.process()
+    status = installed.status(moved.id)
+    assert status is not None
+    assert status.state == "pending", status.error
+    agent.advance(timedelta(hours=1, minutes=1))
+    agent.process()
+    assert installed.status(moved.id).state == "applied"  # type: ignore[union-attr]
+    assert installed.config().replica.target_text == "\\\\NAS-02\\worm"
 
 
 def test_a_share_without_a_user_is_tested_by_the_requests_task(
