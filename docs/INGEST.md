@@ -16,9 +16,9 @@
   ağı başına **kesin** satır sayıları) da satırlarla **aynı işlemde** yazılır: yüklenen her satır
   tam bir kez sayılır. Bu sürüme yükseltmeden önce yüklenmiş dosyaları worker işi
   `search.counts_backfill` gün bitince sayar; o zamana kadar o günlerin istatistikleri doğrudan
-  sayılır. Bu adımın kendi maliyeti tek süreçte bir satırın yükleme süresinin en çok yaklaşık
-  %2,5'idir; hız ölçümleri çalışmadan çalışmaya oynamanın içinde kaldı (aşağıda "Measured
-  throughput").
+  sayılır. Bu adımın kendi maliyeti tek süreçli yüklemenin işlemci süresinin yaklaşık %1,4'üdür;
+  `bench_throughput.py --repeat 3` ile Wave 1'e göre yavaşlama ölçülemedi (medyanlar +%0,2 ve
+  2 worker ile +%1,6; aşağıda "Measured throughput").
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -149,7 +149,8 @@ transaction, from exactly the lines whose rows loaded in it:
   `action` (lower-cased) and the /24 of its client address when that is a private IPv4 address;
   `count_key` is the one definition, also used by `rebuild_stream`, so what ingest counted equals
   a recount of the rows (tested on every path below). The loader groups a batch's lines by what
-  `count_key` reads and makes each key once per group (about 1.9 µs a line instead of 5).
+  `count_key` reads and makes each key once per group (about 1.8 µs a line instead of 5); until
+  the step it keeps the runs of lines `COPY` loaded, not one object per line.
 - A line whose typed row is not loaded — dropped by the row check (`rowcheck.<table>`) or refused
   by `COPY` and salvaged with its `messages` row alone (`copy.<table>`) — counts with `tbl = ''`:
   the search over the typed tables does not find it either. A line without a `messages` row
@@ -276,30 +277,43 @@ were not faster than the single runs below: report the minimum and median of
 | realistic load-generator mix (`tools/loadgen`, 2 days, 431,000–441,000 lines: 35 % DNS, 27 % traffic, 18 % web filter, 17 % application control), workers 0 / 2 / 3 | **3,755–3,809 / 7,191–7,941 / 7,477–8,729 lines/s** |
 | live feed **10,000 lines/s for 30 s**, real parsers, `--workers 2` | **did not keep up**: backlog 52,285 lines (≈ 5.2 s) and growing; caught up 5.7 s after the feed stopped |
 
-**Wave 2: the `counts` step and the `fg_web` index (2026-10-26).** The same VM, but shared with
-the test runs of the other Wave 2 packages (load average 2–9, the machine 30–100 % busy), so each
-tree was measured in turn, round after round (`bench_throughput.py --lines 200000 --batch-rows
-5000`, one run per round, and one load-generator day of 217,875 lines: 18 % web filter lines,
-800 summary keys); min–max (median) lines/s:
+**Wave 2: the `counts` step and the `fg_web` index (2026-10-26).** The gate of the Wave 2
+contract: `bench_throughput.py --repeat 3` before (Wave 1) and after, at most 5 % slower. The same
+VM, `--lines 200000 --batch-rows 5000 --workers 0 2 --repeat 3`, the two trees alternating
+(Wave 1, Wave 2, Wave 2, Wave 1, twice: 12 runs each; load average 1.3–2.8); min–max (median)
+lines/s:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Wave 1 (no `fg_web` index, no `counts` step) | 5,713–6,345 (6,156) | 9,668–12,368 (11,680) |
+| **Wave 2 (the index and the `counts` step)** | **5,657–6,407 (6,171)** | **11,513–12,346 (11,866)** |
+
+The medians differ by +0.2 % and +1.6 %: no slowdown is measurable, the gate holds (ingest
+process CPU, median: 30.98 / 30.99 s in-process, 8.68 / 8.82 s with 2 workers). The step's own
+cost, measured inside such a run: 1.8 µs a line to make the keys (5 µs before the lines were
+grouped by what `count_key` reads) and 0.1 s CPU for the 40 upserts (2–7 keys each), together
+0.45 s of the 31 s an in-process run takes (1.4 %); with 2 workers the service process, at about
+50 % of one core, has that time spare. A first version kept a tuple per loaded line until the
+step: the garbage collector then ran about 300 times more per 200,000 lines (0.3 s), and single
+runs alternating with Wave 1 on a busy machine were 3.5–4.6 % slower in-process; the loader now
+keeps the runs of lines `COPY` loaded.
+
+Earlier rounds, while the test runs of the other Wave 2 packages shared the machine (load average
+2–9, 30–100 % busy): one run per tree and round, and one load-generator day of 217,875 lines
+(18 % web filter lines, 800 summary keys) besides; min–max (median) lines/s:
 
 | Trees compared | `bench_throughput.py` in-process / `--workers 2` | load-generator day in-process / `--workers 2` |
 |---|---|---|
 | Wave 1 (no index, no counts), 3 rounds | 4,445–4,997 (4,993) / 6,416–8,670 (8,162) | 3,953–4,370 (4,348) / 5,226–8,348 (7,662) |
 | with the `fg_web` index, same rounds (6 / 3) | 4,400–5,091 (4,815) / 6,506–9,904 (8,204) | 4,008–4,535 (4,332) / 6,392–8,412 (7,153) |
 | with the index, 4 later rounds | 4,153–5,298 (4,856) / 5,225–7,136 (6,316) | 4,000–4,892 (4,544) / 6,216–7,917 (6,654) |
-| **with the index and the `counts` step**, the same 4 rounds | **4,486–5,614 (4,997) / 4,329–8,673 (7,278)** | **4,090–4,718 (4,372) / 5,777–6,734 (6,142)** |
+| with the index and the first version of the `counts` step, the same 4 rounds | 4,486–5,614 (4,997) / 4,329–8,673 (7,278) | 4,090–4,718 (4,372) / 5,777–6,734 (6,142) |
 
 The index costs nothing measurable (the benchmark has no web filter lines; the load-generator day
-has 18 %). With the `counts` step the medians of `bench_throughput.py` are within the run-to-run
-spread (+3 % in-process, +15 % with 2 workers), so the Wave 2 gate (at most 5 % slower) holds;
-the load-generator day's medians are 4 % / 8 % lower, inside a spread of up to 27 % between two
-runs of one round. The step's own cost, measured alone: 1.9 µs a line to make the keys (5 µs
-before the lines were grouped by what `count_key` reads), and the upsert 3.5 ms per batch of
-5,000 lines (2–7 keys) for the benchmark, 15 ms (37–247 keys) for the load-generator day
-(measured with a commit of its own; in the load transaction there is none): 0.7–3 µs a line,
-together at most about 2.5 % of the ≈ 200 µs an in-process line costs. With 2 workers the service
-process does it in CPU time it has spare (it runs at 30–50 % of one core). Re-measure on site
-with the rest (below).
+has 18 %). The differences of these rounds (−8 % to +15 %) lie inside a spread of up to 27 %
+between two runs of one round. The upsert of the load-generator day, with its 37–247 keys a
+batch, took 15 ms a batch measured alone with a commit of its own (3 µs a line; in the load
+transaction there is no commit of its own). Re-measure on site with the rest (below).
 
 Default `[ingest] workers = 2`: about 1.7× the in-process speed; a third worker adds 10–13 %
 on 4 vCPU but competes with PostgreSQL, the API and the collector on the same cores. **Spec 14
