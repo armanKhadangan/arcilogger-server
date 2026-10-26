@@ -171,6 +171,11 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/admin/config/versions"): None,
     ("GET", f"{V}/admin/diagnostics"): None,
     ("POST", f"{V}/credits/query"): None,
+    # Canlı Akış (contract 2.14): 5651 Temel
+    ("POST", f"{V}/live/streams"): None,
+    ("GET", f"{V}/live/streams/{{stream_id}}"): None,
+    ("DELETE", f"{V}/live/streams/{{stream_id}}"): None,
+    ("GET", f"{V}/live/status"): None,
     ("GET", f"{V}/settings"): None,
     ("PATCH", f"{V}/settings"): None,
     ("POST", f"{V}/settings/{{key}}/reset"): None,
@@ -193,6 +198,7 @@ PLACEHOLDERS = {
     "{day}": "2026-10-12",
     "{user_id}": "1",
     "{request_id}": "0" * 32,
+    "{stream_id}": "ornek-akis",
 }
 #: Called last: they end or change the session the other calls use.
 LAST = [("POST", f"{V}/auth/password"), ("POST", f"{V}/auth/logout")]
@@ -232,7 +238,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 103
+    assert len(ROUTES) - len(gated) == 107
 
 
 def test_the_module_markers_equal_the_table() -> None:

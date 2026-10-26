@@ -34,6 +34,8 @@ EXPECTED_ROUTERS = {
     "/vlans": "devices",
     "/imports": "devices",
     "/sources": "sources",
+    # Canlı Akış, the live tail of the raw spool (contract 2.14).
+    "/live": "live",
     # Kullanım (spec 10, docs/MVP-CONTRACTS.md section 12).
     "/usage": "usage",
     # The "Güvenlik" page and the "Panel" (docs/MVP-CONTRACTS.md section 14).
