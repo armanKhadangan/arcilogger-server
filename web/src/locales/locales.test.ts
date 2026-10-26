@@ -60,16 +60,31 @@ describe('locale files', () => {
   });
 
   it('claim no legal compliance and no copy protection (licensing contract 3.5, 8.3)', () => {
+    // The phrases and the folding of `OVERSTATEMENTS` / `_fold` in tests/test_docs_consistency.py:
+    // lower case with the dotless and dotted i folded and white space collapsed, per text.
+    const fold = (text: string) =>
+      text
+        .toLocaleLowerCase('tr')
+        .replace(/i\u0307/g, 'i')
+        .replace(/ı/g, 'i')
+        .replace(/\s+/g, ' ');
+    const claims = [
+      'yasal olarak uyumlu',
+      'legally compliant',
+      'kopyalanamaz',
+      'kırılamaz',
+      'tamper-proof',
+      'tamper proof',
+    ].map(fold);
     for (const [name, tree] of Object.entries(SHIPPED)) {
-      const text = JSON.stringify(tree).toLocaleLowerCase('tr');
-      for (const claim of [
-        'yasal olarak uyumlu',
-        'legally compliant',
-        'kopyalanamaz',
-        'kırılamaz',
-        'tamper-proof',
-      ])
-        expect(text, `${name}: ${claim}`).not.toContain(claim);
+      for (const key of keys(tree)) {
+        const value = key.split('.').reduce<unknown>((node, part) => (node as Tree)[part], tree);
+        const text = fold(String(value));
+        expect(
+          claims.filter((claim) => text.includes(claim)),
+          `${name}: ${key}`,
+        ).toEqual([]);
+      }
     }
   });
 
