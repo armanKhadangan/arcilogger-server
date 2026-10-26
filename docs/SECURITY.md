@@ -24,8 +24,16 @@
   15 dakika hareketsizlik veya 12 saat sonunda oturum kapanır. TOTP adımından ve parola
   değişikliğinden sonra **yeni oturum anahtarı** verilir; parola değişince diğer oturumlar kapanır.
 - Her değiştirici istek **CSRF** anahtarı ister. Hassas işlemler (kullanıcı yönetimi, isteğe bağlı
-  TOTP kurulumu, kanıt paketi oluşturma ve indirme; ileride kimlik bilgisi ve saklama ayarları)
-  son 5 dakika içinde **parolanın yeniden girilmesini** ister.
+  TOTP kurulumu, kanıt paketi oluşturma ve indirme; Ayarlar sayfalarında Kamu SM, SMTP ve replika
+  ayarları, saat kaynağı, saklama süresi, yedeklemeyi kapatmak, bir log kaynağını kapatmak ya da
+  silmek) son 5 dakika içinde **parolanın yeniden girilmesini** ister.
+- **Tarayıcıdan yönetim** (bölüm 14, [AYARLAR.md](AYARLAR.md)): API yapılandırmayı, gizli depoyu
+  ve sertifika klasörlerini **yazamaz**; imzalı istekleri ayrı bir sanal hesap
+  (`NT SERVICE\ArciAdmin`) yeniden denetleyip uygular. Güvenlik duvarı, Windows Saati ve Zamane
+  istemcisi, istekten veri almayan SYSTEM görevi `\ARCILOGGER\ApplySystem` tarafından
+  değiştirilir. Görevler yalnızca güvenilen yerlerdeki programları çalıştırır; tarayıcı
+  `data_dir` ve `secrets_dir` değerlerini hiçbir zaman değiştiremez. Sınırlar (kaynak ağları,
+  beklemeler, kapatma) yalnızca yöneticilerin yazabildiği `admin\policy.json` dosyasındadır.
 - Kişisel veri gören roller **KVKK bilgilendirmesini** onaylamadan kişi düzeyinde veri döndüren
   uç noktalara erişemez (sunucu tarafında zorunlu, `require_privacy_notice`).
 - Giriş, hatalı giriş, kilitleme, TOTP hataları, çıkış, parola ve kullanıcı değişiklikleri
@@ -50,7 +58,11 @@ hashed single-use recovery codes; progressive per-account lockout plus per-IP ra
 uniform failure responses; hashed, rotated, revocable session tokens in strict cookies; CSRF on
 every mutation; re-authentication for sensitive actions; the KVKK notice enforced by the server
 on person-level endpoints; every security event in the hash-chained audit log, never with a
-secret; a one-time console token for the first administrator. Offline licensing (section 13):
+secret; a one-time console token for the first administrator. Browser administration (section
+14): the API cannot write the configuration, the secret store or the certificate folders; a
+separate virtual account (`NT SERVICE\ArciAdmin`) checks and applies signed requests; the
+firewall, Windows Time and the Zamane client are changed by a SYSTEM task that takes no input from
+a request; the tasks run programs from trusted places only. Offline licensing (section 13):
 only public keys and revoked licence ids in the code, no telemetry, services and tasks on isolated
 Python (`python -I`), and a plain list of what an offline licence check cannot prevent.
 
@@ -241,8 +253,16 @@ calls `POST /auth/reauth` `{password, code}` and repeats the request. A complete
 re-authentication. Used today for every user-management change, new recovery codes, voluntary
 TOTP enrolment, evidence package creation (`evidence.create`) and evidence download
 (`evidence.download`, combined with the KVKK notice through `require_privacy_notice(...,
-recent=True)`). To be used (spec 13) for the credential settings (Kamu SM, replica, SMTP) and the
-retention settings when their pages exist.
+recent=True)`).
+
+The Settings pages (browser administration, section 14) ask for it (spec 13) for every change of
+`[tsa]` except the credit alert threshold and the timeout (this covers the Kamu SM customer number
+and password), every `[smtp]` and `[replica]` change (their passwords included), every retention
+change, a clock source change, switching the backup off, and switching a log source off or
+removing it. The API checks it before it writes the request; the signed request carries the time
+of the confirmation (`actor.reauth_at`), and the administration agent refuses a request whose
+confirmation is older than 5 minutes (`reauth_missing`), so a request made without it is refused
+even if it reaches the inbox another way.
 
 ## 7a. KVKK notice on person-level endpoints
 
@@ -399,6 +419,14 @@ entries add `os_user`; never the licensee name or server ids):
 | Legal | the KVKK notice text (web app) and the retention of audit entries need legal review |
 | Legal drafts | for the lawyer: [legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md) (employee information text), [legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md) (retention and deletion policy) — drafts, not approved |
 | Licence enforcement | an offline check against the server's own administrator: what it cannot prevent is listed in section 13; a `.pth` file in the venv's site-packages is not stopped by `python -I` (phase 2) |
+| Compromised ArciApi (browser administration) | it still reads every stored secret (unchanged) and can request any change of the allow-list. The agent's journal, the Event Log, `R20-config-change` and the holds make it visible; it cannot lower retention below 730 days, choose a program to run or skip a hold (section 14) |
+| Compromised ArciAdmin | it writes the configuration, including keys the browser does not offer (they take effect at the next restart, or at once for keys that are reloaded live), and can skip its own holds for retention and the replica; `config_origin` and the missing journal entry make that visible. `execpolicy` (a one-element `java`, trusted locations and hashes) and ApplySystem's own derivation keep it from running code as LOCAL SERVICE or SYSTEM; a staged Zamane client still waits for ApplySystem's own `first_seen` and an administrator's `approve-jar` |
+| Shared LOCAL SERVICE and task requests | another process running as LocalService can read the task requests in `state\requests`, forge task results (display and journal only) and replay a signed request before it expires (one extra sealing attempt) — per-task SIDs would close this (ADR-0007 section 8) |
+| Kamu SM password on a command line | the Zamane client takes it as an argument: administrators can see it in the process list during a credit query (ArciAdmin) and during the tasks (LOCAL SERVICE) (ADR-0001) |
+| Python as SYSTEM | ApplySystem runs the installed program's Python as SYSTEM to parse the TOML that ArciAdmin writes (`tomllib`, pydantic), as the installer already does as an administrator; its program folder is writable by administrators only |
+| Hand edit during a browser change | a text editor and the browser at the same time: the agent's `expect` check finds the hand edit at the next request (conflict). Use one way at a time (SETTINGS.md section 7) |
+| Comments in `[[sources]]` | lost at the first browser change of the sources (the previous file stays in `admin\versions`) |
+| Strict outbound mode and DNS | host names are resolved when ApplySystem runs; a host that does not resolve keeps its previous outbound rule and is reported (`partially_active`) |
 
 ## 13. Offline licensing
 
@@ -449,3 +477,81 @@ What the licensing **cannot** protect against offline (the threat model, ADR-001
 
 The remedies are contractual: the licence agreement, the licensor's register of issued licences
 and the licensee name shown in the interface.
+
+## 14. Browser administration
+
+Decision: [ADR-0014](adr/0014-browser-administration.md); operator guide: [AYARLAR.md](AYARLAR.md) /
+[SETTINGS.md](SETTINGS.md). The web interface changes the server's configuration without giving
+the web-facing API the right to write it.
+
+**Identities.** Four parties, each with only the rights it needs (contract 2.2, applied by the
+installer's ACL plan `Get-ArciAclPlan`):
+
+| Who | Writes | Never |
+|---|---|---|
+| ArciApi (`NT SERVICE\ArciApi`) | signed requests and uploads into `admin\inbox` (create and write files; it may delete only its own) | `arcilogger.toml`, `secrets.json`, `secret.key`, `kamusm-roots`, `smtp-ca`, `zamane`, `admin\keys`, `policy.json` |
+| ArciAdmin (`NT SERVICE\ArciAdmin`, virtual account) | `arcilogger.toml` and `secrets.json` (explicit file entries), new files in `kamusm-roots` and `smtp-ca` (it may delete only files it created), `zamane\web` (staging), its own `admin` folders, task requests in `state\requests`, `logs` | `secret.key`, a root an administrator placed, `zamane` itself, `zamane\approved`, `policy.json`, `admin\keys`, `install`, the spool, the vault, exports, backups; no service-control, task, firewall or registry right, no listener, no database |
+| `\ARCILOGGER\ApplySystem` (SYSTEM) | the `ARCILOGGER Syslog UDP/TCP` rules (in strict outbound mode the `ARCILOGGER Out …` rules), the Windows Time peers, `zamane\approved`, `admin\system` | another firewall rule, a profile, 443, 3389, 5985; it takes **no input from a request** |
+| `\ARCILOGGER\Requests` and the evidence tasks (LOCAL SERVICE) | task results in `state\requests` | the configuration; a staged Zamane client (no right on `zamane\web`) |
+
+**Signed requests.** The API signs every request with its own Ed25519 key
+(`admin\keys\api-ed25519.key`, readable by ArciApi only); the agent signs task requests with
+another (`agent-ed25519.key`, readable by ArciAdmin only); `keys.json` holds the public keys and
+the installation id. The installer creates `admin\` and `admin\keys\` protected (administrators
+and SYSTEM only) **before** `keys init` writes the keys, and only then grants each key its one
+reader, so no inherited right ever reaches a private key. The agent moves a request out of the
+inbox before it reads it, checks the size, the key, the signature over the raw bytes, the
+installation id, the issue and expiry times (at most 10 minutes), a ledger of seen ids (no
+replay) and the re-authentication time (section 7), and only then parses and validates it with the
+same rules as the API. A refusal raises `R20-admin` ("possible tampering" for a signature or
+installation failure) and Event 4120.
+
+**What the browser can change** is a fixed allow-list (`arcilogger_core.admin.rules`); every other
+key is refused (`config_key_locked`). Nothing the browser can change moves `data_dir` or
+`secrets_dir` (Day 0 note D0-2): the TOML editor never writes those keys, and the services and
+tasks refuse a configuration whose `secrets_dir` is not the folder of their fixed `--config` path
+or whose `data_dir` is not the data root the installer recorded (`data-root.txt`). The installer
+itself takes the data root from that record, never from `data_dir`: a `data_dir` that differs, or
+a record it cannot use, stops the run before any change, and only `-DataRoot` moves the record.
+It deletes and re-creates the record on every run (owner: Administrators; read for the services
+and tasks only), so a record ArciAdmin created while it was missing is never kept. The agent keeps
+every previous version (`admin\versions`) and puts it back when a step fails.
+
+**Programs.** The tasks and the API check every program before they run it
+(`arcilogger_core.execpolicy`): `[tsa] java` is a single element unless the installer recorded the
+whole command, a program lies below `policy.executable_roots` (Program Files) or was recorded with
+its SHA-256 at that very path, and a Zamane client runs only from `zamane\` outside its staging
+folder, with a known, approved or installer-recorded hash. The installer records a program only
+where nobody but administrators, SYSTEM and TrustedInstaller can change it, plant a file next to
+it or replace a folder above it (write, delete, permission and owner rights on the file; creating
+or deleting files in its folder; deleting or re-permissioning a folder above; any other owner);
+the stock rights of `C:\` and `C:\Program Files` pass, a folder of its own on `C:\` does not. An
+upgrade with a program elsewhere stops before any change and says how to fix it. A Zamane client
+from outside `zamane\` is copied in (a `..` in its path is resolved first). ApplySystem promotes only a known release; any other uploaded client waits
+for `approve-jar` on the console, at the earliest after `jar_hold_hours`.
+
+**Guard rails.** `admin\policy.json` (administrators only; the worker reads it too, to know
+whether the agent's heartbeat is expected) holds the source networks, the holds and the off
+switch. ApplySystem opens 514 only to the enabled sources inside them; the installer stops when
+the configuration has one outside them (it would lose its opening), and a source added by hand
+later stays open only where the rules hold it already (`source_outside_policy`, `R20-admin`).
+A missing or invalid file means browser administration **off** for every reader (fail closed),
+never a stopped 5651 function. `-DisableBrowserAdministration` switches it
+off; no licence state blocks it or a 5651 function. Guarded changes (retention, replica, unknown
+Zamane clients) are held and alerted (`R20-config-change`, without values or user names).
+
+**Audit and events.** Every request and every outcome is in the hash-chained audit log
+(`admin.request`, `admin.applied`, `admin.system`, `settings.secret_change`, …) with masked
+values; a secret value, or a hash of one, is never written to the audit log, the journal, an API
+answer or the database. Application log events of the source `ARCILOGGER-Admin` only wake a task
+or tell a person: any local process can write one, the signed request is the authority.
+
+**Residual risks** are in section 12 (from "Compromised ArciApi" on). **Verify on site and in the
+Windows CI job:** that the replace of `arcilogger.toml` keeps the explicit ArciAdmin entry, and
+that the installer puts it back on `secrets.json` after its own `secret set` (a console
+`secret set` / `secret delete` writes a new file without it: run `Set-ArciVaultAcl.ps1`
+afterwards, SETTINGS.md section 7); that
+CreateFiles with CREATOR OWNER Delete lets ArciAdmin create, write, rename and delete only its own
+files in `kamusm-roots`; that a virtual account can write the Application log; that event
+triggers wake LOCAL SERVICE and SYSTEM tasks; that the in-place firewall update loses no
+datagram.

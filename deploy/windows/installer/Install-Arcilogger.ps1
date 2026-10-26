@@ -72,21 +72,51 @@
       itself at run time (state version_not_covered). An upgrade without any licence whose vault
       holds sealed days older than 14 days warns that the trial counts as over.
 
-    -Upgrade:   pg_dump backup first (a failed backup changes nothing), pause the scheduled tasks,
-                stop the services, keep the old program folder as <InstallDir>.previous, install
-                the new version, migrate the database last, start. If anything fails, the
-                previous version is put back and started again automatically. If the failure
-                happened while the database schema was being migrated, only the collector and
-                the web server are started on the previous version (the evidence path needs no
-                database) and the command that restores the pre-upgrade dump is printed.
+    Browser administration (docs\adr\0014-browser-administration.md, docs\AYARLAR.md /
+    docs\SETTINGS.md): the service ArciAdmin (NT SERVICE\ArciAdmin; no listener, no administrator
+    rights) applies what is changed under Ayarlar in the web interface, and the task
+    \ARCILOGGER\ApplySystem (SYSTEM) derives the firewall's syslog senders, the strict outbound
+    rules and the Windows Time peers from the validated configuration. Their guard rails go into
+    admin\policy.json, which only administrators write:
+      -SourceNetwork  the networks a log source address must lie in (default RFC 1918:
+                      10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).
+      -AdminChangeHoldHours  how long the most consequential changes wait before they apply
+                      (enabling or shortening retention, disabling or retargeting the replica);
+                      default 0, at most 168.
+      -ZamaneHoldHours  how long an uploaded Zamane client that is not a known release waits
+                      before an administrator may approve it (approve-jar); default 24, 1-168.
+      -DisableBrowserAdministration  ArciAdmin refuses every request and the web interface names
+                      the console commands instead (-DisableBrowserAdministration:$false switches
+                      it on again). No 5651 function depends on it.
+      The four are remembered in install\state.json: a later run (an upgrade) keeps them unless
+      they are given again. Every run also records the programs the tasks run from outside the
+      trusted folders (tsa.java, backup.pg_dump, backup.pg_restore) with their SHA-256 in
+      policy.json, copies a tsa.zamane_jar from outside zamane\ into it and records its SHA-256 in
+      zamane\zamane-jar.sha256, so sealing never stops because of the checks the tasks make
+      before they run a program; a program in a folder that someone other than administrators
+      and SYSTEM can write stops the preflight instead (move it or fix the folder's rights).
+
+    -Upgrade:   pg_dump backup first (a failed backup changes nothing), keep the configuration
+                as arcilogger.toml.before-upgrade-<time>, pause the scheduled tasks, stop the
+                services (ArciAdmin first), keep the old program folder as
+                <InstallDir>.previous, install the new version, migrate the database last, start
+                (ArciAdmin last). If anything fails, the previous version is put back and started
+                again automatically. If the failure happened while the database schema was being
+                migrated, only the collector and the web server are started on the previous
+                version (the evidence path needs no database) and the command that restores the
+                pre-upgrade dump is printed.
     -Rollback:  put <InstallDir>.previous back; with -RestoreDatabase also the last pre-upgrade
                 dump (or -DatabaseDump). -Rollback -RestoreDatabase without a previous version
-                folder restores only the database.
-    -Uninstall: removes services, scheduled tasks, firewall rules and the ARCILOGGER program
-                folders (only folders that this installer created) and restores the power
-                settings Set-ArciPower.ps1 recorded. It NEVER deletes the data folder (spool,
-                vault, exports, logs, backups), the configuration, the secret store, Caddy's CA or
-                the database.
+                folder restores only the database. Before the previous version's services start
+                (also after a failed upgrade), its Python must load arcilogger.toml; a
+                configuration the browser changed in a way it does not know (enabled = false of
+                a log source) is replaced by the copy kept before the upgrade, and the installer
+                says so: the later browser changes are undone, the audit log keeps them.
+    -Uninstall: removes services, scheduled tasks, the Event Log source ARCILOGGER-Admin, firewall
+                rules and the ARCILOGGER program folders (only folders that this installer
+                created) and restores the power settings Set-ArciPower.ps1 recorded. It NEVER
+                deletes the data folder (spool, vault, exports, logs, backups), the configuration,
+                the secret store, the administration folder (admin\), Caddy's CA or the database.
     -Auto:      install, or upgrade when another bundle is installed (used by ARCILOGGER-Setup.exe);
                 the console window then waits for Enter before it closes.
     -DryRun / -WhatIf: checks and prints the plan, changes nothing (-PlanPath writes it as JSON).
@@ -154,6 +184,11 @@ param(
     # Licence (see .DESCRIPTION): a .lic to install, and the override of the maintenance rule.
     [string]$LicenseFile,
     [switch]$AllowUncoveredUpgrade,
+    # Browser administration (see .DESCRIPTION): remembered in install\state.json when given.
+    [string[]]$SourceNetwork,
+    [int]$AdminChangeHoldHours,
+    [int]$ZamaneHoldHours,
+    [switch]$DisableBrowserAdministration,
     [switch]$Force
 )
 
@@ -183,10 +218,16 @@ $script:NtpServerSource = $(if ($script:NtpServerGiven) { 'parameter' } else { '
 $script:FallbackServer = 'time.ume.tubitak.gov.tr'   # [clock] fallback_server of the configuration in use
 $script:ConfigReadError = $null        # site_name or [clock] of the configuration is not readable
 $script:SourceCount = $null           # [[sources]] of the configuration in use; $null: not read (Invoke-SourcesPreflight)
+$script:SourceSenders = @()           # their enabled sender addresses (Invoke-AdminPolicyPreflight checks them)
 # -ServerAddress / -ServerName: given, else remembered or detected (Resolve-ServerIdentity).
 $script:ServerAddressGiven = $PSBoundParameters.ContainsKey('ServerAddress') -and [bool]$ServerAddress
 $script:ServerNameGiven = $PSBoundParameters.ContainsKey('ServerName') -and [bool]$ServerName
 $script:ServerAddressSource = $(if ($script:ServerAddressGiven) { 'parameter' } else { 'none' })
+# The browser administration's choices: given ones win and are remembered (Resolve-AdminPolicyChoice).
+$script:SourceNetworkGiven = $PSBoundParameters.ContainsKey('SourceNetwork')
+$script:HoldHoursGiven = $PSBoundParameters.ContainsKey('AdminChangeHoldHours')
+$script:JarHoldHoursGiven = $PSBoundParameters.ContainsKey('ZamaneHoldHours')
+$script:BrowserAdministrationGiven = $PSBoundParameters.ContainsKey('DisableBrowserAdministration')
 $script:ServerDetection = $null
 $script:DataRootSource = 'parameter'   # parameter, config (arcilogger.toml) or auto (Select-ArciDataRoot)
 $script:DataRootChoice = $null
@@ -198,6 +239,12 @@ $script:FreshInstall = $false          # this run installs the program files for
 $script:ReleaseDate = $null
 $script:LicenseInfo = $null
 $script:LicenseStop = $null
+# Browser administration: the guard rails of admin\policy.json, given or remembered
+# (Resolve-AdminPolicyChoice), and what Invoke-ExecutablePreflight found to record: programs the
+# tasks run from outside the trusted folders and the Zamane client (Get-ArciZamaneJarPlan).
+$script:AdminPolicyChoice = $null
+$script:ExecutableRecords = $null
+$script:ZamaneJarPlan = $null
 $script:Plan = New-Object System.Collections.Generic.List[object]
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 $script:Failures = New-Object System.Collections.Generic.List[string]
@@ -215,6 +262,7 @@ $script:TasksRegistered = $false     # the tasks were registered from the new pr
 $script:MigrationStarted = $false    # arcilogger-db upgrade was started (the schema may have changed)
 $script:RestoreStarted = $false      # pg_restore was started (the database content may have changed)
 $script:LastDump = $null
+$script:ConfigRestored = $false      # Restore-ConfigForProgram put the copy from before the upgrade back
 $PreviousDir = $null
 $ConfigPath = $null
 $transcript = $null
@@ -227,9 +275,11 @@ if ($Uninstall) { $Mode = 'uninstall' }
 if ($Rollback) { $Mode = 'rollback' }
 
 $ServiceNames = Get-ArciServiceNames
-# Services that need PostgreSQL. The collector and Caddy do not: after a failed schema migration
+# Services that need PostgreSQL, and ArciAdmin with them: it needs no database, but without the
+# API it has nothing to apply and it must not change the configuration of an installation whose
+# schema is half migrated. The collector and Caddy need neither: after a failed schema migration
 # they keep running on the previous version, so no syslog message is lost.
-$DatabaseServiceNames = @('ArciIngest', 'ArciApi', 'ArciWorker')
+$DatabaseServiceNames = @('ArciIngest', 'ArciApi', 'ArciWorker', 'ArciAdmin')
 $EvidenceServiceNames = @('ArciCollector', 'ArciWeb')
 $ReleaseRoot = Split-Path -Parent $PSScriptRoot   # bundle root or installed program folder
 
@@ -371,6 +421,15 @@ $StateDir = Join-Path $ProgramDataDir 'install'
 $StatePath = Join-Path $StateDir 'state.json'
 $FirewallStatePath = Join-Path $StateDir 'firewall-state.json'
 $PowerStatePath = Join-Path $StateDir 'power-state.json'
+# The browser administration (Config.admin_dir; contract 2.2), the Zamane client folder, the
+# secret store's values and the record of the data root every task and service checks the
+# configuration's data_dir against (config.DATA_ROOT_RECORD, written on every run).
+$AdminDir = Join-Path $ProgramDataDir 'admin'
+$AdminKeysDir = Join-Path $AdminDir 'keys'
+$PolicyPath = Join-Path $AdminDir 'policy.json'
+$ZamaneDir = Join-Path $ProgramDataDir 'zamane'
+$SecretsFile = Join-Path $ProgramDataDir 'secrets.json'
+$DataRootRecord = Join-Path $ProgramDataDir 'data-root.txt'
 $CaddyRootSource = Join-Path $ProgramDataDir 'caddy\data\caddy\pki\authorities\local\root.crt'
 $CaddyRootCopy = Join-Path $ProgramDataDir 'caddy-root.crt'
 $TarExe = $(if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32\tar.exe' } else { 'tar' })
@@ -389,15 +448,29 @@ function Get-ConfiguredDataRoot {
 $separators = [char[]]@([char]92, [char]47)
 $configured = Get-ConfiguredDataRoot
 $dataRootGiven = $PSBoundParameters.ContainsKey('DataRoot') -and [bool]$DataRoot
-if ($configured) {
-    if ($dataRootGiven -and ((ConvertTo-FullPath $DataRoot).TrimEnd($separators) -ne (ConvertTo-FullPath $configured).TrimEnd($separators))) {
-        Stop-Installer 2 ("-DataRoot ({0}) arcilogger.toml içindeki data_dir ({1}) ile aynı değil [differs from data_dir in arcilogger.toml]." -f $DataRoot, $configured)
-    }
-    $DataRoot = $configured
-    $script:DataRootFromConfig = $true
-    $script:DataRootSource = 'config'
+# The record (data-root.txt) first: ArciAdmin can write data_dir, so a run never takes a changed
+# one from the configuration and never moves the record unless -DataRoot says so (Day 0 note
+# D0-2). A problem stops the run in the preflight, before any change (Invoke-Preflight).
+$script:DataRootRecordFacts = Read-ArciDataRootRecord -Path $DataRootRecord
+$script:DataRootResolution = Resolve-ArciDataRoot -Record $script:DataRootRecordFacts `
+    -Configured $(if ($configured) { (ConvertTo-FullPath $configured).TrimEnd($separators) } else { '' }) `
+    -Given $(if ($dataRootGiven) { (ConvertTo-FullPath $DataRoot).TrimEnd($separators) } else { '' }) `
+    -AdminInstalled:(Test-Path -LiteralPath $AdminDir)
+if ($script:DataRootResolution.Path) {
+    $DataRoot = $script:DataRootResolution.Path
+    $script:DataRootSource = $script:DataRootResolution.Source
+    $script:DataRootFromConfig = $script:DataRootSource -in @('record', 'config')
 }
-elseif (-not $dataRootGiven) {
+elseif ($script:DataRootResolution.Problem) {
+    # Only to finish the preflight, which stops the run: the record when it can be read, else data_dir.
+    $fallback = @([string]$script:DataRootRecordFacts.Value, [string]$configured, [string]$DataRoot) | Where-Object { $_ } | Select-Object -First 1
+    if ($fallback) {
+        $DataRoot = $fallback
+        $script:DataRootFromConfig = $true
+        $script:DataRootSource = 'record'
+    }
+}
+if (-not $DataRoot) {
     # A new installation without -DataRoot (the setup .exe never passes it): a fixed NTFS D:,
     # otherwise the system drive; the preflight checks the drive and warns about the latter.
     $script:DataRootChoice = Select-ArciDataRoot -DataDrive (Get-ArciDriveFacts -Root 'D:\') -SystemDrive $env:SystemDrive
@@ -834,11 +907,21 @@ function Remove-ArciServices {
 }
 
 function Install-ArciServices([switch]$MissingOnly) {
+    <#
+    Register the services of the program in $InstallDir. A service whose WinSW wrapper or program
+    the folder does not hold is skipped with a warning: a rollback to a version from before
+    ArciAdmin has neither (Remove-ArciServices has removed its registration).
+    #>
     foreach ($name in $ServiceNames) {
         if ($MissingOnly -and (Get-Service -Name $name -ErrorAction SilentlyContinue)) { continue }
         $wrapper = Join-Path $ServicesDir ($name + '.exe')
         $target = Get-ServiceExecutable $name
-        if (-not (Test-Path -LiteralPath $wrapper)) { throw ("WinSW yok [missing]: {0}" -f $wrapper) }
+        if (-not (Test-Path -LiteralPath $wrapper)) {
+            $message = "{0}: hizmet sarmalayıcısı bu sürümde yok, hizmet kurulmadı [no WinSW wrapper in this version, service skipped]: {1}" -f $name, $wrapper
+            Write-ArciWarn $message
+            $script:Warnings.Add($message)
+            continue
+        }
         if (-not $target -or -not (Test-Path -LiteralPath $target)) {
             $message = "{0}: program bu sürümde yok, hizmet kurulmadı [not part of this version, service skipped]: {1}" -f $name, $target
             Write-ArciWarn $message
@@ -1059,10 +1142,19 @@ function Get-DataDirectories {
         (Join-Path $DataRoot 'exports'), (Join-Path $DataRoot 'state'), (Join-Path $DataRoot 'logs'),
         (Join-Path $DataRoot 'state\seal'), (Join-Path $DataRoot 'state\replica'),
         (Join-Path $DataRoot 'state\verify'), (Join-Path $DataRoot 'state\clock'),
+        # Signed task requests of the browser administration (ADR-0014) and the tasks' answers.
+        (Join-Path $DataRoot 'state\requests'), (Join-Path $DataRoot 'state\requests\seal'),
+        (Join-Path $DataRoot 'state\requests\tasks'), (Join-Path $DataRoot 'state\requests\results'),
+        (Join-Path $DataRoot 'state\requests\seen'),
         (Join-Path $DataRoot 'backups'), (Join-Path $DataRoot 'backups\db'),
-        $ProgramDataDir, (Join-Path $ProgramDataDir 'kamusm-roots'), (Join-Path $ProgramDataDir 'zamane'),
+        $ProgramDataDir, (Join-Path $ProgramDataDir 'kamusm-roots'), (Join-Path $ProgramDataDir 'smtp-ca'),
+        $ZamaneDir, (Join-Path $ZamaneDir 'web'), (Join-Path $ZamaneDir 'approved'),
         (Join-Path $ProgramDataDir 'caddy'), (Join-Path $ProgramDataDir 'caddy\data'), (Join-Path $ProgramDataDir 'caddy\config'),
-        $StateDir
+        $StateDir,
+        $AdminDir, $AdminKeysDir, (Join-Path $AdminDir 'inbox'), (Join-Path $AdminDir 'inbox\uploads'),
+        (Join-Path $AdminDir 'work'), (Join-Path $AdminDir 'pending'), (Join-Path $AdminDir 'state'),
+        (Join-Path $AdminDir 'versions'), (Join-Path $AdminDir 'status'), (Join-Path $AdminDir 'journal'),
+        (Join-Path $AdminDir 'system')
     )
 }
 
@@ -1162,6 +1254,16 @@ function Invoke-ConfigSteps {
             Write-ArciUtf8File -Path $ConfigPath -Text $text
         } ([pscustomobject]@{ data_dir = $dataDirValue; collector_bind = $bindValue; site_name = $siteValue; ntp_server = $ntpValue })
     }
+    # The data root every task and service checks the configuration's data_dir against
+    # (data-root.txt, Day 0 note D0-2): written on every run from the record itself, -DataRoot
+    # or the choice of a first installation (Resolve-ArciDataRoot), before ArciAdmin gets its
+    # right to create files in this folder (Invoke-AclSteps). Deleted and created anew, never
+    # rewritten in place: a record someone else created would keep its owner, and an owner can
+    # change the rights. Nothing the browser changes can move it.
+    Invoke-Step 'config.data-root' ("Veri klasörü kaydı [data root record]: {0}" -f $DataRootRecord) {
+        if (Test-Path -LiteralPath $DataRootRecord) { Remove-Item -LiteralPath $DataRootRecord -Force }
+        Write-ArciUtf8File -Path $DataRootRecord -Text ($DataRoot + "`n")
+    } $DataRoot
     Invoke-Step 'config.database-section' '[database] bölümü (bu sürüm destekliyorsa ve yoksa) [added if supported and missing]' {
         $supported = (Invoke-ArciProcess -FilePath $VenvPython -ArgumentList @('-I', '-c', 'from arcilogger_core.config import Config; print(''database'' in Config.model_fields)')).StdOut.Trim()
         $text = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8)
@@ -1171,6 +1273,15 @@ function Invoke-ConfigSteps {
             Write-ArciInfo '[database] eklendi [added].'
         }
     }
+    # Before the validation: a Zamane client from outside zamane\ is copied in and tsa.zamane_jar
+    # names the copy (Update-ExecutableRecords).
+    $recordDetail = $null
+    if ($null -ne $script:ZamaneJarPlan -or $null -ne $script:ExecutableRecords) {
+        $recordDetail = [pscustomobject]@{ zamane_jar = $script:ZamaneJarPlan; trusted_executables = $script:ExecutableRecords }
+    }
+    Invoke-Step 'executables.record' 'Görevlerin çalıştırdığı programlar kaydediliyor [recording the programs the tasks run] (tsa.java, tsa.zamane_jar, backup.pg_dump, backup.pg_restore)' {
+        Update-ExecutableRecords
+    } $recordDetail
     Invoke-Step 'config.validate' 'Yapılandırma doğrulanıyor [validating configuration]' {
         $code = 'import sys; from arcilogger_core.config import load_config; c = load_config(__import__(''pathlib'').Path(sys.argv[1])); print(c.data_dir, c.collector.bind, c.tsa.provider)'
         $result = Invoke-ArciProcess -FilePath $VenvPython -ArgumentList @('-I', '-c', $code, $ConfigPath)
@@ -1180,12 +1291,24 @@ function Invoke-ConfigSteps {
         $result = Invoke-ArciProcess -FilePath $CoreExe -ArgumentList @('--config', $ConfigPath, 'secret', 'init')
         Write-ArciInfo $result.StdOut.Trim()
     }
+    # ArciAdmin writes secrets.json through an explicit entry on the file (Invoke-AclSteps): the
+    # file must exist, with no stored value yet, before that step.
+    Invoke-Step 'secrets.file' ("Gizli değerler dosyası [secret values file]: {0}" -f $SecretsFile) {
+        if (-not (Test-Path -LiteralPath $SecretsFile)) { Write-ArciUtf8File -Path $SecretsFile -Text "{}`n" }
+    }
     if ($ZamaneJar) {
         Invoke-Step 'zamane.jar' ("Zamane istemcisi [client]: {0}" -f $ZamaneJar) { Install-ZamaneJar }
     }
+    Invoke-AdminSteps
 }
 
 function Install-ZamaneJar {
+    <#
+    -ZamaneJar: the Zamane client into zamane\ after its SHA-256 was compared with the value on
+    the Kamu SM page, and its line appended to zamane\zamane-jar.sha256 (the lines already there
+    stay: the tasks accept every recorded client, arcilogger_core.execpolicy). A different file of
+    the same name in zamane\ is never overwritten.
+    #>
     if (-not (Test-Path -LiteralPath $ZamaneJar -PathType Leaf)) { throw ("Dosya yok [file missing]: {0}" -f $ZamaneJar) }
     $actual = Get-ArciFileSha256 -Path $ZamaneJar
     Write-Host ("    Zamane jar SHA-256: {0}" -f $actual)
@@ -1198,11 +1321,398 @@ function Install-ZamaneJar {
         $answer = Read-Host 'Bu değer Kamu SM indirme sayfasındaki SHA-256 ile aynı mı? (E/H) [same as on the Kamu SM page?]'
         if ($answer -notmatch '^(e|E|y|Y)') { throw 'Zamane jar onaylanmadı [jar not confirmed].' }
     }
-    $folder = Join-Path $ProgramDataDir 'zamane'
-    $target = Join-Path $folder ([System.IO.Path]::GetFileName($ZamaneJar))
-    Copy-Item -LiteralPath $ZamaneJar -Destination $target -Force
-    $record = "{0}  {1}`n# confirmed {2} by {3}`n" -f $actual, [System.IO.Path]::GetFileName($ZamaneJar), [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'), [Environment]::UserName
-    Write-ArciUtf8File -Path (Join-Path $folder 'zamane-jar.sha256') -Text $record
+    $target = Join-Path $ZamaneDir ([System.IO.Path]::GetFileName($ZamaneJar))
+    if ((Test-Path -LiteralPath $target) -and (Get-ArciFileSha256 -Path $target) -ne $actual) {
+        throw ("{0} başka bir dosya; üzerine yazılmaz, farklı bir dosya adı kullanın [a different file, not overwritten: use another file name]" -f $target)
+    }
+    if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $ZamaneJar -Destination $target }
+    Add-ZamaneJarRecord -Sha256 $actual -Name ([System.IO.Path]::GetFileName($ZamaneJar)) -Note ('confirmed {0} by {1}' -f [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'), [Environment]::UserName)
+}
+
+function Add-ZamaneJarRecord([string]$Sha256, [string]$Name, [string]$Note) {
+    <# Append "<sha256>  <file name>" and a comment line to zamane\zamane-jar.sha256 unless the hash is recorded already. #>
+    $record = Join-Path $ZamaneDir 'zamane-jar.sha256'
+    $recorded = Read-ArciInstallerHashes -Path $record
+    if (@($recorded) -contains $Sha256) { return }
+    $existing = ''
+    if (Test-Path -LiteralPath $record) { $existing = [System.IO.File]::ReadAllText($record) }
+    if ($existing -and -not $existing.EndsWith("`n")) { $existing += "`n" }
+    Write-ArciUtf8File -Path $record -Text ($existing + ("{0}  {1}`n# {2}`n" -f $Sha256, $Name, $Note))
+}
+
+# --- browser administration ----------------------------------------------------------------------
+
+function Read-RememberedAdminPolicy {
+    <# The choices of the browser administration install\state.json remembers (admin_policy), or $null. #>
+    $state = $null
+    try { $state = Read-InstallState } catch { $state = $null }
+    if ($null -eq $state -or -not ($state.PSObject.Properties.Name -contains 'admin_policy') -or $null -eq $state.admin_policy) { return $null }
+    $state.admin_policy
+}
+
+function Resolve-AdminPolicyChoice {
+    <#
+    The guard rails of admin\policy.json for this run (contract 2.4.1). For the four choices a
+    given parameter wins (-DisableBrowserAdministration, -SourceNetwork, -AdminChangeHoldHours,
+    -ZamaneHoldHours; remembered at the end of the run); then a valid existing policy.json (an
+    administrator may have edited it by hand); then what install\state.json remembers; then the
+    defaults. The keys without a parameter (min_prefix_v4, max_sources, executable_roots,
+    tsa_test_per_day) and the recorded programs come from a valid existing policy.json or are the
+    defaults. Invoke-AdminPolicyPreflight checks the result.
+    #>
+    $existing = Read-ArciAdminPolicy -Path $PolicyPath
+    $remembered = Read-RememberedAdminPolicy
+    $pick = {
+        param([bool]$Given, $Value, [string]$Policy, [string]$State, $Default)
+        if ($Given) { return , $Value }
+        if ($existing.Valid) { return , $existing.$Policy }
+        if ($null -ne $remembered -and $remembered.PSObject.Properties.Name -contains $State -and $null -ne $remembered.$State) { return , $remembered.$State }
+        , $Default
+    }
+    $kept = { param([string]$Name, $Default) if ($existing.Valid) { , $existing.$Name } else { , $Default } }
+    # "-SourceNetwork 10.0.0.0/8,172.16.0.0/12" reaches a script run with -File as one text.
+    $given = @($SourceNetwork | ForEach-Object { ([string]$_) -split '[,;\s]+' } | Where-Object { $_ })
+    # Assigned first: a list returned as one object (", $list") would be wrapped by @(...).
+    $networks = & $pick $script:SourceNetworkGiven $given 'SourceNetworks' 'source_networks' (Get-ArciDefaultSourceNetworks)
+    $roots = & $kept 'ExecutableRoots' @('C:\Program Files', 'C:\Program Files (x86)')
+    $trusted = & $kept 'TrustedExecutables' @()
+    $script:AdminPolicyChoice = [pscustomobject]@{
+        Existing           = $existing
+        Enabled            = [bool](& $pick $script:BrowserAdministrationGiven (-not $DisableBrowserAdministration) 'Enabled' 'enabled' $true)
+        SourceNetworks     = @($networks | ForEach-Object { [string]$_ })
+        HoldHours          = (& $pick $script:HoldHoursGiven $AdminChangeHoldHours 'HoldHours' 'hold_hours' 0)
+        JarHoldHours       = (& $pick $script:JarHoldHoursGiven $ZamaneHoldHours 'JarHoldHours' 'jar_hold_hours' 24)
+        MinPrefixV4        = (& $kept 'MinPrefixV4' 16)
+        MaxSources         = (& $kept 'MaxSources' 500)
+        ExecutableRoots    = @($roots | ForEach-Object { [string]$_ })
+        TsaTestPerDay      = (& $kept 'TsaTestPerDay' 3)
+        TrustedExecutables = @($trusted | Where-Object { $null -ne $_ })
+    }
+}
+
+function Invoke-AdminPolicyPreflight {
+    <# The guard rails (Resolve-AdminPolicyChoice): a value policy.json cannot hold stops the run before any change. #>
+    $choice = $script:AdminPolicyChoice
+    if ($null -eq $choice) { return }
+    $problems = New-Object System.Collections.Generic.List[string]
+    foreach ($value in @($choice.SourceNetworks)) {
+        $checked = ConvertTo-ArciSourceNetwork -Value ([string]$value)
+        if ($checked.Problem) { $problems.Add(("-SourceNetwork '{0}': {1}" -f $value, $checked.Problem)) }
+    }
+    if (@($choice.SourceNetworks).Count -eq 0) { $problems.Add('-SourceNetwork boş [empty]: en az bir ağ gerekli [at least one network]') }
+    $hold = 0
+    if (-not [int]::TryParse([string]$choice.HoldHours, [ref]$hold) -or $hold -lt 0 -or $hold -gt 168) { $problems.Add(("-AdminChangeHoldHours {0}: 0-168 saat [hours]" -f $choice.HoldHours)) }
+    if (-not [int]::TryParse([string]$choice.JarHoldHours, [ref]$hold) -or $hold -lt 1 -or $hold -gt 168) { $problems.Add(("-ZamaneHoldHours {0}: 1-168 saat [hours]" -f $choice.JarHoldHours)) }
+    if ($problems.Count -gt 0) {
+        Add-Check 'admin-policy' 'fail' ("Tarayıcı yönetimi ayarları geçersiz [invalid browser administration settings]: {0}" -f ($problems -join '; '))
+        return
+    }
+    # Every enabled log source must lie in these networks: ApplySystem gives the firewall's 514
+    # rule only the senders the policy allows (contract 2.8.3), so a source outside them would
+    # lose its opening at its first run, without any change in the browser. Checked before any
+    # change; where ApplySystem cannot narrow the rule (browser administration off, a firewall
+    # ARCILOGGER does not manage) it is a warning.
+    $outside = New-Object System.Collections.Generic.List[string]
+    $networks = New-Object System.Collections.Generic.List[string]
+    foreach ($network in @($choice.SourceNetworks)) { $networks.Add([string]$network) }
+    foreach ($value in @($script:SourceSenders)) {
+        # As system-plan reads it (host bits of a network cleared, a /32 as the address).
+        $sender = ConvertTo-ArciSyslogSender -Value ([string]$value)
+        $why = Get-ArciSyslogSenderProblem -Value $(if ($sender) { $sender } else { [string]$value }) -SourceNetwork @($choice.SourceNetworks) -MinPrefixV4 $choice.MinPrefixV4
+        if (-not $why) { continue }
+        $outside.Add(('{0}: {1}' -f $value, $why))
+        $parsed = ConvertTo-ArciNetwork -Value $sender
+        if ($null -ne $parsed -and $parsed.Prefix -ge $choice.MinPrefixV4 -and -not $networks.Contains($sender)) { $networks.Add($sender) }
+    }
+    if ($outside.Count -gt 0) {
+        $text = "Log kaynakları tarayıcı yönetiminin kaynak ağlarının dışında [log sources outside the browser administration's source networks] ({0}): ApplySystem bu göndericileri güvenlik duvarının 514 kuralından çıkarırdı, logları kaybolurdu [ApplySystem would take these senders out of the firewall's 514 rule and their logs would be lost]. Kurulumu ağlarıyla yeniden çalıştırın (liste varsayılanın yerine geçer) [run the installer again with their networks; the list replaces the default]: -SourceNetwork {1}. /{2} ağından geniş bir kaynağı daraltın ya da admin\policy.json içindeki min_prefix_v4 değerini elle küçültün [narrow a source wider than /{2}, or lower min_prefix_v4 in admin\policy.json by hand]." -f ($outside -join '; '), ($networks -join ','), $choice.MinPrefixV4
+        $narrows = $choice.Enabled -and ((-not $SkipFirewall) -or (Test-Path -LiteralPath $FirewallStatePath))
+        Add-Check 'admin-policy-sources' $(if ($narrows) { 'fail' } else { 'warn' }) $text
+    }
+    if ($choice.Existing.Exists -and -not $choice.Existing.Valid) {
+        Add-Check 'admin-policy-file' 'warn' ("{0} geçersiz, yeniden yazılacak; elle yazılan değerler varsayılana döner [invalid, rewritten with the defaults]: {1}" -f $PolicyPath, $choice.Existing.Problem)
+    }
+    $state = $(if ($choice.Enabled) { 'açık [on]' } else { 'kapalı [off] (-DisableBrowserAdministration)' })
+    Add-Check 'admin-policy' 'ok' ("Tarayıcı yönetimi [browser administration] {0}; kaynak ağları [source networks] {1}; bekletme [hold] {2} saat, Zamane istemcisi [Zamane client] {3} saat" -f $state, (@($choice.SourceNetworks) -join ', '), $choice.HoldHours, $choice.JarHoldHours)
+}
+
+function Find-SystemPathProgram([string]$Name) {
+    <# The file the system PATH (the machine's, which the tasks see) finds for a bare program name such as java, or $null. #>
+    $names = @($Name)
+    if (-not [System.IO.Path]::HasExtension($Name)) { $names += ($Name + '.exe') }
+    foreach ($folder in ([string][Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)).Split(';')) {
+        if (-not $folder.Trim()) { continue }
+        foreach ($candidate in $names) {
+            $file = Join-Path ([Environment]::ExpandEnvironmentVariables($folder.Trim())) $candidate
+            if (Test-Path -LiteralPath $file -PathType Leaf) { return $file }
+        }
+    }
+    $null
+}
+
+function Get-PathWriters([string]$Path) {
+    <# Who other than administrators and SYSTEM could change $Path or a folder above it (Get-ArciUnsafeWriters); nobody where Windows rights cannot be read (a dry run off Windows). #>
+    $facts = Get-ArciPathAclFacts -Path $Path
+    if ($null -eq $facts) { return , @() }
+    $writers = Get-ArciUnsafeWriters -Facts $facts
+    , @($writers)
+}
+
+function Get-ExecutableRecordPlan($Config) {
+    <#
+    What this run records for the configuration $Config (Read-ArciTomlFile) so that the tasks
+    keep running its programs (arcilogger_core.execpolicy, contract 2.16): Records (what, path,
+    sha256, argv) for policy.trusted_executables, Jar (Get-ArciZamaneJarPlan), Warnings and
+    Problems (each stops the run). A program, or a Zamane client copied into zamane\, is recorded
+    only from a folder that only administrators and SYSTEM can write (Day 0 note D0-3): anyone
+    else who can write it could replace the file the record trusts.
+    #>
+    $records = New-Object System.Collections.Generic.List[object]
+    $warnings = New-Object System.Collections.Generic.List[string]
+    $problems = New-Object System.Collections.Generic.List[string]
+    $fix = 'programı Program Files altına taşıyın ya da klasörün yazma haklarını yalnızca yöneticilere ve SYSTEM''e bırakın, sonra kurulumu yeniden çalıştırın [move the program below Program Files or leave the write rights of its folders to administrators and SYSTEM only, then run the installer again]'
+    $candidates = Get-ArciExecutableRecords -Config $Config -ExecutableRoot @($script:AdminPolicyChoice.ExecutableRoots)
+    foreach ($candidate in $candidates) {
+        $file = [string]$candidate.Path
+        if (-not ($file.Contains('\') -or $file.Contains('/'))) { $file = Find-SystemPathProgram $file }
+        if (-not $file -or -not (Test-Path -LiteralPath $file -PathType Leaf)) {
+            $warnings.Add(("{0} bulunamadı, kaydedilmedi [not found, not recorded]: {1}" -f $candidate.What, $candidate.Path))
+            continue
+        }
+        $writers = Get-PathWriters $file
+        if (@($writers).Count -gt 0) {
+            $problems.Add(("{0} {1}: yöneticiler ve SYSTEM dışında yazabilenler var [others can write it] ({2}); {3}" -f $candidate.What, $candidate.Path, (@($writers) -join '; '), $fix))
+            continue
+        }
+        $records.Add([pscustomobject]@{ what = $candidate.What; path = [string]$candidate.Path; sha256 = (Get-ArciFileSha256 -Path $file); argv = $candidate.Argv })
+    }
+    $jar = [string](Get-ArciConfigValue -Config $Config -Path 'tsa.zamane_jar' -Default '')
+    $sha256 = $null
+    if ($jar -and (Test-Path -LiteralPath $jar -PathType Leaf)) { $sha256 = Get-ArciFileSha256 -Path $jar }
+    $installer = Read-ArciInstallerHashes -Path (Join-Path $ZamaneDir 'zamane-jar.sha256')
+    $recorded = @($installer)
+    $jars = Join-Path $AdminDir 'system\jars.json'
+    if (Test-Path -LiteralPath $jars) {
+        try { $recorded += @((Read-JsonFile $jars).approved | ForEach-Object { [string]$_.sha256 }) } catch { Write-Verbose 'jars.json unreadable: nothing approved' }
+    }
+    $target = $null
+    if ($jar) {
+        $name = $jar.Replace('/', '\').Split('\')[-1]
+        $existing = Join-Path $ZamaneDir $name
+        if ($name -and (Test-Path -LiteralPath $existing -PathType Leaf)) { $target = Get-ArciFileSha256 -Path $existing }
+    }
+    $plan = Get-ArciZamaneJarPlan -Jar $jar -Sha256 $sha256 -ZamaneDir $ZamaneDir -Recorded $recorded -TargetSha256 $target
+    if ($plan.Action -eq 'refuse') { $problems.Add(('tsa.zamane_jar {0}: {1}' -f $jar, $plan.Reason)) }
+    if ($plan.Action -eq 'copy') {
+        $writers = Get-PathWriters $jar
+        if (@($writers).Count -gt 0) { $problems.Add(("tsa.zamane_jar {0}: yöneticiler ve SYSTEM dışında yazabilenler var [others can write it] ({1}); istemciyi -ZamaneJar ile kurun [install the client with -ZamaneJar]" -f $jar, (@($writers) -join '; '))) }
+    }
+    [pscustomobject]@{ Records = $records.ToArray(); Jar = $plan; Warnings = $warnings.ToArray(); Problems = $problems.ToArray() }
+}
+
+function Invoke-ExecutablePreflight {
+    <#
+    The programs the tasks run, checked before any change (contract 2.16): what this run will
+    record (Get-ExecutableRecordPlan) and what stops it. Needs this installation's Python to read
+    an existing arcilogger.toml (an upgrade or repair: the version still installed); without one
+    (a new configuration, or a new installation over a kept one) the same checks run in the
+    executables.record step with the new Python.
+    #>
+    if (-not (Test-Path -LiteralPath $ConfigPath) -or -not (Test-Path -LiteralPath $VenvPython)) { return }
+    try { $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath }
+    catch {
+        Add-Check 'executables' 'fail' ("arcilogger.toml okunamadı [unreadable]: {0}" -f $_.Exception.Message)
+        return
+    }
+    $result = Get-ExecutableRecordPlan $config
+    $script:ExecutableRecords = $result.Records
+    $script:ZamaneJarPlan = $result.Jar
+    foreach ($warning in $result.Warnings) { Add-Check 'executables' 'warn' $warning }
+    foreach ($problem in $result.Problems) { Add-Check 'executables' 'fail' $problem }
+    if ($result.Problems.Count -eq 0) {
+        $what = @($result.Records | ForEach-Object { '{0} {1}' -f $_.what, $_.path })
+        if ($result.Jar.Action -ne 'none') { $what += ('tsa.zamane_jar {0} ({1})' -f $result.Jar.Jar, $result.Jar.Action) }
+        if ($what.Count -gt 0) { Add-Check 'executables' 'ok' ("Kaydedilecek programlar [programs to record]: {0}" -f ($what -join '; ')) }
+        else { Add-Check 'executables' 'ok' 'Görevlerin programları güvenilen klasörlerde [the tasks'' programs are in the trusted folders]' }
+    }
+}
+
+function Update-ExecutableRecords {
+    <#
+    The executables.record step: read the configuration with this installation's Python, check
+    it (Get-ExecutableRecordPlan; the preflight did so already where it could), keep the
+    programs for policy.json (Invoke-AdminSteps) and carry out the Zamane client's record: its
+    line appended to zamane-jar.sha256 and, for a client outside zamane\, the copy, with
+    tsa.zamane_jar pointed at it (the previous configuration kept as arcilogger.toml.before-<time>).
+    #>
+    $result = Get-ExecutableRecordPlan (Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath)
+    if ($result.Problems.Count -gt 0) { throw ($result.Problems -join ' | ') }
+    foreach ($warning in $result.Warnings) { Write-ArciWarn $warning; $script:Warnings.Add($warning) }
+    $script:ExecutableRecords = $result.Records
+    $script:ZamaneJarPlan = $result.Jar
+    $plan = $result.Jar
+    if ($plan.Action -eq 'copy') {
+        $copied = $false
+        if (-not (Test-Path -LiteralPath $plan.Target)) {
+            Copy-Item -LiteralPath $plan.Jar -Destination $plan.Target
+            $copied = $true
+        }
+        if ((Get-ArciFileSha256 -Path $plan.Target) -ne $plan.Sha256) {
+            if ($copied) { Remove-Item -LiteralPath $plan.Target -Force }
+            throw ("Zamane istemcisinin kopyası tutmuyor [the copy of the Zamane client does not match]: {0}" -f $plan.Target)
+        }
+        $text = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8)
+        $backup = '{0}.before-{1}' -f $ConfigPath, [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
+        Copy-Item -LiteralPath $ConfigPath -Destination $backup -Force
+        Write-ArciUtf8File -Path $ConfigPath -Text (Set-ArciTomlString -Text $text -Section 'tsa' -Key 'zamane_jar' -Value $plan.Target.Replace('\', '/'))
+        Add-ZamaneJarRecord -Sha256 $plan.Sha256 -Name ([System.IO.Path]::GetFileName($plan.Target)) -Note ('copied from {0} on {1} by the installer' -f $plan.Jar, [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+        $message = 'tsa.zamane_jar {0} -> {1}: {2} (önceki yapılandırma [previous configuration]: {3})' -f $plan.Jar, $plan.Target, $plan.Reason, $backup
+        Write-ArciWarn $message
+        $script:Warnings.Add($message)
+    }
+    elseif ($plan.Action -eq 'record') {
+        Add-ZamaneJarRecord -Sha256 $plan.Sha256 -Name ([System.IO.Path]::GetFileName($plan.Jar)) -Note ('recorded on {0} by the installer' -f [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+        Write-ArciInfo ('{0}: {1}' -f $plan.Jar, $plan.Reason)
+    }
+    foreach ($record in $script:ExecutableRecords) {
+        $message = '{0} {1} güvenilen programlara eklendi [recorded as a trusted program] (SHA-256 {2}); program değişirse kurulumu yeniden çalıştırın [run the installer again when the program changes]' -f $record.what, $record.path, $record.sha256
+        Write-ArciWarn $message
+        $script:Warnings.Add($message)
+    }
+}
+
+function Get-AdminPolicyText([object[]]$Records) {
+    <#
+    The text of admin\policy.json this run writes: the choices of Resolve-AdminPolicyChoice and
+    the trusted programs, those of policy.json kept unless $Records has a program of the same
+    path (the new record replaces it).
+    #>
+    $choice = $script:AdminPolicyChoice
+    $new = @($Records | Where-Object { $null -ne $_ })
+    $trusted = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($choice.TrustedExecutables)) {
+        if ($null -eq $entry) { continue }
+        if (@($new | Where-Object { [string]$_.path -ieq [string]$entry.path }).Count -eq 0) { $trusted.Add($entry) }
+    }
+    foreach ($record in $new) { $trusted.Add([pscustomobject]@{ path = $record.path; sha256 = $record.sha256; argv = $record.argv }) }
+    New-ArciAdminPolicy -Enabled $choice.Enabled -SourceNetwork @($choice.SourceNetworks) -MinPrefixV4 $choice.MinPrefixV4 `
+        -MaxSources $choice.MaxSources -HoldHours $choice.HoldHours -JarHoldHours $choice.JarHoldHours `
+        -ExecutableRoot @($choice.ExecutableRoots) -TrustedExecutable $trusted.ToArray() -TsaTestPerDay $choice.TsaTestPerDay
+}
+
+function Invoke-AdminSteps {
+    <#
+    The browser administration's part of the configuration (ADR-0014, contract 2.16), safe to
+    run again: admin\ and admin\keys\ protected (administrators and SYSTEM only) before
+    "keys init" creates the channel's keys (it never replaces one), admin\policy.json with the
+    remembered choices and the recorded programs, and the Event Log source ARCILOGGER-Admin.
+    Invoke-AclSteps then grants every reader its one right.
+    #>
+    $aclPlan = Get-ArciAclPlan -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir
+    $protected = @($aclPlan | Where-Object { $_.Path -eq $AdminDir -or $_.Path -eq $AdminKeysDir })
+    Invoke-Step 'admin.protect' ("Yönetim klasörü korunuyor [protecting the administration folder]: {0}" -f $AdminDir) {
+        # The inheritable read of the configuration folder for the services and LOCAL SERVICE
+        # must never reach a private key, even if this run stops before its ACL step (D0-7).
+        foreach ($entry in $protected) {
+            [void](New-Item -ItemType Directory -Path $entry.Path -Force)
+            Set-ArciAclEntry -Entry $entry
+        }
+    } $protected
+    Invoke-Step 'admin.keys' 'Yönetim kanalının anahtarları [administration channel keys] (keys init; var olan bir anahtar değişmez [an existing key is never replaced])' {
+        $result = Invoke-ArciProcess -FilePath $VenvPython -ArgumentList @('-I', '-m', 'arcilogger_core.admin', 'keys', 'init', '--config', $ConfigPath)
+        if ($result.StdOut.Trim()) { Write-ArciInfo $result.StdOut.Trim() }
+    } $AdminKeysDir
+    $planned = $null
+    if ($script:IsDryRun) {
+        try { $planned = (Get-AdminPolicyText -Records $script:ExecutableRecords) | ConvertFrom-Json }
+        catch { $planned = $_.Exception.Message }
+    }
+    $state = $(if ($script:AdminPolicyChoice.Enabled) { 'açık [on]' } else { 'kapalı [off]' })
+    Invoke-Step 'admin.policy' ("Tarayıcı yönetimi kuralları [browser administration policy] ({0}): {1}" -f $state, $PolicyPath) {
+        Write-ArciUtf8File -Path $PolicyPath -Text (Get-AdminPolicyText -Records $script:ExecutableRecords)
+    } $planned
+    Invoke-Step 'admin.event-source' 'Olay günlüğü kaynağı [Event Log source] ARCILOGGER-Admin (Application)' {
+        Write-ArciInfo ('ARCILOGGER-Admin: {0}' -f (Register-ArciEventSource))
+    }
+}
+
+function Save-ConfigBeforeUpgrade {
+    <#
+    Keep arcilogger.toml as arcilogger.toml.before-upgrade-<UTC time> and remember its name in
+    install\state.json (config_before_upgrade): a rollback to this version puts it back when the
+    version cannot load what the browser changed later (Restore-ConfigForProgram).
+    #>
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { return }
+    $copy = '{0}.before-upgrade-{1}' -f $ConfigPath, [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
+    Copy-Item -LiteralPath $ConfigPath -Destination $copy -Force
+    Write-InstallState @{ config_before_upgrade = $copy }
+    Write-ArciInfo ('Yapılandırmanın kopyası [copy of the configuration]: {0}' -f $copy)
+}
+
+function Restore-ConfigForProgram {
+    <#
+    Before the services of the program in $InstallDir start again after a rollback or a failed
+    upgrade (contract 2.16): its Python must load arcilogger.toml (Test-ArciProgramConfig). A
+    version from before the browser administration refuses what the browser added, such as
+    enabled = false of a log source: the copy kept before the upgrade (config_before_upgrade of
+    install\state.json) is put back then, the refused file kept beside it as
+    arcilogger.toml.refused-<time>, and the operator is told. Only the content is written, so
+    arcilogger.toml keeps its rights.
+    #>
+    if (-not (Test-Path -LiteralPath $ConfigPath) -or -not (Test-Path -LiteralPath $VenvPython)) { return }
+    $problem = Test-ArciProgramConfig -Python $VenvPython -ConfigPath $ConfigPath
+    if (-not $problem) { return }
+    $state = Read-InstallState
+    $copy = $null
+    if ($state.PSObject.Properties.Name -contains 'config_before_upgrade') { $copy = [string]$state.config_before_upgrade }
+    if (-not $copy -or -not (Test-Path -LiteralPath $copy -PathType Leaf)) {
+        throw ("arcilogger.toml bu sürümle yüklenmiyor ve yükseltme öncesi kopyası yok; dosyayı elle düzeltin [arcilogger.toml does not load with this version and there is no copy from before the upgrade: fix it by hand]: {0}" -f $problem)
+    }
+    $refused = '{0}.refused-{1}' -f $ConfigPath, [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
+    Copy-Item -LiteralPath $ConfigPath -Destination $refused -Force
+    [System.IO.File]::WriteAllBytes($ConfigPath, [System.IO.File]::ReadAllBytes($copy))
+    $script:ConfigRestored = $true
+    $still = Test-ArciProgramConfig -Python $VenvPython -ConfigPath $ConfigPath
+    if ($still) { throw ("Yükseltme öncesi kopya da yüklenmiyor [the copy from before the upgrade does not load either]: {0}" -f $still) }
+    $message = 'Tarayıcıdan yapılan sonraki değişiklikler geri alındı; denetim kaydında duruyorlar [later browser changes were rolled back; they remain in the audit log]. Önceki sürüm arcilogger.toml''u yükleyemedi [the previous version could not load arcilogger.toml] ({0}); yükseltme öncesi kopya geri kondu [the copy from before the upgrade is back]: {1}; reddedilen dosya [the refused file]: {2}. Güvenlik duvarı ve Windows Saati bu yapılandırmaya göre yeniden ayarlanır [the firewall and Windows Time are set again from this configuration]' -f $problem, $copy, $refused
+    Write-ArciWarn $message
+    $script:Warnings.Add($message)
+}
+
+function Sync-SystemAfterRollback {
+    <#
+    After a rollback, or a failed upgrade whose configuration had to be put back: the firewall's
+    syslog and outbound rules and the Windows Time peers follow the configuration as the program
+    in $InstallDir reads it. ApplySystem set them from the newer configuration and is gone with
+    the newer tasks; a configuration put back by Restore-ConfigForProgram lists sources again (a
+    source switched off or removed in the browser) that the rules no longer let through. The
+    restored program's own scripts run: Set-ArciFirewall.ps1 in its full mode with the choices
+    its state file remembers (only where ARCILOGGER manages the firewall), Set-ArciTime.ps1 with
+    [clock]. A failure is a warning naming the command to run by hand, never a failed rollback:
+    the services and the evidence path come back either way.
+    #>
+    $scripts = Join-Path $InstallDir 'scripts'
+    if (-not $SkipFirewall -and (Test-Path -LiteralPath $FirewallStatePath)) {
+        $firewall = Join-Path $scripts 'Set-ArciFirewall.ps1'
+        try { & $firewall -ConfigPath $ConfigPath -Python $VenvPython -StateFile $FirewallStatePath -Force:$Force }
+        catch {
+            $message = 'Güvenlik duvarı geri alınan yapılandırmayla eşitlenemedi, 514 kuralı eski olabilir [firewall not brought in line with the restored configuration, the 514 rule may be stale]: {0}. Yönetici PowerShell''inde çalıştırın [run in an administrator PowerShell]: powershell -ExecutionPolicy Bypass -File "{1}"' -f $_.Exception.Message, $firewall
+            Write-ArciWarn $message
+            $script:Warnings.Add($message)
+        }
+    }
+    if (-not $SkipTimeSetup) {
+        $time = Join-Path $scripts 'Set-ArciTime.ps1'
+        try {
+            $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath
+            & $time -Primary (Get-ArciConfigValue -Config $config -Path 'clock.ntp_server' -Default '') -Fallback (Get-ArciConfigValue -Config $config -Path 'clock.fallback_server' -Default 'time.ume.tubitak.gov.tr')
+        }
+        catch {
+            $message = 'Windows Saati geri alınan yapılandırmayla eşitlenemedi [Windows Time not brought in line with the restored configuration]: {0}. Çalıştırın [run]: powershell -ExecutionPolicy Bypass -File "{1}" -Primary <[clock] ntp_server>' -f $_.Exception.Message, $time
+            Write-ArciWarn $message
+            $script:Warnings.Add($message)
+        }
+    }
 }
 
 function Test-JavaForZamane {
@@ -1251,6 +1761,21 @@ function Invoke-AclSteps {
         & (Join-Path $ScriptsDir 'Set-ArciVaultAcl.ps1') -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir
         Set-PostgresDataAccess
     } $aclPlan
+}
+
+function Restore-ConfigFileAccess {
+    <#
+    The entries of arcilogger.toml and secrets.json of the ACL plan once more, after this run
+    stored a secret (contract 2.2): "arcilogger-core secret set" writes a new secrets.json and
+    renames it over the old one, and the new file carries only the inherited entries. Without
+    the explicit ArciAdmin entry the agent could not replace the file it applies the browser's
+    changes to (acl_drift after the first change). Off Windows (the tests) there is nothing to set.
+    #>
+    if (-not (Test-ArciWindows)) { return }
+    $entries = @(Get-ArciAclPlan -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir | Where-Object { $_.Path -eq $ConfigPath -or $_.Path -eq $SecretsFile })
+    foreach ($entry in $entries) {
+        if (Test-Path -LiteralPath $entry.Path) { Set-ArciAclEntry -Entry $entry }
+    }
 }
 
 # --- health ------------------------------------------------------------------------------------------
@@ -1366,6 +1891,10 @@ function Show-NextSteps {
     Write-Host ('      & "{0}" setup-token --config "{1}"' -f $ApiExe, $ConfigPath)
     Write-Host ('      Sonra {0}/setup adresini açıp anahtarı, kullanıcı adını ve parolayı girin [then open {0}/setup].' -f $url)
     Write-Host '   3. Kamu SM test hesabı [test account]:'
+    $browserAdministration = ($null -eq $script:AdminPolicyChoice) -or $script:AdminPolicyChoice.Enabled
+    if ($browserAdministration) {
+        Write-Host '      Web arayüzünde Ayarlar → Kamu SM sihirbazı bunu adım adım yapar (Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, damga testi); konsoldan da yapılabilir [the Kamu SM wizard under Settings in the web interface does it step by step; or at the console] (docs\AYARLAR.md):'
+    }
     Write-Host ('      Önce kök sertifikalar [roots first]: Kamu SM kök sertifikalarını {0} içine koyun, SHA-256 parmak izlerini Kamu SM''nin yayımladığı değerlerle karşılaştırın [compare the fingerprints] (docs\KURULUM.md bölüm 10).' -f (Join-Path $ProgramDataDir 'kamusm-roots'))
     Write-Host '      tsa-test 1 kontör harcar ve damgayı bu köklerle doğrular [tsa-test spends 1 credit, then verifies with these roots].'
     if ($atConsole) {
@@ -1373,6 +1902,7 @@ function Show-NextSteps {
     }
     Write-Host ('      & "{0}" secret set kamusm.customer' -f $CoreExe)
     Write-Host ('      & "{0}" secret set kamusm.password' -f $CoreExe)
+    Write-Host ('      & "{0}"   # secret set / secret delete sonrası: ArciAdmin''in secrets.json hakkı geri gelir [after a console secret set / secret delete: gives ArciAdmin its right on secrets.json back]' -f (Join-Path $InstallDir 'scripts\Set-ArciVaultAcl.ps1'))
     Write-Host ('      & "{0}" credit ; & "{0}" tsa-test' -f $CoreExe)
     Write-Host '   4. Cihaz ayarları [device setup]: docs\DEVICE-SETUP.md'
     if ($script:SourceCount -eq 0) {
@@ -1383,6 +1913,12 @@ function Show-NextSteps {
         else {
             Write-Host '      O zamana kadar güvenlik duvarı 514''ü hiçbir göndericiye açmaz, hiçbir log kaydedilmez; ekledikten sonra kurulumu yeniden çalıştırın [until then the firewall opens 514 to no sender and no log is recorded; run the installer again after adding them].'
         }
+        if ($browserAdministration) {
+            Write-Host '      Kaynaklar web arayüzünde Ayarlar → Kaynaklar''dan da eklenir; toplayıcı ve güvenlik duvarı yeniden başlatma olmadan izler [or add them under Settings → Sources in the web interface: the collector and the firewall follow without a restart].'
+        }
+    }
+    if (-not $browserAdministration) {
+        Write-Host '      Tarayıcı yönetimi kapalı (-DisableBrowserAdministration): ayarlar konsoldan değişir [browser administration is off: settings change at the console] (docs\AYARLAR.md).'
     }
     Write-Host '   5. Kurulumdan sonraki ilk adımlar [first steps]: docs\ILK-ADIMLAR.md (EN: docs\FIRST-STEPS.md)'
     # 6. The licence: its state when one is installed, otherwise the request code to e-mail to the
@@ -1514,6 +2050,8 @@ function Read-KamuSmCredentials {
             if ($result.ExitCode -ne 0) { Write-Host ('    {0}: çıkış kodu {1} [exit code]: {2}' -f $pair[0], $result.ExitCode, $result.StdErr.Trim()) -ForegroundColor Yellow }
             else { $stored++ }
         }
+        # Each "secret set" replaced secrets.json: ArciAdmin's entry back on it (contract 2.2).
+        if ($stored -gt 0) { Restore-ConfigFileAccess }
         if ($stored -eq 2) {
             Write-Host '    Bağlantı testinden önce Kamu SM kök sertifikalarını koyun, sonra credit ve tsa-test (docs\KURULUM.md bölüm 10) [roots first, then credit and tsa-test].'
         }
@@ -1649,6 +2187,7 @@ function Invoke-SourcesPreflight {
         $script:SourceCount = $tables.Tables
         $unread = $tables.Tables - $senders.Count
     }
+    $script:SourceSenders = @($senders)
     if ($script:SourceCount -eq 0) {
         $where = $(if ($existing) { '{0} içinde [[sources]] yok [no [[sources]] in it]' -f $ConfigPath } else { 'yeni arcilogger.toml [[sources]] olmadan oluşturulur; örnekteki cihazlar yalnızca yorum satırıdır [the new arcilogger.toml has no [[sources]]; the example''s devices are comments only]' })
         $effect = $(if ($SkipFirewall) { 'her gönderici bilinmeyen gönderici sayılır (unknown-<ip>) ve hiçbir kaynak sessizlik için izlenmez (R15) [every sender counts as unknown, no source is watched for silence]' } else { 'güvenlik duvarı 514''ü hiçbir göndericiye açmaz, hiçbir log kaydedilmez [the firewall opens 514 to no sender, no log is recorded]' })
@@ -1904,6 +2443,8 @@ function Invoke-Preflight {
     if (-not $SkipFirewall -and ($Mode -eq 'install' -or $Mode -eq 'upgrade')) { Invoke-FirewallPreflight }
     if ($Mode -eq 'install' -or $Mode -eq 'upgrade') {
         Invoke-SourcesPreflight
+        Invoke-AdminPolicyPreflight
+        Invoke-ExecutablePreflight
         Invoke-LicensePreflight
     }
 
@@ -1913,7 +2454,18 @@ function Invoke-Preflight {
             Add-Check 'programdata' 'fail' ("Zamanlanmış görevler yapılandırmayı {0} içinde arar; -ProgramDataDir yalnızca deneme için [scheduled tasks read the default config path]" -f $defaultProgramData)
         }
     }
-    if (-not $script:DataRootFromConfig -and $Mode -eq 'install') {
+    # The data root record (Resolve-ArciDataRoot): a data_dir that differs from it, or a record
+    # that cannot be used, stops the run; -DataRoot moves it deliberately.
+    if ($script:DataRootResolution.Problem) {
+        Add-Check 'data-root' 'fail' $script:DataRootResolution.Problem
+    }
+    elseif ($script:DataRootResolution.Replaces) {
+        Add-Check 'data-root' 'warn' ("Kayıtlı veri klasörü [recorded data root] {0} -> {1} (-DataRoot, {2}); hizmetler ve görevler yalnızca yeni klasörü kabul eder [the services and tasks accept only the new folder]" -f $script:DataRootResolution.Replaces, $DataRoot, $DataRootRecord)
+    }
+    elseif ($script:DataRootSource -eq 'record') {
+        Add-Check 'data-root' 'ok' ("Veri klasörü [data folder] {0} ({1})" -f $DataRoot, $DataRootRecord)
+    }
+    elseif (-not $script:DataRootFromConfig -and $Mode -eq 'install') {
         if ($script:DataRootSource -eq 'auto' -and $null -ne $script:DataRootChoice -and $script:DataRootChoice.Fallback) {
             Add-Check 'data-root' 'info' ("Veri klasörü otomatik seçildi [data folder chosen automatically]: {0} ({1}); başka bir disk için -DataRoot [another disk: -DataRoot]" -f $DataRoot, $script:DataRootChoice.Reason)
         }
@@ -2215,7 +2767,11 @@ function Invoke-CommonTail {
     if (-not $SkipDatabase) {
         # Versions without the database package (arcilogger-db) need no database yet.
         Invoke-Step 'database.provision' 'PostgreSQL rolü ve veritabanı [role and database]' {
-            if (Test-Path -LiteralPath $DbExe) { Invoke-DatabaseProvision }
+            if (Test-Path -LiteralPath $DbExe) {
+                Invoke-DatabaseProvision
+                # "secret set database.password" replaced secrets.json after Invoke-AclSteps.
+                Restore-ConfigFileAccess
+            }
             else {
                 $message = 'arcilogger-db bu sürümde yok; veritabanı adımları atlandı [no database package in this version, database steps skipped].'
                 Write-ArciWarn $message
@@ -2348,6 +2904,11 @@ function Restore-ArciRuntime {
             }
             Rename-ArciFolder -LiteralPath $PreviousDir -NewName (Split-Path -Leaf $InstallDir)
             $script:ProgramMoved = $false
+        }
+        # Before its services start: the previous version must load the configuration.
+        & $step 'Yapılandırma önceki sürümle yükleniyor [the configuration loads with the previous version]' { Restore-ConfigForProgram }
+        if ($script:ConfigRestored) {
+            & $step 'Güvenlik duvarı ve saat geri konan yapılandırmayla [firewall and time follow the configuration put back]' { Sync-SystemAfterRollback }
         }
     }
     & $step 'Hizmetler kayıtlı [services registered]' { Install-ArciServices -MissingOnly }
@@ -2493,6 +3054,15 @@ function Invoke-Upgrade {
             Stop-Installer 2 ("Veritabanı yedeği alınamadı; hiçbir şey değiştirilmedi [database backup failed, nothing changed]: {0}" -f $_.Exception.Message)
         }
     }
+    # Before any change too: the configuration the previous version loads (Restore-ConfigForProgram
+    # puts it back when a rollback cannot load what the browser changed afterwards).
+    try {
+        Invoke-Step 'config.before-upgrade' ("Yapılandırmanın yükseltme öncesi kopyası [copy of the configuration before the upgrade]: {0}.before-upgrade-<UTC>" -f $ConfigPath) { Save-ConfigBeforeUpgrade }
+    }
+    catch {
+        if ($script:IsDryRun) { throw }
+        Stop-Installer 2 ("Yapılandırma kopyalanamadı; hiçbir şey değiştirilmedi [configuration not copied, nothing changed]: {0}" -f $_.Exception.Message)
+    }
     try {
         Invoke-Step 'tasks.disable' 'Zamanlanmış görevler duraklatılıyor, çalışanlar bekleniyor [pausing scheduled tasks]' { Disable-ArciTasks }
         Invoke-Step 'services.stop' 'Hizmetler durduruluyor [stopping services]' { Stop-ArciServices }
@@ -2569,6 +3139,17 @@ function Invoke-RollbackMode {
         if ($RestoreDatabase) {
             Invoke-Step 'database.restore' 'Veritabanı yükseltme öncesi yedekten geri yükleniyor [restoring pre-upgrade dump]' { Invoke-DatabaseRestore }
         }
+        # A version from before the browser administration refuses what the browser added.
+        Invoke-Step 'config.compatible' 'Yapılandırma önceki sürümle yükleniyor, gerekirse yükseltme öncesi kopya geri konuyor [the configuration must load with the previous version, else the copy from before the upgrade is put back]' { Restore-ConfigForProgram }
+        # ApplySystem leaves with the newer tasks: the rules and the time peers it set follow the
+        # configuration as the restored program reads it, before the collector starts again.
+        $restoreDetail = [pscustomobject]@{
+            firewall   = $(if (-not $SkipFirewall -and (Test-Path -LiteralPath $FirewallStatePath)) { Join-Path $InstallDir 'scripts\Set-ArciFirewall.ps1' } else { $null })
+            time       = $(if (-not $SkipTimeSetup) { Join-Path $InstallDir 'scripts\Set-ArciTime.ps1' } else { $null })
+            state_file = $FirewallStatePath
+        }
+        Invoke-Step 'system.restore' 'Güvenlik duvarı ve Windows Saati geri alınan sürümün betikleriyle yapılandırmaya göre [firewall and Windows Time from the configuration, with the restored version''s scripts]' { Sync-SystemAfterRollback } $restoreDetail
+        # Services the previous version does not have (ArciAdmin) stay removed.
         Invoke-Step 'services.install' 'Windows hizmetleri [Windows services]' { Install-ArciServices }
         Invoke-Step 'tasks.register' 'Zamanlanmış görevler [scheduled tasks]' {
             Save-TaskChoices
@@ -2628,6 +3209,10 @@ function Invoke-UninstallMode {
     Invoke-Step 'tasks.unregister' 'Zamanlanmış görevler kaldırılıyor [removing scheduled tasks] \ARCILOGGER\' {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
     }
+    # The events already written stay in the Application log.
+    Invoke-Step 'eventlog.remove' 'Olay günlüğü kaynağı kaldırılıyor [removing the Event Log source] ARCILOGGER-Admin' {
+        Write-ArciInfo ('ARCILOGGER-Admin: {0}' -f (Unregister-ArciEventSource))
+    }
     Invoke-Step 'firewall.remove' 'Güvenlik duvarı kuralları kaldırılıyor, önceki ayarlar geri yükleniyor [removing firewall rules, restoring previous settings]' {
         & (Join-Path $ScriptsDir 'Set-ArciFirewall.ps1') -Remove -StateFile $FirewallStatePath
     }
@@ -2650,7 +3235,7 @@ function Invoke-UninstallMode {
     }
     foreach ($kept in @(
             @('keep.data', $DataRoot, 'Veri klasörü korunuyor (ham loglar, kasa, dışa aktarımlar, yedekler) [data folder kept]'),
-            @('keep.config', $ProgramDataDir, 'Yapılandırma, gizli depo, Kamu SM kökleri, Caddy CA korunuyor [configuration and secrets kept]'),
+            @('keep.config', $ProgramDataDir, 'Yapılandırma, gizli depo, yönetim klasörü (admin\), Kamu SM kökleri, Caddy CA korunuyor [configuration, secrets and the administration folder kept]'),
             @('keep.database', 'PostgreSQL', 'Veritabanı silinmedi [database kept]; istenirse elle: DROP DATABASE arcilogger; DROP ROLE arcilogger;')
         )) {
         Add-PlanItem -Id $kept[0] -Status 'kept' -Text ("{0}: {1}" -f $kept[2], $kept[1]) -Detail $kept[1]
@@ -2688,6 +3273,7 @@ try {
         }
         Resolve-ServerIdentity
         Resolve-SetupValues
+        Resolve-AdminPolicyChoice
     }
     if ($Mode -ne 'uninstall') {
         Invoke-Preflight
@@ -2733,11 +3319,17 @@ if ($script:IsDryRun) {
     Stop-Installer 0 'Deneme tamam; hiçbir şey değiştirilmedi [dry run complete, nothing changed].'
 }
 if ($Mode -eq 'install' -or $Mode -eq 'upgrade') {
-    # The server address and name are remembered for the next run (an upgrade, the setup .exe).
+    # The server address and name and the browser administration's choices are remembered for the
+    # next run (an upgrade, the setup .exe).
+    $choice = $script:AdminPolicyChoice
     Write-InstallState @{
         version = $script:Manifest.version; fingerprint = $script:BundleInfo.Fingerprint; last_mode = $Mode
         pending_database_restore = $null; last_failure = $null
         server_address = $ServerAddress; server_name = $ServerName
+        admin_policy = [pscustomobject]@{
+            enabled = $choice.Enabled; source_networks = @($choice.SourceNetworks)
+            hold_hours = $choice.HoldHours; jar_hold_hours = $choice.JarHoldHours
+        }
     }
     Show-NextSteps
 }
