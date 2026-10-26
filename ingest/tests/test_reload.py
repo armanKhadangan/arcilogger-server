@@ -17,11 +17,13 @@ import pytest
 from sqlalchemy import Engine, text
 
 from arcilogger_core.config import load_config
+from arcilogger_db.engine import engine_from_url
 from arcilogger_ingest.service import IngestService
 from arcilogger_ingest.status import read_status
 from arcilogger_ingest.testing import (
     DAY,
     SOURCES,
+    TcpProxy,
     World,
     check_exactly_once,
     dhcp_message,
@@ -75,6 +77,11 @@ def wait_for(predicate: Callable[[], bool], timeout: float = 15.0) -> None:
         time.sleep(0.02)
 
 
+def lines_loaded(engine: Engine, source: str) -> int:
+    """Lines of ``source`` on :data:`DAY` committed so far (0 before its first batch)."""
+    return offsets(engine).get((source, DAY), (0, 0, False))[1]
+
+
 def sources_table(engine: Engine) -> dict[str, tuple[str, bool, bool]]:
     """name -> (type, enabled, expected) of the ``sources`` table."""
     with engine.connect() as connection:
@@ -126,7 +133,7 @@ def test_new_sources_are_taken_and_written_with_enabled(
     # A device sending before it is configured: its folder is read by content detection.
     world.append("switch-2", DAY, (dhcp_message(i) for i in range(10)), sender="172.20.10.22")
     with running(world, db_engine, config_path) as service:
-        wait_for(lambda: offsets(db_engine).get(("switch-2", DAY), (0, 0, False))[1] == 10)
+        wait_for(lambda: lines_loaded(db_engine, "switch-2") == 10)
         assert service.streams[("switch-2", DAY)].info.source_type is None
         before = offsets(db_engine)
         rewrite(config_path, toml_of(world, [*SOURCES, {**SWITCH, "enabled": False}]))
@@ -146,8 +153,8 @@ def test_new_sources_are_taken_and_written_with_enabled(
         rewrite(config_path, toml_of(world, [*core_off, SWITCH]))
         wait_for(lambda: sources_table(db_engine)["core-r1"][1] is False)
         assert sources_table(db_engine)["switch-2"][1] is True
-        wait_for(lambda: offsets(db_engine)[("fortigate", DAY)][1] == 60)
-        wait_for(lambda: offsets(db_engine)[("switch-2", DAY)][1] == 20)
+        wait_for(lambda: lines_loaded(db_engine, "fortigate") == 60)
+        wait_for(lambda: lines_loaded(db_engine, "switch-2") == 20)
         rewrite(config_path, toml_of(world, [*SOURCES, SWITCH]))
         wait_for(lambda: sources_table(db_engine)["core-r1"][1] is True)
     assert check_exactly_once(db_engine, world) == []
@@ -190,6 +197,40 @@ def test_read_but_unloaded_lines_are_read_again_with_the_new_sources(
     assert [row[0] for row in kinds] == ["dhcp"]  # parsed as MikroTik lines
 
 
+@pytest.fixture
+def proxied_engine(proxy: TcpProxy, pg_dsn: str) -> Iterator[Engine]:
+    engine = engine_from_url(proxy.dsn(pg_dsn), application="ingest-test")
+    yield engine
+    engine.dispose()
+
+
+def test_a_change_while_the_database_is_down_is_taken_and_synced_later(
+    world: World, db_engine: Engine, proxy: TcpProxy, proxied_engine: Engine, config_path: Path
+) -> None:
+    """The batch retried during the outage does not hold the new sources back: the status
+    names the new file at once (the browser does not end at ``partially_active``), and the
+    ``sources`` table follows when the database is back."""
+    world.append("switch-2", DAY, (dhcp_message(i) for i in range(10)), sender="172.20.10.22")
+    with running(world, proxied_engine, config_path) as service:
+        wait_for(lambda: lines_loaded(db_engine, "switch-2") == 10)
+        proxy.down()
+        world.append(
+            "switch-2", DAY, (dhcp_message(i) for i in range(10, 20)), sender="172.20.10.22"
+        )
+        wait_for(lambda: proxy.refused >= 2)  # the new batch is being retried
+        rewrite(config_path, toml_of(world, [*SOURCES, {**SWITCH, "enabled": False}]))
+        wait_for(lambda: (status_config(world) or {}).get("sha256") == sha(config_path))
+        status = read_status(world.layout.ingest_status)
+        assert status is not None
+        assert status["database"]["ok"] is False
+        assert service.streams[("switch-2", DAY)].info.source_type == "mikrotik"
+        assert sources_table(db_engine)["switch-2"][1] is True  # not written yet
+        proxy.up()
+        wait_for(lambda: sources_table(db_engine)["switch-2"] == ("mikrotik", False, True))
+        wait_for(lambda: lines_loaded(db_engine, "switch-2") == 20)
+    assert check_exactly_once(db_engine, world) == []
+
+
 def test_a_broken_file_keeps_the_sources_and_loading_goes_on(
     world: World, db_engine: Engine, config_path: Path
 ) -> None:
@@ -205,7 +246,7 @@ def test_a_broken_file_keeps_the_sources_and_loading_goes_on(
         assert block["error"].startswith("sources.1.type: ")
         assert [source.name for source in service.config.sources] == ["fortigate", "core-r1", "ap"]
         world.append("core-r1", DAY, (dhcp_message(i) for i in range(10, 20)))
-        wait_for(lambda: offsets(db_engine)[("core-r1", DAY)][1] == 20)
+        wait_for(lambda: lines_loaded(db_engine, "core-r1") == 20)
     assert check_exactly_once(db_engine, world) == []
 
 

@@ -26,9 +26,12 @@ seconds for the dashboard.
 A changed ``[[sources]]`` in ``arcilogger.toml`` is taken without a restart (ADR-0014): between
 two batches the service drops what it read but did not load (it is read again), re-resolves
 every open stream for the new sources (offsets stay) and writes the sources, ``enabled``
-included, to the ``sources`` table. A file that does not load keeps the running sources; a
-change of a key ingest reads only at start-up is reported in the status file's ``config``
-block, which also names the SHA-256 of the file in use.
+included, to the ``sources`` table. While the database is unavailable the file is looked at
+before every retry, so a change is taken (and its SHA-256 reported) within one retry interval;
+the batch waiting for the database is dropped and read again for the new sources, and the
+``sources`` table follows once the database is back. A file that does not load keeps the
+running sources; a change of a key ingest reads only at start-up is reported in the status
+file's ``config`` block, which also names the SHA-256 of the file in use.
 
 Only one instance works on a database at a time (:mod:`arcilogger_ingest.instance`): a second
 one waits — and writes no status file — until the first stops (``--once``: exits with code 4).
@@ -342,6 +345,7 @@ class IngestService:
                     return EXIT_DB_UNAVAILABLE
                 self._backoff(attempt)
                 attempt += 1
+                self._reload()  # new sources are written to the table by the next attempt
                 continue
             self._database_up()
             self._scan_vault()
@@ -443,15 +447,16 @@ class IngestService:
 
     # -- live reload of [[sources]] (ADR-0014) --------------------------------------------------
 
-    def _reload(self) -> None:
-        """Between two batches: take a changed ``[[sources]]`` of the configuration file.
+    def _reload(self) -> bool:
+        """Between two batches, and before each retry while the database is unavailable: take
+        a changed ``[[sources]]`` of the configuration file; True when new sources were taken.
 
         What was read but not loaded is dropped and read again (the spool is the queue), so
         every line is prepared with the sources in use when it is loaded; the open streams are
         resolved again with their committed offsets, and the ``sources`` table follows (retried
         before the next batch while the database is unavailable)."""
         if self._watcher is None:
-            return
+            return False
         watch = self._watcher.poll()
         before, self.config_watch = self.config_watch, watch
         if before is None or before.status_block() != watch.status_block():
@@ -471,8 +476,9 @@ class IngestService:
                 self._sync_configured_sources()
             except DBAPIError as exc:
                 self._database_down(exc)
-                return
+                return watch.changed
             self._sources_unsynced = False
+        return watch.changed
 
     def _resolve_streams(self) -> None:
         """Every open stream as the configuration now describes its folder (parser type,
@@ -857,6 +863,8 @@ class IngestService:
                 attempt += 1
                 if self.stop.is_set():
                     return False
+                if self._reload():  # the batch was read for the old sources: dropped, it is
+                    return True  # read again for the new ones
                 continue
             self._committed(head, result)
             self._database_up()
