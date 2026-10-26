@@ -70,7 +70,7 @@ from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.matcher import Matcher, Record
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import site_day, utc_now
+from arcilogger_core.timeutil import site_day, to_site, utc_now
 from arcilogger_db.kinds import kind_of
 from arcilogger_db.settings import get_settings
 from arcilogger_ingest.prepare import PATTERN_RAW, StreamInfo, prepare_line
@@ -289,7 +289,7 @@ class Stream:
         self.pending, self.pending_since = {}, None
         return {
             **counts,
-            "since": since.isoformat(),
+            "since": to_site(since).isoformat(),
             "message_tr": message_tr,
             "message_en": message_en,
         }

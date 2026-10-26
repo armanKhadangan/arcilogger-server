@@ -1,0 +1,1601 @@
+{
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "live_stream_limit": {
+      "body": {
+        "error": {
+          "code": "live_stream_limit",
+          "message_en": "You can have at most 2 live tails open at a time (server total 4); close the one in another tab.",
+          "message_tr": "Aynı anda en fazla 2 canlı akış açabilirsiniz (sunucuda toplam 4); başka bir sekmedeki akışı kapatın."
+        }
+      },
+      "headers": {},
+      "status": 429
+    },
+    "live_stream_not_found": {
+      "body": {
+        "error": {
+          "code": "live_stream_not_found",
+          "message_en": "Live tail not found (it was closed or the server restarted).",
+          "message_tr": "Canlı akış bulunamadı (kapatılmış ya da sunucu yeniden başlamış olabilir)."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "privacy_notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "search_unknown_field": {
+      "body": {
+        "error": {
+          "code": "search_unknown_field",
+          "details": {
+            "end": 8,
+            "params": {
+              "field": "banana"
+            },
+            "start": 0
+          },
+          "message_en": "There is no field “banana”. Press “?” for the list of fields; put it in quotes to search for it as text.",
+          "message_tr": "“banana” diye bir alan yok. Alan listesi için “?” düğmesine basın; metin olarak aramak için tırnak içine alın."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_value_invalid": {
+      "body": {
+        "error": {
+          "code": "search_value_invalid",
+          "details": {
+            "end": 12,
+            "params": {
+              "field": "srcip",
+              "format": "ip",
+              "value": "banana"
+            },
+            "start": 6
+          },
+          "message_en": "“banana” is not valid for “srcip” (expected: an IP address or network, e.g. 172.20.41.5, 172.20.41.0/24, 172.20.41.*).",
+          "message_tr": "“srcip” alanı için “banana” geçerli değil (beklenen: IP adresi ya da ağ, ör. 172.20.41.5, 172.20.41.0/24, 172.20.41.*)."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "validation_error": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "backfill"
+              ],
+              "msg": "Input should be less than or equal to 200",
+              "type": "less_than_equal"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "events": {
+    "dropped": [
+      {
+        "data": {
+          "epoch": "9GyQ_n3cu9Mk",
+          "folders": [
+            {
+              "day": "2026-10-13",
+              "folder": "fortigate",
+              "start_line": 6
+            }
+          ],
+          "limits": {
+            "buffer_lines": 5000,
+            "keepalive_seconds": 15,
+            "max_lines_per_second": 10,
+            "max_minutes": 60
+          },
+          "notice_version": "1",
+          "stream_id": "2vOJgKZ3JKynJMBy4ZOMHQ"
+        },
+        "event": "hello",
+        "id": null
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 7,
+          "offset": 2386,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347339+03:00",
+          "sender": "172.31.255.1",
+          "seq": 12,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50100,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50100 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200100 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:12"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 8,
+          "offset": 2784,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347358+03:00",
+          "sender": "172.31.255.1",
+          "seq": 13,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50101,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50101 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200101 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:13"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 9,
+          "offset": 3182,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347366+03:00",
+          "sender": "172.31.255.1",
+          "seq": 14,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50102,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50102 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200102 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:14"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 10,
+          "offset": 3580,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347371+03:00",
+          "sender": "172.31.255.1",
+          "seq": 15,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50103,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50103 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200103 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:15"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 11,
+          "offset": 3978,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347376+03:00",
+          "sender": "172.31.255.1",
+          "seq": 16,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50104,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50104 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200104 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:16"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 12,
+          "offset": 4376,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347381+03:00",
+          "sender": "172.31.255.1",
+          "seq": 17,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50105,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50105 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200105 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:17"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 13,
+          "offset": 4774,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347386+03:00",
+          "sender": "172.31.255.1",
+          "seq": 18,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50106,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50106 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200106 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:18"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 14,
+          "offset": 5172,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347390+03:00",
+          "sender": "172.31.255.1",
+          "seq": 19,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50107,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50107 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200107 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:19"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 15,
+          "offset": 5570,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347395+03:00",
+          "sender": "172.31.255.1",
+          "seq": 20,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50108,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50108 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200108 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:20"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 16,
+          "offset": 5968,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347400+03:00",
+          "sender": "172.31.255.1",
+          "seq": 21,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50109,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50109 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200109 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:21"
+      },
+      {
+        "data": {
+          "behind": 0,
+          "message_en": "15 lines were not shown: at most 10 lines a second are shown.",
+          "message_tr": "15 satır gösterilmedi: saniyede en fazla 10 satır gösterilir.",
+          "parse_budget": 0,
+          "rate_limited": 15,
+          "since": "2026-10-13T04:00:35.867685+00:00",
+          "slow_client": 0
+        },
+        "event": "dropped",
+        "id": null
+      }
+    ],
+    "end": [
+      {
+        "data": {
+          "epoch": "9GyQ_n3cu9Mk",
+          "folders": [
+            {
+              "day": "2026-10-13",
+              "folder": "core-r1",
+              "start_line": 3
+            },
+            {
+              "day": "2026-10-13",
+              "folder": "fortigate",
+              "start_line": 5
+            }
+          ],
+          "limits": {
+            "buffer_lines": 5000,
+            "keepalive_seconds": 15,
+            "max_lines_per_second": 100,
+            "max_minutes": 60
+          },
+          "notice_version": "1",
+          "stream_id": "wdSND2uB9Fw3zAXHicP7GA"
+        },
+        "event": "hello",
+        "id": null
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 7,
+          "offset": 2386,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347339+03:00",
+          "sender": "172.31.255.1",
+          "seq": 12,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50100,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50100 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200100 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:12"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 8,
+          "offset": 2784,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347358+03:00",
+          "sender": "172.31.255.1",
+          "seq": 13,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50101,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50101 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200101 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:13"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 9,
+          "offset": 3182,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347366+03:00",
+          "sender": "172.31.255.1",
+          "seq": 14,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50102,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50102 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200102 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:14"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 10,
+          "offset": 3580,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347371+03:00",
+          "sender": "172.31.255.1",
+          "seq": 15,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50103,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50103 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200103 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:15"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 11,
+          "offset": 3978,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347376+03:00",
+          "sender": "172.31.255.1",
+          "seq": 16,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50104,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50104 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200104 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:16"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 12,
+          "offset": 4376,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347381+03:00",
+          "sender": "172.31.255.1",
+          "seq": 17,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50105,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50105 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200105 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:17"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 13,
+          "offset": 4774,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347386+03:00",
+          "sender": "172.31.255.1",
+          "seq": 18,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50106,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50106 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200106 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:18"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 14,
+          "offset": 5172,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347390+03:00",
+          "sender": "172.31.255.1",
+          "seq": 19,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50107,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50107 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200107 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:19"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 15,
+          "offset": 5570,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347395+03:00",
+          "sender": "172.31.255.1",
+          "seq": 20,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50108,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50108 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200108 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:20"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 16,
+          "offset": 5968,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347400+03:00",
+          "sender": "172.31.255.1",
+          "seq": 21,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50109,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50109 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200109 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:21"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 17,
+          "offset": 6366,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347404+03:00",
+          "sender": "172.31.255.1",
+          "seq": 22,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50110,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50110 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200110 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:22"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 18,
+          "offset": 6764,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347424+03:00",
+          "sender": "172.31.255.1",
+          "seq": 23,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50111,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50111 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200111 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:23"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 19,
+          "offset": 7162,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347429+03:00",
+          "sender": "172.31.255.1",
+          "seq": 24,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50112,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50112 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200112 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:24"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 20,
+          "offset": 7560,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347434+03:00",
+          "sender": "172.31.255.1",
+          "seq": 25,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50113,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50113 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200113 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:25"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 21,
+          "offset": 7958,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347438+03:00",
+          "sender": "172.31.255.1",
+          "seq": 26,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50114,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50114 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200114 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:26"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 22,
+          "offset": 8356,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347442+03:00",
+          "sender": "172.31.255.1",
+          "seq": 27,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50115,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50115 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200115 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:27"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 23,
+          "offset": 8754,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347447+03:00",
+          "sender": "172.31.255.1",
+          "seq": 28,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50116,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50116 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200116 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:28"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 24,
+          "offset": 9152,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347451+03:00",
+          "sender": "172.31.255.1",
+          "seq": 29,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50117,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50117 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200117 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:29"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 25,
+          "offset": 9550,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347455+03:00",
+          "sender": "172.31.255.1",
+          "seq": 30,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50118,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50118 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200118 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:30"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 26,
+          "offset": 9948,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347459+03:00",
+          "sender": "172.31.255.1",
+          "seq": 31,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50119,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50119 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200119 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:31"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 27,
+          "offset": 10346,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347463+03:00",
+          "sender": "172.31.255.1",
+          "seq": 32,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50120,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50120 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200120 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:32"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 28,
+          "offset": 10744,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347472+03:00",
+          "sender": "172.31.255.1",
+          "seq": 33,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50121,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50121 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200121 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:33"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 29,
+          "offset": 11142,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347476+03:00",
+          "sender": "172.31.255.1",
+          "seq": 34,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50122,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50122 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200122 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:34"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 30,
+          "offset": 11540,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347481+03:00",
+          "sender": "172.31.255.1",
+          "seq": 35,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50123,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50123 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200123 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:35"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 31,
+          "offset": 11938,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:35.347486+03:00",
+          "sender": "172.31.255.1",
+          "seq": 36,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50124,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50124 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200124 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:36"
+      },
+      {
+        "data": {
+          "code": "time_limit",
+          "message_en": "The live tail stopped after 60 minutes (unattended screen). Press “Resume” to continue.",
+          "message_tr": "Canlı akış 60 dakika sonra durduruldu (gözetimsiz ekran). Sürdürmek için “Sürdür”e basın."
+        },
+        "event": "end",
+        "id": null
+      }
+    ],
+    "gap": [
+      {
+        "data": {
+          "epoch": "9GyQ_n3cu9Mk",
+          "folders": [
+            {
+              "day": "2026-10-13",
+              "folder": "fortigate",
+              "start_line": 6
+            }
+          ],
+          "limits": {
+            "buffer_lines": 5000,
+            "keepalive_seconds": 15,
+            "max_lines_per_second": 10,
+            "max_minutes": 60
+          },
+          "notice_version": "1",
+          "stream_id": "2vOJgKZ3JKynJMBy4ZOMHQ"
+        },
+        "event": "hello",
+        "id": null
+      },
+      {
+        "data": {
+          "message_en": "The lines in between could not be shown; you can open this interval in Search.",
+          "message_tr": "Aradaki satırlar gösterilemedi; bu aralığı Arama'da açabilirsiniz.",
+          "missed": null,
+          "reason": "hub_restarted"
+        },
+        "event": "gap",
+        "id": null
+      }
+    ],
+    "stream": [
+      {
+        "data": {
+          "epoch": "9GyQ_n3cu9Mk",
+          "folders": [
+            {
+              "day": "2026-10-13",
+              "folder": "core-r1",
+              "start_line": 3
+            },
+            {
+              "day": "2026-10-13",
+              "folder": "fortigate",
+              "start_line": 5
+            }
+          ],
+          "limits": {
+            "buffer_lines": 5000,
+            "keepalive_seconds": 15,
+            "max_lines_per_second": 100,
+            "max_minutes": 60
+          },
+          "notice_version": "1",
+          "stream_id": "wdSND2uB9Fw3zAXHicP7GA"
+        },
+        "event": "hello",
+        "id": null
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 3,
+          "offset": 796,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:24.085949+03:00",
+          "sender": "172.31.255.1",
+          "seq": 6,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50002,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50002 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200002 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:6"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 4,
+          "offset": 1194,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:24.085955+03:00",
+          "sender": "172.31.255.1",
+          "seq": 7,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50003,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50003 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200003 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:7"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 5,
+          "offset": 1592,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:24.085961+03:00",
+          "sender": "172.31.255.1",
+          "seq": 8,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50004,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50004 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200004 proto=6 action=\"accept\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:8"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": null,
+          "line": 4,
+          "offset": 471,
+          "parse_error": "rawlog.invalid",
+          "parse_skipped": false,
+          "parsed": false,
+          "received": null,
+          "sender": null,
+          "seq": 9,
+          "source": "core-r1",
+          "subtype": null,
+          "summary": {},
+          "text": "\\u0000\\u0000 torn fragment of a line",
+          "truncated": false,
+          "type": null
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:9"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "traffic",
+          "line": 6,
+          "offset": 1990,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:24.221337+03:00",
+          "sender": "172.31.255.1",
+          "seq": 10,
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "deny",
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": "port2 → wan1",
+            "policy": "12",
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 50010,
+            "vlan_id": 42
+          },
+          "text": "<189>date=2026-10-13 time=07:00:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=50010 srcintf=\"port2\" dstip=203.0.113.10 dstport=443 dstintf=\"wan1\" policyid=12 sessionid=3200010 proto=6 action=\"deny\" service=\"HTTPS\" sentbyte=1200 rcvdbyte=5400",
+          "truncated": false,
+          "type": "traffic"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:10"
+      },
+      {
+        "data": {
+          "day": "2026-10-13",
+          "kind": "syslog",
+          "line": 1,
+          "offset": 0,
+          "parse_error": null,
+          "parse_skipped": false,
+          "parsed": true,
+          "received": "2026-10-13T07:00:24.221761+03:00",
+          "sender": "198.51.100.23",
+          "seq": 11,
+          "source": "unknown-198.51.100.23",
+          "subtype": null,
+          "summary": {},
+          "text": "<13>Oct 13 07:00:00 yeni-cihaz ilk mesaj",
+          "truncated": false,
+          "type": "syslog"
+        },
+        "event": "line",
+        "id": "9GyQ_n3cu9Mk:11"
+      }
+    ]
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:07.150349+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "open": {
+    "admin": {
+      "epoch": "9GyQ_n3cu9Mk",
+      "expires_at": "2026-10-13T05:00:24.187282Z",
+      "folders": [
+        {
+          "day": "2026-10-13",
+          "folder": "core-r1",
+          "start_line": 3
+        },
+        {
+          "day": "2026-10-13",
+          "folder": "fortigate",
+          "start_line": 5
+        }
+      ],
+      "limits": {
+        "buffer_lines": 5000,
+        "keepalive_seconds": 15,
+        "max_lines_per_second": 100,
+        "max_minutes": 60
+      },
+      "stream_id": "wdSND2uB9Fw3zAXHicP7GA"
+    },
+    "auditor": {
+      "epoch": "9GyQ_n3cu9Mk",
+      "expires_at": "2026-10-13T05:00:35.327356Z",
+      "folders": [
+        {
+          "day": "2026-10-13",
+          "folder": "fortigate",
+          "start_line": 6
+        }
+      ],
+      "limits": {
+        "buffer_lines": 5000,
+        "keepalive_seconds": 15,
+        "max_lines_per_second": 10,
+        "max_minutes": 60
+      },
+      "stream_id": "2vOJgKZ3JKynJMBy4ZOMHQ"
+    }
+  },
+  "status": {
+    "hub": {
+      "files": 3,
+      "lines_per_second": 0.0,
+      "parsed_per_second": 0.0,
+      "running": true,
+      "skipped_total": 0
+    },
+    "max_streams": 4,
+    "streams": 2
+  }
+}

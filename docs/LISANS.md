@@ -103,6 +103,8 @@ vermez.
 | `/persons` | Kişiler | 5651 Temel |
 | `/departments` | Departmanlar | 5651 Temel |
 | `/vlans` | VLAN'lar ve alt ağlar | 5651 Temel |
+| `/live` | Canlı Akış: ham kayıt klasöründen anlık satırlar | 5651 Temel |
+| `/sources` | Kaynaklar: log kaynaklarının durumu, geçmişi ve son satırları | 5651 Temel |
 | `/license` | Lisans durumu, lisans dosyası yükleme ve kaldırma | 5651 Temel |
 | `/admin` | Ayarlar: sunucu yapılandırması, yönetim hizmetinin durumu, değişiklik istekleri ve geçmişi | 5651 Temel |
 | `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |

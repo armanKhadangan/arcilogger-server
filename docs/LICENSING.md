@@ -102,6 +102,8 @@ licence state.
 | `/persons` | Persons | 5651 Core |
 | `/departments` | Departments | 5651 Core |
 | `/vlans` | VLANs and subnets | 5651 Core |
+| `/live` | Canlı Akış (live tail): lines from the raw spool as they arrive | 5651 Core |
+| `/sources` | Kaynaklar (sources): the state, history and last lines of every log source | 5651 Core |
 | `/license` | Licence state, upload and removal of the licence file | 5651 Core |
 | `/admin` | Settings: the machine configuration, the administration service's state, change requests and their history | 5651 Core |
 | `/settings` | Application settings (the database settings) | 5651 Core |

@@ -207,6 +207,16 @@
       "get",
       "post"
     ],
+    "/api/v1/live/status": [
+      "get"
+    ],
+    "/api/v1/live/streams": [
+      "post"
+    ],
+    "/api/v1/live/streams/{stream_id}": [
+      "delete",
+      "get"
+    ],
     "/api/v1/lookup/5651": [
       "post"
     ],
@@ -283,6 +293,15 @@
     ],
     "/api/v1/settings/{key}/reset": [
       "post"
+    ],
+    "/api/v1/sources": [
+      "get"
+    ],
+    "/api/v1/sources/{name}": [
+      "get"
+    ],
+    "/api/v1/sources/{name}/tail": [
+      "get"
     ],
     "/api/v1/usage/categories": [
       "get"
@@ -2606,6 +2625,32 @@
       "title": "CodeMessage",
       "type": "object"
     },
+    "CollectorState": {
+      "properties": {
+        "fresh": {
+          "title": "Fresh",
+          "type": "boolean"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated At"
+        }
+      },
+      "required": [
+        "updated_at",
+        "fresh"
+      ],
+      "title": "CollectorState",
+      "type": "object"
+    },
     "CompanyUsage": {
       "properties": {
         "active_users": {
@@ -3031,6 +3076,67 @@
       "title": "DashboardIngest",
       "type": "object"
     },
+    "DashboardParseFailures": {
+      "description": "Today's parse failures (\"Ayrıştırma hataları\"): counts and patterns, never content.",
+      "properties": {
+        "by_source": {
+          "items": {
+            "$ref": "#/components/schemas/SourceFailures"
+          },
+          "title": "By Source",
+          "type": "array"
+        },
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "failures": {
+          "title": "Failures",
+          "type": "integer"
+        },
+        "last7": {
+          "items": {
+            "$ref": "#/components/schemas/FailureDay"
+          },
+          "title": "Last7",
+          "type": "array"
+        },
+        "lines": {
+          "title": "Lines",
+          "type": "integer"
+        },
+        "permille": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Permille"
+        },
+        "top_patterns": {
+          "items": {
+            "$ref": "#/components/schemas/FailurePattern"
+          },
+          "title": "Top Patterns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "day",
+        "lines",
+        "failures",
+        "permille",
+        "by_source",
+        "top_patterns",
+        "last7"
+      ],
+      "title": "DashboardParseFailures",
+      "type": "object"
+    },
     "DashboardSeal": {
       "properties": {
         "calendar": {
@@ -3098,6 +3204,16 @@
             }
           ]
         },
+        "parse_failures": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/DashboardParseFailures"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "seal": {
           "anyOf": [
             {
@@ -3115,9 +3231,39 @@
         "seal",
         "credit",
         "clock",
-        "alerts"
+        "alerts",
+        "parse_failures"
       ],
       "title": "DashboardSummary",
+      "type": "object"
+    },
+    "DayHealth": {
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "failures": {
+          "title": "Failures",
+          "type": "integer"
+        },
+        "lines": {
+          "title": "Lines",
+          "type": "integer"
+        },
+        "sealed": {
+          "title": "Sealed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "day",
+        "lines",
+        "failures",
+        "sealed"
+      ],
+      "title": "DayHealth",
       "type": "object"
     },
     "DepartmentCreate": {
@@ -4506,6 +4652,57 @@
       "title": "EvidencePage",
       "type": "object"
     },
+    "FailureDay": {
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "failures": {
+          "title": "Failures",
+          "type": "integer"
+        },
+        "lines": {
+          "title": "Lines",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "day",
+        "lines",
+        "failures"
+      ],
+      "title": "FailureDay",
+      "type": "object"
+    },
+    "FailurePattern": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "example": {
+          "$ref": "#/components/schemas/RawRef"
+        },
+        "pattern": {
+          "title": "Pattern",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "pattern",
+        "count",
+        "example"
+      ],
+      "title": "FailurePattern",
+      "type": "object"
+    },
     "FirewallOut": {
       "properties": {
         "managed": {
@@ -4698,6 +4895,25 @@
         "sessions"
       ],
       "title": "HostnameRow",
+      "type": "object"
+    },
+    "HourCount": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "hour": {
+          "format": "date-time",
+          "title": "Hour",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hour",
+        "count"
+      ],
+      "title": "HourCount",
       "type": "object"
     },
     "HourPoint": {
@@ -5510,6 +5726,483 @@
         "email"
       ],
       "title": "LicensorOut",
+      "type": "object"
+    },
+    "LiveDropped": {
+      "description": "``event: dropped`` (at most once a second) — matching lines not shown since ``since``.",
+      "properties": {
+        "behind": {
+          "title": "Behind",
+          "type": "integer"
+        },
+        "message_en": {
+          "title": "Message En",
+          "type": "string"
+        },
+        "message_tr": {
+          "title": "Message Tr",
+          "type": "string"
+        },
+        "parse_budget": {
+          "title": "Parse Budget",
+          "type": "integer"
+        },
+        "rate_limited": {
+          "title": "Rate Limited",
+          "type": "integer"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "slow_client": {
+          "title": "Slow Client",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rate_limited",
+        "slow_client",
+        "parse_budget",
+        "behind",
+        "since",
+        "message_tr",
+        "message_en"
+      ],
+      "title": "LiveDropped",
+      "type": "object"
+    },
+    "LiveEnd": {
+      "description": "``event: end`` — the stream is closed; the web app does not reconnect.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message_en": {
+          "title": "Message En",
+          "type": "string"
+        },
+        "message_tr": {
+          "title": "Message Tr",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message_tr",
+        "message_en"
+      ],
+      "title": "LiveEnd",
+      "type": "object"
+    },
+    "LiveEvents": {
+      "description": "The ``data:`` of each event of ``GET /live/streams/{id}`` (``text/event-stream``).",
+      "properties": {
+        "dropped": {
+          "$ref": "#/components/schemas/LiveDropped"
+        },
+        "end": {
+          "$ref": "#/components/schemas/LiveEnd"
+        },
+        "gap": {
+          "$ref": "#/components/schemas/LiveGap"
+        },
+        "hello": {
+          "$ref": "#/components/schemas/LiveHello"
+        },
+        "line": {
+          "$ref": "#/components/schemas/LiveLine"
+        }
+      },
+      "required": [
+        "hello",
+        "line",
+        "dropped",
+        "gap",
+        "end"
+      ],
+      "title": "LiveEvents",
+      "type": "object"
+    },
+    "LiveFolder": {
+      "description": "A spool folder the stream follows: lines after ``start_line`` of its ``day`` are new.",
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "folder": {
+          "title": "Folder",
+          "type": "string"
+        },
+        "start_line": {
+          "title": "Start Line",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "folder",
+        "day",
+        "start_line"
+      ],
+      "title": "LiveFolder",
+      "type": "object"
+    },
+    "LiveGap": {
+      "description": "``event: gap`` — lines in between may be missing (open them in Arama).",
+      "properties": {
+        "message_en": {
+          "title": "Message En",
+          "type": "string"
+        },
+        "message_tr": {
+          "title": "Message Tr",
+          "type": "string"
+        },
+        "missed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Missed"
+        },
+        "reason": {
+          "enum": [
+            "resume_too_late",
+            "hub_restarted",
+            "file_replaced"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "missed",
+        "message_tr",
+        "message_en"
+      ],
+      "title": "LiveGap",
+      "type": "object"
+    },
+    "LiveHello": {
+      "description": "``event: hello`` — the first event of every connection.",
+      "properties": {
+        "epoch": {
+          "title": "Epoch",
+          "type": "string"
+        },
+        "folders": {
+          "items": {
+            "$ref": "#/components/schemas/LiveFolder"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/components/schemas/LiveLimits"
+        },
+        "notice_version": {
+          "title": "Notice Version",
+          "type": "string"
+        },
+        "stream_id": {
+          "title": "Stream Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream_id",
+        "epoch",
+        "notice_version",
+        "folders",
+        "limits"
+      ],
+      "title": "LiveHello",
+      "type": "object"
+    },
+    "LiveHubStatus": {
+      "properties": {
+        "files": {
+          "title": "Files",
+          "type": "integer"
+        },
+        "lines_per_second": {
+          "title": "Lines Per Second",
+          "type": "number"
+        },
+        "parsed_per_second": {
+          "title": "Parsed Per Second",
+          "type": "number"
+        },
+        "running": {
+          "title": "Running",
+          "type": "boolean"
+        },
+        "skipped_total": {
+          "title": "Skipped Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "running",
+        "files",
+        "lines_per_second",
+        "parsed_per_second",
+        "skipped_total"
+      ],
+      "title": "LiveHubStatus",
+      "type": "object"
+    },
+    "LiveLimits": {
+      "properties": {
+        "buffer_lines": {
+          "title": "Buffer Lines",
+          "type": "integer"
+        },
+        "keepalive_seconds": {
+          "title": "Keepalive Seconds",
+          "type": "integer"
+        },
+        "max_lines_per_second": {
+          "title": "Max Lines Per Second",
+          "type": "integer"
+        },
+        "max_minutes": {
+          "title": "Max Minutes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_lines_per_second",
+        "keepalive_seconds",
+        "buffer_lines",
+        "max_minutes"
+      ],
+      "title": "LiveLimits",
+      "type": "object"
+    },
+    "LiveLine": {
+      "description": "``event: line`` (``id: <epoch>:<seq>``) — one raw line of the spool.\n\n``parsed`` fields (``kind``, ``type``, ``subtype``, ``summary``, ``parse_error``) are a\npreview: ingest's row may differ in details. ``parsed: false`` with ``parse_skipped: true``:\nthe server had no parse budget left for the line; ``parse_error: \"rawlog.invalid\"``: the\nline is not in the collector's format (\"biçim dışı\"). The whole line: ``GET /raw`` with\n``source``, ``day``, ``line``, ``offset``.",
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "integer"
+        },
+        "parse_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parse Error"
+        },
+        "parse_skipped": {
+          "title": "Parse Skipped",
+          "type": "boolean"
+        },
+        "parsed": {
+          "title": "Parsed",
+          "type": "boolean"
+        },
+        "received": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Received"
+        },
+        "sender": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sender"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subtype"
+        },
+        "summary": {
+          "$ref": "#/components/schemas/SearchSummary"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Type"
+        }
+      },
+      "required": [
+        "seq",
+        "received",
+        "source",
+        "sender",
+        "day",
+        "line",
+        "offset",
+        "kind",
+        "type",
+        "subtype",
+        "summary",
+        "text",
+        "truncated",
+        "parse_error",
+        "parsed",
+        "parse_skipped"
+      ],
+      "title": "LiveLine",
+      "type": "object"
+    },
+    "LiveStatus": {
+      "properties": {
+        "hub": {
+          "$ref": "#/components/schemas/LiveHubStatus"
+        },
+        "max_streams": {
+          "title": "Max Streams",
+          "type": "integer"
+        },
+        "streams": {
+          "title": "Streams",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "streams",
+        "max_streams",
+        "hub"
+      ],
+      "title": "LiveStatus",
+      "type": "object"
+    },
+    "LiveStreamIn": {
+      "additionalProperties": false,
+      "properties": {
+        "backfill": {
+          "anyOf": [
+            {
+              "maximum": 200.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Backfill"
+        },
+        "q": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Q",
+          "type": "string"
+        }
+      },
+      "title": "LiveStreamIn",
+      "type": "object"
+    },
+    "LiveStreamOut": {
+      "properties": {
+        "epoch": {
+          "title": "Epoch",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "folders": {
+          "items": {
+            "$ref": "#/components/schemas/LiveFolder"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/components/schemas/LiveLimits"
+        },
+        "stream_id": {
+          "title": "Stream Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream_id",
+        "epoch",
+        "expires_at",
+        "folders",
+        "limits"
+      ],
+      "title": "LiveStreamOut",
       "type": "object"
     },
     "LockedPath": {
@@ -6890,6 +7583,36 @@
         "sender"
       ],
       "title": "RawLineOut",
+      "type": "object"
+    },
+    "RawRef": {
+      "description": "A raw line: line ``line`` of ``spool/<source>/<day>.log`` (or the sealed file), which\nstarts at byte ``offset``.",
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "day",
+        "line",
+        "offset"
+      ],
+      "title": "RawRef",
       "type": "object"
     },
     "Readiness": {
@@ -8508,6 +9231,200 @@
       "title": "SealYesterday",
       "type": "object"
     },
+    "SearchSummary": {
+      "description": "The typed fields of a row, for the \"Özet\" column (only those the row has).",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Action"
+        },
+        "app": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "App"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Domain"
+        },
+        "dstip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dstip"
+        },
+        "dstport": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dstport"
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Interface"
+        },
+        "mac": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mac"
+        },
+        "natip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Natip"
+        },
+        "natport": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Natport"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Policy"
+        },
+        "proto": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Proto"
+        },
+        "srcip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Srcip"
+        },
+        "srcport": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Srcport"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Url"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User"
+        },
+        "vlan_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Vlan Id"
+        }
+      },
+      "title": "SearchSummary",
+      "type": "object"
+    },
     "SecretMeta": {
       "description": "A stored credential: whether it is set, and who changed it when; never its value.",
       "properties": {
@@ -9626,6 +10543,506 @@
       "title": "SourceCheckBody",
       "type": "object"
     },
+    "SourceDetail": {
+      "properties": {
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Address"
+        },
+        "configured": {
+          "title": "Configured",
+          "type": "boolean"
+        },
+        "daily": {
+          "items": {
+            "$ref": "#/components/schemas/DayHealth"
+          },
+          "title": "Daily",
+          "type": "array"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "expected": {
+          "title": "Expected",
+          "type": "boolean"
+        },
+        "first_seen": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "First Seen"
+        },
+        "gaps": {
+          "items": {
+            "$ref": "#/components/schemas/SourceGap"
+          },
+          "title": "Gaps",
+          "type": "array"
+        },
+        "heartbeat_minutes": {
+          "title": "Heartbeat Minutes",
+          "type": "integer"
+        },
+        "hourly": {
+          "items": {
+            "$ref": "#/components/schemas/HourCount"
+          },
+          "title": "Hourly",
+          "type": "array"
+        },
+        "last_message": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Message"
+        },
+        "last_message_origin": {
+          "anyOf": [
+            {
+              "enum": [
+                "collector",
+                "database"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Message Origin"
+        },
+        "lines_today": {
+          "title": "Lines Today",
+          "type": "integer"
+        },
+        "messages_per_minute": {
+          "title": "Messages Per Minute",
+          "type": "number"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "network_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Network Of"
+        },
+        "parse_failure_permille": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parse Failure Permille"
+        },
+        "parse_failures": {
+          "items": {
+            "$ref": "#/components/schemas/SourceParseFailure"
+          },
+          "title": "Parse Failures",
+          "type": "array"
+        },
+        "parse_failures_today": {
+          "title": "Parse Failures Today",
+          "type": "integer"
+        },
+        "pending_bytes": {
+          "title": "Pending Bytes",
+          "type": "integer"
+        },
+        "promoted_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Promoted To"
+        },
+        "silent_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Silent Minutes"
+        },
+        "sparkline": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Sparkline",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "silent",
+            "never",
+            "disabled",
+            "unknown",
+            "promoted"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "suggested": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/Suggested"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "unknown": {
+          "title": "Unknown",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "address",
+        "configured",
+        "network_of",
+        "unknown",
+        "enabled",
+        "expected",
+        "heartbeat_minutes",
+        "first_seen",
+        "last_message",
+        "last_message_origin",
+        "state",
+        "silent_minutes",
+        "messages_per_minute",
+        "sparkline",
+        "lines_today",
+        "pending_bytes",
+        "parse_failures_today",
+        "parse_failure_permille",
+        "promoted_to",
+        "suggested",
+        "hourly",
+        "daily",
+        "gaps",
+        "parse_failures"
+      ],
+      "title": "SourceDetail",
+      "type": "object"
+    },
+    "SourceFailures": {
+      "properties": {
+        "failures": {
+          "title": "Failures",
+          "type": "integer"
+        },
+        "lines": {
+          "title": "Lines",
+          "type": "integer"
+        },
+        "permille": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Permille"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "lines",
+        "failures",
+        "permille"
+      ],
+      "title": "SourceFailures",
+      "type": "object"
+    },
+    "SourceGap": {
+      "properties": {
+        "from": {
+          "format": "date-time",
+          "title": "From",
+          "type": "string"
+        },
+        "minutes": {
+          "title": "Minutes",
+          "type": "integer"
+        },
+        "origin": {
+          "enum": [
+            "manifest",
+            "live"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "to": {
+          "format": "date-time",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "minutes",
+        "reason",
+        "origin"
+      ],
+      "title": "SourceGap",
+      "type": "object"
+    },
+    "SourceHealth": {
+      "properties": {
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Address"
+        },
+        "configured": {
+          "title": "Configured",
+          "type": "boolean"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "expected": {
+          "title": "Expected",
+          "type": "boolean"
+        },
+        "first_seen": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "First Seen"
+        },
+        "heartbeat_minutes": {
+          "title": "Heartbeat Minutes",
+          "type": "integer"
+        },
+        "last_message": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Message"
+        },
+        "last_message_origin": {
+          "anyOf": [
+            {
+              "enum": [
+                "collector",
+                "database"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Message Origin"
+        },
+        "lines_today": {
+          "title": "Lines Today",
+          "type": "integer"
+        },
+        "messages_per_minute": {
+          "title": "Messages Per Minute",
+          "type": "number"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "network_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Network Of"
+        },
+        "parse_failure_permille": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parse Failure Permille"
+        },
+        "parse_failures_today": {
+          "title": "Parse Failures Today",
+          "type": "integer"
+        },
+        "pending_bytes": {
+          "title": "Pending Bytes",
+          "type": "integer"
+        },
+        "promoted_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Promoted To"
+        },
+        "silent_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Silent Minutes"
+        },
+        "sparkline": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Sparkline",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "silent",
+            "never",
+            "disabled",
+            "unknown",
+            "promoted"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "suggested": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/Suggested"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "unknown": {
+          "title": "Unknown",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "address",
+        "configured",
+        "network_of",
+        "unknown",
+        "enabled",
+        "expected",
+        "heartbeat_minutes",
+        "first_seen",
+        "last_message",
+        "last_message_origin",
+        "state",
+        "silent_minutes",
+        "messages_per_minute",
+        "sparkline",
+        "lines_today",
+        "pending_bytes",
+        "parse_failures_today",
+        "parse_failure_permille",
+        "promoted_to",
+        "suggested"
+      ],
+      "title": "SourceHealth",
+      "type": "object"
+    },
     "SourceIn": {
       "additionalProperties": false,
       "description": "A ``[[sources]]`` table as the browser edits it (the rules check the values).",
@@ -9756,6 +11173,209 @@
         "last_seen"
       ],
       "title": "SourceOut",
+      "type": "object"
+    },
+    "SourceParseFailure": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "example": {
+          "$ref": "#/components/schemas/RawRef"
+        },
+        "first_seen": {
+          "format": "date-time",
+          "title": "First Seen",
+          "type": "string"
+        },
+        "last_seen": {
+          "format": "date-time",
+          "title": "Last Seen",
+          "type": "string"
+        },
+        "pattern": {
+          "title": "Pattern",
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "pattern",
+        "count",
+        "first_seen",
+        "last_seen",
+        "error",
+        "example"
+      ],
+      "title": "SourceParseFailure",
+      "type": "object"
+    },
+    "SourceTail": {
+      "properties": {
+        "day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Day"
+        },
+        "from_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From Line"
+        },
+        "from_offset": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From Offset"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/components/schemas/TailLine"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "const": "spool",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Origin"
+        },
+        "range_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Range Sha256"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "const": "no_file_today",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "to_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To Line"
+        },
+        "to_offset": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To Offset"
+        }
+      },
+      "required": [
+        "source",
+        "day",
+        "origin",
+        "from_line",
+        "to_line",
+        "from_offset",
+        "to_offset",
+        "range_sha256",
+        "lines"
+      ],
+      "title": "SourceTail",
+      "type": "object"
+    },
+    "SourcesOverview": {
+      "properties": {
+        "collector": {
+          "$ref": "#/components/schemas/CollectorState"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/SourceHealth"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "today": {
+          "format": "date",
+          "title": "Today",
+          "type": "string"
+        }
+      },
+      "required": [
+        "generated_at",
+        "today",
+        "collector",
+        "items"
+      ],
+      "title": "SourcesOverview",
       "type": "object"
     },
     "StagedJar": {
@@ -10170,6 +11790,30 @@
       "title": "SubjectRow",
       "type": "object"
     },
+    "Suggested": {
+      "description": "What \"Kaynak olarak tanımla\" fills in for an unknown sender.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "fortigate",
+            "mikrotik",
+            "generic"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "Suggested",
+      "type": "object"
+    },
     "SystemOut": {
       "description": "ApplySystem's last run (``admin\\system\\status.json``).",
       "properties": {
@@ -10286,6 +11930,59 @@
         "error"
       ],
       "title": "SystemTaskCheck",
+      "type": "object"
+    },
+    "TailLine": {
+      "properties": {
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "integer"
+        },
+        "received": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Received"
+        },
+        "sender": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sender"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "offset",
+        "received",
+        "sender",
+        "text",
+        "sha256"
+      ],
+      "title": "TailLine",
       "type": "object"
     },
     "TemporaryPassword": {
