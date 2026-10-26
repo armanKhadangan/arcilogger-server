@@ -2,9 +2,9 @@
 
 **Kayıt · Mühür · Rapor** — kuruluşun kendi sunucusunda çalışan log kayıt, mühürleme, arama ve
 raporlama sistemi. Kuruluşa özgü hiçbir bilgi (ad, ağ planı, cihaz adresleri) ürünle gelmez:
-kuruluş adı, saat kaynağı ve yönetici PC'sinin adresi kurulumda girilir, log kaynakları
-yapılandırmada, departmanlar kurulumdan sonra web arayüzünde tanımlanır
-([docs/KURULUM.md](docs/KURULUM.md) bölüm 7.1).
+kuruluş adı, saat kaynağı ve yönetici PC'sinin adresi kurulumda girilir; log kaynakları,
+departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
+([docs/KURULUM.md](docs/KURULUM.md) bölüm 7.1, [docs/AYARLAR.md](docs/AYARLAR.md)).
 
 > 5651 sayılı Kanun ve 11.04.2017 tarihli İnternet Toplu Kullanım Sağlayıcıları Hakkında
 > Yönetmelik yükümlülüklerini **desteklemek için tasarlanmıştır**. Hukuki uygunluk için hukuk
@@ -20,6 +20,13 @@ yapılandırmada, departmanlar kurulumdan sonra web arayüzünde tanımlanır
   kime atanmış olduğuna göre (atama geçmişi) adlandırılır; atanmamış cihazda sonuç cihaz ve
   VLAN'dan türetilen departmanda biter.
 - Kullanıcılar, roller, iki adımlı doğrulama (TOTP) ve değiştirilemez (zincirli) denetim kaydı.
+- **Tarayıcıdan yönetim:** kuruluş adı ve saat, uygulama ayarları, Kamu SM sihirbazı, log
+  kaynakları, e-posta, replika, saklama ve yedekleme Ayarlar sayfalarından değişir; **Şimdi
+  mühürle** ve **Kontör sorgula** Mühürleme sayfasındadır. Değişikliği API değil, yalnızca
+  yapılandırmaya yazabilen ayrı bir hizmet (ArciAdmin) imzalı istekle uygular; hizmetler yeniden
+  başlatılmaz, her değişiklik denetim kaydına yazılır. Kurulum, yükseltme, PostgreSQL, dosya
+  yolları ve çalıştırılan programlar bilerek sunucu konsolunda kalır
+  ([docs/AYARLAR.md](docs/AYARLAR.md) bölüm 5, English: [docs/SETTINGS.md](docs/SETTINGS.md)).
 - Uyarılar: sessiz kalan log kaynağı (R15) ve sistem denetimleri (R20: mühürleme, doğrulama, disk,
   saat, kontör, replika, veritabanı yedeği …); yüksek ve kritik uyarılar `[smtp]` ayarlıysa
   e-postayla bildirilir. **Güvenlik** sayfasında listelenir, durumu değiştirilir ve not eklenir
@@ -55,7 +62,9 @@ yapılandırmada, departmanlar kurulumdan sonra web arayüzünde tanımlanır
 - Kurulum: [docs/KURULUM.md](docs/KURULUM.md) (English: [docs/INSTALL.md](docs/INSTALL.md));
   kurulum programı ve betikler: [deploy/windows/README.md](deploy/windows/README.md).
 - Kurulumdan sonra (ilk yönetici, Kamu SM test → üretim, ilk 5651 sorgusu, günlük kontroller):
-  [docs/ILK-ADIMLAR.md](docs/ILK-ADIMLAR.md) (English: [docs/FIRST-STEPS.md](docs/FIRST-STEPS.md)).
+  [docs/ILK-ADIMLAR.md](docs/ILK-ADIMLAR.md) (English: [docs/FIRST-STEPS.md](docs/FIRST-STEPS.md));
+  Ayarlar sayfaları ve konsolda kalanlar: [docs/AYARLAR.md](docs/AYARLAR.md) (English:
+  [docs/SETTINGS.md](docs/SETTINGS.md)).
 - Lisans ve etkinleştirme (modüller, deneme, istek kodu, bakım süresi):
   [docs/LISANS.md](docs/LISANS.md) (English: [docs/LICENSING.md](docs/LICENSING.md)); lisans
   verenin aracı (yalnızca hak sahibi için, pakete girmez):
@@ -82,12 +91,14 @@ aşamayı gösteren **yer tutuculardır**.
 | M3 | Kira zaman çizelgesi, NAT dizini, 5651 sorgu, PDF rapor, kanıt paketi | kısmen — ✅ kira zaman çizelgesi, 5651 Sorgu + resmi PDF rapor, Kanıt Paketleri, Mühürleme sayfası, Cihazlar ve Kişiler sayfası, bağımsız doğrulayıcı |
 | M4 | Kullanım analitiği, zamanlanmış raporlar, e-posta | kısmen — ✅ kullanım analizi motoru ve API'si ([docs/KULLANIM.md](docs/KULLANIM.md)), zamanlanmış kullanım raporları (HTML e-posta, PDF, Excel; [docs/KULLANIM-RAPORLARI.md](docs/KULLANIM-RAPORLARI.md)), Raporlar sayfası (zamanlamalar, şimdi çalıştır, önizleme, gönderim geçmişi), Kullanım sayfası |
 | M5 | Güvenlik kuralları (20 kural), uyarılar | kısmen — ✅ R15 (log kaynağı sessiz) ve R20 sistem denetimleri, uyarı e-postası, Güvenlik sayfası (uyarı listesi, durum akışı, notlar; [docs/UYARILAR.md](docs/UYARILAR.md)); kural motoru, kural düzenleyici ve webhook'lar yok |
-| M6 | Yetkilendirme, 2FA, denetim kaydı, uyum sayfası, ayarlar, ilk kurulum sihirbazı | kısmen — ✅ kullanıcılar ve roller, TOTP, zincirli denetim kaydı (Denetim Kaydı sayfası), ilk yönetici kurulumu; yer tutucu: Uyum Durumu, Sistem; ayarlar sayfası yok (`arcilogger-db settings`) |
+| M6 | Yetkilendirme, 2FA, denetim kaydı, uyum sayfası, ayarlar, ilk kurulum sihirbazı | kısmen — ✅ kullanıcılar ve roller, TOTP, zincirli denetim kaydı (Denetim Kaydı sayfası), ilk yönetici kurulumu, tarayıcıdan yönetim (Ayarlar sayfaları, Kamu SM sihirbazı, Şimdi mühürle, Kontör sorgula; [docs/AYARLAR.md](docs/AYARLAR.md)); yer tutucu: Uyum Durumu, Sistem; ilk kurulum sihirbazı yok |
 | M7 | Sağlamlaştırma, Windows kurulum programı, yedekleme/geri yükleme, belgeler | kısmen — ✅ Windows kurulum programı (çevrimdışı paket, yükseltme, geri alma), yük üreteci, gece veritabanı yedeği ve geri yükleme ([docs/YEDEKLEME.md](docs/YEDEKLEME.md)); `ISLETIM.md` yok |
 
 Yer tutucu sayfalar: **Kaynaklar, Canlı Akış, Arama, Uyum Durumu, Sistem**. Çalışan sayfalar:
 Panel, 5651 Sorgu, Kullanım, Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler, Raporlar,
-Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans).
+Denetim Kaydı, Ayarlar (Genel, Uygulama ayarları, Kamu SM, Kaynaklar, E-posta, Replika, Saklama,
+Yedekleme, Değişiklik geçmişi, Kullanıcılar ve Roller, Lisans). Ana menüdeki Kaynaklar sayfası
+(kaynak listesi ve canlı durum) yer tutucudur; kaynaklar Ayarlar → Kaynaklar'da düzenlenir.
 
 ## Geliştirme / Development
 

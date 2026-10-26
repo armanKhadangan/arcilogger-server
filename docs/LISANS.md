@@ -97,13 +97,15 @@ vermez.
 | `/lookups` | Kaydedilmiş 5651 sorguları | 5651 Temel |
 | `/raw` | Ham log satırları | 5651 Temel |
 | `/evidence` | Kanıt paketleri | 5651 Temel |
-| `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama | 5651 Temel |
-| `/credits` | Kamu SM kontörü | 5651 Temel |
+| `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama, "Şimdi mühürle" | 5651 Temel |
+| `/credits` | Kamu SM kontörü, "Kontör sorgula" | 5651 Temel |
 | `/devices` | Cihazlar ve cihaz-kişi atamaları | 5651 Temel |
 | `/persons` | Kişiler | 5651 Temel |
 | `/departments` | Departmanlar | 5651 Temel |
 | `/vlans` | VLAN'lar ve alt ağlar | 5651 Temel |
 | `/license` | Lisans durumu, lisans dosyası yükleme ve kaldırma | 5651 Temel |
+| `/admin` | Ayarlar: sunucu yapılandırması, yönetim hizmetinin durumu, değişiklik istekleri ve geçmişi | 5651 Temel |
+| `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
@@ -124,6 +126,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `leases.late_evidence` | 5651 Temel | her zaman çalışır |
 | `evidence.purge` | 5651 Temel | her zaman çalışır |
 | `audit.import` | 5651 Temel | her zaman çalışır |
+| `admin.requests` | — (tarayıcıdan yönetim: deneme e-postası, kira zaman çizelgesinin yeniden oluşturulması) | her zaman çalışır |
 | `alerts.import` | 5651 Temel | her zaman çalışır |
 | `alerts.r15` | 5651 Temel | her zaman çalışır |
 | `alerts.system` | 5651 Temel | her zaman çalışır |

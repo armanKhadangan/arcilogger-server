@@ -10,6 +10,9 @@ or the web application::
     arcilogger-core credit                           Kamu SM credit (kontör)
     arcilogger-core clock-check                      SNTP offset sample
     arcilogger-core tsa-test                         stamp and verify a random 1 KB file
+    arcilogger-core requests run                     the browser administration's signed
+                                                     requests: credit query, TSA test,
+                                                     replica test (ADR-0014)
     arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, database,
                                                      replica, SMTP)
     arcilogger-core status                           summary for monitoring
@@ -21,6 +24,10 @@ or the web application::
     arcilogger-core evidence verify PATH [--quick] [--json]  standalone verifier, no config
     arcilogger-core evidence purge [--keep-days 30]  delete old packages from exports/
     arcilogger-core version | info
+
+``seal`` also runs the browser administration's signed seal requests ("Şimdi mühürle"). Every
+command refuses a configuration whose ``secrets_dir`` or ``data_dir`` is not the installation's
+own folder (:func:`arcilogger_core.config.check_fixed_location`).
 
 Exit codes: 0 success, 1 a problem that needs attention, 2 usage or configuration error.
 """
@@ -37,18 +44,37 @@ import sys
 import tempfile
 import zipfile
 from collections.abc import Sequence
-from dataclasses import asdict
-from datetime import date, timedelta
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from arcilogger_core import PRODUCT_NAME, __version__
+from arcilogger_core.admin.contract import (
+    ActionResult,
+    AdminLayout,
+    CreditResult,
+    ReplicaTestResult,
+    SealResult,
+    TaskKind,
+    TaskRequest,
+    TaskResult,
+    TsaTestResult,
+)
 from arcilogger_core.alerts import raise_alert
 from arcilogger_core.chain import sealed_days, verify_range
 from arcilogger_core.clockcheck import check_clock
-from arcilogger_core.config import Config, default_config_path, load_config, setup_problems
+from arcilogger_core.config import (
+    Config,
+    ConfigLocationError,
+    check_fixed_location,
+    default_config_path,
+    load_config,
+    setup_problems,
+)
 from arcilogger_core.credit import check_credit
 from arcilogger_core.evidence import (
     DEFAULT_KEEP_DAYS,
@@ -61,12 +87,13 @@ from arcilogger_core.evidence import (
     purge_expired,
     run_verifier,
 )
+from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.fmt import format_bytes, format_datetime
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.replica import probe, replicate_day, replicate_due
 from arcilogger_core.retention import run_retention
-from arcilogger_core.seal import Sealer, config_alert
+from arcilogger_core.seal import DELETED, SEALED, SKIPPED, Sealer, SealOutcome, config_alert
 from arcilogger_core.secretstore import (
     DATABASE_PASSWORD,
     KAMUSM_CUSTOMER,
@@ -78,9 +105,10 @@ from arcilogger_core.secretstore import (
     SecretStoreError,
     record_change,
 )
-from arcilogger_core.smbshare import connected
+from arcilogger_core.smbshare import connected, unc_root
+from arcilogger_core.taskrequests import clean, finish, take, task_result
 from arcilogger_core.timeutil import SITE_TZ_NAME, isoformat_site, site_day, utc_now
-from arcilogger_core.tsa import make_provider, trusted_roots
+from arcilogger_core.tsa import TsaExecutableError, make_provider, trusted_roots
 from arcilogger_core.tsa.base import TsaConfigurationError, TsaError
 from arcilogger_core.tsa.verify import confirmed_legal_grade, verify_token
 
@@ -114,13 +142,25 @@ class App:
     def __init__(self, config_path: Path | None) -> None:
         self.config_path = config_path or default_config_path()
         self.config: Config = load_config(self.config_path)
+        check_fixed_location(self.config, self.config_path)
         self.layout = Layout(self.config.data_dir)
         self.secrets = SecretStore(
             self.config.secrets_dir / "secret.key", self.config.secrets_dir / "secrets.json"
         )
 
+    @cached_property
+    def anchors(self) -> TrustAnchors:
+        """What the executable policy trusts: the folder of the fixed configuration path and
+        its ``admin\\policy.json``, read once per run (ADR-0014, Day 0 note D0-2)."""
+        return TrustAnchors.of(self.config_path)
+
+    @property
+    def keys_dir(self) -> Path:
+        """``admin\\keys`` of the installation folder: they verify the task requests."""
+        return AdminLayout(self.anchors.root / "admin").keys
+
     def provider(self) -> Any:
-        return make_provider(self.config, self.layout, self.secrets)
+        return make_provider(self.config, self.layout, self.secrets, anchors=self.anchors)
 
     def roots(self) -> Any:
         return trusted_roots(self.config, self.layout)
@@ -178,6 +218,8 @@ def _sealer(app: App) -> Sealer:
         provider = app.provider()
     except SecretStoreError as exc:
         raise SealConfigError("secret-store", exc) from exc
+    except TsaExecutableError as exc:
+        raise SealConfigError("executable", exc) from exc
     except TsaConfigurationError as exc:
         raise SealConfigError(_provider_cause(app), exc) from exc
     try:
@@ -187,7 +229,21 @@ def _sealer(app: App) -> Sealer:
     return Sealer(app.config, provider=provider, roots=roots)
 
 
+def _seal_requests(app: App) -> list[TaskRequest]:
+    """The browser's signed seal requests ("Şimdi mühürle"). They are optional for the Seal
+    task: whatever goes wrong with their folders is logged, and the run seals every due day as
+    it would without them (the 5651 pipeline never waits for the administration channel)."""
+    try:
+        return take(app.layout, "seal", app.keys_dir)
+    except Exception:  # take() handles the file errors itself; this is for anything else
+        log.exception("seal requests not taken; sealing goes on without them")
+        return []
+
+
 def cmd_seal(args: argparse.Namespace, app: App) -> int:
+    # The browser's seal requests ("Şimdi mühürle"); a run for one --day leaves them waiting.
+    requests = [] if args.day else _seal_requests(app)
+    started = utc_now()
     try:
         sealer = _sealer(app)
     except SealConfigError as exc:
@@ -198,15 +254,72 @@ def cmd_seal(args: argparse.Namespace, app: App) -> int:
             config_alert(app.layout, exc.cause, exc.error)
         except OSError as write_error:
             log.error("could not write alert R20-seal-config: %s", write_error)
+        code = "executable_refused" if exc.cause == "executable" else "seal_failed"
+        for request in requests:
+            finish(app.layout, request, task_result(request, started_at=started, code=code))
         print(f"Hata: {exc}", file=sys.stderr)
         return 1
-    outcomes = [sealer.seal_day(args.day)] if args.day else sealer.seal_due()
+    if args.day:
+        outcomes = [sealer.seal_day(args.day)]
+    else:
+        wanted = {request.params.day: request.id for request in requests if request.params.day}
+        outcomes = sealer.seal_due(requested=wanted)
+        for request in requests:
+            try:
+                result = _seal_result(sealer, request, outcomes, started)
+            except (OSError, ValueError) as exc:  # the day state cannot be read back
+                log.error("seal request %s: %s", request.id, exc)
+                result = task_result(request, started_at=started, code="seal_failed")
+            finish(app.layout, request, result)
+        clean(app.layout)
     if not outcomes:
         print("Mühürlenecek kapanmış gün yok.")
         return 0
     for outcome in outcomes:
         print(f"{outcome.day.isoformat()}  {outcome.status:8}  {outcome.message}")
     return 0 if all(o.status == "sealed" for o in outcomes) else 1
+
+
+def _seal_result(
+    sealer: Sealer, request: TaskRequest, outcomes: Sequence[SealOutcome], started: datetime
+) -> TaskResult:
+    """What this run did with the requested day; when it did not reach the day, why: the day
+    was sealed (or skipped, deleted) before, or an earlier day still waits."""
+    day = request.params.day
+    if day is None:  # pragma: no cover - a seal request always names its day (the model)
+        raise ValueError(f"seal request {request.id} names no day")
+    state = sealer.state(day)
+    outcome = next((o for o in outcomes if o.day == day), None)
+    if outcome is None:
+        status = str(state.get("status"))
+        outcome = (
+            SealOutcome(day, status, f"{day} is {status}")
+            if status in (SEALED, SKIPPED, DELETED)
+            else SealOutcome(day, "waiting", "an earlier day is not sealed yet")
+        )
+    sealed = outcome.status == SEALED
+    message = outcome.message
+    if outcome.status in ("pending", "failed"):
+        # The attempt's error text may name a file (the vault, the Zamane client) and a result
+        # never does (contract 2.4.6): its code instead; the day's page shows the error.
+        code = state.get("last_error_code") or "unknown"
+        message = f"the sealing attempt failed ({code}); the day's details have the error"
+    result = SealResult.model_validate(
+        {
+            "day": day,
+            "status": outcome.status,
+            "message": message,
+            "serial": state.get("serial") if sealed else None,
+            "gen_time": state.get("gen_time") if sealed else None,
+        }
+    )
+    if not sealed:
+        return task_result(request, started_at=started, code="seal_failed", result=result)
+    texts = (
+        f"{day.strftime('%d.%m.%Y')} günü mühürlendi ve doğrulandı.",
+        f"{day.isoformat()} was sealed and verified.",
+    )
+    return task_result(request, started_at=started, result=result, texts=texts)
 
 
 def cmd_verify(args: argparse.Namespace, app: App) -> int:
@@ -346,8 +459,23 @@ def cmd_clock(_: argparse.Namespace, app: App) -> int:
     return 0 if sample.get("ok") and within else 1
 
 
-def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
-    """Connection test: stamp a random 1 KB file and verify it (uses 1 credit)."""
+@dataclass(frozen=True)
+class TsaTest:
+    """One stamp test: ``report`` is the JSON of ``arcilogger-core tsa-test``, None when no
+    stamp was obtained (``error`` says why)."""
+
+    report: dict[str, Any] | None
+    error: str | None = None
+
+    @property
+    def verified(self) -> bool:
+        return self.report is not None and self.report["verified"] is True
+
+
+def run_tsa_test(app: App) -> TsaTest:
+    """Stamp a random 1 KB file and verify the token independently (uses 1 credit). Shared by
+    ``tsa-test`` and the browser's "Damga testi" (Requests task). A configuration that cannot
+    stamp at all (no provider, no pinned roots) raises, as before."""
     folder = app.layout.state / "tsa-test"
     folder.mkdir(parents=True, exist_ok=True)
     stamp_name = utc_now().strftime("%Y%m%dT%H%M%SZ")
@@ -357,8 +485,7 @@ def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
     try:
         stamp = provider.stamp(sample)
     except TsaError as exc:
-        print(f"Zaman damgası alınamadı: {exc}")
-        return 1
+        return TsaTest(None, str(exc))
     result = verify_token(
         stamp.token_path.read_bytes(),
         roots=app.roots(),
@@ -366,7 +493,7 @@ def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
         require_critical_eku=app.config.tsa.require_critical_eku,
     )
     info = result.info
-    _print_json(
+    return TsaTest(
         {
             "provider": provider.name,
             # The configuration points at the Kamu SM production server …
@@ -389,7 +516,160 @@ def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
             "token": str(stamp.token_path),
         }
     )
-    return 0 if result.ok else 1
+
+
+def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
+    """Connection test: stamp a random 1 KB file and verify it (uses 1 credit)."""
+    test = run_tsa_test(app)
+    if test.report is None:
+        print(f"Zaman damgası alınamadı: {test.error}")
+        return 1
+    _print_json(test.report)
+    return 0 if test.verified else 1
+
+
+# -- the Requests task (ADR-0014; contract 2.9) ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TaskDone:
+    """What a task request did: ``code`` is None when it succeeded, ``texts`` then say what
+    (Turkish, English); ``result`` holds the facts (never a secret or a file path)."""
+
+    code: str | None
+    result: ActionResult | None = None
+    texts: tuple[str, str] | None = None
+
+
+#: The code of a request of each kind that failed for a reason of its own.
+FAILURE_CODES: dict[TaskKind, str] = {
+    "seal": "seal_failed",
+    "credit": "credit_query_failed",
+    "tsa_test": "tsa_test_failed",
+    "replica_test": "replica_test_failed",
+}
+
+
+def _not_started(exc: Exception, kind: TaskKind) -> TaskDone:
+    """A request whose provider could not be built: refused by the executable policy, or the
+    kind's own failure (credentials, secret store, configuration; the log has the detail)."""
+    log.error("%s request: %s", kind, exc)
+    refused = isinstance(exc, TsaExecutableError)
+    return TaskDone("executable_refused" if refused else FAILURE_CODES[kind])
+
+
+def run_credit_request(app: App) -> TaskDone:
+    """The credit query ("Kontör sorgula"): the daily credit check, now (``credit.jsonl``,
+    ``R20-credit``)."""
+    threshold = app.config.tsa.credit_alert_threshold
+    try:
+        provider = app.provider()
+    except (TsaError, SecretStoreError) as exc:
+        return _not_started(exc, "credit")
+    credits = check_credit(provider, app.layout, threshold)
+    if credits is None:
+        return TaskDone("credit_query_failed")
+    return TaskDone(
+        None,
+        CreditResult(credits=credits, threshold=threshold, below_threshold=credits < threshold),
+        (
+            f"Kalan kontör: {credits} (uyarı eşiği {threshold}).",
+            f"Credits left: {credits} (alert threshold {threshold}).",
+        ),
+    )
+
+
+def run_tsa_test_request(app: App) -> TaskDone:
+    """The stamp test ("Damga testi", 1 credit): ``tsa-test``, its JSON without the token's
+    path as the result."""
+    try:
+        test = run_tsa_test(app)
+    except (TsaError, SecretStoreError) as exc:
+        return _not_started(exc, "tsa_test")
+    if test.report is None:
+        log.warning("tsa_test request: no time stamp: %s", test.error)
+        return TaskDone("tsa_test_failed")
+    facts = TsaTestResult.model_validate(
+        {key: value for key, value in test.report.items() if key != "token"}
+    )
+    if not test.verified:
+        return TaskDone("tsa_test_failed", facts)
+    return TaskDone(
+        None,
+        facts,
+        (
+            "Zaman damgası alındı ve bağımsız olarak doğrulandı.",
+            "A time stamp was obtained and verified independently.",
+        ),
+    )
+
+
+def _replica_problem(exc: Exception, target: Path) -> str:
+    """What went wrong, without a path: a result never names one (contract 2.4.6)."""
+    if isinstance(exc, SecretStoreError):
+        return "the stored replica.password cannot be read (secret store)"
+    if isinstance(exc, OSError) and exc.strerror:  # the file name is not part of it
+        return exc.strerror
+    text = str(exc)
+    for path in {str(target), target.as_posix(), unc_root(target) or ""} - {""}:
+        text = text.replace(path, "<replica>")
+    return text
+
+
+def run_replica_test_request(app: App) -> TaskDone:
+    """The replica test ("Replika testi"), as ``replica --test``: connect to the share with
+    ``replica.user`` and its stored password, write, read back and delete a probe file. The
+    saved target is tested whether the replica is enabled yet or not."""
+    target = app.config.replica.target
+    if target is None:
+        return TaskDone(
+            "replica_test_failed", ReplicaTestResult(ok=False, message="replica.target is not set")
+        )
+    user = app.config.replica.user
+    try:
+        password = app.secrets.get(REPLICA_PASSWORD) if user else None
+        with connected(target, user, password):
+            probe(target)
+    except (OSError, SecretStoreError) as exc:  # ShareError is an OSError, never the password
+        log.warning("replica_test request: %s", exc)
+        problem = _replica_problem(exc, target)
+        return TaskDone("replica_test_failed", ReplicaTestResult(ok=False, message=problem))
+    return TaskDone(
+        None,
+        ReplicaTestResult(ok=True, message="write, read back and delete work"),
+        (
+            "Replika paylaşımına bağlanıldı; deneme dosyası yazıldı, okundu ve silindi.",
+            "The replica share was reached; a probe file was written, read back and deleted.",
+        ),
+    )
+
+
+def cmd_requests(_: argparse.Namespace, app: App) -> int:
+    """``requests run``: every valid request of ``state\\requests\\tasks``, oldest first (the
+    task ``\\ARCILOGGER\\Requests``, woken by Event 4111 and every 5 minutes). Exit 0 when there
+    is none or all succeeded, 1 when one failed (its result says why)."""
+    runners = {
+        "credit": run_credit_request,
+        "tsa_test": run_tsa_test_request,
+        "replica_test": run_replica_test_request,
+    }
+    failed = 0
+    for request in take(app.layout, "tasks", app.keys_dir):  # never a seal request (its queue)
+        started = utc_now()
+        try:
+            done = runners[request.kind](app)
+        except Exception:  # one broken request must not keep the next one from running
+            log.exception("task request %s (%s) failed", request.id, request.kind)
+            done = TaskDone(FAILURE_CODES[request.kind])
+        result = task_result(
+            request, started_at=started, code=done.code, result=done.result, texts=done.texts
+        )
+        finish(app.layout, request, result)
+        log.info("task request %s (%s): %s", request.id, request.kind, done.code or "ok")
+        print(f"{request.id}  {request.kind:12}  {done.code or 'ok'}")
+        failed += done.code is not None
+    clean(app.layout)
+    return 1 if failed else 0
 
 
 def cmd_secret(args: argparse.Namespace, app: App) -> int:
@@ -628,6 +908,13 @@ def _build_parser() -> argparse.ArgumentParser:
     commands.add_parser("credit", help="query the Kamu SM credit")
     commands.add_parser("clock-check", help="measure the clock offset (SNTP)")
     commands.add_parser("tsa-test", help="stamp and verify a random file (uses 1 credit)")
+    requests = commands.add_parser(
+        "requests", help="signed requests of the browser administration (Requests task)"
+    )
+    request_commands = requests.add_subparsers(dest="requests_command", required=True)
+    request_commands.add_parser(
+        "run", help="run the waiting credit query, TSA test and replica test requests"
+    )
     commands.add_parser("status", help="summary for monitoring")
     config_check = commands.add_parser(
         "config-check", help="what a production configuration still lacks (exit 1: incomplete)"
@@ -695,6 +982,7 @@ HANDLERS = {
     "credit": cmd_credit,
     "clock-check": cmd_clock,
     "tsa-test": cmd_tsa_test,
+    "requests": cmd_requests,
     "secret": cmd_secret,
     "status": cmd_status,
     "config-check": cmd_config_check,
@@ -739,6 +1027,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         app = App(args.config)
+    except ConfigLocationError as exc:
+        print(f"Hata: {exc}", file=sys.stderr)
+        # Sealing stops: R20-seal-config once a day, into the recorded data root only (without
+        # a usable record the configured data_dir is not known to be the installation's).
+        if args.command == "seal" and exc.data_root is not None:
+            try:
+                config_alert(Layout(exc.data_root), "location", exc)
+            except OSError as write_error:
+                print(f"R20-seal-config yazılamadı: {write_error}", file=sys.stderr)
+        return 2
     except (OSError, ValidationError, ValueError) as exc:
         print(f"Yapılandırma okunamadı: {exc}", file=sys.stderr)
         return 2

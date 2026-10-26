@@ -28,7 +28,7 @@ from pydantic import ValidationError
 from arcilogger_api import __version__
 from arcilogger_api.app import create_app
 from arcilogger_api.auth import admin_cli
-from arcilogger_core.config import load_config
+from arcilogger_core.config import check_fixed_location, default_config_path, load_config
 
 
 def _utf8_console() -> None:
@@ -80,8 +80,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command not in ("serve", "setup-token", "create-admin"):
         parser.print_help()
         return 2
+    path = args.config or default_config_path()
     try:
-        config = load_config(args.config)
+        config = load_config(path)
+        # Nothing the browser can change may move the secret store or the data root (ADR-0014).
+        check_fixed_location(config, path)
     except (OSError, ValidationError, ValueError) as exc:
         print(f"Yapılandırma okunamadı: {exc}", file=sys.stderr)
         return 2
@@ -92,7 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return admin_cli.create_admin(config)
         return admin_cli.create_admin(config, deactivate=args.deactivate)
     _run_server(
-        create_app(config),
+        create_app(config, config_path=path),
         host=args.host or config.api.host,
         port=args.port or config.api.port,
         reload=False,

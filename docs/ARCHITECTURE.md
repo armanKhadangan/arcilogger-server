@@ -16,6 +16,10 @@
 - Ham loglar önce değiştirilmeden diske yazılır (delil), her gece sıkıştırılır, SHA-256 ile
   özetlenir, önceki güne zincirlenir ve **Kamu SM zaman damgası** ile mühürlenir.
 - Mühürleme; veritabanı veya web arayüzü çalışmasa bile Windows Görev Zamanlayıcı ile çalışır.
+- Sunucu ayarları **tarayıcıdan** değişir ([AYARLAR.md](AYARLAR.md)): API yalnızca imzalı bir istek
+  bırakır; yapılandırmayı ayrı bir hizmet (ArciAdmin) yazar, güvenlik duvarını ve saati SYSTEM
+  görevi ApplySystem kendi türettiği değerlerle günceller. Bir ayar değişikliği mühürlemeyi
+  hiçbir zaman durdurmaz.
 
 ## Summary (EN)
 
@@ -23,6 +27,9 @@ ARCILOGGER is a **single Windows server**. People use it **only through a web br
 installed on user PCs and no agent runs on employee computers — all data arrives as syslog from the
 network devices. Raw logs are written unchanged first, then sealed nightly (gzip, SHA-256 chain,
 Kamu SM qualified time stamp). The evidence path does not depend on the database or the web stack.
+The server's settings change from the browser through a separate administration service and a
+SYSTEM task that derives the firewall and time settings itself (ADR-0014); a settings change never
+stops collection or sealing.
 
 ## Deployment model
 
@@ -48,6 +55,7 @@ Windows services (automatic start, restart on failure, each under its own virtua
 | `ArciApi` | `arcilogger_api` (FastAPI, Uvicorn) | HTTP API for the web interface: auth/TOTP, users, audit log, 5651 lookup + PDF report, evidence packages, seals, devices and persons, alerts (state workflow, notes) and the dashboard summary | 127.0.0.1:8000 | MVP; more pages M4–M6 |
 | `ArciWorker` | `arcilogger_worker` | Today: lease timeline, devices and IP conflicts, partitions, evidence purge, audit import, alerts (import of `alerts.jsonl`, R15/R20 checks, alert e-mail; ADR-0010), usage rollups (`usage.*` jobs, estimated time per person/site/category; ADR-0011, docs/USAGE.md), the licence check (`license.check`, ADR-0013). Later: NAT index, the rule engine and its detections (M5) | — | MVP (M3); M4–M5 |
 | `ArciWeb` | Caddy | HTTPS (internal CA), serves the web interface, proxies `/api` | server address:443 | MVP (installer) |
+| `ArciAdmin` | `arcilogger_core.admin` (Python) | The administration agent of the browser administration ([ADR-0014](adr/0014-browser-administration.md)): checks the API's signed requests in `admin\inbox` again and applies them (the only writer of `arcilogger.toml` and `secrets.json`), keeps the versions, follows the services reloading, writes signed task requests (Seal now, credit query, tests) | — (no listener, no database) | Wave 1 |
 | `postgresql-x64-16` | PostgreSQL 16 (operator-installed); TimescaleDB optional, otherwise native monthly partitions ([ADR-0005](adr/0005-database-and-mvp-contracts.md)) | Derived, rebuildable data, plus users, lookups and the audit log | 127.0.0.1:5432 | MVP (M2) |
 
 Scheduled tasks (Task Scheduler folder `\ARCILOGGER\`, "run as soon as possible after a missed
@@ -63,9 +71,25 @@ database backup runs `arcilogger-db`):
 | `Credit` | daily 06:00 | Kamu SM credit query | M1 |
 | `ClockCheck` | hourly | Clock offset against `[clock] ntp_server` (else only `[clock] fallback_server`) | M1 |
 | `Backup` | daily 01:40 | `pg_dump` of the database into `backups\scheduled\`, check, retention (needs PostgreSQL, not part of the evidence path; [ADR-0009](adr/0009-database-backup.md)) | M7 |
+| `Requests` | on event 4111, and every 5 minutes | The task requests of the browser administration (credit query, time-stamp test, replica test), signed by ArciAdmin; LOCAL SERVICE like the other evidence tasks | Wave 1 |
+| `ApplySystem` | on event 4101, and every 5 minutes | **SYSTEM** (the named exception): brings the firewall's syslog rules (and, in strict outbound mode, its outbound rules), Windows Time and the promotion of known Zamane clients in step with the validated configuration; it takes no input from a request (`Sync-ArciSystem.ps1`) | Wave 1 |
+
+`Seal` also starts on event 4110 (**Şimdi mühürle** on the Sealing page). The events come from the
+Application log source `ARCILOGGER-Admin`; an event only wakes a task, the signed request file is
+the authority ([SECURITY.md](SECURITY.md) section 14).
 
 **Evidence path independence:** collector → spool → `arcilogger-core` (Task Scheduler) → Kamu SM.
-None of these need PostgreSQL, the API, the worker or Caddy, nor the licence.
+None of these need PostgreSQL, the API, the worker or Caddy, nor the licence, nor the browser
+administration: with ArciAdmin stopped or `-DisableBrowserAdministration`, collection and sealing
+go on, and a settings change never stops them (the services reload the configuration and keep the
+previous one when a new one does not load).
+
+**Browser administration** ([ADR-0014](adr/0014-browser-administration.md),
+[SETTINGS.md](SETTINGS.md)): browser → ArciApi (validates, signs, writes `admin\inbox`) →
+ArciAdmin (checks again, writes the configuration, keeps a version) → the services reload
+(`configwatch`: collector and ingest ≤ 5 s for `[[sources]]`, the API and the worker within a
+few seconds) → Event 4101 → ApplySystem (firewall, time, Zamane clients). The programs the tasks
+run are checked by `arcilogger_core.execpolicy`.
 
 The Python services run `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_<package> …` and the
 tasks `python.exe -I -m …` (isolated: no `PYTHON*` environment variable can load other code into
@@ -126,13 +150,14 @@ switches, APs ─┘ ───────────────────�
 | Path | Content |
 |---|---|
 | `C:\Program Files\ARCILOGGER\` | Program: Python runtime, wheels, web build, Caddy, service wrapper |
-| `C:\ProgramData\ARCILOGGER\` | `arcilogger.toml` (example: `deploy/windows/arcilogger.example.toml`), `secret.key` + `secrets.json`, `kamusm-roots\`, `zamane\` |
+| `C:\ProgramData\ARCILOGGER\` | `arcilogger.toml` (example: `deploy/windows/arcilogger.example.toml`), `data-root.txt` (the data root the installer recorded), `secret.key` + `secrets.json`, `kamusm-roots\`, `smtp-ca\`, `zamane\` (`web\` uploaded clients waiting, `approved\` promoted ones), `install\` (installer state) |
+| `C:\ProgramData\ARCILOGGER\admin\` | Browser administration: `policy.json` (the installer's limits, administrators only), `keys\`, `inbox\`, `versions\`, `status\`, `journal\`, `system\` (ApplySystem's status, `jars.json`) |
 | `D:\ARCILOGGER\spool\<source>\<YYYY-MM-DD>.log` | Today's raw files (append-only) |
 | `D:\ARCILOGGER\vault\<YYYY>\<MM>\<DD>\` | Sealed days: `<source>.log.gz`, `audit.jsonl.gz`, `manifest-<date>.json`, `.zd` token |
 | `D:\ARCILOGGER\vault\renewals\`, `vault\deletions\` | Re-stamping and sealed deletion records |
 | `D:\ARCILOGGER\exports\` | Evidence packages `ARCILOGGER-kanit-*.zip` (kept `evidence.keep_days`, 30 days; the purge touches only these) |
 | `D:\ARCILOGGER\exports\reports\` | Stored official 5651 reports (`ARCILOGGER-5651-rapor-<id>.pdf` and `.zd`), rendered once and served unchanged; **not purged** (no retention job yet, [RAPOR.md](RAPOR.md)) |
-| `D:\ARCILOGGER\state\` | Status files of the services, alerts, per-day job state; `license-status.json` (the licence state for the installer, never trusted by the product) |
+| `D:\ARCILOGGER\state\` | Status files of the services, alerts, per-day job state; `license-status.json` (the licence state for the installer, never trusted by the product); `requests\` (signed task requests and their results) |
 | `D:\ARCILOGGER\logs\`, `backups\` | Service logs (rotated); database dumps: `backups\db\` before upgrades, `backups\scheduled\` nightly ([YEDEKLEME.md](YEDEKLEME.md)) |
 | `D:\ARCILOGGER\db\` | PostgreSQL data directory |
 

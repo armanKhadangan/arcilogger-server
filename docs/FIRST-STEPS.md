@@ -7,7 +7,11 @@
 > of personal data reviewed by a lawyer.
 
 For this release (MVP): what to do, in order, from the first administrator to the first 5651
-lookup and the daily checks once the installer has finished. Database backup and restore:
+lookup and the daily checks once the installer has finished. Most of the server's settings
+(organisation name, time, Kamu SM, log sources, e-mail, replica, retention, backup) can also be
+changed on the **Ayarlar** (Settings) pages of the web interface: [SETTINGS.md](SETTINGS.md). The
+commands in this document are the console path, valid also while the browser administration is
+switched off (`-DisableBrowserAdministration`). Database backup and restore:
 [BACKUP.md](BACKUP.md). Day-to-day operations, the meaning of every alert and replacing the
 server will be collected in `ISLETIM.md` / `OPERATIONS.md` (M7).
 
@@ -126,16 +130,23 @@ section 4) is for development and trial servers only: its root is trusted only w
 verify** (`R20-verify`, the monthly whole-chain check fails); there is no supported way to make
 them verifiable again.
 
-**Test account and switching to production:** [INSTALL.md](INSTALL.md) section 10 — roots
-(fingerprint comparison), `secret set`, `credit`, `tsa-test` in that order; for production: buy
-kontör, the production credentials, `url = "http://zd.kamusm.gov.tr"`, `[tsa]
-legal_root_fingerprints`, then `Restart-Service ArciApi` (the API reads the configuration only at
-start; without the restart the red "test stamp" banner and the report stamps keep the old
-setting).
+**Test account and switching to production:** the **Ayarlar → Kamu SM** wizard of the web
+interface ([SETTINGS.md](SETTINGS.md)) or, on the console, [INSTALL.md](INSTALL.md) section 10 —
+roots (fingerprint comparison), `secret set`, `credit`, `tsa-test` in that order; for production:
+buy kontör, the production credentials, `url = "http://zd.kamusm.gov.tr"`, `[tsa]
+legal_root_fingerprints`. The API loads the new setting by itself within 2 seconds; when the
+Settings page shows "A change waits for a restart", or on a version before this one,
+`Restart-Service ArciApi` (until it is loaded the red "test stamp" banner and the report stamps
+keep the old setting).
 
 ## 4. After editing `arcilogger.toml`
 
-The services read the configuration **only at start**; scheduled tasks read it on every run.
+The services take changes made on the Settings pages without a restart ([SETTINGS.md](SETTINGS.md)
+section 2). After a hand edit too, the collector and ingest load the log sources, and the API
+and the worker the sections they read, within seconds; scheduled tasks read the file on every run; the `ApplySystem` task brings the firewall in step within 5
+minutes. **Use one way at a time** (the browser or a hand edit). For the sections that are not
+reloaded live (`[collector]`, `[api]`, `[ingest]`, `[worker]`, `[database]`) and while the browser
+administration is off:
 
 ```powershell
 # [[sources]] or the [tsa] URL/port changed: the firewall first
@@ -215,8 +226,8 @@ not names).
 
 ## 6. Settings in the database
 
-Until the settings page (M6) exists, database settings are read and changed with
-`arcilogger-db settings`. Every change is written to the **hash-chained audit log**
+Database settings are read and changed on **Ayarlar → Uygulama ayarları** (Settings →
+Application settings) in the web interface or, on the console, with `arcilogger-db settings`. Every change is written to the **hash-chained audit log**
 (`settings.change`) with the old and the new value; `--by` is the ARCILOGGER user name of whoever
 made the change (`tolga` in the examples below). Upgrades and the seed never reset a changed
 value.
@@ -267,10 +278,17 @@ section 8):
   rule editor or webhook; `arcilogger-worker alerts list --open` still works on the server and
   e-mail is sent once `[smtp]` is set up.
 - **Sealing configuration errors** (no Kamu SM credentials, no root in the `kamusm-roots` folder,
-  `[tsa] zamane_jar` not set) stop the Seal task before sealing starts: the task's last run result
-  is `0x1`, the error goes to `D:\ARCILOGGER\logs\core.log` on every run and an
+  `[tsa] zamane_jar` not set, or Java or the Zamane client not trusted: cause `executable`, e.g. a
+  jar copied into `zamane\` by hand after the installation, which runs only once the installer
+  recorded it with `-ZamaneJar` or it was uploaded in Ayarlar → Kamu SM and approved,
+  [INSTALL.md](INSTALL.md) section 7) stop the Seal task before sealing starts: the task's last run
+  result is `0x1`, the error goes to `D:\ARCILOGGER\logs\core.log` on every run and an
   `R20-seal-config` alert is written once per day and cause.
-- "Seal now" is not available on the web; run the `\ARCILOGGER\Seal` task in Task Scheduler.
+- **Seal now** and **Query credit** are on the Sealing page (`seal.manage`): "Seal now" has the
+  `\ARCILOGGER\Seal` task seal the oldest due day once, "Query credit" has the
+  `\ARCILOGGER\Requests` task query Kamu SM once. Both go through the administration service
+  ArciAdmin; while browser administration is off or ArciAdmin does not answer, run the
+  `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler instead.
 - The database dumps lie on the server's own `D:` disk; copying them off the server (external
   disk, a NAS) is done by hand (section 10).
 
@@ -333,6 +351,8 @@ Every day:
   | `R20-license` | Paid modules ending or off: the trial ends within 3 days, a time-limited licence within 14 days, or the paid modules are off because of the licence state (trial over, licence invalid or for another server, expired, version not covered); the 5651 functions keep working. Settings → Licence ([LICENSING.md](LICENSING.md)) |
   | `R20-license-limit` | Users (no new user can be added) or log sources (still collected and sealed) above the licence's limit |
   | `R20-license-maintenance` | Maintenance ends within 30 days or has ended (`info`: upgrades and support only, the licence stays valid) |
+  | `R20-admin` | Browser administration problem: the administration service (ArciAdmin) has not answered for more than 2 minutes, a request whose signature or installation does not match was refused (possible tampering), a change was rolled back, manual action is needed, the file rights changed (after a console `secret set`: `Set-ArciVaultAcl.ps1`), `ApplySystem` could not bring the firewall, the time or the Zamane client in step, or it found a log source outside the policy networks. The 5651 functions go on; [SETTINGS.md](SETTINGS.md) section 8 |
+  | `R20-config-change` | Significant configuration change (a guarded setting): retention switched on or its days lowered, the replica switched off or retargeted, a log source switched off or removed, production → test, the Kamu SM credentials changed, a root or a legal fingerprint added, a Zamane client uploaded or promoted (high); SMTP or the backup switched off (medium). If no known administrator made it, **Cancel** a held change or **Revert** an applied one on the **Change history** page and look at the audit log |
   | `new-log-source` | A sender that is not in the configuration (if the firewall let it through) |
   | `wrong-transport` | A message arrived over a transport its source does not allow (`[[sources]] transport`): a forged UDP message or a wrong device setting; the message was not recorded |
 

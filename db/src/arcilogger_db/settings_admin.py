@@ -1,7 +1,8 @@
-"""Administrator changes of database settings, validated and audited (until the M6 settings page).
+"""Administrator changes of database settings, validated and audited.
 
-``arcilogger-db settings set KEY JSON_VALUE --by NAME`` (:mod:`arcilogger_db.cli`) calls
-:func:`change_setting`, and the settings page of a later version will call the same function:
+``arcilogger-db settings set KEY JSON_VALUE --by NAME`` (:mod:`arcilogger_db.cli`) and the web
+interface's ``PATCH /settings`` and ``POST /settings/{key}/reset`` (ADR-0014, contract 2.13) call
+:func:`change_setting`:
 
 * the key must be a known setting and the value valid for it
   (:func:`arcilogger_db.settings.validate_setting`, normalised);
@@ -9,8 +10,9 @@
   never puts the shipped default back over it (:mod:`arcilogger_db.seed`);
 * the same transaction appends ``settings.change`` with ``{"old": …, "new": …}`` to the
   hash-chained audit log (spec 8.5) through the one shared writer
-  (:func:`arcilogger_db.audit.append_entry`); the API copies it into the audit spool with its next
-  flush (at start and every minute), so it is sealed like every other entry.
+  (:func:`arcilogger_db.audit.append_entry`), with the user's id and address when the web
+  interface made the change; the API copies it into the audit spool with its next flush (at start
+  and every minute), so it is sealed like every other entry.
 
 A change made with hand-written SQL is neither validated nor audited, and a row left with
 ``updated_by = ':seed'`` is reverted by the next upgrade.
@@ -18,6 +20,7 @@ A change made with hand-written SQL is neither validated nor audited, and a row 
 
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass
 from typing import Any, Final
@@ -63,23 +66,46 @@ def change_setting(
     value: Any,
     *,
     actor: str,
+    actor_id: int | None = None,
+    ip: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> SettingChange:
     """Validate, write and audit one change in the caller's (READ COMMITTED) transaction; the
-    caller commits. ``ValueError`` for an unknown key, an invalid value or actor."""
+    caller commits. ``actor_id`` and ``ip``: the signed-in user and the request's address (the
+    web interface; ``None`` on the console). ``ValueError`` for an invalid actor,
+    :class:`~arcilogger_db.settings.SettingValueError` (a ``ValueError``) for an unknown key or
+    an invalid value."""
     name = check_actor(actor)
     new = validate_setting(key, value)
     old = get_setting(session, key)
     set_setting(session, key, new, updated_by=name)
     entry = append_entry(
         session,
-        actor_id=None,
+        actor_id=actor_id,
         actor=name,
         action=AUDIT_ACTION,
         target=f"setting:{key}",
         details={**(details or {}), "old": old, "new": new},
+        ip=ip,
     )
     return SettingChange(key=key, old=old, new=new, audit_id=entry.id)
+
+
+def reset_setting(
+    session: Session,
+    key: str,
+    *,
+    actor: str,
+    actor_id: int | None = None,
+    ip: str | None = None,
+) -> SettingChange:
+    """Put the shipped default of ``key`` back (``POST /settings/{key}/reset``): a change like
+    any other, audited ``settings.change`` with ``details.reset = true``. The row keeps the
+    actor's name, so a later version's new default does not replace the value chosen here."""
+    default = copy.deepcopy(DEFAULT_SETTINGS.get(key))
+    return change_setting(
+        session, key, default, actor=actor, actor_id=actor_id, ip=ip, details={"reset": True}
+    )
 
 
 @dataclass(frozen=True)

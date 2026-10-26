@@ -9,9 +9,14 @@ name: Windows installer
 # The end-to-end job builds a real offline bundle with Build-ArciBundle.ps1 (Windows PowerShell
 # 5.1, as on the admin PC) and then installs, upgrades, rolls back, survives a broken upgrade and
 # uninstalls ARCILOGGER on the throw-away runner (as Administrator), with the PostgreSQL of the
-# runner image: ingest, API and worker run under their virtual accounts, the API is called through
-# Caddy (today's raw line from the spool, the sealing calendar) and the Seal task runs through
-# Task Scheduler as LOCAL SERVICE under the installed NTFS rights.
+# runner image: ingest, API, worker and the administration agent ArciAdmin run under their
+# virtual accounts, the API is called through Caddy (today's raw line from the spool, the sealing
+# calendar) and the Seal task runs through Task Scheduler as LOCAL SERVICE under the installed
+# NTFS rights. The browser administration (docs/adr/0014, contract test plan 3) is driven through
+# Caddy too: "Şimdi mühürle" wakes the Seal task, a site name change reaches "active" with the
+# rights of contract 2.2 read back, a log source added in the browser reaches the syslog firewall
+# rule (ApplySystem, SYSTEM) within 2 minutes, "Kontör sorgula" runs in the Requests task; the
+# rollback goes to a program without ArciAdmin and sealing goes on.
 #
 # The end-to-end job checks what the Python services and tasks do under the installed rights, so
 # it also runs when their code or their locked dependencies change: a change in api/, core/,
@@ -91,7 +96,8 @@ jobs:
   installer-e2e:
     name: Installer end to end (Windows, real bundle)
     runs-on: windows-latest
-    timeout-minutes: 60
+    # The browser administration steps wait for scheduled tasks (at most 15 minutes each).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -191,6 +191,31 @@ başlayanlar açıklamadır) ve adları ve adresleri kendi cihazlarınızınkiyl
 kurulumu yeniden çalıştırın ya da güvenlik duvarını yeniden uygulayıp hizmetleri yeniden başlatın
 (bu bölümün sonundaki komutlar). Kaynak yokken `-SkipFirewall` ile kurulmuş bir sunucu her
 göndericiyi `unknown-<ip>` olarak kaydeder ve ayrıştırıcısını içerikten seçer (aşağıda).
+Kurulumdan sonra kaynaklar web arayüzünde **Ayarlar → Kaynaklar** sayfasından eklenir,
+düzenlenir, kapatılır ya da silinir; toplayıcı, ingest ve güvenlik duvarı değişikliği
+kendiliğinden izler, yeniden başlatma gerekmez ([AYARLAR.md](AYARLAR.md)).
+
+Her kaynağın adresi kurulumun izin verdiği ağlardan birinde olmalıdır (`-SourceNetwork`,
+varsayılan özel ağlar; en geniş ağ /16). Bu ağların
+dışında bir kaynağı olan yapılandırmayla kurulum ve yükseltme, hiçbir şeyi değiştirmeden ön
+denetimde durur ve verilecek `-SourceNetwork` değerini yazar (ör. başka bir yerleşkenin genel
+adresi ya da CGNAT adresi). Sonradan elle eklenmiş böyle bir kaynağa `ApplySystem` 514'ü
+açmaz; güvenlik duvarında zaten açık olanı açık bırakır. İkisinde de `R20-admin` uyarısı ve
+`source_outside_policy` kodu görünür.
+
+**Bir kaynağı kapatmak.** `[[sources]] enabled = false` (Ayarlar → Kaynaklar'daki anahtar) bir
+kaynağı silmeden kapatır: güvenlik duvarı o göndericinin 514 iznini kaldırır, sessiz kaynak
+uyarısı (R15) ve mühürlemenin boşluk denetimi onu artık beklemez. Kapalı kaynaktan yine de gelen
+bir ileti kaydedilir (ham kayıt hiçbir zaman atılmaz). Kaynak lisansın kaynak sayısında sayılmaya
+devam eder. Yalnızca `false` yazılır; anahtar yoksa kaynak açıktır:
+
+```toml
+[[sources]]
+name = "eski-switch"
+type = "generic"
+address = "<switch>"
+enabled = false             # kapalı: 514 izni yok, R15 beklemez
+```
 
 Her cihazdan bir test mesajı gönderin:
 
@@ -235,8 +260,10 @@ için:
   (**Doğrulayın:** günlük dosyasının yolu `Get-NetFirewallProfile | Format-List Name, LogFileName`
   ile görünür.)
 
-`[[sources]]` değiştikten sonra güvenlik duvarını yeniden uygulayın ve hizmetleri yeniden başlatın
-(yapılandırma yalnızca hizmet başlarken okunur):
+`[[sources]]` elle değiştirildiğinde toplayıcı ve ingest kaynakları 5 saniye içinde yükler,
+`ApplySystem` görevi güvenlik duvarını en geç 5 dakika içinde eşitler. Tarayıcı yönetimi
+kapalıysa (`-DisableBrowserAdministration`) güvenlik duvarını kendiniz uygulayın; `[collector]`
+bölümü değiştiyse hizmetleri yeniden başlatın:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"

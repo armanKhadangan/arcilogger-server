@@ -56,6 +56,8 @@ from sqlalchemy.dialects.postgresql import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from arcilogger_core.admin.contract import ADMIN_REQUEST_KINDS, SECTIONS, STATES, TERMINAL_STATES
+
 TZ = TIMESTAMP(timezone=True)
 
 #: Deterministic constraint and index names: migrations stay stable across machines.
@@ -122,6 +124,15 @@ LICENSE_EVENT_KINDS: Final = ("install", "remove", "refuse", "limit", "state")
 LICENSE_SOURCES: Final = ("web", "cli", "worker", "seed")
 #: Largest licence file (bytes) ``license_files.content`` holds (``license_too_large`` above).
 LICENSE_MAX_BYTES: Final = 65536
+
+#: Browser administration (ADR-0014, contract 2.15): who carries a request out — the agent
+#: ``ArciAdmin`` (a signed request file) or the worker (the non-secret actions it takes from
+#: ``admin_requests`` itself: test e-mail, lease rebuild).
+ADMIN_REQUEST_CHANNELS: Final = ("agent", "worker")
+#: A key of ``admin_requests.params`` / ``result`` named like this (case-insensitive) holds a
+#: masked secret (``{"secret": true, "old": "set", …}``), never a value: no secret ever enters
+#: the database (ADR-0009 §6), checked by the database itself (``ck_admin_requests_*_masked``).
+SECRET_KEY_PATTERN: Final = "password|customer|token"  # noqa: S105 - key names, no secret
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -1758,6 +1769,98 @@ class ReportRun(Base):
     )
     #: The files were deleted after ``reports.keep_days``.
     expired_at: Mapped[datetime | None] = mapped_column(TZ)
+
+
+# =================================================================================================
+# Browser administration (ADR-0014; contract 2.15, revision 0015_admin_requests)
+# =================================================================================================
+
+
+def _masked(column: str) -> str:
+    """``column`` holds no key named like a secret (:data:`SECRET_KEY_PATTERN`) at any depth,
+    unless its value is a masked secret ``{"secret": true, …}``."""
+    path = (
+        '$.** ? (@.type() == "object").keyvalue() '
+        f'? (@.key like_regex "{SECRET_KEY_PATTERN}" flag "i" && !(@.value.secret == true))'
+    )
+    return f"NOT jsonb_path_exists({column}, '{path}')"
+
+
+class AdminRequest(Base):
+    """One request of the browser administration, from the API's ``202`` to its outcome.
+
+    The API inserts the row in the transaction that writes ``admin.request`` to the audit log
+    (``audit_id``) and, for ``channel = 'agent'``, renames the signed request file into the
+    agent's inbox after the commit; it mirrors every terminal state of the agent's status here,
+    so the history outlives the agent's 30-day cleanup. ``channel = 'worker'`` rows
+    (``worker.test_email``, ``worker.lease_rebuild``) never become a file: the worker job
+    ``admin.requests`` takes them with ``FOR UPDATE SKIP LOCKED`` and writes their ``result``
+    and the audit entry in one transaction (:mod:`arcilogger_worker.admin_jobs`).
+
+    ``params`` and ``result`` are never secret: masked changes, the day, the range, the test
+    recipient; a key named like a secret must hold a masked secret (checked by the database).
+    ``state`` is one of ``arcilogger_core.admin.contract.STATES`` and ``terminal`` says whether
+    it is one of ``TERMINAL_STATES`` (also checked).
+    """
+
+    __tablename__ = "admin_requests"
+    __table_args__ = (
+        CheckConstraint("id ~ '^[0-9a-f]{32}$'", name="id"),
+        CheckConstraint(_in("kind", ADMIN_REQUEST_KINDS), name="kind"),
+        CheckConstraint(_in("channel", ADMIN_REQUEST_CHANNELS), name="channel"),
+        CheckConstraint("(channel = 'worker') = (kind LIKE 'worker.%')", name="channel_kind"),
+        CheckConstraint(f"section IS NULL OR {_in('section', SECTIONS)}", name="section"),
+        CheckConstraint(_in("state", STATES), name="state"),
+        CheckConstraint(
+            f"terminal = ({_in('state', tuple(s for s in STATES if s in TERMINAL_STATES))})",
+            name="terminal",
+        ),
+        CheckConstraint("btrim(requested_by) <> ''", name="requested_by"),
+        CheckConstraint(_masked("params"), name="params_masked"),
+        CheckConstraint(_masked("result"), name="result_masked"),
+        Index("ix_admin_requests_channel_state_created_at", "channel", "state", "created_at"),
+        Index("ix_admin_requests_kind_created_at", "kind", text("created_at DESC")),
+        Index("ix_admin_requests_section", "section", postgresql_where=text("NOT terminal")),
+        {
+            "comment": (
+                "Requests of the browser administration (ADR-0014): state, requester, "
+                "non-secret parameters and result."
+            )
+        },
+    )
+
+    #: 32 lower-case hex digits: the request id of the signed file, the status and the journal.
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The configuration section of a ``config.*`` request (``None`` for an action).
+    section: Mapped[str | None] = mapped_column(Text)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    terminal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: The user (NULL once the user row is gone; ``requested_by`` keeps the name).
+    requested_by_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    #: User name of the requester.
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+    #: An agent request expires unclaimed (the signed file's ``expires_at``); a worker request
+    #: is not started after it.
+    expires_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: When a held change takes effect.
+    effective_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: Non-secret parameters: masked changes, ``day``, ``from``/``to``, ``to`` (test e-mail).
+    params: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    #: The outcome (an action's result, a worker job's progress and result).
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    #: A code of ``arcilogger_core.admin.messages`` (texts added by the API).
+    error_code: Mapped[str | None] = mapped_column(Text)
+    rolled_back: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: The ``admin.request`` entry of the audit log (no foreign key, as ``audit_imports``).
+    audit_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 # =================================================================================================

@@ -96,13 +96,15 @@ licence state.
 | `/lookups` | Saved 5651 lookups | 5651 Core |
 | `/raw` | Raw log lines | 5651 Core |
 | `/evidence` | Evidence packages | 5651 Core |
-| `/seals` | Sealed days, manifest, time stamp, verification | 5651 Core |
-| `/credits` | Kamu SM credit | 5651 Core |
+| `/seals` | Sealed days, manifest, time stamp, verification, "Şimdi mühürle" (seal now) | 5651 Core |
+| `/credits` | Kamu SM credit, "Kontör sorgula" (query now) | 5651 Core |
 | `/devices` | Devices and device-person assignments | 5651 Core |
 | `/persons` | Persons | 5651 Core |
 | `/departments` | Departments | 5651 Core |
 | `/vlans` | VLANs and subnets | 5651 Core |
 | `/license` | Licence state, upload and removal of the licence file | 5651 Core |
+| `/admin` | Settings: the machine configuration, the administration service's state, change requests and their history | 5651 Core |
+| `/settings` | Application settings (the database settings) | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
@@ -123,6 +125,7 @@ data of a module that is off is not deleted.
 | `leases.late_evidence` | 5651 Core | always runs |
 | `evidence.purge` | 5651 Core | always runs |
 | `audit.import` | 5651 Core | always runs |
+| `admin.requests` | — (browser administration: the test e-mail, the lease timeline rebuild) | always runs |
 | `alerts.import` | 5651 Core | always runs |
 | `alerts.r15` | 5651 Core | always runs |
 | `alerts.system` | 5651 Core | always runs |

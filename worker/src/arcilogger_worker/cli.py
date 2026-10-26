@@ -18,6 +18,13 @@ lease settings the timeline cannot work with), 3 database unreachable. A failed 
 recorded as a ``failed`` ``leases.rebuild`` job run with the error, never left ``running``; the
 usage rebuild records one ``usage.rebuild`` job run for the range.
 
+``run`` refuses (exit 2) a configuration that moves the installation's folders: ``secrets_dir``
+must be the folder of the ``--config`` file and ``data_dir`` the data root the installer
+recorded in ``data-root.txt`` next to it (:func:`arcilogger_core.config.check_fixed_location`;
+ADR-0014, contract Day 0 notes D0-2, WP2-1): the
+administration agent may write ``arcilogger.toml``, and the worker imports what it finds below
+``data_dir`` into the audit log.
+
 Licence (contract 1.4): only ``usage rebuild`` is gated — refused with exit 1 and the
 ``module_not_licensed`` message while ``usage_analytics`` is off. ``run``, ``rebuild`` (the lease
 timeline, the 5651 attribution repair), ``alerts …`` and ``version`` work in every licence state.
@@ -40,7 +47,13 @@ from sqlalchemy import Engine, text, update
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from arcilogger_core.config import Config, load_config
+from arcilogger_core.config import (
+    Config,
+    ConfigLocationError,
+    check_fixed_location,
+    default_config_path,
+    load_config,
+)
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.engine import make_engine, session_factory
@@ -48,7 +61,7 @@ from arcilogger_db.license_guard import module_not_licensed_texts, safe_status
 from arcilogger_db.models import JobRun
 from arcilogger_worker import __version__
 from arcilogger_worker.alerts.commands import list_alerts, send_test_email
-from arcilogger_worker.correlation.leases import rebuild_day
+from arcilogger_worker.correlation.rebuild import rebuild_lease_day
 from arcilogger_worker.service import Worker, default_jobs
 from arcilogger_worker.usage.jobs import rebuild_range
 
@@ -156,6 +169,12 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
     config = _load(config_path)
     if config is None:
         return EXIT_CONFIG
+    fixed_path = config_path or default_config_path()
+    try:
+        check_fixed_location(config, fixed_path)
+    except ConfigLocationError as exc:  # nothing is written below a data_dir that may not be ours
+        print(exc, file=sys.stderr)  # both languages
+        return EXIT_CONFIG
     _setup_logging(config.data_dir / "logs")
     engine = make_engine(config, application="worker")
     stop = stop or threading.Event()
@@ -174,6 +193,7 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
         layout=Layout(config.data_dir),
         jobs=default_jobs(config.worker.interval_seconds),
         config=config,
+        config_path=fixed_path,  # live reload, the admin folder
     )
     try:
         worker.run(stop)
@@ -183,55 +203,21 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
 
 
 def _rebuild_one(sessions: sessionmaker[Session], day: date, *, lookahead: bool) -> int:
-    """Rebuild one day in its own transaction, recorded as a ``leases.rebuild`` job run;
-    returns the exit code."""
-    with sessions() as session:
-        run = JobRun(
-            job="leases.rebuild",
-            started_at=utc_now(),
-            status="running",
-            details={"day": day.isoformat(), "manual": True},
-        )
-        session.add(run)
-        session.commit()
-        run_id = run.id
-    code = EXIT_OK
-    with sessions() as session:
-        try:
-            report = rebuild_day(session, day, lookahead=lookahead)
-            session.commit()
-        except Exception as exc:  # recorded and reported; the job run never stays "running"
-            session.rollback()
-            # ValueError: lease/ARP/NAT settings the timeline cannot work with (Context.load).
-            code = EXIT_CONFIG if isinstance(exc, ValueError) else EXIT_FAILED
-            details: dict[str, object] = {
-                "day": day.isoformat(),
-                "manual": True,
-                "error": type(exc).__name__,
-                "message": str(exc)[:500],
-            }
-            kind = "ayar hatası / settings error" if code == EXIT_CONFIG else "failed"
-            print(f"{day}: başarısız / {kind}: {type(exc).__name__}: {exc}", file=sys.stderr)
-        else:
-            details = {**report.details(), "manual": True}
-            print(
-                f"{day}: {report.inserted} kira yazıldı, {report.updated} güncellendi, "
-                f"{report.deleted} silindi, {report.alerts} yeni uyarı / {report.inserted} "
-                f"written, {report.updated} updated, {report.deleted} deleted, "
-                f"{report.alerts} new alerts"
-            )
-    with sessions() as session:
-        session.execute(
-            update(JobRun)
-            .where(JobRun.id == run_id)
-            .values(
-                status="ok" if code == EXIT_OK else "failed",
-                finished_at=utc_now(),
-                details=details,
-            )
-        )
-        session.commit()
-    return code
+    """Rebuild one day (:func:`.correlation.rebuild.rebuild_lease_day`); returns the exit
+    code."""
+    outcome = rebuild_lease_day(sessions, day, lookahead=lookahead)
+    report = outcome.report
+    if report is None:
+        kind = "ayar hatası / settings error" if outcome.settings_error else "failed"
+        print(f"{day}: başarısız / {kind}: {outcome.error_text}", file=sys.stderr)
+        return EXIT_CONFIG if outcome.settings_error else EXIT_FAILED
+    print(
+        f"{day}: {report.inserted} kira yazıldı, {report.updated} güncellendi, "
+        f"{report.deleted} silindi, {report.alerts} yeni uyarı / {report.inserted} "
+        f"written, {report.updated} updated, {report.deleted} deleted, "
+        f"{report.alerts} new alerts"
+    )
+    return EXIT_OK
 
 
 def rebuild(config_path: Path | None, first: date, last: date | None) -> int:

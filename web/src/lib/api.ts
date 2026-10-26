@@ -419,6 +419,7 @@ export const api = {
     apiRequest<T>(path, { ...options, method: 'PATCH', body }),
   put: <T>(path: string, body?: unknown, options?: Options) =>
     apiRequest<T>(path, { ...options, method: 'PUT', body }),
-  delete: <T>(path: string, options?: Options) =>
+  /** A JSON `body` only where the API takes one (`DELETE /admin/config/smtp/ca`). */
+  delete: <T>(path: string, options?: Options & Pick<RequestOptions, 'body'>) =>
     apiRequest<T>(path, { ...options, method: 'DELETE' }),
 };

@@ -15,7 +15,7 @@ Paketin içeriği ve bağımsız doğrulama adımları: [DENETCI-KILAVUZU.md](DE
 | Paket oluşturmak | ✔ (son 5 dk içinde parola onayı) | — (sahip kararı, `docs/roles.md`) | — |
 | Paket indirmek | ✔ (parola onayı + KVKK metni) | ✔ (parola onayı + KVKK metni; aşağıdaki not) | — |
 | Bir günü şimdi doğrulamak ("Doğrula") | ✔ | ✔ | — |
-| "Şimdi mühürle" | bu sürümde web'den yok (bölüm 4) | — | — |
+| "Şimdi mühürle", "Kontör sorgula" | ✔ (`seal.manage`, bölüm 4) | — | — |
 
 **Sorgu paketlerinin görünürlüğü:** bir 5651 sorgusundan oluşturulan paket o sorgunun resmi
 raporunu (talep, gerekçe, sonuç, kişi zinciri) içerir. Bu yüzden sorguların görünürlük kuralı
@@ -154,11 +154,17 @@ değiştirilmediğini bununla kontrol eder (DENETCI-KILAVUZU bölüm 5).
   (`seal.verify`); takvim zamanlanmış ve anlık doğrulamanın yenisini gösterir. Süre aşımı ya da
   doğrulama sürecinin hiç başlatılamaması (`error`) sonuçsuz sayılır, yine kaydedilir ve
   denetlenir, günü kırmızıya çevirmez.
-- **Şimdi mühürle:** bu sürümde web'den yapılamaz (`501`): web hizmetinin kasaya yazma izni yoktur
-  (ADR-0007). `\ARCILOGGER\Seal` görevi her gece 00:10'dan itibaren 5 dakikada bir çalışır ve
-  başarısız denemeleri tekrarlar; hemen mühürlemek için Görev Zamanlayıcı'dan çalıştırın.
-  *Sonraki sürüm:* imzalı bir istek dosyası, Seal görevi tarafından alınır.
-- **Kontör** (`GET /credits`): `\ARCILOGGER\Credit` görevinin günlük sorgu geçmişi ve uyarı eşiği.
+- **Şimdi mühürle** (`POST /seals/{gün}/seal`, `seal.manage`, `202`): web hizmetinin kasaya
+  yazma izni yoktur (ADR-0007); istek yönetim hizmeti ArciAdmin üzerinden imzalı bir görev isteği
+  olur ve `\ARCILOGGER\Seal` görevi sıradaki (en eski) mühürlenmemiş günü bir kez mühürlemeyi
+  dener (ADR-0014; gece yarısından sonraki bekleme, boş gün kuralı ve gün sırası atlanmaz). Görev
+  her gece 00:10'dan itibaren 5 dakikada bir de çalışır ve başarısız denemeleri tekrarlar.
+  Tarayıcıdan yönetim kapalıyken ya da ArciAdmin yanıt vermiyorken düğme kullanılamaz; o zaman
+  görevi Görev Zamanlayıcı'dan çalıştırın.
+- **Kontör** (`GET /credits`): `\ARCILOGGER\Credit` görevinin günlük sorgu geçmişi ve uyarı
+  eşiği. **Kontör sorgula** (`POST /credits/query`, `seal.manage`, dakikada en çok 1) sorguyu
+  ArciAdmin üzerinden `\ARCILOGGER\Requests` görevine bir kez yaptırır; yanıt aynı geçmişe
+  yazılır.
 - **Denetim kaydı:** zamanlanmış mühürleme ve imha veritabanı olmadan çalışır; worker her 15
   dakikada bir sonuçlarını denetim kaydına aktarır — her olay **bir kez**:
   `seal.run` mühürlenen her gün (`sealed`) ve her başarısız deneme (`failed`; `state\alerts.jsonl`
@@ -232,9 +238,12 @@ ARCILOGGER is *designed to support* Law 5651 obligations; it does not claim lega
   production (root not configured)" badge and an info notice, never the red test/mock one; verification and token-check errors
   in Turkish as `errors_tr`/`warnings_tr`) and the replica; manifest/token downloads
   (audited); "Verify now" in a child process with a 300 s limit, stored in `seal_verifications`
-  (the API may not write `state\verify`); "Seal now" is not available through the API in this
-  version (`501`, run the `\ARCILOGGER\Seal` task; planned: a signed request file picked up by
-  the Seal task); `/credits` shows the Kamu SM credit history.
+  (the API may not write `state\verify`); "Seal now" (`POST /seals/{day}/seal`, `seal.manage`,
+  `202`) becomes a signed task request through the administration service ArciAdmin, and the
+  `\ARCILOGGER\Seal` task tries the oldest unsealed day once (ADR-0014); `/credits` shows the Kamu
+  SM credit history, and "Query credit" (`POST /credits/query`, at most once a minute) has the
+  `\ARCILOGGER\Requests` task query it once. While browser administration is off or ArciAdmin
+  does not answer, run the `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler.
 - **Sealing states:** a day whose token is in the vault but which the Seal task did not finish
   (an error in its state file) is `failed` with that error; a deletion record without a time
   stamp, or whose days are still in the vault, does not make a day `deleted`. A verification

@@ -13,11 +13,14 @@ import argparse
 import ast
 import codecs
 import importlib
+import importlib.util
 import inspect
 import ipaddress
 import itertools
 import json
 import re
+import subprocess
+import sys
 import textwrap
 import tomllib
 import typing
@@ -42,6 +45,7 @@ from arcilogger_api.routers.usage import PERSON_PERMISSIONS
 from arcilogger_api.routers.vlans import router as vlans_router
 from arcilogger_api.security import ROLE_PERMISSIONS
 from arcilogger_collector.service import unknown_source_name
+from arcilogger_core.admin.contract import EVENT_SOURCE, Event
 from arcilogger_core.cli import _build_parser as core_parser
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import BackupConfig, Config, IngestConfig, WorkerConfig
@@ -88,6 +92,9 @@ OPERATOR_DOCS = (
 )
 #: The database backup runbooks (ADR-0009), read on the server like the operator documents.
 BACKUP_DOCS = ("YEDEKLEME.md", "BACKUP.md")
+#: The guide to the Settings pages (browser administration, ADR-0014), read like the operator
+#: documents.
+SETTINGS_DOCS = ("AYARLAR.md", "SETTINGS.md")
 LEGAL_DRAFTS = ("legal/aydinlatma-metni-taslak.md", "legal/saklama-imha-politikasi-taslak.md")
 DRAFT_MARKER = "**Taslak — hukuk müşaviri onayı gerekir**"
 
@@ -179,7 +186,7 @@ def test_security_doc_and_web_setup_page_show_the_same_command() -> None:
     assert 'code="arcilogger-api setup-token"' not in page
 
 
-@pytest.mark.parametrize("name", OPERATOR_DOCS + BACKUP_DOCS)
+@pytest.mark.parametrize("name", OPERATOR_DOCS + BACKUP_DOCS + SETTINGS_DOCS)
 def test_operator_code_blocks_never_call_a_program_by_its_bare_name(name: str) -> None:
     """The programs are not on PATH on the server: a bare command fails there."""
     bare = re.compile(r"^\s*arcilogger-(core|api|ingest|db|worker|collector)\b")
@@ -473,6 +480,11 @@ def _exists(name: str) -> bool:
     if kind == "attr":
         module, _, attribute = what.rpartition(".")
         return hasattr(importlib.import_module(module), attribute)
+    if kind == "admin":  # a console command of python -I -m arcilogger_core.admin
+        if importlib.util.find_spec("arcilogger_core.admin.__main__") is None:
+            return False
+        command = [sys.executable, "-I", "-m", "arcilogger_core.admin", *what.split(), "--help"]
+        return subprocess.run(command, capture_output=True, check=False).returncode == 0
     if what == "arcilogger-core config-check":
         return _subcommand(core_parser(), "config-check") is not None
     if what == "arcilogger-db settings":
@@ -1472,7 +1484,11 @@ def _api_areas() -> dict[str, str | None]:
         }
         assert len(modules) <= 1, router.prefix
         if router.routes:
-            areas[router.prefix] = next(iter(modules), None)
+            # One area per first path segment (``/admin`` holds ``/admin/requests``, …).
+            area = "/" + router.prefix.split("/")[1]
+            module = next(iter(modules), None)
+            assert areas.get(area, module) == module, router.prefix
+            areas[area] = module
     return areas
 
 
@@ -1903,3 +1919,48 @@ def _fold(text: str) -> str:
 def test_no_text_claims_compliance_or_an_unbreakable_licence(path: Path) -> None:
     text = _fold(_read(path))
     assert [phrase for phrase in OVERSTATEMENTS if _fold(phrase) in text] == []
+
+
+# -- browser administration (ADR-0014) ------------------------------------------------------------
+
+#: The installer parameters that set the limits of the browser administration (admin\policy.json,
+#: contract 2.16): declared without a default, so a choice once given is remembered.
+ADMIN_POLICY_PARAMETERS: Final = (
+    "SourceNetwork",
+    "AdminChangeHoldHours",
+    "ZamaneHoldHours",
+    "DisableBrowserAdministration",
+)
+
+
+@pytest.mark.parametrize("name", SETTINGS_DOCS)
+def test_settings_guides_name_the_limits_and_the_console_path(name: str) -> None:
+    """AYARLAR.md / SETTINGS.md: the installer's limits exist as its parameters, the console
+    commands exist (or their branch is pending), every event of the source ARCILOGGER-Admin is
+    explained with its number, and the wording rule holds."""
+    text = _doc(name)
+    unquoted = re.sub(r"^> ?", "", text, flags=re.MULTILINE)
+    assert "5651 yükümlülüklerini desteklemek için tasarlanmıştır" in _flat(unquoted)
+    other = "SETTINGS.md" if name == "AYARLAR.md" else "AYARLAR.md"
+    assert f"]({other})" in text
+    for parameter in ADMIN_POLICY_PARAMETERS:
+        assert f"`-{parameter}`" in text, parameter
+        assert _exists(f"installer:Install-Arcilogger.ps1 -{parameter}"), parameter
+    for command in ("approve-jar", "status", "versions"):
+        assert f"arcilogger_core.admin {command}" in text, command
+        name_ = f"admin:{command}"
+        assert _exists(name_) or name_ in PENDING_FROM_PARALLEL_BRANCHES, name_
+    for needed in ("admin\\policy.json", "ApplySystem", "NT SERVICE\\ArciAdmin", EVENT_SOURCE):
+        assert needed in text, needed
+    for code in ("R20-admin", "R20-config-change", "firewall_not_managed"):
+        assert f"`{code}`" in text, code
+    explained = {int(number) for number in re.findall(r"\b(41\d\d)\b", text)}
+    assert {int(event) for event in Event} <= explained
+
+
+def test_installer_and_first_steps_point_to_the_settings_guide() -> None:
+    steps = _show_next_steps()
+    assert "docs\\AYARLAR.md" in steps
+    for name in ("ILK-ADIMLAR.md", "FIRST-STEPS.md", "KURULUM.md", "INSTALL.md"):
+        guide = "AYARLAR.md" if name in ("ILK-ADIMLAR.md", "KURULUM.md") else "SETTINGS.md"
+        assert f"]({guide})" in _doc(name), name

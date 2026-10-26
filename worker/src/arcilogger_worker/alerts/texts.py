@@ -6,9 +6,11 @@ from a few **whitelisted facts** of ``details``, each checked for its shape befo
 (a source name — a sender inside a configured network or one that is not configured is named with
 its IP address, ``ap-172.20.10.23``, ``unknown-172.20.19.9`` —, a day, a number, a drive letter,
 a job name, a licence state and the names of licence modules, the IP address of a new sender, of
-a message refused for its transport (``wrong-transport``) or of an IP conflict). Anything else an
-alert carries — raw log lines, error texts, person or device owner names, MAC addresses, paths,
-the licensee — is never put into an e-mail, whatever it contains.
+a message refused for its transport (``wrong-transport``) or of an IP conflict, the section and
+the field names of a configuration change and the outcome code of the browser administration).
+Anything else an alert carries — raw log lines, error texts, person or device owner names, MAC
+addresses, paths, configuration values, user names, the licensee — is never put into an e-mail,
+whatever it contains.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Final
 
+from arcilogger_core.admin.messages import MESSAGES as ADMIN_MESSAGES
+from arcilogger_core.admin.messages import WARNINGS as ADMIN_WARNINGS
 from arcilogger_core.fmt import format_date, format_datetime, format_number
 from arcilogger_core.seal import CONFIG_CAUSES
 
@@ -186,6 +190,24 @@ RULES: Final[Mapping[str, RuleText]] = {
         "Renew maintenance for new versions and support (LICENSING.md section 7); the licence "
         "stays valid.",
     ),
+    # Browser administration (ADR-0014): the agent ArciAdmin, ApplySystem and the worker's check
+    # of the agent's heartbeat raise R20-admin; the agent raises R20-config-change.
+    "R20-admin": RuleText(
+        "Tarayıcıdan yönetim sorunu",
+        "Browser administration problem",
+        "Ayarlar → Değişiklik geçmişi sayfasına ve Olay Görüntüleyicisi'ndeki ARCILOGGER-Admin "
+        "kayıtlarına bakın; hizmeti denetleyin: Get-Service ArciAdmin.",
+        "Look at Settings → Change history and at the ARCILOGGER-Admin entries in Event Viewer; "
+        "check the service: Get-Service ArciAdmin.",
+    ),
+    "R20-config-change": RuleText(
+        "Önemli yapılandırma değişikliği",
+        "Significant configuration change",
+        "Değişikliği bilinen bir yönetici yapmadıysa hemen inceleyin: Ayarlar → Değişiklik "
+        "geçmişi.",
+        "If no known administrator made this change, look into it at once: Settings → Change "
+        "history.",
+    ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
         "New log source",
@@ -253,13 +275,17 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
     ),
     "R20-seal-config": (
         "1. Ayrıntılardaki nedeni okuyun: Kamu SM kimlik bilgileri, kamusm-roots kökleri, "
-        "[tsa] zamane_jar ya da gizli depo anahtarı.\n"
-        "2. Eksik olanı ILK-ADIMLAR.md bölüm 3'e göre tamamlayın (kamusm.md).\n"
+        "[tsa] zamane_jar, gizli depo anahtarı, güvenilir konumda olmayan [tsa] java ya da "
+        "zamane_jar, ya da kurulumun klasörü olmayan secrets_dir / data_dir.\n"
+        "2. Eksik olanı ILK-ADIMLAR.md bölüm 3'e göre tamamlayın (kamusm.md); klasör nedeni "
+        "için arcilogger.toml dosyasını sunucuda denetleyin.\n"
         "3. Seal görevi 5 dakika içinde yeniden dener; sonraki başarılı mühürden sonra uyarı "
         "kendiliğinden kapanır.",
         "1. Read the cause in the details: Kamu SM credentials, kamusm-roots roots, "
-        "[tsa] zamane_jar or the secret store key.\n"
-        "2. Complete what is missing (FIRST-STEPS.md section 3, kamusm.md).\n"
+        "[tsa] zamane_jar, the secret store key, a [tsa] java or zamane_jar outside a trusted "
+        "location, or a secrets_dir / data_dir that is not the installation's folder.\n"
+        "2. Complete what is missing (FIRST-STEPS.md section 3, kamusm.md); for the folder "
+        "cause, check arcilogger.toml on the server.\n"
         "3. The Seal task retries within 5 minutes; the alert closes by itself after the next "
         "successful seal.",
     ),
@@ -447,6 +473,57 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "3. Information only: the licence and the installed version stay valid; versions released "
         "after the end of maintenance do not switch the paid modules on. Renewed maintenance "
         "closes the alert by itself.",
+    ),
+    "R20-admin": (
+        "1. Ayrıntılardaki nedeni okuyun: yönetim hizmeti yanıt vermiyor, bir istek reddedildi "
+        "(geçersiz imza ya da başka bir kurulum: olası kurcalama), bir değişiklik geri alındı, "
+        "elle müdahale gerekiyor, yönetim hizmeti ayar dosyalarına yazma hakkını kaybetti "
+        "(acl_drift) ya da güvenlik duvarı, saat veya Zamane adımı uygulanamadı.\n"
+        "2. Hizmeti denetleyin (Get-Service ArciAdmin) ve Olay Görüntüleyicisi → Windows "
+        "Günlükleri → Uygulama altında ARCILOGGER-Admin kaynağının kayıtlarına bakın.\n"
+        "3. Reddedilen istek için Ayarlar → Değişiklik geçmişi sayfasında ve denetim kaydında "
+        "isteği kimin hazırladığını inceleyin; beklenmeyen bir imza ya da kurulum hatası varsa "
+        "sunucuya erişimi denetleyin.\n"
+        "4. Elle müdahale gerekiyorsa sürüm numarası ve adımlar isteğin ayrıntısındadır "
+        "(sunucuda yönetici PowerShell'inde: & \"C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\"
+        'python.exe" -I -m arcilogger_core.admin versions restore <n>). Kod acl_drift ise '
+        'değişiklik yürürlüktedir: sürüm geri yüklemeyin, & "C:\\Program Files\\ARCILOGGER\\'
+        'scripts\\Set-ArciVaultAcl.ps1" betiğini çalıştırın.\n'
+        "5. Hizmet yeniden yanıt verince 'yanıt vermiyor' uyarısı kendiliğinden kapanır; "
+        "diğerlerini sonucu not olarak ekleyip kapatın.",
+        "1. Read the cause in the details: the administration service is not answering, a "
+        "request was rejected (invalid signature or another installation: possible tampering), "
+        "a change was rolled back, manual action is needed, the administration service lost its "
+        "write right on the configuration files (acl_drift), or the firewall, time or Zamane "
+        "step could not be applied.\n"
+        "2. Check the service (Get-Service ArciAdmin) and the entries of the source "
+        "ARCILOGGER-Admin under Event Viewer → Windows Logs → Application.\n"
+        "3. For a rejected request, look at who prepared it under Settings → Change history and "
+        "in the audit log; for an unexpected signature or installation error check who can "
+        "reach the server.\n"
+        "4. When manual action is needed, the version number and the steps are in the request's "
+        'details (on the server, in an administrator PowerShell: & "C:\\Program Files\\'
+        'ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin versions restore '
+        "<n>). For the code acl_drift the change is in force: do not restore a version, run "
+        '& "C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVaultAcl.ps1".\n'
+        "5. The 'not answering' alert closes by itself once the service answers again; add the "
+        "result of the others as a note and close them.",
+    ),
+    "R20-config-change": (
+        "1. Ayrıntılarda hangi bölümün ve hangi alanların değiştiğini görün.\n"
+        "2. Ayarlar → Değişiklik geçmişi sayfasında isteği, denetim kaydında kimin yaptığını "
+        "inceleyin.\n"
+        "3. Değişikliği bilinen bir yönetici yapmadıysa hemen harekete geçin: bekletilen bir "
+        "değişikliği (saklama süresi, replika) süresi dolmadan İptal et ile durdurun ya da Geri "
+        "al ile önceki ayarlara dönün; ilgili kullanıcının parolasını değiştirin.\n"
+        "4. Bilinen bir yöneticinin değişikliğiyse not ekleyip uyarıyı kapatın.",
+        "1. See in the details which section and which fields changed.\n"
+        "2. Look at the request under Settings → Change history and at who made it in the audit "
+        "log.\n"
+        "3. If no known administrator made the change, act at once: stop a held change "
+        "(retention, replica) with Cancel before its hold ends, or go back to the previous "
+        "settings with Revert; change the password of the user concerned.\n"
+        "4. If a known administrator made it, add a note and close the alert.",
     ),
     "R20-email": (
         "1. [smtp] ayarlarını ve smtp.password gizli değerini denetleyin.\n"
@@ -841,6 +918,68 @@ def _license_maintenance(d: Mapping[str, Any]) -> Facts | None:
     )
 
 
+#: The sections of the browser administration (``R20-config-change`` ``details.section``,
+#: ``arcilogger_core.admin.contract.SECTIONS``) as the web interface names them.
+CONFIG_SECTIONS: Final[Mapping[str, tuple[str, str]]] = {
+    "general": ("Genel", "General"),
+    "tsa": ("Kamu SM ve zaman damgası", "Kamu SM and time stamps"),
+    "smtp": ("E-posta (SMTP)", "E-mail (SMTP)"),
+    "replica": ("Replika", "Replica"),
+    "retention": ("Saklama ve imha", "Retention"),
+    "backup": ("Veritabanı yedeği", "Database backup"),
+    "sources": ("Log kaynakları", "Log sources"),
+}
+#: A configuration path (``smtp.host``, ``sources.switch-2.enabled``: a field name, never a
+#: value; ``arcilogger_core.admin.contract.ConfigPath``).
+_CONFIG_PATH = re.compile(r"^[a-z_]+(?:\.[a-z0-9][a-z0-9_-]*)*$")
+#: Most field names listed in an ``R20-config-change`` sentence.
+PATHS_LISTED: Final = 10
+
+
+def _config_change(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-config-change``: the section and the names of the fields that changed (ADR-0014:
+    no value, no user name)."""
+    section = d.get("section")
+    names = CONFIG_SECTIONS.get(section) if isinstance(section, str) else None
+    if names is None:
+        return None
+    raw = d.get("paths")
+    paths = [
+        path
+        for path in (raw if isinstance(raw, list) else [])
+        if isinstance(path, str) and len(path) <= 200 and _CONFIG_PATH.match(path)
+    ]
+    listed = ", ".join(paths[:PATHS_LISTED]) + (", …" if len(paths) > PATHS_LISTED else "")
+    tail = f" ({listed})" if listed else ""
+    return (
+        f"Yapılandırma değişti: {names[0]}{tail}.",
+        f"Configuration changed: {names[1]}{tail}.",
+    )
+
+
+def _admin(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-admin``: the agent's heartbeat (the worker's check), else the outcome code of the
+    agent or ApplySystem with its own text (:data:`arcilogger_core.admin.messages.MESSAGES`), or
+    the warning code of what ApplySystem left out (``source_outside_policy``, ``WARNINGS``)."""
+    if d.get("case") == "heartbeat":
+        minutes = _int(d, "minutes")
+        silent_tr, silent_en = (
+            ("hiç yanıt vermedi", "has never answered")
+            if minutes is None
+            else (f"{minutes} dakikadır yanıt vermiyor", f"has not answered for {minutes} minutes")
+        )
+        return (
+            f"Yönetim hizmeti (ArciAdmin) {silent_tr}: tarayıcıdan yapılan değişiklikler "
+            "uygulanmıyor. 5651 kayıtlarının toplanması ve mühürlenmesi etkilenmez.",
+            f"The administration service (ArciAdmin) {silent_en}: changes made in the browser "
+            "are not applied. Collecting and sealing the 5651 records is not affected.",
+        )
+    code = d.get("code")
+    if not isinstance(code, str):
+        return None
+    return ADMIN_MESSAGES.get(code) or ADMIN_WARNINGS.get(code)
+
+
 def _sender(d: Mapping[str, Any]) -> Facts | None:
     address = _ip(d.get("address"))
     if address is None:
@@ -871,6 +1010,8 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-license": _license,
     "R20-license-limit": _license_limit,
     "R20-license-maintenance": _license_maintenance,
+    "R20-admin": _admin,
+    "R20-config-change": _config_change,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,

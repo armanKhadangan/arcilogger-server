@@ -9,7 +9,11 @@
   [MVP-CONTRACTS.md](../MVP-CONTRACTS.md) as §16 with the API work. The channel's names, limits
   and file formats are code: `arcilogger_core.admin.contract`, `arcilogger_core.admin.envelope`,
   `arcilogger_core.admin.keys`, `arcilogger_core.admin.messages`, `arcilogger_core.execpolicy`,
-  `arcilogger_core.configwatch`.
+  `arcilogger_core.configwatch`. The agent and what it checks: `arcilogger_core.admin.agent`
+  (the request pipeline), `.rules` (every rule of a section; the API imports it too),
+  `.tomledit` (the narrow TOML editor), `.apply` (the transaction, versions and recovery),
+  `.probe` (connection tests in a child process), `.systemplan` (ApplySystem's plan) and
+  `.__main__` (the console commands); `arcilogger_core.tsa.preflight` and `arcilogger_core.smtp`.
 
 ## Context
 
@@ -96,8 +100,8 @@ The constraints that shape the design:
     ApplySystem also write the Windows Application log (source `ARCILOGGER-Admin`). Secrets appear
     only as `set`/`unset`.
 12. **Off switch.** `-DisableBrowserAdministration` writes `enabled: false` into `policy.json`; the
-    agent then refuses every request and the web shows the console path. No licence state ever
-    affects any of this.
+    agent then refuses every request, fails every held change that falls due and the web shows
+    the console path. No licence state ever affects any of this.
 
 ## Consequences
 

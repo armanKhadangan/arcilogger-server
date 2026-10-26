@@ -166,6 +166,39 @@ def test_csrf_is_required_on_every_mutating_request(
         )
 
 
+#: The browser administration's prefixes (ADR-0014): every change is CSRF-checked too.
+ADMIN_PREFIXES = ("/api/v1/admin", "/api/v1/settings")
+ADMIN_ACTIONS = (("POST", "/api/v1/seals/{day}/seal"), ("POST", "/api/v1/credits/query"))
+
+
+def test_csrf_is_required_on_every_change_of_the_browser_administration(
+    app: FastAPI, client: TestClient, login_as: Login
+) -> None:
+    paths: dict[str, dict[str, Any]] = app.openapi()["paths"]
+    mutating = [
+        (method.upper(), path)
+        for path, operations in paths.items()
+        if path.startswith(ADMIN_PREFIXES)
+        for method in operations
+        if method.upper() != "GET"
+    ]
+    assert len(mutating) >= 4
+    login_as(client, "admin")
+    del client.headers[CSRF_HEADER]
+    for method, path in [*mutating, *ADMIN_ACTIONS]:
+        url = (
+            path.replace("{day}", "2026-10-12")
+            .replace("{request_id}", "0" * 32)
+            .replace("{key}", "lookup.tolerance_seconds")
+            .replace("{name}", "core-r1")
+        )
+        response = client.request(method, url, json={})
+        assert (response.status_code, response.json()["error"]["code"]) == (403, "csrf_failed"), (
+            method,
+            path,
+        )
+
+
 def test_no_session_is_401_everywhere_but_the_public_endpoints(
     client: TestClient, make_user: MakeUser
 ) -> None:

@@ -23,6 +23,12 @@ import pytest
 from sqlalchemy import URL, Engine, make_url, select, text
 from sqlalchemy.orm import Session
 
+from arcilogger_core.admin.contract import (
+    AdminLayout,
+    AdminPolicy,
+    TrustedExecutable,
+    dump_document,
+)
 from arcilogger_core.alerts import read_alerts
 from arcilogger_core.config import BackupConfig, Config, load_config
 from arcilogger_core.secretstore import DATABASE_PASSWORD, SecretStore
@@ -195,6 +201,36 @@ def _backup_alerts(tmp_path: Path) -> list[dict[str, Any]]:
     return [alert for alert in alerts if alert["rule"] == "R20-backup"]
 
 
+def _trust(installation: Path, *roots: Path, recorded: tuple[Path, ...] = ()) -> None:
+    """The installation's ``admin\\policy.json``: programs below ``roots`` may run, and those
+    ``recorded`` by the installer with their SHA-256 (ADR-0014, ``execpolicy``)."""
+    policy = AdminPolicy(
+        enabled=True,
+        executable_roots=tuple(str(root) for root in roots),
+        trusted_executables=tuple(
+            TrustedExecutable(path=str(path), sha256=file_sha256(path)[0]) for path in recorded
+        ),
+        written_at=NOW,
+        written_by="installer",
+    )
+    target = AdminLayout(installation / "admin").policy
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(dump_document(policy))
+
+
+@pytest.fixture(autouse=True)
+def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test's installation folder is ``tmp_path`` (``default_config_path()``), whose policy
+    trusts the programs below it: a configured ``pg_dump`` runs only from a trusted place."""
+    monkeypatch.setenv("ARCILOGGER_CONFIG", str(tmp_path / "arcilogger.toml"))
+    _trust(tmp_path, tmp_path)
+    if os.name == "nt":  # the fake tools are .cmd launchers (_fake_tools)
+        monkeypatch.setattr(
+            backup_module, "_tool_names", lambda name: (f"{name}.exe", f"{name}.cmd")
+        )
+    return tmp_path
+
+
 # -- names, folders, tools ------------------------------------------------------------------------
 
 
@@ -273,6 +309,64 @@ def test_find_tool_order(tmp_path: Path) -> None:
     assert found.found_by == "PATH"
     with pytest.raises(BackupError, match=r"set \[backup\] pg_dump"):
         find_tool("pg_dump", services={}, versions_root=tmp_path / "none", search_path="")
+
+
+def test_a_configured_tool_runs_only_from_a_trusted_place(tmp_path: Path) -> None:
+    """ADR-0014 (contract 2.8.4): the administration agent may write ``[backup] pg_dump``, and
+    the Backup task runs it as LOCAL SERVICE: only a program below ``executable_roots`` or the
+    one the installer recorded at its path runs."""
+    trusted, _ = _fake_tools(tmp_path / "tools")
+    other, _ = _fake_tools(tmp_path / "other")
+    _trust(tmp_path, tmp_path / "tools", recorded=(other,))
+    assert find_tool("pg_dump", str(trusted), services={}).path == trusted
+    assert find_tool("pg_dump", str(other), services={}).path == other  # recorded with its hash
+    copy = tmp_path / "copy" / other.name
+    copy.parent.mkdir()
+    copy.write_bytes(other.read_bytes())
+    with pytest.raises(BackupError, match=r"\[backup\] pg_dump: .*executable_refused"):
+        find_tool("pg_dump", str(copy), services={})  # the same bytes elsewhere: refused
+    if os.name != "nt":  # a link inside the trusted folder to a program outside it
+        link = tmp_path / "tools" / "linked" / copy.name
+        link.parent.mkdir()
+        link.symlink_to(copy)
+        with pytest.raises(BackupError, match="executable_refused"):
+            find_tool("pg_dump", str(link), services={})
+    # A tool found without configuration (service, versions folder, PATH) is not a free value.
+    folder = tmp_path / "versions" / "16" / "bin"
+    folder.mkdir(parents=True)
+    exe = folder / ("pg_dump.exe" if os.name == "nt" else "pg_dump")
+    exe.write_text("")
+    assert find_tool("pg_dump", services={}, versions_root=tmp_path / "versions").path == exe
+
+
+def test_a_configured_tool_must_be_the_tool_itself(tmp_path: Path) -> None:
+    """A trusted folder holds other programs too (``C:\\Program Files\\PowerShell\\7\\pwsh.exe``):
+    ``[backup] pg_dump`` must name a ``pg_dump`` (execpolicy ``names``), and ``pg_restore`` a
+    ``pg_restore``, or nothing runs."""
+    pg_dump, pg_restore = _fake_tools(tmp_path / "tools")
+    other = pg_dump.with_name(pg_dump.name.replace("pg_dump", "pwsh"))
+    other.write_bytes(pg_dump.read_bytes())
+    for name, configured in (("pg_dump", other), ("pg_restore", pg_dump), ("pg_dump", pg_restore)):
+        with pytest.raises(BackupError, match=rf"\[backup\] {name}: .*executable_refused"):
+            find_tool(name, str(configured), services={})
+    assert find_tool("pg_restore", str(pg_restore), services={}).path == pg_restore
+
+
+def test_a_refused_tool_fails_the_backup_with_its_alert(tmp_path: Path) -> None:
+    _fake_tools(tmp_path / "tools")
+    config = load_config(_config(tmp_path))
+    _trust(tmp_path, tmp_path / "elsewhere")  # the configured tools are not trusted
+    outcome = run_backup(config, clock=lambda: NOW, probe=_probe())
+    assert not outcome.ok
+    assert outcome.error is not None
+    assert "executable_refused" in outcome.error
+    assert _calls(tmp_path / "tools") == []  # nothing ran
+    last = _last(tmp_path)
+    assert (last["ok"], last["file"]) == (False, None)
+    assert "executable_refused" in last["error"]
+    (alert,) = _backup_alerts(tmp_path)
+    assert alert["severity"] == "high"
+    assert list(_scheduled(tmp_path).glob("*.dump")) == []
 
 
 def test_tool_version(tmp_path: Path) -> None:
@@ -594,7 +688,7 @@ def test_a_failed_retention_keeps_the_dump_and_has_its_own_alert(
     monkeypatch.setattr(
         cli_module,
         "run_backup",
-        lambda config: run_backup(config, clock=lambda: NOW, probe=_probe()),
+        lambda config, **kwargs: run_backup(config, clock=lambda: NOW, probe=_probe(), **kwargs),
     )
     assert main(["backup", "run", "--config", str(config_path)]) == 1
     captured = capsys.readouterr()
@@ -637,6 +731,39 @@ def test_cli_run_disabled(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
     assert "kapalı" in capsys.readouterr().out
     assert not (tmp_path / "data" / "state" / "backup" / "last.json").exists()
     assert _calls(tmp_path / "tools") == []
+
+
+def test_cli_run_refuses_a_configuration_that_moves_its_folders(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR-0014 (contract Day 0 notes D0-2, WP2-1): the administration agent may write
+    ``arcilogger.toml``. The Backup task runs only with ``secrets_dir`` in the folder of its
+    ``--config`` file (it chooses the database password) and ``data_dir`` at the data root the
+    installer recorded; nothing runs and nothing is written otherwise."""
+    _fake_tools(tmp_path / "tools")
+    config = _config(
+        tmp_path, database='host = "127.0.0.1"\nport = 1\nconnect_timeout_seconds = 1\n'
+    )
+    text = config.read_text(encoding="utf-8")
+    config.write_text(f'secrets_dir = "{(tmp_path / "elsewhere").as_posix()}"\n' + text)
+    assert main(["backup", "run", "--config", str(config)]) == 2
+    assert "secrets_dir" in capsys.readouterr().err
+    config.write_text(text, encoding="utf-8")
+    record = tmp_path / "data-root.txt"
+    data = (tmp_path / "data").as_posix()
+    for content, named in (
+        (f"{(tmp_path / 'other').as_posix()}\n".encode(), "data_dir"),
+        (b"relative/data\n", "data-root.txt"),
+        (data.encode("utf-16"), "data-root.txt"),  # a record that cannot be used fails closed
+    ):
+        record.write_bytes(content)
+        assert main(["backup", "run", "--config", str(config)]) == 2
+        assert named in capsys.readouterr().err
+    assert _calls(tmp_path / "tools") == []
+    assert not (tmp_path / "data").exists()  # no log, no last.json, no alert
+    record.write_text(f"\ufeff{data}\n", encoding="utf-8")
+    assert main(["backup", "run", "--config", str(config)]) == 1  # runs (no database here)
+    assert _last(tmp_path)["ok"] is False
 
 
 def test_cli_run_without_a_database(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -871,6 +998,7 @@ def live(pg_dsn: str, tmp_path: Path) -> Iterator[Live]:
     finally:
         probe.dispose()
     pg_dump, pg_restore = (_real_tool(name, int(number) // 10000) for name in TOOLS)
+    _trust(tmp_path, tmp_path, pg_dump.parent, pg_restore.parent)  # the real tools may run
     path = tmp_path / "arcilogger.toml"
     path.write_text(
         f'data_dir = "{(tmp_path / "data").as_posix()}"\n'

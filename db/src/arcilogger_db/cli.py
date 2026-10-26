@@ -65,7 +65,14 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from arcilogger_core.canonical import CanonicalJsonError, canonical_json
-from arcilogger_core.config import Config, default_config_path, load_config
+from arcilogger_core.config import (
+    Config,
+    ConfigLocationError,
+    check_fixed_location,
+    default_config_path,
+    load_config,
+)
+from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.fmt import format_bytes, format_datetime
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStoreError
@@ -403,7 +410,7 @@ def _backup_run(config: Config, args: argparse.Namespace) -> int:
             "[scheduled database backup is disabled]."
         )
         return EXIT_OK
-    outcome = run_backup(config)
+    outcome = run_backup(config, anchors=TrustAnchors.of(args.config or default_config_path()))
     if not outcome.ok or outcome.file is None or outcome.size is None:
         print(
             f"Veritabanı yedeği alınamadı [database backup failed]: {outcome.error}",
@@ -498,7 +505,8 @@ def _backup_verify(config: Config, args: argparse.Namespace) -> int:
     if not files:
         print("Doğrulanacak yedek yok [no backup to verify].", file=sys.stderr)
         return EXIT_ATTENTION
-    tool = find_tool("pg_restore", config.backup.pg_restore)
+    anchors = TrustAnchors.of(args.config or default_config_path())
+    tool = find_tool("pg_restore", config.backup.pg_restore, anchors=anchors)
     checks = [verify_backup(path, tool, deep=args.deep) for path in files]
     for check in checks:
         _print_verification(check)
@@ -548,7 +556,13 @@ def _backup_restore(config: Config, args: argparse.Namespace) -> int:
     password = _read_password(args.superuser)
     try:
         outcome = restore_backup(
-            config, args.file, name, superuser=args.superuser, password=password, sha256=sha256
+            config,
+            args.file,
+            name,
+            superuser=args.superuser,
+            password=password,
+            sha256=sha256,
+            anchors=TrustAnchors.of(args.config or default_config_path()),
         )
     except RestoreRefusedError as exc:
         print(
@@ -608,6 +622,12 @@ BACKUP_ACTIONS = {
 
 
 def cmd_backup(config: Config, args: argparse.Namespace) -> int:
+    if args.backup_command == "run":  # the Backup task: before anything is written to data_dir
+        try:  # secrets_dir chooses the database password the dump runs with (Day 0 note D0-2)
+            check_fixed_location(config, args.config or default_config_path())
+        except ConfigLocationError as exc:
+            print(exc, file=sys.stderr)  # both languages
+            return EXIT_USAGE
     handler = _backup_log(config) if args.backup_command != "list" else None
     try:
         return BACKUP_ACTIONS[args.backup_command](config, args)

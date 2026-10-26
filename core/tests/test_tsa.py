@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from arcilogger_core.config import Config
+from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
 from arcilogger_core.tsa import make_provider, trusted_roots
@@ -397,16 +399,24 @@ def test_factory(tmp_path: Path) -> None:
     )
     assert isinstance(http, Rfc3161HttpProvider)
     assert http.url == "http://x:8080"
+    # The installer's Zamane client (execpolicy: zamane\ and its record, ADR-0014).
+    jar = tmp_path / "zamane" / "z.jar"
+    jar.parent.mkdir()
+    jar.write_bytes(b"PK\x03\x04 client")
+    (jar.parent / "zamane-jar.sha256").write_text(
+        f"{hashlib.sha256(jar.read_bytes()).hexdigest()}  z.jar\n", encoding="utf-8"
+    )
+    anchors = TrustAnchors.of(tmp_path / "arcilogger.toml")
     zamane_settings = {
         "provider": "zamane",
         "url": "http://zd.kamusm.gov.tr",
-        "zamane_jar": str(tmp_path / "z.jar"),
+        "zamane_jar": str(jar),
     }
     with pytest.raises(TsaConfigurationError, match="customer"):
-        make_provider(_config(tmp_path, zamane_settings), layout, secrets)
+        make_provider(_config(tmp_path, zamane_settings), layout, secrets, anchors=anchors)
     secrets.set(KAMUSM_CUSTOMER, "123456")
     secrets.set(KAMUSM_PASSWORD, "pw-secret")
-    provider = make_provider(_config(tmp_path, zamane_settings), layout, secrets)
+    provider = make_provider(_config(tmp_path, zamane_settings), layout, secrets, anchors=anchors)
     assert isinstance(provider, ZamaneCliProvider)
     assert provider.legal_grade is True
     with pytest.raises(TsaConfigurationError, match="zamane_jar"):

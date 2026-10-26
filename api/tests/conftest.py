@@ -10,6 +10,13 @@ and the ``X-CSRF-Token`` header on that client (use several clients for several 
 ``licence`` (licensing tests, marked ``license_live``): real licence evaluation with the
 deterministic test key and the default server id, and :class:`LicenceKit` helpers (upload,
 store a licence directly, backdate the trial, read events and audit entries).
+
+``installed`` (browser administration, ADR-0014): a test that uses it gets an app started with a
+real installation folder (``arcilogger_core.admin.testing.make_installation``: configuration
+file, channel keys, ``policy.json``, secret store) and its fixed configuration path, which the
+API reloads on every request; ``agent`` is the real administration agent of that installation
+(``FakeAgent``), started, so its heartbeat is fresh. Use ``pytestmark =
+pytest.mark.usefixtures("installed")`` for a whole module.
 """
 
 from __future__ import annotations
@@ -21,17 +28,25 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.oid import NameOID
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_api import deps
 from arcilogger_api import testing as api_testing
 from arcilogger_api.app import create_app
 from arcilogger_api.auth.accounts import accept_privacy, privacy_version
 from arcilogger_api.deps import AppState
 from arcilogger_api.security import hash_token
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core.admin import testing as admin_testing
+from arcilogger_core.admin.testing import FakeAgent, Installed
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.license import load_license
@@ -46,9 +61,80 @@ from arcilogger_db.models import (
     UserSession,
 )
 
+#: The configuration file of ``installed``: the fictional site of the administration tests.
+ADMIN_TOML = admin_testing.DEFAULT_TOML.replace(
+    "[collector]", "[api]\nsecure_cookies = false\n\n[collector]", 1
+)
+
 
 @pytest.fixture
-def api_config(tmp_path: Path) -> Config:
+def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Installed:
+    """An installation folder for the browser administration (the app below serves it)."""
+    monkeypatch.setattr(deps, "RELOAD_SECONDS", 0.0)  # the API looks at the file every request
+    return admin_testing.make_installation(tmp_path / "programdata", toml=ADMIN_TOML)
+
+
+@pytest.fixture
+def agent(installed: Installed) -> FakeAgent:
+    """The real agent of ``installed`` (fake clock, event log, prober, tasks), started."""
+    fake = FakeAgent(installed)
+    fake.start()
+    return fake
+
+
+def _installed(request: pytest.FixtureRequest) -> Installed | None:
+    if "installed" not in request.fixturenames:
+        return None
+    found: Installed = request.getfixturevalue("installed")
+    return found
+
+
+@pytest.fixture
+def reauthenticate(app_session_factory: sessionmaker[Session]) -> Callable[[LoggedIn], None]:
+    """Mark a session as re-authenticated just now (``ensure_recent_auth``)."""
+
+    def mark(who: LoggedIn) -> None:
+        with app_session_factory() as session:
+            session.execute(
+                update(UserSession)
+                .where(UserSession.token_hash == hash_token(who.session_token))
+                .values(reauthenticated_at=datetime.now(UTC))
+            )
+            session.commit()
+
+    return mark
+
+
+def _ca_certificate(name: str = "Örnek Test Kök") -> bytes:
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    start = datetime.now(UTC) - timedelta(days=1)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(start)
+        .not_valid_after(start + timedelta(days=3650))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+        .sign(key, hashes.SHA256())
+    )
+    return certificate.public_bytes(Encoding.PEM)
+
+
+@pytest.fixture
+def ca_pem() -> Callable[..., bytes]:
+    """A new self-signed CA certificate in PEM (a Kamu SM root or an SMTP CA file of a test;
+    never a real one): ``ca_pem()`` or ``ca_pem("Ad")``."""
+    return _ca_certificate
+
+
+@pytest.fixture
+def api_config(request: pytest.FixtureRequest, tmp_path: Path) -> Config:
+    site = _installed(request)
+    if site is not None:
+        return site.config()
     return Config.model_validate(
         {
             "site_name": api_testing.EXAMPLE_SITE_NAME,
@@ -65,8 +151,9 @@ def layout(api_config: Config) -> Layout:
 
 
 @pytest.fixture
-def app(api_config: Config, db_engine: Engine) -> FastAPI:
-    return create_app(api_config, db_engine)
+def app(request: pytest.FixtureRequest, api_config: Config, db_engine: Engine) -> FastAPI:
+    site = _installed(request)
+    return create_app(api_config, db_engine, config_path=site.config_path if site else None)
 
 
 @pytest.fixture

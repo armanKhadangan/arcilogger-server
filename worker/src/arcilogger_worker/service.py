@@ -21,9 +21,14 @@ Jobs (``DEFAULT_JOBS``):
 ``audit.import``            every 15 minutes: scheduled sealing and retention runs
                             (``state/seal``, ``vault/deletions``, ``state/alerts.jsonl``)
                             into the audit log, each event once (``seal.run``,
-                            ``retention.run``)
+                            ``retention.run``), and the browser administration's journal
+                            (``admin.*``, ``settings.secret_change``; :mod:`.admin_jobs`)
+``admin.requests``          every 15 seconds: the browser's test e-mails and lease rebuilds
+                            (``admin_requests`` of ``channel = 'worker'``; :mod:`.admin_jobs`)
 ``alerts.import``           every minute: new ``state/alerts.jsonl`` lines into ``alerts``,
-                            each once (:mod:`.alerts.importer`)
+                            each once, and those of the administration's
+                            ``admin/status/alerts.jsonl`` and ``admin/system/alerts.jsonl``
+                            (:mod:`.alerts.importer`)
 ``alerts.r15``              every minute: R15 log source silent (:mod:`.alerts.r15`)
 ``alerts.system``           every 5 minutes: the R20 system checks (:mod:`.alerts.system`)
 ``alerts.notify``           every minute: alert e-mail through ``[smtp]``
@@ -51,6 +56,16 @@ their interval, doubling up to 30 min), so a job that fails every time does not 
 back. While the database is unreachable a job is retried after :data:`DATABASE_RETRY`.
 :meth:`Worker.run` returns when the stop event is set (Ctrl+C / service stop / SIGTERM).
 
+**Live reload** (ADR-0014, contract 2.8): every :meth:`Worker.tick` first asks a
+:class:`~arcilogger_core.configwatch.ConfigWatcher` whether ``arcilogger.toml`` changed (a stat
+at most every :data:`RELOAD_SECONDS`), so a change made in the browser — the site name, ``[smtp]``,
+``[tsa]``, ``[replica]``, ``[backup]`` … — reaches the next job without a restart. ``[database]``,
+``[worker]``, ``data_dir`` and ``secrets_dir`` are read only at start-up: a hand edit of them is
+reported in the status file's ``config`` block (``restart_keys``), which also names the SHA-256
+of the file in use; an invalid file keeps the configuration in use. The browser
+administration's files are read from the ``admin`` folder next to the fixed ``--config`` path
+(:attr:`Worker.admin`), never from a folder the configuration names.
+
 **Licence gates** (licensing contract 7): a job of a paid module (``Job.module``: the ``usage.*``
 rollups → ``usage_analytics``, ``reports.run_due`` → ``usage_reports``) asks
 :func:`.licensing.module_gate` before its ``running`` row is written. While the module is off
@@ -77,7 +92,9 @@ from sqlalchemy import Engine, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_core.admin.contract import AdminLayout
 from arcilogger_core.config import Config
+from arcilogger_core.configwatch import WORKER_HOT, ConfigWatch, ConfigWatcher
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site, utc_now
@@ -85,6 +102,7 @@ from arcilogger_db.engine import session_factory
 from arcilogger_db.models import JobRun
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_worker import __version__
+from arcilogger_worker.admin_jobs import import_admin_events, process_requests
 from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.notify import run_notify
 from arcilogger_worker.alerts.r15 import check_silent_sources
@@ -105,6 +123,8 @@ log = logging.getLogger("arcilogger_worker")
 SLEEP_SECONDS: Final = 1.0
 #: The status file is rewritten at least this often (and after every job run).
 STATUS_EVERY: Final = timedelta(seconds=15)
+#: ``arcilogger.toml`` is looked at at most this often (a stat; read when it changed).
+RELOAD_SECONDS: Final = 2.0
 #: First retry of a failed daily job; doubles per failure up to :data:`DAILY_RETRY_MAX`.
 DAILY_RETRY_FIRST: Final = timedelta(minutes=15)
 DAILY_RETRY_MAX: Final = timedelta(hours=4)
@@ -127,6 +147,11 @@ class JobContext:
     started_at: datetime | None = None
     #: The worker's licence status for the gates (kept 60 s; ``None``: computed every time).
     license_cache: StatusCache | None = None
+    #: The installation's ``admin`` folder of the browser administration (``None``: no
+    #: ``--config`` path known, e.g. a test: its journals and alert files are left out).
+    admin: AdminLayout | None = None
+    #: When the worker took the ``[replica]`` in use, if later than its start (live reload).
+    replica_since: datetime | None = None
 
 
 JobFunc = Callable[[JobContext], Mapping[str, Any]]
@@ -168,6 +193,8 @@ SKIPPED: Final = "_skipped"
 LATE_EVIDENCE_EVERY: Final = timedelta(minutes=10)
 #: How often ``audit.import`` looks for new sealing and retention events.
 AUDIT_IMPORT_EVERY: Final = timedelta(minutes=15)
+#: ``admin.requests`` looks for the browser's worker requests every 15 seconds (contract 2.9).
+ADMIN_REQUESTS_EVERY: Final = timedelta(seconds=15)
 #: ``alerts.import``, ``alerts.r15`` and ``alerts.notify`` run every minute, the R20 checks
 #: every 5 minutes (they read more files).
 ALERTS_EVERY: Final = timedelta(minutes=1)
@@ -227,8 +254,21 @@ def job_evidence_purge(ctx: JobContext) -> Mapping[str, Any]:
 
 
 def job_audit_import(ctx: JobContext) -> Mapping[str, Any]:
-    """Scheduled sealing and retention runs into the audit log (each event once)."""
-    return import_job_events(ctx.sessions, ctx.layout, now=ctx.now).details()
+    """Scheduled sealing and retention runs, and the browser administration's journal, into the
+    audit log (each event once)."""
+    report = import_job_events(ctx.sessions, ctx.layout, now=ctx.now)
+    if ctx.admin is not None:
+        import_admin_events(ctx.sessions, ctx.admin, report)
+    return report.details()
+
+
+def job_admin_requests(ctx: JobContext) -> Mapping[str, Any]:
+    """The browser's test e-mails and lease rebuilds (``admin_requests``, worker channel)."""
+    report = process_requests(ctx.sessions, job_config(ctx), now=ctx.now)
+    details = report.details()
+    if not report.steps and not report.more:
+        details[SKIPPED] = True
+    return details
 
 
 def job_config(ctx: JobContext) -> Config:
@@ -239,8 +279,9 @@ def job_config(ctx: JobContext) -> Config:
 
 
 def job_alerts_import(ctx: JobContext) -> Mapping[str, Any]:
-    """New ``state/alerts.jsonl`` lines into ``alerts`` (each line once)."""
-    return import_alerts(ctx.sessions, ctx.layout, now=ctx.now).details()
+    """New lines of ``state/alerts.jsonl`` and of the administration's alert files into
+    ``alerts`` (each line once)."""
+    return import_alerts(ctx.sessions, ctx.layout, now=ctx.now, admin=ctx.admin).details()
 
 
 def job_alerts_r15(ctx: JobContext) -> Mapping[str, Any]:
@@ -254,9 +295,16 @@ def job_alerts_r15(ctx: JobContext) -> Mapping[str, Any]:
 
 
 def job_alerts_system(ctx: JobContext) -> Mapping[str, Any]:
-    """R20: disk, sealing, verification, credit, replica, parsing, jobs, backup, clock."""
+    """R20: disk, sealing, verification, credit, replica, parsing, jobs, backup, clock, the
+    administration agent."""
     return run_system_checks(
-        ctx.sessions, ctx.layout, job_config(ctx), now=ctx.now, started_at=ctx.started_at
+        ctx.sessions,
+        ctx.layout,
+        job_config(ctx),
+        now=ctx.now,
+        started_at=ctx.started_at,
+        admin=ctx.admin,
+        replica_since=ctx.replica_since,
     ).details()
 
 
@@ -324,6 +372,7 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         Job("leases.late_evidence", job_leases_late_evidence, every=LATE_EVIDENCE_EVERY),
         Job("evidence.purge", job_evidence_purge, daily_after=time(3, 0)),
         Job("audit.import", job_audit_import, every=AUDIT_IMPORT_EVERY),
+        Job("admin.requests", job_admin_requests, every=ADMIN_REQUESTS_EVERY),
         # Alerts: import and checks first, the e-mail last (it sends what they raised).
         Job("alerts.import", job_alerts_import, every=ALERTS_EVERY),
         Job("alerts.r15", job_alerts_r15, every=ALERTS_EVERY),
@@ -401,6 +450,11 @@ class Worker:
     state: str = "starting"
     #: Passed to every job (``JobContext.config``).
     config: Config | None = None
+    #: The fixed ``--config`` path ``config`` was loaded from: watched for changes, and its
+    #: folder holds the ``admin`` folder (``None``: no live reload and no administration, e.g. a
+    #: test with a configuration of its own).
+    config_path: Path | None = None
+    reload_seconds: float = RELOAD_SECONDS
 
     def __post_init__(self) -> None:
         self.sessions = session_factory(self.engine)
@@ -410,6 +464,33 @@ class Worker:
         self.license_cache = StatusCache()
         #: Per gated job: locked at the last evaluation (absent before the first one).
         self.gates: dict[str, bool] = {}
+        #: The browser administration's folder, next to the fixed configuration file
+        #: (contract Day 0 notes D0-1, D0-2): never ``config.admin_dir``.
+        self.admin = (
+            None
+            if self.config_path is None
+            else AdminLayout(self.config_path.absolute().parent / "admin")
+        )
+        #: When the worker took the ``[replica]`` in use, when that was after its start.
+        self.replica_since: datetime | None = None
+        self._watcher = (
+            None
+            if self.config_path is None or self.config is None
+            else ConfigWatcher(
+                self.config_path,
+                self.config,
+                hot=WORKER_HOT,
+                min_interval=self.reload_seconds,
+                now=self.clock,
+            )
+        )
+        #: What the configuration watch last found (the status file's ``config`` block).
+        self.config_watch: ConfigWatch | None = None
+        if self._watcher is not None:
+            self.config_watch = self._watcher.poll()  # the file as it is now
+            self.config = self.config_watch.config
+        #: The status file is rewritten at the next loop (a new ``config`` block).
+        self._status_due = False
 
     @property
     def status_path(self) -> Path:
@@ -454,11 +535,26 @@ class Worker:
             return state.retry_at
         return due
 
+    def reload_config(self) -> None:
+        """Take a changed configuration file (every key but ``database``, ``worker``,
+        ``data_dir`` and ``secrets_dir``); an invalid one keeps the configuration in use."""
+        if self._watcher is None:
+            return
+        watch = self._watcher.poll()
+        before, self.config_watch = self.config_watch, watch
+        if before is None or before.status_block() != watch.status_block():
+            self._status_due = True  # the browser administration waits for the new SHA-256
+        if watch.changed:
+            if self.config is None or self.config.replica != watch.config.replica:
+                self.replica_since = self.clock()
+            self.config = watch.config
+
     def tick(self) -> list[tuple[str, str]]:
         """Run every job that is due now (in declaration order); ``[(job, status)]``."""
         done: list[tuple[str, str]] = []
         if self.started_at is None:  # run() sets it; a test may tick without run()
             self.started_at = self.clock()
+        self.reload_config()
         try:
             if not self._loaded_history:
                 self._load_history()
@@ -488,6 +584,8 @@ class Worker:
             self.config,
             self.started_at,
             license_cache=self.license_cache,
+            admin=self.admin,
+            replica_since=self.replica_since,
         )
 
     # -- licence gates ----------------------------------------------------------------------------
@@ -625,6 +723,9 @@ class Worker:
             "database": {None: "unknown", True: "ok", False: "unreachable"}[self.database_ok],
             "jobs": {name: state.as_json() for name, state in self.states.items()},
         }
+        if self.config_watch is not None:  # the configuration in use (contract 2.4.12)
+            data["config"] = self.config_watch.status_block()
+        self._status_due = False
         try:
             atomic_write_text(
                 self.status_path, json.dumps(data, ensure_ascii=False, indent=2) + "\n"
@@ -641,7 +742,7 @@ class Worker:
             while not stop.is_set():
                 ran = self.tick()
                 now = self.clock()
-                if ran or written is None or now - written >= STATUS_EVERY:
+                if ran or self._status_due or written is None or now - written >= STATUS_EVERY:
                     self.write_status()
                     written = now
                 # Short waits: on Windows a blocked wait is not interrupted by Ctrl+C, the signal

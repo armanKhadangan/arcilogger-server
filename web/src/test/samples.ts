@@ -32,6 +32,13 @@ import type {
   VlanOut,
 } from '@/lib/api-types';
 import type { SealDayDetail } from '@/lib/seal-types';
+import type {
+  AdminAccepted,
+  AdminCheck,
+  AdminConfig,
+  AdminRequestOut,
+  AdminStatus,
+} from '@/lib/settings-types';
 
 import {
   viewerForm,
@@ -83,6 +90,21 @@ export const SEALS = load('seals') as {
   meta: { site_today: string };
   calendars: Record<string, Calendar>;
   days: Record<string, SealDayDetail>;
+  /** "Şimdi mühürle": the 202 answer and the request queued and done. */
+  seal_now: AdminAccepted;
+  seal_now_queued: AdminRequestOut;
+  seal_now_done: AdminRequestOut;
+  errors: Record<string, ErrorSample>;
+};
+
+/** Browser administration (contract 2.11): the configuration, the status, checks and requests. */
+export const ADMIN = load('admin') as {
+  config: AdminConfig;
+  status: AdminStatus;
+  check_general: AdminCheck;
+  request_active: AdminRequestOut;
+  sources: { check_add: AdminCheck; check_update: AdminCheck; remove_accepted: AdminAccepted };
+  sections: { check_smtp: AdminCheck; smtp_accepted: AdminAccepted; smtp_done: AdminRequestOut };
   errors: Record<string, ErrorSample>;
 };
 

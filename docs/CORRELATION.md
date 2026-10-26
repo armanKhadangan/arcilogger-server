@@ -333,10 +333,11 @@ All explanation texts (Turkish and English, no legal claims) are in `lookup/text
 | `leases.recheck_today` | hourly — rebuild today (late evidence of today) |
 | `leases.late_evidence` | every 10 minutes — rebuild older days whose evidence arrived after their rebuild (section 1) |
 | `evidence.purge` | daily after 03:00 — deletes expired evidence packages (`evidence.keep_days`, 30 days; `arcilogger_worker.evidence_jobs.purge_evidence`, audited as `evidence.purge`) |
-| `audit.import` | every 15 minutes — copies the results of the database-free scheduled sealing and retention runs into the audit log, each event once (`seal.run`, `retention.run`; docs/KANIT-PAKETI.md) |
-| `alerts.import` | every minute — new `state/alerts.jsonl` lines into `alerts`, each line once (byte offset in the internal setting `worker.alerts_import`, written with the alerts; docs/ALERTS.md) |
+| `audit.import` | every 15 minutes — copies the results of the database-free scheduled sealing and retention runs into the audit log, each event once (`seal.run`, `retention.run`; docs/KANIT-PAKETI.md), and the browser administration's journals: the agent's `admin\journal\` (`admin.*`, `settings.secret_change`) and ApplySystem's `admin\system\journal.jsonl` (`admin.system`), read from the `admin` folder next to the worker's `--config` file (ADR-0014, `arcilogger_worker.admin_jobs`) |
+| `admin.requests` | every 15 seconds — the browser administration's test e-mails and lease rebuilds (`admin_requests` rows of `channel = 'worker'`, claimed with `FOR UPDATE SKIP LOCKED`; a lease rebuild runs day by day as `leases.rebuild` job runs with the request's id; audited as `smtp.test` / `leases.rebuild`; ADR-0014, `arcilogger_worker.admin_jobs`) |
+| `alerts.import` | every minute — new lines of `state/alerts.jsonl` and of the browser administration's `admin\status\alerts.jsonl` (the agent) and `admin\system\alerts.jsonl` (ApplySystem) into `alerts`, each line once (a byte offset per file in the internal settings `worker.alerts_import`, `worker.alerts_import.admin` and `worker.alerts_import.system`, written with the alerts; docs/ALERTS.md) |
 | `alerts.r15` | every minute — R15 log source silent (`sources.last_seen`, the collector status, `[[sources]] heartbeat_minutes`; `alerts.r15_*` settings) |
-| `alerts.system` | every 5 minutes — the R20 checks: disk, sealing, verification, credit, replica, parse failures, failing jobs, database backup, clock (`alerts.*` settings) |
+| `alerts.system` | every 5 minutes — the R20 checks: disk, sealing, verification, credit, replica, parse failures, failing jobs, database backup, clock (`alerts.*` settings), and the heartbeat of the administration agent ArciAdmin (`R20-admin` when `admin\status\agent.json` is older than 2 minutes or missing, from 5 minutes after the worker's start; ADR-0014) |
 | `alerts.notify` | every minute — alert e-mail through `[smtp]` to `alerts.email_recipients` (`alert_deliveries`; skipped while `[smtp] enabled = false`; ADR-0010) |
 | `usage.requests` | every 30 seconds — usage rebuild requests of the web interface (`usage_rebuilds`, `POST /api/v1/usage/rebuild`; ADR-0011, docs/USAGE.md) |
 | `usage.daily` | daily after 00:45 — yesterday's usage rollup rebuilt as `final` |
@@ -391,8 +392,9 @@ most `arp.interval_seconds`), `devices.infrastructure_macs`, `devices.oui_file` 
 (author `:system`; not settings, not for editing): `worker.leases_watermark`,
 `worker.leases_ingest_seen`.
 
-**Changing a setting** (until the settings page, M6): `arcilogger-db settings set KEY JSON_VALUE --by NAME` on the
-server (`list`, `get KEY` show the values). The installer does not put `venv\Scripts` on `PATH`,
+**Changing a setting:** on **Ayarlar → Uygulama ayarları** (Settings → Application settings,
+[SETTINGS.md](SETTINGS.md) section 1), or on the server console with
+`arcilogger-db settings set KEY JSON_VALUE --by NAME` (`list`, `get KEY` show the values). The installer does not put `venv\Scripts` on `PATH`,
 so in an administrator PowerShell call it with its full path:
 `& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" settings set KEY JSON_VALUE --by NAME`
 (the configuration is read from `C:\ProgramData\ARCILOGGER\arcilogger.toml`). It validates the key and the value, writes
@@ -411,7 +413,8 @@ with their ranges in docs/ALERTS.md section 3. The usage jobs read the `usage.*`
 (thresholds, background rules, work hours, holidays, re-attribution window, retention; docs/USAGE.md
 section 4); their subject step is the attribution chain of section 2 (`Attributor`, extended with
 `covered_until`, `leases_overlapping` and `assignments` for the usage rollups). Internal, written
-by `alerts.import` (author `:system`): `worker.alerts_import`. Operator steps and PowerShell quoting:
+by `alerts.import` (author `:system`): `worker.alerts_import`, `worker.alerts_import.admin`,
+`worker.alerts_import.system`. Operator steps and PowerShell quoting:
 docs/ILK-ADIMLAR.md section 6. Settings are read from the database when used, so no service
 restart is needed.
 

@@ -68,7 +68,8 @@ ROUTES: dict[tuple[str, str], str | None] = {
     # Module bulk_import: 2 routes
     ("POST", f"{V}/imports/{{kind}}"): BI,
     ("GET", f"{V}/imports/{{kind}}/template.csv"): BI,
-    # 5651 Temel, never gated: 62 routes and the 3 of the licence
+    # 5651 Temel, never gated: 62 routes, the 3 of the licence and the 38 of the browser
+    # administration (ADR-0014)
     ("GET", f"{V}/health"): None,
     ("GET", f"{V}/alerts"): None,
     ("GET", f"{V}/alerts/summary"): None,
@@ -134,6 +135,45 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/license"): None,
     ("POST", f"{V}/license"): None,
     ("DELETE", f"{V}/license"): None,
+    # Browser administration (ADR-0014): never licence-gated.
+    ("GET", f"{V}/admin/config"): None,
+    ("GET", f"{V}/admin/status"): None,
+    ("POST", f"{V}/admin/config/general/check"): None,
+    ("PUT", f"{V}/admin/config/general"): None,
+    ("POST", f"{V}/admin/config/tsa/check"): None,
+    ("PUT", f"{V}/admin/config/tsa"): None,
+    ("POST", f"{V}/admin/config/tsa/roots"): None,
+    ("POST", f"{V}/admin/config/tsa/legal-roots"): None,
+    ("POST", f"{V}/admin/config/tsa/zamane"): None,
+    ("POST", f"{V}/admin/uploads"): None,
+    ("POST", f"{V}/admin/config/sources/check"): None,
+    ("POST", f"{V}/admin/config/sources"): None,
+    ("PUT", f"{V}/admin/config/sources/{{name}}"): None,
+    ("DELETE", f"{V}/admin/config/sources/{{name}}"): None,
+    ("POST", f"{V}/admin/config/smtp/check"): None,
+    ("PUT", f"{V}/admin/config/smtp"): None,
+    ("POST", f"{V}/admin/config/smtp/ca"): None,
+    ("DELETE", f"{V}/admin/config/smtp/ca"): None,
+    ("POST", f"{V}/admin/config/replica/check"): None,
+    ("PUT", f"{V}/admin/config/replica"): None,
+    ("POST", f"{V}/admin/config/retention/check"): None,
+    ("PUT", f"{V}/admin/config/retention"): None,
+    ("POST", f"{V}/admin/config/backup/check"): None,
+    ("PUT", f"{V}/admin/config/backup"): None,
+    ("POST", f"{V}/admin/actions/tsa-test"): None,
+    ("POST", f"{V}/admin/actions/replica-test"): None,
+    ("POST", f"{V}/admin/actions/test-email"): None,
+    ("POST", f"{V}/admin/actions/lease-rebuild"): None,
+    ("GET", f"{V}/admin/requests"): None,
+    ("GET", f"{V}/admin/requests/{{request_id}}"): None,
+    ("DELETE", f"{V}/admin/requests/{{request_id}}"): None,
+    ("POST", f"{V}/admin/requests/{{request_id}}/revert"): None,
+    ("GET", f"{V}/admin/config/versions"): None,
+    ("GET", f"{V}/admin/diagnostics"): None,
+    ("POST", f"{V}/credits/query"): None,
+    ("GET", f"{V}/settings"): None,
+    ("PATCH", f"{V}/settings"): None,
+    ("POST", f"{V}/settings/{{key}}/reset"): None,
 }
 PLACEHOLDERS = {
     "{key}": "x",
@@ -152,6 +192,7 @@ PLACEHOLDERS = {
     "{person_id}": "1",
     "{day}": "2026-10-12",
     "{user_id}": "1",
+    "{request_id}": "0" * 32,
 }
 #: Called last: they end or change the session the other calls use.
 LAST = [("POST", f"{V}/auth/password"), ("POST", f"{V}/auth/logout")]
@@ -191,7 +232,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 65
+    assert len(ROUTES) - len(gated) == 103
 
 
 def test_the_module_markers_equal_the_table() -> None:

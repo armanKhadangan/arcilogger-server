@@ -1,5 +1,6 @@
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
+import type { SealActionResult } from '@/lib/settings-types';
 import { SEALS, need } from '@/test/samples';
 
 import {
@@ -125,11 +126,20 @@ describe('day details in Turkish', () => {
 });
 
 describe('"Şimdi mühürle"', () => {
-  it("shows the API's own 501 explanation, word for word", () => {
-    const error = need(SEALS.errors.seal_now_unavailable, '501 sample');
-    expect(error.status).toBe(501);
-    expect(tr.sealing.sealNow.explanation).toBe(error.body.error.message_tr);
-    expect(en.sealing.sealNow.explanation).toBe(error.body.error.message_en);
+  it("names the Seal task's outcome of the captured request in both languages", () => {
+    const result = SEALS.seal_now_done.result as SealActionResult | null;
+    expect(SEALS.seal_now_done.kind).toBe('action.seal');
+    expect(result?.status).toBe('sealed');
+    for (const locale of [tr, en]) {
+      expect(Object.keys(locale.sealing.sealNow.outcome).sort()).toEqual([
+        'deleted',
+        'failed',
+        'pending',
+        'sealed',
+        'skipped',
+        'waiting',
+      ]);
+    }
   });
 });
 
