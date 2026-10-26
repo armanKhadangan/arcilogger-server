@@ -712,10 +712,15 @@ class Channel:
 
     @property
     def firewall_managed(self) -> bool | None:
-        """Whether ARCILOGGER manages the Windows firewall, as ApplySystem last reported it
-        (``admin\\system\\status.json``); None before its first report. The installer's
+        """Whether ApplySystem keeps the Windows firewall's syslog rules: as it last reported it
+        (``admin\\system\\status.json``) while browser administration is on, None before its
+        first report. With administration off (``policy.json`` ``enabled = false``, missing or
+        invalid) ApplySystem changes nothing and never reports (``Sync-ArciSystem.ps1`` step 1),
+        so False, whatever a report from before says. The installer's
         ``install\\firewall-state.json`` is read by SYSTEM and the agent only: the API has no
         right on ``install\\`` (contract 2.2), where opening it fails with "access denied"."""
+        if not self.policy.enabled:
+            return False
         system = self.system
         return system.firewall.managed if system is not None else None
 

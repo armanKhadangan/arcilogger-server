@@ -225,7 +225,8 @@ class SourceOut(BaseModel):
     transport: Literal["any", "udp", "tcp"]
     enabled: bool
     #: The syslog rule: ``open`` (lets it in), ``closed``, ``pending`` (ApplySystem has not
-    #: caught up yet), ``not_managed`` (the installation does not manage the firewall).
+    #: caught up yet), ``not_managed`` (ApplySystem keeps no firewall rule: ``-SkipFirewall``,
+    #: or browser administration off).
     firewall: Literal["open", "closed", "pending", "not_managed"]
     last_seen: datetime | None
 
@@ -426,7 +427,9 @@ def _canonical(address: str) -> str:
 def _sources(channel: Channel, db: Session, config: Config) -> list[SourceOut]:
     """The configured sources with their syslog rule as ApplySystem last reported it. Before its
     first report the firewall counts as managed (an installation manages it unless
-    ``-SkipFirewall``, which that report then says): an enabled source is ``pending``."""
+    ``-SkipFirewall``, which that report then says): an enabled source is ``pending``. With
+    browser administration off ApplySystem keeps no rule and never reports: ``not_managed``
+    (:attr:`Channel.firewall_managed`)."""
     seen = dict(db.execute(select(Source.name, Source.last_seen)).all())
     system = channel.system
     managed = channel.firewall_managed is not False

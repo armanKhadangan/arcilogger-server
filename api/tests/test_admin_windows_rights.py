@@ -194,21 +194,72 @@ def test_the_strict_outbound_mode_comes_from_applysystem(
     assert rights.refused == []
 
 
-def test_before_applysystem_reports_a_source_waits_for_the_firewall(
-    client: TestClient, login_as: Login, installed: Installed, rights: ApiRights
-) -> None:
+def add_source(installed: Installed) -> None:
+    """An enabled source written into ``arcilogger.toml`` by hand (on the console)."""
     text = installed.config_path.read_text(encoding="utf-8")
     installed.config_path.write_text(
         text + '\n[[sources]]\nname = "core-r1"\ntype = "mikrotik"\naddress = "172.31.255.1"\n',
         encoding="utf-8",
     )
-    FakeSystem(installed)  # managed (the installer's file), but no report yet
-    login_as(client, "admin")
+
+
+def source_firewall(client: TestClient, rights: ApiRights) -> str:
+    """The ``firewall`` column of the one source, answered with the API's Windows rights."""
     with rights.as_api():
         response = client.get(f"{V}/admin/config")
     assert response.status_code == 200, response.text
+    assert unreadable(response.json()) == {}
     (source,) = response.json()["sections"]["sources"]
-    assert source["firewall"] == "pending"
+    found: str = source["firewall"]
+    return found
+
+
+def test_before_applysystem_reports_a_source_waits_for_the_firewall(
+    client: TestClient, login_as: Login, installed: Installed, rights: ApiRights
+) -> None:
+    add_source(installed)
+    FakeSystem(installed)  # managed (the installer's file), but no report yet
+    login_as(client, "admin")
+    assert source_firewall(client, rights) == "pending"
+    assert rights.refused == []
+
+
+def test_a_firewall_applysystem_reports_as_not_managed(
+    client: TestClient, login_as: Login, installed: Installed, rights: ApiRights
+) -> None:
+    """``-SkipFirewall``: no ``install\\firewall-state.json``, and ApplySystem's report says
+    the firewall is not ARCILOGGER's. The API learns it from that report alone."""
+    add_source(installed)
+    system_agent(installed, managed=False)
+    assert not (installed.root / "install" / "firewall-state.json").exists()
+    login_as(client, "admin")
+    assert source_firewall(client, rights) == "not_managed"
+    with rights.as_api():
+        status = client.get(f"{V}/admin/status").json()
+    assert status["system"]["firewall"]["managed"] is False
+    assert rights.refused == []
+
+
+def test_with_browser_administration_off_no_source_waits_for_the_firewall(
+    client: TestClient, login_as: Login, installed: Installed, rights: ApiRights
+) -> None:
+    """``-DisableBrowserAdministration``: ``Sync-ArciSystem.ps1`` stops at its first step and
+    never writes ``admin\\system\\status.json``, so a source would wait for a report that never
+    comes (``pending``, "Güncelleniyor", for ever). With ``-SkipFirewall`` too, and with a
+    report from before the switch-off, which ApplySystem no longer keeps up to date: the rules
+    are the console's then (``Set-ArciFirewall.ps1``, docs/SETTINGS.md section 6)."""
+    add_source(installed)
+    login_as(client, "admin")
+    installed.write_policy(enabled=False)
+    FakeSystem(installed, managed=False)  # -SkipFirewall
+    assert not installed.layout.system_status.exists()
+    assert source_firewall(client, rights) == "not_managed"
+
+    installed.write_policy()
+    system_agent(installed)  # a managed firewall, reported while the administration was on
+    assert source_firewall(client, rights) == "open"
+    installed.write_policy(enabled=False)
+    assert source_firewall(client, rights) == "not_managed"
     assert rights.refused == []
 
 

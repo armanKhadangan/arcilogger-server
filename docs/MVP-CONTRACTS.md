@@ -1127,10 +1127,12 @@ not usable: then the sections show the API's configuration), restart_required}`.
 never a value: `set` from the names of `secrets.json`, `changed_at` / `changed_by` from
 `admin\status\secret-meta.json`. A source's `firewall` and the strict outbound mode come from
 ApplySystem's `admin\system\status.json` (before its first report the firewall counts as
-managed: an enabled source is `pending`); the API never opens `install\` (contract 2.2: NT
-SERVICE\ArciApi has no right there). A file or folder the API finds but cannot read (on Windows:
-no right for NT SERVICE\ArciApi) is never a 500: it is a `warning` problem with the path as
-`key` and the text of `admin_file_unreadable`, and what depends on it is left out.
+managed: an enabled source is `pending`); with browser administration off (`policy.json`)
+ApplySystem keeps no rule and never reports, so every source is `not_managed`, whatever an
+older report says. The API never opens `install\` (contract 2.2: NT SERVICE\ArciApi has no
+right there). A file or folder the API finds but cannot read (on Windows: no right for NT
+SERVICE\ArciApi) is never a 500: it is a `warning` problem with the path as `key` and the text
+of `admin_file_unreadable`, and what depends on it is left out.
 
 `AdminStatus {agent: AgentOut {state: ok | stale | missing | disabled, version, heartbeat_at,
 queue, pending, java_candidates, seal_ready, system_task}, system: SystemOut {state: ok |

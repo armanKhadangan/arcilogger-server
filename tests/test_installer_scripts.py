@@ -7110,6 +7110,37 @@ def _e2e_json(path: str, cafile: Path, cookie: str, log: Log) -> dict[str, Any]:
     return found
 
 
+def _e2e_config(cafile: Path, cookie: str, log: Log) -> dict[str, Any]:
+    """``GET /admin/config`` through Caddy, read without a file the API could not read.
+
+    The API answers 200 even when NT SERVICE\\ArciApi may not read the roots folder, the Zamane
+    client, the SMTP CA file, the secret names or their meta, the agent's heartbeat or
+    ApplySystem's ``status.json``: each is a warning problem (``admin_file_unreadable``, the path
+    as its key) and what depends on it is left out, a source's firewall column among them. The
+    check looks at the problems, or it would not notice a missing NTFS right."""
+    from arcilogger_api.admin_channel import TEXTS
+
+    document = _e2e_json("/api/v1/admin/config", cafile, cookie, log)
+    message_en = TEXTS["admin_file_unreadable"][1]
+    unreadable = [item for item in document["problems"] if item["message_en"] == message_en]
+    assert not unreadable, ("admin config: NT SERVICE\\ArciApi cannot read", unreadable, log())
+    return document
+
+
+def _e2e_source_open(name: str, cafile: Path, cookie: str, log: Log, timeout: int = 120) -> None:
+    """The settings page shows the source's syslog rule ``open`` within ``timeout`` seconds:
+    ApplySystem's ``admin\\system\\status.json`` lists its sender and NT SERVICE\\ArciApi reads
+    it (``pending`` until then, for ever when the API cannot read the report)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        sources = _e2e_config(cafile, cookie, log)["sections"]["sources"]
+        source = next((source for source in sources if source["name"] == name), None)
+        if source is not None and source["firewall"] == "open":
+            return
+        assert time.monotonic() < deadline, ("source firewall", name, source, log())
+        time.sleep(5)
+
+
 def _e2e_wait_for_agent(cafile: Path, cookie: str, log: Log) -> None:
     """ArciAdmin's heartbeat is fresh (``GET /admin/status``): until then the API answers
     ``admin_agent_unavailable`` (contract 2.16)."""
@@ -7137,7 +7168,7 @@ def _e2e_browser_administration(
         return text
 
     def etag(section: str) -> str:
-        found: str = _e2e_json("/api/v1/admin/config", cafile, cookie, log)["etags"][section]
+        found: str = _e2e_config(cafile, cookie, log)["etags"][section]
         return found
 
     # 1. The site name: ArciAdmin replaces arcilogger.toml (ReplaceFileW), the API and the worker
@@ -7178,6 +7209,8 @@ def _e2e_browser_administration(
     assert done["state"] == "active", (done, log())
     steps = {step["step"]: step["state"] for step in done["steps"]}
     assert (steps["reload.collector"], steps["system.firewall"]) == ("done", "done"), steps
+    # The settings page says so too: the API reads the firewall from ApplySystem's report.
+    _e2e_source_open(str(E2E_SOURCE["name"]), cafile, cookie, log)
 
     # 3. "Kontör sorgula": the Requests task (LOCAL SERVICE, Event 4111) asks the mock provider.
     accepted = submit("POST", "/api/v1/credits/query")
@@ -7188,6 +7221,7 @@ def _e2e_browser_administration(
     assert state["results"]["Requests"] == 0, (state["results"], log())
     expected = {int(Event.SEAL_REQUESTED), int(Event.TASK_REQUESTED), int(Event.SYSTEM_SYNC_RESULT)}
     assert expected <= set(state["events"]), (state["events"], log())
+    _e2e_config(cafile, cookie, log)  # nothing became unreadable for NT SERVICE\ArciApi meanwhile
 
 
 def _e2e_state(powershell: str, tmp_path: Path) -> dict[str, Any]:
@@ -7251,6 +7285,47 @@ def test_a_failed_end_to_end_check_prints_the_server_side(tmp_path: Path) -> Non
     for found in ('{"state": "idle"}', '"acl_drift"', '{"state": "applied"}'):
         assert found in text, found
     assert f"----- {program_data / 'admin' / 'system' / 'status.json'}" in text
+
+
+def test_the_end_to_end_settings_checks_read_what_the_api_could_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The settings page answers 200 even when NT SERVICE\\ArciApi may not read a file it
+    needs (a warning problem ``admin_file_unreadable``): the Windows job's checks fail on such
+    a problem, and the new source's firewall column must turn ``open``, never stay
+    ``pending``, as when the API cannot read ApplySystem's ``status.json``."""
+    from arcilogger_api.admin_channel import TEXTS
+
+    message_tr, message_en = TEXTS["admin_file_unreadable"]
+    status = r"C:\ProgramData\ARCILOGGER\admin\system\status.json"
+    denied = {"level": "warning", "key": status, "message_tr": message_tr, "message_en": message_en}
+    other = {"level": "warning", "key": "tsa.provider", "message_tr": "Mock", "message_en": "Mock"}
+    answers: list[dict[str, Any]] = []
+
+    def config(firewall: str, *problems: dict[str, str]) -> dict[str, Any]:
+        source = {"name": E2E_SOURCE["name"], "firewall": firewall}
+        return {"etags": {}, "problems": list(problems), "sections": {"sources": [source]}}
+
+    def get(path: str, cafile: Path, cookie: str) -> tuple[int, str]:
+        assert path == "/api/v1/admin/config", path
+        return 200, json.dumps(answers.pop(0))
+
+    def log() -> str:
+        return "server side"
+
+    monkeypatch.setattr(sys.modules[__name__], "_https_get", get)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    name, cafile = str(E2E_SOURCE["name"]), Path("caddy-root.crt")
+    answers[:] = [config("pending", other), config("open", other)]
+    _e2e_source_open(name, cafile, "", log)
+    assert answers == []
+    answers[:] = [config("open", other, denied)]
+    with pytest.raises(AssertionError, match="server side") as failed:
+        _e2e_config(cafile, "", log)
+    assert status.replace("\\", "\\\\") in str(failed.value)
+    answers[:] = [config("pending", other)]
+    with pytest.raises(AssertionError, match="source firewall"):
+        _e2e_source_open(name, cafile, "", log, timeout=0)
 
 
 @pytest.mark.skipif(not E2E_BUNDLE, reason="needs the real bundle the end-to-end job builds")
