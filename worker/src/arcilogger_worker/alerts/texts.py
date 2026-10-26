@@ -272,13 +272,17 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
     ),
     "R20-seal-config": (
         "1. Ayrıntılardaki nedeni okuyun: Kamu SM kimlik bilgileri, kamusm-roots kökleri, "
-        "[tsa] zamane_jar ya da gizli depo anahtarı.\n"
-        "2. Eksik olanı ILK-ADIMLAR.md bölüm 3'e göre tamamlayın (kamusm.md).\n"
+        "[tsa] zamane_jar, gizli depo anahtarı, güvenilir konumda olmayan [tsa] java ya da "
+        "zamane_jar, ya da kurulumun klasörü olmayan secrets_dir / data_dir.\n"
+        "2. Eksik olanı ILK-ADIMLAR.md bölüm 3'e göre tamamlayın (kamusm.md); klasör nedeni "
+        "için arcilogger.toml dosyasını sunucuda denetleyin.\n"
         "3. Seal görevi 5 dakika içinde yeniden dener; sonraki başarılı mühürden sonra uyarı "
         "kendiliğinden kapanır.",
         "1. Read the cause in the details: Kamu SM credentials, kamusm-roots roots, "
-        "[tsa] zamane_jar or the secret store key.\n"
-        "2. Complete what is missing (FIRST-STEPS.md section 3, kamusm.md).\n"
+        "[tsa] zamane_jar, the secret store key, a [tsa] java or zamane_jar outside a trusted "
+        "location, or a secrets_dir / data_dir that is not the installation's folder.\n"
+        "2. Complete what is missing (FIRST-STEPS.md section 3, kamusm.md); for the folder "
+        "cause, check arcilogger.toml on the server.\n"
         "3. The Seal task retries within 5 minutes; the alert closes by itself after the next "
         "successful seal.",
     ),
