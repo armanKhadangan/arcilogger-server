@@ -518,7 +518,27 @@
       "audit": "Denetim kaydı",
       "auditHint": "Bu isteğin denetim kaydı satırları şu hedefle bulunur:",
       "auditTarget": "Hedef",
-      "openAudit": "Denetim kaydını aç"
+      "openAudit": "Denetim kaydını aç",
+      "versions": {
+        "title": "Yapılandırma sürümleri",
+        "description": "Yönetim hizmetinin sakladığı yapılandırma sürümleri, en yeni önce. Son uygulanan değişiklik, isteği açılıp \"Geri al\" ile geri alınır.",
+        "caption": "Saklanan yapılandırma sürümleri, en yeni önce",
+        "empty": "Henüz saklanan sürüm yok.",
+        "number": "Sürüm",
+        "paths": "Değişen ayarlar",
+        "current": "Geçerli",
+        "secrets": "Gizli bilgi",
+        "openRequest": "{{number}} numaralı sürümün isteğini aç",
+        "console": "Sunucu konsolu",
+        "restore": "Daha eski bir sürüm yalnızca sunucu konsolundan geri yüklenir; örneğin bir önceki sürüm için:",
+        "command": "Sunucu konsolu komutu"
+      },
+      "diagnostics": {
+        "title": "Tanılama paketi",
+        "description": "Destek için ZIP dosyası: hizmetlerin durum dosyaları, gizli bilgileri çıkarılmış son günlük satırları, gizli bilgiler olmadan yapılandırma ve son istekler. Hiçbir ham kayıt satırı içermez. Parolanız yeniden sorulur.",
+        "download": "Tanılama paketini indir",
+        "saved": "{{name}} kaydedildi ({{size}})."
+      }
     },
     "kamusm": {
       "title": "Kamu SM zaman damgası",

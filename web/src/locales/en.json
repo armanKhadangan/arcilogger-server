@@ -518,7 +518,27 @@
       "audit": "Audit log",
       "auditHint": "The audit log entries of this request have this target:",
       "auditTarget": "Target",
-      "openAudit": "Open the audit log"
+      "openAudit": "Open the audit log",
+      "versions": {
+        "title": "Configuration versions",
+        "description": "The configuration versions the administration service keeps, newest first. The last applied change is undone by opening its request and choosing \"Revert\".",
+        "caption": "Kept configuration versions, newest first",
+        "empty": "No version is kept yet.",
+        "number": "Version",
+        "paths": "Changed settings",
+        "current": "Current",
+        "secrets": "Secret",
+        "openRequest": "Open the request of version {{number}}",
+        "console": "Server console",
+        "restore": "An older version is restored on the server console only; for example the previous one:",
+        "command": "Server console command"
+      },
+      "diagnostics": {
+        "title": "Diagnostics package",
+        "description": "A ZIP file for support: the services' status files, the last log lines with secrets removed, the configuration without secrets and the last requests. It holds no raw log line. Your password is asked again.",
+        "download": "Download the diagnostics package",
+        "saved": "{{name}} saved ({{size}})."
+      }
     },
     "kamusm": {
       "title": "Kamu SM time stamps",

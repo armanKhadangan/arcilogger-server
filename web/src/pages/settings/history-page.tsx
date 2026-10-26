@@ -31,11 +31,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { requestSectionState } from '@/lib/admin-requests';
 import { errorMessage } from '@/lib/api';
-import { useAdminRequests, useAdminStatus } from '@/lib/api-hooks';
+import { useAdminRequest, useAdminRequests, useAdminStatus } from '@/lib/api-hooks';
 import { formatDateTime } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import type { AdminRequestOut, RequestKind } from '@/lib/settings-types';
 
+import { DiagnosticsCard, VersionsCard } from './history-parts';
 import { requestTitle } from './request-labels';
 
 const KINDS: RequestKind[] = [
@@ -150,6 +151,9 @@ export function HistoryPage() {
   const lang = currentLang();
   const [kind, setKind] = useState<RequestKind | null>(null);
   const [open, setOpen] = useState<AdminRequestOut | null>(null);
+  // A request opened from the versions (it may not be on the loaded pages of the list).
+  const [openId, setOpenId] = useState<string | null>(null);
+  const byId = useAdminRequest(openId).data ?? null;
   const opener = useRef<HTMLElement | null>(null);
   const status = useAdminStatus();
   const requests = useAdminRequests(kind);
@@ -280,10 +284,20 @@ export function HistoryPage() {
           </Button>
         ) : null}
       </SettingsCard>
+      <VersionsCard
+        onOpen={(id) => {
+          opener.current =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setOpen(null);
+          setOpenId(id);
+        }}
+      />
+      <DiagnosticsCard />
       <RequestSheet
-        request={open}
+        request={open ?? (openId ? byId : null)}
         onClose={() => {
           setOpen(null);
+          setOpenId(null);
         }}
         returnFocus={opener}
       />

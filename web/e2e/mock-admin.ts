@@ -946,7 +946,19 @@ export class AdminMock {
   readonly sealed = new Map<string, { serial: string; gen_time: string; sealed_at: string }>();
   /** Checks "Kontör sorgula" added to the credit history. */
   readonly creditChecks: CreditCheck[] = [];
-  readonly versions: ConfigVersion[] = [];
+  /** The kept configurations, newest first (16: the installer's). */
+  readonly versions: ConfigVersion[] = [
+    {
+      n: 16,
+      at: '2026-09-30T09:12:00+03:00',
+      request_id: null,
+      actor: 'installer',
+      paths: [],
+      has_secrets: true,
+    },
+  ];
+  /** Diagnostics packages handed out. */
+  diagnostics = 0;
   readonly settings: SettingGroup[] = startSettings();
   readonly uploads = new Map<string, UploadPreview>();
   private lastCredit: number | null = null;
@@ -2687,6 +2699,31 @@ export class AdminMock {
     return this.accepted(item);
   }
 
+  // -- versions and diagnostics (contract 2.11.1, M4) ------------------------------------------
+
+  private diagnosticsPackage(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(account)) return account;
+    this.diagnostics += 1;
+    // A ZIP holding one entry (the status files would be in it; no raw log line ever is).
+    const body = Buffer.from(
+      'PK\u0003\u0004mock arcilogger diagnostics: status, config without secrets, requests',
+      'utf8',
+    );
+    return [
+      200,
+      null,
+      {
+        body,
+        contentType: 'application/zip',
+        headers: {
+          'Content-Disposition': `attachment; filename="arcilogger-diagnostics-${siteDay(this.now()).replaceAll('-', '')}.zip"`,
+          'Cache-Control': 'no-store',
+        },
+      },
+    ];
+  }
+
   // -- requests: list, one, cancel, revert ------------------------------------------------------
 
   private listRequests(call: RecordedCall, host: MockHost): Answer {
@@ -3112,6 +3149,11 @@ export class AdminMock {
     if (route === 'POST /admin/config/backup/check') return this.backup(call, host, true);
     if (route === 'PUT /admin/config/backup') return this.backup(call, host, false);
     if (route === 'POST /admin/actions/lease-rebuild') return this.leaseRebuild(call, host);
+    if (route === 'GET /admin/config/versions') {
+      const account = host.requirePermission(call, 'settings.manage');
+      return Array.isArray(account) ? account : [200, copy(this.versions)];
+    }
+    if (route === 'GET /admin/diagnostics') return this.diagnosticsPackage(call, host);
     if (route === 'GET /admin/requests') return this.listRequests(call, host);
     if ((match = /^\/admin\/requests\/([0-9a-f]{32})$/.exec(path))) {
       const id = match[1] ?? '';
