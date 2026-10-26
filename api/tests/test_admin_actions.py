@@ -40,6 +40,8 @@ pytestmark = pytest.mark.usefixtures("installed")
 
 Login = Callable[..., LoggedIn]
 V = "/api/v1"
+#: Fixed when the module is collected; a test that compares a day with the server's today takes
+#: today when it runs, since a run can cross midnight.
 TODAY = site_day(utc_now())
 #: Four sealed days, a failed one (the oldest due) and one never tried, before today.
 SEALED = [TODAY - timedelta(days=offset) for offset in (7, 6, 5, 4)]
@@ -98,12 +100,19 @@ def test_seal_now_reaches_the_seal_task_once_for_the_oldest_due_day(
     [
         (SEALED[1], "seal_day_sealed"),
         (WAITING, "seal_not_due"),
-        (TODAY, "seal_not_due"),
+        (None, "seal_not_due"),  # today, taken when the test runs
     ],
+    ids=["sealed", "waiting", "today"],
 )
 def test_seal_now_refuses_a_day_that_is_not_next(
-    client: TestClient, login_as: Login, agent: FakeAgent, vault: SealedVault, day: date, code: str
+    client: TestClient,
+    login_as: Login,
+    agent: FakeAgent,
+    vault: SealedVault,
+    day: date | None,
+    code: str,
 ) -> None:
+    day = day or site_day(utc_now())
     login_as(client, "admin")
     response = client.post(f"{V}/seals/{day.isoformat()}/seal")
     assert error(response) == (409, code)
@@ -347,20 +356,21 @@ def test_a_lease_rebuild_is_worked_day_by_day_within_its_range(
     api_config: Config,
     app_session_factory: sessionmaker[Session],
 ) -> None:
+    today = site_day(utc_now())
     login_as(client, "admin")
     url = f"{V}/admin/actions/lease-rebuild"
-    span = {"from": (TODAY - timedelta(days=2)).isoformat(), "to": TODAY.isoformat()}
+    span = {"from": (today - timedelta(days=2)).isoformat(), "to": today.isoformat()}
     assert error(client.post(url, json=span)) == (422, "lease_rebuild_range")  # no log yet
     with app_session_factory() as session:
         evidence = Evidence(session, Layout(api_config.data_dir))
         evidence.dhcp(
-            at_site(TODAY - timedelta(days=2)), "assigned", "172.20.60.21", "02:00:00:00:00:21"
+            at_site(today - timedelta(days=2)), "assigned", "172.20.60.21", "02:00:00:00:00:21"
         )
         session.commit()
     for refused in (
-        {"from": (TODAY - timedelta(days=3)).isoformat(), "to": TODAY.isoformat()},
-        {"from": TODAY.isoformat(), "to": (TODAY + timedelta(days=1)).isoformat()},
-        {"from": TODAY.isoformat(), "to": (TODAY - timedelta(days=1)).isoformat()},
+        {"from": (today - timedelta(days=3)).isoformat(), "to": today.isoformat()},
+        {"from": today.isoformat(), "to": (today + timedelta(days=1)).isoformat()},
+        {"from": today.isoformat(), "to": (today - timedelta(days=1)).isoformat()},
     ):
         assert error(client.post(url, json=refused)) == (422, "lease_rebuild_range"), refused
     response = client.post(url, json=span)
