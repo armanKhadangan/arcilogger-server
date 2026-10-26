@@ -23,7 +23,7 @@ endpoints the pages use are in section 10.
 | Page (address) | Changed from the browser | Deliberately console only |
 |---|---|---|
 | **General** (`/settings/general`) | organisation name (`site_name`), local and fallback time source (`[clock] ntp_server`, `[clock] fallback_server`), clock offset alert threshold (`[clock] alert_offset_ms`); the last measured offset is shown, a new time server is tried before it is saved | `[clock] ntp_port` |
-| **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
+| **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, search and live tail, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
 | **Kamu SM** (`/settings/kamusm`) | a wizard: Java (one of those the administration service found on the server), Zamane client (upload), root certificates (add) and legal root fingerprints (installed roots only), customer number and password (tried with a credit query when saved), **Stamp test (uses 1 credit)**, **Switch to production** (and back to test), credit alert threshold and timeout; `[seal]` read-only | the mock or another provider, a free URL or port, the digest, removing a root or a fingerprint, a free `java` path, approving an unknown Zamane release (`approve-jar`, section 4) |
 | **Sources** (`/settings/sources`) | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it (typing its name); the table shows the last message and the firewall state | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
 | **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour) | — |
@@ -52,6 +52,33 @@ log source off or removing it; the application settings of sessions and password
 privacy (`privacy.*`), the retention periods and the pseudonyms of the anonymous role, the alert
 e-mail recipients and lowest severity; cancelling a held change, **Revert** and the diagnostics
 package ([SECURITY.md](SECURITY.md) section 7).
+
+The **Search and live tail** group (`search.*`, `live.*`; [ADR-0015](adr/0015-search-live-sources.md))
+holds the limits of the Arama and Canlı Akış pages: every request has a time budget and every
+user a share, so that no search or tail competes with loading the logs (ingest). The values are
+starting values, not measured facts; no value can switch a limit or a budget off. Every request
+reads them again (a live tail when it opens):
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `search.max_days` | 31 | 1–92 | longest range of one search (days, device time) |
+| `search.page_size_max` | 500 | 50–1000 | most rows of one request (the web interface asks for 100) |
+| `search.request_budget_ms` | 4000 | 500–30000 | time for rows; then what was found so far is shown with the interval scanned |
+| `search.stats_budget_ms` | 8000 | 1000–60000 | time for the chart and the facets |
+| `search.facet_sample_rows` | 100000 | 1000–1000000 | most matches for facets counted directly |
+| `search.max_concurrent` | 3 | 1–10 | search requests running at once; at most `[database] pool_size` minus 2 |
+| `search.runs_per_minute` | 30 | 1–600 | new searches per user and minute |
+| `search.export_max_rows` | 100000 | 1–1000000 | most rows of one export file |
+| `search.export_max_per_hour` | 10 | 1–100 | exports per user and hour |
+| `search.export_budget_seconds` | 120 | 10–900 | time to build one export file |
+| `search.saved_max_per_user` | 100 | 1–1000 | saved searches per user (personal) |
+| `live.max_streams_total` | 4 | 1–20 | live tails open on the server at a time |
+| `live.max_streams_per_user` | 2 | 1–10 | live tails open per user |
+| `live.max_lines_per_second` | 100 | 10–500 | lines a second shown per tail; the rest are counted and reported |
+| `live.parse_lines_per_second` | 1000 | 50–10000 | lines a second parsed for the live tails |
+| `live.buffer_lines` | 5000 | 500–50000 | newest lines the server keeps for a resume |
+| `live.max_minutes` | 60 | 5–480 | duration of one tail (unattended screen); Resume starts it again |
+| `live.backfill_lines` | 50 | 0–200 | recent lines shown at once when a tail opens |
 
 ## 2. How it works
 

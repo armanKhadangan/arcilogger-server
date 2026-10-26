@@ -26,6 +26,7 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     await expect(page.getByRole('tab')).toHaveText([
       'Uyarılar ve e-posta',
       '5651 sorgu ve kira zaman çizelgesi',
+      'Arama ve canlı akış',
       'Kullanım analizi',
       'Kullanım raporları',
       'Kanıt paketleri',

@@ -36,6 +36,7 @@ class Group:
 GROUPS: Final[tuple[Group, ...]] = (
     Group("alerts", "Uyarılar ve e-posta", "Alerts and e-mail"),
     Group("lookup", "5651 sorgu ve kira zaman çizelgesi", "5651 lookup and lease timeline"),
+    Group("search", "Arama ve canlı akış", "Search and live tail"),
     Group("usage", "Kullanım analizi", "Usage analytics"),
     Group("reports", "Kullanım raporları", "Usage reports"),
     Group("evidence", "Kanıt paketleri", "Evidence packages"),
@@ -381,6 +382,150 @@ _LOOKUP = _group(
     ),
 )
 
+_SEARCH = _group(
+    "search",
+    (
+        "search.max_days",
+        "En uzun arama aralığı (gün)",
+        "Longest search range (days)",
+        "Bir aramanın başlangıcı ile bitişi arasında en çok bu kadar gün olabilir (cihaz zamanı).",
+        "A search may span at most this many days from its start to its end (device time).",
+    ),
+    (
+        "search.page_size_max",
+        "Sayfa başına en çok satır",
+        "Most rows per page",
+        "Bir arama isteğinin isteyebileceği en çok satır; web arayüzü 100 satır ister.",
+        "The most rows one search request may ask for; the web interface asks for 100.",
+    ),
+    (
+        "search.request_budget_ms",
+        "Satır arama süresi (ms)",
+        "Time for rows (ms)",
+        "Bir istek satırları en çok bu kadar milisaniye arar; süre dolunca o ana kadar "
+        "bulduklarını taranan aralıkla birlikte gösterir.",
+        "One request looks for rows at most this many milliseconds; then it shows what it found "
+        "so far, with the interval scanned.",
+    ),
+    (
+        "search.stats_budget_ms",
+        "İstatistik süresi (ms)",
+        "Time for statistics (ms)",
+        "Grafik ve dağılımlar en çok bu kadar milisaniye sayılır; süre dolunca sayılmayan kısım "
+        "gösterilir.",
+        "The chart and the facets are counted at most this many milliseconds; then the part not "
+        "counted is shown.",
+    ),
+    (
+        "search.facet_sample_rows",
+        "Dağılımlar için en çok eşleşme",
+        "Most matches for facets",
+        "Özet tablodan sayılamayan dağılımlar en yeni bu kadar eşleşmeye göre hesaplanır.",
+        "Facets the summary table cannot answer are computed from the newest this many matches.",
+    ),
+    (
+        "search.max_concurrent",
+        "Aynı anda çalışan arama",
+        "Searches running at once",
+        "Sunucuda aynı anda çalışabilen arama, sayfa, istatistik ve dışa aktarma istekleri; "
+        "veritabanı bağlantı sayısının 2 eksiğini geçmemeli.",
+        "Search, page, statistics and export requests the server runs at once; keep it at most "
+        "the database pool size minus 2.",
+    ),
+    (
+        "search.runs_per_minute",
+        "Dakikada en çok yeni arama",
+        "New searches per minute",
+        "Bir kullanıcının dakikada başlatabileceği en çok yeni arama.",
+        "The most new searches one user may start per minute.",
+    ),
+    (
+        "search.export_max_rows",
+        "Dışa aktarmada en çok satır",
+        "Most rows per export",
+        "Bir dışa aktarma dosyası en çok bu kadar satır içerir; fazlası kesilir ve dosyada "
+        "belirtilir.",
+        "One export file holds at most this many rows; the rest is cut off and the file says so.",
+    ),
+    (
+        "search.export_max_per_hour",
+        "Saatte en çok dışa aktarma",
+        "Exports per hour",
+        "Bir kullanıcının saatte en çok dışa aktarma sayısı.",
+        "The most exports of one user per hour.",
+    ),
+    (
+        "search.export_budget_seconds",
+        "Dışa aktarma süresi (saniye)",
+        "Time for an export (seconds)",
+        "Bir dışa aktarma dosyası en çok bu kadar saniyede hazırlanır; süre dolunca dosya "
+        "kesilir ve dosyada belirtilir.",
+        "One export file is built in at most this many seconds; then the file is cut off and "
+        "says so.",
+    ),
+    (
+        "search.saved_max_per_user",
+        "Kullanıcı başına kayıtlı arama",
+        "Saved searches per user",
+        "Bir kullanıcının saklayabileceği en çok kayıtlı arama; kayıtlı aramalar kişiseldir.",
+        "The most saved searches one user may keep; saved searches are personal.",
+    ),
+    (
+        "live.max_streams_total",
+        "Sunucuda en çok canlı akış",
+        "Live tails on the server",
+        "Sunucuda aynı anda açık olabilen en çok canlı akış.",
+        "The most live tails open on the server at a time.",
+    ),
+    (
+        "live.max_streams_per_user",
+        "Kullanıcı başına canlı akış",
+        "Live tails per user",
+        "Bir kullanıcının aynı anda açık tutabileceği en çok canlı akış.",
+        "The most live tails one user may keep open at a time.",
+    ),
+    (
+        "live.max_lines_per_second",
+        "Akış başına saniyede satır",
+        "Lines a second per tail",
+        "Bir canlı akışın saniyede gösterdiği en çok satır; fazlası sayılır ve gösterilmedi "
+        "olarak bildirilir.",
+        "The most lines one live tail shows a second; the rest are counted and reported as not "
+        "shown.",
+    ),
+    (
+        "live.parse_lines_per_second",
+        "Saniyede ayrıştırılan satır",
+        "Lines parsed a second",
+        "Canlı akışlar için sunucunun saniyede ayrıştırdığı en çok satır; fazlası ayrıştırılmadan "
+        "gösterilir ya da alan filtresi uygulanamadığı için bildirilir.",
+        "The most lines a second the server parses for the live tails; the rest are shown "
+        "unparsed, or reported because a field filter could not be applied.",
+    ),
+    (
+        "live.buffer_lines",
+        "Sürdürme için saklanan satır",
+        "Lines kept for a resume",
+        "Duraklatılan ya da kopan bir akışın sürdürülebilmesi için sunucuda tutulan en yeni "
+        "satırlar.",
+        "The newest lines the server keeps so that a paused or dropped tail can resume.",
+    ),
+    (
+        "live.max_minutes",
+        "Canlı akış süresi (dakika)",
+        "Live tail duration (minutes)",
+        "Bir canlı akış bu kadar dakika sonra durur (gözetimsiz ekran); Sürdür ile yeniden başlar.",
+        "A live tail stops after this many minutes (unattended screen); Resume starts it again.",
+    ),
+    (
+        "live.backfill_lines",
+        "Açılışta gösterilen satır",
+        "Lines shown on opening",
+        "Bir canlı akış açılırken hemen gösterilen en çok son satır; 0: yalnızca yeni satırlar.",
+        "The most recent lines shown at once when a live tail opens; 0: new lines only.",
+    ),
+)
+
 _USAGE = _group(
     "usage",
     (
@@ -696,7 +841,16 @@ _DATABASE = _group(
 #: Every visible setting, by key, in the order of :data:`GROUPS` (then as listed).
 SETTINGS: Final[Mapping[str, SettingMeta]] = {
     meta.key: meta
-    for meta in (*_ALERTS, *_LOOKUP, *_USAGE, *_REPORTS, *_EVIDENCE, *_SECURITY, *_DATABASE)
+    for meta in (
+        *_ALERTS,
+        *_LOOKUP,
+        *_SEARCH,
+        *_USAGE,
+        *_REPORTS,
+        *_EVIDENCE,
+        *_SECURITY,
+        *_DATABASE,
+    )
 }
 
 

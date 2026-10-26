@@ -213,6 +213,39 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     # After the worker was stopped: run a missed schedule once, for its newest occurrence
     # (false: skip occurrences more than 30 minutes late).
     "reports.catch_up": True,
+    # --- Search (Arama) and live tail (Canlı Akış) (ADR-0015, docs/ARAMA.md) -----------------
+    # Starting values, not measured facts: they keep one search or stream from competing with
+    # ingest on the one server. Read per request (the live hub when a stream opens).
+    # Longest time range of one search (days, device time).
+    "search.max_days": 31,
+    # Largest page a search request may ask for (the web interface asks for 100).
+    "search.page_size_max": 500,
+    # Time budget of one request for rows, and for its statistics (milliseconds): the scan then
+    # stops and answers what it found so far (``complete: false``).
+    "search.request_budget_ms": 4000,
+    "search.stats_budget_ms": 8000,
+    # Facets counted directly look at the newest this many matches at most.
+    "search.facet_sample_rows": 100000,
+    # Search, page, statistics, evidence and export requests running at once in the API (keep
+    # it at the database pool size minus 2), and new searches per user and minute.
+    "search.max_concurrent": 3,
+    "search.runs_per_minute": 30,
+    # Export: most rows of one file, most files per user and hour, longest build (seconds).
+    "search.export_max_rows": 100000,
+    "search.export_max_per_hour": 10,
+    "search.export_budget_seconds": 120,
+    # Saved searches per user (personal only).
+    "search.saved_max_per_user": 100,
+    # Live tail: open streams on the server and per user, lines a second shown per stream,
+    # lines a second the server parses for all streams, lines kept for a resume, minutes before
+    # an unattended stream stops, and lines shown at once when a stream opens.
+    "live.max_streams_total": 4,
+    "live.max_streams_per_user": 2,
+    "live.max_lines_per_second": 100,
+    "live.parse_lines_per_second": 1000,
+    "live.buffer_lines": 5000,
+    "live.max_minutes": 60,
+    "live.backfill_lines": 50,
 }
 
 
@@ -442,6 +475,25 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     # Area R (usage reports).
     "reports.keep_days": (1, None),
     "reports.max_attachment_mb": (1, 100),
+    # Search and live tail (ADR-0015): no value switches a limit or a budget off.
+    "search.max_days": (1, 92),
+    "search.page_size_max": (50, 1000),
+    "search.request_budget_ms": (500, 30_000),
+    "search.stats_budget_ms": (1000, 60_000),
+    "search.facet_sample_rows": (1000, 1_000_000),
+    "search.max_concurrent": (1, 10),
+    "search.runs_per_minute": (1, 600),
+    "search.export_max_rows": (1, 1_000_000),
+    "search.export_max_per_hour": (1, 100),
+    "search.export_budget_seconds": (10, 900),
+    "search.saved_max_per_user": (1, 1000),
+    "live.max_streams_total": (1, 20),
+    "live.max_streams_per_user": (1, 10),
+    "live.max_lines_per_second": (10, 500),
+    "live.parse_lines_per_second": (50, 10_000),
+    "live.buffer_lines": (500, 50_000),
+    "live.max_minutes": (5, 480),
+    "live.backfill_lines": (0, 200),
 }
 #: Area E: most addresses ``alerts.email_recipients`` may list.
 MAX_EMAIL_RECIPIENTS: Final = 20
