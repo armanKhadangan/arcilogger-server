@@ -27,6 +27,7 @@ from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import CIDR
 from sqlalchemy.exc import IntegrityError
 
+from arcilogger_core.timeutil import day_window
 from arcilogger_db.bulk import copy_rows
 from arcilogger_db.kinds import ACTION_TABLES, CLIENT_IP, KINDS
 from arcilogger_db.models import Base, IngestOffset, Message, SearchCount
@@ -42,6 +43,7 @@ from arcilogger_db.searchcounts import (
     upsert_counts,
     verify,
 )
+from arcilogger_ingest.parsers.syslog import DEFAULT_MAX_CLOCK_SKEW, plausible_time
 
 DAY = date(2026, 9, 23)
 #: 09:00 site time of DAY.
@@ -306,8 +308,19 @@ def test_rebuild_of_a_file_without_typed_rows(db_engine: Engine) -> None:
 
 
 def test_the_window_of_a_file_covers_the_clock_skew_bound() -> None:
+    """The parsers keep a device time only within ``DEFAULT_MAX_CLOCK_SKEW`` of the receive time,
+    which lies in the file's site day: the furthest such rows are inside the rebuild's window."""
     start, end = stream_window(DAY)
-    assert timedelta(days=1) <= COUNTS_TIME_MARGIN
+    first, after = day_window(DAY)
+    last = after - timedelta(microseconds=1)
+    for received, device in (
+        (first, first - DEFAULT_MAX_CLOCK_SKEW),
+        (last, last + DEFAULT_MAX_CLOCK_SKEW),
+    ):
+        time = plausible_time(device, received)
+        assert time is not None  # ingest keeps it
+        assert start <= time < end
+    assert DEFAULT_MAX_CLOCK_SKEW + timedelta(hours=1) <= COUNTS_TIME_MARGIN
     assert end - start == timedelta(days=1) + 2 * COUNTS_TIME_MARGIN
 
 
