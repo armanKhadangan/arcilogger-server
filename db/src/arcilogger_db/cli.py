@@ -54,6 +54,7 @@ import argparse
 import getpass
 import json
 import logging
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -66,6 +67,7 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.canonical import CanonicalJsonError, canonical_json
 from arcilogger_core.config import Config, default_config_path, load_config
+from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.fmt import format_bytes, format_datetime
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStoreError
@@ -403,7 +405,7 @@ def _backup_run(config: Config, args: argparse.Namespace) -> int:
             "[scheduled database backup is disabled]."
         )
         return EXIT_OK
-    outcome = run_backup(config)
+    outcome = run_backup(config, anchors=TrustAnchors.of(args.config or default_config_path()))
     if not outcome.ok or outcome.file is None or outcome.size is None:
         print(
             f"Veritabanı yedeği alınamadı [database backup failed]: {outcome.error}",
@@ -498,7 +500,8 @@ def _backup_verify(config: Config, args: argparse.Namespace) -> int:
     if not files:
         print("Doğrulanacak yedek yok [no backup to verify].", file=sys.stderr)
         return EXIT_ATTENTION
-    tool = find_tool("pg_restore", config.backup.pg_restore)
+    anchors = TrustAnchors.of(args.config or default_config_path())
+    tool = find_tool("pg_restore", config.backup.pg_restore, anchors=anchors)
     checks = [verify_backup(path, tool, deep=args.deep) for path in files]
     for check in checks:
         _print_verification(check)
@@ -548,7 +551,13 @@ def _backup_restore(config: Config, args: argparse.Namespace) -> int:
     password = _read_password(args.superuser)
     try:
         outcome = restore_backup(
-            config, args.file, name, superuser=args.superuser, password=password, sha256=sha256
+            config,
+            args.file,
+            name,
+            superuser=args.superuser,
+            password=password,
+            sha256=sha256,
+            anchors=TrustAnchors.of(args.config or default_config_path()),
         )
     except RestoreRefusedError as exc:
         print(
@@ -607,7 +616,54 @@ BACKUP_ACTIONS = {
 }
 
 
+#: The installer's record of the data root, next to the configuration file (contract WP2-1).
+DATA_ROOT_RECORD = "data-root.txt"
+
+
+def _lexical(path: Path) -> str:
+    """``path`` made absolute without following a link (Windows: case-insensitive)."""
+    return os.path.normcase(os.path.abspath(path))  # noqa: PTH100 - lexical on purpose
+
+
+def _location_problem(config: Config, config_path: Path) -> str | None:
+    """Why the Backup task must not use ``config``, or ``None`` (ADR-0014, contract Day 0 notes
+    D0-2, WP2-1, WP3-5): ``secrets_dir`` is not the folder of the fixed ``config_path`` (it
+    chooses the database password the dump runs with), or ``data_dir`` is not the data root
+    recorded in :data:`DATA_ROOT_RECORD` (no record: not checked; a record that cannot be used
+    refuses the configuration). The semantics of WP2's ``config.check_fixed_location``, which
+    replaces this at the merge."""
+    if _lexical(config.secrets_dir) != _lexical(config_path.parent):
+        return (
+            f"secrets_dir ({config.secrets_dir}) yapılandırma dosyasının klasörü değil [is not "
+            f"the folder of the configuration file ({config_path.parent})]"
+        )
+    record = config_path.parent / DATA_ROOT_RECORD
+    try:
+        text = record.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"{record} okunamadı [cannot be read] ({type(exc).__name__})"
+    lines = text.strip().splitlines()
+    if len(lines) != 1 or not Path(lines[0].strip()).is_absolute():
+        return f"{record}: tek satırda mutlak bir yol değil [not one line with an absolute path]"
+    if _lexical(config.data_dir) != _lexical(Path(lines[0].strip())):
+        return (
+            f"data_dir ({config.data_dir}) kurulumun veri klasörü değil [is not the data root "
+            f"the installer recorded ({lines[0].strip()})]"
+        )
+    return None
+
+
 def cmd_backup(config: Config, args: argparse.Namespace) -> int:
+    if args.backup_command == "run":  # the Backup task: before anything is written to data_dir
+        problem = _location_problem(config, args.config or default_config_path())
+        if problem is not None:
+            print(
+                f"Yapılandırma kullanılmadı [the configuration was not used]: {problem}",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
     handler = _backup_log(config) if args.backup_command != "list" else None
     try:
         return BACKUP_ACTIONS[args.backup_command](config, args)

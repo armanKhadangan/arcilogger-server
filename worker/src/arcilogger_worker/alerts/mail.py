@@ -350,6 +350,11 @@ class SmtpSender:
                 permanent=code is not None and 500 <= code < 600,
                 recipient=isinstance(exc, smtplib.SMTPRecipientsRefused),
             ) from None
+        except UnicodeEncodeError:  # smtplib's AUTH PLAIN and LOGIN send ASCII only
+            raise SmtpSendError(
+                "AUTH: the user name or password has characters smtplib cannot send (ASCII only)",
+                permanent=False,
+            ) from None
 
     def _send(self, message: EmailMessage, recipient: str) -> None:
         settings = self.config

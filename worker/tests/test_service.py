@@ -170,6 +170,7 @@ def test_default_jobs_run_against_the_database(
         ("leases.late_evidence", "ok"),
         ("evidence.purge", "ok"),
         ("audit.import", "ok"),
+        ("admin.requests", "skipped"),  # no test e-mail or lease rebuild requested
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
@@ -189,6 +190,7 @@ def test_default_jobs_run_against_the_database(
         ("leases.recheck_today", "ok"),
         ("leases.late_evidence", "ok"),
         ("audit.import", "ok"),
+        ("admin.requests", "skipped"),
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),

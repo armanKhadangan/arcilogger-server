@@ -2,13 +2,18 @@
 
 The evidence tasks (sealing, verification, replica, retention, clock, credit) and the collector
 run without the database and append their alerts to ``state/alerts.jsonl``
-(:func:`arcilogger_core.alerts.raise_alert`, one JSON object per line). The file is only ever
-appended to, so a **byte offset** is enough to know what was imported:
+(:func:`arcilogger_core.alerts.raise_alert`, one JSON object per line). The browser
+administration (ADR-0014) has two more files in the same format: the agent ArciAdmin's
+``admin/status/alerts.jsonl`` and ApplySystem's ``admin/system/alerts.jsonl`` (:data:`ADMIN_FILES`,
+read from the ``admin`` folder next to the worker's fixed ``--config`` path). Each file has its
+own position and is read the same way. A file is only ever appended to, so a **byte offset** is
+enough to know what was imported:
 
-* The offset (the end of the last complete line imported) is stored in the internal setting
-  :data:`OFFSET_KEY` in the **same transaction** as the alerts of those lines, under an advisory
-  lock. A crash before the commit leaves neither, after it both: every line is imported exactly
-  once, across restarts and with two workers by mistake.
+* The offset (the end of the last complete line imported) is stored in an internal setting
+  (:data:`OFFSET_KEY`; the administration's files: the keys of :data:`ADMIN_FILES`) in the
+  **same transaction** as the alerts of those lines, under an advisory lock. A crash before
+  the commit leaves neither, after it both: every line is imported exactly once, across
+  restarts and with two workers by mistake.
 * Only complete lines (ending with ``\\n``) are read. A torn last line — the writer is in the
   middle of it, or a power cut left it — waits for its newline; the offset stays before it.
   After a power cut that newline comes from the next alert: ``raise_alert`` starts it on a fresh
@@ -46,6 +51,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_core.admin.contract import AdminLayout
 from arcilogger_core.layout import Layout
 from arcilogger_db.models import ALERT_SEVERITIES
 from arcilogger_db.settings import SYSTEM_AUTHOR, get_setting, set_setting
@@ -58,6 +64,36 @@ OFFSET_KEY: Final = "worker.alerts_import"
 #: pg_advisory_xact_lock key ("ARCIALIM" as a signed 64-bit integer).
 IMPORT_LOCK_KEY: Final = int.from_bytes(b"ARCIALIM", "big") - 2**63
 SOURCE: Final = "state/alerts.jsonl"
+
+
+@dataclass(frozen=True)
+class AlertFile:
+    """One alert file: where it is, its name in ``details.origin.file`` and the internal
+    setting that keeps its position."""
+
+    path: Path
+    source: str
+    offset_key: str
+
+
+#: The administration's alert files: the agent's and ApplySystem's (source, position setting).
+ADMIN_FILES: Final = (
+    ("admin/status/alerts.jsonl", "worker.alerts_import.admin"),
+    ("admin/system/alerts.jsonl", "worker.alerts_import.system"),
+)
+
+
+def alert_files(layout: Layout, admin: AdminLayout | None = None) -> list[AlertFile]:
+    """``state/alerts.jsonl``, then the administration's files when there is an ``admin``
+    folder."""
+    files = [AlertFile(layout.alerts, SOURCE, OFFSET_KEY)]
+    if admin is not None:
+        (agent_source, agent_key), (system_source, system_key) = ADMIN_FILES
+        files.append(AlertFile(admin.alerts, agent_source, agent_key))
+        files.append(AlertFile(admin.system_alerts, system_source, system_key))
+    return files
+
+
 #: Lines per transaction, and transactions per run (the rest waits for the next minute).
 BATCH_LINES: Final = 500
 MAX_BATCHES: Final = 20
@@ -89,9 +125,12 @@ class AlertImportReport:
     #: The file was replaced and read again from the start.
     reset: bool = False
     problems: list[str] = field(default_factory=list)
+    #: The administration's files read in the same run (by source), each with its own report;
+    #: the fields above are those of ``state/alerts.jsonl``.
+    files: dict[str, AlertImportReport] = field(default_factory=dict)
 
     def details(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "lines": self.lines,
             "created": self.created,
             "merged": self.merged,
@@ -101,6 +140,9 @@ class AlertImportReport:
             "problems": self.problems[:50],
             "problem_count": len(self.problems),
         }
+        if self.files:
+            result["files"] = {source: report.details() for source, report in self.files.items()}
+        return result
 
 
 @dataclass(frozen=True)
@@ -123,8 +165,8 @@ class Batch:
     partial: bool = False
 
 
-def read_position(session: Session) -> Position:
-    value = get_setting(session, OFFSET_KEY, None)
+def read_position(session: Session, key: str = OFFSET_KEY) -> Position:
+    value = get_setting(session, key, None)
     if not isinstance(value, Mapping):
         return Position()
     offset, head = value.get("offset"), value.get("head")
@@ -269,9 +311,16 @@ def _after_fragment(line: bytes) -> tuple[int, dict[str, Any]] | None:
 
 
 def import_line(
-    session: Session, offset: int, line: bytes, report: AlertImportReport, *, now: datetime
+    session: Session,
+    offset: int,
+    line: bytes,
+    report: AlertImportReport,
+    *,
+    now: datetime,
+    source: str = SOURCE,
 ) -> None:
-    """One ``alerts.jsonl`` line (inside the caller's transaction, in a savepoint)."""
+    """One line of the alert file ``source`` (inside the caller's transaction, in a
+    savepoint)."""
     if not line.strip():
         return
     entry = _parse(line)
@@ -288,7 +337,7 @@ def import_line(
     raw = entry.get("details")
     facts: dict[str, Any] = raw if isinstance(raw, dict) else {}
     message = str(entry.get("message") or rule)
-    details: dict[str, Any] = {**facts, "origin": {"file": SOURCE, "offset": offset}}
+    details: dict[str, Any] = {**facts, "origin": {"file": source, "offset": offset}}
     if severity not in ALERT_SEVERITIES:
         details["severity_given"] = str(severity)[:40]
         severity = "medium"
@@ -317,40 +366,41 @@ def import_line(
         report.merged += 1
 
 
-def import_alerts(
-    sessions: sessionmaker[Session], layout: Layout, *, now: datetime
+def import_alert_file(
+    sessions: sessionmaker[Session], file: AlertFile, *, now: datetime
 ) -> AlertImportReport:
-    """Import every complete line after the stored offset (see the module docstring)."""
+    """Import every complete line of ``file`` after its stored offset (see the module
+    docstring)."""
     report = AlertImportReport()
     for _ in range(MAX_BATCHES):
         with sessions() as session:
             session.execute(select(func.pg_advisory_xact_lock(IMPORT_LOCK_KEY)))
-            position = read_position(session)
+            position = read_position(session, file.offset_key)
             try:
-                batch = read_batch(layout.alerts, position)
+                batch = read_batch(file.path, position)
             except FileNotFoundError:
                 report.offset = position.offset
                 return report
             except OSError as exc:
-                report.problems.append(f"{layout.alerts.name}: {type(exc).__name__}")
-                log.warning("cannot read %s: %s", layout.alerts, exc)
+                report.problems.append(f"{file.path.name}: {type(exc).__name__}")
+                log.warning("cannot read %s: %s", file.path, exc)
                 return report
             if batch.reset:
                 report.reset = True
                 log.warning(
                     "%s was replaced (shorter than offset %d or another first line): read again "
                     "from the start",
-                    layout.alerts,
+                    file.path,
                     position.offset,
                 )
             for offset in batch.skipped:
                 report.problems.append(f"offset {offset}: line longer than {MAX_LINE_BYTES} bytes")
             for offset, line in batch.lines:
-                import_line(session, offset, line, report, now=now)
+                import_line(session, offset, line, report, now=now, source=file.source)
             if (batch.end, batch.head) != (position.offset, position.head):
                 set_setting(
                     session,
-                    OFFSET_KEY,
+                    file.offset_key,
                     {"offset": batch.end, "head": batch.head},
                     updated_by=SYSTEM_AUTHOR,
                 )
@@ -359,5 +409,21 @@ def import_alerts(
         if not batch.more:
             break
     if report.problems:
-        log.warning("alerts import: %s", "; ".join(report.problems[:10]))
+        log.warning("alerts import (%s): %s", file.source, "; ".join(report.problems[:10]))
+    return report
+
+
+def import_alerts(
+    sessions: sessionmaker[Session],
+    layout: Layout,
+    *,
+    now: datetime,
+    admin: AdminLayout | None = None,
+) -> AlertImportReport:
+    """``state/alerts.jsonl``, then the administration's alert files (``admin``: the
+    ``admin`` folder of the installation; None: there is none)."""
+    main, *others = alert_files(layout, admin)
+    report = import_alert_file(sessions, main, now=now)
+    for file in others:
+        report.files[file.source] = import_alert_file(sessions, file, now=now)
     return report

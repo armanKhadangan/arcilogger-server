@@ -71,6 +71,17 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "Deneme e-postası gönderilemedi.",
             "The trial e-mail could not be sent.",
         ),
+        # The worker channel (``admin_requests``, contract Day 0 note WP3-5).
+        "smtp_not_configured": (
+            "SMTP sunucusu ve gönderen adresi ayarlanmamış.",
+            "The SMTP server and sender address are not set.",
+        ),
+        "lease_rebuild_failed": (
+            "Kira zaman çizelgesi bazı günler için yeniden oluşturulamadı; o günlerin hatası "
+            "iş kayıtlarında (leases.rebuild). Diğer günler yeniden oluşturuldu.",
+            "The lease timeline could not be rebuilt for some days; their error is in the job "
+            "runs (leases.rebuild). The other days were rebuilt.",
+        ),
         "replica_test_failed": (
             "Replika paylaşımına bağlanılamadı.",
             "The replica share could not be reached.",

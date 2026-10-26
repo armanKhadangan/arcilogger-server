@@ -123,6 +123,7 @@ data of a module that is off is not deleted.
 | `leases.late_evidence` | 5651 Core | always runs |
 | `evidence.purge` | 5651 Core | always runs |
 | `audit.import` | 5651 Core | always runs |
+| `admin.requests` | — (browser administration: the test e-mail, the lease timeline rebuild) | always runs |
 | `alerts.import` | 5651 Core | always runs |
 | `alerts.r15` | 5651 Core | always runs |
 | `alerts.system` | 5651 Core | always runs |

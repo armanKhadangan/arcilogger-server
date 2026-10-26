@@ -18,6 +18,12 @@ lease settings the timeline cannot work with), 3 database unreachable. A failed 
 recorded as a ``failed`` ``leases.rebuild`` job run with the error, never left ``running``; the
 usage rebuild records one ``usage.rebuild`` job run for the range.
 
+``run`` refuses (exit 2) a configuration that moves the installation's folders: ``secrets_dir``
+must be the folder of the ``--config`` file and ``data_dir`` the data root the installer
+recorded in ``data-root.txt`` next to it (ADR-0014, contract Day 0 notes D0-2, WP2-1): the
+administration agent may write ``arcilogger.toml``, and the worker imports what it finds below
+``data_dir`` into the audit log.
+
 Licence (contract 1.4): only ``usage rebuild`` is gated — refused with exit 1 and the
 ``module_not_licensed`` message while ``usage_analytics`` is off. ``run``, ``rebuild`` (the lease
 timeline, the 5651 attribution repair), ``alerts …`` and ``version`` work in every licence state.
@@ -27,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
@@ -40,7 +47,7 @@ from sqlalchemy import Engine, text, update
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from arcilogger_core.config import Config, load_config
+from arcilogger_core.config import Config, default_config_path, load_config
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.engine import make_engine, session_factory
@@ -48,7 +55,7 @@ from arcilogger_db.license_guard import module_not_licensed_texts, safe_status
 from arcilogger_db.models import JobRun
 from arcilogger_worker import __version__
 from arcilogger_worker.alerts.commands import list_alerts, send_test_email
-from arcilogger_worker.correlation.leases import rebuild_day
+from arcilogger_worker.correlation.rebuild import rebuild_lease_day
 from arcilogger_worker.service import Worker, default_jobs
 from arcilogger_worker.usage.jobs import rebuild_range
 
@@ -138,6 +145,45 @@ def _load(config_path: Path | None) -> Config | None:
         return None
 
 
+#: The installer's record of the data root, next to the configuration file (contract WP2-1).
+DATA_ROOT_RECORD = "data-root.txt"
+
+
+def _lexical(path: Path) -> str:
+    """``path`` made absolute without following a link (Windows: case-insensitive)."""
+    return os.path.normcase(os.path.abspath(path))  # noqa: PTH100 - lexical on purpose
+
+
+def _location_problem(config: Config, config_path: Path) -> str | None:
+    """Why the worker must not use ``config``, or ``None`` (ADR-0014, contract Day 0 notes D0-2,
+    WP2-1, WP3-5): ``secrets_dir`` is not the folder of the fixed ``config_path`` (it chooses
+    the SMTP and database passwords), or ``data_dir`` is not the data root recorded in
+    :data:`DATA_ROOT_RECORD` (no record: not checked; a record that cannot be used refuses the
+    configuration). The semantics of WP2's ``config.check_fixed_location``, which replaces this
+    at the merge."""
+    if _lexical(config.secrets_dir) != _lexical(config_path.parent):
+        return (
+            f"secrets_dir ({config.secrets_dir}) yapılandırma dosyasının klasörü değil / is "
+            f"not the folder of the configuration file ({config_path.parent})"
+        )
+    record = config_path.parent / DATA_ROOT_RECORD
+    try:
+        text = record.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"{record} okunamadı / cannot be read ({type(exc).__name__})"
+    lines = text.strip().splitlines()
+    if len(lines) != 1 or not Path(lines[0].strip()).is_absolute():
+        return f"{record}: tek satırda mutlak bir yol değil / not one line with an absolute path"
+    if _lexical(config.data_dir) != _lexical(Path(lines[0].strip())):
+        return (
+            f"data_dir ({config.data_dir}) kurulumun veri klasörü değil / is not the data root "
+            f"the installer recorded ({lines[0].strip()})"
+        )
+    return None
+
+
 def _check_database(engine: Engine) -> bool:
     try:
         with engine.connect() as connection:
@@ -155,6 +201,14 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
     """Service entry point: the job loop until ``stop`` (or a signal) ends it."""
     config = _load(config_path)
     if config is None:
+        return EXIT_CONFIG
+    fixed_path = config_path or default_config_path()
+    problem = _location_problem(config, fixed_path)
+    if problem is not None:  # nothing is written below a data_dir that may not be ours
+        print(
+            f"Yapılandırma kullanılmadı / the configuration was not used: {problem}",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG
     _setup_logging(config.data_dir / "logs")
     engine = make_engine(config, application="worker")
@@ -174,6 +228,7 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
         layout=Layout(config.data_dir),
         jobs=default_jobs(config.worker.interval_seconds),
         config=config,
+        config_path=fixed_path,  # live reload, the admin folder
     )
     try:
         worker.run(stop)
@@ -183,55 +238,21 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
 
 
 def _rebuild_one(sessions: sessionmaker[Session], day: date, *, lookahead: bool) -> int:
-    """Rebuild one day in its own transaction, recorded as a ``leases.rebuild`` job run;
-    returns the exit code."""
-    with sessions() as session:
-        run = JobRun(
-            job="leases.rebuild",
-            started_at=utc_now(),
-            status="running",
-            details={"day": day.isoformat(), "manual": True},
-        )
-        session.add(run)
-        session.commit()
-        run_id = run.id
-    code = EXIT_OK
-    with sessions() as session:
-        try:
-            report = rebuild_day(session, day, lookahead=lookahead)
-            session.commit()
-        except Exception as exc:  # recorded and reported; the job run never stays "running"
-            session.rollback()
-            # ValueError: lease/ARP/NAT settings the timeline cannot work with (Context.load).
-            code = EXIT_CONFIG if isinstance(exc, ValueError) else EXIT_FAILED
-            details: dict[str, object] = {
-                "day": day.isoformat(),
-                "manual": True,
-                "error": type(exc).__name__,
-                "message": str(exc)[:500],
-            }
-            kind = "ayar hatası / settings error" if code == EXIT_CONFIG else "failed"
-            print(f"{day}: başarısız / {kind}: {type(exc).__name__}: {exc}", file=sys.stderr)
-        else:
-            details = {**report.details(), "manual": True}
-            print(
-                f"{day}: {report.inserted} kira yazıldı, {report.updated} güncellendi, "
-                f"{report.deleted} silindi, {report.alerts} yeni uyarı / {report.inserted} "
-                f"written, {report.updated} updated, {report.deleted} deleted, "
-                f"{report.alerts} new alerts"
-            )
-    with sessions() as session:
-        session.execute(
-            update(JobRun)
-            .where(JobRun.id == run_id)
-            .values(
-                status="ok" if code == EXIT_OK else "failed",
-                finished_at=utc_now(),
-                details=details,
-            )
-        )
-        session.commit()
-    return code
+    """Rebuild one day (:func:`.correlation.rebuild.rebuild_lease_day`); returns the exit
+    code."""
+    outcome = rebuild_lease_day(sessions, day, lookahead=lookahead)
+    report = outcome.report
+    if report is None:
+        kind = "ayar hatası / settings error" if outcome.settings_error else "failed"
+        print(f"{day}: başarısız / {kind}: {outcome.error_text}", file=sys.stderr)
+        return EXIT_CONFIG if outcome.settings_error else EXIT_FAILED
+    print(
+        f"{day}: {report.inserted} kira yazıldı, {report.updated} güncellendi, "
+        f"{report.deleted} silindi, {report.alerts} yeni uyarı / {report.inserted} "
+        f"written, {report.updated} updated, {report.deleted} deleted, "
+        f"{report.alerts} new alerts"
+    )
+    return EXIT_OK
 
 
 def rebuild(config_path: Path | None, first: date, last: date | None) -> int:

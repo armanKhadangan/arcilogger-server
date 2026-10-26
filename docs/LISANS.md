@@ -124,6 +124,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `leases.late_evidence` | 5651 Temel | her zaman çalışır |
 | `evidence.purge` | 5651 Temel | her zaman çalışır |
 | `audit.import` | 5651 Temel | her zaman çalışır |
+| `admin.requests` | — (tarayıcıdan yönetim: deneme e-postası, kira zaman çizelgesinin yeniden oluşturulması) | her zaman çalışır |
 | `alerts.import` | 5651 Temel | her zaman çalışır |
 | `alerts.r15` | 5651 Temel | her zaman çalışır |
 | `alerts.system` | 5651 Temel | her zaman çalışır |
