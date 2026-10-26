@@ -8,7 +8,7 @@
  * are (quotes respected); whether a clause is valid is the server's answer (`POST /search/parse`).
  */
 
-import { isApiError } from '@/lib/api';
+import { isApiError, type DownloadedFile } from '@/lib/api';
 import type { DateString, RawLine } from '@/lib/api-types';
 import { endpoint, siteDateTime, visibleText } from '@/lib/display';
 import type { HandoffPayloads } from '@/lib/handoff';
@@ -21,6 +21,7 @@ import type {
   SearchRefs,
   SearchRow,
 } from '@/lib/search-types';
+import { codePointLength } from '@/lib/validation';
 
 /** The evidence extract's maximum (`routers.evidence.MAX_EXTRACT_LINES`). */
 export const MAX_REFS = 10_000;
@@ -390,4 +391,38 @@ export function evidenceHandoff(page: SearchPage, refs: SearchRefs): HandoffPayl
     unsealed_days: [...refs.unsealed_days].sort(),
     query: page.query.normalized,
   };
+}
+
+// -- the record drawer, the export, saved searches ---------------------------------------------
+
+/** A column's value as text (device-provided text with its escapes visible). */
+export function fieldText(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string') return visibleText(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return visibleText(JSON.stringify(value));
+}
+
+/** The columns with a value (empty ones are left out), in the API's order. */
+export function filledFields(fields: Record<string, unknown>): [string, string][] {
+  return Object.entries(fields)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([name, value]) => [name, fieldText(value)]);
+}
+
+/** Why a file was cut short (`X-Arci-Export-Truncated`: `rows` or `time`), `null` when whole. */
+export function truncationOf(file: Pick<DownloadedFile, 'headers'>): 'rows' | 'time' | null {
+  const value = file.headers.get('X-Arci-Export-Truncated');
+  return value === 'rows' || value === 'time' ? value : null;
+}
+
+/** `SavedSearchIn.name`: 1 … 80 characters. */
+export const SAVED_NAME_MAX = 80;
+
+/** A name's problem (i18n key), `null` when it can be saved. */
+export function savedNameProblem(name: string): string | null {
+  const text = name.trim();
+  if (!text) return 'validation.required';
+  if (codePointLength(text) > SAVED_NAME_MAX) return 'validation.tooLong';
+  return null;
 }
