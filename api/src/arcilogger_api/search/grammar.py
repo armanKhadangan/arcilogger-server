@@ -62,8 +62,9 @@ LIMITS: Final = {
     "max_values": MAX_VALUES,
     "max_terms": MAX_TERMS,
 }
-#: Words that end a bare token (and may not appear in one).
+#: Characters that end a bare token (whitespace too); a value also ends at a comma.
 _STOP: Final = frozenset('"()')
+_VALUE_STOP: Final = _STOP | {","}
 _KEYWORDS: Final = frozenset({"AND", "OR", "NOT"})
 
 
@@ -303,7 +304,7 @@ class _Parser:
                 if not text:
                     raise _syntax("empty_value", value_start, index)
             else:
-                index = self._token_end(index, _STOP | {","})
+                index = self._token_end(index, _VALUE_STOP)
                 text, quoted = self.text[value_start:index], False
             if len(text) > MAX_VALUE_CHARS or len(values) == MAX_VALUES:
                 raise SearchQueryError("search_too_complex", value_start, index)
