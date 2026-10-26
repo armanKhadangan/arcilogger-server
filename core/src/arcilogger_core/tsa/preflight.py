@@ -92,10 +92,8 @@ def roots_present(config: Config) -> bool:
     if config.tsa.provider == "mock":
         return True
     directory = config.tsa.roots_dir
-    if directory is None or not directory.is_dir():
-        return False
-    try:
-        return bool(load_roots_dir(directory))
+    try:  # Path.is_dir raises "access denied" (Python 3.12) instead of answering False
+        return directory is not None and directory.is_dir() and bool(load_roots_dir(directory))
     except (OSError, ValueError, TsaError):
         return False
 

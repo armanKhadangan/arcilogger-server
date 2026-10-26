@@ -90,7 +90,7 @@ def lookup_body() -> dict[str, Any]:
     }
 
 
-def lock(state: str, licence: Any, monkeypatch: pytest.MonkeyPatch) -> str:
+def lock(state: str, licence: Any) -> str:
     """Bring the installation into ``state`` (a licence limited to one log source); returns
     the state ``GET /license`` must report."""
     licence.trial_over()
@@ -104,13 +104,13 @@ def lock(state: str, licence: Any, monkeypatch: pytest.MonkeyPatch) -> str:
         options["maintenance_until"] = date(2026, 1, 1)
     licence.store(make_license(**options))
     if state == "invalid":
-        monkeypatch.setattr(keys, "TRUSTED_KEYS", {})
+        licence.patch.setattr(keys, "TRUSTED_KEYS", {})
     if state == "wrong_server_unreadable":
 
         def unreadable() -> Any:
             raise fingerprint.FingerprintError("GetSystemFirmwareTable failed")
 
-        monkeypatch.setattr(fingerprint, "IDENTITY_PROVIDER", unreadable)
+        licence.patch.setattr(fingerprint, "IDENTITY_PROVIDER", unreadable)
         fingerprint.clear_cache()
     licence.invalidate()
     return "wrong_server" if state == "wrong_server_unreadable" else state
@@ -180,7 +180,7 @@ def test_the_5651_path_works_in_every_locked_state(
         set_setting(session, "lookup.report_timestamp", True, updated_by="admin")
         session.commit()
     licence.admin(client, login_as, password=PASSWORD)
-    expected = lock(state, licence, monkeypatch)
+    expected = lock(state, licence)
     document = client.get(f"{V}/license").json()
     assert document["status"] == expected
     assert [m["key"] for m in document["modules"] if m["enabled"]] == ["core_5651"]
@@ -260,7 +260,7 @@ def test_browser_administration_works_in_every_locked_state(
     the machine configuration, "Kontör sorgula" and the database settings work whatever the
     licence says."""
     licence.admin(client, login_as, password=PASSWORD)
-    lock(state, licence, monkeypatch)
+    lock(state, licence)
     assert client.get(f"{V}/admin/config").status_code == 200
     assert client.get(f"{V}/admin/status").json()["agent"]["state"] == "ok"
     tag = client.get(f"{V}/admin/config").json()["etags"]["general"]

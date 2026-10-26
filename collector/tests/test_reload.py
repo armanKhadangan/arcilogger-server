@@ -13,7 +13,7 @@ import os
 import socket
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal
 
 import pytest
 
@@ -39,6 +39,13 @@ address = "127.0.0.1"
 """
 SWITCH = '\n[[sources]]\nname = "switch-2"\ntype = "mikrotik"\naddress = "127.0.0.2"\n'
 MESSAGE = b"<30>2026-10-25T09:38:26.380+03:00 SWITCH-2 system,info link up"
+#: ``time.monotonic()`` ticks every 1/64 s on Windows before Python 3.13 (GetTickCount64), and
+#: the event loop runs every timer that is due within one tick as soon as it wakes up: there
+#: ``asyncio.sleep(0.002)`` ends at the loop's next wake-up (the datagram just sent wakes it), not
+#: 2 ms later. 400 datagrams paced by it were all sent before the file was changed 0.2 s later.
+WINDOWS_TICK: Final = 1 / 64
+
+Timers = Literal["native", "windows"]
 
 
 @pytest.fixture
@@ -93,8 +100,22 @@ async def wait_for(predicate: Callable[[], bool], timeout: float = 5.0) -> None:
         await asyncio.sleep(0.01)
 
 
-def with_collector(config_path: Path, body: Callable[[Collector], Awaitable[None]]) -> None:
+def windows_timers(loop: asyncio.AbstractEventLoop) -> None:
+    """Give ``loop`` the timer resolution of Windows before Python 3.13 (:data:`WINDOWS_TICK`)."""
+    attributes = vars(loop)
+    assert "_clock_resolution" in attributes, "asyncio keeps its timer resolution elsewhere now"
+    attributes["_clock_resolution"] = WINDOWS_TICK
+
+
+def with_collector(
+    config_path: Path,
+    body: Callable[[Collector], Awaitable[None]],
+    *,
+    timers: Timers = "native",
+) -> None:
     async def scenario() -> None:
+        if timers == "windows":
+            windows_timers(asyncio.get_running_loop())
         collector = Collector(
             load_config(config_path), config_path=config_path, reload_seconds=0.05
         )
@@ -115,35 +136,64 @@ async def send(collector: Collector, sock: socket.socket, count: int, start: int
         await asyncio.sleep(0.002)
 
 
+async def send_until(collector: Collector, sock: socket.socket, enough: Callable[[], bool]) -> int:
+    """Numbered datagrams (from #0) until ``enough()``; how many were sent. They are paced as by
+    :func:`send`, but no step of a test may count on that pace (:data:`WINDOWS_TICK`)."""
+    address = collector.udp_address
+    assert address is not None
+    sent = 0
+    while not enough():
+        sock.sendto(MESSAGE + f" #{sent}".encode(), address)
+        sent += 1
+        await asyncio.sleep(0.002)
+    return sent
+
+
+def messages_of(collector: Collector, source: str) -> int:
+    stats = collector.stats.sources.get(source)
+    return 0 if stats is None else stats.messages
+
+
+@pytest.mark.parametrize("timers", ["native", "windows"])
 def test_a_new_source_is_taken_while_its_datagrams_arrive(
-    config_path: Path, sender: socket.socket
+    config_path: Path, sender: socket.socket, timers: Timers
 ) -> None:
+    """The sender keeps sending from before the change until the new source has datagrams of
+    its own, so the reload falls between two of its datagrams whatever the pace of the timers
+    (a fixed number of them may all be sent before the file even changes)."""
     layout = Layout(load_config(config_path).data_dir)
+    total = 0
 
     async def body(collector: Collector) -> None:
+        nonlocal total
         listening = collector.udp_address
         await wait_for(lambda: layout.collector_status.exists())
         assert status(layout)["config"]["sha256"] == sha(config_path)
-        sending = asyncio.create_task(send(collector, sender, 400))
-        await asyncio.sleep(0.2)  # datagrams of a sender the configuration does not know yet
-        rewrite(config_path, config_path.read_text(encoding="utf-8") + SWITCH)
-        await wait_for(lambda: collector.config.source_for("127.0.0.2") is not None)
-        await wait_for(lambda: status(layout)["config"]["sha256"] == sha(config_path))
-        await sending
-        total = 400
-        await wait_for(lambda: collector.stats.sources.get("switch-2") is not None)
+        sending = asyncio.create_task(
+            send_until(collector, sender, lambda: messages_of(collector, "switch-2") >= 20)
+        )
+        try:
+            # datagrams of a sender the configuration does not know yet
+            await wait_for(lambda: messages_of(collector, "unknown-127.0.0.2") >= 20)
+            rewrite(config_path, config_path.read_text(encoding="utf-8") + SWITCH)
+            await wait_for(lambda: collector.config.source_for("127.0.0.2") is not None)
+            await wait_for(lambda: status(layout)["config"]["sha256"] == sha(config_path))
+            await wait_for(lambda: messages_of(collector, "switch-2") >= 20)
+            total = await sending
+        finally:
+            sending.cancel()
         await wait_for(
             lambda: sum(stats.messages for stats in collector.stats.sources.values()) == total
         )
         assert collector.udp_address == listening  # the same socket: nothing was restarted
 
-    with_collector(config_path, body)
+    with_collector(config_path, body, timers=timers)
     unknown = spooled(layout, "unknown-127.0.0.2")
     switch = spooled(layout, "switch-2")
-    assert unknown, "the sender was unknown before the reload"
-    assert switch, "and a source of its own after it"
+    assert len(unknown) >= 20, "the sender was unknown before the reload"
+    assert len(switch) >= 20, "and a source of its own after it"
     numbers = [int(message.rsplit(b"#", 1)[1]) for message in unknown + switch]
-    assert numbers == list(range(400)), "none lost, none twice, in order"
+    assert numbers == list(range(total)), "none lost, none twice, in order"
     block = status(layout)["config"]
     assert (block["sha256"], block["error"], block["restart_keys"]) == (sha(config_path), None, [])
 

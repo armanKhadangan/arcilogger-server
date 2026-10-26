@@ -199,10 +199,20 @@ class LicenceKit:
 
     UPLOAD = "/api/v1/license"
 
-    def __init__(self, app: FastAPI, factory: sessionmaker[Session], server_id: str) -> None:
+    def __init__(
+        self,
+        app: FastAPI,
+        factory: sessionmaker[Session],
+        server_id: str,
+        patch: pytest.MonkeyPatch,
+    ) -> None:
         self.app = app
         self.factory = factory
         self.server_id = server_id
+        #: Swaps of the licence module state (``keys.TRUSTED_KEYS``, the identity provider) made
+        #: through this one are undone before the fixture restores the key set and the identity;
+        #: the test's own ``monkeypatch`` would undo them afterwards and leave the test key behind.
+        self.patch = patch
 
     def invalidate(self) -> None:
         """Forget the API's cached status and the trusted-time caches."""
@@ -299,6 +309,6 @@ def licence(app: FastAPI, app_session_factory: sessionmaker[Session]) -> Iterato
     """Real licence evaluation with the test key and the default server id (mark the test
     ``license_live``)."""
     clear_trusted_time_cache()
-    with fixed_identity() as server_id, trusted_test_keys():
-        yield LicenceKit(app, app_session_factory, server_id)
+    with fixed_identity() as server_id, trusted_test_keys(), pytest.MonkeyPatch.context() as patch:
+        yield LicenceKit(app, app_session_factory, server_id, patch)
     clear_trusted_time_cache()

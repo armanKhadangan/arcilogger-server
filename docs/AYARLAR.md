@@ -209,7 +209,7 @@ parametreleriyle seçilir ve sonraki çalıştırmalarda hatırlanır ([KURULUM.
 | `-SourceNetwork` | `10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16` | bir log kaynağının adresi bu ağlardan birinde olmalı (en geniş /16) |
 | `-AdminChangeHoldHours` | 0 | saklama ve replika değişikliklerinin bekleme süresi (0–168 saat) |
 | `-ZamaneHoldHours` | 24 | bilinmeyen bir Zamane istemcisinin en erken onaylanabileceği süre (1–168 saat) |
-| `-DisableBrowserAdministration` | kapalı | tarayıcı yönetimini kapatır: ArciAdmin her isteği reddeder, ApplySystem bir şey yapmaz; 5651 işlevleri (toplama, mühürleme, doğrulama) hiç etkilenmez. **Şimdi mühürle** ve **Kontör sorgula** o sırada kullanılamaz (Görev Zamanlayıcı'da `\ARCILOGGER\Seal` ya da `\ARCILOGGER\Credit` görevini başlatın); `[[sources]]` elle değişince `Set-ArciFirewall.ps1` betiğini kendiniz çalıştırın |
+| `-DisableBrowserAdministration` | kapalı | tarayıcı yönetimini kapatır: ArciAdmin her isteği reddeder, ApplySystem bir şey yapmaz; 5651 işlevleri (toplama, mühürleme, doğrulama) hiç etkilenmez. **Şimdi mühürle** ve **Kontör sorgula** o sırada kullanılamaz (Görev Zamanlayıcı'da `\ARCILOGGER\Seal` ya da `\ARCILOGGER\Credit` görevini başlatın); `[[sources]]` elle değişince `Set-ArciFirewall.ps1` betiğini kendiniz çalıştırın (**Kaynaklar** tablosu güvenlik duvarını o sırada **Yönetilmiyor** gösterir) |
 
 Kurulum yapılandırmadaki açık her log kaynağını bu ağlarla karşılaştırır: dışında kalan bir
 kaynak varsa hiçbir şeyi değiştirmeden durur ve verilecek `-SourceNetwork` değerini yazar
