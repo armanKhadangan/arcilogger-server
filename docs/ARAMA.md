@@ -322,7 +322,25 @@ satır (4,9 milyon satır ve türlü kayıtları), yaklaşık 150 istemci, arana
 Süreler API üzerinden (tarayıcı olmadan), bir ısınma çalıştırmasından sonra üç denemenin en
 iyisidir.
 
-{{PERF_TR}}
+Ölçüm (2026-10-26): 4 işlemcili, başka işlerle paylaşılan bir Linux geliştirme makinesi, PostgreSQL 16 yerel aylık bölümlerle (TimescaleDB yok); 4.913.180 `messages` satırı 130 saniyede yazıldı, özet tablo ve istatistiklerle birlikte veri 689 saniyede hazırdı. TimescaleDB'li CI işi aynı testi 7 günden eski parçalar sıkıştırılmış olarak çalıştırır.
+
+| # | Sorgu | Aralık | Bütçe | İlk çalıştırma | En iyi | Not |
+|---|---|---|---|---|---|---|
+| Q1 | boş sorgu, ilk sayfa | 1 gün | 500 ms | 216 ms | 59 ms |  |
+| Q1 | boş sorgu, ilk sayfa | 30 gün | 500 ms | 67 ms | 53 ms |  |
+| Q2 | `srcip:<aranan istemci>` | 1 gün | 2.000 ms | 211 ms | 65 ms |  |
+| Q2 | `srcip:<aranan istemci>` | 30 gün | 10.000 ms | 87 ms | 66 ms |  |
+| Q3 | `srcip:172.20.41.0/24` | 1 gün | 2.000 ms | 70 ms | 70 ms | yaygın değer: birincil anahtar |
+| Q4 | `srcip:<aranan> type:web action:blocked` | 30 gün | 10.000 ms | 72 ms | 57 ms |  |
+| Q5 | `domain:<nadir alan adı> type:web` | 30 gün | 10.000 ms | 70 ms | 61 ms |  |
+| Q6 | `type:dhcp mac:<nadir MAC>` | 30 gün | 10.000 ms | 72 ms | 73 ms |  |
+| Q7 | `qname:<nadir ad>` | 30 gün | 10.000 ms | 58 ms | 58 ms |  |
+| Q8 | istatistik `type:web action:blocked department:Finans` | 30 gün | 500 ms | 24 ms | 20 ms | yol `rollup` |
+| Q9 | istatistik `srcip:<aranan>` (doğrudan) | 1 gün | 2.000 ms | 66 ms | 50 ms |  |
+| Q10 | 10.000 satırlık dışa aktarma (Q2) | 30 gün | 10.000 ms | 2.715 ms | 2.549 ms |  |
+| S1 | nadir serbest metin terimi | 1 gün | 4.500 ms | 2.377 ms | 2.386 ms | tamam, 10 satır |
+| S2 | `dstport:3389 action:deny` | 1 gün | 4.500 ms | 94 ms | 62 ms | tamam, 100 satır |
+| S3 | `ip:<aranan>` | 30 gün | 4.500 ms | 162 ms | 114 ms | tamam, 100 satır |
 
 Ayrıca her sorgunun planı denetlenir: indeksli alanlarla (`srcip:`, `domain:`, `mac:`, `qname:`)
 yüksek hacimli tablolar sırayla taranmaz.

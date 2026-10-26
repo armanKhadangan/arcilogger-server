@@ -322,7 +322,25 @@ MVP-CONTRACTS.md section 17. Data: the newest day 2,000,000 lines and each of th
 it 100,000 lines (4.9 million lines and their typed rows), about 150 clients, rare values to
 find. Times through the API (no browser), the best of three after one warm-up run.
 
-{{PERF_EN}}
+Measured (2026-10-26) on a 4-CPU Linux development machine shared with other work, PostgreSQL 16 with native monthly partitions (no TimescaleDB); 4,913,180 `messages` rows were written in 130 seconds, ready with the summary table and statistics in 689 seconds. The TimescaleDB CI job runs the same test with the chunks older than 7 days compressed.
+
+| # | Query | Range | Budget | First run | Best | Note |
+|---|---|---|---|---|---|---|
+| Q1 | empty query, first page | 1 day | 500 ms | 216 ms | 59 ms |  |
+| Q1 | empty query, first page | 30 days | 500 ms | 67 ms | 53 ms |  |
+| Q2 | `srcip:<needle client>` | 1 day | 2,000 ms | 211 ms | 65 ms |  |
+| Q2 | `srcip:<needle client>` | 30 days | 10,000 ms | 87 ms | 66 ms |  |
+| Q3 | `srcip:172.20.41.0/24` | 1 day | 2,000 ms | 70 ms | 70 ms | common value: primary key |
+| Q4 | `srcip:<needle> type:web action:blocked` | 30 days | 10,000 ms | 72 ms | 57 ms |  |
+| Q5 | `domain:<rare domain> type:web` | 30 days | 10,000 ms | 70 ms | 61 ms |  |
+| Q6 | `type:dhcp mac:<rare MAC>` | 30 days | 10,000 ms | 72 ms | 73 ms |  |
+| Q7 | `qname:<rare name>` | 30 days | 10,000 ms | 58 ms | 58 ms |  |
+| Q8 | statistics `type:web action:blocked department:Finans` | 30 days | 500 ms | 24 ms | 20 ms | mode `rollup` |
+| Q9 | statistics `srcip:<needle>` (direct) | 1 day | 2,000 ms | 66 ms | 50 ms |  |
+| Q10 | export of 10,000 rows (Q2) | 30 days | 10,000 ms | 2,715 ms | 2,549 ms |  |
+| S1 | rare free-text term | 1 day | 4,500 ms | 2,377 ms | 2,386 ms | complete, 10 rows |
+| S2 | `dstport:3389 action:deny` | 1 day | 4,500 ms | 94 ms | 62 ms | complete, 100 rows |
+| S3 | `ip:<needle>` | 30 days | 4,500 ms | 162 ms | 114 ms | complete, 100 rows |
 
 The plan of every query is checked too: with indexed fields (`srcip:`, `domain:`, `mac:`,
 `qname:`) no high-volume table is read sequentially.
