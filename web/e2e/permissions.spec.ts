@@ -92,6 +92,8 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
     '/settings/users',
     '/settings/general',
     '/settings/application',
+    '/settings/kamusm',
+    '/settings/sources',
     '/settings/history',
     '/lookup',
     '/evidence',
@@ -161,7 +163,13 @@ test('browser administration is for administrators: the API refuses everyone els
   await expect(page.getByRole('link', { name: /^Kullanıcılar ve Roller/ })).toBeVisible();
   await expect(page.getByRole('link', { name: /^Genel/ })).toHaveCount(0);
   await expect(page.getByTestId('agent-status')).toHaveCount(0);
-  for (const path of ['/settings/general', '/settings/application', '/settings/history']) {
+  for (const path of [
+    '/settings/general',
+    '/settings/application',
+    '/settings/kamusm',
+    '/settings/sources',
+    '/settings/history',
+  ]) {
     await page.goto(path);
     await expect(
       page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),

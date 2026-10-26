@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
+import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
 import { CSRF_TOKEN, mockApi } from './mock-api';
 
 /**
@@ -18,13 +18,19 @@ test.describe('Ayarlar', () => {
     await page.goto('/settings');
     await expect(page.getByRole('heading', { level: 1, name: 'Ayarlar' })).toBeVisible();
     await expect(page.getByTestId('agent-status')).toHaveText('Yönetim hizmeti: çalışıyor');
-    for (const [name, href] of [
-      [/^Genel/, '/settings/general'],
-      [/^Uygulama ayarları/, '/settings/application'],
-      [/^Değişiklik geçmişi/, '/settings/history'],
+    for (const [key, href] of [
+      ['general', '/settings/general'],
+      ['application', '/settings/application'],
+      ['kamusm', '/settings/kamusm'],
+      ['sources', '/settings/sources'],
+      ['history', '/settings/history'],
     ] as const)
-      await expect(page.getByRole('link', { name })).toHaveAttribute('href', href);
+      await expect(page.getByTestId(`settings-${key}`).getByRole('link')).toHaveAttribute(
+        'href',
+        href,
+      );
     await expect(page.getByText('Güvenlik kuralları', { exact: true })).toBeVisible();
+    await expect(page.getByText('E-posta', { exact: true })).toBeVisible();
   });
 
   test('the chip says when the service is late or not running', async ({ page }) => {
@@ -227,6 +233,75 @@ test.describe('Ayarlar → Genel', () => {
       timeout: 10_000,
     });
     await expect(progress).toContainText('ArciWorker yeni ayarı henüz almadı.');
+  });
+
+  test('the time sources: checked, re-authenticated, then the system task updates Windows Time', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    await page.goto('/settings/general');
+    const clock = page.getByTestId('settings-clock');
+    await expect(clock.getByTestId('measured-offset')).toContainText('Son ölçülen sapma: 3,2 ms');
+    await expect(clock.getByTestId('locked-value')).toContainText('123 (UDP)');
+    const ntp = page.getByLabel('Yerel saat kaynağı');
+    const fallback = page.getByLabel('Yedek saat sunucusu');
+    const save = page.getByRole('button', { name: 'Kaydet' });
+    await expect(ntp).toHaveValue('172.20.10.1');
+    await ntp.fill('ntp_sunucu');
+    await save.click();
+    await expect(clock).toContainText('Geçerli bir sunucu adı ya da IPv4 adresi girin.');
+    await expect(ntp).toBeFocused();
+    await ntp.fill('');
+    await fallback.fill('');
+    await save.click();
+    await expect(clock).toContainText('En az bir saat sunucusu gerekir');
+    await fallback.fill('time.ume.tubitak.gov.tr');
+    await expect(clock).toContainText('Yerel saat kaynağı boş');
+    await page.getByLabel('Saat sapması uyarı eşiği (ms)').fill('70000');
+    await save.click();
+    await expect(clock).toContainText('En çok 60000 olmalı.');
+    expect(api.callsTo('POST', '/admin/config/general/check')).toHaveLength(0);
+
+    await page.getByLabel('Saat sapması uyarı eşiği (ms)').fill('1500');
+    await ntp.fill('172.20.10.2');
+    await expect(clock).toContainText(
+      'Saat ayarlarının değişikliği için parolanız yeniden sorulur.',
+    );
+    await save.click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await expect(review.getByRole('row', { name: /Yerel saat kaynağı/ })).toContainText(
+      '172.20.10.1172.20.10.2',
+    );
+    await expect(review).toContainText('Windows saat hizmeti güncellenir');
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await expect(page.getByTestId('request-progress').getByTestId('request-state')).toHaveText(
+      'Uygulandı',
+      { timeout: 10_000 },
+    );
+    expect(api.admin.sections.general.clock).toEqual({
+      ntp_server: '172.20.10.2',
+      fallback_server: 'time.ume.tubitak.gov.tr',
+      alert_offset_ms: 1500,
+    });
+    expect(api.callsTo('PUT', '/admin/config/general').at(-1)?.body).toMatchObject({
+      probe: true,
+    });
+  });
+
+  test('the new time server could not be reached: nothing changed', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    api.admin.nextOutcome = 'probe_failed';
+    await page.goto('/settings/general');
+    await page.getByLabel('Yerel saat kaynağı').fill('172.20.10.3');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await page.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    await expect(page.getByTestId('request-progress').getByTestId('request-state')).toHaveText(
+      'Bağlantı denemesi başarısız, hiçbir şey değişmedi',
+      { timeout: 10_000 },
+    );
+    expect(api.admin.sections.general.clock.ntp_server).toBe('172.20.10.1');
   });
 
   test('leaving with unsaved changes asks first', async ({ page }) => {

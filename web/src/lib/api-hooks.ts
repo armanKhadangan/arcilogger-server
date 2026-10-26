@@ -1345,17 +1345,25 @@ export function useAdminRequests(kind: RequestKind | null) {
   });
 }
 
-/** Every request queues a change: the history shows it, the status counts it. */
+/**
+ * Every request queues a change: the history shows it, the status counts it, the configuration
+ * may list it. `secret`: the variables may hold a new credential, so the finished mutation is not
+ * kept in the cache.
+ */
 function useAdminMutation<TVariables, TResult = AdminAccepted>(
   fn: (variables: TVariables) => Promise<TResult>,
+  { secret = false }: { secret?: boolean } = {},
 ) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: fn,
+    ...(secret ? { gcTime: 0 } : {}),
+    // An accepted change may show at once in the configuration (`pending`, a staged client).
     onSettled: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: queryKeys.adminRequestsAll }),
         client.invalidateQueries({ queryKey: queryKeys.adminStatus }),
+        client.invalidateQueries({ queryKey: queryKeys.adminConfig }),
       ]),
   });
 }
@@ -1368,6 +1376,8 @@ export type SectionChange = {
 /** `POST /admin/config/{section}/check`: the changes, effects and warnings; nothing is queued. */
 export function useCheckSection() {
   return useMutation({
+    // The body may hold a new credential: not kept once the check is answered.
+    gcTime: 0,
     mutationFn: ({ section, body }: SectionChange) =>
       api.post<AdminCheck>(`/admin/config/${section}/check`, body),
   });
@@ -1395,7 +1405,7 @@ function putSection(change: ConfigChange): Promise<AdminAccepted> {
 
 /** `PUT /admin/config/{section}` → 202 with the request to follow (re-auth: `withReauth`). */
 export function useApplySection() {
-  return useAdminMutation(putSection);
+  return useAdminMutation(putSection, { secret: true });
 }
 
 /** `POST /admin/config/sources` (`sources.manage`). */

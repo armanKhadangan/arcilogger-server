@@ -28,6 +28,7 @@ export function SectionActions<B>({
   renderResult,
   onTerminal,
   extra,
+  failureDetails,
 }: {
   state: SectionState;
   flow: SectionFlow<B>;
@@ -42,6 +43,8 @@ export function SectionActions<B>({
   onTerminal?: (request: AdminRequestOut) => void;
   /** More buttons next to "Kaydet" (e.g. "Bağlantıyı test et"). */
   extra?: ReactNode;
+  /** More about a refusal (e.g. the causes of `tsa_would_break`), inside its banner. */
+  failureDetails?: ReactNode;
 }) {
   const { t } = useTranslation();
   const busy = state === 'submitting' || state === 'reauth' || state === 'confirm';
@@ -70,7 +73,12 @@ export function SectionActions<B>({
           </span>
         </Alert>
       ) : null}
-      {flow.failure ? <Alert tone="danger">{errorMessage(flow.failure)}</Alert> : null}
+      {flow.failure ? (
+        <Alert tone="danger">
+          {errorMessage(flow.failure)}
+          {failureDetails}
+        </Alert>
+      ) : null}
       {flow.problems.length > 0 ? <Alert tone="danger">{t('admin.section.invalid')}</Alert> : null}
       {state !== 'read_only' ? (
         <div className="flex flex-wrap items-center gap-2">

@@ -394,13 +394,15 @@
       "history": "Değişiklik geçmişi"
     },
     "hints": {
-      "general": "Kuruluş adı; raporlarda, e-postalarda ve kanıt paketlerinde görünür.",
+      "general": "Kuruluş adı, saat kaynakları ve saat sapması uyarı eşiği.",
       "application": "Uyarılar, 5651 sorgu, kullanım (mesai saatleri ve tatiller), raporlar, oturum ve gizlilik.",
-      "history": "Tarayıcıdan yapılan değişiklikler ve işlemler, durumlarıyla."
+      "history": "Tarayıcıdan yapılan değişiklikler ve işlemler, durumlarıyla.",
+      "kamusm": "Kamu SM zaman damgası: Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, test ve üretim sunucusu.",
+      "sources": "Log gönderen cihazlar: adres, tür, beklenen sinyal aralığı ve güvenlik duvarı durumu."
     },
     "general": {
       "title": "Genel",
-      "description": "Kuruluşun adı. Değişikliği sunucudaki yönetim hizmeti uygular; hiçbir hizmet yeniden başlatılmaz.",
+      "description": "Kuruluşun adı ve saat kaynakları. Değişikliği sunucudaki yönetim hizmeti uygular; hiçbir hizmet yeniden başlatılmaz.",
       "siteTitle": "Kuruluş",
       "siteDescription": "Raporlarda, e-postalarda ve kanıt paketlerinde görünen ad.",
       "siteName": "Kuruluş adı",
@@ -409,7 +411,23 @@
         "siteNameRequired": "Kuruluş adı boş olamaz.",
         "siteNameTooLong": "Kuruluş adı en çok 200 karakter olabilir.",
         "clockServersRequired": "En az bir saat sunucusu gerekir (yerel kaynak ya da yedek sunucu)."
-      }
+      },
+      "clockTitle": "Saat",
+      "clockDescription": "Sunucunun saatini eşitlediği kaynaklar ve saat sapması uyarısının eşiği. Windows saat hizmetini sistem görevi günceller.",
+      "ntpServer": "Yerel saat kaynağı",
+      "ntpServerHint": "Ağınızdaki NTP sunucusu (ör. ana yönlendirici); boş bırakılabilir.",
+      "fallbackServer": "Yedek saat sunucusu",
+      "fallbackServerHint": "Yerel kaynağa ulaşılamadığında kullanılan sunucu (ör. time.ume.tubitak.gov.tr).",
+      "alertOffset": "Saat sapması uyarı eşiği (ms)",
+      "alertOffsetHint": "1–60 000 milisaniye. Ölçülen sapma bu değeri aşınca uyarı oluşur.",
+      "ntpPort": "NTP bağlantı noktası",
+      "ntpEmpty": "Yerel saat kaynağı boş: sunucu yalnızca yedek saat sunucusunu kullanır.",
+      "systemTask": "Sistem görevi şu an çalışmıyor: ayar kaydedilir, ancak Windows saat hizmeti ve güvenlik duvarı kuralı sistem görevi yeniden çalışana kadar güncellenmez.",
+      "probe": "Kaydetmeden önce yeni saat sunucusunu dene",
+      "clockReauth": "Saat ayarlarının değişikliği için parolanız yeniden sorulur.",
+      "probing": "Saat sunucusu deneniyor…",
+      "offset": "Son ölçülen sapma: {{offset}} ms ({{server}}, {{time}})",
+      "offsetUnknown": "Saat sapması henüz ölçülmedi."
     },
     "application": {
       "title": "Uygulama ayarları",
@@ -497,6 +515,271 @@
       "auditHint": "Bu isteğin denetim kaydı satırları şu hedefle bulunur:",
       "auditTarget": "Hedef",
       "openAudit": "Denetim kaydını aç"
+    },
+    "kamusm": {
+      "title": "Kamu SM zaman damgası",
+      "description": "Günlük mühürlemede kullanılan Kamu SM Zamane zaman damgası hizmetinin kurulumu, adım adım. Mühürlemeyi durduracak bir değişiklik uygulanmaz.",
+      "provider": "Şu an kullanılan zaman damgası sağlayıcısı: {{provider}}. Bu sayfadan kaydedilen her değişiklik Kamu SM Zamane sunucusuna geçer; mühürlemeyi durduracak bir değişiklik uygulanmaz.",
+      "stepsLabel": "Kurulum adımları",
+      "probing": "Kamu SM ile bağlantı deneniyor…",
+      "unsaved": "Diğer adımlarda kaydedilmemiş değişiklikler var; o adımda kaydedin ya da bırakın.",
+      "status": {
+        "ok": "Tamam",
+        "missing": "Eksik",
+        "error": "Hata",
+        "pending": "Bekliyor",
+        "optional": "İsteğe bağlı"
+      },
+      "steps": {
+        "java": {
+          "title": "Java",
+          "description": "Zamane istemcisini çalıştıracak Java 8. Yönetim hizmetinin sunucuda bulduğu kurulumlardan biri seçilir."
+        },
+        "zamane": {
+          "title": "Zamane istemcisi",
+          "description": "Kamu SM'nin yayımladığı Zamane istemcisi (.jar ya da .zip). Bilinmeyen bir sürüm, sunucu konsolunda onaylanana kadar kullanılmaz."
+        },
+        "roots": {
+          "title": "Kök sertifikalar",
+          "description": "Damgaları doğrulamak için kullanılan Kamu SM kök sertifikaları. Kaldırma yalnızca sunucu konsolundan yapılır."
+        },
+        "credentials": {
+          "title": "Müşteri bilgileri",
+          "description": "Kamu SM müşteri numarası ve parolası. Kayıtlı değerler tarayıcıya hiç gönderilmez; kaydederken yeni değerlerle kontör sorgusu yapılır."
+        },
+        "test": {
+          "title": "Damga testi",
+          "description": "Yapılandırılmış sunucudan bir zaman damgası alınır ve sunucuda doğrulanır."
+        },
+        "production": {
+          "title": "Üretime geç",
+          "description": "Eksikler tamamlandığında üretim sunucusuna geçilir. Test sunucusuna dönüş üretim damgalarını durdurur."
+        },
+        "credit": {
+          "title": "Kontör uyarı eşiği",
+          "description": "Kalan kontör bu sayının altına düşünce uyarı oluşur; damga isteğinin zaman aşımı."
+        }
+      },
+      "java": {
+        "choose": "Java kurulumu",
+        "hint": "Yalnızca yönetim hizmetinin bulduğu kurulumlar seçilebilir; başka bir yol sunucu konsolundan ayarlanır.",
+        "noneTitle": "Java 8 bulunamadı",
+        "none": "Yönetim hizmeti sunucuda Java 8 bulamadı. Eclipse Temurin (Adoptium) JRE 8 ya da Oracle Java 8 kurun; liste bir sonraki denetimde güncellenir.",
+        "notListed": "Ayarlı Java ({{java}}) bulunan kurulumlar arasında değil."
+      },
+      "zamane": {
+        "current": "Kullanılan istemci",
+        "none": "Zamane istemcisi yok.",
+        "unknownRelease": "bilinmeyen sürüm",
+        "trusted": {
+          "installer": "kurulumla gelen",
+          "known": "bilinen Kamu SM sürümü",
+          "approved": "konsolda onaylandı",
+          "false": "çalıştırılamaz"
+        },
+        "staged": "Onay bekleyen istemci {{sha}}",
+        "approve": "Bu istemci, bir yönetici sunucu konsolunda aşağıdaki komutu çalıştırınca kullanılır.",
+        "approveAfter": "Bu istemci en erken {{time}} itibarıyla, bir yönetici sunucu konsolunda aşağıdaki komutu çalıştırınca kullanılır.",
+        "command": "Sunucu konsolu komutu",
+        "upload": "Zamane istemcisi dosyası",
+        "uploadHint": ".jar ya da tek bir tss-client-console-*.jar içeren .zip; en çok 25 MiB.",
+        "file": "{{kind}} dosyası: {{name}} ({{size}})",
+        "sha": "Dosyanın SHA-256 değeri",
+        "refused": "Dosya bir Zamane istemcisi olarak kabul edilmedi.",
+        "known": "Bilinen Kamu SM sürümü: {{release}}. Sistem görevi kopyaladıktan sonra kullanılır.",
+        "unknownTitle": "Bilinmeyen sürüm",
+        "unknownBody": "Bu sürüm bilinen sürümler arasında değil. Kamu SM indirme sayfasındaki SHA-256 değerini girin; istemci en erken {{hours}} saat sonra, bir yönetici sunucu konsolunda onaylayınca kullanılır.",
+        "expected": "Kamu SM sayfasındaki SHA-256",
+        "expectedHint": "64 onaltılık karakter; boşluk ve büyük/küçük harf önemli değil.",
+        "use": "Bu istemciyi kullan"
+      },
+      "roots": {
+        "caption": "Kurulu Kamu SM kök sertifikaları",
+        "none": "Kurulu kök sertifika yok.",
+        "subject": "Konu",
+        "issuer": "Yayımlayan",
+        "notAfter": "Geçerlilik sonu",
+        "validity": "Geçerlilik",
+        "key": "Anahtar",
+        "fingerprint": "SHA-256 parmak izi",
+        "legal": "Yasal kök",
+        "isLegal": "Yasal kök",
+        "source": {
+          "installer": "kurulumla gelen",
+          "web": "tarayıcıdan eklendi"
+        },
+        "mark": "Yasal kök olarak işaretle",
+        "markLabel": "{{subject}} sertifikasını yasal kök olarak işaretle",
+        "markTitle": "Yasal kök olarak işaretlensin mi?",
+        "markBody": "Bu parmak izi yasal kök parmak izlerine eklenir. Kaldırma yalnızca sunucu konsolundan yapılır.",
+        "noLegal": "Henüz yasal kök işaretlenmedi: damgalar doğrulanır, ancak yasal nitelikli sayılmaz.",
+        "upload": "Kök sertifika dosyası",
+        "uploadHint": "PEM ya da DER, tek sertifika, en çok 64 KiB.",
+        "installed": "Bu sertifika zaten kurulu.",
+        "legalSwitch": "Yasal kök olarak da işaretle",
+        "compared": "Parmak izini Kamu SM'nin yayımladığı değerle karşılaştırdım",
+        "install": "Sertifikayı kur"
+      },
+      "credentials": {
+        "customer": "Müşteri numarası",
+        "customerHint": "1–64 karakter, boşluk içermez.",
+        "password": "Parola",
+        "clear": "Müşteri numarası ve parola birlikte silinir. Mühürleme bunlara ihtiyaç duyuyorsa değişiklik uygulanmaz.",
+        "probe": "Kaydetmeden önce yeni bilgilerle kontör sorgusu yap"
+      },
+      "test": {
+        "server": {
+          "test": "Damga Kamu SM test sunucusundan alınır.",
+          "production": "Damga Kamu SM üretim sunucusundan alınır.",
+          "other": "Damga yapılandırılmış sağlayıcıdan ({{provider}}) alınır."
+        },
+        "button": "Damga testi (1 kontör harcar)",
+        "limit_one": "Günde en çok {{count}} test yapılabilir.",
+        "limit_other": "Günde en çok {{count}} test yapılabilir.",
+        "confirmTitle": "Damga testi yapılsın mı?",
+        "confirmBody": "Bir zaman damgası alınır ve sunucuda doğrulanır; 1 kontör harcanır.",
+        "confirm": "Testi başlat",
+        "verified": "Doğrulama",
+        "verifiedYes": "Doğrulandı",
+        "verifiedNo": "Doğrulanamadı",
+        "provider": "Sağlayıcı",
+        "serial": "Seri numarası",
+        "genTime": "Damga zamanı",
+        "tsa": "Damgayı veren",
+        "legal": "Yasal nitelik",
+        "legalYes": "Yasal kökten doğrulandı",
+        "legalNo": "Yasal kökten doğrulanmadı",
+        "errors": "Hatalar"
+      },
+      "production": {
+        "current": {
+          "test": "Şu an Kamu SM test sunucusu kullanılıyor.",
+          "production": "Şu an Kamu SM üretim sunucusu kullanılıyor.",
+          "other": "Şu an {{provider}} sağlayıcısı kullanılıyor."
+        },
+        "checklist": "Üretim için gerekenler",
+        "items": {
+          "credentials": "Müşteri numarası ve parola kayıtlı",
+          "zamane_jar": "Onaylı Zamane istemcisi",
+          "java": "Java seçili",
+          "roots": "En az bir kök sertifika kurulu"
+        },
+        "legal": "Yasal kök işaretli",
+        "noLegal": "Yasal kök işaretlenmedi (geçişi engellemez)",
+        "tested": "Damga testi başarılı",
+        "notTested": "Henüz başarılı bir damga testi yok (geçişi engellemez)",
+        "toProduction": "Üretim sunucusuna geç",
+        "toTest": "Test sunucusuna dön",
+        "notReady": "Üretime geçmek için yukarıdaki eksikleri tamamlayın.",
+        "saveFirst": "Önce diğer adımlardaki değişiklikleri kaydedin ya da bırakın.",
+        "confirmTitle": "Üretim sunucusuna geçilsin mi?",
+        "confirmBody": "Mühürleme bundan sonra Kamu SM üretim sunucusunun damgalarını kullanır; her damga kontör harcar.",
+        "testTitle": "Test sunucusuna dönülsün mü?",
+        "testBody": "Üretim damgaları durur; mühürleme test sunucusunun damgalarını kullanır. Değişiklik yüksek önemli bir uyarı oluşturur."
+      },
+      "credit": {
+        "threshold": "Kontör uyarı eşiği",
+        "thresholdHint": "0–1 000 000. Kalan kontör bu sayının altına düşünce uyarı oluşur.",
+        "timeout": "Damga isteği zaman aşımı (sn)",
+        "timeoutHint": "5–600 saniye."
+      },
+      "seal": {
+        "title": "Mühürleme",
+        "description": "[seal] bölümü ve uzman [tsa] ayarları yalnızca sunucu konsolundan değiştirilir.",
+        "ready": "Mühürleme görevi geçerli ayarlarla mühürleyebilir.",
+        "notReady": "Mühürleme görevi geçerli ayarlarla mühürleyemez"
+      },
+      "causes": {
+        "zamane_jar": "Zamane istemcisi ayarlı değil ya da çalıştırılamıyor.",
+        "credentials": "Kamu SM müşteri numarası ya da parolası kayıtlı değil.",
+        "roots": "Kurulu kök sertifika yok.",
+        "secret_store": "Gizli bilgi deposu okunamıyor.",
+        "provider": "Zaman damgası sağlayıcısının ayarları geçersiz.",
+        "executable": "Java ya da Zamane istemcisi güvenilir konumda değil ya da değeri tanınmıyor.",
+        "location": "Bir program dosyası güvenilir konumların dışında."
+      },
+      "errors": {
+        "customer": "Müşteri numarası 1–64 karakter olmalı ve boşluk ya da denetim karakteri içermemeli.",
+        "password": "Parola 1–128 karakter olmalı ve denetim karakteri içermemeli.",
+        "sha": "64 onaltılık karakterlik bir SHA-256 değeri girin.",
+        "shaMismatch": "Girilen SHA-256 dosyanın değeriyle aynı değil."
+      }
+    },
+    "sources": {
+      "title": "Kaynaklar",
+      "description": "Log gönderen cihazlar. Toplayıcı ve işleyici değişikliği yeniden başlatılmadan alır; sistem görevi her kaynağın adresi için syslog bağlantı noktasını açar ya da kapatır.",
+      "tableTitle": "Yapılandırılmış kaynaklar",
+      "tableDescription": "{{count}} kaynak (en çok {{max}}).",
+      "caption": "Yapılandırılmış log kaynakları",
+      "empty": "Henüz kaynak yok. Güvenlik duvarınızı ve ana yönlendiricinizi ekleyin.",
+      "add": "Kaynak ekle",
+      "addTitle": "Kaynak ekle",
+      "editTitle": "{{name}} kaynağını düzenle",
+      "dialogDescription": "Kaydetmeden önce değişiklikler ve etkileri gösterilir.",
+      "review": "Değişiklikleri gözden geçir",
+      "nameHint": "Küçük harf, rakam ve tire; en çok 63 karakter. Sonradan değiştirilemez.",
+      "nameFixed": "Kaynağın adı değiştirilemez.",
+      "addressHint": "Tek bir IPv4 adresi (172.20.10.1) ya da ağ (172.20.10.0/24).",
+      "heartbeat": "Beklenen sinyal aralığı (dk)",
+      "heartbeatHint": "1–1440 dakika. Bu süre boyunca kayıt gelmezse sessiz kaynak uyarısı oluşur.",
+      "expectedHint": "Sessiz kaynak uyarısı bu kaynağı izler.",
+      "enabledHint": "Kapalı bir kaynağın kayıtları toplanmaz.",
+      "minutes_one": "{{count}} dk",
+      "minutes_other": "{{count}} dk",
+      "yes": "Evet",
+      "no": "Hayır",
+      "never": "Henüz yok",
+      "enabledFor": "{{name}} etkin",
+      "editFor": "{{name}} kaynağını düzenle",
+      "removeFor": "{{name}} kaynağını kaldır",
+      "remove": "Kaynağı kaldır",
+      "removeTitle": "{{name}} kaldırılsın mı?",
+      "removeBody": "Kaynak yapılandırmadan çıkarılır ve güvenlik duvarı kuralı kapatılır. Kaydedilmiş ve mühürlenmiş kayıtları değişmez. Parolanız yeniden sorulur.",
+      "removeType": "Onaylamak için kaynağın adını yazın: {{name}}",
+      "systemTask": "Sistem görevi şu an çalışmıyor: değişiklikler kaydedilir, ancak güvenlik duvarı kuralları sistem görevi yeniden çalışana kadar güncellenmez.",
+      "lockedTitle": "Sunucu konsolundan değiştirilen ayarlar",
+      "columns": {
+        "name": "Ad",
+        "type": "Tür",
+        "address": "Adres",
+        "transport": "Taşıma",
+        "heartbeat": "Sinyal aralığı",
+        "expected": "Beklenen",
+        "enabled": "Etkin",
+        "lastSeen": "Son kayıt",
+        "firewall": "Güvenlik duvarı",
+        "actions": "İşlemler"
+      },
+      "types": {
+        "fortigate": "FortiGate",
+        "mikrotik": "MikroTik",
+        "generic": "Genel syslog"
+      },
+      "transports": {
+        "any": "UDP ve TCP",
+        "udp": "UDP",
+        "tcp": "TCP"
+      },
+      "firewall": {
+        "open": "Açık",
+        "closed": "Kapalı",
+        "pending": "Güncelleniyor",
+        "not_managed": "Yönetilmiyor"
+      },
+      "errors": {
+        "name": "Ad küçük harf ya da rakamla başlamalı; yalnızca küçük harf, rakam ve tire içermeli (en çok 63 karakter).",
+        "nameUnknown": "\"unknown-\" ile başlayan adlar tanınmayan göndericiler için ayrılmıştır.",
+        "nameTaken": "Bu adda bir kaynak zaten var.",
+        "ipv6": "IPv6 adresleri henüz desteklenmiyor; bir IPv4 adresi girin.",
+        "address": "Geçerli bir IPv4 adresi ya da ağı girin (ör. 172.20.10.1 ya da 172.20.10.0/24).",
+        "hostBits": "Ağ adresi, ağın ilk adresi olmalı (ör. 172.20.10.0/24).",
+        "reserved": "Bu adres bir kaynak için kullanılamaz (geri döngü, çok noktaya yayın, yerel bağlantı ya da ayrılmış).",
+        "prefix": "Ağ çok geniş; daha uzun bir önek kullanın.",
+        "notAllowed": "Adres, yönetim politikasının izin verdiği ağların dışında.",
+        "addressTaken": "Bu adres başka bir kaynakta kullanılıyor.",
+        "overlap": "Bu ağ başka bir kaynağın ağıyla çakışıyor.",
+        "limit": "Kaynak sayısı üst sınıra ulaştı."
+      }
     }
   },
   "audit": {
@@ -2786,7 +3069,9 @@
       "heldUntil": "Bu değişiklik bekletilir: {{time}} tarihinde uygulanır; o zamana kadar iptal edilebilir.",
       "held": "Bu değişiklik bekletilir; bekletme süresi sonunda uygulanır.",
       "reauth": "Kaydederken parolanızı yeniden girmeniz istenecek.",
-      "confirm": "Onayla ve kaydet"
+      "confirm": "Onayla ve kaydet",
+      "source": "Kaynak {{name}}",
+      "sourceField": "{{name}} · {{field}}"
     },
     "effects": {
       "reload": {
@@ -2810,6 +3095,21 @@
         "ntp_server": "Yerel saat kaynağı",
         "fallback_server": "Yedek saat sunucusu",
         "alert_offset_ms": "Saat sapması uyarı eşiği (ms)"
+      },
+      "tsa": {
+        "server": "Zaman damgası sunucusu",
+        "provider": "Zaman damgası sağlayıcısı",
+        "url": "Zaman damgası adresi",
+        "credit_alert_threshold": "Kontör uyarı eşiği",
+        "timeout_seconds": "Damga isteği zaman aşımı (sn)",
+        "java": "Java",
+        "zamane_jar": "Zamane istemcisi",
+        "roots": "Kök sertifikalar",
+        "legal_root_fingerprints": "Yasal kök parmak izleri"
+      },
+      "kamusm": {
+        "customer": "Kamu SM müşteri numarası",
+        "password": "Kamu SM parolası"
       }
     },
     "section": {
@@ -2830,6 +3130,11 @@
       "integer": "Bir tam sayı girin.",
       "min": "En az {{min}} olmalı.",
       "max": "En çok {{max}} olmalı."
+    },
+    "upload": {
+      "send": "Dosyayı gönder",
+      "chosen": "{{name}} ({{size}}) seçildi; göndermek için düğmeye basın. Sunucu dosyayı inceler, henüz hiçbir şey kurulmaz.",
+      "tooLarge": "Dosya çok büyük; en çok {{size}} olabilir."
     }
   }
 }

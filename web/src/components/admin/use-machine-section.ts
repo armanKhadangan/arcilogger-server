@@ -30,16 +30,29 @@ export function useMachineSection<S extends ConfigSection>(
   const status = useAdminStatus();
   const check = useCheckSection();
   const apply = useApplySection();
-  const { mutateAsync: checkAsync } = check;
-  const { mutateAsync: applyAsync } = apply;
+  const { mutateAsync: checkAsync, reset: resetCheck } = check;
+  const { mutateAsync: applyAsync, reset: resetApply } = apply;
+  // A body may hold a new credential: the mutations forget it as soon as they are answered.
   const flow = useSectionFlow<SectionBodies[S]>({
     check: useCallback(
-      (body: SectionBodies[S]) => checkAsync({ section, body } as SectionChange),
-      [checkAsync, section],
+      async (body: SectionBodies[S]) => {
+        try {
+          return await checkAsync({ section, body } as SectionChange);
+        } finally {
+          resetCheck();
+        }
+      },
+      [checkAsync, resetCheck, section],
     ),
     submit: useCallback(
-      (body: SectionBodies[S]) => applyAsync({ section, body } as ConfigChange),
-      [applyAsync, section],
+      async (body: SectionBodies[S]) => {
+        try {
+          return await applyAsync({ section, body } as ConfigChange);
+        } finally {
+          resetApply();
+        }
+      },
+      [applyAsync, resetApply, section],
     ),
   });
   const agent = status.data?.agent.state ?? null;

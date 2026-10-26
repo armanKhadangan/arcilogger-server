@@ -394,13 +394,15 @@
       "history": "Change history"
     },
     "hints": {
-      "general": "The organisation's name, shown in reports, e-mails and evidence packages.",
+      "general": "The organisation's name, the time sources and the clock offset alert threshold.",
       "application": "Alerts, 5651 lookup, usage (work hours and holidays), reports, sessions and privacy.",
-      "history": "Changes and actions made in the browser, with their state."
+      "history": "Changes and actions made in the browser, with their state.",
+      "kamusm": "Kamu SM time stamps: Java, the Zamane client, root certificates, customer credentials, test and production server.",
+      "sources": "Devices that send logs: address, type, expected heartbeat and firewall state."
     },
     "general": {
       "title": "General",
-      "description": "The organisation's name. The administration service on the server applies the change; no service is restarted.",
+      "description": "The organisation's name and the time sources. The administration service on the server applies the change; no service is restarted.",
       "siteTitle": "Organisation",
       "siteDescription": "The name shown in reports, e-mails and evidence packages.",
       "siteName": "Organisation name",
@@ -409,7 +411,23 @@
         "siteNameRequired": "The organisation name cannot be empty.",
         "siteNameTooLong": "The organisation name can be at most 200 characters.",
         "clockServersRequired": "At least one time server is required (the local source or the fallback)."
-      }
+      },
+      "clockTitle": "Clock",
+      "clockDescription": "The sources the server synchronises its clock with and the threshold of the clock offset alert. The system task updates the Windows Time service.",
+      "ntpServer": "Local time source",
+      "ntpServerHint": "An NTP server in your network (e.g. the core router); may be left empty.",
+      "fallbackServer": "Fallback time server",
+      "fallbackServerHint": "Used when the local source cannot be reached (e.g. time.ume.tubitak.gov.tr).",
+      "alertOffset": "Clock offset alert threshold (ms)",
+      "alertOffsetHint": "1–60,000 milliseconds. An alert is raised when the measured offset exceeds it.",
+      "ntpPort": "NTP port",
+      "ntpEmpty": "The local time source is empty: the server uses only the fallback time server.",
+      "systemTask": "The system task is not running: the setting is saved, but the Windows Time service and the firewall rule are not updated until the system task runs again.",
+      "probe": "Try the new time server before saving",
+      "clockReauth": "Changing the clock settings asks for your password again.",
+      "probing": "Trying the time server…",
+      "offset": "Last measured offset: {{offset}} ms ({{server}}, {{time}})",
+      "offsetUnknown": "The clock offset has not been measured yet."
     },
     "application": {
       "title": "Application settings",
@@ -497,6 +515,271 @@
       "auditHint": "The audit log entries of this request have this target:",
       "auditTarget": "Target",
       "openAudit": "Open the audit log"
+    },
+    "kamusm": {
+      "title": "Kamu SM time stamps",
+      "description": "Setting up the Kamu SM Zamane time-stamp service used for the daily sealing, step by step. A change that would stop sealing is not applied.",
+      "provider": "The time-stamp provider in use: {{provider}}. Every change saved on this page switches to the Kamu SM Zamane server; a change that would stop sealing is not applied.",
+      "stepsLabel": "Setup steps",
+      "probing": "Connecting to Kamu SM…",
+      "unsaved": "Other steps have unsaved changes; save them on their step or discard them.",
+      "status": {
+        "ok": "OK",
+        "missing": "Missing",
+        "error": "Error",
+        "pending": "Waiting",
+        "optional": "Optional"
+      },
+      "steps": {
+        "java": {
+          "title": "Java",
+          "description": "The Java 8 that runs the Zamane client, chosen from the installations the administration service found on the server."
+        },
+        "zamane": {
+          "title": "Zamane client",
+          "description": "The Zamane client Kamu SM publishes (.jar or .zip). An unknown release is not used until it is approved on the server console."
+        },
+        "roots": {
+          "title": "Root certificates",
+          "description": "The Kamu SM root certificates that verify the stamps. Removing one is done on the server console only."
+        },
+        "credentials": {
+          "title": "Customer credentials",
+          "description": "The Kamu SM customer number and password. Stored values are never sent to the browser; saving runs a credit query with the new values."
+        },
+        "test": {
+          "title": "Stamp test",
+          "description": "One time stamp is obtained from the configured server and verified on the server."
+        },
+        "production": {
+          "title": "Switch to production",
+          "description": "Once everything is in place, switch to the production server. Switching back to the test server stops production stamps."
+        },
+        "credit": {
+          "title": "Credit alert threshold",
+          "description": "An alert is raised when the remaining credits drop below this number; the time limit of a stamp request."
+        }
+      },
+      "java": {
+        "choose": "Java installation",
+        "hint": "Only installations the administration service found can be chosen; another path is set on the server console.",
+        "noneTitle": "No Java 8 found",
+        "none": "The administration service found no Java 8 on the server. Install Eclipse Temurin (Adoptium) JRE 8 or Oracle Java 8; the list is updated at the next check.",
+        "notListed": "The configured Java ({{java}}) is not among the installations found."
+      },
+      "zamane": {
+        "current": "Client in use",
+        "none": "No Zamane client.",
+        "unknownRelease": "unknown release",
+        "trusted": {
+          "installer": "from the installer",
+          "known": "a known Kamu SM release",
+          "approved": "approved on the console",
+          "false": "may not run"
+        },
+        "staged": "Client {{sha}} waits for its approval",
+        "approve": "This client is used once an administrator runs the command below on the server console.",
+        "approveAfter": "This client is used from {{time}} at the earliest, once an administrator runs the command below on the server console.",
+        "command": "Server console command",
+        "upload": "Zamane client file",
+        "uploadHint": "A .jar, or a .zip holding exactly one tss-client-console-*.jar; at most 25 MiB.",
+        "file": "{{kind}} file: {{name}} ({{size}})",
+        "sha": "The file's SHA-256",
+        "refused": "The file was not accepted as a Zamane client.",
+        "known": "A known Kamu SM release: {{release}}. It is used once the system task has copied it.",
+        "unknownTitle": "Unknown release",
+        "unknownBody": "This release is not a known one. Enter the SHA-256 shown on the Kamu SM download page; the client is used {{hours}} hours later at the earliest, once an administrator approves it on the server console.",
+        "expected": "SHA-256 from the Kamu SM page",
+        "expectedHint": "64 hexadecimal characters; spaces and case do not matter.",
+        "use": "Use this client"
+      },
+      "roots": {
+        "caption": "Installed Kamu SM root certificates",
+        "none": "No root certificate is installed.",
+        "subject": "Subject",
+        "issuer": "Issuer",
+        "notAfter": "Valid until",
+        "validity": "Validity",
+        "key": "Key",
+        "fingerprint": "SHA-256 fingerprint",
+        "legal": "Legal root",
+        "isLegal": "Legal root",
+        "source": {
+          "installer": "from the installer",
+          "web": "added in the browser"
+        },
+        "mark": "Mark as legal root",
+        "markLabel": "Mark {{subject}} as a legal root",
+        "markTitle": "Mark as a legal root?",
+        "markBody": "This fingerprint is added to the legal root fingerprints. Removing it is done on the server console only.",
+        "noLegal": "No legal root is marked yet: stamps are verified but not counted as legal grade.",
+        "upload": "Root certificate file",
+        "uploadHint": "PEM or DER, one certificate, at most 64 KiB.",
+        "installed": "This certificate is already installed.",
+        "legalSwitch": "Also mark it as a legal root",
+        "compared": "I compared the fingerprint with the value Kamu SM publishes",
+        "install": "Install the certificate"
+      },
+      "credentials": {
+        "customer": "Customer number",
+        "customerHint": "1–64 characters, no spaces.",
+        "password": "Password",
+        "clear": "The customer number and the password are deleted together. If sealing needs them, the change is not applied.",
+        "probe": "Run a credit query with the new credentials before saving"
+      },
+      "test": {
+        "server": {
+          "test": "The stamp comes from the Kamu SM test server.",
+          "production": "The stamp comes from the Kamu SM production server.",
+          "other": "The stamp comes from the configured provider ({{provider}})."
+        },
+        "button": "Stamp test (uses 1 credit)",
+        "limit_one": "At most {{count}} test a day.",
+        "limit_other": "At most {{count}} tests a day.",
+        "confirmTitle": "Run a stamp test?",
+        "confirmBody": "One time stamp is obtained and verified on the server; it uses 1 credit.",
+        "confirm": "Start the test",
+        "verified": "Verification",
+        "verifiedYes": "Verified",
+        "verifiedNo": "Not verified",
+        "provider": "Provider",
+        "serial": "Serial number",
+        "genTime": "Stamp time",
+        "tsa": "Issued by",
+        "legal": "Legal grade",
+        "legalYes": "Verified from a legal root",
+        "legalNo": "Not verified from a legal root",
+        "errors": "Errors"
+      },
+      "production": {
+        "current": {
+          "test": "The Kamu SM test server is in use.",
+          "production": "The Kamu SM production server is in use.",
+          "other": "The {{provider}} provider is in use."
+        },
+        "checklist": "What production needs",
+        "items": {
+          "credentials": "Customer number and password stored",
+          "zamane_jar": "An approved Zamane client",
+          "java": "Java chosen",
+          "roots": "At least one root certificate installed"
+        },
+        "legal": "A legal root is marked",
+        "noLegal": "No legal root is marked (does not block the switch)",
+        "tested": "A stamp test succeeded",
+        "notTested": "No stamp test has succeeded yet (does not block the switch)",
+        "toProduction": "Switch to the production server",
+        "toTest": "Back to the test server",
+        "notReady": "Complete the missing items above to switch to production.",
+        "saveFirst": "Save or discard the changes on the other steps first.",
+        "confirmTitle": "Switch to the production server?",
+        "confirmBody": "From now on sealing uses stamps of the Kamu SM production server; every stamp uses a credit.",
+        "testTitle": "Back to the test server?",
+        "testBody": "Production stamps stop; sealing uses stamps of the test server. The change raises a high-severity alert."
+      },
+      "credit": {
+        "threshold": "Credit alert threshold",
+        "thresholdHint": "0–1,000,000. An alert is raised when the remaining credits drop below it.",
+        "timeout": "Stamp request timeout (s)",
+        "timeoutHint": "5–600 seconds."
+      },
+      "seal": {
+        "title": "Sealing",
+        "description": "The [seal] section and the expert [tsa] settings are changed on the server console only.",
+        "ready": "The Seal task can seal with the current settings.",
+        "notReady": "The Seal task cannot seal with the current settings"
+      },
+      "causes": {
+        "zamane_jar": "The Zamane client is not set or may not run.",
+        "credentials": "The Kamu SM customer number or password is not stored.",
+        "roots": "No root certificate is installed.",
+        "secret_store": "The secret store cannot be read.",
+        "provider": "The time-stamp provider's settings are invalid.",
+        "executable": "Java or the Zamane client is not in a trusted location, or its hash is not recognised.",
+        "location": "A program file is outside the trusted locations."
+      },
+      "errors": {
+        "customer": "The customer number must be 1–64 characters without spaces or control characters.",
+        "password": "The password must be 1–128 characters without control characters.",
+        "sha": "Enter a SHA-256 value of 64 hexadecimal characters.",
+        "shaMismatch": "The SHA-256 you entered does not match the file's."
+      }
+    },
+    "sources": {
+      "title": "Sources",
+      "description": "Devices that send logs. The collector and ingest take a change without a restart; the system task opens or closes the syslog port for each source's address.",
+      "tableTitle": "Configured sources",
+      "tableDescription": "{{count}} sources (at most {{max}}).",
+      "caption": "Configured log sources",
+      "empty": "No source yet. Add your firewall and your core router.",
+      "add": "Add a source",
+      "addTitle": "Add a source",
+      "editTitle": "Edit the source {{name}}",
+      "dialogDescription": "The changes and their effects are shown before anything is saved.",
+      "review": "Review the changes",
+      "nameHint": "Lower-case letters, digits and hyphens; at most 63 characters. It cannot be changed later.",
+      "nameFixed": "A source's name cannot be changed.",
+      "addressHint": "One IPv4 address (172.20.10.1) or a network (172.20.10.0/24).",
+      "heartbeat": "Expected heartbeat (min)",
+      "heartbeatHint": "1–1440 minutes. A silent-source alert is raised when nothing arrives for this long.",
+      "expectedHint": "The silent-source alert watches this source.",
+      "enabledHint": "Records of a disabled source are not collected.",
+      "minutes_one": "{{count}} min",
+      "minutes_other": "{{count}} min",
+      "yes": "Yes",
+      "no": "No",
+      "never": "None yet",
+      "enabledFor": "{{name}} enabled",
+      "editFor": "Edit the source {{name}}",
+      "removeFor": "Remove the source {{name}}",
+      "remove": "Remove the source",
+      "removeTitle": "Remove {{name}}?",
+      "removeBody": "The source is taken out of the configuration and its firewall rule is closed. Its stored and sealed records do not change. Your password is asked again.",
+      "removeType": "Type the source's name to confirm: {{name}}",
+      "systemTask": "The system task is not running: changes are saved, but the firewall rules are not updated until the system task runs again.",
+      "lockedTitle": "Settings changed on the server console",
+      "columns": {
+        "name": "Name",
+        "type": "Type",
+        "address": "Address",
+        "transport": "Transport",
+        "heartbeat": "Heartbeat",
+        "expected": "Expected",
+        "enabled": "Enabled",
+        "lastSeen": "Last record",
+        "firewall": "Firewall",
+        "actions": "Actions"
+      },
+      "types": {
+        "fortigate": "FortiGate",
+        "mikrotik": "MikroTik",
+        "generic": "Generic syslog"
+      },
+      "transports": {
+        "any": "UDP and TCP",
+        "udp": "UDP",
+        "tcp": "TCP"
+      },
+      "firewall": {
+        "open": "Open",
+        "closed": "Closed",
+        "pending": "Updating",
+        "not_managed": "Not managed"
+      },
+      "errors": {
+        "name": "The name must start with a lower-case letter or a digit and hold only lower-case letters, digits and hyphens (at most 63 characters).",
+        "nameUnknown": "Names starting with \"unknown-\" are reserved for unknown senders.",
+        "nameTaken": "A source with this name already exists.",
+        "ipv6": "IPv6 addresses are not supported yet; enter an IPv4 address.",
+        "address": "Enter a valid IPv4 address or network (e.g. 172.20.10.1 or 172.20.10.0/24).",
+        "hostBits": "A network must be written with its first address (e.g. 172.20.10.0/24).",
+        "reserved": "This address cannot be used for a source (loopback, multicast, link-local or reserved).",
+        "prefix": "The network is too wide; use a longer prefix.",
+        "notAllowed": "The address is outside the networks the administration policy allows.",
+        "addressTaken": "Another source uses this address.",
+        "overlap": "This network overlaps another source's network.",
+        "limit": "The number of sources has reached its limit."
+      }
     }
   },
   "audit": {
@@ -2786,7 +3069,9 @@
       "heldUntil": "This change is held: it is applied at {{time}} and can be cancelled until then.",
       "held": "This change is held; it is applied when the hold ends.",
       "reauth": "You will be asked for your password again when saving.",
-      "confirm": "Confirm and save"
+      "confirm": "Confirm and save",
+      "source": "Source {{name}}",
+      "sourceField": "{{name}} · {{field}}"
     },
     "effects": {
       "reload": {
@@ -2810,6 +3095,21 @@
         "ntp_server": "Local time source",
         "fallback_server": "Fallback time server",
         "alert_offset_ms": "Clock offset alert threshold (ms)"
+      },
+      "tsa": {
+        "server": "Time-stamp server",
+        "provider": "Time-stamp provider",
+        "url": "Time-stamp address",
+        "credit_alert_threshold": "Credit alert threshold",
+        "timeout_seconds": "Stamp request timeout (s)",
+        "java": "Java",
+        "zamane_jar": "Zamane client",
+        "roots": "Root certificates",
+        "legal_root_fingerprints": "Legal root fingerprints"
+      },
+      "kamusm": {
+        "customer": "Kamu SM customer number",
+        "password": "Kamu SM password"
       }
     },
     "section": {
@@ -2830,6 +3130,11 @@
       "integer": "Enter a whole number.",
       "min": "Must be at least {{min}}.",
       "max": "Must be at most {{max}}."
+    },
+    "upload": {
+      "send": "Send the file",
+      "chosen": "{{name}} ({{size}}) chosen; press the button to send it. The server inspects the file; nothing is installed yet.",
+      "tooLarge": "The file is too large; at most {{size}}."
     }
   }
 }

@@ -1,4 +1,13 @@
-import { Building2, ChevronRight, History, KeyRound, SlidersHorizontal, Users } from 'lucide-react';
+import {
+  Building2,
+  ChevronRight,
+  History,
+  KeyRound,
+  Network,
+  SlidersHorizontal,
+  Stamp,
+  Users,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -14,33 +23,33 @@ import { useAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
 
 /** Sections of spec 12.3 page 15 that come later ("Gizlilik" is in Uygulama ayarları). */
-const LATER_SECTIONS = [
-  'kamusm',
-  'sources',
-  'email',
-  'replica',
-  'retention',
-  'backup',
-  'rules',
-] as const;
+const LATER_SECTIONS = ['email', 'replica', 'retention', 'backup', 'rules'] as const;
 
 interface Section {
   key: string;
   to: string;
   icon: LucideIcon;
-  permission: string;
+  /** Every one of them is needed. */
+  permissions: readonly string[];
 }
 
 /** The sections of the browser administration (contract 2.17), in the order of the page. */
 const SECTIONS: readonly Section[] = [
-  { key: 'general', to: '/settings/general', icon: Building2, permission: 'settings.manage' },
+  { key: 'general', to: '/settings/general', icon: Building2, permissions: ['settings.manage'] },
   {
     key: 'application',
     to: '/settings/application',
     icon: SlidersHorizontal,
-    permission: 'settings.manage',
+    permissions: ['settings.manage'],
   },
-  { key: 'history', to: '/settings/history', icon: History, permission: 'settings.manage' },
+  { key: 'kamusm', to: '/settings/kamusm', icon: Stamp, permissions: ['settings.manage'] },
+  {
+    key: 'sources',
+    to: '/settings/sources',
+    icon: Network,
+    permissions: ['settings.manage', 'sources.manage'],
+  },
+  { key: 'history', to: '/settings/history', icon: History, permissions: ['settings.manage'] },
 ];
 
 function SectionCard({
@@ -111,6 +120,7 @@ export function SettingsPage() {
   const { can } = useAuth();
   const manage = can('settings.manage');
   const status = useAdminStatus(manage);
+  const sections = SECTIONS.filter((section) => section.permissions.every((item) => can(item)));
   return (
     <div>
       <PageHeader
@@ -128,7 +138,7 @@ export function SettingsPage() {
             hint={t('settings.usersHint')}
           />
         ) : null}
-        {SECTIONS.filter((section) => can(section.permission)).map((section) => (
+        {sections.map((section) => (
           <SectionCard
             key={section.key}
             to={section.to}

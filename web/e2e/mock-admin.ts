@@ -32,14 +32,17 @@ import type {
   Change,
   CodeMessage,
   ConfigVersion,
+  ReadinessItem,
   RequestKind,
   RequestState,
   RequestStep,
   SettingGroup,
   SettingOut,
   SettingValue,
+  SourceConfig,
   SourceOut,
   StepState,
+  TsaSection,
   UploadPreview,
 } from '../src/lib/settings-types';
 
@@ -619,6 +622,8 @@ interface MockRequest {
   before: unknown;
   /** The day of a seal request. */
   day: string | null;
+  /** Undoes what accepting it did at once (a staged Zamane client), when it is cancelled. */
+  cancel?: () => void;
 }
 
 const SEALABLE = new Set(['failed', 'pending']);
@@ -666,6 +671,27 @@ function validHost(text: string): boolean {
   return /^[\d.]+$/.test(text) ? IPV4.test(text) : HOST.test(text);
 }
 
+const TSA_KEYS = [
+  'etag',
+  'server',
+  'credit_alert_threshold',
+  'timeout_seconds',
+  'java',
+  'customer',
+  'password',
+  'clear_credentials',
+  'confirm',
+  'probe',
+];
+const TSA_REQUIRED = [
+  'etag',
+  'server',
+  'credit_alert_threshold',
+  'timeout_seconds',
+  'java',
+  'probe',
+];
+
 /**
  * Request bodies of the administration API: every field it knows and the required ones (the
  * API's models are `extra="forbid"`).
@@ -675,6 +701,26 @@ const BODIES: Record<string, { known: string[]; required: string[] }> = {
     known: ['etag', 'site_name', 'clock', 'probe'],
     required: ['etag', 'site_name', 'clock', 'probe'],
   },
+  'POST /admin/config/general/check': {
+    known: ['etag', 'site_name', 'clock', 'probe'],
+    required: ['etag', 'site_name', 'clock', 'probe'],
+  },
+  'PUT /admin/config/tsa': { known: TSA_KEYS, required: TSA_REQUIRED },
+  'POST /admin/config/tsa/check': { known: TSA_KEYS, required: TSA_REQUIRED },
+  'POST /admin/config/tsa/roots': {
+    known: ['etag', 'upload_id', 'legal', 'confirmed'],
+    required: ['etag', 'upload_id', 'legal', 'confirmed'],
+  },
+  'POST /admin/config/tsa/legal-roots': {
+    known: ['etag', 'sha256', 'confirmed'],
+    required: ['etag', 'sha256', 'confirmed'],
+  },
+  'POST /admin/config/tsa/zamane': {
+    known: ['etag', 'upload_id', 'expected_sha256'],
+    required: ['etag', 'upload_id'],
+  },
+  'POST /admin/config/sources': { known: ['etag', 'source'], required: ['etag', 'source'] },
+  'POST /admin/config/sources/check': { known: ['etag', 'source'], required: ['etag', 'source'] },
   'PATCH /settings': { known: ['changes'], required: ['changes'] },
   'POST /admin/actions/tsa-test': { known: ['confirm_credit'], required: [] },
   'POST /admin/actions/replica-test': { known: [], required: [] },
@@ -1420,6 +1466,644 @@ export class AdminMock {
     return outcome;
   }
 
+  /** A refusal with the status of the contract's catalogue (2.12). */
+  private reject(code: string, details?: unknown): [number, unknown] {
+    return this.refuse(HTTP[code]?.[0] ?? 422, code, details);
+  }
+
+  /** The common refusals of a change: service down, stale `etag`, a change still running. */
+  private blocked(section: AdminSection, etag: unknown): [number, unknown] | null {
+    const down = this.unavailable();
+    if (down) return down;
+    if (etag !== this.etag(section))
+      return this.refuse(409, 'config_conflict', { current_etag: this.etag(section) });
+    if (this.busy(section)) return this.refuse(409, 'admin_section_busy');
+    return null;
+  }
+
+  // -- uploads (contract 2.4.4, 2.6 "tsa") -----------------------------------------------------
+
+  private upload(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const kind = call.query.get('kind');
+    if (kind !== 'kamusm_root' && kind !== 'zamane_client' && kind !== 'smtp_ca')
+      return this.reject('upload_kind_invalid');
+    const file = multipartFile(call);
+    if (!file)
+      return host.error(422, 'validation_error', [
+        { loc: ['body', 'file'], type: 'missing', msg: 'Field required' },
+      ]);
+    const size = Buffer.byteLength(file.content);
+    if (size > UPLOAD_LIMITS[kind]) return this.reject('upload_too_large');
+    const digest = sha256(file.content);
+    const preview: UploadPreview = {
+      upload_id: newId(),
+      kind,
+      size,
+      sha256: digest,
+      expires_at: this.iso(30 * 60_000),
+    };
+    if (kind === 'zamane_client') {
+      const zip = file.name.toLowerCase().endsWith('.zip');
+      if ((!zip && !file.name.toLowerCase().endsWith('.jar')) || file.content.includes('broken'))
+        return this.reject('zamane_archive_invalid');
+      const known = file.content.includes('known-release');
+      preview.zamane = {
+        kind: zip ? 'zip' : 'jar',
+        jar_name: zip ? 'tss-client-console-3.1.4.jar' : file.name,
+        jar_sha256: zip ? sha256(`${file.content} jar`) : digest,
+        release: known ? 'tss-client-console 3.1.4' : null,
+        known,
+        accepted: true,
+        reason: null,
+      };
+    } else {
+      if (!file.content.includes('BEGIN CERTIFICATE'))
+        return this.reject('root_certificate_invalid');
+      const expired = file.content.includes('expired');
+      const subject =
+        /^Subject: (.+)$/m.exec(file.content)?.[1] ??
+        'CN=Kamu SM Kök Sertifika Hizmet Sağlayıcısı - Sürüm 2 (örnek)';
+      preview.certificate = {
+        subject,
+        issuer: subject,
+        not_before: '2021-06-01T00:00:00+03:00',
+        not_after: expired ? '2025-06-01T00:00:00+03:00' : '2041-06-01T00:00:00+03:00',
+        is_ca: true,
+        self_signed: true,
+        key: 'RSA 4096',
+        installed: this.sections.tsa.roots.some((root) => root.sha256 === digest),
+        warnings: expired ? [message('root_expired')] : [],
+      };
+    }
+    this.uploads.set(preview.upload_id, preview);
+    return [201, copy(preview)];
+  }
+
+  // -- the Kamu SM section ----------------------------------------------------------------------
+
+  /** `readiness` and `seal_ready` of a Kamu SM section (`tsa.preflight`, simplified). */
+  private refreshTsa(tsa: TsaSection = this.sections.tsa): TsaSection {
+    tsa.readiness = { production: false, missing: tsaMissing(tsa) };
+    tsa.readiness.production = tsa.readiness.missing.length === 0;
+    const causes = tsa.provider === 'zamane' ? tsa.readiness.missing.map(causeOf) : [];
+    tsa.seal_ready = { ok: causes.length === 0, causes };
+    return tsa;
+  }
+
+  private tsaTested(): boolean {
+    return [...this.requests.values()].some(
+      (item) => item.out.kind === 'action.tsa_test' && item.out.state === 'succeeded',
+    );
+  }
+
+  private tsa(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as {
+      etag?: string;
+      server?: unknown;
+      credit_alert_threshold?: unknown;
+      timeout_seconds?: unknown;
+      java?: unknown;
+      customer?: unknown;
+      password?: unknown;
+      clear_credentials?: unknown;
+      confirm?: unknown;
+      probe?: unknown;
+    };
+    if (body.server === 'mock') return this.reject('tsa_mock_refused');
+    if (body.server !== 'test' && body.server !== 'production')
+      return this.reject('tsa_server_invalid');
+    const problems = [];
+    const threshold = body.credit_alert_threshold;
+    if (
+      typeof threshold !== 'number' ||
+      !Number.isInteger(threshold) ||
+      threshold < 0 ||
+      threshold > 1_000_000
+    )
+      problems.push(problem('credit_alert_threshold', 'config_invalid'));
+    const timeout = body.timeout_seconds;
+    if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 5 || timeout > 600)
+      problems.push(problem('timeout_seconds', 'config_invalid'));
+    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
+    const java = typeof body.java === 'string' ? body.java : null;
+    if (java !== null && !JAVA_CHOICES.includes(java))
+      return this.reject('java_not_detected', [problem('java', 'java_not_detected')]);
+    const customer = typeof body.customer === 'string' ? body.customer : null;
+    const password = typeof body.password === 'string' ? body.password : null;
+    if (customer !== null && !/^[^\s\p{Cc}\p{Cf}]{1,64}$/u.test(customer))
+      return this.reject('secret_invalid', [problem('customer', 'secret_invalid')]);
+    if (password !== null && !/^[^\p{Cc}\p{Cf}]{1,128}$/u.test(password))
+      return this.reject('secret_invalid', [problem('password', 'secret_invalid')]);
+    const clear = body.clear_credentials === true;
+    const current = this.sections.tsa;
+    const candidate = copy(current);
+    candidate.provider = 'zamane';
+    candidate.server = body.server;
+    candidate.java = java;
+    candidate.credit_alert_threshold = threshold as number;
+    candidate.timeout_seconds = timeout as number;
+    const by = `web:${account.username}`;
+    const secretChanges: Record<string, Change> = {};
+    for (const [name, value] of [
+      ['kamusm.customer', customer],
+      ['kamusm.password', password],
+    ] as const) {
+      const was = current.secrets[name]?.set ? 'set' : 'unset';
+      if (clear && was === 'set') {
+        candidate.secrets[name] = { set: false, changed_at: this.iso(), changed_by: by };
+        secretChanges[name] = { secret: true, old: was, new: 'deleted', changed: true };
+      } else if (!clear && value !== null) {
+        candidate.secrets[name] = { set: true, changed_at: this.iso(), changed_by: by };
+        secretChanges[name] = { secret: true, old: was, new: 'set', changed: true };
+      }
+    }
+    this.refreshTsa(candidate);
+    const production = current.provider === 'zamane' && current.server === 'production';
+    if (body.server === 'production' && !candidate.readiness.production)
+      return this.reject('tsa_not_ready', { missing: candidate.readiness.missing });
+    if (production && body.server === 'test' && body.confirm !== true)
+      return this.reject('tsa_confirm_required');
+    if (current.seal_ready.ok && !candidate.seal_ready.ok)
+      return this.reject('tsa_would_break', { causes: candidate.seal_ready.causes });
+    const pick = (tsa: TsaSection) => ({
+      provider: tsa.provider,
+      server: tsa.server,
+      credit_alert_threshold: tsa.credit_alert_threshold,
+      timeout_seconds: tsa.timeout_seconds,
+      java: tsa.java,
+    });
+    const changes: Record<string, Change> = {
+      ...diff('tsa', pick(current), pick(candidate)),
+      ...secretChanges,
+    };
+    const reauth = Object.keys(changes).some(
+      (path) => path !== 'tsa.credit_alert_threshold' && path !== 'tsa.timeout_seconds',
+    );
+    const warnings: string[] = [];
+    if (body.server === 'production' && !production) {
+      if (!candidate.roots.some((root) => root.legal)) warnings.push('legal_roots_empty');
+      if (!this.tsaTested()) warnings.push('production_not_tested');
+    }
+    if (production && body.server === 'test') warnings.push('production_stamps_stop');
+    const sealing = reauth;
+    const effects = ['reload.worker', 'reload.api', ...(sealing ? ['task.next_run:Seal'] : [])];
+    const check: AdminCheck = {
+      changes,
+      effects,
+      warnings: warnings.map(message),
+      guarded: false,
+      effective_at: null,
+      reauth_required: reauth,
+      readiness: candidate.readiness,
+    };
+    if (dryRun) return [200, check];
+    if (reauth) {
+      const recent = host.requirePermission(call, 'settings.manage', true);
+      if (Array.isArray(recent)) return recent;
+    }
+    const refused = this.blocked('tsa', body.etag);
+    if (refused) return refused;
+    const probed =
+      body.probe !== false &&
+      (Object.keys(secretChanges).length > 0 ||
+        Boolean(changes['tsa.server'] ?? changes['tsa.provider']));
+    const steps: RequestStep[] = [
+      'received',
+      'validate',
+      ...(probed ? (['probe'] as RequestStep[]) : []),
+      'backup',
+      ...(Object.keys(secretChanges).length > 0 ? (['write_secrets'] as RequestStep[]) : []),
+      'write_config',
+      'verify',
+      'reload.worker',
+      'reload.api',
+      'journal',
+    ];
+    const before = copy(current);
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'tsa',
+      account,
+      steps,
+      changes,
+      warnings,
+      outcome: this.takeOutcome(),
+      before,
+      apply: () => {
+        // Uploads applied meanwhile (roots, a client) stay.
+        const now = this.sections.tsa;
+        this.sections.tsa = this.refreshTsa({
+          ...candidate,
+          roots: now.roots,
+          zamane: now.zamane,
+        });
+        this.recordVersion(item, account);
+      },
+    });
+    return this.accepted(item, effects);
+  }
+
+  private addRoot(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(account)) return account;
+    const body = call.body as {
+      etag?: string;
+      upload_id?: string;
+      legal?: unknown;
+      confirmed?: unknown;
+    };
+    const upload = this.uploads.get(body.upload_id ?? '');
+    if (!upload?.certificate || upload.kind !== 'kamusm_root')
+      return this.reject('upload_not_found');
+    if (this.sections.tsa.roots.some((root) => root.sha256 === upload.sha256))
+      return this.reject('root_exists');
+    const legal = body.legal === true;
+    if (legal && body.confirmed !== true) return this.reject('legal_root_confirm_required');
+    const refused = this.blocked('tsa', body.etag);
+    if (refused) return refused;
+    const certificate = upload.certificate;
+    const warnings = [
+      ...certificate.warnings.map((warning) => warning.code),
+      ...(!legal && !this.sections.tsa.roots.some((root) => root.legal)
+        ? ['legal_roots_empty']
+        : []),
+    ];
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'tsa',
+      account,
+      steps: [
+        'received',
+        'validate',
+        'backup',
+        'install_files',
+        'write_config',
+        'verify',
+        'reload.worker',
+        'journal',
+      ],
+      changes: {
+        'tsa.roots': { old: null, new: certificate.subject },
+        ...(legal ? { 'tsa.legal_root_fingerprints': { old: null, new: upload.sha256 } } : {}),
+      },
+      warnings,
+      outcome: this.takeOutcome(),
+      before: copy(this.sections.tsa),
+      apply: () => {
+        this.sections.tsa.roots.push({
+          sha256: upload.sha256,
+          subject: certificate.subject,
+          not_after: certificate.not_after,
+          legal,
+          source: 'web',
+        });
+        this.uploads.delete(upload.upload_id);
+        this.refreshTsa();
+        this.recordVersion(item, account);
+      },
+    });
+    return this.accepted(item, ['reload.worker']);
+  }
+
+  private addLegalRoot(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(account)) return account;
+    const body = call.body as { etag?: string; sha256?: string; confirmed?: unknown };
+    const root = this.sections.tsa.roots.find((item) => item.sha256 === body.sha256);
+    if (!root) return this.reject('root_not_installed');
+    if (body.confirmed !== true) return this.reject('legal_root_confirm_required');
+    const refused = this.blocked('tsa', body.etag);
+    if (refused) return refused;
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'tsa',
+      account,
+      steps: [
+        'received',
+        'validate',
+        'backup',
+        'write_config',
+        'verify',
+        'reload.worker',
+        'journal',
+      ],
+      changes: { 'tsa.legal_root_fingerprints': { old: null, new: root.sha256 } },
+      outcome: this.takeOutcome(),
+      before: copy(this.sections.tsa),
+      apply: () => {
+        const installed = this.sections.tsa.roots.find((entry) => entry.sha256 === root.sha256);
+        if (installed) installed.legal = true;
+        this.recordVersion(item, account);
+      },
+    });
+    return this.accepted(item, ['reload.worker']);
+  }
+
+  private stageZamane(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(account)) return account;
+    const body = call.body as { etag?: string; upload_id?: string; expected_sha256?: unknown };
+    const upload = this.uploads.get(body.upload_id ?? '');
+    const zamane = upload?.zamane;
+    if (!upload || !zamane || upload.kind !== 'zamane_client')
+      return this.reject('upload_not_found');
+    if (!zamane.known) {
+      if (typeof body.expected_sha256 !== 'string')
+        return this.reject('zamane_sha256_required', [
+          problem('expected_sha256', 'zamane_sha256_required'),
+        ]);
+      if (body.expected_sha256.toLowerCase() !== upload.sha256)
+        return this.reject('zamane_sha256_mismatch', [
+          problem('expected_sha256', 'zamane_sha256_mismatch'),
+        ]);
+    }
+    const refused = this.blocked('tsa', body.etag);
+    if (refused) return refused;
+    const hold = zamane.known ? null : 24 * 3_600_000;
+    const tsa = this.sections.tsa;
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'tsa',
+      account,
+      steps: [
+        'received',
+        'validate',
+        ...(hold === null ? [] : (['hold'] as RequestStep[])),
+        'install_files',
+        'jar.promotion',
+        'write_config',
+        'verify',
+        'reload.worker',
+        'journal',
+      ],
+      changes: { 'tsa.zamane_jar': { old: tsa.zamane.sha256, new: zamane.jar_sha256 } },
+      warnings: zamane.known ? [] : ['unknown_jar_held'],
+      outcome: this.takeOutcome(),
+      hold,
+      before: copy(tsa),
+      apply: () => {
+        this.sections.tsa.zamane = {
+          present: true,
+          sha256: zamane.jar_sha256,
+          release: zamane.release,
+          trusted: 'known',
+          staged: this.sections.tsa.zamane.staged.filter(
+            (entry) => entry.sha256 !== zamane.jar_sha256,
+          ),
+        };
+        this.uploads.delete(upload.upload_id);
+        this.refreshTsa();
+        this.recordVersion(item, account);
+      },
+    });
+    if (hold !== null) {
+      tsa.zamane.staged.push({ sha256: zamane.jar_sha256, effective_at: item.out.effective_at });
+      item.cancel = () => {
+        this.sections.tsa.zamane.staged = this.sections.tsa.zamane.staged.filter(
+          (entry) => entry.sha256 !== zamane.jar_sha256,
+        );
+      };
+    }
+    return this.accepted(item, ['jar.promotion', 'reload.worker']);
+  }
+
+  private tsaTest(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as { confirm_credit?: unknown };
+    if (body.confirm_credit !== true) return this.reject('tsa_test_confirm_required');
+    const down = this.unavailable();
+    if (down) return down;
+    const today = this.iso().slice(0, 10);
+    const done = [...this.requests.values()].filter(
+      (item) => item.out.kind === 'action.tsa_test' && item.out.created_at.slice(0, 10) === today,
+    ).length;
+    if (done >= 3) return this.reject('tsa_test_limit');
+    const tsa = this.sections.tsa;
+    const legal = tsa.roots.find((root) => root.legal) ?? null;
+    const root = legal ?? tsa.roots[0] ?? null;
+    const outcome = this.takeAction();
+    const result = {
+      provider: tsa.provider,
+      legal_grade_claimed: legal !== null,
+      legal_grade: legal !== null,
+      root_sha256: root?.sha256 ?? null,
+      root: root?.subject ?? null,
+      verified: true,
+      errors: [],
+      warnings: [],
+      gen_time: this.iso(),
+      serial: sha256(`tsa test ${String(done)}`)
+        .slice(0, 16)
+        .toUpperCase(),
+      tsa: 'CN=Kamu SM Zaman Damgası Test Sunucusu (örnek)',
+      tsa_cert_not_after: '2031-01-01T00:00:00+03:00',
+      container: 'test.zd',
+    };
+    const item = this.enqueue({
+      kind: 'action.tsa_test',
+      section: null,
+      account,
+      steps: ['received', 'dispatch', 'task', 'journal'],
+      result: outcome === 'succeeded' ? result : null,
+      ...(outcome === 'succeeded'
+        ? {}
+        : {
+            failure:
+              outcome === 'timed_out'
+                ? { state: 'timed_out' as RequestState, error: 'task_timeout' }
+                : { state: 'failed' as RequestState, error: 'tsa_test_failed' },
+          }),
+    });
+    return this.accepted(item);
+  }
+
+  // -- sources (contract 2.6 "sources") ---------------------------------------------------------
+
+  /** The refusal of a source, or `null` (`editing`: the name of the source it replaces). */
+  private sourceRefusal(
+    source: unknown,
+    editing: string | null,
+    host: MockHost,
+  ): [number, unknown] | null {
+    if (typeof source !== 'object' || source === null || Array.isArray(source))
+      return host.error(422, 'validation_error', [
+        {
+          loc: ['body', 'source'],
+          type: 'model_attributes_type',
+          msg: 'Input should be an object',
+        },
+      ]);
+    const extra = Object.keys(source).filter((key) => !SOURCE_KEYS.includes(key));
+    const missing = SOURCE_KEYS.filter((key) => !Object.hasOwn(source, key));
+    if (extra.length > 0 || missing.length > 0)
+      return host.error(422, 'validation_error', [
+        ...extra.map((key) => ({
+          loc: ['body', 'source', key],
+          type: 'extra_forbidden',
+          msg: 'Extra inputs are not permitted',
+        })),
+        ...missing.map((key) => ({
+          loc: ['body', 'source', key],
+          type: 'missing',
+          msg: 'Field required',
+        })),
+      ]);
+    const value = source as SourceConfig;
+    const others = this.sections.sources.filter((item) => item.name !== editing);
+    if (editing === null) {
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(value.name) || value.name.startsWith('unknown-'))
+        return this.refuse(422, 'config_invalid', [problem('source.name', 'config_invalid')]);
+      if (others.some((item) => item.name === value.name))
+        return this.reject('source_name_taken', [problem('source.name', 'source_name_taken')]);
+      if (this.sections.sources.length >= 500) return this.reject('source_limit');
+    } else if (value.name !== editing) return this.reject('source_rename_not_allowed');
+    const problems = [];
+    if (!['fortigate', 'mikrotik', 'generic'].includes(value.type))
+      problems.push(problem('source.type', 'config_invalid'));
+    if (!['any', 'udp', 'tcp'].includes(value.transport))
+      problems.push(problem('source.transport', 'config_invalid'));
+    const heartbeat = value.heartbeat_minutes;
+    if (!Number.isInteger(heartbeat) || heartbeat < 1 || heartbeat > 1440)
+      problems.push(problem('source.heartbeat_minutes', 'config_invalid'));
+    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
+    const address = (code: string) => this.reject(code, [problem('source.address', code)]);
+    if (value.address.includes(':')) return address('source_ipv6_unsupported');
+    const network = networkOf(value.address);
+    if (!network)
+      return this.refuse(422, 'config_invalid', [problem('source.address', 'config_invalid')]);
+    if (
+      RESERVED_NETWORKS.some((reserved) => overlap(reserved, network)) ||
+      value.address === '255.255.255.255'
+    )
+      return address('source_reserved_address');
+    if (LOCAL_ADDRESSES.includes(value.address)) return address('source_own_address');
+    if (!POLICY_NETWORKS.some((allowed) => inside(allowed, network)))
+      return address('source_network_not_allowed');
+    if (network.prefix < 32 && network.prefix < 16) return address('source_prefix_too_short');
+    if (others.some((item) => item.address === value.address))
+      return address('source_address_taken');
+    if (
+      network.prefix < 32 &&
+      others.some((item) => {
+        const other = networkOf(item.address);
+        return other !== null && other.prefix < 32 && overlap(other, network);
+      })
+    )
+      return address('source_overlap');
+    return null;
+  }
+
+  private sourceChange(
+    call: RecordedCall,
+    host: MockHost,
+    mode: 'check' | 'add' | 'update',
+    path: string | null,
+  ): Answer {
+    const body = call.body as { etag?: string; source?: unknown };
+    const name =
+      mode === 'update' ? path : ((body.source as { name?: unknown } | undefined)?.name ?? null);
+    const existing = this.sections.sources.find((item) => item.name === name) ?? null;
+    if (mode === 'update' && !existing) {
+      const account = host.requirePermission(call, 'sources.manage');
+      return Array.isArray(account) ? account : this.reject('source_not_found');
+    }
+    // A check of a known name is the check of its change, else of its addition.
+    const editing = mode === 'add' ? null : (existing?.name ?? null);
+    const disabling =
+      existing !== null &&
+      existing.enabled &&
+      (body.source as { enabled?: unknown } | undefined)?.enabled === false;
+    const account = host.requirePermission(call, 'sources.manage', mode !== 'check' && disabling);
+    if (Array.isArray(account)) return account;
+    const refusal = this.sourceRefusal(body.source, editing, host);
+    if (refusal) return refusal;
+    const source = body.source as SourceConfig;
+    const fields = (item: SourceConfig | null): Record<string, unknown> =>
+      item
+        ? {
+            type: item.type,
+            address: item.address,
+            transport: item.transport,
+            heartbeat_minutes: item.heartbeat_minutes,
+            expected: item.expected,
+            enabled: item.enabled,
+          }
+        : {};
+    const changes = diff(
+      `sources.${source.name}`,
+      fields(editing === null ? null : existing),
+      fields(source),
+    );
+    const warnings = disabling && existing.expected ? ['source_disable_gaps'] : [];
+    const effects = ['reload.collector', 'reload.ingest', 'system.firewall'];
+    if (mode === 'check')
+      return [
+        200,
+        {
+          changes,
+          effects,
+          warnings: warnings.map(message),
+          guarded: false,
+          effective_at: null,
+          reauth_required: disabling,
+        } satisfies AdminCheck,
+      ];
+    const refused = this.blocked('sources', body.etag);
+    if (refused) return refused;
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'sources',
+      account,
+      steps: SOURCE_STEPS,
+      changes,
+      warnings,
+      outcome: this.takeOutcome(),
+      before: copy(this.sections.sources),
+      apply: () => {
+        const row: SourceOut = {
+          ...source,
+          firewall: source.enabled ? 'open' : 'closed',
+          last_seen: existing?.last_seen ?? null,
+        };
+        const at = this.sections.sources.findIndex((entry) => entry.name === source.name);
+        if (at >= 0) this.sections.sources[at] = row;
+        else this.sections.sources.push(row);
+        this.recordVersion(item, account);
+      },
+    });
+    return this.accepted(item, effects);
+  }
+
+  private removeSource(call: RecordedCall, host: MockHost, name: string): Answer {
+    const account = host.requirePermission(call, 'sources.manage', true);
+    if (Array.isArray(account)) return account;
+    const existing = this.sections.sources.find((item) => item.name === name);
+    if (!existing) return this.reject('source_not_found');
+    if (call.query.get('confirm') !== name) return this.reject('source_confirm_mismatch');
+    const refused = this.blocked('sources', call.query.get('etag'));
+    if (refused) return refused;
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'sources',
+      account,
+      steps: SOURCE_STEPS,
+      changes: { [`sources.${name}`]: { old: existing.address, new: null } },
+      warnings: existing.expected && existing.enabled ? ['source_disable_gaps'] : [],
+      outcome: this.takeOutcome(),
+      before: copy(this.sections.sources),
+      apply: () => {
+        this.sections.sources = this.sections.sources.filter((entry) => entry.name !== name);
+        this.recordVersion(item, account);
+      },
+    });
+    return this.accepted(item, ['reload.collector', 'reload.ingest', 'system.firewall']);
+  }
+
   // -- requests: list, one, cancel, revert ------------------------------------------------------
 
   private listRequests(call: RecordedCall, host: MockHost): Answer {
@@ -1463,6 +2147,7 @@ export class AdminMock {
     if (item.out.state !== 'queued' && item.out.state !== 'pending')
       return this.refuse(409, 'request_not_cancellable');
     item.cancelled = true;
+    item.cancel?.();
     const cancel = this.enqueue({
       kind: 'config.cancel',
       section: item.out.section,
@@ -1812,6 +2497,25 @@ export class AdminMock {
     }
     if (route === 'POST /admin/config/general/check') return this.general(call, host, true);
     if (route === 'PUT /admin/config/general') return this.general(call, host, false);
+    if (route === 'POST /admin/uploads') return this.upload(call, host);
+    if (route === 'POST /admin/config/tsa/check') return this.tsa(call, host, true);
+    if (route === 'PUT /admin/config/tsa') return this.tsa(call, host, false);
+    if (route === 'POST /admin/config/tsa/roots') return this.addRoot(call, host);
+    if (route === 'POST /admin/config/tsa/legal-roots') return this.addLegalRoot(call, host);
+    if (route === 'POST /admin/config/tsa/zamane') return this.stageZamane(call, host);
+    if (route === 'POST /admin/actions/tsa-test') return this.tsaTest(call, host);
+    if (route === 'POST /admin/config/sources/check')
+      return this.sourceChange(call, host, 'check', null);
+    if (route === 'POST /admin/config/sources') return this.sourceChange(call, host, 'add', null);
+    if ((match = /^\/admin\/config\/sources\/([^/]+)$/.exec(path))) {
+      const name = decodeURIComponent(match[1] ?? '');
+      if (method === 'PUT') {
+        const problems = bodyProblems('POST /admin/config/sources', call.body);
+        if (problems.length > 0) return host.error(422, 'validation_error', problems);
+        return this.sourceChange(call, host, 'update', name);
+      }
+      if (method === 'DELETE') return this.removeSource(call, host, name);
+    }
     if (route === 'GET /admin/requests') return this.listRequests(call, host);
     if ((match = /^\/admin\/requests\/([0-9a-f]{32})$/.exec(path))) {
       const id = match[1] ?? '';
@@ -1837,6 +2541,118 @@ export class AdminMock {
     return null;
   }
 }
+
+// -- uploads, Kamu SM and sources of the mock (contract 2.4.4, 2.6) -------------------------------
+
+/** Largest upload per kind (contract 2.4.4). */
+const UPLOAD_LIMITS: Record<UploadPreview['kind'], number> = {
+  kamusm_root: 64 * 1024,
+  smtp_ca: 256 * 1024,
+  zamane_client: 25 * 1024 * 1024,
+};
+
+/** The `file` part of a multipart body (the specs upload text files). */
+function multipartFile(call: RecordedCall): { name: string; content: string } | null {
+  const boundary = /boundary=(?:"([^"]+)"|([^;]+))/.exec(call.contentType ?? '');
+  if (!call.raw || !boundary) return null;
+  for (const part of call.raw.split(`--${boundary[1] ?? boundary[2] ?? ''}`)) {
+    const head = part.indexOf('\r\n\r\n');
+    if (head < 0) continue;
+    const headers = part.slice(0, head);
+    const name = /filename="([^"]*)"/.exec(headers);
+    if (!name || !/name="file"/.test(headers)) continue;
+    const content = part.slice(head + 4);
+    return {
+      name: name[1] ?? '',
+      content: content.endsWith('\r\n') ? content.slice(0, -2) : content,
+    };
+  }
+  return null;
+}
+
+/** What the production server still needs (`readiness.missing`). */
+function tsaMissing(tsa: TsaSection): ReadinessItem[] {
+  const missing: ReadinessItem[] = [];
+  if (!(tsa.secrets['kamusm.customer']?.set && tsa.secrets['kamusm.password']?.set))
+    missing.push('credentials');
+  if (!tsa.zamane.present || tsa.zamane.trusted === false) missing.push('zamane_jar');
+  if (tsa.java === null || !JAVA_CHOICES.includes(tsa.java)) missing.push('java');
+  if (tsa.roots.length === 0) missing.push('roots');
+  return missing;
+}
+
+/** The sealing cause of a missing item (`seal.CONFIG_CAUSES`, WP2's `executable`). */
+function causeOf(item: ReadinessItem): string {
+  return {
+    credentials: 'credentials',
+    zamane_jar: 'zamane-jar',
+    java: 'executable',
+    roots: 'roots',
+  }[item];
+}
+
+const SOURCE_KEYS = [
+  'name',
+  'type',
+  'address',
+  'heartbeat_minutes',
+  'expected',
+  'transport',
+  'enabled',
+];
+const SOURCE_STEPS: RequestStep[] = [
+  'received',
+  'validate',
+  'backup',
+  'write_config',
+  'verify',
+  'reload.collector',
+  'reload.ingest',
+  'system.firewall',
+  'journal',
+];
+
+interface Net {
+  base: number;
+  prefix: number;
+}
+
+function networkOf(text: string): Net | null {
+  const [address = '', prefixText, ...rest] = text.split('/');
+  if (rest.length > 0 || !IPV4.test(address)) return null;
+  const value = address.split('.').reduce((sum, part) => sum * 256 + Number(part), 0);
+  const prefix = prefixText === undefined ? 32 : Number(prefixText);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  const size = 2 ** (32 - prefix);
+  if (value % size !== 0) return null;
+  return { base: value, prefix };
+}
+
+function inside(outer: Net, inner: Net): boolean {
+  if (inner.prefix < outer.prefix) return false;
+  const size = 2 ** (32 - outer.prefix);
+  return Math.floor(inner.base / size) * size === outer.base;
+}
+
+function overlap(a: Net, b: Net): boolean {
+  return inside(a, b) || inside(b, a);
+}
+
+function nets(...texts: string[]): Net[] {
+  return texts.map((text) => networkOf(text)).filter((net): net is Net => net !== null);
+}
+
+const RESERVED_NETWORKS = nets(
+  '0.0.0.0/8',
+  '127.0.0.0/8',
+  '169.254.0.0/16',
+  '224.0.0.0/4',
+  '240.0.0.0/4',
+);
+/** `policy.source_networks` of the mock (as `config().policy`). */
+const POLICY_NETWORKS = nets('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16');
+/** `agent.json.local_addresses`: the server's own address. */
+const LOCAL_ADDRESSES = ['172.20.10.5'];
 
 // -- the database settings of the mock (contract 2.13) --------------------------------------------
 

@@ -207,10 +207,29 @@ export const routes: RouteObject[] = [
                 }),
               },
               {
+                path: 'settings/kamusm',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/kamusm-page')).KamusmPage,
+                }),
+              },
+              {
                 path: 'settings/history',
                 lazy: async () => ({
                   Component: (await import('@/pages/settings/history-page')).HistoryPage,
                 }),
+              },
+              // The sources need `sources.manage` too (the configuration is read with
+              // `settings.manage`).
+              {
+                element: <PermissionGate anyOf={['sources.manage']} />,
+                children: [
+                  {
+                    path: 'settings/sources',
+                    lazy: async () => ({
+                      Component: (await import('@/pages/settings/sources-page')).SourcesPage,
+                    }),
+                  },
+                ],
               },
             ],
           },
