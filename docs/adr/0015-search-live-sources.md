@@ -105,10 +105,12 @@ How values compare, in both compilations: text ignores case for ASCII letters on
 database's locale C: `lower()`/`ILIKE`; Turkish İ/ı, Ş/ş … are matched as typed, and the
 answer says so); `qname:` and `source:` compare exactly as stored (index-backed); a negated
 clause is `NOT coalesce(…, false)`, so a record whose columns are empty matches it; `field:*`
-means the field has a value. Token fields (`action`, `qtype`, `level`, `logid`) compare the
-lower-cased column with the lower-cased input: devices write `qtype=AAAA` and `action=Edit`, and
-the summary table lower-cases `action`, so only a case-insensitive comparison keeps the rows, the
-counts and the live tail in agreement (none of these columns is indexed).
+means the field has a value (refused for `type`, `vlan` and `department`, which have no column of
+their own: `-vlan:*` would not mean "outside every VLAN"). Token fields (`action`, `qtype`,
+`level`, `logid`) compare the lower-cased column with the lower-cased input: devices write
+`qtype=AAAA` and `action=Edit`, and the summary table lower-cases `action`, so only a
+case-insensitive comparison keeps the rows, the counts and the live tail in agreement (none of
+these columns is indexed).
 
 ## Consequences
 

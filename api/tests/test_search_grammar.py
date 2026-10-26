@@ -113,6 +113,7 @@ def _refused(text: str) -> SearchQueryError:
         ("severity:0-7 severity:<3", "severity:<=debug severity:<=crit"),
         ("type:WEB,Dhcp", "type:web,dhcp"),
         ("policy:12 policy:Internet*", "policy:12 policy:Internet*"),
+        ('policy:"12" policy:"Internet"', 'policy:"12" policy:Internet'),  # a name of digits
         ("vlan:41,42 department:Finans department:3", "vlan:41,42 department:Finans department:3"),
         ("source:Core-*", "source:core-*"),
         ("--foo", '-"-foo"'),
@@ -156,6 +157,13 @@ def test_values_carry_their_form() -> None:
     assert domain.values == (DomainValue("example.com", subdomains_only=True),)
     assert user.values == (PatternValue("adm", starts=True),)
     assert sev.values == (SeverityValue(0, 3),)
+
+
+def test_a_quoted_number_is_a_policy_name() -> None:
+    number, name = parse_query('policy:12 policy:"12"').clauses
+    assert number.values == (IntValue(12, 12),)  # policyid
+    assert name.values == (PatternValue("12"),)  # policyname
+    assert name.render() == 'policy:"12"'
 
 
 def test_terms_are_the_positive_free_text() -> None:
@@ -212,6 +220,9 @@ def test_terms_are_the_positive_free_text() -> None:
         ("source:*core", "search_value_invalid", (7, 12), {"format": "source"}),
         ("type:mail", "search_value_invalid", (5, 9), {"format": "kind"}),
         ("type:*", "search_value_invalid", (5, 6), {}),
+        ("vlan:*", "search_value_invalid", (5, 6), {"format": "vlan"}),
+        ("-vlan:*", "search_value_invalid", (6, 7), {"format": "vlan"}),
+        ("department:*", "search_value_invalid", (11, 12), {"format": "department"}),
         ("severity:loud", "search_value_invalid", (9, 13), {"format": "severity"}),
         ("severity:<emerg", "search_value_invalid", (9, 15), {}),
         ("severity:٣-4", "search_value_invalid", (9, 12), {}),
@@ -337,7 +348,7 @@ def _field_value(name: str) -> st.SearchStrategy[str]:
         "kind": ["web", "dhcp", "TRAFFIC"],
         "severity": ["err", "<=warning", "2-4", "7"],
         "error": ["fortigate.kv", "mikrotik.*"],
-        "policy": ["12", "Internet*"],
+        "policy": ["12", "Internet*", '"12"'],
         "vlan": ["41", "61"],
         "department": ["Finans", '"İdari İşler"', "3"],
         "freetext": ["youtube", '"login failure"'],

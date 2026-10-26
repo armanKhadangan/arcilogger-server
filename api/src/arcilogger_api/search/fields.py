@@ -221,6 +221,8 @@ class PatternValue:
     core: str
     starts: bool = False
     ends: bool = False
+    #: A ``policy:`` name: one of digits only is written quoted (bare digits are the number).
+    quote_digits: bool = field(default=False, compare=False)
 
     @property
     def exact(self) -> bool:
@@ -228,6 +230,8 @@ class PatternValue:
 
     def render(self) -> str:
         if self.exact:
+            if self.quote_digits and self.core.isascii() and self.core.isdigit():
+                return quote(self.core)
             return bare_or_quoted(self.core, literal_star=True)
         # A wildcard value was bare: it holds nothing that needs quotes and no other "*".
         return ("*" if self.ends else "") + self.core + ("*" if self.starts else "")
@@ -1061,6 +1065,9 @@ _MAC_PREFIX: Final = re.compile(r"^([0-9a-f]{2}(?:[:-][0-9a-f]{2}){0,4})[:-]\*$"
 _LABEL: Final = re.compile(r"^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$")
 _ERROR_NAME: Final = re.compile(r"^[a-z0-9._-]+$")
 _SEVERITY: Final = re.compile(r"^(>=|<=|>|<)?([a-z]+|[0-7])$")
+#: Forms without ``field:*``: ``type`` names kinds, not a column; ``vlan:*``/``department:*``
+#: would only test the client address a VLAN is looked up by, not that it lies in one.
+_NOT_PRESENT: Final = frozenset({"kind", "vlan", "department"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -1272,7 +1279,8 @@ def _policy(entry: Field, raw: RawValue) -> IntValue | PatternValue:
     text = raw.text.strip()
     if not raw.quoted and text.isascii() and text.isdigit():
         return _int(entry, raw)
-    return _pattern(entry, raw)
+    name = _pattern(entry, raw)
+    return PatternValue(name.core, starts=name.starts, ends=name.ends, quote_digits=True)
 
 
 def _vlan(entry: Field, raw: RawValue) -> VlanValue:
@@ -1300,7 +1308,9 @@ def parse_value(entry: Field, raw: RawValue) -> Value:
     """The value object of ``raw`` for ``entry``; :class:`SearchQueryError` when the field does
     not accept it (``search_value_invalid``, ``search_term_too_short``)."""
     form = entry.form
-    if raw.text == "*" and not raw.quoted and form not in ("freetext", "kind"):
+    if raw.text == "*" and not raw.quoted and form != "freetext":
+        if form in _NOT_PRESENT:
+            raise _invalid(entry, raw)
         return Present()
     if form == "ip":
         return _ip(entry, raw)

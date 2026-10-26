@@ -17,8 +17,10 @@ Clauses are ANDed; ``-`` or ``NOT`` negates one; a bare ``AND`` is ignored. Pare
 bare ``OR`` are refused (``search_or_unsupported``: OR is a comma inside one field). A word with
 ``:`` whose prefix is no field is refused (``search_unknown_field``), never taken as free text,
 with a hint when it looks like a MAC address (``mac:…``) or an address or URL (quote it).
-``field:*`` means the field has a value. Wildcards ``*`` are read in bare values only: a quoted
-value is literal. Time is not part of the query (``from``/``to`` travel beside it).
+``field:*`` means the field has a value (refused for ``type``, ``vlan`` and ``department``, which
+have no column of their own). Wildcards ``*`` are read in bare values only: a quoted value is
+literal (``policy:"12"`` is a policy name, ``policy:12`` the number). Time is not part of the
+query (``from``/``to`` travel beside it).
 
 :func:`parse_query` is hand-written, linear in the length of the text and bounded by
 :data:`LIMITS` (1,000 characters, 16 clauses, 20 values per clause, 5 free-text terms, 256
