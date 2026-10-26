@@ -496,6 +496,29 @@ def test_seal_now_and_credit_query_run_in_their_tasks(
     assert all(line.requested_by is not None for line in actions)
 
 
+@pytest.mark.parametrize(
+    ("kind", "task", "key", "value"),
+    [
+        ("action.tsa_test", "tsa_test", "verified", True),
+        ("action.replica_test", "replica_test", "ok", True),
+    ],
+)
+def test_the_tsa_and_replica_tests_run_in_the_requests_task(
+    installed: Installed, agent: FakeAgent, kind: Any, task: str, key: str, value: object
+) -> None:
+    request = installed.request(kind)
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "succeeded", status
+    assert status.result is not None
+    assert status.result.model_dump()[key] == value
+    assert agent.tasks is not None
+    assert [(t.kind, t.origin) for t in agent.tasks.taken] == [(task, request.id)]
+    assert list(installed.data.request_dir("tasks").glob("*.json")) == []  # taken and answered
+
+
 def test_a_failed_task_and_a_silent_task(installed: Installed) -> None:
     def failed(request: TaskRequest, now: datetime) -> TaskResult:
         return TaskResult(
