@@ -5,9 +5,9 @@ import { mockApi } from './mock-api';
 
 /**
  * Ayarlar → E-posta (contract 2.17): the SMTP server with its write-only password (never sent to
- * another server), the trial e-mail before enabling or moving it, the CA upload, "Test e-postası
- * gönder", and the `alerts.email_*` database settings on the same page. The API is
- * `mock-admin.ts`.
+ * another server), the trial e-mail before enabling or moving it, the CA upload (tried with the
+ * new trust, the password again), "Test e-postası gönder", and the `alerts.email_*` database
+ * settings on the same page. The API is `mock-admin.ts`.
  */
 
 const CA = [
@@ -182,17 +182,43 @@ test.describe('Ayarlar → E-posta', () => {
     await card.getByRole('button', { name: 'Dosyayı gönder' }).click();
     const preview = card.getByTestId('smtp-ca-preview');
     await expect(preview).toContainText('CN=Örnek İç CA (örnek)');
-    await preview.getByRole('button', { name: "Bu CA'yı kullan" }).click();
+    // The server is tried with the new trust first (a recipient), and with a user name the
+    // password comes again: the stored one never goes to a server trusted differently.
+    const use = preview.getByRole('button', { name: "Bu CA'yı kullan" });
+    await expect(use).toBeDisabled();
+    await preview.getByLabel('Deneme e-postasının alıcısı').click();
+    await page.getByRole('option', { name: 'tolga@ornek.com.tr' }).click();
+    await preview.getByLabel('Parola', { exact: true }).fill('ca-smtp-degeri'); // gitleaks:allow — fake test value
+    await use.click();
     await confirmReauth(page);
     await expect(card.getByTestId('request-state')).toHaveText('Uygulandı', { timeout: 10_000 });
     await expect(page.getByTestId('smtp-ca')).toContainText('Yüklenen CA kullanılıyor');
     expect(api.callsTo('POST', '/admin/uploads')[0]?.query.get('kind')).toBe('smtp_ca');
+    expect(api.callsTo('POST', '/admin/config/smtp/ca').at(-1)?.body).toEqual({
+      etag: expect.stringMatching(/^smtp:/) as unknown,
+      upload_id: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown,
+      test_to: 'tolga@ornek.com.tr',
+      password: 'ca-smtp-degeri', // gitleaks:allow — fake test value
+    });
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
 
     await card.getByRole('button', { name: 'Windows sertifika deposuna dön' }).click();
+    const clear = card.getByTestId('smtp-ca-clear');
+    await clear.getByLabel('Deneme e-postasının alıcısı').click();
+    await page.getByRole('option', { name: 'tolga@ornek.com.tr' }).click();
+    await clear.getByLabel('Parola', { exact: true }).fill('ca-smtp-degeri-2'); // gitleaks:allow — fake test value
+    await clear.getByRole('button', { name: 'Windows sertifika deposuna dön' }).click();
     await expect(page.getByTestId('smtp-ca')).toContainText('Windows sertifika deposu', {
       timeout: 10_000,
     });
-    expect(api.callsTo('DELETE', '/admin/config/smtp/ca')[0]?.query.get('etag')).toMatch(/^smtp:/);
+    const cleared = api.callsTo('DELETE', '/admin/config/smtp/ca')[0];
+    expect(cleared?.query.get('etag')).toMatch(/^smtp:/);
+    // The recipient and the password in the body: an address never goes into a URL (WP4-4).
+    expect(cleared?.body).toEqual({
+      test_to: 'tolga@ornek.com.tr',
+      password: 'ca-smtp-degeri-2', // gitleaks:allow — fake test value
+    });
+    expect([...(cleared?.query.keys() ?? [])]).toEqual(['etag']);
   });
 });
 

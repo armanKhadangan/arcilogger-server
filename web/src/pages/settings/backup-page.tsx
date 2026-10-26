@@ -42,6 +42,9 @@ const RANGES: Record<BackupField, [number, number]> = {
   min_free_gb: [0, 100_000],
 };
 const FIELDS: readonly BackupField[] = ['keep_daily', 'keep_weekly', 'keep_monthly', 'min_free_gb'];
+/** The paths the API may name for a field (422 `details`). */
+const PATHS = (name: BackupField) => [name, `backup.${name}`];
+const SHOWN = FIELDS.flatMap(PATHS);
 
 const EMPTY: BackupForm = {
   enabled: true,
@@ -115,7 +118,7 @@ function BackupState() {
 export function BackupPage() {
   const { t } = useTranslation();
   const id = useId();
-  const section = useMachineSection('backup');
+  const section = useMachineSection('backup', { fields: SHOWN });
   const { config, flow } = section;
   const backup = config.data?.sections.backup;
   const server = useMemo(() => toForm(backup), [backup]);
@@ -162,7 +165,7 @@ export function BackupPage() {
   const field = (name: BackupField) => ({
     id: `${id}-${name}`,
     value: values[name],
-    error: fieldMessage(t, flow.problems, errors[name], [name, `backup.${name}`], {
+    error: fieldMessage(t, flow.problems, errors[name], PATHS(name), {
       min: RANGES[name][0],
       max: RANGES[name][1],
     }),

@@ -17,12 +17,12 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { AgentStatusChip } from '@/components/admin/agent-status';
+import { AgentStatusChip, ConfigProblems } from '@/components/admin/agent-status';
 import { LicenseStateBadge } from '@/components/license/license-state-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { useAdminStatus, useLicense } from '@/lib/api-hooks';
+import { useAdminConfig, useAdminStatus, useLicense } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
 
@@ -138,6 +138,8 @@ export function SettingsPage() {
   const { can } = useAuth();
   const manage = can('settings.manage');
   const status = useAdminStatus(manage);
+  // The installation's setup problems (e.g. no local time source), every one of them here.
+  const config = useAdminConfig(manage);
   const sections = SECTIONS.filter((section) => section.permissions.every((item) => can(item)));
   return (
     <div>
@@ -146,6 +148,11 @@ export function SettingsPage() {
         description={t('settings.description')}
         actions={manage ? <AgentStatusChip status={status.data} /> : undefined}
       />
+      {manage ? (
+        <div className="mb-4 empty:hidden">
+          <ConfigProblems problems={config.data?.problems} />
+        </div>
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
         {can(LICENSE_ADMIN_PERMISSION) ? <LicenseCard /> : null}
         {can('users.manage') ? (

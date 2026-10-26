@@ -175,11 +175,12 @@ test.describe('Ayarlar → Kamu SM', () => {
     await upload(page, 'Zamane istemcisi dosyası', 'tss-client-console-3.1.4.zip', 'known-release');
     const preview = page.getByTestId('zamane-preview');
     await expect(preview).toContainText('ZIP dosyası: tss-client-console-3.1.4.jar');
-    await expect(preview).toContainText('Bilinen Kamu SM sürümü: tss-client-console 3.1.4.');
+    // `release` is the client's version (`zamane_releases.ZamaneRelease.version`).
+    await expect(preview).toContainText('Bilinen Kamu SM sürümü: 3.1.4.');
     await preview.getByRole('button', { name: 'Bu istemciyi kullan' }).click();
     await confirmReauth(page);
     await applied(page);
-    await expect(page.getByTestId('zamane-current')).toContainText('tss-client-console 3.1.4');
+    await expect(page.getByTestId('zamane-current')).toContainText('3.1.4');
     await expect(page.getByTestId('zamane-current')).toContainText('bilinen Kamu SM sürümü');
     const stage = api.callsTo('POST', '/admin/config/tsa/zamane');
     expect(stage.at(-1)?.body).toEqual({
@@ -328,7 +329,8 @@ test.describe('Ayarlar → Kamu SM', () => {
     await upload(page, 'Kök sertifika dosyası', 'kamusm-kok-v3.pem', PEM);
     const preview = page.getByTestId('root-preview');
     await expect(preview).toContainText('CN=Kamu SM Kök Sertifika Hizmet Sağlayıcısı - Sürüm 3');
-    await expect(preview).toContainText('RSA 4096');
+    // The captured inspection of a root (`samples/admin.json` `kamusm.upload_root`).
+    await expect(preview).toContainText('EC P-256');
     await preview.getByLabel('Yasal kök olarak da işaretle').click();
     const install = preview.getByRole('button', { name: 'Sertifikayı kur' });
     await expect(install).toBeDisabled();

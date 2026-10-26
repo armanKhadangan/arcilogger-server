@@ -80,6 +80,8 @@ const FIREWALL: Record<FirewallState, NonNullable<BadgeProps['tone']>> = {
 interface SourceChange {
   mode: 'add' | 'update';
   body: SourceBody;
+  /** Typed in the dialog, whose fields show the refusals (`false`: a row's enable switch). */
+  dialog: boolean;
 }
 
 interface Removal {
@@ -95,11 +97,15 @@ interface Editing {
   values: SourceForm;
 }
 
-const PATHS: Record<SourceField, string[]> = {
-  name: ['name', 'source.name'],
-  address: ['address', 'source.address'],
-  heartbeat: ['heartbeat_minutes', 'source.heartbeat_minutes'],
-};
+/** The configuration paths the API names for a field of the source `name` (422/409 `details`). */
+function sourcePaths(name: string): Record<SourceField, string[]> {
+  const source = `sources.${name.trim()}`;
+  return {
+    name: [`${source}.name`],
+    address: [`${source}.address`],
+    heartbeat: [`${source}.heartbeat_minutes`],
+  };
+}
 
 function SourceDialog({
   editing,
@@ -297,6 +303,11 @@ export function SourcesPage() {
           : updateAsync({ name: body.body.source.name, body: body.body }),
       [addAsync, updateAsync],
     ),
+    fields: useCallback(
+      (body: SourceChange) =>
+        body.dialog ? Object.values(sourcePaths(body.body.source.name)).flat() : [],
+      [],
+    ),
   });
   const removal = useSectionFlow<Removal>({
     check: null,
@@ -343,6 +354,7 @@ export function SourcesPage() {
     void change.start({
       mode: editing.mode,
       body: { etag, source: fromSourceForm(editing.values) },
+      dialog: true,
     });
   }
 
@@ -354,14 +366,21 @@ export function SourcesPage() {
     void change.start({
       mode: 'update',
       body: { etag, source: { ...sourceConfig(source), enabled } },
+      dialog: false,
     });
   }
 
   const message = (field: SourceField) =>
-    fieldMessage(t, change.problems, errors[field], PATHS[field], {
-      min: HEARTBEAT_MIN,
-      max: HEARTBEAT_MAX,
-    });
+    fieldMessage(
+      t,
+      change.problems,
+      errors[field],
+      sourcePaths(editing?.values.name ?? '')[field],
+      {
+        min: HEARTBEAT_MIN,
+        max: HEARTBEAT_MAX,
+      },
+    );
   // The dialog stays open while the change is checked and comes back after a refusal.
   const dialogOpen =
     editing !== null &&

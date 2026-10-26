@@ -851,6 +851,8 @@
         "clear": "Back to the Windows certificate store",
         "upload": "CA file",
         "uploadHint": "PEM, 1–10 certificates, at most 256 KiB.",
+        "testToHint": "The connection is tried with the CA first: the trial e-mail goes to this address.",
+        "passwordHint": "While a user name is set, the stored password is not sent to a server trusted differently; enter the password again.",
         "use": "Use this CA"
       },
       "test": {
@@ -891,6 +893,7 @@
         "description": "Connects to the saved share and writes and removes a test file (at most once a minute).",
         "button": "Test the connection",
         "ok": "Connection succeeded",
+        "okText": "The replica target was reached; a test file was written, read back and removed.",
         "failed": "Connection failed"
       },
       "errors": {
@@ -1569,7 +1572,6 @@
     },
     "sealNow": {
       "button": "Seal now",
-      "explanation": "Seal now is not available from the web interface in this version: the web service may not write to the vault. Sealing runs as the scheduled task \\ARCILOGGER\\Seal every 5 minutes from 00:10 and retries failed attempts by itself. To seal at once, run that task in Task Scheduler on the server.",
       "hint": "The sealing task tries this day once without waiting for its retry time; the wait after midnight, the empty-day rule and the order of days still apply.",
       "blocked": {
         "sealed": "This day is already sealed.",
@@ -3113,6 +3115,9 @@
     "restart": {
       "title": "A change waits for a restart",
       "body": "arcilogger.toml was changed by hand on the server; that change takes effect only when the service concerned is restarted."
+    },
+    "problems": {
+      "title": "Problems of the installation"
     },
     "progress": {
       "sending": "Sending…",

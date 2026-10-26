@@ -48,6 +48,18 @@ import type {
   VlanOut,
 } from '../src/lib/api-types';
 import type { SealDayDetail } from '../src/lib/seal-types';
+import type {
+  AdminAccepted,
+  AdminCheck,
+  AdminConfig,
+  AdminRequestOut,
+  AdminRequestPage,
+  AdminStatus,
+  ConfigVersion,
+  SettingsOut,
+  SettingsPatchResult,
+  UploadPreview,
+} from '../src/lib/settings-types';
 import type { LicenseSamples } from '../src/test/license-samples';
 
 function load(name: string): unknown {
@@ -126,6 +138,10 @@ export const SEALS = load('seals') as {
   verify_quick: VerifyResult;
   manifest_file: FileSample & { text: string };
   token_file: FileSample & { base64: string };
+  /** "Şimdi mühürle": the 202 answer and the request queued and done. */
+  seal_now: AdminAccepted;
+  seal_now_queued: AdminRequestOut;
+  seal_now_done: AdminRequestOut;
   errors: Record<string, ErrorSample>;
 };
 
@@ -133,6 +149,102 @@ export const CREDITS = load('credits') as {
   mock: Credits;
   kamusm: Credits;
   kamusm_low: Credits;
+  /** "Kontör sorgula": the 202 answer, the request done, the second query within a minute. */
+  query: AdminAccepted;
+  query_done: AdminRequestOut;
+  query_limited: ErrorSample;
+};
+
+/**
+ * Browser administration (contract 2.11, captured with the real administration agent and its
+ * tasks on a throwaway installation, `FakeAgent(system=True)`): the configuration as installed,
+ * after the Kamu SM steps and after the other sections were changed, the status in each state of
+ * the agent, every answer of a change and the history.
+ */
+export const ADMIN = load('admin') as {
+  meta: SampleMeta;
+  config: AdminConfig;
+  status: AdminStatus;
+  status_after: AdminStatus;
+  status_agent_missing: AdminStatus;
+  status_disabled: AdminStatus;
+  check_general: AdminCheck;
+  check_clock: AdminCheck;
+  accepted: AdminAccepted;
+  request_queued: AdminRequestOut;
+  request_active: AdminRequestOut;
+  requests: AdminRequestPage;
+  kamusm: {
+    config: AdminConfig;
+    check_credentials: AdminCheck;
+    credentials_accepted: AdminAccepted;
+    credentials_active: AdminRequestOut;
+    upload_root: UploadPreview;
+    root_accepted: AdminAccepted;
+    root_active: AdminRequestOut;
+    upload_zamane: UploadPreview;
+    zamane_accepted: AdminAccepted;
+    zamane_pending: AdminRequestOut;
+    tsa_test_accepted: AdminAccepted;
+    tsa_test_done: AdminRequestOut;
+  };
+  sources: {
+    check_add: AdminCheck;
+    check_update: AdminCheck;
+    add_accepted: AdminAccepted;
+    add_applied: AdminRequestOut;
+    add_active: AdminRequestOut;
+    remove_accepted: AdminAccepted;
+    remove_active: AdminRequestOut;
+  };
+  sections: {
+    config: AdminConfig;
+    check_smtp: AdminCheck;
+    smtp_accepted: AdminAccepted;
+    smtp_done: AdminRequestOut;
+    upload_smtp_ca: UploadPreview;
+    smtp_ca_accepted: AdminAccepted;
+    smtp_ca_done: AdminRequestOut;
+    test_email_accepted: AdminAccepted;
+    test_email_done: AdminRequestOut;
+    check_replica: AdminCheck;
+    replica_accepted: AdminAccepted;
+    replica_done: AdminRequestOut;
+    replica_test_accepted: AdminAccepted;
+    replica_test_done: AdminRequestOut;
+    check_retention: AdminCheck;
+    retention_accepted: AdminAccepted;
+    retention_done: AdminRequestOut;
+    check_backup: AdminCheck;
+    backup_accepted: AdminAccepted;
+    backup_done: AdminRequestOut;
+    lease_rebuild_accepted: AdminAccepted;
+    lease_rebuild_done: AdminRequestOut;
+  };
+  history: {
+    held_accepted: AdminAccepted;
+    held_pending: AdminRequestOut;
+    cancel_held_accepted: AdminAccepted;
+    cancel_held_done: AdminRequestOut;
+    held_cancelled: AdminRequestOut;
+    cancel_queued: AdminAccepted;
+    cancelled_queued: AdminRequestOut;
+    revert_accepted: AdminAccepted;
+    revert_done: AdminRequestOut;
+    requests: AdminRequestPage;
+    versions: ConfigVersion[];
+  };
+  errors: Record<string, ErrorSample>;
+};
+
+/** The database settings (contract 2.13): every group, a change, a reset and the refusals. */
+export const SETTINGS = load('settings') as {
+  meta: SampleMeta;
+  list: SettingsOut;
+  list_changed: SettingsOut;
+  patch: SettingsPatchResult;
+  reset: SettingsPatchResult;
+  errors: Record<string, ErrorSample>;
 };
 
 /** A CSV file the API sent (export, template): headers and the text as received. */

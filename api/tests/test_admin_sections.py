@@ -142,6 +142,41 @@ def test_the_smtp_ca_file_is_trusted_and_cleared(
     assert error(again) == (422, "config_unchanged")
 
 
+def test_a_new_smtp_ca_file_needs_the_password_again(
+    client: TestClient, admin: LoggedIn, agent: FakeAgent, ca_pem: Pem
+) -> None:
+    """With a user name the CA file is part of the server's identity: the stored password is
+    never sent to a server trusted differently, so the CA change takes the password again."""
+    body = {"etag": etag(client, "smtp"), **SMTP, "password": "Örnek-Posta-Parola-3"}
+    assert settle(client, agent, client.put(f"{CONFIG}/smtp", json=body))["state"] == "active"
+    staged = client.post(
+        f"{V}/admin/uploads",
+        params={"kind": "smtp_ca"},
+        files={"file": ("posta-ca.pem", ca_pem("Örnek Posta Kökü"), "application/x-pem-file")},
+    )
+    ca = {"etag": etag(client, "smtp"), "upload_id": staged.json()["upload_id"], "test_to": OWN}
+    refused = client.post(f"{CONFIG}/smtp/ca", json=ca)
+    assert error(refused) == (422, "secret_rebind_required")
+    assert fields(refused) == [("smtp.password", "secret_rebind_required")]
+
+    response = client.post(f"{CONFIG}/smtp/ca", json={**ca, "password": "Örnek-Posta-Parola-4"})
+    assert "Örnek-Posta-Parola-4" not in response.text
+    done = settle(client, agent, response)
+    assert done["state"] == "active", done
+    assert done["changes"]["smtp.password"]["new"] == "set"
+    assert agent.prober.calls[-1].secrets == {"smtp.password": "Örnek-Posta-Parola-4"}
+
+    params = {"etag": etag(client, "smtp")}
+    again = client.request("DELETE", f"{CONFIG}/smtp/ca", params=params, json={"test_to": OWN})
+    assert error(again) == (422, "secret_rebind_required")
+    clear = {"test_to": OWN, "password": "Örnek-Posta-Parola-5"}
+    cleared = settle(
+        client, agent, client.request("DELETE", f"{CONFIG}/smtp/ca", params=params, json=clear)
+    )
+    assert cleared["state"] == "active", cleared
+    assert agent.prober.calls[-1].secrets == {"smtp.password": "Örnek-Posta-Parola-5"}
+
+
 def test_the_replica_share_is_probed_and_a_switch_off_is_held(
     client: TestClient, admin: LoggedIn, installed: Installed, agent: FakeAgent
 ) -> None:

@@ -22,7 +22,7 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { editable, localized } from '@/lib/admin-requests';
+import { editable } from '@/lib/admin-requests';
 import { errorMessage, isApiError } from '@/lib/api';
 import { useReplicaTest } from '@/lib/api-hooks';
 import type {
@@ -49,6 +49,7 @@ const PATHS: Record<ReplicaField, string[]> = {
   user: ['user', 'replica.user'],
   password: ['password', 'replica.password'],
 };
+const SHOWN = Object.values(PATHS).flat();
 
 function toForm(replica: ReplicaSection | undefined): ReplicaForm | undefined {
   if (!replica) return undefined;
@@ -88,16 +89,14 @@ function validate(
   return errors;
 }
 
+/**
+ * The task's `{ok, message}`: `message` is a technical detail (the texts of a failure are the
+ * request's own, from its code), shown only when the test failed.
+ */
 function TestOutcome({ request }: { request: AdminRequestOut }) {
   const { t } = useTranslation();
-  const result = request.result as
-    (ReplicaTestResult & Partial<Record<'message_tr' | 'message_en', string>>) | null;
+  const result = request.result as ReplicaTestResult | null;
   if (!result) return null;
-  // Contract 2.9 names `{ok, message_tr, message_en}`, 2.4.9 `{ok, message}`: either is shown.
-  const text =
-    result.message_tr !== undefined && result.message_en !== undefined
-      ? localized({ message_tr: result.message_tr, message_en: result.message_en })
-      : result.message;
   return (
     <Alert
       tone={result.ok ? 'success' : 'danger'}
@@ -105,7 +104,11 @@ function TestOutcome({ request }: { request: AdminRequestOut }) {
       title={result.ok ? t('settings.replica.test.ok') : t('settings.replica.test.failed')}
       data-testid="replica-test-result"
     >
-      {text}
+      {result.ok ? (
+        t('settings.replica.test.okText')
+      ) : (
+        <span className="font-mono text-xs break-all">{result.message}</span>
+      )}
     </Alert>
   );
 }
@@ -167,7 +170,7 @@ function ReplicaTest({ writable }: { writable: boolean }) {
 export function ReplicaPage() {
   const { t } = useTranslation();
   const id = useId();
-  const section = useMachineSection('replica');
+  const section = useMachineSection('replica', { fields: SHOWN });
   const { config, flow } = section;
   const replica = config.data?.sections.replica;
   const server = useMemo(() => toForm(replica), [replica]);

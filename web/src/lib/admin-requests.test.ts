@@ -1,8 +1,11 @@
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
+import { ADMIN } from '@/test/samples';
+
 import {
   cancellable,
+  changeRows,
   changeValueText,
   editable,
   errorList,
@@ -84,31 +87,9 @@ const KINDS: RequestKind[] = [
   'worker.lease_rebuild',
 ];
 
+/** The captured site name change, applied (`ADMIN.request_active`), with `overrides`. */
 function request(overrides: Partial<AdminRequestOut> = {}): AdminRequestOut {
-  return {
-    id: '6f1c1a2b3c4d5e6f708192a3b4c5d6e7',
-    short_id: '6f1c1a2b',
-    kind: 'config.apply',
-    section: 'general',
-    state: 'active',
-    terminal: true,
-    label_tr: 'Uygulandı',
-    label_en: 'Applied',
-    requested_by: 'tolga',
-    created_at: '2026-10-13T12:00:00Z',
-    updated_at: '2026-10-13T12:00:05Z',
-    effective_at: null,
-    version: { number: 17, from: 'a'.repeat(64), to: 'b'.repeat(64) },
-    steps: [],
-    changes: {},
-    result: null,
-    error: null,
-    rolled_back: false,
-    warnings: [],
-    manual_steps_tr: null,
-    manual_steps_en: null,
-    ...overrides,
-  };
+  return { ...structuredClone(ADMIN.request_active), steps: [], ...overrides };
 }
 
 function lookup(tree: unknown, path: string): unknown {
@@ -354,8 +335,37 @@ describe("the API's answers", () => {
     expect(revertible(request({ state: 'failed' }))).toBe(false);
     expect(revertible(request({ kind: 'action.seal' }))).toBe(false);
     expect(cancellable(request({ state: 'queued' }))).toBe(true);
+    expect(cancellable(request({ state: 'waiting_for_agent' }))).toBe(true);
     expect(cancellable(request({ state: 'pending' }))).toBe(true);
     expect(cancellable(request({ state: 'applying' }))).toBe(false);
+    expect(cancellable(request({ state: 'received' }))).toBe(false);
+    // A cancellation itself is not cancelled.
+    expect(cancellable(request({ kind: 'config.cancel', state: 'queued' }))).toBe(false);
+  });
+
+  it("lists a source's changed fields one by one (the API sends its whole table)", () => {
+    // The captured dry run of a heartbeat change, an addition and a removal.
+    expect(changeRows(ADMIN.sources.check_update.changes)).toEqual([
+      ['sources.erisim-noktalari.heartbeat_minutes', { old: 60, new: 30 }],
+    ]);
+    const added = changeRows(ADMIN.sources.check_add.changes);
+    expect(added.map(([path]) => path)).toEqual([
+      'sources.erisim-noktalari.address',
+      'sources.erisim-noktalari.enabled',
+      'sources.erisim-noktalari.expected',
+      'sources.erisim-noktalari.heartbeat_minutes',
+      'sources.erisim-noktalari.transport',
+      'sources.erisim-noktalari.type',
+    ]);
+    expect(added[0]?.[1]).toEqual({ old: null, new: '172.20.20.0/24' });
+    expect(changeRows(ADMIN.sources.remove_accepted.changes)[0]?.[1]).toEqual({
+      old: '172.20.20.0/24',
+      new: null,
+    });
+    // Every other change stays as it is.
+    expect(changeRows(ADMIN.check_general.changes)).toEqual(
+      Object.entries(ADMIN.check_general.changes),
+    );
   });
 
   it('writes values of a change list as text', () => {

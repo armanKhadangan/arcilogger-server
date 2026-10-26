@@ -77,6 +77,7 @@ const PATHS: Record<SmtpField, string[]> = {
   timeout: ['timeout_seconds', 'smtp.timeout_seconds'],
   test_to: ['test_to'],
 };
+const SHOWN = Object.values(PATHS).flat();
 const BOUNDS: Partial<Record<SmtpField, Record<string, number>>> = {
   port: { min: 1, max: 65_535 },
   timeout: { min: 1, max: 300 },
@@ -150,7 +151,7 @@ export function EmailPage() {
   const { t } = useTranslation();
   const id = useId();
   const { can, me } = useAuth();
-  const section = useMachineSection('smtp');
+  const section = useMachineSection('smtp', { fields: SHOWN });
   const { config, flow } = section;
   const smtp = config.data?.sections.smtp;
   const server = useMemo(() => toForm(smtp), [smtp]);
@@ -399,7 +400,12 @@ export function EmailPage() {
             }}
             probingText={t('settings.email.probing')}
           />
-          <SmtpCaCard smtp={smtp} etag={section.etag} writable={section.writable} />
+          <SmtpCaCard
+            smtp={smtp}
+            etag={section.etag}
+            writable={section.writable}
+            recipients={recipients}
+          />
           {/* The worker sends it (contract 2.9), so it works while ArciAdmin is not running. */}
           <TestEmailCard
             recipients={recipients}

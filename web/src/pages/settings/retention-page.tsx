@@ -35,6 +35,8 @@ interface RetentionForm {
 }
 
 const EMPTY: RetentionForm = { enabled: false, days: '730' };
+/** The paths the API may name for the days (422 `details`). */
+const DAYS_PATHS = ['days', 'retention.days'];
 
 function toForm(retention: RetentionSection | undefined): RetentionForm | undefined {
   if (!retention) return undefined;
@@ -77,7 +79,7 @@ export function PreviewText({ preview }: { preview: RetentionPreview }) {
 export function RetentionPage() {
   const { t } = useTranslation();
   const id = useId();
-  const section = useMachineSection('retention');
+  const section = useMachineSection('retention', { fields: DAYS_PATHS });
   const { config, flow } = section;
   const retention = config.data?.sections.retention;
   const server = useMemo(() => toForm(retention), [retention]);
@@ -161,7 +163,7 @@ export function RetentionPage() {
               label={t('settings.retention.days')}
               hint={t('settings.retention.daysHint', { min: minimum })}
               value={values.days}
-              error={fieldMessage(t, flow.problems, errors.days, ['days', 'retention.days'], {
+              error={fieldMessage(t, flow.problems, errors.days, DAYS_PATHS, {
                 min: minimum,
                 max: MAX_DAYS,
               })}

@@ -66,6 +66,7 @@ const PATHS: Record<TsaField, string[]> = {
   customer: ['customer', 'kamusm.customer'],
   password: ['password', 'kamusm.password'],
 };
+const SHOWN = Object.values(PATHS).flat();
 const BOUNDS: Record<TsaField, Record<string, number>> = {
   java: {},
   threshold: { min: 0, max: 1_000_000 },
@@ -132,7 +133,7 @@ export function KamusmPage() {
   const id = useId();
   const { can } = useAuth();
   const [params] = useSearchParams();
-  const section = useMachineSection('tsa');
+  const section = useMachineSection('tsa', { fields: SHOWN });
   const { config, flow } = section;
   const tsa = config.data?.sections.tsa;
   const server = useMemo(() => tsaForm(tsa), [tsa]);

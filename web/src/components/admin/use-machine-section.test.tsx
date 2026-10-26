@@ -5,16 +5,10 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { AuthProvider } from '@/lib/auth';
 import { ReauthProvider } from '@/lib/reauth';
-import type {
-  AdminAccepted,
-  AdminCheck,
-  AdminConfig,
-  AdminRequestOut,
-  AdminStatus,
-  SmtpBody,
-} from '@/lib/settings-types';
+import type { SmtpBody } from '@/lib/settings-types';
 import { errorResponse, installFetch, jsonResponse, makeMe, setCsrfCookie } from '@/test/api-mock';
 import { testQueryClient } from '@/test/render';
+import { ADMIN } from '@/test/samples';
 
 import { useMachineSection } from './use-machine-section';
 
@@ -27,47 +21,19 @@ import { useMachineSection } from './use-machine-section';
 const PASSWORD = 'yeni-smtp-degeri'; // gitleaks:allow — fake test value
 const ID = '6f1c1a2b'.repeat(4);
 
-const CONFIG = {
-  etags: { smtp: 'smtp:1' },
-  sections: {},
-  locked: [],
-  pending: [],
-} as unknown as AdminConfig;
-const STATUS = { agent: { state: 'ok' }, restart_required: false } as unknown as AdminStatus;
-const CHECK: AdminCheck = {
-  changes: { 'smtp.password': { secret: true, old: 'set', new: 'set', changed: true } },
-  effects: ['reload.worker'],
-  warnings: [],
-  guarded: false,
-  effective_at: null,
-  reauth_required: true,
-};
+// The captured configuration, status and SMTP change (`samples/admin.json`).
+const CONFIG = ADMIN.config;
+const STATUS = ADMIN.status;
+const CHECK = ADMIN.sections.check_smtp;
 const ACCEPTED = {
+  ...ADMIN.sections.smtp_accepted,
   request_id: ID,
   short_id: ID.slice(0, 8),
-  state: 'queued',
   status_url: `/api/v1/admin/requests/${ID}`,
-  guarded: false,
-  effective_at: null,
-  changes: CHECK.changes,
-  effects: CHECK.effects,
-  warnings: [],
-} as AdminAccepted;
-const ACTIVE = {
-  id: ID,
-  short_id: ID.slice(0, 8),
-  kind: 'config.apply',
-  section: 'smtp',
-  state: 'active',
-  terminal: true,
-  label_tr: 'Uygulandı',
-  label_en: 'Applied',
-  steps: [],
-  changes: CHECK.changes,
-  warnings: [],
-} as unknown as AdminRequestOut;
+};
+const ACTIVE = { ...ADMIN.sections.smtp_done, id: ID, short_id: ID.slice(0, 8) };
 const BODY: SmtpBody = {
-  etag: 'smtp:1',
+  etag: CONFIG.etags.smtp ?? '',
   enabled: true,
   host: 'smtp.ornek.example',
   port: 587,
@@ -129,7 +95,7 @@ describe('useMachineSection', () => {
       wrapper: wrapperFor(client),
     });
     await waitFor(() => {
-      expect(result.current.etag).toBe('smtp:1');
+      expect(result.current.etag).toBe(CONFIG.etags.smtp);
     });
 
     await act(async () => {

@@ -851,6 +851,8 @@
         "clear": "Windows sertifika deposuna dön",
         "upload": "CA dosyası",
         "uploadHint": "PEM, 1–10 sertifika, en çok 256 KiB.",
+        "testToHint": "CA ile bağlantı önce denenir: deneme e-postası bu adrese gider.",
+        "passwordHint": "Kullanıcı adı ayarlıyken kayıtlı parola farklı güvenilen bir sunucuya gönderilmez; parolayı yeniden girin.",
         "use": "Bu CA'yı kullan"
       },
       "test": {
@@ -891,6 +893,7 @@
         "description": "Kayıtlı paylaşıma bağlanılır, bir deneme dosyası yazılıp silinir (dakikada en çok 1).",
         "button": "Bağlantıyı test et",
         "ok": "Bağlantı başarılı",
+        "okText": "Replika hedefine bağlanıldı; deneme dosyası yazılıp okundu ve silindi.",
         "failed": "Bağlantı başarısız"
       },
       "errors": {
@@ -1569,7 +1572,6 @@
     },
     "sealNow": {
       "button": "Şimdi mühürle",
-      "explanation": "Şimdi mühürle bu sürümde web arayüzünden yapılamaz: web hizmetinin kasaya yazma izni yoktur. Mühürleme, zamanlanmış \\ARCILOGGER\\Seal görevi ile her gece 00:10'dan itibaren 5 dakikada bir çalışır ve başarısız denemeleri kendiliğinden tekrarlar. Hemen mühürlemek için sunucuda Görev Zamanlayıcı'dan bu görevi çalıştırın.",
       "hint": "Mühürleme görevi bu günü yeniden deneme zamanını beklemeden bir kez dener; gece yarısından sonraki bekleme, boş gün kuralı ve gün sırası aynen geçerlidir.",
       "blocked": {
         "sealed": "Bu gün zaten mühürlü.",
@@ -3113,6 +3115,9 @@
     "restart": {
       "title": "Yeniden başlatma bekleyen değişiklik",
       "body": "arcilogger.toml sunucuda elle değiştirilmiş; bu değişiklik ancak ilgili hizmet yeniden başlatılınca etkinleşir."
+    },
+    "problems": {
+      "title": "Kurulumdaki sorunlar"
     },
     "progress": {
       "sending": "Gönderiliyor…",

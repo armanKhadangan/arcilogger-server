@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next';
 
 import { Alert } from '@/components/ui/alert';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { localized } from '@/lib/admin-requests';
 import { formatDateTime } from '@/lib/format';
-import type { AdminStatus, AgentState } from '@/lib/settings-types';
+import type { AdminStatus, AgentState, SetupProblem } from '@/lib/settings-types';
 
 const CHIP: Record<AgentState, { tone: NonNullable<BadgeProps['tone']>; icon: LucideIcon }> = {
   ok: { tone: 'success', icon: CircleCheck },
@@ -86,6 +87,39 @@ export function RestartBanner({ status }: { status: AdminStatus | undefined }) {
     >
       <p>{t('admin.restart.body')}</p>
       {keys.length > 0 ? <p className="mt-1 font-mono text-xs">{keys.join(', ')}</p> : null}
+    </Alert>
+  );
+}
+
+/**
+ * The problems of the configuration in force (`AdminConfig.problems`, `setup_problems`; an
+ * `arcilogger.toml` that does not load is an error and nothing can be saved until it is fixed).
+ */
+export function ConfigProblems({
+  problems,
+  levels = ['error', 'warning'],
+}: {
+  problems: readonly SetupProblem[] | undefined;
+  levels?: readonly SetupProblem['level'][];
+}) {
+  const { t } = useTranslation();
+  const shown = (problems ?? []).filter((item) => levels.includes(item.level));
+  if (shown.length === 0) return null;
+  const error = shown.some((item) => item.level === 'error');
+  return (
+    <Alert
+      tone={error ? 'danger' : 'warning'}
+      assertive={false}
+      title={t('admin.problems.title')}
+      data-testid="config-problems"
+    >
+      <ul className="flex flex-col gap-1">
+        {shown.map((item) => (
+          <li key={`${item.key}:${item.message_en}`}>
+            <span className="font-mono text-xs">{item.key}</span> — {localized(item)}
+          </li>
+        ))}
+      </ul>
     </Alert>
   );
 }

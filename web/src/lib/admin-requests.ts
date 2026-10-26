@@ -266,6 +266,32 @@ export function isSecretChange(change: Change): change is SecretChange {
   return 'secret' in change && change.secret;
 }
 
+function isTable(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A change list as the review shows it: a source is changed as its whole `[[sources]]` table
+ * (`sources.<name>: {old, new}`, `null` for an addition or a removal); its fields are listed one
+ * by one (`sources.<name>.<field>`), only those that change, the name not at all.
+ */
+export function changeRows(changes: Record<string, Change>): [string, Change][] {
+  return Object.entries(changes).flatMap(([path, change]): [string, Change][] => {
+    if (!/^sources\.[^.]+$/.test(path) || isSecretChange(change)) return [[path, change]];
+    const old = isTable(change.old) ? change.old : null;
+    const next = isTable(change.new) ? change.new : null;
+    if (!old && !next) return [[path, change]];
+    const fields = [...new Set([...Object.keys(old ?? {}), ...Object.keys(next ?? {})])];
+    return fields
+      .filter((field) => field !== 'name')
+      .filter((field) => JSON.stringify(old?.[field]) !== JSON.stringify(next?.[field]))
+      .map((field) => [
+        `${path}.${field}`,
+        { old: old?.[field] ?? null, new: next?.[field] ?? null },
+      ]);
+  });
+}
+
 /** A value of a change list as text (lists joined, `null`/empty as a dash). */
 export function changeValueText(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
@@ -313,7 +339,12 @@ export function revertible(request: AdminRequestOut): boolean {
   );
 }
 
-/** Whether "İptal et" is offered: a request that has not started (queued or held). */
+/**
+ * Whether "İptal et" is offered: a request the administration service has not taken (queued, or
+ * still waiting for it; the API removes the file at once) or a held change (a signed
+ * `config.cancel`). A worker request can be cancelled while it is queued.
+ */
 export function cancellable(request: AdminRequestOut): boolean {
-  return request.state === 'queued' || request.state === 'pending';
+  if (request.kind === 'config.cancel') return false;
+  return ['queued', 'waiting_for_agent', 'pending'].includes(request.state);
 }

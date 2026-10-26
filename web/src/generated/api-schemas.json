@@ -9426,6 +9426,17 @@
           "title": "Etag",
           "type": "string"
         },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Password"
+        },
         "probe": {
           "default": true,
           "title": "Probe",
@@ -9456,8 +9467,19 @@
     },
     "SmtpCaClear": {
       "additionalProperties": false,
-      "description": "The optional body of ``DELETE /admin/config/smtp/ca``: the probe's recipient (an address\nnever goes into a URL, which the service log records).",
+      "description": "The optional body of ``DELETE /admin/config/smtp/ca``: the probe's recipient (an address\nnever goes into a URL, which the service log records) and, with a user name, the password.",
       "properties": {
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Password"
+        },
         "probe": {
           "default": true,
           "title": "Probe",

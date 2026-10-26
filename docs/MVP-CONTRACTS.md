@@ -1065,8 +1065,8 @@ row's state stands. Texts: `admin_channel.texts(code)` (the API's `TEXTS`, then
 | `POST /admin/config/tsa/legal-roots` | `settings.manage`; re-auth | `{etag, sha256, confirmed}` → 202 (an installed root made a legal root) |
 | `POST /admin/config/tsa/zamane` | `settings.manage`; re-auth | `{etag, upload_id, expected_sha256?}` → 202, held (`guarded`, `effective_at` = now + `policy.jar_hold_hours`) unless a known release; 422 `zamane_sha256_required` / `zamane_sha256_mismatch` for another one |
 | `POST /admin/config/smtp/check`, `PUT /admin/config/smtp` | `settings.manage`; re-auth | `{etag, enabled?, host?, port?, security?: starttls \| ssl \| none, username?, from_address?, timeout_seconds?, password?, clear_password?, test_to?, probe = true}` (a text field sent as null or empty is removed) → 200 `AdminCheck` / 202 |
-| `POST /admin/config/smtp/ca` | `settings.manage`; re-auth | `{etag, upload_id, test_to?, probe = true}` → 202 (`smtp.ca_file`) |
-| `DELETE /admin/config/smtp/ca?etag=` | `settings.manage`; re-auth | optional body `{test_to?, probe = true}` → 202 (back to the system's trust store) |
+| `POST /admin/config/smtp/ca` | `settings.manage`; re-auth | `{etag, upload_id, test_to?, password?, probe = true}` → 202 (`smtp.ca_file`; with a user name the password again, else 422 `secret_rebind_required`) |
+| `DELETE /admin/config/smtp/ca?etag=` | `settings.manage`; re-auth | optional body `{test_to?, password?, probe = true}` → 202 (back to the system's trust store) |
 | `POST /admin/config/replica/check`, `PUT /admin/config/replica` | `settings.manage`; re-auth | `{etag, enabled?, target?, user?, password?, clear_password?, probe = true}` → 200 / 202 (switching it off or moving it is held for `policy.hold_hours`) |
 | `POST /admin/config/retention/check`, `PUT /admin/config/retention` | `settings.manage`; re-auth | `{etag, enabled?, days?, confirm_delete_days?}` → 200 `AdminCheck` with `retention_preview` / 202 |
 | `POST /admin/config/backup/check`, `PUT /admin/config/backup` | `settings.manage`; re-auth | `{etag, enabled?, keep_daily?, keep_weekly?, keep_monthly?, min_free_gb?}` → 200 / 202 |

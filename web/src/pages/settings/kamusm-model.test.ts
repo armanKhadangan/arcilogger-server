@@ -49,8 +49,8 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
       },
     ],
     secrets: {
-      'kamusm.customer': { set: true, changed_at: null },
-      'kamusm.password': { set: true, changed_at: null },
+      'kamusm.customer': { set: true, changed_at: null, changed_by: null },
+      'kamusm.password': { set: true, changed_at: null, changed_by: null },
     },
     readiness: { production: true, missing: [] },
     seal_ready: { ok: true, causes: [] },
@@ -120,8 +120,8 @@ describe('the Kamu SM wizard (contract 2.17)', () => {
       zamane: { present: false, sha256: null, release: null, trusted: false, staged: [] },
       roots: [],
       secrets: {
-        'kamusm.customer': { set: false, changed_at: null },
-        'kamusm.password': { set: true, changed_at: null },
+        'kamusm.customer': { set: false, changed_at: null, changed_by: null },
+        'kamusm.password': { set: true, changed_at: null, changed_by: null },
       },
       readiness: { production: false, missing: ['credentials', 'zamane_jar', 'java', 'roots'] },
     });

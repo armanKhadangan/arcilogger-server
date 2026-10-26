@@ -1273,19 +1273,28 @@ class SmtpCaBody(Body):
     upload_id: str
     #: The server is tried with the new trust first: its test e-mail goes here.
     test_to: str | None = None
+    #: The CA file is part of the server's identity: with a user name the password comes again
+    #: (``secret_rebind_required`` otherwise; write-only, a Fernet token to the agent).
+    password: str | None = None
     probe: bool = True
 
     def form(self) -> dict[str, Any]:
-        return {"ca": {"upload_id": self.upload_id}, "test_to": self.test_to, "probe": self.probe}
+        return {
+            "ca": {"upload_id": self.upload_id},
+            "test_to": self.test_to,
+            "password": self.password,
+            "probe": self.probe,
+        }
 
 
 class SmtpCaClear(BaseModel):
     """The optional body of ``DELETE /admin/config/smtp/ca``: the probe's recipient (an address
-    never goes into a URL, which the service log records)."""
+    never goes into a URL, which the service log records) and, with a user name, the password."""
 
     model_config = ConfigDict(extra="forbid")
 
     test_to: str | None = None
+    password: str | None = None
     probe: bool = True
 
 
@@ -1330,7 +1339,12 @@ def clear_smtp_ca(
     """Back to the system's trust store for the e-mail server (re-authentication)."""
     channel.require_enabled()
     options = body or SmtpCaClear()
-    form = {"clear_ca": True, "test_to": options.test_to, "probe": options.probe}
+    form = {
+        "clear_ca": True,
+        "test_to": options.test_to,
+        "password": options.password,
+        "probe": options.probe,
+    }
     check = checked(channel, db, user, "smtp", Body(etag=etag), encrypt=True, form=form)
     return queue(channel, db, user, request, "smtp", check, probe=options.probe)
 

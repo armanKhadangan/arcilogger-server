@@ -5,8 +5,9 @@ import { CSRF_TOKEN, mockApi } from './mock-api';
 
 /**
  * Ayarlar → Uygulama ayarları (contract 2.13, 2.17): the database settings by group with the
- * server's labels, every kind of editor (number, switch, list, the work hours and the holidays),
- * the browser's and the server's checks, re-authentication, the conflict and "Varsayılana dön".
+ * server's labels (the captured `GET /settings`, `samples/settings.json`), every kind of editor
+ * (number, switch, list, the work hours and the holidays), the browser's and the server's
+ * checks, re-authentication, the conflict and "Varsayılana dön".
  */
 
 function group(page: Page, id: string) {
@@ -43,7 +44,7 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
       'Parola onayı gerekir',
     );
     await expect(
-      alerts.getByRole('switch', { name: 'Çözülen uyarılar için de e-posta' }),
+      alerts.getByRole('switch', { name: 'Çözülen uyarıları da bildir' }),
     ).toHaveAttribute('aria-checked', 'true');
 
     await openTab(page, '5651 sorgu ve kira zaman çizelgesi');
@@ -162,12 +163,11 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings/application?group=lookup');
     const lookup = group(page, 'lookup');
-    await lookup.getByLabel('Genel (WAN) IP adresleri').fill('198.51.100.7\nnot-an-ip');
+    await lookup.getByLabel('Genel IP adresleri (NAT)').fill('198.51.100.7\nnot-an-ip');
     await lookup.getByRole('button', { name: 'Kaydet' }).click();
+    // `validate_setting`'s text (`setting_ip_invalid`), never the value it refused.
     await expect(
-      lookup
-        .getByTestId('setting-nat.public_ips')
-        .getByText("nat.public_ips: geçersiz IP adresi 'not-an-ip'"),
+      lookup.getByTestId('setting-nat.public_ips').getByText('Geçersiz IP adresi.'),
     ).toBeVisible();
     await expect(
       lookup.getByText('Bazı ayar değerleri geçersiz; işaretli ayarları düzeltin.'),
@@ -180,7 +180,7 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     const api = await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings/application');
     const alerts = group(page, 'alerts');
-    await alerts.getByLabel('Disk doluluk uyarısı (%)').fill('85');
+    await alerts.getByLabel('Disk doluluk eşiği (%)').fill('85');
     const disk = api.admin.settings[0]?.settings.find(
       (item) => item.key === 'alerts.disk_used_percent',
     );
@@ -189,7 +189,7 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     await alerts.getByRole('button', { name: 'Kaydet' }).click();
     await expect(alerts.getByText('Ayar başka biri tarafından değiştirildi')).toBeVisible();
     await alerts.getByRole('button', { name: 'Güncel değerleri al' }).click();
-    await expect(alerts.getByLabel('Disk doluluk uyarısı (%)')).toHaveValue('90');
+    await expect(alerts.getByLabel('Disk doluluk eşiği (%)')).toHaveValue('90');
   });
 
   test('"Varsayılana dön" and drafts kept across tabs, with the unsaved-change guard', async ({
@@ -203,18 +203,18 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     Object.assign(idle, { value: 30, is_default: false, updated_by: 'ayse.yilmaz' });
     await page.goto('/settings/application?group=security');
     const security = group(page, 'security');
-    await expect(security.getByLabel('Hareketsizlik süresi (dakika)')).toHaveValue('30');
+    await expect(security.getByLabel('Boşta kalma süresi (dakika)')).toHaveValue('30');
     await security
       .getByTestId('setting-auth.idle_minutes')
       .getByRole('button', { name: 'Varsayılana dön' })
       .click();
-    await expect(security.getByLabel('Hareketsizlik süresi (dakika)')).toHaveValue('15');
+    await expect(security.getByLabel('Boşta kalma süresi (dakika)')).toHaveValue('15');
     expect(api.callsTo('POST', '/settings/auth.idle_minutes/reset')).toHaveLength(1);
 
-    await security.getByLabel('En kısa parola uzunluğu').fill('14');
+    await security.getByLabel('En kısa parola').fill('14');
     await openTab(page, 'Veritabanı');
     await openTab(page, 'Oturum, parola ve gizlilik');
-    await expect(security.getByLabel('En kısa parola uzunluğu')).toHaveValue('14');
+    await expect(security.getByLabel('En kısa parola')).toHaveValue('14');
     await page.getByRole('link', { name: 'Ayarlar' }).first().click();
     await expect(page.getByRole('dialog', { name: 'Kaydedilmemiş değişiklikler' })).toBeVisible();
   });

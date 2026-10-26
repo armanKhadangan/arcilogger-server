@@ -4,10 +4,13 @@
  * requests (`/admin/requests`), uploads, the actions (`/seals/{day}/seal`, `/credits/query`,
  * `/admin/actions/*`) and the database settings (`/settings`).
  *
- * Written by hand from the contract while the API is being built (its mocks are
- * `web/e2e/mock-admin.ts`). Once the API exists they move into `api-types.ts`, where
- * `api-types.test.ts` compares them with the generated OpenAPI document and `api-samples.test.ts`
- * with the captured answers (`web/e2e/samples/admin.json`, `settings.json`).
+ * Each interface of an OpenAPI schema has its name; `api-types.test.ts` compares them with the
+ * generated snapshot `src/generated/api-schemas.json` like those of `api-types.ts`, and
+ * `api-samples.test.ts` with the answers captured from the real API (`web/e2e/samples/admin.json`,
+ * `settings.json`; the E2E mock `web/e2e/mock-admin.ts` starts from them). Where the API declares
+ * a plain string (or any JSON value) whose values come from a fixed list in the Python code
+ * (`arcilogger_core.admin.contract`, `settings_meta`), the field has the list as a union here
+ * (`NARROWED` in `api-types.test.ts`).
  *
  * Secrets are never values here: a stored credential is `{set, changed_at, changed_by}`, a secret
  * in a change list `{secret: true, old: "set"|"unset", new: …}`.
@@ -106,7 +109,7 @@ export interface SecretMeta {
   set: boolean;
   changed_at: DateTimeString | null;
   /** `web:<username>`, `cli` or `installer`. */
-  changed_by?: string | null;
+  changed_by: string | null;
 }
 
 export interface ClockSection {
@@ -179,6 +182,11 @@ export interface TsaSection {
 
 export type SmtpSecurity = 'starttls' | 'ssl' | 'none';
 
+/** The CA file the e-mail server is checked with (`smtp.ca_file`), `null`: the system's. */
+export interface SmtpCa {
+  sha256: string | null;
+}
+
 export interface SmtpSection {
   enabled: boolean;
   host: string | null;
@@ -187,7 +195,7 @@ export interface SmtpSection {
   username: string | null;
   from_address: string | null;
   timeout_seconds: number;
-  ca: { sha256: string | null };
+  ca: SmtpCa;
   secrets: Partial<Record<BrowserSecret, SecretMeta>>;
 }
 
@@ -228,7 +236,7 @@ export type SourceType = 'fortigate' | 'mikrotik' | 'generic';
 export type SourceTransport = 'any' | 'udp' | 'tcp';
 export type FirewallState = 'open' | 'closed' | 'pending' | 'not_managed';
 
-/** A `[[sources]]` table as the browser edits it. */
+/** A `[[sources]]` table as the browser edits it (every field of {@link SourceIn}). */
 export interface SourceConfig {
   name: string;
   type: SourceType;
@@ -238,6 +246,17 @@ export interface SourceConfig {
   expected: boolean;
   transport: SourceTransport;
   enabled: boolean;
+}
+
+/** A source in a change body: a field left out takes the `SourceConfig` default of the server. */
+export interface SourceIn {
+  name: string;
+  type: SourceType;
+  address: string;
+  heartbeat_minutes?: number;
+  expected?: boolean;
+  transport?: SourceTransport;
+  enabled?: boolean;
 }
 
 export interface SourceOut extends SourceConfig {
@@ -277,8 +296,8 @@ export interface AdminPolicyOut {
 /** A held change (`pending\<id>.json`). */
 export interface PendingChange {
   request_id: string;
-  section: AdminSection;
-  effective_at: DateTimeString;
+  section: AdminSection | null;
+  effective_at: DateTimeString | null;
 }
 
 /** `setup_problems` of the configuration, the "Türkçe [English]" text split. */
@@ -292,7 +311,7 @@ export interface SetupProblem {
 export interface AdminConfig {
   config_sha256: string;
   /** `"<section>:<sha256>"` per section: sent back with a change (409 `config_conflict`). */
-  etags: Partial<Record<AdminSection, string>>;
+  etags: Record<string, string>;
   sections: AdminSections;
   locked: LockedPath[];
   policy: AdminPolicyOut;
@@ -313,23 +332,41 @@ export interface SystemTaskCheck {
   error: string | null;
 }
 
+/** A held change the administration service waits with. */
+export interface PendingRequestOut {
+  id: string;
+  effective_at: DateTimeString;
+}
+
 export interface AgentOut {
   state: AgentState;
   version: string | null;
   heartbeat_at: DateTimeString | null;
   queue: number;
-  pending: { id: string; effective_at: DateTimeString }[];
+  pending: PendingRequestOut[];
   java_candidates: string[];
   seal_ready: SealReady | null;
   system_task: SystemTaskCheck | null;
+}
+
+/** What ApplySystem last did to the Windows firewall. */
+export interface FirewallOut {
+  managed: boolean;
+  strict_outbound: boolean;
+  syslog_addresses: string[];
+}
+
+/** The time peers ApplySystem set (`w32tm` notation). */
+export interface TimeOut {
+  peers: string;
 }
 
 export interface SystemOut {
   state: 'ok' | 'error' | 'never' | 'stale';
   at: DateTimeString | null;
   applied_config_sha256: string | null;
-  firewall: { managed: boolean; strict_outbound: boolean; syslog_addresses: string[] } | null;
-  time: { peers: string } | null;
+  firewall: FirewallOut | null;
+  time: TimeOut | null;
   code: string | null;
 }
 
@@ -385,11 +422,14 @@ export interface AdminCheck {
   readiness?: Readiness | null;
 }
 
-/** 202: the request is queued; follow it at `status_url`. */
+/**
+ * 202: the request is queued; follow it at `status_url`. `cancelled`: `DELETE /admin/requests/{id}`
+ * of a request the administration service had not taken (removed at once, nothing to follow).
+ */
 export interface AdminAccepted {
   request_id: string;
   short_id: string;
-  state: 'queued';
+  state: 'queued' | 'cancelled';
   status_url: string;
   guarded: boolean;
   effective_at: DateTimeString | null;
@@ -415,7 +455,8 @@ export interface CertificatePreview {
 
 export interface ZamanePreview {
   kind: 'jar' | 'zip';
-  jar_name: string;
+  /** The client's name inside a ZIP archive, `null` for a .jar. */
+  jar_name: string | null;
   jar_sha256: string;
   release: string | null;
   known: boolean;
@@ -493,9 +534,13 @@ export interface ReplicaTestResult {
   message: string;
 }
 
-/** `worker.test_email` (the address masked, ADR-0010 A4). */
+/** `worker.test_email` (the address masked, ADR-0010 A4: `b***@ornek.example`). */
 export interface TestEmailResult {
   ok: boolean;
+  to: string;
+  /** The server's reply code to a refused message, `null` otherwise. */
+  smtp_code: number | null;
+  /** A fixed sentence of the worker, never the exception's text. */
   error_text: string | null;
 }
 
@@ -548,71 +593,86 @@ export interface ConfigVersion {
 }
 
 // -- request bodies (2.11.1, 2.11.3) --------------------------------------------------------------
+//
+// A field left out of a section's change stays as it is (the API's models default every field);
+// the pages send the whole form. A secret is sent once and never read back.
+
+/** The time servers of a general change (a server sent as `null` stays as it is). */
+export interface ClockBody {
+  ntp_server?: string | null;
+  fallback_server?: string | null;
+  alert_offset_ms?: number | null;
+}
 
 export interface GeneralBody {
   etag: string;
-  site_name: string;
-  clock: ClockSection;
-  probe: boolean;
+  site_name?: string | null;
+  clock?: ClockBody | null;
+  /** Test a changed time server first (SNTP); `true` when left out. */
+  probe?: boolean;
 }
 
 export interface TsaBody {
   etag: string;
-  server: TsaServer;
-  credit_alert_threshold: number;
-  timeout_seconds: number;
-  java: string | null;
-  customer?: string;
-  password?: string;
+  /** `test` or `production` (`mock`: 422 `tsa_mock_refused`). */
+  server?: string | null;
+  credit_alert_threshold?: number | null;
+  timeout_seconds?: number | null;
+  java?: string | null;
+  customer?: string | null;
+  password?: string | null;
   clear_credentials?: boolean;
+  /** Production to test stops production stamps: the user said so. */
   confirm?: boolean;
-  probe: boolean;
+  probe?: boolean;
 }
 
 export interface SmtpBody {
   etag: string;
-  enabled: boolean;
-  host: string | null;
-  port: number;
-  security: SmtpSecurity;
-  username: string | null;
-  from_address: string | null;
-  timeout_seconds: number;
-  password?: string;
+  enabled?: boolean | null;
+  host?: string | null;
+  port?: number | null;
+  security?: SmtpSecurity | null;
+  username?: string | null;
+  from_address?: string | null;
+  timeout_seconds?: number | null;
+  password?: string | null;
   clear_password?: boolean;
-  test_to?: string;
-  probe: boolean;
+  /** The probe's test e-mail goes here (an alert recipient or one's own address). */
+  test_to?: string | null;
+  probe?: boolean;
 }
 
 export interface ReplicaBody {
   etag: string;
-  enabled: boolean;
-  target: string | null;
-  user: string | null;
-  password?: string;
+  enabled?: boolean | null;
+  target?: string | null;
+  user?: string | null;
+  password?: string | null;
   clear_password?: boolean;
-  probe: boolean;
+  probe?: boolean;
 }
 
 export interface RetentionBody {
   etag: string;
-  enabled: boolean;
-  days: number;
-  confirm_delete_days?: number;
+  enabled?: boolean | null;
+  days?: number | null;
+  /** The number of sealed days the change deletes (`retention_preview.days_to_delete`). */
+  confirm_delete_days?: number | null;
 }
 
 export interface BackupBody {
   etag: string;
-  enabled: boolean;
-  keep_daily: number;
-  keep_weekly: number;
-  keep_monthly: number;
-  min_free_gb: number;
+  enabled?: boolean | null;
+  keep_daily?: number | null;
+  keep_weekly?: number | null;
+  keep_monthly?: number | null;
+  min_free_gb?: number | null;
 }
 
 export interface SourceBody {
   etag: string;
-  source: SourceConfig;
+  source: SourceIn;
 }
 
 /**
@@ -627,29 +687,50 @@ export interface SourceCheckBody extends SourceBody {
 export interface RootBody {
   etag: string;
   upload_id: string;
-  legal: boolean;
-  confirmed: boolean;
+  /** Also a legal root (`tsa.legal_root_fingerprints`; needs `confirmed`). */
+  legal?: boolean;
+  /** "Parmak izini Kamu SM'nin yayımladığı değerle karşılaştırdım". */
+  confirmed?: boolean;
 }
 
 export interface LegalRootBody {
   etag: string;
   sha256: string;
-  confirmed: boolean;
+  confirmed?: boolean;
 }
 
 export interface ZamaneBody {
   etag: string;
   upload_id: string;
-  expected_sha256?: string;
+  expected_sha256?: string | null;
 }
 
+/**
+ * `POST /admin/config/smtp/ca`: the server is tried with the new trust first (WP4-4), so a
+ * recipient is needed while the server is enabled (422 `smtp_test_recipient_required`); with a
+ * user name the password comes again (422 `secret_rebind_required`, WP1-10).
+ */
 export interface SmtpCaBody {
   etag: string;
   upload_id: string;
+  test_to?: string | null;
+  password?: string | null;
+  probe?: boolean;
+}
+
+/**
+ * The optional JSON body of `DELETE /admin/config/smtp/ca?etag=` (an address never goes into a
+ * URL): the same recipient and password as {@link SmtpCaBody}.
+ */
+export interface SmtpCaClear {
+  test_to?: string | null;
+  password?: string | null;
+  probe?: boolean;
 }
 
 export interface TsaTestBody {
-  confirm_credit: true;
+  /** The test spends one credit: 422 `tsa_test_confirm_required` unless `true`. */
+  confirm_credit?: boolean;
 }
 
 export interface TestEmailBody {
@@ -727,8 +808,16 @@ export interface SettingsPatch {
   changes: SettingChange[];
 }
 
+/** A setting a change (or a reset) wrote. */
+export interface ChangedSetting {
+  key: string;
+  old: SettingValue;
+  new: SettingValue;
+}
+
+/** The answer of `PATCH /settings` and of `POST /settings/{key}/reset`. */
 export interface SettingsPatchResult {
-  changed: { key: string; old: SettingValue; new: SettingValue }[];
+  changed: ChangedSetting[];
   unchanged: string[];
 }
 

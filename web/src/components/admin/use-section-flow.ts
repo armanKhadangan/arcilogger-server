@@ -23,6 +23,11 @@ export interface SectionFlowOptions<B> {
   check: ((body: B) => Promise<AdminCheck>) | null;
   /** The change itself (202 with the request to follow). */
   submit: (body: B) => Promise<AdminAccepted>;
+  /**
+   * The configuration paths the form shows at one of its fields (`fieldMessage`) for a body; a
+   * refusal that names none of them (`sources`, `tsa.provider`, …) is shown above the form.
+   */
+  fields?: (body: B) => readonly string[];
 }
 
 export interface SectionFlow<B> {
@@ -56,7 +61,11 @@ export interface SectionFlow<B> {
  * follow the request until it is terminal. The form keeps its own values; the flow only knows
  * the body it sends.
  */
-export function useSectionFlow<B>({ check, submit }: SectionFlowOptions<B>): SectionFlow<B> {
+export function useSectionFlow<B>({
+  check,
+  submit,
+  fields: shownFields,
+}: SectionFlowOptions<B>): SectionFlow<B> {
   const { confirm: reauthenticate } = useReauth();
   const [phase, setPhase] = useState<FlowPhase>('edit');
   const [waiting, setWaiting] = useState<{ body: B; check: AdminCheck | null } | null>(null);
@@ -66,18 +75,22 @@ export function useSectionFlow<B>({ check, submit }: SectionFlowOptions<B>): Sec
   const [conflict, setConflict] = useState(false);
   const request = useAdminRequest(requestId).data;
 
-  const refuse = useCallback((error: unknown) => {
-    setWaiting(null);
-    setPhase('edit');
-    if (isApiError(error, 'config_conflict')) {
-      setConflict(true);
-      return;
-    }
-    const fields = fieldProblems(error);
-    setProblems(fields);
-    // A field problem is shown at its field; the general text only when nothing names a field.
-    setFailure(fields.length > 0 ? null : error);
-  }, []);
+  const refuse = useCallback(
+    (error: unknown, body: B) => {
+      setWaiting(null);
+      setPhase('edit');
+      if (isApiError(error, 'config_conflict')) {
+        setConflict(true);
+        return;
+      }
+      const fields = fieldProblems(error);
+      setProblems(fields);
+      // A field problem is shown at its field; the general text when none names a field shown.
+      const shown = shownFields?.(body) ?? [];
+      setFailure(fields.some((item) => shown.includes(item.field)) ? null : error);
+    },
+    [shownFields],
+  );
 
   const start = useCallback(
     async (body: B) => {
@@ -95,7 +108,7 @@ export function useSectionFlow<B>({ check, submit }: SectionFlowOptions<B>): Sec
         setWaiting({ body, check: result });
         setPhase('confirm');
       } catch (error) {
-        refuse(error);
+        refuse(error, body);
       }
     },
     [check, refuse],
@@ -124,7 +137,7 @@ export function useSectionFlow<B>({ check, submit }: SectionFlowOptions<B>): Sec
         setRequestId(accepted.request_id);
         setPhase('tracking');
       } catch (error) {
-        refuse(error);
+        refuse(error, body);
       }
     },
     [waiting, submit, reauthenticate, refuse],

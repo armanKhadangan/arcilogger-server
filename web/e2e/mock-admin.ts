@@ -6,11 +6,15 @@
  * "Kontör sorgula", the stamp, replica and e-mail tests, the lease rebuild) and the database
  * settings (`/settings`).
  *
- * Written by hand from the contract while the API is being built: every answer has the shape of
- * `src/lib/settings-types.ts`, refusals use the contract's codes and Turkish/English texts
- * (2.12, `arcilogger_core.admin.messages`), and a body with a field the endpoint does not know or
- * without a required one is refused like the API's `extra="forbid"` models. Once the API exists,
- * the captured samples (`samples/admin.json`, `settings.json`) replace the hand-written state.
+ * It starts from the answers captured from the real API (`samples/admin.json`, `settings.json`,
+ * the seal-now and credit samples): the configuration, the locked paths and the policy as
+ * installed, the status of each state of the service, the settings with their labels and bounds,
+ * the inspection of an upload, the result of each action and the texts of every captured refusal
+ * — the tables below hold only what no capture shows, and every captured text is compared with
+ * them when the mock loads. The request bodies are checked against the API's models
+ * (`mock-api.ts`). Requests report the steps of the real agent and API in their order (the agent's
+ * steps, then the services' reloads and the system task), changes the API's paths and change
+ * lists (a source as its whole table), refusals the first problem's code with every field.
  *
  * Simplifications (the real rules are tested in core/tests and api/tests): the rules of 2.6 only
  * as far as the specs need them; one step of a request every {@link AdminOptions.stepMs}; a
@@ -29,40 +33,59 @@ import type {
   AdminSection,
   AdminStatus,
   AgentState,
+  BackupBody,
   Change,
   CodeMessage,
   ConfigVersion,
+  CreditActionResult,
+  FieldProblem,
+  GeneralBody,
+  LeaseRebuildBody,
+  LeaseRebuildResult,
+  LegalRootBody,
   ReadinessItem,
+  ReplicaBody,
+  ReplicaTestResult,
   RequestKind,
   RequestState,
   RequestStep,
+  RetentionBody,
   RetentionPreview,
+  RootBody,
+  SealActionResult,
   SettingGroup,
   SettingOut,
+  SettingProblem,
+  SettingsPatch,
+  SettingsPatchResult,
   SettingValue,
+  SmtpBody,
+  SmtpCaBody,
+  SmtpCaClear,
+  SmtpSection,
+  SourceCheckBody,
   SourceConfig,
   SourceOut,
   StepState,
+  TestEmailBody,
+  TestEmailResult,
+  TsaBody,
   TsaSection,
+  TsaTestBody,
+  TsaTestResult,
   UploadPreview,
+  ZamaneBody,
 } from '../src/lib/settings-types';
 
 import type { MockUser, RecordedCall } from './mock-api';
 import type { Answer, MockHost } from './mock-records';
-import { copy, CREDITS, SEALS } from './samples';
+import { ADMIN, copy, CREDITS, SEALS, SETTINGS } from './samples';
 
-/** HTTP refusals of the administration API (contract 2.12): code -> [status, tr, en]. */
+/**
+ * HTTP refusals of the administration API no capture shows (contract 2.12, `admin_channel.TEXTS`,
+ * `arcilogger_core.admin.messages`): code -> [status, tr, en].
+ */
 const HTTP: Record<string, [number, string, string]> = {
-  admin_agent_unavailable: [
-    503,
-    'Yönetim hizmeti (ArciAdmin) yanıt vermiyor; değişiklik kuyruğa alınmadı. Sunucuda "ARCILOGGER Yönetim" hizmetini başlatın.',
-    'The administration service (ArciAdmin) is not responding; the change was not queued. Start the "ARCILOGGER Yönetim" service on the server.',
-  ],
-  admin_disabled: [
-    503,
-    'Tarayıcıdan sunucu yönetimi bu kurulumda kapalı; değişikliği sunucu konsolunda yapın.',
-    'Browser administration is switched off on this installation; make the change on the server console.',
-  ],
   admin_channel_key_missing: [
     503,
     'Yönetim kanalının anahtarı bulunamadı; kurulumu onarın (Install-Arcilogger.ps1).',
@@ -72,32 +95,6 @@ const HTTP: Record<string, [number, string, string]> = {
     429,
     'Bekleyen değişiklik sayısı sınıra ulaştı; öncekilerin bitmesini bekleyip tekrar deneyin.',
     'Too many changes are waiting; wait for the earlier ones to finish and try again.',
-  ],
-  admin_rate_limited: [
-    429,
-    'Bu işlem kısa süre önce yapıldı; biraz sonra tekrar deneyin.',
-    'This action ran a moment ago; try again shortly.',
-  ],
-  admin_section_busy: [
-    409,
-    'Bu bölüm için bekleyen bir değişiklik var; bitmesini bekleyin ya da iptal edin.',
-    'A change to this section is still open; wait for it to finish or cancel it.',
-  ],
-  admin_request_not_found: [404, 'Değişiklik isteği bulunamadı.', 'Change request not found.'],
-  request_not_cancellable: [
-    409,
-    'Bu istek artık iptal edilemez: uygulanmaya başlandı ya da bitti.',
-    'This request can no longer be cancelled: it has started or finished.',
-  ],
-  request_not_revertible: [
-    409,
-    'Bu değişiklik geri alınamaz: yalnızca sürümü saklanan, uygulanmış yapılandırma değişiklikleri geri alınabilir.',
-    'This change cannot be reverted: only applied configuration changes whose version is still kept can be reverted.',
-  ],
-  config_conflict: [
-    409,
-    'Bu ayarlar siz düzenlerken başka bir yerden değiştirildi; sayfayı yenileyip tekrar deneyin.',
-    'These settings were changed elsewhere while you were editing; reload the page and try again.',
   ],
   config_unsupported_format: [
     409,
@@ -114,26 +111,10 @@ const HTTP: Record<string, [number, string, string]> = {
     'Bu ayar güvenlik nedeniyle yalnızca sunucu konsolundan değiştirilebilir.',
     'For security reasons this setting can only be changed on the server console.',
   ],
-  site_name_required: [422, 'Kuruluş adı boş olamaz.', 'The organisation name cannot be empty.'],
-  host_invalid: [
-    422,
-    'Geçerli bir sunucu adı ya da IPv4 adresi girin.',
-    'Enter a valid host name or IPv4 address.',
-  ],
   clock_servers_required: [
     422,
     'En az bir saat sunucusu gerekir (yerel kaynak ya da yedek sunucu).',
     'At least one time server is required (the local source or the fallback).',
-  ],
-  retention_below_minimum: [
-    422,
-    'Saklama süresi 730 günden (iki yıl) kısa olamaz.',
-    'The retention period cannot be shorter than 730 days (two years).',
-  ],
-  retention_confirm_mismatch: [
-    422,
-    'Onaylamak için önizlemedeki silinecek gün sayısını aynen yazın.',
-    'To confirm, type exactly the number of days to be deleted shown in the preview.',
   ],
   source_invalid: [
     422,
@@ -145,11 +126,6 @@ const HTTP: Record<string, [number, string, string]> = {
     409,
     'Bu kaynak adı zaten kullanılıyor.',
     'This source name is already in use.',
-  ],
-  source_address_taken: [
-    409,
-    'Bu adres başka bir kaynağa ait.',
-    'This address belongs to another source.',
   ],
   source_overlap: [
     409,
@@ -176,11 +152,6 @@ const HTTP: Record<string, [number, string, string]> = {
     'Bu adres ARCILOGGER sunucusunun kendi adresi.',
     "This is the ARCILOGGER server's own address.",
   ],
-  source_network_not_allowed: [
-    422,
-    'Adres, kurulumda izin verilen kaynak ağlarının dışında; bu liste yalnızca sunucu konsolundan değiştirilebilir.',
-    'The address is outside the source networks allowed at installation; that list can only be changed on the server console.',
-  ],
   source_prefix_too_short: [
     422,
     'Ağ izin verilenden geniş; daha dar bir ağ girin.',
@@ -190,11 +161,6 @@ const HTTP: Record<string, [number, string, string]> = {
     422,
     'Kaynak sayısı üst sınırına ulaşıldı.',
     'The maximum number of sources has been reached.',
-  ],
-  source_confirm_mismatch: [
-    422,
-    'Silmeyi onaylamak için kaynağın adını aynen yazın.',
-    "Type the source's name exactly to confirm the removal.",
   ],
   secret_invalid: [
     422,
@@ -206,11 +172,6 @@ const HTTP: Record<string, [number, string, string]> = {
     'Sunucu, kullanıcı ya da bağlantı türü değişti; kayıtlı parola yeni hedefe gönderilmez. Parolayı yeniden girin.',
     'The server, user or connection type changed; the stored password is not sent to a new destination. Enter the password again.',
   ],
-  smtp_password_required: [
-    422,
-    'Kullanıcı adı girildiğinde SMTP parolası da gerekir.',
-    'An SMTP password is required when a user name is set.',
-  ],
   smtp_plaintext_auth_refused: [
     422,
     'Şifresiz bağlantıda parola yalnızca bu sunucudaki bir aktarıcıya gönderilebilir; STARTTLS ya da SSL seçin.',
@@ -220,21 +181,6 @@ const HTTP: Record<string, [number, string, string]> = {
     422,
     'Kaydetmeden önce deneme e-postası için bir alıcı seçin.',
     'Choose a recipient for the trial e-mail before saving.',
-  ],
-  test_email_recipient_not_allowed: [
-    422,
-    'Deneme e-postası yalnızca uyarı alıcılarına ya da kendi e-posta adresinize gönderilebilir.',
-    'A trial e-mail can only go to the alert recipients or to your own address.',
-  ],
-  smtp_not_configured: [
-    409,
-    'SMTP sunucusu ve gönderen adresi ayarlanmamış.',
-    'The SMTP server and sender address are not set.',
-  ],
-  replica_target_invalid: [
-    422,
-    'Replika hedefi \\\\sunucu\\paylaşım biçiminde bir ağ paylaşımı olmalı.',
-    'The replica target must be a network share like \\\\server\\share.',
   ],
   replica_user_invalid: [
     422,
@@ -251,20 +197,10 @@ const HTTP: Record<string, [number, string, string]> = {
     'Zaman damgası sunucusu "test" ya da "production" olmalı.',
     'The time-stamp server must be "test" or "production".',
   ],
-  tsa_mock_refused: [
-    422,
-    'Deneme (mock) zaman damgası web arayüzünden seçilemez.',
-    'The trial (mock) time stamp cannot be chosen from the web interface.',
-  ],
   tsa_not_ready: [
     409,
     'Üretim sunucusuna geçmeden önce eksikleri tamamlayın: kimlik bilgileri, onaylı Zamane istemcisi, Java ve en az bir kök sertifika.',
     'Complete the missing items before switching to the production server: credentials, an approved Zamane client, Java and at least one root certificate.',
-  ],
-  tsa_would_break: [
-    409,
-    'Bu değişiklik şu an çalışan mühürlemeyi durdururdu; uygulanmadı. Nedenler aşağıda.',
-    'This change would stop sealing, which works now; it was not applied. The causes are below.',
   ],
   tsa_confirm_required: [
     422,
@@ -276,11 +212,6 @@ const HTTP: Record<string, [number, string, string]> = {
     'Seçilen Java sunucuda bulunamadı; listeden birini seçin.',
     'The selected Java was not found on the server; choose one from the list.',
   ],
-  root_certificate_invalid: [
-    422,
-    'Dosya geçerli bir kök sertifika değil (tek, kendinden imzalı bir CA sertifikası olmalı).',
-    'The file is not a valid root certificate (it must be a single self-signed CA certificate).',
-  ],
   root_exists: [
     409,
     'Bu kök sertifika zaten kurulu.',
@@ -291,20 +222,10 @@ const HTTP: Record<string, [number, string, string]> = {
     'Yasal kök olarak yalnızca kurulu bir kök sertifika işaretlenebilir.',
     'Only an installed root certificate can be marked as a legal root.',
   ],
-  legal_root_confirm_required: [
-    422,
-    "Parmak izini Kamu SM'nin yayımladığı değerle karşılaştırdığınızı onaylayın.",
-    'Confirm that you compared the fingerprint with the value Kamu SM publishes.',
-  ],
   zamane_archive_invalid: [
     422,
     'Dosya bir Zamane istemcisi değil: bir .jar ya da tek bir tss-client-console-*.jar içeren .zip olmalı.',
     'The file is not a Zamane client: it must be a .jar, or a .zip holding exactly one tss-client-console-*.jar.',
-  ],
-  zamane_sha256_required: [
-    422,
-    'Bu sürüm bilinen sürümler arasında değil; Kamu SM indirme sayfasındaki SHA-256 değerini girin.',
-    'This is not a known release; enter the SHA-256 shown on the Kamu SM download page.',
   ],
   zamane_sha256_mismatch: [
     422,
@@ -312,58 +233,15 @@ const HTTP: Record<string, [number, string, string]> = {
     "The file's SHA-256 does not match the value you entered; the file was not used.",
   ],
   upload_too_large: [413, 'Dosya izin verilen boyuttan büyük.', 'The file is larger than allowed.'],
-  upload_kind_invalid: [422, 'Bilinmeyen yükleme türü.', 'Unknown upload kind.'],
   upload_not_found: [
     404,
     'Yüklenen dosya bulunamadı ya da süresi doldu (30 dakika); yeniden yükleyin.',
     'The uploaded file was not found or has expired (30 minutes); upload it again.',
   ],
-  seal_not_due: [
-    409,
-    'Şimdi yalnızca sıradaki (en eski) mühürlenmemiş kapalı gün mühürlenebilir; bu gün henüz sırada değil ya da gece yarısından hemen sonraki beklemede.',
-    'Only the next (oldest) closed unsealed day can be sealed now; this day is not next yet, or it is in the wait just after midnight.',
-  ],
-  seal_day_sealed: [409, 'Bu gün zaten mühürlü.', 'This day is already sealed.'],
   seal_not_applicable: [
     409,
     'Bu gün mühürlenmez (veri yok, atlandı ya da imha edildi).',
     'This day is not sealed (no data, skipped or deleted).',
-  ],
-  seal_request_pending: [
-    409,
-    'Bu gün için bir mühürleme isteği zaten bekliyor.',
-    'A sealing request for this day is already waiting.',
-  ],
-  tsa_test_confirm_required: [
-    422,
-    'Damga testi 1 kontör harcar; onaylayın.',
-    'The stamp test uses 1 credit; confirm to continue.',
-  ],
-  tsa_test_limit: [
-    429,
-    'Bugünkü damga testi sınırına ulaşıldı.',
-    "Today's stamp test limit has been reached.",
-  ],
-  lease_rebuild_range: [
-    422,
-    'Geçersiz aralık: en çok 31 gün, gelecekte değil ve ilk logdan önce değil.',
-    'Invalid range: at most 31 days, not in the future and not before the first log.',
-  ],
-  setting_invalid: [
-    422,
-    'Bazı ayar değerleri geçersiz; işaretli ayarları düzeltin.',
-    'Some setting values are invalid; correct the marked settings.',
-  ],
-  setting_unknown: [422, 'Bilinmeyen ayar.', 'Unknown setting.'],
-  setting_locked: [
-    422,
-    'Bu ayar web arayüzünden değiştirilemez (sunucudaki bir dosya yolu).',
-    'This setting cannot be changed from the web interface (a file path on the server).',
-  ],
-  setting_conflict: [
-    409,
-    'Ayar siz düzenlerken başka biri tarafından değiştirildi; sayfayı yenileyin.',
-    'The setting was changed by someone else while you were editing; reload the page.',
   ],
 };
 
@@ -557,6 +435,56 @@ const STATE_LABELS: Record<RequestState, [string, string]> = {
   timed_out: ['Zaman aşımı', 'Timed out'],
 };
 
+/**
+ * Every refusal captured from the real API (`samples/admin.json`, `settings.json`, the seal and
+ * credit samples): code -> [status, tr, en]. {@link HTTP} keeps only the codes no capture shows.
+ */
+const CAPTURED: Record<string, [number, string, string]> = Object.fromEntries(
+  [ADMIN.errors, SETTINGS.errors, SEALS.errors, { query_limited: CREDITS.query_limited }].flatMap(
+    (errors) =>
+      Object.values(errors).map(
+        ({ status, body }) =>
+          [body.error.code, [status, body.error.message_tr, body.error.message_en]] as const,
+      ),
+  ),
+);
+for (const code of Object.keys(HTTP))
+  if (code in CAPTURED) throw new Error(`mock-admin: ${code} is captured; use the captured text`);
+
+/** The status and texts of a refusal: the captured answer, else the contract's catalogue. */
+function texts(code: string): [number, string, string] | undefined {
+  return CAPTURED[code] ?? HTTP[code];
+}
+
+/**
+ * The tables above must say what the real API says: every request, warning and step message the
+ * capture shows is compared with them when the mock loads (a changed text fails every spec).
+ */
+function checkCaptured(value: unknown, path: string): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      checkCaptured(item, `${path}[${String(index)}]`);
+    });
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  const item = value as Record<string, unknown>;
+  if (typeof item.kind === 'string' && typeof item.label_tr === 'string') {
+    const label = STATE_LABELS[item.state as RequestState] as [string, string] | undefined;
+    if (label?.[0] !== item.label_tr || label[1] !== item.label_en)
+      throw new Error(`mock-admin: STATE_LABELS.${String(item.state)} differs from ${path}`);
+  }
+  if (typeof item.code === 'string' && typeof item.message_tr === 'string') {
+    const known = MESSAGES[item.code] ?? WARNINGS[item.code] ?? texts(item.code)?.slice(1);
+    if (known?.[0] !== item.message_tr || known[1] !== item.message_en)
+      throw new Error(`mock-admin: the text of ${item.code} differs from ${path}`);
+  }
+  for (const [key, child] of Object.entries(item)) checkCaptured(child, `${path}.${key}`);
+}
+checkCaptured({ ...ADMIN, errors: null, meta: null }, 'admin');
+checkCaptured([SEALS.seal_now, SEALS.seal_now_queued, SEALS.seal_now_done], 'seals');
+checkCaptured([CREDITS.query, CREDITS.query_done], 'credits');
+
 export interface AdminOptions {
   /** The administration service's heartbeat (default `ok`). */
   agent?: AgentState;
@@ -566,7 +494,7 @@ export interface AdminOptions {
   stepMs?: number;
   /** The mock's "now" at start (default: the real time), e.g. the browser clock of a spec. */
   now?: number;
-  /** The Kamu SM section starts empty (the first setup in the wizard). */
+  /** The Kamu SM section of a new installation (the captured one: the first setup). */
   freshTsa?: boolean;
   /** A hand edit on the server waits for a restart (`restart_required`). */
   restartRequired?: boolean;
@@ -592,15 +520,21 @@ interface Stage {
   /** Milliseconds after the request was accepted. */
   at: number;
   state: RequestState;
-  /** The step that runs (the ones before it are done). */
+  /** The step that runs (the ones before it are done; `-1`: none yet). */
   running: number;
+}
+
+interface StepEnd {
+  state: StepState;
+  code?: string;
 }
 
 interface Final {
   state: RequestState;
   error?: string;
-  /** Step states of the end that differ from `done`. */
-  steps?: Partial<Record<RequestStep, StepState>>;
+  /** The steps the request ends with (`done` unless named in `ends`). */
+  steps: RequestStep[];
+  ends?: Partial<Record<RequestStep, StepEnd>>;
   rolledBack?: boolean;
   manual?: [string, string];
   warnings?: string[];
@@ -613,6 +547,10 @@ interface MockRequest {
   stages: Stage[];
   final: Final;
   steps: RequestStep[];
+  /** Steps a change does not need (`hold`, `write_secrets`, `install_files`): `skipped`. */
+  skipped: ReadonlySet<RequestStep>;
+  /** Steps listed already while the request waits (a held client's `jar.promotion`). */
+  ahead: RequestStep[];
   /** Applied once the request passes `applied` (configuration) or succeeds (action). */
   apply: (() => void) | null;
   applied: boolean;
@@ -623,28 +561,51 @@ interface MockRequest {
   before: unknown;
   /** The day of a seal request. */
   day: string | null;
+  /** The effects it was accepted with (a revert takes them over). */
+  effects: string[];
+  /** The outcome of an action, reported once it ends. */
+  result: Record<string, unknown> | null;
   /** Undoes what accepting it did at once (a staged Zamane client), when it is cancelled. */
   cancel?: () => void;
 }
 
 const SEALABLE = new Set(['failed', 'pending']);
-const RELOAD_STEPS = new Set<RequestStep>([
+/**
+ * The agent's steps of a configuration change (`admin/agent.py`): every change reports all of
+ * them, the ones it does not need `skipped` (`probe` only when the change is tried first).
+ */
+const AGENT_STEPS: readonly RequestStep[] = [
+  'received',
+  'validate',
+  'probe',
+  'hold',
+  'backup',
+  'write_secrets',
+  'write_config',
+  'install_files',
+  'verify',
+  'journal',
+];
+/** The API's steps after them, from the change's effects (`admin_channel._activation`). */
+const ACTIVATION_STEPS: readonly RequestStep[] = [
   'reload.collector',
   'reload.ingest',
   'reload.worker',
   'reload.api',
   'system.firewall',
   'system.time',
-  'jar.promotion',
-]);
+];
 const APPLYING_STEPS = new Set<RequestStep>([
   'backup',
   'write_secrets',
   'write_config',
   'install_files',
   'verify',
+  'journal',
   'rollback',
 ]);
+/** The steps of an action the agent hands to a task (the captured seal and credit requests). */
+const ACTION_STEPS: readonly RequestStep[] = ['received', 'dispatch', 'task'];
 
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
@@ -655,8 +616,8 @@ function newId(): string {
 }
 
 /** `{field, code, message_tr, message_en}` of a refused field (422 `details`). */
-function problem(field: string, code: string) {
-  const [, tr, en] = HTTP[code] ?? [422, code, code];
+function problem(field: string, code: string): FieldProblem {
+  const [, tr, en] = texts(code) ?? [422, code, code];
   return { field, code, message_tr: tr, message_en: en };
 }
 
@@ -672,251 +633,81 @@ function validHost(text: string): boolean {
   return /^[\d.]+$/.test(text) ? IPV4.test(text) : HOST.test(text);
 }
 
-const TSA_KEYS = [
-  'etag',
-  'server',
-  'credit_alert_threshold',
-  'timeout_seconds',
-  'java',
-  'customer',
-  'password',
-  'clear_credentials',
-  'confirm',
-  'probe',
-];
-const TSA_REQUIRED = [
-  'etag',
-  'server',
-  'credit_alert_threshold',
-  'timeout_seconds',
-  'java',
-  'probe',
-];
-const SMTP_REQUIRED = [
-  'etag',
-  'enabled',
-  'host',
-  'port',
-  'security',
-  'username',
-  'from_address',
-  'timeout_seconds',
-  'probe',
-];
-const SMTP_KEYS = [...SMTP_REQUIRED, 'password', 'clear_password', 'test_to'];
-const REPLICA_REQUIRED = ['etag', 'enabled', 'target', 'user', 'probe'];
-const REPLICA_KEYS = [...REPLICA_REQUIRED, 'password', 'clear_password'];
-const RETENTION_REQUIRED = ['etag', 'enabled', 'days'];
-const RETENTION_KEYS = [...RETENTION_REQUIRED, 'confirm_delete_days'];
-const BACKUP_KEYS = ['etag', 'enabled', 'keep_daily', 'keep_weekly', 'keep_monthly', 'min_free_gb'];
+/** A text field of a change body: trimmed, `null` when empty. */
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function integer(value: unknown, low: number, high: number): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= low && value <= high;
+}
 
 /**
- * Request bodies of the administration API: every field it knows and the required ones (the
- * API's models are `extra="forbid"`).
+ * The Java 8 installations the administration service finds on the fictional site, and its
+ * installer-recorded Zamane client and Kamu SM test root (the capture runs without Java and
+ * without Kamu SM).
  */
-const BODIES: Record<string, { known: string[]; required: string[] }> = {
-  'PUT /admin/config/general': {
-    known: ['etag', 'site_name', 'clock', 'probe'],
-    required: ['etag', 'site_name', 'clock', 'probe'],
-  },
-  'POST /admin/config/general/check': {
-    known: ['etag', 'site_name', 'clock', 'probe'],
-    required: ['etag', 'site_name', 'clock', 'probe'],
-  },
-  'PUT /admin/config/tsa': { known: TSA_KEYS, required: TSA_REQUIRED },
-  'POST /admin/config/tsa/check': { known: TSA_KEYS, required: TSA_REQUIRED },
-  'POST /admin/config/tsa/roots': {
-    known: ['etag', 'upload_id', 'legal', 'confirmed'],
-    required: ['etag', 'upload_id', 'legal', 'confirmed'],
-  },
-  'POST /admin/config/tsa/legal-roots': {
-    known: ['etag', 'sha256', 'confirmed'],
-    required: ['etag', 'sha256', 'confirmed'],
-  },
-  'POST /admin/config/tsa/zamane': {
-    known: ['etag', 'upload_id', 'expected_sha256'],
-    required: ['etag', 'upload_id'],
-  },
-  'POST /admin/config/sources': { known: ['etag', 'source'], required: ['etag', 'source'] },
-  'PUT /admin/config/smtp': { known: SMTP_KEYS, required: SMTP_REQUIRED },
-  'POST /admin/config/smtp/check': { known: SMTP_KEYS, required: SMTP_REQUIRED },
-  'POST /admin/config/smtp/ca': { known: ['etag', 'upload_id'], required: ['etag', 'upload_id'] },
-  'PUT /admin/config/replica': { known: REPLICA_KEYS, required: REPLICA_REQUIRED },
-  'POST /admin/config/replica/check': { known: REPLICA_KEYS, required: REPLICA_REQUIRED },
-  'PUT /admin/config/retention': { known: RETENTION_KEYS, required: RETENTION_REQUIRED },
-  'POST /admin/config/retention/check': { known: RETENTION_KEYS, required: RETENTION_REQUIRED },
-  'PUT /admin/config/backup': { known: BACKUP_KEYS, required: BACKUP_KEYS },
-  'POST /admin/config/backup/check': { known: BACKUP_KEYS, required: BACKUP_KEYS },
-  // WP5-1: the check names whether it is the addition or the change of the source.
-  'POST /admin/config/sources/check': {
-    known: ['etag', 'source', 'operation'],
-    required: ['etag', 'source', 'operation'],
-  },
-  'PATCH /settings': { known: ['changes'], required: ['changes'] },
-  'POST /admin/actions/tsa-test': { known: ['confirm_credit'], required: [] },
-  'POST /admin/actions/replica-test': { known: [], required: [] },
-  'POST /admin/actions/test-email': { known: ['to'], required: ['to'] },
-  'POST /admin/actions/lease-rebuild': { known: ['from', 'to'], required: ['from', 'to'] },
-};
-
-/** Problems of a body, in the API's `details` format (`[]` when none). */
-function bodyProblems(
-  route: string,
-  body: unknown,
-): { loc: string[]; type: string; msg: string }[] {
-  const spec = BODIES[route];
-  if (!spec) return [];
-  if (typeof body !== 'object' || body === null || Array.isArray(body))
-    return [{ loc: ['body'], type: 'model_attributes_type', msg: 'Input should be an object' }];
-  return [
-    ...Object.keys(body)
-      .filter((key) => !spec.known.includes(key))
-      .map((key) => ({
-        loc: ['body', key],
-        type: 'extra_forbidden',
-        msg: 'Extra inputs are not permitted',
-      })),
-    ...spec.required
-      .filter((key) => !Object.hasOwn(body, key))
-      .map((key) => ({ loc: ['body', key], type: 'missing', msg: 'Field required' })),
-  ];
-}
-
-/** The machine configuration every test starts with (the repository's fictional site). */
-function startConfig(options: AdminOptions): AdminConfig['sections'] {
-  const installed = '2026-09-30T09:12:00+03:00';
-  return {
-    general: {
-      site_name: 'Örnek A.Ş.',
-      clock: {
-        ntp_server: '172.20.10.1',
-        fallback_server: 'time.ume.tubitak.gov.tr',
-        alert_offset_ms: 1000,
-      },
-    },
-    tsa: options.freshTsa
-      ? {
-          provider: 'mock',
-          server: null,
-          credit_alert_threshold: 500,
-          timeout_seconds: 60,
-          java: null,
-          java_choices: JAVA_CHOICES,
-          zamane: { present: false, sha256: null, release: null, trusted: false, staged: [] },
-          roots: [],
-          secrets: {
-            'kamusm.customer': { set: false, changed_at: null },
-            'kamusm.password': { set: false, changed_at: null },
-          },
-          readiness: { production: false, missing: ['credentials', 'zamane_jar', 'java', 'roots'] },
-          seal_ready: { ok: true, causes: [] },
-        }
-      : {
-          provider: 'zamane',
-          server: 'test',
-          credit_alert_threshold: 500,
-          timeout_seconds: 60,
-          java: JAVA_CHOICES[0] ?? null,
-          java_choices: JAVA_CHOICES,
-          zamane: {
-            present: true,
-            sha256: INSTALLED_JAR,
-            release: null,
-            trusted: 'installer',
-            staged: [],
-          },
-          roots: [
-            {
-              sha256: INSTALLED_ROOT,
-              subject: 'CN=Kamu SM Test Kök Sertifikası (örnek)',
-              not_after: '2036-01-01T00:00:00+03:00',
-              legal: false,
-              source: 'installer',
-            },
-          ],
-          secrets: {
-            'kamusm.customer': { set: true, changed_at: installed, changed_by: 'cli' },
-            'kamusm.password': { set: true, changed_at: installed, changed_by: 'cli' },
-          },
-          readiness: { production: true, missing: [] },
-          seal_ready: { ok: true, causes: [] },
-        },
-    smtp: {
-      enabled: true,
-      host: 'smtp.ornek.example',
-      port: 587,
-      security: 'starttls',
-      username: 'arcilogger',
-      from_address: 'arcilogger@ornek.example',
-      timeout_seconds: 30,
-      ca: { sha256: null },
-      secrets: { 'smtp.password': { set: true, changed_at: installed, changed_by: 'cli' } },
-    },
-    replica: {
-      enabled: true,
-      target: '\\\\NAS-01\\arcilogger-worm',
-      user: 'NAS-01\\arcireplica',
-      secrets: {
-        'replica.password': { set: true, changed_at: installed, changed_by: 'installer' },
-      },
-    },
-    retention: {
-      enabled: false,
-      days: 760,
-      minimum_days: 730,
-      preview: { cutoff: '2024-09-13', days_to_delete: 0, oldest: null, newest: null },
-    },
-    backup: { enabled: true, keep_daily: 14, keep_weekly: 8, keep_monthly: 12, min_free_gb: 10 },
-    sources: [
-      source('fortigate', 'fortigate', '172.31.255.1', 10, '2026-10-13T14:59:58+03:00'),
-      source('core-r1', 'mikrotik', '172.20.10.1', 15, '2026-10-13T14:59:41+03:00'),
-      source('switch-1', 'mikrotik', '172.20.10.21', 15, '2026-10-13T14:52:10+03:00'),
-    ],
-  };
-}
-
 const JAVA_CHOICES = [
   'C:/Program Files/Eclipse Adoptium/jre-8.0.432.6-hotspot/bin/java.exe',
   'C:/Program Files/Java/jre1.8.0_421/bin/java.exe',
 ];
-/** SHA-256 of the installer-recorded Zamane client and root of the fictional site. */
 const INSTALLED_JAR = sha256('e2e installer zamane client');
 const INSTALLED_ROOT = sha256('e2e kamu sm test root');
+/** When the installer recorded the site's credentials. */
+const INSTALLED_AT = '2026-09-30T09:12:00+03:00';
 
-function source(
-  name: string,
-  type: SourceOut['type'],
-  address: string,
-  heartbeat: number,
-  lastSeen: string | null,
-): SourceOut {
-  return {
-    name,
-    type,
-    address,
-    heartbeat_minutes: heartbeat,
-    expected: true,
-    transport: 'any',
+/**
+ * The machine configuration every test starts with: the installation the capture made
+ * (`ADMIN.config`: the site name and clock, retention, backup and the two sources) and the
+ * replica share as the capture set it up (`ADMIN.sections.config`). What the capture cannot set
+ * up is added in the captured shapes: the Kamu SM provider with Java, the installer's Zamane
+ * client, test root and credentials (`freshTsa`: the captured section of a new installation,
+ * with the site's Java found), and an SMTP account with a stored password (the capture's mail
+ * server takes no login).
+ */
+function startConfig(options: AdminOptions): AdminConfig['sections'] {
+  const sections = copy(ADMIN.config.sections);
+  const stored = { set: true, changed_at: INSTALLED_AT, changed_by: 'cli' };
+  sections.tsa = options.freshTsa
+    ? { ...sections.tsa, java_choices: [...JAVA_CHOICES] }
+    : {
+        ...sections.tsa,
+        provider: 'zamane',
+        server: 'test',
+        java: JAVA_CHOICES[0] ?? null,
+        java_choices: [...JAVA_CHOICES],
+        zamane: {
+          present: true,
+          sha256: INSTALLED_JAR,
+          release: null,
+          trusted: 'installer',
+          staged: [],
+        },
+        roots: [
+          {
+            sha256: INSTALLED_ROOT,
+            subject: 'CN=Kamu SM Test Kök Sertifikası (örnek)',
+            not_after: '2036-01-01T00:00:00+03:00',
+            legal: false,
+            source: 'installer',
+          },
+        ],
+        secrets: { 'kamusm.customer': { ...stored }, 'kamusm.password': { ...stored } },
+      };
+  sections.smtp = {
+    ...sections.smtp,
     enabled: true,
-    firewall: 'open',
-    last_seen: lastSeen,
+    host: 'smtp.ornek.example',
+    port: 587,
+    security: 'starttls',
+    username: 'arcilogger',
+    from_address: 'arcilogger@ornek.example',
+    timeout_seconds: 30,
+    secrets: { 'smtp.password': { ...stored } },
   };
+  sections.replica = copy(ADMIN.sections.config.sections.replica);
+  return sections;
 }
-
-const LOCKED: AdminConfig['locked'] = [
-  { path: 'tsa.digest', reason: 'expert' },
-  { path: 'tsa.credit_regex', reason: 'expert' },
-  { path: 'tsa.zamane_verify_flag', reason: 'expert' },
-  { path: 'tsa.require_critical_eku', reason: 'expert' },
-  { path: 'tsa.roots_dir', reason: 'security' },
-  { path: 'clock.ntp_port', reason: 'service' },
-  { path: 'collector.unknown_senders', reason: 'collector' },
-  { path: 'seal.quiet_minutes', reason: 'evidence' },
-  { path: 'seal.retry_minutes', reason: 'evidence' },
-  { path: 'backup.dir', reason: 'security' },
-  { path: 'backup.pg_dump', reason: 'security' },
-  { path: 'backup.pg_restore', reason: 'security' },
-];
 
 /** Values as the API compares them for an `etag` (secrets only set/unset). */
 function etagOf(section: string, values: unknown): string {
@@ -932,6 +723,19 @@ function diff(prefix: string, before: Record<string, unknown>, after: Record<str
       changes[prefix ? `${prefix}.${key}` : key] = { old: old ?? null, new: value };
   }
   return changes;
+}
+
+/** The `[[sources]]` table of a source (what a change list holds: the whole table). */
+function sourceTable(source: SourceConfig): SourceConfig {
+  return {
+    name: source.name,
+    type: source.type,
+    address: source.address,
+    heartbeat_minutes: source.heartbeat_minutes,
+    expected: source.expected,
+    transport: source.transport,
+    enabled: source.enabled,
+  };
 }
 
 export class AdminMock {
@@ -952,12 +756,13 @@ export class AdminMock {
   readonly creditChecks: CreditCheck[] = [];
   /**
    * The kept configurations, newest first (contract 2.4.10): version *n* is the pair from before
-   * its request was applied (16: before a restore on the server console).
+   * its request was applied (16: before a restore on the server console). The captured list
+   * names the capture's own requests, so the mock keeps its own.
    */
   readonly versions: ConfigVersion[] = [
     {
       n: 16,
-      at: '2026-09-30T09:12:00+03:00',
+      at: INSTALLED_AT,
       request_id: null,
       actor: 'console',
       paths: [],
@@ -966,10 +771,11 @@ export class AdminMock {
   ];
   /** Diagnostics packages handed out. */
   diagnostics = 0;
-  readonly settings: SettingGroup[] = startSettings();
+  /** The database settings as the capture's API lists them (`settings.json`). */
+  readonly settings: SettingGroup[] = copy(SETTINGS.list.groups);
   readonly uploads = new Map<string, UploadPreview>();
-  private lastCredit: number | null = null;
-  private lastReplicaTest: number | null = null;
+  /** When each action was last accepted (its rate limit, contract 2.11.3). */
+  private readonly lastAction = new Map<RequestKind, number>();
   /** When test e-mails were sent (5 an hour). */
   private readonly testEmails: number[] = [];
   private readonly realStart = Date.now();
@@ -985,6 +791,7 @@ export class AdminMock {
     this.outside = options.outside ?? false;
     this.base = options.now ?? Date.now();
     this.creditsSample = creditsSample;
+    this.refreshTsa();
   }
 
   /** The mock's clock (the spec's browser time when given). */
@@ -997,7 +804,7 @@ export class AdminMock {
   }
 
   refuse(status: number, code: string, details?: unknown): [number, unknown] {
-    const [, tr, en] = HTTP[code] ?? [status, code, code];
+    const [, tr, en] = texts(code) ?? [status, code, code];
     return [
       status,
       {
@@ -1011,21 +818,39 @@ export class AdminMock {
     ];
   }
 
+  /** A refusal with the status of the API (the captured answer, else the catalogue, 2.12). */
+  private reject(code: string, details?: unknown): [number, unknown] {
+    return this.refuse(texts(code)?.[0] ?? 422, code, details);
+  }
+
+  /**
+   * A refused check (WP4-2): the first problem's code and status; `details` lists every field,
+   * or carries the first problem's own facts (`missing`, `causes`).
+   */
+  private refused(problems: FieldProblem[], facts?: Record<string, unknown>): [number, unknown] {
+    return this.reject(problems[0]?.code ?? 'config_invalid', facts ?? problems);
+  }
+
+  /** A 429 with its `Retry-After` header (seconds). */
+  private limited(code: string, retryAfter: number): Answer {
+    const [status, body] = this.reject(code, { retry_after: retryAfter });
+    return [
+      status,
+      body,
+      {
+        body: Buffer.from(JSON.stringify(body)),
+        contentType: 'application/json',
+        headers: { 'Retry-After': String(retryAfter) },
+      },
+    ];
+  }
+
   // -- the configuration ----------------------------------------------------------------------
 
   /** What the API compares for a section's `etag`. */
   private editable(section: AdminSection): unknown {
     const values = this.sections[section];
-    if (section === 'sources')
-      return (values as SourceOut[]).map((item) => ({
-        name: item.name,
-        type: item.type,
-        address: item.address,
-        heartbeat_minutes: item.heartbeat_minutes,
-        expected: item.expected,
-        transport: item.transport,
-        enabled: item.enabled,
-      }));
+    if (section === 'sources') return (values as SourceOut[]).map(sourceTable);
     return values;
   }
 
@@ -1050,66 +875,70 @@ export class AdminMock {
         ...this.sections,
         retention: {
           ...this.sections.retention,
-          preview: this.retentionPreview(this.sections.retention.days),
+          // The configuration's preview has no first run (that is the check's, with its hold).
+          preview: { ...this.retentionPreview(this.sections.retention.days), first_run_at: null },
         },
       }),
-      locked: copy(LOCKED),
+      locked: copy(ADMIN.config.locked),
       policy: {
+        ...copy(ADMIN.config.policy),
         enabled: this.agent !== 'disabled',
-        source_networks: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
-        min_prefix_v4: 16,
-        max_sources: 500,
         hold_hours: this.holdHours,
-        jar_hold_hours: 24,
-        tsa_test_per_day: 3,
       },
       pending: [...this.requests.values()]
         .filter((item) => item.out.state === 'pending' && item.out.section && item.out.effective_at)
         .map((item) => ({
           request_id: item.out.id,
-          section: item.out.section as AdminSection,
-          effective_at: item.out.effective_at as string,
+          section: item.out.section,
+          effective_at: item.out.effective_at,
         })),
-      problems: this.sections.general.clock.ntp_server
-        ? []
-        : [
-            {
-              level: 'warning',
-              key: 'clock.ntp_server',
-              message_tr: WARNINGS.ntp_server_empty?.[0] ?? '',
-              message_en: WARNINGS.ntp_server_empty?.[1] ?? '',
-            },
-          ],
+      // `setup_problems` of the captured installation: no local time source.
+      problems: copy(ADMIN.config.problems).filter(
+        (item) => item.key !== 'clock.ntp_server' || !this.sections.general.clock.ntp_server,
+      ),
       restart_required: this.restartRequired,
     };
   }
 
+  /** The captured status, with this mock's heartbeat, requests and configuration. */
   status(): AdminStatus {
     const sha = sha256(JSON.stringify(this.sections));
-    const heartbeat =
-      this.agent === 'missing' ? null : this.iso(this.agent === 'stale' ? -75_000 : -4_000);
-    const service = (restart: string[] = []) => ({
-      sha256: sha,
-      loaded_at: this.iso(-60_000),
-      error: null,
-      restart_keys: restart,
-      running: true,
-    });
+    const captured =
+      this.agent === 'missing'
+        ? ADMIN.status_agent_missing
+        : this.agent === 'disabled'
+          ? ADMIN.status_disabled
+          : ADMIN.status;
+    const agent = copy(captured.agent);
+    agent.state = this.agent;
+    if (this.agent !== 'missing') {
+      agent.heartbeat_at = this.iso(this.agent === 'stale' ? -75_000 : -4_000);
+      agent.java_candidates = [...JAVA_CHOICES];
+      agent.seal_ready = copy(this.sections.tsa.seal_ready);
+      if (agent.system_task) agent.system_task.checked_at = this.iso(-120_000);
+    }
+    agent.queue = [...this.requests.values()].filter((item) => item.out.state === 'queued').length;
+    agent.pending = [...this.requests.values()]
+      .filter((item) => item.out.state === 'pending' && item.out.effective_at)
+      .map((item) => ({ id: item.out.id, effective_at: item.out.effective_at ?? '' }));
+    const { ntp_server: local, fallback_server: fallback } = this.sections.general.clock;
+    const services = Object.fromEntries(
+      Object.entries(copy(ADMIN.status.services)).map(([name, service]) => [
+        name,
+        {
+          ...service,
+          // Every service of the site runs and has the configuration in force.
+          sha256: sha,
+          loaded_at: this.iso(-60_000),
+          running: true,
+          restart_keys: name === 'ArciCollector' && this.restartRequired ? ['collector'] : [],
+        },
+      ]),
+    );
     return {
-      agent: {
-        state: this.agent,
-        version: this.agent === 'missing' ? null : '0.1.0',
-        heartbeat_at: heartbeat,
-        queue: [...this.requests.values()].filter((item) => item.out.state === 'queued').length,
-        pending: [...this.requests.values()]
-          .filter((item) => item.out.state === 'pending' && item.out.effective_at)
-          .map((item) => ({ id: item.out.id, effective_at: item.out.effective_at as string })),
-        java_candidates: JAVA_CHOICES,
-        seal_ready: this.sections.tsa.seal_ready,
-        system_task: { ok: true, checked_at: this.iso(-120_000), error: null },
-      },
+      agent,
       system: {
-        state: 'ok',
+        ...copy(ADMIN.status.system),
         at: this.iso(-120_000),
         applied_config_sha256: sha,
         firewall: {
@@ -1119,34 +948,34 @@ export class AdminMock {
             .filter((item) => item.enabled)
             .map((item) => item.address),
         },
+        // `systemplan.peer_list`: the local source in client mode, the fallback as fallback.
         time: {
-          peers: `${this.sections.general.clock.ntp_server},0x8 ${this.sections.general.clock.fallback_server},0xa`,
+          peers:
+            local && fallback && local !== fallback
+              ? `${local},0x8 ${fallback},0xA`
+              : `${local || fallback},0x8`,
         },
-        code: null,
       },
-      services: {
-        ArciCollector: service(this.restartRequired ? ['collector'] : []),
-        ArciIngest: service(),
-        ArciWorker: service(),
-        ArciApi: service(),
-      },
+      services,
       config_sha256: sha,
       config_origin: this.outside ? 'outside' : 'browser',
       restart_required: this.restartRequired,
     };
   }
 
-  /** 503 while the administration service does not answer or is switched off. */
+  /** 503 while browser administration is switched off or the service does not answer. */
   private unavailable(): [number, unknown] | null {
-    if (this.agent === 'missing') return this.refuse(503, 'admin_agent_unavailable');
-    if (this.agent === 'disabled') return this.refuse(503, 'admin_disabled');
+    if (this.agent === 'disabled') return this.reject('admin_disabled');
+    if (this.agent === 'missing') return this.reject('admin_agent_unavailable');
     return null;
   }
 
   private busy(section: AdminSection): boolean {
     return [...this.requests.values()].some(
       (item) =>
-        item.out.section === section && item.out.kind === 'config.apply' && !item.out.terminal,
+        item.out.section === section &&
+        (item.out.kind === 'config.apply' || item.out.kind === 'config.revert') &&
+        !item.out.terminal,
     );
   }
 
@@ -1157,11 +986,30 @@ export class AdminMock {
     for (const item of this.requests.values()) this.advance(item);
   }
 
+  private stepOut(step: RequestStep, end: StepEnd): AdminRequestOut['steps'][number] {
+    const text = end.code ? message(end.code) : null;
+    return {
+      step,
+      state: end.state,
+      at: end.state === 'pending' ? null : this.iso(),
+      code: end.code ?? null,
+      message_tr: text?.message_tr ?? null,
+      message_en: text?.message_en ?? null,
+    };
+  }
+
   private advance(item: MockRequest): void {
     if (item.out.terminal) return;
     const out = item.out;
     if (item.cancelled) {
-      this.finish(item, { state: 'cancelled' });
+      // A held change keeps the steps the agent took (its hold `skipped`); a queued one has none.
+      this.finish(item, {
+        state: 'cancelled',
+        steps: item.held
+          ? item.steps.filter((step) => ['received', 'validate', 'hold'].includes(step))
+          : [],
+        ends: { hold: { state: 'skipped' } },
+      });
       return;
     }
     const age = Date.now() - item.started;
@@ -1174,13 +1022,23 @@ export class AdminMock {
       return;
     }
     out.state = stage.state;
-    out.label_tr = STATE_LABELS[stage.state][0];
-    out.label_en = STATE_LABELS[stage.state][1];
-    out.steps = item.steps.map((step, index) => ({
-      step,
-      state: index < stage.running ? 'done' : index === stage.running ? 'running' : 'pending',
-      ...(index < stage.running ? { at: this.iso() } : {}),
-    }));
+    [out.label_tr, out.label_en] = STATE_LABELS[stage.state];
+    // The agent lists a step once it reaches it; the API the reloads once the file is written.
+    // The worker reports no steps.
+    const shown = out.kind.startsWith('worker.') ? [] : item.steps.slice(0, stage.running + 1);
+    out.steps = [
+      ...shown.map((step, index) =>
+        this.stepOut(
+          step,
+          index < stage.running
+            ? { state: item.skipped.has(step) ? 'skipped' : 'done' }
+            : { state: 'running' },
+        ),
+      ),
+      ...(stage.state === 'pending'
+        ? item.ahead.map((step) => this.stepOut(step, { state: 'pending' }))
+        : []),
+    ];
     if (stage.state === 'applied' || stage.state === 'succeeded') this.applyOnce(item);
     out.updated_at = this.iso();
   }
@@ -1195,14 +1053,19 @@ export class AdminMock {
     const out = item.out;
     out.state = final.state;
     out.terminal = true;
-    out.label_tr = STATE_LABELS[final.state][0];
-    out.label_en = STATE_LABELS[final.state][1];
-    out.steps = item.steps.map((step) => ({
-      step,
-      state: final.steps?.[step] ?? 'done',
-      at: this.iso(),
-    }));
-    if (final.error) out.error = { ...message(final.error) };
+    [out.label_tr, out.label_en] = STATE_LABELS[final.state];
+    out.steps = (out.kind.startsWith('worker.') ? [] : final.steps).map((step) =>
+      this.stepOut(
+        step,
+        final.ends?.[step] ?? { state: item.skipped.has(step) ? 'skipped' : 'done' },
+      ),
+    );
+    if (final.error) {
+      const { code, message_tr, message_en } = message(final.error);
+      out.error = { code, message_tr, message_en, field: null };
+    }
+    // A task or the worker reports its outcome also when it failed (`{ok: false, …}`).
+    if (item.result) out.result = copy(item.result);
     out.rolled_back = final.rolledBack ?? false;
     if (final.manual) [out.manual_steps_tr, out.manual_steps_en] = final.manual;
     for (const code of final.warnings ?? [])
@@ -1211,73 +1074,93 @@ export class AdminMock {
     out.updated_at = this.iso();
   }
 
+  /** The state of a request while `step` runs (a hold that does not hold is passed through). */
+  private stateOf(step: RequestStep, held: boolean): RequestState {
+    if (step === 'probe') return 'probing';
+    if (step === 'hold') return held ? 'pending' : 'received';
+    if (step === 'dispatch') return 'dispatched';
+    if (step === 'task') return 'running';
+    if (APPLYING_STEPS.has(step)) return 'applying';
+    if (ACTIVATION_STEPS.includes(step)) return 'applied';
+    return 'received';
+  }
+
   /** Stages of a request through `steps`, and how it ends. */
   private plan(
     steps: RequestStep[],
     outcome: Outcome,
     kind: RequestKind,
+    held: boolean,
   ): { steps: RequestStep[]; stages: Stage[]; final: Final; apply: boolean } {
     const action = kind.startsWith('action.') || kind.startsWith('worker.');
     const stages: Stage[] = [{ at: 0, state: 'queued', running: -1 }];
-    let at = this.stepMs;
-    const stateOf = (step: RequestStep): RequestState => {
-      if (step === 'probe') return 'probing';
-      if (step === 'hold') return 'pending';
-      if (step === 'dispatch') return 'dispatched';
-      if (step === 'task') return 'running';
-      if (APPLYING_STEPS.has(step)) return 'applying';
-      if (RELOAD_STEPS.has(step)) return 'applied';
-      return 'received';
+    const staged = (list: RequestStep[]) => {
+      let at = this.stepMs;
+      list.forEach((step, index) => {
+        stages.push({ at, state: this.stateOf(step, held), running: index });
+        at += this.stepMs;
+      });
     };
     if (outcome === 'expired')
       return {
         steps: [],
         stages,
-        final: { state: 'expired', error: 'request_expired' },
+        final: { state: 'expired', error: 'request_expired', steps: [] },
         apply: false,
       };
     if (outcome === 'rejected')
       return {
         steps: ['received'],
         stages,
-        final: { state: 'rejected', error: 'signature_invalid', steps: { received: 'failed' } },
+        final: {
+          state: 'rejected',
+          error: 'signature_invalid',
+          steps: ['received'],
+          ends: { received: { state: 'failed', code: 'signature_invalid' } },
+        },
         apply: false,
       };
     let list = [...steps];
-    let final: Final = { state: action ? 'succeeded' : 'active' };
+    let final: Final = { state: action ? 'succeeded' : 'active', steps: list };
     let apply = true;
     if (outcome === 'probe_failed' && list.includes('probe')) {
-      const cut = list.indexOf('probe');
-      const skipped = Object.fromEntries(
-        list.slice(cut + 1).map((step): [RequestStep, StepState] => [step, 'skipped']),
-      );
+      // The agent stops at the probe: nothing after it runs.
+      list = list.slice(0, list.indexOf('probe') + 1);
       final = {
         state: 'probe_failed',
         error: 'probe_failed',
-        steps: { probe: 'failed', ...skipped },
+        steps: list,
+        ends: { probe: { state: 'failed', code: 'probe_failed' } },
       };
       apply = false;
     } else if (outcome === 'conflict') {
-      const skipped = Object.fromEntries(
-        list.slice(2).map((step): [RequestStep, StepState] => [step, 'skipped']),
-      );
-      final = { state: 'conflict', error: 'conflict', steps: { validate: 'failed', ...skipped } };
+      list = list.slice(0, 2);
+      final = {
+        state: 'conflict',
+        error: 'conflict',
+        steps: list,
+        ends: { validate: { state: 'failed', code: 'conflict' } },
+      };
       apply = false;
     } else if (outcome === 'failed' || outcome === 'needs_attention') {
-      const verify = list.indexOf('verify');
-      list = [...list.slice(0, verify + 1), 'rollback'];
+      list = [...list.slice(0, list.indexOf('verify') + 1), 'rollback', 'journal'];
       final =
         outcome === 'failed'
           ? {
               state: 'failed',
               error: 'verify_failed',
               rolledBack: true,
-              steps: { verify: 'failed', rollback: 'done' },
+              steps: list,
+              ends: { verify: { state: 'failed', code: 'verify_failed' } },
             }
           : {
               state: 'needs_attention',
               error: 'rollback_failed',
-              steps: { verify: 'failed', rollback: 'failed' },
+              steps: list,
+              ends: {
+                verify: { state: 'failed', code: 'verify_failed' },
+                rollback: { state: 'failed', code: 'rollback_failed' },
+              },
               manual: [
                 '1. Sunucuda yönetici olarak bir komut istemi açın.\n2. python -I -m arcilogger_core.admin versions list\n3. python -I -m arcilogger_core.admin versions restore 17',
                 '1. Open a command prompt as an administrator on the server.\n2. python -I -m arcilogger_core.admin versions list\n3. python -I -m arcilogger_core.admin versions restore 17',
@@ -1285,24 +1168,16 @@ export class AdminMock {
             };
       apply = false;
     } else if (outcome === 'partially_active') {
-      // The last service of the request has not loaded it; a system step failed.
+      // The last service of the request has not loaded it in time; a system step failed.
       const reloads = list.filter((step) => step.startsWith('reload.'));
-      const system = list.filter((step) => step.startsWith('system.'));
-      const steps: Partial<Record<RequestStep, StepState>> = {};
+      const ends: Partial<Record<RequestStep, StepEnd>> = {};
       const last = reloads.at(-1);
-      if (last) steps[last] = 'pending';
-      for (const step of system) steps[step] = 'failed';
-      final = {
-        state: 'partially_active',
-        ...(system.length > 0 ? { error: 'system_sync_failed' } : {}),
-        steps,
-        warnings: ['service_not_reloaded'],
-      };
+      if (last) ends[last] = { state: 'warning', code: 'service_not_reloaded' };
+      for (const step of list.filter((item) => item.startsWith('system.')))
+        ends[step] = { state: 'failed', code: 'system_sync_failed' };
+      final = { state: 'partially_active', steps: list, ends, warnings: ['service_not_reloaded'] };
     }
-    list.forEach((step, index) => {
-      stages.push({ at, state: stateOf(step), running: index });
-      at += this.stepMs;
-    });
+    staged(list);
     return { steps: list, stages, final, apply };
   }
 
@@ -1311,8 +1186,11 @@ export class AdminMock {
     section: AdminSection | null;
     account: MockUser;
     steps: RequestStep[];
+    skipped?: RequestStep[];
+    ahead?: RequestStep[];
     changes?: Record<string, Change>;
     warnings?: string[];
+    effects?: string[];
     apply?: () => void;
     before?: unknown;
     outcome?: Outcome;
@@ -1323,8 +1201,8 @@ export class AdminMock {
   }): MockRequest {
     const id = newId();
     const outcome = init.outcome ?? 'active';
-    const planned = this.plan(init.steps, outcome, init.kind);
     const held = init.hold !== undefined && init.hold !== null;
+    const planned = this.plan(init.steps, outcome, init.kind, held);
     if (held) {
       const hold = planned.steps.indexOf('hold');
       planned.stages = planned.stages.filter((stage) => stage.running <= hold);
@@ -1333,7 +1211,8 @@ export class AdminMock {
       planned.final = {
         state: init.failure.state,
         error: init.failure.error,
-        steps: { task: 'failed' },
+        steps: planned.steps,
+        ends: { task: { state: 'failed', code: init.failure.error } },
       };
     const out: AdminRequestOut = {
       id,
@@ -1364,26 +1243,22 @@ export class AdminMock {
       stages: planned.stages,
       final: planned.final,
       steps: planned.steps,
+      skipped: new Set([...(init.skipped ?? []), ...(held ? [] : (['hold'] as RequestStep[]))]),
+      ahead: init.ahead ?? [],
       apply: planned.apply && !init.failure ? (init.apply ?? null) : null,
       applied: false,
       held,
       cancelled: false,
       before: init.before ?? null,
       day: init.day ?? null,
+      effects: init.effects ?? [],
+      result: init.result ?? null,
     };
-    if (init.result !== undefined) {
-      const result = init.result;
-      const apply = item.apply;
-      item.apply = () => {
-        out.result = result;
-        apply?.();
-      };
-    }
     this.requests.set(id, item);
     return item;
   }
 
-  private accepted(item: MockRequest, effects: string[] = []): [number, AdminAccepted] {
+  private accepted(item: MockRequest): [number, AdminAccepted] {
     return [
       202,
       {
@@ -1393,9 +1268,9 @@ export class AdminMock {
         status_url: `/api/v1/admin/requests/${item.out.id}`,
         guarded: item.held,
         effective_at: item.out.effective_at,
-        changes: item.out.changes,
-        effects,
-        warnings: item.out.warnings,
+        changes: copy(item.out.changes),
+        effects: [...item.effects],
+        warnings: copy(item.out.warnings),
       },
     ];
   }
@@ -1419,101 +1294,6 @@ export class AdminMock {
     item.out.version = { number: n, from: sha256(`${n}-from`), to: sha256(`${n}-to`) };
   }
 
-  // -- the general section ----------------------------------------------------------------------
-
-  private generalCheck(body: { site_name?: unknown; clock?: unknown }) {
-    const problems = [];
-    const name = typeof body.site_name === 'string' ? body.site_name.trim() : '';
-    if (!name) problems.push(problem('site_name', 'site_name_required'));
-    const clock = (body.clock ?? {}) as Record<string, unknown>;
-    const ntp = typeof clock.ntp_server === 'string' ? clock.ntp_server.trim() : '';
-    const fallback = typeof clock.fallback_server === 'string' ? clock.fallback_server.trim() : '';
-    if (ntp && !validHost(ntp)) problems.push(problem('clock.ntp_server', 'host_invalid'));
-    if (fallback && !validHost(fallback))
-      problems.push(problem('clock.fallback_server', 'host_invalid'));
-    if (!ntp && !fallback)
-      problems.push(problem('clock.fallback_server', 'clock_servers_required'));
-    const offset = clock.alert_offset_ms;
-    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 1 || offset > 60_000)
-      problems.push(problem('clock.alert_offset_ms', 'config_invalid'));
-    const current = this.sections.general;
-    const next = {
-      site_name: name,
-      clock: { ntp_server: ntp, fallback_server: fallback, alert_offset_ms: Number(offset) },
-    };
-    const changes = {
-      ...diff('', { site_name: current.site_name }, { site_name: next.site_name }),
-      ...diff('clock', current.clock as unknown as Record<string, unknown>, next.clock),
-    };
-    const clockChanged = Object.keys(changes).some((path) => path.startsWith('clock.'));
-    const warnings = !ntp && fallback ? ['ntp_server_empty'] : [];
-    const effects = [
-      ...(changes.site_name ? ['reload.api', 'reload.worker'] : []),
-      ...(clockChanged ? ['system.time', 'task.next_run:ClockCheck'] : []),
-    ];
-    return { problems, next, changes, clockChanged, warnings, effects };
-  }
-
-  private general(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
-    const account = host.requirePermission(call, 'settings.manage');
-    if (Array.isArray(account)) return account;
-    const body = call.body as {
-      etag?: string;
-      site_name?: unknown;
-      clock?: unknown;
-      probe?: boolean;
-    };
-    const checked = this.generalCheck(body);
-    if (checked.problems.length > 0) return this.refuse(422, 'config_invalid', checked.problems);
-    const check: AdminCheck = {
-      changes: checked.changes,
-      effects: checked.effects,
-      warnings: checked.warnings.map(message),
-      guarded: false,
-      effective_at: null,
-      reauth_required: checked.clockChanged,
-    };
-    if (dryRun) return [200, check];
-    if (checked.clockChanged) {
-      const recent = host.requirePermission(call, 'settings.manage', true);
-      if (Array.isArray(recent)) return recent;
-    }
-    const down = this.unavailable();
-    if (down) return down;
-    if (body.etag !== this.etag('general'))
-      return this.refuse(409, 'config_conflict', { current_etag: this.etag('general') });
-    if (this.busy('general')) return this.refuse(409, 'admin_section_busy');
-    const before = copy(this.sections.general);
-    const steps: RequestStep[] = [
-      'received',
-      'validate',
-      ...(checked.clockChanged && body.probe !== false ? (['probe'] as RequestStep[]) : []),
-      'backup',
-      'write_config',
-      'verify',
-      'reload.api',
-      'reload.worker',
-      ...(checked.clockChanged ? (['system.time'] as RequestStep[]) : []),
-      'journal',
-    ];
-    const outcome = this.takeOutcome();
-    const item = this.enqueue({
-      kind: 'config.apply',
-      section: 'general',
-      account,
-      steps,
-      changes: checked.changes,
-      warnings: [...checked.warnings, ...(this.agent === 'stale' ? ['agent_stale'] : [])],
-      outcome,
-      before,
-      apply: () => {
-        this.sections.general = checked.next;
-        this.recordVersion(item, account);
-      },
-    });
-    return this.accepted(item, checked.effects);
-  }
-
   private takeOutcome(): Outcome {
     const outcome = this.nextOutcome ?? 'active';
     this.nextOutcome = null;
@@ -1526,23 +1306,179 @@ export class AdminMock {
     return outcome;
   }
 
-  /** A refusal with the status of the contract's catalogue (2.12). */
-  private reject(code: string, details?: unknown): [number, unknown] {
-    return this.refuse(HTTP[code]?.[0] ?? 422, code, details);
+  // -- the common path of a change (contract 2.11.1, `routers/admin_config.py`) -----------------
+
+  /**
+   * The check of a change before its rules: the `PUT` first needs browser administration on
+   * (503 `admin_disabled`); both need the section's current `etag` (409 `config_conflict`).
+   */
+  private stale(section: AdminSection, etag: unknown, dryRun: boolean): [number, unknown] | null {
+    if (!dryRun && this.agent === 'disabled') return this.reject('admin_disabled');
+    if (etag !== this.etag(section))
+      return this.reject('config_conflict', { current_etag: this.etag(section) });
+    return null;
   }
 
-  /** The common refusals of a change: service down, stale `etag`, a change still running. */
-  private blocked(section: AdminSection, etag: unknown): [number, unknown] | null {
-    const down = this.unavailable();
-    if (down) return down;
-    if (etag !== this.etag(section))
-      return this.refuse(409, 'config_conflict', { current_etag: this.etag(section) });
-    if (this.busy(section)) return this.refuse(409, 'admin_section_busy');
-    return null;
+  /**
+   * The answer of a checked change: the dry run's `AdminCheck`, or the change queued after the
+   * API's last refusals in their order (nothing changes: 422 `config_unchanged`; the password
+   * confirmation; the administration service; a change of the section still open).
+   */
+  private change(
+    call: RecordedCall,
+    host: MockHost,
+    dryRun: boolean,
+    account: MockUser,
+    plan: {
+      section: AdminSection;
+      changes: Record<string, Change>;
+      warnings: string[];
+      effects: string[];
+      reauth: boolean;
+      probe: boolean;
+      secrets?: boolean;
+      installs?: boolean;
+      /** Held for `policy.hold_hours` (a guarded change, contract 2.3). */
+      held?: boolean;
+      /** Held for `hold` ms instead (a Zamane client for `jar_hold_hours`). */
+      hold?: number | null;
+      ahead?: RequestStep[];
+      check?: Partial<AdminCheck>;
+      next: () => void;
+      cancel?: () => void;
+    },
+  ): Answer {
+    const hold =
+      plan.hold !== undefined
+        ? plan.hold
+        : plan.held && this.holdHours > 0
+          ? this.holdHours * 3_600_000
+          : null;
+    const effects = [...plan.effects].sort();
+    if (dryRun)
+      return [
+        200,
+        {
+          changes: plan.changes,
+          effects,
+          warnings: plan.warnings.map(message),
+          guarded: hold !== null,
+          effective_at: hold === null ? null : this.iso(hold),
+          reauth_required: plan.reauth,
+          retention_preview: null,
+          readiness: null,
+          ...plan.check,
+        } satisfies AdminCheck,
+      ];
+    if (Object.keys(plan.changes).length === 0) return this.reject('config_unchanged');
+    if (plan.reauth) {
+      const recent = host.requirePermission(call, 'settings.manage', true);
+      if (Array.isArray(recent)) return recent;
+    }
+    if (this.agent === 'missing') return this.reject('admin_agent_unavailable');
+    if (this.busy(plan.section)) return this.reject('admin_section_busy');
+    const skipped: RequestStep[] = [
+      ...(plan.secrets ? [] : (['write_secrets'] as RequestStep[])),
+      ...(plan.installs ? [] : (['install_files'] as RequestStep[])),
+    ];
+    const steps = [
+      ...AGENT_STEPS.filter((step) => step !== 'probe' || plan.probe),
+      ...ACTIVATION_STEPS.filter((step) => effects.includes(step)),
+    ];
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: plan.section,
+      account,
+      steps,
+      skipped,
+      ahead: plan.ahead ?? [],
+      changes: plan.changes,
+      effects,
+      warnings: [
+        ...plan.warnings,
+        ...(hold !== null && plan.hold === undefined ? ['change_held'] : []),
+        ...(this.agent === 'stale' ? ['agent_stale'] : []),
+      ],
+      outcome: this.takeOutcome(),
+      hold,
+      before: copy(this.sections[plan.section]),
+      apply: () => {
+        plan.next();
+        this.recordVersion(item, account);
+      },
+    });
+    if (plan.cancel) item.cancel = plan.cancel;
+    // The agent reports the check's warnings at its validation step.
+    item.final.ends = {
+      ...(plan.warnings.length > 0 ? { validate: { state: 'warning' } } : {}),
+      ...item.final.ends,
+    };
+    return this.accepted(item);
+  }
+
+  // -- the general section ----------------------------------------------------------------------
+
+  private general(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as GeneralBody;
+    const refusal = this.stale('general', body.etag, dryRun);
+    if (refusal) return refusal;
+    const current = this.sections.general;
+    const problems: FieldProblem[] = [];
+    // A field left out stays as it is; a clock server sent as `null` too (`GeneralBody.form`).
+    const name = body.site_name === undefined ? current.site_name : (text(body.site_name) ?? '');
+    if (body.site_name !== undefined && !name)
+      problems.push(problem('site_name', 'site_name_required'));
+    const clock = body.clock ?? {};
+    const ntp =
+      typeof clock.ntp_server === 'string' ? clock.ntp_server.trim() : current.clock.ntp_server;
+    const fallback =
+      typeof clock.fallback_server === 'string'
+        ? clock.fallback_server.trim()
+        : current.clock.fallback_server;
+    const offset = clock.alert_offset_ms ?? current.clock.alert_offset_ms;
+    if (ntp && !validHost(ntp)) problems.push(problem('clock.ntp_server', 'host_invalid'));
+    if (fallback && !validHost(fallback))
+      problems.push(problem('clock.fallback_server', 'host_invalid'));
+    if (!ntp && !fallback)
+      problems.push(problem('clock.fallback_server', 'clock_servers_required'));
+    if (!integer(offset, 1, 60_000))
+      problems.push(problem('clock.alert_offset_ms', 'config_invalid'));
+    if (problems.length > 0) return this.refused(problems);
+    const next = {
+      site_name: name,
+      clock: { ntp_server: ntp, fallback_server: fallback, alert_offset_ms: offset },
+    };
+    const changes = {
+      ...diff('', { site_name: current.site_name }, { site_name: next.site_name }),
+      ...diff('clock', { ...current.clock }, next.clock),
+    };
+    const clockChanged = Object.keys(changes).some((path) => path.startsWith('clock.'));
+    return this.change(call, host, dryRun, account, {
+      section: 'general',
+      changes,
+      warnings: !ntp && fallback && clockChanged ? ['ntp_server_empty'] : [],
+      effects: [
+        ...(changes.site_name ? ['reload.api', 'reload.worker'] : []),
+        ...(clockChanged ? ['system.time', 'task.next_run:ClockCheck'] : []),
+      ],
+      reauth: clockChanged,
+      probe: clockChanged && body.probe !== false && Boolean(ntp),
+      next: () => {
+        this.sections.general = next;
+      },
+    });
   }
 
   // -- uploads (contract 2.4.4, 2.6 "tsa") -----------------------------------------------------
 
+  /**
+   * `POST /admin/uploads?kind=`: the captured inspection of an upload of its kind
+   * (`ADMIN.kamusm.upload_root`, `upload_zamane`, `ADMIN.sections.upload_smtp_ca`), for the file
+   * the spec sent: its size and SHA-256, a subject the PEM names, an expired certificate (the
+   * text `expired`), a known Zamane release (the text `known-release`).
+   */
   private upload(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
@@ -1557,9 +1493,15 @@ export class AdminMock {
     const size = Buffer.byteLength(file.content);
     if (size > UPLOAD_LIMITS[kind]) return this.reject('upload_too_large');
     const digest = sha256(file.content);
+    const captured =
+      kind === 'zamane_client'
+        ? ADMIN.kamusm.upload_zamane
+        : kind === 'smtp_ca'
+          ? ADMIN.sections.upload_smtp_ca
+          : ADMIN.kamusm.upload_root;
     const preview: UploadPreview = {
+      ...copy(captured),
       upload_id: newId(),
-      kind,
       size,
       sha256: digest,
       expires_at: this.iso(30 * 60_000),
@@ -1570,35 +1512,42 @@ export class AdminMock {
         return this.reject('zamane_archive_invalid');
       const known = file.content.includes('known-release');
       preview.zamane = {
+        ...copy(ADMIN.kamusm.upload_zamane.zamane ?? null),
         kind: zip ? 'zip' : 'jar',
-        jar_name: zip ? 'tss-client-console-3.1.4.jar' : file.name,
+        jar_name: zip ? 'tss-client-console-3.1.4.jar' : null,
         jar_sha256: zip ? sha256(`${file.content} jar`) : digest,
-        release: known ? 'tss-client-console 3.1.4' : null,
+        release: known ? '3.1.4' : null,
         known,
         accepted: true,
-        reason: null,
+        reason: known ? null : 'unknown_jar_held',
       };
     } else {
       if (!file.content.includes('BEGIN CERTIFICATE'))
         return this.reject('root_certificate_invalid');
       const expired = file.content.includes('expired');
-      const subject =
-        /^Subject: (.+)$/m.exec(file.content)?.[1] ??
-        'CN=Kamu SM Kök Sertifika Hizmet Sağlayıcısı - Sürüm 2 (örnek)';
+      const certificate = copy(captured.certificate);
+      if (!certificate) throw new Error('mock-admin: the captured upload has no certificate');
+      const subject = /^Subject: (.+)$/m.exec(file.content)?.[1] ?? certificate.subject;
       preview.certificate = {
+        ...certificate,
         subject,
         issuer: subject,
-        not_before: '2021-06-01T00:00:00+03:00',
-        not_after: expired ? '2025-06-01T00:00:00+03:00' : '2041-06-01T00:00:00+03:00',
-        is_ca: true,
-        self_signed: true,
-        key: 'RSA 4096',
-        installed: this.sections.tsa.roots.some((root) => root.sha256 === digest),
+        ...(expired
+          ? { not_before: '2021-06-01T00:00:00Z', not_after: '2025-06-01T00:00:00Z' }
+          : {}),
+        installed:
+          kind === 'kamusm_root' && this.sections.tsa.roots.some((root) => root.sha256 === digest),
         warnings: expired ? [message('root_expired')] : [],
       };
     }
     this.uploads.set(preview.upload_id, preview);
     return [201, copy(preview)];
+  }
+
+  /** An upload of `kind` of this mock (404 `upload_not_found` otherwise, like another's). */
+  private staged(id: unknown, kind: UploadPreview['kind']): UploadPreview | null {
+    const upload = this.uploads.get(typeof id === 'string' ? id : '');
+    return upload?.kind === kind ? upload : null;
   }
 
   // -- the Kamu SM section ----------------------------------------------------------------------
@@ -1621,51 +1570,37 @@ export class AdminMock {
   private tsa(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as {
-      etag?: string;
-      server?: unknown;
-      credit_alert_threshold?: unknown;
-      timeout_seconds?: unknown;
-      java?: unknown;
-      customer?: unknown;
-      password?: unknown;
-      clear_credentials?: unknown;
-      confirm?: unknown;
-      probe?: unknown;
-    };
-    if (body.server === 'mock') return this.reject('tsa_mock_refused');
-    if (body.server !== 'test' && body.server !== 'production')
-      return this.reject('tsa_server_invalid');
-    const problems = [];
-    const threshold = body.credit_alert_threshold;
-    if (
-      typeof threshold !== 'number' ||
-      !Number.isInteger(threshold) ||
-      threshold < 0 ||
-      threshold > 1_000_000
-    )
-      problems.push(problem('credit_alert_threshold', 'config_invalid'));
-    const timeout = body.timeout_seconds;
-    if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 5 || timeout > 600)
-      problems.push(problem('timeout_seconds', 'config_invalid'));
-    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
-    const java = typeof body.java === 'string' ? body.java : null;
+    const body = call.body as TsaBody;
+    const refusal = this.stale('tsa', body.etag, dryRun);
+    if (refusal) return refusal;
+    const current = this.sections.tsa;
+    const server = body.server ?? current.server;
+    if (server === 'mock') return this.refused([problem('tsa.provider', 'tsa_mock_refused')]);
+    if (server !== 'test' && server !== 'production')
+      return this.refused([problem('tsa.provider', 'tsa_server_invalid')]);
+    const problems: FieldProblem[] = [];
+    const threshold = body.credit_alert_threshold ?? current.credit_alert_threshold;
+    if (!integer(threshold, 0, 1_000_000))
+      problems.push(problem('tsa.credit_alert_threshold', 'config_invalid'));
+    const timeout = body.timeout_seconds ?? current.timeout_seconds;
+    if (!integer(timeout, 5, 600)) problems.push(problem('tsa.timeout_seconds', 'config_invalid'));
+    const java = body.java === undefined ? current.java : body.java;
     if (java !== null && !JAVA_CHOICES.includes(java))
-      return this.reject('java_not_detected', [problem('java', 'java_not_detected')]);
+      problems.push(problem('tsa.java', 'java_not_detected'));
     const customer = typeof body.customer === 'string' ? body.customer : null;
     const password = typeof body.password === 'string' ? body.password : null;
     if (customer !== null && !/^[^\s\p{Cc}\p{Cf}]{1,64}$/u.test(customer))
-      return this.reject('secret_invalid', [problem('customer', 'secret_invalid')]);
+      problems.push(problem('kamusm.customer', 'secret_invalid'));
     if (password !== null && !/^[^\p{Cc}\p{Cf}]{1,128}$/u.test(password))
-      return this.reject('secret_invalid', [problem('password', 'secret_invalid')]);
+      problems.push(problem('kamusm.password', 'secret_invalid'));
+    if (problems.length > 0) return this.refused(problems);
     const clear = body.clear_credentials === true;
-    const current = this.sections.tsa;
     const candidate = copy(current);
     candidate.provider = 'zamane';
-    candidate.server = body.server;
+    candidate.server = server;
     candidate.java = java;
-    candidate.credit_alert_threshold = threshold as number;
-    candidate.timeout_seconds = timeout as number;
+    candidate.credit_alert_threshold = threshold;
+    candidate.timeout_seconds = timeout;
     const by = `web:${account.username}`;
     const secretChanges: Record<string, Change> = {};
     for (const [name, value] of [
@@ -1683,12 +1618,16 @@ export class AdminMock {
     }
     this.refreshTsa(candidate);
     const production = current.provider === 'zamane' && current.server === 'production';
-    if (body.server === 'production' && !candidate.readiness.production)
-      return this.reject('tsa_not_ready', { missing: candidate.readiness.missing });
-    if (production && body.server === 'test' && body.confirm !== true)
-      return this.reject('tsa_confirm_required');
+    if (server === 'production' && !candidate.readiness.production)
+      return this.refused([problem('tsa.provider', 'tsa_not_ready')], {
+        missing: candidate.readiness.missing,
+      });
+    if (production && server === 'test' && body.confirm !== true)
+      return this.refused([problem('tsa.provider', 'tsa_confirm_required')]);
     if (current.seal_ready.ok && !candidate.seal_ready.ok)
-      return this.reject('tsa_would_break', { causes: candidate.seal_ready.causes });
+      return this.refused([problem('tsa.provider', 'tsa_would_break')], {
+        causes: candidate.seal_ready.causes,
+      });
     const pick = (tsa: TsaSection) => ({
       provider: tsa.provider,
       server: tsa.server,
@@ -1704,116 +1643,69 @@ export class AdminMock {
       (path) => path !== 'tsa.credit_alert_threshold' && path !== 'tsa.timeout_seconds',
     );
     const warnings: string[] = [];
-    if (body.server === 'production' && !production) {
+    if (server === 'production' && !production) {
       if (!candidate.roots.some((root) => root.legal)) warnings.push('legal_roots_empty');
       if (!this.tsaTested()) warnings.push('production_not_tested');
     }
-    if (production && body.server === 'test') warnings.push('production_stamps_stop');
-    const sealing = reauth;
-    const effects = ['reload.worker', 'reload.api', ...(sealing ? ['task.next_run:Seal'] : [])];
-    const check: AdminCheck = {
-      changes,
-      effects,
-      warnings: warnings.map(message),
-      guarded: false,
-      effective_at: null,
-      reauth_required: reauth,
-      readiness: candidate.readiness,
-    };
-    if (dryRun) return [200, check];
-    if (reauth) {
-      const recent = host.requirePermission(call, 'settings.manage', true);
-      if (Array.isArray(recent)) return recent;
-    }
-    const refused = this.blocked('tsa', body.etag);
-    if (refused) return refused;
-    const probed =
-      body.probe !== false &&
-      (Object.keys(secretChanges).length > 0 ||
-        Boolean(changes['tsa.server'] ?? changes['tsa.provider']));
-    const steps: RequestStep[] = [
-      'received',
-      'validate',
-      ...(probed ? (['probe'] as RequestStep[]) : []),
-      'backup',
-      ...(Object.keys(secretChanges).length > 0 ? (['write_secrets'] as RequestStep[]) : []),
-      'write_config',
-      'verify',
-      'reload.worker',
-      'reload.api',
-      'journal',
-    ];
-    const before = copy(current);
-    const item = this.enqueue({
-      kind: 'config.apply',
+    if (production && server === 'test') warnings.push('production_stamps_stop');
+    const secrets = Object.keys(secretChanges).length > 0;
+    return this.change(call, host, dryRun, account, {
       section: 'tsa',
-      account,
-      steps,
       changes,
       warnings,
-      outcome: this.takeOutcome(),
-      before,
-      apply: () => {
+      effects: ['reload.api', 'reload.worker', ...(reauth ? ['task.next_run:Seal'] : [])],
+      reauth,
+      probe:
+        body.probe !== false &&
+        (secrets || Boolean(changes['tsa.server'] ?? changes['tsa.provider'])),
+      secrets,
+      check: { readiness: candidate.readiness },
+      next: () => {
         // Uploads applied meanwhile (roots, a client) stay.
         const now = this.sections.tsa;
-        this.sections.tsa = this.refreshTsa({
-          ...candidate,
-          roots: now.roots,
-          zamane: now.zamane,
-        });
-        this.recordVersion(item, account);
+        this.sections.tsa = this.refreshTsa({ ...candidate, roots: now.roots, zamane: now.zamane });
       },
     });
-    return this.accepted(item, effects);
+  }
+
+  /** `tsa.legal_root_fingerprints` before and after `sha` is added. */
+  private legalRoots(sha: string): Change {
+    const old = this.sections.tsa.roots.filter((root) => root.legal).map((root) => root.sha256);
+    return { old, new: [...old, sha] };
   }
 
   private addRoot(call: RecordedCall, host: MockHost): Answer {
-    const account = host.requirePermission(call, 'settings.manage', true);
+    const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as {
-      etag?: string;
-      upload_id?: string;
-      legal?: unknown;
-      confirmed?: unknown;
-    };
-    const upload = this.uploads.get(body.upload_id ?? '');
-    if (!upload?.certificate || upload.kind !== 'kamusm_root')
-      return this.reject('upload_not_found');
+    const body = call.body as RootBody;
+    const refusal = this.stale('tsa', body.etag, false);
+    if (refusal) return refusal;
+    const upload = this.staged(body.upload_id, 'kamusm_root');
+    const certificate = upload?.certificate;
+    if (!upload || !certificate) return this.reject('upload_not_found');
     if (this.sections.tsa.roots.some((root) => root.sha256 === upload.sha256))
-      return this.reject('root_exists');
+      return this.refused([problem('tsa.roots_dir', 'root_exists')]);
     const legal = body.legal === true;
-    if (legal && body.confirmed !== true) return this.reject('legal_root_confirm_required');
-    const refused = this.blocked('tsa', body.etag);
-    if (refused) return refused;
-    const certificate = upload.certificate;
+    if (legal && body.confirmed !== true)
+      return this.refused([problem('tsa.legal_root_fingerprints', 'legal_root_confirm_required')]);
     const warnings = [
       ...certificate.warnings.map((warning) => warning.code),
       ...(!legal && !this.sections.tsa.roots.some((root) => root.legal)
         ? ['legal_roots_empty']
         : []),
     ];
-    const item = this.enqueue({
-      kind: 'config.apply',
+    return this.change(call, host, false, account, {
       section: 'tsa',
-      account,
-      steps: [
-        'received',
-        'validate',
-        'backup',
-        'install_files',
-        'write_config',
-        'verify',
-        'reload.worker',
-        'journal',
-      ],
       changes: {
-        'tsa.roots': { old: null, new: certificate.subject },
-        ...(legal ? { 'tsa.legal_root_fingerprints': { old: null, new: upload.sha256 } } : {}),
+        ...(legal ? { 'tsa.legal_root_fingerprints': this.legalRoots(upload.sha256) } : {}),
+        [`tsa.roots.${upload.sha256}`]: { old: null, new: 'installed' },
       },
       warnings,
-      outcome: this.takeOutcome(),
-      before: copy(this.sections.tsa),
-      apply: () => {
+      effects: ['reload.api', 'reload.worker', 'task.next_run:Seal'],
+      reauth: true,
+      probe: false,
+      installs: true,
+      next: () => {
         this.sections.tsa.roots.push({
           sha256: upload.sha256,
           subject: certificate.subject,
@@ -1823,89 +1715,73 @@ export class AdminMock {
         });
         this.uploads.delete(upload.upload_id);
         this.refreshTsa();
-        this.recordVersion(item, account);
       },
     });
-    return this.accepted(item, ['reload.worker']);
   }
 
   private addLegalRoot(call: RecordedCall, host: MockHost): Answer {
-    const account = host.requirePermission(call, 'settings.manage', true);
+    const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as { etag?: string; sha256?: string; confirmed?: unknown };
+    const body = call.body as LegalRootBody;
+    const refusal = this.stale('tsa', body.etag, false);
+    if (refusal) return refusal;
     const root = this.sections.tsa.roots.find((item) => item.sha256 === body.sha256);
-    if (!root) return this.reject('root_not_installed');
-    if (body.confirmed !== true) return this.reject('legal_root_confirm_required');
-    const refused = this.blocked('tsa', body.etag);
-    if (refused) return refused;
-    const item = this.enqueue({
-      kind: 'config.apply',
+    if (!root) return this.refused([problem('tsa.legal_root_fingerprints', 'root_not_installed')]);
+    if (body.confirmed !== true)
+      return this.refused([problem('tsa.legal_root_fingerprints', 'legal_root_confirm_required')]);
+    return this.change(call, host, false, account, {
       section: 'tsa',
-      account,
-      steps: [
-        'received',
-        'validate',
-        'backup',
-        'write_config',
-        'verify',
-        'reload.worker',
-        'journal',
-      ],
-      changes: { 'tsa.legal_root_fingerprints': { old: null, new: root.sha256 } },
-      outcome: this.takeOutcome(),
-      before: copy(this.sections.tsa),
-      apply: () => {
+      changes: { 'tsa.legal_root_fingerprints': this.legalRoots(root.sha256) },
+      warnings: [],
+      effects: ['reload.api', 'reload.worker', 'task.next_run:Seal'],
+      reauth: true,
+      probe: false,
+      next: () => {
         const installed = this.sections.tsa.roots.find((entry) => entry.sha256 === root.sha256);
         if (installed) installed.legal = true;
-        this.recordVersion(item, account);
       },
     });
-    return this.accepted(item, ['reload.worker']);
   }
 
   private stageZamane(call: RecordedCall, host: MockHost): Answer {
-    const account = host.requirePermission(call, 'settings.manage', true);
+    const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as { etag?: string; upload_id?: string; expected_sha256?: unknown };
-    const upload = this.uploads.get(body.upload_id ?? '');
+    const body = call.body as ZamaneBody;
+    const refusal = this.stale('tsa', body.etag, false);
+    if (refusal) return refusal;
+    const upload = this.staged(body.upload_id, 'zamane_client');
     const zamane = upload?.zamane;
-    if (!upload || !zamane || upload.kind !== 'zamane_client')
-      return this.reject('upload_not_found');
+    if (!upload || !zamane) return this.reject('upload_not_found');
     if (!zamane.known) {
       if (typeof body.expected_sha256 !== 'string')
-        return this.reject('zamane_sha256_required', [
-          problem('expected_sha256', 'zamane_sha256_required'),
-        ]);
+        return this.refused([problem('tsa.zamane_jar', 'zamane_sha256_required')]);
       if (body.expected_sha256.toLowerCase() !== upload.sha256)
-        return this.reject('zamane_sha256_mismatch', [
-          problem('expected_sha256', 'zamane_sha256_mismatch'),
-        ]);
+        return this.refused([problem('tsa.zamane_jar', 'zamane_sha256_mismatch')]);
     }
-    const refused = this.blocked('tsa', body.etag);
-    if (refused) return refused;
-    const hold = zamane.known ? null : 24 * 3_600_000;
+    const hold = zamane.known ? null : this.config().policy.jar_hold_hours * 3_600_000;
     const tsa = this.sections.tsa;
-    const item = this.enqueue({
-      kind: 'config.apply',
+    // A known release is promoted at once (`zamane\web\`), another after the console approves it.
+    const path = `zamane/${zamane.known ? 'web' : 'approved'}/${zamane.jar_sha256}.jar`;
+    const staged = {
+      sha256: zamane.jar_sha256,
+      effective_at: hold === null ? null : this.iso(hold),
+    };
+    const answer = this.change(call, host, false, account, {
       section: 'tsa',
-      account,
-      steps: [
-        'received',
-        'validate',
-        ...(hold === null ? [] : (['hold'] as RequestStep[])),
-        'install_files',
-        'jar.promotion',
-        'write_config',
-        'verify',
-        'reload.worker',
-        'journal',
-      ],
-      changes: { 'tsa.zamane_jar': { old: tsa.zamane.sha256, new: zamane.jar_sha256 } },
+      changes: {
+        'tsa.zamane_jar': {
+          old: tsa.zamane.present ? `zamane/${tsa.zamane.sha256 ?? ''}.jar` : null,
+          new: path,
+        },
+      },
       warnings: zamane.known ? [] : ['unknown_jar_held'],
-      outcome: this.takeOutcome(),
+      effects: ['jar.promotion', 'reload.api', 'reload.worker', 'task.next_run:Seal'],
+      reauth: true,
+      probe: false,
+      installs: true,
       hold,
-      before: copy(tsa),
-      apply: () => {
+      ahead: ['jar.promotion'],
+      next: () => {
         this.sections.tsa.zamane = {
           present: true,
           sha256: zamane.jar_sha256,
@@ -1917,59 +1793,66 @@ export class AdminMock {
         };
         this.uploads.delete(upload.upload_id);
         this.refreshTsa();
-        this.recordVersion(item, account);
       },
-    });
-    if (hold !== null) {
-      tsa.zamane.staged.push({ sha256: zamane.jar_sha256, effective_at: item.out.effective_at });
-      item.cancel = () => {
+      cancel: () => {
         this.sections.tsa.zamane.staged = this.sections.tsa.zamane.staged.filter(
           (entry) => entry.sha256 !== zamane.jar_sha256,
         );
-      };
-    }
-    return this.accepted(item, ['jar.promotion', 'reload.worker']);
+      },
+    });
+    if (answer[0] === 202 && hold !== null) tsa.zamane.staged.push(staged);
+    return answer;
   }
 
   private tsaTest(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as { confirm_credit?: unknown };
+    const body = call.body as TsaTestBody;
     if (body.confirm_credit !== true) return this.reject('tsa_test_confirm_required');
-    const down = this.unavailable();
-    if (down) return down;
-    const today = this.iso().slice(0, 10);
+    if (this.agent === 'disabled') return this.reject('admin_disabled');
+    // One every 5 minutes, then `policy.tsa_test_per_day` a site day (WP4-3).
+    const last = this.lastAction.get('action.tsa_test');
+    if (last !== undefined && Date.now() - last < 5 * 60_000)
+      return this.limited(
+        'admin_rate_limited',
+        Math.ceil((5 * 60_000 - (Date.now() - last)) / 1000),
+      );
+    const today = siteDay(this.now());
     const done = [...this.requests.values()].filter(
-      (item) => item.out.kind === 'action.tsa_test' && item.out.created_at.slice(0, 10) === today,
+      (item) =>
+        item.out.kind === 'action.tsa_test' && siteDay(new Date(item.out.created_at)) === today,
     ).length;
-    if (done >= 3) return this.reject('tsa_test_limit');
+    if (done >= this.config().policy.tsa_test_per_day) {
+      const midnight = Date.parse(`${today}T00:00:00+03:00`) + 86_400_000;
+      return this.limited('tsa_test_limit', Math.ceil((midnight - this.now().getTime()) / 1000));
+    }
+    if (this.agent === 'missing') return this.reject('admin_agent_unavailable');
+    this.lastAction.set('action.tsa_test', Date.now());
     const tsa = this.sections.tsa;
     const legal = tsa.roots.find((root) => root.legal) ?? null;
     const root = legal ?? tsa.roots[0] ?? null;
     const outcome = this.takeAction();
-    const result = {
+    // The captured result of the capture's test stamp, as the site's Kamu SM test server gives it.
+    const result: TsaTestResult = {
+      ...(copy(ADMIN.kamusm.tsa_test_done.result) as unknown as TsaTestResult),
       provider: tsa.provider,
       legal_grade_claimed: legal !== null,
       legal_grade: legal !== null,
       root_sha256: root?.sha256 ?? null,
       root: root?.subject ?? null,
-      verified: true,
-      errors: [],
-      warnings: [],
       gen_time: this.iso(),
       serial: sha256(`tsa test ${String(done)}`)
         .slice(0, 16)
         .toUpperCase(),
       tsa: 'CN=Kamu SM Zaman Damgası Test Sunucusu (örnek)',
-      tsa_cert_not_after: '2031-01-01T00:00:00+03:00',
-      container: 'test.zd',
+      tsa_cert_not_after: '2031-01-01T00:00:00Z',
     };
     const item = this.enqueue({
       kind: 'action.tsa_test',
       section: null,
       account,
-      steps: ['received', 'dispatch', 'task', 'journal'],
-      result: outcome === 'succeeded' ? result : null,
+      steps: [...ACTION_STEPS],
+      result: outcome === 'succeeded' ? { ...result } : null,
       ...(outcome === 'succeeded'
         ? {}
         : {
@@ -1984,68 +1867,37 @@ export class AdminMock {
 
   // -- sources (contract 2.6 "sources") ---------------------------------------------------------
 
-  /** The refusal of a source, or `null` (`editing`: the name of the source it replaces). */
-  private sourceRefusal(
-    source: unknown,
-    editing: string | null,
-    host: MockHost,
-  ): [number, unknown] | null {
-    if (typeof source !== 'object' || source === null || Array.isArray(source))
-      return host.error(422, 'validation_error', [
-        {
-          loc: ['body', 'source'],
-          type: 'model_attributes_type',
-          msg: 'Input should be an object',
-        },
-      ]);
-    const extra = Object.keys(source).filter((key) => !SOURCE_KEYS.includes(key));
-    const missing = SOURCE_KEYS.filter((key) => !Object.hasOwn(source, key));
-    if (extra.length > 0 || missing.length > 0)
-      return host.error(422, 'validation_error', [
-        ...extra.map((key) => ({
-          loc: ['body', 'source', key],
-          type: 'extra_forbidden',
-          msg: 'Extra inputs are not permitted',
-        })),
-        ...missing.map((key) => ({
-          loc: ['body', 'source', key],
-          type: 'missing',
-          msg: 'Field required',
-        })),
-      ]);
-    const value = source as SourceConfig;
+  /** The refusals of a source (`editing`: the name of the source it replaces), `[]` if none. */
+  private sourceProblems(value: SourceConfig, editing: string | null): FieldProblem[] {
+    const at = (key: string) => `sources.${value.name}.${key}`;
     const others = this.sections.sources.filter((item) => item.name !== editing);
     if (editing === null) {
       if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(value.name) || value.name.startsWith('unknown-'))
-        return this.refuse(422, 'config_invalid', [problem('source.name', 'config_invalid')]);
+        return [problem(at('name'), 'source_invalid')];
       if (others.some((item) => item.name === value.name))
-        return this.reject('source_name_taken', [problem('source.name', 'source_name_taken')]);
-      if (this.sections.sources.length >= 500) return this.reject('source_limit');
-    } else if (value.name !== editing) return this.reject('source_rename_not_allowed');
-    const problems = [];
-    if (!['fortigate', 'mikrotik', 'generic'].includes(value.type))
-      problems.push(problem('source.type', 'config_invalid'));
-    if (!['any', 'udp', 'tcp'].includes(value.transport))
-      problems.push(problem('source.transport', 'config_invalid'));
-    const heartbeat = value.heartbeat_minutes;
-    if (!Number.isInteger(heartbeat) || heartbeat < 1 || heartbeat > 1440)
-      problems.push(problem('source.heartbeat_minutes', 'config_invalid'));
-    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
-    const address = (code: string) => this.reject(code, [problem('source.address', code)]);
+        return [problem(at('name'), 'source_name_taken')];
+      if (this.sections.sources.length >= this.config().policy.max_sources)
+        return [problem('sources', 'source_limit')];
+    }
+    const problems: FieldProblem[] = [];
+    if (!integer(value.heartbeat_minutes, 1, 1440))
+      problems.push(problem(at('heartbeat_minutes'), 'source_invalid'));
+    const address = (code: string) => [...problems, problem(at('address'), code)];
     if (value.address.includes(':')) return address('source_ipv6_unsupported');
     const network = networkOf(value.address);
-    if (!network)
-      return this.refuse(422, 'config_invalid', [problem('source.address', 'config_invalid')]);
+    if (!network) return address('source_invalid');
     if (
       RESERVED_NETWORKS.some((reserved) => overlap(reserved, network)) ||
       value.address === '255.255.255.255'
     )
       return address('source_reserved_address');
     if (LOCAL_ADDRESSES.includes(value.address)) return address('source_own_address');
-    if (!POLICY_NETWORKS.some((allowed) => inside(allowed, network)))
+    if (!nets(...this.config().policy.source_networks).some((allowed) => inside(allowed, network)))
       return address('source_network_not_allowed');
-    if (network.prefix < 32 && network.prefix < 16) return address('source_prefix_too_short');
-    if (others.some((item) => item.address === value.address))
+    if (network.prefix < this.config().policy.min_prefix_v4)
+      return address('source_prefix_too_short');
+    const host = (text: string) => text.replace(/\/32$/, '');
+    if (others.some((item) => host(item.address) === host(value.address)))
       return address('source_address_taken');
     if (
       network.prefix < 32 &&
@@ -2055,7 +1907,7 @@ export class AdminMock {
       })
     )
       return address('source_overlap');
-    return null;
+    return problems;
   }
 
   private sourceChange(
@@ -2064,76 +1916,48 @@ export class AdminMock {
     mode: 'check' | 'add' | 'update',
     path: string | null,
   ): Answer {
-    const body = call.body as { etag?: string; source?: unknown; operation?: unknown };
-    if (mode === 'check' && body.operation !== 'add' && body.operation !== 'update')
-      return host.error(422, 'validation_error', [
-        {
-          loc: ['body', 'operation'],
-          type: 'literal_error',
-          msg: "Input should be 'add' or 'update'",
-        },
-      ]);
+    const body = call.body as SourceCheckBody;
     // The check says which change it is (WP5-1): an addition, or the change of a known name.
-    const operation = mode === 'check' ? (body.operation as 'add' | 'update') : mode;
-    const name =
-      mode === 'update' ? path : ((body.source as { name?: unknown } | undefined)?.name ?? null);
+    const operation = mode === 'check' ? body.operation : mode;
+    const name = mode === 'update' ? path : body.source.name;
     const existing = this.sections.sources.find((item) => item.name === name) ?? null;
-    if (operation === 'update' && !existing) {
-      const account = host.requirePermission(call, 'sources.manage');
-      return Array.isArray(account) ? account : this.reject('source_not_found');
+    const account = host.requirePermission(call, 'sources.manage');
+    if (Array.isArray(account)) return account;
+    const refusal = this.stale('sources', body.etag, mode === 'check');
+    if (refusal) return refusal;
+    // A field left out takes the `SourceConfig` default.
+    const source: SourceConfig = {
+      heartbeat_minutes: 15,
+      expected: true,
+      transport: 'any',
+      enabled: true,
+      ...body.source,
+    };
+    if (operation === 'update') {
+      if (!existing) return this.refused([problem('sources', 'source_not_found')]);
+      if (source.name !== existing.name)
+        return this.refused([
+          problem(`sources.${existing.name}.name`, 'source_rename_not_allowed'),
+        ]);
     }
     const editing = operation === 'add' ? null : (existing?.name ?? null);
-    const disabling =
-      existing !== null &&
-      existing.enabled &&
-      (body.source as { enabled?: unknown } | undefined)?.enabled === false;
-    const account = host.requirePermission(call, 'sources.manage', mode !== 'check' && disabling);
-    if (Array.isArray(account)) return account;
-    const refusal = this.sourceRefusal(body.source, editing, host);
-    if (refusal) return refusal;
-    const source = body.source as SourceConfig;
-    const fields = (item: SourceConfig | null): Record<string, unknown> =>
-      item
-        ? {
-            type: item.type,
-            address: item.address,
-            transport: item.transport,
-            heartbeat_minutes: item.heartbeat_minutes,
-            expected: item.expected,
-            enabled: item.enabled,
-          }
-        : {};
-    const changes = diff(
-      `sources.${source.name}`,
-      fields(editing === null ? null : existing),
-      fields(source),
-    );
-    const warnings = disabling && existing.expected ? ['source_disable_gaps'] : [];
-    const effects = ['reload.collector', 'reload.ingest', 'system.firewall'];
-    if (mode === 'check')
-      return [
-        200,
-        {
-          changes,
-          effects,
-          warnings: warnings.map(message),
-          guarded: false,
-          effective_at: null,
-          reauth_required: disabling,
-        } satisfies AdminCheck,
-      ];
-    const refused = this.blocked('sources', body.etag);
-    if (refused) return refused;
-    const item = this.enqueue({
-      kind: 'config.apply',
+    const problems = this.sourceProblems(source, editing);
+    if (problems.length > 0) return this.refused(problems);
+    const before = editing === null || !existing ? null : sourceTable(existing);
+    const after = sourceTable(source);
+    const changes: Record<string, Change> =
+      JSON.stringify(before) === JSON.stringify(after)
+        ? {}
+        : { [`sources.${source.name}`]: { old: before, new: after } };
+    const disabling = existing !== null && existing.enabled && !source.enabled;
+    return this.change(call, host, mode === 'check', account, {
       section: 'sources',
-      account,
-      steps: SOURCE_STEPS,
       changes,
-      warnings,
-      outcome: this.takeOutcome(),
-      before: copy(this.sections.sources),
-      apply: () => {
+      warnings: disabling && existing.expected ? ['source_disable_gaps'] : [],
+      effects: ['reload.api', 'reload.collector', 'reload.ingest', 'system.firewall'],
+      reauth: disabling,
+      probe: false,
+      next: () => {
         const row: SourceOut = {
           ...source,
           firewall: source.enabled ? 'open' : 'closed',
@@ -2142,113 +1966,33 @@ export class AdminMock {
         const at = this.sections.sources.findIndex((entry) => entry.name === source.name);
         if (at >= 0) this.sections.sources[at] = row;
         else this.sections.sources.push(row);
-        this.recordVersion(item, account);
       },
     });
-    return this.accepted(item, effects);
   }
 
   private removeSource(call: RecordedCall, host: MockHost, name: string): Answer {
-    const account = host.requirePermission(call, 'sources.manage', true);
+    const account = host.requirePermission(call, 'sources.manage');
     if (Array.isArray(account)) return account;
+    const refusal = this.stale('sources', call.query.get('etag'), false);
+    if (refusal) return refusal;
     const existing = this.sections.sources.find((item) => item.name === name);
-    if (!existing) return this.reject('source_not_found');
-    if (call.query.get('confirm') !== name) return this.reject('source_confirm_mismatch');
-    const refused = this.blocked('sources', call.query.get('etag'));
-    if (refused) return refused;
-    const item = this.enqueue({
-      kind: 'config.apply',
+    if (!existing) return this.refused([problem('sources', 'source_not_found')]);
+    if (call.query.get('confirm') !== name)
+      return this.refused([problem(`sources.${name}`, 'source_confirm_mismatch')]);
+    return this.change(call, host, false, account, {
       section: 'sources',
-      account,
-      steps: SOURCE_STEPS,
-      changes: { [`sources.${name}`]: { old: existing.address, new: null } },
+      changes: { [`sources.${name}`]: { old: sourceTable(existing), new: null } },
       warnings: existing.expected && existing.enabled ? ['source_disable_gaps'] : [],
-      outcome: this.takeOutcome(),
-      before: copy(this.sections.sources),
-      apply: () => {
+      effects: ['reload.api', 'reload.collector', 'reload.ingest', 'system.firewall'],
+      reauth: true,
+      probe: false,
+      next: () => {
         this.sections.sources = this.sections.sources.filter((entry) => entry.name !== name);
-        this.recordVersion(item, account);
       },
     });
-    return this.accepted(item, ['reload.collector', 'reload.ingest', 'system.firewall']);
   }
 
   // -- smtp, replica, retention, backup (contract 2.6) ------------------------------------------
-
-  /**
-   * The common part of a section's check and change: the dry run's answer, or the change
-   * accepted (re-authentication, the service, the `etag`, a change still running), held for
-   * `policy.hold_hours` when `held`.
-   */
-  private sectionChange(
-    call: RecordedCall,
-    host: MockHost,
-    dryRun: boolean,
-    account: MockUser,
-    plan: {
-      section: Exclude<AdminSection, 'general' | 'tsa' | 'sources'>;
-      etag: unknown;
-      changes: Record<string, Change>;
-      warnings: string[];
-      effects: string[];
-      reauth: boolean;
-      probe: boolean;
-      secrets: boolean;
-      held: boolean;
-      reloads: RequestStep[];
-      next: () => void;
-      check?: Partial<AdminCheck>;
-    },
-  ): Answer {
-    const hold = plan.held && this.holdHours > 0 ? this.holdHours * 3_600_000 : null;
-    if (dryRun)
-      return [
-        200,
-        {
-          changes: plan.changes,
-          effects: plan.effects,
-          warnings: plan.warnings.map(message),
-          guarded: hold !== null,
-          effective_at: hold === null ? null : this.iso(hold),
-          reauth_required: plan.reauth,
-          ...plan.check,
-        } satisfies AdminCheck,
-      ];
-    if (plan.reauth) {
-      const recent = host.requirePermission(call, 'settings.manage', true);
-      if (Array.isArray(recent)) return recent;
-    }
-    const refused = this.blocked(plan.section, plan.etag);
-    if (refused) return refused;
-    const steps: RequestStep[] = [
-      'received',
-      'validate',
-      ...(plan.probe ? (['probe'] as RequestStep[]) : []),
-      ...(hold === null ? [] : (['hold'] as RequestStep[])),
-      'backup',
-      ...(plan.secrets ? (['write_secrets'] as RequestStep[]) : []),
-      'write_config',
-      'verify',
-      ...plan.reloads,
-      'journal',
-    ];
-    const item = this.enqueue({
-      kind: 'config.apply',
-      section: plan.section,
-      account,
-      steps,
-      changes: plan.changes,
-      warnings: [...plan.warnings, ...(hold === null ? [] : ['change_held'])],
-      outcome: this.takeOutcome(),
-      hold,
-      before: copy(this.sections[plan.section]),
-      apply: () => {
-        plan.next();
-        this.recordVersion(item, account);
-      },
-    });
-    return this.accepted(item, plan.effects);
-  }
 
   /** `{secret: true, old, new}` of a write-only field (`null`: unchanged). */
   private secretChange(
@@ -2263,81 +2007,92 @@ export class AdminMock {
     return null;
   }
 
-  private smtp(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
-    const account = host.requirePermission(call, 'settings.manage');
-    if (Array.isArray(account)) return account;
-    const body = call.body as Record<string, unknown>;
+  /**
+   * The SMTP rules (contract 2.6 "smtp"): the account, the trust (the CA file is part of the
+   * server's identity while a user name is set, WP1-10) and the trial e-mail of a new server.
+   */
+  private smtpRules(
+    body: SmtpBody | SmtpCaBody | SmtpCaClear,
+    next: SmtpSection,
+    account: MockUser,
+  ): { problems: FieldProblem[]; secret: Change | null; probe: boolean; warnings: string[] } {
     const current = this.sections.smtp;
-    const text = (key: string) =>
-      typeof body[key] === 'string' && body[key].trim() ? body[key].trim() : null;
-    const next = {
-      enabled: body.enabled === true,
-      host: text('host'),
-      port: body.port,
-      security: body.security,
-      username: text('username'),
-      from_address: text('from_address'),
-      timeout_seconds: body.timeout_seconds,
-    };
-    const problems = [];
-    if (
-      typeof next.port !== 'number' ||
-      !Number.isInteger(next.port) ||
-      next.port < 1 ||
-      next.port > 65_535
-    )
-      problems.push(problem('port', 'config_invalid'));
-    if (
-      typeof next.timeout_seconds !== 'number' ||
-      !Number.isInteger(next.timeout_seconds) ||
-      next.timeout_seconds < 1 ||
-      next.timeout_seconds > 300
-    )
-      problems.push(problem('timeout_seconds', 'config_invalid'));
-    if (!['starttls', 'ssl', 'none'].includes(String(next.security)))
-      problems.push(problem('security', 'config_invalid'));
-    if (next.host !== null && !validHost(next.host)) problems.push(problem('host', 'host_invalid'));
+    const problems: FieldProblem[] = [];
+    if (!integer(next.port, 1, 65_535)) problems.push(problem('smtp.port', 'config_invalid'));
+    if (!integer(next.timeout_seconds, 1, 300))
+      problems.push(problem('smtp.timeout_seconds', 'config_invalid'));
+    if (next.host !== null && !validHost(next.host))
+      problems.push(problem('smtp.host', 'host_invalid'));
     if (next.from_address !== null && !EMAIL.test(next.from_address))
-      problems.push(problem('from_address', 'config_invalid'));
-    if (next.enabled && next.host === null) problems.push(problem('host', 'config_invalid'));
+      problems.push(problem('smtp.from_address', 'config_invalid'));
+    if (next.enabled && next.host === null) problems.push(problem('smtp.host', 'config_invalid'));
     if (next.enabled && next.from_address === null)
-      problems.push(problem('from_address', 'config_invalid'));
-    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
+      problems.push(problem('smtp.from_address', 'config_invalid'));
     const stored = current.secrets['smtp.password']?.set ?? false;
-    const typed = typeof body.password === 'string' && body.password !== '';
-    const clear = body.clear_password === true || (next.username === null && stored);
+    const password = 'password' in body ? body.password : null;
+    const typed = typeof password === 'string' && password !== '';
+    const clearing = 'clear_password' in body && body.clear_password === true;
+    const clear = clearing || (next.username === null && stored);
     const endpoint =
       next.host !== current.host ||
       next.port !== current.port ||
       next.security !== current.security ||
-      next.username !== current.username;
+      next.username !== current.username ||
+      next.ca.sha256 !== current.ca.sha256;
     if (next.username !== null) {
-      if (!typed && (!stored || body.clear_password === true))
-        return this.reject('smtp_password_required', [
-          problem('password', 'smtp_password_required'),
-        ]);
-      if (stored && !typed && endpoint)
-        return this.reject('secret_rebind_required', [
-          problem('password', 'secret_rebind_required'),
-        ]);
+      if (!typed && (!stored || clearing))
+        problems.push(problem('smtp.password', 'smtp_password_required'));
+      else if (!typed && endpoint)
+        problems.push(problem('smtp.password', 'secret_rebind_required'));
       if (next.security === 'none' && !['localhost', '127.0.0.1', '::1'].includes(next.host ?? ''))
-        return this.reject('smtp_plaintext_auth_refused', [
-          problem('security', 'smtp_plaintext_auth_refused'),
-        ]);
+        problems.push(problem('smtp.security', 'smtp_plaintext_auth_refused'));
     }
-    const needsTest = next.enabled && (!current.enabled || endpoint);
-    if (needsTest) {
+    const probe = next.enabled && (!current.enabled || endpoint) && body.probe !== false;
+    if (probe && problems.length === 0) {
       const to = typeof body.test_to === 'string' ? body.test_to : null;
-      if (to === null)
-        return this.reject('smtp_test_recipient_required', [
-          problem('test_to', 'smtp_test_recipient_required'),
-        ]);
-      if (!this.recipients(account).includes(to))
-        return this.reject('test_email_recipient_not_allowed', [
-          problem('test_to', 'test_email_recipient_not_allowed'),
-        ]);
+      if (to === null) problems.push(problem('test_to', 'smtp_test_recipient_required'));
+      else if (!this.recipients(account).includes(to))
+        problems.push(problem('test_to', 'test_email_recipient_not_allowed'));
     }
-    const values = (smtp: typeof next) => ({
+    const warnings = [
+      ...(current.enabled && !next.enabled ? ['smtp_disabled'] : []),
+      ...(next.security === 'none' && next.username === null && next.enabled
+        ? ['smtp_plaintext']
+        : []),
+    ];
+    const secret = this.secretChange(current.secrets['smtp.password'], password, clear);
+    return { problems, secret, probe, warnings };
+  }
+
+  private smtpSecrets(secret: Change | null, account: MockUser): SmtpSection['secrets'] {
+    if (!secret || !('secret' in secret)) return this.sections.smtp.secrets;
+    const by = { changed_at: this.iso(), changed_by: `web:${account.username}` };
+    return { 'smtp.password': { set: secret.new === 'set', ...by } };
+  }
+
+  private smtp(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as SmtpBody;
+    const refusal = this.stale('smtp', body.etag, dryRun);
+    if (refusal) return refusal;
+    const current = this.sections.smtp;
+    // A text field sent as null or empty is removed; a field left out stays as it is.
+    const field = <K extends 'host' | 'username' | 'from_address'>(key: K) =>
+      body[key] === undefined ? current[key] : text(body[key]);
+    const next: SmtpSection = {
+      ...current,
+      enabled: body.enabled ?? current.enabled,
+      host: field('host'),
+      port: body.port ?? current.port,
+      security: body.security ?? current.security,
+      username: field('username'),
+      from_address: field('from_address'),
+      timeout_seconds: body.timeout_seconds ?? current.timeout_seconds,
+    };
+    const rules = this.smtpRules(body, next, account);
+    if (rules.problems.length > 0) return this.refused(rules.problems);
+    const values = (smtp: SmtpSection) => ({
       enabled: smtp.enabled,
       host: smtp.host,
       port: smtp.port,
@@ -2346,37 +2101,19 @@ export class AdminMock {
       from_address: smtp.from_address,
       timeout_seconds: smtp.timeout_seconds,
     });
-    const secret = this.secretChange(current.secrets['smtp.password'], body.password, clear);
-    const changes: Record<string, Change> = {
-      ...diff('smtp', values(current), values(next)),
-      ...(secret ? { 'smtp.password': secret } : {}),
-    };
-    const warnings = [
-      ...(current.enabled && !next.enabled ? ['smtp_disabled'] : []),
-      ...(next.security === 'none' && next.username === null && next.enabled
-        ? ['smtp_plaintext']
-        : []),
-    ];
-    return this.sectionChange(call, host, dryRun, account, {
+    return this.change(call, host, dryRun, account, {
       section: 'smtp',
-      etag: body.etag,
-      changes,
-      warnings,
+      changes: {
+        ...diff('smtp', values(current), values(next)),
+        ...(rules.secret ? { 'smtp.password': rules.secret } : {}),
+      },
+      warnings: rules.warnings,
       effects: ['reload.worker'],
       reauth: true,
-      probe: needsTest && body.probe !== false,
-      secrets: secret !== null,
-      held: false,
-      reloads: ['reload.worker'],
+      probe: rules.probe,
+      secrets: rules.secret !== null,
       next: () => {
-        const by = { changed_at: this.iso(), changed_by: `web:${account.username}` };
-        this.sections.smtp = {
-          ...this.sections.smtp,
-          ...(next as Omit<typeof current, 'ca' | 'secrets'>),
-          secrets: secret
-            ? { 'smtp.password': { set: secret.new === 'set', ...by } }
-            : this.sections.smtp.secrets,
-        };
+        this.sections.smtp = { ...next, secrets: this.smtpSecrets(rules.secret, account) };
       },
     });
   }
@@ -2392,63 +2129,83 @@ export class AdminMock {
     ];
   }
 
+  /** `POST /admin/config/smtp/ca` (`clear`: `DELETE …?etag=`, its body optional). */
   private smtpCa(call: RecordedCall, host: MockHost, clear: boolean): Answer {
-    const account = host.requirePermission(call, 'settings.manage', true);
+    const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = (call.body ?? {}) as { etag?: string; upload_id?: string };
-    const upload = clear ? null : this.uploads.get(body.upload_id ?? '');
-    if (!clear && (!upload || upload.kind !== 'smtp_ca')) return this.reject('upload_not_found');
-    const refused = this.blocked('smtp', clear ? call.query.get('etag') : body.etag);
-    if (refused) return refused;
+    const body = (call.body ?? {}) as SmtpCaBody | SmtpCaClear;
+    const refusal = this.stale(
+      'smtp',
+      clear ? call.query.get('etag') : (body as SmtpCaBody).etag,
+      false,
+    );
+    if (refusal) return refusal;
+    const upload = clear ? null : this.staged((body as SmtpCaBody).upload_id, 'smtp_ca');
+    if (!clear && !upload) return this.reject('upload_not_found');
+    const current = this.sections.smtp;
     const sha = upload?.sha256 ?? null;
-    const item = this.enqueue({
-      kind: 'config.apply',
+    const next: SmtpSection = { ...current, ca: { sha256: sha } };
+    const rules = this.smtpRules(body, next, account);
+    if (rules.problems.length > 0) return this.refused(rules.problems);
+    const path = (digest: string | null) => (digest ? `smtp-ca/${digest}.pem` : null);
+    return this.change(call, host, false, account, {
       section: 'smtp',
-      account,
-      steps: [
-        'received',
-        'validate',
-        'backup',
-        'install_files',
-        'write_config',
-        'verify',
-        'reload.worker',
-        'journal',
-      ],
-      changes: { 'smtp.ca_file': { old: this.sections.smtp.ca.sha256, new: sha } },
-      outcome: this.takeOutcome(),
-      before: copy(this.sections.smtp),
-      apply: () => {
-        this.sections.smtp.ca = { sha256: sha };
+      changes:
+        current.ca.sha256 === sha
+          ? {}
+          : {
+              'smtp.ca_file': { old: path(current.ca.sha256), new: path(sha) },
+              ...(rules.secret ? { 'smtp.password': rules.secret } : {}),
+            },
+      warnings: rules.warnings,
+      effects: ['reload.worker'],
+      reauth: true,
+      probe: rules.probe,
+      secrets: rules.secret !== null,
+      installs: upload !== null,
+      next: () => {
+        this.sections.smtp = { ...next, secrets: this.smtpSecrets(rules.secret, account) };
         if (upload) this.uploads.delete(upload.upload_id);
-        this.recordVersion(item, account);
       },
     });
-    return this.accepted(item, ['reload.worker']);
   }
 
+  /** The worker's test e-mail (WP3-2, WP4-4): no agent needed, 5 in any 60 minutes. */
   private testEmail(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const to = (call.body as { to?: unknown }).to;
+    const to = (call.body as TestEmailBody).to.trim();
+    if (!this.recipients(account).some((item) => item.toLowerCase() === to.toLowerCase()))
+      return this.reject('test_email_recipient_not_allowed');
     const smtp = this.sections.smtp;
     if (!smtp.host || !smtp.from_address) return this.reject('smtp_not_configured');
-    if (typeof to !== 'string' || !this.recipients(account).includes(to))
-      return this.reject('test_email_recipient_not_allowed');
     const hour = Date.now() - 3_600_000;
     const sent = this.testEmails.filter((at) => at > hour);
-    if (sent.length >= 5) return this.reject('admin_rate_limited', { retry_after: 600 });
+    if (sent.length >= 5)
+      return this.limited('admin_rate_limited', Math.ceil(((sent[0] ?? 0) - hour) / 1000));
     this.testEmails.push(Date.now());
     const outcome = this.takeAction();
+    // The captured result (the address masked, ADR-0010 A4).
+    const captured = ADMIN.sections.test_email_done.result as unknown as TestEmailResult;
+    const result: TestEmailResult =
+      outcome === 'succeeded'
+        ? { ...captured, to: maskAddress(to) }
+        : {
+            ...captured,
+            ok: false,
+            to: maskAddress(to),
+            smtp_code: 535,
+            error_text: '535 5.7.8 Kimlik doğrulama başarısız',
+          };
     const item = this.enqueue({
       kind: 'worker.test_email',
       section: null,
       account,
-      steps: ['received', 'task', 'journal'],
-      result:
-        outcome === 'succeeded'
-          ? { ok: true, error_text: null }
-          : { ok: false, error_text: '535 5.7.8 Kimlik doğrulama başarısız (b***@ornek.example)' },
+      steps: [],
+      result: { ...result },
+      ...(outcome === 'succeeded'
+        ? {}
+        : { failure: { state: 'failed' as RequestState, error: 'smtp_test_failed' } }),
     });
     return this.accepted(item);
   }
@@ -2456,16 +2213,17 @@ export class AdminMock {
   private replica(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as Record<string, unknown>;
+    const body = call.body as ReplicaBody;
+    const refusal = this.stale('replica', body.etag, dryRun);
+    if (refusal) return refusal;
     const current = this.sections.replica;
-    const target =
-      typeof body.target === 'string' && body.target.trim() ? body.target.trim() : null;
-    const user = typeof body.user === 'string' && body.user.trim() ? body.user.trim() : null;
-    const enabled = body.enabled === true;
+    const target = body.target === undefined ? current.target : text(body.target);
+    const user = body.user === undefined ? current.user : text(body.user);
+    const enabled = body.enabled ?? current.enabled;
+    const problems: FieldProblem[] = [];
     if (target !== null && !UNC.test(target))
-      return this.reject('replica_target_invalid', [problem('target', 'replica_target_invalid')]);
-    if (enabled && target === null)
-      return this.refuse(422, 'config_invalid', [problem('target', 'config_invalid')]);
+      problems.push(problem('replica.target', 'replica_target_invalid'));
+    if (enabled && target === null) problems.push(problem('replica.target', 'config_invalid'));
     const stored = current.secrets['replica.password']?.set ?? false;
     const typed = typeof body.password === 'string' && body.password !== '';
     const clear = body.clear_password === true;
@@ -2476,46 +2234,45 @@ export class AdminMock {
           user,
         )
       )
-        return this.reject('replica_user_invalid', [problem('user', 'replica_user_invalid')]);
-      if (!typed && (!stored || clear))
-        return this.reject('replica_password_required', [
-          problem('password', 'replica_password_required'),
-        ]);
-      if (stored && !typed && (hostOf(target) !== hostOf(current.target) || user !== current.user))
-        return this.reject('secret_rebind_required', [
-          problem('password', 'secret_rebind_required'),
-        ]);
+        problems.push(problem('replica.user', 'replica_user_invalid'));
+      else if (!typed && (!stored || clear))
+        problems.push(problem('replica.password', 'replica_password_required'));
+      else if (
+        stored &&
+        !typed &&
+        (hostOf(target) !== hostOf(current.target) || user !== current.user)
+      )
+        problems.push(problem('replica.password', 'secret_rebind_required'));
     }
+    if (problems.length > 0) return this.refused(problems);
     const next = { enabled, target, user };
     const secret = this.secretChange(current.secrets['replica.password'], body.password, clear);
-    const changes: Record<string, Change> = {
-      ...diff(
-        'replica',
-        { enabled: current.enabled, target: current.target, user: current.user },
-        next,
-      ),
-      ...(secret ? { 'replica.password': secret } : {}),
-    };
-    const held = current.enabled && (!enabled || target !== current.target);
     const touched = target !== current.target || user !== current.user || secret !== null;
-    return this.sectionChange(call, host, dryRun, account, {
+    return this.change(call, host, dryRun, account, {
       section: 'replica',
-      etag: body.etag,
-      changes,
+      changes: {
+        ...diff(
+          'replica',
+          { enabled: current.enabled, target: current.target, user: current.user },
+          next,
+        ),
+        ...(secret ? { 'replica.password': secret } : {}),
+      },
       warnings: [],
-      effects: ['task.next_run:Replica'],
+      effects: ['reload.worker', 'task.next_run:Replica'],
       reauth: true,
       probe: enabled && touched && body.probe !== false,
       secrets: secret !== null,
-      held,
-      reloads: ['reload.worker'],
+      // Switching the replica off or moving it is guarded (contract 2.3).
+      held: current.enabled && (!enabled || target !== current.target),
       next: () => {
         const by = { changed_at: this.iso(), changed_by: `web:${account.username}` };
         this.sections.replica = {
           ...next,
-          secrets: secret
-            ? { 'replica.password': { set: secret.new === 'set', ...by } }
-            : this.sections.replica.secrets,
+          secrets:
+            secret && 'secret' in secret
+              ? { 'replica.password': { set: secret.new === 'set', ...by } }
+              : this.sections.replica.secrets,
         };
       },
     });
@@ -2524,42 +2281,30 @@ export class AdminMock {
   private replicaTest(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const down = this.unavailable();
-    if (down) return down;
-    if (this.lastReplicaTest !== null && Date.now() - this.lastReplicaTest < 60_000) {
-      const retry = Math.ceil((60_000 - (Date.now() - this.lastReplicaTest)) / 1000);
-      const [status, body] = this.reject('admin_rate_limited', { retry_after: retry });
-      return [
-        status,
-        body,
-        {
-          body: Buffer.from(JSON.stringify(body)),
-          contentType: 'application/json',
-          headers: { 'Retry-After': String(retry) },
-        },
-      ];
-    }
-    this.lastReplicaTest = Date.now();
+    if (this.agent === 'disabled') return this.reject('admin_disabled');
+    const last = this.lastAction.get('action.replica_test');
+    if (last !== undefined && Date.now() - last < 60_000)
+      return this.limited('admin_rate_limited', Math.ceil((60_000 - (Date.now() - last)) / 1000));
+    if (this.agent === 'missing') return this.reject('admin_agent_unavailable');
+    this.lastAction.set('action.replica_test', Date.now());
     const outcome = this.takeAction();
-    const ok = outcome === 'succeeded';
+    const captured = ADMIN.sections.replica_test_done.result as unknown as ReplicaTestResult;
+    const result: ReplicaTestResult =
+      outcome === 'succeeded' ? { ...captured } : { ok: false, message: 'access denied' };
     const item = this.enqueue({
       kind: 'action.replica_test',
       section: null,
       account,
-      steps: ['received', 'dispatch', 'task', 'journal'],
-      result: ok
-        ? {
-            ok: true,
-            message: 'connected, test file written and removed',
-            message_tr: 'Replika hedefine bağlanıldı; deneme dosyası yazılıp silindi.',
-            message_en: 'Connected to the replica target; a test file was written and removed.',
-          }
+      steps: [...ACTION_STEPS],
+      result: outcome === 'timed_out' ? null : { ...result },
+      ...(outcome === 'succeeded'
+        ? {}
         : {
-            ok: false,
-            message: 'access denied',
-            message_tr: 'Replika hedefine bağlanılamadı: erişim reddedildi.',
-            message_en: 'Could not connect to the replica target: access denied.',
-          },
+            failure:
+              outcome === 'timed_out'
+                ? { state: 'timed_out' as RequestState, error: 'task_timeout' }
+                : { state: 'failed' as RequestState, error: 'replica_test_failed' },
+          }),
     });
     return this.accepted(item);
   }
@@ -2596,41 +2341,35 @@ export class AdminMock {
   private retention(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as {
-      etag?: unknown;
-      enabled?: unknown;
-      days?: unknown;
-      confirm_delete_days?: unknown;
-    };
+    const body = call.body as RetentionBody;
+    const refusal = this.stale('retention', body.etag, dryRun);
+    if (refusal) return refusal;
     const current = this.sections.retention;
-    const days = body.days;
-    if (typeof days !== 'number' || !Number.isInteger(days))
-      return this.refuse(422, 'config_invalid', [problem('days', 'config_invalid')]);
+    const days = body.days ?? current.days;
+    if (!integer(days, -Infinity, Infinity) || days > 36_500)
+      return this.refused([problem('retention.days', 'config_invalid')]);
     if (days < current.minimum_days)
-      return this.reject('retention_below_minimum', [problem('days', 'retention_below_minimum')]);
-    if (days > 36_500)
-      return this.refuse(422, 'config_invalid', [problem('days', 'config_invalid')]);
-    const enabled = body.enabled === true;
+      return this.refused([problem('retention.days', 'retention_below_minimum')]);
+    const enabled = body.enabled ?? current.enabled;
     const deletes = enabled && (!current.enabled || days < current.days);
     const hold = deletes && this.holdHours > 0 ? this.holdHours * 3_600_000 : 0;
     const preview = this.retentionPreview(days, hold);
-    if (!dryRun && deletes && body.confirm_delete_days !== preview.days_to_delete)
-      return this.reject('retention_confirm_mismatch');
-    return this.sectionChange(call, host, dryRun, account, {
+    // Without `confirm_delete_days` the dry run takes the preview's number (WP4-4).
+    const confirmed = body.confirm_delete_days ?? (dryRun ? preview.days_to_delete : null);
+    if (deletes && preview.days_to_delete > 0 && confirmed !== preview.days_to_delete)
+      return this.refused([problem('retention.days', 'retention_confirm_mismatch')]);
+    return this.change(call, host, dryRun, account, {
       section: 'retention',
-      etag: body.etag,
       changes: diff(
         'retention',
         { enabled: current.enabled, days: current.days },
         { enabled, days },
       ),
       warnings: [],
-      effects: ['task.next_run:Retention'],
+      effects: ['reload.api', 'task.next_run:Retention'],
       reauth: true,
       probe: false,
-      secrets: false,
       held: deletes,
-      reloads: ['reload.worker'],
       check: { retention_preview: preview },
       next: () => {
         this.sections.retention = { ...this.sections.retention, enabled, days };
@@ -2641,7 +2380,17 @@ export class AdminMock {
   private backup(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as Record<string, unknown>;
+    const body = call.body as BackupBody;
+    const refusal = this.stale('backup', body.etag, dryRun);
+    if (refusal) return refusal;
+    const current = this.sections.backup;
+    const next: typeof current = {
+      enabled: body.enabled ?? current.enabled,
+      keep_daily: body.keep_daily ?? current.keep_daily,
+      keep_weekly: body.keep_weekly ?? current.keep_weekly,
+      keep_monthly: body.keep_monthly ?? current.keep_monthly,
+      min_free_gb: body.min_free_gb ?? current.min_free_gb,
+    };
     const ranges: Record<string, [number, number]> = {
       keep_daily: [1, 3660],
       keep_weekly: [0, 520],
@@ -2649,49 +2398,29 @@ export class AdminMock {
       min_free_gb: [0, 100_000],
     };
     const problems = Object.entries(ranges)
-      .filter(([key, [min, max]]) => {
-        const value = body[key];
-        return typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max;
-      })
-      .map(([key]) => problem(key, 'config_invalid'));
-    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
-    const current = this.sections.backup;
-    const next: typeof current = {
-      enabled: body.enabled === true,
-      keep_daily: body.keep_daily as number,
-      keep_weekly: body.keep_weekly as number,
-      keep_monthly: body.keep_monthly as number,
-      min_free_gb: body.min_free_gb as number,
-    };
-    return this.sectionChange(call, host, dryRun, account, {
+      .filter(([key, [low, high]]) => !integer(next[key as keyof typeof next], low, high))
+      .map(([key]) => problem(`backup.${key}`, 'config_invalid'));
+    if (problems.length > 0) return this.refused(problems);
+    return this.change(call, host, dryRun, account, {
       section: 'backup',
-      etag: body.etag,
-      changes: diff(
-        'backup',
-        current as unknown as Record<string, unknown>,
-        next as unknown as Record<string, unknown>,
-      ),
+      changes: diff('backup', { ...current }, { ...next }),
       warnings: current.enabled && !next.enabled ? ['backup_disabled'] : [],
       effects: ['task.next_run:Backup'],
       reauth: true,
       probe: false,
-      secrets: false,
-      held: false,
-      reloads: ['reload.worker'],
       next: () => {
         this.sections.backup = next;
       },
     });
   }
 
+  /** The worker's lease rebuild (WP3-2): at most 31 past days, not before the first log. */
   private leaseRebuild(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    const body = call.body as { from?: unknown; to?: unknown };
-    const day = (value: unknown) =>
-      typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
-        ? Date.parse(`${value}T00:00:00Z`)
-        : NaN;
+    const body = call.body as LeaseRebuildBody;
+    const day = (value: string) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
     const from = day(body.from);
     const to = day(body.to);
     const today = Date.parse(`${siteDay(this.now())}T00:00:00Z`);
@@ -2706,16 +2435,21 @@ export class AdminMock {
     )
       return this.reject('lease_rebuild_range');
     const outcome = this.takeAction();
+    const result: LeaseRebuildResult = {
+      done_days: total,
+      total_days: total,
+      failed_days: outcome === 'succeeded' ? [] : [body.from],
+    };
     const item = this.enqueue({
       kind: 'worker.lease_rebuild',
       section: null,
       account,
-      steps: ['received', 'task', 'journal'],
-      result: {
-        done_days: total,
-        total_days: total,
-        failed_days: outcome === 'succeeded' ? [] : [String(body.from)],
-      },
+      // Its row goes queued → running → done (the worker reports no steps).
+      steps: ['task'],
+      result: { ...result },
+      ...(outcome === 'succeeded'
+        ? {}
+        : { failure: { state: 'failed' as RequestState, error: 'lease_rebuild_failed' } }),
     });
     return this.accepted(item);
   }
@@ -2747,22 +2481,24 @@ export class AdminMock {
 
   // -- requests: list, one, cancel, revert ------------------------------------------------------
 
+  /** `GET /admin/requests`: newest first; `cursor` is the id of the last item of the page before. */
   private listRequests(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
     const kind = call.query.get('kind');
     const limit = Number(call.query.get('limit') ?? 50);
-    const offset = Number(call.query.get('cursor') ?? 0);
+    const cursor = call.query.get('cursor');
     const items = [...this.requests.values()]
       .map((item) => item.out)
       .filter((out) => !kind || out.kind === kind)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    const page = items.slice(offset, offset + limit);
+      .reverse();
+    const start = cursor ? items.findIndex((out) => out.id === cursor) + 1 : 0;
+    const page = items.slice(start, start + limit);
     return [
       200,
       {
         items: copy(page),
-        next_cursor: offset + limit < items.length ? String(offset + limit) : null,
+        next_cursor: start + limit < items.length ? (page.at(-1)?.id ?? null) : null,
       },
     ];
   }
@@ -2776,69 +2512,85 @@ export class AdminMock {
         : 'settings.manage';
     const account = host.requirePermission(call, own);
     if (Array.isArray(account)) return account;
-    if (!item) return this.refuse(404, 'admin_request_not_found');
+    if (!item) return this.reject('admin_request_not_found');
     return [200, copy(item.out)];
   }
 
+  /**
+   * `DELETE /admin/requests/{id}` (WP4-5): a request the service has not taken is removed at once
+   * (`state: cancelled`, nothing to follow); a held change is cancelled by a signed
+   * `config.cancel` (a password confirmation), which the target reports once taken.
+   */
   private cancelRequest(call: RecordedCall, host: MockHost, id: string): Answer {
     const item = this.requests.get(id);
-    const account = host.requirePermission(call, 'settings.manage', item?.out.state === 'pending');
+    const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    if (!item) return this.refuse(404, 'admin_request_not_found');
-    if (item.out.state !== 'queued' && item.out.state !== 'pending')
-      return this.refuse(409, 'request_not_cancellable');
-    item.cancelled = true;
-    item.cancel?.();
+    if (!item) return this.reject('admin_request_not_found');
+    const state = item.out.state;
+    if (state === 'queued' || state === 'waiting_for_agent') {
+      item.cancelled = true;
+      item.cancel?.();
+      this.advance(item);
+      const [, answer] = this.accepted(item);
+      return [202, { ...answer, state: 'cancelled' } satisfies AdminAccepted];
+    }
+    if (state !== 'pending') return this.reject('request_not_cancellable');
+    const recent = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(recent)) return recent;
     const cancel = this.enqueue({
       kind: 'config.cancel',
-      section: item.out.section,
+      section: null,
       account,
-      steps: ['received', 'validate', 'journal'],
+      steps: ['received', 'validate'],
+      apply: () => {
+        item.cancelled = true;
+        item.cancel?.();
+      },
     });
+    cancel.final.state = 'succeeded';
     return this.accepted(cancel);
   }
 
   private revertRequest(call: RecordedCall, host: MockHost, id: string): Answer {
-    const account = host.requirePermission(call, 'settings.manage', true);
+    const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
     const item = this.requests.get(id);
-    if (!item) return this.refuse(404, 'admin_request_not_found');
+    if (!item) return this.reject('admin_request_not_found');
     const out = item.out;
     if (
       !(out.kind === 'config.apply' || out.kind === 'config.revert') ||
-      !(out.state === 'active' || out.state === 'partially_active') ||
+      !['applied', 'active', 'partially_active'].includes(out.state) ||
       out.version === null ||
       out.section === null ||
       item.before === null
     )
-      return this.refuse(409, 'request_not_revertible');
+      return this.reject('request_not_revertible');
+    const recent = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(recent)) return recent;
     const down = this.unavailable();
     if (down) return down;
     const section = out.section;
+    if (this.busy(section)) return this.reject('admin_section_busy');
     const before = item.before;
+    // The target's changes the other way round (a secret stays `set`/`unset` only).
     const changes = Object.fromEntries(
       Object.entries(out.changes).map(([path, change]) => [
         path,
-        'secret' in change
-          ? change
-          : { old: (change as { new: unknown }).new, new: (change as { old: unknown }).old },
+        { ...change, old: change.new, new: change.old },
       ]),
     );
+    const effects = [...item.effects];
     const revert = this.enqueue({
       kind: 'config.revert',
       section,
       account,
       steps: [
-        'received',
-        'validate',
-        'backup',
-        'write_config',
-        'verify',
-        'reload.api',
-        'reload.worker',
-        'journal',
+        ...AGENT_STEPS.filter((step) => step !== 'probe'),
+        ...ACTIVATION_STEPS.filter((step) => effects.includes(step)),
       ],
+      skipped: ['write_secrets', 'install_files'],
       changes,
+      effects,
       before: copy(this.sections[section]),
       apply: () => {
         (this.sections as Record<AdminSection, unknown>)[section] = copy(before);
@@ -2857,38 +2609,43 @@ export class AdminMock {
     return cell?.state ?? SEALS.days[day]?.state ?? null;
   }
 
+  /** "Şimdi mühürle" (`routers/seals.py`): the day's 409s first, then the service. */
   private sealNow(call: RecordedCall, host: MockHost, day: string): Answer {
     const account = host.requirePermission(call, 'seal.manage');
     if (Array.isArray(account)) return account;
-    const down = this.unavailable();
-    if (down) return down;
     const state = this.dayState(day);
     if (state === 'sealed' || state === 'verified' || state === 'late')
-      return this.refuse(409, 'seal_day_sealed');
+      return this.reject('seal_day_sealed');
     if (state === null || state === 'no_data' || state === 'deleted')
-      return this.refuse(409, 'seal_not_applicable');
-    if (!SEALABLE.has(state)) return this.refuse(409, 'seal_not_due');
+      return this.reject('seal_not_applicable');
+    if (!SEALABLE.has(state)) return this.reject('seal_not_due');
     const earlier = SEALS.calendar_current.days.find(
       (cell) => cell.day < day && SEALABLE.has(this.dayState(cell.day) ?? ''),
     );
-    if (earlier) return this.refuse(409, 'seal_not_due');
+    if (earlier) return this.reject('seal_not_due');
     const waiting = [...this.requests.values()].some(
       (item) => item.out.kind === 'action.seal' && !item.out.terminal && item.day === day,
     );
-    if (waiting) return this.refuse(409, 'seal_request_pending');
+    if (waiting) return this.reject('seal_request_pending');
+    const down = this.unavailable();
+    if (down) return down;
     const outcome = this.takeAction();
     const serial = sha256(`seal ${day}`).slice(0, 16).toUpperCase();
     const genTime = this.iso();
+    // The captured outcome of the Seal task (`SealOutcome`), for this day.
+    const result: SealActionResult = {
+      ...(copy(SEALS.seal_now_done.result) as unknown as SealActionResult),
+      day,
+      serial,
+      gen_time: genTime,
+    };
     const item = this.enqueue({
       kind: 'action.seal',
       section: null,
       account,
-      steps: ['received', 'dispatch', 'task', 'journal'],
+      steps: [...ACTION_STEPS],
       day,
-      result:
-        outcome === 'succeeded'
-          ? { day, status: 'sealed', message: `${day} sealed`, serial, gen_time: genTime }
-          : null,
+      result: outcome === 'succeeded' ? { ...result } : null,
       ...(outcome === 'succeeded'
         ? {
             apply: () => {
@@ -2905,29 +2662,21 @@ export class AdminMock {
     return this.accepted(item);
   }
 
+  /** "Kontör sorgula" (`routers/credits.py`): one a minute, then the service. */
   private creditQuery(call: RecordedCall, host: MockHost): Answer {
     const account = host.requirePermission(call, 'seal.manage');
     if (Array.isArray(account)) return account;
+    const last = this.lastAction.get('action.credit');
+    if (last !== undefined && Date.now() - last < 60_000)
+      return this.limited('admin_rate_limited', Math.ceil((60_000 - (Date.now() - last)) / 1000));
     const down = this.unavailable();
     if (down) return down;
-    if (this.lastCredit !== null && Date.now() - this.lastCredit < 60_000) {
-      const retry = Math.ceil((60_000 - (Date.now() - this.lastCredit)) / 1000);
-      const [status, body] = this.refuse(429, 'admin_rate_limited', { retry_after: retry });
-      return [
-        status,
-        body,
-        {
-          body: Buffer.from(JSON.stringify(body)),
-          contentType: 'application/json',
-          headers: { 'Retry-After': String(retry) },
-        },
-      ];
-    }
-    this.lastCredit = Date.now();
+    this.lastAction.set('action.credit', Date.now());
     const sample = this.creditsSample();
     const outcome = this.takeAction();
     const credits = (this.creditChecks.at(-1)?.credits ?? sample.remaining ?? 9612) - 1;
-    const result = {
+    const result: CreditActionResult = {
+      ...(copy(CREDITS.query_done.result) as unknown as CreditActionResult),
       credits,
       threshold: sample.threshold,
       below_threshold: credits < sample.threshold,
@@ -2936,8 +2685,8 @@ export class AdminMock {
       kind: 'action.credit',
       section: null,
       account,
-      steps: ['received', 'dispatch', 'task', 'journal'],
-      result: outcome === 'succeeded' ? result : null,
+      steps: [...ACTION_STEPS],
+      result: outcome === 'succeeded' ? { ...result } : null,
       ...(outcome === 'succeeded'
         ? {
             apply: () => {
@@ -3040,7 +2789,7 @@ export class AdminMock {
     return [200, credits];
   }
 
-  // -- database settings ------------------------------------------------------------------------
+  // -- database settings (contract 2.13, `routers/settings.py`) --------------------------------
 
   private setting(key: string): SettingOut | undefined {
     for (const group of this.settings) {
@@ -3050,62 +2799,90 @@ export class AdminMock {
     return undefined;
   }
 
-  private patchSettings(call: RecordedCall, host: MockHost): Answer {
-    const body = call.body as {
-      changes: { key: string; old: SettingValue; value: SettingValue }[];
-    };
-    const reauth = body.changes.some((change) => this.setting(change.key)?.reauth);
-    const account = host.requirePermission(call, 'settings.manage', reauth);
-    if (Array.isArray(account)) return account;
-    const problems = [];
-    const conflicts = [];
-    for (const change of body.changes) {
-      const setting = this.setting(change.key);
-      if (!setting) return this.refuse(422, 'setting_unknown');
-      if (setting.locked) return this.refuse(422, 'setting_locked');
-      if (JSON.stringify(change.old) !== JSON.stringify(setting.value))
-        conflicts.push({ key: change.key, current: setting.value });
-      const refused = settingProblem(setting, change.value);
-      if (refused)
-        problems.push({
-          key: change.key,
-          code: 'setting_invalid',
-          message_tr: refused[0],
-          message_en: refused[1],
-        });
-    }
-    if (problems.length > 0) return this.refuse(422, 'setting_invalid', problems);
-    if (conflicts.length > 0) return this.refuse(409, 'setting_conflict', conflicts);
-    const changed = [];
-    const unchanged = [];
-    for (const change of body.changes) {
-      const setting = this.setting(change.key);
+  /** An unknown or locked key (the API's order: before any value is looked at). */
+  private unusable(key: string): [number, unknown] | null {
+    const setting = this.setting(key);
+    if (!setting) return this.reject('setting_unknown');
+    if (setting.locked) return this.reject('setting_locked', [{ key }]);
+    return null;
+  }
+
+  /** Write the values that differ (`settings_admin.change_setting`, `reset_setting`). */
+  private write(account: MockUser, values: [string, SettingValue][]): SettingsPatchResult {
+    const changed: SettingsPatchResult['changed'] = [];
+    const unchanged: string[] = [];
+    for (const [key, value] of values) {
+      const setting = this.setting(key);
       if (!setting) continue;
-      if (JSON.stringify(setting.value) === JSON.stringify(change.value)) {
-        unchanged.push(change.key);
+      if (JSON.stringify(setting.value) === JSON.stringify(value)) {
+        unchanged.push(key);
         continue;
       }
-      changed.push({ key: change.key, old: setting.value, new: change.value });
-      setting.value = copy(change.value);
+      changed.push({ key, old: setting.value, new: copy(value) });
+      setting.value = copy(value);
       setting.is_default = JSON.stringify(setting.value) === JSON.stringify(setting.default);
       setting.updated_by = account.username;
       setting.updated_at = this.iso();
     }
-    return [200, { changed, unchanged }];
+    return { changed, unchanged };
+  }
+
+  /** `PATCH /settings`: keys, values, conflicts, then the password confirmation. */
+  private patchSettings(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const { changes } = call.body as SettingsPatch;
+    for (const change of changes) {
+      const refusal = this.unusable(change.key);
+      if (refusal) return refusal;
+    }
+    const problems: SettingProblem[] = [];
+    for (const change of changes) {
+      const setting = this.setting(change.key);
+      const refused = setting ? settingProblem(setting, change.value) : null;
+      if (refused) {
+        const [tr, en] = SETTING_ERRORS[refused.code] ?? [refused.code, refused.code];
+        problems.push({
+          key: change.key,
+          code: refused.code,
+          message_tr: format(tr, refused.facts),
+          message_en: format(en, refused.facts),
+        });
+      }
+    }
+    if (problems.length > 0) return this.reject('setting_invalid', problems);
+    const conflicts = changes
+      .map((change) => ({ change, setting: this.setting(change.key) }))
+      .filter(
+        ({ change, setting }) => JSON.stringify(change.old) !== JSON.stringify(setting?.value),
+      )
+      .map(({ change, setting }) => ({ key: change.key, current: setting?.value ?? null }));
+    if (conflicts.length > 0) return this.reject('setting_conflict', conflicts);
+    if (changes.some((change) => this.setting(change.key)?.reauth)) {
+      const recent = host.requirePermission(call, 'settings.manage', true);
+      if (Array.isArray(recent)) return recent;
+    }
+    return [
+      200,
+      this.write(
+        account,
+        changes.map((change) => [change.key, change.value]),
+      ),
+    ];
   }
 
   private resetSetting(call: RecordedCall, host: MockHost, key: string): Answer {
-    const setting = this.setting(key);
-    const account = host.requirePermission(call, 'settings.manage', setting?.reauth ?? false);
+    const account = host.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return account;
-    if (!setting) return this.refuse(422, 'setting_unknown');
-    if (setting.locked) return this.refuse(422, 'setting_locked');
-    const old = setting.value;
-    setting.value = copy(setting.default);
-    setting.is_default = true;
-    setting.updated_by = account.username;
-    setting.updated_at = this.iso();
-    return [200, { changed: [{ key, old, new: setting.value }], unchanged: [] }];
+    const refusal = this.unusable(key);
+    if (refusal) return refusal;
+    const setting = this.setting(key);
+    if (!setting) return this.reject('setting_unknown');
+    if (setting.reauth) {
+      const recent = host.requirePermission(call, 'settings.manage', true);
+      if (Array.isArray(recent)) return recent;
+    }
+    return [200, this.write(account, [[key, setting.default]])];
   }
 
   // -- routing ----------------------------------------------------------------------------------
@@ -3122,12 +2899,7 @@ export class AdminMock {
     )
       return null;
     this.tick();
-    const problems = bodyProblems(route, call.body);
-    if (problems.length > 0) {
-      const account = host.requirePermission(call, 'dashboard.usage');
-      if (Array.isArray(account)) return account;
-      return host.error(422, 'validation_error', problems);
-    }
+    // The request bodies were checked against the API's models (`mock-api.ts` `bodyProblems`).
     if (route === 'GET /admin/status') {
       const account = host.requirePermission(call, 'settings.manage');
       return Array.isArray(account) ? account : [200, this.status()];
@@ -3150,11 +2922,7 @@ export class AdminMock {
     if (route === 'POST /admin/config/sources') return this.sourceChange(call, host, 'add', null);
     if ((match = /^\/admin\/config\/sources\/([^/]+)$/.exec(path))) {
       const name = decodeURIComponent(match[1] ?? '');
-      if (method === 'PUT') {
-        const problems = bodyProblems('POST /admin/config/sources', call.body);
-        if (problems.length > 0) return host.error(422, 'validation_error', problems);
-        return this.sourceChange(call, host, 'update', name);
-      }
+      if (method === 'PUT') return this.sourceChange(call, host, 'update', name);
       if (method === 'DELETE') return this.removeSource(call, host, name);
     }
     if (route === 'POST /admin/config/smtp/check') return this.smtp(call, host, true);
@@ -3208,10 +2976,19 @@ const UNC =
   /^\\\\[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\\[A-Za-z0-9$_.-]{1,80}(?:\\[^\\:*?"<>|/]+)*$/;
 /** The oldest day of the mock's data (sealed days, logs). */
 const OLDEST_DAY = '2024-03-01';
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /** The site's day of a moment (UTC+03:00 all year). */
 function siteDay(at: Date): string {
   return new Date(at.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** `admin_jobs.mask_address`: `bora@ornek.example` → `b***@ornek.example` (ADR-0010 A4). */
+function maskAddress(address: string): string {
+  const at = address.trim().lastIndexOf('@');
+  const local = address.trim().slice(0, Math.max(at, 0));
+  const domain = address.trim().slice(at + 1);
+  return at < 0 || !local || !domain ? '***' : `${local.slice(0, 1)}***@${domain}`;
 }
 
 // -- uploads, Kamu SM and sources of the mock (contract 2.4.4, 2.6) -------------------------------
@@ -3263,27 +3040,6 @@ function causeOf(item: ReadinessItem): string {
   }[item];
 }
 
-const SOURCE_KEYS = [
-  'name',
-  'type',
-  'address',
-  'heartbeat_minutes',
-  'expected',
-  'transport',
-  'enabled',
-];
-const SOURCE_STEPS: RequestStep[] = [
-  'received',
-  'validate',
-  'backup',
-  'write_config',
-  'verify',
-  'reload.collector',
-  'reload.ingest',
-  'system.firewall',
-  'journal',
-];
-
 interface Net {
   base: number;
   prefix: number;
@@ -3321,357 +3077,99 @@ const RESERVED_NETWORKS = nets(
   '224.0.0.0/4',
   '240.0.0.0/4',
 );
-/** `policy.source_networks` of the mock (as `config().policy`). */
-const POLICY_NETWORKS = nets('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16');
 /** `agent.json.local_addresses`: the server's own address. */
 const LOCAL_ADDRESSES = ['172.20.10.5'];
 
 // -- the database settings of the mock (contract 2.13) --------------------------------------------
 
-type Meta = [
-  key: string,
-  type: SettingOut['type'],
-  value: SettingValue,
-  tr: string,
-  en: string,
-  helpTr: string,
-  helpEn: string,
-  extra?: Partial<SettingOut>,
-];
-
-function settingOut([key, type, value, tr, en, helpTr, helpEn, extra]: Meta): SettingOut {
-  return {
-    key,
-    value: copy(value),
-    default: copy(value),
-    is_default: true,
-    type,
-    min: null,
-    max: null,
-    reauth: false,
-    locked: false,
-    label_tr: tr,
-    label_en: en,
-    help_tr: helpTr,
-    help_en: helpEn,
-    updated_by: ':seed',
-    updated_at: '2026-09-30T09:12:00+03:00',
-    ...extra,
-  };
+/**
+ * The refusals `validate_setting` gives the values the specs send (`arcilogger_db.settings`
+ * `SETTING_ERRORS`, Turkish first); `{low}`-style placeholders take the facts.
+ */
+const SETTING_ERRORS: Record<string, [string, string]> = {
+  setting_type: [
+    'Değer türü yanlış: {expected_tr} bekleniyor.',
+    'Wrong type of value: {expected_en} expected.',
+  ],
+  setting_below_minimum: ['En az {low} olmalı.', 'Must be at least {low}.'],
+  setting_out_of_range: ['{low} ile {high} arasında olmalı.', 'Must be between {low} and {high}.'],
+  setting_ip_invalid: ['Geçersiz IP adresi.', 'Invalid IP address.'],
+  setting_email_invalid: ['Geçersiz e-posta adresi.', 'Invalid e-mail address.'],
+  setting_totp_required: [
+    '{roles} rolleri için iki adımlı doğrulama (TOTP) zorunludur (şartname 13): listeye rol eklenebilir, bu roller çıkarılamaz.',
+    'Two-step verification (TOTP) is mandatory for the {roles} roles (specification 13): roles may be added, these cannot be removed.',
+  ],
+  setting_work_hours_order: [
+    'Mesai başlangıcı bitişten önce olmalı (gece vardiyası yok).',
+    'Work hours must start before they end (no night shift).',
+  ],
+  setting_holiday_invalid: [
+    'Geçersiz tarih (AA-GG ya da YYYY-AA-GG).',
+    'Invalid date (MM-DD or YYYY-MM-DD).',
+  ],
+};
+{
+  // The captured refusal holds one of these texts: it must still be the API's.
+  const captured = SETTINGS.errors.setting_invalid?.body.error.details as SettingProblem[];
+  for (const item of captured) {
+    const [tr, en] = SETTING_ERRORS[item.code] ?? ['', ''];
+    const facts = { low: 1, high: 10_000 };
+    if (format(tr, facts) !== item.message_tr || format(en, facts) !== item.message_en)
+      throw new Error(`mock-admin: SETTING_ERRORS.${item.code} differs from the capture`);
+  }
 }
 
-function group(id: SettingGroup['id'], tr: string, en: string, items: Meta[]): SettingGroup {
-  return { id, label_tr: tr, label_en: en, settings: items.map(settingOut) };
-}
-
-/** A representative part of `DEFAULT_SETTINGS` in every group, every kind of value. */
-function startSettings(): SettingGroup[] {
-  return [
-    group('alerts', 'Uyarılar ve e-posta', 'Alerts and e-mail', [
-      [
-        'alerts.email_recipients',
-        'string_list',
-        [],
-        'Uyarı e-postası alıcıları',
-        'Alert e-mail recipients',
-        'Uyarı e-postalarını alan adresler, en çok 20; boş liste: e-posta gönderilmez.',
-        'The addresses that receive alert e-mails, at most 20; an empty list sends none.',
-        { reauth: true },
-      ],
-      [
-        'alerts.email_min_severity',
-        'string',
-        'high',
-        'E-postayla gönderilen en düşük önem',
-        'Lowest severity e-mailed',
-        'Bu ve daha yüksek önemdeki uyarılar e-postayla gider.',
-        'Alerts of this severity and above are e-mailed.',
-        { reauth: true },
-      ],
-      [
-        'alerts.email_max_per_hour',
-        'integer',
-        20,
-        'Saatte en çok e-posta',
-        'E-mails per hour at most',
-        'Bir saatte gönderilen uyarı e-postası sayısının üst sınırı.',
-        'The most alert e-mails sent in one hour.',
-        { min: 1, max: 1000 },
-      ],
-      [
-        'alerts.email_resolved',
-        'boolean',
-        true,
-        'Çözülen uyarılar için de e-posta',
-        'E-mail resolved alerts too',
-        'Bir uyarı kendiliğinden çözülünce de e-posta gönderilir.',
-        'An e-mail is also sent when an alert resolves itself.',
-      ],
-      [
-        'alerts.disk_used_percent',
-        'integer',
-        80,
-        'Disk doluluk uyarısı (%)',
-        'Disk usage alert (%)',
-        'Veri diskinin doluluğu bu yüzdeyi geçince uyarı.',
-        'Alert when the data disk is fuller than this percentage.',
-        { min: 50, max: 99 },
-      ],
-    ]),
-    group('lookup', '5651 sorgu ve kira zaman çizelgesi', '5651 lookup and lease timeline', [
-      [
-        'nat.public_ips',
-        'string_list',
-        [],
-        'Genel (WAN) IP adresleri',
-        'Public (WAN) IP addresses',
-        'Güvenlik duvarının genel adresleri; boş: çift NAT, sorgu aday listesi verir.',
-        "The firewall's public addresses; empty: double NAT, a lookup gives candidates.",
-      ],
-      [
-        'lookup.tolerance_seconds',
-        'integer',
-        60,
-        'Sorgu toleransı (± saniye)',
-        'Lookup tolerance (± seconds)',
-        'Talep edilen zamanın çevresinde aranan süre.',
-        'How far around the requested time a lookup searches.',
-        { min: 0, max: 3600 },
-      ],
-      [
-        'lookup.port_hint',
-        'boolean',
-        false,
-        'Port ipucu',
-        'Port hint',
-        'Genel porta eşit güvenlik duvarı portu olan adaylar öne alınır.',
-        'Candidates whose firewall port equals the public port rank first.',
-      ],
-      [
-        'lease.server_seconds',
-        'object',
-        {},
-        'DHCP sunucusuna göre kira süresi',
-        'Lease time per DHCP server',
-        'Varsayılandan farklı kira süresi olan DHCP sunucuları (saniye).',
-        'DHCP servers whose lease time differs from the default (seconds).',
-      ],
-      [
-        'devices.oui_file',
-        'string',
-        '',
-        'OUI listesi dosyası',
-        'OUI list file',
-        'Sunucuda yöneticinin koyduğu IEEE OUI listesinin yolu.',
-        'The path of an IEEE OUI listing the administrator placed on the server.',
-        { locked: true },
-      ],
-    ]),
-    group('usage', 'Kullanım analizi', 'Usage analytics', [
-      [
-        'usage.work_hours',
-        'object',
-        { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' },
-        'Mesai saatleri',
-        'Work hours',
-        'Mesai günleri ve saatleri; geri kalanı mesai dışıdır.',
-        'The work days and hours; the rest is off hours.',
-      ],
-      [
-        'usage.holidays',
-        'string_list',
-        ['01-01', '04-23', '05-01', '05-19', '07-15', '08-30', '10-29'],
-        'Tatil günleri',
-        'Holidays',
-        'Tatil günleri mesai dışı sayılır.',
-        'Holidays count as off hours.',
-      ],
-      [
-        'usage.background_ports',
-        'integer_list',
-        [53, 123, 853],
-        'Arka plan portları',
-        'Background ports',
-        'Bu portlardaki trafik arka plan trafiği sayılır.',
-        'Traffic on these ports counts as background traffic.',
-      ],
-      [
-        'usage.retention_days',
-        'integer',
-        400,
-        'Kullanım özetlerinin saklama süresi (gün)',
-        'Usage rollup retention (days)',
-        'Bu süreden eski kullanım özetleri silinir.',
-        'Usage rollups older than this are deleted.',
-        { min: 1, reauth: true },
-      ],
-      [
-        'usage.psl_file',
-        'string',
-        '',
-        'Genel son ek listesi dosyası',
-        'Public suffix list file',
-        'Sunucuda yöneticinin koyduğu daha yeni bir liste.',
-        'A newer list the administrator placed on the server.',
-        { locked: true },
-      ],
-    ]),
-    group('reports', 'Kullanım raporları', 'Usage reports', [
-      [
-        'reports.keep_days',
-        'integer',
-        400,
-        'Rapor dosyalarının saklama süresi (gün)',
-        'Report file retention (days)',
-        'Bu süreden eski rapor dosyaları silinir.',
-        'Report files older than this are deleted.',
-        { min: 1, reauth: true },
-      ],
-      [
-        'reports.catch_up',
-        'boolean',
-        true,
-        'Kaçırılan raporu çalıştır',
-        'Run a missed report',
-        'Çalışan hizmet durduysa kaçırılan zamanlama bir kez çalıştırılır.',
-        'A schedule missed while the worker was stopped runs once.',
-      ],
-    ]),
-    group('evidence', 'Kanıt paketleri', 'Evidence packages', [
-      [
-        'evidence.keep_days',
-        'integer',
-        30,
-        'Kanıt paketlerinin saklama süresi (gün)',
-        'Evidence package retention (days)',
-        'Bu süreden eski paketler silinir.',
-        'Packages older than this are deleted.',
-        { min: 1, reauth: true },
-      ],
-      [
-        'evidence.max_requests_per_hour',
-        'integer',
-        10,
-        'Saatte en çok paket isteği',
-        'Package requests per hour at most',
-        'Bir kullanıcının bir saatte isteyebileceği paket sayısı.',
-        'How many packages one user may request in an hour.',
-        { min: 1 },
-      ],
-    ]),
-    group('security', 'Oturum, parola ve gizlilik', 'Sessions, passwords and privacy', [
-      [
-        'auth.idle_minutes',
-        'integer',
-        15,
-        'Hareketsizlik süresi (dakika)',
-        'Idle timeout (minutes)',
-        'Bu süre işlem yapılmazsa oturum kapanır.',
-        'The session closes after this long without activity.',
-        { min: 1, max: 120, reauth: true },
-      ],
-      [
-        'auth.password_min_length',
-        'integer',
-        12,
-        'En kısa parola uzunluğu',
-        'Shortest password',
-        'Yeni parolaların en az uzunluğu.',
-        'The least length of new passwords.',
-        { min: 12, max: 128, reauth: true },
-      ],
-      [
-        'auth.totp_required_roles',
-        'string_list',
-        ['admin', 'auditor'],
-        'İki adımlı doğrulama zorunlu roller',
-        'Roles that must use two-factor authentication',
-        'Yönetici ve denetçi için zorunludur; rol eklenebilir.',
-        'Mandatory for administrators and auditors; roles may be added.',
-        { reauth: true },
-      ],
-      [
-        'privacy.notice_version',
-        'string',
-        '1',
-        'KVKK bilgilendirme metni sürümü',
-        'Privacy notice version',
-        'Değişince kullanıcılar metni yeniden onaylar.',
-        'When it changes, users accept the notice again.',
-        { reauth: true },
-      ],
-    ]),
-    group('database', 'Veritabanı', 'Database', [
-      [
-        'db.retention_days',
-        'integer',
-        400,
-        'Veritabanı saklama süresi (gün)',
-        'Database retention (days)',
-        'Veritabanındaki kayıtlar bu süre tutulur; ham kayıtlar kasada kalır.',
-        'Database records are kept this long; the raw logs stay in the vault.',
-        { min: 1, reauth: true },
-      ],
-    ]),
-  ];
-}
-
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const HOLIDAY = /^(?:\d{4}-)?\d{2}-\d{2}$/;
+const TYPE_NAMES: Record<string, [string, string]> = {
+  boolean: ['true/false', 'true/false'],
+  number: ['tam sayı', 'an integer'],
+  string: ['metin', 'a text'],
+  list: ['liste', 'a list'],
+  object: ['nesne', 'an object'],
+};
 
-/** `validate_setting`'s refusal of a value, Turkish first (`null`: accepted). */
-function settingProblem(setting: SettingOut, value: SettingValue): [string, string] | null {
+function format(text: string, facts: Record<string, unknown>): string {
+  return text.replace(/\{(\w+)\}/g, (all, name: string) =>
+    name in facts ? String(facts[name]) : all,
+  );
+}
+
+/** `validate_setting`'s refusal of a value (`null`: accepted). */
+function settingProblem(
+  setting: SettingOut,
+  value: SettingValue,
+): { code: string; facts: Record<string, unknown> } | null {
   const kind = Array.isArray(setting.default) ? 'list' : typeof setting.default;
   const actual = Array.isArray(value) ? 'list' : typeof value;
-  if (kind !== actual)
-    return [`${setting.key}: değer türü geçersiz`, `${setting.key}: wrong kind of value`];
+  if (kind !== actual || (setting.type === 'integer' && !Number.isInteger(value))) {
+    const [tr, en] = TYPE_NAMES[kind] ?? [kind, kind];
+    return { code: 'setting_type', facts: { expected_tr: tr, expected_en: en } };
+  }
   if (setting.type === 'integer') {
     const number = value as number;
-    if (!Number.isInteger(number))
-      return [`${setting.key}: tam sayı bekleniyor`, `${setting.key}: a whole number is expected`];
     const low = setting.min ?? 0;
-    if (number < low || (setting.max !== null && number > setting.max)) {
-      const upper = setting.max === null ? '' : `, en çok ${setting.max}`;
-      const upperEn = setting.max === null ? '' : `, at most ${setting.max}`;
-      return [
-        `${setting.key}: en az ${low}${upper} olmalı`,
-        `${setting.key}: must be at least ${low}${upperEn}`,
-      ];
-    }
+    if (number < low || (setting.max !== null && number > setting.max))
+      return setting.max === null
+        ? { code: 'setting_below_minimum', facts: { low } }
+        : { code: 'setting_out_of_range', facts: { low, high: setting.max } };
   }
-  if (setting.key === 'nat.public_ips') {
-    const bad = (value as string[]).find((item) => !IPV4.test(item) && !item.includes(':'));
-    if (bad !== undefined)
-      return [
-        `${setting.key}: geçersiz IP adresi '${bad}'`,
-        `${setting.key}: invalid IP address '${bad}'`,
-      ];
-  }
+  if (setting.key === 'nat.public_ips' && (value as string[]).some((item) => !IPV4.test(item)))
+    return { code: 'setting_ip_invalid', facts: {} };
   if (
     setting.key === 'alerts.email_recipients' &&
     (value as string[]).some((item) => !EMAIL.test(item))
   )
-    return [`${setting.key}: geçersiz e-posta adresi`, `${setting.key}: invalid e-mail address`];
+    return { code: 'setting_email_invalid', facts: {} };
   if (setting.key === 'usage.holidays' && (value as string[]).some((item) => !HOLIDAY.test(item)))
-    return [
-      `${setting.key}: geçersiz tarih (AA-GG ya da YYYY-AA-GG)`,
-      `${setting.key}: invalid date (MM-DD or YYYY-MM-DD)`,
-    ];
+    return { code: 'setting_holiday_invalid', facts: {} };
   if (
     setting.key === 'auth.totp_required_roles' &&
     !['admin', 'auditor'].every((role) => (value as string[]).includes(role))
   )
-    return [
-      `${setting.key}: admin, auditor rolü için iki adımlı doğrulama (TOTP) zorunludur`,
-      `${setting.key}: two-factor authentication (TOTP) is mandatory for admin, auditor`,
-    ];
+    return { code: 'setting_totp_required', facts: { roles: 'admin, auditor' } };
   if (setting.key === 'usage.work_hours') {
-    const hours = value as { days: number[]; start: string; end: string };
-    if (!(hours.start < hours.end))
-      return [
-        `${setting.key}: mesai başlangıcı bitişten önce olmalı`,
-        `${setting.key}: work must start before it ends`,
-      ];
+    const hours = value as { start: string; end: string };
+    if (!(hours.start < hours.end)) return { code: 'setting_work_hours_order', facts: {} };
   }
   return null;
 }

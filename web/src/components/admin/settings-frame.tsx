@@ -8,14 +8,14 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { useAdminStatus } from '@/lib/api-hooks';
+import { useAdminConfig, useAdminStatus } from '@/lib/api-hooks';
 
-import { AgentBanner, AgentStatusChip, RestartBanner } from './agent-status';
+import { AgentBanner, AgentStatusChip, ConfigProblems, RestartBanner } from './agent-status';
 
 /**
  * A page of "Ayarlar" (contract 2.17): the way back, the title with the administration
  * service's chip, and why nothing can be saved when the service is not running (the forms are
- * read-only then; the banner names the console path).
+ * read-only then; the banner names the console path) or the configuration does not load.
  */
 export function SettingsFrame({
   title,
@@ -31,6 +31,7 @@ export function SettingsFrame({
 }) {
   const { t } = useTranslation();
   const status = useAdminStatus(machine);
+  const config = useAdminConfig(machine);
   return (
     <div>
       <Button asChild variant="link" size="sm" className="mb-2">
@@ -48,6 +49,7 @@ export function SettingsFrame({
         {machine ? (
           <>
             <AgentBanner status={status.data} />
+            <ConfigProblems problems={config.data?.problems} levels={['error']} />
             <RestartBanner status={status.data} />
           </>
         ) : null}

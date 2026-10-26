@@ -8,7 +8,7 @@ import { mockApi } from './mock-api';
  * record and the firewall state, a source added and changed through the check and the review,
  * the browser's and the server's refusals at their fields, switching one off (confirmation and
  * re-authentication) and removing one (re-authentication and the name typed). The API is
- * `mock-admin.ts`.
+ * `mock-admin.ts`, with the two sources of the captured installation (`samples/admin.json`).
  */
 
 function table(page: Page) {
@@ -30,7 +30,7 @@ test.describe('Ayarlar → Kaynaklar', () => {
     await expect(page).toHaveURL(/\/settings\/sources$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Kaynaklar' })).toBeVisible();
     const rows = table(page).getByRole('row');
-    await expect(rows).toHaveCount(4);
+    await expect(rows).toHaveCount(3);
     const core = table(page).getByRole('row', { name: /core-r1/ });
     await expect(core).toContainText('MikroTik');
     await expect(core).toContainText('172.20.10.1');
@@ -38,7 +38,7 @@ test.describe('Ayarlar → Kaynaklar', () => {
     await expect(core).toContainText('15 dk');
     await expect(core).toContainText('Açık');
     await expect(core.getByRole('switch', { name: 'core-r1 etkin' })).toBeChecked();
-    await expect(page.getByTestId('sources-table')).toContainText('3 kaynak (en çok 500).');
+    await expect(page.getByTestId('sources-table')).toContainText('2 kaynak (en çok 500).');
     await expect(page.getByTestId('sources-locked')).toContainText('collector.unknown_senders');
   });
 
@@ -142,7 +142,7 @@ test.describe('Ayarlar → Kaynaklar', () => {
   test('switching a source off asks first and re-authenticates', async ({ page }) => {
     const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
     await page.goto('/settings/sources');
-    await page.getByRole('switch', { name: 'switch-1 etkin' }).click();
+    await page.getByRole('switch', { name: 'fortigate etkin' }).click();
     const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
     await expect(review).toContainText(
       'Kapatılan kaynak, mühürlenmemiş günlerin boşluk listesinde artık beklenmez.',
@@ -151,10 +151,10 @@ test.describe('Ayarlar → Kaynaklar', () => {
     await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
     await confirmReauth(page);
     await applied(page);
-    const row = table(page).getByRole('row', { name: /switch-1/ });
+    const row = table(page).getByRole('row', { name: /fortigate/ });
     await expect(row.getByRole('switch')).not.toBeChecked();
     await expect(row).toContainText('Kapalı');
-    expect(api.admin.sections.sources.find((item) => item.name === 'switch-1')?.enabled).toBe(
+    expect(api.admin.sections.sources.find((item) => item.name === 'fortigate')?.enabled).toBe(
       false,
     );
   });
@@ -162,20 +162,20 @@ test.describe('Ayarlar → Kaynaklar', () => {
   test('removing a source needs its name typed and a re-authentication', async ({ page }) => {
     const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
     await page.goto('/settings/sources');
-    await page.getByRole('button', { name: 'switch-1 kaynağını kaldır' }).click();
-    const dialog = page.getByRole('dialog', { name: 'switch-1 kaldırılsın mı?' });
+    await page.getByRole('button', { name: 'fortigate kaynağını kaldır' }).click();
+    const dialog = page.getByRole('dialog', { name: 'fortigate kaldırılsın mı?' });
     await expect(dialog).toContainText('Kaydedilmiş ve mühürlenmiş kayıtları değişmez.');
     const remove = dialog.getByRole('button', { name: 'Kaynağı kaldır' });
     await expect(remove).toBeDisabled();
-    await dialog.getByLabel('Onaylamak için kaynağın adını yazın: switch-1').fill('switch');
+    await dialog.getByLabel('Onaylamak için kaynağın adını yazın: fortigate').fill('forti');
     await expect(remove).toBeDisabled();
-    await dialog.getByLabel('Onaylamak için kaynağın adını yazın: switch-1').fill('switch-1');
+    await dialog.getByLabel('Onaylamak için kaynağın adını yazın: fortigate').fill('fortigate');
     await remove.click();
     await confirmReauth(page);
     await applied(page);
-    await expect(table(page).getByRole('row', { name: /switch-1/ })).toHaveCount(0);
-    const call = api.callsTo('DELETE', '/admin/config/sources/switch-1')[0];
-    expect(call?.query.get('confirm')).toBe('switch-1');
+    await expect(table(page).getByRole('row', { name: /fortigate/ })).toHaveCount(0);
+    const call = api.callsTo('DELETE', '/admin/config/sources/fortigate')[0];
+    expect(call?.query.get('confirm')).toBe('fortigate');
     expect(call?.query.get('etag')).toMatch(/^sources:/);
   });
 
@@ -211,8 +211,8 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       .getByRole('dialog', { name: 'Kaynak ekle' })
       .getByRole('button', { name: 'İptal' })
       .click();
-    await page.getByRole('button', { name: 'switch-1 kaynağını kaldır' }).click();
-    await expect(page.getByRole('dialog', { name: 'switch-1 kaldırılsın mı?' })).toBeVisible();
+    await page.getByRole('button', { name: 'fortigate kaynağını kaldır' }).click();
+    await expect(page.getByRole('dialog', { name: 'fortigate kaldırılsın mı?' })).toBeVisible();
     await expectNoA11yViolations(page);
   });
 }

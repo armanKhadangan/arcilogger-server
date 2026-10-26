@@ -7,7 +7,8 @@ import { CSRF_TOKEN, mockApi } from './mock-api';
  * Ayarlar and Ayarlar → Genel (contract 2.17): the sections, the administration service's chip,
  * the site name through the whole request (check, confirmation, the request's states until
  * "Uygulandı"), the refusals and failures a section shows, and the read-only page while the
- * service is not running. The API is `mock-admin.ts` (hand-written from the contract).
+ * service is not running. The API is `mock-admin.ts`, starting from the installation the capture
+ * made (`samples/admin.json`: no local time source yet).
  */
 
 test.describe('Ayarlar', () => {
@@ -18,6 +19,10 @@ test.describe('Ayarlar', () => {
     await page.goto('/settings');
     await expect(page.getByRole('heading', { level: 1, name: 'Ayarlar' })).toBeVisible();
     await expect(page.getByTestId('agent-status')).toHaveText('Yönetim hizmeti: çalışıyor');
+    // The installation's setup problems, as the API words them (`setup_problems`).
+    await expect(page.getByTestId('config-problems')).toContainText(
+      'clock.ntp_server — Yerel saat kaynağı (clock.ntp_server) ayarlanmamış',
+    );
     for (const [key, href] of [
       ['general', '/settings/general'],
       ['application', '/settings/application'],
@@ -98,7 +103,7 @@ test.describe('Ayarlar → Genel', () => {
       etag: expect.stringMatching(/^general:[0-9a-f]{64}$/) as unknown,
       site_name: 'Örnek Holding A.Ş.',
       clock: {
-        ntp_server: '172.20.10.1',
+        ntp_server: '',
         fallback_server: 'time.ume.tubitak.gov.tr',
         alert_offset_ms: 1000,
       },
@@ -235,7 +240,8 @@ test.describe('Ayarlar → Genel', () => {
     await expect(progress.getByTestId('request-state')).toHaveText('Kısmen uygulandı', {
       timeout: 10_000,
     });
-    await expect(progress).toContainText('ArciWorker yeni ayarı henüz almadı.');
+    // The API reports the reloads in the order collector, ingest, worker, web service.
+    await expect(progress).toContainText('ArciApi yeni ayarı henüz almadı.');
   });
 
   test('the time sources: checked, re-authenticated, then the system task updates Windows Time', async ({
@@ -246,12 +252,12 @@ test.describe('Ayarlar → Genel', () => {
     const clock = page.getByTestId('settings-clock');
     await expect(clock.getByTestId('measured-offset')).toContainText('Son ölçülen sapma: 3,2 ms');
     // The locked port is named with its reason; the API does not send its value.
-    await expect(clock.getByTestId('locked-value')).toContainText('clock.ntp_port (hizmet ayarı)');
+    await expect(clock.getByTestId('locked-value')).toContainText('clock.ntp_port (uzman ayarı)');
     await expect(clock.getByTestId('locked-value')).not.toContainText('123');
     const ntp = page.getByLabel('Yerel saat kaynağı');
     const fallback = page.getByLabel('Yedek saat sunucusu');
     const save = page.getByRole('button', { name: 'Kaydet' });
-    await expect(ntp).toHaveValue('172.20.10.1');
+    await expect(ntp).toHaveValue('');
     await ntp.fill('ntp_sunucu');
     await save.click();
     await expect(clock).toContainText('Geçerli bir sunucu adı ya da IPv4 adresi girin.');
@@ -275,7 +281,7 @@ test.describe('Ayarlar → Genel', () => {
     await save.click();
     const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
     await expect(review.getByRole('row', { name: /Yerel saat kaynağı/ })).toContainText(
-      '172.20.10.1172.20.10.2',
+      '—172.20.10.2',
     );
     await expect(review).toContainText('Windows saat hizmeti güncellenir');
     await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
@@ -289,6 +295,8 @@ test.describe('Ayarlar → Genel', () => {
       fallback_server: 'time.ume.tubitak.gov.tr',
       alert_offset_ms: 1500,
     });
+    // A local time source now: no setup problem is left.
+    expect(api.admin.config().problems).toEqual([]);
     expect(api.callsTo('PUT', '/admin/config/general').at(-1)?.body).toMatchObject({
       probe: true,
     });
@@ -306,7 +314,7 @@ test.describe('Ayarlar → Genel', () => {
       'Bağlantı denemesi başarısız, hiçbir şey değişmedi',
       { timeout: 10_000 },
     );
-    expect(api.admin.sections.general.clock.ntp_server).toBe('172.20.10.1');
+    expect(api.admin.sections.general.clock.ntp_server).toBe('');
   });
 
   test('leaving with unsaved changes asks first', async ({ page }) => {

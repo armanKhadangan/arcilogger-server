@@ -78,7 +78,7 @@ describe('SecretField (contract 2.17 "Field states")', () => {
     expect(screen.getByText('Kaydedince silinecek')).toBeInTheDocument();
     expect(seen.at(-1)).toEqual({ value: '', editing: false, clear: true });
     unmount();
-    render(<Form meta={{ set: false, changed_at: null }} allowClear seen={[]} />);
+    render(<Form meta={{ set: false, changed_at: null, changed_by: null }} allowClear seen={[]} />);
     expect(screen.getByText('Kayıtlı değil')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Gir' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sil' })).toBeNull();

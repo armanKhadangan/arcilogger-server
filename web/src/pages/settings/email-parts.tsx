@@ -2,6 +2,7 @@ import { Mail, ShieldCheck } from 'lucide-react';
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { TextField } from '@/components/admin/form-fields';
 import { RequestProgress } from '@/components/admin/request-progress';
 import { SettingsCard } from '@/components/admin/settings-frame';
 import { UploadField } from '@/components/admin/upload-field';
@@ -167,24 +168,42 @@ export function TestEmailCard({
 /**
  * The CA of the SMTP server (contract 2.6 "smtp"): the system's trust store, or an uploaded PEM
  * file of 1–10 certificates (`smtp-ca\<sha256>.pem`). Both changes need a password confirmation.
+ * The CA decides which server is trusted, so an enabled server is tried with it first (a test
+ * e-mail to `recipients`), and with a user name the SMTP password is typed again: the stored one
+ * is never sent to a server trusted differently (WP1-10, WP4-4).
  */
 export function SmtpCaCard({
   smtp,
   etag,
   writable,
+  recipients,
 }: {
   smtp: SmtpSection;
   etag: string;
   writable: boolean;
+  recipients: readonly string[];
 }) {
   const { t } = useTranslation();
+  const id = useId();
   const { withReauth } = useReauth();
   const setCa = useSetSmtpCa();
   const clearCa = useClearSmtpCa();
   const [preview, setPreview] = useState<UploadPreview | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [testTo, setTestTo] = useState('');
+  const [password, setPassword] = useState('');
+  // Going back to the system's store asks for the same as a new file first.
+  const [clearing, setClearing] = useState(false);
   const certificate = preview?.certificate ?? null;
+  const needsTest = smtp.enabled;
+  const needsPassword = smtp.username !== null;
+  const ready = (!needsTest || testTo !== '') && (!needsPassword || password !== '');
+  // What the server is tried with (the same for the upload and for going back).
+  const probe = {
+    ...(needsTest ? { test_to: testTo } : {}),
+    ...(needsPassword ? { password } : {}),
+  };
 
   async function run(action: () => Promise<{ request_id: string }>) {
     setFailure(null);
@@ -192,10 +211,42 @@ export function SmtpCaCard({
       const accepted = await withReauth(action);
       setRequestId(accepted.request_id);
       setPreview(null);
+      setClearing(false);
+      setPassword('');
     } catch (error) {
       if (!isReauthCancelled(error)) setFailure(errorMessage(error));
     }
   }
+
+  const probeFields =
+    needsTest || needsPassword ? (
+      <div className="flex flex-col gap-3">
+        {needsTest ? (
+          <RecipientSelect
+            id={`${id}-test_to`}
+            label={t('settings.email.testTo')}
+            hint={t('settings.email.ca.testToHint')}
+            value={testTo}
+            options={recipients}
+            disabled={!writable}
+            onChange={setTestTo}
+          />
+        ) : null}
+        {needsPassword ? (
+          <TextField
+            id={`${id}-password`}
+            label={t('settings.email.password')}
+            hint={t('settings.email.ca.passwordHint')}
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            disabled={!writable}
+            inputClassName="w-80 max-w-full"
+            onChange={setPassword}
+          />
+        ) : null}
+      </div>
+    ) : null;
 
   return (
     <SettingsCard
@@ -219,14 +270,45 @@ export function SmtpCaCard({
           t('settings.email.ca.system')
         )}
       </p>
-      {smtp.ca.sha256 ? (
+      {smtp.ca.sha256 && clearing ? (
+        <div
+          className="flex flex-col gap-3 rounded-lg border border-border p-4"
+          data-testid="smtp-ca-clear"
+        >
+          {probeFields}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!writable || !ready}
+              busy={clearCa.isPending}
+              onClick={() => void run(() => clearCa.mutateAsync({ etag, ...probe }))}
+            >
+              {t('settings.email.ca.clear')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setClearing(false);
+                setPassword('');
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+          </div>
+        </div>
+      ) : smtp.ca.sha256 ? (
         <div>
           <Button
             variant="secondary"
             size="sm"
             disabled={!writable}
             busy={clearCa.isPending}
-            onClick={() => void run(() => clearCa.mutateAsync(etag))}
+            onClick={() => {
+              if (probeFields) setClearing(true);
+              else void run(() => clearCa.mutateAsync({ etag }));
+            }}
           >
             {t('settings.email.ca.clear')}
           </Button>
@@ -262,12 +344,13 @@ export function SmtpCaCard({
               {localized(warning)}
             </Alert>
           ))}
+          {probeFields}
           <div>
             <Button
-              disabled={!writable}
+              disabled={!writable || !ready}
               busy={setCa.isPending}
               onClick={() =>
-                void run(() => setCa.mutateAsync({ etag, upload_id: preview.upload_id }))
+                void run(() => setCa.mutateAsync({ etag, upload_id: preview.upload_id, ...probe }))
               }
             >
               {t('settings.email.ca.use')}

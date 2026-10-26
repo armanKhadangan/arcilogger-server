@@ -148,6 +148,7 @@ import type {
   SettingsPatch,
   SettingsPatchResult,
   SmtpCaBody,
+  SmtpCaClear,
   SourceBody,
   TestEmailBody,
   TsaTestBody,
@@ -1373,13 +1374,32 @@ export type SectionChange = {
   [S in AdminSection]: { section: S; body: SectionBodies[S] };
 }[AdminSection];
 
+/** The dry run of each section (one route per section, like the changes). */
+function checkSection(change: SectionChange): Promise<AdminCheck> {
+  switch (change.section) {
+    case 'general':
+      return api.post<AdminCheck>('/admin/config/general/check', change.body);
+    case 'tsa':
+      return api.post<AdminCheck>('/admin/config/tsa/check', change.body);
+    case 'smtp':
+      return api.post<AdminCheck>('/admin/config/smtp/check', change.body);
+    case 'replica':
+      return api.post<AdminCheck>('/admin/config/replica/check', change.body);
+    case 'retention':
+      return api.post<AdminCheck>('/admin/config/retention/check', change.body);
+    case 'backup':
+      return api.post<AdminCheck>('/admin/config/backup/check', change.body);
+    case 'sources':
+      return api.post<AdminCheck>('/admin/config/sources/check', change.body);
+  }
+}
+
 /** `POST /admin/config/{section}/check`: the changes, effects and warnings; nothing is queued. */
 export function useCheckSection() {
   return useMutation({
     // The body may hold a new credential: not kept once the check is answered.
     gcTime: 0,
-    mutationFn: ({ section, body }: SectionChange) =>
-      api.post<AdminCheck>(`/admin/config/${section}/check`, body),
+    mutationFn: checkSection,
   });
 }
 
@@ -1469,15 +1489,21 @@ export function useStageZamane() {
 
 /** `POST /admin/config/smtp/ca`: trust an uploaded CA file for the SMTP server. */
 export function useSetSmtpCa() {
-  return useAdminMutation((body: SmtpCaBody) =>
-    api.post<AdminAccepted>('/admin/config/smtp/ca', body),
+  return useAdminMutation(
+    (body: SmtpCaBody) => api.post<AdminAccepted>('/admin/config/smtp/ca', body),
+    { secret: true },
   );
 }
 
-/** `DELETE /admin/config/smtp/ca?etag=…`: back to the system's trust store. */
+/**
+ * `DELETE /admin/config/smtp/ca?etag=…`: back to the system's trust store (the probe's recipient
+ * and the password in the JSON body, like the upload's).
+ */
 export function useClearSmtpCa() {
-  return useAdminMutation((etag: string) =>
-    api.delete<AdminAccepted>('/admin/config/smtp/ca', { params: { etag } }),
+  return useAdminMutation(
+    ({ etag, ...body }: SmtpCaClear & { etag: string }) =>
+      api.delete<AdminAccepted>('/admin/config/smtp/ca', { params: { etag }, body }),
+    { secret: true },
   );
 }
 
@@ -1564,12 +1590,12 @@ export function usePatchSettings() {
   });
 }
 
-/** `POST /settings/{key}/reset`: back to the shipped default (audited). */
+/** `POST /settings/{key}/reset`: back to the shipped default (audited; unchanged if it was). */
 export function useResetSetting() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (key: SettingOut['key']) =>
-      api.post<unknown>(`/settings/${encodeURIComponent(key)}/reset`),
+      api.post<SettingsPatchResult>(`/settings/${encodeURIComponent(key)}/reset`),
     onSettled: () => client.invalidateQueries({ queryKey: queryKeys.settings }),
   });
 }

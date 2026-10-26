@@ -1,6 +1,6 @@
 /**
- * The TypeScript API types (`api-types.ts`) and the endpoints the app calls must match the
- * API's OpenAPI document (`src/generated/api-schemas.json`, made by
+ * The TypeScript API types (`api-types.ts`, `settings-types.ts`) and the endpoints the app calls
+ * must match the API's OpenAPI document (`src/generated/api-schemas.json`, made by
  * `web/scripts/export_api_contract.py` from the FastAPI app). A renamed, retyped, newly required
  * or removed field — or a call to an endpoint that does not exist — fails here.
  */
@@ -18,7 +18,7 @@ const PATHS = contract.paths as Record<string, string[]>;
 
 /** `src/` (the tests run from `web/`, like every npm script). */
 const SRC = join(process.cwd(), 'src');
-const TYPES_FILE = join(SRC, 'lib', 'api-types.ts');
+const TYPES_FILES = ['api-types.ts', 'settings-types.ts'].map((name) => join(SRC, 'lib', name));
 
 /**
  * Interfaces of api-types.ts that are not OpenAPI schemas (error body, query parameters, the
@@ -36,27 +36,64 @@ const NOT_SCHEMAS = new Set([
   'PersonPreview',
   'AssignmentPreview',
   'UsageParams',
+  // settings-types.ts: the members of a union, the action results (`result` of a request is any
+  // JSON object, checked in api-samples.test.ts), the details of refusals and a form's source.
+  'FieldProblem',
+  'ValueChange',
+  'SecretChange',
+  'SealActionResult',
+  'CreditActionResult',
+  'TsaTestResult',
+  'ReplicaTestResult',
+  'TestEmailResult',
+  'LeaseRebuildResult',
+  'SectionBodies',
+  'SettingProblem',
+  'SettingConflict',
+  'SourceConfig',
 ]);
 /** OpenAPI schemas the web app does not use. */
 const UNUSED_SCHEMAS = new Set(['HTTPValidationError', 'ValidationError', 'Health']);
+
+/**
+ * Unions that narrow a wider API type: the API declares a plain string (or any JSON value) whose
+ * values come from a fixed list in the Python code (`arcilogger_core.admin.contract` `State`,
+ * `Step`, `StepState`, `RequestKind`/`WorkerKind`, `Section`; `routers/admin_config.py`
+ * `Readiness`; `settings_meta`). A field of such a union agrees with the API type named here;
+ * `api-samples.test.ts` checks the captured answers against the union itself.
+ */
+const NARROWED: Record<string, string> = {
+  RequestKind: 'string',
+  RequestState: 'string',
+  RequestStep: 'string',
+  StepState: 'string',
+  AdminSection: 'string',
+  ReadinessItem: 'string',
+  SettingType: 'string',
+  SettingGroupId: 'string',
+  SettingValue: 'ref:JsonValue',
+};
 
 interface Field {
   optional: boolean;
   type: string;
 }
 
-const source = ts.createSourceFile(
-  TYPES_FILE,
-  readFileSync(TYPES_FILE, 'utf8'),
-  ts.ScriptTarget.ES2022,
-  true,
-);
 const aliases = new Map<string, ts.TypeNode>();
 const interfaces = new Map<string, ts.InterfaceDeclaration>();
-source.forEachChild((node) => {
-  if (ts.isTypeAliasDeclaration(node)) aliases.set(node.name.text, node.type);
-  if (ts.isInterfaceDeclaration(node)) interfaces.set(node.name.text, node);
-});
+for (const file of TYPES_FILES) {
+  ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.ES2022, true).forEachChild(
+    (node) => {
+      if (ts.isTypeAliasDeclaration(node)) aliases.set(node.name.text, node.type);
+      if (ts.isInterfaceDeclaration(node)) interfaces.set(node.name.text, node);
+    },
+  );
+}
+
+/** The text of a node (its own source file: the types come from two files). */
+function text(node: ts.Node): string {
+  return node.getText(node.getSourceFile());
+}
 
 /** A type as a sorted set of atoms: `string`, `number`, `null`, `"lit"`, `ref:X`, `array<…>`. */
 function tsType(node: ts.TypeNode): string[] {
@@ -64,6 +101,8 @@ function tsType(node: ts.TypeNode): string[] {
   if (ts.isArrayTypeNode(node)) return [`array<${tsType(node.elementType).join('|')}>`];
   if (ts.isLiteralTypeNode(node)) {
     if (node.literal.kind === ts.SyntaxKind.NullKeyword) return ['null'];
+    if (node.literal.kind === ts.SyntaxKind.FalseKeyword) return ['false'];
+    if (node.literal.kind === ts.SyntaxKind.TrueKeyword) return ['true'];
     if (ts.isStringLiteral(node.literal)) return [JSON.stringify(node.literal.text)];
   }
   switch (node.kind) {
@@ -77,14 +116,19 @@ function tsType(node: ts.TypeNode): string[] {
       return ['unknown'];
   }
   if (ts.isTypeReferenceNode(node)) {
-    const name = node.typeName.getText(source);
+    const name = text(node.typeName);
     if (name === 'DateTimeString') return ['string(date-time)'];
     if (name === 'Record') return ['object'];
+    // `Partial<Record<…>>`: a map whose keys are a fixed list, not all of them present.
+    const [argument] = node.typeArguments ?? [];
+    if (name === 'Partial' && argument && tsType(argument).join() === 'object') return ['object'];
+    const narrowed = NARROWED[name];
+    if (narrowed) return [narrowed];
     const alias = aliases.get(name);
     if (alias) return tsType(alias);
     return [`ref:${name}`];
   }
-  throw new Error(`unsupported type in api-types.ts: ${node.getText(source)}`);
+  throw new Error(`unsupported type in the API types: ${text(node)}`);
 }
 
 function tsFields(name: string): Map<string, Field> {
@@ -93,13 +137,12 @@ function tsFields(name: string): Map<string, Field> {
   const fields = new Map<string, Field>();
   for (const clause of declaration.heritageClauses ?? []) {
     for (const parent of clause.types) {
-      for (const [key, field] of tsFields(parent.expression.getText(source)))
-        fields.set(key, field);
+      for (const [key, field] of tsFields(text(parent.expression))) fields.set(key, field);
     }
   }
   for (const member of declaration.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue;
-    fields.set(member.name.getText(source), {
+    fields.set(text(member.name), {
       optional: Boolean(member.questionToken),
       type: tsType(member.type).join(' | '),
     });
@@ -151,8 +194,10 @@ const schemaInterfaces = [...interfaces.keys()].filter((name) => !NOT_SCHEMAS.ha
 
 describe('API types match the OpenAPI document', () => {
   it('has a TypeScript interface for every schema the app may receive or send', () => {
+    // A value schema (`JsonValue`: any JSON value) has a narrowing union instead.
+    const values = new Set(Object.values(NARROWED).map((type) => type.replace(/^ref:/, '')));
     const missing = Object.keys(SCHEMAS).filter(
-      (name) => !UNUSED_SCHEMAS.has(name) && !interfaces.has(name),
+      (name) => !UNUSED_SCHEMAS.has(name) && !values.has(name) && !interfaces.has(name),
     );
     expect(missing).toEqual([]);
   });
@@ -215,43 +260,6 @@ function matches(code: string, openapi: string): boolean {
   );
 }
 
-/**
- * Endpoints of the Wave 1 contract (2.11, 2.13: browser administration and database settings)
- * the app calls before the API that serves them is merged; their types are in
- * `settings-types.ts`, written from the contract. Each entry leaves this list when the generated
- * document has it (the final sync), and the test below fails until it does.
- */
-const CONTRACT_PENDING: Record<string, string[]> = {
-  '/api/v1/admin/status': ['get'],
-  '/api/v1/admin/config': ['get'],
-  '/api/v1/admin/config/{section}/check': ['post'],
-  '/api/v1/admin/config/general': ['put'],
-  '/api/v1/admin/config/tsa': ['put'],
-  '/api/v1/admin/config/smtp': ['put'],
-  '/api/v1/admin/config/replica': ['put'],
-  '/api/v1/admin/config/retention': ['put'],
-  '/api/v1/admin/config/backup': ['put'],
-  '/api/v1/admin/config/sources': ['post'],
-  '/api/v1/admin/config/sources/{name}': ['put', 'delete'],
-  '/api/v1/admin/uploads': ['post'],
-  '/api/v1/admin/config/tsa/roots': ['post'],
-  '/api/v1/admin/config/tsa/legal-roots': ['post'],
-  '/api/v1/admin/config/tsa/zamane': ['post'],
-  '/api/v1/admin/config/smtp/ca': ['post', 'delete'],
-  '/api/v1/admin/config/versions': ['get'],
-  '/api/v1/admin/diagnostics': ['get'],
-  '/api/v1/admin/requests': ['get'],
-  '/api/v1/admin/requests/{request_id}': ['get', 'delete'],
-  '/api/v1/admin/requests/{request_id}/revert': ['post'],
-  '/api/v1/admin/actions/tsa-test': ['post'],
-  '/api/v1/admin/actions/replica-test': ['post'],
-  '/api/v1/admin/actions/test-email': ['post'],
-  '/api/v1/admin/actions/lease-rebuild': ['post'],
-  '/api/v1/credits/query': ['post'],
-  '/api/v1/settings': ['get', 'patch'],
-  '/api/v1/settings/{key}/reset': ['post'],
-};
-
 describe('endpoints the app calls exist in the API', () => {
   const calls = apiCalls();
 
@@ -263,19 +271,10 @@ describe('endpoints the app calls exist in the API', () => {
   it.each(calls.map((call) => [`${call.method.toUpperCase()} ${call.path}`, call] as const))(
     '%s',
     (_, call) => {
-      const found = [...Object.entries(PATHS), ...Object.entries(CONTRACT_PENDING)].find(
+      const found = Object.entries(PATHS).find(
         ([path, methods]) => matches(call.path, path) && methods.includes(call.method),
       );
       expect(found, `${call.file}: ${call.method} ${call.path}`).toBeDefined();
     },
   );
-
-  it('waits only for contract endpoints the generated document does not have yet', () => {
-    const arrived = Object.entries(CONTRACT_PENDING).flatMap(([path, methods]) =>
-      methods
-        .filter((method) => PATHS[path]?.includes(method))
-        .map((method) => `${method} ${path}`),
-    );
-    expect(arrived, 'remove them from CONTRACT_PENDING (final sync)').toEqual([]);
-  });
 });

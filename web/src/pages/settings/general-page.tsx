@@ -51,6 +51,7 @@ const PATHS: Record<GeneralField, string[]> = {
   fallback_server: ['clock.fallback_server'],
   alert_offset_ms: ['clock.alert_offset_ms'],
 };
+const SHOWN = Object.values(PATHS).flat();
 
 function toForm(general: GeneralSection | undefined): GeneralForm | undefined {
   if (!general) return undefined;
@@ -93,7 +94,7 @@ function MeasuredOffset() {
 export function GeneralPage() {
   const { t } = useTranslation();
   const id = useId();
-  const section = useMachineSection('general');
+  const section = useMachineSection('general', { fields: SHOWN });
   const { config, flow, status } = section;
   const server = useMemo(() => toForm(config.data?.sections.general), [config.data]);
   const form = useServerValues(server, EMPTY);

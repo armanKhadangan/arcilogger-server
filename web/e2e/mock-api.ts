@@ -31,7 +31,17 @@ import { LicenseMock, type LicenseOptions } from './mock-license';
 import { RecordsMock, type Answer, type RecordsOptions } from './mock-records';
 import { ReportsMock } from './mock-reports';
 import { UsageMock, type UsageOptions } from './mock-usage';
-import { ALERTS, CREDITS, EVIDENCE, LOOKUPS, RAW, REPORTS, SEALS } from './samples';
+import {
+  ADMIN,
+  ALERTS,
+  CREDITS,
+  EVIDENCE,
+  LOOKUPS,
+  RAW,
+  REPORTS,
+  SEALS,
+  SETTINGS,
+} from './samples';
 
 export const CSRF_TOKEN = 'e2e-csrf-token';
 export const VALID_TOTP = '123456';
@@ -144,6 +154,9 @@ const SAMPLE_TEXTS: Record<string, [string, string]> = Object.fromEntries(
     SEALS.errors,
     ALERTS.errors,
     REPORTS.errors,
+    ADMIN.errors,
+    SETTINGS.errors,
+    { query_limited: CREDITS.query_limited },
   ].flatMap((errors) =>
     Object.values(errors).map(({ body }) => [
       body.error.code,
@@ -154,9 +167,10 @@ const SAMPLE_TEXTS: Record<string, [string, string]> = Object.fromEntries(
 
 /**
  * The request model of every API endpoint with a JSON body (its `requestBody` in the OpenAPI
- * document). Every one is `extra="forbid"`: the API answers 422 `validation_error` to a body with a
- * field it does not know or without a required one — and so does the mock, so a field the web app
- * sends but the API does not accept fails the E2E tests instead of passing a lenient mock.
+ * document). Every one is `extra="forbid"`, and so are the models inside it (`ClockBody`,
+ * `SourceIn`, `SettingChange`): the API answers 422 `validation_error` to a body with a field it
+ * does not know or without a required one — and so does the mock, so a field the web app sends
+ * but the API does not accept fails the E2E tests instead of passing a lenient mock.
  */
 const REQUEST_BODIES: Record<string, string> = {
   'POST /auth/login': 'LoginBody',
@@ -184,38 +198,91 @@ const REQUEST_BODIES: Record<string, string> = {
   'PATCH /reports/schedules/{id}': 'ScheduleUpdate',
   'POST /reports/schedules/{id}/run': 'RunRequest',
   'POST /usage/rebuild': 'RebuildRequest',
+  // Browser administration (contract 2.11) and the database settings (2.13).
+  'POST /admin/config/general/check': 'GeneralBody',
+  'PUT /admin/config/general': 'GeneralBody',
+  'POST /admin/config/tsa/check': 'TsaBody',
+  'PUT /admin/config/tsa': 'TsaBody',
+  'POST /admin/config/tsa/roots': 'RootBody',
+  'POST /admin/config/tsa/legal-roots': 'LegalRootBody',
+  'POST /admin/config/tsa/zamane': 'ZamaneBody',
+  'POST /admin/config/sources/check': 'SourceCheckBody',
+  'POST /admin/config/sources': 'SourceBody',
+  'PUT /admin/config/sources/{name}': 'SourceBody',
+  'POST /admin/config/smtp/check': 'SmtpBody',
+  'PUT /admin/config/smtp': 'SmtpBody',
+  'POST /admin/config/smtp/ca': 'SmtpCaBody',
+  'DELETE /admin/config/smtp/ca': 'SmtpCaClear',
+  'POST /admin/config/replica/check': 'ReplicaBody',
+  'PUT /admin/config/replica': 'ReplicaBody',
+  'POST /admin/config/retention/check': 'RetentionBody',
+  'PUT /admin/config/retention': 'RetentionBody',
+  'POST /admin/config/backup/check': 'BackupBody',
+  'PUT /admin/config/backup': 'BackupBody',
+  'POST /admin/actions/tsa-test': 'TsaTestBody',
+  'POST /admin/actions/test-email': 'TestEmailBody',
+  'POST /admin/actions/lease-rebuild': 'LeaseRebuildBody',
+  'PATCH /settings': 'SettingsPatch',
 };
+/** Routes whose body may be left out altogether (`body: SmtpCaClear | None = None`). */
+const OPTIONAL_BODIES = new Set(['DELETE /admin/config/smtp/ca']);
 for (const [route, name] of Object.entries(REQUEST_BODIES)) {
   if (API_SCHEMAS[name]?.additionalProperties !== false)
     throw new Error(`${route}: no strict OpenAPI schema ${name} in api-schemas.json`);
+}
+
+type Problem = { loc: string[]; type: string; msg: string };
+
+/** The strict model a property holds (`$ref`, or `anyOf` with `null`), if any. */
+function strictModel(property: unknown): string | null {
+  const schema = property as { $ref?: string; anyOf?: { $ref?: string }[] } | undefined;
+  const ref = schema?.$ref ?? schema?.anyOf?.find((item) => item.$ref)?.$ref;
+  const name = ref?.split('/').pop();
+  return name && API_SCHEMAS[name]?.additionalProperties === false ? name : null;
+}
+
+/** Unknown and missing fields of `value` against the strict model `name`, at `loc`. */
+function modelProblems(name: string, value: unknown, loc: string[]): Problem[] {
+  const schema = API_SCHEMAS[name];
+  if (!schema) return [];
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return [{ loc, type: 'model_attributes_type', msg: 'Input should be an object' }];
+  const known = (schema.properties ?? {}) as Record<string, { items?: unknown }>;
+  const problems: Problem[] = [
+    ...Object.keys(value)
+      .filter((key) => !Object.hasOwn(known, key))
+      .map((key) => ({
+        loc: [...loc, key],
+        type: 'extra_forbidden',
+        msg: 'Extra inputs are not permitted',
+      })),
+    ...(schema.required ?? [])
+      .filter((key) => !Object.hasOwn(value, key))
+      .map((key) => ({ loc: [...loc, key], type: 'missing', msg: 'Field required' })),
+  ];
+  for (const [key, property] of Object.entries(known)) {
+    const item = (value as Record<string, unknown>)[key];
+    if (item === undefined || item === null) continue;
+    const nested = strictModel(property);
+    if (nested) problems.push(...modelProblems(nested, item, [...loc, key]));
+    const listed = strictModel(property.items);
+    if (listed && Array.isArray(item))
+      item.forEach((entry, index) =>
+        problems.push(...modelProblems(listed, entry, [...loc, key, String(index)])),
+      );
+  }
+  return problems;
 }
 
 /**
  * Problems of a request body against the API's model (unknown and missing fields only — the
  * values are the mocked endpoints' business), in the API's `details` format; `[]` when none.
  */
-export function bodyProblems(
-  route: string,
-  body: unknown,
-): { loc: string[]; type: string; msg: string }[] {
+export function bodyProblems(route: string, body: unknown): Problem[] {
   const name = REQUEST_BODIES[route];
-  const schema = name ? API_SCHEMAS[name] : undefined;
-  if (!schema) return [];
-  if (typeof body !== 'object' || body === null || Array.isArray(body))
-    return [{ loc: ['body'], type: 'model_attributes_type', msg: 'Input should be an object' }];
-  const known = schema.properties ?? {};
-  return [
-    ...Object.keys(body)
-      .filter((key) => !Object.hasOwn(known, key))
-      .map((key) => ({
-        loc: ['body', key],
-        type: 'extra_forbidden',
-        msg: 'Extra inputs are not permitted',
-      })),
-    ...(schema.required ?? [])
-      .filter((key) => !Object.hasOwn(body, key))
-      .map((key) => ({ loc: ['body', key], type: 'missing', msg: 'Field required' })),
-  ];
+  if (!name) return [];
+  if (OPTIONAL_BODIES.has(route) && (body === null || body === undefined)) return [];
+  return modelProblems(name, body, ['body']);
 }
 
 const ROLE_INFO = ROLE_CONTRACT.roles;
@@ -632,7 +699,8 @@ export class MockApi {
     }
     const route = `${method} ${path
       .replace(/\/\d+(?=\/|$)/, '/{id}')
-      .replace(/^\/devices\/(?!assign$|export\.csv$)[^/]+$/, '/devices/{mac}')}`;
+      .replace(/^\/devices\/(?!assign$|export\.csv$)[^/]+$/, '/devices/{mac}')
+      .replace(/^\/admin\/config\/sources\/(?!check$)[^/]+$/, '/admin/config/sources/{name}')}`;
     // A locked module's routes refuse after authentication, before any validation (6.4).
     const locked = this.license.gate(call, this);
     if (locked) return locked;

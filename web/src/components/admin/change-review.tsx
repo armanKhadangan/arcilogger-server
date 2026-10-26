@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { changeValueText, isSecretChange, localized } from '@/lib/admin-requests';
+import { changeRows, changeValueText, isSecretChange, localized } from '@/lib/admin-requests';
 import { formatDateTime } from '@/lib/format';
 import type { AdminCheck, Change } from '@/lib/settings-types';
 
@@ -59,7 +59,7 @@ export function ChangesTable({
   caption: string;
 }) {
   const { t } = useTranslation();
-  const entries = Object.entries(changes);
+  const entries = changeRows(changes);
   if (entries.length === 0) return <p className="text-13 text-muted">{t('admin.review.none')}</p>;
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
