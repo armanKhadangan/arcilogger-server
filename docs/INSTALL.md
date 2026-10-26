@@ -886,10 +886,10 @@ with the 3.6 GiB table in memory: a table read from disk, or a slower disk, take
 million log lines a day, about 18 % of them web filter lines, 400 days hold about 72 million
 `fg_web` rows: about 2 minutes, more when they do not fit in memory; at 5 million lines a day five
 times as long. Ingest is stopped while the schema is migrated; the collector keeps writing the
-spool, so nothing is lost and ingest catches up afterwards ([INGEST.md](INGEST.md)). After the upgrade the worker job
-`search.counts_backfill` counts the days loaded before it into Arama's summary table, newest day
-first, for at most a minute every 10 minutes; until a day is counted, Arama counts that day's
-statistics directly (slower, same result). What is still to count:
+spool, so nothing is lost and ingest catches up afterwards ([INGEST.md](INGEST.md)). After the
+upgrade the worker job `search.counts_backfill` counts the days loaded before it into Arama's
+summary table, newest day first, for at most a minute every 10 minutes; until a day is counted,
+Arama counts that day's statistics directly (slower, same result). What is still to count:
 
 ```powershell
 & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" search-counts status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
@@ -972,10 +972,10 @@ after the installation (`Get-MpPreference`), and the owner's decision on `spool`
 (exclusion or scheduled scan only); the first night's `D:\ARCILOGGER\state\backup\last.json`, the
 duration and size of the nightly database dump and the first restore drill ([BACKUP.md](BACKUP.md)
 sections 6 and 8); on the upgrade to the version with Arama, how long the schema migration with
-`ix_fg_web_rhost_time` takes on the real database (section 13) and, after the
-first days, `arcilogger-db search-counts verify`: the summary table must match the rows and the
-counts of names not stored in lower case (`fg_dns.qname`, `fg_web.hostname`) must be 0; that the
-Python services start with the isolated interpreter (`Get-CimInstance
+`ix_fg_web_rhost_time` takes on the real database (section 13) and, after the first days,
+`arcilogger-db search-counts verify`: the summary table must match the rows and the counts of
+names not stored in lower case (`fg_dns.qname`, `fg_web.hostname`) must be 0; that the Python
+services start with the isolated interpreter (`Get-CimInstance
 Win32_Process -Filter "Name = 'python.exe'" | Format-List CommandLine`: `python.exe -I -X utf8 -u
 -m arcilogger_api serve …`; `sc.exe qc` shows the service wrapper) and that the server id reads the
 same under the ArciApi service's virtual account and in an administrator PowerShell (the server

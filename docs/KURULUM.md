@@ -1025,9 +1025,8 @@ sürdü (13–15 sn, indeks 553 MiB; 2026-10-26 ölçümü, makinede başka işl
 tablo bellekteyken: diskten okunan bir tabloda ya da yavaş bir diskte daha uzun sürer). Günde 1
 milyon log satırında, bunların yaklaşık %18'i web filtresi satırıyken, 400 gün yaklaşık 72 milyon
 `fg_web` satırı eder: yaklaşık 2 dakika, belleğe sığmıyorsa daha uzun; günde 5 milyon satırda beş
-katı.
-Şema yükseltilirken ingest durur; toplayıcı spool'a yazmayı sürdürür, hiçbir şey kaybolmaz ve
-ingest ardından yetişir ([INGEST.md](INGEST.md)). Yükseltmeden sonra worker işi
+katı. Şema yükseltilirken ingest durur; toplayıcı spool'a yazmayı sürdürür, hiçbir şey kaybolmaz
+ve ingest ardından yetişir ([INGEST.md](INGEST.md)). Yükseltmeden sonra worker işi
 `search.counts_backfill`, yükseltmeden önce yüklenmiş günleri Arama'nın özet tablosuna sayar: en
 yeni gün önce, 10 dakikada bir en çok bir dakika. Bir gün sayılana kadar Arama o günün
 istatistiklerini doğrudan sayar (daha yavaş, sonuç aynı). Sayılmayı bekleyenler:
