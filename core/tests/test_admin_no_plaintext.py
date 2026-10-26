@@ -1,10 +1,12 @@
 """No secret leaves the secret store in plain text (ADR-0014; contract 3, the canary test).
 
 A canary value goes into every secret the browser may set — the Kamu SM customer number and
-password, the SMTP password, the replica password — through applies that succeed, a probe that
-fails and echoes it, a held change, a rejected request and a crash recovery. Afterwards no file
-under the installation folder or the data root (inbox, work, pending, status, journal, versions,
-system, task requests, logs) and no log record contains the plaintext.
+password, the SMTP password, the replica password — through applies that succeed, an SMTP and a
+replica probe that fail and echo it, a held change that carries a new password, a rejected
+request and an apply that crashes before its commit point and is recovered. At every stage, the
+crash's leftovers included (``txn.json``, the ``.tmp`` files, the work folder), no file under the
+installation folder or the data root (inbox, work, pending, status, journal, versions, system,
+task requests, logs) and no log record or event contains the plaintext.
 """
 
 from __future__ import annotations
@@ -18,7 +20,9 @@ from typing import Any
 import pytest
 from pydantic import JsonValue
 
+from arcilogger_core.admin.apply import Applier
 from arcilogger_core.admin.probe import ProbeKind, ProbeResult
+from arcilogger_core.admin.store import read_pending, read_txn
 from arcilogger_core.admin.testing import FakeAgent, FakeProber, Installed, make_installation
 from arcilogger_core.timeutil import utc_now
 
@@ -30,18 +34,26 @@ CANARIES = {
 }
 
 
+class Crash(BaseException):
+    """Stops the agent at a checkpoint as a power cut would."""
+
+
 class EchoingProber(FakeProber):
-    """A probe that fails and puts every secret it was given into its message."""
+    """Every probe puts each secret it was given into its message; those of ``failing``
+    fail with it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failing: set[str] = set()
 
     def run(
         self, kind: ProbeKind, params: Mapping[str, JsonValue], secrets: Mapping[str, str]
     ) -> ProbeResult:
         super().run(kind, params, secrets)
-        if kind == "replica":
-            return ProbeResult(
-                False, "replica_test_failed", "refused: " + " ".join(secrets.values())
-            )
-        return ProbeResult(True, None, "ok " + " ".join(secrets.values()))
+        echo = " ".join(secrets.values())
+        if kind in self.failing:
+            return ProbeResult(False, f"{kind}_test_failed", f"refused: {echo}")
+        return ProbeResult(True, None, f"ok {echo}")
 
 
 def every_file(*roots: Path) -> Iterator[Path]:
@@ -49,13 +61,32 @@ def every_file(*roots: Path) -> Iterator[Path]:
         yield from (path for path in root.rglob("*") if path.is_file())
 
 
-def token(installed: Installed, name: str) -> dict[str, Any]:
+def token(installed: Installed, name: str, expect: str = "unset") -> dict[str, Any]:
     return {
         "op": "secret_set",
         "name": name,
-        "expect": "unset",
+        "expect": expect,
         "token": installed.store.encrypt_value(CANARIES[name]),
     }
+
+
+def plaintext_in(
+    installed: Installed, caplog: pytest.LogCaptureFixture, *agents: FakeAgent
+) -> list[str]:
+    """Where a canary appears: files, log records, events."""
+    found = [
+        str(path)
+        for path in every_file(installed.root, installed.data_dir)
+        for value in CANARIES.values()
+        if value.encode() in path.read_bytes()
+    ]
+    for value in CANARIES.values():
+        if value in caplog.text:
+            found.append(f"log: {value}")
+        for agent in agents:
+            events = [message for _, _, message in agent.events.events]
+            found += [f"event: {message}" for message in events if value in message]
+    return found
 
 
 @pytest.fixture
@@ -64,7 +95,7 @@ def installed(tmp_path: Path) -> Installed:
 
 
 def test_no_plaintext_secret_reaches_a_file_or_a_log(
-    installed: Installed, caplog: pytest.LogCaptureFixture
+    installed: Installed, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     caplog.set_level(logging.DEBUG)
     prober = EchoingProber()
@@ -83,45 +114,79 @@ def test_no_plaintext_secret_reaches_a_file_or_a_log(
         {"op": "set", "path": "replica.user", "expect": None, "value": "NAS-01\\arcireplica"},
         token(installed, "replica.password"),
     ]
-    requests = [
-        installed.request(
+    test_to = {"test_to": "bt@ornek.example"}
+    steps: list[tuple[set[str], Any]] = [
+        (set(), installed.request(
             section="tsa",
             ops=[token(installed, "kamusm.customer"), token(installed, "kamusm.password")],
-        ),
-        installed.request(section="smtp", ops=smtp, options={"test_to": "bt@ornek.example"}),
-        installed.request(section="replica", ops=replica),  # the probe fails and echoes
-        installed.request(section="replica", ops=replica, probe=False),
-        installed.request(  # expired: rejected after its signature verified
+        )),
+        ({"smtp"}, installed.request(section="smtp", ops=smtp, options=test_to)),  # echoes
+        (set(), installed.request(section="smtp", ops=smtp, options=test_to)),
+        ({"replica"}, installed.request(section="replica", ops=replica)),  # echoes
+        (set(), installed.request(section="replica", ops=replica)),
+        (set(), installed.request(  # expired: rejected after its signature verified
             section="tsa",
             ops=[token(installed, "kamusm.password")],
             now=utc_now() - timedelta(minutes=20),
-        ),
-    ]
-    for request in requests:
+        )),
+    ]  # fmt: skip
+    for failing, request in steps:
+        prober.failing = failing
         installed.submit(request)
         agent.process()
-    states = [installed.status(r.id).state for r in requests]  # type: ignore[union-attr]
-    assert states == ["applied", "applied", "probe_failed", "applied", "rejected"]
+    states = [installed.status(r.id).state for _, r in steps]  # type: ignore[union-attr]
+    assert states == ["applied", "probe_failed", "applied", "probe_failed", "applied", "rejected"]
+    assert [call.kind for call in prober.calls] == ["smtp", "smtp", "replica", "replica"]
+    assert all(call.secrets for call in prober.calls)  # each probe was given its password
     assert installed.store.get("smtp.password") == CANARIES["smtp.password"]
-    assert {call.kind for call in prober.calls} == {"smtp", "replica"}
-    # A held change keeps its token in pending\ until it is due.
+    assert plaintext_in(installed, caplog, agent) == []
+
+    # A held change keeps its new password in pending\ (still encrypted) until it is due.
     installed.write_policy(hold_hours=1)
-    held = installed.request(
+    moved = installed.request(
         section="replica",
         ops=[
-            {"op": "set", "path": "replica.enabled", "expect": True, "value": False},
+            {"op": "set", "path": "replica.target", "expect": "\\\\NAS-01\\worm",
+             "value": "\\\\NAS-02\\worm"},
+            token(installed, "replica.password", "set"),
         ],
-    )
-    installed.submit(held)
+        probe=False,
+    )  # fmt: skip
+    installed.submit(moved)
     agent.process()
-    assert installed.status(held.id).state == "pending"  # type: ignore[union-attr]
-    found = [
-        str(path)
-        for path in every_file(installed.root, installed.data_dir)
-        for value in CANARIES.values()
-        if value.encode() in path.read_bytes()
-    ]
-    assert found == []
-    for value in CANARIES.values():
-        assert value not in caplog.text
-        assert all(value not in message for _, _, message in agent.events.events)
+    assert installed.status(moved.id).state == "pending"  # type: ignore[union-attr]
+    assert [item.id for item in read_pending(installed.layout)] == [moved.id]
+    assert plaintext_in(installed, caplog, agent) == []
+
+    # An apply that stops after secrets.json was replaced (the old arcilogger.toml still in
+    # force), and its recovery, which puts the old secrets.json back.
+    def crash(step: str) -> None:
+        if step == "replace_config":
+            raise Crash(step)
+
+    crashing = FakeAgent(installed, prober=prober, checkpoint=crash)
+    again = installed.request(
+        section="smtp",
+        ops=[
+            {"op": "set", "path": "smtp.host", "expect": "smtp.ornek.example",
+             "value": "smtp2.ornek.example"},
+            token(installed, "smtp.password", "set"),
+        ],
+        probe=False,
+    )  # fmt: skip
+    installed.submit(again)
+    with monkeypatch.context() as power_cut:  # no clean-up runs either
+        power_cut.setattr(Applier, "_discard_temps", lambda self, txn_id: None)
+        with pytest.raises(Crash):
+            crashing.process()
+    assert read_txn(installed.layout) is not None
+    assert installed.layout.work_dir(again.id).is_dir()
+    assert [p.name for p in installed.root.iterdir() if p.name.endswith(".tmp")]
+    assert plaintext_in(installed, caplog, agent, crashing) == []
+    recovering = FakeAgent(installed, prober=prober, now=utc_now() + timedelta(hours=1, minutes=1))
+    recovering.process()  # the recovery, then the held change that is due now
+    assert installed.status(again.id).error.code == "interrupted"  # type: ignore[union-attr]
+    assert installed.status(moved.id).state == "applied"  # type: ignore[union-attr]
+    assert installed.store.get("replica.password") == CANARIES["replica.password"]
+    assert read_txn(installed.layout) is None
+    assert plaintext_in(installed, caplog, agent, crashing, recovering) == []
