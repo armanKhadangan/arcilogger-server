@@ -76,6 +76,7 @@ from arcilogger_core.config import (
     MIN_RETENTION_DAYS,
     Config,
     SourceConfig,
+    replica_target_text,
 )
 from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.secretstore import SecretValueError, check_secret_value
@@ -1527,9 +1528,15 @@ def _body_smtp(body: _Body, data: Mapping[str, Any]) -> None:
 def _body_replica(body: _Body, data: Mapping[str, Any]) -> None:
     if "enabled" in data:
         body.set("replica.enabled", data["enabled"])
-    for key in ("target", "user"):
-        if key in data:
-            body.set(f"replica.{key}", _optional_text(data[key]))
+    if "target" in data:
+        target = _optional_text(data["target"])
+        if isinstance(target, str) and unc_ok(target):
+            # The text the configuration gives back for it (``//NAS-01/worm/`` is
+            # ``\\NAS-01\worm``); a refused one is checked as it was typed.
+            target = replica_target_text(target)
+        body.set("replica.target", target)
+    if "user" in data:
+        body.set("replica.user", _optional_text(data["user"]))
     if data.get("password") is not None:
         body.secret("replica.password", data["password"])
     user = _optional_text(data["user"]) if "user" in data else body.current.replica.user

@@ -4,7 +4,8 @@
   configuration file, ``secret.key`` and ``secrets.json``, the channel keys (``keys init``: real
   Ed25519 keys made for the test, never a fixed key), ``policy.json`` and a data root;
   :class:`Installed` signs and queues requests exactly as the API does (``.tmp``, then rename),
-  stages uploads and reads statuses and journals;
+  stages uploads and reads statuses and journals; :func:`windows_replica_target` gives a
+  loaded configuration the replica target Windows would make of the same file;
 * :class:`FakeAgent` runs the real :class:`~arcilogger_core.admin.agent.Agent` synchronously
   (:meth:`FakeAgent.process`), with a settable clock, :class:`FakeEventLog`,
   :class:`FakeProber` and, when given, :class:`FakeTasks` (the Seal and Requests tasks) and
@@ -27,7 +28,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from pydantic import JsonValue
@@ -287,6 +288,18 @@ def make_installation(
     init_keys(installed.layout.keys)
     installed.write_policy(**dict(policy or {}))
     return installed
+
+
+def windows_replica_target(config: Config) -> Config:
+    """``config`` with ``replica.target`` as Windows loads it: there ``str()`` of the path
+    ``\\\\NAS-01\\worm`` is ``\\\\NAS-01\\worm\\`` (a share root keeps its separator), which a
+    path made from that text gives here too. Wraps ``parse_config`` where a test simulates it."""
+    target = config.replica.target
+    if target is None:
+        return config
+    windows = Path(str(PureWindowsPath(str(target))))
+    replica = config.replica.model_copy(update={"target": windows})
+    return config.model_copy(update={"replica": replica})
 
 
 # -- the task side ---------------------------------------------------------------------------------

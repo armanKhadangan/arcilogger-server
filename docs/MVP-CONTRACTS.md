@@ -1191,7 +1191,9 @@ change of the e-mail server is first tried by the agent (connect, log in, a test
 `smtp_test_recipient_required` without one); a user needs the password again when the server,
 port, security, user or CA file changes (`secret_rebind_required`); a password over an
 unencrypted connection is refused (`smtp_plaintext_auth_refused`). The replica share is tried
-the same way (`probe` `replica`; without a user the Requests task tests it afterwards). A
+the same way (`probe` `replica`; without a user the Requests task tests it afterwards). Its
+target is saved, shown and expected as one text on every platform: `\\host\share[\folder]`,
+backslashes and no trailing separator (`//NAS-01/worm/` is saved as `\\NAS-01\worm`). A
 retention change that enables it or shortens it must name the number of sealed days it deletes
 (`confirm_delete_days` = `retention_preview.days_to_delete`, else 422
 `retention_confirm_mismatch`); the dry run without it shows that number. Retention never goes

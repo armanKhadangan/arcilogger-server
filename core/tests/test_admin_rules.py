@@ -39,6 +39,7 @@ from arcilogger_core.admin.rules import (
     locked_paths,
     validate_section,
 )
+from arcilogger_core.admin.testing import windows_replica_target
 from arcilogger_core.config import Config, parse_config
 from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.timeutil import SITE_TZ
@@ -1365,6 +1366,41 @@ def test_turning_a_replica_off_or_moving_it_is_guarded(root: Path) -> None:
     policy = POLICY.model_copy(update={"hold_hours": 4})
     assert off.effective_at(policy, NOW) == NOW + timedelta(hours=4)
     assert off.effective_at(POLICY, NOW) is None  # no hold configured
+
+
+def test_a_share_is_saved_as_the_text_it_reads_back_as(root: Path, config: Config) -> None:
+    """``//NAS-01/worm/`` is saved as ``\\\\NAS-01\\worm``, the text the configuration gives
+    back for it; a target the rules refuse is checked as it was typed."""
+    for typed in ("//NAS-01/worm/", "\\\\NAS-01\\worm\\", " \\\\NAS-01\\worm "):
+        check = validate_section("replica", config, {"target": typed}, context(root))
+        assert check.ok, check.errors
+        assert [op["value"] for op in check.ops if op.get("path") == "replica.target"] == [
+            "\\\\NAS-01\\worm"
+        ]
+    refused = validate_section("replica", config, {"target": "//NAS-01/worm/./x"}, context(root))
+    assert [(p.code, p.field) for p in refused.errors] == [
+        ("replica_target_invalid", "replica.target")
+    ]
+
+
+def test_a_share_saved_on_windows_reads_back_as_saved(root: Path) -> None:
+    """Windows keeps a share root's separator in ``str()`` of its path: the target saved
+    must still be the one the page shows, the form sends back unchanged and a move of the share
+    expects (a held move ended in ``conflict`` there)."""
+    config = windows_replica_target(with_tables(root, REPLICA_ON))
+    assert str(config.replica.target) == "\\\\NAS-01\\arcilogger-worm\\"  # as on Windows
+    saved = "\\\\NAS-01\\arcilogger-worm"
+    assert rules.current_value(config, "replica.target") == saved
+    stored = context(root, stored_secrets=frozenset({"replica.password"}))
+    unchanged = validate_section("replica", config, {"target": saved}, stored)
+    assert unchanged.ok
+    assert unchanged.ops == ()
+    moved = SetOp(op="set", path="replica.target", expect=saved, value="\\\\NAS-01\\baska")
+    assert conflicts([moved], config, frozenset({"replica.password"})) == []
+    check = validate_section("replica", config, {"target": "\\\\NAS-01\\baska"}, stored)
+    assert check.ok
+    assert check.guarded
+    assert check.changes["replica.target"] == {"old": saved, "new": "\\\\NAS-01\\baska"}
 
 
 def test_strict_outbound_mode_tests_a_new_share_after_the_firewall(root: Path) -> None:

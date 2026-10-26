@@ -20,11 +20,18 @@ import tomllib
 import unicodedata
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 MIN_RETENTION_DAYS = 730  # two years: İnternet Toplu Kullanım Sağlayıcıları Yönetmeliği md. 4/1-b
 DEFAULT_RETENTION_DAYS = 760  # two years plus a margin
@@ -168,9 +175,25 @@ class RetentionConfig(_Model):
     days: int = Field(default=DEFAULT_RETENTION_DAYS, ge=MIN_RETENTION_DAYS)
 
 
+def replica_target_text(target: Path | str) -> str:
+    """``replica.target`` as the configuration shows and compares it, the same text on every
+    platform. A UNC target (``\\\\host\\share[\\folder]``, also written ``//host/share``) is
+    given with backslashes and without a trailing separator: ``str()`` of a Windows path ends a
+    share root with one (``\\\\NAS-01\\worm\\``) while a POSIX path keeps the text as typed, so
+    the value read back from the file would no longer be the one the operator saved, and an op
+    whose ``expect`` is that value would conflict. Any other path is ``str(target)``."""
+    text = str(target)
+    path = PureWindowsPath(text)
+    host, _, share = path.drive[2:].partition("\\")
+    if not path.drive.startswith("\\\\") or host in ("", "?", ".") or not share:
+        return text
+    return str(path).rstrip("\\")
+
+
 class ReplicaConfig(_Model):
     enabled: bool = False
-    #: Mounted share or UNC path, e.g. "\\\\NAS-01\\arcilogger-worm".
+    #: Mounted share or UNC path, e.g. "\\\\NAS-01\\arcilogger-worm". As JSON (the settings
+    #: page, an op's ``expect``) it is :func:`replica_target_text`.
     target: Path | None = None
     #: User for an SMB (UNC) target, e.g. "NAS-01\\arcireplica"; its password is the stored
     #: secret ``replica.password``. The Replica task runs as LOCAL SERVICE, which reaches the
@@ -182,6 +205,15 @@ class ReplicaConfig(_Model):
         if self.enabled and self.target is None:
             raise ValueError("replica.target is required when replica.enabled = true")
         return self
+
+    @field_serializer("target", when_used="json-unless-none")
+    def _target_json(self, target: Path) -> str:
+        return replica_target_text(target)
+
+    @property
+    def target_text(self) -> str | None:
+        """``target`` as :func:`replica_target_text` gives it (None: not set)."""
+        return None if self.target is None else replica_target_text(self.target)
 
 
 class ClockConfig(_Model):
