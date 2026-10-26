@@ -45,7 +45,7 @@ import hashlib
 import json
 import logging
 import os
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from functools import cached_property
@@ -78,6 +78,7 @@ from arcilogger_core.admin.contract import (
     AgentStatus,
     DocumentError,
     JarsFile,
+    JournalLine,
     RequestKind,
     RequestStatus,
     SystemStatus,
@@ -320,7 +321,8 @@ class AdminAccepted(BaseModel):
 
     request_id: str
     short_id: str
-    state: Literal["queued"]
+    #: ``cancelled``: a queued request removed from the inbox before the agent took it.
+    state: Literal["queued", "cancelled"]
     status_url: str
     guarded: bool
     effective_at: datetime | None
@@ -666,17 +668,23 @@ class Channel:
         block = config_status_of(status) if status is not None else None
         return ServiceView(block, age <= SERVICE_FRESH.total_seconds())
 
+    def journal(self) -> Iterator[JournalLine]:
+        """The agent's journal of the last 400 days (as long as it keeps it), newest first."""
+        if self.layout is None:
+            return
+        today = site_day(self.now)
+        for back in range(ORIGIN_DAYS + 1):
+            yield from reversed(read_journal(self.layout, today - timedelta(days=back)))
+
     def config_origin(self) -> Literal["browser", "outside"]:
         """``browser`` when the file is the one the agent wrote last (the newest applied
         change of its journal), else ``outside`` (a hand edit, or a console restore)."""
         current = self.files.sha256
-        if self.layout is None or current is None:
+        if current is None:
             return "outside"
-        today = site_day(self.now)
-        for back in range(ORIGIN_DAYS + 1):
-            for line in reversed(read_journal(self.layout, today - timedelta(days=back))):
-                if line.config_sha256 is not None and line.state in ("applied", "recovered"):
-                    return "browser" if line.config_sha256.to == current else "outside"
+        for line in self.journal():
+            if line.config_sha256 is not None and line.state in ("applied", "recovered"):
+                return "browser" if line.config_sha256.to == current else "outside"
         return "outside"
 
     # -- the rules' context --------------------------------------------------------------------
@@ -1042,13 +1050,18 @@ class Channel:
         return self.accepted(row)
 
     def accepted(
-        self, row: AdminRequestRow, *, warnings: Iterable[str] = (), guarded: bool = False
+        self,
+        row: AdminRequestRow,
+        *,
+        warnings: Iterable[str] = (),
+        guarded: bool = False,
+        state: Literal["queued", "cancelled"] = "queued",
     ) -> AdminAccepted:
         params = row.params or {}
         return AdminAccepted(
             request_id=row.id,
             short_id=row.id[:8],
-            state="queued",
+            state=state,
             status_url=f"/api/v1/admin/requests/{row.id}",
             guarded=guarded,
             effective_at=row.effective_at,

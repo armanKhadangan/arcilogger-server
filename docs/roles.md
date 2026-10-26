@@ -268,6 +268,8 @@ may follow the request they started.
 | `PUT /admin/config/smtp`, `/replica`, `/retention`, `/backup` (and their checks), `POST` / `DELETE /admin/config/smtp/ca` | `settings.manage` (+ re-auth) | ✔ | — | — | — |
 | `POST /admin/actions/tsa-test`, `/replica-test`, `/test-email`, `/lease-rebuild` | `settings.manage` | ✔ | — | — | — |
 | `GET /admin/requests/{id}` of one's own seal now / credit query | `seal.manage` | ✔ | — | — | — |
+| `DELETE /admin/requests/{id}`, `POST /admin/requests/{id}/revert`, `GET /admin/config/versions` | `settings.manage` (cancel of a held change and revert: + re-auth) | ✔ | — | — | — |
+| `GET /admin/diagnostics` | `settings.manage` + re-auth | ✔ | — | — | — |
 | `POST /seals/{day}/seal`, `POST /credits/query` | `seal.manage` | ✔ | — | — | — |
 | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset` | `settings.manage` (+ re-auth for `REAUTH_KEYS`) | ✔ | — | — | — |
 
@@ -276,7 +278,8 @@ agent's journal (`admin.applied`, `admin.failed`, …); a refused change is audi
 `admin.refused` with its codes only; a setting change is `settings.change` with the user's id
 and address (docs/MVP-CONTRACTS.md section 16). `api/tests/test_admin_config.py`,
 `test_admin_kamusm.py`, `test_admin_sources.py`, `test_admin_sections.py`,
-`test_admin_actions.py` and `test_settings_api.py` check the roles.
+`test_admin_actions.py`, `test_admin_history.py` and `test_settings_api.py` check the roles;
+`tests/test_admin_end_to_end.py` runs the whole channel on Linux.
 
 ## Kararlar / Decisions
 

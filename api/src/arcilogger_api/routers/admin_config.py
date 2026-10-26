@@ -22,13 +22,18 @@ value) in a transaction of its own.
 
 from __future__ import annotations
 
+import io
 import ipaddress
+import json
+import os
 import re
+import zipfile
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
-from typing import Annotated, Any, Literal
+from pathlib import Path
+from typing import Annotated, Any, Final, Literal
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi import Path as PathParam
 from pydantic import BaseModel, ConfigDict, JsonValue
 from sqlalchemy import select
@@ -54,6 +59,8 @@ from arcilogger_api.uploads import MESSAGES as UPLOAD_TEXTS
 from arcilogger_api.uploads import OVERHEAD, multipart_file, read_body
 from arcilogger_core.admin import rules
 from arcilogger_core.admin.contract import (
+    BROWSER_SECRETS,
+    KEEP_CONFIG_VERSIONS,
     UPLOAD_LIFETIME,
     UPLOAD_LIMITS,
     DocumentError,
@@ -1401,3 +1408,188 @@ def put_backup(
     channel.require_enabled()
     check = checked(channel, db, user, "backup", body, encrypt=True)
     return queue(channel, db, user, request, "backup", check)
+
+
+# -- versions and diagnostics (M4) ----------------------------------------------------------------
+
+
+class ConfigVersion(BaseModel):
+    """Version ``n``: the configuration pair the agent saved **before** request ``request_id``
+    was applied ("Geri al" restores it for the paths that request changed)."""
+
+    n: int
+    at: datetime
+    request_id: str | None
+    actor: str
+    paths: list[str]
+    #: The request changed a stored credential (its ``secrets.json`` copy is kept for the
+    #: newest 5 such versions).
+    has_secrets: bool
+
+
+@router.get("/config/versions")
+def list_versions(user: SettingsDep, channel: ChannelDep) -> list[ConfigVersion]:
+    """The kept versions, newest first, from the agent's journal (the API cannot read the
+    version store itself, contract 2.4.10)."""
+    found: list[ConfigVersion] = []
+    for line in channel.journal():
+        if line.version is None or line.state not in ("applied", "recovered"):
+            continue
+        found.append(
+            ConfigVersion(
+                n=line.version,
+                at=line.at,
+                request_id=line.request,
+                actor=line.requested_by.username if line.requested_by else "console",
+                paths=list(line.changes),
+                has_secrets=bool(line.secrets)
+                or any(path in BROWSER_SECRETS for path in line.changes),
+            )
+        )
+        if len(found) >= KEEP_CONFIG_VERSIONS:
+            break
+    return found
+
+
+#: Lines of each service log in the diagnostics, and request statuses.
+DIAGNOSTIC_LOG_LINES: Final = 200
+DIAGNOSTIC_REQUESTS: Final = 50
+#: A request's status file (``admin\status\<id>.json``).
+_STATUS = re.compile(r"^[0-9a-f]{32}\.json$")
+#: ``password=…``, ``token: …`` and the like in a log line or the configuration.
+_SECRET_PAIR = re.compile(
+    r"(?i)\b([\w.-]*(?:password|passwd|secret|token|customer)[\w.-]*)(\s*[=:]\s*)(\"[^\"]*\"|\S+)"
+)
+
+
+def _scrubbed(text: str, secrets: Sequence[str]) -> str:
+    """``text`` without ``key = value`` pairs of secret keys and without any stored secret."""
+    text = _SECRET_PAIR.sub(lambda match: f"{match[1]}{match[2]}***", text)
+    for secret in secrets:
+        text = text.replace(secret, "***")
+    return text
+
+
+def _tail(path: Path, lines: int) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - lines * 400))
+            data = handle.read()
+    except OSError as exc:
+        return f"(okunamadı / unreadable: {type(exc).__name__})\n"
+    return "\n".join(data.decode("utf-8", "replace").splitlines()[-lines:]) + "\n"
+
+
+def diagnostics(channel: Channel) -> tuple[bytes, list[str]]:
+    """The support ZIP: status files, the service logs' last lines and the configuration with
+    every secret removed, the configuration check, the newest request statuses. No raw log line
+    (nothing of the spool or the vault) and no secret value."""
+    files: dict[str, bytes] = {}
+    store = channel.store()
+    try:
+        secrets = [value for name in channel.stored if (value := store.get(name))]
+    except (OSError, ValueError, SecretStoreError):
+        secrets = []
+    current = channel.files
+    installation = channel.installation
+    if installation is not None:
+        try:
+            text = installation.toml.read_text(encoding="utf-8")
+        except OSError as exc:
+            text = f"(okunamadı / unreadable: {type(exc).__name__})\n"
+        files["config/arcilogger.toml"] = _scrubbed(text, secrets).encode("utf-8")
+    problems = [problem.model_dump(mode="json") for problem in _problems(current)]
+    files["config/config-check.json"] = json.dumps(
+        {"config_sha256": current.sha256, "error": current.error, "problems": problems},
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+    files["status/admin-status.json"] = status_of(channel).model_dump_json(indent=2).encode()
+    data = channel.data
+    layout = channel.layout
+    sources = {
+        "status/collector-status.json": data.collector_status,
+        "status/ingest-status.json": data.ingest_status,
+        "status/worker-status.json": data.worker_status,
+    }
+    if layout is not None:
+        sources["status/agent.json"] = layout.agent_status
+        sources["status/system-status.json"] = layout.system / "status.json"
+    for name, path in sources.items():
+        try:
+            files[name] = _scrubbed(path.read_text(encoding="utf-8"), secrets).encode("utf-8")
+        except OSError:
+            continue
+    if layout is not None:
+        try:
+            statuses = sorted(
+                (path for path in layout.status.glob("*.json") if _STATUS.fullmatch(path.name)),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )[:DIAGNOSTIC_REQUESTS]
+        except OSError:
+            statuses = []
+        for path in statuses:
+            try:
+                files[f"requests/{path.name}"] = path.read_bytes()
+            except OSError:
+                continue
+    try:
+        logs = sorted(data.logs.glob("*.log"))
+    except OSError:
+        logs = []
+    for path in logs:
+        tail = _tail(path, DIAGNOSTIC_LOG_LINES)
+        files[f"logs/{path.name}"] = _scrubbed(tail, secrets).encode("utf-8")
+    files["README.txt"] = DIAGNOSTICS_README.encode("utf-8")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in sorted(files.items()):
+            archive.writestr(name, content)
+    return buffer.getvalue(), sorted(files)
+
+
+#: The first file of the ZIP, Turkish first.
+DIAGNOSTICS_README: Final = """\
+ARCILOGGER tanı paketi / diagnostics package
+
+Bu paket destek için hazırlanmıştır: hizmetlerin durum dosyaları, hizmet günlüklerinin son
+satırları, parolaları çıkarılmış yapılandırma, yapılandırma denetimi ve son isteklerin
+durumları. Ham log satırı ve parola içermez.
+
+Prepared for support: the services' status files, the last lines of the service logs, the
+configuration without its secrets, the configuration check and the newest request statuses. It
+holds no raw log line and no secret.
+"""
+
+
+@router.get(
+    "/diagnostics",
+    response_class=Response,
+    responses={200: {"content": {"application/zip": {}}}},
+)
+def get_diagnostics(
+    request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> Response:
+    """The support ZIP (re-authentication; audited ``admin.diagnostics`` with the file names)."""
+    require_reauth(user, True)
+    data, names = diagnostics(channel)
+    record_audit(
+        db,
+        actor=user,
+        action="admin.diagnostics",
+        target=None,
+        details={"files": names},
+        ip=client_ip(request),
+    )
+    stamp = channel.now.strftime("%Y%m%d-%H%M%S")
+    return Response(
+        data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="arcilogger-tani-{stamp}.zip"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

@@ -959,7 +959,8 @@ needs a signed-in user (401 first), then answers **403 `module_not_licensed`** w
 the module is enabled — before parameter and model validation, for any well-formed request. The
 status is cached on `AppState.license_cache` for `LICENSE_CACHE_SECONDS` = 30 s and read through
 `arcilogger_db.license_guard.safe_status` (a failure: `core_5651` only, never cached). Every other
-route (5651 Temel, 65 routes incl. the three of the licence) is never gated, in any state; the
+route (5651 Temel: 103 routes, incl. the three of the licence and the 38 of the browser
+administration, section 16) is never gated, in any state; the
 dashboard summary never changes with the licence.
 
 **Users limit** (`routers/users.py`): after `lock_user_management`, `POST /users` and a `PATCH
@@ -1077,8 +1078,12 @@ row's state stands. Texts: `admin_channel.texts(code)` (the API's `TEXTS`, then
 | `POST /admin/actions/replica-test` | `settings.manage` | `{}` → 202 (`action.replica_test`, `{ok, message}`); 429 `admin_rate_limited` within a minute |
 | `POST /admin/actions/test-email` | `settings.manage` | `{to}` → 202 (`worker.test_email`, `{ok, to, smtp_code, error_text}`, the address masked); 422 `test_email_recipient_not_allowed`, 409 `smtp_not_configured`, 429 `admin_rate_limited` after five an hour |
 | `POST /admin/actions/lease-rebuild` | `settings.manage` | `{from, to}` → 202 (`worker.lease_rebuild`, `{done_days, total_days, failed_days}`); 422 `lease_rebuild_range` |
+| `GET /admin/config/versions` | `settings.manage` | `[ConfigVersion {n, at, request_id, actor, paths, has_secrets}]`, newest first, at most the 20 kept |
+| `GET /admin/diagnostics` | `settings.manage`; re-auth | the support ZIP (below), audited `admin.diagnostics {files}` |
 | `GET /admin/requests?kind=&cursor=&limit=50` | `settings.manage` | `AdminRequestPage {items: [AdminRequestOut], next_cursor}`, newest first (cursor: the last id; `limit` 1-200) |
 | `GET /admin/requests/{id}` | `settings.manage`; `seal.manage` for one's own `action.seal` / `action.credit` | `AdminRequestOut`; 404 `admin_request_not_found` |
+| `DELETE /admin/requests/{id}` | `settings.manage`; re-auth for a held change | cancel → 202 (`state: cancelled` for a request the agent had not taken; a held change: the signed `config.cancel` to follow); 409 `request_not_cancellable` |
+| `POST /admin/requests/{id}/revert` | `settings.manage`; re-auth | "Geri al" → 202 (`config.revert`, the changes the other way round); 409 `request_not_revertible` |
 | `POST /seals/{day}/seal` | `seal.manage` | "Şimdi mühürle" → 202 (`action.seal`, `params.day`) |
 | `POST /credits/query` | `seal.manage` | "Kontör sorgula" → 202 (`action.credit`); 429 `admin_rate_limited` within a minute |
 | `GET /settings` | `settings.manage` | `SettingsOut` (below) |
@@ -1192,6 +1197,26 @@ worked by the worker's job `admin.requests` (every 15 s). The row's `params` kee
 for the worker; `admin.request` and the result hold it masked (`b***@ornek.example`). A test
 e-mail not sent within 10 minutes is `expired`. The lease rebuild takes at most 31 days, not in
 the future and not before the first DHCP or ARP record (`leases.first_evidence_time`).
+
+**History** (`routers/admin_requests.py`, M4): a request the agent has not taken yet (`queued`,
+`waiting_for_agent`; a queued worker row likewise) is cancelled by the API itself: its inbox file
+is removed (the API's CREATOR OWNER right) and the row is `cancelled` at once. A held change
+(`pending`) is cancelled by the agent: a signed `config.cancel` (`options.target`) after a
+re-authentication; the target then reports `cancelled` and its staged files are removed.
+Anything else is 409 `request_not_cancellable`; both ways are audited `admin.request_cancel
+{state_before}`. A revert is a signed `config.revert` of an applied `config.apply` or
+`config.revert` with a version: the agent builds the inverse from the version it saved before the
+change (the paths that change touched, secrets as that version's ciphertext while it is one of
+the 5 kept) and puts it through the same rules; it keeps the target's section busy. The versions
+come from the agent's journal (`applied`/`recovered` lines with a version), since only the agent
+reads `admin\versions`; `actor` is the requester's username.
+
+**Diagnostics** (`GET /admin/diagnostics`): `README.txt`, `config/arcilogger.toml` (every
+`password`/`secret`/`token`/`customer` value and every stored credential replaced by `***`),
+`config/config-check.json`, `status/admin-status.json` (`AdminStatus`), the status files of the
+agent, ApplySystem, collector, ingest and worker, the newest 50 `requests/<id>.json` (codes only)
+and the last 200 lines of each service log under `logs\` with the same removals. No file of the
+spool, the vault or the exports: no raw log line.
 
 **"Şimdi mühürle"** (`routers/seals.py`): 409 `seal_day_sealed` (sealed), `seal_not_applicable`
 (skipped, deleted, no data), `seal_not_due` (not `Sealer.closed_unsealed_days()[0]`, not

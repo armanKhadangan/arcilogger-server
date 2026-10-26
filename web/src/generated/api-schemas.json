@@ -75,11 +75,21 @@
     "/api/v1/admin/config/tsa/zamane": [
       "post"
     ],
+    "/api/v1/admin/config/versions": [
+      "get"
+    ],
+    "/api/v1/admin/diagnostics": [
+      "get"
+    ],
     "/api/v1/admin/requests": [
       "get"
     ],
     "/api/v1/admin/requests/{request_id}": [
+      "delete",
       "get"
+    ],
+    "/api/v1/admin/requests/{request_id}/revert": [
+      "post"
     ],
     "/api/v1/admin/status": [
       "get"
@@ -380,7 +390,10 @@
           "type": "string"
         },
         "state": {
-          "const": "queued",
+          "enum": [
+            "queued",
+            "cancelled"
+          ],
           "title": "State",
           "type": "string"
         },
@@ -2675,6 +2688,56 @@
         "departments"
       ],
       "title": "CompanyUsage",
+      "type": "object"
+    },
+    "ConfigVersion": {
+      "description": "Version ``n``: the configuration pair the agent saved **before** request ``request_id``\nwas applied (\"Geri al\" restores it for the paths that request changed).",
+      "properties": {
+        "actor": {
+          "title": "Actor",
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "has_secrets": {
+          "title": "Has Secrets",
+          "type": "boolean"
+        },
+        "n": {
+          "title": "N",
+          "type": "integer"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Request Id"
+        }
+      },
+      "required": [
+        "n",
+        "at",
+        "request_id",
+        "actor",
+        "paths",
+        "has_secrets"
+      ],
+      "title": "ConfigVersion",
       "type": "object"
     },
     "CreatedUser": {

@@ -10,6 +10,16 @@ second for 15 s, then every 3 s, ``X-Arci-Background: 1``) until a terminal stat
 * ``GET /admin/requests?kind=&cursor=&limit=`` — newest first (``settings.manage``);
 * ``GET /admin/requests/{id}`` — one request (``settings.manage``; ``seal.manage`` is enough for
   one's own ``action.seal`` and ``action.credit``).
+* ``DELETE /admin/requests/{id}`` — cancel (``settings.manage``): a request the agent has not
+  taken yet is removed from the inbox by the API (``cancelled`` at once; a queued worker row
+  likewise); a held change (``pending``) gets a signed ``config.cancel`` (re-authentication),
+  after which the agent reports the target ``cancelled``. Anything else is 409
+  ``request_not_cancellable``. Audited ``admin.request_cancel {state_before}``.
+* ``POST /admin/requests/{id}/revert`` — "Geri al" (``settings.manage``, re-authentication): a
+  signed ``config.revert`` of an applied configuration change; the agent builds the inverse from
+  the version it saved before the change, restricted to the paths the change touched, and puts
+  it through the same rules. It keeps the target's section busy. 409 ``request_not_revertible``
+  for anything but an applied change with a version.
 
 Reading a request brings its ``admin_requests`` row up to date
 (:meth:`arcilogger_api.admin_channel.Channel.view`), so the history outlives the agent's own
@@ -18,16 +28,26 @@ Reading a request brings its ``admin_requests`` row up to date
 
 from __future__ import annotations
 
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select, tuple_
+from sqlalchemy.orm import Session
 
-from arcilogger_api.admin_channel import AdminRequestOut, ChannelDep, find_row
+from arcilogger_api.admin_channel import (
+    AdminAccepted,
+    AdminRequestOut,
+    ChannelDep,
+    admin_error,
+    find_row,
+    require_reauth,
+)
+from arcilogger_api.audit import record_audit
 from arcilogger_api.deps import DbSession
 from arcilogger_api.errors import ApiError
-from arcilogger_api.security import CurrentUser, require
+from arcilogger_api.security import CurrentUser, client_ip, require
 from arcilogger_core.admin.contract import RequestKind, WorkerKind
 from arcilogger_db.models import AdminRequest as AdminRequestRow
 
@@ -89,3 +109,92 @@ def get_request(
     if not user.has("settings.manage") and not own_action:
         raise ApiError(403, "forbidden")
     return channel.view(db, row)
+
+
+#: States in which the agent has not taken a request yet (its file is still in the inbox).
+UNCLAIMED = ("queued", "waiting_for_agent")
+#: A configuration change these states report applied can be reverted.
+REVERTIBLE = ("applied", "active", "partially_active")
+
+
+def _cancelled(db: Session, row: AdminRequestRow, now: datetime) -> None:
+    row.state, row.terminal = "cancelled", True
+    row.updated_at = now
+    db.flush()
+
+
+@router.delete("/{request_id}", status_code=status.HTTP_202_ACCEPTED)
+def cancel_request(
+    request_id: RequestId, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """Cancel a request that has not started, or a held change."""
+    row = find_row(db, request_id)
+    before = channel.view(db, row).state
+    if row.channel == "worker":
+        if before != "queued":
+            raise admin_error("request_not_cancellable")
+        _cancelled(db, row, channel.now)
+    elif before in UNCLAIMED and channel.remove_queued(row.id):
+        _cancelled(db, row, channel.now)
+    elif channel.view(db, row).state == "pending":
+        require_reauth(user, True)
+        record_audit(
+            db,
+            actor=user,
+            action="admin.request_cancel",
+            target=f"admin-request:{row.id}",
+            details={"state_before": "pending"},
+            ip=client_ip(request),
+        )
+        return channel.submit(db, user, request, kind="config.cancel", options={"target": row.id})
+    else:
+        raise admin_error("request_not_cancellable")
+    record_audit(
+        db,
+        actor=user,
+        action="admin.request_cancel",
+        target=f"admin-request:{row.id}",
+        details={"state_before": before},
+        ip=client_ip(request),
+    )
+    return channel.accepted(row, state="cancelled")
+
+
+def _inverse(changes: Any) -> dict[str, dict[str, Any]]:
+    """The target's changes the other way round (a secret stays ``set``/``unset`` only)."""
+    found: dict[str, dict[str, Any]] = {}
+    for item in changes if isinstance(changes, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            continue
+        change = {key: value for key, value in item.items() if key != "path"}
+        change["old"], change["new"] = item.get("new"), item.get("old")
+        found[item["path"]] = change
+    return found
+
+
+@router.post("/{request_id}/revert", status_code=status.HTTP_202_ACCEPTED)
+def revert_request(
+    request_id: RequestId, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """Put back what an applied configuration change changed ("Geri al")."""
+    row = find_row(db, request_id)
+    view = channel.view(db, row)
+    if (
+        row.kind not in ("config.apply", "config.revert")
+        or view.state not in REVERTIBLE
+        or view.version is None
+        or row.section is None
+    ):
+        raise admin_error("request_not_revertible")
+    require_reauth(user, True)
+    params = row.params or {}
+    return channel.submit(
+        db,
+        user,
+        request,
+        kind="config.revert",
+        options={"target": row.id},
+        changes=_inverse(params.get("changes")),
+        effects=[str(effect) for effect in params.get("effects") or []],
+        busy_section=row.section,
+    )

@@ -2955,6 +2955,55 @@ def capture_admin_sections(capture: Capture, admin: Any) -> None:
     out["config"] = capture.json(admin.get(config), 200)
 
 
+def capture_admin_history(capture: Capture, admin: Any) -> None:
+    """``admin.json`` ``history``: the versions, a revert, a queued request cancelled by the API,
+    a held change cancelled by the agent, and the refusals of both."""
+    out = capture.samples["admin"].setdefault("history", {})
+    errors = capture.samples["admin"].setdefault("errors", {})
+    agent = capture.agent()
+    config = f"{API}/admin/config"
+    requests = f"{API}/admin/requests"
+
+    def tag(section: str) -> str:
+        found: str = capture.json(admin.get(config), 200)["etags"][section]
+        return found
+
+    out["versions"] = capture.json(admin.get(f"{config}/versions"), 200)
+    applied = out["versions"][0]["request_id"]
+    errors["request_not_cancellable"] = capture.error(
+        admin.delete(f"{requests}/{applied}"), 409, "request_not_cancellable"
+    )
+    capture.recent(admin)
+    revert = capture.json(admin.post(f"{requests}/{applied}/revert"), 202)
+    out["revert_accepted"] = revert
+    agent.process()
+    out["revert_done"] = capture.json(admin.get(revert["status_url"]), 200)
+
+    backup = {"etag": tag("backup"), "keep_weekly": 10}
+    queued = capture.json(admin.put(f"{config}/backup", json=backup), 202)
+    out["cancel_queued"] = capture.json(admin.delete(f"{requests}/{queued['request_id']}"), 202)
+    out["cancelled_queued"] = capture.json(admin.get(queued["status_url"]), 200)
+    errors["request_not_revertible"] = capture.error(
+        admin.post(f"{requests}/{queued['request_id']}/revert"), 409, "request_not_revertible"
+    )
+
+    capture.installed.write_policy(hold_hours=12)
+    held = capture.json(
+        admin.put(f"{config}/replica", json={"etag": tag("replica"), "enabled": False}), 202
+    )
+    out["held_accepted"] = held
+    agent.process()
+    out["held_pending"] = capture.json(admin.get(held["status_url"]), 200)
+    capture.recent(admin)
+    cancel = capture.json(admin.delete(f"{requests}/{held['request_id']}"), 202)
+    out["cancel_held_accepted"] = cancel
+    agent.process()
+    out["cancel_held_done"] = capture.json(admin.get(cancel["status_url"]), 200)
+    out["held_cancelled"] = capture.json(admin.get(held["status_url"]), 200)
+    capture.installed.write_policy()
+    out["requests"] = capture.json(admin.get(requests, params={"limit": 10}), 200)
+
+
 def capture_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
     """Steps 1-7 of the module text: the lookup site and its pages, then the usage site."""
     build_site(capture)
@@ -2978,6 +3027,7 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
     capture_kamusm(capture, admin)
     capture_admin_sources(capture, admin)
     capture_admin_sections(capture, admin)
+    capture_admin_history(capture, admin)
     vault.unlock_all()
     capture.samples["usage"] = capture_usage(server, template, root)
 
