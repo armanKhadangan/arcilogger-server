@@ -165,9 +165,9 @@ audit entry. Exact = `transip ∈ settings.exact_addresses()`.
 - **Lease ids are stable** across rebuilds (a recomputed interval keeps the id of the stored row
   with the same ip, mac and start), so `LeaseInfo.lease_id` in a stored outcome and in audit
   entries keeps pointing at its row; an id disappears only when its interval disappears.
-- **Settings read by the worker** are all in `DEFAULT_SETTINGS` (changed with
-  `arcilogger-db settings set KEY JSON_VALUE --by NAME` until the M6 settings page; validated, audited as
-  `settings.change`):
+- **Settings read by the worker** are all in `DEFAULT_SETTINGS` (changed on Ayarlar → Uygulama
+  ayarları or with `arcilogger-db settings set KEY JSON_VALUE --by NAME` on the console; validated,
+  audited as `settings.change`):
   `lookup.port_hint` (false), `lookup.dns_lookback_seconds` (3600), `devices.oui_file` (""),
   `arp.ignore_after_release_seconds` (300), `worker.leases_lag_seconds` (120); the API adds
   `lookup.timeout_seconds` (5) and `lookup.report_timestamp` (false), section 6.

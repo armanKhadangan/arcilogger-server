@@ -278,10 +278,17 @@ section 8):
   rule editor or webhook; `arcilogger-worker alerts list --open` still works on the server and
   e-mail is sent once `[smtp]` is set up.
 - **Sealing configuration errors** (no Kamu SM credentials, no root in the `kamusm-roots` folder,
-  `[tsa] zamane_jar` not set) stop the Seal task before sealing starts: the task's last run result
-  is `0x1`, the error goes to `D:\ARCILOGGER\logs\core.log` on every run and an
+  `[tsa] zamane_jar` not set, or Java or the Zamane client not trusted: cause `executable`, e.g. a
+  jar copied into `zamane\` by hand after the installation, which runs only once the installer
+  recorded it with `-ZamaneJar` or it was uploaded in Ayarlar → Kamu SM and approved,
+  [INSTALL.md](INSTALL.md) section 7) stop the Seal task before sealing starts: the task's last run
+  result is `0x1`, the error goes to `D:\ARCILOGGER\logs\core.log` on every run and an
   `R20-seal-config` alert is written once per day and cause.
-- "Seal now" is not available on the web; run the `\ARCILOGGER\Seal` task in Task Scheduler.
+- **Seal now** and **Query credit** are on the Sealing page (`seal.manage`): "Seal now" has the
+  `\ARCILOGGER\Seal` task seal the oldest due day once, "Query credit" has the
+  `\ARCILOGGER\Requests` task query Kamu SM once. Both go through the administration service
+  ArciAdmin; while browser administration is off or ArciAdmin does not answer, run the
+  `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler instead.
 - The database dumps lie on the server's own `D:` disk; copying them off the server (external
   disk, a NAS) is done by hand (section 10).
 

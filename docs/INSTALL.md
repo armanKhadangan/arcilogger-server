@@ -332,8 +332,15 @@ ones too.
 
 (or double-click `ARCILOGGER-Setup-<version>.exe`, which runs the same script with `-Auto` —
 install, or upgrade when another version is installed — in a window that stays open until you
-press **Enter**; then copy the jar to `C:\ProgramData\ARCILOGGER\zamane\` by hand after comparing
-its SHA-256.)
+press **Enter**. The setup installs no Zamane client, and a jar copied into
+`C:\ProgramData\ARCILOGGER\zamane\` by hand afterwards does not run: the tasks run only a client
+the installer recorded, a known release or one approved on the console, so sealing stops with the
+cause `executable`. Add the client with the script of the bundle,
+`powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -ZamaneJar
+C:\Kurulum\tss-client-console-3.1.33.jar -ZamaneJarSha256 <value from Kamu SM>` (it compares the
+SHA-256, copies and records the file; `[tsa] zamane_jar` must name that file), or upload it in
+**Ayarlar → Kamu SM**: this version knows no Zamane release, so an uploaded client waits for
+`approve-jar` on the console, at the earliest after `jar_hold_hours` (default 24, section 7.2).)
 
 The setup `.exe` passes the two licence options on to the script; give them from an
 administrator command prompt or PowerShell (any case; `-` works as well as `/`):
@@ -655,9 +662,10 @@ roots it ends with "no pinned root certificates" after spending the credit. The 
 
    Every console `secret set` / `secret delete` replaces `secrets.json` with a new file, which
    lacks the administration service's (`ArciAdmin`) write right. Run `Set-ArciVaultAcl.ps1` (or
-   the installer) again afterwards; otherwise the next change made in the browser ends in
-   "manual action needed" with `acl_drift`. After the values entered at the end of the first
-   installation the installer does this itself.
+   the installer) again afterwards; otherwise the next change made in the browser is applied
+   with the warning "the administration service can no longer write the configuration files"
+   (`acl_drift`, a critical `R20-admin` alert), and the change after it fails until you do. After
+   the values entered at the end of the first installation the installer does this itself.
 3. **Credit:** `& $core credit` (output format: open item K4).
 4. **Connection test:** `& $core tsa-test` (stamps and verifies 1 KB of random data, 1 kontör).
 

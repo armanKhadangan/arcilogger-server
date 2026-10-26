@@ -79,7 +79,12 @@ Web arayüzünde **Ayarlar → Kamu SM** sihirbazı 2–7. adımları aynı sır
 Zamane istemcisinin yüklenmesi (bilinen bir sürüm değilse SHA-256 karşılaştırması ve konsolda
 `approve-jar`), kök sertifikalar ve yasal parmak izleri, müşteri bilgileri (kaydederken kontör
 sorgusuyla denenir), test sunucusunda damga testi, üretime geçiş ([AYARLAR.md](AYARLAR.md)
-bölüm 4). Aşağıdaki adımlar konsoldaki yoldur.
+bölüm 4). Bu sürüm hiçbir Zamane sürümünü tanımaz: tarayıcıdan yüklenen istemci her zaman
+konsolda `approve-jar` bekler, en erken `jar_hold_hours` (varsayılan 24) sonra. Bu arada öteki
+adımlar (kökler, müşteri bilgileri, eşik) kaydedilebilir; müşteri bilgileri istemci
+etkinleşmeden kontör sorgusuyla denenemez ("Kontör sorgusu yapılmadı" uyarısı), bunu istemci
+onaylanınca "Kontör sorgula" ile yapın. Beklememek için istemciyi kurulumda `-ZamaneJar` ile
+kurun ([KURULUM.md](KURULUM.md) bölüm 7). Aşağıdaki adımlar konsoldaki yoldur.
 
 1. Test kullanıcısı isteyin (aşağıdaki e-posta). Kullanıcı gelene kadar ne olacağına ilk başarılı
    mühürden **önce** karar verin ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 3): zinciri canlıya geçiş

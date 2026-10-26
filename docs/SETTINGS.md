@@ -39,7 +39,9 @@ administrator.
 **Switching a source off** (`enabled = false`): the firewall removes the sender's 514 opening;
 the silent-source alert (R15) and the sealer's gap check no longer expect it. A message that
 still arrives from it is **recorded** (raw logs are never dropped). A switched-off source still
-counts for the licence's source number.
+counts for the licence's source number. A **removed** source closes the same way; its row stays in
+the database for the history, switched off and no longer expected, so R15 and the dashboard stop
+waiting for it.
 
 **Secret values** (the Kamu SM customer number and password, the SMTP and replica passwords)
 never reach the screen: the fields show "Stored ✓" and the time of the last change; **Change**
@@ -91,24 +93,26 @@ late / not running / switched off** (last answer younger than 30 seconds / young
 / older or none / browser administration switched off). While the service is not running, or the
 browser administration is switched off (section 6), the machine settings are read-only and the
 page names the console path; the application settings (database), the test e-mail and the lease
-rebuild (worker) always work.
+rebuild (worker) always work. **Seal now** and **Query credit** on the Sealing page go through
+ArciAdmin as well and are unavailable then: the console path is the `\ARCILOGGER\Seal` or
+`\ARCILOGGER\Credit` task in Task Scheduler (the nightly runs go on as always).
 
 A request's state is shown on the page. The important ones:
 
 | State | Meaning | What to do |
 |---|---|---|
 | **Written, services loading** | the file is written, the services are taking the new setting | wait (at most 2 minutes) |
-| **Applied** | every service runs with the new setting | — |
+| **Applied** | every service runs with the new setting | — ; with the warning "the administration service can no longer write the configuration files" (`acl_drift`) the change is in force, but the next one fails until you run `Set-ArciVaultAcl.ps1` (section 8) |
 | **Done** | an action (sealing, credit query, a test) has finished; its result is in the request | — |
-| **Held** | a guarded change, applied when the countdown ends (section 4) | **Cancel** if needed |
+| **Held** | a guarded change, applied when the countdown ends (section 4); a Zamane client that is not a known release is never applied on its own: the page shows from when it can be approved on the console (`approve-jar`) | **Cancel** if needed |
 | **Partly applied** | a service did not take the setting within 2 minutes, or the firewall could not be updated | the services and the **Security** page; ApplySystem tries again at its next run |
 | **Connection test failed, nothing changed** | the server could not be reached with the new values | read the reason on the page, correct the value |
 | **Not applied, the previous settings are in use** | a step failed, ArciAdmin put the previous version back | read the reason on the page, fix and save again; **Revert** for a change that was applied |
-| **Manual action needed** | putting it back failed too | section 8; note the version number |
+| **Manual action needed** | a step failed and putting the previous version back failed too (`rollback_failed`) | the steps on the page (section 8); note the version number |
 | **Conflict: changed elsewhere** | the file changed meanwhile, by hand or by another request | reload the page and save again |
 | **Rejected** | ArciAdmin did not accept the request (signature, expiry, a rule) | read the reason; a signature or installation error is an `R20-admin` alert |
 | **Expired, nothing changed** | ArciAdmin did not take the request in time | check the service (section 8) |
-| **Timed out** | the task (Seal, Requests) wrote no result within 15 minutes | the task's last result (Task Scheduler, `\ARCILOGGER\`) |
+| **Timed out** | no task (Seal, Requests) took the request within 15 minutes; it was withdrawn, nothing ran (a request the task took is waited for while the task may run it, e.g. a long Seal run) | the task's last result (Task Scheduler, `\ARCILOGGER\`) |
 
 The short request number on the page is for support.
 
@@ -132,7 +136,11 @@ First-time setup is never held (switching the replica on the first time, test �
 runs from there. If it is a known release, ApplySystem copies it into `zamane\approved`
 (event 4107). An unknown release is only recorded (event 4104); an administrator approves it on
 the console after comparing its SHA-256 with the value on the Kamu SM page. Time alone never makes
-a client runnable:
+a client runnable. This version knows no Zamane release, so a client uploaded in the browser
+always waits for `approve-jar`, at the earliest `jar_hold_hours` after the upload; meanwhile the
+other steps of the wizard (Java, roots, credentials, the threshold) can be saved, and a second
+client only once the first is approved or cancelled. To avoid the wait, install the client with
+the installer's `-ZamaneJar` ([INSTALL.md](INSTALL.md) section 7). The command:
 
 ```powershell
 $py  = "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe"
@@ -174,7 +182,7 @@ The values are chosen with installer parameters and remembered by later runs
 | `-SourceNetwork` | `10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16` | a log source's address must lie in one of these networks (at widest a /16) |
 | `-AdminChangeHoldHours` | 0 | the hold of retention and replica changes (0–168 hours) |
 | `-ZamaneHoldHours` | 24 | how long before an unknown Zamane client can be approved (1–168 hours) |
-| `-DisableBrowserAdministration` | off | switches the browser administration off: ArciAdmin refuses every request, ApplySystem does nothing; the 5651 functions (collection, sealing, verification) are not affected at all |
+| `-DisableBrowserAdministration` | off | switches the browser administration off: ArciAdmin refuses every request, ApplySystem does nothing; the 5651 functions (collection, sealing, verification) are not affected at all. **Seal now** and **Query credit** are unavailable then (start the `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler), and after a hand edit of `[[sources]]` run `Set-ArciFirewall.ps1` yourself |
 
 The installer compares every enabled log source of the configuration with these networks: when
 one lies outside them it stops before any change and names the `-SourceNetwork` value to give
@@ -208,10 +216,11 @@ lines inside those tables are lost then (the previous file stays in `admin\versi
 **Secrets on the console.** `arcilogger-core secret set` / `secret delete` replace `secrets.json`
 with a new file, which lacks ArciAdmin's write right. Afterwards run
 `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an administrator PowerShell (or
-run the installer again); otherwise the next change made in the browser ends in "manual action
-needed" with `acl_drift`, and no secret can change from the browser. The installer does this
-itself after the values it stores (the database password, the Kamu SM credentials at the end of
-the first installation).
+run the installer again); otherwise the next change made in the browser is applied with the
+warning "the administration service can no longer write the configuration files" (`acl_drift`, a
+critical `R20-admin` alert), and the change after it fails until the rights are repaired. The
+installer does this itself after the values it stores (the database password, the Kamu SM
+credentials at the end of the first installation).
 
 ## 8. Troubleshooting
 
@@ -229,15 +238,17 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # bring the f
 - **The administration service is not running:** `Start-Service ArciAdmin`; its log is in
   `D:\ARCILOGGER\logs`. While it is stopped the 5651 functions go on; only the browser cannot
   change settings.
-- **"Manual action needed":** put the previous version back on the console with the version
-  number from the page (`& $py -I -m arcilogger_core.admin versions restore <N> --config $cfg`);
-  the services load the restored file by themselves. Restart a service that shows "A change waits
-  for a restart".
+- **"Manual action needed"** (`rollback_failed`): put the previous version back on the console
+  with the version number from the page (`& $py -I -m arcilogger_core.admin versions restore <N>
+  --config $cfg`; the page shows the command with the full path); the services load the restored
+  file by themselves. Restart a service that shows "A change waits for a restart".
 - **For support:** **Download the diagnostics package** on the **Change history** page (with the
   password re-entered): the services' status files, the last log lines and the configuration,
   every secret replaced by `***`; no raw log, no vault, no export.
-- **`acl_drift`:** ArciAdmin cannot write `arcilogger.toml` or `secrets.json` (most often after
-  a console `secret set`, section 7): run `Set-ArciVaultAcl.ps1`, then save the change again.
+- **`acl_drift`:** the change was applied, but ArciAdmin can no longer write `arcilogger.toml` or
+  `secrets.json` (most often after a console `secret set`, section 7): run
+  `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` before the next change. Do not
+  restore a version: that would undo the applied change and repair nothing.
 - **The firewall could not be updated:** the last result of the ApplySystem task and event 4106;
   after an installation with `-SkipFirewall` the firewall is not ARCILOGGER's
   (`firewall_not_managed`) and its rules are kept by hand.

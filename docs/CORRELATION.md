@@ -392,8 +392,9 @@ most `arp.interval_seconds`), `devices.infrastructure_macs`, `devices.oui_file` 
 (author `:system`; not settings, not for editing): `worker.leases_watermark`,
 `worker.leases_ingest_seen`.
 
-**Changing a setting** (until the settings page, M6): `arcilogger-db settings set KEY JSON_VALUE --by NAME` on the
-server (`list`, `get KEY` show the values). The installer does not put `venv\Scripts` on `PATH`,
+**Changing a setting:** on **Ayarlar → Uygulama ayarları** (Settings → Application settings,
+[SETTINGS.md](SETTINGS.md) section 1), or on the server console with
+`arcilogger-db settings set KEY JSON_VALUE --by NAME` (`list`, `get KEY` show the values). The installer does not put `venv\Scripts` on `PATH`,
 so in an administrator PowerShell call it with its full path:
 `& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" settings set KEY JSON_VALUE --by NAME`
 (the configuration is read from `C:\ProgramData\ARCILOGGER\arcilogger.toml`). It validates the key and the value, writes

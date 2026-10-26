@@ -275,11 +275,18 @@ veritabanından okunur; hizmetleri yeniden başlatmak gerekmez. Sahada belirleni
   kapatın. Kural motoru (YAML kuralları), kural düzenleyici ve webhook'lar yoktur; sunucuda
   `arcilogger-worker alerts list --open` da çalışır, e-posta `[smtp]` ayarlanınca gider.
 - **Mühürlemenin yapılandırma hataları** (Kamu SM kimlik bilgileri yok, `kamusm-roots` klasöründe
-  kök yok, `[tsa] zamane_jar` ayarlı değil) Seal görevini mühürlemeye başlamadan durdurur:
-  görevin son çalışma sonucu `0x1`, hata her çalışmada `D:\ARCILOGGER\logs\core.log` dosyasına,
+  kök yok, `[tsa] zamane_jar` ayarlı değil ya da Java veya Zamane istemcisi güvenilir değil:
+  `executable` nedeni, ör. kurulumdan sonra `zamane\` içine elle kopyalanan bir jar; bu jar ancak
+  kurulum `-ZamaneJar` ile kaydedince ya da Ayarlar → Kamu SM'den yüklenip onaylanınca çalışır,
+  [KURULUM.md](KURULUM.md) bölüm 7) Seal görevini mühürlemeye başlamadan durdurur: görevin son
+  çalışma sonucu `0x1`, hata her çalışmada `D:\ARCILOGGER\logs\core.log` dosyasına,
   `R20-seal-config` uyarısı gün ve neden başına bir kez yazılır.
-- "Şimdi mühürle" web'den yapılamaz; hemen mühürlemek için Görev Zamanlayıcı'da
-  `\ARCILOGGER\Seal` görevini çalıştırın.
+- **Şimdi mühürle** ve **Kontör sorgula** Mühürleme sayfasındadır (`seal.manage`): "Şimdi
+  mühürle" sıradaki (en eski) günü `\ARCILOGGER\Seal` görevine bir kez mühürletir, "Kontör
+  sorgula" Kamu SM'yi `\ARCILOGGER\Requests` görevine bir kez sorgulatır. İkisi de yönetim
+  hizmeti ArciAdmin üzerinden çalışır; tarayıcıdan yönetim kapalıyken ya da ArciAdmin yanıt
+  vermiyorken Görev Zamanlayıcı'da `\ARCILOGGER\Seal` ya da `\ARCILOGGER\Credit` görevini
+  çalıştırın.
 - Veritabanı yedekleri sunucunun kendi `D:` diskinde durur; sunucu dışına (harici disk, bir
   NAS) kopyalama elle yapılır (bölüm 10).
 

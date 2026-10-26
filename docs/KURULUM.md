@@ -405,9 +405,16 @@ powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
 
 `ARCILOGGER-Setup-<sürüm>.exe` kullanıyorsanız çift tıklayın: aynı betik `-Auto` ile bir PowerShell
 penceresinde çalışır (kurulu değilse kurar, başka bir sürüm kuruluysa yükseltir) ve pencere siz
-**Enter**'a basana kadar açık kalır. Bu yolda Zamane jar'ını elle ekleyin: `Get-FileHash <jar>
--Algorithm SHA256` değerini Kamu SM sayfasındakiyle karşılaştırın ve dosyayı
-`C:\ProgramData\ARCILOGGER\zamane\` içine kopyalayın.
+**Enter**'a basana kadar açık kalır. Kurulum dosyası Zamane istemcisini kurmaz; sonradan
+`C:\ProgramData\ARCILOGGER\zamane\` içine elle kopyalanan bir jar da çalışmaz: görevler yalnızca
+kurulumun kaydettiği, bilinen bir sürüm olan ya da konsolda onaylanan istemciyi çalıştırır, bu
+yüzden mühürleme `executable` nedeniyle durur. İstemciyi paketteki betikle ekleyin:
+`powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -ZamaneJar
+C:\Kurulum\tss-client-console-3.1.33.jar -ZamaneJarSha256 <Kamu SM sayfasındaki SHA-256>` (SHA-256
+değerini karşılaştırır, dosyayı kopyalar ve kaydeder; `[tsa] zamane_jar` bu dosyayı göstermeli)
+ya da **Ayarlar → Kamu SM** sayfasından yükleyin: bu sürüm hiçbir Zamane sürümünü tanımadığı için
+yüklenen istemci konsolda `approve-jar` bekler, en erken `jar_hold_hours` sonra (varsayılan 24,
+bölüm 7.2).
 
 Kurulum `.exe` dosyası iki lisans seçeneğini de betiğe iletir; yönetici komut isteminden ya da
 PowerShell'den verin (büyük/küçük harf fark etmez, `-` ile de yazılabilir):
@@ -770,8 +777,10 @@ mühürlemesi (`\ARCILOGGER\Seal` görevi) de kökler olmadan hiçbir günü mü
    Konsoldan her `secret set` / `secret delete`, `secrets.json` dosyasını yeni bir dosyayla
    değiştirir; yeni dosyada yönetim hizmetinin (`ArciAdmin`) yazma hakkı yoktur. Ardından
    `Set-ArciVaultAcl.ps1` betiğini (ya da kurulumu) yeniden çalıştırın; yoksa tarayıcıdan yapılan
-   bir sonraki değişiklik `acl_drift` ile "Elle müdahale gerekiyor" olur. İlk kurulumun sonunda
-   girilen değerlerden sonra kurulum bunu kendisi yapar.
+   bir sonraki değişiklik "yönetim hizmeti ayar dosyalarına artık yazamıyor" uyarısıyla uygulanır
+   (`acl_drift`, kritik `R20-admin` uyarısı) ve ondan sonraki değişiklik, betik çalıştırılana
+   kadar başarısız olur. İlk kurulumun sonunda girilen değerlerden sonra kurulum bunu kendisi
+   yapar.
 3. **Kontör:** `& $core credit` — kontör okunuyor mu? (çıktı biçimi açık konu K4)
 4. **Bağlantı testi:** `& $core tsa-test` — 1 KB rastgele dosyayı damgalar ve doğrular (1 kontör).
 

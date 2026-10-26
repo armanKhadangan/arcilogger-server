@@ -39,7 +39,8 @@ yöneticinin işidir.
 **Bir kaynağı kapatmak** (`enabled = false`): güvenlik duvarı o göndericinin 514 iznini kaldırır,
 sessiz kaynak uyarısı (R15) ve mühürlemenin boşluk denetimi onu artık beklemez. Kapalı kaynaktan
 yine de gelen bir ileti **kaydedilir** (ham kayıt hiçbir zaman atılmaz). Kapalı kaynak lisansın
-kaynak sayısında sayılmaya devam eder.
+kaynak sayısında sayılmaya devam eder. **Silinen** bir kaynak da aynı biçimde kapanır; veritabanındaki
+satırı geçmiş için kalır, kapalı ve artık beklenmeyen olarak: R15 ve pano onu beklemez.
 
 **Gizli değerler** (Kamu SM müşteri numarası ve parolası, SMTP ve replika parolası) hiçbir zaman
 ekrana gelmez: alanlar "Kayıtlı ✓" ve son değişiklik zamanını gösterir, **Değiştir** ile yenisi
@@ -92,23 +93,26 @@ gecikiyor / çalışmıyor / kapalı** (son yanıt 30 saniyeden yeni / 2 dakikad
 da hiç / tarayıcı yönetimi kapalı). Hizmet çalışmıyorsa ya da tarayıcı yönetimi kapatıldıysa
 (bölüm 6) makine ayarları salt okunurdur ve sayfa konsoldaki yolu gösterir; uygulama ayarları
 (veritabanı), test e-postası ve kiraların yeniden oluşturulması (worker) her zaman çalışır.
+Mühürleme sayfasındaki **Şimdi mühürle** ve **Kontör sorgula** da ArciAdmin üzerinden çalışır ve o
+sırada kullanılamaz: konsoldaki yol Görev Zamanlayıcı'daki `\ARCILOGGER\Seal` ya da
+`\ARCILOGGER\Credit` görevidir (gece çalışmaları her zamanki gibi sürer).
 
 Bir isteğin durumu sayfada izlenir. Önemli olanlar:
 
 | Durum | Anlamı | Ne yapılır |
 |---|---|---|
 | **Yazıldı, hizmetler yüklüyor** | dosya yazıldı, hizmetler yeni ayarı alıyor | bekleyin (en çok 2 dakika) |
-| **Uygulandı** | bütün hizmetler yeni ayarla çalışıyor | — |
+| **Uygulandı** | bütün hizmetler yeni ayarla çalışıyor | — ; "yönetim hizmeti ayar dosyalarına artık yazamıyor" uyarısıyla (`acl_drift`) değişiklik yürürlüktedir, ancak `Set-ArciVaultAcl.ps1` çalıştırılana kadar sonraki değişiklik başarısız olur (bölüm 8) |
 | **Tamamlandı** | bir işlem (mühürleme, kontör sorgusu, test) bitti; sonucu istekte | — |
-| **Bekletiliyor** | korumalı bir değişiklik, geri sayım bitince uygulanır (bölüm 4) | gerekirse **İptal et** |
+| **Bekletiliyor** | korumalı bir değişiklik, geri sayım bitince uygulanır (bölüm 4); bilinen bir sürüm olmayan Zamane istemcisi ise hiçbir zaman kendiliğinden uygulanmaz: sayfa konsolda ne zamandan itibaren onaylanabileceğini (`approve-jar`) gösterir | gerekirse **İptal et** |
 | **Kısmen uygulandı** | bir hizmet yeni ayarı 2 dakikada almadı ya da güvenlik duvarı güncellenemedi | Hizmetler ve **Güvenlik** sayfası; ApplySystem bir sonraki çalışmasında yeniden dener |
 | **Bağlantı denemesi başarısız, hiçbir şey değişmedi** | yeni değerlerle sunucuya bağlanılamadı | sayfadaki nedeni okuyun, değeri düzeltin |
 | **Uygulanmadı, önceki ayarlar geçerli** | bir adım başarısız oldu, ArciAdmin önceki sürümü geri koydu | sayfadaki nedeni okuyun, düzeltip yeniden kaydedin; uygulanmış bir değişiklik için **Geri al** |
-| **Elle müdahale gerekiyor** | geri koyma da başarısız oldu | bölüm 8; sürüm numarasını not edin |
+| **Elle müdahale gerekiyor** | bir adım başarısız oldu ve önceki sürümü geri koymak da başarısız oldu (`rollback_failed`) | sayfadaki adımlar (bölüm 8); sürüm numarasını not edin |
 | **Çakışma: ayarlar başka yerden değişti** | dosya bu arada elle ya da başka bir istekle değişti | sayfayı yenileyip yeniden kaydedin |
 | **Reddedildi** | ArciAdmin isteği kabul etmedi (imza, süre, kural) | nedeni okuyun; imza ya da kurulum hatası `R20-admin` uyarısıdır |
 | **Süresi doldu, hiçbir şey değişmedi** | ArciAdmin isteği zamanında almadı | hizmetin durumuna bakın (bölüm 8) |
-| **Zaman aşımı** | görev (Seal, Requests) 15 dakikada sonuç yazmadı | görevin son sonucuna bakın (Görev Zamanlayıcı, `\ARCILOGGER\`) |
+| **Zaman aşımı** | hiçbir görev (Seal, Requests) isteği 15 dakikada almadı; istek geri çekildi, hiçbir şey çalışmadı (görevin aldığı bir istek, ör. uzun süren bir Seal çalışması, görev çalışabildiği sürece beklenir) | görevin son sonucuna bakın (Görev Zamanlayıcı, `\ARCILOGGER\`) |
 
 Kısa istek numarası destek için sayfada yazar.
 
@@ -132,7 +136,11 @@ durdurulur.
 oradan **hiçbir zaman** çalışmaz. Bilinen bir sürümse ApplySystem onu `zamane\approved` klasörüne
 kopyalar (olay 4107). Bilinmeyen bir sürüm ise yalnızca kaydedilir (olay 4104) ve bir yönetici
 SHA-256 değerini Kamu SM sayfasındakiyle karşılaştırdıktan sonra konsolda onaylar; süre tek
-başına hiçbir istemciyi çalıştırmaz:
+başına hiçbir istemciyi çalıştırmaz. Bu sürüm hiçbir Zamane sürümünü tanımaz: tarayıcıdan
+yüklenen istemci her zaman `approve-jar` bekler, en erken yüklemeden `jar_hold_hours` sonra. Bu
+arada sihirbazın öteki adımları (Java, kökler, kimlik bilgileri, eşik) kaydedilebilir; ikinci bir
+istemci ise ancak ilki onaylanınca ya da iptal edilince. Beklememek için istemciyi kurulumun
+`-ZamaneJar` seçeneğiyle kurun ([KURULUM.md](KURULUM.md) bölüm 7). Komut:
 
 ```powershell
 $py  = "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe"
@@ -174,7 +182,7 @@ parametreleriyle seçilir ve sonraki çalıştırmalarda hatırlanır ([KURULUM.
 | `-SourceNetwork` | `10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16` | bir log kaynağının adresi bu ağlardan birinde olmalı (en geniş /16) |
 | `-AdminChangeHoldHours` | 0 | saklama ve replika değişikliklerinin bekleme süresi (0–168 saat) |
 | `-ZamaneHoldHours` | 24 | bilinmeyen bir Zamane istemcisinin en erken onaylanabileceği süre (1–168 saat) |
-| `-DisableBrowserAdministration` | kapalı | tarayıcı yönetimini kapatır: ArciAdmin her isteği reddeder, ApplySystem bir şey yapmaz; 5651 işlevleri (toplama, mühürleme, doğrulama) hiç etkilenmez |
+| `-DisableBrowserAdministration` | kapalı | tarayıcı yönetimini kapatır: ArciAdmin her isteği reddeder, ApplySystem bir şey yapmaz; 5651 işlevleri (toplama, mühürleme, doğrulama) hiç etkilenmez. **Şimdi mühürle** ve **Kontör sorgula** o sırada kullanılamaz (Görev Zamanlayıcı'da `\ARCILOGGER\Seal` ya da `\ARCILOGGER\Credit` görevini başlatın); `[[sources]]` elle değişince `Set-ArciFirewall.ps1` betiğini kendiniz çalıştırın |
 
 Kurulum yapılandırmadaki açık her log kaynağını bu ağlarla karşılaştırır: dışında kalan bir
 kaynak varsa hiçbir şeyi değiştirmeden durur ve verilecek `-SourceNetwork` değerini yazar
@@ -210,9 +218,10 @@ klasöründe kalır).
 dosyasını yeni bir dosyayla değiştirir; yeni dosyada ArciAdmin'in yazma hakkı yoktur. Ardından
 yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"`
 çalıştırın (ya da kurulumu yeniden çalıştırın); yoksa tarayıcıdan yapılan bir sonraki değişiklik
-`acl_drift` ile "Elle müdahale gerekiyor" olur ve hiçbir gizli değer tarayıcıdan değişmez.
-Kurulum kendi sakladığı değerlerden (veritabanı parolası, ilk kurulumun sonundaki Kamu SM
-bilgileri) sonra bunu kendisi yapar.
+"yönetim hizmeti ayar dosyalarına artık yazamıyor" uyarısıyla uygulanır (`acl_drift`, kritik
+`R20-admin` uyarısı) ve ondan sonraki değişiklik, haklar onarılana kadar başarısız olur. Kurulum
+kendi sakladığı değerlerden (veritabanı parolası, ilk kurulumun sonundaki Kamu SM bilgileri)
+sonra bunu kendisi yapar.
 
 ## 8. Sorun giderme
 
@@ -230,16 +239,17 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # güvenlik d
 - **Yönetim hizmeti çalışmıyor:** `Start-Service ArciAdmin`; hizmet günlüğü
   `D:\ARCILOGGER\logs` klasöründedir. Hizmet dururken 5651 işlevleri çalışmaya devam eder; yalnızca
   tarayıcıdan ayar değişmez.
-- **"Elle müdahale gerekiyor":** sayfadaki sürüm numarasıyla önceki sürümü konsolda geri koyun
-  (`& $py -I -m arcilogger_core.admin versions restore <N> --config $cfg`); hizmetler geri konan
-  dosyayı kendileri yükler. Bir hizmet "Yeniden başlatma bekleyen değişiklik" gösteriyorsa onu
-  yeniden başlatın.
+- **"Elle müdahale gerekiyor"** (`rollback_failed`): sayfadaki sürüm numarasıyla önceki sürümü
+  konsolda geri koyun (`& $py -I -m arcilogger_core.admin versions restore <N> --config $cfg`;
+  sayfa komutu tam yoluyla gösterir); hizmetler geri konan dosyayı kendileri yükler. Bir hizmet
+  "Yeniden başlatma bekleyen değişiklik" gösteriyorsa onu yeniden başlatın.
 - **Destek için:** **Değişiklik geçmişi** sayfasındaki **Tanılama paketini indir** (parolanın
   yeniden girilmesiyle): hizmetlerin durum dosyaları, son günlük satırları ve yapılandırma, gizli
   bilgiler `***` ile değiştirilmiş; ham log, kasa ve dışa aktarım yoktur.
-- **`acl_drift`:** ArciAdmin `arcilogger.toml` ya da `secrets.json` dosyasına yazamıyor (çoğu
-  zaman konsoldan bir `secret set` sonrası, bölüm 7): `Set-ArciVaultAcl.ps1` çalıştırın, sonra
-  değişikliği yeniden kaydedin.
+- **`acl_drift`:** değişiklik uygulandı, ancak ArciAdmin `arcilogger.toml` ya da `secrets.json`
+  dosyasına artık yazamıyor (çoğu zaman konsoldan bir `secret set` sonrası, bölüm 7): sonraki
+  değişiklikten önce `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` çalıştırın.
+  Bir sürümü geri yüklemeyin: bu, uygulanmış değişikliği geri alır ve hiçbir şeyi onarmaz.
 - **Güvenlik duvarı güncellenemedi:** ApplySystem görevinin son sonucu ve olay 4106; kurulum
   `-SkipFirewall` ile yapıldıysa güvenlik duvarı ARCILOGGER'ın değildir (`firewall_not_managed`)
   ve kurallar elle tutulur.
