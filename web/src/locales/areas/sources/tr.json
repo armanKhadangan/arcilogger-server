@@ -122,5 +122,11 @@
         "invalidNote": "Toplayıcı biçiminde olmayan satırlar (rawlog.invalid) veritabanına yüklenmez; Arama onları bulamaz, yalnızca örnek satırları açılır."
       }
     }
+  },
+  "settings": {
+    "sources": {
+      "prefillNotice": "Kaynaklar sayfasındaki bilinmeyen gönderici {{address}} için dolduruldu. Adı gözden geçirin; unknown-{{address}} klasörü ve eski kayıtları yerinde kalır.",
+      "prefillBlocked": "{{address}} göndericisi şu anda kaynak olarak eklenemez: kaynakları değiştirme yetkiniz yok ya da yönetim hizmeti (ArciAdmin) çalışmıyor."
+    }
   }
 }

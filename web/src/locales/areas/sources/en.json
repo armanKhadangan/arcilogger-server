@@ -122,5 +122,11 @@
         "invalidNote": "Lines not in the collector's format (rawlog.invalid) are not loaded into the database; Search cannot find them, only their example line opens."
       }
     }
+  },
+  "settings": {
+    "sources": {
+      "prefillNotice": "Filled in for the unknown sender {{address}} of the Sources page. Review the name; the folder unknown-{{address}} and its earlier records stay where they are.",
+      "prefillBlocked": "The sender {{address}} cannot be added as a source now: you may not change the sources, or the administration service (ArciAdmin) is not running."
+    }
   }
 }
