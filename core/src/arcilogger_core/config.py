@@ -55,6 +55,12 @@ class SourceConfig(_Model):
     #: TCP 514, ``tcp`` makes the collector drop (count + alert) UDP datagrams claiming its
     #: address (docs/DEVICE-SETUP.md).
     transport: Literal["any", "udp", "tcp"] = "any"
+    #: ``false`` switches a source off without removing it (ADR-0014): the firewall no longer
+    #: lets the sender reach 514, ingest marks it disabled (R15 and the dashboard skip it) and
+    #: the sealer's gap check no longer expects it. A message that still arrives is recorded
+    #: under the source's name as before (raw logs are never dropped), and the source still
+    #: counts for the licence's log-source limit (ADR-0013).
+    enabled: bool = True
 
     @field_validator("address")
     @classmethod
@@ -353,6 +359,14 @@ class Config(_Model):
         """Whether the organisation name is configured (:func:`setup_problems` reports it)."""
         return bool(self.site_name)
 
+    @property
+    def admin_dir(self) -> Path:
+        """The browser administration's folder (ADR-0014): ``admin`` next to the secret store,
+        ``C:\\ProgramData\\ARCILOGGER\\admin`` on the server. Not a key of its own, so the file
+        (which the administration agent writes) cannot point the guard rails it holds
+        (``policy.json``, the channel keys) at another folder by itself."""
+        return self.secrets_dir / "admin"
+
     @model_validator(mode="after")
     def _unique_sources(self) -> Config:
         names = [source.name for source in self.sources]
@@ -473,10 +487,16 @@ def default_config_path() -> Path:
     return path / "arcilogger.toml"
 
 
+def parse_config(data: bytes, path: Path) -> Config:
+    """Validate the bytes of the configuration file at ``path`` (``secrets_dir`` defaults to
+    its folder). :func:`load_config` and the live reload (:mod:`arcilogger_core.configwatch`)
+    share it, so a reloaded file means exactly what it means at start-up."""
+    raw = tomllib.loads(data.decode("utf-8"))
+    raw.setdefault("secrets_dir", str(path.parent))
+    return Config.model_validate(raw)
+
+
 def load_config(path: Path | None = None) -> Config:
     """Read and validate the configuration file."""
     config_path = path or default_config_path()
-    with config_path.open("rb") as handle:
-        raw = tomllib.load(handle)
-    raw.setdefault("secrets_dir", str(config_path.parent))
-    return Config.model_validate(raw)
+    return parse_config(config_path.read_bytes(), config_path)

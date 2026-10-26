@@ -144,7 +144,7 @@ def status(config_path: Path | None) -> int:
     config = _load(config_path)
     if config is None:
         return EXIT_CONFIG
-    path = Layout(config.data_dir).state / "ingest-status.json"
+    path = Layout(config.data_dir).ingest_status
     data = read_status(path)
     if data is None:
         print(f"{path}: yok / not found (ingest never ran?)", file=sys.stderr)

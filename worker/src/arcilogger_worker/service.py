@@ -100,7 +100,6 @@ from arcilogger_worker.usage import jobs as usage_jobs
 
 log = logging.getLogger("arcilogger_worker")
 
-STATUS_FILE: Final = "worker-status.json"
 #: The loop checks for due jobs and stop requests this often.
 SLEEP_SECONDS: Final = 1.0
 #: The status file is rewritten at least this often (and after every job run).
@@ -413,7 +412,7 @@ class Worker:
 
     @property
     def status_path(self) -> Path:
-        return self.layout.state / STATUS_FILE
+        return self.layout.worker_status
 
     # -- scheduling -------------------------------------------------------------------------------
 
