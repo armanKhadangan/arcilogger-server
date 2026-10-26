@@ -359,12 +359,18 @@ def _field_value(name: str) -> st.SearchStrategy[str]:
 @st.composite
 def _queries(draw: st.DrawFn) -> str:
     clauses = []
+    terms = 0
     for _ in range(draw(st.integers(0, 6))):
         name = draw(st.sampled_from(sorted(FIELDS)))
+        value = draw(_field_value(name))
+        if FIELDS[name].form == "freetext":
+            count = value.count(",") + 1
+            if terms + count >= MAX_TERMS:  # within the limit, one left for the trailing term
+                continue
+            terms += count
         alias = draw(st.sampled_from((name, *FIELDS[name].aliases)))
         sign = draw(st.sampled_from(["", "-", "NOT "]))
-        clauses.append(f"{sign}{alias.upper() if draw(st.booleans()) else alias}:"
-                       f"{draw(_field_value(name))}")  # fmt: skip
+        clauses.append(f"{sign}{alias.upper() if draw(st.booleans()) else alias}:{value}")
     if draw(st.booleans()):
         clauses.append(draw(st.sampled_from(["youtube", '"login failure"', "-blocked"])))
     return draw(st.sampled_from([" ", "  ", " AND "])).join(clauses)
