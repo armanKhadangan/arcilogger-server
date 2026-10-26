@@ -13,7 +13,6 @@ job ``admin.requests``) sends the same e-mail with :func:`trial_email`.
 from __future__ import annotations
 
 import re
-import smtplib
 import sys
 from dataclasses import dataclass
 from email.message import EmailMessage
@@ -76,21 +75,6 @@ class TrialEmailOutcome:
     error_text: str | None = None
 
 
-def _reply_code(exc: SmtpSendError) -> int | None:
-    """The server's reply code behind ``exc``, ``None`` for an authentication failure (as the
-    transport's ``smtp_code`` of contract WP1-2). The sender raises it while handling the
-    stdlib's exception, which stays its ``__context__``."""
-    cause = exc.__context__
-    if isinstance(cause, smtplib.SMTPRecipientsRefused):
-        codes = [code for code, _ in cause.recipients.values()]
-        return min(codes) if codes else None
-    if isinstance(cause, smtplib.SMTPResponseException) and not isinstance(
-        cause, smtplib.SMTPAuthenticationError
-    ):
-        return int(cause.smtp_code)
-    return None
-
-
 @dataclass(frozen=True)
 class TrialEmail:
     """One test e-mail ready to go (:func:`trial_email`)."""
@@ -104,7 +88,7 @@ class TrialEmail:
         try:
             self.sender.send(self.message, self.recipient)
         except SmtpSendError as exc:
-            return TrialEmailOutcome(False, self.where, _reply_code(exc), str(exc))
+            return TrialEmailOutcome(False, self.where, exc.smtp_code, str(exc))
         return TrialEmailOutcome(True, self.where)
 
 
