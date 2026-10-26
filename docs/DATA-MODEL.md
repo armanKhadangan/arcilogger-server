@@ -27,6 +27,9 @@
   `0014_license`) yalnızca eklenerek yazılır ve hiçbir zaman silinmez. Lisansın kendisi bu
   tablolar değil, her değerlendirmede imzası yeniden doğrulanan lisans dosyasıdır
   ([LISANS.md](LISANS.md)).
+- Tarayıcıdan yönetim istekleri (`admin_requests`; revizyon `0015_admin_requests`, ADR-0014)
+  hiçbir gizli bilgi tutmaz: adı parola, müşteri numarası ya da belirteç gibi olan bir alanda
+  yalnızca "kayıtlı / kayıtlı değil" bilgisi bulunabilir; bunu veritabanının kendisi denetler.
 
 ## Summary (EN)
 
@@ -41,7 +44,9 @@ are deleted daily after 03:30 by the worker job `usage.retention` once older tha
 `usage.retention_days` (default 400), finished rebuild requests (`usage_rebuilds`) after 90 days
 (see "Retention"). The licence tables (`license_*`, revision `0014_license`) are append-only and
 never deleted; the licence itself is the signed file they hold, verified again on every
-evaluation ("Licence tables").
+evaluation ("Licence tables"). The requests of the browser administration (`admin_requests`,
+revision `0015_admin_requests`, ADR-0014) hold no secret: a field named like a password, a
+customer number or a token may only say whether a secret is set, which the database checks.
 
 ## Conventions
 
@@ -125,7 +130,8 @@ but which are not in a table go to `extra`.
 | `evidence_packages` | id | Evidence ZIP in `exports/`: scope (JSON: content, days, sources, extract lines, lookup, reference, `estimated_bytes` — the size estimate used by the request limits), path (file name, empty until ready), SHA-256, size, password protected (the password is never stored), status (queued/building/ready/failed/expired/deleted), error, expiry (`evidence.keep_days`), download count, `package_name` (id in `paket.json`), `index_sha256`, `verifier_sha256` (SHA-256 of the package's `verify.py`), `legal_grade`, `finished_at` (revision `0007_evidence_seals`; `docs/KANIT-PAKETI.md`) |
 | `evidence_downloads` | id | Each download (who, when, IP) |
 | `seal_verifications` | id; index (day, finished_at) | "Doğrula" on the sealing page: day, started/finished, user, `deep`, outcome (ok/failed/timeout/error), errors, warnings, details. The scheduled verifications stay in `state/verify` (the API may not write there) |
-| `audit_imports` | `key` | Events of the scheduled sealing/retention tasks already copied into `audit_log` (`seal:<day>:sealed`, `seal:<day>:attempt:<n>`, `retention:<record>`, `retention:<record>:incomplete`, `retention:alert:<sha256 of the alert line>`) and the entry id: each event is imported once |
+| `audit_imports` | `key` | Events of the scheduled sealing/retention tasks already copied into `audit_log` (`seal:<day>:sealed`, `seal:<day>:attempt:<n>`, `retention:<record>`, `retention:<record>:incomplete`, `retention:alert:<sha256 of the alert line>`) and of the browser administration's journals (`admin:<request>:<state>`, `admin-secret:<line>:<name>`, `admin-system:<line>`) and the entry id: each event is imported once |
+| `admin_requests` | id (32 hex); index (channel, state, created_at), (kind, created_at DESC), (section) where not terminal | Requests of the browser administration (ADR-0014, revision `0015_admin_requests`): `kind` (`config.apply`/`revert`/`cancel`, `action.seal`/`credit`/`tsa_test`/`replica_test`, `worker.test_email`/`lease_rebuild`), `section`, `channel` (`agent`: a signed request file for ArciAdmin; `worker`: taken by the worker job `admin.requests` with `FOR UPDATE SKIP LOCKED`), `state` and `terminal` (checked against each other), the requester (`requested_by_id`: users, SET NULL; `requested_by`: the name), `expires_at`, `effective_at`, `params` and `result` (never a secret: a key named like `password`, `customer` or `token` must hold a masked secret `{"secret": true, …}`, checked by the database), `error_code`, `rolled_back`, `audit_id` (the `admin.request` entry) |
 | `alerts` | id | time (when it happened), rule, severity, state (open/acknowledged/resolved/dismissed), title, details, `dedup_key` (at most one *open* alert per key), `created_at` (when the row was written), `resolved_at`; written by ingest, correlation and the alert jobs (docs/ALERTS.md), resolved automatically by the check that owns the key (`details.auto_resolved`); a person changes the state on the Security page (`alert_events`) |
 | `alert_deliveries` | id; unique (alert_id, kind, recipient) | Alert e-mail per recipient (ADR-0010): kind (new/resolved), status (queued/sent/failed/suppressed), attempts, last error (never a password), next attempt, `message_id` of the e-mail that carried it, created/sent |
 | `usage_days` | `day` | Usage rollups (revision `0010_usage`, ADR-0011, [USAGE.md](USAGE.md)): one row per rolled-up site day — status (`partial` today, `final` after its late window), computed at, `computed_until`, `inputs_hash` (engine version, `usage.*` settings, suffix list, ingest progress of the day, taken before the logs are read), `attribution_hash` (who every source address belonged to when), the day's source `ips`, run details. The re-attribution job compares the hashes with the current state |
@@ -232,8 +238,9 @@ PostgreSQL 16.
 - The licence tables (`license_installation`, `license_files`, `license_events`) are append-only
   and have no expiry.
 - `lookups`, `lookup_reports` (and the PDFs in `exports\reports\`), `audit_log`,
-  `user_sessions` and the assignment history (`device_assignments`, `persons`) have no expiry
-  yet; the open decisions are listed in
+  `user_sessions`, the assignment history (`device_assignments`, `persons`) and the history of
+  the browser administration (`admin_requests`) have no expiry yet; the open decisions are
+  listed in
   [legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md).
 - Older data stays available in the vault; re-ingesting a sealed day on request ("arşivden yeniden
   yükle") is a later feature.

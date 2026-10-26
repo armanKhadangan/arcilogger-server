@@ -13,6 +13,13 @@ percentages instead of fractions).
 ``updated_by`` is the administrator's user name, or one of the internal authors ``:seed``,
 ``:system`` and ``:migration``. A ``:`` can never appear in a user name (``users.username`` check),
 so a user can never be mistaken for the seed.
+
+An administrator's value goes through :func:`validate_setting`, from the console and from the
+web interface alike (``GET/PATCH /settings``, ADR-0014). A refusal is a
+:class:`SettingValueError`: the console prints its Turkish text, the web interface shows its
+``code`` with ``message_tr`` and ``message_en``. :data:`REAUTH_KEYS` need a recent
+re-authentication in the web interface, :data:`LOCKED_KEYS` are changed on the console only;
+labels and help texts are in :mod:`arcilogger_db.settings_meta`.
 """
 
 from __future__ import annotations
@@ -241,12 +248,144 @@ def get_settings(
     return result
 
 
+#: Why a value is refused (``SettingValueError.code``) -> (Turkish, English) for the web
+#: interface, Turkish first; ``{…}`` are filled from the setting's rules (bounds, limits, names),
+#: never from the value given, so a text never repeats what was submitted.
+SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
+    "setting_unknown": ("Bilinmeyen ayar.", "Unknown setting."),
+    "setting_type": (
+        "Değer türü yanlış: {expected_tr} bekleniyor.",
+        "Wrong type of value: {expected_en} expected.",
+    ),
+    "setting_not_canonical": (
+        "Değer denetim kaydına tam olarak yazılamaz (ondalıklı sayı kullanmayın).",
+        "The value cannot be recorded exactly in the audit log (do not use decimal numbers).",
+    ),
+    "setting_below_minimum": ("En az {low} olmalı.", "Must be at least {low}."),
+    "setting_out_of_range": (
+        "{low} ile {high} arasında olmalı.",
+        "Must be between {low} and {high}.",
+    ),
+    "setting_ip_invalid": ("Geçersiz IP adresi.", "Invalid IP address."),
+    "setting_mac_invalid": ("Geçersiz MAC adresi.", "Invalid MAC address."),
+    "setting_role_unknown": (
+        "Bilinmeyen rol; geçerli roller: {roles}.",
+        "Unknown role; the valid roles are {roles}.",
+    ),
+    "setting_totp_required": (
+        "{roles} rolleri için iki adımlı doğrulama (TOTP) zorunludur (şartname 13): listeye rol "
+        "eklenebilir, bu roller çıkarılamaz.",
+        "Two-step verification (TOTP) is mandatory for the {roles} roles (specification 13): "
+        "roles may be added, these cannot be removed.",
+    ),
+    "setting_regex_invalid": ("Geçersiz düzenli ifade.", "Invalid regular expression."),
+    "setting_regex_group": (
+        "İlk grup VLAN numarasını yakalamalı, ör. ^dhcp(\\d+)$.",
+        "The first group must capture the VLAN number, e.g. ^dhcp(\\d+)$.",
+    ),
+    "setting_lease_seconds": (
+        "Her DHCP sunucusu için en az 60 saniye gerekir.",
+        "Each DHCP server needs at least 60 seconds.",
+    ),
+    "setting_empty": ("Boş olamaz.", "Cannot be empty."),
+    "setting_email_invalid": ("Geçersiz e-posta adresi.", "Invalid e-mail address."),
+    "setting_too_many": ("En çok {limit} öğe girilebilir.", "At most {limit} items are allowed."),
+    "setting_severity_invalid": (
+        "Önem derecesi {severities} değerlerinden biri olmalı.",
+        "The severity must be one of {severities}.",
+    ),
+    "setting_url_invalid": (
+        "https:// ile başlayan bir sunucu adresi girin, ör. https://172.20.10.5 (boş: "
+        "yapılandırmadan).",
+        "Enter a server address starting with https://, e.g. https://172.20.10.5 (empty: from "
+        "the configuration).",
+    ),
+    "setting_domain_pattern_invalid": (
+        "Geçersiz alan adı kalıbı (ör. *.example.com).",
+        "Invalid host name pattern (e.g. *.example.com).",
+    ),
+    "setting_appcat_invalid": (
+        "Geçersiz uygulama kategorisi (boş ya da 100 karakterden uzun).",
+        "Invalid application category (empty or longer than 100 characters).",
+    ),
+    "setting_ports_invalid": (
+        "1-65535 arası port numaraları bekleniyor.",
+        "Port numbers from 1 to 65535 expected.",
+    ),
+    "setting_work_hours_fields": (
+        "days, start ve end alanları bekleniyor.",
+        "The fields days, start and end are expected.",
+    ),
+    "setting_work_hours_days": (
+        "Günler 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı.",
+        "The days must be day numbers from 1 (Monday) to 7 (Sunday).",
+    ),
+    "setting_work_hours_time": (
+        "Başlangıç ve bitiş SS:DD biçiminde olmalı (ör. 08:00).",
+        "Start and end must be given as HH:MM (e.g. 08:00).",
+    ),
+    "setting_work_hours_order": (
+        "Mesai başlangıcı bitişten önce olmalı (gece vardiyası yok).",
+        "Work hours must start before they end (no night shift).",
+    ),
+    "setting_holiday_invalid": (
+        "Geçersiz tarih (AA-GG ya da YYYY-AA-GG).",
+        "Invalid date (MM-DD or YYYY-MM-DD).",
+    ),
+}
+
+
+class SettingValueError(ValueError):
+    """A value :func:`validate_setting` refuses for ``key``.
+
+    ``str(exc)`` is the console's Turkish text (``arcilogger-db settings set``): it names the key
+    and may repeat the value given. ``code``, ``message_tr`` and ``message_en`` are what the web
+    interface shows next to the field (``PATCH /settings``: 422 ``setting_invalid`` with
+    ``details[{key, code, message_tr, message_en}]``, contract 2.13); they never repeat a
+    submitted value (:data:`SETTING_ERRORS`).
+    """
+
+    def __init__(self, key: str, code: str, text: str, **facts: Any) -> None:
+        super().__init__(text)
+        message_tr, message_en = SETTING_ERRORS[code]
+        self.key = key
+        self.code = code
+        self.message_tr = message_tr.format(**facts)
+        self.message_en = message_en.format(**facts)
+
+
 def check_setting_value(key: str, value: Any) -> None:
-    """``ValueError`` unless ``value`` can be stored **and audited** (canonical JSON)."""
+    """:class:`SettingValueError` unless ``value`` can be stored **and audited** (canonical
+    JSON)."""
     try:
         canonical_json(value)
     except CanonicalJsonError as exc:
-        raise ValueError(f"setting {key}: value cannot be audited exactly: {exc}") from exc
+        raise SettingValueError(
+            key, "setting_not_canonical", f"setting {key}: value cannot be audited exactly: {exc}"
+        ) from exc
+
+
+# -- changes from the web interface (ADR-0014, contract 2.13) -------------------------------------
+
+#: Keys whose change needs a recent re-authentication in the web interface (``PATCH /settings``,
+#: ``POST /settings/{key}/reset``): sessions, passwords and privacy, how long personal data and
+#: evidence copies are kept, and who gets which alert e-mails (a stolen session cannot silence
+#: the alerts).
+REAUTH_KEYS: Final[frozenset[str]] = frozenset(
+    {key for key in DEFAULT_SETTINGS if key.startswith(("auth.", "privacy."))}
+    | {
+        "db.retention_days",
+        "usage.retention_days",
+        "reports.keep_days",
+        "evidence.keep_days",
+        "usage.pseudonymize_anonymous_role",
+        "alerts.email_recipients",
+        "alerts.email_min_severity",
+    }
+)
+#: Keys the web interface shows but never changes: paths of files on the server. The console
+#: (``arcilogger-db settings set``) still changes them.
+LOCKED_KEYS: Final[frozenset[str]] = frozenset({"devices.oui_file", "usage.psl_file"})
 
 
 # -- validation of administrator changes ----------------------------------------------------------
@@ -327,21 +466,33 @@ _TYPE_NAMES: Final[Mapping[type, str]] = {
     float: "ondalıklı sayı",
     type(None): "null",
 }
+#: The English names of :data:`_TYPE_NAMES` (``SettingValueError.message_en``).
+_TYPE_NAMES_EN: Final[Mapping[type, str]] = {
+    bool: "true/false",
+    int: "an integer",
+    str: "a text",
+    list: "a list",
+    dict: "an object",
+}
 
 
 def _ip(key: str, value: Any) -> str:
     if not isinstance(value, str):
-        raise ValueError(f"{key}: IP adresi bekleniyor, verilen {value!r}")
+        raise SettingValueError(
+            key, "setting_ip_invalid", f"{key}: IP adresi bekleniyor, verilen {value!r}"
+        )
     try:
         return canonical_ip(value.strip())
     except ValueError as exc:
-        raise ValueError(f"{key}: geçersiz IP adresi {value!r}") from exc
+        raise SettingValueError(
+            key, "setting_ip_invalid", f"{key}: geçersiz IP adresi {value!r}"
+        ) from exc
 
 
 def _mac(key: str, value: Any) -> str:
     digits = re.sub(r"[:.\-]", "", value.strip()).lower() if isinstance(value, str) else ""
     if not _MAC_DIGITS.match(digits):
-        raise ValueError(f"{key}: geçersiz MAC adresi {value!r}")
+        raise SettingValueError(key, "setting_mac_invalid", f"{key}: geçersiz MAC adresi {value!r}")
     return ":".join(digits[i : i + 2] for i in range(0, 12, 2))
 
 
@@ -350,7 +501,8 @@ def _unique(values: list[str]) -> list[str]:
 
 
 def validate_setting(key: str, value: Any) -> Any:
-    """The value an administrator may store for ``key``, normalised; ``ValueError`` otherwise.
+    """The value an administrator may store for ``key``, normalised; :class:`SettingValueError`
+    (a ``ValueError``) otherwise.
 
     Only known keys (:data:`DEFAULT_SETTINGS`) are accepted, with the JSON type of their
     default (a ``bool`` is not an integer), within :data:`INTEGER_RANGES`; addresses are checked
@@ -358,20 +510,28 @@ def validate_setting(key: str, value: Any) -> Any:
     ``aa:bb:cc:dd:ee:ff``), so a typing error cannot stop the lookups that read them.
     """
     if key not in DEFAULT_SETTINGS:
-        raise ValueError(f"bilinmeyen ayar: {key}")
+        raise SettingValueError(key, "setting_unknown", f"bilinmeyen ayar: {key}")
     default = DEFAULT_SETTINGS[key]
     kind = type(default)
     if type(value) is not kind:
-        raise ValueError(
+        raise SettingValueError(
+            key,
+            "setting_type",
             f"{key}: {_TYPE_NAMES[kind]} bekleniyor (varsayılan "
-            f"{canonical_json(default).decode()}), verilen: {_TYPE_NAMES.get(type(value), 'başka')}"
+            f"{canonical_json(default).decode()}), verilen: "
+            f"{_TYPE_NAMES.get(type(value), 'başka')}",
+            expected_tr=_TYPE_NAMES[kind],
+            expected_en=_TYPE_NAMES_EN[kind],
         )
     check_setting_value(key, value)
     if isinstance(value, int) and not isinstance(value, bool):
         low, high = INTEGER_RANGES.get(key, (0, None))
         if value < low or (high is not None and value > high):
             upper = "" if high is None else f", en çok {high}"
-            raise ValueError(f"{key}: en az {low}{upper} olmalı")
+            code = "setting_below_minimum" if high is None else "setting_out_of_range"
+            raise SettingValueError(
+                key, code, f"{key}: en az {low}{upper} olmalı", low=low, high=high
+            )
     if key == "nat.public_ips":
         return _unique([_ip(key, item) for item in value])
     if key == "nat.wan_transip":
@@ -381,27 +541,43 @@ def validate_setting(key: str, value: Any) -> Any:
     if key == "auth.totp_required_roles":
         unknown = [item for item in value if item not in _ROLES]
         if unknown:
-            raise ValueError(f"{key}: bilinmeyen rol {unknown} (geçerli: {', '.join(_ROLES)})")
+            raise SettingValueError(
+                key,
+                "setting_role_unknown",
+                f"{key}: bilinmeyen rol {unknown} (geçerli: {', '.join(_ROLES)})",
+                roles=", ".join(_ROLES),
+            )
         missing = [role for role in TOTP_MANDATORY_ROLES if role not in value]
         if missing:
-            raise ValueError(
+            raise SettingValueError(
+                key,
+                "setting_totp_required",
                 f"{key}: {', '.join(missing)} rolü için iki adımlı doğrulama (TOTP) zorunludur "
-                "(şartname 13); listeye rol eklenebilir, bu roller çıkarılamaz"
+                "(şartname 13); listeye rol eklenebilir, bu roller çıkarılamaz",
+                roles=", ".join(TOTP_MANDATORY_ROLES),
             )
         return _unique(value)
     if key == "dhcp.server_vlan_regex":
         try:
             pattern = re.compile(value)
         except re.error as exc:
-            raise ValueError(f"{key}: geçersiz düzenli ifade: {exc}") from exc
+            raise SettingValueError(
+                key, "setting_regex_invalid", f"{key}: geçersiz düzenli ifade: {exc}"
+            ) from exc
         if pattern.groups < 1:
-            raise ValueError(f"{key}: ilk grup VLAN numarasını yakalamalı, örn. ^dhcp(\\d+)$")
+            raise SettingValueError(
+                key,
+                "setting_regex_group",
+                f"{key}: ilk grup VLAN numarasını yakalamalı, örn. ^dhcp(\\d+)$",
+            )
     if key == "lease.server_seconds":
         for server, seconds in value.items():
             if type(seconds) is not int or seconds < 60:
-                raise ValueError(f"{key}: {server!r} için en az 60 saniye gerekir")
+                raise SettingValueError(
+                    key, "setting_lease_seconds", f"{key}: {server!r} için en az 60 saniye gerekir"
+                )
     if key == "privacy.notice_version" and not value.strip():
-        raise ValueError(f"{key}: boş olamaz")
+        raise SettingValueError(key, "setting_empty", f"{key}: boş olamaz")
     if key.startswith("alerts."):
         return _validate_alert_setting(key, value)
     if key.startswith("usage."):
@@ -413,18 +589,23 @@ def email_addresses(
     key: str, value: Iterable[Any], *, limit: int = MAX_EMAIL_RECIPIENTS
 ) -> list[str]:
     """E-mail recipients as stored: trimmed, the domain lower-case, duplicates dropped, at most
-    ``limit``; ``ValueError`` naming ``key`` for anything that is not an address. Shared by
+    ``limit``; :class:`SettingValueError` naming ``key`` for anything that is not an address.
+    Shared by
     ``alerts.email_recipients`` and the recipients of a report schedule (area R)."""
     addresses = []
     for item in value:
         address = item.strip() if isinstance(item, str) else ""
         if not _EMAIL.match(address) or len(address) > 254:
-            raise ValueError(f"{key}: geçersiz e-posta adresi {item!r}")
+            raise SettingValueError(
+                key, "setting_email_invalid", f"{key}: geçersiz e-posta adresi {item!r}"
+            )
         local, _, domain = address.partition("@")
         addresses.append(f"{local}@{domain.lower()}")
     addresses = _unique(addresses)
     if len(addresses) > limit:
-        raise ValueError(f"{key}: en çok {limit} adres")
+        raise SettingValueError(
+            key, "setting_too_many", f"{key}: en çok {limit} adres", limit=limit
+        )
     return addresses
 
 
@@ -434,14 +615,22 @@ def _validate_alert_setting(key: str, value: Any) -> Any:
         return email_addresses(key, value)
     if key == "alerts.email_min_severity":
         if value not in ALERT_SEVERITY_ORDER:
-            raise ValueError(f"{key}: {', '.join(ALERT_SEVERITY_ORDER)} değerlerinden biri olmalı")
+            severities = ", ".join(ALERT_SEVERITY_ORDER)
+            raise SettingValueError(
+                key,
+                "setting_severity_invalid",
+                f"{key}: {severities} değerlerinden biri olmalı",
+                severities=severities,
+            )
         return value
     if key == "alerts.web_base_url":
         url = value.strip().rstrip("/")
         if url and not _WEB_URL.match(url):
-            raise ValueError(
+            raise SettingValueError(
+                key,
+                "setting_url_invalid",
                 f"{key}: https:// ile başlayan sunucu adresi bekleniyor, ör. "
-                "https://10.0.0.10 (boş: yapılandırmadan)"
+                "https://10.0.0.10 (boş: yapılandırmadan)",
             )
         return url
     return value
@@ -463,7 +652,11 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
         for item in value:
             pattern = item.strip().lower().rstrip(".") if isinstance(item, str) else ""
             if not _DOMAIN_PATTERN.match(pattern) or pattern.strip("*?.") == "":
-                raise ValueError(f"{key}: geçersiz alan adı kalıbı {item!r} (ör. *.example.com)")
+                raise SettingValueError(
+                    key,
+                    "setting_domain_pattern_invalid",
+                    f"{key}: geçersiz alan adı kalıbı {item!r} (ör. *.example.com)",
+                )
             patterns.append(pattern)
         return _limited(key, _unique(patterns))
     if key == "usage.background_appcats":
@@ -471,12 +664,16 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
         for item in value:
             name = item.strip() if isinstance(item, str) else ""
             if not name or len(name) > 100:
-                raise ValueError(f"{key}: geçersiz uygulama kategorisi {item!r}")
+                raise SettingValueError(
+                    key, "setting_appcat_invalid", f"{key}: geçersiz uygulama kategorisi {item!r}"
+                )
             names.append(name)
         return _limited(key, _unique(names))
     if key == "usage.background_ports":
         if any(type(item) is not int or not 1 <= item <= 65535 for item in value):
-            raise ValueError(f"{key}: 1-65535 arası port numaraları bekleniyor")
+            raise SettingValueError(
+                key, "setting_ports_invalid", f"{key}: 1-65535 arası port numaraları bekleniyor"
+            )
         return _limited(key, sorted(set(value)))
     if key == "usage.work_hours":
         return _work_hours(key, value)
@@ -485,7 +682,11 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
         for item in value:
             day = item.strip() if isinstance(item, str) else ""
             if not _valid_holiday(day):
-                raise ValueError(f"{key}: geçersiz tarih {item!r} (AA-GG ya da YYYY-AA-GG)")
+                raise SettingValueError(
+                    key,
+                    "setting_holiday_invalid",
+                    f"{key}: geçersiz tarih {item!r} (AA-GG ya da YYYY-AA-GG)",
+                )
             days.append(day)
         return _limited(key, sorted(set(days)))
     if key == "usage.psl_file":
@@ -495,7 +696,9 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
 
 def _limited(key: str, items: list[Any]) -> list[Any]:
     if len(items) > MAX_USAGE_LIST:
-        raise ValueError(f"{key}: en çok {MAX_USAGE_LIST} öğe")
+        raise SettingValueError(
+            key, "setting_too_many", f"{key}: en çok {MAX_USAGE_LIST} öğe", limit=MAX_USAGE_LIST
+        )
     return items
 
 
@@ -513,16 +716,32 @@ def _valid_holiday(text: str) -> bool:
 
 def _work_hours(key: str, value: dict[str, Any]) -> dict[str, Any]:
     if set(value) != {"days", "start", "end"}:
-        raise ValueError(f"{key}: days, start ve end alanları bekleniyor")
+        raise SettingValueError(
+            key, "setting_work_hours_fields", f"{key}: days, start ve end alanları bekleniyor"
+        )
     days, start, end = value["days"], value["start"], value["end"]
     if not isinstance(days, list) or any(type(d) is not int or not 1 <= d <= 7 for d in days):
-        raise ValueError(f"{key}: days 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı")
+        raise SettingValueError(
+            key,
+            "setting_work_hours_days",
+            f"{key}: days 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı",
+        )
     if not isinstance(start, str) or not isinstance(end, str):
-        raise ValueError(f"{key}: start ve end SS:DD biçiminde olmalı")
+        raise SettingValueError(
+            key, "setting_work_hours_time", f"{key}: start ve end SS:DD biçiminde olmalı"
+        )
     if not _HHMM.match(start) or not _HHMM.match(end):
-        raise ValueError(f"{key}: start ve end SS:DD biçiminde olmalı (ör. 08:00)")
+        raise SettingValueError(
+            key,
+            "setting_work_hours_time",
+            f"{key}: start ve end SS:DD biçiminde olmalı (ör. 08:00)",
+        )
     if start >= end:
-        raise ValueError(f"{key}: mesai başlangıcı bitişten önce olmalı (gece vardiyası yok)")
+        raise SettingValueError(
+            key,
+            "setting_work_hours_order",
+            f"{key}: mesai başlangıcı bitişten önce olmalı (gece vardiyası yok)",
+        )
     return {"days": sorted(set(days)), "start": start, "end": end}
 
 

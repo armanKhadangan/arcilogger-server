@@ -40,7 +40,7 @@ from sqlalchemy import Engine, text, update
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from arcilogger_core.config import Config, load_config
+from arcilogger_core.config import Config, default_config_path, load_config
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.engine import make_engine, session_factory
@@ -174,6 +174,7 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
         layout=Layout(config.data_dir),
         jobs=default_jobs(config.worker.interval_seconds),
         config=config,
+        config_path=config_path or default_config_path(),  # live reload, the admin folder
     )
     try:
         worker.run(stop)
