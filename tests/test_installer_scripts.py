@@ -9758,8 +9758,20 @@ def test_system_sync_dry_run_applies_the_example_plan(engine: str, tmp_path: Pat
 
 def test_system_sync_takes_the_fast_path_when_nothing_changed(engine: str, tmp_path: Path) -> None:
     """The inputs of the last successful run (configuration, collector acknowledgement,
-    policy, staged clients) unchanged: nothing is checked or applied, no event is written."""
+    policy, staged clients) unchanged: nothing is checked or applied, no event is written.
+    status.json is written again with what it said and a new time: ArciAdmin's start-up ping
+    (Event 4101) is answered by that change (agent.json ``system_task``)."""
     site = SyncSite(tmp_path)
+    previous = {
+        "schema": "arcilogger.admin-system/1", "at": "2026-10-25T10:10:00+03:00", "ok": True,
+        "code": "source_outside_policy", "applied_config_sha256": site.plan["config_sha256"],
+        "collector_ack_sha256": site.plan["collector_ack_sha256"],
+        "firewall": {"managed": True, "strict_outbound": True,
+                     "syslog_addresses": ["172.20.10.1"], "outbound_hosts": ["172.20.10.1"]},
+        "time": {"peers": "172.20.10.1,0x8", "changed_at": "2026-10-24T09:00:00+03:00"},
+        "jars": {"staged": 0, "promoted": 0},
+    }  # fmt: skip
+    site.write("status.json", previous)
     site.write("sync-state.json", site.sync_state())
     result, report = site.run(engine)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -9767,9 +9779,15 @@ def test_system_sync_takes_the_fast_path_when_nothing_changed(engine: str, tmp_p
     assert _steps(report) == {"plan": ("done", None)}
     assert report["events"] == []
     assert report["journal"] == []
-    assert report["status"] is None
-    for changed in ("policy", "staged", "config"):
+    assert report["alerts"] == []
+    status = _system_status(report)
+    before = parse_document(SystemStatus, json.dumps(previous).encode())
+    assert status.at > before.at
+    assert status.model_copy(update={"at": before.at}) == before
+    for changed in ("policy", "staged", "config", "status"):
         site = SyncSite(tmp_path / changed)
+        if changed != "status":  # without status.json the run is a full one
+            site.write("status.json", previous)
         site.write("sync-state.json", site.sync_state())
         if changed == "policy":
             site.write_policy(hold_hours=1)

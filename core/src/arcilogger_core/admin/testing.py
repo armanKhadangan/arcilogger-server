@@ -66,6 +66,7 @@ from arcilogger_core.admin.contract import (
 )
 from arcilogger_core.admin.envelope import EnvelopeError, open_task_request, sign_admin_request
 from arcilogger_core.admin.keys import SigningKey, init_keys, load_keys, load_signing_key
+from arcilogger_core.admin.policy import read_policy
 from arcilogger_core.admin.probe import ProbeKind, ProbeResult
 from arcilogger_core.admin.store import read_journal, read_status
 from arcilogger_core.admin.systemplan import peer_list, read_inputs
@@ -396,6 +397,10 @@ class FakeSystem:
         self.syslog_addresses: tuple[str, ...] = ()
         self.peers: str | None = None
         self.plans: list[Any] = []
+        #: The inputs of the last full run (``sync-state.json``) and how many runs took the
+        #: fast path since.
+        self.inputs: tuple[Any, ...] | None = None
+        self.fast_runs = 0
         if managed:
             state = installed.root / "install" / "firewall-state.json"
             state.parent.mkdir(parents=True, exist_ok=True)
@@ -438,17 +443,32 @@ class FakeSystem:
         return target
 
     def run(self) -> Any:
-        """One ApplySystem run; returns the plan it applied."""
+        """One ApplySystem run; returns the plan it applied. Unchanged inputs (configuration,
+        collector acknowledgement, policy, staged clients) take the fast path: only
+        ``status.json`` is written again, with a new time (as ``Sync-ArciSystem.ps1``)."""
         now = self.now()
         planned = system_plan(read_inputs(self.installed.config_path, now=now))
+        staging = self.installed.root / "zamane" / "web"
+        names = sorted(path.stem for path in staging.glob("*.jar")) if staging.is_dir() else []
+        inputs = (
+            planned.config_sha256,
+            planned.collector_ack_sha256,
+            read_policy(self.installed.layout.policy).sha256,
+            tuple(names),
+        )
+        status_path = self.installed.layout.system_status
+        if inputs == self.inputs and status_path.exists():
+            previous = parse_document(SystemStatus, status_path.read_bytes())
+            atomic_write_bytes(status_path, dump_document(previous.model_copy(update={"at": now})))
+            self.fast_runs += 1
+            return planned
+        self.inputs = inputs
         self.plans.append(planned)
         self.syslog_addresses = planned.firewall.syslog_addresses
         if planned.time.changed:
             self.peers = peer_list(planned.time.primary, planned.time.fallback)
         jars = self._jars()
         staged_known = {entry.sha256 for entry in jars.staged}
-        staging = self.installed.root / "zamane" / "web"
-        names = sorted(path.stem for path in staging.glob("*.jar")) if staging.is_dir() else []
         new_staged = [
             StagedJar(sha256=name, first_seen=now) for name in names if name not in staged_known
         ]

@@ -127,6 +127,28 @@ def test_the_heartbeat_reports_the_agent(installed: Installed, agent: FakeAgent)
     )
 
 
+def test_a_restart_with_nothing_changed_is_answered_by_the_fast_path(
+    installed: Installed,
+) -> None:
+    """After a reboot or a service restart ApplySystem finds nothing to change: its fast path
+    still writes status.json again, which answers the start-up ping (Event 4101)."""
+    first = FakeAgent(installed, system=True)
+    first.process()
+    system = first.system
+    assert system is not None
+    assert len(system.plans) == 1  # one full run, the others took the fast path
+    restarted = FakeAgent(installed, system=system, now=utc_now())
+    restarted.start()
+    runs = system.fast_runs
+    system.run()
+    assert (system.fast_runs, len(system.plans)) == (runs + 1, 1)
+    status = restarted.agent.heartbeat()
+    assert status.system_task.ok
+    assert status.system_task.checked_at is not None
+    restarted.advance(timedelta(minutes=6))
+    assert restarted.agent.heartbeat().system_task.ok
+
+
 # -- claim, verify, ledger -------------------------------------------------------------------------
 
 

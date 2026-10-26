@@ -14,7 +14,8 @@
       2. system-plan; a failure is reported (status.json ok = false, system_plan_failed,
          Event 4106 error) and ends the run (exit 1). When the configuration's SHA-256, the
          collector's acknowledgement, the policy's SHA-256 and the staged Zamane clients equal
-         those of the last successful run, the run ends here (fast path, exit 0).
+         those of the last successful run, the run ends here (fast path, exit 0): only
+         status.json is written again, with a new time (ArciAdmin's start-up check).
       3. Every address, host and file of the plan is checked again (policy networks, the host
          pattern, zamane\web\<sha256>.jar of this installation); one that fails stops the run
          before any change (system_plan_invalid).
@@ -295,9 +296,12 @@ $ackSha = [string](Get-ArciJsonField -Object $plan -Name 'collector_ack_sha256')
 $staged = Get-StagedClients
 $inputs = [pscustomobject][ordered]@{ config_sha256 = $configSha; collector_ack_sha256 = $ackSha; policy_sha256 = $policy.Sha256; staged = @($staged) }
 $last = Read-SyncJson $SyncStatePath
-if ($null -ne $last -and ($last | ConvertTo-Json -Depth 3 -Compress) -ceq ($inputs | ConvertTo-Json -Depth 3 -Compress)) {
+if ($null -ne $last -and $null -ne $previous -and ($last | ConvertTo-Json -Depth 3 -Compress) -ceq ($inputs | ConvertTo-Json -Depth 3 -Compress)) {
     $report.fast_path = $true
     Write-ArciInfo 'Değişiklik yok [nothing changed since the last run].'
+    # status.json is written again all the same (what it said, a new "at"): ArciAdmin's start
+    # (Event 4101) waits for it to change to know that this task runs (agent.json system_task).
+    Write-SyncStatus ([bool](Get-ArciJsonField -Object $previous -Name 'ok')) ([string](Get-ArciJsonField -Object $previous -Name 'code')) $lastFirewall $lastTime ([string](Get-ArciJsonField -Object $previous -Name 'applied_config_sha256')) ([string](Get-ArciJsonField -Object $previous -Name 'collector_ack_sha256'))
     Exit-Sync 0
 }
 
