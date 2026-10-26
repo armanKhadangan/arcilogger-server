@@ -120,7 +120,7 @@ describe('useHandoff', () => {
 describe('the top bar’s search box', () => {
   it('hands its term to Arama in memory: not in router state, not in the address', async () => {
     const user = userEvent.setup();
-    installFetch((request) =>
+    const calls = installFetch((request) =>
       request.path === '/api/v1/auth/me'
         ? jsonResponse(200, makeMe('admin'))
         : errorResponse(404, 'not_found'),
@@ -132,7 +132,14 @@ describe('the top bar’s search box', () => {
     const { location } = router.state;
     expect([location.pathname, location.search, location.hash]).toEqual(['/search', '', '']);
     expect(location.state as unknown).toBeNull();
-    expect(handoff.take('/search')).toEqual({ q: '172.20.41.23' });
+    // Arama took the entry (once) as a query, and searched it in a request body.
+    expect(await screen.findByRole('combobox', { name: 'Sorgu' })).toHaveValue('ip:172.20.41.23');
+    await waitFor(() => {
+      expect(
+        calls.find((call) => call.method === 'POST' && call.path === '/api/v1/search')?.body,
+      ).toMatchObject({ q: 'ip:172.20.41.23' });
+    });
+    expect(handoff.take('/search')).toBeNull();
   });
 
   it('opens Arama with nothing handed over for an empty box', async () => {

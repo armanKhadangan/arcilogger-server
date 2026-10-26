@@ -58,7 +58,8 @@ describe('user menu: change the own password', () => {
         ? jsonResponse(200, changed())
         : errorResponse(403, 'credentials_invalid', { tr: 'Mevcut parola hatalı.' }),
     );
-    renderApp('/search'); // a placeholder page: no requests of its own
+    // Arama runs no search when it opens; its catalogue and saved searches answer 404 here.
+    renderApp('/search');
     const dialog = await openDialog(user);
     expect(
       within(dialog).getByText(/Diğer tarayıcı ve cihazlardaki oturumlarınız kapatılır/),
