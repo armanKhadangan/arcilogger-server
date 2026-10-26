@@ -486,9 +486,9 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "sunucuya erişimi denetleyin.\n"
         "4. Elle müdahale gerekiyorsa sürüm numarası ve adımlar isteğin ayrıntısındadır "
         "(sunucuda yönetici PowerShell'inde: & \"C:\\Program Files\\ARCILOGGER\\venv\\Scripts\\"
-        "python.exe\" -I -m arcilogger_core.admin versions restore <n>). Kod acl_drift ise "
-        "değişiklik yürürlüktedir: sürüm geri yüklemeyin, & \"C:\\Program Files\\ARCILOGGER\\"
-        "scripts\\Set-ArciVaultAcl.ps1\" betiğini çalıştırın.\n"
+        'python.exe" -I -m arcilogger_core.admin versions restore <n>). Kod acl_drift ise '
+        'değişiklik yürürlüktedir: sürüm geri yüklemeyin, & "C:\\Program Files\\ARCILOGGER\\'
+        'scripts\\Set-ArciVaultAcl.ps1" betiğini çalıştırın.\n'
         "5. Hizmet yeniden yanıt verince 'yanıt vermiyor' uyarısı kendiliğinden kapanır; "
         "diğerlerini sonucu not olarak ekleyip kapatın.",
         "1. Read the cause in the details: the administration service is not answering, a "
@@ -502,10 +502,10 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "in the audit log; for an unexpected signature or installation error check who can "
         "reach the server.\n"
         "4. When manual action is needed, the version number and the steps are in the request's "
-        "details (on the server, in an administrator PowerShell: & \"C:\\Program Files\\"
-        "ARCILOGGER\\venv\\Scripts\\python.exe\" -I -m arcilogger_core.admin versions restore "
+        'details (on the server, in an administrator PowerShell: & "C:\\Program Files\\'
+        'ARCILOGGER\\venv\\Scripts\\python.exe" -I -m arcilogger_core.admin versions restore '
         "<n>). For the code acl_drift the change is in force: do not restore a version, run "
-        "& \"C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVaultAcl.ps1\".\n"
+        '& "C:\\Program Files\\ARCILOGGER\\scripts\\Set-ArciVaultAcl.ps1".\n'
         "5. The 'not answering' alert closes by itself once the service answers again; add the "
         "result of the others as a note and close them.",
     ),
