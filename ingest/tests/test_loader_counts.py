@@ -6,6 +6,7 @@ exactly the lines whose rows loaded — in the transaction of the rows, across b
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as clock_time
 from typing import Any
@@ -333,16 +334,18 @@ def test_grouping_lines_gives_the_keys_of_count_key_line_by_line() -> None:
     only_typed = _line(13, end, "dhcp", "assigned", "mt_dhcp", action="assigned", ip="172.20.60.9")
     only_typed.rows.pop(0)
     nothing = PreparedLine(stream=salvaged.stream, line=14, offset=0)  # rawlog.invalid
-    batch: list[tuple[PreparedLine, bool]] = [(line, True) for line in lines * 3]
-    batch += [(salvaged, False), (interface, False), (only_typed, True), (nothing, True)]
+    # as the loader records them: runs COPY loaded whole, and salvaged lines one by one
+    batch: list[tuple[Sequence[PreparedLine], bool]] = [(lines * 2, True), (lines, True)]
+    batch += [((salvaged,), False), ((interface,), False), ((only_typed, nothing), True)]
 
     expected: Counter[CountKey] = Counter()
-    for line, typed_loaded in batch:
-        rows = dict(line.rows)
-        if "messages" not in rows:
-            continue
-        table = next((name for name in rows if name != "messages"), None) if typed_loaded else None
-        expected[count_key(rows["messages"], table, rows.get(table) if table else None)] += 1
+    for run, typed_loaded in batch:
+        for line in run:
+            rows = dict(line.rows)
+            if "messages" not in rows:
+                continue
+            table = next((n for n in rows if n != "messages"), None) if typed_loaded else None
+            expected[count_key(rows["messages"], table, rows.get(table) if table else None)] += 1
     assert _count_keys(batch) == expected
     assert sum(expected.values()) == 3 * 18 + 2
     web = {key: n for key, n in expected.items() if key.tbl == "fg_web"}

@@ -71,9 +71,11 @@ class _CopyFailedError(Exception):
         self.error = error
 
 
-#: A line whose rows loaded, and whether its typed row loaded too (``False``: its ``messages`` row
-#: was salvaged alone).
-_Loaded = tuple[PreparedLine, bool]
+#: Lines whose rows loaded, as ``COPY`` loaded them: a run of lines with all their rows (``True``),
+#: or one line whose ``messages`` row was salvaged alone (``False``). Runs, not a tuple per line:
+#: 5,000 tuples a batch kept until the ``counts`` step made the garbage collector run measurably
+#: more often.
+_Loaded = tuple[Sequence[PreparedLine], bool]
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 _HOUR: Final = timedelta(hours=1)
 
@@ -267,7 +269,7 @@ class Loader:
             )
         for table, count in attempt.items():
             counts[table] = counts.get(table, 0) + count
-        loaded.extend((line, True) for line in lines)
+        loaded.append((lines, True))
         return 0
 
     def _salvage(
@@ -307,7 +309,7 @@ class Loader:
         except _CopyFailedError:
             return
         counts["messages"] = counts.get("messages", 0) + attempt.get("messages", 0)
-        loaded.append((line, False))  # without its typed row: counted with tbl = ''
+        loaded.append(((line,), False))  # without its typed row: counted with tbl = ''
 
     # -- parse failures ---------------------------------------------------------------------------
 
@@ -449,32 +451,33 @@ def _count_keys(loaded: Iterable[_Loaded]) -> Counter[CountKey]:
     may share one (``Blocked`` and ``blocked``), the counter adds them.
     """
     groups: dict[tuple[Any, ...], list[Any]] = {}
-    for line, typed_loaded in loaded:
-        rows = line.rows
-        if not rows or rows[0][0] != "messages":
-            continue  # no messages row (rawlog.invalid, copy.messages): in no search, no count
-        message = rows[0][1]
-        table, typed = rows[1] if typed_loaded and len(rows) > 1 else (None, None)
-        action = client = None
-        if typed is not None:
-            action = typed.get("action")
-            column = CLIENT_IP.get(table or "")
-            client = None if column is None else net_of(typed.get(column))
-        group = (
-            (message["time"] - _EPOCH) // _HOUR,  # exact: no float rounding at an hour's end
-            message["source"],
-            message["raw_day"],
-            message["type"],
-            message.get("subtype"),
-            table,
-            action,
-            client,
-        )
-        found = groups.get(group)
-        if found is None:
-            groups[group] = [message, table, typed, 1]
-        else:
-            found[3] += 1
+    for lines, typed_loaded in loaded:
+        for line in lines:
+            rows = line.rows
+            if not rows or rows[0][0] != "messages":
+                continue  # no messages row (rawlog.invalid, copy.messages): in no search, no count
+            message = rows[0][1]
+            table, typed = rows[1] if typed_loaded and len(rows) > 1 else (None, None)
+            action = client = None
+            if typed is not None:
+                action = typed.get("action")
+                column = CLIENT_IP.get(table or "")
+                client = None if column is None else net_of(typed.get(column))
+            group = (
+                (message["time"] - _EPOCH) // _HOUR,  # exact: no float rounding at an hour's end
+                message["source"],
+                message["raw_day"],
+                message["type"],
+                message.get("subtype"),
+                table,
+                action,
+                client,
+            )
+            found = groups.get(group)
+            if found is None:
+                groups[group] = [message, table, typed, 1]
+            else:
+                found[3] += 1
     keys: Counter[CountKey] = Counter()
     for message, table, typed, lines in groups.values():
         keys[count_key(message, table, typed)] += lines
