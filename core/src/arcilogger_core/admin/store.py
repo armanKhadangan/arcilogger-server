@@ -58,7 +58,7 @@ from arcilogger_core.admin.contract import (
     parse_document,
 )
 from arcilogger_core.alerts import Severity, raise_alert
-from arcilogger_core.config import Config
+from arcilogger_core.config import Config, ConfigLocationError, check_fixed_location
 from arcilogger_core.execpolicy import TrustAnchors, ZamanePaths
 from arcilogger_core.fsutil import atomic_write_bytes, fsync_dir
 from arcilogger_core.secretstore import SecretStore
@@ -73,8 +73,6 @@ LEDGER_SCHEMA: Final = "arcilogger.admin-ledger/1"
 PENDING_SCHEMA: Final = "arcilogger.admin-pending/1"
 WAITS_SCHEMA: Final = "arcilogger.admin-waits/1"
 TXN_SCHEMA: Final = "arcilogger.admin-txn/1"
-#: The installer's record of the data root, next to the configuration (contract note WP2-1).
-DATA_ROOT_RECORD: Final = "data-root.txt"
 
 
 @dataclass(frozen=True)
@@ -132,18 +130,13 @@ class Installation:
     def location_problem(self, config: Config) -> str | None:
         """Why ``config`` is not followed, or None: its ``secrets_dir`` is not this folder, or
         its ``data_dir`` is not the data root the installer recorded in ``data-root.txt`` (no
-        record: not checked). Nothing the browser can change may move either (contract Day 0
-        notes D0-2 and WP2-1)."""
-        if not _same_path(config.secrets_dir, self.root):
-            return "secrets_dir is not the folder of the configuration file"
+        record: not checked; an unusable record refuses). Nothing the browser can change may
+        move either (contract Day 0 notes D0-2 and WP2-1):
+        :func:`arcilogger_core.config.check_fixed_location` with this folder's fixed path."""
         try:
-            recorded = (self.root / DATA_ROOT_RECORD).read_text(encoding="utf-8-sig").strip()
-        except FileNotFoundError:
-            return None
-        except (OSError, UnicodeDecodeError):
-            return f"{DATA_ROOT_RECORD} cannot be read"
-        if not recorded or not _same_path(config.data_dir, Path(recorded)):
-            return f"data_dir is not the data root recorded in {DATA_ROOT_RECORD}"
+            check_fixed_location(config, self.config_path)
+        except ConfigLocationError as exc:
+            return str(exc)
         return None
 
     def secret_store(self) -> SecretStore:
@@ -152,11 +145,6 @@ class Installation:
     def temp_file(self, target: Path, request_id: str) -> Path:
         """``.<name>.<id>.tmp`` next to ``target`` (same volume, so the replace is atomic)."""
         return target.with_name(f".{target.name}.{check_id(request_id)}.tmp")
-
-
-def _same_path(a: Path, b: Path) -> bool:
-    """Lexically the same absolute path (Windows: case-insensitive); no link is followed."""
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))  # noqa: PTH100
 
 
 def read_bytes_or_none(path: Path) -> bytes | None:

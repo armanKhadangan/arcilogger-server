@@ -20,7 +20,8 @@ usage rebuild records one ``usage.rebuild`` job run for the range.
 
 ``run`` refuses (exit 2) a configuration that moves the installation's folders: ``secrets_dir``
 must be the folder of the ``--config`` file and ``data_dir`` the data root the installer
-recorded in ``data-root.txt`` next to it (ADR-0014, contract Day 0 notes D0-2, WP2-1): the
+recorded in ``data-root.txt`` next to it (:func:`arcilogger_core.config.check_fixed_location`;
+ADR-0014, contract Day 0 notes D0-2, WP2-1): the
 administration agent may write ``arcilogger.toml``, and the worker imports what it finds below
 ``data_dir`` into the audit log.
 
@@ -33,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import signal
 import sys
 import threading
@@ -47,7 +47,13 @@ from sqlalchemy import Engine, text, update
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from arcilogger_core.config import Config, default_config_path, load_config
+from arcilogger_core.config import (
+    Config,
+    ConfigLocationError,
+    check_fixed_location,
+    default_config_path,
+    load_config,
+)
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.engine import make_engine, session_factory
@@ -145,45 +151,6 @@ def _load(config_path: Path | None) -> Config | None:
         return None
 
 
-#: The installer's record of the data root, next to the configuration file (contract WP2-1).
-DATA_ROOT_RECORD = "data-root.txt"
-
-
-def _lexical(path: Path) -> str:
-    """``path`` made absolute without following a link (Windows: case-insensitive)."""
-    return os.path.normcase(os.path.abspath(path))  # noqa: PTH100 - lexical on purpose
-
-
-def _location_problem(config: Config, config_path: Path) -> str | None:
-    """Why the worker must not use ``config``, or ``None`` (ADR-0014, contract Day 0 notes D0-2,
-    WP2-1, WP3-5): ``secrets_dir`` is not the folder of the fixed ``config_path`` (it chooses
-    the SMTP and database passwords), or ``data_dir`` is not the data root recorded in
-    :data:`DATA_ROOT_RECORD` (no record: not checked; a record that cannot be used refuses the
-    configuration). The semantics of WP2's ``config.check_fixed_location``, which replaces this
-    at the merge."""
-    if _lexical(config.secrets_dir) != _lexical(config_path.parent):
-        return (
-            f"secrets_dir ({config.secrets_dir}) yapılandırma dosyasının klasörü değil / is "
-            f"not the folder of the configuration file ({config_path.parent})"
-        )
-    record = config_path.parent / DATA_ROOT_RECORD
-    try:
-        text = record.read_text(encoding="utf-8-sig")
-    except FileNotFoundError:
-        return None
-    except (OSError, UnicodeDecodeError) as exc:
-        return f"{record} okunamadı / cannot be read ({type(exc).__name__})"
-    lines = text.strip().splitlines()
-    if len(lines) != 1 or not Path(lines[0].strip()).is_absolute():
-        return f"{record}: tek satırda mutlak bir yol değil / not one line with an absolute path"
-    if _lexical(config.data_dir) != _lexical(Path(lines[0].strip())):
-        return (
-            f"data_dir ({config.data_dir}) kurulumun veri klasörü değil / is not the data root "
-            f"the installer recorded ({lines[0].strip()})"
-        )
-    return None
-
-
 def _check_database(engine: Engine) -> bool:
     try:
         with engine.connect() as connection:
@@ -203,12 +170,10 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
     if config is None:
         return EXIT_CONFIG
     fixed_path = config_path or default_config_path()
-    problem = _location_problem(config, fixed_path)
-    if problem is not None:  # nothing is written below a data_dir that may not be ours
-        print(
-            f"Yapılandırma kullanılmadı / the configuration was not used: {problem}",
-            file=sys.stderr,
-        )
+    try:
+        check_fixed_location(config, fixed_path)
+    except ConfigLocationError as exc:  # nothing is written below a data_dir that may not be ours
+        print(exc, file=sys.stderr)  # both languages
         return EXIT_CONFIG
     _setup_logging(config.data_dir / "logs")
     engine = make_engine(config, application="worker")

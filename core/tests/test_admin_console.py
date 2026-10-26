@@ -138,6 +138,9 @@ def test_system_plan_refuses_a_data_root_the_installer_did_not_record(
 ) -> None:
     (installed.root / "data-root.txt").write_text(str(tmp_path / "other"), encoding="utf-8")
     assert run(installed, "system-plan") == 1
+    assert "data_dir" in capsys.readouterr().err
+    (installed.root / "data-root.txt").write_text("relative/data\n", encoding="utf-8")
+    assert run(installed, "system-plan") == 1  # an unusable record fails closed
     assert "data-root.txt" in capsys.readouterr().err
 
 
