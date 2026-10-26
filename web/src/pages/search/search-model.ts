@@ -1,7 +1,8 @@
 /**
  * Arama's pure helpers: the top bar's term as a query, adding and removing clauses (facets, "Hariç
- * tut"), completions for the query bar, a row's summary, the state of a partial scan and the
- * hand-over of a search's raw lines to the evidence wizard.
+ * tut"), completions for the query bar, a row's summary, the state of a partial scan, the
+ * hand-over of a search's raw lines to the evidence wizard, the record drawer's fields, the
+ * export's truncation and the names of saved searches.
  *
  * The query text is the single source of truth: a facet click edits the text, and the server
  * parses it again (`POST /search`). The small lexer here only finds where the clauses of the text

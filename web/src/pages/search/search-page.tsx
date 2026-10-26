@@ -239,14 +239,19 @@ export function SearchPage() {
     const refused = problemOf(state.error);
     const input = state.input;
     if (refused && input && 'q' in input && input.q === text) return [refused];
-    if (parse.data && debounced === text) return parse.data.errors.map((error) => ({ ...error }));
+    if (parse.data && debounced === text) return parse.data.errors;
     return [];
   }, [state.error, state.input, text, parse.data, debounced]);
 
   const first = state.first;
   const last = state.last;
   const scan = last ? scanState(last, state.continues, state.rows.length) : null;
-  const runError = state.error !== null && first === null && problemOf(state.error) === null;
+  // A refusal of the run itself (rows cleared), unless the query bar or the KVKK notice shows it.
+  const runError =
+    state.error !== null &&
+    first === null &&
+    problemOf(state.error) === null &&
+    !isApiError(state.error, 'privacy_notice_required');
   const pageError = state.error !== null && first !== null;
   const notices = noticesOf(first?.notices, stats.data?.notices);
   const kinds = fields.data?.kinds ?? [];
