@@ -62,6 +62,11 @@ How the samples are made (everything is the production code, in this process):
    ``RELEASE_DATE`` is bumped. Times on these sites are exact moments (not the running clock),
    so the licence samples are the same on every capture.
 
+The search, live tail and sources pages' samples (``search.json``, ``live.json``,
+``sources.json``) come from modules of their own next to this script, each kept with its API
+(``samples_search.py``, ``samples_live_sources.py``): their ``capture`` runs on the main site after
+step 7's pages and returns ``{file name: data}``; a file whose data is empty is not written.
+
 Steps 1-7 run with every licence module on, as the tests do by default
 (``override_status(all_modules_status())``): those samples describe their own pages, not the
 licence.
@@ -183,6 +188,17 @@ from arcilogger_worker.usage.jobs import rebuild_day as rebuild_usage_day
 from arcilogger_worker.usage.testing import build_golden_site
 from arcilogger_worker.usage import report_data
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
+
+# The sample modules next to this script: on the path when it runs as a script, not when a test
+# loads it by its file name.
+_SCRIPTS = str(Path(__file__).resolve().parent)
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
+import samples_live_sources  # noqa: E402
+import samples_search  # noqa: E402
+
+#: The pages whose samples a module of their own captures (module text).
+SAMPLE_MODULES = (samples_search, samples_live_sources)
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "e2e" / "samples"
 API = "/api/v1"
@@ -3005,7 +3021,8 @@ def capture_admin_history(capture: Capture, admin: Any) -> None:
 
 
 def capture_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
-    """Steps 1-7 of the module text: the lookup site and its pages, then the usage site."""
+    """Steps 1-7 of the module text: the lookup site and its pages (with the sample modules'
+    pages), then the usage site."""
     build_site(capture)
     vault = seal_october(capture)
     odd = write_odd_line(capture)
@@ -3028,6 +3045,12 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
     capture_admin_sources(capture, admin)
     capture_admin_sections(capture, admin)
     capture_admin_history(capture, admin)
+    for module in SAMPLE_MODULES:
+        for name, data in module.capture(capture, admin, auditor, newcomer).items():
+            if name in capture.samples:
+                raise SystemExit(f"{module.__name__}: {name}.json is captured here already")
+            if data:
+                capture.samples[name] = data
     vault.unlock_all()
     capture.samples["usage"] = capture_usage(server, template, root)
 
@@ -3112,6 +3135,12 @@ FILE_KEYS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "license": (MAP_KEYS - {"details"}, ENUM_KEYS | {"problem", "source", "from", "to"}),
     # A request's ``changes`` are keyed by the paths it changes, a root's by its fingerprint.
     "admin": (MAP_KEYS | {"changes"}, ENUM_KEYS),
+    # The sample modules' files: their own keys added to the defaults (``SHAPE_KEYS``).
+    **{
+        name: (MAP_KEYS | maps, ENUM_KEYS | enums)
+        for module in SAMPLE_MODULES
+        for name, (maps, enums) in module.SHAPE_KEYS.items()
+    },
 }
 
 
