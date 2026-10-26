@@ -36,6 +36,7 @@ import type {
   RequestKind,
   RequestState,
   RequestStep,
+  RetentionPreview,
   SettingGroup,
   SettingOut,
   SettingValue,
@@ -691,6 +692,23 @@ const TSA_REQUIRED = [
   'java',
   'probe',
 ];
+const SMTP_REQUIRED = [
+  'etag',
+  'enabled',
+  'host',
+  'port',
+  'security',
+  'username',
+  'from_address',
+  'timeout_seconds',
+  'probe',
+];
+const SMTP_KEYS = [...SMTP_REQUIRED, 'password', 'clear_password', 'test_to'];
+const REPLICA_REQUIRED = ['etag', 'enabled', 'target', 'user', 'probe'];
+const REPLICA_KEYS = [...REPLICA_REQUIRED, 'password', 'clear_password'];
+const RETENTION_REQUIRED = ['etag', 'enabled', 'days'];
+const RETENTION_KEYS = [...RETENTION_REQUIRED, 'confirm_delete_days'];
+const BACKUP_KEYS = ['etag', 'enabled', 'keep_daily', 'keep_weekly', 'keep_monthly', 'min_free_gb'];
 
 /**
  * Request bodies of the administration API: every field it knows and the required ones (the
@@ -720,6 +738,15 @@ const BODIES: Record<string, { known: string[]; required: string[] }> = {
     required: ['etag', 'upload_id'],
   },
   'POST /admin/config/sources': { known: ['etag', 'source'], required: ['etag', 'source'] },
+  'PUT /admin/config/smtp': { known: SMTP_KEYS, required: SMTP_REQUIRED },
+  'POST /admin/config/smtp/check': { known: SMTP_KEYS, required: SMTP_REQUIRED },
+  'POST /admin/config/smtp/ca': { known: ['etag', 'upload_id'], required: ['etag', 'upload_id'] },
+  'PUT /admin/config/replica': { known: REPLICA_KEYS, required: REPLICA_REQUIRED },
+  'POST /admin/config/replica/check': { known: REPLICA_KEYS, required: REPLICA_REQUIRED },
+  'PUT /admin/config/retention': { known: RETENTION_KEYS, required: RETENTION_REQUIRED },
+  'POST /admin/config/retention/check': { known: RETENTION_KEYS, required: RETENTION_REQUIRED },
+  'PUT /admin/config/backup': { known: BACKUP_KEYS, required: BACKUP_KEYS },
+  'POST /admin/config/backup/check': { known: BACKUP_KEYS, required: BACKUP_KEYS },
   'POST /admin/config/sources/check': { known: ['etag', 'source'], required: ['etag', 'source'] },
   'PATCH /settings': { known: ['changes'], required: ['changes'] },
   'POST /admin/actions/tsa-test': { known: ['confirm_credit'], required: [] },
@@ -923,6 +950,9 @@ export class AdminMock {
   readonly settings: SettingGroup[] = startSettings();
   readonly uploads = new Map<string, UploadPreview>();
   private lastCredit: number | null = null;
+  private lastReplicaTest: number | null = null;
+  /** When test e-mails were sent (5 an hour). */
+  private readonly testEmails: number[] = [];
   private readonly realStart = Date.now();
   private readonly base: number;
   private readonly creditsSample: () => Credits;
@@ -997,7 +1027,13 @@ export class AdminMock {
     return {
       config_sha256: sha256(JSON.stringify(this.sections)),
       etags: Object.fromEntries(sections.map((section) => [section, this.etag(section)])),
-      sections: copy(this.sections),
+      sections: copy({
+        ...this.sections,
+        retention: {
+          ...this.sections.retention,
+          preview: this.retentionPreview(this.sections.retention.days),
+        },
+      }),
       locked: copy(LOCKED),
       policy: {
         enabled: this.agent !== 'disabled',
@@ -2104,6 +2140,553 @@ export class AdminMock {
     return this.accepted(item, ['reload.collector', 'reload.ingest', 'system.firewall']);
   }
 
+  // -- smtp, replica, retention, backup (contract 2.6) ------------------------------------------
+
+  /**
+   * The common part of a section's check and change: the dry run's answer, or the change
+   * accepted (re-authentication, the service, the `etag`, a change still running), held for
+   * `policy.hold_hours` when `held`.
+   */
+  private sectionChange(
+    call: RecordedCall,
+    host: MockHost,
+    dryRun: boolean,
+    account: MockUser,
+    plan: {
+      section: Exclude<AdminSection, 'general' | 'tsa' | 'sources'>;
+      etag: unknown;
+      changes: Record<string, Change>;
+      warnings: string[];
+      effects: string[];
+      reauth: boolean;
+      probe: boolean;
+      secrets: boolean;
+      held: boolean;
+      reloads: RequestStep[];
+      next: () => void;
+      check?: Partial<AdminCheck>;
+    },
+  ): Answer {
+    const hold = plan.held && this.holdHours > 0 ? this.holdHours * 3_600_000 : null;
+    if (dryRun)
+      return [
+        200,
+        {
+          changes: plan.changes,
+          effects: plan.effects,
+          warnings: plan.warnings.map(message),
+          guarded: hold !== null,
+          effective_at: hold === null ? null : this.iso(hold),
+          reauth_required: plan.reauth,
+          ...plan.check,
+        } satisfies AdminCheck,
+      ];
+    if (plan.reauth) {
+      const recent = host.requirePermission(call, 'settings.manage', true);
+      if (Array.isArray(recent)) return recent;
+    }
+    const refused = this.blocked(plan.section, plan.etag);
+    if (refused) return refused;
+    const steps: RequestStep[] = [
+      'received',
+      'validate',
+      ...(plan.probe ? (['probe'] as RequestStep[]) : []),
+      ...(hold === null ? [] : (['hold'] as RequestStep[])),
+      'backup',
+      ...(plan.secrets ? (['write_secrets'] as RequestStep[]) : []),
+      'write_config',
+      'verify',
+      ...plan.reloads,
+      'journal',
+    ];
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: plan.section,
+      account,
+      steps,
+      changes: plan.changes,
+      warnings: [...plan.warnings, ...(hold === null ? [] : ['change_held'])],
+      outcome: this.takeOutcome(),
+      hold,
+      before: copy(this.sections[plan.section]),
+      apply: () => {
+        plan.next();
+        this.recordVersion(item, account);
+      },
+    });
+    return this.accepted(item, plan.effects);
+  }
+
+  /** `{secret: true, old, new}` of a write-only field (`null`: unchanged). */
+  private secretChange(
+    meta: { set: boolean } | undefined,
+    value: unknown,
+    clear: boolean,
+  ): Change | null {
+    const was = meta?.set ? 'set' : 'unset';
+    if (clear && was === 'set') return { secret: true, old: was, new: 'deleted', changed: true };
+    if (typeof value === 'string' && value !== '')
+      return { secret: true, old: was, new: 'set', changed: true };
+    return null;
+  }
+
+  private smtp(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as Record<string, unknown>;
+    const current = this.sections.smtp;
+    const text = (key: string) =>
+      typeof body[key] === 'string' && body[key].trim() ? body[key].trim() : null;
+    const next = {
+      enabled: body.enabled === true,
+      host: text('host'),
+      port: body.port,
+      security: body.security,
+      username: text('username'),
+      from_address: text('from_address'),
+      timeout_seconds: body.timeout_seconds,
+    };
+    const problems = [];
+    if (
+      typeof next.port !== 'number' ||
+      !Number.isInteger(next.port) ||
+      next.port < 1 ||
+      next.port > 65_535
+    )
+      problems.push(problem('port', 'config_invalid'));
+    if (
+      typeof next.timeout_seconds !== 'number' ||
+      !Number.isInteger(next.timeout_seconds) ||
+      next.timeout_seconds < 1 ||
+      next.timeout_seconds > 300
+    )
+      problems.push(problem('timeout_seconds', 'config_invalid'));
+    if (!['starttls', 'ssl', 'none'].includes(String(next.security)))
+      problems.push(problem('security', 'config_invalid'));
+    if (next.host !== null && !validHost(next.host)) problems.push(problem('host', 'host_invalid'));
+    if (next.from_address !== null && !EMAIL.test(next.from_address))
+      problems.push(problem('from_address', 'config_invalid'));
+    if (next.enabled && next.host === null) problems.push(problem('host', 'config_invalid'));
+    if (next.enabled && next.from_address === null)
+      problems.push(problem('from_address', 'config_invalid'));
+    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
+    const stored = current.secrets['smtp.password']?.set ?? false;
+    const typed = typeof body.password === 'string' && body.password !== '';
+    const clear = body.clear_password === true || (next.username === null && stored);
+    const endpoint =
+      next.host !== current.host ||
+      next.port !== current.port ||
+      next.security !== current.security ||
+      next.username !== current.username;
+    if (next.username !== null) {
+      if (!typed && (!stored || body.clear_password === true))
+        return this.reject('smtp_password_required', [
+          problem('password', 'smtp_password_required'),
+        ]);
+      if (stored && !typed && endpoint)
+        return this.reject('secret_rebind_required', [
+          problem('password', 'secret_rebind_required'),
+        ]);
+      if (next.security === 'none' && !['localhost', '127.0.0.1', '::1'].includes(next.host ?? ''))
+        return this.reject('smtp_plaintext_auth_refused', [
+          problem('security', 'smtp_plaintext_auth_refused'),
+        ]);
+    }
+    const needsTest = next.enabled && (!current.enabled || endpoint);
+    if (needsTest) {
+      const to = typeof body.test_to === 'string' ? body.test_to : null;
+      if (to === null)
+        return this.reject('smtp_test_recipient_required', [
+          problem('test_to', 'smtp_test_recipient_required'),
+        ]);
+      if (!this.recipients(account).includes(to))
+        return this.reject('test_email_recipient_not_allowed', [
+          problem('test_to', 'test_email_recipient_not_allowed'),
+        ]);
+    }
+    const values = (smtp: typeof next) => ({
+      enabled: smtp.enabled,
+      host: smtp.host,
+      port: smtp.port,
+      security: smtp.security,
+      username: smtp.username,
+      from_address: smtp.from_address,
+      timeout_seconds: smtp.timeout_seconds,
+    });
+    const secret = this.secretChange(current.secrets['smtp.password'], body.password, clear);
+    const changes: Record<string, Change> = {
+      ...diff('smtp', values(current), values(next)),
+      ...(secret ? { 'smtp.password': secret } : {}),
+    };
+    const warnings = [
+      ...(current.enabled && !next.enabled ? ['smtp_disabled'] : []),
+      ...(next.security === 'none' && next.username === null && next.enabled
+        ? ['smtp_plaintext']
+        : []),
+    ];
+    return this.sectionChange(call, host, dryRun, account, {
+      section: 'smtp',
+      etag: body.etag,
+      changes,
+      warnings,
+      effects: ['reload.worker'],
+      reauth: true,
+      probe: needsTest && body.probe !== false,
+      secrets: secret !== null,
+      held: false,
+      reloads: ['reload.worker'],
+      next: () => {
+        const by = { changed_at: this.iso(), changed_by: `web:${account.username}` };
+        this.sections.smtp = {
+          ...this.sections.smtp,
+          ...(next as Omit<typeof current, 'ca' | 'secrets'>),
+          secrets: secret
+            ? { 'smtp.password': { set: secret.new === 'set', ...by } }
+            : this.sections.smtp.secrets,
+        };
+      },
+    });
+  }
+
+  /** The addresses a test e-mail may go to: the alert recipients and one's own address. */
+  private recipients(account: MockUser): string[] {
+    const listed = this.setting('alerts.email_recipients')?.value;
+    return [
+      ...(Array.isArray(listed)
+        ? listed.filter((item): item is string => typeof item === 'string')
+        : []),
+      ...(account.email ? [account.email] : []),
+    ];
+  }
+
+  private smtpCa(call: RecordedCall, host: MockHost, clear: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage', true);
+    if (Array.isArray(account)) return account;
+    const body = (call.body ?? {}) as { etag?: string; upload_id?: string };
+    const upload = clear ? null : this.uploads.get(body.upload_id ?? '');
+    if (!clear && (!upload || upload.kind !== 'smtp_ca')) return this.reject('upload_not_found');
+    const refused = this.blocked('smtp', clear ? call.query.get('etag') : body.etag);
+    if (refused) return refused;
+    const sha = upload?.sha256 ?? null;
+    const item = this.enqueue({
+      kind: 'config.apply',
+      section: 'smtp',
+      account,
+      steps: [
+        'received',
+        'validate',
+        'backup',
+        'install_files',
+        'write_config',
+        'verify',
+        'reload.worker',
+        'journal',
+      ],
+      changes: { 'smtp.ca_file': { old: this.sections.smtp.ca.sha256, new: sha } },
+      outcome: this.takeOutcome(),
+      before: copy(this.sections.smtp),
+      apply: () => {
+        this.sections.smtp.ca = { sha256: sha };
+        if (upload) this.uploads.delete(upload.upload_id);
+        this.recordVersion(item, account);
+      },
+    });
+    return this.accepted(item, ['reload.worker']);
+  }
+
+  private testEmail(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const to = (call.body as { to?: unknown }).to;
+    const smtp = this.sections.smtp;
+    if (!smtp.host || !smtp.from_address) return this.reject('smtp_not_configured');
+    if (typeof to !== 'string' || !this.recipients(account).includes(to))
+      return this.reject('test_email_recipient_not_allowed');
+    const hour = Date.now() - 3_600_000;
+    const sent = this.testEmails.filter((at) => at > hour);
+    if (sent.length >= 5) return this.reject('admin_rate_limited', { retry_after: 600 });
+    this.testEmails.push(Date.now());
+    const outcome = this.takeAction();
+    const item = this.enqueue({
+      kind: 'worker.test_email',
+      section: null,
+      account,
+      steps: ['received', 'task', 'journal'],
+      result:
+        outcome === 'succeeded'
+          ? { ok: true, error_text: null }
+          : { ok: false, error_text: '535 5.7.8 Kimlik doğrulama başarısız (b***@ornek.example)' },
+    });
+    return this.accepted(item);
+  }
+
+  private replica(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as Record<string, unknown>;
+    const current = this.sections.replica;
+    const target =
+      typeof body.target === 'string' && body.target.trim() ? body.target.trim() : null;
+    const user = typeof body.user === 'string' && body.user.trim() ? body.user.trim() : null;
+    const enabled = body.enabled === true;
+    if (target !== null && !UNC.test(target))
+      return this.reject('replica_target_invalid', [problem('target', 'replica_target_invalid')]);
+    if (enabled && target === null)
+      return this.refuse(422, 'config_invalid', [problem('target', 'config_invalid')]);
+    const stored = current.secrets['replica.password']?.set ?? false;
+    const typed = typeof body.password === 'string' && body.password !== '';
+    const clear = body.clear_password === true;
+    const hostOf = (value: string | null) => value?.slice(2).split('\\')[0]?.toLowerCase() ?? '';
+    if (user !== null) {
+      if (
+        !/^[A-Za-z0-9][A-Za-z0-9.-]*\\[^\\@\s]+$|^[^\\@\s]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(
+          user,
+        )
+      )
+        return this.reject('replica_user_invalid', [problem('user', 'replica_user_invalid')]);
+      if (!typed && (!stored || clear))
+        return this.reject('replica_password_required', [
+          problem('password', 'replica_password_required'),
+        ]);
+      if (stored && !typed && (hostOf(target) !== hostOf(current.target) || user !== current.user))
+        return this.reject('secret_rebind_required', [
+          problem('password', 'secret_rebind_required'),
+        ]);
+    }
+    const next = { enabled, target, user };
+    const secret = this.secretChange(current.secrets['replica.password'], body.password, clear);
+    const changes: Record<string, Change> = {
+      ...diff(
+        'replica',
+        { enabled: current.enabled, target: current.target, user: current.user },
+        next,
+      ),
+      ...(secret ? { 'replica.password': secret } : {}),
+    };
+    const held = current.enabled && (!enabled || target !== current.target);
+    const touched = target !== current.target || user !== current.user || secret !== null;
+    return this.sectionChange(call, host, dryRun, account, {
+      section: 'replica',
+      etag: body.etag,
+      changes,
+      warnings: [],
+      effects: ['task.next_run:Replica'],
+      reauth: true,
+      probe: enabled && touched && body.probe !== false,
+      secrets: secret !== null,
+      held,
+      reloads: ['reload.worker'],
+      next: () => {
+        const by = { changed_at: this.iso(), changed_by: `web:${account.username}` };
+        this.sections.replica = {
+          ...next,
+          secrets: secret
+            ? { 'replica.password': { set: secret.new === 'set', ...by } }
+            : this.sections.replica.secrets,
+        };
+      },
+    });
+  }
+
+  private replicaTest(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const down = this.unavailable();
+    if (down) return down;
+    if (this.lastReplicaTest !== null && Date.now() - this.lastReplicaTest < 60_000) {
+      const retry = Math.ceil((60_000 - (Date.now() - this.lastReplicaTest)) / 1000);
+      const [status, body] = this.reject('admin_rate_limited', { retry_after: retry });
+      return [
+        status,
+        body,
+        {
+          body: Buffer.from(JSON.stringify(body)),
+          contentType: 'application/json',
+          headers: { 'Retry-After': String(retry) },
+        },
+      ];
+    }
+    this.lastReplicaTest = Date.now();
+    const outcome = this.takeAction();
+    const ok = outcome === 'succeeded';
+    const item = this.enqueue({
+      kind: 'action.replica_test',
+      section: null,
+      account,
+      steps: ['received', 'dispatch', 'task', 'journal'],
+      result: ok
+        ? {
+            ok: true,
+            message: 'connected, test file written and removed',
+            message_tr: 'Replika hedefine bağlanıldı; deneme dosyası yazılıp silindi.',
+            message_en: 'Connected to the replica target; a test file was written and removed.',
+          }
+        : {
+            ok: false,
+            message: 'access denied',
+            message_tr: 'Replika hedefine bağlanılamadı: erişim reddedildi.',
+            message_en: 'Could not connect to the replica target: access denied.',
+          },
+    });
+    return this.accepted(item);
+  }
+
+  /** What the Retention task would delete with `days` (`retention.plan`, the mock's data). */
+  private retentionPreview(days: number, effectiveInMs = 0): RetentionPreview {
+    const today = Date.parse(`${siteDay(this.now())}T00:00:00Z`);
+    const cutoff = new Date(today - days * 86_400_000).toISOString().slice(0, 10);
+    const oldest = Date.parse(`${OLDEST_DAY}T00:00:00Z`);
+    const count = Math.max(
+      0,
+      Math.round((Date.parse(`${cutoff}T00:00:00Z`) - oldest) / 86_400_000),
+    );
+    const effective = new Date(this.now().getTime() + effectiveInMs + 3 * 3_600_000);
+    const at2 = Date.UTC(
+      effective.getUTCFullYear(),
+      effective.getUTCMonth(),
+      effective.getUTCDate(),
+      2,
+    );
+    const first = at2 > effective.getTime() ? at2 : at2 + 86_400_000;
+    return {
+      cutoff,
+      days_to_delete: count,
+      oldest: count > 0 ? OLDEST_DAY : null,
+      newest:
+        count > 0
+          ? new Date(Date.parse(`${cutoff}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
+          : null,
+      first_run_at: `${new Date(first).toISOString().slice(0, 16)}:00+03:00`,
+    };
+  }
+
+  private retention(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as {
+      etag?: unknown;
+      enabled?: unknown;
+      days?: unknown;
+      confirm_delete_days?: unknown;
+    };
+    const current = this.sections.retention;
+    const days = body.days;
+    if (typeof days !== 'number' || !Number.isInteger(days))
+      return this.refuse(422, 'config_invalid', [problem('days', 'config_invalid')]);
+    if (days < current.minimum_days)
+      return this.reject('retention_below_minimum', [problem('days', 'retention_below_minimum')]);
+    if (days > 36_500)
+      return this.refuse(422, 'config_invalid', [problem('days', 'config_invalid')]);
+    const enabled = body.enabled === true;
+    const deletes = enabled && (!current.enabled || days < current.days);
+    const hold = deletes && this.holdHours > 0 ? this.holdHours * 3_600_000 : 0;
+    const preview = this.retentionPreview(days, hold);
+    if (!dryRun && deletes && body.confirm_delete_days !== preview.days_to_delete)
+      return this.reject('retention_confirm_mismatch');
+    return this.sectionChange(call, host, dryRun, account, {
+      section: 'retention',
+      etag: body.etag,
+      changes: diff(
+        'retention',
+        { enabled: current.enabled, days: current.days },
+        { enabled, days },
+      ),
+      warnings: [],
+      effects: ['task.next_run:Retention'],
+      reauth: true,
+      probe: false,
+      secrets: false,
+      held: deletes,
+      reloads: ['reload.worker'],
+      check: { retention_preview: preview },
+      next: () => {
+        this.sections.retention = { ...this.sections.retention, enabled, days };
+      },
+    });
+  }
+
+  private backup(call: RecordedCall, host: MockHost, dryRun: boolean): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as Record<string, unknown>;
+    const ranges: Record<string, [number, number]> = {
+      keep_daily: [1, 3660],
+      keep_weekly: [0, 520],
+      keep_monthly: [0, 1200],
+      min_free_gb: [0, 100_000],
+    };
+    const problems = Object.entries(ranges)
+      .filter(([key, [min, max]]) => {
+        const value = body[key];
+        return typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max;
+      })
+      .map(([key]) => problem(key, 'config_invalid'));
+    if (problems.length > 0) return this.refuse(422, 'config_invalid', problems);
+    const current = this.sections.backup;
+    const next: typeof current = {
+      enabled: body.enabled === true,
+      keep_daily: body.keep_daily as number,
+      keep_weekly: body.keep_weekly as number,
+      keep_monthly: body.keep_monthly as number,
+      min_free_gb: body.min_free_gb as number,
+    };
+    return this.sectionChange(call, host, dryRun, account, {
+      section: 'backup',
+      etag: body.etag,
+      changes: diff(
+        'backup',
+        current as unknown as Record<string, unknown>,
+        next as unknown as Record<string, unknown>,
+      ),
+      warnings: current.enabled && !next.enabled ? ['backup_disabled'] : [],
+      effects: ['task.next_run:Backup'],
+      reauth: true,
+      probe: false,
+      secrets: false,
+      held: false,
+      reloads: ['reload.worker'],
+      next: () => {
+        this.sections.backup = next;
+      },
+    });
+  }
+
+  private leaseRebuild(call: RecordedCall, host: MockHost): Answer {
+    const account = host.requirePermission(call, 'settings.manage');
+    if (Array.isArray(account)) return account;
+    const body = call.body as { from?: unknown; to?: unknown };
+    const day = (value: unknown) =>
+      typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? Date.parse(`${value}T00:00:00Z`)
+        : NaN;
+    const from = day(body.from);
+    const to = day(body.to);
+    const today = Date.parse(`${siteDay(this.now())}T00:00:00Z`);
+    const total = Math.round((to - from) / 86_400_000) + 1;
+    if (
+      Number.isNaN(from) ||
+      Number.isNaN(to) ||
+      total < 1 ||
+      total > 31 ||
+      to > today ||
+      from < Date.parse(`${OLDEST_DAY}T00:00:00Z`)
+    )
+      return this.reject('lease_rebuild_range');
+    const outcome = this.takeAction();
+    const item = this.enqueue({
+      kind: 'worker.lease_rebuild',
+      section: null,
+      account,
+      steps: ['received', 'task', 'journal'],
+      result: {
+        done_days: total,
+        total_days: total,
+        failed_days: outcome === 'succeeded' ? [] : [String(body.from)],
+      },
+    });
+    return this.accepted(item);
+  }
+
   // -- requests: list, one, cancel, revert ------------------------------------------------------
 
   private listRequests(call: RecordedCall, host: MockHost): Answer {
@@ -2516,6 +3099,19 @@ export class AdminMock {
       }
       if (method === 'DELETE') return this.removeSource(call, host, name);
     }
+    if (route === 'POST /admin/config/smtp/check') return this.smtp(call, host, true);
+    if (route === 'PUT /admin/config/smtp') return this.smtp(call, host, false);
+    if (route === 'POST /admin/config/smtp/ca') return this.smtpCa(call, host, false);
+    if (route === 'DELETE /admin/config/smtp/ca') return this.smtpCa(call, host, true);
+    if (route === 'POST /admin/actions/test-email') return this.testEmail(call, host);
+    if (route === 'POST /admin/config/replica/check') return this.replica(call, host, true);
+    if (route === 'PUT /admin/config/replica') return this.replica(call, host, false);
+    if (route === 'POST /admin/actions/replica-test') return this.replicaTest(call, host);
+    if (route === 'POST /admin/config/retention/check') return this.retention(call, host, true);
+    if (route === 'PUT /admin/config/retention') return this.retention(call, host, false);
+    if (route === 'POST /admin/config/backup/check') return this.backup(call, host, true);
+    if (route === 'PUT /admin/config/backup') return this.backup(call, host, false);
+    if (route === 'POST /admin/actions/lease-rebuild') return this.leaseRebuild(call, host);
     if (route === 'GET /admin/requests') return this.listRequests(call, host);
     if ((match = /^\/admin\/requests\/([0-9a-f]{32})$/.exec(path))) {
       const id = match[1] ?? '';
@@ -2540,6 +3136,19 @@ export class AdminMock {
       return this.resetSetting(call, host, match[1] ?? '');
     return null;
   }
+}
+
+// -- smtp, replica, retention and the actions of M3 ---------------------------------------------
+
+/** `\\host\share[\path]` (contract 2.6 "replica", simplified). */
+const UNC =
+  /^\\\\[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\\[A-Za-z0-9$_.-]{1,80}(?:\\[^\\:*?"<>|/]+)*$/;
+/** The oldest day of the mock's data (sealed days, logs). */
+const OLDEST_DAY = '2024-03-01';
+
+/** The site's day of a moment (UTC+03:00 all year). */
+function siteDay(at: Date): string {
+  return new Date(at.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
 }
 
 // -- uploads, Kamu SM and sources of the mock (contract 2.4.4, 2.6) -------------------------------

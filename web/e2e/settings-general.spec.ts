@@ -23,6 +23,10 @@ test.describe('Ayarlar', () => {
       ['application', '/settings/application'],
       ['kamusm', '/settings/kamusm'],
       ['sources', '/settings/sources'],
+      ['email', '/settings/email'],
+      ['replica', '/settings/replica'],
+      ['retention', '/settings/retention'],
+      ['backup', '/settings/backup'],
       ['history', '/settings/history'],
     ] as const)
       await expect(page.getByTestId(`settings-${key}`).getByRole('link')).toHaveAttribute(
@@ -30,7 +34,6 @@ test.describe('Ayarlar', () => {
         href,
       );
     await expect(page.getByText('Güvenlik kuralları', { exact: true })).toBeVisible();
-    await expect(page.getByText('E-posta', { exact: true })).toBeVisible();
   });
 
   test('the chip says when the service is late or not running', async ({ page }) => {

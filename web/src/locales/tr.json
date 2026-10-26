@@ -398,7 +398,11 @@
       "application": "Uyarılar, 5651 sorgu, kullanım (mesai saatleri ve tatiller), raporlar, oturum ve gizlilik.",
       "history": "Tarayıcıdan yapılan değişiklikler ve işlemler, durumlarıyla.",
       "kamusm": "Kamu SM zaman damgası: Java, Zamane istemcisi, kök sertifikalar, müşteri bilgileri, test ve üretim sunucusu.",
-      "sources": "Log gönderen cihazlar: adres, tür, beklenen sinyal aralığı ve güvenlik duvarı durumu."
+      "sources": "Log gönderen cihazlar: adres, tür, beklenen sinyal aralığı ve güvenlik duvarı durumu.",
+      "email": "Uyarı e-postalarının SMTP sunucusu, alıcılar ve test e-postası.",
+      "replica": "Mühürlü günlerin kopyalandığı ağ paylaşımı ve bağlantı testi.",
+      "retention": "Saklama süresi ve süresi dolan günlerin silinmesi.",
+      "backup": "Veritabanı yedeklerinin saklanması ve gereken boş alan."
     },
     "general": {
       "title": "Genel",
@@ -779,6 +783,161 @@
         "addressTaken": "Bu adres başka bir kaynakta kullanılıyor.",
         "overlap": "Bu ağ başka bir kaynağın ağıyla çakışıyor.",
         "limit": "Kaynak sayısı üst sınıra ulaştı."
+      }
+    },
+    "email": {
+      "title": "E-posta",
+      "description": "Uyarı e-postalarını gönderen SMTP sunucusu ve uyarı e-postası ayarları. SMTP ayarlarını sunucudaki yönetim hizmeti uygular.",
+      "smtpTitle": "SMTP bağlantısı",
+      "smtpDescription": "Açarken ya da sunucuyu değiştirirken önce bir deneme e-postası gönderilir. Parola kayıtlıysa tarayıcıya hiç gönderilmez.",
+      "enabled": "E-posta gönderimi açık",
+      "enabledHint": "Kapalıyken uyarılar yalnızca panelde görünür.",
+      "disabling": "E-posta gönderimi kapanır: uyarılar artık e-postayla bildirilmez.",
+      "host": "SMTP sunucusu",
+      "hostHint": "Sunucu adı ya da IPv4 adresi.",
+      "port": "Bağlantı noktası",
+      "security": "Bağlantı güvenliği",
+      "securities": {
+        "starttls": "STARTTLS",
+        "ssl": "SSL/TLS",
+        "none": "Şifresiz"
+      },
+      "plaintext": "Şifresiz bağlantıda e-postalar ağda açık metin gider.",
+      "timeout": "Zaman aşımı (sn)",
+      "timeoutHint": "1–300 saniye.",
+      "from": "Gönderen adresi",
+      "fromHint": "Uyarı e-postalarının gönderen adresi.",
+      "username": "Kullanıcı adı",
+      "usernameHint": "Kimlik doğrulama gerekmiyorsa boş bırakın.",
+      "password": "Parola",
+      "passwordHint": "Sunucu, bağlantı noktası, güvenlik ya da kullanıcı adı değişirse parola yeniden girilmelidir.",
+      "testTo": "Deneme e-postasının alıcısı",
+      "testToHint": "Uyarı alıcılarından biri ya da kendi adresiniz.",
+      "chooseRecipient": "Alıcı seçin",
+      "noRecipients": "Deneme e-postası için alıcı yok: aşağıdan bir uyarı alıcısı ekleyin ya da hesabınıza e-posta adresi girin.",
+      "probe": "Kaydetmeden önce deneme e-postası gönder",
+      "probing": "Deneme e-postası gönderiliyor…",
+      "alertsTitle": "Uyarı e-postaları",
+      "alertsDescription": "Alıcılar, en düşük önem derecesi ve saatlik sınır (veritabanı ayarları; hemen geçerli olur).",
+      "ca": {
+        "title": "Sunucu sertifikası",
+        "description": "SMTP sunucusunun sertifikası kurum içi bir CA'dan geliyorsa o CA'yı yükleyin.",
+        "system": "Windows sertifika deposu kullanılıyor.",
+        "custom": "Yüklenen CA kullanılıyor:",
+        "clear": "Windows sertifika deposuna dön",
+        "upload": "CA dosyası",
+        "uploadHint": "PEM, 1–10 sertifika, en çok 256 KiB.",
+        "use": "Bu CA'yı kullan"
+      },
+      "test": {
+        "title": "Test e-postası",
+        "description": "Kayıtlı SMTP ayarlarıyla bir deneme e-postası gönderilir (saatte en çok 5).",
+        "to": "Alıcı",
+        "send": "Test e-postası gönder",
+        "sent": "Test e-postası gönderildi.",
+        "failed": "Test e-postası gönderilemedi: {{error}}"
+      },
+      "errors": {
+        "username": "Kullanıcı adı en çok 256 karakter olabilir.",
+        "passwordRequired": "Kullanıcı adı için parola gerekir.",
+        "rebind": "Sunucu ya da kullanıcı değişti; kayıtlı parola yeni sunucuya gönderilmez, parolayı yeniden girin.",
+        "plaintextAuth": "Kullanıcı adı şifresiz bağlantıyla yalnızca bu sunucunun kendisine gönderilebilir.",
+        "testTo": "Deneme e-postası için bir alıcı seçin."
+      }
+    },
+    "replica": {
+      "title": "Replika",
+      "description": "Mühürlü günlerin kopyalandığı ağ paylaşımı. Değişikliği sunucudaki yönetim hizmeti uygular.",
+      "cardTitle": "Replika hedefi",
+      "cardDescription": "Kaydederken yeni değerlerle bağlantı denenir. Parola kayıtlıysa tarayıcıya hiç gönderilmez.",
+      "enabled": "Replika açık",
+      "enabledHint": "Mühürlü günler her gece bu paylaşıma da kopyalanır.",
+      "disabling": "Replika kapanır: mühürlü günler artık ikinci bir yere kopyalanmaz.",
+      "target": "Paylaşım",
+      "targetHint": "\\\\sunucu\\paylaşım biçiminde, ör. \\\\yedek-sunucu\\arcilogger-worm.",
+      "user": "Kullanıcı",
+      "userHint": "SUNUCU\\kullanıcı, ALAN\\kullanıcı ya da kullanıcı@alan.",
+      "password": "Parola",
+      "held_one": "Bu değişiklik {{count}} saat bekletilir; o süre içinde iptal edilebilir.",
+      "held_other": "Bu değişiklik {{count}} saat bekletilir; o süre içinde iptal edilebilir.",
+      "probe": "Kaydetmeden önce bağlantıyı dene",
+      "probing": "Replika hedefine bağlanılıyor…",
+      "test": {
+        "title": "Bağlantı testi",
+        "description": "Kayıtlı paylaşıma bağlanılır, bir deneme dosyası yazılıp silinir (dakikada en çok 1).",
+        "button": "Bağlantıyı test et",
+        "ok": "Bağlantı başarılı",
+        "failed": "Bağlantı başarısız"
+      },
+      "errors": {
+        "target": "Paylaşım \\\\sunucu\\paylaşım biçiminde olmalı (sürücü harfi, \\\\?\\ ya da .. kullanılamaz).",
+        "user": "Kullanıcı SUNUCU\\kullanıcı, ALAN\\kullanıcı ya da kullanıcı@alan biçiminde olmalı (en çok 256 karakter).",
+        "passwordRequired": "Kullanıcı için parola gerekir.",
+        "rebind": "Sunucu ya da kullanıcı değişti; kayıtlı parola yeni hedefe gönderilmez, parolayı yeniden girin."
+      }
+    },
+    "retention": {
+      "title": "Saklama",
+      "description": "Saklama süresi dolan mühürlü günlerin silinmesi. Süre içindeki ham kayıtlara hiçbir zaman dokunulmaz.",
+      "cardTitle": "Saklama süresi",
+      "cardDescription": "Açarken ya da süreyi kısaltırken silinecek gün sayısı gösterilir ve onaylamak için yazılır.",
+      "currentOn_one": "Saklama açık: {{count}} günden eski günler silinir.",
+      "currentOn_other": "Saklama açık: {{count}} günden eski günler silinir.",
+      "currentOff": "Saklama kapalı: hiçbir gün silinmez.",
+      "enabled": "Süresi dolan günleri sil",
+      "enabledHint": "Saklama görevi her gece 02:00'de çalışır.",
+      "days": "Saklama süresi (gün)",
+      "daysHint": "En az {{min}} gün; daha kısa bir süre kabul edilmez.",
+      "deletes": "Bu değişiklik günleri siler. Kaydederken silinecek gün sayısı gösterilir ve onaylamanız istenir.",
+      "preview_one": "{{days}} gün silinecek (en eski {{oldest}}, en yeni {{newest}}; {{cutoff}} ve sonrası saklanır).",
+      "preview_other": "{{days}} gün silinecek (en eski {{oldest}}, en yeni {{newest}}; {{cutoff}} ve sonrası saklanır).",
+      "previewNone": "Silinecek gün yok ({{cutoff}} ve sonrası saklanır).",
+      "firstRun": "İlk silme: {{time}}.",
+      "confirmType_one": "Onaylamak için silinecek gün sayısını yazın: {{count}}",
+      "confirmType_other": "Onaylamak için silinecek gün sayısını yazın: {{count}}"
+    },
+    "backup": {
+      "title": "Yedekleme",
+      "description": "Veritabanı yedeklerinin saklanması. Yedek klasörü ve araçlar yalnızca sunucu konsolundan değiştirilir.",
+      "cardTitle": "Yedekleme görevi",
+      "cardDescription": "Kaç günlük, haftalık ve aylık yedeğin saklanacağı ve yedek diskinde gereken boş alan.",
+      "enabled": "Veritabanı yedeklemesi açık",
+      "enabledHint": "Yedekleme görevi her gece çalışır.",
+      "disabling": "Yedekleme kapanır: veritabanının yeni yedeği alınmaz.",
+      "fields": {
+        "keep_daily": "Günlük yedek",
+        "keep_weekly": "Haftalık yedek",
+        "keep_monthly": "Aylık yedek",
+        "min_free_gb": "Gereken boş alan (GB)"
+      },
+      "hints": {
+        "keep_daily": "{{min}}–{{max}} yedek.",
+        "keep_weekly": "{{min}}–{{max}} yedek.",
+        "keep_monthly": "{{min}}–{{max}} yedek.",
+        "min_free_gb": "{{min}}–{{max}} GB. Disk bundan azsa yedekleme yapılmaz ve uyarı oluşur."
+      },
+      "stateTitle": "Son yedekleme",
+      "stateNote": "Son yedeklemenin ayrıntıları bu sürümde web arayüzünde gösterilmez; başarısız ya da yapılamayan bir yedekleme uyarı olarak görünür.",
+      "noAlerts": "Açık yedekleme uyarısı yok.",
+      "alertsLink": "Güvenlik sayfasındaki uyarılar",
+      "stateHidden": "Yedekleme uyarılarını görme yetkiniz yok."
+    },
+    "leaseRebuild": {
+      "title": "Kiraları yeniden oluştur",
+      "description": "Seçilen günlerin kira zaman çizelgesi ham kayıtlardan yeniden oluşturulur (en çok 31 gün, bugün dahil geçmiş günler). Ham kayıtlar yalnızca okunur.",
+      "from": "İlk gün",
+      "to": "Son gün",
+      "dayHint": "GG.AA.YYYY",
+      "button": "Kiraları yeniden oluştur",
+      "confirmTitle": "Kiralar yeniden oluşturulsun mu?",
+      "confirmBody": "{{from}} – {{to}} günlerinin kira zaman çizelgesi yeniden oluşturulur. Bu sırada 5651 sorguları bu günler için eski çizelgeyi kullanır.",
+      "progress": "{{done}} / {{total}} gün tamamlandı.",
+      "failedDays": "Yeniden oluşturulamayan günler: {{days}}",
+      "errors": {
+        "day": "Günü GG.AA.YYYY biçiminde girin.",
+        "future": "Gelecekteki bir gün seçilemez.",
+        "order": "Son gün ilk günden önce olamaz.",
+        "tooLong": "En çok 31 gün seçilebilir."
       }
     }
   },
@@ -3110,6 +3269,34 @@
       "kamusm": {
         "customer": "Kamu SM müşteri numarası",
         "password": "Kamu SM parolası"
+      },
+      "smtp": {
+        "enabled": "E-posta gönderimi",
+        "host": "SMTP sunucusu",
+        "port": "SMTP bağlantı noktası",
+        "security": "Bağlantı güvenliği",
+        "username": "SMTP kullanıcı adı",
+        "password": "SMTP parolası",
+        "from_address": "Gönderen adresi",
+        "timeout_seconds": "SMTP zaman aşımı (sn)",
+        "ca_file": "SMTP sunucusunun CA sertifikası"
+      },
+      "replica": {
+        "enabled": "Replika",
+        "target": "Replika hedefi",
+        "user": "Replika kullanıcısı",
+        "password": "Replika parolası"
+      },
+      "retention": {
+        "enabled": "Saklama süresi sonunda silme",
+        "days": "Saklama süresi (gün)"
+      },
+      "backup": {
+        "enabled": "Veritabanı yedeklemesi",
+        "keep_daily": "Saklanan günlük yedek",
+        "keep_weekly": "Saklanan haftalık yedek",
+        "keep_monthly": "Saklanan aylık yedek",
+        "min_free_gb": "Gereken boş alan (GB)"
       }
     },
     "section": {
@@ -3129,7 +3316,8 @@
       "hostInvalid": "Geçerli bir sunucu adı ya da IPv4 adresi girin.",
       "integer": "Bir tam sayı girin.",
       "min": "En az {{min}} olmalı.",
-      "max": "En çok {{max}} olmalı."
+      "max": "En çok {{max}} olmalı.",
+      "emailInvalid": "Geçerli bir e-posta adresi girin."
     },
     "upload": {
       "send": "Dosyayı gönder",

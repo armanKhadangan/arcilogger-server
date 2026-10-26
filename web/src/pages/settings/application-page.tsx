@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth';
 import { currentLang } from '@/lib/i18n';
 import type { SettingGroup } from '@/lib/settings-types';
 
+import { LeaseRebuild } from './lease-rebuild';
 import { SettingsGroupForm } from './settings-group-form';
 
 /**
@@ -21,7 +22,8 @@ import { SettingsGroupForm } from './settings-group-form';
  * the API lists, by group (alerts, 5651 lookup and lease timeline, usage with the work hours and
  * the holidays, reports, evidence packages, sessions and privacy, database), with the server's
  * Turkish and English labels, help texts and bounds. A group is saved as a whole; nothing here
- * needs the administration service or a restart.
+ * needs the administration service or a restart. The lookup group also rebuilds the lease
+ * timeline of past days ("Kiraları yeniden oluştur").
  */
 export function ApplicationPage() {
   const { t } = useTranslation();
@@ -102,6 +104,11 @@ export function ApplicationPage() {
                   markDirty(group.id, value);
                 }}
                 testId={`settings-group-${group.id}`}
+                footer={
+                  group.id === 'lookup' ? (
+                    <LeaseRebuild canEdit={can('settings.manage')} />
+                  ) : undefined
+                }
               />
             </TabsContent>
           ))}

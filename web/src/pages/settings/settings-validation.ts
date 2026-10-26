@@ -71,3 +71,47 @@ export function integerError(
   if (max !== null && value > max) return 'admin.errors.max';
   return undefined;
 }
+
+/** `EMAIL_ADDRESS` of `arcilogger_core.config` (at most 254 characters). */
+const EMAIL_ADDRESS = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+
+/** An e-mail address; `''` passes when `optional`. */
+export function validateEmail(value: string, optional: boolean): string | undefined {
+  const text = value.trim();
+  if (!text) return optional ? undefined : 'validation.required';
+  return EMAIL_ADDRESS.test(text) && text.length <= 254 ? undefined : 'admin.errors.emailInvalid';
+}
+
+/** The hosts an SMTP user name may be sent to without TLS (`smtp_plaintext_auth_refused`). */
+export const LOCAL_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '::1'];
+
+const SHARE = /^[A-Za-z0-9$_.-]{1,80}$/;
+const PATH_SEGMENT = /^[^:*?"<>|/]+$/;
+
+/**
+ * The replica target (contract 2.6 "replica"): `\\host\share[\path]` with a host name or an
+ * IPv4 address, a share of `[A-Za-z0-9$_.-]`, path segments without `..`; no `\\?\`, `\\.\` or
+ * drive letter.
+ */
+export function validateUnc(value: string): string | undefined {
+  const text = value.trim();
+  if (!text) return 'validation.required';
+  if (!text.startsWith('\\\\') || text.startsWith('\\\\?\\') || text.startsWith('\\\\.\\'))
+    return 'settings.replica.errors.target';
+  const [host = '', share = '', ...path] = text.slice(2).split('\\');
+  if (validateHost(host, false) || !SHARE.test(share)) return 'settings.replica.errors.target';
+  const bad = path.some(
+    (segment) => segment === '..' || segment === '.' || !PATH_SEGMENT.test(segment),
+  );
+  return bad ? 'settings.replica.errors.target' : undefined;
+}
+
+/** The replica user: `HOST\user`, `DOMAIN\user` or `user@domain`, at most 256 characters. */
+export function validateReplicaUser(value: string): string | undefined {
+  const text = value.trim();
+  if (!text) return 'validation.required';
+  const shaped =
+    /^[A-Za-z0-9][A-Za-z0-9.-]*\\[^\\@\s]+$/.test(text) ||
+    /^[^\\@\s]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(text);
+  return shaped && codePointLength(text) <= 256 ? undefined : 'settings.replica.errors.user';
+}

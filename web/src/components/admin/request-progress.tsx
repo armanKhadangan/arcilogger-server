@@ -199,7 +199,15 @@ export function RequestProgress({
   const [problem, setProblem] = useState<string | null>(null);
   const request = query.data;
   const reported = useRef<string | null>(null);
+  const held = useRef<string | null>(null);
   const seconds = useCountdown(request?.state === 'pending' ? request.effective_at : null);
+
+  // A held change is listed in the configuration (`pending`) from now on.
+  useEffect(() => {
+    if (request?.state !== 'pending' || held.current === request.id) return;
+    held.current = request.id;
+    void client.invalidateQueries({ queryKey: queryKeys.adminConfig });
+  }, [request, client]);
 
   useEffect(() => {
     if (!request || !isTerminal(request.state) || reported.current === request.id) return;

@@ -218,7 +218,52 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     await page.getByRole('link', { name: 'Ayarlar' }).first().click();
     await expect(page.getByRole('dialog', { name: 'Kaydedilmemiş değişiklikler' })).toBeVisible();
   });
+
+  test('"Kiraları yeniden oluştur": at most 31 past days, with its progress', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.goto('/settings/application?group=lookup');
+    const rebuild = group(page, 'lookup').getByTestId('lease-rebuild');
+    const from = rebuild.getByLabel('İlk gün');
+    const to = rebuild.getByLabel('Son gün');
+    const button = rebuild.getByRole('button', { name: 'Kiraları yeniden oluştur' });
+    await from.fill(siteDay(-40));
+    await to.fill(siteDay(-1));
+    await button.click();
+    await expect(rebuild).toContainText('En çok 31 gün seçilebilir.');
+    await to.fill(siteDay(2));
+    await button.click();
+    await expect(rebuild).toContainText('Gelecekteki bir gün seçilemez.');
+    await from.fill('32.13.2026');
+    await button.click();
+    await expect(rebuild).toContainText('Günü GG.AA.YYYY biçiminde girin.');
+    expect(api.callsTo('POST', '/admin/actions/lease-rebuild')).toHaveLength(0);
+
+    await from.fill(siteDay(-3));
+    await to.fill(siteDay(-1));
+    await button.click();
+    const ask = page.getByRole('dialog', { name: 'Kiralar yeniden oluşturulsun mu?' });
+    await expect(ask).toContainText(`${siteDay(-3)} – ${siteDay(-1)}`);
+    await ask.getByRole('button', { name: 'Kiraları yeniden oluştur' }).click();
+    await expect(rebuild.getByTestId('lease-rebuild-result')).toHaveText('3 / 3 gün tamamlandı.', {
+      timeout: 10_000,
+    });
+    expect(api.callsTo('POST', '/admin/actions/lease-rebuild')[0]?.body).toEqual({
+      from: isoDay(-3),
+      to: isoDay(-1),
+    });
+  });
 });
+
+/** A day relative to today at the site (UTC+03:00), as `YYYY-MM-DD`. */
+function isoDay(offset: number): string {
+  return new Date(Date.now() + 3 * 3_600_000 + offset * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** The same day as typed in the site's format (`GG.AA.YYYY`). */
+function siteDay(offset: number): string {
+  const [year = '', month = '', day = ''] = isoDay(offset).split('-');
+  return `${day}.${month}.${year}`;
+}
 
 for (const theme of ['light', 'dark'] as Theme[]) {
   test(`Uygulama ayarları accessibility — ${theme}`, async ({ page }) => {

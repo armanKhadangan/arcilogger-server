@@ -213,6 +213,30 @@ export const routes: RouteObject[] = [
                 }),
               },
               {
+                path: 'settings/email',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/email-page')).EmailPage,
+                }),
+              },
+              {
+                path: 'settings/replica',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/replica-page')).ReplicaPage,
+                }),
+              },
+              {
+                path: 'settings/retention',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/retention-page')).RetentionPage,
+                }),
+              },
+              {
+                path: 'settings/backup',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/backup-page')).BackupPage,
+                }),
+              },
+              {
                 path: 'settings/history',
                 lazy: async () => ({
                   Component: (await import('@/pages/settings/history-page')).HistoryPage,

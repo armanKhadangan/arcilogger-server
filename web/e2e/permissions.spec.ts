@@ -94,6 +94,10 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
     '/settings/application',
     '/settings/kamusm',
     '/settings/sources',
+    '/settings/email',
+    '/settings/replica',
+    '/settings/retention',
+    '/settings/backup',
     '/settings/history',
     '/lookup',
     '/evidence',
@@ -168,6 +172,10 @@ test('browser administration is for administrators: the API refuses everyone els
     '/settings/application',
     '/settings/kamusm',
     '/settings/sources',
+    '/settings/email',
+    '/settings/replica',
+    '/settings/retention',
+    '/settings/backup',
     '/settings/history',
   ]) {
     await page.goto(path);

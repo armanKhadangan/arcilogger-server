@@ -1,8 +1,12 @@
 import {
   Building2,
+  CalendarClock,
   ChevronRight,
+  DatabaseBackup,
+  HardDriveUpload,
   History,
   KeyRound,
+  Mail,
   Network,
   SlidersHorizontal,
   Stamp,
@@ -23,7 +27,7 @@ import { useAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
 
 /** Sections of spec 12.3 page 15 that come later ("Gizlilik" is in Uygulama ayarları). */
-const LATER_SECTIONS = ['email', 'replica', 'retention', 'backup', 'rules'] as const;
+const LATER_SECTIONS = ['rules'] as const;
 
 interface Section {
   key: string;
@@ -49,6 +53,20 @@ const SECTIONS: readonly Section[] = [
     icon: Network,
     permissions: ['settings.manage', 'sources.manage'],
   },
+  { key: 'email', to: '/settings/email', icon: Mail, permissions: ['settings.manage'] },
+  {
+    key: 'replica',
+    to: '/settings/replica',
+    icon: HardDriveUpload,
+    permissions: ['settings.manage'],
+  },
+  {
+    key: 'retention',
+    to: '/settings/retention',
+    icon: CalendarClock,
+    permissions: ['settings.manage'],
+  },
+  { key: 'backup', to: '/settings/backup', icon: DatabaseBackup, permissions: ['settings.manage'] },
   { key: 'history', to: '/settings/history', icon: History, permissions: ['settings.manage'] },
 ];
 
