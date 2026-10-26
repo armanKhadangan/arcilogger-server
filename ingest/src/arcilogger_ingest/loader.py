@@ -33,7 +33,7 @@ import logging
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
 from sqlalchemy import Connection, Engine, func, text, update
@@ -42,9 +42,10 @@ from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 
 from arcilogger_core.timeutil import isoformat_site, utc_now
 from arcilogger_db.bulk import copy_rows
+from arcilogger_db.kinds import CLIENT_IP
 from arcilogger_db.models import Alert, IngestOffset, ParseFailure, Source
 from arcilogger_db.rowcheck import check_row
-from arcilogger_db.searchcounts import CountKey, count_key, upsert_counts
+from arcilogger_db.searchcounts import CountKey, count_key, net_of, upsert_counts
 from arcilogger_ingest.prepare import DETAIL_MAX, Failure, PreparedLine
 
 log = logging.getLogger("arcilogger.ingest")
@@ -73,6 +74,8 @@ class _CopyFailedError(Exception):
 #: A line whose rows loaded, and whether its typed row loaded too (``False``: its ``messages`` row
 #: was salvaged alone).
 _Loaded = tuple[PreparedLine, bool]
+_EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
+_HOUR: Final = timedelta(hours=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -436,19 +439,45 @@ class Loader:
 
 def _count_keys(loaded: Iterable[_Loaded]) -> Counter[CountKey]:
     """The ``search_counts`` keys of the loaded lines: ``count_key`` of the ``messages`` row and,
-    when it loaded, of the typed row (a line has at most one)."""
-    keys: Counter[CountKey] = Counter()
+    when it loaded, of the typed row (``prepare`` puts the ``messages`` row first; a line has at
+    most one typed row).
+
+    ``count_key`` costs a few microseconds a line, a measurable share of a line's whole load, so
+    the lines are first grouped by everything it reads — the UTC hour of the device time, the
+    file, type and subtype, the typed table, its action as written and the /24 of its client
+    address — and the key is made once per group. Lines of one group have one key; two groups
+    may share one (``Blocked`` and ``blocked``), the counter adds them.
+    """
+    groups: dict[tuple[Any, ...], list[Any]] = {}
     for line, typed_loaded in loaded:
-        message: dict[str, Any] | None = None
-        table: str | None = None
-        typed: dict[str, Any] | None = None
-        for name, values in line.rows:
-            if name == "messages":
-                message = values
-            elif typed_loaded and table is None:
-                table, typed = name, values
-        if message is not None:
-            keys[count_key(message, table, typed)] += 1
+        rows = line.rows
+        if not rows or rows[0][0] != "messages":
+            continue  # no messages row (rawlog.invalid, copy.messages): in no search, no count
+        message = rows[0][1]
+        table, typed = rows[1] if typed_loaded and len(rows) > 1 else (None, None)
+        action = client = None
+        if typed is not None:
+            action = typed.get("action")
+            column = CLIENT_IP.get(table or "")
+            client = None if column is None else net_of(typed.get(column))
+        group = (
+            (message["time"] - _EPOCH) // _HOUR,  # exact: no float rounding at an hour's end
+            message["source"],
+            message["raw_day"],
+            message["type"],
+            message.get("subtype"),
+            table,
+            action,
+            client,
+        )
+        found = groups.get(group)
+        if found is None:
+            groups[group] = [message, table, typed, 1]
+        else:
+            found[3] += 1
+    keys: Counter[CountKey] = Counter()
+    for message, table, typed, lines in groups.values():
+        keys[count_key(message, table, typed)] += lines
     return keys
 
 

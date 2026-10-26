@@ -6,7 +6,7 @@ exactly the lines whose rows loaded — in the transaction of the rows, across b
 from __future__ import annotations
 
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as clock_time
 from typing import Any
 
@@ -15,10 +15,11 @@ from sqlalchemy import Connection, Engine, text
 
 from arcilogger_core.rawlog import RawRecord
 from arcilogger_core.timeutil import day_window
-from arcilogger_db.searchcounts import CountKey, rebuild_stream, verify
+from arcilogger_db.searchcounts import CountKey, count_key, rebuild_stream, verify
 from arcilogger_ingest import prepare
+from arcilogger_ingest.loader import _count_keys
 from arcilogger_ingest.parsers import LinePosition, ParsedRow, ParseOutcome, get_parser
-from arcilogger_ingest.prepare import PATTERN_RAW, PATTERN_ROWCHECK
+from arcilogger_ingest.prepare import PATTERN_RAW, PATTERN_ROWCHECK, PreparedLine, StreamInfo
 from arcilogger_ingest.testing import (
     DAY,
     World,
@@ -260,3 +261,94 @@ def test_a_device_clock_a_day_off_counts_in_its_own_hour(world: World, db_engine
     assert key.hour == behind.replace(minute=0, second=0, microsecond=0)
     assert key.raw_day == DAY
     assert key.hour < day_window(DAY)[0]
+
+
+def _line(
+    number: int,
+    when: datetime,
+    type_: str,
+    subtype: str | None,
+    table: str | None = None,
+    *,
+    source: str = "fortigate",
+    raw_day: date = DAY,
+    **typed: Any,
+) -> PreparedLine:
+    reference = {"time": when, "source": source, "raw_day": raw_day, "raw_line": number}
+    rows: list[tuple[str, dict[str, Any]]] = [
+        ("messages", {**reference, "type": type_, "subtype": subtype, "text": ""})
+    ]
+    if table is not None:
+        rows.append((table, {**reference, **typed}))
+    return PreparedLine(
+        stream=StreamInfo("fortigate", "fortigate", DAY), line=number, offset=0, rows=rows
+    )
+
+
+def test_grouping_lines_gives_the_keys_of_count_key_line_by_line() -> None:
+    """``_count_keys`` makes one key per group of lines; the result must be ``count_key`` of every
+    line: hours split to the microsecond, actions differing in case, client addresses of one /24,
+    public and IPv6 clients, a table without client column, a salvaged line, lines without a
+    ``messages`` row."""
+    end = datetime(2026, 9, 23, 6, 59, 59, 999999, tzinfo=UTC)  # the last instant of an hour
+    lines = [
+        _line(1, end, "utm", "webfilter", "fg_web", action="Blocked", srcip="172.20.42.76"),
+        _line(
+            2,
+            end + timedelta(microseconds=1),
+            "utm",
+            "webfilter",
+            "fg_web",
+            action="blocked",
+            srcip="172.20.42.200",
+        ),
+        _line(
+            3,
+            end - timedelta(minutes=59),
+            "utm",
+            "webfilter",
+            "fg_web",
+            action="blocked",
+            srcip="172.20.42.7",
+        ),
+        _line(4, end, "traffic", "forward", "fg_traffic", action="accept", srcip="203.0.113.10"),
+        _line(5, end, "utm", "ssl", "fg_app", action="pass", srcip="fe80::1"),
+        _line(6, end, "utm", "ssl", "fg_app", action="pass", srcip=None),
+        _line(7, end, "heartbeat", None, "mt_event", event="heartbeat", ip=None),
+        _line(8, end, "interface", "up", "mt_interface", interface="ether1"),
+        _line(9, end, "utm", None),  # Other UTM
+        _line(10, end, "dhcp", "assigned", "mt_dhcp", action="assigned", ip="172.20.60.120"),
+        _line(11, end, "utm", "webfilter", "fg_web", action="passthrough", srcip="172.20.42.76"),
+        _line(15, end, "utm", "webfilter", "fg_web", action="blocked", srcip="172.20.43.5"),
+        # each of these differs from the line before it in one thing only
+        _line(16, end, "utm", "dns"),
+        _line(17, end, "utm", None, source="core-r1"),
+        _line(18, end, "utm", None, raw_day=NEXT),
+        _line(19, end, "unknown", None),
+        _line(20, end, "syslog", None),
+    ]
+    interface = _line(21, end, "interface", "up", "mt_interface", interface="ether2")
+    lines.append(interface)
+    salvaged = _line(12, end, "dhcp", "assigned", "mt_dhcp", action="assigned", ip="172.20.60.9")
+    only_typed = _line(13, end, "dhcp", "assigned", "mt_dhcp", action="assigned", ip="172.20.60.9")
+    only_typed.rows.pop(0)
+    nothing = PreparedLine(stream=salvaged.stream, line=14, offset=0)  # rawlog.invalid
+    batch: list[tuple[PreparedLine, bool]] = [(line, True) for line in lines * 3]
+    batch += [(salvaged, False), (interface, False), (only_typed, True), (nothing, True)]
+
+    expected: Counter[CountKey] = Counter()
+    for line, typed_loaded in batch:
+        rows = dict(line.rows)
+        if "messages" not in rows:
+            continue
+        table = next((name for name in rows if name != "messages"), None) if typed_loaded else None
+        expected[count_key(rows["messages"], table, rows.get(table) if table else None)] += 1
+    assert _count_keys(batch) == expected
+    assert sum(expected.values()) == 3 * 18 + 2
+    web = {key: n for key, n in expected.items() if key.tbl == "fg_web"}
+    assert sorted((key.hour.hour, key.action, key.net, n) for key, n in web.items()) == [
+        (6, "blocked", "172.20.42.0/24", 6),  # lines 1 and 3, three times
+        (6, "blocked", "172.20.43.0/24", 3),  # line 15: line 1 but for its client's /24
+        (6, "passthrough", "172.20.42.0/24", 3),  # line 11: line 1 but for its action
+        (7, "blocked", "172.20.42.0/24", 3),  # line 2: the next hour by a microsecond
+    ]
