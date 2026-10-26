@@ -5,6 +5,61 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Browser administration (Wave 1)
+
+Most of what an administrator configured on the server console is now a page in **Ayarlar**
+([ADR-0014](docs/adr/0014-browser-administration.md); docs/AYARLAR.md / SETTINGS.md). Decided by
+the developer on the owner's delegation; the owner may change it (the ADR lists the open points).
+
+- **Pages:** Genel (organisation name, time sources, clock alert threshold), Uygulama ayarları
+  (every database setting by group with Turkish and English validation, work hours and holidays,
+  lease rebuild), Kamu SM (wizard: Java, Zamane client upload, root certificates and legal root
+  fingerprints, customer number and password tried with a credit query, stamp test, test ↔
+  production, credit threshold), Kaynaklar (add, edit, switch off, remove a log source with its
+  firewall opening), E-posta (SMTP, password, CA file, alert e-mail settings, trial and test
+  e-mails), Replika, Saklama (≥ 730 days, the days to delete shown and typed to confirm), Yedekleme
+  and Değişiklik geçmişi (requests, cancel, revert, configuration versions, a diagnostics ZIP
+  without secrets). **Şimdi mühürle** (202 instead of 501) and **Kontör sorgula** on the sealing
+  page. Secret fields are never filled in: "Kayıtlı ✓" and the time of the last change.
+- **How:** a new service **ArciAdmin** (`NT SERVICE\ArciAdmin`, no listener, no administrator
+  rights) is the only writer of `arcilogger.toml` and `secrets.json`; the API never gains write
+  access to the configuration, `secret.key` or the vault. The API hands it Ed25519-signed requests
+  through a protected inbox (secrets as Fernet tokens), with one allow-list of rules checked by
+  the API (422 at once) and again by the agent; the agent applies atomically (write-ahead record,
+  version store, replace, verify, rollback, crash recovery), probes credentials before saving and
+  reports each step. The input-free SYSTEM task `\ARCILOGGER\ApplySystem` derives the firewall's
+  syslog addresses and Windows Time peers from the validated file and widens a syslog opening only
+  after the collector has loaded the new source. Seal now runs in the Seal task (LOCAL SERVICE)
+  through a request the agent signs; credit query, stamp test and replica test run in the new
+  task `\ARCILOGGER\Requests`; test e-mail and lease rebuild are worker jobs (`admin_requests`,
+  revision `0015`). Executables are never free values from the browser and every task re-checks
+  them at run time (`execpolicy`); an unknown Zamane release needs `approve-jar` on the console
+  after `jar_hold_hours`.
+- **No restart:** collector and ingest reload `[[sources]]`, worker and API the rest of the
+  configuration within seconds, keep the old one on an error and report the SHA-256 they loaded;
+  the 5651 pipeline never stops for a settings change. A switched-off source is still recorded
+  (raw logs are never dropped) but no longer expected by R15 or the sealer's gap check.
+- **Safety:** credential, retention, replica, clock and source switch-off changes need a recent
+  re-authentication; the 730-day floor is enforced by the API, the agent and the retention job;
+  nothing the browser changes can move `data_dir` or `secrets_dir` (checked against the
+  installer's `data-root.txt` by every service and task); `-DisableBrowserAdministration` switches
+  it all off. Every request and outcome is audited (`admin.request` in the API transaction, the
+  agent's journal imported into the hash chain, Windows Event Log source `ARCILOGGER-Admin`); new
+  alerts `R20-admin` and `R20-config-change`. No licence state affects any of it.
+- **API:** `/api/v1/admin/config/*`, `/admin/status`, `/admin/requests`, `/admin/diagnostics`,
+  `GET/PATCH /settings`, `POST /seals/{day}/seal`, `POST /credits/query` (docs/MVP-CONTRACTS.md
+  §16, docs/roles.md).
+- **Installer:** ArciAdmin, the Requests and ApplySystem tasks, the administration keys,
+  `admin\policy.json`, the Event Log source, `data-root.txt`, trusted executables recorded on
+  install and upgrade, `Set-ArciFirewall.ps1 -SyncFromConfig` updating rules in place;
+  `-SourceNetwork`, `-DisableBrowserAdministration`; rollback to a version without ArciAdmin
+  removes it. The Windows end-to-end job covers seal now through Caddy, a site name change, a new
+  source reaching both firewall rules, the credit query and the rollback.
+- **Stays on the console:** installation and upgrade, PostgreSQL, `[database]`, `[api]`,
+  `[collector]`, `[ingest]`, `[worker]`, `[seal]`, paths and executables, removing a root or a
+  legal fingerprint, `admin\policy.json`, the firewall's administrator addresses, the database
+  password, the pseudonym key, key rotation, `approve-jar`, `create-admin` (SETTINGS §5).
+
 ### Fixes and smaller additions (Wave 0)
 
 - **Usage analytics counted no 192.168.0.0/16 network.** The private-source filter of the usage

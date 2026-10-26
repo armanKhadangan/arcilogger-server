@@ -34,9 +34,9 @@ CONFIG = f"{V}/admin/config"
 OWN = "tolga@ornek.example"
 CANARIES = {
     "kamusm.customer": "771100229933",
-    "kamusm.password": "Kanarya-Kamusm-Parola-91",
-    "smtp.password": "Kanarya-Smtp-Parola-92",
-    "replica.password": "Kanarya-Replika-Parola-93",
+    "kamusm.password": "Kanarya-Kamusm-Parola-91",  # gitleaks:allow (fake canary)
+    "smtp.password": "Kanarya-Smtp-Parola-92",  # gitleaks:allow (fake canary)
+    "replica.password": "Kanarya-Replika-Parola-93",  # gitleaks:allow (fake canary)
 }
 
 
