@@ -4,7 +4,7 @@
       "latest": [
         {
           "auto_resolved": false,
-          "created_at": "2026-10-13T04:00:16.771142Z",
+          "created_at": "2026-10-13T04:00:26.511859Z",
           "id": 8,
           "notes_count": 0,
           "resolved_at": null,
@@ -15,13 +15,13 @@
           "state": "open",
           "summary_en": "A usage report could not be sent to 1 recipient(s) (run 3).",
           "summary_tr": "Kullanım raporu 1 alıcıya gönderilemedi (çalıştırma 3).",
-          "time": "2026-10-13T04:00:16.771142Z",
+          "time": "2026-10-13T04:00:26.511859Z",
           "title": "Kullanım raporu gönderilemedi (çalıştırma 3, alıcı i***@ornek.example): recipient refused: 550 5.1.1 mailbox unavailable",
-          "updated_at": "2026-10-13T04:00:17.218286Z"
+          "updated_at": "2026-10-13T04:00:26.998385Z"
         },
         {
           "auto_resolved": false,
-          "created_at": "2026-10-13T04:00:14.417989Z",
+          "created_at": "2026-10-13T04:00:24.168977Z",
           "id": 7,
           "notes_count": 1,
           "resolved_at": null,
@@ -32,13 +32,13 @@
           "state": "acknowledged",
           "summary_en": "Drive D: is 84% full (threshold 80%).",
           "summary_tr": "D: diski %84 dolu (eşik %80).",
-          "time": "2026-10-13T04:00:14.405577Z",
+          "time": "2026-10-13T04:00:24.158770Z",
           "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
-          "updated_at": "2026-10-13T04:00:14.482150Z"
+          "updated_at": "2026-10-13T04:00:24.229970Z"
         },
         {
           "auto_resolved": false,
-          "created_at": "2026-10-13T04:00:14.278288Z",
+          "created_at": "2026-10-13T04:00:24.021628Z",
           "id": 4,
           "notes_count": 0,
           "resolved_at": null,
@@ -47,15 +47,15 @@
           "rule_name_tr": "Log kaynağı sessiz",
           "severity": "high",
           "state": "open",
-          "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:13.",
-          "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:13.",
-          "time": "2026-10-13T04:00:14.278288Z",
-          "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:13+03:00)",
-          "updated_at": "2026-10-13T04:00:14.319255Z"
+          "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:23.",
+          "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:23.",
+          "time": "2026-10-13T04:00:24.021628Z",
+          "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:23+03:00)",
+          "updated_at": "2026-10-13T04:00:24.066204Z"
         },
         {
           "auto_resolved": false,
-          "created_at": "2026-10-13T04:00:14.278288Z",
+          "created_at": "2026-10-13T04:00:24.021628Z",
           "id": 2,
           "notes_count": 0,
           "resolved_at": null,
@@ -66,13 +66,13 @@
           "state": "open",
           "summary_en": "11.10.2026 could not be sealed (attempt 1).",
           "summary_tr": "11.10.2026 günü mühürlenemedi (1. deneme).",
-          "time": "2026-10-13T04:00:01Z",
+          "time": "2026-10-13T04:00:00Z",
           "title": "Mühürleme başarısız (11.10.2026): mock TSA unreachable (injected). 5 dk sonra tekrar denenecek.",
-          "updated_at": "2026-10-13T04:00:14.295244Z"
+          "updated_at": "2026-10-13T04:00:24.042105Z"
         },
         {
           "auto_resolved": false,
-          "created_at": "2026-10-12T23:00:14.278288Z",
+          "created_at": "2026-10-12T23:00:24.021628Z",
           "id": 6,
           "notes_count": 2,
           "resolved_at": null,
@@ -83,9 +83,9 @@
           "state": "open",
           "summary_en": "Sender address: 172.20.10.77.",
           "summary_tr": "Gönderici adresi: 172.20.10.77.",
-          "time": "2026-10-12T23:00:14.278288Z",
+          "time": "2026-10-12T23:00:24.021628Z",
           "title": "Yeni log kaynağı: 172.20.10.77 (kaydediliyor)",
-          "updated_at": "2026-10-13T04:00:14.729214Z"
+          "updated_at": "2026-10-13T04:00:24.454942Z"
         }
       ],
       "open_by_severity": {
@@ -97,7 +97,7 @@
       }
     },
     "clock": {
-      "checked_at": "2026-10-13T03:10:13Z",
+      "checked_at": "2026-10-13T03:10:23Z",
       "ntp_server": "172.20.10.1",
       "offset_ms": 3.2,
       "ok": true
@@ -107,12 +107,12 @@
       "remaining": 9612,
       "threshold": 500
     },
-    "generated_at": "2026-10-13T07:00:57.049511+03:00",
+    "generated_at": "2026-10-13T07:01:06.810435+03:00",
     "ingest": {
-      "messages_per_minute": 1294.1,
+      "messages_per_minute": 1296.5,
       "silent": [
         {
-          "last_seen": "2026-10-13T06:42:13.814637+03:00",
+          "last_seen": "2026-10-13T06:42:23.522152+03:00",
           "name": "switch-3"
         }
       ],
@@ -120,15 +120,11 @@
       "sources_total": 3,
       "sparkline": [
         {
-          "count": 1259,
-          "minute": "2026-10-13T06:00:00+03:00"
-        },
-        {
-          "count": 1297,
+          "count": 1296,
           "minute": "2026-10-13T06:01:00+03:00"
         },
         {
-          "count": 1333,
+          "count": 1334,
           "minute": "2026-10-13T06:02:00+03:00"
         },
         {
@@ -140,7 +136,7 @@
           "minute": "2026-10-13T06:04:00+03:00"
         },
         {
-          "count": 1188,
+          "count": 1187,
           "minute": "2026-10-13T06:05:00+03:00"
         },
         {
@@ -148,15 +144,15 @@
           "minute": "2026-10-13T06:06:00+03:00"
         },
         {
-          "count": 1258,
+          "count": 1259,
           "minute": "2026-10-13T06:07:00+03:00"
         },
         {
-          "count": 1296,
+          "count": 1295,
           "minute": "2026-10-13T06:08:00+03:00"
         },
         {
-          "count": 1332,
+          "count": 1333,
           "minute": "2026-10-13T06:09:00+03:00"
         },
         {
@@ -168,7 +164,7 @@
           "minute": "2026-10-13T06:11:00+03:00"
         },
         {
-          "count": 1187,
+          "count": 1186,
           "minute": "2026-10-13T06:12:00+03:00"
         },
         {
@@ -176,15 +172,15 @@
           "minute": "2026-10-13T06:13:00+03:00"
         },
         {
-          "count": 1257,
+          "count": 1258,
           "minute": "2026-10-13T06:14:00+03:00"
         },
         {
-          "count": 1295,
+          "count": 1294,
           "minute": "2026-10-13T06:15:00+03:00"
         },
         {
-          "count": 1331,
+          "count": 1332,
           "minute": "2026-10-13T06:16:00+03:00"
         },
         {
@@ -196,7 +192,7 @@
           "minute": "2026-10-13T06:18:00+03:00"
         },
         {
-          "count": 1186,
+          "count": 1185,
           "minute": "2026-10-13T06:19:00+03:00"
         },
         {
@@ -204,15 +200,15 @@
           "minute": "2026-10-13T06:20:00+03:00"
         },
         {
-          "count": 1256,
+          "count": 1257,
           "minute": "2026-10-13T06:21:00+03:00"
         },
         {
-          "count": 1294,
+          "count": 1293,
           "minute": "2026-10-13T06:22:00+03:00"
         },
         {
-          "count": 1330,
+          "count": 1331,
           "minute": "2026-10-13T06:23:00+03:00"
         },
         {
@@ -224,7 +220,7 @@
           "minute": "2026-10-13T06:25:00+03:00"
         },
         {
-          "count": 1185,
+          "count": 1184,
           "minute": "2026-10-13T06:26:00+03:00"
         },
         {
@@ -232,15 +228,15 @@
           "minute": "2026-10-13T06:27:00+03:00"
         },
         {
-          "count": 1255,
+          "count": 1256,
           "minute": "2026-10-13T06:28:00+03:00"
         },
         {
-          "count": 1293,
+          "count": 1292,
           "minute": "2026-10-13T06:29:00+03:00"
         },
         {
-          "count": 1329,
+          "count": 1330,
           "minute": "2026-10-13T06:30:00+03:00"
         },
         {
@@ -252,7 +248,7 @@
           "minute": "2026-10-13T06:32:00+03:00"
         },
         {
-          "count": 1184,
+          "count": 1183,
           "minute": "2026-10-13T06:33:00+03:00"
         },
         {
@@ -260,15 +256,15 @@
           "minute": "2026-10-13T06:34:00+03:00"
         },
         {
-          "count": 1254,
+          "count": 1255,
           "minute": "2026-10-13T06:35:00+03:00"
         },
         {
-          "count": 1292,
+          "count": 1291,
           "minute": "2026-10-13T06:36:00+03:00"
         },
         {
-          "count": 1328,
+          "count": 1329,
           "minute": "2026-10-13T06:37:00+03:00"
         },
         {
@@ -280,7 +276,7 @@
           "minute": "2026-10-13T06:39:00+03:00"
         },
         {
-          "count": 1183,
+          "count": 1182,
           "minute": "2026-10-13T06:40:00+03:00"
         },
         {
@@ -288,15 +284,15 @@
           "minute": "2026-10-13T06:41:00+03:00"
         },
         {
-          "count": 1253,
+          "count": 1254,
           "minute": "2026-10-13T06:42:00+03:00"
         },
         {
-          "count": 1291,
+          "count": 1290,
           "minute": "2026-10-13T06:43:00+03:00"
         },
         {
-          "count": 1327,
+          "count": 1328,
           "minute": "2026-10-13T06:44:00+03:00"
         },
         {
@@ -308,7 +304,7 @@
           "minute": "2026-10-13T06:46:00+03:00"
         },
         {
-          "count": 1182,
+          "count": 1181,
           "minute": "2026-10-13T06:47:00+03:00"
         },
         {
@@ -316,15 +312,15 @@
           "minute": "2026-10-13T06:48:00+03:00"
         },
         {
-          "count": 1252,
+          "count": 1253,
           "minute": "2026-10-13T06:49:00+03:00"
         },
         {
-          "count": 1290,
+          "count": 1289,
           "minute": "2026-10-13T06:50:00+03:00"
         },
         {
-          "count": 1326,
+          "count": 1327,
           "minute": "2026-10-13T06:51:00+03:00"
         },
         {
@@ -336,7 +332,7 @@
           "minute": "2026-10-13T06:53:00+03:00"
         },
         {
-          "count": 1181,
+          "count": 1180,
           "minute": "2026-10-13T06:54:00+03:00"
         },
         {
@@ -344,20 +340,24 @@
           "minute": "2026-10-13T06:55:00+03:00"
         },
         {
-          "count": 1251,
+          "count": 1252,
           "minute": "2026-10-13T06:56:00+03:00"
         },
         {
-          "count": 1289,
+          "count": 1288,
           "minute": "2026-10-13T06:57:00+03:00"
         },
         {
-          "count": 1325,
+          "count": 1326,
           "minute": "2026-10-13T06:58:00+03:00"
         },
         {
           "count": 1363,
           "minute": "2026-10-13T06:59:00+03:00"
+        },
+        {
+          "count": 1399,
+          "minute": "2026-10-13T07:00:00+03:00"
         }
       ]
     },
@@ -666,7 +666,7 @@
       ],
       "enabled": true,
       "expected": true,
-      "first_seen": "2026-09-03T07:00:13.814637+03:00",
+      "first_seen": "2026-09-03T07:00:23.522152+03:00",
       "gaps": [
         {
           "from": "2026-10-09T14:00:00.003000+03:00",
@@ -899,10 +899,10 @@
           "hour": "2026-10-13T07:00:00+03:00"
         }
       ],
-      "last_message": "2026-10-13T06:59:23.814637+03:00",
+      "last_message": "2026-10-13T06:59:33.522152+03:00",
       "last_message_origin": "collector",
       "lines_today": 4,
-      "messages_per_minute": 143.3,
+      "messages_per_minute": 143.6,
       "name": "core-r1",
       "network_of": null,
       "parse_failure_permille": 250.0,
@@ -917,8 +917,8 @@
             "offset": 0,
             "source": "core-r1"
           },
-          "first_seen": "2026-10-13T07:00:56.665255+03:00",
-          "last_seen": "2026-10-13T07:00:56.665255+03:00",
+          "first_seen": "2026-10-13T07:01:06.401511+03:00",
+          "last_seen": "2026-10-13T07:01:06.401511+03:00",
           "pattern": "rawlog.invalid"
         }
       ],
@@ -927,24 +927,16 @@
       "promoted_to": null,
       "silent_minutes": null,
       "sparkline": [
-        139,
         144,
-        148,
-        152,
-        156,
-        131,
-        136,
-        139,
-        143,
-        148,
+        149,
         152,
         156,
         131,
         135,
         139,
-        144,
-        147,
-        152,
+        143,
+        148,
+        153,
         156,
         131,
         135,
@@ -953,7 +945,14 @@
         147,
         152,
         156,
-        131,
+        132,
+        135,
+        139,
+        143,
+        147,
+        151,
+        156,
+        132,
         135,
         139,
         143,
@@ -974,19 +973,20 @@
         147,
         151,
         155,
-        131,
-        135,
+        130,
+        136,
         139,
         143,
         147,
         151,
         155,
-        131,
+        130,
         134,
-        139,
+        140,
         143,
         147,
-        151
+        151,
+        155
       ],
       "state": "active",
       "suggested": null,
@@ -1084,7 +1084,7 @@
       ],
       "enabled": true,
       "expected": true,
-      "first_seen": "2026-09-03T07:00:13.814637+03:00",
+      "first_seen": "2026-09-03T07:00:23.522152+03:00",
       "gaps": [
         {
           "from": "2026-10-09T13:30:00.003000+03:00",
@@ -1303,10 +1303,10 @@
           "hour": "2026-10-13T07:00:00+03:00"
         }
       ],
-      "last_message": "2026-10-13T07:00:09.814637+03:00",
+      "last_message": "2026-10-13T07:00:19.522152+03:00",
       "last_message_origin": "collector",
       "lines_today": 31,
-      "messages_per_minute": 1150.8,
+      "messages_per_minute": 1152.8,
       "name": "fortigate",
       "network_of": null,
       "parse_failure_permille": 64.5,
@@ -1321,8 +1321,8 @@
             "offset": 0,
             "source": "fortigate"
           },
-          "first_seen": "2026-10-13T07:00:56.665255+03:00",
-          "last_seen": "2026-10-13T07:00:56.665255+03:00",
+          "first_seen": "2026-10-13T07:01:06.401511+03:00",
+          "last_seen": "2026-10-13T07:01:06.401511+03:00",
           "pattern": "fortigate.kv"
         }
       ],
@@ -1331,66 +1331,66 @@
       "promoted_to": null,
       "silent_minutes": null,
       "sparkline": [
-        1120,
-        1153,
+        1152,
         1185,
         1219,
         1251,
-        1057,
+        1056,
+        1087,
+        1120,
+        1152,
+        1185,
+        1217,
+        1250,
+        1055,
         1086,
         1119,
-        1153,
-        1184,
-        1218,
-        1250,
-        1056,
-        1086,
-        1118,
         1151,
-        1184,
+        1185,
         1217,
         1249,
-        1055,
+        1053,
         1085,
+        1118,
+        1150,
+        1184,
+        1217,
+        1248,
+        1052,
+        1084,
         1117,
-        1151,
+        1149,
         1183,
         1216,
         1248,
-        1054,
-        1084,
-        1116,
-        1150,
-        1182,
-        1216,
-        1248,
-        1052,
+        1051,
         1083,
-        1115,
-        1149,
-        1181,
+        1116,
+        1148,
+        1182,
         1215,
         1247,
-        1052,
+        1051,
         1082,
-        1114,
-        1148,
-        1180,
+        1115,
+        1147,
+        1181,
         1214,
         1246,
         1051,
-        1081,
-        1113,
-        1147,
-        1179,
+        1080,
+        1114,
+        1146,
+        1180,
         1213,
         1245,
         1050,
         1081,
         1112,
-        1146,
-        1178,
-        1212
+        1145,
+        1179,
+        1212,
+        1244
       ],
       "state": "active",
       "suggested": null,
@@ -1488,7 +1488,7 @@
       ],
       "enabled": true,
       "expected": true,
-      "first_seen": "2026-10-13T06:40:56.665255+03:00",
+      "first_seen": "2026-10-13T06:41:06.401511+03:00",
       "gaps": [],
       "heartbeat_minutes": 15,
       "hourly": [
@@ -1685,7 +1685,7 @@
           "hour": "2026-10-13T07:00:00+03:00"
         }
       ],
-      "last_message": "2026-10-13T06:59:56.665255+03:00",
+      "last_message": "2026-10-13T07:00:06.401511+03:00",
       "last_message_origin": "database",
       "lines_today": 0,
       "messages_per_minute": 0.0,
@@ -1804,7 +1804,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:07.150349+00:00",
+    "captured_at": "2026-10-13T04:01:16.817681+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1814,21 +1814,21 @@
   "overview": {
     "collector": {
       "fresh": true,
-      "updated_at": "2026-10-13T07:00:13.814637+03:00"
+      "updated_at": "2026-10-13T07:00:23.522152+03:00"
     },
-    "generated_at": "2026-10-13T07:00:56.707682+03:00",
+    "generated_at": "2026-10-13T07:01:06.442657+03:00",
     "items": [
       {
         "address": "172.20.10.1",
         "configured": true,
         "enabled": true,
         "expected": true,
-        "first_seen": "2026-09-03T07:00:13.814637+03:00",
+        "first_seen": "2026-09-03T07:00:23.522152+03:00",
         "heartbeat_minutes": 15,
-        "last_message": "2026-10-13T06:59:23.814637+03:00",
+        "last_message": "2026-10-13T06:59:33.522152+03:00",
         "last_message_origin": "collector",
         "lines_today": 4,
-        "messages_per_minute": 143.3,
+        "messages_per_minute": 143.6,
         "name": "core-r1",
         "network_of": null,
         "parse_failure_permille": 250.0,
@@ -1837,24 +1837,16 @@
         "promoted_to": null,
         "silent_minutes": null,
         "sparkline": [
-          139,
           144,
-          148,
-          152,
-          156,
-          131,
-          136,
-          139,
-          143,
-          148,
+          149,
           152,
           156,
           131,
           135,
           139,
-          144,
-          147,
-          152,
+          143,
+          148,
+          153,
           156,
           131,
           135,
@@ -1863,7 +1855,14 @@
           147,
           152,
           156,
-          131,
+          132,
+          135,
+          139,
+          143,
+          147,
+          151,
+          156,
+          132,
           135,
           139,
           143,
@@ -1884,19 +1883,20 @@
           147,
           151,
           155,
-          131,
-          135,
+          130,
+          136,
           139,
           143,
           147,
           151,
           155,
-          131,
+          130,
           134,
-          139,
+          140,
           143,
           147,
-          151
+          151,
+          155
         ],
         "state": "active",
         "suggested": null,
@@ -1908,12 +1908,12 @@
         "configured": true,
         "enabled": true,
         "expected": true,
-        "first_seen": "2026-09-03T07:00:13.814637+03:00",
+        "first_seen": "2026-09-03T07:00:23.522152+03:00",
         "heartbeat_minutes": 15,
-        "last_message": "2026-10-13T07:00:09.814637+03:00",
+        "last_message": "2026-10-13T07:00:19.522152+03:00",
         "last_message_origin": "collector",
         "lines_today": 31,
-        "messages_per_minute": 1150.8,
+        "messages_per_minute": 1152.8,
         "name": "fortigate",
         "network_of": null,
         "parse_failure_permille": 64.5,
@@ -1922,66 +1922,66 @@
         "promoted_to": null,
         "silent_minutes": null,
         "sparkline": [
-          1120,
-          1153,
+          1152,
           1185,
           1219,
           1251,
-          1057,
+          1056,
+          1087,
+          1120,
+          1152,
+          1185,
+          1217,
+          1250,
+          1055,
           1086,
           1119,
-          1153,
-          1184,
-          1218,
-          1250,
-          1056,
-          1086,
-          1118,
           1151,
-          1184,
+          1185,
           1217,
           1249,
-          1055,
+          1053,
           1085,
+          1118,
+          1150,
+          1184,
+          1217,
+          1248,
+          1052,
+          1084,
           1117,
-          1151,
+          1149,
           1183,
           1216,
           1248,
-          1054,
-          1084,
-          1116,
-          1150,
-          1182,
-          1216,
-          1248,
-          1052,
+          1051,
           1083,
-          1115,
-          1149,
-          1181,
+          1116,
+          1148,
+          1182,
           1215,
           1247,
-          1052,
+          1051,
           1082,
-          1114,
-          1148,
-          1180,
+          1115,
+          1147,
+          1181,
           1214,
           1246,
           1051,
-          1081,
-          1113,
-          1147,
-          1179,
+          1080,
+          1114,
+          1146,
+          1180,
           1213,
           1245,
           1050,
           1081,
           1112,
-          1146,
-          1178,
-          1212
+          1145,
+          1179,
+          1212,
+          1244
         ],
         "state": "active",
         "suggested": null,
@@ -1993,9 +1993,9 @@
         "configured": false,
         "enabled": true,
         "expected": true,
-        "first_seen": "2026-09-03T07:00:13.814637+03:00",
+        "first_seen": "2026-09-03T07:00:23.522152+03:00",
         "heartbeat_minutes": 15,
-        "last_message": "2026-10-13T06:42:13.814637+03:00",
+        "last_message": "2026-10-13T06:42:23.522152+03:00",
         "last_message_origin": "database",
         "lines_today": 0,
         "messages_per_minute": 0.0,
@@ -2078,9 +2078,9 @@
         "configured": false,
         "enabled": true,
         "expected": true,
-        "first_seen": "2026-10-13T06:40:56.665255+03:00",
+        "first_seen": "2026-10-13T06:41:06.401511+03:00",
         "heartbeat_minutes": 15,
-        "last_message": "2026-10-13T06:59:56.665255+03:00",
+        "last_message": "2026-10-13T07:00:06.401511+03:00",
         "last_message_origin": "database",
         "lines_today": 0,
         "messages_per_minute": 0.0,
@@ -2173,25 +2173,25 @@
         {
           "line": 1,
           "offset": 0,
-          "received": "2026-10-13T07:00:24.086051+03:00",
+          "received": "2026-10-13T07:00:33.822788+03:00",
           "sender": "172.20.10.1",
-          "sha256": "e3912c9735b4e6ea02fd7994c265252759b90dae61805c5732cfe647b11c0842",
+          "sha256": "78697388ae35f49d1fbc5d28e9abee7e5af4d8c7b92bf268204146004b60dc2a",
           "text": "<30>2026-10-13T07:00:00.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14"
         },
         {
           "line": 2,
           "offset": 157,
-          "received": "2026-10-13T07:00:24.086058+03:00",
+          "received": "2026-10-13T07:00:33.822797+03:00",
           "sender": "172.20.10.1",
-          "sha256": "18655c3ccf6fb691b1fb29e5ab852e2885df352da96d5809cf96d432d27d762b",
+          "sha256": "5a43a73d508dba470f4667844e94e27e8200eda22b001de35850a4e097c98296",
           "text": "<30>2026-10-13T07:00:01.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14"
         },
         {
           "line": 3,
           "offset": 314,
-          "received": "2026-10-13T07:00:24.086063+03:00",
+          "received": "2026-10-13T07:00:33.822802+03:00",
           "sender": "172.20.10.1",
-          "sha256": "682cf60aedc049bee45ac75a21946bac0d7c073323f0749d913153bf06b5dc69",
+          "sha256": "6a43db160a21d8c256c1e3947cbf470caacafa26c683080cb9ac2c29a3a53259",
           "text": "<30>2026-10-13T07:00:02.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14"
         },
         {
@@ -2204,7 +2204,7 @@
         }
       ],
       "origin": "spool",
-      "range_sha256": "587c03cc775c4b7bce7316f05ec9935ddbdb2cdb39e9d4b947bb477841a7e1a7",
+      "range_sha256": "3075038b05b8ebfdbbeaa5ef08560db86f5eeb6c7749c44af0e21b9a0480af87",
       "reason": null,
       "source": "core-r1",
       "to_line": 4,
