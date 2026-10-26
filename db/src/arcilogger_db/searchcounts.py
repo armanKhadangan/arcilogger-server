@@ -217,7 +217,8 @@ def _recount(
             .where(messages_where)
         )
     counts: Counter[CountKey] = Counter()
-    result = connection.execution_options(stream_results=True, yield_per=FETCH_ROWS).execute(query)
+    # Statement options: Connection.execution_options would stream every later statement too.
+    result = connection.execute(query.execution_options(stream_results=True, yield_per=FETCH_ROWS))
     for row in result.mappings():
         table = row.get("tbl")
         values = None
