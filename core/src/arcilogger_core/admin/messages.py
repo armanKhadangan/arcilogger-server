@@ -7,8 +7,12 @@ texts from here (``{"code", "message_tr", "message_en"}``), Turkish first. Three
 * :data:`WARNINGS` — what a request warns about (``warnings[].code``, a step in ``warning``);
 * :data:`STATE_LABELS` — the request states of :data:`arcilogger_core.admin.contract.STATES`.
 
-The API's own HTTP errors (``admin_agent_unavailable``, ``config_conflict``, the field codes of
-the section rules, …) are listed in the API's error tables. No text claims legal compliance.
+:data:`MESSAGES` also holds the codes of the section rules (:mod:`arcilogger_core.admin.rules`)
+that the agent's own, authoritative check can report in a status (``site_name_required``,
+``source_overlap``, …; contract Day 0 note D0-9), with the texts the API answers them with. The
+API's own HTTP errors (``admin_agent_unavailable``, ``config_conflict``, the typed confirmations
+such as ``retention_confirm_mismatch``, …) are listed in the API's error tables. No text claims
+legal compliance.
 """
 
 from __future__ import annotations
@@ -142,6 +146,189 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "Bu program yolu güvenilir bir konumda değil; görev çalıştırmadı.",
             "This program path is not in a trusted location; the task did not run it.",
         ),
+        # -- the agent's own refusals ---------------------------------------------------------
+        "admin_disabled": (
+            "Tarayıcıdan sunucu yönetimi bu kurulumda kapalı; değişikliği sunucu konsolunda yapın.",
+            "Browser administration is switched off on this installation; make the change on "
+            "the server console.",
+        ),
+        "request_not_cancellable": (
+            "Bu istek artık iptal edilemez: uygulanmaya başlandı ya da bitti.",
+            "This request can no longer be cancelled: it has started or finished.",
+        ),
+        "request_not_revertible": (
+            "Bu değişiklik geri alınamaz: yalnızca sürümü saklanan, uygulanmış yapılandırma "
+            "değişiklikleri geri alınabilir.",
+            "This change cannot be reverted: only applied configuration changes whose version "
+            "is still kept can be reverted.",
+        ),
+        # -- the section rules (arcilogger_core.admin.rules), when the agent's check refuses ---
+        "config_unsupported_format": (
+            "arcilogger.toml dosyasında web arayüzünün güvenle düzenleyemediği bir yazım var "
+            "(satır içi tablo, noktalı anahtar ya da çok satırlı metin); bu değişikliği "
+            "sunucuda elle yapın.",
+            "arcilogger.toml contains syntax the web interface cannot edit safely (an inline "
+            "table, a dotted key or a multi-line string); make this change on the server by "
+            "hand.",
+        ),
+        "config_invalid": (
+            "Ayarlar geçersiz; işaretli alanları düzeltin.",
+            "The settings are invalid; correct the marked fields.",
+        ),
+        "config_key_locked": (
+            "Bu ayar güvenlik nedeniyle yalnızca sunucu konsolundan değiştirilebilir.",
+            "For security reasons this setting can only be changed on the server console.",
+        ),
+        "site_name_required": (
+            "Kuruluş adı boş olamaz.",
+            "The organisation name cannot be empty.",
+        ),
+        "host_invalid": (
+            "Geçerli bir sunucu adı ya da IPv4 adresi girin.",
+            "Enter a valid host name or IPv4 address.",
+        ),
+        "clock_servers_required": (
+            "En az bir saat sunucusu gerekir (yerel kaynak ya da yedek sunucu).",
+            "At least one time server is required (the local source or the fallback).",
+        ),
+        "retention_below_minimum": (
+            "Saklama süresi 730 günden (iki yıl) kısa olamaz.",
+            "The retention period cannot be shorter than 730 days (two years).",
+        ),
+        "source_invalid": (
+            "Kaynak bilgileri geçersiz; işaretli alanları düzeltin.",
+            "The source is invalid; correct the marked fields.",
+        ),
+        "source_not_found": (
+            "Kaynak bulunamadı.",
+            "Source not found.",
+        ),
+        "source_name_taken": (
+            "Bu kaynak adı zaten kullanılıyor.",
+            "This source name is already in use.",
+        ),
+        "source_address_taken": (
+            "Bu adres başka bir kaynağa ait.",
+            "This address belongs to another source.",
+        ),
+        "source_overlap": (
+            "Bu ağ başka bir kaynağın ağıyla çakışıyor.",
+            "This network overlaps the network of another source.",
+        ),
+        "source_rename_not_allowed": (
+            "Kaynak adı sonradan değiştirilemez (ham log klasörünün adıdır); yeni bir kaynak "
+            "ekleyin.",
+            "A source name cannot be changed (it names the raw log folder); add a new source "
+            "instead.",
+        ),
+        "source_ipv6_unsupported": (
+            "Şimdilik yalnızca IPv4 adresleri ve ağları desteklenir.",
+            "Only IPv4 addresses and networks are supported for now.",
+        ),
+        "source_reserved_address": (
+            "Bu adres bir log kaynağı olamaz (geri döngü, çok noktaya yayın, yerel bağlantı, yayın "
+            "ya da ayrılmış adres).",
+            "This address cannot be a log source (loopback, multicast, link-local, broadcast or "
+            "reserved).",
+        ),
+        "source_own_address": (
+            "Bu adres ARCILOGGER sunucusunun kendi adresi.",
+            "This is the ARCILOGGER server's own address.",
+        ),
+        "source_network_not_allowed": (
+            "Adres, kurulumda izin verilen kaynak ağlarının dışında; bu liste yalnızca sunucu "
+            "konsolundan değiştirilebilir.",
+            "The address is outside the source networks allowed at installation; that list can "
+            "only be changed on the server console.",
+        ),
+        "source_prefix_too_short": (
+            "Ağ izin verilenden geniş; daha dar bir ağ girin.",
+            "The network is wider than allowed; enter a narrower network.",
+        ),
+        "source_limit": (
+            "Kaynak sayısı üst sınırına ulaşıldı.",
+            "The maximum number of sources has been reached.",
+        ),
+        "secret_invalid": (
+            "Girilen gizli bilgi geçersiz (boş, çok uzun ya da kontrol karakteri içeriyor).",
+            "The secret is invalid (empty, too long or containing control characters).",
+        ),
+        "secret_rebind_required": (
+            "Sunucu, kullanıcı ya da bağlantı türü değişti; kayıtlı parola yeni hedefe "
+            "gönderilmez. Parolayı yeniden girin.",
+            "The server, user or connection type changed; the stored password is not sent to a "
+            "new destination. Enter the password again.",
+        ),
+        "smtp_password_required": (
+            "Kullanıcı adı girildiğinde SMTP parolası da gerekir.",
+            "An SMTP password is required when a user name is set.",
+        ),
+        "smtp_plaintext_auth_refused": (
+            "Şifresiz bağlantıda parola yalnızca bu sunucudaki bir aktarıcıya gönderilebilir; "
+            "STARTTLS ya da SSL seçin.",
+            "Without encryption a password can only be sent to a relay on this server; choose "
+            "STARTTLS or SSL.",
+        ),
+        "smtp_test_recipient_required": (
+            "Kaydetmeden önce deneme e-postası için bir alıcı seçin.",
+            "Choose a recipient for the trial e-mail before saving.",
+        ),
+        "replica_target_invalid": (
+            "Replika hedefi \\\\sunucu\\paylaşım biçiminde bir ağ paylaşımı olmalı.",
+            "The replica target must be a network share like \\\\server\\share.",
+        ),
+        "replica_user_invalid": (
+            "Kullanıcı SUNUCU\\kullanıcı, ETKİALANI\\kullanıcı ya da kullanıcı@etkialanı "
+            "biçiminde olmalı.",
+            "The user must look like SERVER\\user, DOMAIN\\user or user@domain.",
+        ),
+        "replica_password_required": (
+            "Replika kullanıcısı için parola gerekir.",
+            "A password is required for the replica user.",
+        ),
+        "tsa_server_invalid": (
+            'Zaman damgası sunucusu "test" ya da "production" olmalı.',
+            'The time-stamp server must be "test" or "production".',
+        ),
+        "tsa_mock_refused": (
+            "Deneme (mock) zaman damgası web arayüzünden seçilemez.",
+            "The trial (mock) time stamp cannot be chosen from the web interface.",
+        ),
+        "tsa_not_ready": (
+            "Üretim sunucusuna geçmeden önce eksikleri tamamlayın: kimlik bilgileri, onaylı "
+            "Zamane istemcisi, Java ve en az bir kök sertifika.",
+            "Complete the missing items before switching to the production server: "
+            "credentials, an approved Zamane client, Java and at least one root certificate.",
+        ),
+        "tsa_would_break": (
+            "Bu değişiklik şu an çalışan mühürlemeyi durdururdu; uygulanmadı. Nedenler aşağıda.",
+            "This change would stop sealing, which works now; it was not applied. The causes "
+            "are below.",
+        ),
+        "java_not_detected": (
+            "Seçilen Java sunucuda bulunamadı; listeden birini seçin.",
+            "The selected Java was not found on the server; choose one from the list.",
+        ),
+        "root_certificate_invalid": (
+            "Dosya geçerli bir kök sertifika değil (tek, kendinden imzalı bir CA sertifikası "
+            "olmalı).",
+            "The file is not a valid root certificate (it must be a single self-signed CA "
+            "certificate).",
+        ),
+        "root_exists": (
+            "Bu kök sertifika zaten kurulu.",
+            "This root certificate is already installed.",
+        ),
+        "root_not_installed": (
+            "Yasal kök olarak yalnızca kurulu bir kök sertifika işaretlenebilir.",
+            "Only an installed root certificate can be marked as a legal root.",
+        ),
+        "zamane_archive_invalid": (
+            "Dosya bir Zamane istemcisi değil: bir .jar ya da tek bir tss-client-console-*.jar "
+            "içeren .zip olmalı.",
+            "The file is not a Zamane client: it must be a .jar, or a .zip holding exactly one "
+            "tss-client-console-*.jar.",
+        ),
     }
 )
 
@@ -196,6 +383,12 @@ WARNINGS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "güvenlik duvarı kuralına eklenmedi.",
             "The source address lies outside the networks of the administration policy or is "
             "wider than allowed; it was not added to the firewall rule.",
+        ),
+        "outbound_host_invalid": (
+            "Bir sunucu adı güvenlik duvarı kuralı için geçerli değil; sıkı giden trafik "
+            "kuralına eklenmedi.",
+            "A server name is not valid for a firewall rule; it was not added to the strict "
+            "outbound rule.",
         ),
         "ntp_server_empty": (
             "Yerel saat kaynağı yok; saat yalnızca yedek sunucuyla eşitlenir.",
