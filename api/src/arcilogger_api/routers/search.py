@@ -76,6 +76,7 @@ from arcilogger_api.search.planner import (
 )
 from arcilogger_api.search.registry import Entry, SearchRegistry, new_search_id
 from arcilogger_api.search.schemas import (
+    DEFAULT_LIMIT,
     FieldCatalogue,
     ParseRequest,
     ParseResult,
@@ -300,7 +301,8 @@ def run_search(
         raise search_error("search_range_invalid")
     else:
         q, start, end = body.q, body.from_, body.to
-    _check_limit(body.limit, settings)
+    limit = body.limit or min(DEFAULT_LIMIT, int(settings["search.page_size_max"]))
+    _check_limit(limit, settings)
     check_range(start, end, int(settings["search.max_days"]))
     query = _parse(q)
     site = SiteNetwork.load(db, config)
@@ -321,7 +323,7 @@ def run_search(
     try:
         with reading(db, state, user, settings):
             page = run_page(
-                db, plan, start, end, None, body.limit, budget, clock=state.clock, hook=state.hook
+                db, plan, start, end, None, limit, budget, clock=state.clock, hook=state.hook
             )
             items = page_rows(db, plan, page.rows, site)
             found = _oldest_notice(db, state, start)
@@ -343,7 +345,7 @@ def run_search(
         plan=plan,
         start=start,
         end=end,
-        limit=body.limit,
+        limit=limit,
         saved_id=body.saved_id,
         created_at=utc_now(),
         notices=tuple(found),

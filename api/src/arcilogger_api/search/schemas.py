@@ -14,6 +14,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstrai
 
 from arcilogger_db.models import SAVED_SEARCH_NAME_MAX, SAVED_SEARCH_QUERY_MAX
 
+#: The page size when a search names none (the web app's default).
+DEFAULT_LIMIT = 100
 #: Largest number of evidence references (the evidence extract's maximum, MAX_EXTRACT_LINES).
 MAX_REFS = 10_000
 #: Largest saved-search id and row id accepted (PostgreSQL ``bigint``).
@@ -45,8 +47,9 @@ class SearchRequest(StrictModel):
     q: QueryText = ""
     from_: AwareDatetime | None = Field(default=None, alias="from")
     to: AwareDatetime | None = None
-    #: 1 … ``search.page_size_max`` (checked by the endpoint, which reads the setting).
-    limit: int = Field(default=100, ge=1, le=1000)
+    #: 1 … ``search.page_size_max`` (checked by the endpoint, which reads the setting); without
+    #: it 100, or the maximum when that is smaller.
+    limit: int | None = Field(default=None, ge=1, le=1000)
     saved_id: int | None = Field(default=None, ge=1, le=MAX_ID)
 
 
