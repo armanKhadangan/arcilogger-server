@@ -1,9 +1,10 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ChangeReviewDialog } from '@/components/admin/change-review';
 import { fieldMessage } from '@/components/admin/field-messages';
+import { HeldChanges } from '@/components/admin/held-change';
 import { SectionActions } from '@/components/admin/section-actions';
 import { SECRET_KEPT, secretChanged, type SecretEdit } from '@/components/admin/secret-edit';
 import {
@@ -27,10 +28,12 @@ import { CreditQuery } from '../sealing/credits-card';
 
 import {
   STEPS,
+  causeKey,
   isStep,
   stepStatus,
   tsaBody,
   tsaForm,
+  unplacedCauses,
   validateCustomer,
   validateNumbers,
   validatePassword,
@@ -74,6 +77,12 @@ const BOUNDS: Record<TsaField, Record<string, number>> = {
 /** The steps whose values are saved with "Kaydet" (the others act on their own). */
 const FORM_STEPS: readonly StepId[] = ['java', 'credentials', 'production', 'credit'];
 
+/** What `send` adds to the form: the server to switch to, and the confirmation of a switch back. */
+interface SendOptions {
+  server?: TsaServer;
+  confirm?: boolean;
+}
+
 /** A stamp test that succeeded and was verified (the newest ones; the server decides again). */
 function useTested(): boolean {
   const tests = useAdminRequests('action.tsa_test');
@@ -114,7 +123,9 @@ function credentialErrors(credentials: Credentials): FieldErrors<'customer' | 'p
  * `seal_ready`: Java, the Zamane client, the root certificates, the customer credentials, a
  * test stamp, the switch to the production server and the credit alert threshold. The `[seal]`
  * section is shown read-only. A change that would stop a sealer that works now is refused by
- * the server (`tsa_would_break`) with its causes.
+ * the server (`tsa_would_break`) with its causes. A cause no step shows (a moved secret store,
+ * contract D0-2) is named above the steps, and so is a held change of the section (an unknown
+ * Zamane client waiting for the console) with its countdown and "İptal et".
  */
 export function KamusmPage() {
   const { t } = useTranslation();
@@ -129,6 +140,10 @@ export function KamusmPage() {
   const [credentials, setCredentials] = useState<Credentials>(KEPT);
   const [probe, setProbe] = useState(true);
   const [errors, setErrors] = useState<FieldErrors<TsaField>>({});
+  // The request the Zamane or the roots step started; the step shows it while it is open.
+  const [started, setStarted] = useState<{ step: StepId; id: string } | null>(null);
+  // "Yeniden dene" sends what the last attempt sent (a switch of the server included).
+  const lastSend = useRef<SendOptions>({});
   const tested = useTested();
   const credentialsDirty =
     credentials.clear ||
@@ -149,6 +164,7 @@ export function KamusmPage() {
   const requested = params.get('step');
   const step: StepId = isStep(requested) ? requested : tsa ? firstOpen(tsa, tested) : 'java';
   const values = form.values;
+  const unplaced = tsa ? unplacedCauses(tsa) : [];
 
   function change(next: Partial<TsaForm>) {
     form.setValues((current) => ({ ...current, ...next }));
@@ -162,8 +178,9 @@ export function KamusmPage() {
     setErrors({});
   }
 
-  function send(options: { server?: TsaServer; confirm?: boolean }) {
+  function send(options: SendOptions) {
     if (!tsa) return;
+    lastSend.current = options;
     const found: FieldErrors<TsaField> = {
       ...validateNumbers(values),
       ...credentialErrors(credentials),
@@ -205,10 +222,24 @@ export function KamusmPage() {
             etag={section.etag}
             writable={section.writable}
             policy={policy}
+            requestId={started?.step === 'zamane' ? started.id : null}
+            onStarted={(requestId) => {
+              setStarted({ step: 'zamane', id: requestId });
+            }}
           />
         ) : null;
       case 'roots':
-        return <RootsStep tsa={tsaSection} etag={section.etag} writable={section.writable} />;
+        return (
+          <RootsStep
+            tsa={tsaSection}
+            etag={section.etag}
+            writable={section.writable}
+            requestId={started?.step === 'roots' ? started.id : null}
+            onStarted={(requestId) => {
+              setStarted({ step: 'roots', id: requestId });
+            }}
+          />
+        );
       case 'credentials':
         return (
           <CredentialsStep
@@ -277,6 +308,28 @@ export function KamusmPage() {
               {t('settings.kamusm.provider', { provider: tsa.provider })}
             </Alert>
           ) : null}
+          {unplaced.length > 0 ? (
+            <Alert
+              tone="danger"
+              title={t('settings.kamusm.seal.unplacedTitle')}
+              data-testid="seal-unplaced"
+            >
+              <ul className="list-disc pl-5">
+                {unplaced.map((cause) => (
+                  <li key={cause}>{t(causeKey(cause), { defaultValue: cause })}</li>
+                ))}
+              </ul>
+              <p className="mt-1">{t('settings.kamusm.seal.unplacedBody')}</p>
+            </Alert>
+          ) : null}
+          <HeldChanges
+            config={config.data}
+            section="tsa"
+            except={[
+              FORM_STEPS.includes(step) ? flow.requestId : null,
+              started?.step === step ? started.id : null,
+            ]}
+          />
           <div className="grid gap-4 lg:grid-cols-[16rem_1fr]">
             <nav aria-label={t('settings.kamusm.stepsLabel')}>
               <ol className="flex flex-col gap-1" data-testid="kamusm-steps">
@@ -321,6 +374,9 @@ export function KamusmPage() {
                   dirty={dirty}
                   onSave={() => {
                     send({});
+                  }}
+                  onRetry={() => {
+                    send(lastSend.current);
                   }}
                   onRestore={restore}
                   onReload={() => {

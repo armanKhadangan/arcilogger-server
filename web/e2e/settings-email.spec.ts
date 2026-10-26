@@ -63,7 +63,10 @@ test.describe('Ayarlar → E-posta', () => {
     await expect(review.getByRole('row', { name: /SMTP sunucusu/ })).toContainText(
       'smtp.ornek.examplesmtp2.ornek.example',
     );
-    await expect(review.getByRole('row', { name: /SMTP parolası/ })).toContainText('kayıtlı');
+    // The stored password is overwritten: not "kayıtlı → kayıtlı".
+    await expect(review.getByRole('row', { name: /SMTP parolası/ })).toContainText(
+      'kayıtlıyenisiyle değiştirilecek',
+    );
     await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
     await confirmReauth(page);
     await applied(page);
@@ -82,7 +85,18 @@ test.describe('Ayarlar → E-posta', () => {
     });
     expect(api.admin.sections.smtp.host).toBe('smtp2.ornek.example');
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
-    expect(JSON.stringify(api.admin.config())).not.toContain('yeni-smtp-degeri');
+    // The password went out with the check and the change only, and nothing on the page keeps it.
+    const carrying = api.calls
+      .filter((call) => JSON.stringify(call.body ?? null).includes('yeni-smtp-degeri'))
+      .map((call) => `${call.method} ${call.path}`);
+    expect(new Set(carrying)).toEqual(
+      new Set(['POST /admin/config/smtp/check', 'PUT /admin/config/smtp']),
+    );
+    expect(await page.content()).not.toContain('yeni-smtp-degeri');
+    const stored = await page.evaluate(() =>
+      JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]),
+    );
+    expect(stored).not.toContain('yeni-smtp-degeri');
   });
 
   test('a user name is never sent without TLS to another host', async ({ page }) => {
@@ -135,6 +149,25 @@ test.describe('Ayarlar → E-posta', () => {
       'Test e-postası gönderilemedi: 535 5.7.8',
       { timeout: 10_000 },
     );
+  });
+
+  test('"Test e-postası gönder" goes through the worker: it works without the administration service', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', admin: { agent: 'missing' } });
+    await page.goto('/settings/email');
+    await expect(page.getByTestId('agent-unavailable')).toBeVisible();
+    await expect(
+      page.getByTestId('section-actions').getByRole('button', { name: 'Kaydet' }),
+    ).toBeDisabled();
+    const card = page.getByTestId('settings-test-email');
+    await card.getByLabel('Alıcı').click();
+    await page.getByRole('option', { name: 'tolga@ornek.com.tr' }).click();
+    await card.getByRole('button', { name: 'Test e-postası gönder' }).click();
+    await expect(card.getByTestId('test-email-result')).toHaveText('Test e-postası gönderildi.', {
+      timeout: 10_000,
+    });
+    expect(api.callsTo('POST', '/admin/actions/test-email')).toHaveLength(1);
   });
 
   test('an internal CA is uploaded, used, and given up again', async ({ page }) => {

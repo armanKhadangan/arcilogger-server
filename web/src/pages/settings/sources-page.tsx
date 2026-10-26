@@ -286,7 +286,8 @@ export function SourcesPage() {
   const { mutateAsync: removeAsync } = remove;
   const change = useSectionFlow<SourceChange>({
     check: useCallback(
-      (body: SourceChange) => checkAsync({ section: 'sources', body: body.body }),
+      (body: SourceChange) =>
+        checkAsync({ section: 'sources', body: { ...body.body, operation: body.mode } }),
       [checkAsync],
     ),
     submit: useCallback(

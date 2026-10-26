@@ -121,8 +121,8 @@ test.describe('Ayarlar → Değişiklik geçmişi', () => {
     expect(api.callsTo('POST', `/admin/requests/${id}/revert`)).toHaveLength(2);
   });
 
-  test('the kept versions, newest first, with the request of each', async ({ page }) => {
-    await mockApi(page, { signedInAs: 'tolga' });
+  test('the kept versions, newest first, each the settings before its change', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
     await changeSiteName(page, 'Örnek Holding A.Ş.');
     await expect(page.getByTestId('request-state')).toHaveText('Uygulandı', { timeout: 10_000 });
     await page.goto('/settings/history');
@@ -131,20 +131,49 @@ test.describe('Ayarlar → Değişiklik geçmişi', () => {
     });
     const rows = versions.getByRole('row');
     await expect(rows).toHaveCount(3);
+    // Version 17 is the configuration from before the site name change, not the one in use.
     await expect(rows.nth(1)).toContainText('17');
-    await expect(rows.nth(1)).toContainText('Geçerli');
+    await expect(rows.nth(1)).toContainText('Son değişiklikten önceki');
+    await expect(rows.nth(1)).not.toContainText('Geçerli');
     await expect(rows.nth(1)).toContainText('Kuruluş adı');
     await expect(rows.nth(1)).toContainText('tolga');
-    await expect(rows.nth(2)).toContainText('installer');
+    await expect(rows.nth(1)).toContainText('Ayarlar; gizli bilgiler de geri yüklenir');
+    await expect(rows.nth(2)).toContainText('console');
     await expect(rows.nth(2)).toContainText('Sunucu konsolu');
-    await expect(rows.nth(2)).toContainText('Gizli bilgi');
-    await expect(page.getByTestId('settings-versions')).toContainText(
-      'python -I -m arcilogger_core.admin versions restore 16',
-    );
+    await expect(rows.nth(2)).not.toContainText('Son değişiklikten önceki');
+    // Restoring the newest version undoes the latest change, and only that one.
+    const card = page.getByTestId('settings-versions');
+    await expect(card).toContainText('Örneğin son değişikliği geri almak için:');
+    await expect(card).toContainText('python -I -m arcilogger_core.admin versions restore 17');
+    await expect(card).not.toContainText('versions restore 16');
+    expect(api.admin.versions[0]?.request_id).toBe([...api.admin.requests.keys()][0]);
     await versions.getByRole('button', { name: '17 numaralı sürümün isteğini aç' }).click();
     await expect(
       page.getByRole('dialog', { name: 'Genel · Yapılandırma değişikliği' }),
     ).toBeVisible();
+  });
+
+  test('an older version without its secrets; a malformed version number gives no command', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    api.admin.versions.splice(0, 1, {
+      n: -1,
+      at: '2026-09-30T09:12:00+03:00',
+      request_id: null,
+      actor: 'console',
+      paths: [],
+      has_secrets: false,
+    });
+    await page.goto('/settings/history');
+    const card = page.getByTestId('settings-versions');
+    await expect(card.getByRole('row').nth(1)).toContainText(
+      'Yalnızca ayarlar; gizli bilgiler artık saklanmıyor',
+    );
+    await expect(card.getByTestId('console-command-refused')).toContainText(
+      'Sunucunun bildirdiği değer beklenen biçimde değil',
+    );
+    await expect(card).not.toContainText('versions restore');
   });
 
   test('the diagnostics package is downloaded after a password confirmation', async ({ page }) => {

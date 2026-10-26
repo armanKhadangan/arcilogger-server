@@ -2,12 +2,13 @@ import { FileArchive, KeyRound } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ConsoleCommand } from '@/components/admin/console-command';
+import { restoreVersionCommand } from '@/components/admin/console-commands';
 import { pathLabel } from '@/components/admin/labels';
 import { SettingsCard } from '@/components/admin/settings-frame';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { CodeBlock } from '@/components/ui/code-block';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiDownload, errorMessage } from '@/lib/api';
 import { useConfigVersions } from '@/lib/api-hooks';
@@ -16,21 +17,19 @@ import { formatBytes, formatDateTime } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import { isReauthCancelled, useReauth } from '@/lib/reauth';
 
-/** The console command that restores a kept version (contract 2.18: restore stays on the console). */
-function restoreCommand(n: number): string {
-  return `python -I -m arcilogger_core.admin versions restore ${String(n)}`;
-}
-
 /**
- * The kept configurations (`GET /admin/config/versions`, contract 2.11.1): number, time, who,
- * the settings it changed and whether it touched a secret. The last applied change is undone
- * with "Geri al" in its request; an older version is restored on the server console.
+ * The kept configurations (`GET /admin/config/versions`, contract 2.11.1, 2.4.10). Version *n*
+ * is the configuration from **before** its request was applied, so the configuration in use is
+ * not among them: each row shows the change that followed it (time, who, the settings it changed,
+ * its request) and whether a restore brings the secrets back too (only the newest 5 versions keep
+ * them). The last applied change is undone with "Geri al" in its request; any version is restored
+ * on the server console.
  */
 export function VersionsCard({ onOpen }: { onOpen: (requestId: string) => void }) {
   const { t } = useTranslation();
   const versions = useConfigVersions();
   const items = versions.data ?? [];
-  const newest = items[0]?.n ?? null;
+  const newest = items[0] ?? null;
   return (
     <SettingsCard
       title={t('settings.history.versions.title')}
@@ -63,6 +62,9 @@ export function VersionsCard({ onOpen }: { onOpen: (requestId: string) => void }
                     {t('settings.history.versions.paths')}
                   </th>
                   <th scope="col" className="px-3 py-2 font-medium">
+                    {t('settings.history.versions.restores')}
+                  </th>
+                  <th scope="col" className="px-3 py-2 font-medium">
                     {t('settings.history.columns.request')}
                   </th>
                 </tr>
@@ -72,25 +74,29 @@ export function VersionsCard({ onOpen }: { onOpen: (requestId: string) => void }
                   <tr key={version.n} className="border-t border-border align-top">
                     <th scope="row" className="px-3 py-2 text-left font-mono text-xs font-medium">
                       {version.n}
-                      {version.n === newest ? (
-                        <Badge tone="success" className="ml-2">
-                          {t('settings.history.versions.current')}
+                      {version.n === newest?.n ? (
+                        <Badge tone="neutral" className="ml-2">
+                          {t('settings.history.versions.beforeLatest')}
                         </Badge>
                       ) : null}
                     </th>
                     <td className="px-3 py-2 tabular">{formatDateTime(version.at)}</td>
                     <td className="px-3 py-2">{version.actor}</td>
                     <td className="px-3 py-2">
-                      <span className="flex flex-wrap items-center gap-1">
-                        {version.paths.length === 0
-                          ? '—'
-                          : version.paths.map((path) => pathLabel(path, t)).join(', ')}
-                        {version.has_secrets ? (
-                          <Badge tone="neutral" icon={KeyRound}>
-                            {t('settings.history.versions.secrets')}
-                          </Badge>
-                        ) : null}
-                      </span>
+                      {version.paths.length === 0
+                        ? '—'
+                        : version.paths.map((path) => pathLabel(path, t)).join(', ')}
+                    </td>
+                    <td className="px-3 py-2">
+                      {version.has_secrets ? (
+                        <Badge tone="neutral" icon={KeyRound}>
+                          {t('settings.history.versions.withSecrets')}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-strong">
+                          {t('settings.history.versions.withoutSecrets')}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       {version.request_id ? (
@@ -116,12 +122,12 @@ export function VersionsCard({ onOpen }: { onOpen: (requestId: string) => void }
               </tbody>
             </table>
           </div>
-          {items.length > 1 ? (
+          {newest ? (
             <div className="flex flex-col gap-2">
               <p className="text-13 text-muted-strong">{t('settings.history.versions.restore')}</p>
-              <CodeBlock
+              <ConsoleCommand
                 label={t('settings.history.versions.command')}
-                code={restoreCommand(items[1]?.n ?? 0)}
+                command={restoreVersionCommand(newest.n)}
               />
             </div>
           ) : null}

@@ -21,6 +21,7 @@ export function SectionActions<B>({
   flow,
   dirty,
   onSave,
+  onRetry,
   onRestore,
   onReload,
   saveLabel,
@@ -34,6 +35,8 @@ export function SectionActions<B>({
   flow: SectionFlow<B>;
   dirty: boolean;
   onSave: () => void;
+  /** "Yeniden dene" after a failure; `onSave` when the section only sends its form. */
+  onRetry?: () => void;
   onRestore: () => void;
   /** Reload the configuration (after a conflict). */
   onReload: () => void;
@@ -109,7 +112,7 @@ export function SectionActions<B>({
         <RequestProgress
           requestId={flow.requestId}
           probingText={probingText}
-          onRetry={onSave}
+          onRetry={onRetry ?? onSave}
           onReload={reload}
           renderResult={renderResult}
           onTerminal={onTerminal}

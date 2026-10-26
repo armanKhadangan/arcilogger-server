@@ -142,7 +142,38 @@ export function normalizeSha256(text: string): string | null {
   return /^[0-9a-f]{64}$/.test(value) ? value : null;
 }
 
-/** The text key of a sealing cause (`seal.CONFIG_CAUSES` and WP2's `executable`, `location`). */
+/**
+ * The causes of `seal_ready` (`seal.CONFIG_CAUSES`, with WP2's `executable` and `location`). Each
+ * has a text; `kamusm-model.test.ts` checks the list against `core/.../seal.py`.
+ */
+export const SEAL_CAUSES = [
+  'zamane-jar',
+  'credentials',
+  'roots',
+  'secret-store',
+  'provider',
+  'executable',
+  'location',
+] as const;
+
+/** The step that shows a cause as its error (`stepStatus`); the others have none. */
+const CAUSE_STEPS: Partial<Record<string, StepId>> = {
+  executable: 'java',
+  'zamane-jar': 'zamane',
+  roots: 'roots',
+  credentials: 'credentials',
+};
+
+/**
+ * The causes that stop sealing but are no step's error (a moved secret store or data folder, an
+ * unreadable secret store, an invalid provider): every step may read "Tamam" while the Seal task
+ * cannot seal, so the page names them above the steps.
+ */
+export function unplacedCauses(tsa: TsaSection): string[] {
+  return tsa.seal_ready.causes.filter((cause) => CAUSE_STEPS[cause] === undefined);
+}
+
+/** The text key of a sealing cause (`SEAL_CAUSES`; an unknown one shows its code). */
 export function causeKey(cause: string): string {
   return `settings.kamusm.causes.${cause.replace(/-/g, '_')}`;
 }

@@ -92,6 +92,11 @@ test.describe('Ayarlar → Kaynaklar', () => {
       },
     });
     expect(api.callsTo('POST', '/auth/reauth')).toHaveLength(0);
+    // The dry run says it checks an addition (contract gap WP5-1).
+    expect(api.callsTo('POST', '/admin/config/sources/check').at(-1)?.body).toMatchObject({
+      operation: 'add',
+      source: { name: 'ap-1' },
+    });
   });
 
   test("the server's refusal is shown at its field", async ({ page }) => {
@@ -127,6 +132,11 @@ test.describe('Ayarlar → Kaynaklar', () => {
     const put = api.callsTo('PUT', '/admin/config/sources/core-r1');
     expect(put).toHaveLength(1);
     expect(put[0]?.body).toMatchObject({ source: { name: 'core-r1', heartbeat_minutes: 30 } });
+    expect(put[0]?.body).not.toHaveProperty('operation');
+    expect(api.callsTo('POST', '/admin/config/sources/check').at(-1)?.body).toMatchObject({
+      operation: 'update',
+      source: { name: 'core-r1' },
+    });
   });
 
   test('switching a source off asks first and re-authenticates', async ({ page }) => {

@@ -211,7 +211,11 @@ export function GeneralPage() {
                 inputClassName="w-40"
               />
               {ntpPort ? (
-                <LockedValue label={t('settings.general.ntpPort')} value="123 (UDP)" />
+                // The API names the locked key, not its value (it may differ from 123).
+                <LockedValue
+                  label={t('settings.general.ntpPort')}
+                  value={`${ntpPort.path} (${t(`admin.locked.reasons.${ntpPort.reason}`)})`}
+                />
               ) : null}
             </div>
             {!values.ntp_server.trim() && values.fallback_server.trim() ? (

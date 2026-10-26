@@ -194,6 +194,9 @@ test.describe('Mühürleme', () => {
       { timeout: 10_000 },
     );
     await expect(progress).toContainText('Mühürleme denemesi başarısız; hata gün ayrıntısında.');
+    // An action changes no setting: not the sentence of a configuration change.
+    await expect(progress).toContainText('İşlem tamamlanamadı; hiçbir ayar değişmedi.');
+    await expect(progress).not.toContainText('önceki ayarlar geçerli.');
     await expect(day(page, /^11 Ekim 2026: Başarısız/)).toBeVisible();
 
     api.admin.agent = 'missing';

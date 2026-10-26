@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 import {
   cancellable,
+  isAction,
   isTerminal,
   localized,
   requestSectionState,
@@ -247,6 +248,8 @@ export function RequestProgress({
     );
 
   const state = requestSectionState(request.state);
+  // An action (seal, credit query, test, rebuild) changes no setting: its texts say so.
+  const action = isAction(request.kind);
   const label = lang === 'en' ? request.label_en : request.label_tr;
   const error = request.error ? localized(request.error) : null;
   const manual = lang === 'en' ? request.manual_steps_en : request.manual_steps_tr;
@@ -281,7 +284,11 @@ export function RequestProgress({
   if (state === 'waiting_for_agent')
     body.push(<p key="waiting">{t('admin.progress.waitingForAgent')}</p>);
   if (state === 'applying' || state === 'applied')
-    body.push(<p key="applying">{t(`admin.progress.${state}`)}</p>);
+    body.push(
+      <p key="applying">
+        {t(action ? 'admin.progress.actionRunning' : `admin.progress.${state}`)}
+      </p>,
+    );
   if (state === 'pending')
     body.push(
       <p key="pending" data-testid="hold-countdown">
@@ -293,7 +300,10 @@ export function RequestProgress({
           : t('admin.progress.held')}
       </p>,
     );
-  if (state === 'active') body.push(<p key="active">{t('admin.progress.active')}</p>);
+  if (state === 'active')
+    body.push(
+      <p key="active">{t(action ? 'admin.progress.actionDone' : 'admin.progress.active')}</p>,
+    );
   if (state === 'partially_active') {
     body.push(<p key="partly">{t('admin.progress.partiallyActive')}</p>);
     for (const service of notReloaded)
@@ -301,7 +311,10 @@ export function RequestProgress({
     for (const step of systemFailed)
       body.push(<p key={step}>{t(`admin.progress.systemFailed.${step.replace('.', '_')}`)}</p>);
   }
-  if (state === 'failed') body.push(<p key="failed">{t('admin.progress.failed')}</p>);
+  if (state === 'failed')
+    body.push(
+      <p key="failed">{t(action ? 'admin.progress.actionFailed' : 'admin.progress.failed')}</p>,
+    );
   if (state === 'conflict' || state === 'rejected')
     body.push(<p key="conflict">{t('admin.progress.conflict')}</p>);
   if (state === 'expired') body.push(<p key="expired">{t('admin.progress.expired')}</p>);

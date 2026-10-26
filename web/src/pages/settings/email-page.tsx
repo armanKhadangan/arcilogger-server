@@ -400,7 +400,11 @@ export function EmailPage() {
             probingText={t('settings.email.probing')}
           />
           <SmtpCaCard smtp={smtp} etag={section.etag} writable={section.writable} />
-          <TestEmailCard recipients={recipients} writable={section.writable && smtp.enabled} />
+          {/* The worker sends it (contract 2.9), so it works while ArciAdmin is not running. */}
+          <TestEmailCard
+            recipients={recipients}
+            writable={can('settings.manage') && smtp.enabled}
+          />
         </>
       ) : null}
       {settings.isError ? (

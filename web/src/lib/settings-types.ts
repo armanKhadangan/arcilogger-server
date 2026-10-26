@@ -615,6 +615,15 @@ export interface SourceBody {
   source: SourceConfig;
 }
 
+/**
+ * `POST /admin/config/sources/check`: the body of the addition (`POST`) or of the change
+ * (`PUT /sources/{name}`) it checks, and which of the two (contract gap WP5-1: "as the PUT"
+ * does not say; a check of a known name as an addition would refuse every change).
+ */
+export interface SourceCheckBody extends SourceBody {
+  operation: 'add' | 'update';
+}
+
 export interface RootBody {
   etag: string;
   upload_id: string;
@@ -652,7 +661,7 @@ export interface LeaseRebuildBody {
   to: DateString;
 }
 
-/** The body of each section's `PUT` (and of its `/check`). */
+/** The body of each section's `PUT` and of its `/check` (the sources: of the check only). */
 export interface SectionBodies {
   general: GeneralBody;
   tsa: TsaBody;
@@ -660,7 +669,7 @@ export interface SectionBodies {
   replica: ReplicaBody;
   retention: RetentionBody;
   backup: BackupBody;
-  sources: SourceBody;
+  sources: SourceCheckBody;
 }
 
 // -- /settings (2.13) -----------------------------------------------------------------------------

@@ -245,7 +245,9 @@ test.describe('Ayarlar → Genel', () => {
     await page.goto('/settings/general');
     const clock = page.getByTestId('settings-clock');
     await expect(clock.getByTestId('measured-offset')).toContainText('Son ölçülen sapma: 3,2 ms');
-    await expect(clock.getByTestId('locked-value')).toContainText('123 (UDP)');
+    // The locked port is named with its reason; the API does not send its value.
+    await expect(clock.getByTestId('locked-value')).toContainText('clock.ntp_port (hizmet ayarı)');
+    await expect(clock.getByTestId('locked-value')).not.toContainText('123');
     const ntp = page.getByLabel('Yerel saat kaynağı');
     const fallback = page.getByLabel('Yedek saat sunucusu');
     const save = page.getByRole('button', { name: 'Kaydet' });

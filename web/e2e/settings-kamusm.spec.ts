@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { expect, test, type Page } from '@playwright/test';
 
 import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
@@ -7,8 +9,9 @@ import { mockApi } from './mock-api';
  * Ayarlar → Kamu SM (contract 2.17): the wizard with the state of each step, the write-only
  * credentials (never pre-filled) with the re-authentication, the Zamane client (a known release
  * and one held for the console's approval), the root certificates and the legal roots, the
- * stamp test, the switch to production and back, the credit threshold, and the server's refusal
- * of a change that would stop a working sealer. The API is `mock-admin.ts`.
+ * stamp test, the switch to production and back, the credit threshold, the server's refusal of
+ * a change that would stop a working sealer, a held client on a later visit, and a sealing cause
+ * that no step shows. The API is `mock-admin.ts`.
  */
 
 const PEM = [
@@ -104,8 +107,12 @@ test.describe('Ayarlar → Kamu SM', () => {
     await page.getByRole('button', { name: 'Kaydet' }).click();
     const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
     const table = review.getByRole('table', { name: 'Kaydedilecek değişiklikler' });
+    // Both credentials are stored already: they are overwritten, not "kayıtlı → kayıtlı".
     await expect(table.getByRole('row', { name: /Kamu SM müşteri numarası/ })).toContainText(
-      'kayıtlı',
+      'kayıtlıyenisiyle değiştirilecek',
+    );
+    await expect(table.getByRole('row', { name: /Kamu SM parolası/ })).toContainText(
+      'kayıtlıyenisiyle değiştirilecek',
     );
     await expect(table).not.toContainText('100200300');
     await expect(review).toContainText('Kaydederken parolanızı yeniden girmeniz istenecek.');
@@ -127,9 +134,23 @@ test.describe('Ayarlar → Kamu SM', () => {
     // Back to "Kayıtlı ✓": nothing typed stays in the page.
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
     await expect(card).toContainText('web: tolga');
-    const answers = api.calls.filter((call) => call.path.startsWith('/admin/requests'));
-    expect(answers.length).toBeGreaterThan(0);
-    expect(JSON.stringify(api.admin.config())).not.toContain('yeni-gizli-deger');
+    // The new values went out with the check and the change only (the change twice: refused
+    // once for the password confirmation), and nothing on the page keeps them.
+    for (const secret of ['100200300', 'yeni-gizli-deger']) {
+      const carrying = api.calls
+        .filter((call) => JSON.stringify(call.body ?? null).includes(secret))
+        .map((call) => `${call.method} ${call.path}`);
+      expect(carrying).toEqual([
+        'POST /admin/config/tsa/check',
+        'PUT /admin/config/tsa',
+        'PUT /admin/config/tsa',
+      ]);
+      expect(await page.content()).not.toContain(secret);
+    }
+    const stored = await page.evaluate(() =>
+      JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]),
+    );
+    expect(stored).not.toContain('yeni-gizli-deger');
     expect(api.admin.sections.tsa.secrets['kamusm.customer']?.changed_by).toBe('web:tolga');
   });
 
@@ -174,6 +195,8 @@ test.describe('Ayarlar → Kamu SM', () => {
     page,
   }) => {
     const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    // The value the Kamu SM download page publishes for this file.
+    const digest = createHash('sha256').update('unreleased build').digest('hex');
     await page.goto('/settings/kamusm?step=zamane');
     await upload(
       page,
@@ -184,6 +207,11 @@ test.describe('Ayarlar → Kamu SM', () => {
     const preview = page.getByTestId('zamane-preview');
     await expect(preview).toContainText('Bilinmeyen sürüm');
     await expect(preview).toContainText('en erken 24 saat sonra');
+    // The file's own hash is not on the screen to be copied into the check, nor a command.
+    await expect(preview).toContainText('dosyanın değeri bu ekranda bilerek gösterilmez');
+    await expect(preview).not.toContainText(digest);
+    await expect(preview).not.toContainText('approve-jar');
+    await expect(preview.getByRole('button', { name: 'Kopyala' })).toHaveCount(0);
     const expected = preview.getByLabel('Kamu SM sayfasındaki SHA-256');
     await expected.fill('abc');
     await preview.getByRole('button', { name: 'Bu istemciyi kullan' }).click();
@@ -193,7 +221,6 @@ test.describe('Ayarlar → Kamu SM', () => {
     await expect(preview).toContainText('Girilen SHA-256 dosyanın değeriyle aynı değil.');
     expect(api.callsTo('POST', '/admin/config/tsa/zamane')).toHaveLength(0);
 
-    const digest = ((await preview.locator('pre').first().textContent()) ?? '').trim();
     await expected.fill(digest.toUpperCase().replace(/(.{8})/g, '$1 '));
     await preview.getByRole('button', { name: 'Bu istemciyi kullan' }).click();
     await confirmReauth(page);
@@ -203,11 +230,92 @@ test.describe('Ayarlar → Kamu SM', () => {
     });
     const staged = page.getByTestId('zamane-staged');
     await expect(staged).toContainText(`python -I -m arcilogger_core.admin approve-jar ${digest}`);
+    await expect(staged).toContainText("Kamu SM'den indirdiğiniz istemci .jar dosyasınınki");
     expect(api.callsTo('POST', '/admin/config/tsa/zamane').at(-1)?.body).toMatchObject({
       expected_sha256: digest,
     });
     // The client in use stays until the console approves the new one.
     await expect(page.getByTestId('zamane-current')).toContainText('kurulumla gelen');
+  });
+
+  test('a held client is shown again on a later visit and cancelled from this page', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    const digest = createHash('sha256').update('unreleased build').digest('hex');
+    await page.goto('/settings/kamusm?step=zamane');
+    await upload(
+      page,
+      'Zamane istemcisi dosyası',
+      'tss-client-console-9.9.jar',
+      'unreleased build',
+    );
+    await page.getByLabel('Kamu SM sayfasındaki SHA-256').fill(digest);
+    await page.getByRole('button', { name: 'Bu istemciyi kullan' }).click();
+    await confirmReauth(page);
+    await expect(page.getByTestId('request-state')).toHaveText('Bekletiliyor', {
+      timeout: 10_000,
+    });
+
+    // Another day: the held change is listed with its countdown, on any step of the wizard.
+    await page.goto('/settings/kamusm?step=credit');
+    const held = page.getByTestId('held-change');
+    await expect(held.getByTestId('request-state')).toHaveText('Bekletiliyor');
+    await expect(held.getByTestId('hold-countdown')).toContainText('kalan');
+    await expect(page.getByTestId('request-progress')).toHaveCount(1);
+    // The password was confirmed a moment ago, so the cancellation is not asked again.
+    await held.getByRole('button', { name: 'İptal et' }).click();
+    // Cancelled: the change leaves the configuration's held list, and the client its staging.
+    await expect(held).toHaveCount(0, { timeout: 10_000 });
+    expect(api.admin.sections.tsa.zamane.staged).toEqual([]);
+    await openStep(page, /^2\. Zamane istemcisi/);
+    await expect(page.getByTestId('zamane-staged')).toHaveCount(0);
+    const id = [...api.admin.requests.values()].find((item) => item.out.section === 'tsa')?.out.id;
+    expect(api.callsTo('DELETE', `/admin/requests/${id ?? ''}`).length).toBeGreaterThan(0);
+  });
+
+  test('a sealing cause that no step shows is named above the steps', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    api.admin.sections.tsa.seal_ready = { ok: false, causes: ['location'] };
+    await page.goto('/settings/kamusm');
+    const banner = page.getByTestId('seal-unplaced');
+    await expect(banner).toContainText('nedeni sihirbazın adımlarından birinde değil');
+    await expect(banner).toContainText(
+      'Ayar dosyasındaki secrets_dir ya da data_dir bu kurulumun klasörü değil',
+    );
+    await expect(page.getByTestId('seal-view')).toContainText('arcilogger.toml');
+  });
+
+  test('"Yeniden dene" after a failed switch to production tries the switch again', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', staleReauth: true });
+    api.admin.nextOutcome = 'failed';
+    await page.goto('/settings/kamusm?step=production');
+    await page.getByRole('button', { name: 'Üretim sunucusuna geç' }).click();
+    await page
+      .getByRole('dialog', { name: 'Üretim sunucusuna geçilsin mi?' })
+      .getByRole('button', { name: 'Üretim sunucusuna geç' })
+      .click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await confirmReauth(page);
+    const progress = page.getByTestId('request-progress');
+    await expect(progress.getByTestId('request-state')).toHaveText(
+      'Uygulanmadı, önceki ayarlar geçerli',
+      { timeout: 10_000 },
+    );
+    await progress.getByRole('button', { name: 'Yeniden dene' }).click();
+    await expect(review.getByRole('row', { name: /Zaman damgası sunucusu/ })).toContainText(
+      'testproduction',
+    );
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await applied(page);
+    await expect(page.getByTestId('tsa-server')).toHaveText(
+      'Şu an Kamu SM üretim sunucusu kullanılıyor.',
+    );
+    const put = api.callsTo('PUT', '/admin/config/tsa').map((call) => call.body);
+    expect(put.at(-1)).toMatchObject({ server: 'production' });
   });
 
   test('installs a root as a legal root and marks an installed one', async ({ page }) => {

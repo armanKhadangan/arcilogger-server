@@ -3,6 +3,8 @@ import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ChangeReviewDialog } from '@/components/admin/change-review';
+import { ConsoleCommand } from '@/components/admin/console-command';
+import { approveJarCommand } from '@/components/admin/console-commands';
 import { RequestProgress } from '@/components/admin/request-progress';
 import { UploadField } from '@/components/admin/upload-field';
 import { Alert } from '@/components/ui/alert';
@@ -24,35 +26,39 @@ import type { AdminPolicyOut, TsaSection, UploadPreview } from '@/lib/settings-t
 
 import { normalizeSha256 } from './kamusm-model';
 
-/** The console command that approves a staged Zamane client (D0-16). */
-function approveCommand(sha256: string): string {
-  return `python -I -m arcilogger_core.admin approve-jar ${sha256}`;
-}
-
 /** A request one of these steps started, followed until it ends. */
 function Started({ requestId }: { requestId: string | null }) {
   if (!requestId) return null;
   return <RequestProgress requestId={requestId} />;
 }
 
+/** The request a step started (kept by the page, so it is still shown after a step change). */
+export interface StepRequest {
+  requestId: string | null;
+  onStarted: (requestId: string) => void;
+}
+
 /**
  * Step 2 "Zamane istemcisi": the client in use and why it may run, clients waiting for their
  * approval, and the upload of a new one. A known Kamu SM release is used once the system task
  * has copied it; any other release waits for an administrator's `approve-jar` on the server
- * console, at the earliest after `jar_hold_hours`, against the SHA-256 typed here from the Kamu SM
- * download page.
+ * console, at the earliest after `jar_hold_hours`. Its SHA-256 is typed here from the Kamu SM
+ * download page: the screen does not show the file's own value before that, so the comparison
+ * with Kamu SM cannot become a copy of what the server says (R7, D0-16).
  */
 export function ZamaneStep({
   tsa,
   etag,
   writable,
   policy,
+  requestId,
+  onStarted,
 }: {
   tsa: TsaSection;
   etag: string;
   writable: boolean;
   policy: AdminPolicyOut;
-}) {
+} & StepRequest) {
   const { t } = useTranslation();
   const lang = currentLang();
   const id = useId();
@@ -62,7 +68,6 @@ export function ZamaneStep({
   const [expected, setExpected] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(null);
   const client = tsa.zamane;
   const zamane = preview?.zamane ?? null;
 
@@ -91,7 +96,7 @@ export function ZamaneStep({
           ...(sha ? { expected_sha256: sha } : {}),
         }),
       );
-      setRequestId(accepted.request_id);
+      onStarted(accepted.request_id);
       setPreview(null);
       setExpected('');
     } catch (error) {
@@ -134,10 +139,9 @@ export function ZamaneStep({
                 })
               : t('settings.kamusm.zamane.approve')}
           </p>
-          <CodeBlock
+          <ConsoleCommand
             label={t('settings.kamusm.zamane.command')}
-            code={approveCommand(item.sha256)}
-            wrap
+            command={approveJarCommand(item.sha256)}
           />
         </Alert>
       ))}
@@ -166,7 +170,9 @@ export function ZamaneStep({
               size: formatBytes(preview.size, lang),
             })}
           </p>
-          <CodeBlock label={t('settings.kamusm.zamane.sha')} code={preview.sha256} wrap />
+          {!zamane.accepted || zamane.known ? (
+            <CodeBlock label={t('settings.kamusm.zamane.sha')} code={preview.sha256} wrap />
+          ) : null}
           {!zamane.accepted ? (
             <Alert tone="danger">{zamane.reason ?? t('settings.kamusm.zamane.refused')}</Alert>
           ) : zamane.known ? (
@@ -175,17 +181,13 @@ export function ZamaneStep({
             </Alert>
           ) : (
             <>
+              {/* The console command follows under "Onay bekleyen istemci" once it is staged. */}
               <Alert
                 tone="warning"
                 assertive={false}
                 title={t('settings.kamusm.zamane.unknownTitle')}
               >
-                <p>{t('settings.kamusm.zamane.unknownBody', { hours: policy.jar_hold_hours })}</p>
-                <CodeBlock
-                  label={t('settings.kamusm.zamane.command')}
-                  code={approveCommand(preview.sha256)}
-                  wrap
-                />
+                {t('settings.kamusm.zamane.unknownBody', { hours: policy.jar_hold_hours })}
               </Alert>
               <Field
                 id={`${id}-expected`}
@@ -234,11 +236,13 @@ export function RootsStep({
   tsa,
   etag,
   writable,
+  requestId,
+  onStarted,
 }: {
   tsa: TsaSection;
   etag: string;
   writable: boolean;
-}) {
+} & StepRequest) {
   const { t } = useTranslation();
   const id = useId();
   const { withReauth } = useReauth();
@@ -250,7 +254,6 @@ export function RootsStep({
   const [marking, setMarking] = useState<string | null>(null);
   const [markConfirmed, setMarkConfirmed] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(null);
   const certificate = preview?.certificate ?? null;
   const legalCount = tsa.roots.filter((root) => root.legal).length;
 
@@ -266,7 +269,7 @@ export function RootsStep({
           confirmed: legal && confirmed,
         }),
       );
-      setRequestId(accepted.request_id);
+      onStarted(accepted.request_id);
       setPreview(null);
       setLegal(false);
       setConfirmed(false);
@@ -282,7 +285,7 @@ export function RootsStep({
       const accepted = await withReauth(() =>
         addLegal.mutateAsync({ etag, sha256: marking, confirmed: true }),
       );
-      setRequestId(accepted.request_id);
+      onStarted(accepted.request_id);
       setMarking(null);
     } catch (error) {
       if (!isReauthCancelled(error)) {

@@ -521,16 +521,18 @@
       "openAudit": "Open the audit log",
       "versions": {
         "title": "Configuration versions",
-        "description": "The configuration versions the administration service keeps, newest first. The last applied change is undone by opening its request and choosing \"Revert\".",
+        "description": "The configuration versions the administration service keeps, newest first. Each version is the settings from just before a change was applied; the settings in use are not listed. The time, user, settings and request of a row belong to that change. The last applied change is undone by opening its request and choosing \"Revert\".",
         "caption": "Kept configuration versions, newest first",
         "empty": "No version is kept yet.",
         "number": "Version",
         "paths": "Changed settings",
-        "current": "Current",
-        "secrets": "Secret",
+        "beforeLatest": "Before the latest change",
+        "restores": "Restore",
+        "withSecrets": "Settings; secrets are restored too",
+        "withoutSecrets": "Settings only; the secrets are no longer kept",
         "openRequest": "Open the request of version {{number}}",
         "console": "Server console",
-        "restore": "An older version is restored on the server console only; for example the previous one:",
+        "restore": "A version is restored on the server console only and brings back the settings from before its change. For example, to undo the latest change:",
         "command": "Server console command"
       },
       "diagnostics": {
@@ -602,8 +604,8 @@
           "false": "may not run"
         },
         "staged": "Client {{sha}} waits for its approval",
-        "approve": "This client is used once an administrator runs the command below on the server console.",
-        "approveAfter": "This client is used from {{time}} at the earliest, once an administrator runs the command below on the server console.",
+        "approve": "This client is used once an administrator runs the command below on the server console. Before running it, check that the SHA-256 in the command is that of the client .jar you downloaded from Kamu SM (the .jar inside the .zip, if it came as one).",
+        "approveAfter": "This client is used from {{time}} at the earliest, once an administrator runs the command below on the server console. Before running it, check that the SHA-256 in the command is that of the client .jar you downloaded from Kamu SM (the .jar inside the .zip, if it came as one).",
         "command": "Server console command",
         "upload": "Zamane client file",
         "uploadHint": "A .jar, or a .zip holding exactly one tss-client-console-*.jar; at most 25 MiB.",
@@ -612,9 +614,9 @@
         "refused": "The file was not accepted as a Zamane client.",
         "known": "A known Kamu SM release: {{release}}. It is used once the system task has copied it.",
         "unknownTitle": "Unknown release",
-        "unknownBody": "This release is not a known one. Enter the SHA-256 shown on the Kamu SM download page; the client is used {{hours}} hours later at the earliest, once an administrator approves it on the server console.",
+        "unknownBody": "This release is not a known one. Enter the SHA-256 from the Kamu SM download page; this screen deliberately does not show the file's value. The client is used {{hours}} hours later at the earliest, once an administrator approves it on the server console.",
         "expected": "SHA-256 from the Kamu SM page",
-        "expectedHint": "64 hexadecimal characters; spaces and case do not matter.",
+        "expectedHint": "The value on the Kamu SM download page: 64 hexadecimal characters; spaces and case do not matter.",
         "use": "Use this client"
       },
       "roots": {
@@ -711,7 +713,9 @@
         "title": "Sealing",
         "description": "The [seal] section and the expert [tsa] settings are changed on the server console only.",
         "ready": "The Seal task can seal with the current settings.",
-        "notReady": "The Seal task cannot seal with the current settings"
+        "notReady": "The Seal task cannot seal with the current settings",
+        "unplacedTitle": "The Seal task cannot seal; the cause is not one of the wizard's steps",
+        "unplacedBody": "This cannot be fixed in the wizard; it must be resolved on the server console."
       },
       "causes": {
         "zamane_jar": "The Zamane client is not set or may not run.",
@@ -720,13 +724,13 @@
         "secret_store": "The secret store cannot be read.",
         "provider": "The time-stamp provider's settings are invalid.",
         "executable": "Java or the Zamane client is not in a trusted location, or its hash is not recognised.",
-        "location": "A program file is outside the trusted locations."
+        "location": "secrets_dir or data_dir in the configuration is not this installation's folder; sealing does not run with it. Correct arcilogger.toml on the server console."
       },
       "errors": {
         "customer": "The customer number must be 1–64 characters without spaces or control characters.",
         "password": "The password must be 1–128 characters without control characters.",
         "sha": "Enter a SHA-256 value of 64 hexadecimal characters.",
-        "shaMismatch": "The SHA-256 you entered does not match the file's."
+        "shaMismatch": "The SHA-256 you entered does not match the file's. Download the file from the Kamu SM page again or compare the value again."
       }
     },
     "sources": {
@@ -3119,9 +3123,11 @@
       "waitingForAgent": "The administration service has not answered yet; it may be stopped. The request waits until it expires.",
       "applying": "Applying…",
       "applied": "Written; the services are loading the new settings.",
+      "actionRunning": "Running…",
       "heldUntil": "This change is held: it is applied at {{time}} ({{left}} left). It can be cancelled until then.",
       "held": "This change is held; it is applied when the hold ends.",
       "active": "Applied: the services run with the new settings.",
+      "actionDone": "Done.",
       "partiallyActive": "Partly applied: the configuration was written, but not everything has taken it.",
       "notReloaded": "{{service}} has not loaded the new settings yet.",
       "systemFailed": {
@@ -3130,6 +3136,7 @@
         "jar_promotion": "The Zamane client could not be approved."
       },
       "failed": "Not applied, the previous settings are in use.",
+      "actionFailed": "The action did not complete; no setting was changed.",
       "conflict": "Another change was made; reload the page.",
       "expired": "The request expired; nothing changed.",
       "cancelled": "Cancelled; nothing changed.",
@@ -3230,6 +3237,9 @@
         "collector": "log collector"
       }
     },
+    "console": {
+      "refused": "The value the server reported is not in the expected form, so no command is shown. Check the state on the server console."
+    },
     "review": {
       "title": "Confirm the changes",
       "description": "The server's check is below. When you confirm, the change goes to the administration service.",
@@ -3241,7 +3251,8 @@
       "secret": {
         "set": "stored",
         "unset": "not stored",
-        "deleted": "deleted"
+        "deleted": "deleted",
+        "replaced": "will be replaced with a new one"
       },
       "effects": "Effect",
       "warnings": "Warnings",

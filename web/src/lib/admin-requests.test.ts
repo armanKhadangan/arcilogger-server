@@ -8,6 +8,7 @@ import {
   errorList,
   fieldProblems,
   inFlight,
+  isAction,
   isTerminal,
   REQUEST_POLL_FAST_FOR_MS,
   REQUEST_POLL_FAST_MS,
@@ -172,6 +173,19 @@ describe('following a request (contract 2.10)', () => {
       succeeded: 'active',
       timed_out: 'failed',
     });
+  });
+});
+
+describe('actions and configuration changes', () => {
+  it('an action of a task or of the worker changes no setting', () => {
+    expect(KINDS.filter(isAction)).toEqual([
+      'action.seal',
+      'action.credit',
+      'action.tsa_test',
+      'action.replica_test',
+      'worker.test_email',
+      'worker.lease_rebuild',
+    ]);
   });
 });
 

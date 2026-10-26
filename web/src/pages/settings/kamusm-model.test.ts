@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { SECRET_KEPT } from '@/components/admin/secret-edit';
 import type { TsaSection } from '@/lib/settings-types';
+import en from '@/locales/en.json';
+import tr from '@/locales/tr.json';
 
 import {
+  SEAL_CAUSES,
   STEPS,
   causeKey,
   isStep,
@@ -9,6 +15,7 @@ import {
   stepStatus,
   tsaBody,
   tsaForm,
+  unplacedCauses,
   validateCustomer,
   validateNumbers,
   validatePassword,
@@ -52,6 +59,27 @@ function tsa(overrides: Partial<TsaSection> = {}): TsaSection {
 }
 
 const KEPT: Credentials = { customer: SECRET_KEPT, password: SECRET_KEPT, clear: false };
+
+/** The keys of `CONFIG_CAUSES` in `core/src/arcilogger_core/seal.py` (the tests run from `web/`). */
+function coreCauses(): string[] {
+  const source = readFileSync(
+    join(process.cwd(), '..', 'core', 'src', 'arcilogger_core', 'seal.py'),
+    'utf8',
+  );
+  const block = /^CONFIG_CAUSES[^=]*= \{\n([\s\S]*?)^\}/m.exec(source)?.[1] ?? '';
+  return [...block.matchAll(/^ {4}"([a-z-]+)": \(/gm)].map((match) => match[1] ?? '');
+}
+
+/** The text of a dotted key in a locale file, `undefined` when there is none. */
+function text(locale: object, key: string): unknown {
+  return key
+    .split('.')
+    .reduce<unknown>(
+      (node, part) =>
+        node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined,
+      locale,
+    );
+}
 
 describe('the Kamu SM wizard (contract 2.17)', () => {
   it('knows its seven steps', () => {
@@ -191,5 +219,35 @@ describe('the Kamu SM wizard (contract 2.17)', () => {
     expect(normalizeSha256('abc')).toBeNull();
     expect(causeKey('zamane-jar')).toBe('settings.kamusm.causes.zamane_jar');
     expect(causeKey('secret-store')).toBe('settings.kamusm.causes.secret_store');
+  });
+
+  it('every sealing cause of the core has a Turkish and an English text', () => {
+    const core = coreCauses();
+    expect(core).toEqual(expect.arrayContaining(['zamane-jar', 'credentials', 'roots']));
+    expect(SEAL_CAUSES).toEqual(expect.arrayContaining(core));
+    for (const cause of SEAL_CAUSES) {
+      expect(text(tr, causeKey(cause)), cause).toEqual(expect.any(String));
+      expect(text(en, causeKey(cause)), cause).toEqual(expect.any(String));
+    }
+    // `location` is the refusal of a moved secret store or data folder (D0-2, WP2-1).
+    for (const locale of [tr, en]) {
+      expect(text(locale, causeKey('location'))).toMatch(/secrets_dir.*data_dir/);
+      expect(text(locale, causeKey('location'))).toContain('arcilogger.toml');
+    }
+  });
+
+  it('names the causes no step shows, so the steps cannot all read "Tamam" unexplained', () => {
+    const stopped = tsa({
+      seal_ready: { ok: false, causes: ['location', 'roots', 'secret-store', 'provider'] },
+    });
+    expect(unplacedCauses(stopped)).toEqual(['location', 'secret-store', 'provider']);
+    expect(STEPS.some((step) => stepStatus(step, stopped, false) === 'error')).toBe(true);
+    const moved = tsa({ seal_ready: { ok: false, causes: ['location'] } });
+    expect(STEPS.map((step) => stepStatus(step, moved, false))).not.toContain('error');
+    expect(unplacedCauses(moved)).toEqual(['location']);
+    expect(unplacedCauses(tsa())).toEqual([]);
+    expect(
+      unplacedCauses(tsa({ seal_ready: { ok: false, causes: ['executable', 'zamane-jar'] } })),
+    ).toEqual([]);
   });
 });

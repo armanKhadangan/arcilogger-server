@@ -18,7 +18,7 @@ import type { AdminCheck, Change } from '@/lib/settings-types';
 
 import { effectLabel, pathLabel } from './labels';
 
-function SecretCell({ value }: { value: 'set' | 'unset' | 'deleted' }) {
+function SecretCell({ value }: { value: 'set' | 'unset' | 'deleted' | 'replaced' }) {
   const { t } = useTranslation();
   return <span className="italic">{t(`admin.review.secret.${value}`)}</span>;
 }
@@ -31,7 +31,14 @@ function ChangeCells({ change }: { change: Change }) {
           <SecretCell value={change.old} />
         </td>
         <td className="px-3 py-2">
-          <SecretCell value={change.new === 'set' && change.changed ? 'set' : change.new} />
+          {/* A stored credential overwritten by a new one is not "kayıtlı → kayıtlı". */}
+          <SecretCell
+            value={
+              change.old === 'set' && change.new === 'set' && change.changed
+                ? 'replaced'
+                : change.new
+            }
+          />
         </td>
       </>
     );

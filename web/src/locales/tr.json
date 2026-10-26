@@ -521,16 +521,18 @@
       "openAudit": "Denetim kaydını aç",
       "versions": {
         "title": "Yapılandırma sürümleri",
-        "description": "Yönetim hizmetinin sakladığı yapılandırma sürümleri, en yeni önce. Son uygulanan değişiklik, isteği açılıp \"Geri al\" ile geri alınır.",
+        "description": "Yönetim hizmetinin sakladığı yapılandırma sürümleri, en yeni önce. Her sürüm, bir değişiklik uygulanmadan hemen önceki ayarlardır; kullanımdaki ayarlar listede yer almaz. Bir satırın zamanı, kullanıcısı, ayarları ve isteği o değişikliğe aittir. Son uygulanan değişiklik, isteği açılıp \"Geri al\" ile geri alınır.",
         "caption": "Saklanan yapılandırma sürümleri, en yeni önce",
         "empty": "Henüz saklanan sürüm yok.",
         "number": "Sürüm",
         "paths": "Değişen ayarlar",
-        "current": "Geçerli",
-        "secrets": "Gizli bilgi",
+        "beforeLatest": "Son değişiklikten önceki",
+        "restores": "Geri yükleme",
+        "withSecrets": "Ayarlar; gizli bilgiler de geri yüklenir",
+        "withoutSecrets": "Yalnızca ayarlar; gizli bilgiler artık saklanmıyor",
         "openRequest": "{{number}} numaralı sürümün isteğini aç",
         "console": "Sunucu konsolu",
-        "restore": "Daha eski bir sürüm yalnızca sunucu konsolundan geri yüklenir; örneğin bir önceki sürüm için:",
+        "restore": "Bir sürüm yalnızca sunucu konsolundan geri yüklenir ve o sürümün değişikliğinden önceki ayarlara döner. Örneğin son değişikliği geri almak için:",
         "command": "Sunucu konsolu komutu"
       },
       "diagnostics": {
@@ -602,8 +604,8 @@
           "false": "çalıştırılamaz"
         },
         "staged": "Onay bekleyen istemci {{sha}}",
-        "approve": "Bu istemci, bir yönetici sunucu konsolunda aşağıdaki komutu çalıştırınca kullanılır.",
-        "approveAfter": "Bu istemci en erken {{time}} itibarıyla, bir yönetici sunucu konsolunda aşağıdaki komutu çalıştırınca kullanılır.",
+        "approve": "Bu istemci, bir yönetici sunucu konsolunda aşağıdaki komutu çalıştırınca kullanılır. Çalıştırmadan önce komuttaki SHA-256 değerinin Kamu SM'den indirdiğiniz istemci .jar dosyasınınki olduğunu denetleyin (bir .zip içinde geldiyse içindeki .jar).",
+        "approveAfter": "Bu istemci en erken {{time}} itibarıyla, bir yönetici sunucu konsolunda aşağıdaki komutu çalıştırınca kullanılır. Çalıştırmadan önce komuttaki SHA-256 değerinin Kamu SM'den indirdiğiniz istemci .jar dosyasınınki olduğunu denetleyin (bir .zip içinde geldiyse içindeki .jar).",
         "command": "Sunucu konsolu komutu",
         "upload": "Zamane istemcisi dosyası",
         "uploadHint": ".jar ya da tek bir tss-client-console-*.jar içeren .zip; en çok 25 MiB.",
@@ -612,9 +614,9 @@
         "refused": "Dosya bir Zamane istemcisi olarak kabul edilmedi.",
         "known": "Bilinen Kamu SM sürümü: {{release}}. Sistem görevi kopyaladıktan sonra kullanılır.",
         "unknownTitle": "Bilinmeyen sürüm",
-        "unknownBody": "Bu sürüm bilinen sürümler arasında değil. Kamu SM indirme sayfasındaki SHA-256 değerini girin; istemci en erken {{hours}} saat sonra, bir yönetici sunucu konsolunda onaylayınca kullanılır.",
+        "unknownBody": "Bu sürüm bilinen sürümler arasında değil. SHA-256 değerini Kamu SM indirme sayfasından alıp girin; dosyanın değeri bu ekranda bilerek gösterilmez. İstemci en erken {{hours}} saat sonra, bir yönetici sunucu konsolunda onaylayınca kullanılır.",
         "expected": "Kamu SM sayfasındaki SHA-256",
-        "expectedHint": "64 onaltılık karakter; boşluk ve büyük/küçük harf önemli değil.",
+        "expectedHint": "Kamu SM indirme sayfasındaki değer: 64 onaltılık karakter; boşluk ve büyük/küçük harf önemli değil.",
         "use": "Bu istemciyi kullan"
       },
       "roots": {
@@ -711,7 +713,9 @@
         "title": "Mühürleme",
         "description": "[seal] bölümü ve uzman [tsa] ayarları yalnızca sunucu konsolundan değiştirilir.",
         "ready": "Mühürleme görevi geçerli ayarlarla mühürleyebilir.",
-        "notReady": "Mühürleme görevi geçerli ayarlarla mühürleyemez"
+        "notReady": "Mühürleme görevi geçerli ayarlarla mühürleyemez",
+        "unplacedTitle": "Mühürleme görevi mühürleyemez; nedeni sihirbazın adımlarından birinde değil",
+        "unplacedBody": "Bu sorun sihirbazdan düzeltilemez; sunucu konsolunda giderilmelidir."
       },
       "causes": {
         "zamane_jar": "Zamane istemcisi ayarlı değil ya da çalıştırılamıyor.",
@@ -720,13 +724,13 @@
         "secret_store": "Gizli bilgi deposu okunamıyor.",
         "provider": "Zaman damgası sağlayıcısının ayarları geçersiz.",
         "executable": "Java ya da Zamane istemcisi güvenilir konumda değil ya da değeri tanınmıyor.",
-        "location": "Bir program dosyası güvenilir konumların dışında."
+        "location": "Ayar dosyasındaki secrets_dir ya da data_dir bu kurulumun klasörü değil; mühürleme bu ayarla çalışmaz. Sunucu konsolunda arcilogger.toml'u düzeltin."
       },
       "errors": {
         "customer": "Müşteri numarası 1–64 karakter olmalı ve boşluk ya da denetim karakteri içermemeli.",
         "password": "Parola 1–128 karakter olmalı ve denetim karakteri içermemeli.",
         "sha": "64 onaltılık karakterlik bir SHA-256 değeri girin.",
-        "shaMismatch": "Girilen SHA-256 dosyanın değeriyle aynı değil."
+        "shaMismatch": "Girilen SHA-256 dosyanın değeriyle aynı değil. Dosyayı Kamu SM sayfasından yeniden indirin ya da değeri yeniden karşılaştırın."
       }
     },
     "sources": {
@@ -3119,9 +3123,11 @@
       "waitingForAgent": "Yönetim hizmeti henüz yanıt vermedi; hizmet durmuş olabilir. İsteğin süresi dolana kadar beklenir.",
       "applying": "Uygulanıyor…",
       "applied": "Yazıldı; hizmetler yeni ayarı yüklüyor.",
+      "actionRunning": "Çalışıyor…",
       "heldUntil": "Bu değişiklik bekletiliyor: {{time}} tarihinde uygulanır (kalan {{left}}). O zamana kadar iptal edilebilir.",
       "held": "Bu değişiklik bekletiliyor; bekletme süresi sonunda uygulanır.",
       "active": "Uygulandı: hizmetler yeni ayarla çalışıyor.",
+      "actionDone": "Tamamlandı.",
       "partiallyActive": "Kısmen uygulandı: ayar dosyası yazıldı, ancak her şey yeni ayarı almadı.",
       "notReloaded": "{{service}} yeni ayarı henüz almadı.",
       "systemFailed": {
@@ -3130,6 +3136,7 @@
         "jar_promotion": "Zamane istemcisi onaylanamadı."
       },
       "failed": "Uygulanmadı, önceki ayarlar geçerli.",
+      "actionFailed": "İşlem tamamlanamadı; hiçbir ayar değişmedi.",
       "conflict": "Başka bir değişiklik yapıldı; sayfayı yenileyin.",
       "expired": "İsteğin süresi doldu; hiçbir şey değişmedi.",
       "cancelled": "İptal edildi; hiçbir şey değişmedi.",
@@ -3230,6 +3237,9 @@
         "collector": "log toplayıcı"
       }
     },
+    "console": {
+      "refused": "Sunucunun bildirdiği değer beklenen biçimde değil; bu yüzden komut gösterilmiyor. Durumu sunucu konsolunda denetleyin."
+    },
     "review": {
       "title": "Değişiklikleri onaylayın",
       "description": "Sunucunun ön denetimi aşağıda. Onayladığınızda değişiklik yönetim hizmetine iletilir.",
@@ -3241,7 +3251,8 @@
       "secret": {
         "set": "kayıtlı",
         "unset": "kayıtlı değil",
-        "deleted": "silinecek"
+        "deleted": "silinecek",
+        "replaced": "yenisiyle değiştirilecek"
       },
       "effects": "Etkisi",
       "warnings": "Uyarılar",

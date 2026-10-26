@@ -24,6 +24,7 @@ import type {
   Change,
   CodeMessage,
   FieldProblem,
+  RequestKind,
   RequestState,
   RequestStep,
   SecretChange,
@@ -56,6 +57,11 @@ export const TERMINAL_STATES: ReadonlySet<RequestState> = new Set<RequestState>(
 
 export function isTerminal(state: RequestState): boolean {
   return TERMINAL_STATES.has(state);
+}
+
+/** An action of the agent's tasks or of the worker (`action.*`, `worker.*`): no setting changes. */
+export function isAction(kind: RequestKind): boolean {
+  return kind.startsWith('action.') || kind.startsWith('worker.');
 }
 
 /**

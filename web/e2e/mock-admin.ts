@@ -747,7 +747,11 @@ const BODIES: Record<string, { known: string[]; required: string[] }> = {
   'POST /admin/config/retention/check': { known: RETENTION_KEYS, required: RETENTION_REQUIRED },
   'PUT /admin/config/backup': { known: BACKUP_KEYS, required: BACKUP_KEYS },
   'POST /admin/config/backup/check': { known: BACKUP_KEYS, required: BACKUP_KEYS },
-  'POST /admin/config/sources/check': { known: ['etag', 'source'], required: ['etag', 'source'] },
+  // WP5-1: the check names whether it is the addition or the change of the source.
+  'POST /admin/config/sources/check': {
+    known: ['etag', 'source', 'operation'],
+    required: ['etag', 'source', 'operation'],
+  },
   'PATCH /settings': { known: ['changes'], required: ['changes'] },
   'POST /admin/actions/tsa-test': { known: ['confirm_credit'], required: [] },
   'POST /admin/actions/replica-test': { known: [], required: [] },
@@ -946,13 +950,16 @@ export class AdminMock {
   readonly sealed = new Map<string, { serial: string; gen_time: string; sealed_at: string }>();
   /** Checks "Kontör sorgula" added to the credit history. */
   readonly creditChecks: CreditCheck[] = [];
-  /** The kept configurations, newest first (16: the installer's). */
+  /**
+   * The kept configurations, newest first (contract 2.4.10): version *n* is the pair from before
+   * its request was applied (16: before a restore on the server console).
+   */
   readonly versions: ConfigVersion[] = [
     {
       n: 16,
       at: '2026-09-30T09:12:00+03:00',
       request_id: null,
-      actor: 'installer',
+      actor: 'console',
       paths: [],
       has_secrets: true,
     },
@@ -1393,7 +1400,10 @@ export class AdminMock {
     ];
   }
 
-  /** A configuration change applied: a new version keeps the pair before it. */
+  /**
+   * A configuration change applied: a new version keeps the pair from before it. The newest 20
+   * configurations are kept, and `secrets.json` only with the newest 5 (`has_secrets`).
+   */
   private recordVersion(item: MockRequest, account: MockUser): void {
     const n = (this.versions[0]?.n ?? 16) + 1;
     this.versions.unshift({
@@ -1402,8 +1412,10 @@ export class AdminMock {
       request_id: item.out.id,
       actor: account.username,
       paths: Object.keys(item.out.changes),
-      has_secrets: Object.values(item.out.changes).some((change) => 'secret' in change),
+      has_secrets: true,
     });
+    this.versions.splice(20);
+    for (const version of this.versions.slice(5)) version.has_secrets = false;
     item.out.version = { number: n, from: sha256(`${n}-from`), to: sha256(`${n}-to`) };
   }
 
@@ -2052,16 +2064,25 @@ export class AdminMock {
     mode: 'check' | 'add' | 'update',
     path: string | null,
   ): Answer {
-    const body = call.body as { etag?: string; source?: unknown };
+    const body = call.body as { etag?: string; source?: unknown; operation?: unknown };
+    if (mode === 'check' && body.operation !== 'add' && body.operation !== 'update')
+      return host.error(422, 'validation_error', [
+        {
+          loc: ['body', 'operation'],
+          type: 'literal_error',
+          msg: "Input should be 'add' or 'update'",
+        },
+      ]);
+    // The check says which change it is (WP5-1): an addition, or the change of a known name.
+    const operation = mode === 'check' ? (body.operation as 'add' | 'update') : mode;
     const name =
       mode === 'update' ? path : ((body.source as { name?: unknown } | undefined)?.name ?? null);
     const existing = this.sections.sources.find((item) => item.name === name) ?? null;
-    if (mode === 'update' && !existing) {
+    if (operation === 'update' && !existing) {
       const account = host.requirePermission(call, 'sources.manage');
       return Array.isArray(account) ? account : this.reject('source_not_found');
     }
-    // A check of a known name is the check of its change, else of its addition.
-    const editing = mode === 'add' ? null : (existing?.name ?? null);
+    const editing = operation === 'add' ? null : (existing?.name ?? null);
     const disabling =
       existing !== null &&
       existing.enabled &&
