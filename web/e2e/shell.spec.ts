@@ -118,12 +118,12 @@ test.describe('application shell', () => {
     expect(caption.y).toBeGreaterThanOrEqual(product.y + product.height - 1);
   });
 
-  test('no global search box or time range while no page uses them', async ({ page }) => {
-    // Admin (has search.read): the search page is still a placeholder (M2).
-    for (const path of ['/', '/audit', '/lookup', '/evidence', '/sealing']) {
+  test('the global search box is on every page; no time range outside Arama', async ({ page }) => {
+    // Admin (has search.read): the box leads to Arama, the only page with a time range.
+    for (const path of ['/', '/sources', '/live', '/audit', '/lookup', '/evidence', '/sealing']) {
       await page.goto(path);
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-      await expect(page.getByRole('search')).toHaveCount(0);
+      await expect(page.locator('header').getByRole('search')).toHaveCount(1);
       await expect(
         page.locator('header').getByRole('button', { name: /^Tarih aralığı/ }),
       ).toHaveCount(0);
@@ -136,6 +136,22 @@ test.describe('application shell', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Uyum Durumu' })).toBeVisible();
     await expectNoA11yViolations(page);
   });
+});
+
+test.describe('global search box', () => {
+  for (const [username, shown] of [
+    ['tolga', true],
+    ['ayse.yilmaz', true],
+    ['mehmet.kaya', false],
+    ['zeynep', false],
+  ] as const) {
+    test(`only with search.read — ${username}`, async ({ page }) => {
+      await mockApi(page, { signedInAs: username });
+      await page.goto('/');
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      await expect(page.locator('header').getByRole('search')).toHaveCount(shown ? 1 : 0);
+    });
+  }
 });
 
 test.describe('organisation name in the sidebar', () => {

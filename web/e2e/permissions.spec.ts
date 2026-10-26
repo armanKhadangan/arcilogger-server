@@ -88,6 +88,9 @@ for (const [username, uiKit] of [
 test('pages outside the role stay closed when opened by URL', async ({ page }) => {
   const api = await mockApi(page, { signedInAs: 'mehmet.kaya' });
   for (const path of [
+    '/sources',
+    '/live',
+    '/search',
     '/audit',
     '/settings/users',
     '/settings/general',
@@ -114,6 +117,9 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
   expect(
     api.calls.filter((call) =>
       [
+        '/sources',
+        '/live',
+        '/search',
         '/audit',
         '/users',
         '/lookup',
@@ -131,16 +137,38 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
   ).toEqual([]);
 });
 
-test('the report viewer cannot open the 5651, evidence or sealing pages either', async ({
+test('the report viewer cannot open the 5651, evidence, sealing or log pages either', async ({
   page,
 }) => {
   await mockApi(page, { signedInAs: 'zeynep' });
-  for (const path of ['/lookup/1', '/evidence?lookup=1', '/sealing?day=2026-10-04']) {
+  for (const path of [
+    '/lookup/1',
+    '/evidence?lookup=1',
+    '/sealing?day=2026-10-04',
+    '/sources',
+    '/live',
+    '/search',
+  ]) {
     await page.goto(path);
     await expect(
       page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
     ).toBeVisible();
   }
+});
+
+test('the auditor opens Arama and Canlı Akış, not Kaynaklar (administrators only)', async ({
+  page,
+}) => {
+  const api = await mockApi(page, { signedInAs: 'ayse.yilmaz' });
+  for (const [path, heading] of [
+    ['/search', 'Arama'],
+    ['/live', 'Canlı Akış'],
+    ['/sources', 'Bu sayfa için yetkiniz yok'],
+  ] as const) {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+  }
+  expect(api.calls.filter((call) => call.path.startsWith('/sources'))).toEqual([]);
 });
 
 test('the auditor reads the audit log but cannot manage users', async ({ page }) => {

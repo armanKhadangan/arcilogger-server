@@ -1,0 +1,5 @@
+{
+  "search": {
+    "description": "Search the records by IP, MAC, domain, user and text; every result leads to its raw line."
+  }
+}

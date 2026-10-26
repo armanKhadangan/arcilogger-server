@@ -1,0 +1,5 @@
+{
+  "sources": {
+    "description": "The state of the devices that send logs: last message, volume and parse failures. Sources are edited in Settings → Sources."
+  }
+}
