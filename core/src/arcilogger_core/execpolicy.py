@@ -159,6 +159,27 @@ def _local_path(text: str, what: str) -> Path:
     return resolved
 
 
+def _is_file(path: Path, text: str, what: str) -> bool:
+    """``path.is_file()``; a file that cannot be read is refused (Python 3.12 raises "access
+    denied" from ``is_file`` on Windows instead of answering False)."""
+    try:
+        return path.is_file()
+    except OSError as exc:
+        raise ExecutableRefusedError(what, f"{text!r} cannot be read ({_reason(exc)})") from exc
+
+
+def _sha256_of(path: Path, text: str, what: str) -> str:
+    """The file's SHA-256; a file that cannot be read is refused (fail closed)."""
+    try:
+        return file_sha256(path)
+    except OSError as exc:
+        raise ExecutableRefusedError(what, f"{text!r} cannot be read ({_reason(exc)})") from exc
+
+
+def _reason(exc: OSError) -> str:
+    return f"{type(exc).__name__}: {exc.strerror or exc}"
+
+
 def _inside(path: Path, roots: Collection[str]) -> bool:
     for root in roots:
         base = Path(root)
@@ -196,11 +217,11 @@ def check_executable(
     resolved = _local_path(text, what)
     if allowed and resolved.name.lower() not in allowed:
         raise ExecutableRefusedError(what, f"{text!r} is not one of {sorted(allowed)}")
-    if not resolved.is_file():
+    if not _is_file(resolved, text, what):
         raise ExecutableRefusedError(what, f"{text!r} is not a file")
     if _inside(resolved, anchors.policy.executable_roots):
         return str(resolved)
-    if _trusted_here(resolved, file_sha256(resolved), anchors.policy):
+    if _trusted_here(resolved, _sha256_of(resolved, text, what), anchors.policy):
         return str(resolved)
     raise ExecutableRefusedError(
         what, f"{text!r} is neither in policy.executable_roots nor recorded with its SHA-256"
@@ -258,9 +279,9 @@ def check_zamane_jar(path: Path | str, anchors: TrustAnchors) -> CheckedJar:
     root = folders.root.resolve()
     if not resolved.is_relative_to(root) or resolved.is_relative_to(folders.staging.resolve()):
         raise ExecutableRefusedError(what, f"{str(path)!r} is not an installed client in {root}")
-    if not resolved.is_file():
+    if not _is_file(resolved, str(path), what):
         raise ExecutableRefusedError(what, f"{str(path)!r} is not a file")
-    digest = file_sha256(resolved)
+    digest = _sha256_of(resolved, str(path), what)
     if (
         digest in KNOWN_RELEASES
         or digest in _approved_hashes(anchors)

@@ -322,6 +322,32 @@ def installed_jar(machine: Machine, content: bytes = b"PK\x03\x04 zamane client"
     return jar
 
 
+@pytest.mark.parametrize("denied", ["stat", "open"])
+def test_a_program_that_cannot_be_read_is_refused(
+    machine: Machine, monkeypatch: pytest.MonkeyPatch, denied: str
+) -> None:
+    """Windows: an account without a right on a file gets "access denied" from ``Path.is_file``
+    (Python 3.12 raises it instead of answering False) and from hashing it. The checks refuse
+    such a program or client (fail closed) instead of raising an OSError no caller expects (the
+    API's settings page, the Seal task, the backup)."""
+    java = program(machine.outside / "java" / "bin" / "java.exe")
+    trusted = TrustedExecutable(path=str(java), sha256=sha(java))
+    jar = installed_jar(machine)
+    real = getattr(Path, denied)
+
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self in (java, jar):
+            raise PermissionError(13, "Access is denied", str(self))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, denied, refuse)
+    anchors = machine.anchors(trusted_executables=(trusted,))
+    assert "cannot be read (PermissionError: Access is denied)" in refusal(
+        check_java, (str(java),), anchors
+    )
+    assert "cannot be read" in refusal(check_zamane_jar, jar, anchors)
+
+
 def test_the_installer_recorded_jar_is_accepted(machine: Machine) -> None:
     jar = installed_jar(machine)
     checked = check_zamane_jar(jar, machine.anchors())
