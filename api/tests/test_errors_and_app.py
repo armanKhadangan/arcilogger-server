@@ -180,6 +180,7 @@ def test_serve_uses_configuration(
     assert seen["reload"] is False
     assert seen["proxy_headers"] is True
     assert seen["forwarded_allow_ips"] == "127.0.0.1"
+    assert seen["timeout_graceful_shutdown"] == 5  # an open live tail never holds a stop
     assert isinstance(seen["app"], FastAPI)
     assert cli.main(["--config", str(config), "serve", "--port", "9000"]) == 0
     assert seen["port"] == 9000
