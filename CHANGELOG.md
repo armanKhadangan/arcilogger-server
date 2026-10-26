@@ -54,7 +54,8 @@ the developer on the owner's delegation; the owner may change it (the ADR lists 
   install and upgrade, `Set-ArciFirewall.ps1 -SyncFromConfig` updating rules in place;
   `-SourceNetwork`, `-DisableBrowserAdministration`; rollback to a version without ArciAdmin
   removes it. The Windows end-to-end job covers seal now through Caddy, a site name change, a new
-  source reaching both firewall rules, the credit query and the rollback.
+  source reaching both firewall rules, the credit query and the rollback. A dry run whose plan
+  trips over a problem its preflight already reported returns 2 like the real run (was 3).
 - **Stays on the console:** installation and upgrade, PostgreSQL, `[database]`, `[api]`,
   `[collector]`, `[ingest]`, `[worker]`, `[seal]`, paths and executables, removing a root or a
   legal fingerprint, `admin\policy.json`, the firewall's administrator addresses, the database

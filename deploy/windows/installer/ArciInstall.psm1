@@ -1834,7 +1834,9 @@ function Get-ArciAclPlan {
         parent disabled), Aces and Audit. Pure data, no system calls: the dry run prints it and the
         tests check it on any platform. Parents come before their children (Set-ArciVaultAcl.ps1
         creates a missing folder in this order). "Read" of a folder is ReadAndExecute (list and
-        traverse), of a file Read.
+        traverse), of a file Read. The entries go down the pipeline one by one, so
+        "Get-ArciAclPlan | Where-Object { $_.Path -eq ... }" selects entries: written as one array,
+        $_ would be the whole plan, $_.Path every path, and Set-ArciAclEntry would get them all.
 
         - Collector (the only network-facing Python service): reads and writes the spool but has no
           Delete right there, so it cannot delete or rename raw evidence (it can write into a
@@ -2137,7 +2139,7 @@ function Get-ArciAclPlan {
         (New-Entry ($DataRoot + $p + 'backups' + $p + 'scheduled') 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify))))
     )
-    , $entries
+    $entries
 }
 
 function Get-ArciAceFlags {

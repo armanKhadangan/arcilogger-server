@@ -3308,6 +3308,13 @@ try {
 catch {
     Write-Host ("HATA [error]: {0}" -f $_.Exception.Message) -ForegroundColor Red
     Write-Host ($_.ScriptStackTrace)
+    if ($script:IsDryRun -and $script:Failures.Count -gt 0) {
+        # A dry run plans on past its preflight failures and can then trip over what they reported
+        # (an arcilogger.toml the venv's Python cannot read): the real run stops in the preflight
+        # (exit 2) and never gets here, so the dry run returns that too, not 3 (a failed change).
+        Add-PlanItem -Id 'plan.incomplete' -Status 'fail' -Text $_.Exception.Message
+        Stop-Installer 2 'Deneme planı bu hatada durdu; gerçek çalıştırma ön denetimde dururdu, hiçbir şey değiştirilmedi [dry run stopped at this error; a real run would stop at the preflight, nothing changed].'
+    }
     Stop-Installer 3 'Kurulum yarıda kaldı; yukarıdaki hatayı giderip yeniden çalıştırın (betik tekrar çalıştırılabilir) [failed; fix the error and run again].'
 }
 
