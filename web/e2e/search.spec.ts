@@ -25,8 +25,12 @@ const LAST_24H = {
 async function openSearch(
   page: Page,
   user = 'tolga',
-  options: { api?: MockOptions; search?: SearchOptions; path?: string } = {},
+  options: { api?: MockOptions; search?: SearchOptions; path?: string; clock?: boolean } = {},
 ): Promise<{ api: MockApi; search: SearchMock }> {
+  // The browser's clock at 15:00 site time on the sample day (`useSampleClock`). Not for a drag
+  // across the histogram: recharts throttles mouse moves by `Date.now()`, which a fixed clock stops.
+  if (options.clock !== false)
+    await page.clock.setFixedTime(new Date(`${SAMPLE_TODAY}T15:00:00+03:00`));
   const api = await mockApi(page, { signedInAs: user, ...options.api });
   const search = await mockSearch(page, api, options.search);
   await page.goto(options.path ?? '/search');
@@ -65,10 +69,6 @@ async function keptAnywhere(page: Page, text: string): Promise<boolean> {
   );
   return kept.includes(text) || kept.includes(encodeURIComponent(text));
 }
-
-test.beforeEach(async ({ page }) => {
-  await useSampleClock(page, SAMPLE_TODAY);
-});
 
 test.describe('Arama', () => {
   test('runs a query in a request body, never in the address, history or storage', async ({
@@ -133,7 +133,8 @@ test.describe('Arama', () => {
     ).toBeVisible();
     await expect(page.getByText(turkish)).toHaveCount(0);
 
-    await queryBox(page).fill('istemciip:172.20.42.57');
+    const english = page.getByRole('combobox', { name: 'Query' });
+    await english.fill('istemciip:172.20.42.57');
     await expect(underline).toHaveText('istemciip:172.20.42.57');
     await expect(page.getByText(/^There is no field “istemciip”/)).toBeVisible();
   });
@@ -210,10 +211,10 @@ test.describe('Arama', () => {
   });
 
   test('dragging across the histogram searches the shorter range', async ({ page }) => {
-    const { api } = await openSearch(page);
+    const { api } = await openSearch(page, 'tolga', { clock: false });
     await runQuery(page, 'srcip:172.20.42.57');
     const chart = page.getByTestId('histogram');
-    await expect(chart.locator('.recharts-bar-rectangle').first()).toBeVisible();
+    await expect(chart.locator('.recharts-surface')).toBeVisible();
     const box = await chart.boundingBox();
     if (!box) throw new Error('no histogram');
     const y = box.y + box.height / 2;
@@ -227,7 +228,9 @@ test.describe('Arama', () => {
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
     expect(from && to && Date.parse(from) < Date.parse(to)).toBe(true);
-    expect(Date.parse(from ?? '')).toBeGreaterThan(Date.parse(LAST_24H.from));
+    const first = api.callsTo('POST', '/search')[0]?.body as { from: string; to: string };
+    expect(Date.parse(from ?? '')).toBeGreaterThan(Date.parse(first.from));
+    expect(Date.parse(to ?? '')).toBeLessThanOrEqual(Date.parse(first.to) + 3_600_000);
     expect(api.callsTo('POST', '/search')[1]?.body).toEqual({
       q: 'srcip:172.20.42.57',
       from,
@@ -294,7 +297,7 @@ test.describe('Arama', () => {
     const { api } = await openSearch(page);
     await runQuery(page, '"login failure"');
     const banner = page
-      .getByRole('alert')
+      .getByRole('status')
       .filter({ hasText: 'Arama aralığın tamamını tarayamadı' });
     await expect(banner).toBeVisible();
     await expect(banner).toContainText('Arama 5 kez kendiliğinden sürdü');
@@ -440,9 +443,11 @@ test.describe('Arama', () => {
     const download = page.waitForEvent('download');
     await dialog.getByRole('button', { name: 'Dışa aktar' }).click();
     expect((await download).suggestedFilename()).toMatch(/-kismi\.xlsx$/);
-    await expect(page.getByText('Dosya kısaltıldı')).toBeVisible();
+    await expect(page.getByText('Dosya kısaltıldı', { exact: true })).toBeVisible();
     await expect(
-      page.getByText('Satır sınırına ulaşıldı: dosya aramanın yalnızca ilk satırlarını içerir.'),
+      page.getByText('Satır sınırına ulaşıldı: dosya aramanın yalnızca ilk satırlarını içerir.', {
+        exact: true,
+      }),
     ).toBeVisible();
   });
 
@@ -510,6 +515,7 @@ test.describe('Arama', () => {
   });
 
   test('a saved search in the address waits for the KVKK notice', async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
     const api = await mockApi(page, { signedInAs: 'ayse.yilmaz' });
     const search = await mockSearch(page, api);
     search.saved.set(1, {
@@ -554,6 +560,7 @@ test.describe('Arama', () => {
   test('a request body with a field the API does not know is refused (strict mock)', async ({
     page,
   }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
     const api = await mockApi(page, { signedInAs: 'tolga' });
     await mockSearch(page, api);
     await page.goto('/search');

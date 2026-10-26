@@ -882,13 +882,15 @@ export class SearchMock {
     const span = end - Date.parse(from);
     const step = Math.max(1000, Math.min(span / (bases.length + 1), 37 * 60_000));
     return bases.map((base, index) => {
-      const time = new Date(end - (index + 1) * step).toISOString().replace('.000Z', 'Z');
+      // Whole seconds, like the device times of the parsers.
+      const moment = Math.floor((end - (index + 1) * step) / 1000) * 1000;
+      const time = new Date(moment).toISOString().replace('.000Z', 'Z');
       return {
         // The database id: unique over the mock's searches.
         key: `${base.table}:${time}:${number * 10_000 + index + 1}`,
         table: base.table,
         time,
-        time_received: time.replace('Z', '.003Z'),
+        time_received: new Date(moment + 3).toISOString(),
         source: base.source,
         sender: base.sender,
         kind: base.kind,
