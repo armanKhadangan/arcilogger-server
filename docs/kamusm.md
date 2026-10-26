@@ -75,6 +75,12 @@ java -jar tss-client-console-3.1.33.jar -k  <sunucu> <port> <müşteri no> <paro
 
 ## 4. Bağlantı testi (kurulumda)
 
+Web arayüzünde **Ayarlar → Kamu SM** sihirbazı 2–7. adımları aynı sırayla yapar: Java seçimi,
+Zamane istemcisinin yüklenmesi (bilinen bir sürüm değilse SHA-256 karşılaştırması ve konsolda
+`approve-jar`), kök sertifikalar ve yasal parmak izleri, müşteri bilgileri (kaydederken kontör
+sorgusuyla denenir), test sunucusunda damga testi, üretime geçiş ([AYARLAR.md](AYARLAR.md)
+bölüm 4). Aşağıdaki adımlar konsoldaki yoldur.
+
 1. Test kullanıcısı isteyin (aşağıdaki e-posta). Kullanıcı gelene kadar ne olacağına ilk başarılı
    mühürden **önce** karar verin ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 3): zinciri canlıya geçiş
    gününde başlatmak (`[seal] first_day`) ya da test süresinde de mühürlemek; seçim sahibindir.
@@ -114,8 +120,8 @@ java -jar tss-client-console-3.1.33.jar -k  <sunucu> <port> <müşteri no> <paro
    bilgilerinin üretimde geçerli olup olmadığı doğrulanmadı), `[tsa]` içinde
    `url = "http://zd.kamusm.gov.tr"` ve Kamu SM kökünün SHA-256 parmak izini
    `legal_root_fingerprints` listesine yazma (liste boşsa hiçbir damga yasal nitelikli
-   gösterilmez), ardından `Restart-Service ArciApi` — API yapılandırmayı yalnızca başlarken
-   okur. Kırmızı "test damgası" uyarısı ancak yeniden başlatmadan sonra kaybolur.
+   gösterilmez). API değişen yapılandırmayı birkaç saniye içinde kendisi yükler; kırmızı "test
+   damgası" uyarısı yeniden başlatma olmadan kalkar.
 
 ### Test kullanıcısı talep e-postası (taslak)
 

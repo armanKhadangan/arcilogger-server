@@ -21,16 +21,17 @@ installer\Build-ArciBundle.ps1                        installer\Install-Arcilogg
 |---|---|
 | `installer/components.json` | Third-party components: version, licence, licence text (tag-pinned URL + SHA-256), download URL, SHA-256 (only values computed from a downloaded file), role (bundled / operator-installed) |
 | `installer/Build-ArciBundle.ps1` | Builds `dist\ARCILOGGER-<version>\` (with `licenses\` and `THIRD-PARTY-NOTICES.txt`) on a machine with internet, and the setup `.exe` when Inno Setup is installed (`-RequireInno`: stop without it); TimescaleDB only with `-IncludeTimescaleDB`. `bundle-manifest.json` carries `version` and `release_date` (`RELEASE_DATE` of `core/src/arcilogger_core/__init__.py`, the day a licence's maintenance must cover; `built_at` is the build machine's clock, informational only); the build stops when the ARCILOGGER wheels contain the licence test helpers (`arcilogger_core/license/testing.py`, `arcilogger_db/pytest_plugin.py`). The licence issuer (`tools/license-issuer`) is never part of the bundle |
-| `installer/Install-Arcilogger.ps1` | Install, `-Upgrade`, `-Rollback` (with `-RestoreDatabase`), `-Uninstall` (only its own program folders; never data), `-DryRun` / `-WhatIf`; automatic recovery when a step fails; data root, server address and name chosen or remembered without parameters; the organisation's values without a default, asked at the console when missing: `-SiteName` (required on a first installation), `-NtpServer` (empty: only the public fallback, with a warning), `-AdminAddress` (remembered); setup token and Kamu SM credentials at the end of a first installation (console only); licence: `-LicenseFile`, `-AllowUncoveredUpgrade` and the request code at the end (see [Licence](#licence)) |
+| `installer/Install-Arcilogger.ps1` | Install, `-Upgrade`, `-Rollback` (with `-RestoreDatabase`), `-Uninstall` (only its own program folders; never data), `-DryRun` / `-WhatIf`; automatic recovery when a step fails; data root, server address and name chosen or remembered without parameters; the organisation's values without a default, asked at the console when missing: `-SiteName` (required on a first installation), `-NtpServer` (empty: only the public fallback, with a warning), `-AdminAddress` (remembered); setup token and Kamu SM credentials at the end of a first installation (console only); licence: `-LicenseFile`, `-AllowUncoveredUpgrade` and the request code at the end (see [Licence](#licence)); browser administration: `-SourceNetwork`, `-AdminChangeHoldHours`, `-ZamaneHoldHours`, `-DisableBrowserAdministration` (see [Browser administration](#browser-administration)) |
 | `installer/ArciInstall.psm1` | Shared helpers: checksums, service SIDs, SCRAM verifier, rights plan, strict address/CIDR checks, collector bind and server address detection, data drive and operating system checks, program-folder markers, process runner (with a time limit), HTTPS health check, licence file / status file / release date readers and the maintenance comparison (no Python, no trust decision), the bundle's wheel check |
 | `installer/ARCILOGGER.iss` | Inno Setup 6.3+ wrapper (Turkish and English) around the bundle: runs `Install-Arcilogger.ps1 -Auto`, plus `-LicenseFile "<full path>"` for `/LICENSEFILE="<file>"` and `-AllowUncoveredUpgrade` for `/ALLOWUNCOVEREDUPGRADE` on the setup's command line (see [Licence](#licence)) |
-| `services/*.xml` | WinSW 2.12 definitions: `ArciCollector`, `ArciIngest`, `ArciApi`, `ArciWorker` (the venv's `python.exe -I -X utf8 -u -m arcilogger_<package>`), `ArciWeb` (Caddy) (`{{...}}` filled in by the installer) |
+| `services/*.xml` | WinSW 2.12 definitions: `ArciCollector`, `ArciIngest`, `ArciApi`, `ArciWorker`, `ArciAdmin` (the venv's `python.exe -I -X utf8 -u -m arcilogger_<package>`, the agent `-m arcilogger_core.admin serve`), `ArciWeb` (Caddy) (`{{...}}` filled in by the installer); a definition whose wrapper is missing from a program folder is skipped with a warning (a rollback to a version without ArciAdmin) |
 | `caddy/Caddyfile` | HTTPS on 443 with Caddy's internal CA, SPA, `/api` → `[api]` host:port (default 127.0.0.1:8000, written into `ArciWeb.xml` by the installer), security headers |
-| `tasks/*.xml` | Task Scheduler definitions: Seal, VerifyDaily/Weekly/Monthly, Replica, Retention, Credit, ClockCheck, Backup (database dump, ADR-0009); each runs `python -I -m …` |
-| `scripts/Register-ArciTasks.ps1` | Registers the tasks under `\ARCILOGGER\` (LOCAL SERVICE, venv Python, isolated) |
+| `tasks/*.xml` | Task Scheduler definitions: Seal (also on event 4110), VerifyDaily/Weekly/Monthly, Replica, Retention, Credit, ClockCheck, Backup (database dump, ADR-0009), Requests (event 4111 and every 5 minutes); each runs `python -I -m …`; ApplySystem (SYSTEM, event 4101 and every 5 minutes) runs `Sync-ArciSystem.ps1` |
+| `scripts/Register-ArciTasks.ps1` | Registers the tasks under `\ARCILOGGER\` (LOCAL SERVICE, venv Python, isolated; ApplySystem as SYSTEM, the named exception), filling in `{{PYTHON}}` and `{{SCRIPTS}}` (`-ScriptDirectory`) |
+| `scripts/Sync-ArciSystem.ps1` | ApplySystem (ADR-0014, contract 2.8.3): no input from a request; runs the read-only `system-plan` of the installed program, checks every value against `admin\policy.json`, then the firewall (`Set-ArciFirewall.ps1 -SyncFromConfig`), Windows Time (`Set-ArciTime.ps1`) and the promotion of known Zamane clients; `admin\system\status.json`, journal, Event 4106/4107; `-DryRun -PlanPath -ReportPath` for tests |
 | `scripts/Set-ArciTime.ps1` | Time zone Türkiye; Windows Time → `[clock] ntp_server` (the local time source, usually the core router), `time.ume.tubitak.gov.tr` as fallback; without a local source the fallback only |
 | `scripts/Set-ArciVaultAcl.ps1` | NTFS rights per service account, vault auditing (SACL); `-PlanOnly` prints them |
-| `scripts/Set-ArciFirewall.ps1` | Windows Defender Firewall: 514 from `[[sources]]`, 443/3389 from the admin PC (`-AdminAddress`, no default), every other inbound allow rule disabled except Core Networking; `-StrictOutbound` (SMTP rule from `[smtp]`), `-AllowWinRM`, `-KeepRule`, `-SmtpServer` (remembered), `-Remove` (restores what it changed), `-DryRun` |
+| `scripts/Set-ArciFirewall.ps1` | Windows Defender Firewall: 514 from the enabled `[[sources]]`, 443/3389 from the admin PC (`-AdminAddress`, no default), every other inbound allow rule disabled except Core Networking; `-StrictOutbound` (SMTP rule from `[smtp]`), `-AllowWinRM`, `-KeepRule`, `-SmtpServer` (remembered), `-Remove` (restores what it changed), `-DryRun`; `-SyncFromConfig` (ApplySystem): the syslog rules and, in strict outbound mode, the `ARCILOGGER Out …` rules updated in place after a check against `policy.json`, nothing else (exit 0 done, 2 refused, 3 not managed) |
 | `scripts/Set-ArciPower.ps1` | Desktop Windows only: no sleep or hibernation on AC, Fast Startup off, network adapter power saving off; previous values recorded, `-Remove` restores them; `-DryRun` |
 | `arcilogger.example.toml` | Example configuration: the installer's template for a new `arcilogger.toml` (no organisation name, no local time source, **no log source**); its `[[sources]]` are commented-out examples (the devices of a fictional example network): the administrator adds the organisation's own (`docs/DEVICE-SETUP.md` section 4) |
 
@@ -39,7 +40,7 @@ installer\Build-ArciBundle.ps1                        installer\Install-Arcilogg
 | Path | Content | Written by |
 |---|---|---|
 | `C:\Program Files\ARCILOGGER\` | `python\`, `venv\`, `web\`, `caddy\`, `services\` (WinSW + XML), `installer\`, `scripts\`, `tasks\`, `licenses\`, `THIRD-PARTY-NOTICES.txt`, `VERSION.json` (`INSTALL-IN-PROGRESS.json` while being written) | installer only (replaced on upgrade; previous kept as `ARCILOGGER.previous`, a failed new version as `ARCILOGGER.failed-<time>`) |
-| `C:\ProgramData\ARCILOGGER\` | `arcilogger.toml`, `secret.key` + `secrets.json`, `kamusm-roots\`, `zamane\`, `caddy\` (internal CA), `install\` (`state.json` with the remembered server address and name, `firewall-state.json`, `power-state.json` on desktop Windows) | administrators; read by services and tasks |
+| `C:\ProgramData\ARCILOGGER\` | `arcilogger.toml`, `data-root.txt`, `secret.key` + `secrets.json`, `kamusm-roots\`, `smtp-ca\`, `zamane\` (`web\` staging, `approved\`), `caddy\` (internal CA), `install\` (protected: `state.json` with the remembered server address and name, `firewall-state.json`, `power-state.json` on desktop Windows), `admin\` (protected: `policy.json`, `keys\`, `inbox\`, `versions\`, `status\`, `journal\`, `system\`) | administrators; ArciAdmin writes `arcilogger.toml`, `secrets.json`, new files in `kamusm-roots\` / `smtp-ca\` and its `admin\` folders; read by services and tasks |
 | `D:\ARCILOGGER\` (`C:\ARCILOGGER\` without a data disk) | `spool\` (with the protected `_audit\`), `vault\`, `exports\`, `state\` (with the protected `seal\`, `replica\`, `verify\`, `clock\`), `logs\`, `backups\db\` and `backups\scheduled\` (database dumps), `db\` (PostgreSQL) | services and tasks, each only where it needs to (ADR-0007 section 4) |
 
 ## Services and accounts
@@ -51,7 +52,9 @@ installer\Build-ArciBundle.ps1                        installer\Install-Arcilogg
 | `ArciApi` | `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_api serve --config …` (`[api]` host:port, default 127.0.0.1:8000; `forwarded_allow_ips` must cover that host, which Caddy connects from: the preflight checks it) | `NT SERVICE\ArciApi` | automatic (delayed) |
 | `ArciWorker` | `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_worker run --config …` | `NT SERVICE\ArciWorker` | automatic (delayed) |
 | `ArciWeb` | `caddy run --config …\Caddyfile` | `NT SERVICE\ArciWeb` | automatic (delayed) |
-| Task Scheduler `\ARCILOGGER\*` | `python -I -m arcilogger_core <command>`; Backup: `python -I -m arcilogger_db backup run` | LOCAL SERVICE (a shared Windows account: other LocalService services share its rights, ADR-0007 section 8) | per task |
+| `ArciAdmin` | `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_core.admin serve --config …` (no listener, no database) | `NT SERVICE\ArciAdmin` | automatic (delayed); started last, stopped first |
+| Task Scheduler `\ARCILOGGER\*` | `python -I -m arcilogger_core <command>`; Backup: `python -I -m arcilogger_db backup run`; Requests: `python -I -m arcilogger_core requests run` | LOCAL SERVICE (a shared Windows account: other LocalService services share its rights, ADR-0007 section 8) | per task |
+| Task Scheduler `\ARCILOGGER\ApplySystem` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File …\scripts\Sync-ArciSystem.ps1` | SYSTEM (`HighestAvailable`) | event 4101, every 5 minutes |
 
 All services restart on failure and write rolling logs to `D:\ARCILOGGER\logs`.
 
@@ -80,6 +83,23 @@ The rule is **advisory**: the licence file and the status file are read without 
 signature and the customer can edit them. The product enforces the maintenance itself: a running
 version whose release date is after `maintenance_until` is in the state `version_not_covered`
 (paid modules off) whatever the installer did. `VERSION.json` records `release_date` too.
+
+## Browser administration
+
+The Settings pages of the web interface change the server's configuration (ADR-0014; operator
+guide `docs/AYARLAR.md` / `docs/SETTINGS.md`; security `docs/SECURITY.md` section 14). The
+installer prepares it on every run, idempotently:
+
+| Step | Effect |
+|---|---|
+| `config.data-root` | `data-root.txt`: the data root every service and task checks `data_dir` against (Day 0 note D0-2) |
+| `executables.record` | the programs the tasks run outside the trusted folders (`tsa.java` with its whole command when it has more than one element, `backup.pg_dump`, `backup.pg_restore`) go into `policy.trusted_executables` with their SHA-256, only from folders nobody but administrators, SYSTEM and TrustedInstaller can write (else the preflight stops); a Zamane client outside `zamane\` is copied in and `tsa.zamane_jar` pointed at the copy; its hash is appended to `zamane\zamane-jar.sha256` |
+| `secrets.file` | `secrets.json` (`{}`) before its file entry for ArciAdmin |
+| `admin.protect`, `admin.keys` | `admin\` and `admin\keys\` protected (administrators and SYSTEM only) **before** `python -I -m arcilogger_core.admin keys init` writes the channel's keys (never replaced); the ACL step then grants each key its one reader |
+| `admin.policy` | `admin\policy.json` (`New-ArciAdminPolicy`): the parameters, else the values of a valid existing file (hand edits are kept), else those remembered in `install\state.json`, else the defaults; an invalid file is rewritten with a warning |
+| `admin.event-source` | the Application log source `ARCILOGGER-Admin` (`Register-ArciEventSource`; removed by `-Uninstall`) |
+| `config.before-upgrade` | before an upgrade changes anything: `arcilogger.toml.before-upgrade-<UTC>`, its name in `state.json` (`config_before_upgrade`) |
+| `config.compatible` | a rollback (and the automatic recovery) first loads the configuration with the previous program's Python (`Test-ArciProgramConfig`); when that refuses it, the copy from before the upgrade is put back and the refused file kept as `arcilogger.toml.refused-<time>` |
 
 ## Server requirements
 
@@ -130,3 +150,12 @@ upgrades, rolls back, survives a broken upgrade and removes ARCILOGGER on the th
 (`ARCILOGGER_E2E_BUNDLE`; never set it on a machine you care about). Locally:
 `ARCILOGGER_PWSH=<pwsh>`, `ARCILOGGER_CADDY=<caddy>` and `ARCILOGGER_ISCC=<ISCC.exe>` enable those
 parts.
+
+The browser administration's deployment runs on Linux too: every ACL row of contract 2.2 as pure
+data (and the inheritance flags Windows gets), `New-ArciAdminPolicy` / `Read-ArciAdminPolicy`
+against the core's `AdminPolicy` model, the event source helpers against a fake
+`System.Diagnostics.EventLog`, the executable records and the Zamane copy checked afterwards with
+`arcilogger_core.execpolicy`, the rollback check against a fake older venv, and dry runs of
+`Set-ArciFirewall.ps1 -SyncFromConfig` and of `Sync-ArciSystem.ps1` (fast path, narrowing,
+widening, refused values, jar promotion, a staged client behind a link) with the system plan
+example of `core/tests/test_admin_contract.py`.

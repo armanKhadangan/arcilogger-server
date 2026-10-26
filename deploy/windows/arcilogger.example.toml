@@ -24,6 +24,9 @@ data_dir = "D:/ARCILOGGER"
 # Then run the installer again (it applies the firewall and restarts the services), or
 # Set-ArciFirewall.ps1 and Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker
 # (docs/DEVICE-SETUP.md section 4). `arcilogger-core config-check` warns while there is none.
+# After the installation, Ayarlar -> Kaynaklar (Settings -> Sources) in the web interface adds,
+# switches off and removes sources without a restart (docs/SETTINGS.md); its first change moves
+# all [[sources]] tables into one marked block and drops the comments inside them.
 #   name              lower-case letters, digits and "-": the spool folder ("unknown-" is reserved)
 #   type              "fortigate" | "mikrotik" | "generic": selects the parser
 #   address           the sender's IP address, or a network such as "10.0.7.0/24" for devices
@@ -34,6 +37,8 @@ data_dir = "D:/ARCILOGGER"
 #                     the LAN. Once a device sends over TCP 514, set "tcp": UDP datagrams claiming
 #                     its address are then dropped, counted and alerted (wrong-transport).
 #                     Recommended for the firewall and the core router (docs/DEVICE-SETUP.md 1.1).
+#   enabled           false: switched off (no 514 opening, no R15, no gap check); a message that
+#                     still arrives is recorded. Default true; the web interface writes only false.
 #
 # EXAMPLE (ÖRNEK): the devices of the documentation's fictional example network: a firewall, the
 # core router (the DHCP server) and a switch. Remove the "#" at the start of the lines of the

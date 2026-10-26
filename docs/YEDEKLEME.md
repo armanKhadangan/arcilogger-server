@@ -72,8 +72,18 @@ Ayarlar (`C:\ProgramData\ARCILOGGER\arcilogger.toml`, `[backup]` bölümü; yoks
 yeni `C:\Program Files\PostgreSQL\<sürüm>\bin`, sonra `PATH`), `[backup] min_free_gb` (10).
 `dir` değiştirilirse yeni klasörün izinlerini yönetici kendisi verir (kurulum programı yalnızca
 varsayılan klasöre izin verir). `enabled = false` (ör. veritabanını başka bir ürün yedekliyorsa)
-görevi hiçbir şey yapmaz hâle getirir ve ArciWorker yeniden başlayınca worker'ın `R20-backup`
-uyarılarını kapatır (`Restart-Service ArciWorker`; [UYARILAR.md](UYARILAR.md)).
+görevi hiçbir şey yapmaz hâle getirir ve worker'ın `R20-backup` uyarılarını kapatır (worker
+yapılandırmayı 1 dakika içinde yeniden yükler; bu sürümden önceki bir sürümde
+`Restart-Service ArciWorker`; [UYARILAR.md](UYARILAR.md)).
+
+**Tarayıcıdan:** web arayüzünde **Ayarlar → Yedekleme** sayfası `[backup] enabled`,
+`[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly` ve `[backup] min_free_gb`
+değerlerini değiştirir ve son yedeğin sonucunu (`state\backup\last.json`) gösterir. Yedeklemeyi
+kapatmak parolanın yeniden girilmesini ister ve `R20-config-change` (orta) uyarısı üretir.
+`[backup] dir`, `[backup] pg_dump` ve `[backup] pg_restore` yalnızca konsoldan değişir: görev
+yalnızca güvenilen yerlerdeki programları çalıştırır, Program Files dışındaki bir `pg_dump` ya da
+`pg_restore` yolu kurulumda SHA-256 değeriyle kaydedilir ([AYARLAR.md](AYARLAR.md) bölüm 6). Geri
+yükleme ve tatbikat (bölüm 5 ve 6) her zaman konsoldadır.
 
 **Her gün** ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 9):
 

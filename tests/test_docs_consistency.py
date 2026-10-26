@@ -1957,3 +1957,11 @@ def test_settings_guides_name_the_limits_and_the_console_path(name: str) -> None
         assert f"`{code}`" in text, code
     explained = {int(number) for number in re.findall(r"\b(41\d\d)\b", text)}
     assert {int(event) for event in Event} <= explained
+
+
+def test_installer_and_first_steps_point_to_the_settings_guide() -> None:
+    steps = _show_next_steps()
+    assert "docs\\AYARLAR.md" in steps
+    for name in ("ILK-ADIMLAR.md", "FIRST-STEPS.md", "KURULUM.md", "INSTALL.md"):
+        guide = "AYARLAR.md" if name in ("ILK-ADIMLAR.md", "KURULUM.md") else "SETTINGS.md"
+        assert f"]({guide})" in _doc(name), name

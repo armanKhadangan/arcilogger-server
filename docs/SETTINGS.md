@@ -41,9 +41,11 @@ still arrives from it is **recorded** (raw logs are never dropped). A switched-o
 counts for the licence's source number.
 
 **Secret values** (the Kamu SM password, the SMTP and replica passwords) never reach the screen:
-the fields show "Stored ✓" and the time of the last change; **Change** writes a new one. Changing
-credentials, the retention period or the replica target asks for the password again within the
-last 5 minutes ([SECURITY.md](SECURITY.md) section 7).
+the fields show "Stored ✓" and the time of the last change; **Change** writes a new one. The password is
+asked again (within the last 5 minutes) for the Kamu SM settings (except the credit threshold and
+the timeout; the customer number and password included), every SMTP and replica change, the
+retention settings, a clock source, switching the backup off, and switching a log source off or
+removing it ([SECURITY.md](SECURITY.md) section 7).
 
 ## 2. How it works
 

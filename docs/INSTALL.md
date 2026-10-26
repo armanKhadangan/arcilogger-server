@@ -389,7 +389,13 @@ goes on and ends with `1`; with `-SkipDatabase` it is not installed and the comm
 printed) and `-AllowUncoveredUpgrade` (installs a version the licence's maintenance does not cover
 anyway, with 5651 Temel only: the paid modules stay off until a licence that covers it is
 installed, section 13). Both are for an installation or an upgrade only (`2` with `-Uninstall` or
-`-Rollback`).
+`-Rollback`). The browser administration (section 7.2) takes `-SourceNetwork` (the networks a log
+source added in the browser must lie in; default the RFC 1918 private networks, several
+separated by commas), `-AdminChangeHoldHours` (the hold of retention and replica changes,
+0–168 hours, default `0`), `-ZamaneHoldHours` (how long before an unknown Zamane client can be
+approved, 1–168 hours, default `24`) and `-DisableBrowserAdministration` (switches it off; the 5651
+functions are not affected; `-DisableBrowserAdministration:$false` switches it on again); all four
+are remembered.
 
 What it does: bundle checksums and preflight (Windows version and edition — Windows Server
 2022/2025 and Windows 11 Pro/Enterprise/Education are supported, Windows 10 and Home stop it, ARM64
@@ -405,26 +411,38 @@ stop, section 7.1; the licence's maintenance rule `preflight.license`: a bundle 
 `release_date` in `bundle-manifest.json`, is after the maintenance date of `-LicenseFile` or of the
 installed licence **stops** it with `2` — `-AllowUncoveredUpgrade` warns and goes on, section 13,
 [LICENSING.md](LICENSING.md) section 7; without a licence it is information only) → folders `C:\Program Files\ARCILOGGER`, `C:\ProgramData\ARCILOGGER`, the
-data folder → Python 3.12, venv, offline hash-checked wheels, web interface, Caddy, WinSW →
+data folder (and the browser administration's `admin\` folder, `smtp-ca\`, `zamane\web\`,
+`zamane\approved\`, `state\requests\`) → Python 3.12, venv, offline hash-checked wheels, web
+interface, Caddy, WinSW →
 `arcilogger.toml` only if absent (`data_dir` = data folder, `[collector] bind` = server address,
 `site_name` = organisation name, `[clock] ntp_server` = local time source; the example
 configures **no log source**, the `[[sources]]` of its fictional example network are comments,
 section 7.1; an existing file is left alone but for a given `-SiteName` / `-NtpServer` line) →
-secret store key → least-privilege NTFS rights and vault auditing (the collector cannot delete or
+the data root recorded in `C:\ProgramData\ARCILOGGER\data-root.txt` (the services and tasks
+check `data_dir` against it; no browser change can move the data folder) → the programs the tasks
+run recorded (section 7.2) → secret store key and an empty `secrets.json` → the browser
+administration's keys (`keys init`, an existing key is never replaced), `admin\policy.json` and
+the Event Log source `ARCILOGGER-Admin` → least-privilege NTFS rights and vault auditing (the collector cannot delete or
 rename raw files and cannot reach the audit spool or the sealing state; only the scheduled tasks
 write the nightly database dumps in `backups\scheduled`, which no service can read; limit: the
 scheduled tasks run as Windows' shared LOCAL SERVICE account, so Windows services running as
 LocalService share
-their rights — ADR-0007 section 8) → database role and
+their rights — ADR-0007 section 8; the administration service ArciAdmin writes only
+`arcilogger.toml` and `secrets.json`, through entries on those files, and its own folders, and can
+only add files to `kamusm-roots` and `smtp-ca`; the API only drops requests into `admin\inbox`,
+[SECURITY.md](SECURITY.md) section 14) → database role and
 database (random password into the encrypted secret store on stdin; PostgreSQL only sees its
 SCRAM verifier; the database UTF8 with the `C` locale, created only if missing) → services
-`ArciCollector`, `ArciIngest`, `ArciApi`, `ArciWorker`, `ArciWeb` under their virtual accounts (the
-collector and Caddy, which need no database, start right away; the Python services run the venv's
+`ArciCollector`, `ArciIngest`, `ArciApi`, `ArciWorker`, `ArciWeb` and the administration service
+`ArciAdmin` ("ARCILOGGER Yönetim (Admin)") under their virtual accounts (the collector and Caddy,
+which need no database, start right away; ArciAdmin starts last and stops first; the Python services run the venv's
 interpreter **isolated**, `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_<package> …`, so no
 environment variable — `PYTHONPATH`, `PYTHONSTARTUP`, machine-wide or the service's own — can make
 them load another module; `ARCILOGGER_CONFIG` still applies) → time sync, on desktop Windows
 the power settings (`Set-ArciPower.ps1`, section 17), firewall, scheduled tasks (including the nightly database dump at
-01:40, [BACKUP.md](BACKUP.md); a task you switched off stays off; the tasks run Python isolated too,
+01:40, [BACKUP.md](BACKUP.md), the task requests of the browser in `Requests` (LOCAL SERVICE) and
+`ApplySystem` (SYSTEM), which keeps the firewall and Windows Time in step with the configuration;
+a task you switched off stays off; the tasks run Python isolated too,
 `python.exe -I -m arcilogger_core …`, `-I -m arcilogger_db backup run`) → `arcilogger-db
 upgrade`, the **last** change (a first installation's trial starts here) → with `-LicenseFile`, the
 step `license.install` (a refusal is only a warning) → start ingest, API and worker → health check (services,
@@ -446,7 +464,7 @@ over (its `INSTALL-IN-PROGRESS.json` marker identifies the folder), a later one 
 `-Force` needed. Log: first `%TEMP%\ARCILOGGER-<mode>-*.log`, copied into the `logs` folder of the
 data folder once that exists (`D:\ARCILOGGER\logs\` or `C:\ARCILOGGER\logs\`); the window prints
 the path at the end. Programs missing from the
-bundle are skipped with a warning (this version's bundle has the programs of all five services);
+bundle are skipped with a warning (this version's bundle has the programs of all six services);
 without the `arcilogger-db` package the database steps are skipped.
 
 The ARCILOGGER programs are **not on `PATH`**: always run them by their full path
@@ -493,10 +511,45 @@ installation ends with warnings, exit code `1`). Add the `[[sources]]` of your f
 router (the DHCP server) and your other devices that send syslog (remove the `#` in front of the
 example lines in the file and change the names and addresses; [DEVICE-SETUP.md](DEVICE-SETUP.md)
 section 4) and run the installer again (or `Set-ArciFirewall.ps1` and a restart of the services,
-section 12); the firewall opens 514 only for them (section 11). An upgrade keeps an existing
+section 12); the firewall opens 514 only for them (section 11). After the installation sources
+can also be added on **Ayarlar → Kaynaklar** (Settings → Sources) in the web interface: the
+firewall follows by itself, no restart is needed ([SETTINGS.md](SETTINGS.md)). An upgrade keeps an existing
 `arcilogger.toml` and its sources (only a given `-SiteName` / `-NtpServer` line changes). In the database the VLAN list and the departments are empty on a new installation: both
 are entered on the **Departmanlar ve VLAN'lar** tab of the Cihazlar ve Kişiler page
 ([FIRST-STEPS.md](FIRST-STEPS.md) sections 5 and 12).
+
+### 7.2 Browser administration
+
+After the installation the server's settings change on the **Ayarlar** (Settings) pages of the
+web interface: organisation name, time sources, Kamu SM (the test → production wizard), log
+sources, e-mail, replica, retention, backup ([SETTINGS.md](SETTINGS.md)). The API cannot write the
+configuration; the administration service `ArciAdmin` applies signed requests, and the SYSTEM task
+`ApplySystem` derives the firewall and Windows Time settings from the configuration itself. The
+console commands of this guide remain the console path.
+
+The installer writes the limits into `C:\ProgramData\ARCILOGGER\admin\policy.json`, which only
+administrators can change, and remembers them:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade `
+    -SourceNetwork 172.16.0.0/12 -AdminChangeHoldHours 24 -ZamaneHoldHours 48
+# switch the browser administration off (the 5651 functions are not affected):
+powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -DisableBrowserAdministration
+```
+
+The values of a valid hand-edited `policy.json` are kept; an invalid file switches the browser
+administration off and the installer rewrites it, with a warning.
+
+**The programs the tasks run:** the tasks run programs from trusted places only
+(`C:\Program Files`, `C:\Program Files (x86)`, the `java` on the system `PATH`). The installer
+records a `java` outside Program Files, a `[tsa] java` command with extra arguments and the
+`[backup] pg_dump` / `[backup] pg_restore` paths with their SHA-256 in `policy.json`, with a warning
+for each; run the installer again when such a program changes. When anyone but administrators
+and SYSTEM can write the folder of a program to record, the installer stops before any change and
+asks you to move it below Program Files. The Zamane client runs only from
+`C:\ProgramData\ARCILOGGER\zamane\`: when `[tsa] zamane_jar` names another place, the installer
+copies the file there, points `zamane_jar` at the copy (the previous configuration stays as
+`arcilogger.toml.before-<time>`) and appends its SHA-256 to `zamane\zamane-jar.sha256`.
 
 ## 8. Root certificate on the admin PC
 
@@ -556,6 +609,10 @@ Other users (the auditor etc.) and what comes next: [FIRST-STEPS.md](FIRST-STEPS
 
 ## 10. Kamu SM connection (test → production)
 
+The **Ayarlar → Kamu SM** wizard of the web interface does the steps below in the same order
+(Java, the Zamane client, roots and fingerprints, the customer data with a credit query, the stamp
+test, the switch to production; [SETTINGS.md](SETTINGS.md)). The console path:
+
 When Kamu SM has issued the test user ([kamusm.md](kamusm.md) section 4), work **in this order**.
 `tsa-test` first takes the stamp (1 kontör) and then verifies it against the pinned roots: without
 roots it ends with "no pinned root certificates" after spending the credit. The nightly sealing
@@ -595,9 +652,10 @@ Decide **beforehand** whether the Seal task may seal days with test stamps durin
    ARCILOGGER shows a stamp as legal grade only when the stamp's certificate chain reaches a Kamu
    SM root whose SHA-256 fingerprint you listed in `legal_root_fingerprints` in the same section
    (the value recorded in step 1); with an empty list nothing is shown as legal grade.
-4. The API reads the configuration only at start: `Restart-Service ArciApi`. Without the restart
-   the red "test stamp" banner and the report stamps keep the old setting. (Scheduled tasks read
-   the configuration on every run.)
+4. The API loads the changed configuration by itself within 2 seconds; the red "test stamp"
+   banner and the report stamps follow the new setting (scheduled tasks read it on every run). On
+   a version before this one, or when the Settings page shows "a hand edit has not been loaded
+   yet": `Restart-Service ArciApi`.
 5. Check with `& $core credit` and `& $core status` (`legal_grade`); the red banner on the sealing
    page must be gone.
 
@@ -679,8 +737,13 @@ Firewall (`Set-ArciFirewall.ps1`):
 - The choices (`-StrictOutbound`, `-AdminAddress`, `-AllowWinRM`, `-KeepRule`, `-SmtpServer`) are
   remembered in `C:\ProgramData\ARCILOGGER\install\firewall-state.json`; an upgrade keeps them.
   Name a parameter again to change it.
-- After changing `[[sources]]` (or the `[tsa]` URL/port) re-run the firewall script and restart
-  the services — they read `arcilogger.toml` **only at start** (UDP syslog sent while the
+- Changes of `[[sources]]` (on Ayarlar → Kaynaklar or by hand) are loaded by the collector and
+  ingest within 5 seconds; the `ApplySystem` task updates the syslog rules in place (only
+  `ARCILOGGER Syslog UDP/TCP` and, in strict outbound mode, the `ARCILOGGER Out …` rules; no other
+  rule, no profile, nor 443, 3389, 5985), after a hand edit within 5 minutes. Run the script
+  yourself when the browser administration is off (`-DisableBrowserAdministration`) or when the
+  `[tsa]` URL/port or the admin addresses changed. Restart the services after a change of
+  `[collector]`, `[api]`, `[ingest]`, `[worker]` or `[database]` (UDP syslog sent while the
   collector restarts can be lost for a few seconds):
 
   ```powershell
@@ -736,7 +799,11 @@ The database is dumped first (`D:\ARCILOGGER\backups\db\*.dump`; no dump, no cha
 scheduled tasks are paused, the services stopped, the old program folder is kept as
 `C:\Program Files\ARCILOGGER.previous`, the new version installed, the collector and Caddy (no
 database) started again at once, the schema migrated **last**, and then ingest, API and worker
-start. If a step fails (exit code `3`):
+start, the administration service `ArciAdmin` last (it stops first). Right after the database
+dump `arcilogger.toml` is copied to `arcilogger.toml.before-upgrade-<UTC time>` and the name
+remembered in `install\state.json` (`config_before_upgrade`); the programs the tasks run are
+recorded (section 7.2), and a program in a folder that is not trusted stops the upgrade before
+any change. If a step fails (exit code `3`):
 
 - **before the migration** (folder move refused, program installation, firewall, tasks): the
   previous version is put back and started automatically, the paused tasks run again; the
@@ -753,6 +820,16 @@ Manual rollback: `Install-Arcilogger.ps1 -Rollback` (add `-RestoreDatabase` to r
 pre-upgrade dump too; the restore is one transaction). Without `ARCILOGGER.previous`,
 `-Rollback -RestoreDatabase` restores only the database while the collector keeps running.
 
+A rollback (and the automatic return after a failed upgrade) loads the configuration **with the
+previous version's Python** before it starts that version's services. When the previous version
+does not know a change made in the browser (for example a source switched off,
+`[[sources]] enabled = false`), the copy from before the upgrade is put back, the refused file is
+kept beside it as `arcilogger.toml.refused-<time>`, and the installer warns "Tarayıcıdan yapılan
+sonraki değişiklikler geri alındı; denetim kaydında duruyorlar [later browser changes were rolled
+back; they remain in the audit log]". Without the copy the rollback stops with `3` and asks for
+the file to be fixed by hand. A rollback to a version from before the browser administration
+removes the `ArciAdmin` service; sealing and the other tasks go on.
+
 The pre-upgrade dumps (`backups\db`) are separate from the nightly dumps (`backups\scheduled`,
 [BACKUP.md](BACKUP.md)) and never deleted automatically; delete old ones by hand. An upgrade waits
 for running tasks: do not start it while the nightly dump (01:40) runs.
@@ -762,7 +839,8 @@ for running tasks: do not start it while the nightly dump (01:40) runs.
 `Install-Arcilogger.ps1 -Uninstall` first pauses the scheduled tasks and waits for a running one
 (sealing, monthly verification; they run Python from the program folder) for up to
 `-TaskWaitMinutes` (30); a task still running then stops it before anything is removed (exit code
-`2`, tasks enabled again: run it later). It then removes services, scheduled tasks and firewall
+`2`, tasks enabled again: run it later). It then removes services (`ArciAdmin` included), scheduled
+tasks, the Event Log source `ARCILOGGER-Admin` (the events written stay in the log) and firewall
 rules (restoring the Windows rules and profile settings it had changed), on desktop Windows puts
 the power settings back to their values from before the installation
 (`C:\ProgramData\ARCILOGGER\install\power-state.json`; the time zone, the time sync settings and
@@ -770,8 +848,8 @@ the "File System" audit policy are not reverted), and removes only the program f
 created (`C:\Program Files\ARCILOGGER`, `.previous`, `.failed-*`, `.rolled-back-*` with its
 `VERSION.json` or `INSTALL-IN-PROGRESS.json`). Any other folder — a mistyped `-InstallDir`, a drive
 root, a Windows folder — stops it before anything is removed. It **never** deletes the raw logs,
-the vault, exports, backups (`D:\ARCILOGGER`), the configuration and secret store
-(`C:\ProgramData\ARCILOGGER`) or the database.
+the vault, exports, backups (`D:\ARCILOGGER`), the configuration, the secret store and the
+browser administration's `admin\` folder (`C:\ProgramData\ARCILOGGER`) or the database.
 
 ## 15. Troubleshooting
 
@@ -831,7 +909,12 @@ Win32_Process -Filter "Name = 'python.exe'" | Format-List CommandLine`: `python.
 -m arcilogger_api serve …`; `sc.exe qc` shows the service wrapper) and that the server id reads the
 same under the ArciApi service's virtual account and in an administrator PowerShell (the server
 id on Settings → Licence must equal the one of `arcilogger-db license status`;
-[LICENSING.md](LICENSING.md) section 4.1).
+[LICENSING.md](LICENSING.md) section 4.1); for the browser administration
+([SETTINGS.md](SETTINGS.md) section 9), that ArciAdmin's entry on `arcilogger.toml` survives a
+change of the file (`Get-Acl`), that ArciAdmin can add and delete only its own files in
+`kamusm-roots`, that the `ARCILOGGER-Admin` events wake the `Requests`, `Seal` and `ApplySystem`
+tasks (`Get-WinEvent`, the Task Scheduler history), and that no syslog message is lost while a
+firewall rule is updated in place.
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).

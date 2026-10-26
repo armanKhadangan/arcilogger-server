@@ -41,9 +41,11 @@ yine de gelen bir ileti **kaydedilir** (ham kayıt hiçbir zaman atılmaz). Kapa
 kaynak sayısında sayılmaya devam eder.
 
 **Gizli değerler** (Kamu SM parolası, SMTP ve replika parolası) hiçbir zaman ekrana gelmez:
-alanlar "Kayıtlı ✓" ve son değişiklik zamanını gösterir, **Değiştir** ile yenisi yazılır. Kimlik
-bilgilerini, saklama süresini ve replika hedefini değiştirmek son 5 dakika içinde parolanın yeniden
-girilmesini ister ([SECURITY.md](SECURITY.md) bölüm 7).
+alanlar "Kayıtlı ✓" ve son değişiklik zamanını gösterir, **Değiştir** ile yenisi yazılır. Son 5 dakika
+içinde parolanın yeniden girilmesi şunlar için istenir: Kamu SM ayarları (kontör eşiği ve zaman
+aşımı dışında; müşteri numarası ve parola dahil), her SMTP ve replika değişikliği, saklama
+ayarları, saat kaynağı, yedeklemeyi kapatmak, bir log kaynağını kapatmak ya da silmek
+([SECURITY.md](SECURITY.md) bölüm 7).
 
 ## 2. Nasıl çalışır?
 
