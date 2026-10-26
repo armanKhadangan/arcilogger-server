@@ -46,6 +46,19 @@
     -Remove deletes the ARCILOGGER rules, enables the recorded rules again and restores the
     profile settings (enabled, default inbound and outbound action) recorded at the first run.
 
+    -SyncFromConfig is the input-free step of the SYSTEM task \ARCILOGGER\ApplySystem
+    (Sync-ArciSystem.ps1, docs/adr/0014-browser-administration.md): -SourceAddress (the enabled
+    senders system-plan derived, may be empty) and, in strict outbound mode, -Outbound (rule,
+    host, port) are checked against admin\policy.json (-PolicyPath: the networks a sender must lie
+    in and the widest network) before anything changes. It then updates the two syslog rules in
+    place (Set-NetFirewallAddressFilter), creates them when the first sender appears and removes
+    them when the last one goes (an empty RemoteAddress would mean any address), and in strict
+    mode updates the Out NTP / Kamu SM / SMTP / Replica rules in place (a host that does not
+    resolve keeps its rule as it is). It never disables or removes another rule, never changes a
+    profile, needs no -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
+    0 done, 2 refused (nothing changed), 3 not managed (no state file: an installation with
+    -SkipFirewall). The full mode above stays for the installer and the console.
+
     All ARCILOGGER rules are in the rule group "ARCILOGGER". Safe to run again (idempotent).
 
 .PARAMETER Force
@@ -58,6 +71,8 @@
     .\Set-ArciFirewall.ps1 -AdminAddress 10.0.0.10 -StrictOutbound -SmtpServer mail.example.com:587
 .EXAMPLE
     .\Set-ArciFirewall.ps1 -DryRun -PlanPath plan.json
+.EXAMPLE
+    .\Set-ArciFirewall.ps1 -SyncFromConfig -SourceAddress 172.20.10.1, 172.20.20.0/24 -DryRun -PlanPath sync.json
 #>
 [CmdletBinding()]
 param(
@@ -79,6 +94,11 @@ param(
     [string]$KamuSmCertificateHost = 'sertifikalar.kamusm.gov.tr',
     [string]$StateFile = $(if ($env:ProgramData) { Join-Path $env:ProgramData 'ARCILOGGER\install\firewall-state.json' } else { 'C:\ProgramData\ARCILOGGER\install\firewall-state.json' }),
     [switch]$Remove,
+    # ApplySystem's in-place update (see .DESCRIPTION): -SourceAddress and -Outbound come from
+    # system-plan, admin\policy.json bounds them.
+    [switch]$SyncFromConfig,
+    [object[]]$Outbound,
+    [string]$PolicyPath = $(if ($env:ProgramData) { Join-Path $env:ProgramData 'ARCILOGGER\admin\policy.json' } else { 'C:\ProgramData\ARCILOGGER\admin\policy.json' }),
     [switch]$DryRun,
     [string]$PlanPath,
     [switch]$Force
@@ -161,6 +181,145 @@ function Get-KeptGroupRules {
 function Get-OtherAllowRules([string]$Direction) {
     <# Enabled allow rules of this direction that ARCILOGGER does not keep (local rules only). #>
     @(Get-NetFirewallRule -Direction $Direction -Action Allow -Enabled True -ErrorAction SilentlyContinue | Where-Object { $_ -and -not (Test-KeptRule $_) })
+}
+
+# --- -SyncFromConfig (ApplySystem, ADR-0014) --------------------------------------------------------
+
+function Invoke-SyncFromConfig {
+    <#
+    The input-free firewall step of ApplySystem (contract 2.8.3 step 4). The syslog senders
+    (-SourceAddress, may be empty) and, in strict outbound mode, the outbound hosts (-Outbound:
+    rule, host, port) come from system-plan; every value is checked against admin\policy.json
+    (-PolicyPath) before any change, and a refused one changes nothing. The two syslog rules are
+    updated in place (Set-NetFirewallAddressFilter), created when the list becomes non-empty and
+    removed when it becomes empty (an empty RemoteAddress would mean any address); in strict mode
+    the Out NTP / Kamu SM / SMTP / Replica rules of the plan are updated in place, a rule whose
+    host does not resolve now keeps its addresses. Nothing else is touched: no other rule is
+    disabled or removed, no profile changes, the 443, 3389 and 5985 rules and the operator's
+    choices of the state file stay as they are. Never prompts. Returns the exit code: 0 done,
+    2 refused (nothing changed), 3 not managed (no state file: -SkipFirewall).
+    #>
+    $policy = Read-ArciAdminPolicy -Path $PolicyPath
+    $managed = Test-Path -LiteralPath $StateFile -PathType Leaf
+    $strict = $false
+    if ($managed) { $strict = [bool](Read-FirewallState).strict_outbound }
+    $senders = @($SourceAddress | Where-Object { $_ })
+    $problems = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+    if (-not $policy.Valid -or -not $policy.Enabled) {
+        $problems.Add(('Tarayıcı yönetimi kapalı ya da policy.json geçersiz [browser administration off or policy.json invalid]: {0}; tam kipi kullanın [use the full mode]' -f $(if ($policy.Problem) { $policy.Problem } else { 'enabled = false' })))
+    }
+    else {
+        foreach ($value in $senders) {
+            $why = Get-ArciSyslogSenderProblem -Value $value -SourceNetwork @($policy.SourceNetworks) -MinPrefixV4 $policy.MinPrefixV4
+            if ($why) { $problems.Add(('{0}: {1}' -f $value, $why)) }
+        }
+        if (@($senders | Select-Object -Unique).Count -ne $senders.Count) { $problems.Add('aynı gönderici iki kez [a sender given twice]') }
+    }
+    $outbound = @($Outbound | Where-Object { $null -ne $_ })
+    foreach ($entry in $outbound) {
+        $why = Get-ArciOutboundProblem -Rule ([string]$entry.rule) -HostName ([string]$entry.host) -Port $entry.port
+        if ($why) { $problems.Add($why) }
+    }
+    $changes = New-Object System.Collections.Generic.List[object]
+    foreach ($pair in @(@('ARCILOGGER Syslog UDP', 'UDP'), @('ARCILOGGER Syslog TCP', 'TCP'))) {
+        $operation = $(if ($senders.Count -gt 0) { 'set' } else { 'remove' })
+        $changes.Add([pscustomobject]@{ rule = $pair[0]; direction = 'Inbound'; protocol = $pair[1]; ports = @("$SyslogPort"); remote_address = $senders; hosts = @(); operation = $operation; reason = $null })
+    }
+    if ($strict) {
+        foreach ($name in @($outbound | ForEach-Object { [string]$_.rule } | Select-Object -Unique)) {
+            $entries = @($outbound | Where-Object { [string]$_.rule -eq $name })
+            $hosts = @($entries | ForEach-Object { [string]$_.host } | Select-Object -Unique)
+            $ports = @($entries | ForEach-Object { [string]$_.port } | Select-Object -Unique)
+            $addresses = New-Object System.Collections.Generic.List[string]
+            $unresolved = @()
+            foreach ($target in $hosts) {
+                # Assigned first: the list comes back as one object.
+                $found = Resolve-HostAddresses $target
+                if (@($found).Count -eq 0) { $unresolved += $target }
+                Add-Unique $addresses @($found)
+            }
+            $protocol = $(if ($name -eq 'ARCILOGGER Out NTP') { 'UDP' } else { 'TCP' })
+            $change = [pscustomobject]@{ rule = $name; direction = 'Outbound'; protocol = $protocol; ports = $ports; remote_address = $addresses.ToArray(); hosts = $hosts; operation = 'set'; reason = $null }
+            if ($unresolved.Count -gt 0) {
+                # Offline DNS: the rule keeps the addresses it has (contract 2.18 R8).
+                $change.operation = 'keep'
+                $change.reason = 'çözümlenemedi [not resolved]: {0}' -f ($unresolved -join ', ')
+                $warnings.Add(('{0}: {1}' -f $name, $change.reason))
+            }
+            $changes.Add($change)
+        }
+    }
+    elseif ($outbound.Count -gt 0) {
+        $warnings.Add('Sıkı giden kip kapalı: giden kurallar değişmez [strict outbound mode is off: no outbound rule changes]')
+    }
+    $code = 0
+    if (-not $managed) { $code = 3 }
+    elseif ($problems.Count -gt 0) { $code = 2 }
+    $plan = [pscustomobject]@{
+        group           = $Group
+        mode            = 'sync'
+        managed         = $managed
+        strict_outbound = $strict
+        policy          = [pscustomobject]@{ valid = $policy.Valid; enabled = $policy.Enabled; source_networks = @($policy.SourceNetworks); min_prefix_v4 = $policy.MinPrefixV4 }
+        changes         = @(if ($code -eq 0) { $changes.ToArray() })
+        profiles        = 'unchanged'
+        other_rules     = 'unchanged'
+        would_disable   = $null
+        problems        = $problems.ToArray()
+        warnings        = $warnings.ToArray()
+        exit_code       = $code
+        state_file      = $StateFile
+    }
+    if ($PlanPath) { Write-ArciUtf8File -Path $PlanPath -Text ($plan | ConvertTo-Json -Depth 6) }
+    foreach ($warning in $warnings) { Write-ArciWarn $warning }
+    if ($code -eq 3) {
+        Write-ArciInfo ('Güvenlik duvarı ARCILOGGER tarafından yönetilmiyor (durum dosyası yok, -SkipFirewall) [firewall not managed by ARCILOGGER]: {0}' -f $StateFile)
+        return 3
+    }
+    if ($code -eq 2) {
+        foreach ($problem in $problems) { Write-Host ('    [HATA]  ' + $problem) }
+        Write-ArciStep 'Reddedildi, hiçbir kural değişmedi [refused, no rule changed].'
+        return 2
+    }
+    foreach ($change in $changes) {
+        Write-ArciStep ("{0}: {1} {2} {3} <- {4}" -f $change.rule, $change.operation, $change.protocol, ($change.ports -join ','), ($change.remote_address -join ', '))
+    }
+    if ($DryRun) {
+        Write-ArciInfo 'Deneme çalıştırması; güvenlik duvarı değiştirilmedi [dry run, firewall unchanged].'
+        return 0
+    }
+    if (-not (Test-ArciWindows)) { throw 'Bu betik yalnızca Windows üzerinde çalışır [Windows only].' }
+    foreach ($change in $changes) {
+        $existing = @(Get-NetFirewallRule -Group $Group -ErrorAction SilentlyContinue | Where-Object { $_ -and [string]$_.DisplayName -eq $change.rule })
+        if ($change.operation -eq 'keep') { continue }
+        if ($change.operation -eq 'remove') {
+            foreach ($rule in $existing) { $rule | Remove-NetFirewallRule }
+            continue
+        }
+        if ($existing.Count -gt 0) {
+            # In place: the rule never disappears, so no datagram meets a moment without it.
+            foreach ($rule in $existing) {
+                $rule | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress $change.remote_address
+                if ($change.direction -eq 'Outbound') { $rule | Get-NetFirewallPortFilter | Set-NetFirewallPortFilter -RemotePort $change.ports }
+            }
+            continue
+        }
+        $arguments = @{
+            DisplayName = $change.rule; Group = $Group; Direction = $change.direction; Protocol = $change.protocol
+            RemoteAddress = $change.remote_address; Action = 'Allow'; Profile = 'Any'; Enabled = 'True'
+            Description = ('ARCILOGGER: {0}' -f $(if ($change.direction -eq 'Inbound') { 'syslog from configured senders' } else { 'strict outbound (ApplySystem)' }))
+        }
+        if ($change.direction -eq 'Inbound') { $arguments['LocalPort'] = $change.ports } else { $arguments['RemotePort'] = $change.ports }
+        New-NetFirewallRule @arguments | Out-Null
+    }
+    Write-ArciStep 'Güvenlik duvarı eşitlendi [firewall in step with the configuration].'
+    0
+}
+
+if ($SyncFromConfig) {
+    $syncCode = Invoke-SyncFromConfig
+    exit $syncCode
 }
 
 # --- configuration and mode ------------------------------------------------------------------------

@@ -22,7 +22,7 @@ if ($PSVersionTable.PSVersion.Major -lt 6) { Remove-TypeData -TypeName System.Ar
 
 # --- constants ------------------------------------------------------------------------------------
 
-$script:ArciServiceNames = @('ArciCollector', 'ArciIngest', 'ArciApi', 'ArciWorker', 'ArciWeb')
+$script:ArciServiceNames = @('ArciCollector', 'ArciIngest', 'ArciApi', 'ArciWorker', 'ArciWeb', 'ArciAdmin')
 
 $script:WellKnownSid = @{
     System         = 'S-1-5-18'
@@ -30,10 +30,20 @@ $script:WellKnownSid = @{
     Administrators = 'S-1-5-32-544'
     Everyone       = 'S-1-1-0'
     Users          = 'S-1-5-32-545'
+    # The placeholder of an inheritable entry: whoever creates a file below gets it (its owner).
+    CreatorOwner   = 'S-1-3-0'
 }
 
+# The Windows Application log source of the browser administration (ArciAdmin and ApplySystem,
+# arcilogger_core.admin.contract.EVENT_SOURCE).
+$script:ArciEventSource = 'ARCILOGGER-Admin'
+
 function Get-ArciServiceNames {
-    <# The ARCILOGGER Windows services in start order (collector first: it receives the logs). #>
+    <#
+    The ARCILOGGER Windows services in start order: the collector first (it receives the logs),
+    ArciAdmin last. ArciAdmin writes the configuration the others load (ADR-0014): it is stopped
+    before them, so no change is applied while they stop or are replaced, and started after them.
+    #>
     [CmdletBinding()]
     [OutputType([string[]])]
     param()
@@ -43,7 +53,7 @@ function Get-ArciServiceNames {
 function Get-ArciWellKnownSid {
     [CmdletBinding()]
     [OutputType([string])]
-    param([Parameter(Mandatory = $true)][ValidateSet('System', 'LocalService', 'Administrators', 'Everyone', 'Users')][string]$Name)
+    param([Parameter(Mandatory = $true)][ValidateSet('System', 'LocalService', 'Administrators', 'Everyone', 'Users', 'CreatorOwner')][string]$Name)
     $script:WellKnownSid[$Name]
 }
 
@@ -1001,13 +1011,18 @@ function Test-ArciProxyTrust {
 }
 
 function Get-ArciSourceAddresses {
-    <# Sender addresses and networks from the [[sources]] tables (for the firewall). #>
+    <#
+    Sender addresses and networks from the [[sources]] tables (for the firewall). A source with
+    enabled = false is left out: its address gets no 514 opening (a message that still arrives
+    from it is recorded as before, ADR-0014).
+    #>
     [CmdletBinding()]
     [OutputType([string[]])]
     param([Parameter(Mandatory = $true)]$Config)
     $addresses = New-Object System.Collections.Generic.List[string]
     if ($Config.PSObject.Properties.Name -contains 'sources') {
         foreach ($source in @($Config.sources)) {
+            if ($source.PSObject.Properties.Name -contains 'enabled' -and $source.enabled -eq $false) { continue }
             if ($source.PSObject.Properties.Name -contains 'address' -and $source.address) { $addresses.Add([string]$source.address) }
         }
     }
@@ -1024,7 +1039,8 @@ function Get-ArciSourceTables {
         A narrow pattern like Get-ArciCollectorBind, for the case where no Python is installed yet
         (a new installation, or one over the configuration a removal kept); with Python the
         installer reads the file with tomllib (Get-ArciSourceAddresses). A commented-out table
-        ("#[[sources]]", as in the example configuration) is not one. An address written in
+        ("#[[sources]]", as in the example configuration) is not one, and neither is a source
+        switched off with enabled = false (as Get-ArciSourceAddresses). An address written in
         another form (a dotted key, an inline table, a multi-line string) is not seen: Tables is
         then larger than the number of Addresses.
     #>
@@ -1032,12 +1048,16 @@ function Get-ArciSourceTables {
     param([AllowEmptyString()][string]$Text)
     $tables = [regex]::Matches($Text, '(?ms)^[ \t]*\[\[[ \t]*sources[ \t]*\]\][ \t]*(?:#[^\r\n]*)?\r?$(?<body>.*?)(?=^[ \t]*\[|\z)')
     $addresses = New-Object System.Collections.Generic.List[string]
+    $count = 0
     foreach ($table in $tables) {
-        $address = [regex]::Match($table.Groups['body'].Value, '(?m)^[ \t]*address[ \t]*=[ \t]*(?:"(?<v>[^"\r\n]*)"|''(?<v>[^''\r\n]*)'')[ \t]*(?:#[^\r\n]*)?\r?$')
+        $body = $table.Groups['body'].Value
+        if ([regex]::IsMatch($body, '(?m)^[ \t]*enabled[ \t]*=[ \t]*false[ \t]*(?:#[^\r\n]*)?\r?$')) { continue }
+        $count++
+        $address = [regex]::Match($body, '(?m)^[ \t]*address[ \t]*=[ \t]*(?:"(?<v>[^"\r\n]*)"|''(?<v>[^''\r\n]*)'')[ \t]*(?:#[^\r\n]*)?\r?$')
         # An empty address is skipped like Get-ArciSourceAddresses does.
         if ($address.Success -and $address.Groups['v'].Value) { $addresses.Add($address.Groups['v'].Value) }
     }
-    [pscustomobject]@{ Tables = $tables.Count; Addresses = $addresses.ToArray() }
+    [pscustomobject]@{ Tables = $count; Addresses = $addresses.ToArray() }
 }
 
 # --- addresses ------------------------------------------------------------------------------------
@@ -1547,6 +1567,11 @@ function Get-ArciSiteToday {
     [CmdletBinding()]
     [OutputType([string])]
     param([datetime]$UtcNow = [DateTime]::UtcNow)
+    (ConvertTo-ArciSiteTime -UtcNow $UtcNow).Local.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertTo-ArciSiteTime([datetime]$UtcNow) {
+    <# -UtcNow at the site: Local (the wall clock) and Offset (from UTC), as Get-ArciSiteToday explains. #>
     if ($UtcNow.Kind -eq [DateTimeKind]::Local) { $utc = $UtcNow.ToUniversalTime() }
     else { $utc = [DateTime]::SpecifyKind($UtcNow, [DateTimeKind]::Utc) }
     $zone = $null
@@ -1557,9 +1582,21 @@ function Get-ArciSiteToday {
         }
         catch { $zone = $null }
     }
-    if ($null -ne $zone) { $local = [System.TimeZoneInfo]::ConvertTimeFromUtc($utc, $zone) }
-    else { $local = $utc.AddHours(3) }
-    $local.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    if ($null -ne $zone) { return [pscustomobject]@{ Local = [System.TimeZoneInfo]::ConvertTimeFromUtc($utc, $zone); Offset = $zone.GetUtcOffset($utc) } }
+    [pscustomobject]@{ Local = $utc.AddHours(3); Offset = [TimeSpan]::FromHours(3) }
+}
+
+function Get-ArciSiteTimestamp {
+    <#
+    Now at the site as ISO 8601 with its offset ('2026-10-25T10:00:00+03:00'), the form of the
+    state files of ARCILOGGER (arcilogger_core.timeutil.isoformat_site). -UtcNow for tests.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([datetime]$UtcNow = [DateTime]::UtcNow)
+    $site = ConvertTo-ArciSiteTime -UtcNow $UtcNow
+    $sign = $(if ($site.Offset -lt [TimeSpan]::Zero) { '-' } else { '+' })
+    '{0}{1}{2:hh\:mm}' -f $site.Local.ToString('yyyy-MM-ddTHH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture), $sign, $site.Offset.Duration()
 }
 
 function Get-ArciOldestVaultDay {
@@ -1649,22 +1686,35 @@ function New-ArciAce {
         [switch]$ThisFolderOnly,
         # Inherited by sub-folders only, never by files (for a list right: on a file the same bit
         # is ReadData, so a list-only account must not pass it on to files).
-        [switch]$FoldersOnly
+        [switch]$FoldersOnly,
+        # Inherited by files only, never by sub-folders (CREATOR OWNER Delete: a file's creator
+        # may delete it, never a folder).
+        [switch]$FilesOnly,
+        # Not for the folder itself, only for what is created below it.
+        [switch]$InheritOnly,
+        # Only one level down: the files directly in the folder, not those of its sub-folders.
+        [switch]$OneLevel
     )
+    $inherit = -not $ThisFolderOnly
     [pscustomobject]@{
-        Sid = $Sid; Who = $Who; Rights = $Rights; Inherit = (-not $ThisFolderOnly)
-        FoldersOnly = [bool]($FoldersOnly -and -not $ThisFolderOnly)
+        Sid = $Sid; Who = $Who; Rights = $Rights; Inherit = $inherit
+        FoldersOnly = [bool]($FoldersOnly -and $inherit)
+        FilesOnly = [bool]($FilesOnly -and -not $FoldersOnly -and $inherit)
+        InheritOnly = [bool]($InheritOnly -and $inherit)
+        OneLevel = [bool]($OneLevel -and $inherit)
     }
 }
 
 function Get-ArciAclPlan {
     <#
     .SYNOPSIS
-        Who may do what in the ARCILOGGER folders (least privilege, docs/adr/0007).
+        Who may do what in the ARCILOGGER folders (least privilege, docs/adr/0007, docs/adr/0014).
     .DESCRIPTION
         Returns one entry per path: Path, Kind (Directory/File), Protect (inheritance from the
         parent disabled), Aces and Audit. Pure data, no system calls: the dry run prints it and the
-        tests check it on any platform.
+        tests check it on any platform. Parents come before their children (Set-ArciVaultAcl.ps1
+        creates a missing folder in this order). "Read" of a folder is ReadAndExecute (list and
+        traverse), of a file Read.
 
         - Collector (the only network-facing Python service): reads and writes the spool but has no
           Delete right there, so it cannot delete or rename raw evidence (it can write into a
@@ -1675,19 +1725,38 @@ function Get-ArciAclPlan {
           verify and clock check; only they write state\seal, state\replica, state\verify and
           state\clock (core seal.py trusts state\seal\<day>.json when it decides a day is sealed).
           The database backup (Backup task, ADR-0009) writes and prunes backups\scheduled, which
-          no service can read; backups and backups\db stay administrators-only.
+          no service can read; backups and backups\db stay administrators-only. The tasks take
+          their signed requests from state\requests (ADR-0014) and read admin\keys\keys.json,
+          admin\policy.json and admin\system\jars.json.
           LOCAL SERVICE is a shared Windows account: other LocalService services hold these
           rights too (known limitation, owner decision: docs/adr/0007 section 8).
         - API: appends to the audit spool (spool\_audit, no delete) and writes exports; reads
           the spool (raw lines of days not sealed yet: GET /raw, the 5651 report, the sealing
-          calendar; read only - no write, no delete), the vault and the state.
+          calendar; read only - no write, no delete), the vault and the state. For the browser
+          administration it writes signed requests into admin\inbox (create and write, no
+          delete except its own files) and reads the agent's status and journal; it never gets
+          a write right on the configuration, secret.key, secrets.json or zamane\.
+        - ArciAdmin (the administration agent, ADR-0014; no listener, no administrator rights):
+          the only writer of arcilogger.toml and secrets.json (explicit file entries, which
+          ReplaceFileW keeps), with CreateFiles in the configuration folder for its temporary
+          files and CREATOR OWNER Delete on the files of that folder only (it can delete what it
+          created, never secret.key or another file an administrator placed). In kamusm-roots
+          and smtp-ca it may only add files. It stages uploaded Zamane clients in zamane\web,
+          which no task can read (a staged client never runs); zamane\approved is written by
+          SYSTEM (ApplySystem) and administrators only. It writes its own admin\ folders,
+          state\requests (task requests) and its logs, and reads the state of the services.
+          No access to the spool, the vault, the exports, the backups or the evidence-job state.
+        - ApplySystem (SYSTEM) and administrators: full control everywhere (the owners entry of
+          every protected path); admin\policy.json is written by administrators only.
         - Ingest: reads the spool and the vault (catching up on days sealed while the database
           was down, ADR-0002), writes its own state.
         - Worker: reads the vault and the job state; may only list the spool and its source
           folders (inherited by folders, not by files), so it finds the oldest spool day by file
           name for the licence decision like the API (licensing contract 3.4) without reading
-          raw logs.
+          raw logs. It reads the agent's status, journal and the system journal (audit import).
         - Web (Caddy): only its own data folder (internal CA private key) and the logs.
+        - install\ (the installer's own state, firewall-state.json which SYSTEM reads) is
+          protected: administrators, SYSTEM and ArciAdmin read only.
         - The PostgreSQL data folder is never touched (its installer sets its own rights).
     #>
     [CmdletBinding()]
@@ -1699,16 +1768,23 @@ function Get-ArciAclPlan {
     $system = $script:WellKnownSid.System
     $admins = $script:WellKnownSid.Administrators
     $localService = $script:WellKnownSid.LocalService
+    $creatorOwner = $script:WellKnownSid.CreatorOwner
     $collector = Get-ArciServiceSid 'ArciCollector'
     $ingest = Get-ArciServiceSid 'ArciIngest'
     $api = Get-ArciServiceSid 'ArciApi'
     $worker = Get-ArciServiceSid 'ArciWorker'
     $web = Get-ArciServiceSid 'ArciWeb'
+    $agent = Get-ArciServiceSid 'ArciAdmin'
     $read = 'ReadAndExecute'
     $full = 'FullControl'
     $modify = 'Modify'
     $appendOnly = 'ReadAndExecute, Write'
     $listOnly = 'ListDirectory, ReadAttributes, Traverse'
+    # The API's right on the inbox: create a request file and write it, read it back, list the
+    # folder (quotas); deleting is left to CREATOR OWNER (its own temporary files).
+    $inboxWriter = 'CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory'
+    # The agent's right on state\requests: read, create a task request and write it.
+    $requestWriter = 'ReadAndExecute, CreateFiles, WriteData'
 
     function New-Entry([string]$Path, [string]$Kind, [bool]$Protect, [object[]]$Aces, [bool]$Audit = $false) {
         [pscustomobject]@{ Path = $Path; Kind = $Kind; Protect = $Protect; Aces = @($Aces); Audit = $Audit }
@@ -1718,6 +1794,13 @@ function Get-ArciAclPlan {
         (New-ArciAce -Sid $admins -Who 'Administrators' -Rights $full)
     )
     $p = [System.IO.Path]::DirectorySeparatorChar
+    $adminDir = $ProgramDataDir + $p + 'admin'
+    $keysDir = $adminDir + $p + 'keys'
+    # Add-only (kamusm-roots, smtp-ca): create a file, delete only one created by the agent.
+    $addOnly = @(
+        (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'CreateFiles' -ThisFolderOnly),
+        (New-ArciAce -Sid $creatorOwner -Who 'CREATOR OWNER (files ArciAdmin added)' -Rights 'Delete' -FilesOnly -InheritOnly)
+    )
     $entries = @(
         # Program files: read for every ARCILOGGER account (inherits the Program Files defaults too).
         (New-Entry $InstallDir 'Directory' $false @(
@@ -1726,23 +1809,109 @@ function Get-ArciAclPlan {
                 (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                 (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
                 (New-ArciAce -Sid $web -Who 'NT SERVICE\ArciWeb' -Rights $read),
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $read),
                 (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $read))),
-        # Configuration, Kamu SM roots, Zamane jar: read-only for the services and tasks.
+        # Configuration, Kamu SM roots, Zamane jar: read-only for the services and tasks. ArciAdmin
+        # may create files here (the temporary files of an apply, this folder only) and delete
+        # the files it created (CREATOR OWNER, files of this folder only, never a sub-folder).
         (New-Entry $ProgramDataDir 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $collector -Who 'NT SERVICE\ArciCollector' -Rights $read),
                     (New-ArciAce -Sid $ingest -Who 'NT SERVICE\ArciIngest' -Rights $read),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $read),
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'CreateFiles' -ThisFolderOnly),
+                    (New-ArciAce -Sid $creatorOwner -Who 'CREATOR OWNER (files ArciAdmin created here)' -Rights 'Delete' -FilesOnly -InheritOnly -OneLevel),
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $read)))),
+        # The two files the browser administration changes: an explicit entry for ArciAdmin on top
+        # of the inherited read rights (ReplaceFileW keeps it, contract 2.2).
+        (New-Entry ($ProgramDataDir + $p + 'arcilogger.toml') 'File' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
+        (New-Entry ($ProgramDataDir + $p + 'secrets.json') 'File' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
         # The encryption key of the secret store: not for the collector (it never needs a secret).
+        # Nobody but administrators may write or delete it.
         (New-Entry ($ProgramDataDir + $p + 'secret.key') 'File' $true ($owners + @(
                     (New-ArciAce -Sid $ingest -Who 'NT SERVICE\ArciIngest' -Rights 'Read'),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights 'Read'),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights 'Read'),
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'Read'),
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights 'Read')))),
+        # Kamu SM roots and SMTP CA files: ArciAdmin adds a file (read inherited), it never changes
+        # or deletes one an administrator placed.
+        (New-Entry ($ProgramDataDir + $p + 'kamusm-roots') 'Directory' $false $addOnly),
+        (New-Entry ($ProgramDataDir + $p + 'smtp-ca') 'Directory' $false $addOnly),
+        # Uploaded Zamane clients wait here for their approval: no task may read them (a staged
+        # client never runs); ApplySystem (SYSTEM) only hashes and copies them.
+        (New-Entry ($ProgramDataDir + $p + 'zamane' + $p + 'web') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read)))),
+        # Approved clients: written by SYSTEM (ApplySystem promotes a known release, approve-jar)
+        # and administrators only; run by the tasks and the API's report stamps.
+        (New-Entry ($ProgramDataDir + $p + 'zamane' + $p + 'approved') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $read),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $read)))),
         # Caddy's data folder holds the private key of the internal CA: Caddy and administrators only.
         (New-Entry ($ProgramDataDir + $p + 'caddy') 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $web -Who 'NT SERVICE\ArciWeb' -Rights $modify)))),
+        # The installer's own state (firewall-state.json, which ApplySystem reads as SYSTEM).
+        (New-Entry ($ProgramDataDir + $p + 'install') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $read)))),
+        # The browser administration (ADR-0014): protected; the readers may list the folder itself,
+        # every sub-folder below grants its own rights.
+        (New-Entry $adminDir 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $listOnly -ThisFolderOnly),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $listOnly -ThisFolderOnly),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $listOnly -ThisFolderOnly),
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $listOnly -ThisFolderOnly)))),
+        # The guard rails: read by the agent, the API, the tasks and SYSTEM; written by the
+        # installer (administrators) only.
+        (New-Entry ($adminDir + $p + 'policy.json') 'File' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'Read'),
+                (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights 'Read'),
+                (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights 'Read'))),
+        # The channel's keys: protected before "keys init" creates them (Install-Arcilogger.ps1);
+        # each private key is readable by its one service, the public keys by every reader.
+        (New-Entry $keysDir 'Directory' $true $owners),
+        (New-Entry ($keysDir + $p + 'agent-ed25519.key') 'File' $true ($owners + @(
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'Read')))),
+        (New-Entry ($keysDir + $p + 'api-ed25519.key') 'File' $true ($owners + @(
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights 'Read')))),
+        (New-Entry ($keysDir + $p + 'keys.json') 'File' $true ($owners + @(
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'Read'),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights 'Read'),
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights 'Read')))),
+        # The inbox (and inbox\uploads below it): the API creates and writes requests and uploads,
+        # the agent claims them.
+        (New-Entry ($adminDir + $p + 'inbox') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify),
+                (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $inboxWriter),
+                (New-ArciAce -Sid $creatorOwner -Who 'CREATOR OWNER (the API''s own files)' -Rights 'Delete' -InheritOnly))),
+        # The agent's own folders (SYSTEM reads the versions through its full right).
+        (New-Entry ($adminDir + $p + 'work') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
+        (New-Entry ($adminDir + $p + 'pending') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
+        (New-Entry ($adminDir + $p + 'state') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
+        (New-Entry ($adminDir + $p + 'versions') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
+        # Heartbeat, request status, alerts and the journal: the API shows them, the worker imports them.
+        (New-Entry ($adminDir + $p + 'status') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify),
+                (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read))),
+        (New-Entry ($adminDir + $p + 'journal') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify),
+                (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read))),
+        # ApplySystem's state (SYSTEM writes it through its full right): the tasks read jars.json.
+        (New-Entry ($adminDir + $p + 'system') 'Directory' $false @(
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $read),
+                (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
+                (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $read))),
         # Data root: list only (this folder), everything else is granted per sub-folder.
         (New-Entry $DataRoot 'Directory' $true ($owners + @(
                     (New-ArciAce -Sid $collector -Who 'NT SERVICE\ArciCollector' -Rights $read -ThisFolderOnly),
@@ -1750,6 +1919,7 @@ function Get-ArciAclPlan {
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read -ThisFolderOnly),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read -ThisFolderOnly),
                     (New-ArciAce -Sid $web -Who 'NT SERVICE\ArciWeb' -Rights $read -ThisFolderOnly),
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $read -ThisFolderOnly),
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $read -ThisFolderOnly)))),
         # Raw spool. The API reads the days that are not sealed yet (raw line view, the 5651
         # report and the sealing calendar; MVP-CONTRACTS 6.1): read only, inherited by the source
@@ -1776,12 +1946,15 @@ function Get-ArciAclPlan {
                 (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read),
                 (New-ArciAce -Sid $ingest -Who 'NT SERVICE\ArciIngest' -Rights $read)) $true),
         # Service status and alerts: every Python service keeps its own files here (ingest
-        # offsets live in the database).
+        # offsets live in the database). ArciAdmin reads them (which configuration each service
+        # loaded, the collector's acknowledgement for the firewall); it reaches none of the
+        # protected folders below.
         (New-Entry ($DataRoot + $p + 'state') 'Directory' $false @(
                 (New-ArciAce -Sid $collector -Who 'NT SERVICE\ArciCollector' -Rights $modify),
                 (New-ArciAce -Sid $ingest -Who 'NT SERVICE\ArciIngest' -Rights $modify),
                 (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $modify),
                 (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $read),
                 (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify))),
         # Evidence-job state (protected): written only by the scheduled tasks. A service that could
         # write state\seal\<day>.json with status "sealed" could stop that day from ever being sealed.
@@ -1802,6 +1975,13 @@ function Get-ArciAclPlan {
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify),
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $read),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $read)))),
+        # Signed task requests (seal now, credit query, TSA and replica test; ADR-0014): ArciAdmin
+        # writes them and deletes only its own, the tasks take, answer and delete them. No service
+        # but the agent can put a request here; the signature is the authority.
+        (New-Entry ($DataRoot + $p + 'state' + $p + 'requests') 'Directory' $true ($owners + @(
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $requestWriter),
+                    (New-ArciAce -Sid $creatorOwner -Who 'CREATOR OWNER (ArciAdmin''s own requests)' -Rights 'Delete' -InheritOnly),
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify)))),
         (New-Entry ($DataRoot + $p + 'exports') 'Directory' $false @(
                 (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $modify),
                 (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $modify))),
@@ -1811,6 +1991,7 @@ function Get-ArciAclPlan {
                 (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $modify),
                 (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $modify),
                 (New-ArciAce -Sid $web -Who 'NT SERVICE\ArciWeb' -Rights $modify),
+                (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify),
                 (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify))),
         # Database dumps: administrators only (inherited from the data root), so backups\db - the
         # installer's dumps before an upgrade - is too.
@@ -1822,6 +2003,30 @@ function Get-ArciAclPlan {
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $modify))))
     )
     , $entries
+}
+
+function Get-ArciAceFlags {
+    <#
+    .SYNOPSIS
+        The Windows inheritance and propagation flags of a planned entry (New-ArciAce) on a path
+        of -Kind, as text ('ContainerInherit, ObjectInherit', 'None', ...). Pure; Set-ArciAclEntry
+        applies them.
+    .DESCRIPTION
+        On a file nothing is inherited. On a folder: FoldersOnly is ContainerInherit, FilesOnly
+        ObjectInherit, else both; InheritOnly leaves the folder itself out; OneLevel
+        (NoPropagateInherit) stops an entry at the folder's own children: an entry inherited by
+        files only would otherwise reach the files of every sub-folder too.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Kind, [Parameter(Mandatory = $true)]$Ace)
+    if ($Kind -ne 'Directory' -or -not $Ace.Inherit) { return [pscustomobject]@{ Inheritance = 'None'; Propagation = 'None' } }
+    $inheritance = 'ContainerInherit, ObjectInherit'
+    if ($Ace.FoldersOnly) { $inheritance = 'ContainerInherit' }
+    elseif ($Ace.PSObject.Properties.Name -contains 'FilesOnly' -and $Ace.FilesOnly) { $inheritance = 'ObjectInherit' }
+    $propagation = @()
+    if ($Ace.PSObject.Properties.Name -contains 'InheritOnly' -and $Ace.InheritOnly) { $propagation += 'InheritOnly' }
+    if ($Ace.PSObject.Properties.Name -contains 'OneLevel' -and $Ace.OneLevel) { $propagation += 'NoPropagateInherit' }
+    [pscustomobject]@{ Inheritance = $inheritance; Propagation = $(if ($propagation.Count -gt 0) { $propagation -join ', ' } else { 'None' }) }
 }
 
 function Get-ArciAccessControl {
@@ -1862,16 +2067,10 @@ function Set-ArciAclEntry {
     foreach ($ace in $Entry.Aces) {
         $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $ace.Sid
         $rights = [System.Security.AccessControl.FileSystemRights]$ace.Rights
-        if ($Entry.Kind -eq 'Directory' -and $ace.Inherit -and $ace.FoldersOnly) {
-            $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit
-        }
-        elseif ($Entry.Kind -eq 'Directory' -and $ace.Inherit) {
-            $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-        }
-        else {
-            $inherit = [System.Security.AccessControl.InheritanceFlags]::None
-        }
-        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, ([System.Security.AccessControl.PropagationFlags]::None), ([System.Security.AccessControl.AccessControlType]::Allow)
+        $flags = Get-ArciAceFlags -Kind $Entry.Kind -Ace $ace
+        $inherit = [System.Security.AccessControl.InheritanceFlags]$flags.Inheritance
+        $propagation = [System.Security.AccessControl.PropagationFlags]$flags.Propagation
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $sid, $rights, $inherit, $propagation, ([System.Security.AccessControl.AccessControlType]::Allow)
         $security.AddAccessRule($rule)
     }
     Set-ArciAccessControl -Item $item -Security $security
@@ -1895,6 +2094,624 @@ function Set-ArciVaultAudit {
     $rule = New-Object System.Security.AccessControl.FileSystemAuditRule -ArgumentList $everyone, $rights, $inherit, ([System.Security.AccessControl.PropagationFlags]::None), $flags
     $security.SetAuditRule($rule)
     Set-ArciAccessControl -Item $item -Security $security
+}
+
+# --- browser administration (ADR-0014) -----------------------------------------------------------
+#
+# The installer prepares what the administration agent ArciAdmin and the SYSTEM task
+# \ARCILOGGER\ApplySystem trust: admin\policy.json (the guard rails, written by administrators
+# only), the record of the programs the tasks may run (policy.trusted_executables and
+# zamane\zamane-jar.sha256, arcilogger_core.execpolicy) and the Application log source. Nothing
+# here depends on the licence, and nothing of the 5651 path depends on the browser administration:
+# -DisableBrowserAdministration switches the agent off, never sealing.
+
+$script:AdminPolicySchema = 'arcilogger.admin-policy/1'
+$script:DefaultSourceNetworks = @('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')
+$script:DefaultExecutableRoots = @('C:\Program Files', 'C:\Program Files (x86)')
+# Who may write a program the installer records as trusted: SYSTEM, Administrators,
+# TrustedInstaller. CREATOR OWNER and OWNER RIGHTS only stand for the owner, which is checked
+# itself.
+$script:TrustedWriterSids = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+$script:OwnerPlaceholderSids = @('S-1-3-0', 'S-1-3-4')
+# FileSystemRights that change a file or what a folder holds: WriteData (CreateFiles),
+# AppendData (CreateDirectories), WriteExtendedAttributes, DeleteSubdirectoriesAndFiles,
+# WriteAttributes, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE.
+$script:WriteRightsMask = [int64](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+# What the system plan may name (arcilogger_core.admin.contract: OutboundRule, HostName).
+$script:OutboundRulePattern = '^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$'
+$script:HostNamePattern = '^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
+
+function Get-ArciDefaultSourceNetworks {
+    <# The default -SourceNetwork of the installer (RFC 1918), as policy.json states it. #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+    , $script:DefaultSourceNetworks
+}
+
+function ConvertTo-ArciSourceNetwork {
+    <#
+    .SYNOPSIS
+        -Value as a source network of policy.json: Network (canonical CIDR text such as
+        "172.16.0.0/12"; an address alone is its /32) and Problem ("Türkçe [English]", $null
+        when it is valid).
+    .DESCRIPTION
+        An IPv4 network without host bits (Python's ipaddress.IPv4Network(strict=True), which
+        arcilogger_core.admin.contract.AdminPolicy applies): "172.16.0.1/12" is refused, not
+        silently widened to the network it lies in.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Value)
+    $network = ConvertTo-ArciNetwork -Value $Value
+    if ($null -eq $network -or $network.Bytes.Length -ne 4) {
+        return [pscustomobject]@{ Network = $null; Problem = 'IPv4 ağı değil, örnek 172.16.0.0/12 [not an IPv4 network, e.g. 172.16.0.0/12]' }
+    }
+    for ($i = 0; $i -lt 4; $i++) {
+        $bits = [Math]::Max(0, [Math]::Min(8, $network.Prefix - 8 * $i))
+        $mask = (0xFF -shl (8 - $bits)) -band 0xFF
+        if (([int]$network.Bytes[$i] -band (-bnot $mask) -band 0xFF) -ne 0) {
+            return [pscustomobject]@{ Network = $null; Problem = ('ağ adresi değil, ağın içinde bir adres [a host address, not the network address]: /{0}' -f $network.Prefix) }
+        }
+    }
+    [pscustomobject]@{ Network = ('{0}/{1}' -f $network.Address, $network.Prefix); Problem = $null }
+}
+
+function New-ArciAdminPolicy {
+    <#
+    .SYNOPSIS
+        The text of admin\policy.json (contract 2.4.1): the guard rails of the browser
+        administration. Pure; Install-Arcilogger.ps1 writes it (administrators only).
+    .DESCRIPTION
+        arcilogger_core.admin.contract.AdminPolicy reads it strictly: no unknown key, integers
+        only, every range checked (min_prefix_v4 8-32, max_sources 1-5000, hold_hours 0-168,
+        jar_hold_hours 1-168, tsa_test_per_day 0-20). A missing or invalid file switches the
+        browser administration off (fail closed), never a 5651 function. -Enabled:$false is
+        -DisableBrowserAdministration: the agent refuses every request and the web interface
+        names the console path instead.
+        -TrustedExecutable: the programs the installer recorded outside the default trusted
+        locations (path, sha256 and, for a tsa.java with more than one element, argv).
+        -WrittenAt: an ISO 8601 time with offset (default: now at the site).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [bool]$Enabled = $true,
+        [string[]]$SourceNetwork = $script:DefaultSourceNetworks,
+        [ValidateRange(8, 32)][int]$MinPrefixV4 = 16,
+        [ValidateRange(1, 5000)][int]$MaxSources = 500,
+        [ValidateRange(0, 168)][int]$HoldHours = 0,
+        [ValidateRange(1, 168)][int]$JarHoldHours = 24,
+        [string[]]$ExecutableRoot = $script:DefaultExecutableRoots,
+        [AllowEmptyCollection()][object[]]$TrustedExecutable = @(),
+        [ValidateRange(0, 20)][int]$TsaTestPerDay = 3,
+        [string]$WrittenAt,
+        [string]$WrittenBy = 'installer'
+    )
+    if (-not $WrittenAt) { $WrittenAt = Get-ArciSiteTimestamp }
+    $networks = New-Object System.Collections.Generic.List[string]
+    foreach ($value in @($SourceNetwork)) {
+        $checked = ConvertTo-ArciSourceNetwork -Value $value
+        if ($checked.Problem) { throw ("-SourceNetwork '{0}': {1}" -f $value, $checked.Problem) }
+        if (-not $networks.Contains($checked.Network)) { $networks.Add($checked.Network) }
+    }
+    $trusted = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($TrustedExecutable)) {
+        if ($null -eq $entry) { continue }
+        $sha256 = ([string]$entry.sha256).ToLowerInvariant()
+        if ($sha256 -notmatch '^[0-9a-f]{64}$') { throw ("SHA-256 geçersiz [invalid]: {0}" -f $entry.path) }
+        $item = [ordered]@{ path = [string]$entry.path; sha256 = $sha256 }
+        $argv = @()
+        if ($entry.PSObject.Properties.Name -contains 'argv') { $argv = @($entry.argv | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }) }
+        if ($argv.Count -gt 0) { $item['argv'] = $argv }
+        $trusted.Add([pscustomobject]$item)
+    }
+    $document = [pscustomobject][ordered]@{
+        schema              = $script:AdminPolicySchema
+        enabled             = $Enabled
+        source_networks     = $networks.ToArray()
+        min_prefix_v4       = $MinPrefixV4
+        max_sources         = $MaxSources
+        hold_hours          = $HoldHours
+        jar_hold_hours      = $JarHoldHours
+        executable_roots    = @($ExecutableRoot | ForEach-Object { [string]$_ })
+        trusted_executables = $trusted.ToArray()
+        tsa_test_per_day    = $TsaTestPerDay
+        written_at          = $WrittenAt
+        written_by          = $WrittenBy
+    }
+    ($document | ConvertTo-Json -Depth 5) + "`n"
+}
+
+function Read-ArciAdminPolicy {
+    <#
+    .SYNOPSIS
+        admin\policy.json as arcilogger_core.admin.contract.load_policy reads it. Returns
+        Exists, Valid, Problem, Sha256 (of the file's bytes, $null without a file) and the
+        values; a missing or invalid file gives the values of FALLBACK_POLICY: Enabled $false
+        (fail closed) with the default networks and executable roots, nothing trusted.
+    .DESCRIPTION
+        The checks of AdminPolicy (contract 2.4.1): UTF-8 without a byte order mark, one JSON
+        object with only the known keys and its schema stated, booleans and integers of their
+        type (no floats) in range, IPv4 source networks without host bits, texts of 1-1000
+        characters, trusted executables with a path, a 64-hex SHA-256 and an optional argv.
+        ApplySystem (Sync-ArciSystem.ps1, Set-ArciFirewall.ps1 -SyncFromConfig) reads it so;
+        the installer keeps what an administrator wrote by hand (the keys without a parameter).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $policy = [pscustomobject]@{
+        Exists = $false; Valid = $false; Problem = $null; Sha256 = $null
+        Enabled = $false; SourceNetworks = $script:DefaultSourceNetworks; MinPrefixV4 = 16; MaxSources = 500
+        HoldHours = 0; JarHoldHours = 24; ExecutableRoots = $script:DefaultExecutableRoots; TrustedExecutables = @()
+        TsaTestPerDay = 3; WrittenAt = $null; WrittenBy = $null
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        $policy.Problem = 'policy.json yok [missing]'
+        return $policy
+    }
+    $policy.Exists = $true
+    $fail = {
+        param([string]$Reason)
+        $policy.Problem = $Reason
+        $policy
+    }
+    try { $bytes = [System.IO.File]::ReadAllBytes($Path) }
+    catch { return (& $fail ('okunamadı [unreadable]: {0}' -f $_.Exception.Message)) }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $policy.Sha256 = ([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+    if ($bytes.Length -gt 1048576) { return (& $fail 'çok büyük [too large]') }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { return (& $fail 'bayt sırası işareti var [has a byte order mark]') }
+    $strict = New-Object System.Text.UTF8Encoding -ArgumentList $false, $true
+    try { $text = $strict.GetString($bytes) }
+    catch { return (& $fail 'UTF-8 değil [not UTF-8]') }
+    try { $document = $text | ConvertFrom-Json }
+    catch { return (& $fail ('JSON değil [not JSON]: {0}' -f $_.Exception.Message)) }
+    if ($document -isnot [System.Management.Automation.PSCustomObject]) { return (& $fail 'JSON nesnesi değil [not a JSON object]') }
+    $known = @('schema', 'enabled', 'source_networks', 'min_prefix_v4', 'max_sources', 'hold_hours', 'jar_hold_hours', 'executable_roots', 'trusted_executables', 'tsa_test_per_day', 'written_at', 'written_by')
+    $names = @($document.PSObject.Properties | ForEach-Object { $_.Name })
+    $unknown = @($names | Where-Object { $known -cnotcontains $_ })
+    if ($unknown.Count -gt 0) { return (& $fail ('bilinmeyen anahtar [unknown key]: {0}' -f ($unknown -join ', '))) }
+    foreach ($required in @('schema', 'enabled', 'written_at', 'written_by')) {
+        if ($names -cnotcontains $required) { return (& $fail ('{0} yok [missing]' -f $required)) }
+    }
+    if ($document.schema -isnot [string] -or $document.schema -cne $script:AdminPolicySchema) { return (& $fail ('schema {0} değil [is not {0}]' -f $script:AdminPolicySchema)) }
+    if ($document.enabled -isnot [bool]) { return (& $fail 'enabled true ya da false değil [is not true or false]') }
+    $isText = { param($Value) ($Value -is [string]) -and $Value.Length -ge 1 -and $Value.Length -le 1000 }
+    $integer = {
+        param([string]$Name, [int]$Minimum, [int]$Maximum, [int]$Default)
+        if ($names -cnotcontains $Name) { return $Default }
+        $value = $document.$Name
+        if (-not ($value -is [int] -or $value -is [long]) -or $value -lt $Minimum -or $value -gt $Maximum) {
+            throw ('{0} {1}-{2} arasında bir tam sayı değil [is not an integer from {1} to {2}]' -f $Name, $Minimum, $Maximum)
+        }
+        [int]$value
+    }
+    try {
+        $minPrefix = & $integer 'min_prefix_v4' 8 32 16
+        $maxSources = & $integer 'max_sources' 1 5000 500
+        $holdHours = & $integer 'hold_hours' 0 168 0
+        $jarHoldHours = & $integer 'jar_hold_hours' 1 168 24
+        $tsaTests = & $integer 'tsa_test_per_day' 0 20 3
+    }
+    catch { return (& $fail $_.Exception.Message) }
+    $networks = $script:DefaultSourceNetworks
+    if ($names -ccontains 'source_networks') {
+        if ($document.source_networks -isnot [System.Array]) { return (& $fail 'source_networks bir liste değil [is not a list]') }
+        $list = New-Object System.Collections.Generic.List[string]
+        foreach ($value in @($document.source_networks)) {
+            $checked = ConvertTo-ArciSourceNetwork -Value ([string]$value)
+            if ($value -isnot [string] -or $checked.Problem) { return (& $fail ('source_networks: {0}' -f $value)) }
+            $list.Add($checked.Network)
+        }
+        $networks = $list.ToArray()
+    }
+    $roots = $script:DefaultExecutableRoots
+    if ($names -ccontains 'executable_roots') {
+        if ($document.executable_roots -isnot [System.Array]) { return (& $fail 'executable_roots bir liste değil [is not a list]') }
+        foreach ($value in @($document.executable_roots)) { if (-not (& $isText $value)) { return (& $fail ('executable_roots: {0}' -f $value)) } }
+        $roots = @($document.executable_roots)
+    }
+    $trusted = @()
+    if ($names -ccontains 'trusted_executables') {
+        if ($document.trusted_executables -isnot [System.Array]) { return (& $fail 'trusted_executables bir liste değil [is not a list]') }
+        foreach ($entry in @($document.trusted_executables)) {
+            if ($entry -isnot [System.Management.Automation.PSCustomObject]) { return (& $fail 'trusted_executables: nesne değil [not an object]') }
+            $keys = @($entry.PSObject.Properties | ForEach-Object { $_.Name })
+            if (@($keys | Where-Object { @('path', 'sha256', 'argv') -cnotcontains $_ }).Count -gt 0 -or $keys -cnotcontains 'path' -or $keys -cnotcontains 'sha256') {
+                return (& $fail 'trusted_executables: path ve sha256 gerekli, başka anahtar olmaz [path and sha256 required, no other key but argv]')
+            }
+            if (-not (& $isText $entry.path) -or $entry.sha256 -isnot [string] -or $entry.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+                return (& $fail ('trusted_executables: {0}' -f $entry.path))
+            }
+            if ($keys -ccontains 'argv' -and $null -ne $entry.argv) {
+                $argv = @($entry.argv)
+                if ($entry.argv -isnot [System.Array] -or $argv.Count -eq 0 -or @($argv | Where-Object { -not (& $isText $_) }).Count -gt 0) {
+                    return (& $fail ('trusted_executables argv: {0}' -f $entry.path))
+                }
+            }
+        }
+        $trusted = @($document.trusted_executables)
+    }
+    # ConvertFrom-Json of PowerShell 7 turns an ISO 8601 text into a DateTime: one without an
+    # offset is of the kind Unspecified.
+    if (-not ((& $isText $document.written_at) -or $document.written_at -is [datetime])) { return (& $fail 'written_at bir zaman değil [is not a time]') }
+    if (($document.written_at -is [datetime] -and $document.written_at.Kind -eq [System.DateTimeKind]::Unspecified) -or
+        ($document.written_at -is [string] -and $document.written_at -notmatch '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$')) {
+        return (& $fail 'written_at saat farkı olan bir ISO 8601 zamanı değil [is not an ISO 8601 time with an offset]')
+    }
+    if (-not (& $isText $document.written_by)) { return (& $fail 'written_by bir metin değil [is not a text]') }
+    $policy.Valid = $true
+    $policy.Enabled = [bool]$document.enabled
+    $policy.SourceNetworks = $networks
+    $policy.MinPrefixV4 = $minPrefix
+    $policy.MaxSources = $maxSources
+    $policy.HoldHours = $holdHours
+    $policy.JarHoldHours = $jarHoldHours
+    $policy.ExecutableRoots = $roots
+    $policy.TrustedExecutables = $trusted
+    $policy.TsaTestPerDay = $tsaTests
+    $policy.WrittenAt = $document.written_at
+    $policy.WrittenBy = [string]$document.written_by
+    $policy
+}
+
+function Get-ArciSyslogSenderProblem {
+    <#
+    .SYNOPSIS
+        Why -Value may not be a syslog sender of ApplySystem's firewall step, "Türkçe [English]",
+        or $null when it may: an IPv4 address or network in canonical text (no host bits),
+        inside one of -SourceNetwork and not wider than /-MinPrefixV4 (admin\policy.json,
+        contract 2.8.3 step 3; the same rule as system-plan, checked again before any change).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyString()][string]$Value,
+        [AllowEmptyCollection()][string[]]$SourceNetwork = @(),
+        [ValidateRange(0, 32)][int]$MinPrefixV4 = 16
+    )
+    $network = ConvertTo-ArciNetwork -Value $Value
+    if ($null -eq $network -or $network.Bytes.Length -ne 4 -or $network.Text -ne $Value) { return 'IPv4 adresi ya da ağı değil [not an IPv4 address or network]' }
+    if ($Value.Contains('/') -and (ConvertTo-ArciSourceNetwork -Value $Value).Network -ne $Value) { return 'ağ adresi değil, ağın içinde bir adres [a host address, not the network address]' }
+    if ($network.Prefix -lt $MinPrefixV4) { return ('/{0}, izin verilen en geniş ağ /{1} [wider than the widest network allowed]' -f $network.Prefix, $MinPrefixV4) }
+    foreach ($allowed in @($SourceNetwork)) {
+        $outer = ConvertTo-ArciNetwork -Value $allowed
+        if ($null -ne $outer -and $outer.Prefix -le $network.Prefix -and (Test-ArciAddressInNetwork -Address ([string]$network.Address) -Network $allowed)) { return $null }
+    }
+    'izin verilen ağların dışında [outside the allowed networks]: {0}' -f (@($SourceNetwork) -join ', ')
+}
+
+function Get-ArciOutboundProblem {
+    <#
+    .SYNOPSIS
+        Why an outbound entry of the system plan (Rule, HostName, Port) may not be applied in
+        strict outbound mode, or $null: the rule is one ApplySystem updates (ARCILOGGER Out NTP,
+        Out Kamu SM, Out SMTP, Out SMTP 2-9, Out Replica), the host a plain host name or IPv4
+        address, the port 1-65535 (contract 2.8.3 step 3).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Rule, [AllowEmptyString()][string]$HostName, [AllowNull()]$Port)
+    if ($Rule -notmatch $script:OutboundRulePattern) { return ('kural bu adımda güncellenmez [rule not updated by this step]: {0}' -f $Rule) }
+    if (-not (Test-ArciHostName $HostName)) { return ('ana bilgisayar adı geçersiz [invalid host name]: {0}' -f $HostName) }
+    $number = 0
+    if (-not [int]::TryParse([string]$Port, [ref]$number) -or $number -lt 1 -or $number -gt 65535) { return ('port geçersiz [invalid port]: {0}' -f $Port) }
+    $null
+}
+
+function Test-ArciHostName {
+    <# True for a host name or IPv4 address as the system plan may name it (letters, digits, dots and hyphens; 1-253 characters). #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([AllowNull()][AllowEmptyString()][string]$Value)
+    [bool]($Value -and $Value -match $script:HostNamePattern)
+}
+
+function Get-ArciEventLogApi {
+    <# The calls of System.Diagnostics.EventLog the event source helpers make, as script blocks (the tests give their own with -EventLog). #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param()
+    @{
+        Exists = { param([string]$Source) [System.Diagnostics.EventLog]::SourceExists($Source) }
+        LogOf  = { param([string]$Source) [System.Diagnostics.EventLog]::LogNameFromSourceName($Source, '.') }
+        Create = { param([string]$Source, [string]$LogName) [System.Diagnostics.EventLog]::CreateEventSource($Source, $LogName) }
+        Delete = { param([string]$Source) [System.Diagnostics.EventLog]::DeleteEventSource($Source) }
+        Write  = {
+            param([string]$Source, [string]$Message, [string]$Level, [int]$Id)
+            [System.Diagnostics.EventLog]::WriteEntry($Source, $Message, [System.Diagnostics.EventLogEntryType]$Level, $Id)
+        }
+    }
+}
+
+function Write-ArciEvent {
+    <#
+    .SYNOPSIS
+        Write one entry of the source ARCILOGGER-Admin into the Application log (ApplySystem:
+        4104, 4106, 4107; contract 2.14). -Level: Information, Warning or Error. Never fails the
+        caller: an entry that cannot be written (the source is not registered) only returns
+        $false; an event only wakes a task or tells a person, it is no authority.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)][int]$Id,
+        [ValidateSet('Information', 'Warning', 'Error')][string]$Level = 'Information',
+        [Parameter(Mandatory = $true)][string]$Message,
+        [string]$Source = $script:ArciEventSource,
+        [hashtable]$EventLog
+    )
+    if (-not $EventLog) { $EventLog = Get-ArciEventLogApi }
+    try {
+        & $EventLog['Write'] $Source $Message $Level $Id
+        $true
+    }
+    catch {
+        Write-Verbose ('event {0} not written: {1}' -f $Id, $_.Exception.Message)
+        $false
+    }
+}
+
+function Register-ArciEventSource {
+    <#
+    .SYNOPSIS
+        Register the Application log source ARCILOGGER-Admin, with which ArciAdmin and
+        ApplySystem write their events (contract 2.14; an event only wakes a task, the signed
+        request is the authority). Idempotent: 'present' when it is registered for the
+        Application log already, 'created', or 'moved' when a source of that name belonged to
+        another log.
+    .DESCRIPTION
+        Needs an administrator (a source is a registry key below
+        HKLM\SYSTEM\CurrentControlSet\Services\EventLog). Works in Windows PowerShell 5.1 and
+        PowerShell 7 (System.Diagnostics.EventLog). -EventLog: the calls to make
+        (Get-ArciEventLogApi by default).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$Source = $script:ArciEventSource, [string]$LogName = 'Application', [hashtable]$EventLog)
+    if (-not $EventLog) { $EventLog = Get-ArciEventLogApi }
+    if (& $EventLog['Exists'] $Source) {
+        if ([string](& $EventLog['LogOf'] $Source) -eq $LogName) { return 'present' }
+        & $EventLog['Delete'] $Source
+        & $EventLog['Create'] $Source $LogName
+        return 'moved'
+    }
+    & $EventLog['Create'] $Source $LogName
+    'created'
+}
+
+function Unregister-ArciEventSource {
+    <# Remove the Application log source ARCILOGGER-Admin (-Uninstall): 'removed', or 'absent' when there is none. The events already written stay in the log. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$Source = $script:ArciEventSource, [hashtable]$EventLog)
+    if (-not $EventLog) { $EventLog = Get-ArciEventLogApi }
+    if (-not (& $EventLog['Exists'] $Source)) { return 'absent' }
+    & $EventLog['Delete'] $Source
+    'removed'
+}
+
+function Test-ArciProgramConfig {
+    <#
+    .SYNOPSIS
+        Whether the program whose Python is -Python loads -ConfigPath: $null when it does,
+        otherwise the reason (one line).
+    .DESCRIPTION
+        Run before a rollback starts the previous version's services (contract 2.16): a version
+        from before the browser administration refuses a key it does not know (its Config has
+        extra="forbid"), such as enabled = false in a [[sources]] table, and its services and
+        tasks would not start. The program is never trusted with more than this one read.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)][string]$Python,
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [ValidateRange(1, 3600)][int]$TimeoutSeconds = 120
+    )
+    $code = @(
+        'import pathlib, sys',
+        'try:',
+        '    from arcilogger_core.config import load_config',
+        '    load_config(pathlib.Path(sys.argv[1]))',
+        'except Exception as exc:',
+        '    sys.exit(" ".join(str(exc).split())[:400] or type(exc).__name__)'
+    ) -join "`n"
+    try { $result = Invoke-ArciProcess -FilePath $Python -ArgumentList @('-I', '-c', $code, $ConfigPath) -AllowFailure -TimeoutSeconds $TimeoutSeconds }
+    catch { return ('{0} çalıştırılamadı [could not be run]: {1}' -f $Python, $_.Exception.Message) }
+    if ($result.ExitCode -eq 0) { return $null }
+    $lines = @(($result.StdErr + "`n" + $result.StdOut) -split '\r?\n' | Where-Object { $_.Trim() })
+    if ($lines.Count -eq 0) { return ('çıkış kodu {0} [exit code]' -f $result.ExitCode) }
+    $lines[-1].Trim()
+}
+
+function Test-ArciPathBelow([string]$Path, [string]$Folder) {
+    <# True when -Path is -Folder or lies below it (case-insensitive, either separator, no ".." resolved). #>
+    if (-not $Path -or -not $Folder) { return $false }
+    $separators = [char[]]@([char]92, [char]47)
+    $p = $Path.Replace('/', '\').TrimEnd($separators)
+    $f = $Folder.Replace('/', '\').TrimEnd($separators)
+    ($p -ieq $f) -or $p.StartsWith($f + '\', [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-ArciExecutableRecords {
+    <#
+    .SYNOPSIS
+        The configured programs the installer must record in policy.trusted_executables so
+        that the tasks keep running them after an upgrade (arcilogger_core.execpolicy, contract
+        2.16): one entry (What, Path, Argv) each. Pure: -Config as Read-ArciTomlFile returns it.
+    .DESCRIPTION
+        tsa.java when it has more than one element (the whole command is recorded as Argv: an
+        extra JVM argument runs only as a recorded command) or names an absolute path outside
+        -ExecutableRoot; backup.pg_dump and backup.pg_restore when set to a path outside it. A
+        bare java / java.exe without arguments needs no record (execpolicy finds it through
+        the system PATH, which only administrators set), nor does a program below
+        -ExecutableRoot. The Zamane jar is never recorded here: it runs only from zamane\
+        (Get-ArciZamaneJarPlan).
+    #>
+    [CmdletBinding()]
+    param([AllowNull()]$Config, [string[]]$ExecutableRoot = $script:DefaultExecutableRoots)
+    $records = New-Object System.Collections.Generic.List[object]
+    $outside = {
+        param([string]$Path)
+        foreach ($root in @($ExecutableRoot)) { if (Test-ArciPathBelow $Path $root) { return $false } }
+        $true
+    }
+    $java = @(Get-ArciConfigValue -Config $Config -Path 'tsa.java' -Default @('java') | ForEach-Object { [string]$_ })
+    if ($java.Count -gt 0) {
+        $program = $java[0]
+        $absolute = $program.Contains('\') -or $program.Contains('/')
+        if ($java.Count -gt 1 -or ($absolute -and (& $outside $program))) {
+            $argv = $null
+            if ($java.Count -gt 1) { $argv = $java }
+            $records.Add([pscustomobject]@{ What = 'tsa.java'; Path = $program; Argv = $argv })
+        }
+    }
+    foreach ($key in @('backup.pg_dump', 'backup.pg_restore')) {
+        $value = [string](Get-ArciConfigValue -Config $Config -Path $key -Default '')
+        if ($value -and (& $outside $value)) { $records.Add([pscustomobject]@{ What = $key; Path = $value; Argv = $null }) }
+    }
+    , $records.ToArray()
+}
+
+function Get-ArciUnsafeWriters {
+    <#
+    .SYNOPSIS
+        Who other than SYSTEM, Administrators and TrustedInstaller could change a program or a
+        folder above it: one "<path>: <SID>" per finding (an empty list: nobody). Pure: -Facts is
+        what Get-ArciPathAclFacts read (Path, Owner, Rules with Sid, Rights as a number, Allow).
+    .DESCRIPTION
+        A recorded program must stay the file the installer hashed: execpolicy trusts a SHA-256
+        only at its recorded path, and whoever can write the folder could replace the file or
+        put a library next to it (Day 0 note D0-3: the installer records only paths in folders
+        that only administrators and SYSTEM can write). Every allow entry with a write, delete,
+        permission or owner right counts, on the file and on every folder above it (an
+        inherit-only entry too: it reaches what is created below), and so does an owner outside
+        the trusted accounts (an owner can change the rights). CREATOR OWNER and OWNER RIGHTS
+        stand for the owner and are covered by that check.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([AllowNull()][AllowEmptyCollection()][object[]]$Facts)
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($fact in @($Facts)) {
+        if ($null -eq $fact) { continue }
+        $owner = [string]$fact.Owner
+        if ($owner -and $script:TrustedWriterSids -notcontains $owner) {
+            $found.Add(('{0}: {1} (sahip [owner])' -f $fact.Path, $owner))
+        }
+        foreach ($rule in @($fact.Rules)) {
+            if ($null -eq $rule -or -not $rule.Allow) { continue }
+            $sid = [string]$rule.Sid
+            if ($script:TrustedWriterSids -contains $sid -or $script:OwnerPlaceholderSids -contains $sid) { continue }
+            if (([int64]$rule.Rights -band $script:WriteRightsMask) -eq 0) { continue }
+            $text = '{0}: {1}' -f $fact.Path, $sid
+            if (-not $found.Contains($text)) { $found.Add($text) }
+        }
+    }
+    , $found.ToArray()
+}
+
+function Get-ArciPathAclFacts {
+    <#
+    .SYNOPSIS
+        The owner and the access entries of -Path and of every folder above it, as plain data
+        for Get-ArciUnsafeWriters; $null where Windows rights cannot be read (not Windows).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-ArciWindows)) { return $null }
+    $facts = New-Object System.Collections.Generic.List[object]
+    $sidType = [System.Security.Principal.SecurityIdentifier]
+    $current = [System.IO.Path]::GetFullPath($Path)
+    while ($current) {
+        $item = Get-Item -LiteralPath $current -Force
+        $security = Get-ArciAccessControl -Item $item -Sections 'Access, Owner'
+        $rules = New-Object System.Collections.Generic.List[object]
+        foreach ($rule in @($security.GetAccessRules($true, $true, $sidType))) {
+            $rules.Add([pscustomobject]@{
+                    Sid = $rule.IdentityReference.Value; Rights = [int64][int]$rule.FileSystemRights
+                    Allow = ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow)
+                })
+        }
+        $facts.Add([pscustomobject]@{ Path = $current; Owner = $security.GetOwner($sidType).Value; Rules = $rules.ToArray() })
+        $parent = [System.IO.Path]::GetDirectoryName($current)
+        if (-not $parent -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    , $facts.ToArray()
+}
+
+function Read-ArciInstallerHashes {
+    <# The SHA-256 values of zamane\zamane-jar.sha256 ("<sha256>  <file>" lines; "#" lines are comments), as arcilogger_core.execpolicy reads them. #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $hashes = New-Object System.Collections.Generic.List[string]
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return , $hashes.ToArray() }
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+        $fields = @($line.Trim().TrimStart([char]0xFEFF) -split '\s+' | Where-Object { $_ })
+        if ($fields.Count -gt 0 -and -not $fields[0].StartsWith('#')) { $hashes.Add($fields[0].ToLowerInvariant()) }
+    }
+    , $hashes.ToArray()
+}
+
+function Get-ArciZamaneJarPlan {
+    <#
+    .SYNOPSIS
+        What an installation run does with the configured Zamane client (tsa.zamane_jar) so
+        that sealing goes on under execpolicy (contract 2.16, Day 0 note D0-14). Pure.
+    .DESCRIPTION
+        A client runs only from zamane\ (not from its staging folder web\) and only when its
+        SHA-256 is known, approved or recorded by the installer. Returns Action and Reason:
+        - 'none': nothing to do (no client configured, the file is missing - the health check
+          says so -, or it is in zamane\ and its SHA-256 is recorded or approved already);
+        - 'record': in zamane\ but not recorded: its line is appended to zamane-jar.sha256
+          (only administrators and SYSTEM write zamane\ outside web\);
+        - 'copy': outside zamane\ (configured by hand before this version): copied into
+          zamane\ under its file name (Target), its line appended, tsa.zamane_jar pointed at the
+          copy; the original stays where it is. A copy that is there already with the same
+          SHA-256 is used as it is (TargetSha256);
+        - 'refuse': a staged client (web\), or a different file of the same name in zamane\.
+        -Sha256: the client's SHA-256 ($null: the file is missing). -Recorded: the hashes of
+        zamane-jar.sha256 and of the approved clients (jars.json). -TargetSha256: the hash of
+        the file zamane\<name> when one exists.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$Jar,
+        [AllowEmptyString()][string]$Sha256,
+        [Parameter(Mandatory = $true)][string]$ZamaneDir,
+        [AllowEmptyCollection()][string[]]$Recorded = @(),
+        [AllowEmptyString()][string]$TargetSha256
+    )
+    $plan = [pscustomobject]@{ Action = 'none'; Jar = $Jar; Sha256 = $Sha256; Target = $null; Reason = $null }
+    if (-not $Jar -or -not $Sha256) { return $plan }
+    $separators = [char[]]@([char]92, [char]47)
+    $name = $Jar.Replace('/', '\').TrimEnd($separators).Split('\')[-1]
+    # Path.Combine, not Join-Path: no drive of -ZamaneDir needs to exist (pure).
+    if (Test-ArciPathBelow $Jar ([System.IO.Path]::Combine($ZamaneDir, 'web'))) {
+        $plan.Action = 'refuse'
+        $plan.Reason = 'tsa.zamane_jar bekleyen (yüklenmiş, onaylanmamış) bir istemciyi gösteriyor; yüklenen istemci approve-jar ile onaylanınca zamane\approved içinden çalışır [tsa.zamane_jar names a staged client: it runs from zamane\approved once approved with approve-jar]'
+        return $plan
+    }
+    if (Test-ArciPathBelow $Jar $ZamaneDir) {
+        if (@($Recorded) -notcontains $Sha256.ToLowerInvariant()) {
+            $plan.Action = 'record'
+            $plan.Reason = 'zamane\ içindeki istemcinin SHA-256 değeri kayıtlı değil, kaydediliyor [the client in zamane\ is not recorded yet: recording its SHA-256]'
+        }
+        return $plan
+    }
+    $plan.Target = [System.IO.Path]::Combine($ZamaneDir, $name)
+    if ($TargetSha256 -and $TargetSha256.ToLowerInvariant() -ne $Sha256.ToLowerInvariant()) {
+        $plan.Action = 'refuse'
+        $plan.Reason = ('zamane\{0} başka bir dosya; üzerine yazılmaz. tsa.zamane_jar ayarını ya da dosyayı elle düzeltin [zamane\{0} is a different file and is not overwritten: fix tsa.zamane_jar or the file by hand]' -f $name)
+        return $plan
+    }
+    $plan.Action = 'copy'
+    $plan.Reason = ('Zamane istemcisi zamane\ dışında; görevler yalnızca zamane\ içinden çalıştırır: {0} klasörüne kopyalanıyor, tsa.zamane_jar kopyayı gösterecek, özgün dosya yerinde kalır [the client is outside zamane\, which is where the tasks run it from: copied there, tsa.zamane_jar will name the copy, the original stays]' -f $ZamaneDir)
+    $plan
 }
 
 # --- data drive -----------------------------------------------------------------------------------
@@ -2249,9 +3066,13 @@ Export-ModuleMember -Function @(
     'Get-ArciNetworkFacts', 'Get-ArciLocalAddresses', 'Select-ArciServerAddress', 'Get-ArciCollectorBind', 'Test-ArciBindAddress',
     'Get-ArciInstallMarkerName', 'Get-ArciProgramFolderState',
     'ConvertTo-ArciIsoDate', 'Get-ArciJsonField', 'Read-ArciLicenseFile', 'Read-ArciLicenseStatus', 'Test-ArciMaintenanceCovers',
-    'Get-ArciProductReleaseDate', 'Get-ArciSiteToday', 'Get-ArciOldestVaultDay', 'Get-ArciDaysBetween', 'Get-ArciWheelTestHelpers',
-    'New-ArciAce', 'Get-ArciAclPlan',
+    'Get-ArciProductReleaseDate', 'Get-ArciSiteToday', 'Get-ArciSiteTimestamp', 'Get-ArciOldestVaultDay', 'Get-ArciDaysBetween', 'Get-ArciWheelTestHelpers',
+    'New-ArciAce', 'Get-ArciAclPlan', 'Get-ArciAceFlags',
     'Get-ArciAccessControl', 'Set-ArciAccessControl', 'Set-ArciAclEntry', 'Set-ArciVaultAudit',
+    'Get-ArciDefaultSourceNetworks', 'ConvertTo-ArciSourceNetwork', 'New-ArciAdminPolicy', 'Read-ArciAdminPolicy',
+    'Get-ArciSyslogSenderProblem', 'Get-ArciOutboundProblem', 'Test-ArciHostName',
+    'Get-ArciEventLogApi', 'Register-ArciEventSource', 'Unregister-ArciEventSource', 'Write-ArciEvent', 'Test-ArciProgramConfig', 'Test-ArciPathBelow',
+    'Get-ArciExecutableRecords', 'Get-ArciUnsafeWriters', 'Get-ArciPathAclFacts', 'Read-ArciInstallerHashes', 'Get-ArciZamaneJarPlan',
     'Get-ArciDriveFacts', 'Get-ArciDiskBusType', 'Select-ArciDataRoot', 'Get-ArciDataDriveChecks',
     'Get-ArciOsSupport', 'Get-ArciPowerSchemeGuid', 'ConvertFrom-ArciPowercfgQuery',
     'Test-ArciHttpsHealth'

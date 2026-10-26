@@ -17,6 +17,7 @@ import base64
 import hashlib
 import hmac
 import http.server
+import importlib.util
 import inspect
 import json
 import os
@@ -50,6 +51,15 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from uvicorn.middleware.proxy_headers import _TrustedHosts  # what ArciApi trusts (cli.py)
 
 from arcilogger_core import cli, timeutil
+from arcilogger_core.admin.contract import (
+    AdminPolicy,
+    DocumentError,
+    JarsFile,
+    SystemJournalLine,
+    SystemPlan,
+    SystemStatus,
+    parse_document,
+)
 from arcilogger_core.config import ApiConfig
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
@@ -74,10 +84,13 @@ SERVICE_MODULES = {
     "ArciWorker": ("arcilogger_worker", 'run --config "{{CONFIG}}"'),
     "ArciApi": ("arcilogger_api", 'serve --config "{{CONFIG}}"'),
 }
+#: The administration agent of the browser administration (ADR-0014): a module of the core
+#: package, run like the other Python services.
+ADMIN_SERVICE = ("arcilogger_core.admin", 'serve --config "{{CONFIG}}"')
 SERVICE_ENTRY_POINTS = {
     **{
         name: ("python.exe", f"{ISOLATED_SERVICE_FLAGS}{module} {arguments}")
-        for name, (module, arguments) in SERVICE_MODULES.items()
+        for name, (module, arguments) in {**SERVICE_MODULES, "ArciAdmin": ADMIN_SERVICE}.items()
     },
     "ArciWeb": (
         "caddy.exe",
@@ -749,6 +762,8 @@ def test_service_set_matches_installer_and_placeholders_are_filled() -> None:
     assert declared is not None
     names = re.findall(r"'([A-Za-z]+)'", declared.group(1))
     assert names[0] == "ArciCollector", "the collector starts first"
+    # ArciAdmin writes the configuration the others load: it starts last and stops first.
+    assert names[-1] == "ArciAdmin"
     assert set(names) == {p.stem for p in SERVICES.glob("*.xml")} == set(SERVICE_ENTRY_POINTS)
 
     script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
@@ -808,12 +823,24 @@ def test_python_services_and_tasks_run_isolated() -> None:
         assert [n for n in names if n.upper().startswith("PYTHON")] == [], (path.name, names)
         assert "ARCILOGGER_CONFIG" in names, path.name
     tasks = sorted(TASKS.glob("*.xml"))
-    assert len(tasks) >= 9
+    assert len(tasks) >= 11
     for path in tasks:
         assert not LAUNCHER.search(path.read_text(encoding="utf-8")), path.name
         root = ET.parse(path).getroot()  # noqa: S314 - our own repository file
-        assert root.findtext("t:Actions/t:Exec/t:Command", namespaces=TASK_NS) == "{{PYTHON}}"
+        command = root.findtext("t:Actions/t:Exec/t:Command", namespaces=TASK_NS)
         arguments = root.findtext("t:Actions/t:Exec/t:Arguments", namespaces=TASK_NS) or ""
+        if path.stem == "ApplySystem":
+            # The one SYSTEM task runs no Python of its own: the system's Windows PowerShell runs
+            # Sync-ArciSystem.ps1 of the program folder, which runs the venv's python.exe -I.
+            assert command == "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+            assert arguments.startswith("-NoProfile -NonInteractive "), arguments
+            sync = (WINDOWS / "scripts" / "Sync-ArciSystem.ps1").read_text(encoding="utf-8-sig")
+            assert (
+                "@('-I', '-m', 'arcilogger_core.admin', 'system-plan', '--config', $ConfigPath)"
+                in sync
+            )
+            continue
+        assert command == "{{PYTHON}}"
         assert arguments.startswith("-I -m arcilogger_"), (path.name, arguments)
     # Register-ArciTasks.ps1 registers the definitions as they are: only {{PYTHON}} is filled in.
     register = (WINDOWS / "scripts" / "Register-ArciTasks.ps1").read_text(encoding="utf-8-sig")
@@ -821,11 +848,13 @@ def test_python_services_and_tasks_run_isolated() -> None:
     assert "-Xml $xml -Force" in register
 
 
-@pytest.mark.parametrize("name", sorted(SERVICE_MODULES))
+@pytest.mark.parametrize("name", sorted([*SERVICE_MODULES, "ArciAdmin"]))
 def test_isolated_service_command_ignores_python_variables(name: str, tmp_path: Path) -> None:
     """The service's own interpreter flags (here with --help) start the package from the
     environment, and a sitecustomize.py on PYTHONPATH is not loaded; without -I it would be."""
-    module, _ = SERVICE_MODULES[name]
+    module, _ = {**SERVICE_MODULES, "ArciAdmin": ADMIN_SERVICE}[name]
+    if importlib.util.find_spec(f"{module}.__main__") is None:
+        pytest.skip(f"{module} has no entry point yet (WP1 delivers it, contract 4.3)")
     inject = tmp_path / "inject"
     inject.mkdir()
     marker = tmp_path / "loaded.txt"
@@ -4918,12 +4947,21 @@ $executables = @{
     ArciApi       = 'venv/Scripts/arcilogger-api.exe'
     ArciWorker    = 'venv/Scripts/arcilogger-worker.exe'
     ArciWeb       = 'caddy/caddy.exe'
+    ArciAdmin     = 'venv/Scripts/python.exe'
 }
+# The versions installed before the run come from before the browser administration (no
+# ArciAdmin); the bundle's version (Install-ProgramFiles below) has it.
+$oldServices = @('ArciCollector', 'ArciIngest', 'ArciApi', 'ArciWorker', 'ArciWeb')
 
 function Write-Text([string]$Path, [string]$Text) { [System.IO.File]::WriteAllText($Path, $Text) }
 
 function New-FakeProgram {
-    param([string]$Folder, [string]$Version, [string]$Fingerprint, [switch]$Partial)
+    # -InstallPath: the program folder its service definitions name (the installer fills in
+    # {{INSTALL_DIR}}), also for a version kept aside as .previous.
+    param(
+        [string]$Folder, [string]$Version, [string]$Fingerprint, [switch]$Partial,
+        [string[]]$Services = @($executables.Keys), [string]$InstallPath = $Folder
+    )
     foreach ($sub in @('services', 'venv/Scripts', 'tasks', 'caddy', 'installer')) {
         [void](New-Item -ItemType Directory -Path (Join-Path $Folder $sub) -Force)
     }
@@ -4933,10 +4971,10 @@ function New-FakeProgram {
     foreach ($exe in @('arcilogger-core', 'arcilogger-db', 'python')) {
         Write-Text (Join-Path $Folder "venv/Scripts/$exe.exe") 'stub'
     }
-    foreach ($name in $executables.Keys) {
-        $target = Join-Path $Folder $executables[$name]
-        Write-Text $target 'stub'
+    foreach ($name in $Services) {
+        Write-Text (Join-Path $Folder $executables[$name]) 'stub'
         Write-Text (Join-Path $Folder "services/$name.exe") 'stub'
+        $target = Join-Path $InstallPath $executables[$name]
         $xml = "<service><id>$name</id><executable>$target</executable></service>"
         Write-Text (Join-Path $Folder "services/$name.xml") $xml
     }
@@ -4957,10 +4995,15 @@ function Get-FolderVersion([string]$Folder) {
 }
 
 # --- the installed system before the run ---
-New-FakeProgram -Folder $program -Version '1.0.0' -Fingerprint ('a' * 64)
+$rollback = $Scenario.StartsWith('rollback')
+# A rollback leaves a version with ArciAdmin for one from before it.
+$currentServices = $(if ($rollback) { @($executables.Keys) } else { $oldServices })
+New-FakeProgram -Folder $program -Version '1.0.0' -Fingerprint ('a' * 64) -Services $currentServices
 $uninstall = $Scenario.StartsWith('uninstall')
-if ($Scenario -eq 'rollback-swap' -or $uninstall) {
-    New-FakeProgram -Folder "$program.previous" -Version '0.9.0' -Fingerprint ('c' * 64)
+if ($rollback -or $uninstall) {
+    $previous = "$program.previous"
+    New-FakeProgram -Folder $previous -Version '0.9.0' -Fingerprint ('c' * 64) `
+        -Services $oldServices -InstallPath $program
 }
 if ($uninstall) {
     $failed = "$program.failed-20261012000000"
@@ -4980,6 +5023,24 @@ if ($Scenario -eq 'uninstall-desktop') {
     # What Set-ArciPower.ps1 recorded on a desktop Windows at the installation.
     Write-Text (Join-Path $programData 'install/power-state.json') '{"schema": 1, "previous": {}}'
 }
+# The configuration: as the version installed before the run wrote it, or (rollback) as the
+# browser changed it after the upgrade (a source switched off), with the copy that upgrade kept.
+$configPath = Join-Path $programData 'arcilogger.toml'
+$beforeUpgrade = "site_name = `"Kurum`"`n[[sources]]`nname = `"fw`"`naddress = `"172.20.10.1`"`n"
+if ($Scenario -in @('success', 'migration', 'program-files')) {
+    Write-Text $configPath $beforeUpgrade
+}
+if ($rollback) {
+    $changed = $beforeUpgrade
+    if ($Scenario -in @('rollback-incompatible', 'rollback-no-copy')) {
+        $changed += "enabled = false`n"
+    }
+    Write-Text $configPath $changed
+    $copy = "$configPath.before-upgrade-20261020-101500"
+    if ($Scenario -ne 'rollback-no-copy') { Write-Text $copy $beforeUpgrade }
+    $recorded = @{ database_provisioned = $true; config_before_upgrade = $copy } | ConvertTo-Json
+    Write-Text (Join-Path $programData 'install/state.json') $recorded
+}
 $stubScripts = Join-Path $Base 'stubscripts'
 [void](New-Item -ItemType Directory -Path $stubScripts -Force)
 $stub = 'param([switch]$Remove, [string]$StateFile) ' +
@@ -4992,7 +5053,7 @@ Write-Text (Join-Path $stubScripts 'Set-ArciPower.ps1') $powerStub
 
 $mode = @{}
 switch ($Scenario) {
-    'rollback-swap' { $mode['Rollback'] = $true }
+    { $rollback } { $mode['Rollback'] = $true }
     { $uninstall } { $mode['Uninstall'] = $true }
     'repair' { }
     default { $mode['Upgrade'] = $true }
@@ -5014,7 +5075,7 @@ $sim = @{
     processes = (New-Object System.Collections.Generic.List[object])
     transcript = $null; redirected = $null
 }
-foreach ($name in $executables.Keys) {
+foreach ($name in $currentServices) {
     $sim.services[$name] = @{
         status = 'Running'; start = 'auto'; account = "NT SERVICE\$name"; version = '1.0.0'
     }
@@ -5162,6 +5223,18 @@ function Stop-Installer {
     throw 'SIMULATED-STOP'
 }
 function Invoke-ConfigSteps { $sim.calls.Add('config') }
+# What the restored program's Python makes of arcilogger.toml: a version from before the browser
+# administration refuses enabled = false of a log source (extra="forbid").
+function Test-ArciProgramConfig {
+    param([string]$Python, [string]$ConfigPath)
+    $folder = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $Python))
+    $sim.calls.Add(('config-check {0}' -f (Get-FolderVersion $folder)))
+    if ([System.IO.File]::ReadAllText($ConfigPath).Contains('enabled = false')) {
+        return '1 validation error for Config sources.0.enabled Extra inputs are not permitted'
+    }
+    $null
+}
+function Unregister-ArciEventSource { $sim.calls.Add('event source removed'); 'removed' }
 function Invoke-AclSteps { $sim.calls.Add('acl') }
 function Invoke-DatabaseProvision { $sim.calls.Add('provision') }
 if (-not $Scenario.StartsWith('health')) {
@@ -5358,7 +5431,7 @@ try {
             $sim.redirected = (Complete-FirstInstall *>&1 | Out-String)
         }
         'repair' { Invoke-Install }
-        'rollback-swap' { Invoke-RollbackMode }
+        { $rollback } { Invoke-RollbackMode }
         { $uninstall } { Invoke-UninstallMode }
         default { Invoke-Upgrade }
     }
@@ -5396,6 +5469,8 @@ $report = [ordered]@{
     firewall = $firewall; power = $power
     transcript = $sim.transcript; redirected = $sim.redirected
     data_kept = (Test-Path -LiteralPath (Join-Path $dataRoot 'vault/sealed.log.gz'))
+    config = $(if (Test-Path $configPath) { [System.IO.File]::ReadAllText($configPath) })
+    config_files = @(Get-ChildItem -LiteralPath $programData -File | ForEach-Object { $_.Name })
     config_kept = (Test-Path -LiteralPath $statePath)
     module_path = $env:PSModulePath
     health = [ordered]@{
@@ -5443,17 +5518,20 @@ def _running(report: dict[str, Any]) -> set[str]:
     return {name for name, s in report["services"].items() if s["status"] == "Running"}
 
 
+#: The services of the versions the harness installed before the run (before the browser
+#: administration), and of the bundle's version, which adds the administration agent.
 ALL_SERVICES = {"ArciCollector", "ArciIngest", "ArciApi", "ArciWorker", "ArciWeb"}
+NEW_SERVICES = ALL_SERVICES | {"ArciAdmin"}
 
 
 def test_upgrade_succeeds_and_keeps_the_previous_version(engine: str, tmp_path: Path) -> None:
     report = simulate(engine, tmp_path, "success")
     assert report["exit"] is None, report["message"]
     assert _folders(report) == {"ARCILOGGER": "2.0.0", "ARCILOGGER.previous": "1.0.0"}
-    assert _running(report) == ALL_SERVICES
+    assert _running(report) == NEW_SERVICES
     assert {s["version"] for s in report["services"].values()} == {"2.0.0"}
     assert {s["account"] for s in report["services"].values()} == {
-        f"NT SERVICE\\{name}" for name in ALL_SERVICES
+        f"NT SERVICE\\{name}" for name in NEW_SERVICES
     }
     assert report["registered_from"] == ["2.0.0"]
     assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
@@ -5471,6 +5549,9 @@ def test_upgrade_succeeds_and_keeps_the_previous_version(engine: str, tmp_path: 
     for name in ("ArciIngest", "ArciApi", "ArciWorker"):
         assert migration < calls.index(f"start {name}"), f"{name} only on the migrated schema"
     assert calls.count("start ArciCollector") == 1, "a running service is not started again"
+    # ArciAdmin writes the configuration the others load: it starts after all of them.
+    starts = [c for c in calls if c.startswith("start ")]
+    assert starts[-1] == "start ArciAdmin", starts
     dump = report["state"]["last_dump"]
     assert Path(dump).is_file()
     assert Path(dump).parent == tmp_path / "sim" / "data" / "ARCILOGGER" / "backups" / "db"
@@ -5491,7 +5572,7 @@ def test_upgrade_started_with_powershell_7_modules_in_front(tmp_path: Path) -> N
     assert str(pwsh_modules).lower() not in after, report["module_path"]
     assert report["exit"] is None, report["message"]
     assert _folders(report) == {"ARCILOGGER": "2.0.0", "ARCILOGGER.previous": "1.0.0"}
-    assert _running(report) == ALL_SERVICES
+    assert _running(report) == NEW_SERVICES
 
 
 def test_upgrade_failing_in_the_program_files_restores_the_previous_version(
@@ -5535,6 +5616,13 @@ def test_upgrade_failing_in_the_migration_runs_only_the_evidence_path(
         assert services[name]["status"] == "Stopped", name
         assert services[name]["start"] == "demand", "a reboot must not start it either"
     assert {s["version"] for s in services.values()} == {"1.0.0"}
+    # The new version's ArciAdmin was registered before the migration; the previous version has
+    # no wrapper for it, so it stays removed (Install-ArciServices skips it with a warning).
+    assert "ArciAdmin" not in services
+    assert "exe sc.exe delete ArciAdmin" in report["calls"]
+    assert "ArciAdmin: hizmet sarmalayıcısı bu sürümde yok" in report["stdout"]
+    assert "config-check 1.0.0" in report["calls"], "the restored version loads the configuration"
+
     # The new version had registered its tasks: those of the restored version replace them,
     # and a job the operator had switched off stays off.
     assert report["registered_from"] == ["2.0.0", "1.0.0"]
@@ -5583,8 +5671,89 @@ def test_rollback_that_cannot_swap_keeps_the_current_version(engine: str, tmp_pa
     report = simulate(engine, tmp_path, "rollback-swap")
     assert report["exit"] == 3
     assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
-    assert _running(report) == ALL_SERVICES
+    assert _running(report) == NEW_SERVICES
     assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
+
+
+#: arcilogger.toml as the harness writes it before an upgrade (no key a version before the
+#: browser administration would refuse).
+CONFIG_BEFORE_UPGRADE = 'site_name = "Kurum"\n[[sources]]\nname = "fw"\naddress = "172.20.10.1"\n'
+ROLLED_BACK = (
+    "Tarayıcıdan yapılan sonraki değişiklikler geri alındı; denetim kaydında duruyorlar "
+    "[later browser changes were rolled back; they remain in the audit log]"
+)
+
+
+def test_rollback_removes_the_administration_agent_and_keeps_sealing(
+    engine: str, tmp_path: Path
+) -> None:
+    """Contract 2.16: a rollback to a version without ArciAdmin stops it first, removes its
+    registration and starts the previous version's services; its Python must load the
+    configuration first, which it does when the browser added nothing it does not know."""
+    report = simulate(engine, tmp_path, "rollback")
+    assert report["exit"] is None, report["message"]
+    folders = _folders(report)
+    assert folders.pop("ARCILOGGER") == "0.9.0"
+    assert list(folders.values()) == ["1.0.0"]
+    assert next(iter(folders)).startswith("ARCILOGGER.rolled-back-")
+    assert set(report["services"]) == ALL_SERVICES, "ArciAdmin is not part of 0.9.0"
+    assert _running(report) == ALL_SERVICES
+    calls = report["calls"]
+    stops = [c for c in calls if c.startswith("stop ")]
+    assert stops[0] == "stop ArciAdmin", "the agent stops before the services it configures"
+    assert "exe sc.exe delete ArciAdmin" in calls
+    assert "ArciAdmin: hizmet sarmalayıcısı bu sürümde yok" in report["stdout"]
+    check = calls.index("config-check 0.9.0")
+    assert check < next(i for i, c in enumerate(calls) if c.startswith("exe ArciCollector.exe"))
+    assert report["config"] == CONFIG_BEFORE_UPGRADE, "a configuration that loads stays"
+    assert not [name for name in report["config_files"] if ".refused-" in name]
+    assert _unwrapped(ROLLED_BACK) not in _unwrapped(report["stdout"])
+    assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
+
+
+def test_rollback_puts_back_the_configuration_from_before_the_upgrade(
+    engine: str, tmp_path: Path
+) -> None:
+    """The browser switched a source off (enabled = false) after the upgrade: the previous
+    version's Config refuses the key (extra="forbid"), so the copy kept before the upgrade comes
+    back, the refused file stays beside it and the operator is told what that undoes."""
+    report = simulate(engine, tmp_path, "rollback-incompatible")
+    assert report["exit"] is None, report["message"]
+    assert report["config"] == CONFIG_BEFORE_UPGRADE
+    refused = [
+        name for name in report["config_files"] if name.startswith("arcilogger.toml.refused-")
+    ]
+    assert len(refused) == 1, report["config_files"]
+    kept = tmp_path / "sim" / "programdata" / "ARCILOGGER" / refused[0]
+    assert "enabled = false" in kept.read_text(encoding="utf-8")
+    assert _unwrapped(ROLLED_BACK) in _unwrapped(report["stdout"])
+    assert any(ROLLED_BACK in warning for warning in report["health"]["warnings"])
+    assert _running(report) == ALL_SERVICES
+    calls = report["calls"]
+    assert calls.count("config-check 0.9.0") == 2, "the copy is checked too"
+
+
+def test_rollback_without_the_copy_asks_for_the_configuration_to_be_fixed(
+    engine: str, tmp_path: Path
+) -> None:
+    report = simulate(engine, tmp_path, "rollback-no-copy")
+    assert report["exit"] == 3
+    assert _unwrapped("fix it by hand]") in _unwrapped(report["stdout"])
+    assert report["state"]["last_failure"]["operation"] == "rollback"
+
+
+def test_upgrade_keeps_a_copy_of_the_configuration_for_a_rollback(
+    engine: str, tmp_path: Path
+) -> None:
+    """Contract 2.16: before an upgrade changes anything (after the database backup),
+    arcilogger.toml is copied and the copy's name remembered for a later rollback."""
+    report = simulate(engine, tmp_path, "success")
+    copy = Path(report["state"]["config_before_upgrade"])
+    assert re.fullmatch(r"arcilogger\.toml\.before-upgrade-\d{8}-\d{6}", copy.name), copy.name
+    assert copy.name in report["config_files"]
+    assert copy.read_text(encoding="utf-8") == CONFIG_BEFORE_UPGRADE
+    calls = report["calls"]
+    assert calls.index("pg pg_dump.exe") < calls.index("stop ArciCollector")
 
 
 def test_health_check_waits_for_the_api_and_the_certificate(engine: str, tmp_path: Path) -> None:
@@ -5830,7 +5999,7 @@ def test_upgrade_with_a_refused_licence_completes(engine: str, tmp_path: Path) -
     report = simulate(engine, tmp_path, "upgrade-license-refused")
     assert report["exit"] is None, report["message"]
     assert _folders(report) == {"ARCILOGGER": "2.0.0", "ARCILOGGER.previous": "1.0.0"}
-    assert _running(report) == ALL_SERVICES
+    assert _running(report) == NEW_SERVICES
     calls = report["calls"]
     migration = next(
         i for i, c in enumerate(calls) if c.startswith("exe arcilogger-db.exe upgrade --config ")
@@ -7596,3 +7765,1670 @@ def test_the_installer_swaps_program_folders_with_retries() -> None:
     script = INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
     assert "Rename-Item" not in script
     assert script.count("Rename-ArciFolder -LiteralPath") == 6
+
+
+# --- browser administration (ADR-0014; contract 2.2, 2.4.1, 2.8.3, 2.16) ------------------------
+
+AGENT = service_sid("ArciAdmin")
+CREATOR_OWNER = "S-1-3-0"
+LIST_ONLY = "ListDirectory, ReadAttributes, Traverse"
+
+
+def _plan_by_path(document: dict[str, Any], root: Path) -> dict[str, dict[str, Any]]:
+    """The ACL plan's entries by their path below ``root`` (forward slashes), in plan order."""
+    return {
+        Path(entry["Path"].replace("\\", "/")).relative_to(root).as_posix(): entry
+        for entry in document["entries"]
+    }
+
+
+def _scope(entry: dict[str, Any], ace: dict[str, Any]) -> str:
+    if entry["Kind"] == "File":
+        return "file"
+    if not ace["Inherit"]:
+        return "this folder"
+    parts = ["folders" if ace["FoldersOnly"] else "files" if ace["FilesOnly"] else "all"]
+    parts += ["inherit-only"] * ace["InheritOnly"] + ["one level"] * ace["OneLevel"]
+    return " ".join(parts)
+
+
+def _grants(entry: dict[str, Any], sid: str) -> set[tuple[str, str]]:
+    return {(ace["Rights"], _scope(entry, ace)) for ace in entry["Aces"] if ace["Sid"] == sid}
+
+
+def _granted(entries: dict[str, dict[str, Any]], sid: str) -> dict[str, set[tuple[str, str]]]:
+    return {path: grants for path, e in entries.items() if (grants := _grants(e, sid))}
+
+
+WRITE_WORDS = ("FullControl", "Modify", "Write", "WriteData", "CreateFiles", "AppendData", "Delete")
+
+
+def _writes(entries: dict[str, dict[str, Any]], sid: str) -> set[str]:
+    return {
+        path
+        for path, entry in entries.items()
+        for rights, _ in _grants(entry, sid)
+        if any(word in rights for word in WRITE_WORDS)
+    }
+
+
+def test_acl_plan_gives_the_administration_agent_exactly_its_rights(
+    engine: str, tmp_path: Path
+) -> None:
+    """Every row of contract 2.2 for ArciAdmin (NT SERVICE\\ArciAdmin) and for CREATOR OWNER,
+    and nothing else: the agent writes the configuration and the secret store through explicit
+    file entries, may only add files where an administrator keeps files (kamusm-roots, smtp-ca,
+    the configuration folder itself) and has no right on the spool, the vault, the exports, the
+    backups or the evidence-job state."""
+    entries = _plan_by_path(_acl_plan(engine, tmp_path), tmp_path)
+    paths = list(entries)
+    for i, path in enumerate(paths):
+        assert not any(path.startswith(child + "/") for child in paths[i + 1 :]), path
+    read = "ReadAndExecute"
+    assert _granted(entries, AGENT) == {
+        "program": {(read, "all")},
+        "programdata": {(read, "all"), ("CreateFiles", "this folder")},
+        "programdata/arcilogger.toml": {("Modify", "file")},
+        "programdata/secrets.json": {("Modify", "file")},
+        "programdata/secret.key": {("Read", "file")},
+        "programdata/kamusm-roots": {("CreateFiles", "this folder")},
+        "programdata/smtp-ca": {("CreateFiles", "this folder")},
+        "programdata/zamane/web": {("Modify", "all")},
+        "programdata/zamane/approved": {(read, "all")},
+        "programdata/install": {(read, "all")},
+        "programdata/admin": {(LIST_ONLY, "this folder")},
+        "programdata/admin/policy.json": {("Read", "file")},
+        "programdata/admin/keys/agent-ed25519.key": {("Read", "file")},
+        "programdata/admin/keys/keys.json": {("Read", "file")},
+        "programdata/admin/inbox": {("Modify", "all")},
+        "programdata/admin/work": {("Modify", "all")},
+        "programdata/admin/pending": {("Modify", "all")},
+        "programdata/admin/state": {("Modify", "all")},
+        "programdata/admin/versions": {("Modify", "all")},
+        "programdata/admin/status": {("Modify", "all")},
+        "programdata/admin/journal": {("Modify", "all")},
+        "programdata/admin/system": {(read, "all")},
+        "data": {(read, "this folder")},
+        "data/state": {(read, "all")},
+        "data/state/requests": {("ReadAndExecute, CreateFiles, WriteData", "all")},
+        "data/logs": {("Modify", "all")},
+    }
+    # Whoever created a file may delete it, nothing else: the agent's temporary files of an
+    # apply (files of the configuration folder only), its added roots and CA files, the API's
+    # own inbox files and the agent's task requests.
+    assert _granted(entries, CREATOR_OWNER) == {
+        "programdata": {("Delete", "files inherit-only one level")},
+        "programdata/kamusm-roots": {("Delete", "files inherit-only")},
+        "programdata/smtp-ca": {("Delete", "files inherit-only")},
+        "programdata/admin/inbox": {("Delete", "all inherit-only")},
+        "data/state/requests": {("Delete", "all inherit-only")},
+    }
+    for protected in (
+        "programdata/install", "programdata/admin", "programdata/admin/keys",
+        "programdata/admin/keys/agent-ed25519.key", "programdata/admin/keys/api-ed25519.key",
+        "programdata/admin/keys/keys.json", "programdata/zamane/web", "programdata/zamane/approved",
+        "data/state/requests",
+    ):  # fmt: skip
+        assert entries[protected]["Protect"] is True, protected
+        assert _rights(entries[protected], WELL_KNOWN["system"]) == {"FullControl"}, protected
+        assert _rights(entries[protected], WELL_KNOWN["admins"]) == {"FullControl"}, protected
+    # The explicit file entries sit on top of the folder's inherited read rights.
+    for unprotected in (
+        "programdata/arcilogger.toml", "programdata/secrets.json", "programdata/admin/policy.json",
+        "programdata/kamusm-roots", "programdata/smtp-ca", "programdata/admin/inbox",
+    ):  # fmt: skip
+        assert entries[unprotected]["Protect"] is False, unprotected
+    assert "programdata/zamane" not in entries, "zamane\\ keeps the configuration folder's read"
+
+
+def test_acl_plan_keeps_the_api_and_the_tasks_out_of_the_configuration(
+    engine: str, tmp_path: Path
+) -> None:
+    """ArciApi writes the inbox and nothing of the configuration, secret.key, secrets.json or
+    zamane\\; each private key is readable by its one service; LOCAL SERVICE reads the public
+    keys, the policy and jars.json and works in state\\requests, never in the staging folder."""
+    entries = _plan_by_path(_acl_plan(engine, tmp_path), tmp_path)
+    api, worker, tasks = (
+        service_sid("ArciApi"),
+        service_sid("ArciWorker"),
+        WELL_KNOWN["local_service"],
+    )
+    assert _writes(entries, api) == {
+        "programdata/admin/inbox", "data/spool/_audit", "data/exports", "data/logs",
+    }  # fmt: skip
+    assert _grants(entries["programdata/admin/inbox"], api) == {
+        ("CreateFiles, WriteData, ReadData, ReadAttributes, ListDirectory", "all")
+    }
+    for path, readers in (
+        ("programdata/admin/keys/agent-ed25519.key", {AGENT}),
+        ("programdata/admin/keys/api-ed25519.key", {api}),
+        ("programdata/admin/keys/keys.json", {AGENT, api, tasks}),
+        ("programdata/admin/keys", set()),
+        ("programdata/admin/policy.json", {AGENT, api, tasks}),
+    ):
+        owners = {WELL_KNOWN["system"], WELL_KNOWN["admins"]}
+        assert {ace["Sid"] for ace in entries[path]["Aces"]} - owners == readers, path
+    assert _granted(entries, api).keys() >= {
+        "programdata/admin", "programdata/admin/status", "programdata/admin/journal",
+        "programdata/admin/system", "programdata/zamane/web", "programdata/zamane/approved",
+    }  # fmt: skip
+    for hidden in ("work", "pending", "state", "versions"):
+        assert not _grants(entries[f"programdata/admin/{hidden}"], api), hidden
+    assert not _grants(entries["data/state/requests"], api)
+    assert not _grants(entries["programdata/install"], api)
+    assert set(_granted(entries, worker)) >= {
+        "programdata/admin", "programdata/admin/status", "programdata/admin/journal",
+        "programdata/admin/system",
+    }  # fmt: skip
+    assert _grants(entries["data/state/requests"], tasks) == {("Modify", "all")}
+    assert _grants(entries["programdata/admin/system"], tasks) == {("ReadAndExecute", "all")}
+    assert _grants(entries["programdata/zamane/approved"], tasks) == {("ReadAndExecute", "all")}
+    staging = {ace["Sid"] for ace in entries["programdata/zamane/web"]["Aces"]}
+    assert staging == {WELL_KNOWN["system"], WELL_KNOWN["admins"], AGENT, api}, "no task right"
+    for path in ("programdata/install", "programdata/zamane/web", "programdata/admin/keys"):
+        assert not _grants(entries[path], tasks), path
+    for sid in (api, worker, tasks):
+        assert _grants(entries["programdata/admin"], sid) == {(LIST_ONLY, "this folder")}
+
+
+_ACE_FLAGS_SCRIPT = r"""
+param([string]$ModulePath, [string]$Root, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$plan = Get-ArciAclPlan -DataRoot (Join-Path $Root 'data') `
+    -ProgramDataDir (Join-Path $Root 'programdata') -InstallDir (Join-Path $Root 'program')
+$out = @(foreach ($entry in $plan) {
+        foreach ($ace in $entry.Aces) {
+            $flags = Get-ArciAceFlags -Kind $entry.Kind -Ace $ace
+            [pscustomobject]@{
+                path = $entry.Path; sid = $ace.Sid; rights = $ace.Rights
+                inheritance = $flags.Inheritance; propagation = $flags.Propagation
+            }
+        }
+    })
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $out -Depth 4))
+"""
+
+
+def test_acl_entries_become_the_windows_inheritance_flags(engine: str, tmp_path: Path) -> None:
+    """What Set-ArciAclEntry writes (Get-ArciAceFlags): CREATOR OWNER's Delete reaches the files
+    of the configuration folder only (ObjectInherit, InheritOnly, NoPropagateInherit: without
+    the last one it would reach the files of every sub-folder, secret.key's folder included),
+    a file entry inherits nothing, the worker's list right reaches folders only."""
+    output = tmp_path / "flags.json"
+    script = write_script(tmp_path / "flags.ps1", _ACE_FLAGS_SCRIPT)
+    result = run_powershell(
+        engine,
+        script,
+        "-ModulePath",
+        str(MODULE),
+        "-Root",
+        str(tmp_path),
+        "-OutputPath",
+        str(output),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    flags = {
+        (
+            Path(item["path"].replace("\\", "/")).relative_to(tmp_path).as_posix(),
+            item["sid"],
+            item["rights"],
+        ): (
+            item["inheritance"],
+            item["propagation"],
+        )
+        for item in read_json(output)
+    }
+    assert flags[("programdata", CREATOR_OWNER, "Delete")] == (
+        "ObjectInherit",
+        "InheritOnly, NoPropagateInherit",
+    )
+    assert flags[("programdata/kamusm-roots", CREATOR_OWNER, "Delete")] == (
+        "ObjectInherit",
+        "InheritOnly",
+    )
+    assert flags[("programdata/admin/inbox", CREATOR_OWNER, "Delete")] == (
+        "ContainerInherit, ObjectInherit",
+        "InheritOnly",
+    )
+    assert flags[("programdata", AGENT, "CreateFiles")] == ("None", "None")
+    assert flags[("programdata/arcilogger.toml", AGENT, "Modify")] == ("None", "None")
+    assert flags[("data/spool", service_sid("ArciWorker"), LIST_ONLY)] == (
+        "ContainerInherit",
+        "None",
+    )
+    assert flags[("programdata/admin/inbox", AGENT, "Modify")] == (
+        "ContainerInherit, ObjectInherit",
+        "None",
+    )
+
+
+_POLICY_SCRIPT = r"""
+param([string]$ModulePath, [string]$Folder, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$java = 'D:\Tools\java\bin\java.exe'
+$trusted = @(
+    [pscustomobject]@{ path = $java; sha256 = ('A' * 64); argv = @($java, '-Xmx256m') },
+    [pscustomobject]@{ path = 'E:\pg\bin\pg_dump.exe'; sha256 = ('b' * 64); argv = $null }
+)
+Write-ArciUtf8File -Path (Join-Path $Folder 'default.json') -Text (New-ArciAdminPolicy)
+$custom = New-ArciAdminPolicy -Enabled $false -SourceNetwork @('172.20.0.0/16', '10.0.0.1') `
+    -HoldHours 2 -JarHoldHours 48 -TrustedExecutable $trusted -WrittenAt '2026-10-25T10:00:00+03:00'
+Write-ArciUtf8File -Path (Join-Path $Folder 'custom.json') -Text $custom
+$refused = $null
+try { [void](New-ArciAdminPolicy -SourceNetwork @('172.20.0.1/16')) }
+catch { $refused = $_.Exception.Message }
+$read = [ordered]@{}
+foreach ($file in Get-ChildItem -LiteralPath $Folder -Filter '*.json' | Sort-Object Name) {
+    $policy = Read-ArciAdminPolicy -Path $file.FullName
+    $read[$file.Name] = [ordered]@{
+        valid = $policy.Valid; enabled = $policy.Enabled; problem = $policy.Problem
+        sha256 = $policy.Sha256; source_networks = @($policy.SourceNetworks)
+        hold_hours = $policy.HoldHours; jar_hold_hours = $policy.JarHoldHours
+        executable_roots = @($policy.ExecutableRoots); trusted = @($policy.TrustedExecutables).Count
+    }
+}
+$missing = Read-ArciAdminPolicy -Path (Join-Path $Folder 'none.json')
+$report = [ordered]@{
+    refused = $refused; read = $read
+    missing = [ordered]@{
+        exists = $missing.Exists; valid = $missing.Valid; enabled = $missing.Enabled
+    }
+}
+[System.IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 5))
+"""
+
+
+def _policy_document(**changes: Any) -> dict[str, Any]:
+    document: dict[str, Any] = {
+        "schema": "arcilogger.admin-policy/1", "enabled": True,
+        "source_networks": ["172.16.0.0/12"], "min_prefix_v4": 16, "max_sources": 500,
+        "hold_hours": 0, "jar_hold_hours": 24, "executable_roots": ["C:\\Program Files"],
+        "trusted_executables": [], "tsa_test_per_day": 3,
+        "written_at": "2026-10-25T10:00:00+03:00", "written_by": "installer",
+    }  # fmt: skip
+    for key, value in changes.items():
+        if value is None:
+            document.pop(key)
+        else:
+            document[key] = value
+    return document
+
+
+#: policy.json files the installer's reader must judge as arcilogger_core.admin.contract does.
+POLICY_SAMPLES: dict[str, bytes] = {
+    "ok-hand-edited.json": json.dumps(_policy_document(max_sources=50)).encode(),
+    "extra-key.json": json.dumps(_policy_document(comment="x")).encode(),
+    "float.json": json.dumps(_policy_document())
+    .replace('"hold_hours": 0', '"hold_hours": 1.5')
+    .encode(),
+    "bom.json": BOM + json.dumps(_policy_document()).encode(),
+    "range.json": json.dumps(_policy_document(min_prefix_v4=40)).encode(),
+    "host-bits.json": json.dumps(_policy_document(source_networks=["172.16.0.1/12"])).encode(),
+    "no-writer.json": json.dumps(_policy_document(written_by=None)).encode(),
+    "schema.json": json.dumps(_policy_document(schema="arcilogger.admin-policy/2")).encode(),
+    "no-schema.json": json.dumps(_policy_document(schema=None)).encode(),
+    "bad-sha.json": json.dumps(
+        _policy_document(trusted_executables=[{"path": "D:\\java.exe", "sha256": "abc"}])
+    ).encode(),
+    "string-bool.json": json.dumps(_policy_document(enabled="true")).encode(),
+    "jar-hold-zero.json": json.dumps(_policy_document(jar_hold_hours=0)).encode(),
+    "naive-time.json": json.dumps(_policy_document(written_at="2026-10-25T10:00:00")).encode(),
+    "not-json.json": b"{enabled: true",
+}
+
+
+def test_admin_policy_is_written_and_read_as_the_core_reads_it(engine: str, tmp_path: Path) -> None:
+    """New-ArciAdminPolicy writes what arcilogger_core.admin.contract.AdminPolicy accepts
+    strictly (contract 2.4.1); Read-ArciAdminPolicy (ApplySystem, the installer) judges every
+    file as the core does, and a missing or invalid file means browser administration off."""
+    folder = tmp_path / "policies"
+    folder.mkdir()
+    for name, data in POLICY_SAMPLES.items():
+        (folder / name).write_bytes(data)
+    output = tmp_path / "policy-report.json"
+    script = write_script(tmp_path / "policy.ps1", _POLICY_SCRIPT)
+    result = run_powershell(
+        engine,
+        script,
+        "-ModulePath",
+        str(MODULE),
+        "-Folder",
+        str(folder),
+        "-OutputPath",
+        str(output),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = read_json(output)
+    default = parse_document(AdminPolicy, (folder / "default.json").read_bytes())
+    assert default.enabled is True
+    assert default.source_networks == ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    assert (default.hold_hours, default.jar_hold_hours, default.min_prefix_v4) == (0, 24, 16)
+    assert default.executable_roots == ("C:\\Program Files", "C:\\Program Files (x86)")
+    assert default.trusted_executables == ()
+    assert default.written_by == "installer"
+    assert default.written_at.utcoffset() is not None
+    custom = parse_document(AdminPolicy, (folder / "custom.json").read_bytes())
+    assert custom.enabled is False
+    assert custom.source_networks == ("172.20.0.0/16", "10.0.0.1/32")
+    assert (custom.hold_hours, custom.jar_hold_hours) == (2, 48)
+    java, dump = custom.trusted_executables
+    assert java.sha256 == "a" * 64, "lower case, as the core compares it"
+    assert java.argv == ("D:\\Tools\\java\\bin\\java.exe", "-Xmx256m")
+    assert dump.argv is None
+    assert "-SourceNetwork '172.20.0.1/16'" in report["refused"]
+    for name in ["default.json", "custom.json", *POLICY_SAMPLES]:
+        data = (folder / name).read_bytes()
+        try:
+            parse_document(AdminPolicy, data)
+            valid = True
+        except DocumentError:
+            valid = False
+        seen = report["read"][name]
+        assert seen["valid"] is valid, (name, seen["problem"])
+        assert seen["sha256"] == sha256_bytes(data), name
+        if not valid:
+            assert seen["enabled"] is False, "an invalid file switches the administration off"
+            assert seen["source_networks"] == ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+    assert report["read"]["custom.json"]["enabled"] is False
+    assert report["read"]["custom.json"]["trusted"] == 2
+    assert report["read"]["ok-hand-edited.json"]["valid"] is True
+    assert report["missing"] == {"exists": False, "valid": False, "enabled": False}
+
+
+_EVENT_SOURCE_SCRIPT = r"""
+param([string]$ModulePath, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$calls = New-Object System.Collections.Generic.List[string]
+function New-FakeEventLog([bool]$Exists, [string]$Log) {
+    @{
+        Exists = { param($Source) $calls.Add("exists $Source"); $Exists }.GetNewClosure()
+        LogOf  = { param($Source) $Log }.GetNewClosure()
+        Create = { param($Source, $LogName) $calls.Add("create $Source $LogName") }
+        Delete = { param($Source) $calls.Add("delete $Source") }
+        Write  = { param($Source, $Message, $Level, $Id) $calls.Add("write $Source $Id $Level") }
+    }
+}
+$results = [ordered]@{}
+$results['new'] = Register-ArciEventSource -EventLog (New-FakeEventLog $false $null)
+$results['present'] = Register-ArciEventSource -EventLog (New-FakeEventLog $true 'Application')
+$results['moved'] = Register-ArciEventSource -EventLog (New-FakeEventLog $true 'System')
+$results['removed'] = Unregister-ArciEventSource -EventLog (New-FakeEventLog $true 'Application')
+$results['absent'] = Unregister-ArciEventSource -EventLog (New-FakeEventLog $false $null)
+$present = New-FakeEventLog $true 'Application'
+$results['written'] = Write-ArciEvent -Id 4106 -Level 'Error' -Message 'x' -EventLog $present
+$broken = New-FakeEventLog $false $null
+$broken['Write'] = { param($Source, $Message, $Level, $Id) throw 'source not registered' }
+$results['not written'] = Write-ArciEvent -Id 4106 -Message 'x' -EventLog $broken
+$report = [ordered]@{ results = $results; calls = $calls.ToArray() }
+[System.IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 4))
+"""
+
+
+def test_event_source_is_registered_and_removed_idempotently(engine: str, tmp_path: Path) -> None:
+    """Register-ArciEventSource / Unregister-ArciEventSource (contract 2.16) against a fake
+    System.Diagnostics.EventLog: ARCILOGGER-Admin for the Application log, created once, moved
+    from another log, removed by -Uninstall; Write-ArciEvent never fails its caller."""
+    output = tmp_path / "events.json"
+    script = write_script(tmp_path / "events.ps1", _EVENT_SOURCE_SCRIPT)
+    result = run_powershell(engine, script, "-ModulePath", str(MODULE), "-OutputPath", str(output))
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = read_json(output)
+    assert report["results"] == {
+        "new": "created", "present": "present", "moved": "moved", "removed": "removed",
+        "absent": "absent", "written": True, "not written": False,
+    }  # fmt: skip
+    assert report["calls"] == [
+        "exists ARCILOGGER-Admin", "create ARCILOGGER-Admin Application",
+        "exists ARCILOGGER-Admin",
+        "exists ARCILOGGER-Admin", "delete ARCILOGGER-Admin", "create ARCILOGGER-Admin Application",
+        "exists ARCILOGGER-Admin", "delete ARCILOGGER-Admin",
+        "exists ARCILOGGER-Admin",
+        "write ARCILOGGER-Admin 4106 Error",
+    ]  # fmt: skip
+    module = MODULE.read_text(encoding="utf-8-sig")
+    assert "[System.Diagnostics.EventLog]::CreateEventSource($Source, $LogName)" in module
+    assert "$script:ArciEventSource = 'ARCILOGGER-Admin'" in module
+
+
+_ADMIN_HELPERS_SCRIPT = r"""
+param([string]$ModulePath, [string]$Root, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+Import-Module $ModulePath -Force
+$out = [ordered]@{}
+function Rule([string]$Sid, [int64]$Rights, [bool]$Allow = $true) {
+    [pscustomobject]@{ Sid = $Sid; Rights = $Rights; Allow = $Allow }
+}
+function Fact([string]$Path, [string]$Owner, [object[]]$Rules) {
+    [pscustomobject]@{ Path = $Path; Owner = $Owner; Rules = @($Rules) }
+}
+$users = 'S-1-5-32-545'
+$facts = @(
+    (Fact 'D:\Tools\java\bin\java.exe' 'S-1-5-32-544' @(
+            (Rule $users 0x1200a9), (Rule 'S-1-3-0' 0x1f01ff))),
+    (Fact 'D:\Tools\java\bin' 'S-1-5-18' @((Rule $users 0x1301bf $false))),
+    (Fact 'D:\Tools\java' 'S-1-5-21-1-2-3-1001' @()),
+    (Fact 'D:\Tools' 'S-1-5-32-544' @((Rule 'S-1-5-11' 0x4), (Rule 'S-1-5-11' 0x4))),
+    (Fact 'D:\' 'S-1-5-18' @((Rule $users 0x10000000)))
+)
+$writers = Get-ArciUnsafeWriters -Facts $facts
+$out['writers'] = @($writers)
+$installer = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+$rules = @((Rule 'S-1-5-18' 0x1f01ff), (Rule $users 0x1200a9), (Rule 'S-1-15-2-1' 0x1200a9))
+$java = 'C:\Program Files\Java\bin\java.exe'
+$writers = Get-ArciUnsafeWriters -Facts @((Fact $java $installer $rules))
+$out['trusted'] = @($writers)
+
+function Tsa([string[]]$Java) { [pscustomobject]@{ tsa = [pscustomobject]@{ java = $Java } } }
+$config = [pscustomobject]@{
+    tsa    = [pscustomobject]@{
+        java = @('D:\Tools\java\bin\java.exe', '-Xmx256m'); zamane_jar = 'D:\Kamu SM\zamane.jar'
+    }
+    backup = [pscustomobject]@{
+        pg_dump    = 'C:\Program Files\PostgreSQL\17\bin\pg_dump.exe'
+        pg_restore = 'E:\pg\bin\pg_restore.exe'
+    }
+}
+$records = [ordered]@{}
+foreach ($case in @(
+        @('configured', $config),
+        @('bare', (Tsa @('java'))),
+        @('bare with an argument', (Tsa @('java', '-Xmx256m'))),
+        @('below the roots', (Tsa @('C:/Program Files/Eclipse Adoptium/jdk-8/bin/java.exe'))),
+        @('outside the roots', (Tsa @('D:\jdk\bin\java.exe'))),
+        @('no configuration', $null))) {
+    $found = Get-ArciExecutableRecords -Config $case[1]
+    $records[$case[0]] = @($found)
+}
+$out['records'] = $records
+
+$zamane = 'C:\ProgramData\ARCILOGGER\zamane'
+$sha = 'a1' * 32
+$other = 'b2' * 32
+$outside = 'D:\Kamu SM\zamane-1.0.jar'
+function Plan([string]$Jar, [string]$Sha256, [string[]]$Recorded = @(), [string]$Target) {
+    Get-ArciZamaneJarPlan -Jar $Jar -Sha256 $Sha256 -ZamaneDir $zamane -Recorded $Recorded `
+        -TargetSha256 $Target
+}
+$jar = [ordered]@{}
+$jar['none'] = Plan '' ''
+$jar['missing file'] = Plan "$zamane\zamane.jar" ''
+$jar['recorded'] = Plan "$zamane\zamane.jar" $sha @($sha)
+$jar['not recorded'] = Plan "$zamane\zamane.jar" $sha @($other)
+$jar['approved'] = Plan "$zamane\approved\$sha.jar" $sha @($sha)
+$jar['staged'] = Plan "C:/ProgramData/ARCILOGGER/zamane/web/$sha.jar" $sha @($sha)
+$jar['outside'] = Plan $outside $sha
+$jar['copied before'] = Plan $outside $sha @() $sha
+$jar['another file'] = Plan $outside $sha @() $other
+$out['jar'] = $jar
+
+$record = Join-Path $Root 'zamane-jar.sha256'
+$text = ([string][char]0xFEFF) + "# zamane-1.0.jar, Kamu SM page`r`n" + ('A1' * 32) + `
+    "  zamane-1.0.jar`r`n`r`n  " + $other + " *zamane-0.9.jar`n#" + ('c3' * 32) + "`n"
+[System.IO.File]::WriteAllText($record, $text)
+$hashes = Read-ArciInstallerHashes -Path $record
+$out['hashes'] = @($hashes)
+$hashes = Read-ArciInstallerHashes -Path (Join-Path $Root 'none.sha256')
+$out['no hashes'] = @($hashes)
+
+$sources = [pscustomobject]@{ sources = @(
+        [pscustomobject]@{ name = 'fw'; address = '172.20.10.1' },
+        [pscustomobject]@{ name = 'old'; address = '172.20.10.2'; enabled = $false },
+        [pscustomobject]@{ name = 'core'; address = '172.20.20.0/24'; enabled = $true }) }
+$out['source addresses'] = @(Get-ArciSourceAddresses -Config $sources)
+$toml = @(
+    '[[sources]]', 'name = "fw"', 'address = "172.20.10.1"', '',
+    '[[sources]]', 'name = "old"', 'address = "172.20.10.2"', 'enabled = false  # replaced', '',
+    '[[sources]]', 'name = "core"', 'enabled = true', 'address = "172.20.20.0/24"', ''
+) -join "`n"
+$out['source tables'] = Get-ArciSourceTables -Text $toml
+
+$senders = [ordered]@{}
+$allowed = @('172.16.0.0/12', '10.0.0.0/8')
+foreach ($value in @('172.20.10.1', '172.20.20.0/24', '10.0.0.0/16', '172.20.20.1/24',
+        '172.020.10.1', '198.51.100.7', '172.16.0.0/12', 'any', '2001:db8::1')) {
+    $senders[$value] = Get-ArciSyslogSenderProblem -Value $value -SourceNetwork $allowed `
+        -MinPrefixV4 16
+}
+$out['senders'] = $senders
+$outbound = [ordered]@{}
+foreach ($case in @(
+        @('smtp', 'ARCILOGGER Out SMTP', 'smtp.ornek.example', 587),
+        @('second smtp', 'ARCILOGGER Out SMTP 2', 'smtp2.ornek.example', 465),
+        @('ntp', 'ARCILOGGER Out NTP', '172.20.10.1', 123),
+        @('kamu sm', 'ARCILOGGER Out Kamu SM', 'zd.kamusm.gov.tr', 80),
+        @('replica', 'ARCILOGGER Out Replica', 'nas.ornek.example', 445),
+        @('web rule', 'ARCILOGGER HTTPS', 'arcilogger.internal', 443),
+        @('dns rule', 'ARCILOGGER Out DNS UDP', '172.20.10.1', 53),
+        @('tenth smtp', 'ARCILOGGER Out SMTP 10', 'smtp.ornek.example', 587),
+        @('command in the host', 'ARCILOGGER Out SMTP',
+            'smtp.ornek.example; Remove-NetFirewallRule', 587),
+        @('leading hyphen', 'ARCILOGGER Out NTP', '-ntp.ornek.example', 123),
+        @('port 0', 'ARCILOGGER Out SMTP', 'smtp.ornek.example', 0),
+        @('port 65536', 'ARCILOGGER Out SMTP', 'smtp.ornek.example', 65536))) {
+    $outbound[$case[0]] = Get-ArciOutboundProblem -Rule $case[1] -HostName $case[2] -Port $case[3]
+}
+$out['outbound'] = $outbound
+[System.IO.File]::WriteAllText($OutputPath, ($out | ConvertTo-Json -Depth 6))
+"""
+
+
+@pytest.fixture
+def admin_helpers(engine: str, tmp_path: Path) -> dict[str, Any]:
+    root = tmp_path
+    output = root / "report.json"
+    script = write_script(root / "helpers.ps1", _ADMIN_HELPERS_SCRIPT)
+    result = run_powershell(
+        engine, script, "-ModulePath", str(MODULE), "-Root", str(root), "-OutputPath", str(output)
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report: dict[str, Any] = read_json(output)
+    return report
+
+
+def test_unsafe_writers_of_a_program_to_record(admin_helpers: dict[str, Any]) -> None:
+    """Day 0 note D0-3: a program is recorded only where nobody but administrators, SYSTEM and
+    TrustedInstaller can write it or a folder above it (Get-ArciUnsafeWriters): a write right
+    of anyone else, inherit-only or GENERIC_ALL included, and an owner outside them count; a
+    deny entry, a read right and CREATOR OWNER do not."""
+    assert admin_helpers["writers"] == [
+        "D:\\Tools\\java: S-1-5-21-1-2-3-1001 (sahip [owner])",
+        "D:\\Tools: S-1-5-11",
+        "D:\\: S-1-5-32-545",
+    ]
+    assert admin_helpers["trusted"] == []
+
+
+def test_programs_the_installer_records_for_the_tasks(admin_helpers: dict[str, Any]) -> None:
+    """Get-ArciExecutableRecords: what execpolicy would refuse after an upgrade unless the
+    installer records it (contract 2.16): tsa.java with arguments (as the whole command) or
+    outside Program Files, pg_dump / pg_restore outside it; never the Zamane jar."""
+    records = admin_helpers["records"]
+    assert records["configured"] == [
+        {"What": "tsa.java", "Path": "D:\\Tools\\java\\bin\\java.exe",
+         "Argv": ["D:\\Tools\\java\\bin\\java.exe", "-Xmx256m"]},
+        {"What": "backup.pg_restore", "Path": "E:\\pg\\bin\\pg_restore.exe", "Argv": None},
+    ]  # fmt: skip
+    assert records["bare"] == []
+    assert records["bare with an argument"] == [
+        {"What": "tsa.java", "Path": "java", "Argv": ["java", "-Xmx256m"]}
+    ]
+    assert records["below the roots"] == []
+    assert records["outside the roots"] == [
+        {"What": "tsa.java", "Path": "D:\\jdk\\bin\\java.exe", "Argv": None}
+    ]
+    assert records["no configuration"] == []
+
+
+def _windows_path(value: str | None) -> str | None:
+    return None if value is None else value.replace("/", "\\")
+
+
+def test_zamane_client_plan_of_an_installation_run(admin_helpers: dict[str, Any]) -> None:
+    """Day 0 note D0-14: a client runs from zamane\\ only and with a recorded hash; one from
+    outside is copied in (the original stays), a staged upload or a different file of the same
+    name is refused, never overwritten."""
+    plans = {
+        name: (plan["Action"], _windows_path(plan["Target"]))
+        for name, plan in admin_helpers["jar"].items()
+    }
+    zamane = "C:\\ProgramData\\ARCILOGGER\\zamane"
+    assert plans == {
+        "none": ("none", None),
+        "missing file": ("none", None),
+        "recorded": ("none", None),
+        "not recorded": ("record", None),
+        "approved": ("none", None),
+        "staged": ("refuse", None),
+        "outside": ("copy", f"{zamane}\\zamane-1.0.jar"),
+        "copied before": ("copy", f"{zamane}\\zamane-1.0.jar"),
+        "another file": ("refuse", f"{zamane}\\zamane-1.0.jar"),
+    }
+    assert "approve-jar" in admin_helpers["jar"]["staged"]["Reason"]
+    assert "not overwritten" in admin_helpers["jar"]["another file"]["Reason"]
+    assert "the original stays" in admin_helpers["jar"]["outside"]["Reason"]
+
+
+def test_installer_hash_record_is_read_as_execpolicy_reads_it(
+    admin_helpers: dict[str, Any],
+) -> None:
+    assert admin_helpers["hashes"] == ["a1" * 32, "b2" * 32]
+    assert admin_helpers["no hashes"] == []
+
+
+def test_a_source_switched_off_gets_no_firewall_opening(admin_helpers: dict[str, Any]) -> None:
+    """ADR-0014: [[sources]] enabled = false (Ayarlar → Kaynaklar) closes 514 for the source;
+    with and without Python the installer leaves it out."""
+    assert admin_helpers["source addresses"] == ["172.20.10.1", "172.20.20.0/24"]
+    assert admin_helpers["source tables"] == {
+        "Tables": 2,
+        "Addresses": ["172.20.10.1", "172.20.20.0/24"],
+    }
+
+
+def test_firewall_sync_checks_senders_and_outbound_rules_again(
+    admin_helpers: dict[str, Any],
+) -> None:
+    """Contract 2.8.3 step 3: ApplySystem checks every value of the system plan again before
+    it changes a rule (the plan is not trusted for being well formed)."""
+    problems = admin_helpers["senders"]
+    assert [value for value, problem in problems.items() if problem is None] == [
+        "172.20.10.1",
+        "172.20.20.0/24",
+        "10.0.0.0/16",
+    ]
+    assert "[a host address, not the network address]" in problems["172.20.20.1/24"]
+    assert "[outside the allowed networks]" in problems["198.51.100.7"]
+    assert "[wider than the widest network allowed]" in problems["172.16.0.0/12"]
+    for value in ("172.020.10.1", "any", "2001:db8::1"):
+        assert "[not an IPv4 address or network]" in problems[value], value
+    outbound = admin_helpers["outbound"]
+    allowed = {name for name, problem in outbound.items() if problem is None}
+    assert allowed == {"smtp", "second smtp", "ntp", "kamu sm", "replica"}
+    for name in ("web rule", "dns rule", "tenth smtp"):
+        assert "[rule not updated by this step]" in outbound[name], name
+    for name in ("command in the host", "leading hyphen"):
+        assert "[invalid host name]" in outbound[name], name
+    for name in ("port 0", "port 65536"):
+        assert "[invalid port]" in outbound[name], name
+
+
+def _policy_detail(plan: dict[str, Any]) -> AdminPolicy:
+    items = {item["id"]: item for item in plan["items"]}
+    detail = items["admin.policy"]["detail"]
+    assert isinstance(detail, dict), detail
+    return parse_document(AdminPolicy, json.dumps(detail, ensure_ascii=False).encode())
+
+
+def test_dry_run_prepares_the_browser_administration(engine: str, tmp_path: Path) -> None:
+    """Contract 2.16: the data root record before ArciAdmin may write the configuration
+    folder, secrets.json before its file right, admin\\ and admin\\keys\\ protected before the
+    keys exist (D0-7), the policy and the Event Log source; then the rights of every reader."""
+    bundle = make_fake_bundle(tmp_path)
+    result, plan = dry_run(engine, tmp_path, bundle)
+    assert_dry_run_exit(result, plan)
+    ids = _ids(plan)
+    _before(
+        ids,
+        "config.copy",
+        "config.data-root",
+        "config.database-section",
+        "executables.record",
+        "config.validate",
+        "secrets.init",
+        "secrets.file",
+        "admin.protect",
+        "admin.keys",
+        "admin.policy",
+        "admin.event-source",
+        "acl.apply",
+        "services.install",
+    )
+    assert "zamane.jar" not in ids
+    items = {item["id"]: item for item in plan["items"]}
+    data_root = tmp_path / "data" / "ARCILOGGER"
+    assert items["config.data-root"]["detail"] == str(data_root)
+    assert "data-root.txt" in items["config.data-root"]["text"]
+    assert items["preflight.admin-policy"]["status"] == "ok"
+    assert "açık [on]" in items["preflight.admin-policy"]["text"]
+    protected = items["admin.protect"]["detail"]
+    programdata = tmp_path / "programdata" / "ARCILOGGER"
+    assert [Path(entry["Path"]) for entry in protected] == [
+        programdata / "admin",
+        programdata / "admin" / "keys",
+    ]
+    owners = {WELL_KNOWN["system"], WELL_KNOWN["admins"]}
+    readers = {
+        AGENT,
+        service_sid("ArciApi"),
+        service_sid("ArciWorker"),
+        WELL_KNOWN["local_service"],
+    }
+    for entry in protected:
+        assert entry["Protect"] is True
+        assert {ace["Sid"] for ace in entry["Aces"]} <= owners | readers
+    assert {ace["Sid"] for ace in protected[1]["Aces"]} == owners, (
+        "admin\\keys: nobody else until the ACL step names each key's one reader"
+    )
+    policy = _policy_detail(plan)
+    assert policy.enabled is True
+    assert policy.source_networks == ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    assert (policy.hold_hours, policy.jar_hold_hours) == (0, 24)
+    assert policy.trusted_executables == ()
+    assert policy.written_by == "installer"
+    assert "ArciAdmin" in {Path(name).stem for name in bundle.joinpath("services").glob("*.xml")}
+    assert not (tmp_path / "programdata").exists(), "a dry run changes nothing"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (("-DisableBrowserAdministration",), {"enabled": False}),
+        (
+            ("-SourceNetwork", "172.20.0.0/16,10.0.0.1", "-AdminChangeHoldHours", "2",
+             "-ZamaneHoldHours", "48"),
+            {"source_networks": ("172.20.0.0/16", "10.0.0.1/32"), "hold_hours": 2,
+             "jar_hold_hours": 48},
+        ),
+        (("-SourceNetwork", "172.20.0.1/16"), "-SourceNetwork '172.20.0.1/16'"),
+        (("-SourceNetwork", "fe80::/10"), "-SourceNetwork 'fe80::/10'"),
+        (("-AdminChangeHoldHours", "169"), "-AdminChangeHoldHours 169"),
+        (("-ZamaneHoldHours", "0"), "-ZamaneHoldHours 0"),
+    ],
+    ids=["disabled", "networks-and-holds", "host-bits", "ipv6", "hold-too-long", "no-jar-hold"],
+)  # fmt: skip
+def test_dry_run_browser_administration_options(
+    engine: str, tmp_path: Path, arguments: tuple[str, ...], expected: dict[str, Any] | str
+) -> None:
+    bundle = make_fake_bundle(tmp_path)
+    result, plan = dry_run(engine, tmp_path, bundle, *arguments)
+    assert_dry_run_exit(result, plan)
+    check = {item["id"]: item for item in plan["items"]}["preflight.admin-policy"]
+    if isinstance(expected, str):
+        assert check["status"] == "fail", check
+        assert expected in check["text"]
+        assert result.returncode == 2
+        return
+    assert check["status"] == "ok", check
+    policy = _policy_detail(plan)
+    for key, value in expected.items():
+        assert getattr(policy, key) == value, key
+    if expected.get("enabled") is False:
+        assert "kapalı [off] (-DisableBrowserAdministration)" in check["text"]
+
+
+def _write_policy(tmp_path: Path, **changes: Any) -> Path:
+    path = tmp_path / "programdata" / "ARCILOGGER" / "admin" / "policy.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_policy_document(**changes)), encoding="utf-8")
+    return path
+
+
+def test_dry_run_keeps_what_an_administrator_wrote_into_the_policy(
+    engine: str, tmp_path: Path
+) -> None:
+    """A valid policy.json edited by hand keeps its values; a given parameter changes only
+    its own key (and the recorded programs stay)."""
+    trusted = [{"path": "D:\\Tools\\java\\bin\\java.exe", "sha256": "c3" * 32}]
+    _write_policy(
+        tmp_path, enabled=False, max_sources=50, hold_hours=4, source_networks=["172.20.0.0/16"],
+        executable_roots=["C:\\Program Files", "D:\\Apps"], trusted_executables=trusted,
+    )  # fmt: skip
+    bundle = make_fake_bundle(tmp_path)
+    _, plan = dry_run(engine, tmp_path, bundle)
+    policy = _policy_detail(plan)
+    assert policy.enabled is False
+    assert (policy.max_sources, policy.hold_hours) == (50, 4)
+    assert policy.source_networks == ("172.20.0.0/16",)
+    assert policy.executable_roots == ("C:\\Program Files", "D:\\Apps")
+    assert [entry.path for entry in policy.trusted_executables] == [
+        "D:\\Tools\\java\\bin\\java.exe"
+    ]
+    _, plan = dry_run(engine, tmp_path, bundle, "-AdminChangeHoldHours", "1")
+    policy = _policy_detail(plan)
+    assert (policy.enabled, policy.max_sources, policy.hold_hours) == (False, 50, 1)
+
+
+def test_dry_run_rewrites_an_invalid_policy_and_follows_the_remembered_choices(
+    engine: str, tmp_path: Path
+) -> None:
+    """An invalid policy.json (it means browser administration off for every reader) is
+    rewritten with a warning; the choices of an earlier run come from install\\state.json."""
+    _write_policy(tmp_path, max_sources=0)
+    state = tmp_path / "programdata" / "ARCILOGGER" / "install" / "state.json"
+    state.parent.mkdir(parents=True)
+    remembered = {"enabled": False, "source_networks": ["192.168.10.0/24"], "hold_hours": 3,
+                  "jar_hold_hours": 30}  # fmt: skip
+    state.write_text(json.dumps({"admin_policy": remembered}), encoding="utf-8")
+    bundle = make_fake_bundle(tmp_path)
+    result, plan = dry_run(engine, tmp_path, bundle)
+    assert_dry_run_exit(result, plan)
+    items = {item["id"]: item for item in plan["items"]}
+    warning = items["preflight.admin-policy-file"]
+    assert warning["status"] == "warn"
+    assert "[invalid, rewritten with the defaults]" in warning["text"]
+    assert "max_sources" in warning["text"]
+    assert warning["text"] in plan["warnings"]
+    policy = _policy_detail(plan)
+    assert policy.enabled is False
+    assert policy.source_networks == ("192.168.10.0/24",)
+    assert (policy.hold_hours, policy.jar_hold_hours, policy.max_sources) == (3, 30, 500)
+
+
+def _upgrade_with_programs(tmp_path: Path, tsa_and_backup: str) -> Path:
+    """An installed version whose venv python is the test interpreter and a configuration
+    with the given [tsa] / [backup] tables."""
+    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.9", "1" * 64)
+    (program / "venv" / "Scripts").mkdir(parents=True)
+    (program / "venv" / "Scripts" / "python.exe").symlink_to(sys.executable)
+    return _existing_config(
+        tmp_path, f'[[sources]]\nname = "fw"\naddress = "172.20.10.1"\n{tsa_and_backup}'
+    )
+
+
+def _programs_toml(java: str, jar: str, pg_dump: str) -> str:
+    """[tsa] with java and an argument, a Zamane client, [backup] pg_dump: all outside the
+    default trusted folders."""
+    lines = [f'java = ["{java}", "-Xmx256m"]', f'zamane_jar = "{jar}"']
+    return "[tsa]\n" + "\n".join(lines) + f'\n[backup]\npg_dump = "{pg_dump}"\n'
+
+
+def _program(path: Path, content: bytes) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path.as_posix()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a symbolic link to the test interpreter acts as the venv python",
+)
+def test_dry_run_upgrade_plans_the_records_of_the_programs_the_tasks_run(
+    engine: str, tmp_path: Path
+) -> None:
+    """Contract 2.16, D0-14: an upgrade records tsa.java with an argument, a pg_dump outside
+    Program Files and copies a Zamane client from outside zamane\\ in, so that sealing, credit
+    and the backup keep running under execpolicy; a dry run only says so."""
+    java = _program(tmp_path / "tools" / "jdk" / "bin" / "java", b"java")
+    pg_dump = _program(tmp_path / "tools" / "pg" / "bin" / "pg_dump.exe", b"pg_dump")
+    jar = _program(tmp_path / "downloads" / "zamane-1.0.jar", b"zamane client")
+    config = _upgrade_with_programs(
+        tmp_path,
+        _programs_toml(java, jar, pg_dump),
+    )
+    before = config.read_bytes()
+    bundle = make_fake_bundle(tmp_path, version="9.9.10")
+    result, plan = dry_run(engine, tmp_path, bundle, "-Upgrade", site_name=None)
+    assert_dry_run_exit(result, plan)
+    items = {item["id"]: item for item in plan["items"]}
+    check = items["preflight.executables"]
+    assert check["status"] == "ok", check
+    assert f"tsa.zamane_jar {jar} (copy)" in check["text"].replace("\\", "/")
+    detail = items["executables.record"]["detail"]
+    records = {record["what"]: record for record in detail["trusted_executables"]}
+    assert set(records) == {"tsa.java", "backup.pg_dump"}
+    assert records["tsa.java"]["argv"] == [java, "-Xmx256m"]
+    assert records["tsa.java"]["sha256"] == sha256_bytes(b"java")
+    assert records["backup.pg_dump"]["sha256"] == sha256_bytes(b"pg_dump")
+    copy = detail["zamane_jar"]
+    assert copy["Action"] == "copy"
+    zamane = tmp_path / "programdata" / "ARCILOGGER" / "zamane"
+    assert Path(copy["Target"]) == zamane / "zamane-1.0.jar"
+    assert copy["Sha256"] == sha256_bytes(b"zamane client")
+    policy = _policy_detail(plan)
+    assert {(entry.path, entry.sha256) for entry in policy.trusted_executables} == {
+        (java, sha256_bytes(b"java")),
+        (pg_dump, sha256_bytes(b"pg_dump")),
+    }
+    assert config.read_bytes() == before, "a dry run changes nothing"
+    assert not zamane.exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a symbolic link to the test interpreter acts as the venv python",
+)
+@pytest.mark.parametrize("case", ["staged", "another-file"])
+def test_dry_run_upgrade_stops_for_a_zamane_client_it_must_not_use(
+    engine: str, tmp_path: Path, case: str
+) -> None:
+    """A staged upload never runs (it waits for approve-jar); a different file of the same
+    name in zamane\\ is never overwritten. Either stops the upgrade before any change, with what
+    to do, instead of leaving a version that cannot seal."""
+    zamane = tmp_path / "programdata" / "ARCILOGGER" / "zamane"
+    if case == "staged":
+        jar = _program(zamane / "web" / f"{'a1' * 32}.jar", b"uploaded client")
+        needle = "approve-jar"
+    else:
+        _program(zamane / "zamane-1.0.jar", b"another client")
+        jar = _program(tmp_path / "downloads" / "zamane-1.0.jar", b"zamane client")
+        needle = "[zamane\\zamane-1.0.jar is a different file and is not overwritten"
+    _upgrade_with_programs(tmp_path, f'[tsa]\nzamane_jar = "{jar}"\n')
+    bundle = make_fake_bundle(tmp_path, version="9.9.10")
+    result, plan = dry_run(engine, tmp_path, bundle, "-Upgrade", site_name=None)
+    assert_dry_run_exit(result, plan)
+    assert result.returncode == 2
+    failures = [f for f in plan["failures"] if f.startswith("tsa.zamane_jar")]
+    assert len(failures) == 1, plan["failures"]
+    assert needle in failures[0]
+
+
+def test_dry_run_uninstall_removes_the_event_source(engine: str, tmp_path: Path) -> None:
+    bundle = make_fake_bundle(tmp_path)
+    write_version(tmp_path / "program" / "ARCILOGGER", "9.9.9", "1" * 64)
+    result, plan = dry_run(engine, tmp_path, bundle, "-Uninstall")
+    assert_dry_run_exit(result, plan)
+    ids = _ids(plan)
+    _before(ids, "services.remove", "eventlog.remove")
+    kept = {item["id"]: item for item in plan["items"] if item["status"] == "kept"}
+    assert "admin\\" in kept["keep.config"]["text"]
+
+
+_RECORD_SCRIPT = r"""
+param(
+    [string]$Installer, [string]$Base, [string]$NewJar, [string]$NewJarSha256, [string]$OtherJar,
+    [string]$OtherJarSha256, [string]$OutputPath
+)
+$ErrorActionPreference = 'Stop'
+$program = Join-Path $Base 'program/ARCILOGGER'
+$programData = Join-Path $Base 'programdata/ARCILOGGER'
+$dataRoot = Join-Path $Base 'data/ARCILOGGER'
+. $Installer -Upgrade -InstallDir $program -ProgramDataDir $programData -DataRoot $dataRoot `
+    -ServerAddress '172.20.20.15' -ZamaneJar $NewJar -ZamaneJarSha256 $NewJarSha256
+$out = [ordered]@{}
+Resolve-AdminPolicyChoice
+# The executables.record step of an upgrade, twice (a repair after it changes nothing).
+Update-ExecutableRecords
+function Get-Recorded {
+    $what = @($script:ExecutableRecords | ForEach-Object { $_.what })
+    [ordered]@{ action = $script:ZamaneJarPlan.Action; records = $what }
+}
+$out['first'] = Get-Recorded
+Update-ExecutableRecords
+$out['second'] = Get-Recorded
+# -ZamaneJar of the same run, then the admin.policy step.
+Install-ZamaneJar
+Install-ZamaneJar
+Write-ArciUtf8File -Path $PolicyPath -Text (Get-AdminPolicyText -Records $script:ExecutableRecords)
+# Another file of the same name: never overwritten.
+$ZamaneJar = $OtherJar
+$ZamaneJarSha256 = $OtherJarSha256
+try { Install-ZamaneJar; $out['other'] = 'installed' }
+catch { $out['other'] = $_.Exception.Message }
+$out['warnings'] = @($script:Warnings)
+[System.IO.File]::WriteAllText($OutputPath, ($out | ConvertTo-Json -Depth 5))
+"""
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a symbolic link to the test interpreter acts as the venv python",
+)
+def test_upgrade_records_the_programs_so_the_tasks_keep_running(
+    engine: str, tmp_path: Path
+) -> None:
+    """Contract 2.16, D0-14, end to end: after the executables.record, zamane.jar and
+    admin.policy steps of an upgrade, arcilogger_core.execpolicy (what the tasks check before
+    they run a program) accepts the configured java command, pg_dump and the Zamane client,
+    which now runs from its copy in zamane\\; the original outside it is refused."""
+    from arcilogger_core.execpolicy import (
+        ExecutableRefusedError,
+        TrustAnchors,
+        check_executable,
+        check_java,
+        check_zamane_jar,
+    )
+
+    java = _program(tmp_path / "tools" / "jdk" / "bin" / "java", b"java")
+    pg_dump = _program(tmp_path / "tools" / "pg" / "bin" / "pg_dump", b"pg_dump")
+    jar = _program(tmp_path / "downloads" / "zamane-1.0.jar", b"zamane client 1.0")
+    new_jar = _program(tmp_path / "downloads" / "zamane-1.1.jar", b"zamane client 1.1")
+    other = _program(tmp_path / "elsewhere" / "zamane-1.1.jar", b"not the client")
+    config = _upgrade_with_programs(
+        tmp_path,
+        _programs_toml(java, jar, pg_dump),
+    )
+    zamane = config.parent / "zamane"
+    zamane.mkdir()
+    (config.parent / "admin").mkdir()
+    bundle = make_fake_bundle(tmp_path, version="9.9.10")
+    output = tmp_path / "records.json"
+    script = write_script(tmp_path / "records.ps1", _RECORD_SCRIPT)
+    result = run_powershell(
+        engine, script, "-Installer", str(bundle / "installer" / "Install-Arcilogger.ps1"),
+        "-Base", str(tmp_path), "-NewJar", new_jar,
+        "-NewJarSha256", sha256_bytes(b"zamane client 1.1").upper(), "-OtherJar", other,
+        "-OtherJarSha256", sha256_bytes(b"not the client"), "-OutputPath", str(output),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = read_json(output)
+    assert report["first"] == {"action": "copy", "records": ["tsa.java", "backup.pg_dump"]}
+    assert report["second"]["action"] == "none", "the copy is recorded: nothing more to do"
+    assert "[a different file, not overwritten: use another file name]" in report["other"]
+    copy = zamane / "zamane-1.0.jar"
+    assert copy.read_bytes() == b"zamane client 1.0"
+    assert Path(jar).is_file(), "the original stays where it is"
+    configured = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert configured["tsa"]["zamane_jar"] == copy.as_posix()
+    assert configured["tsa"]["java"] == [java, "-Xmx256m"], "nothing else is rewritten"
+    assert len(list(config.parent.glob("arcilogger.toml.before-*"))) == 1
+    lines = (zamane / "zamane-jar.sha256").read_text(encoding="utf-8").splitlines()
+    hashes = [line.split()[0] for line in lines if line and not line.startswith("#")]
+    assert hashes == [sha256_bytes(b"zamane client 1.0"), sha256_bytes(b"zamane client 1.1")]
+    assert (zamane / "zamane-1.1.jar").read_bytes() == b"zamane client 1.1"
+    assert any(
+        "güvenilen programlara eklendi [recorded as a trusted program]" in w
+        for w in report["warnings"]
+    )
+    anchors = TrustAnchors.of(config)
+    assert anchors.policy.written_by == "installer", "policy.json as the installer wrote it"
+    assert check_java(configured["tsa"]["java"], anchors) == (java, "-Xmx256m")
+    assert check_executable(pg_dump, anchors, what="backup.pg_dump") == pg_dump
+    assert check_zamane_jar(configured["tsa"]["zamane_jar"], anchors).path == copy
+    assert check_zamane_jar(zamane / "zamane-1.1.jar", anchors).sha256 == sha256_bytes(
+        b"zamane client 1.1"
+    )
+    with pytest.raises(ExecutableRefusedError):
+        check_zamane_jar(jar, anchors)
+    with pytest.raises(ExecutableRefusedError):
+        check_java([java, "-XX:OnError=calc.exe"], anchors)
+
+
+_PROGRAM_CONFIG_SCRIPT = r"""
+param(
+    [string]$ModulePath, [string]$Root, [string]$OldPython, [string]$CurrentPython,
+    [string]$OutputPath
+)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$out = [ordered]@{}
+foreach ($name in @('before.toml', 'changed.toml', 'broken.toml')) {
+    $file = Join-Path $Root $name
+    $out["old $name"] = Test-ArciProgramConfig -Python $OldPython -ConfigPath $file
+    $out["current $name"] = Test-ArciProgramConfig -Python $CurrentPython -ConfigPath $file
+}
+$out['no program'] = Test-ArciProgramConfig -Python (Join-Path $Root 'missing/python') `
+    -ConfigPath (Join-Path $Root 'before.toml')
+[System.IO.File]::WriteAllText($OutputPath, ($out | ConvertTo-Json -Depth 3))
+"""
+
+#: arcilogger_core.config of a version from before the browser administration, as far as the
+#: rollback check needs it: its Config refuses a key it does not know (extra="forbid").
+_OLD_CONFIG_MODULE = """
+import tomllib
+
+
+def load_config(path):
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    for number, source in enumerate(data.get("sources", [])):
+        for key in sorted(set(source) - {"name", "type", "address"}):
+            raise ValueError(
+                f"1 validation error for Config\\nsources.{number}.{key}\\n"
+                "  Extra inputs are not permitted"
+            )
+    return data
+"""
+
+
+def _old_program(root: Path) -> Path:
+    """A venv (the real interpreter, isolated) with the arcilogger_core of an older version."""
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(root)], check=True)
+    python = root / "bin" / "python"
+    found = subprocess.run(
+        [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        check=True, capture_output=True, text=True,
+    )  # fmt: skip
+    package = Path(found.stdout.strip()) / "arcilogger_core"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "0.9.0"\n', encoding="utf-8")
+    (package / "config.py").write_text(_OLD_CONFIG_MODULE, encoding="utf-8")
+    return python
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX venv stands for the old program")
+def test_rollback_check_loads_the_configuration_with_the_previous_program(
+    engine: str, tmp_path: Path
+) -> None:
+    """Test-ArciProgramConfig runs the program a rollback puts back on arcilogger.toml before
+    its services start (contract 2.16): a key the browser added (enabled = false of a source)
+    is refused by the older version, not by this one."""
+    old = _old_program(tmp_path / "old-venv")
+    data = (tmp_path / "data").as_posix()
+    source = '[[sources]]\nname = "fw"\ntype = "fortigate"\naddress = "172.20.10.1"\n'
+    (tmp_path / "before.toml").write_text(f'data_dir = "{data}"\n{source}', encoding="utf-8")
+    (tmp_path / "changed.toml").write_text(
+        f'data_dir = "{data}"\n{source}enabled = false\n', encoding="utf-8"
+    )
+    (tmp_path / "broken.toml").write_text('data_dir = "unterminated\n', encoding="utf-8")
+    output = tmp_path / "program-config.json"
+    script = write_script(tmp_path / "program-config.ps1", _PROGRAM_CONFIG_SCRIPT)
+    result = run_powershell(
+        engine, script, "-ModulePath", str(MODULE), "-Root", str(tmp_path),
+        "-OldPython", str(old), "-CurrentPython", sys.executable, "-OutputPath", str(output),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = read_json(output)
+    assert report["old before.toml"] is None
+    assert report["current before.toml"] is None
+    assert report["old changed.toml"] == (
+        "1 validation error for Config sources.0.enabled Extra inputs are not permitted"
+    )
+    assert report["current changed.toml"] is None, "this version knows [[sources]] enabled"
+    for program in ("old", "current"):
+        assert report[f"{program} broken.toml"], program
+        assert "\n" not in report[f"{program} broken.toml"], "one line for the log"
+    assert "[could not be run]" in report["no program"]
+
+
+_FIREWALL_SYNC_SCRIPT = r"""
+param([string]$Script, [string]$CasesPath, [string]$Root)
+$ErrorActionPreference = 'Stop'
+$cases = [System.IO.File]::ReadAllText($CasesPath) | ConvertFrom-Json
+foreach ($case in $cases) {
+    $arguments = @{
+        SyncFromConfig = $true; DryRun = $true; PlanPath = (Join-Path $Root ($case.name + '.json'))
+        PolicyPath = (Join-Path $Root $case.policy); StateFile = (Join-Path $Root $case.state)
+        SourceAddress = @($case.senders | ForEach-Object { [string]$_ })
+        Outbound = @($case.outbound)
+    }
+    $global:LASTEXITCODE = -1
+    & $Script @arguments | Out-Host
+    $code = Join-Path $Root ($case.name + '.code')
+    [System.IO.File]::WriteAllText($code, [string]$global:LASTEXITCODE)
+}
+"""
+
+
+def _firewall_sync(
+    engine: str, tmp_path: Path, cases: list[dict[str, Any]]
+) -> tuple[subprocess.CompletedProcess[str], dict[str, tuple[int, dict[str, Any]]]]:
+    (tmp_path / "cases.json").write_text(json.dumps(cases), encoding="utf-8")
+    script = write_script(tmp_path / "sync.ps1", _FIREWALL_SYNC_SCRIPT)
+    result = run_powershell(
+        engine, script, "-Script", str(WINDOWS / "scripts" / "Set-ArciFirewall.ps1"),
+        "-CasesPath", str(tmp_path / "cases.json"), "-Root", str(tmp_path),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    found = {}
+    for case in cases:
+        code = int((tmp_path / f"{case['name']}.code").read_text(encoding="utf-8"))
+        found[case["name"]] = (code, read_json(tmp_path / f"{case['name']}.json"))
+    return result, found
+
+
+SMTP_OUT = {"rule": "ARCILOGGER Out SMTP", "host": "smtp.ornek.example", "port": 587}
+NTP_OUT = {"rule": "ARCILOGGER Out NTP", "host": "172.20.10.1", "port": 123}
+
+
+def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
+    engine: str, tmp_path: Path
+) -> None:
+    """Set-ArciFirewall.ps1 -SyncFromConfig (contract 2.8.3 step 4): the senders of the plan go
+    into the two syslog rules (narrowed, widened within the policy, removed when none is left);
+    in strict mode the plan's outbound rules are updated, an unresolvable host keeps its rule.
+    It never names another rule, a profile, 443, 3389 or 5985, and refuses before any change."""
+    (tmp_path / "policy.json").write_text(
+        json.dumps(_policy_document(source_networks=["172.20.0.0/16"])), encoding="utf-8"
+    )
+    (tmp_path / "off.json").write_text(json.dumps(_policy_document(enabled=False)), "utf-8")
+    (tmp_path / "state.json").write_text(json.dumps({"schema": 1}), encoding="utf-8")
+    (tmp_path / "strict.json").write_text(
+        json.dumps({"schema": 1, "strict_outbound": True}), encoding="utf-8"
+    )
+    base: dict[str, Any] = {"policy": "policy.json", "state": "state.json", "outbound": []}
+    cases: list[dict[str, Any]] = [
+        {**base, "name": "narrowed", "senders": ["172.20.10.1"]},
+        {**base, "name": "widened", "senders": ["172.20.10.1", "172.20.20.0/24", "172.20.30.7"]},
+        {**base, "name": "none-left", "senders": []},
+        {**base, "name": "outside", "senders": ["172.20.10.1", "198.51.100.7"]},
+        {**base, "name": "too-wide", "senders": ["172.0.0.0/8"]},
+        {**base, "name": "twice", "senders": ["172.20.10.1", "172.20.10.1"]},
+        {**base, "name": "not-managed", "senders": ["172.20.10.1"], "state": "none.json"},
+        {**base, "name": "disabled", "senders": ["172.20.10.1"], "policy": "off.json"},
+        {**base, "name": "strict", "senders": ["172.20.10.1"], "state": "strict.json",
+         "outbound": [SMTP_OUT, NTP_OUT]},
+        {**base, "name": "not-strict", "senders": ["172.20.10.1"], "outbound": [SMTP_OUT]},
+        {**base, "name": "bad-rule", "senders": ["172.20.10.1"], "state": "strict.json",
+         "outbound": [{"rule": "ARCILOGGER HTTPS", "host": "172.20.10.37", "port": 443}]},
+    ]  # fmt: skip
+    result, found = _firewall_sync(engine, tmp_path, cases)
+    codes = {name: code for name, (code, _) in found.items()}
+    assert codes == {
+        "narrowed": 0, "widened": 0, "none-left": 0, "outside": 2, "too-wide": 2, "twice": 2,
+        "not-managed": 3, "disabled": 2, "strict": 0, "not-strict": 0, "bad-rule": 2,
+    }  # fmt: skip
+    for name, (code, plan) in found.items():
+        assert plan["mode"] == "sync", name
+        assert plan["exit_code"] == code, name
+        assert (plan["profiles"], plan["other_rules"], plan["would_disable"]) == (
+            "unchanged", "unchanged", None,
+        ), name  # fmt: skip
+        named = {change["rule"] for change in plan["changes"]}
+        assert named <= {"ARCILOGGER Syslog UDP", "ARCILOGGER Syslog TCP",
+                         "ARCILOGGER Out SMTP", "ARCILOGGER Out NTP"}, name  # fmt: skip
+        ports = {port for change in plan["changes"] for port in change["ports"]}
+        assert not ports & {"443", "3389", "5985"}, name
+        if code != 0:
+            assert plan["changes"] == [], f"{name}: refused before any change"
+
+    def syslog(name: str) -> list[tuple[str, str, list[str]]]:
+        changes = found[name][1]["changes"]
+        return [(c["protocol"], c["operation"], c["remote_address"]) for c in changes
+                if c["direction"] == "Inbound"]  # fmt: skip
+
+    assert syslog("narrowed") == [("UDP", "set", ["172.20.10.1"]), ("TCP", "set", ["172.20.10.1"])]
+    widened = ["172.20.10.1", "172.20.20.0/24", "172.20.30.7"]
+    assert syslog("widened") == [("UDP", "set", widened), ("TCP", "set", widened)]
+    assert syslog("none-left") == [("UDP", "remove", []), ("TCP", "remove", [])]
+    assert any("198.51.100.7" in p and "[outside the allowed networks]" in p
+               for p in found["outside"][1]["problems"])  # fmt: skip
+    assert (
+        "[browser administration off or policy.json invalid]" in found["disabled"][1]["problems"][0]
+    )
+    assert "[firewall not managed by ARCILOGGER]" in result.stdout
+    strict = {c["rule"]: c for c in found["strict"][1]["changes"] if c["direction"] == "Outbound"}
+    assert strict["ARCILOGGER Out NTP"]["operation"] == "set"
+    assert strict["ARCILOGGER Out NTP"]["remote_address"] == ["172.20.10.1"]
+    assert strict["ARCILOGGER Out NTP"]["protocol"] == "UDP"
+    assert strict["ARCILOGGER Out SMTP"]["operation"] == "keep", "offline DNS keeps the rule"
+    assert strict["ARCILOGGER Out SMTP"]["ports"] == ["587"]
+    assert any("[not resolved]" in w for w in found["strict"][1]["warnings"])
+    assert [c["direction"] for c in found["not-strict"][1]["changes"]] == ["Inbound", "Inbound"]
+    assert any("[strict outbound mode is off" in w for w in found["not-strict"][1]["warnings"])
+    assert "[rule not updated by this step]" in found["bad-rule"][1]["problems"][0]
+    source = (WINDOWS / "scripts" / "Set-ArciFirewall.ps1").read_text(encoding="utf-8-sig")
+    sync = source[
+        source.index("function Invoke-SyncFromConfig") : source.index("if ($SyncFromConfig)")
+    ]
+    for forbidden in ("Set-NetFirewallProfile", "Disable-NetFirewallRule", "Read-Host",
+                      "Write-FirewallState"):  # fmt: skip
+        assert forbidden not in sync, forbidden
+    assert "Set-NetFirewallAddressFilter" in sync
+
+
+# --- ApplySystem: Sync-ArciSystem.ps1 (contract 2.8.3) -------------------------------------------
+
+SYNC_SCRIPT = WINDOWS / "scripts" / "Sync-ArciSystem.ps1"
+KNOWN_CLIENT = b"a Zamane client release (test bytes)"
+KNOWN_SHA = sha256_bytes(KNOWN_CLIENT)
+
+
+def _system_plan_sample() -> dict[str, Any]:
+    """The example system plan of contract 2.8.3, as core/tests/test_admin_contract.py keeps it
+    (the fixture of these dry runs)."""
+    spec = importlib.util.spec_from_file_location(
+        "_admin_contract_examples", REPO / "core" / "tests" / "test_admin_contract.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan: dict[str, Any] = module.system_plan_sample()
+    parse_document(SystemPlan, json.dumps(plan).encode())
+    return plan
+
+
+class SyncSite:
+    """A configuration folder as ApplySystem finds it: policy.json (172.20.0.0/16), the
+    firewall's state file (strict outbound) and the example plan, its promoted client staged in
+    this folder's zamane\\web."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.root = tmp_path
+        self.programdata = tmp_path / "programdata" / "ARCILOGGER"
+        self.system = self.programdata / "admin" / "system"
+        self.system.mkdir(parents=True)
+        self.web = self.programdata / "zamane" / "web"
+        self.web.mkdir(parents=True)
+        self.policy = self.programdata / "admin" / "policy.json"
+        self.write_policy()
+        state = self.programdata / "install" / "firewall-state.json"
+        state.parent.mkdir()
+        state.write_text(json.dumps({"schema": 1, "strict_outbound": True}), encoding="utf-8")
+        self.firewall_state = state
+        self.staged = self.web / f"{KNOWN_SHA}.jar"
+        self.staged.write_bytes(KNOWN_CLIENT)
+        self.plan = _system_plan_sample()
+        promotion = self.plan["jars"]["promote"][0]
+        promotion["sha256"] = KNOWN_SHA
+        promotion["staged"] = str(self.staged)
+
+    def write_policy(self, **changes: Any) -> None:
+        document = _policy_document(source_networks=["172.20.0.0/16"], **changes)
+        self.policy.write_text(json.dumps(document), encoding="utf-8")
+
+    def write(self, name: str, document: dict[str, Any]) -> None:
+        (self.system / name).write_text(json.dumps(document), encoding="utf-8")
+
+    def sync_state(self, staged: list[str] | None = None) -> dict[str, Any]:
+        """sync-state.json as a successful run of the current plan leaves it."""
+        return {
+            "config_sha256": self.plan["config_sha256"],
+            "collector_ack_sha256": self.plan["collector_ack_sha256"],
+            "policy_sha256": sha256_bytes(self.policy.read_bytes()),
+            "staged": [self.staged.name] if staged is None else staged,
+        }
+
+    def run(
+        self, engine: str, *extra: str, plan: bool = True
+    ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
+        plan_path = self.root / "system-plan.json"
+        plan_path.write_text(json.dumps(self.plan), encoding="utf-8")
+        report_path = self.root / f"sync-{len(list(self.root.glob('sync-*.json')))}.json"
+        arguments = ["-ConfigPath", str(self.programdata / "arcilogger.toml")]
+        arguments += ["-DryRun", "-PlanPath", str(plan_path)] if plan else []
+        result = run_powershell(
+            engine, SYNC_SCRIPT, *arguments, "-ReportPath", str(report_path), *extra
+        )
+        report: dict[str, Any] = read_json(report_path) if report_path.is_file() else {}
+        if report:
+            assert report["exit_code"] == result.returncode, result.stdout + result.stderr
+        return result, report
+
+
+def _steps(report: dict[str, Any]) -> dict[str, tuple[str, str | None]]:
+    return {step["step"]: (step["state"], step["code"]) for step in report["steps"]}
+
+
+def _events(report: dict[str, Any]) -> list[tuple[int, str]]:
+    return [(event["id"], event["level"]) for event in report["events"]]
+
+
+def _system_status(report: dict[str, Any]) -> SystemStatus:
+    return parse_document(SystemStatus, json.dumps(report["status"], ensure_ascii=False).encode())
+
+
+def _journal(report: dict[str, Any]) -> list[SystemJournalLine]:
+    return [
+        parse_document(SystemJournalLine, json.dumps(line, ensure_ascii=False).encode())
+        for line in report["journal"]
+    ]
+
+
+def _sync_changes(report: dict[str, Any]) -> dict[str, tuple[str, list[str]]]:
+    return {c["rule"]: (c["operation"], c["remote_address"]) for c in report["firewall"]["changes"]}
+
+
+def test_system_sync_dry_run_applies_the_example_plan(engine: str, tmp_path: Path) -> None:
+    """The example plan of contract 2.8.3: the two senders into the syslog rules, the strict
+    outbound rules (an offline host keeps its rule), the known client promoted; the documents
+    the run would write are those of the contract, and a dry run writes none of them."""
+    site = SyncSite(tmp_path)
+    result, report = site.run(engine)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert report["dry_run"] is True
+    assert report["fast_path"] is False
+    assert _steps(report) == {
+        "plan": ("done", None), "check": ("done", None), "system.firewall": ("done", None),
+        "system.time": ("skipped", None), "jar.promotion": ("done", None),
+    }  # fmt: skip
+    senders = ["172.20.10.1", "172.20.20.0/24"]
+    changes = _sync_changes(report)
+    assert changes["ARCILOGGER Syslog UDP"] == ("set", senders)
+    assert changes["ARCILOGGER Syslog TCP"] == ("set", senders)
+    assert changes["ARCILOGGER Out NTP"] == ("set", ["172.20.10.1"])
+    assert changes["ARCILOGGER Out SMTP"][0] == "keep"
+    assert report["jars"]["promote"] == [
+        {"sha256": KNOWN_SHA, "staged": str(site.staged),
+         "target": str(site.programdata / "zamane" / "approved" / f"{KNOWN_SHA}.jar"),
+         "result": "promote"},
+    ]  # fmt: skip
+    assert _events(report) == [(4107, "Warning"), (4106, "Information")]
+    status = _system_status(report)
+    assert status.ok is True
+    assert status.code is None
+    assert status.applied_config_sha256 == site.plan["config_sha256"]
+    assert status.collector_ack_sha256 == site.plan["collector_ack_sha256"]
+    assert status.firewall.managed
+    assert status.firewall.strict_outbound
+    assert status.firewall.syslog_addresses == tuple(senders)
+    assert status.firewall.outbound_hosts == ("smtp.ornek.example", "172.20.10.1")
+    assert status.time.peers == "172.20.10.1,0x8 time.ume.tubitak.gov.tr,0xA"
+    assert (status.jars.staged, status.jars.promoted) == (0, 1)
+    journal = _journal(report)
+    assert [line.change for line in journal] == ["firewall", "jar"]
+    assert journal[0].firewall is not None
+    assert (journal[0].firewall.syslog_addresses_count, journal[0].firewall.outbound_rules) == (
+        2,
+        2,
+    )
+    assert journal[1].jar is not None
+    assert journal[1].jar.approved_by == "known"
+    assert report["alerts"] == [
+        {"details": {"section": "tsa", "paths": ["tsa.zamane_jar"]}, "rule": "R20-config-change",
+         "severity": "high", "message": "Zamane istemcisi onaylandı [Zamane client promoted]",
+         "time": report["alerts"][0]["time"]},
+    ]  # fmt: skip
+    assert sorted(path.name for path in site.system.iterdir()) == [], "a dry run writes nothing"
+    assert not (site.programdata / "zamane" / "approved").exists()
+
+
+def test_system_sync_takes_the_fast_path_when_nothing_changed(engine: str, tmp_path: Path) -> None:
+    """The inputs of the last successful run (configuration, collector acknowledgement,
+    policy, staged clients) unchanged: nothing is checked or applied, no event is written."""
+    site = SyncSite(tmp_path)
+    site.write("sync-state.json", site.sync_state())
+    result, report = site.run(engine)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert report["fast_path"] is True
+    assert _steps(report) == {"plan": ("done", None)}
+    assert report["events"] == []
+    assert report["journal"] == []
+    assert report["status"] is None
+    for changed in ("policy", "staged", "config"):
+        site = SyncSite(tmp_path / changed)
+        site.write("sync-state.json", site.sync_state())
+        if changed == "policy":
+            site.write_policy(hold_hours=1)
+        elif changed == "staged":
+            (site.web / f"{'c3' * 32}.jar").write_bytes(b"another upload")
+        else:
+            site.plan["config_sha256"] = "d4" * 32
+        _, report = site.run(engine)
+        assert report["fast_path"] is False, changed
+
+
+@pytest.mark.parametrize(
+    ("before", "senders", "journal"),
+    [
+        (["172.20.10.1", "172.20.20.0/24", "172.20.30.0/24"], ["172.20.10.1"], 1),
+        (["172.20.10.1"], ["172.20.10.1", "172.20.20.0/24", "172.20.40.7"], 3),
+        (["172.20.10.1", "172.20.20.0/24"], ["172.20.10.1", "172.20.20.0/24"], None),
+        (["172.20.10.1"], [], 0),
+    ],
+    ids=["narrowed", "widened", "unchanged", "last-source-off"],
+)
+def test_system_sync_moves_the_syslog_senders_with_the_configuration(
+    engine: str, tmp_path: Path, before: list[str], senders: list[str], journal: int | None
+) -> None:
+    """Contract 2.8.3: what the senders were (status.json) and what they become; a firewall
+    journal line only when they change (imported as admin.system)."""
+    site = SyncSite(tmp_path)
+    previous = {
+        "schema": "arcilogger.admin-system/1", "at": "2026-10-25T10:10:00+03:00", "ok": True,
+        "code": None, "applied_config_sha256": "e5" * 32, "collector_ack_sha256": None,
+        "firewall": {"managed": True, "strict_outbound": True, "syslog_addresses": before,
+                     "outbound_hosts": ["smtp.ornek.example", "172.20.10.1"]},
+        "time": {"peers": "172.20.10.1,0x8 time.ume.tubitak.gov.tr,0xA", "changed_at": None},
+        "jars": {"staged": 0, "promoted": 0},
+    }  # fmt: skip
+    parse_document(SystemStatus, json.dumps(previous).encode())
+    site.write("status.json", previous)
+    site.plan["firewall"]["syslog_addresses"] = senders
+    site.plan["jars"]["promote"] = []
+    result, report = site.run(engine)
+    assert result.returncode == 0, result.stdout + result.stderr
+    operation = "set" if senders else "remove"
+    assert _sync_changes(report)["ARCILOGGER Syslog UDP"] == (operation, senders)
+    assert _system_status(report).firewall.syslog_addresses == tuple(senders)
+    lines = [line for line in _journal(report) if line.change == "firewall"]
+    if journal is None:
+        assert lines == []
+    else:
+        assert len(lines) == 1
+        assert lines[0].firewall is not None
+        assert lines[0].firewall.syslog_addresses_count == journal
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (
+            "outside-policy",
+            "198.51.100.7: izin verilen ağların dışında [outside the allowed networks]",
+        ),
+        ("too-wide", "172.0.0.0/8: /8, izin verilen en geniş ağ /16"),
+        ("bad-host", "[invalid host name]: smtp.ornek.example;calc"),
+        ("bad-time", "time.primary: -ntp.ornek.example"),
+        ("other-installation", "[not in this installation's zamane\\web]"),
+        ("not-known", f"jars.promote: {KNOWN_SHA}"),
+    ],
+)
+def test_system_sync_refuses_a_plan_value_before_any_change(
+    engine: str, tmp_path: Path, change: str, problem: str
+) -> None:
+    """Step 3: every value is checked again; one refused value stops the run before the
+    firewall, the time or a client changes (system_plan_invalid, Event 4106 error, R20-admin),
+    and status.json keeps the blocks that are still in force."""
+    site = SyncSite(tmp_path)
+    firewall = site.plan["firewall"]
+    if change == "outside-policy":
+        firewall["syslog_addresses"] = [*firewall["syslog_addresses"], "198.51.100.7"]
+    elif change == "too-wide":
+        firewall["syslog_addresses"] = ["172.0.0.0/8"]
+    elif change == "bad-host":
+        firewall["outbound"][0]["host"] = "smtp.ornek.example;calc"
+    elif change == "bad-time":
+        site.plan["time"]["primary"] = "-ntp.ornek.example"
+    elif change == "other-installation":
+        site.plan["jars"]["promote"][0]["staged"] = (
+            f"C:\\ProgramData\\ARCILOGGER\\zamane\\web\\{KNOWN_SHA}.jar"
+        )
+    else:
+        site.plan["jars"]["promote"][0]["reason"] = "hold"
+    result, report = site.run(engine)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert report["code"] == "system_plan_invalid"
+    assert _steps(report) == {"plan": ("done", None), "check": ("failed", "system_plan_invalid")}
+    assert any(problem in found for found in report["problems"]), report["problems"]
+    assert report["firewall"] is None
+    assert report["journal"] == []
+    assert _events(report) == [(4106, "Error")]
+    assert [(a["rule"], a["details"]) for a in report["alerts"]] == [
+        ("R20-admin", {"code": "system_plan_invalid"})
+    ]
+    status = _system_status(report)
+    assert (status.ok, status.code) == (False, "system_plan_invalid")
+    assert status.firewall.managed is False, "nothing applied yet: what status.json said"
+
+
+def test_system_sync_reports_a_plan_it_cannot_read(engine: str, tmp_path: Path) -> None:
+    site = SyncSite(tmp_path)
+    site.plan = {"schema": "arcilogger.system-plan/2"}
+    result, report = site.run(engine)
+    assert result.returncode == 1
+    assert report["code"] == "system_plan_failed"
+    assert "[is not arcilogger.system-plan/1]" in report["problems"][0]
+    status = _system_status(report)
+    assert (status.ok, status.code) == (False, "system_plan_failed")
+    assert _events(report) == [(4106, "Error")]
+    assert report["alerts"][0]["rule"] == "R20-admin"
+
+
+def test_system_sync_does_nothing_while_browser_administration_is_off(
+    engine: str, tmp_path: Path
+) -> None:
+    """-DisableBrowserAdministration (or an invalid policy.json): no plan, no change, exit 0;
+    the installer's firewall, time and client stay as they are."""
+    site = SyncSite(tmp_path)
+    site.write_policy(enabled=False)
+    result, report = site.run(engine)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _steps(report) == {"policy": ("skipped", None)}
+    assert report["status"] is None
+    assert report["events"] == []
+    site.policy.write_text("{", encoding="utf-8")
+    result, report = site.run(engine)
+    assert (result.returncode, _steps(report)) == (0, {"policy": ("skipped", None)})
+
+
+def test_system_sync_reads_a_plan_file_only_in_a_dry_run(engine: str, tmp_path: Path) -> None:
+    """The real task always takes its plan from system-plan, never from a file."""
+    site = SyncSite(tmp_path)
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps(site.plan), encoding="utf-8")
+    result, report = site.run(engine, "-PlanPath", str(plan), plan=False)
+    assert result.returncode != 0
+    needle = _unwrapped("-PlanPath yalnızca -DryRun ile [only with -DryRun]")
+    assert needle in _unwrapped(result.stdout + result.stderr)
+    assert report == {}
+
+
+def test_system_sync_skips_a_firewall_it_does_not_manage(engine: str, tmp_path: Path) -> None:
+    """An installation with -SkipFirewall: the step is skipped (firewall_not_managed, a
+    warning), the rest of the plan is applied."""
+    site = SyncSite(tmp_path)
+    site.firewall_state.unlink()
+    result, report = site.run(engine)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _steps(report)["system.firewall"] == ("skipped", "firewall_not_managed")
+    assert report["firewall"] is None
+    status = _system_status(report)
+    assert (status.ok, status.code, status.firewall.managed) == (
+        True,
+        "firewall_not_managed",
+        False,
+    )
+    assert _steps(report)["jar.promotion"] == ("done", None)
+
+
+def test_system_sync_applies_a_changed_time_source(engine: str, tmp_path: Path) -> None:
+    site = SyncSite(tmp_path)
+    site.plan["time"] = {"primary": "ntp.ornek.example", "fallback": "time.ume.tubitak.gov.tr",
+                         "changed": True}  # fmt: skip
+    result, report = site.run(engine)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _steps(report)["system.time"] == ("done", None)
+    peers = "ntp.ornek.example,0x8 time.ume.tubitak.gov.tr,0xA"
+    assert report["time"]["peers"] == peers
+    status = _system_status(report)
+    assert status.time.peers == peers
+    assert status.time.changed_at is not None
+    times = [line.time for line in _journal(report) if line.change == "time"]
+    assert len(times) == 1
+    assert times[0] is not None
+    assert times[0].peers == peers
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a symbolic link needs a privilege on Windows")
+def test_system_sync_refuses_a_staged_client_behind_a_link(engine: str, tmp_path: Path) -> None:
+    """A reparse point (a symbolic link or junction) in zamane\\web could make the copy read
+    a file elsewhere: the promotion is refused, the run reports system_sync_failed."""
+    site = SyncSite(tmp_path)
+    elsewhere = tmp_path / "elsewhere.jar"
+    elsewhere.write_bytes(KNOWN_CLIENT)
+    site.staged.unlink()
+    site.staged.symlink_to(elsewhere)
+    result, report = site.run(engine)
+    assert result.returncode == 1
+    assert report["code"] == "system_sync_failed"
+    assert report["jars"]["promote"][0]["result"] == "refused: missing or a reparse point"
+    assert _steps(report)["jar.promotion"] == ("failed", "system_sync_failed")
+    assert _steps(report)["system.firewall"] == ("done", None), "the other steps still run"
+    status = _system_status(report)
+    assert (status.ok, status.code) == (False, "system_sync_failed")
+    assert status.applied_config_sha256 is None, "not applied: what status.json said before"
+    assert [a["details"] for a in report["alerts"]] == [{"code": "system_sync_failed"}]
+    assert (4107, "Warning") not in _events(report)
+
+
+def test_system_sync_records_a_new_upload_and_never_runs_it(engine: str, tmp_path: Path) -> None:
+    """A staged client that is no known release is only recorded (first_seen, Event 4104);
+    it runs after approve-jar on the console. One approved before stays approved, one whose
+    content does not match its name is not recorded."""
+    site = SyncSite(tmp_path)
+    upload = b"an uploaded client nobody knows"
+    (site.web / f"{sha256_bytes(upload)}.jar").write_bytes(upload)
+    (site.web / f"{'f6' * 32}.jar").write_bytes(b"content of another hash")
+    approved = site.programdata / "zamane" / "approved" / f"{KNOWN_SHA}.jar"
+    site.write("jars.json", {
+        "schema": "arcilogger.admin-jars/1", "staged": [],
+        "approved": [{"sha256": KNOWN_SHA, "path": str(approved),
+                      "approved_at": "2026-10-20T09:00:00+03:00",
+                      "approved_by": "console:bt-yonetici"}],
+    })  # fmt: skip
+    parse_document(JarsFile, (site.system / "jars.json").read_bytes())
+    result, report = site.run(engine)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert report["jars"]["promote"][0]["result"] == "approved already"
+    assert report["jars"]["staged"] == [{"sha256": sha256_bytes(upload)}]
+    assert [event for event in _events(report) if event[0] != 4106] == [(4104, "Warning")]
+    assert "approve-jar" in report["events"][0]["message"]
+    assert any("f6f6" in problem and "[not recorded" in problem for problem in report["problems"])
+    status = _system_status(report)
+    assert (status.ok, status.jars.staged, status.jars.promoted) == (True, 1, 1)
+    assert [line.change for line in _journal(report)] == ["firewall"]
+    assert report["alerts"] == []
