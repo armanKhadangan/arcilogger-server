@@ -263,14 +263,17 @@ export function SavedMenu({
   query,
   range,
   onRun,
+  enabled = true,
 }: {
   /** The query to save (`null`: nothing ran yet). */
   query: string | null;
   range: TimeRange;
   onRun: (saved: SavedSearch) => void;
+  /** Read the list (not while the KVKK notice waits: it is personal). */
+  enabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const saved = useSavedSearches();
+  const saved = useSavedSearches(enabled);
   const create = useCreateSavedSearch();
   const [saving, setSaving] = useState(false);
   const [managing, setManaging] = useState(false);
