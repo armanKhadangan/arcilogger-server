@@ -637,7 +637,7 @@ def test_opening_refusals_are_plain_json(
     for q, code in (
         ("banana:1", "search_unknown_field"),
         ("vlan:99", "search_vlan_unknown"),
-        ("srcip:1.2.3.4 OR srcip:1.2.3.5", "search_or_unsupported"),
+        ("srcip:192.0.2.4 OR srcip:192.0.2.5", "search_or_unsupported"),
         ("ab", "search_term_too_short"),
     ):
         response = client.post("/api/v1/live/streams", json={"q": q})
