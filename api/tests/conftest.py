@@ -85,6 +85,22 @@ def _installed(request: pytest.FixtureRequest) -> Installed | None:
 
 
 @pytest.fixture
+def reauthenticate(app_session_factory: sessionmaker[Session]) -> Callable[[LoggedIn], None]:
+    """Mark a session as re-authenticated just now (``ensure_recent_auth``)."""
+
+    def mark(who: LoggedIn) -> None:
+        with app_session_factory() as session:
+            session.execute(
+                update(UserSession)
+                .where(UserSession.token_hash == hash_token(who.session_token))
+                .values(reauthenticated_at=datetime.now(UTC))
+            )
+            session.commit()
+
+    return mark
+
+
+@pytest.fixture
 def api_config(request: pytest.FixtureRequest, tmp_path: Path) -> Config:
     site = _installed(request)
     if site is not None:

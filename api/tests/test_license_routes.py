@@ -68,7 +68,8 @@ ROUTES: dict[tuple[str, str], str | None] = {
     # Module bulk_import: 2 routes
     ("POST", f"{V}/imports/{{kind}}"): BI,
     ("GET", f"{V}/imports/{{kind}}/template.csv"): BI,
-    # 5651 Temel, never gated: 62 routes, the 3 of the licence and the browser administration's
+    # 5651 Temel, never gated: 62 routes, the 3 of the licence and the 21 of the browser
+    # administration (ADR-0014)
     ("GET", f"{V}/health"): None,
     ("GET", f"{V}/alerts"): None,
     ("GET", f"{V}/alerts/summary"): None,
@@ -139,6 +140,17 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/admin/status"): None,
     ("POST", f"{V}/admin/config/general/check"): None,
     ("PUT", f"{V}/admin/config/general"): None,
+    ("POST", f"{V}/admin/config/tsa/check"): None,
+    ("PUT", f"{V}/admin/config/tsa"): None,
+    ("POST", f"{V}/admin/config/tsa/roots"): None,
+    ("POST", f"{V}/admin/config/tsa/legal-roots"): None,
+    ("POST", f"{V}/admin/config/tsa/zamane"): None,
+    ("POST", f"{V}/admin/uploads"): None,
+    ("POST", f"{V}/admin/config/sources/check"): None,
+    ("POST", f"{V}/admin/config/sources"): None,
+    ("PUT", f"{V}/admin/config/sources/{{name}}"): None,
+    ("DELETE", f"{V}/admin/config/sources/{{name}}"): None,
+    ("POST", f"{V}/admin/actions/tsa-test"): None,
     ("GET", f"{V}/admin/requests"): None,
     ("GET", f"{V}/admin/requests/{{request_id}}"): None,
     ("POST", f"{V}/credits/query"): None,
@@ -203,7 +215,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 75
+    assert len(ROUTES) - len(gated) == 86
 
 
 def test_the_module_markers_equal_the_table() -> None:

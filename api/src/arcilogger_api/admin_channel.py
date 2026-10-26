@@ -72,6 +72,7 @@ from arcilogger_core.admin.contract import (
     SERVICE_FRESH,
     SYSTEM_TASK_TIMEOUT,
     TERMINAL_STATES,
+    UPLOAD_LIFETIME,
     AdminLayout,
     AdminRequest,
     AgentStatus,
@@ -80,6 +81,9 @@ from arcilogger_core.admin.contract import (
     RequestKind,
     RequestStatus,
     SystemStatus,
+    UploadKind,
+    UploadMeta,
+    dump_document,
     heartbeat_state,
     new_id,
     parse_document,
@@ -1037,6 +1041,87 @@ class Channel:
             effects=list(params.get("effects") or []),
             warnings=[code_message(code) for code in dict.fromkeys(warnings)],
         )
+
+    # -- uploads (contract 2.4.4) ---------------------------------------------------------------
+
+    def stage_upload(
+        self, db: Session, user: CurrentUser, request: Request, kind: UploadKind, data: bytes
+    ) -> tuple[UploadMeta, rules.UploadInfo]:
+        """``<id>.bin`` (``.tmp`` then rename) and ``<id>.json`` in ``admin\\inbox\\uploads``,
+        inspected for its kind (a file that is not one is removed again: 422) and audited
+        ``admin.upload``."""
+        self.require_enabled()
+        self.check_inbox()
+        layout = self._installed().admin
+        upload_id = new_id()
+        meta = UploadMeta(
+            id=upload_id,
+            kind=kind,
+            sha256=_sha256(data),
+            size=len(data),
+            created_at=self.now,
+            user_id=user.id,
+        )
+        target = layout.upload_data(upload_id)
+        temp = target.with_name(f"{target.name}.tmp")
+        try:
+            layout.uploads.mkdir(parents=True, exist_ok=True)
+            with temp.open("xb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temp.replace(target)
+            layout.upload_meta(upload_id).write_bytes(dump_document(meta))
+        except OSError as exc:
+            log.error("upload %s not staged: %s", upload_id, exc)
+            temp.unlink(missing_ok=True)
+            target.unlink(missing_ok=True)
+            raise admin_error("admin_inbox_write_failed") from exc
+        info = rules.inspect_upload(upload_id, kind, target, now=self.now)
+        refused = (
+            ("root_certificate_invalid" if info.root is None or not info.root.ok else None)
+            if kind == "kamusm_root"
+            else ("root_certificate_invalid" if info.bundle is None or not info.bundle.ok else None)
+            if kind == "smtp_ca"
+            else ("zamane_archive_invalid" if info.zamane is None or not info.zamane.ok else None)
+        )
+        if refused is not None:
+            target.unlink(missing_ok=True)
+            layout.upload_meta(upload_id).unlink(missing_ok=True)
+            raise admin_error(refused)
+        record_audit(
+            db,
+            actor=user,
+            action="admin.upload",
+            target=f"admin-upload:{upload_id}",
+            details={"kind": kind, "sha256": meta.sha256, "size": meta.size},
+            ip=client_ip(request),
+        )
+        return meta, info
+
+    def uploads(self, user: CurrentUser, ids: Iterable[str]) -> dict[str, rules.UploadInfo]:
+        """The user's own uploads ``ids`` that are not older than 30 minutes, inspected (an
+        unknown, expired or someone else's upload is left out: the rules answer
+        ``upload_not_found``)."""
+        found: dict[str, rules.UploadInfo] = {}
+        layout = self.layout
+        if layout is None:
+            return found
+        for upload_id in ids:
+            try:
+                meta = parse_document(UploadMeta, layout.upload_meta(upload_id).read_bytes())
+            except (OSError, ValueError):  # ValueError: not an id, DocumentError
+                continue
+            data = layout.upload_data(upload_id)
+            if (
+                meta.user_id != user.id
+                or self.now - meta.created_at > UPLOAD_LIFETIME
+                or not data.is_file()
+                or data.stat().st_size != meta.size
+            ):
+                continue
+            found[upload_id] = rules.inspect_upload(upload_id, meta.kind, data, now=self.now)
+        return found
 
     # -- reading a request back ----------------------------------------------------------------
 

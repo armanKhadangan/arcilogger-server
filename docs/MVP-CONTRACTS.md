@@ -1058,6 +1058,16 @@ row's state stands. Texts: `admin_channel.texts(code)` (the API's `TEXTS`, then
 | `GET /admin/status` | `settings.manage` | 200 `AdminStatus` (below) |
 | `POST /admin/config/general/check` | `settings.manage` | dry run of the `PUT`: 200 `AdminCheck`, nothing queued |
 | `PUT /admin/config/general` | `settings.manage`; re-auth for a clock change | `{etag, site_name?, clock?: {ntp_server?, fallback_server?, alert_offset_ms?}, probe = true}` → 202 |
+| `POST /admin/config/tsa/check`, `PUT /admin/config/tsa` | `settings.manage`; re-auth for all but the threshold and the time limit | `{etag, server?: test \| production, credit_alert_threshold?, timeout_seconds?, java?, customer?, password?, clear_credentials?, confirm? (production to test), probe = true}` → 200 `AdminCheck` (with `readiness`) / 202 |
+| `POST /admin/uploads?kind=kamusm_root\|zamane_client\|smtp_ca` | `settings.manage` | `multipart/form-data`, field `file` → 201 `UploadPreview` (below); 422 `upload_kind_invalid`, `root_certificate_invalid`, `zamane_archive_invalid`; 413 `upload_too_large` |
+| `POST /admin/config/tsa/roots` | `settings.manage`; re-auth | `{etag, upload_id, legal = false, confirmed = false}` → 202 (`kamusm-roots\<sha256>.pem`; `legal` also adds it to `tsa.legal_root_fingerprints` and needs `confirmed`: 422 `legal_root_confirm_required`) |
+| `POST /admin/config/tsa/legal-roots` | `settings.manage`; re-auth | `{etag, sha256, confirmed}` → 202 (an installed root made a legal root) |
+| `POST /admin/config/tsa/zamane` | `settings.manage`; re-auth | `{etag, upload_id, expected_sha256?}` → 202, held (`guarded`, `effective_at` = now + `policy.jar_hold_hours`) unless a known release; 422 `zamane_sha256_required` / `zamane_sha256_mismatch` for another one |
+| `POST /admin/config/sources/check` | `sources.manage` | `{etag, source, operation: add \| update}` → 200 `AdminCheck` |
+| `POST /admin/config/sources` | `sources.manage` | `{etag, source: SourceIn}` → 202 |
+| `PUT /admin/config/sources/{name}` | `sources.manage`; re-auth to switch one off | `{etag, source: SourceIn}` (the name cannot change: 422 `source_rename_not_allowed`) → 202 |
+| `DELETE /admin/config/sources/{name}?etag=&confirm=<name>` | `sources.manage`; re-auth | → 202; 422 `source_confirm_mismatch` |
+| `POST /admin/actions/tsa-test` | `settings.manage` | `{confirm_credit: true}` (else 422 `tsa_test_confirm_required`) → 202 (`action.tsa_test`); 429 `admin_rate_limited` within 5 min, `tsa_test_limit` after `policy.tsa_test_per_day` per site day |
 | `GET /admin/requests?kind=&cursor=&limit=50` | `settings.manage` | `AdminRequestPage {items: [AdminRequestOut], next_cursor}`, newest first (cursor: the last id; `limit` 1-200) |
 | `GET /admin/requests/{id}` | `settings.manage`; `seal.manage` for one's own `action.seal` / `action.credit` | `AdminRequestOut`; 404 `admin_request_not_found` |
 | `POST /seals/{day}/seal` | `seal.manage` | "Şimdi mühürle" → 202 (`action.seal`, `params.day`) |
@@ -1117,6 +1127,43 @@ below_threshold}`, …), error: RequestError {code, message_tr, message_en, fiel
 rolled_back, warnings, manual_steps_tr, manual_steps_en}` (the manual steps name `versions
 restore <n>` for `needs_attention`).
 
+**Uploads** (contract 2.4.4): the file goes to `admin\inbox\uploads\<id>.bin` (`.tmp` then
+rename) with `<id>.json` (`UploadMeta {id, kind, sha256, size, created_at, user_id}`), is
+inspected for its kind (`rules.inspect_upload`; one that is not removed again: 422) and audited
+`admin.upload {kind, sha256, size}`; it counts toward the inbox quota. It is usable for 30
+minutes and only by the user who sent it (else the request is refused with 404
+`upload_not_found`); the request's `files` list `{kind, sha256, size, jar_sha256?}`. Limits
+`contract.UPLOAD_LIMITS` (root 64 KiB, SMTP CA file 256 KiB, Zamane client 25 MiB). `UploadPreview
+{upload_id, kind, size, sha256, expires_at, certificate?: CertificatePreview {subject, issuer,
+not_before, not_after, is_ca, self_signed, key, installed, warnings}, zamane?: ZamanePreview
+{kind: jar | zip, jar_name, jar_sha256, release, known, accepted, reason: unknown_jar_held |
+null}}`.
+
+**Kamu SM** (`PUT /admin/config/tsa`): the customer number and password go to the agent only as
+Fernet tokens of the installation's `secret.key` (`SecretStore.encrypt_value`) inside the signed
+request; a response, `admin_requests`, the audit log and the API's log never hold them (a dry
+run shows `{secret, old, new, changed}` only). Only Kamu SM's test and production servers can be
+chosen (422 `tsa_mock_refused`, `tsa_server_invalid`); a switch to production needs everything
+`readiness.missing` lists (409 `tsa_not_ready`, `details.missing`) and a switch that would stop
+the Seal task is 409 `tsa_would_break` (`details.causes`, `seal_preflight`). With new
+credentials or a new server the agent first asks for the credit balance with the candidate
+values (`probe`). A Zamane client that is not a known release waits (`pending`) until an
+administrator runs `python -I -m arcilogger_core.admin approve-jar <sha256>` on the
+console; time alone never makes it
+runnable.
+
+**Log sources** (`SourceIn {name, type: fortigate | mikrotik | generic, address,
+heartbeat_minutes = 15, expected = true, transport: any | udp | tcp = any, enabled = true}`):
+one source per request; the address must lie in `policy.source_networks` (422
+`source_network_not_allowed`), be IPv4 (`source_ipv6_unsupported`), no reserved or own address
+(`source_reserved_address`, `source_own_address`), a network not wider than
+`policy.min_prefix_v4` (`source_prefix_too_short`), not taken (409 `source_address_taken`,
+`source_overlap`, `source_name_taken`). Effects `reload.collector`, `reload.ingest`,
+`reload.api`, `system.firewall`: ApplySystem narrows the syslog rule at once and widens it only
+once the collector reports the new file (a new sender is let in after the collector knows it).
+Switching a source off or removing it warns `source_disable_gaps` (the sealer no longer expects
+it); its raw logs and sealed days stay.
+
 **"Şimdi mühürle"** (`routers/seals.py`): 409 `seal_day_sealed` (sealed), `seal_not_applicable`
 (skipped, deleted, no data), `seal_not_due` (not `Sealer.closed_unsealed_days()[0]`, not
 `failed`/`pending` on the calendar, or in the quiet window after midnight),
@@ -1135,5 +1182,6 @@ through `settings_admin.change_setting(actor=username, actor_id=, ip=)` (audit `
 {old, new}`; a reset adds `reset: true`); a value equal to the one in force is `unchanged` and
 not written.
 
-Captured answers: `web/e2e/samples/admin.json`, `settings.json`, the seal now and credit query
-samples in `seals.json` / `credits.json`.
+Captured answers: `web/e2e/samples/admin.json` (`kamusm`, `sources` and the refusals in
+`errors`), `settings.json`, the seal now and credit query samples in `seals.json` /
+`credits.json`.

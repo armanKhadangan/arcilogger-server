@@ -46,6 +46,7 @@ EXPECTED_ROUTERS = {
     # Ayarlar: the browser administration (ADR-0014, docs/MVP-CONTRACTS.md section 16).
     "/admin": "admin",
     "/admin/requests": "admin",
+    "/admin/actions": "admin",
     "/settings": "settings",
 }
 

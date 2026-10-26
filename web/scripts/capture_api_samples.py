@@ -86,12 +86,14 @@ import argparse
 import base64
 import contextlib
 import hashlib
+import io
 import json
 import logging
 import shutil
 import sys
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -99,6 +101,11 @@ from typing import Any, cast
 from unittest import mock
 from uuid import UUID
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, event, inspect, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -306,10 +313,10 @@ class Capture:
         }
 
     def agent(self) -> FakeAgent:
-        """The site's administration agent (the real one, run synchronously), its heartbeat
-        fresh."""
+        """The site's administration agent (the real one, run synchronously) with ApplySystem
+        (a managed firewall), its heartbeat fresh."""
         if self._agent is None:
-            self._agent = FakeAgent(self.installed)
+            self._agent = FakeAgent(self.installed, system=True)
             self._agent.start()
         self._agent.agent.heartbeat()
         return self._agent
@@ -2634,6 +2641,197 @@ def capture_admin(capture: Capture, admin: Any, auditor: Any) -> None:
     capture.installed.write_policy()
 
 
+def example_root() -> bytes:
+    """A self-signed CA certificate standing in for a Kamu SM root (never a real one)."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Örnek Test Kök Sertifikası")])
+    start = utc_now() - timedelta(days=1)
+    return (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(start)
+        .not_valid_after(start + timedelta(days=3650))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+        .sign(key, hashes.SHA256())
+        .public_bytes(Encoding.PEM)
+    )
+
+
+def example_client() -> bytes:
+    """A .jar standing in for a Zamane client that is not a known release."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+        archive.writestr("ornek/Client.class", b"ornek istemci")
+    return buffer.getvalue()
+
+
+def upload_file(client: Any, kind: str, name: str, data: bytes) -> Any:
+    return client.post(
+        f"{API}/admin/uploads",
+        params={"kind": kind},
+        files={"file": (name, data, "application/octet-stream")},
+    )
+
+
+def capture_kamusm(capture: Capture, admin: Any) -> None:
+    """``admin.json`` ``kamusm``: the Kamu SM wizard's answers (credentials, a root certificate,
+    a Zamane client held for its approval, the stamp test) and its refusals."""
+    out = capture.samples["admin"].setdefault("kamusm", {})
+    errors = capture.samples["admin"].setdefault("errors", {})
+    agent = capture.agent()
+    tsa = f"{API}/admin/config/tsa"
+
+    def tag() -> str:
+        etags = capture.json(admin.get(f"{API}/admin/config"), 200)["etags"]
+        found: str = etags["tsa"]
+        return found
+
+    errors["tsa_mock_refused"] = capture.error(
+        admin.put(tsa, json={"etag": tag(), "server": "mock"}), 422, "tsa_mock_refused"
+    )
+    errors["tsa_would_break"] = capture.error(
+        admin.post(f"{tsa}/check", json={"etag": tag(), "server": "test"}), 409, "tsa_would_break"
+    )
+    credentials = {"etag": tag(), "customer": "123456", "password": "Örnek-Parola-2026"}
+    out["check_credentials"] = capture.json(admin.post(f"{tsa}/check", json=credentials), 200)
+    capture.recent(admin)
+    accepted = capture.json(admin.put(tsa, json=credentials), 202)
+    out["credentials_accepted"] = accepted
+    agent.process()
+    out["credentials_active"] = capture.json(admin.get(accepted["status_url"]), 200)
+
+    errors["upload_kind_invalid"] = capture.error(
+        upload_file(admin, "program", "kurulum.exe", b"MZ"), 422, "upload_kind_invalid"
+    )
+    errors["root_certificate_invalid"] = capture.error(
+        upload_file(admin, "kamusm_root", "kok.pem", b"bir sertifika degil"),
+        422,
+        "root_certificate_invalid",
+    )
+    root = capture.json(upload_file(admin, "kamusm_root", "kok.pem", example_root()), 201)
+    out["upload_root"] = root
+    body = {"etag": tag(), "upload_id": root["upload_id"], "legal": True, "confirmed": False}
+    errors["legal_root_confirm_required"] = capture.error(
+        admin.post(f"{tsa}/roots", json=body), 422, "legal_root_confirm_required"
+    )
+    added = capture.json(admin.post(f"{tsa}/roots", json={**body, "confirmed": True}), 202)
+    out["root_accepted"] = added
+    agent.process()
+    out["root_active"] = capture.json(admin.get(added["status_url"]), 200)
+
+    client = capture.json(
+        upload_file(admin, "zamane_client", "tss-client-console.jar", example_client()), 201
+    )
+    out["upload_zamane"] = client
+    body = {"etag": tag(), "upload_id": client["upload_id"]}
+    errors["zamane_sha256_required"] = capture.error(
+        admin.post(f"{tsa}/zamane", json=body), 422, "zamane_sha256_required"
+    )
+    body["expected_sha256"] = client["zamane"]["jar_sha256"]
+    staged = capture.json(admin.post(f"{tsa}/zamane", json=body), 202)
+    out["zamane_accepted"] = staged
+    agent.process()
+    out["zamane_pending"] = capture.json(admin.get(staged["status_url"]), 200)
+
+    test = f"{API}/admin/actions/tsa-test"
+    errors["tsa_test_confirm_required"] = capture.error(
+        admin.post(test, json={}), 422, "tsa_test_confirm_required"
+    )
+    capture.installed.write_policy(tsa_test_per_day=0)
+    errors["tsa_test_limit"] = capture.error(
+        admin.post(test, json={"confirm_credit": True}), 429, "tsa_test_limit"
+    )
+    capture.installed.write_policy()
+    tested = capture.json(admin.post(test, json={"confirm_credit": True}), 202)
+    out["tsa_test_accepted"] = tested
+    errors["admin_rate_limited"] = capture.error(
+        admin.post(test, json={"confirm_credit": True}), 429, "admin_rate_limited"
+    )
+    agent.process()
+    out["tsa_test_done"] = capture.json(admin.get(tested["status_url"]), 200)
+    out["config"] = capture.json(admin.get(f"{API}/admin/config"), 200)
+
+
+def collector_loads(capture: Capture) -> None:
+    """The collector takes the configuration file now in force (as it does within 5 seconds):
+    its status file names its SHA-256 (contract 2.4.12)."""
+    path = capture.layout.collector_status
+    status = json.loads(path.read_text(encoding="utf-8"))
+    status["config"] = {
+        "sha256": hashlib.sha256(capture.installed.config_path.read_bytes()).hexdigest(),
+        "loaded_at": utc_now().isoformat(timespec="seconds"),
+        "error": None,
+        "restart_keys": [],
+    }
+    path.write_text(json.dumps(status), encoding="utf-8")
+
+
+def capture_admin_sources(capture: Capture, admin: Any) -> None:
+    """``admin.json`` ``sources``: a log source checked, added and removed, and the addresses
+    the browser may not add."""
+    out = capture.samples["admin"].setdefault("sources", {})
+    errors = capture.samples["admin"].setdefault("errors", {})
+    agent = capture.agent()
+    url = f"{API}/admin/config/sources"
+
+    def tag() -> str:
+        etags = capture.json(admin.get(f"{API}/admin/config"), 200)["etags"]
+        found: str = etags["sources"]
+        return found
+
+    source = {
+        "name": "erisim-noktalari",
+        "type": "generic",
+        "address": "172.20.20.0/24",
+        "heartbeat_minutes": 60,
+        "expected": False,
+        "transport": "udp",
+        "enabled": True,
+    }
+    body = {"etag": tag(), "source": source}
+    out["check_add"] = capture.json(admin.post(f"{url}/check", json={**body, "operation": "add"}), 200)
+    errors["source_network_not_allowed"] = capture.error(
+        admin.post(url, json={**body, "source": {**source, "address": "203.0.113.7"}}),
+        422,
+        "source_network_not_allowed",
+    )
+    errors["source_address_taken"] = capture.error(
+        admin.post(url, json={**body, "source": {**source, "address": FIREWALL}}),
+        409,
+        "source_address_taken",
+    )
+    added = capture.json(admin.post(url, json=body), 202)
+    out["add_accepted"] = added
+    agent.process()
+    out["add_applied"] = capture.json(admin.get(added["status_url"]), 200)
+    collector_loads(capture)
+    agent.process()  # ApplySystem opens the syslog rule once the collector runs the new file
+    out["add_active"] = capture.json(admin.get(added["status_url"]), 200)
+    changed = {"etag": tag(), "source": {**source, "heartbeat_minutes": 30}}
+    out["check_update"] = capture.json(
+        admin.post(f"{url}/check", json={**changed, "operation": "update"}), 200
+    )
+    name = source["name"]
+    errors["source_confirm_mismatch"] = capture.error(
+        admin.delete(f"{url}/{name}", params={"etag": tag(), "confirm": "erisim"}),
+        422,
+        "source_confirm_mismatch",
+    )
+    capture.recent(admin)
+    removed = capture.json(
+        admin.delete(f"{url}/{name}", params={"etag": tag(), "confirm": name}), 202
+    )
+    out["remove_accepted"] = removed
+    agent.process()
+    collector_loads(capture)
+    agent.process()
+    out["remove_active"] = capture.json(admin.get(removed["status_url"]), 200)
+
+
 def capture_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
     """Steps 1-7 of the module text: the lookup site and its pages, then the usage site."""
     build_site(capture)
@@ -2654,6 +2852,8 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
     capture_reports(capture, admin, auditor, newcomer)
     capture_settings(capture, admin, auditor)
     capture_admin(capture, admin, auditor)
+    capture_kamusm(capture, admin)
+    capture_admin_sources(capture, admin)
     vault.unlock_all()
     capture.samples["usage"] = capture_usage(server, template, root)
 
@@ -2736,6 +2936,8 @@ FILE_KEYS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     # licence events' and the refusals' details; the licence page maps the problem codes, the
     # time and event sources and the states of a state change to labels.
     "license": (MAP_KEYS - {"details"}, ENUM_KEYS | {"problem", "source", "from", "to"}),
+    # A request's ``changes`` are keyed by the paths it changes, a root's by its fingerprint.
+    "admin": (MAP_KEYS | {"changes"}, ENUM_KEYS),
 }
 
 

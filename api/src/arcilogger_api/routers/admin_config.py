@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import Path as PathParam
 from pydantic import BaseModel, ConfigDict, JsonValue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,11 +48,17 @@ from arcilogger_api.admin_channel import (
 )
 from arcilogger_api.audit import record_audit
 from arcilogger_api.deps import DbSession
+from arcilogger_api.errors import ApiError
 from arcilogger_api.security import CurrentUser, client_ip, require
+from arcilogger_api.uploads import MESSAGES as UPLOAD_TEXTS
+from arcilogger_api.uploads import OVERHEAD, multipart_file, read_body
 from arcilogger_core.admin import rules
 from arcilogger_core.admin.contract import (
+    UPLOAD_LIFETIME,
+    UPLOAD_LIMITS,
     DocumentError,
     Section,
+    UploadKind,
     parse_document,
 )
 from arcilogger_core.admin.contract import SecretMeta as SecretMetaFile
@@ -881,3 +889,325 @@ def put_general(
     channel.require_enabled()
     check = checked(channel, db, user, "general", body, encrypt=True)
     return queue(channel, db, user, request, "general", check, probe=body.probe)
+
+
+# -- Kamu SM (the tsa section) --------------------------------------------------------------------
+
+
+def files_of(ops: Sequence[Mapping[str, JsonValue]]) -> list[dict[str, JsonValue]]:
+    """The uploaded files a request installs (``admin.request`` ``files``)."""
+    kinds = {"root_add": "kamusm_root", "zamane_stage": "zamane_client", "smtp_ca_set": "smtp_ca"}
+    found: list[dict[str, JsonValue]] = []
+    for op in ops:
+        kind = kinds.get(str(op.get("op")))
+        if kind is None:
+            continue
+        item: dict[str, JsonValue] = {"kind": kind, "sha256": op["sha256"], "size": op["size"]}
+        if "jar_sha256" in op:
+            item["jar_sha256"] = op["jar_sha256"]
+        found.append(item)
+    return found
+
+
+class TsaBody(Body):
+    #: ``test`` or ``production`` (a Zamane server of Kamu SM; ``mock``: 422 ``tsa_mock_refused``).
+    server: str | None = None
+    credit_alert_threshold: int | None = None
+    timeout_seconds: int | None = None
+    #: One of the Java installations of ``java_choices``.
+    java: str | None = None
+    #: Write-only: the Kamu SM customer number and password (Fernet tokens to the agent).
+    customer: str | None = None
+    password: str | None = None
+    clear_credentials: bool = False
+    #: Production to test stops production stamps: say so.
+    confirm: bool = False
+    #: Test new credentials or a new server first (a credit query with the candidate values).
+    probe: bool = True
+
+    def form(self) -> dict[str, Any]:
+        return {key: value for key, value in super().form().items() if value is not None}
+
+
+class RootBody(Body):
+    upload_id: str
+    #: Also add its fingerprint to ``tsa.legal_root_fingerprints`` (needs ``confirmed``).
+    legal: bool = False
+    #: "I compared the fingerprint with the value Kamu SM publishes".
+    confirmed: bool = False
+
+    def form(self) -> dict[str, Any]:
+        return {
+            "root": {"upload_id": self.upload_id, "legal": self.legal, "confirmed": self.confirmed}
+        }
+
+
+class LegalRootBody(Body):
+    #: The SHA-256 of an installed root (``roots[].sha256``).
+    sha256: str
+    confirmed: bool = False
+
+    def form(self) -> dict[str, Any]:
+        return {"legal_root": {"sha256": self.sha256, "confirmed": self.confirmed}}
+
+
+class ZamaneBody(Body):
+    upload_id: str
+    #: The SHA-256 on the Kamu SM download page (needed for a release that is not known).
+    expected_sha256: str | None = None
+
+    def form(self) -> dict[str, Any]:
+        client: dict[str, Any] = {"upload_id": self.upload_id}
+        if self.expected_sha256 is not None:
+            client["expected_sha256"] = self.expected_sha256
+        return {"zamane": client}
+
+
+def _uploaded(channel: Channel, user: CurrentUser, body: Body) -> dict[str, rules.UploadInfo]:
+    upload = getattr(body, "upload_id", None)
+    return channel.uploads(user, [upload] if isinstance(upload, str) else [])
+
+
+@router.post("/config/tsa/check")
+def check_tsa(body: TsaBody, db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCheck:
+    """Dry run of a Kamu SM change (with ``readiness`` of the result)."""
+    return dry_run(channel, "tsa", checked(channel, db, user, "tsa", body, encrypt=False))
+
+
+@router.put("/config/tsa", status_code=status.HTTP_202_ACCEPTED)
+def put_tsa(
+    body: TsaBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """The time-stamp server (Kamu SM test or production), credentials, Java, threshold and
+    time limit (re-authentication for all but the threshold and the time limit)."""
+    channel.require_enabled()
+    check = checked(channel, db, user, "tsa", body, encrypt=True)
+    return queue(channel, db, user, request, "tsa", check, probe=body.probe)
+
+
+def _tsa_file_change(
+    body: Body, request: Request, db: Session, user: CurrentUser, channel: Channel
+) -> AdminAccepted:
+    channel.require_enabled()
+    uploads = _uploaded(channel, user, body)
+    check = checked(channel, db, user, "tsa", body, encrypt=True, uploads=uploads)
+    return queue(channel, db, user, request, "tsa", check, files=files_of(check.ops))
+
+
+@router.post("/config/tsa/roots", status_code=status.HTTP_202_ACCEPTED)
+def add_root(
+    body: RootBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """Install an uploaded Kamu SM root certificate (``kamusm-roots\\<sha256>.pem``), and with
+    ``legal`` mark it a legal root."""
+    return _tsa_file_change(body, request, db, user, channel)
+
+
+@router.post("/config/tsa/legal-roots", status_code=status.HTTP_202_ACCEPTED)
+def add_legal_root(
+    body: LegalRootBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """Mark an installed root a legal root (``tsa.legal_root_fingerprints``)."""
+    return _tsa_file_change(body, request, db, user, channel)
+
+
+@router.post("/config/tsa/zamane", status_code=status.HTTP_202_ACCEPTED)
+def stage_zamane(
+    body: ZamaneBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """An uploaded Zamane client: staged by the agent and held (``pending``) until ApplySystem
+    promotes a known release, or an administrator approves another one on the console."""
+    return _tsa_file_change(body, request, db, user, channel)
+
+
+# -- uploads (contract 2.4.4) ---------------------------------------------------------------------
+
+
+class CertificatePreview(BaseModel):
+    subject: str
+    issuer: str
+    not_before: datetime
+    not_after: datetime
+    is_ca: bool
+    self_signed: bool
+    #: ``RSA 4096``, ``EC P-256`` …
+    key: str
+    #: The same root is installed already.
+    installed: bool
+    warnings: list[CodeMessage]
+
+
+class ZamanePreview(BaseModel):
+    kind: Literal["jar", "zip"]
+    #: The client's file name inside a .zip (null for a .jar).
+    jar_name: str | None
+    jar_sha256: str
+    #: The known Kamu SM release, else null (then ``expected_sha256`` is needed).
+    release: str | None
+    known: bool
+    accepted: bool
+    reason: str | None
+
+
+class UploadPreview(BaseModel):
+    upload_id: str
+    kind: Literal["kamusm_root", "zamane_client", "smtp_ca"]
+    size: int
+    sha256: str
+    #: An upload is usable for 30 minutes.
+    expires_at: datetime
+    certificate: CertificatePreview | None = None
+    zamane: ZamanePreview | None = None
+
+
+@router.post("/uploads", status_code=status.HTTP_201_CREATED)
+async def upload(
+    request: Request,
+    db: DbSession,
+    user: SettingsDep,
+    channel: ChannelDep,
+    kind: Annotated[str, Query(max_length=40)],
+) -> UploadPreview:
+    """A root certificate, the SMTP CA file or a Zamane client (``multipart/form-data``,
+    field ``file``), staged for a request and shown before it is made."""
+    if kind not in UPLOAD_LIMITS:
+        raise admin_error("upload_kind_invalid")
+    upload_kind: UploadKind = kind  # type: ignore[assignment]
+    limit = UPLOAD_LIMITS[upload_kind]
+    body = await read_body(request, limit + OVERHEAD, too_large_code="upload_too_large")
+    data = multipart_file(request.headers.get("content-type", ""), body)
+    if len(data) > limit:
+        raise admin_error("upload_too_large")
+    if not data:
+        raise ApiError(422, "upload_invalid", *UPLOAD_TEXTS["upload_invalid"])
+    meta, info = channel.stage_upload(db, user, request, upload_kind, data)
+    preview = UploadPreview(
+        upload_id=meta.id,
+        kind=meta.kind,
+        size=meta.size,
+        sha256=meta.sha256,
+        expires_at=meta.created_at + UPLOAD_LIFETIME,
+    )
+    certificate = None
+    warnings: tuple[str, ...] = ()
+    if info.root is not None and info.root.certificate is not None:
+        certificate, warnings = info.root.certificate, info.root.warnings
+    elif info.bundle is not None and info.bundle.certificates:
+        certificate = info.bundle.certificates[0]
+    if certificate is not None:
+        installed = {root.sha256 for root in channel.roots()}
+        preview.certificate = CertificatePreview(
+            subject=certificate.subject,
+            issuer=certificate.issuer,
+            not_before=certificate.not_before,
+            not_after=certificate.not_after,
+            is_ca=certificate.is_ca,
+            self_signed=certificate.self_signed,
+            key=certificate.key,
+            installed=upload_kind == "kamusm_root" and certificate.sha256 in installed,
+            warnings=[code_message(code) for code in warnings],
+        )
+    client = info.zamane
+    if client is not None and client.kind is not None and client.jar_sha256 is not None:
+        preview.zamane = ZamanePreview(
+            kind=client.kind,
+            jar_name=client.jar_name,
+            jar_sha256=client.jar_sha256,
+            release=client.release,
+            known=client.known,
+            accepted=True,
+            reason=None if client.known else "unknown_jar_held",
+        )
+    return preview
+
+
+# -- log sources ----------------------------------------------------------------------------------
+
+
+class SourceIn(BaseModel):
+    """A ``[[sources]]`` table as the browser edits it (the rules check the values)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: Literal["fortigate", "mikrotik", "generic"]
+    #: An IPv4 address or network (``172.20.20.0/24``).
+    address: str
+    heartbeat_minutes: int = 15
+    expected: bool = True
+    transport: Literal["any", "udp", "tcp"] = "any"
+    enabled: bool = True
+
+
+class SourceBody(Body):
+    source: SourceIn
+
+    def form(self) -> dict[str, Any]:
+        return {"source": self.source.model_dump(mode="json")}
+
+
+class SourceCheckBody(SourceBody):
+    #: Which change it is: the ``POST`` of a new source, or the ``PUT`` of ``source.name``.
+    operation: Literal["add", "update"]
+
+    def form(self) -> dict[str, Any]:
+        data = super().form()
+        if self.operation == "update":
+            data["name"] = self.source.name
+        return data
+
+
+@router.post("/config/sources/check")
+def check_sources(
+    body: SourceCheckBody, db: DbSession, user: SourcesDep, channel: ChannelDep
+) -> AdminCheck:
+    """Dry run of adding (``operation: add``) or changing (``update``) one log source."""
+    return dry_run(channel, "sources", checked(channel, db, user, "sources", body, encrypt=False))
+
+
+@router.post("/config/sources", status_code=status.HTTP_202_ACCEPTED)
+def add_source(
+    body: SourceBody, request: Request, db: DbSession, user: SourcesDep, channel: ChannelDep
+) -> AdminAccepted:
+    """A new log source: the collector and ingest take it within seconds; the firewall opens
+    it once the collector knows it."""
+    channel.require_enabled()
+    check = checked(channel, db, user, "sources", body, encrypt=True)
+    return queue(channel, db, user, request, "sources", check)
+
+
+SourceName = Annotated[str, PathParam(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")]
+
+
+@router.put("/config/sources/{name}", status_code=status.HTTP_202_ACCEPTED)
+def update_source(
+    name: SourceName,
+    body: SourceBody,
+    request: Request,
+    db: DbSession,
+    user: SourcesDep,
+    channel: ChannelDep,
+) -> AdminAccepted:
+    """Change a log source (its name cannot change; disabling needs a re-authentication)."""
+    channel.require_enabled()
+    form = {"name": name, **body.form()}
+    check = checked(channel, db, user, "sources", body, encrypt=True, form=form)
+    return queue(channel, db, user, request, "sources", check)
+
+
+@router.delete("/config/sources/{name}", status_code=status.HTTP_202_ACCEPTED)
+def remove_source(
+    name: SourceName,
+    request: Request,
+    db: DbSession,
+    user: SourcesDep,
+    channel: ChannelDep,
+    etag: Annotated[str, Query(max_length=100)],
+    confirm: Annotated[str, Query(max_length=100)] = "",
+) -> AdminAccepted:
+    """Remove a log source (``confirm`` = its name; a re-authentication). Its raw logs and
+    sealed days stay."""
+    channel.require_enabled()
+    form = {"name": name, "remove": True, "confirm": confirm}
+    check = checked(channel, db, user, "sources", Body(etag=etag), encrypt=True, form=form)
+    return queue(channel, db, user, request, "sources", check)
