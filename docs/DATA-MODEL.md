@@ -1,9 +1,9 @@
 # Veri modeli / Data model
 
 > Durum: MVP (sürüm 0.1.0). Kaynak: `db/src/arcilogger_db/models.py` ve
-> `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports`,
-> `v0007_evidence_seals`, `v0008_device_assignments`). Bir test, modellerle migrasyonların
-> birebir aynı olduğunu her çalıştırmada doğrular.
+> `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
+> `v0016_search`). Bir test, modellerle migrasyonların birebir aynı olduğunu her çalıştırmada
+> doğrular.
 
 ## Özet (TR)
 
@@ -30,6 +30,13 @@
 - Tarayıcıdan yönetim istekleri (`admin_requests`; revizyon `0015_admin_requests`, ADR-0014)
   hiçbir gizli bilgi tutmaz: adı parola, müşteri numarası ya da belirteç gibi olan bir alanda
   yalnızca "kayıtlı / kayıtlı değil" bilgisi bulunabilir; bunu veritabanının kendisi denetler.
+- Arama (revizyon `0016_search`, [ADR-0015](adr/0015-search-live-sources.md)): `search_counts`
+  her saat, spool dosyası, kayıt türü, tablo, eylem ve özel /24 ağı için **kesin** satır
+  sayısını tutar; ingest bunu satırlarla aynı işlemde yazar, böylece geniş bir aramanın
+  istatistikleri milyonlarca satır sayılmadan gelir. `saved_searches` kişisel kayıtlı
+  aramalardır. `ingest_offsets.counts_from_line` yükseltmeden önce yüklenmiş ve henüz
+  sayılmamış dosyaları işaretler; `fg_web` üzerindeki `ix_fg_web_rhost_time` indeksi "bu alan adı
+  ve alt alan adları" aramasını hızlandırır.
 
 ## Summary (EN)
 
@@ -47,6 +54,11 @@ never deleted; the licence itself is the signed file they hold, verified again o
 evaluation ("Licence tables"). The requests of the browser administration (`admin_requests`,
 revision `0015_admin_requests`, ADR-0014) hold no secret: a field named like a password, a
 customer number or a token may only say whether a secret is set, which the database checks.
+Search (revision `0016_search`, [ADR-0015](adr/0015-search-live-sources.md)) adds the exact hourly
+summary table `search_counts` (written by ingest in the transaction of the rows), the personal
+`saved_searches`, `ingest_offsets.counts_from_line` (files loaded before the upgrade and not
+counted yet) and the expression index `ix_fg_web_rhost_time` for "this domain and its
+subdomains".
 
 ## Conventions
 
@@ -89,7 +101,7 @@ through the table itself (never into a partition), so the identity column is use
 |---|---|---|
 | `messages` | Every received message (lightweight): severity, facility, program/topics, host, type, subtype, short text, `parse_error` | (source, time), (type, time) |
 | `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport` | (srcip, time), (transip, transport, time), (sessionid), (dstip, dstport, time) |
-| `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time) |
+| `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time), `ix_fg_web_rhost_time` (reverse(lower(hostname)), time) — the search field `domain:` (revision `0016_search`) |
 | `fg_dns` | DNS: qname, qtype, answers `INET[]`, catdesc, action | (srcip, time), (qname, time) |
 | `fg_app` | Application control: app, appid, appcat, hostname, url | (sessionid), (srcip, time) |
 | `fg_ips` / `fg_virus` | IPS and antivirus events | (srcip, time) |
@@ -111,7 +123,7 @@ but which are not in a table go to `extra`.
 |---|---|---|
 | `sources` | `name` | Type (fortigate/mikrotik/generic), address, enabled, expected, heartbeat minutes, `unknown` (sender not configured → alert "yeni log kaynağı"), first/last seen |
 | `parse_failures` | id; unique (source, day, pattern) | Count of unparsed lines per source/day/pattern, first/last seen, **one example** raw reference (`example_line`, `example_offset`), last error |
-| `ingest_offsets` | (source, day) | Ingest resume point: `byte_offset` and `line_number` of complete lines loaded; `finished_at` when the day is done |
+| `ingest_offsets` | (source, day) | Ingest resume point: `byte_offset` and `line_number` of complete lines loaded; `finished_at` when the day is done; `counts_from_line` (revision `0016_search`): NULL when every loaded line of the file is in `search_counts`, else the lines before it were loaded before the upgrade and wait for the worker job `search.counts_backfill`, which recounts the finished file and clears it (the migration sets `line_number + 1` on every file with loaded lines) |
 | `vlans` | `subnet` | The site's VLANs and subnets (none are shipped): `vlan_id` (unique, NULL for a network without one, e.g. a transit network), `name_tr`, `purpose`, `dhcp_server` (e.g. `dhcp60`), `department_id`, `guest` |
 | `departments` | id | The site's departments, entered by its administrator (none are shipped, see "Seed data") |
 | `persons` | id | Name, department, title, e-mail, employee number (unique), active (persons are deactivated, never deleted), `usage_excluded` (left out of person-level usage views and reports; revision `0010_usage`) |
@@ -146,6 +158,8 @@ but which are not in a table go to `extra`.
 | `usage_rebuilds` | id | Rebuild requests of `POST /api/v1/usage/rebuild`: range, status (queued/running/done/failed), days done, error, requested by; run by the worker job `usage.requests` |
 | `alert_events` | id; index (alert_id, at), (at) | Every change of an alert's state (`from_state` → `to_state`) and every note (`text`, 1–2000 characters) with `actor` (user name, or `system` for the checks' automatic resolution and re-opening, the reason code then in `text`), `actor_id` (users, SET NULL) and `at` (revision `0012_alert_events`, ADR-0010 amendment). Written only by `arcilogger_worker.alerts.store`; the audit log gets `alert.state` / `alert.note` (the note's length only) |
 | `report_schedules` | id | Scheduled usage reports (revision `0011_reports`, ADR-0012): name, kind (end_of_day/full_day/weekly/monthly), `enabled`, `time` (HH:MM, site time), `weekday` (weekly) / `monthday` (monthly), `recipients`, `formats` (`email_html`, `pdf`, `xlsx`), `person_level` (default true: names), `pseudonymize`, `next_run_at`, `updated_by`. The four shipped schedules are inserted once by the migration, disabled |
+| `search_counts` | id; unique `uq_search_counts_key` (hour, source, raw_day, kind, tbl, action, net) `NULLS NOT DISTINCT`; index (source, hour), (raw_day, source) | Exact hourly line counts of the search statistics (revision `0016_search`, ADR-0015, `arcilogger_db.searchcounts`): `hour` (`date_trunc('hour', time)`, device time, UTC), the spool file (`source`, `raw_day`), `kind` (`arcilogger_db.kinds.kind_of` of the `messages` row), `tbl` (the line's typed table, `''` without one), `action` (the typed row's, lower-cased), `net` (the /24 of the typed row's client address when it is private IPv4: 10/8, 172.16/12, 192.168/16, 100.64/10), `n` (> 0). One row per key, about 450 keys an hour for 150 users. The ingest loader adds a batch's counts in the transaction that loads its rows; `searchcounts.rebuild_stream` recounts one file from its rows (`arcilogger-db search-counts rebuild`); derived, like every table |
+| `saved_searches` | id; unique `uq_saved_searches_owner_name` (owner_id, lower(name)) | Personal saved searches (revision `0016_search`): `owner_id` (users, CASCADE), `name` (1–80 characters, unique per owner ignoring case), `query` (≤ 1,000 characters, parsed again on every run), the range as a preset `range_preset` (`15m`, `1h`, `24h`, `today`, `yesterday`, `7d`, `30d`) **or** a fixed `[range_from, range_to)`, never both (`ck_saved_searches_range`), created/updated, `last_run_at` |
 | `report_runs` | id; index (schedule_id, id), index (status) | Every report run (scheduled or "run now"): period, kind (+ `custom`), the schedule's settings then (formats, recipients, person level), status (queued/running/sent/partial/failed), `files` (name, format, size, SHA-256 of each file in `exports/usage-reports/<id>/`), `deliveries` (per recipient: status, attempts, error, sent), `expired_at` (files deleted after `reports.keep_days`). Kept when the schedule is deleted |
 
 Not created yet (later milestones):
@@ -237,6 +251,10 @@ PostgreSQL 16.
   failed) 90 days after they finished.
 - The licence tables (`license_installation`, `license_files`, `license_events`) are append-only
   and have no expiry.
+- The search summary table (`search_counts`) follows the log tables: `partitions.drop_before`
+  also deletes its rows with `hour` before the cutoff, so the counts and the rows stay in step
+  once database retention runs; until then nothing is deleted (no job calls `drop_before`).
+  Saved searches (`saved_searches`) are deleted with their user.
 - `lookups`, `lookup_reports` (and the PDFs in `exports\reports\`), `audit_log`,
   `user_sessions`, the assignment history (`device_assignments`, `persons`) and the history of
   the browser administration (`admin_requests`) have no expiry yet; the open decisions are

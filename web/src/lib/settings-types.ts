@@ -784,7 +784,14 @@ export interface SettingOut {
 }
 
 export type SettingGroupId =
-  'alerts' | 'lookup' | 'usage' | 'reports' | 'evidence' | 'security' | 'database';
+  | 'alerts'
+  | 'lookup'
+  | 'search'
+  | 'usage'
+  | 'reports'
+  | 'evidence'
+  | 'security'
+  | 'database';
 
 export interface SettingGroup {
   id: SettingGroupId;

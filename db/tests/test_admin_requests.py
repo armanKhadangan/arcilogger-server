@@ -68,7 +68,7 @@ def _refused(session: Session, row: AdminRequest, constraint: str) -> None:
 def test_migration_0015_up_and_down(empty_engine: Engine) -> None:
     upgrade(empty_engine, revision="0014_license")
     assert "admin_requests" not in inspect(empty_engine).get_table_names()
-    assert upgrade(empty_engine).after == ("0015_admin_requests",)
+    assert upgrade(empty_engine, revision="0015_admin_requests").after == ("0015_admin_requests",)
     inspector = inspect(empty_engine)
     columns = {column["name"]: column for column in inspector.get_columns("admin_requests")}
     assert set(columns) == {
@@ -115,7 +115,9 @@ def test_migration_0015_up_and_down(empty_engine: Engine) -> None:
     with empty_engine.begin() as connection:
         command.downgrade(alembic_config(connection), "0014_license")
     assert "admin_requests" not in inspect(empty_engine).get_table_names()
-    assert upgrade(empty_engine).after == ("0015_admin_requests",)  # and up again
+    assert upgrade(empty_engine, revision="0015_admin_requests").after == (
+        "0015_admin_requests",
+    )  # and up again
 
 
 def test_the_migration_names_what_the_contract_names() -> None:
