@@ -2547,6 +2547,37 @@ def test_acl_script_follows_the_configured_data_folder(engine: str, tmp_path: Pa
     assert "-DataRoot" in result.stdout + result.stderr
 
 
+def test_acl_script_takes_the_recorded_data_root(engine: str, tmp_path: Path) -> None:
+    """Day 0 note D0-2, WP6-2: ArciAdmin can write data_dir, the record only administrators. Run
+    by hand (after a console "secret set"), Set-ArciVaultAcl.ps1 reads the record as the
+    installer does and never puts the rights of the vault on a folder data_dir names instead."""
+    script = WINDOWS / "scripts" / "Set-ArciVaultAcl.ps1"
+    programdata = tmp_path / "programdata"
+    (programdata / "admin").mkdir(parents=True)
+    data = tmp_path / "data" / "ARCILOGGER"
+    (programdata / "data-root.txt").write_text(f"{data}\n", "utf-8")
+    config = programdata / "arcilogger.toml"
+    plan = tmp_path / "acl.json"
+    arguments = ["-ProgramDataDir", str(programdata), "-InstallDir", str(tmp_path / "program")]
+    arguments += ["-PlanOnly", "-PlanPath", str(plan)]
+    config.write_text(f'data_dir = "{data.as_posix()}"\n', "utf-8")
+    result = run_powershell(engine, script, *arguments)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(read_json(plan)["data_root"]) == data
+    plan.unlink()
+    elsewhere = tmp_path / "elsewhere"
+    config.write_text(f'data_dir = "{elsewhere.as_posix()}"\n', "utf-8")
+    result = run_powershell(engine, script, *arguments)
+    assert result.returncode != 0
+    assert "-DataRoot" in result.stdout + result.stderr
+    assert not plan.exists(), "nothing is planned for a data_dir the record does not name"
+    # A removed record with the administration installed: only -DataRoot names the data root.
+    (programdata / "data-root.txt").unlink()
+    result = run_powershell(engine, script, *arguments)
+    assert result.returncode != 0
+    assert "data-root.txt" in result.stdout + result.stderr
+
+
 def _entries_by_leaf(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {re.split(r"[\\/]", e["Path"])[-1]: e for e in document["entries"]}
 

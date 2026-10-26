@@ -23,6 +23,7 @@ from datetime import date, datetime
 from typing import Any, Final
 
 from arcilogger_core.admin.messages import MESSAGES as ADMIN_MESSAGES
+from arcilogger_core.admin.messages import WARNINGS as ADMIN_WARNINGS
 from arcilogger_core.fmt import format_date, format_datetime, format_number
 from arcilogger_core.seal import CONFIG_CAUSES
 
@@ -947,7 +948,8 @@ def _config_change(d: Mapping[str, Any]) -> Facts | None:
 
 def _admin(d: Mapping[str, Any]) -> Facts | None:
     """``R20-admin``: the agent's heartbeat (the worker's check), else the outcome code of the
-    agent or ApplySystem with its own text (:data:`arcilogger_core.admin.messages.MESSAGES`)."""
+    agent or ApplySystem with its own text (:data:`arcilogger_core.admin.messages.MESSAGES`), or
+    the warning code of what ApplySystem left out (``source_outside_policy``, ``WARNINGS``)."""
     if d.get("case") == "heartbeat":
         minutes = _int(d, "minutes")
         silent_tr, silent_en = (
@@ -962,7 +964,9 @@ def _admin(d: Mapping[str, Any]) -> Facts | None:
             "are not applied. Collecting and sealing the 5651 records is not affected.",
         )
     code = d.get("code")
-    return ADMIN_MESSAGES.get(code) if isinstance(code, str) else None
+    if not isinstance(code, str):
+        return None
+    return ADMIN_MESSAGES.get(code) or ADMIN_WARNINGS.get(code)
 
 
 def _sender(d: Mapping[str, Any]) -> Facts | None:

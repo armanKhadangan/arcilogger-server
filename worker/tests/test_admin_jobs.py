@@ -34,7 +34,7 @@ from arcilogger_core.admin.contract import (
     dump_line,
     new_id,
 )
-from arcilogger_core.admin.messages import MESSAGES
+from arcilogger_core.admin.messages import MESSAGES, WARNINGS
 from arcilogger_core.alerts import raise_alert
 from arcilogger_core.config import Config, ReplicaConfig, SmtpConfig
 from arcilogger_core.layout import Layout
@@ -601,6 +601,9 @@ def test_the_configuration_change_email_carries_only_whitelisted_facts(
 def test_an_administration_problem_is_told_by_its_code() -> None:
     assert describe("R20-admin", {"code": "signature_invalid"}) == MESSAGES["signature_invalid"]
     assert describe("R20-admin", {"code": "acl_drift", "path": "C:\\x"}) == MESSAGES["acl_drift"]
+    # ApplySystem's warnings (Sync-ArciSystem.ps1: what system-plan left out).
+    outside = describe("R20-admin", {"code": "source_outside_policy"})
+    assert outside == WARNINGS["source_outside_policy"]
     assert describe("R20-admin", {"code": "no-such-code"}) == describe("R20-x", {})
     for rule in ("R20-admin", "R20-config-change"):
         text = rule_text(rule)

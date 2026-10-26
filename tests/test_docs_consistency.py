@@ -412,12 +412,7 @@ def test_sealing_configuration_errors_alert_once_a_day(
 #: P1-P4). The documents are merged together with those branches; once a name exists here its
 #: entry must be removed, which makes the checks below strict again
 #: (test_pending_names_are_removed_once_they_exist).
-PENDING_FROM_PARALLEL_BRANCHES: dict[str, str] = {
-    # The console commands of the administration agent (Wave 1 WP1, contract 2.7.2).
-    "admin:approve-jar": "WP1",
-    "admin:status": "WP1",
-    "admin:versions": "WP1",
-}
+PENDING_FROM_PARALLEL_BRANCHES: dict[str, str] = {}
 
 
 def _model_of(annotation: object) -> type[BaseModel] | None:
