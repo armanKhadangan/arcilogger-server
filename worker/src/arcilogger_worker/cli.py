@@ -48,7 +48,7 @@ from arcilogger_db.license_guard import module_not_licensed_texts, safe_status
 from arcilogger_db.models import JobRun
 from arcilogger_worker import __version__
 from arcilogger_worker.alerts.commands import list_alerts, send_test_email
-from arcilogger_worker.correlation.leases import rebuild_day
+from arcilogger_worker.correlation.rebuild import rebuild_lease_day
 from arcilogger_worker.service import Worker, default_jobs
 from arcilogger_worker.usage.jobs import rebuild_range
 
@@ -184,55 +184,21 @@ def run(config_path: Path | None, *, stop: threading.Event | None = None) -> int
 
 
 def _rebuild_one(sessions: sessionmaker[Session], day: date, *, lookahead: bool) -> int:
-    """Rebuild one day in its own transaction, recorded as a ``leases.rebuild`` job run;
-    returns the exit code."""
-    with sessions() as session:
-        run = JobRun(
-            job="leases.rebuild",
-            started_at=utc_now(),
-            status="running",
-            details={"day": day.isoformat(), "manual": True},
-        )
-        session.add(run)
-        session.commit()
-        run_id = run.id
-    code = EXIT_OK
-    with sessions() as session:
-        try:
-            report = rebuild_day(session, day, lookahead=lookahead)
-            session.commit()
-        except Exception as exc:  # recorded and reported; the job run never stays "running"
-            session.rollback()
-            # ValueError: lease/ARP/NAT settings the timeline cannot work with (Context.load).
-            code = EXIT_CONFIG if isinstance(exc, ValueError) else EXIT_FAILED
-            details: dict[str, object] = {
-                "day": day.isoformat(),
-                "manual": True,
-                "error": type(exc).__name__,
-                "message": str(exc)[:500],
-            }
-            kind = "ayar hatası / settings error" if code == EXIT_CONFIG else "failed"
-            print(f"{day}: başarısız / {kind}: {type(exc).__name__}: {exc}", file=sys.stderr)
-        else:
-            details = {**report.details(), "manual": True}
-            print(
-                f"{day}: {report.inserted} kira yazıldı, {report.updated} güncellendi, "
-                f"{report.deleted} silindi, {report.alerts} yeni uyarı / {report.inserted} "
-                f"written, {report.updated} updated, {report.deleted} deleted, "
-                f"{report.alerts} new alerts"
-            )
-    with sessions() as session:
-        session.execute(
-            update(JobRun)
-            .where(JobRun.id == run_id)
-            .values(
-                status="ok" if code == EXIT_OK else "failed",
-                finished_at=utc_now(),
-                details=details,
-            )
-        )
-        session.commit()
-    return code
+    """Rebuild one day (:func:`.correlation.rebuild.rebuild_lease_day`); returns the exit
+    code."""
+    outcome = rebuild_lease_day(sessions, day, lookahead=lookahead)
+    report = outcome.report
+    if report is None:
+        kind = "ayar hatası / settings error" if outcome.settings_error else "failed"
+        print(f"{day}: başarısız / {kind}: {outcome.error_text}", file=sys.stderr)
+        return EXIT_CONFIG if outcome.settings_error else EXIT_FAILED
+    print(
+        f"{day}: {report.inserted} kira yazıldı, {report.updated} güncellendi, "
+        f"{report.deleted} silindi, {report.alerts} yeni uyarı / {report.inserted} "
+        f"written, {report.updated} updated, {report.deleted} deleted, "
+        f"{report.alerts} new alerts"
+    )
+    return EXIT_OK
 
 
 def rebuild(config_path: Path | None, first: date, last: date | None) -> int:

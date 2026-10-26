@@ -23,6 +23,8 @@ Jobs (``DEFAULT_JOBS``):
                             into the audit log, each event once (``seal.run``,
                             ``retention.run``), and the browser administration's journal
                             (``admin.*``, ``settings.secret_change``; :mod:`.admin_jobs`)
+``admin.requests``          every 15 seconds: the browser's test e-mails and lease rebuilds
+                            (``admin_requests`` of ``channel = 'worker'``; :mod:`.admin_jobs`)
 ``alerts.import``           every minute: new ``state/alerts.jsonl`` lines into ``alerts``,
                             each once, and those of the administration's
                             ``admin/status/alerts.jsonl`` and ``admin/system/alerts.jsonl``
@@ -100,7 +102,7 @@ from arcilogger_db.engine import session_factory
 from arcilogger_db.models import JobRun
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_worker import __version__
-from arcilogger_worker.admin_jobs import import_admin_events
+from arcilogger_worker.admin_jobs import import_admin_events, process_requests
 from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.notify import run_notify
 from arcilogger_worker.alerts.r15 import check_silent_sources
@@ -191,6 +193,8 @@ SKIPPED: Final = "_skipped"
 LATE_EVIDENCE_EVERY: Final = timedelta(minutes=10)
 #: How often ``audit.import`` looks for new sealing and retention events.
 AUDIT_IMPORT_EVERY: Final = timedelta(minutes=15)
+#: ``admin.requests`` looks for the browser's worker requests every 15 seconds (contract 2.9).
+ADMIN_REQUESTS_EVERY: Final = timedelta(seconds=15)
 #: ``alerts.import``, ``alerts.r15`` and ``alerts.notify`` run every minute, the R20 checks
 #: every 5 minutes (they read more files).
 ALERTS_EVERY: Final = timedelta(minutes=1)
@@ -256,6 +260,15 @@ def job_audit_import(ctx: JobContext) -> Mapping[str, Any]:
     if ctx.admin is not None:
         import_admin_events(ctx.sessions, ctx.admin, report)
     return report.details()
+
+
+def job_admin_requests(ctx: JobContext) -> Mapping[str, Any]:
+    """The browser's test e-mails and lease rebuilds (``admin_requests``, worker channel)."""
+    report = process_requests(ctx.sessions, job_config(ctx), now=ctx.now)
+    details = report.details()
+    if not report.steps and not report.more:
+        details[SKIPPED] = True
+    return details
 
 
 def job_config(ctx: JobContext) -> Config:
@@ -359,6 +372,7 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         Job("leases.late_evidence", job_leases_late_evidence, every=LATE_EVIDENCE_EVERY),
         Job("evidence.purge", job_evidence_purge, daily_after=time(3, 0)),
         Job("audit.import", job_audit_import, every=AUDIT_IMPORT_EVERY),
+        Job("admin.requests", job_admin_requests, every=ADMIN_REQUESTS_EVERY),
         # Alerts: import and checks first, the e-mail last (it sends what they raised).
         Job("alerts.import", job_alerts_import, every=ALERTS_EVERY),
         Job("alerts.r15", job_alerts_r15, every=ALERTS_EVERY),

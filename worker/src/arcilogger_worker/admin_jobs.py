@@ -28,17 +28,43 @@ worker never imports a line twice (:func:`.evidence_jobs.import_events`). A line
 valid journal line is skipped and reported; it never blocks the lines after it. The folder is
 the ``admin`` folder next to the worker's fixed ``--config`` path, never one the configuration
 names (Day 0 notes D0-1, D0-2).
+
+The worker also works the **worker channel** (contract 2.9): requests the API stores as
+``admin_requests`` rows with ``channel = 'worker'`` because they need no privilege and no secret
+(job ``admin.requests``, every 15 seconds):
+
+* ``worker.test_email`` (``params.to``) — the test e-mail of ``alerts test-email`` through
+  ``[smtp]``; the result is ``{ok, to, smtp_code, error_text}`` with every address masked
+  (``b***@ornek.example``) and the audit entry ``smtp.test``. ``smtp_not_configured`` when the
+  server or the sender is not set, ``smtp_test_failed`` when the e-mail was not accepted.
+* ``worker.lease_rebuild`` (``params.from``, ``params.to``) — the lease timeline of each day
+  rebuilt in order (:func:`.correlation.rebuild.rebuild_lease_day`, a ``leases.rebuild`` job
+  run per day with the request's id). The row is ``running`` with ``{done_days, total_days,
+  failed_days}`` after every day; the last day finishes it (``succeeded``, or ``failed`` when a
+  day failed) with the audit entry ``leases.rebuild``.
+
+A row is claimed with ``FOR UPDATE SKIP LOCKED`` and stays locked while its step runs, so two
+workers never work on one request; the final state and its audit entry are one transaction. A
+range or an address the API would not have accepted fails with ``validation_failed``; a request
+still queued at its ``expires_at`` is ``expired`` (``request_expired``) and nothing is done.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.admin.contract import (
+    TERMINAL_STATES,
     ActionResult,
     AdminLayout,
     CreditResult,
@@ -49,6 +75,14 @@ from arcilogger_core.admin.contract import (
     TsaTestResult,
     parse_document,
 )
+from arcilogger_core.config import EMAIL_ADDRESS, Config
+from arcilogger_core.timeutil import site_day
+from arcilogger_db.audit import append_audit
+from arcilogger_db.models import AdminRequest
+from arcilogger_db.settings import get_setting
+from arcilogger_worker.alerts.commands import TrialEmailRefusedError, trial_email
+from arcilogger_worker.alerts.notify import web_base_url
+from arcilogger_worker.correlation.rebuild import rebuild_lease_day
 from arcilogger_worker.evidence_jobs import SECRET_ACTION, AuditEvent, ImportReport, import_events
 
 log = logging.getLogger("arcilogger_worker.admin")
@@ -57,6 +91,23 @@ log = logging.getLogger("arcilogger_worker.admin")
 JOURNAL_SOURCE: Final = "admin/journal"
 SYSTEM_JOURNAL_SOURCE: Final = "admin/system/journal.jsonl"
 SYSTEM_ACTION: Final = "admin.system"
+
+#: The worker channel's kinds (``WorkerKind`` of the contract) and their audit actions.
+TEST_EMAIL: Final = "worker.test_email"
+LEASE_REBUILD: Final = "worker.lease_rebuild"
+WORKER_KINDS: Final = (TEST_EMAIL, LEASE_REBUILD)
+SMTP_TEST_ACTION: Final = "smtp.test"
+LEASES_REBUILD_ACTION: Final = "leases.rebuild"
+#: A worker request not done yet.
+OPEN_STATES: Final = ("queued", "running")
+#: Longest lease rebuild (the API refuses more with ``lease_rebuild_range``).
+LEASE_REBUILD_DAYS: Final = 31
+#: ``admin.requests`` starts no further step after this long (a rebuild goes on next run).
+REQUESTS_BUDGET: Final = timedelta(seconds=30)
+_ADDRESS: Final = re.compile(EMAIL_ADDRESS)
+_ADDRESS_IN_TEXT: Final = re.compile(
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
+)
 
 
 def _lines(path: Path, report: ImportReport) -> list[bytes]:
@@ -201,4 +252,230 @@ def import_admin_events(
     import_events(sessions, system_events(admin, report), report)
     if len(report.problems) > known:
         log.warning("admin journal import: %s", "; ".join(report.problems[known:][:10]))
+    return report
+
+
+# -- the worker channel (contract 2.9) ------------------------------------------------------------
+
+
+def mask_address(address: str) -> str:
+    """``bora@ornek.example`` → ``b***@ornek.example`` (ADR-0010 A4; ``***`` when it is not an
+    address)."""
+    local, at, domain = address.strip().rpartition("@")
+    if not at or not local or not domain:
+        return "***"
+    return f"{local[0]}***@{domain}"
+
+
+def mask_addresses(text: str) -> str:
+    """Every e-mail address in ``text`` masked (an SMTP reply may quote the recipient)."""
+    return _ADDRESS_IN_TEXT.sub(lambda match: mask_address(match.group()), text)
+
+
+@dataclass
+class RequestsReport:
+    """What one ``admin.requests`` run did: ``<id> <kind> <state>`` per step."""
+
+    steps: list[str] = field(default_factory=list)
+    #: Requests are left for the next run (the time budget was used up).
+    more: bool = False
+
+    def details(self) -> dict[str, Any]:
+        return {"steps": self.steps, "more": self.more}
+
+
+def _requester(row: AdminRequest) -> dict[str, Any]:
+    return {"user_id": row.requested_by_id, "username": row.requested_by}
+
+
+def _claim(session: Session) -> AdminRequest | None:
+    """The next open worker request no other worker holds (``FOR UPDATE SKIP LOCKED``): test
+    e-mails first (a person waits for them), then the oldest."""
+    return session.scalars(
+        select(AdminRequest)
+        .where(
+            AdminRequest.channel == "worker",
+            AdminRequest.kind.in_(WORKER_KINDS),
+            AdminRequest.state.in_(OPEN_STATES),
+        )
+        .order_by(AdminRequest.kind != TEST_EMAIL, AdminRequest.created_at, AdminRequest.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    ).first()
+
+
+def _finish(
+    session: Session,
+    row: AdminRequest,
+    state: str,
+    *,
+    action: str,
+    details: Mapping[str, Any],
+    result: dict[str, Any] | None = None,
+    code: str | None = None,
+) -> None:
+    """The request's final state and its audit entry, in the caller's transaction."""
+    row.state = state
+    row.terminal = state in TERMINAL_STATES
+    row.result = result
+    row.error_code = code
+    audit = {**details, "request": row.id, "requested_by": _requester(row)}
+    if code is not None:
+        audit["code"] = code
+    append_audit(session, action=action, details=audit)
+
+
+def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
+    """Send the test e-mail of ``row`` and record the outcome with its ``smtp.test`` entry."""
+    to = row.params.get("to")
+    if not isinstance(to, str) or not _ADDRESS.match(to):
+        _finish(
+            session,
+            row,
+            "failed",
+            action=SMTP_TEST_ACTION,
+            details={"to": "***", "ok": False, "smtp_code": None},
+            result={"ok": False, "to": "***", "smtp_code": None, "error_text": None},
+            code="validation_failed",
+        )
+        return
+    masked = mask_address(to)
+    web_url = web_base_url(get_setting(session, "alerts.web_base_url"), config)
+    text: str | None
+    code: str | None
+    try:
+        outcome = trial_email(config, to, web_url=web_url).send()
+    except TrialEmailRefusedError as exc:
+        ok, smtp_code, text = False, None, str(exc)
+        code = "smtp_not_configured" if exc.not_configured else "smtp_test_failed"
+    else:
+        ok, smtp_code, text = outcome.ok, outcome.smtp_code, outcome.error_text
+        code = None if ok else "smtp_test_failed"
+    _finish(
+        session,
+        row,
+        "succeeded" if ok else "failed",
+        action=SMTP_TEST_ACTION,
+        details={"to": masked, "ok": ok, "smtp_code": smtp_code},
+        result={
+            "ok": ok,
+            "to": masked,
+            "smtp_code": smtp_code,
+            "error_text": None if text is None else mask_addresses(text),
+        },
+        code=code,
+    )
+
+
+def lease_rebuild_range(params: Mapping[str, Any], *, now: datetime) -> tuple[date, date] | None:
+    """``from`` … ``to`` of a lease rebuild request; ``None`` for a range the API does not
+    accept either (more than :data:`LEASE_REBUILD_DAYS` days, reversed, in the future)."""
+    try:
+        first = date.fromisoformat(str(params["from"]))
+        last = date.fromisoformat(str(params["to"]))
+    except (KeyError, ValueError):
+        return None
+    if last < first or (last - first).days >= LEASE_REBUILD_DAYS or last > site_day(now):
+        return None
+    return first, last
+
+
+def _lease_rebuild(
+    sessions: sessionmaker[Session], session: Session, row: AdminRequest, *, now: datetime
+) -> None:
+    """One step of the lease rebuild of ``row``: start it, or rebuild its next day in that
+    day's own transaction while the row stays locked. The last day finishes the request with
+    its ``leases.rebuild`` entry."""
+    span = lease_rebuild_range(row.params, now=now)
+    if span is None:
+        _finish(
+            session,
+            row,
+            "failed",
+            action=LEASES_REBUILD_ACTION,
+            details={"from": row.params.get("from"), "to": row.params.get("to")},
+            result={"done_days": 0, "total_days": 0, "failed_days": []},
+            code="validation_failed",
+        )
+        return
+    first, last = span
+    total = (last - first).days + 1
+    if row.state == "queued":  # committed at once: "running" shows before the first day is done
+        row.state = "running"
+        row.result = {"done_days": 0, "total_days": total, "failed_days": []}
+        return
+    progress = row.result or {}
+    done = int(progress.get("done_days", 0))
+    failed = [str(day) for day in progress.get("failed_days", [])]
+    position = done + len(failed)
+    if position < total:
+        day = first + timedelta(days=position)
+        outcome = rebuild_lease_day(
+            sessions, day, lookahead=day == last, details={"request": row.id}
+        )
+        if outcome.ok:
+            done += 1
+        else:
+            failed.append(day.isoformat())
+            log.warning("lease rebuild request %s: %s %s", row.id, day, outcome.error_text)
+        position += 1
+    result = {"done_days": done, "total_days": total, "failed_days": failed}
+    if position < total:
+        row.result = result
+        return
+    _finish(
+        session,
+        row,
+        "failed" if failed else "succeeded",
+        action=LEASES_REBUILD_ACTION,
+        details={
+            "from": first.isoformat(),
+            "to": last.isoformat(),
+            "done_days": done,
+            "failed_days": failed,
+        },
+        result=result,
+    )
+
+
+def _expire(session: Session, row: AdminRequest) -> None:
+    """A queued request whose time ran out: nothing was done (``request_expired``)."""
+    details: dict[str, Any]
+    if row.kind == TEST_EMAIL:
+        to = row.params.get("to")
+        details = {"to": mask_address(to) if isinstance(to, str) else "***", "ok": False}
+        action = SMTP_TEST_ACTION
+    else:
+        details = {"from": row.params.get("from"), "to": row.params.get("to")}
+        action = LEASES_REBUILD_ACTION
+    _finish(session, row, "expired", action=action, details=details, code="request_expired")
+
+
+def process_requests(
+    sessions: sessionmaker[Session],
+    config: Config,
+    *,
+    now: datetime,
+    budget: timedelta = REQUESTS_BUDGET,
+) -> RequestsReport:
+    """``admin.requests``: the browser's test e-mails and lease rebuilds (``admin_requests``,
+    ``channel = 'worker'``), one step per claimed row and transaction, until none is left or
+    ``budget`` is used up. Several workers share the queue: a row another one holds is
+    skipped, so no request is worked on twice at the same time."""
+    report = RequestsReport()
+    started = time.monotonic()
+    while time.monotonic() - started <= budget.total_seconds():
+        with sessions() as session:
+            row = _claim(session)
+            if row is None:
+                return report
+            if row.state == "queued" and row.expires_at is not None and now >= row.expires_at:
+                _expire(session, row)
+            elif row.kind == TEST_EMAIL:
+                _test_email(session, row, config)
+            else:
+                _lease_rebuild(sessions, session, row, now=now)
+            report.steps.append(f"{row.id} {row.kind} {row.state}")
+            session.commit()
+    report.more = True
     return report

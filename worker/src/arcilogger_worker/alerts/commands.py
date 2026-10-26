@@ -6,13 +6,17 @@
 ``test-email`` works with ``[smtp] enabled = false`` too (to try the settings before switching
 the e-mail on) and prints either that the server accepted the e-mail or the SMTP error — never
 the password. The link in it is ``alerts.web_base_url`` when the database is reachable, else the
-address derived from the configuration.
+address derived from the configuration. The browser's "Test e-postası gönder" (ADR-0014, worker
+job ``admin.requests``) sends the same e-mail with :func:`trial_email`.
 """
 
 from __future__ import annotations
 
 import re
+import smtplib
 import sys
+from dataclasses import dataclass
+from email.message import EmailMessage
 from typing import TextIO
 
 from sqlalchemy import Engine, select
@@ -46,43 +50,108 @@ def _web_url(engine: Engine | None, config: Config) -> str:
         return web_base_url(None, config)
 
 
+class TrialEmailRefusedError(ValueError):
+    """No test e-mail can be sent with this configuration (``not_configured``: no SMTP server
+    or sender; else the password is unreadable); the text says why, Turkish and English, never
+    with a password."""
+
+    def __init__(self, text: str, *, not_configured: bool) -> None:
+        super().__init__(text)
+        self.not_configured = not_configured
+
+
+@dataclass(frozen=True)
+class TrialEmailOutcome:
+    """A test e-mail handed to the SMTP server, or why the server did not take it."""
+
+    ok: bool
+    #: ``host:port (security)`` it went to.
+    where: str
+    #: The SMTP reply code of a refusal, when the server gave one.
+    smtp_code: int | None = None
+    #: The SMTP error (never the password; it may name the recipient).
+    error_text: str | None = None
+
+
+def _reply_code(exc: SmtpSendError) -> int | None:
+    """The server's reply code behind ``exc``, ``None`` for an authentication failure (as the
+    transport's ``smtp_code`` of contract WP1-2). The sender raises it while handling the
+    stdlib's exception, which stays its ``__context__``."""
+    cause = exc.__context__
+    if isinstance(cause, smtplib.SMTPRecipientsRefused):
+        codes = [code for code, _ in cause.recipients.values()]
+        return min(codes) if codes else None
+    if isinstance(cause, smtplib.SMTPResponseException) and not isinstance(
+        cause, smtplib.SMTPAuthenticationError
+    ):
+        return int(cause.smtp_code)
+    return None
+
+
+@dataclass(frozen=True)
+class TrialEmail:
+    """One test e-mail ready to go (:func:`trial_email`)."""
+
+    sender: SmtpSender
+    message: EmailMessage
+    recipient: str
+    where: str
+
+    def send(self) -> TrialEmailOutcome:
+        try:
+            self.sender.send(self.message, self.recipient)
+        except SmtpSendError as exc:
+            return TrialEmailOutcome(False, self.where, _reply_code(exc), str(exc))
+        return TrialEmailOutcome(True, self.where)
+
+
+def trial_email(config: Config, recipient: str, *, web_url: str) -> TrialEmail:
+    """The test e-mail to ``recipient`` through ``[smtp]`` (also while ``enabled`` is false);
+    :class:`TrialEmailRefusedError` when the configuration cannot send one. Shared by
+    ``alerts test-email`` and the worker job ``admin.requests``."""
+    smtp = config.smtp
+    if smtp.host is None or smtp.from_address is None:
+        raise TrialEmailRefusedError(
+            "[smtp] host ve from_address ayarlı değil / [smtp] host and from_address are not set "
+            "(arcilogger.toml)",
+            not_configured=True,
+        )
+    try:
+        password = smtp_password(config)
+    except (SecretStoreError, OSError, ValueError) as exc:
+        raise TrialEmailRefusedError(
+            f"smtp.password okunamadı / cannot read smtp.password: {exc}", not_configured=False
+        ) from exc
+    message = trial_message(
+        sender=smtp.from_address, recipient=recipient, web_url=web_url, now=utc_now()
+    )
+    where = f"{smtp.host}:{smtp.port} ({smtp.security})"
+    return TrialEmail(SmtpSender(smtp, password), message, recipient, where)
+
+
 def send_test_email(
     config: Config, recipient: str, *, engine: Engine | None = None, out: TextIO | None = None
 ) -> int:
     out = out or sys.stdout
-    smtp = config.smtp
     if not _ADDRESS.match(recipient):
         print(f"Geçersiz e-posta adresi / invalid e-mail address: {recipient!r}", file=sys.stderr)
         return EXIT_CONFIG
-    if smtp.host is None or smtp.from_address is None:
-        print(
-            "[smtp] host ve from_address ayarlı değil / [smtp] host and from_address are not set "
-            "(arcilogger.toml)",
-            file=sys.stderr,
-        )
-        return EXIT_CONFIG
     try:
-        password = smtp_password(config)
-    except (SecretStoreError, OSError, ValueError) as exc:
-        print(f"smtp.password okunamadı / cannot read smtp.password: {exc}", file=sys.stderr)
+        trial = trial_email(config, recipient, web_url=_web_url(engine, config))
+    except TrialEmailRefusedError as exc:
+        print(exc, file=sys.stderr)
         return EXIT_CONFIG
-    now = utc_now()
-    message = trial_message(
-        sender=smtp.from_address, recipient=recipient, web_url=_web_url(engine, config), now=now
-    )
-    where = f"{smtp.host}:{smtp.port} ({smtp.security})"
-    if not smtp.enabled:
+    if not config.smtp.enabled:
         print(
             "Not: [smtp] enabled = false — uyarı e-postaları henüz gönderilmiyor / note: alert "
             "e-mails are not sent yet",
             file=out,
         )
-    try:
-        SmtpSender(smtp, password).send(message, recipient)
-    except SmtpSendError as exc:
-        print(f"Gönderilemedi / not sent ({where}): {exc}", file=sys.stderr)
+    outcome = trial.send()
+    if not outcome.ok:
+        print(f"Gönderilemedi / not sent ({outcome.where}): {outcome.error_text}", file=sys.stderr)
         return EXIT_FAILED
-    print(f"Gönderildi / sent: {recipient} — {where}", file=out)
+    print(f"Gönderildi / sent: {recipient} — {outcome.where}", file=out)
     return EXIT_OK
 
 

@@ -334,6 +334,7 @@ All explanation texts (Turkish and English, no legal claims) are in `lookup/text
 | `leases.late_evidence` | every 10 minutes — rebuild older days whose evidence arrived after their rebuild (section 1) |
 | `evidence.purge` | daily after 03:00 — deletes expired evidence packages (`evidence.keep_days`, 30 days; `arcilogger_worker.evidence_jobs.purge_evidence`, audited as `evidence.purge`) |
 | `audit.import` | every 15 minutes — copies the results of the database-free scheduled sealing and retention runs into the audit log, each event once (`seal.run`, `retention.run`; docs/KANIT-PAKETI.md) |
+| `admin.requests` | every 15 seconds — the browser administration's test e-mails and lease rebuilds (`admin_requests` rows of `channel = 'worker'`, claimed with `FOR UPDATE SKIP LOCKED`; a lease rebuild runs day by day as `leases.rebuild` job runs with the request's id; audited as `smtp.test` / `leases.rebuild`; ADR-0014, `arcilogger_worker.admin_jobs`) |
 | `alerts.import` | every minute — new `state/alerts.jsonl` lines into `alerts`, each line once (byte offset in the internal setting `worker.alerts_import`, written with the alerts; docs/ALERTS.md) |
 | `alerts.r15` | every minute — R15 log source silent (`sources.last_seen`, the collector status, `[[sources]] heartbeat_minutes`; `alerts.r15_*` settings) |
 | `alerts.system` | every 5 minutes — the R20 checks: disk, sealing, verification, credit, replica, parse failures, failing jobs, database backup, clock (`alerts.*` settings) |
