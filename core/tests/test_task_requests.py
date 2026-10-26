@@ -600,6 +600,73 @@ def test_one_failing_request_does_not_stop_the_next(
     assert site.result(second).ok
 
 
+def _replica(site: Site, target: Path, *, enabled: bool = False, user: str = "") -> None:
+    settings = f'\n[replica]\nenabled = {str(enabled).lower()}\ntarget = "{target.as_posix()}"\n'
+    if user:
+        settings += f"user = '{user}'\n"  # a literal string: the backslash stays one
+    site.config.write_text(site.config.read_text(encoding="utf-8") + settings, encoding="utf-8")
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_a_replica_test_request_probes_the_share(site: Site, enabled: bool) -> None:
+    """The saved target, before the replica is switched on or after."""
+    nas = site.programdata.parent / "nas"
+    nas.mkdir()
+    _replica(site, nas, enabled=enabled)
+    request = site.request("replica_test")
+    assert site.run("requests", "run") == 0
+    result = site.result(request)
+    assert result.ok
+    assert result.result is not None
+    assert result.result.model_dump(mode="json") == {
+        "ok": True,
+        "message": "write, read back and delete work",
+    }
+    assert result.message_tr == (
+        "Replika paylaşımına bağlanıldı; deneme dosyası yazıldı, okundu ve silindi."
+    )
+    assert [path.name for path in nas.rglob("*") if path.is_file()] == []  # the probe is gone
+    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
+    assert nas.as_posix() not in raw
+
+
+def test_a_replica_test_that_fails_names_no_path(site: Site) -> None:
+    blocked = site.programdata.parent / "nas"
+    blocked.write_text("a file where the share's folder should be", encoding="utf-8")
+    _replica(site, blocked)
+    request = site.request("replica_test")
+    assert site.run("requests", "run") == 1
+    result = site.result(request)
+    assert result.code == "replica_test_failed"
+    assert result.message_tr == "Replika paylaşımına bağlanılamadı."
+    assert result.result is not None
+    facts = result.result.model_dump(mode="json")
+    assert facts["ok"] is False
+    assert facts["message"]
+    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
+    assert str(site.programdata.parent) not in raw
+    assert site.programdata.parent.as_posix() not in raw
+
+
+def test_a_replica_test_without_a_target_or_password_fails(site: Site) -> None:
+    request = site.request("replica_test")
+    assert site.run("requests", "run") == 1
+    assert site.result(request).code == "replica_test_failed"
+    result = site.result(request).result
+    assert result is not None
+    assert result.model_dump(mode="json")["message"] == "replica.target is not set"
+    share = Path("//NAS-01/arcilogger-worm")
+    _replica(site, share, user="NAS-01\\arcireplica")
+    SecretStore.create_key(site.programdata / "secret.key")  # no password stored
+    request = site.request("replica_test")
+    assert site.run("requests", "run") == 1
+    result = site.result(request).result
+    assert result is not None
+    message = result.model_dump(mode="json")["message"]
+    assert "replica.password" in message
+    assert "NAS-01" not in message
+
+
 # -- the installation's own folders (D0-2) --------------------------------------------------------
 
 

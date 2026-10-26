@@ -56,6 +56,7 @@ from arcilogger_core import PRODUCT_NAME, __version__
 from arcilogger_core.admin.contract import (
     AdminLayout,
     CreditResult,
+    ReplicaTestResult,
     SealResult,
     TaskKind,
     TaskRequest,
@@ -103,7 +104,7 @@ from arcilogger_core.secretstore import (
     SecretStoreError,
     record_change,
 )
-from arcilogger_core.smbshare import connected
+from arcilogger_core.smbshare import connected, unc_root
 from arcilogger_core.taskrequests import clean, finish, take, task_result
 from arcilogger_core.timeutil import SITE_TZ_NAME, isoformat_site, site_day, utc_now
 from arcilogger_core.tsa import TsaExecutableError, make_provider, trusted_roots
@@ -580,11 +581,55 @@ def run_credit_request(app: App) -> TaskDone:
     )
 
 
+def _replica_problem(exc: Exception, target: Path) -> str:
+    """What went wrong, without a path: a result never names one (contract 2.4.6)."""
+    if isinstance(exc, SecretStoreError):
+        return "the stored replica.password cannot be read (secret store)"
+    if isinstance(exc, OSError) and exc.strerror:  # the file name is not part of it
+        return exc.strerror
+    text = str(exc)
+    for path in {str(target), target.as_posix(), unc_root(target) or ""} - {""}:
+        text = text.replace(path, "<replica>")
+    return text
+
+
+def run_replica_test_request(app: App) -> TaskDone:
+    """The replica test ("Replika testi"), as ``replica --test``: connect to the share with
+    ``replica.user`` and its stored password, write, read back and delete a probe file. The
+    saved target is tested whether the replica is enabled yet or not."""
+    target = app.config.replica.target
+    if target is None:
+        return TaskDone(
+            "replica_test_failed", ReplicaTestResult(ok=False, message="replica.target is not set")
+        )
+    user = app.config.replica.user
+    try:
+        password = app.secrets.get(REPLICA_PASSWORD) if user else None
+        with connected(target, user, password):
+            probe(target)
+    except (OSError, SecretStoreError) as exc:  # ShareError is an OSError, never the password
+        log.warning("replica_test request: %s", exc)
+        problem = _replica_problem(exc, target)
+        return TaskDone("replica_test_failed", ReplicaTestResult(ok=False, message=problem))
+    return TaskDone(
+        None,
+        ReplicaTestResult(ok=True, message="write, read back and delete work"),
+        (
+            "Replika paylaşımına bağlanıldı; deneme dosyası yazıldı, okundu ve silindi.",
+            "The replica share was reached; a probe file was written, read back and deleted.",
+        ),
+    )
+
+
 def cmd_requests(_: argparse.Namespace, app: App) -> int:
     """``requests run``: every valid request of ``state\\requests\\tasks``, oldest first (the
     task ``\\ARCILOGGER\\Requests``, woken by Event 4111 and every 5 minutes). Exit 0 when there
     is none or all succeeded, 1 when one failed (its result says why)."""
-    runners = {"credit": run_credit_request, "tsa_test": run_tsa_test_request}
+    runners = {
+        "credit": run_credit_request,
+        "tsa_test": run_tsa_test_request,
+        "replica_test": run_replica_test_request,
+    }
     failed = 0
     for request in take(app.layout, "tasks", app.keys_dir):
         started = utc_now()
