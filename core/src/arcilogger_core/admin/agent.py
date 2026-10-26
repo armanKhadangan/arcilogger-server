@@ -1402,7 +1402,7 @@ class Agent:
         txn = outcome.txn
         log.warning("recovered an interrupted apply %s: %s %s", txn.id, outcome.state, outcome.code)
         if txn.request is None or txn.journal is None:  # a console restore: nothing to report
-            if outcome.state == "applied":
+            if outcome.state in ("applied", "needs_attention"):
                 self.applier.commit()
             return outcome
         finish = _Finish.load(txn.journal)
@@ -1410,7 +1410,9 @@ class Agent:
         # A crash between the journal line and the removal of txn.json: the outcome was
         # journaled already (an audit row, secret records); the rest is reported once.
         earlier = (
-            self._outcome_line(txn.request, txn.started_at) if outcome.state == "applied" else None
+            self._outcome_line(txn.request, txn.started_at)
+            if outcome.state in ("applied", "needs_attention")
+            else None
         )
         if earlier is not None and earlier.state == "needs_attention":
             outcome = replace(outcome, state="needs_attention", code=earlier.code, recovered=False)
@@ -1773,6 +1775,7 @@ class Agent:
             waits = read_waits(self.layout)
             others = tuple(item for item in waits.tasks if item.task != task.id)
             write_waits(self.layout, waits.model_copy(update={"tasks": others}))
+            progress.steps.pop("task", None)
             failed(exc)
             return
         self._event(task_event(task_kind), "info", f"görev isteği [task request] {task.id[:8]}")
@@ -1812,12 +1815,15 @@ class Agent:
         try:
             if (self.data.request_seen / wait.task).exists():
                 return False  # taken: the task is running it
+        except OSError:
+            pass  # the ledger cannot be read now: judged by the request file alone
+        try:
             (self.data.request_dir(task_queue(wait.kind)) / f"{wait.task}.json").unlink(
                 missing_ok=True
             )
-        except OSError as exc:  # a task may still take it: wait until it has expired
+        except OSError as exc:
             log.warning("task request %s not withdrawn: %s", wait.task, exc)
-            return False
+            return True
         return waited > TASK_TIMEOUT + WITHDRAW_GRACE
 
     def _fold(self, wait: TaskWait, result: TaskResult | None) -> None:
