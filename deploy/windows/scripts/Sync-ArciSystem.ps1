@@ -47,7 +47,7 @@
 [CmdletBinding()]
 param(
     [string]$ConfigPath = $(if ($env:ProgramData) { Join-Path $env:ProgramData 'ARCILOGGER\arcilogger.toml' } else { 'C:\ProgramData\ARCILOGGER\arcilogger.toml' }),
-    [string]$Python = $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'ARCILOGGER\venv\Scripts\python.exe' } else { 'C:\Program Files\ARCILOGGER\venv\Scripts\python.exe' }),
+    [string]$Python,
     [switch]$DryRun,
     [string]$PlanPath,
     [string]$ReportPath
@@ -58,6 +58,10 @@ Set-StrictMode -Version 2.0
 Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'installer\ArciInstall.psm1') -Force
 Initialize-ArciModulePath
 
+# The program this script belongs to (its scripts folder is in the program folder, which only
+# administrators write); set here, not as a parameter default: Windows PowerShell 5.1 leaves
+# $PSScriptRoot empty there under -File (ADR-0007 section 7).
+if (-not $Python) { $Python = Join-Path (Split-Path -Parent $PSScriptRoot) 'venv\Scripts\python.exe' }
 if ($PlanPath -and -not $DryRun) { throw '-PlanPath yalnızca -DryRun ile [only with -DryRun]: ApplySystem planı her zaman system-plan''dan alır [always takes the plan from system-plan].' }
 
 # Every path from the folder of the fixed configuration path, never from the configuration.

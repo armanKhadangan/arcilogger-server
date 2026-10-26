@@ -839,6 +839,11 @@ def test_python_services_and_tasks_run_isolated() -> None:
                 "@('-I', '-m', 'arcilogger_core.admin', 'system-plan', '--config', $ConfigPath)"
                 in sync
             )
+            # The venv of the program folder the script belongs to (any -InstallDir).
+            assert (
+                "$Python = Join-Path (Split-Path -Parent $PSScriptRoot) 'venv\\Scripts\\python.exe'"
+                in sync
+            )
             continue
         assert command == "{{PYTHON}}"
         assert arguments.startswith("-I -m arcilogger_"), (path.name, arguments)
@@ -6672,6 +6677,110 @@ $report = [ordered]@{ services = $services; tasks = $tasks; rules = $rules }
 """
 
 
+# The rights and registrations of the browser administration (contract 2.2, 2.16) as Windows
+# reports them: the allow entries of each path, whether it is protected, the event source and the
+# accounts of the Requests and ApplySystem tasks.
+_E2E_ADMIN_SCRIPT = r"""
+param([string[]]$Paths, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Remove-TypeData -TypeName System.Array -ErrorAction SilentlyContinue
+# One text through -File: the paths are separated by commas.
+$Paths = @($Paths | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+$sid = [System.Security.Principal.SecurityIdentifier]
+$acl = [ordered]@{}
+foreach ($path in $Paths) {
+    if (-not (Test-Path -LiteralPath $path)) { $acl[$path] = $null; continue }
+    $security = Get-Acl -LiteralPath $path
+    $rules = @($security.GetAccessRules($true, $true, $sid) | Where-Object { $_ })
+    $entries = @($rules | ForEach-Object {
+            [ordered]@{
+                sid = $_.IdentityReference.Value; rights = [int64][int]$_.FileSystemRights
+                allow = ([string]$_.AccessControlType -eq 'Allow'); inherited = [bool]$_.IsInherited
+            }
+        })
+    $protected = [bool]$security.AreAccessRulesProtected
+    $acl[$path] = [ordered]@{ protected = $protected; entries = $entries }
+}
+$source = 'ARCILOGGER-Admin'
+$log = $null
+if ([System.Diagnostics.EventLog]::SourceExists($source)) {
+    $log = [System.Diagnostics.EventLog]::LogNameFromSourceName($source, '.')
+}
+$principals = [ordered]@{}
+foreach ($name in @('Requests', 'ApplySystem', 'Seal')) {
+    $task = Get-ScheduledTask -TaskPath '\ARCILOGGER\' -TaskName $name -ErrorAction SilentlyContinue
+    if (-not $task) { $principals[$name] = $null; continue }
+    $user = [string]$task.Principal.UserId
+    if ($user -notmatch '^S-1-') {
+        $account = New-Object System.Security.Principal.NTAccount -ArgumentList $user
+        $user = $account.Translate($sid).Value
+    }
+    $principals[$name] = $user
+}
+$report = [ordered]@{ acl = $acl; event_log = $log; principals = $principals }
+[System.IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 6))
+"""
+
+#: FileSystemRights that change a file or a folder's contents (as Get-ArciUnsafeWriters counts).
+E2E_WRITE_RIGHTS = (
+    0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000
+)
+
+
+def _e2e_admin_state(powershell: str, tmp_path: Path, paths: list[Path]) -> dict[str, Any]:
+    script = write_script(tmp_path / "e2e-admin.ps1", _E2E_ADMIN_SCRIPT)
+    out = tmp_path / f"e2e-admin-{time.monotonic_ns()}.json"
+    names = ",".join(str(path) for path in paths)
+    result = run_powershell(powershell, script, "-Paths", names, "-OutputPath", str(out))
+    assert result.returncode == 0, result.stdout + result.stderr
+    state: dict[str, Any] = read_json(out)
+    return state
+
+
+def _e2e_check_admin_rights(
+    powershell: str, tmp_path: Path, program_data: Path, data: Path, log: str
+) -> None:
+    """Contract 2.2 on the real NTFS: the API cannot write the configuration, the secrets, the
+    Zamane folder or the vault; ArciAdmin writes the configuration and the secret store through
+    explicit file entries and nothing of the private key of the API; each private key has one
+    reader; install\\ is protected; the event source belongs to the Application log; Requests
+    runs as LOCAL SERVICE and ApplySystem as SYSTEM."""
+    keys = program_data / "admin" / "keys"
+    paths = [
+        program_data / "arcilogger.toml", program_data / "secrets.json",
+        program_data / "secret.key", program_data / "zamane", program_data / "install",
+        keys / "api-ed25519.key", keys / "agent-ed25519.key", data / "vault",
+    ]  # fmt: skip
+    state = _e2e_admin_state(powershell, tmp_path, paths)
+    acl = {Path(path).name: facts for path, facts in state["acl"].items()}
+    assert all(facts is not None for facts in acl.values()), (acl, log)
+    api, agent = service_sid("ArciApi"), service_sid("ArciAdmin")
+
+    def writes(name: str, sid: str, *, explicit: bool = False) -> bool:
+        return any(
+            entry["allow"] and entry["sid"] == sid and entry["rights"] & E2E_WRITE_RIGHTS
+            and not (explicit and entry["inherited"])
+            for entry in acl[name]["entries"]
+        )  # fmt: skip
+
+    for name in ("arcilogger.toml", "secrets.json", "secret.key", "zamane", "vault"):
+        assert not writes(name, api), (name, acl[name], log)
+    for name in ("arcilogger.toml", "secrets.json"):
+        assert writes(name, agent, explicit=True), (name, acl[name], log)
+    assert not writes("secret.key", agent), (acl["secret.key"], log)
+    owners = {WELL_KNOWN["system"], WELL_KNOWN["admins"]}
+    for name, reader in (("api-ed25519.key", api), ("agent-ed25519.key", agent)):
+        sids = {entry["sid"] for entry in acl[name]["entries"] if entry["allow"]}
+        assert sids == owners | {reader}, (name, acl[name], log)
+    assert acl["install"]["protected"] is True, (acl["install"], log)
+    assert state["event_log"] == "Application", (state, log)
+    assert state["principals"] == {
+        "Requests": WELL_KNOWN["local_service"],
+        "ApplySystem": WELL_KNOWN["system"],
+        "Seal": WELL_KNOWN["local_service"],
+    }, (state, log)
+
+
 def _e2e_state(powershell: str, tmp_path: Path) -> dict[str, Any]:
     script = write_script(tmp_path / "e2e-state.ps1", _E2E_STATE_SCRIPT)
     out = tmp_path / f"e2e-state-{time.monotonic_ns()}.json"
@@ -6763,7 +6872,7 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
     def health_warnings() -> list[str]:
         """Warnings of the last run about services, the API or Caddy (not, e.g., PG's version)."""
         warnings = [str(w) for w in plans[-1].get("warnings", [])]
-        services = ("ArciCollector", "ArciIngest", "ArciApi", "ArciWorker", "ArciWeb")
+        services = ("ArciCollector", "ArciIngest", "ArciApi", "ArciWorker", "ArciWeb", "ArciAdmin")
         prefixes = ("API health", "HTTPS health", "Caddy root", *(f"{s}:" for s in services))
         return [w for w in warnings if w.startswith(prefixes) or "[failed to start]" in w]
 
@@ -6802,11 +6911,19 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         assert (program / "licenses" / "winsw-LICENSE.txt").is_file(), last()
         state = _e2e_state(powershell, tmp_path)
         services = {service["name"]: service for service in state["services"]}
-        for name in ("ArciCollector", "ArciWeb"):
+        # ArciAdmin needs no database: it runs in both modes (contract 2.16).
+        for name in ("ArciCollector", "ArciWeb", "ArciAdmin"):
             assert name in services, (name, state, last())
             assert services[name]["state"] == "Running", (name, last())
             assert services[name]["account"] == f"NT SERVICE\\{name}", services[name]
-        assert {task["name"] for task in state["tasks"]} >= {"Seal", "VerifyDaily", "Replica"}
+        assert {task["name"] for task in state["tasks"]} >= {
+            "Seal", "VerifyDaily", "Replica", "Requests", "ApplySystem",
+        }  # fmt: skip
+        _e2e_check_admin_rights(powershell, tmp_path, program_data, data, last())
+        policy = parse_document(AdminPolicy, (program_data / "admin" / "policy.json").read_bytes())
+        assert policy.enabled is True, last()
+        recorded = (program_data / "data-root.txt").read_text(encoding="utf-8").strip()
+        assert Path(recorded) == data, (recorded, last())
         assert {"ARCILOGGER Syslog UDP", "ARCILOGGER HTTPS"} <= set(state["rules"]), last()
         # A syslog message reaches the raw spool through the service and its NTFS rights.
         marker = f"arcilogger-e2e-{uuid.uuid4().hex}"
@@ -6875,10 +6992,12 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
     assert state["services"] == []
     assert state["tasks"] == []
     assert state["rules"] == []
-    # Data and configuration are never deleted.
+    # Data and configuration are never deleted; the event source goes, the admin folder stays.
     assert any((data / "spool" / "local").glob("*.log"))
     assert (program_data / "arcilogger.toml").is_file()
     assert (program_data / "secret.key").is_file()
+    assert (program_data / "admin" / "policy.json").is_file()
+    assert _e2e_admin_state(powershell, tmp_path, [program_data])["event_log"] is None
 
 
 # --- firewall ------------------------------------------------------------------------------------
