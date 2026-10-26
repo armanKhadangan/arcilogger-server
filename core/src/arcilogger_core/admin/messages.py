@@ -113,9 +113,12 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
             "restored.",
         ),
         "acl_drift": (
-            "Yönetim hizmeti ayar dosyasına yazma iznini kaybetmiş; kurulumu onarın.",
-            "The administration service has lost write access to the configuration; repair the "
-            "installation.",
+            "Yönetim hizmeti ayar dosyalarına yazma iznini kaybetmiş (çoğunlukla konsoldan bir "
+            "secret set sonrası); sunucuda yönetici olarak Set-ArciVaultAcl.ps1 betiğini "
+            "çalıştırın.",
+            "The administration service has lost write access to the configuration files "
+            "(most often after a console secret set); run Set-ArciVaultAcl.ps1 on the server as "
+            "an administrator.",
         ),
         "system_sync_failed": (
             "Güvenlik duvarı, saat ya da Zamane adımı uygulanamadı; önceki kurallar geçerli. "
@@ -380,6 +383,22 @@ WARNINGS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
         "probe_skipped": (
             "Bağlantı denemesi atlandı.",
             "The connection test was skipped.",
+        ),
+        "credit_query_skipped": (
+            "Kontör sorgusu yapılmadı: Zamane istemcisi henüz çalıştırılamıyor (onay bekliyor ya "
+            'da Java veya istemci güvenilir bir konumda değil); istemci etkinleşince "Kontör '
+            'sorgula" ile deneyin.',
+            "The credit was not queried: the Zamane client cannot run yet (it awaits approval, "
+            "or Java or the client is not in a trusted location); once the client is active, "
+            'use "Query credit".',
+        ),
+        "write_access_lost": (
+            "Değişiklik uygulandı, ancak yönetim hizmeti ayar dosyalarına artık yazamıyor: "
+            "sonraki değişiklikten önce sunucuda yönetici olarak Set-ArciVaultAcl.ps1 betiğini "
+            "çalıştırın.",
+            "The change is applied, but the administration service can no longer write the "
+            "configuration files: before the next change, run Set-ArciVaultAcl.ps1 on the "
+            "server as an administrator.",
         ),
         "service_not_reloaded": (
             "Bir hizmet yeni ayarları henüz yüklemedi; ayrıntı adım listesinde.",

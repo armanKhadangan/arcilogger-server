@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from arcilogger_core.admin import __main__ as console
+from arcilogger_core.admin import agent as agent_module
 from arcilogger_core.admin.apply import Applier
 from arcilogger_core.admin.contract import (
     MAX_REQUEST_BYTES,
@@ -35,6 +36,7 @@ from arcilogger_core.admin.store import (
     read_pending,
     read_txn,
     read_waits,
+    write_status,
 )
 from arcilogger_core.admin.testing import (
     DEFAULT_TOML,
@@ -125,6 +127,31 @@ def test_the_heartbeat_reports_the_agent(installed: Installed, agent: FakeAgent)
     assert [int(e) for e in (Event.AGENT_STARTED, Event.SYSTEM_SYNC_REQUESTED)] == (
         agent.events.ids()[:2]
     )
+
+
+def test_an_agent_started_without_a_configuration_takes_the_data_root_later(
+    installed: Installed,
+) -> None:
+    """ArciAdmin started while arcilogger.toml did not load (a hand edit being fixed): once
+    the file loads again, the actions reach the tasks without a restart of the service."""
+    good = installed.config_path.read_bytes()
+    installed.config_path.write_bytes(b"site_name = [\n")
+    agent = FakeAgent(installed)
+    agent.start()
+    started = agent.agent.data
+    assert started is None
+    installed.config_path.write_bytes(good)
+    seal = installed.request("action.seal", options={"day": date(2026, 10, 24)}, now=agent.now())
+    installed.submit(seal)
+    agent.process()
+    taken = agent.agent.data
+    assert taken is not None
+    assert taken.root == installed.config().data_dir
+    assert agent.tasks is not None
+    assert [task.origin for task in agent.tasks.taken] == [seal.id]
+    status = installed.status(seal.id)
+    assert status is not None
+    assert status.error is None or status.error.code != "write_failed"
 
 
 def test_a_restart_with_nothing_changed_is_answered_by_the_fast_path(
@@ -684,6 +711,36 @@ def test_a_failed_task_and_a_silent_task(installed: Installed) -> None:
     assert status.error is not None
     assert (status.state, status.error.code) == ("timed_out", "task_timeout")
     assert read_waits(installed.layout).tasks == ()
+    # Withdrawn: a task that runs later finds nothing, so "timed out" means nothing ran.
+    assert list(installed.data.request_dir("tasks").glob("*.json")) == []
+
+
+def test_a_request_the_task_took_is_folded_in_when_its_long_run_ends(
+    installed: Installed,
+) -> None:
+    """The Seal task took the request (its ledger entry) during a long run: past the 15
+    minutes the request is neither withdrawn nor timed out, and its result is folded in."""
+    agent = FakeAgent(installed, tasks=False)
+    seal = installed.request("action.seal", options={"day": date(2026, 10, 24)})
+    installed.submit(seal)
+    agent.process()
+    (path,) = installed.data.request_dir("seal").glob("*.json")
+    seen = installed.data.request_seen / path.stem
+    seen.parent.mkdir(parents=True, exist_ok=True)
+    seen.touch()
+    agent.advance(timedelta(minutes=40))
+    agent.process()
+    assert installed.status(seal.id).state == "dispatched"  # type: ignore[union-attr]
+    assert path.exists()
+    seen.unlink()  # FakeTasks writes the ledger entry itself when it answers
+    FakeTasks(installed, now=agent.now).run()
+    agent.process()
+    status = installed.status(seal.id)
+    assert status is not None
+    assert status.state == "succeeded", status
+    agent.advance(timedelta(hours=9))
+    agent.process()
+    assert installed.status(seal.id).state == "succeeded"  # type: ignore[union-attr]
 
 
 def test_waits_never_block_other_requests(installed: Installed) -> None:
@@ -766,6 +823,85 @@ def test_a_crash_after_the_journal_line_reports_the_apply_once(
     assert read_txn(installed.layout) is None
     assert second.events.ids().count(int(Event.CHANGE_APPLIED)) == 1
     assert second.events.ids().count(int(Event.SECRET_CHANGED)) == 1
+
+
+def test_a_stop_before_the_status_is_reported_from_the_journal(installed: Installed) -> None:
+    """The journal line was written and txn.json removed, the status still says applying (and
+    the work folder is still there): the next start reports the journaled outcome, once."""
+    agent = FakeAgent(installed)
+    request = site_request(installed)
+    installed.submit(request)
+    agent.process()
+    applied = installed.status(request.id)
+    assert applied is not None
+    assert applied.state == "applied"
+    applying = applied.model_copy(update={"state": "applying", "version": None})
+    write_status(installed.layout, applying)
+    folder = installed.layout.work_dir(request.id)
+    folder.mkdir(parents=True)
+    (folder / "request.req").write_bytes(b"{}")
+    FakeAgent(installed).start()
+    status = installed.status(request.id)
+    assert status is not None
+    assert (status.state, status.error, status.version) == ("applied", None, applied.version)
+    assert [line.state for line in installed.journal()] == ["applied"]
+    assert not folder.exists()
+
+
+def test_a_stop_after_a_failed_rollback_is_judged_again_at_the_next_start(
+    installed: Installed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """txn.json stays until needs_attention is journaled: a stop before that is recovered
+    from the files on disk (here the new pair, which verifies), not reported interrupted."""
+
+    def fail(at: str) -> None:
+        if at in ("verify", "restore"):
+            raise OSError(f"injected at {at}")
+
+    def crash(*args: Any, **kwargs: Any) -> None:
+        raise _Crash
+
+    first = FakeAgent(installed, checkpoint=fail)
+    request = site_request(installed)
+    installed.submit(request)
+    monkeypatch.setattr(first.agent, "_journal", crash)
+    with pytest.raises(_Crash):
+        first.process()
+    assert read_txn(installed.layout) is not None
+    FakeAgent(installed).start()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied", status
+    assert [line.state for line in installed.journal()] == ["recovered"]
+    assert read_txn(installed.layout) is None
+
+
+def test_a_stop_before_the_task_request_is_written_ends_timed_out(
+    installed: Installed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wait and the status come before the request file: a stop in between leaves nothing
+    a task could run, and the request ends timed out instead of expired."""
+
+    def crash(*args: Any, **kwargs: Any) -> None:
+        raise _Crash
+
+    monkeypatch.setattr(agent_module, "write_task_request", crash)
+    first = FakeAgent(installed, now=utc_now())
+    seal = installed.request("action.seal", options={"day": date(2026, 10, 24)})
+    installed.submit(seal)
+    with pytest.raises(_Crash):
+        first.process()
+    monkeypatch.undo()
+    assert installed.status(seal.id).state == "dispatched"  # type: ignore[union-attr]
+    assert [wait.origin for wait in read_waits(installed.layout).tasks] == [seal.id]
+    second = FakeAgent(installed, now=first.now() + timedelta(minutes=16))
+    second.process()
+    status = installed.status(seal.id)
+    assert status is not None
+    assert status.error is not None
+    assert (status.state, status.error.code) == ("timed_out", "task_timeout")
+    assert second.tasks is not None
+    assert second.tasks.taken == []
 
 
 def test_an_interrupted_probe_fails_at_the_next_start(installed: Installed) -> None:
@@ -934,6 +1070,23 @@ def test_an_unknown_client_waits_for_approve_jar(installed: Installed) -> None:
     assert status is not None
     assert status.state == "applied", status
     assert installed.config().tsa.zamane_jar == approved
+
+
+def test_a_held_client_keeps_its_status_past_the_cleanup(installed: Installed) -> None:
+    """A client may wait for "approve-jar" longer than the 30 days statuses are kept: its
+    status stays, so the API does not report it expired while the console can still apply it."""
+    agent = FakeAgent(installed)
+    request, _ = stage_client(installed, client_jar(b"waits long"))
+    agent.process()
+    other = site_request(installed, reauth=False)
+    installed.submit(other)
+    agent.process()
+    old = (agent.now() - timedelta(days=40)).timestamp()
+    for request_id in (request.id, other.id):
+        os.utime(installed.layout.status / f"{request_id}.json", (old, old))
+    agent.agent._cleanup(agent.now())
+    assert installed.status(request.id).state == "pending"  # type: ignore[union-attr]
+    assert installed.status(other.id) is None
 
 
 def test_a_known_release_is_promoted_by_applysystem(
@@ -1294,6 +1447,69 @@ def test_a_change_that_was_not_applied_is_not_reverted(installed: Installed) -> 
     assert installed.config().site_name == "Beta"  # the later change stays
     assert revert(installed, agent, beta).state == "applied"
     assert installed.config().site_name == "Örnek A.Ş."
+
+
+def test_lost_write_access_is_applied_with_a_critical_warning(installed: Installed) -> None:
+    """``acl_drift`` (e.g. after a console ``secret set``): the files were replaced and
+    verified, so the change is reported, journaled and followed up as applied, with a critical
+    R20-admin alert; the versions and a revert see it like any applied change."""
+    rights = {"ok": False}
+    agent = FakeAgent(installed, writable=lambda path: rights["ok"])
+    op = {"op": "set", "path": "clock.ntp_server", "expect": "172.20.10.1", "value": "172.20.10.2"}
+    request = installed.request(section="general", ops=[op], now=agent.now())
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert (status.state, status.error) == ("applied", None)
+    assert status.version is not None
+    assert [w.code for w in status.warnings][-1] == "write_access_lost"
+    assert installed.config().clock.ntp_server == "172.20.10.2"
+    lines = [line for line in installed.journal() if line.request == request.id]
+    assert [(line.state, line.code) for line in lines] == [("applied", "acl_drift")]
+    ids = agent.events.ids()
+    assert int(Event.CHANGE_APPLIED) in ids
+    assert int(Event.CHANGE_FAILED) not in ids
+    assert ids.count(int(Event.SYSTEM_SYNC_REQUESTED)) == 2  # start, the change
+    assert read_txn(installed.layout) is None
+    raised = [(a["rule"], a["severity"], a["details"].get("code")) for a in alerts(installed)]
+    assert ("R20-admin", "critical", "acl_drift") in raised
+    rights["ok"] = True  # Set-ArciVaultAcl.ps1
+    assert revert(installed, agent, request.id).state == "applied"
+    assert installed.config().clock.ntp_server == "172.20.10.1"
+
+
+def test_an_smtp_revert_needs_no_trial_recipient(installed: Installed) -> None:
+    """The values a revert puts back were in force before: no trial e-mail, so "Geri al"
+    works while the server is enabled (``POST .../revert`` takes no recipient)."""
+    prober = FakeProber()
+    agent = FakeAgent(installed, prober=prober)
+    to = {"test_to": "bt@ornek.example"}
+    first = installed.request(
+        section="smtp", ops=smtp_ops(installed, "smtp-parola"), options=to, now=agent.now()
+    )
+    installed.submit(first)
+    agent.process()
+    moved = [
+        {"op": "set", "path": "smtp.host", "expect": "smtp.ornek.example",
+         "value": "posta.ornek.example"},
+        {"op": "secret_set", "name": "smtp.password", "expect": "set",
+         "token": installed.store.encrypt_value("yeni-parola")},
+    ]  # fmt: skip
+    second = installed.request(section="smtp", ops=moved, options=to, now=agent.now())
+    installed.submit(second)
+    agent.process()
+    assert installed.status(second.id).state == "applied"  # type: ignore[union-attr]
+    tested = len(prober.calls)
+    status = revert(installed, agent, second.id)
+    assert status.state == "applied", status
+    assert {step.step: (step.state, step.code) for step in status.steps}["probe"] == (
+        "skipped",
+        "probe_skipped",
+    )
+    assert len(prober.calls) == tested
+    assert installed.config().smtp.host == "smtp.ornek.example"
+    assert installed.store.get("smtp.password") == "smtp-parola"
 
 
 def test_a_guarded_revert_is_held(installed: Installed) -> None:

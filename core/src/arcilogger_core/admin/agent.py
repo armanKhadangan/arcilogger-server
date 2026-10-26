@@ -59,6 +59,8 @@ from arcilogger_core.admin.contract import (
     HEARTBEAT_INTERVAL,
     JOURNAL_DAYS,
     MAX_REQUEST_BYTES,
+    MAX_SEAL_REQUEST_VALIDITY,
+    MAX_TASK_REQUEST_VALIDITY,
     REAUTH_WINDOW,
     SYSTEM_TASK_TIMEOUT,
     TASK_TIMEOUT,
@@ -96,6 +98,7 @@ from arcilogger_core.admin.contract import (
     StepEntry,
     StepState,
     SystemTaskCheck,
+    TaskKind,
     TaskParams,
     TaskResult,
     UploadKind,
@@ -106,6 +109,7 @@ from arcilogger_core.admin.contract import (
     check_id,
     new_id,
     parse_document,
+    task_queue,
 )
 from arcilogger_core.admin.dispatch import (
     new_task_request,
@@ -174,6 +178,17 @@ CLEANUP_INTERVAL: Final = timedelta(minutes=1)
 SYNC_WAIT_MAX: Final = timedelta(minutes=10)
 #: A collector status file older than this means a stopped collector (counts as acknowledged).
 COLLECTOR_FRESH: Final = timedelta(seconds=60)
+#: How long a task may still run after it took a request (the execution time limits of the Seal
+#: and Requests tasks): a request the task took is waited for until it expired plus this.
+TASK_RUN_LIMITS: Final[Mapping[TaskKind, timedelta]] = {
+    "seal": timedelta(hours=2),
+    "credit": timedelta(minutes=15),
+    "tsa_test": timedelta(minutes=15),
+    "replica_test": timedelta(minutes=15),
+}
+#: After a request no task took within ``TASK_TIMEOUT`` is withdrawn, how long the agent still
+#: looks for a task that read it just before (its ledger entry follows the read at once).
+WITHDRAW_GRACE: Final = timedelta(seconds=30)
 #: The address the trial e-mail links to when the server's own address is not known.
 DEFAULT_WEB_URL: Final = "https://arcilogger.internal"
 _PATH: Final = re.compile(r"^[a-z_]+(\.[a-z0-9][a-z0-9_-]*)*$")
@@ -420,11 +435,8 @@ class Agent:
             self.layout.journal,
         ):
             folder.mkdir(parents=True, exist_ok=True)
-        files = self._files()
-        if files.config is not None:
-            self._data_dir = files.config.data_dir
-            self.data = Layout(files.config.data_dir)
-        else:
+        files = self._files()  # takes the data root when the configuration loads
+        if files.config is None:
             log.error("configuration %s does not load: %s", self.installation.toml, files.error)
         self._java_candidates = self._java()
         self._local_addresses = self._addresses()
@@ -612,7 +624,17 @@ class Agent:
         problem = self._fixed_paths(config)
         if problem is not None:
             return _Files(toml, secrets, None, stored, problem)
+        if self.data is None:
+            self._adopt(config)
         return _Files(toml, secrets, config, stored)
+
+    def _adopt(self, config: Config) -> None:
+        """The data root (task requests and results, the collector's status), taken from the
+        first configuration that passes the location check: at start, or later when the agent
+        started while ``arcilogger.toml`` did not load. From then on it no longer moves."""
+        self._data_dir = config.data_dir
+        self.data = Layout(config.data_dir)
+        log.info("data root: %s", config.data_dir)
 
     def _fixed_paths(self, config: Config) -> str | None:
         """Nothing the browser can change may move the secret store or the data root (contract
@@ -1065,6 +1087,8 @@ class Agent:
         now = self.now()
         jar = check.jar_hold
         if jar is not None:
+            # A known release is promoted by ApplySystem at once; any other client is never
+            # applied on time alone (D0-16): its time is when "approve-jar" is first allowed.
             known = find_release(jar) is not None
             effective = now if known else now + timedelta(hours=policy.jar_hold_hours)
         else:
@@ -1222,7 +1246,10 @@ class Agent:
             )
         number = outcome.version.n if outcome.version else None
         transition = (outcome.from_sha256, outcome.to_sha256)
-        written = outcome.state == "applied" or outcome.code == "acl_drift"
+        written = outcome.state == "applied"
+        # In force, but the agent can no longer write a file (e.g. after a console ``secret
+        # set``): applied with a critical warning; the next change fails until it is repaired.
+        drift = written and outcome.code == "acl_drift"
         conflict = outcome.state == "conflict"  # the files changed while it was probed
         applicable: dict[Step, bool] = {
             "backup": True,
@@ -1264,22 +1291,25 @@ class Agent:
                 rolled_back=outcome.rolled_back,
             )
         progress.step("journal", "done")
-        if written:
+        state: State = outcome.state
+        # The status before txn.json goes: a stop in between is recovered at the next start and
+        # reported again (with the journal line written once), never left at "applying".
+        progress.write(
+            state,
+            error=None if drift else outcome.code,
+            version=version,
+            warnings=[*finish.warnings, "write_access_lost"] if drift else finish.warnings,
+            rolled_back=outcome.rolled_back,
+        )
+        if written or outcome.state == "needs_attention":
             self.applier.commit()
+        if written:
             update_secret_meta(
                 self.layout,
                 [record.name for record in finish.secrets],
                 changed_by=f"web:{finish.requested_by.username}",
                 at=self.now(),
             )
-        state: State = outcome.state
-        progress.write(
-            state,
-            error=outcome.code,
-            version=version,
-            warnings=finish.warnings,
-            rolled_back=outcome.rolled_back,
-        )
         short = request_id[:8]
         if outcome.state == "applied":
             self._event(
@@ -1296,6 +1326,14 @@ class Agent:
                 )
             if finish.alert:
                 self._config_alert(finish.section, finish.fields, finish.alert, request_id)
+            if drift:
+                self._alert(
+                    "R20-admin",
+                    "critical",
+                    "Yönetim hizmeti ayar dosyalarına yazamıyor [the administration service can "
+                    f"no longer write the configuration]: acl_drift, sürüm [version] {number}",
+                    {"code": "acl_drift", "request": request_id, "version": number},
+                )
             if finish.system_sync:
                 self._event(Event.SYSTEM_SYNC_REQUESTED, "info", "sistem eşitlemesi [system sync]")
                 if finish.sources:
@@ -1379,21 +1417,50 @@ class Agent:
         self._finish(txn.request, outcome, finish, progress, journaled=earlier is not None)
         return outcome
 
-    def _outcome_line(self, request_id: str, since: datetime) -> JournalLine | None:
+    def _outcome_line(
+        self, request_id: str, since: datetime, *, final: bool = False
+    ) -> JournalLine | None:
         """The journal line that reported the apply of ``request_id`` (``applied``,
-        ``recovered`` or ``needs_attention``), looked for from the day of ``since`` on."""
+        ``recovered`` or ``needs_attention``; ``final``: a ``failed`` line too), looked for
+        from the day of ``since`` on."""
+        states = _APPLY_OUTCOMES | {"failed"} if final else _APPLY_OUTCOMES
         today = site_day(self.now())
         day = max(min(site_day(since), today), today - timedelta(days=JOURNAL_DAYS))
         while day <= today:
             for line in read_journal(self.layout, day):
-                if line.request == request_id and line.state in _APPLY_OUTCOMES:
+                if line.request == request_id and line.state in states:
                     return line
             day += timedelta(days=1)
         return None
 
+    def _report_journaled(self, progress: _Progress, line: JournalLine) -> None:
+        """The status of a request whose outcome the journal holds (written once only)."""
+        version = (
+            VersionRef.model_validate(
+                {"number": line.version, "from": line.config_sha256.from_,
+                 "to": line.config_sha256.to}
+            )
+            if line.version is not None and line.config_sha256 is not None
+            else None
+        )  # fmt: skip
+        if line.state in ("applied", "recovered"):
+            drift = line.code == "acl_drift"
+            progress.write(
+                "applied", version=version, warnings=["write_access_lost"] if drift else ()
+            )
+        elif line.state == "needs_attention":
+            progress.write("needs_attention", error=line.code, version=version)
+        else:
+            progress.write(
+                "conflict" if line.code == "conflict" else "failed",
+                error=line.code or "interrupted",
+                rolled_back=line.rolled_back,
+            )
+
     def _abandoned_work(self) -> None:
         """Work folders of requests the agent took but never finished (it stopped): failed
-        ``interrupted`` (the transaction itself was recovered first)."""
+        ``interrupted`` (the transaction itself was recovered first), unless the journal
+        already reports the outcome (the stop came between its line and the status)."""
         if not self.layout.work.is_dir():
             return
         pending = {item.id for item in read_pending(self.layout)}
@@ -1404,6 +1471,11 @@ class Agent:
             # The states the agent passes through; an apply in progress was recovered above.
             if status is not None and status.state in ("received", "probing", "applying"):
                 progress = _Progress(self, status.id, status.kind, status.section)
+                line = self._outcome_line(status.id, status.updated_at, final=True)
+                if line is not None:
+                    self._report_journaled(progress, line)
+                    remove_tree(folder)
+                    continue
                 progress.write("failed", error="interrupted")
                 requester = self._requester(status.id)
                 if requester is not None:
@@ -1546,9 +1618,9 @@ class Agent:
 
     def _revert(self, request: AdminRequest) -> None:
         """``config.revert``: the inverse ops of the target's paths from its version, through
-        the same rules (contract 2.7.2). The version is saved before the files are replaced,
-        so a request that failed, was rolled back or needs attention has one as well: only a
-        target its journal reports applied is reverted."""
+        the same rules but without a connection test (contract 2.7.2). The version is saved
+        before the files are replaced, so a request that failed, was rolled back or needs
+        attention has one as well: only a target its journal reports applied is reverted."""
         target = request.options.target
         requester = Requester(user_id=request.actor.user_id, username=request.actor.username)
         entry = self.applier.versions.for_request(target) if target else None
@@ -1578,6 +1650,9 @@ class Agent:
                 "kind": "config.apply",
                 "section": section,
                 "ops": [op.model_dump(mode="json") for op in ops],
+                # The values were in force before: they are not tested again (an e-mail
+                # server's revert would otherwise need a trial recipient nobody can give it).
+                "probe": False,
             }
         )
         self._config(apply, work=None, status_kind="config.revert")
@@ -1657,12 +1732,8 @@ class Agent:
         requester = Requester(user_id=request.actor.user_id, username=request.actor.username)
         params = TaskParams(day=request.options.day) if task_kind == "seal" else TaskParams()
         task = new_task_request(task_kind, origin=request.id, params=params, now=self.now())
-        try:
-            if self.data is None:
-                raise OSError("the data root is not known (the configuration did not load)")
-            key = load_signing_key(self.layout.keys, "agent")
-            write_task_request(self.data, task, key)
-        except (KeysError, OSError, ValueError) as exc:
+
+        def failed(exc: Exception) -> None:
             log.error("task request for %s not written: %s", request.id, exc)
             progress.step("dispatch", "failed", "write_failed")
             progress.write("failed", error="write_failed")
@@ -1674,7 +1745,16 @@ class Agent:
                 requested_by=requester,
                 code="write_failed",
             )
+
+        try:
+            if self.data is None:
+                raise OSError("the data root is not known (the configuration did not load)")
+            key = load_signing_key(self.layout.keys, "agent")
+        except (KeysError, OSError) as exc:
+            failed(exc)
             return
+        # The wait and the status first: whatever the task does with the request is folded in
+        # (a stop before the request file is written ends in task_timeout, and nothing ran).
         waits = read_waits(self.layout)
         wait = TaskWait(
             task=task.id,
@@ -1684,10 +1764,18 @@ class Agent:
             requested_by=requester,
         )
         write_waits(self.layout, waits.model_copy(update={"tasks": (*waits.tasks, wait)}))
-        self._event(task_event(task_kind), "info", f"görev isteği [task request] {task.id[:8]}")
         progress.step("dispatch", "done")
         progress.step("task", "pending")
         progress.write("dispatched")
+        try:
+            write_task_request(self.data, task, key)
+        except (OSError, ValueError) as exc:
+            waits = read_waits(self.layout)
+            others = tuple(item for item in waits.tasks if item.task != task.id)
+            write_waits(self.layout, waits.model_copy(update={"tasks": others}))
+            failed(exc)
+            return
+        self._event(task_event(task_kind), "info", f"görev isteği [task request] {task.id[:8]}")
 
     def _fold_waits(self) -> None:
         waits = read_waits(self.layout)
@@ -1699,7 +1787,7 @@ class Agent:
             result = read_result(self.data, wait.task, wait.kind) if self.data else None
             if result is not None:
                 self._fold(wait, result)
-            elif now - wait.dispatched_at > TASK_TIMEOUT:
+            elif self._no_result(wait, now):
                 self._fold(wait, None)
             else:
                 tasks.append(wait)
@@ -1707,8 +1795,33 @@ class Agent:
         if len(tasks) != len(waits.tasks) or len(syncs) != len(waits.syncs):
             write_waits(self.layout, WaitsFile(tasks=tuple(tasks), syncs=tuple(syncs)))
 
+    def _no_result(self, wait: TaskWait, now: datetime) -> bool:
+        """No result will come for ``wait``. A request no task took within ``TASK_TIMEOUT`` is
+        withdrawn (the agent deletes its own file), so ``timed_out`` means that nothing ran; a
+        request the task took (its ledger entry ``seen\\<id>``) is waited for while the task
+        may still run it: a Seal run that takes long seals the day later, and its result is
+        still folded in."""
+        waited = now - wait.dispatched_at
+        if waited <= TASK_TIMEOUT:
+            return False
+        if self.data is None:
+            return True
+        validity = MAX_SEAL_REQUEST_VALIDITY if wait.kind == "seal" else MAX_TASK_REQUEST_VALIDITY
+        if waited > validity + TASK_RUN_LIMITS[wait.kind]:
+            return True
+        try:
+            if (self.data.request_seen / wait.task).exists():
+                return False  # taken: the task is running it
+            (self.data.request_dir(task_queue(wait.kind)) / f"{wait.task}.json").unlink(
+                missing_ok=True
+            )
+        except OSError as exc:  # a task may still take it: wait until it has expired
+            log.warning("task request %s not withdrawn: %s", wait.task, exc)
+            return False
+        return waited > TASK_TIMEOUT + WITHDRAW_GRACE
+
     def _fold(self, wait: TaskWait, result: TaskResult | None) -> None:
-        """A task's result (None: none within 15 minutes) into the origin request."""
+        """A task's result (None: none came, see :meth:`_no_result`) into the origin request."""
         kind: RequestKind = next(k for k, v in ACTION_TASKS.items() if v == wait.kind)
         progress = _Progress(self, wait.origin, kind, None)
         code: str | None

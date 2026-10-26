@@ -667,7 +667,7 @@ def test_new_credentials_are_probed_with_the_credit_query(
     skipped = validate_section("tsa", config, {"password": "yeni-parola"}, untrusted)
     assert skipped.ok
     assert skipped.probes == ()
-    assert warnings(skipped) == ["probe_skipped"]
+    assert warnings(skipped) == ["credit_query_skipped"]  # says why
 
 
 # -- tsa: roots and legal fingerprints -------------------------------------------------------------

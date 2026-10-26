@@ -1086,7 +1086,7 @@ def _tsa_candidate(run: _Run, candidate: Config) -> None:
         if executables_trusted(candidate, context.anchors):
             run.probe("credit")
         else:
-            run.warn("probe_skipped", "tsa.zamane_jar")  # no client to ask with yet
+            run.warn("credit_query_skipped", "tsa.zamane_jar")  # no client to ask with yet
 
 
 def _smtp(run: _Run) -> None:

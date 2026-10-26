@@ -199,13 +199,16 @@ def test_a_restore_that_fails_needs_attention_and_keeps_the_version(installed: I
     assert outcome.version is not None
     assert tool.versions.read(outcome.version.n) == (plan.old_toml, plan.old_secrets)
     assert pair(installed) == (plan.new_toml, plan.new_secrets)  # never a mix
+    assert read_txn(installed.layout) is not None  # until the caller journaled it
+    tool.commit()
     assert read_txn(installed.layout) is None
 
 
 def test_lost_write_access_is_acl_drift(installed: Installed) -> None:
+    """The files were replaced and verified: the change is in force, with the code."""
     plan = make_plan(installed)
     outcome = applier(installed, writable=lambda path: False).apply(plan)
-    assert (outcome.state, outcome.code) == ("needs_attention", "acl_drift")
+    assert (outcome.state, outcome.code) == ("applied", "acl_drift")
     assert pair(installed) == (plan.new_toml, plan.new_secrets)
 
 

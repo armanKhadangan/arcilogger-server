@@ -285,7 +285,14 @@ def cmd_versions_restore(installation: Installation, number: int) -> int:
             f"Sürüm {number} geri yüklendi [restored]; önceki hali sürüm {saved} "
             f"[the previous pair is version {saved}]."
         )
+        if outcome.code == "acl_drift":
+            print(
+                "Not: ayar dosyalarından biri artık yazılamıyor; Set-ArciVaultAcl.ps1 betiğini "
+                "çalıştırın [a configuration file is no longer writable: run Set-ArciVaultAcl.ps1]."
+            )
         return 0
+    if outcome.state == "needs_attention":
+        applier.commit()  # not journaled: the printed code is the report
     print(f"Geri yükleme başarısız [restore failed]: {outcome.code}", file=sys.stderr)
     return 1
 

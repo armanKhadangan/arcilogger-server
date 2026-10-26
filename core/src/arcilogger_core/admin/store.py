@@ -513,14 +513,16 @@ def remove_txn(layout: AdminLayout) -> None:
 
 
 def prune_statuses(layout: AdminLayout, now: datetime) -> int:
-    """Request status files older than 30 days (``agent.json``, ``secret-meta.json`` and the
-    alert file stay)."""
+    """Request status files older than 30 days (``agent.json``, ``secret-meta.json``, the
+    alert file and the status of a change still held stay: a Zamane client may wait for its
+    approval longer than that)."""
     removed = 0
     if not layout.status.is_dir():
         return 0
     limit = (now - timedelta(days=STATUS_DAYS)).timestamp()
+    held = {f"{item.id}.json" for item in read_pending(layout)}
     for path in layout.status.glob("*.json"):
-        if path.name in {layout.agent_status.name, layout.secret_meta.name}:
+        if path.name in {layout.agent_status.name, layout.secret_meta.name} | held:
             continue
         try:
             if path.stat().st_mtime < limit:

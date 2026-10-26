@@ -16,14 +16,17 @@ bytes were built and validated already (steps 1-5, the agent):
     (:func:`~arcilogger_core.admin.winapi.replace_file`; a sharing violation is retried for up to
     10 seconds). ``arcilogger.toml`` is the commit point;
 11. verified: both hashes as planned, ``load_config`` succeeds, every changed secret decrypts;
-12. ``txn.json`` removed (the caller writes the journal line first: :meth:`Applier.commit`).
+12. ``txn.json`` removed (the caller writes the journal line first: :meth:`Applier.commit`;
+    also after a ``needs_attention`` outcome).
 
 A failure in steps 8-11 restores both files from the version of step 7 (replaced again),
 removes the files step 9 installed and verifies the old pair: ``failed`` with
 ``rolled_back``; when that restore fails too: ``needs_attention`` (``rollback_failed``) and the
 version folder for ``versions restore``. The services never see a partial file: every replace is
-atomic and the watchers keep their last valid configuration. After a successful apply the agent
-checks that it can still open both files for writing (``acl_drift``).
+atomic and the watchers keep their last valid configuration. After a successful apply (and a
+recovered one) the writer checks that it can still open both files for writing: if not, the
+change is ``applied`` all the same, with the code ``acl_drift`` (the next change would fail
+until the rights are repaired, ``Set-ArciVaultAcl.ps1``).
 
 :meth:`Applier.recover` runs at start-up before any new request: stage ``prepared`` — the
 temporary files are discarded (``interrupted``); stage ``written`` — the file hashes decide:
@@ -131,8 +134,8 @@ class ChangePlan:
 @dataclass(frozen=True)
 class ApplyOutcome:
     state: Outcome
-    #: ``write_failed``, ``verify_failed``, ``rollback_failed``, ``acl_drift``, ``interrupted``,
-    #: ``conflict``.
+    #: ``write_failed``, ``verify_failed``, ``rollback_failed``, ``interrupted``, ``conflict``;
+    #: with ``applied`` only ``acl_drift`` (in force, but a file is no longer writable).
     code: str | None
     version: VersionEntry | None
     rolled_back: bool
@@ -351,23 +354,21 @@ class Applier:
             return self._rollback(txn, entry, code, str(exc), replaced=replaced)
         finally:
             self._discard_temps(plan.id)
-        if not self.writable():
-            return ApplyOutcome(
-                "needs_attention",
-                "acl_drift",
-                entry,
-                False,
-                old.toml_sha256,
-                new.toml_sha256,
-                reason="a configuration file is no longer writable",
-                txn=txn,
-            )
         return ApplyOutcome(
-            "applied", None, entry, False, old.toml_sha256, new.toml_sha256, txn=txn
+            "applied", self._drift(), entry, False, old.toml_sha256, new.toml_sha256, txn=txn
         )
 
+    def _drift(self) -> str | None:
+        """``acl_drift`` when a configuration file is no longer writable after an apply (the
+        files were replaced and verified: the change is in force)."""
+        if self.writable():
+            return None
+        log.critical("a configuration file is no longer writable: repair its rights")
+        return "acl_drift"
+
     def commit(self) -> None:
-        """Step 12: the apply is complete (after its journal line was written)."""
+        """Step 12: the apply is complete, or needs attention, and its journal line was
+        written."""
         remove_txn(self.layout)
 
     def _rollback(
@@ -384,8 +385,9 @@ class Applier:
                 self._restore(txn)
             self._remove_files(txn.files)
         except (OSError, ApplyError, ValueError) as exc:
+            # txn.json stays until the caller journaled this (:meth:`commit`): a stop before
+            # that is judged again by :meth:`recover` at the next start.
             log.critical("restoring the previous configuration (%s) failed: %s", txn.id, exc)
-            remove_txn(self.layout)
             return ApplyOutcome(
                 "needs_attention",
                 "rollback_failed",
@@ -448,7 +450,9 @@ class Applier:
                 self.verify(txn.new, txn.secret_names)
             except (ApplyError, OSError) as exc:
                 return self._rollback(txn, entry, "verify_failed", str(exc), replaced=True)
-            return ApplyOutcome("applied", None, entry, False, old, new, txn=txn, recovered=True)
+            return ApplyOutcome(
+                "applied", self._drift(), entry, False, old, new, txn=txn, recovered=True
+            )
         if on_disk == old:
             try:
                 self._restore(txn)
