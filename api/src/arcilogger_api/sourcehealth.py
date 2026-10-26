@@ -525,6 +525,8 @@ def gaps(
         )
     wanted = set(names)
     for day in (today - timedelta(days=n) for n in range(1, GAP_DAYS + 1)):
+        if not layout.token(day).is_file():
+            continue  # not sealed (a manifest without its time stamp is a failed attempt's)
         manifest = MANIFESTS.get(layout.manifest(day))
         if manifest is None or manifest.get("day") != day.isoformat():
             continue
