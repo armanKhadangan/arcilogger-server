@@ -87,9 +87,9 @@ previous one when a new one does not load).
 **Browser administration** ([ADR-0014](adr/0014-browser-administration.md),
 [SETTINGS.md](SETTINGS.md)): browser → ArciApi (validates, signs, writes `admin\inbox`) →
 ArciAdmin (checks again, writes the configuration, keeps a version) → the services reload
-(`configwatch`: collector and ingest ≤ 5 s for `[[sources]]`, the API ≤ 2 s, the worker ≤ 60 s)
-→ Event 4101 → ApplySystem (firewall, time, Zamane clients). The programs the tasks run are
-checked by `arcilogger_core.execpolicy`.
+(`configwatch`: collector and ingest ≤ 5 s for `[[sources]]`, the API and the worker within a
+few seconds) → Event 4101 → ApplySystem (firewall, time, Zamane clients). The programs the tasks
+run are checked by `arcilogger_core.execpolicy`.
 
 The Python services run `venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_<package> …` and the
 tasks `python.exe -I -m …` (isolated: no `PYTHON*` environment variable can load other code into

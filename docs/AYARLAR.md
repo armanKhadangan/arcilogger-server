@@ -14,22 +14,23 @@ Masaüstü gerekmez.
 
 ## 1. Ne tarayıcıdan değişir?
 
-**Ayarlar** sayfaları yalnızca **Yönetici** rolüne açıktır (`settings.manage`; **Şimdi mühürle**
-ve **Kontör sorgula** için `seal.manage`). Her sayfa yalnızca aşağıdaki değerleri değiştirir;
-başka her alan kilit simgesiyle gösterilir ("Bu değer güvenlik nedeniyle yalnızca sunucu
-konsolundan değiştirilebilir", bölüm 5).
+**Ayarlar** sayfaları yalnızca **Yönetici** rolüne açıktır (`settings.manage`; **Kaynaklar** için
+ayrıca `sources.manage`). **Mühürleme** sayfasındaki **Şimdi mühürle** ve **Kontör sorgula**
+`seal.manage` ister. Her sayfa yalnızca aşağıdaki değerleri değiştirir; başka her alan kilit
+simgesiyle gösterilir ("Bu değer güvenlik nedeniyle yalnızca sunucu konsolundan
+değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 10'dadır.
 
-| Sayfa | Tarayıcıdan değişen | Bilerek konsolda kalan |
+| Sayfa (adres) | Tarayıcıdan değişen | Bilerek konsolda kalan |
 |---|---|---|
-| **Genel** | kuruluş adı (`site_name`), yerel ve yedek saat kaynağı (`[clock] ntp_server`, `[clock] fallback_server`), saat uyarı eşiği (`[clock] alert_offset_ms`) | `[clock] ntp_port` |
-| **Uygulama ayarları** | veritabanındaki bütün ayarlar (iş saatleri, tatiller, gizlilik, kullanım, uyarı e-postası alıcıları …) | — |
-| **Kamu SM** | test / üretim sunucusu, Java (sunucuda bulunanlardan biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme), yasal kök parmak izleri (yalnızca kurulu kökler için ekleme), müşteri numarası ve parola, kontör uyarı eşiği, zaman aşımı; `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port, özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu |
-| **Kaynaklar** | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
-| **E-posta** | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı, CA dosyası yükleme), SMTP parolası, uyarı e-postası ayarları; **Test e-postası gönder** | — |
-| **Replika** | açık/kapalı, hedef (yalnızca `\\SUNUCU\paylaşım`), kullanıcı, parola; **Bağlantıyı test et** | yerel bir klasör hedefi |
-| **Saklama ve imha** | açık/kapalı, gün sayısı (en az 730) | — |
-| **Yedekleme** | açık/kapalı, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb` | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
-| **Geçmiş** | isteklerin listesi ve durumları, sürümler, denetim kaydına bağlantı | — |
+| **Genel** (`/settings/general`) | kuruluş adı (`site_name`), yerel ve yedek saat kaynağı (`[clock] ntp_server`, `[clock] fallback_server`), saat sapması uyarı eşiği (`[clock] alert_offset_ms`); son ölçülen sapma gösterilir, yeni saat sunucusu kaydetmeden önce denenir | `[clock] ntp_port` |
+| **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
+| **Kamu SM** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği ve zaman aşımı; `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port, özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4) |
+| **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
+| **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5) | — |
+| **Replika** (`/settings/replica`) | açık/kapalı, hedef (yalnızca `\\SUNUCU\paylaşım`), kullanıcı, parola; kaydederken bağlantı denenir; **Bağlantıyı test et** (kayıtlı hedefle, dakikada en çok 1) | yerel bir klasör hedefi |
+| **Saklama** (`/settings/retention`) | süresi dolan günleri silme açık/kapalı, saklama süresi (en az 730 gün); silinecek gün sayısı önceden gösterilir ve yazılarak onaylanır | — |
+| **Yedekleme** (`/settings/backup`) | açık/kapalı, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; son yedeğin ayrıntıları bu sürümde sayfada gösterilmez, başarısız bir yedek `R20-backup` uyarısıdır | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
+| **Değişiklik geçmişi** (`/settings/history`) | isteklerin listesi ve durumları, değişiklikleri, denetim kaydına bağlantı; **İptal et**, **Geri al**; yapılandırma sürümleri; **Tanılama paketini indir** (destek için ZIP, gizli bilgi içermez) | bir sürümü geri yüklemek (`versions restore`, sayfa komutu gösterir) |
 
 Hiçbir sayfa şunları değiştirmez: `data_dir`, `secrets_dir`, `[database]`, `[api]`, `[ingest]`,
 `[worker]`, `[seal]`, veritabanı parolası, kullanım takma ad anahtarı. Bunlar kurulumun ve
@@ -40,24 +41,30 @@ sessiz kaynak uyarısı (R15) ve mühürlemenin boşluk denetimi onu artık bekl
 yine de gelen bir ileti **kaydedilir** (ham kayıt hiçbir zaman atılmaz). Kapalı kaynak lisansın
 kaynak sayısında sayılmaya devam eder.
 
-**Gizli değerler** (Kamu SM parolası, SMTP ve replika parolası) hiçbir zaman ekrana gelmez:
-alanlar "Kayıtlı ✓" ve son değişiklik zamanını gösterir, **Değiştir** ile yenisi yazılır. Son 5 dakika
-içinde parolanın yeniden girilmesi şunlar için istenir: Kamu SM ayarları (kontör eşiği ve zaman
-aşımı dışında; müşteri numarası ve parola dahil), her SMTP ve replika değişikliği, saklama
-ayarları, saat kaynağı, yedeklemeyi kapatmak, bir log kaynağını kapatmak ya da silmek
+**Gizli değerler** (Kamu SM müşteri numarası ve parolası, SMTP ve replika parolası) hiçbir zaman
+ekrana gelmez: alanlar "Kayıtlı ✓" ve son değişiklik zamanını gösterir, **Değiştir** ile yenisi
+yazılır. Son 5 dakika içinde parolanın yeniden girilmesi şunlar için istenir: Kamu SM ayarları
+(kontör eşiği ve zaman aşımı dışında; müşteri numarası ve parola dahil), her SMTP, replika,
+saklama ve yedekleme değişikliği, saat kaynağı ve uyarı eşiği, bir log kaynağını kapatmak ya da
+silmek; oturum ve parola (`auth.*`), gizlilik (`privacy.*`), saklama süreleri ve anonim rolün
+takma adlandırılmasıyla ilgili uygulama ayarları, uyarı e-postası alıcıları ve en düşük önem
+derecesi; bekletilen bir değişikliğin iptali, **Geri al** ve tanılama paketi
 ([SECURITY.md](SECURITY.md) bölüm 7).
 
 ## 2. Nasıl çalışır?
 
-1. **Kaydet**'e basınca API değişikliği denetler (alan sınırları, Kamu SM ve SMTP bağlantısı
-   gerekiyorsa önce denenir) ve imzalı bir istek olarak `C:\ProgramData\ARCILOGGER\admin\inbox`
-   klasörüne bırakır. API yapılandırma dosyasına, gizli depoya ve sertifika klasörlerine
-   **yazamaz**.
+1. Sayfa önce değişikliği gözden geçirmek için gösterir (değişiklikler, etkileri, uyarılar;
+   API'nin kuru denemesi, hiçbir şey kuyruğa alınmaz). **Kaydet**'e basınca API değişikliği
+   aynı kurallarla denetler (alan sınırları, yetki, gerekiyorsa parolanın yeniden girilmesi) ve
+   imzalı bir istek olarak `C:\ProgramData\ARCILOGGER\admin\inbox` klasörüne bırakır. API
+   yapılandırma dosyasına, gizli depoya ve sertifika klasörlerine **yazamaz**.
 2. **ArciAdmin** hizmeti (`NT SERVICE\ArciAdmin`, "ARCILOGGER Yönetim (Admin)") isteğin imzasını,
-   süresini ve kurallarını yeniden denetler, önceki sürümü saklar (`admin\versions`), değişikliği
-   yazar ve hizmetlerin yeni ayarı aldığını izler. Hizmetler değişikliği yeniden başlatılmadan
-   alır: toplayıcı ve ingest log kaynaklarını 5 saniye içinde, API 2 saniye, worker 1 dakika
-   içinde; zamanlanmış görevler bir sonraki çalışmalarında.
+   süresini ve kurallarını yeniden denetler; gerekiyorsa yeni değerlerle bağlantıyı önce dener
+   (Kamu SM kontör sorgusu, deneme e-postası, replika paylaşımı, saat sunucusu: "Bağlantı
+   deneniyor"), önceki sürümü saklar (`admin\versions`), değişikliği yazar ve hizmetlerin yeni
+   ayarı aldığını izler. Hizmetler değişikliği yeniden başlatılmadan birkaç saniye içinde alır
+   (toplayıcı ve ingest log kaynaklarını, API ve worker kendi okudukları bölümleri); zamanlanmış
+   görevler bir sonraki çalışmalarında.
 3. Güvenlik duvarı, Windows Saati ve Zamane istemcisinin etkinleştirilmesi **SYSTEM** hesabıyla
    çalışan `\ARCILOGGER\ApplySystem` görevinin işidir. Görev istekten hiçbir veri almaz: her
    şeyi doğrulanmış `arcilogger.toml` dosyasından ve yalnızca yöneticilerin yazabildiği
@@ -66,7 +73,10 @@ ayarları, saat kaynağı, yedeklemeyi kapatmak, bir log kaynağını kapatmak y
    duvarında yalnızca `ARCILOGGER Syslog UDP/TCP` kuralları (sıkı giden kipte `ARCILOGGER Out …`
    kuralları) yerinde güncellenir; başka bir kural, profil, 443, 3389 ya da 5985 değişmez.
    Kaynak eklenince 514 izni, toplayıcı yeni kaynağı tanıdıktan sonra açılır; kaynak kapanınca
-   ya da silinince hemen kapanır.
+   ya da silinince hemen kapanır. Windows Saati'nin eş listesini görev ilk çalışmasında da
+   `[clock]` değerlerinden kurar, kurulum `-SkipTimeSetup` ile yapılmış olsa bile; saati başka bir
+   yolla (ör. etki alanı) yönetilen bir sunucuda tarayıcı yönetimini `-DisableBrowserAdministration`
+   ile kapatın (bölüm 6).
 4. **Şimdi mühürle** (Mühürleme sayfası) ve **Kontör sorgula** de aynı kanaldan geçer: ArciAdmin
    imzalı bir görev isteği yazar, `\ARCILOGGER\Seal` görevi (olay 4110) ya da `\ARCILOGGER\Requests`
    görevi (olay 4111, LOCAL SERVICE) işi yapar. Mühürleme her zamanki gibi kendi görevinde
@@ -78,21 +88,27 @@ ayarları, saat kaynağı, yedeklemeyi kapatmak, bir log kaynağını kapatmak y
 ## 3. Durum göstergesi ve istek durumları
 
 Ayarlar başlığındaki gösterge ArciAdmin'in durumunu söyler: **Yönetim hizmeti: çalışıyor /
-gecikiyor / çalışmıyor**. Hizmet çalışmıyorsa ya da tarayıcı yönetimi kapatıldıysa (bölüm 6)
-makine ayarları salt okunurdur ve sayfa konsoldaki yolu gösterir; uygulama ayarları (veritabanı)
-her zaman değiştirilebilir.
+gecikiyor / çalışmıyor / kapalı** (son yanıt 30 saniyeden yeni / 2 dakikadan yeni / daha eski ya
+da hiç / tarayıcı yönetimi kapalı). Hizmet çalışmıyorsa ya da tarayıcı yönetimi kapatıldıysa
+(bölüm 6) makine ayarları salt okunurdur ve sayfa konsoldaki yolu gösterir; uygulama ayarları
+(veritabanı), test e-postası ve kiraların yeniden oluşturulması (worker) her zaman çalışır.
 
 Bir isteğin durumu sayfada izlenir. Önemli olanlar:
 
 | Durum | Anlamı | Ne yapılır |
 |---|---|---|
+| **Yazıldı, hizmetler yüklüyor** | dosya yazıldı, hizmetler yeni ayarı alıyor | bekleyin (en çok 2 dakika) |
 | **Uygulandı** | bütün hizmetler yeni ayarla çalışıyor | — |
+| **Tamamlandı** | bir işlem (mühürleme, kontör sorgusu, test) bitti; sonucu istekte | — |
 | **Bekletiliyor** | korumalı bir değişiklik, geri sayım bitince uygulanır (bölüm 4) | gerekirse **İptal et** |
 | **Kısmen uygulandı** | bir hizmet yeni ayarı 2 dakikada almadı ya da güvenlik duvarı güncellenemedi | Hizmetler ve **Güvenlik** sayfası; ApplySystem bir sonraki çalışmasında yeniden dener |
-| **Uygulanmadı, önceki ayarlar geçerli** | bir adım başarısız oldu, ArciAdmin önceki sürümü geri koydu | sayfadaki nedeni okuyun, düzeltip yeniden kaydedin |
+| **Bağlantı denemesi başarısız, hiçbir şey değişmedi** | yeni değerlerle sunucuya bağlanılamadı | sayfadaki nedeni okuyun, değeri düzeltin |
+| **Uygulanmadı, önceki ayarlar geçerli** | bir adım başarısız oldu, ArciAdmin önceki sürümü geri koydu | sayfadaki nedeni okuyun, düzeltip yeniden kaydedin; uygulanmış bir değişiklik için **Geri al** |
 | **Elle müdahale gerekiyor** | geri koyma da başarısız oldu | bölüm 8; sürüm numarasını not edin |
 | **Çakışma: ayarlar başka yerden değişti** | dosya bu arada elle ya da başka bir istekle değişti | sayfayı yenileyip yeniden kaydedin |
+| **Reddedildi** | ArciAdmin isteği kabul etmedi (imza, süre, kural) | nedeni okuyun; imza ya da kurulum hatası `R20-admin` uyarısıdır |
 | **Süresi doldu, hiçbir şey değişmedi** | ArciAdmin isteği zamanında almadı | hizmetin durumuna bakın (bölüm 8) |
+| **Zaman aşımı** | görev (Seal, Requests) 15 dakikada sonuç yazmadı | görevin son sonucuna bakın (Görev Zamanlayıcı, `\ARCILOGGER\`) |
 
 Kısa istek numarası destek için sayfada yazar.
 
@@ -108,7 +124,8 @@ uyarısı (e-posta ayarlıysa e-postayla) ve Windows olay günlüğü kaydı (ol
 | bilinen bir sürüm olmayan bir Zamane istemcisi | konsolda `approve-jar` ile, en erken `jar_hold_hours` (varsayılan 24) saat sonra |
 
 Bekleme süresi kurulumda `-AdminChangeHoldHours` ve `-ZamaneHoldHours` ile seçilir (bölüm 6).
-Bekleyen bir değişiklik **Geçmiş** sayfasında ya da kendi sayfasında **İptal et** ile durdurulur.
+Bekleyen bir değişiklik **Değişiklik geçmişi** sayfasında ya da kendi sayfasında **İptal et** ile
+durdurulur.
 İlk kurulum adımları beklemez (replikayı ilk kez açmak, test → üretim geçişi).
 
 **Zamane istemcisi:** Kamu SM sihirbazında yüklenen dosya önce `zamane\web` klasöründe bekler ve
@@ -183,7 +200,8 @@ tarayıcı bunu bir sonraki kayıtta fark eder ("Çakışma") ve üzerine yazmaz
 değişiklikler de canlı yüklenir: log kaynakları (toplayıcı, ingest), API ve worker'ın okuduğu
 bölümler yeniden başlatma gerektirmez. Canlı yüklenmeyen bölümler (`[database]`, `[api]`,
 `[collector]`, `[ingest]`, `[worker]`, `data_dir`, `secrets_dir`) için ilgili hizmeti yeniden
-başlatın; sayfa bunu "Elle yapılan bir değişiklik henüz yüklenmedi" diye gösterir.
+başlatın; sayfa bunu "Yeniden başlatma bekleyen değişiklik" diye gösterir. Elle yapılan bir
+değişiklik **Değişiklik geçmişi** sayfasında listelenmez ("Ayar dosyası elle değiştirilmiş").
 Tarayıcı ilk kaynak değişikliğinde bütün `[[sources]]` tablolarını işaretli bir bölüme taşır;
 o tabloların içindeki yorum satırları bu sırada kaybolur (önceki dosya `admin\versions`
 klasöründe kalır).
@@ -202,8 +220,9 @@ bilgileri) sonra bunu kendisi yapar.
 $py  = "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe"
 $cfg = "C:\ProgramData\ARCILOGGER\arcilogger.toml"
 Get-Service ArciAdmin                                    # çalışıyor mu?
-& $py -I -m arcilogger_core.admin status --config $cfg   # son istekler, kalp atışı
+& $py -I -m arcilogger_core.admin status --config $cfg   # kalp atışı, bekleyenler, sürümler
 & $py -I -m arcilogger_core.admin versions list --config $cfg
+& $py -I -m arcilogger_core.admin recover --config $cfg  # yarım kalan bir uygulamayı tamamla
 Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'ARCILOGGER-Admin' } -MaxEvents 20
 Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # güvenlik duvarını hemen eşitle
 ```
@@ -212,15 +231,21 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # güvenlik d
   `D:\ARCILOGGER\logs` klasöründedir. Hizmet dururken 5651 işlevleri çalışmaya devam eder; yalnızca
   tarayıcıdan ayar değişmez.
 - **"Elle müdahale gerekiyor":** sayfadaki sürüm numarasıyla önceki sürümü konsolda geri koyun
-  (`versions restore <N>`), sonra `Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker`.
+  (`& $py -I -m arcilogger_core.admin versions restore <N> --config $cfg`); hizmetler geri konan
+  dosyayı kendileri yükler. Bir hizmet "Yeniden başlatma bekleyen değişiklik" gösteriyorsa onu
+  yeniden başlatın.
+- **Destek için:** **Değişiklik geçmişi** sayfasındaki **Tanılama paketini indir** (parolanın
+  yeniden girilmesiyle): hizmetlerin durum dosyaları, son günlük satırları ve yapılandırma, gizli
+  bilgiler `***` ile değiştirilmiş; ham log, kasa ve dışa aktarım yoktur.
 - **`acl_drift`:** ArciAdmin `arcilogger.toml` ya da `secrets.json` dosyasına yazamıyor (çoğu
   zaman konsoldan bir `secret set` sonrası, bölüm 7): `Set-ArciVaultAcl.ps1` çalıştırın, sonra
   değişikliği yeniden kaydedin.
 - **Güvenlik duvarı güncellenemedi:** ApplySystem görevinin son sonucu ve olay 4106; kurulum
   `-SkipFirewall` ile yapıldıysa güvenlik duvarı ARCILOGGER'ın değildir (`firewall_not_managed`)
   ve kurallar elle tutulur.
-- Uyarılar: `R20-admin` (reddedilen bir istek, duran hizmet, başarısız eşitleme, elle müdahale)
-  ve `R20-config-change` (korumalı değişiklikler) — [UYARILAR.md](UYARILAR.md) bölüm 2.
+- Uyarılar: `R20-admin` ("Tarayıcıdan yönetim sorunu": reddedilen bir istek, duran hizmet,
+  başarısız eşitleme, geri alma, elle müdahale) ve `R20-config-change` ("Önemli yapılandırma
+  değişikliği": korumalı değişiklikler) — [UYARILAR.md](UYARILAR.md) bölüm 2.
 
 Olay kimlikleri (kaynak `ARCILOGGER-Admin`, Uygulama günlüğü): 4100/4199 hizmet başladı/duruyor,
 4101 sistem eşitlemesi istendi, 4102 uygulandı, 4103 başarısız, 4104 bekletiliyor ya da istemci
@@ -230,9 +255,44 @@ yalnızca bir görevi uyandırır; yetki imzalı istektedir.
 
 ## 9. Sahada doğrulanacaklar
 
-- ArciAdmin'in `kamusm-roots` klasörüne yalnızca kendi dosyalarını ekleyip silebildiği, bir
-  sanal hesabın Uygulama günlüğüne yazabildiği;
-- olay tetikleyicilerinin LOCAL SERVICE ve SYSTEM görevlerini uyandırdığı;
-- güvenlik duvarı kuralının yerinde güncellenirken hiçbir syslog iletisinin kaybolmadığı;
-- Kamu SM test sunucusunda kontör sorgusunun kontör harcamadığı;
+Windows CI (kurulum iş akışının uçtan uca işi, temiz bir Windows sunucuda) şunları dener:
+ArciAdmin'in `NT SERVICE\ArciAdmin` olarak çalışması ve Uygulama günlüğüne yazması, 2.2'deki
+haklar (API'nin yapılandırmaya, gizli depoya, `zamane` ve kasaya yazamaması; `arcilogger.toml`
+değiştirildikten sonra ArciAdmin'in kendi girdisinin kalması), Caddy üzerinden bir kuruluş adı
+değişikliğinin "Uygulandı" olması, tarayıcıdan eklenen bir kaynağın 2 dakika içinde iki syslog
+kuralına girmesi, **Şimdi mühürle** ile Seal görevinin (LOCAL SERVICE) bir günü mühürlemesi,
+**Kontör sorgula**'nın Requests görevinde çalışması ve ArciAdmin'siz bir sürüme geri dönüşte
+mühürlemenin sürmesi. Sahada ayrıca:
+
+- ArciAdmin'in `kamusm-roots` klasörüne yalnızca kendi dosyalarını ekleyip silebildiği;
+- olay tetikleyicilerinin görevleri 5 dakikalık çalışmayı beklemeden uyandırdığı (Seal, Requests,
+  ApplySystem);
+- güvenlik duvarı kuralı yerinde güncellenirken hiçbir syslog iletisinin kaybolmadığı (gerçek
+  cihazlarla);
+- Kamu SM test sunucusunda kontör sorgusunun kontör harcamadığı, müşteri numarasının biçimi;
 - Zamane dağıtımının biçimi (jar ya da zip) ve `NT SERVICE\ArciAdmin` altında Java'nın bulunması.
+
+## 10. Sayfaların kullandığı API uçları
+
+Web arayüzü yalnızca aşağıdaki uçları kullanır (hepsi `/api/v1` altında, oturum ve CSRF
+korumasıyla; ayrıntılı biçim: [MVP-CONTRACTS.md](MVP-CONTRACTS.md) bölüm 16). Makine ayarını
+değiştiren ya da bir işlem başlatan her uç `202` ile isteğin numarasını ve `status_url` adresini döndürür; durum
+`GET /admin/requests/{id}` ile izlenir. Her hata `code`, `message_tr` ve `message_en` taşır.
+
+| Sayfa | Uçlar |
+|---|---|
+| Durum göstergesi, bütün sayfalar | `GET /admin/status`, `GET /admin/config` (değerler, `etag`'ler, kilitli alanlar) |
+| Genel | `POST /admin/config/general/check`, `PUT /admin/config/general` |
+| Uygulama ayarları | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `POST /admin/actions/lease-rebuild` |
+| Kamu SM | `POST /admin/config/tsa/check`, `PUT /admin/config/tsa`; `POST /admin/uploads?kind=…` ardından `POST /admin/config/tsa/zamane`, `POST /admin/config/tsa/roots`, `POST /admin/config/tsa/legal-roots`; `POST /admin/actions/tsa-test` |
+| Kaynaklar | `POST /admin/config/sources/check`, `POST /admin/config/sources`, `PUT /admin/config/sources/{name}`, `DELETE /admin/config/sources/{name}` |
+| E-posta | `POST /admin/config/smtp/check`, `PUT /admin/config/smtp`, `POST /admin/config/smtp/ca`, `DELETE /admin/config/smtp/ca`; `POST /admin/actions/test-email`; uyarı e-postası ayarları `PATCH /settings` |
+| Replika | `POST /admin/config/replica/check`, `PUT /admin/config/replica`, `POST /admin/actions/replica-test` |
+| Saklama | `POST /admin/config/retention/check`, `PUT /admin/config/retention` |
+| Yedekleme | `POST /admin/config/backup/check`, `PUT /admin/config/backup` |
+| Değişiklik geçmişi | `GET /admin/requests`, `GET /admin/requests/{id}`, `DELETE /admin/requests/{id}` (İptal et), `POST /admin/requests/{id}/revert` (Geri al), `GET /admin/config/versions`, `GET /admin/diagnostics` |
+| Mühürleme | `POST /seals/{day}/seal` (Şimdi mühürle), `GET /credits`, `POST /credits/query` (Kontör sorgula) |
+
+Uygulama ayarları ve worker işlemleri (test e-postası, kiraların yeniden oluşturulması)
+veritabanından geçer ve yönetim hizmetini beklemez; diğer her şey imzalı istekle ArciAdmin'e
+gider.

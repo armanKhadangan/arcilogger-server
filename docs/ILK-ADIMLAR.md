@@ -136,16 +136,14 @@ doğrulanabilir kılmanın desteklenen bir yolu yoktur.
 ([AYARLAR.md](AYARLAR.md)) ya da konsolda [KURULUM.md](KURULUM.md) bölüm 10 — sırasıyla kök
 sertifikalar (parmak izi karşılaştırması), `secret set`, `credit`, `tsa-test`; üretimde kontör satın
 alma, üretim kimlik bilgileri, `url = "http://zd.kamusm.gov.tr"`, `[tsa] legal_root_fingerprints`.
-API yeni ayarı 2 saniye içinde kendisi yükler; Ayarlar sayfası "Elle yapılan bir değişiklik henüz
-yüklenmedi" gösteriyorsa ya da bu sürümden önceki bir sürümde `Restart-Service ArciApi` (yeniden
+API yeni ayarı 2 saniye içinde kendisi yükler; Ayarlar sayfası "Yeniden başlatma bekleyen değişiklik" gösteriyorsa ya da bu sürümden önceki bir sürümde `Restart-Service ArciApi` (yeniden
 yüklenmeden kırmızı "test damgası" uyarısı ve rapor damgaları eski ayarla kalır).
 
 ## 4. `arcilogger.toml` değiştiğinde
 
 Ayarlar sayfalarından yapılan değişiklikleri hizmetler yeniden başlatılmadan alır
 ([AYARLAR.md](AYARLAR.md) bölüm 2). Dosyayı elle düzenlediğinizde de log kaynaklarını toplayıcı
-ve ingest 5 saniye, API'nin ve worker'ın okuduğu bölümleri API 2 saniye, worker 1 dakika içinde
-yükler; zamanlanmış görevler her çalıştırmada yeniden okur; güvenlik duvarını `ApplySystem`
+ve ingest, kendi okudukları bölümleri API ve worker birkaç saniye içinde yükler; zamanlanmış görevler her çalıştırmada yeniden okur; güvenlik duvarını `ApplySystem`
 görevi en geç 5 dakika içinde eşitler. **Bir seferde tek yol kullanın** (tarayıcı ya da elle).
 Canlı yüklenmeyen bölümler (`[collector]`, `[api]`, `[ingest]`, `[worker]`, `[database]`) ve
 tarayıcı yönetimi kapalıyken:
@@ -344,8 +342,8 @@ Her gün:
   | `R20-license` | Ücretli modüller kapanıyor ya da kapalı: deneme süresi 3 gün içinde, süreli bir lisans 14 gün içinde bitiyor ya da lisans durumu yüzünden ücretli modüller kapalı (deneme bitti, lisans doğrulanamıyor ya da başka sunucu için, süresi doldu, sürüm bakım kapsamında değil); 5651 işlevleri çalışmaya devam eder. Ayarlar → Lisans ([LISANS.md](LISANS.md)) |
   | `R20-license-limit` | Kullanıcı (yeni kullanıcı eklenemez) ya da log kaynağı (toplanmaya ve mühürlenmeye devam eder) sayısı lisans sınırını aşıyor |
   | `R20-license-maintenance` | Bakım süresi 30 gün içinde bitiyor ya da bitti (`info`: yalnızca yükseltmeler ve destek, lisans geçerli kalır) |
-  | `R20-admin` | Tarayıcı yönetiminde bir sorun: yönetim hizmeti (ArciAdmin) 2 dakikadan uzun süredir yanıt vermiyor, imzası ya da kurulumu tutmayan bir istek reddedildi (olası kurcalama), bir değişiklik geri alındı, elle müdahale gerekiyor, dosya izinleri değişmiş (konsoldan bir `secret set` sonrası: `Set-ArciVaultAcl.ps1`), `ApplySystem` güvenlik duvarını, saati veya Zamane istemcisini eşitleyemedi ya da politika ağlarının dışında bir log kaynağı buldu. 5651 işlevleri sürer; [AYARLAR.md](AYARLAR.md) bölüm 8 |
-  | `R20-config-change` | Korumalı bir ayar değişikliği: saklama açıldı ya da gün sayısı düştü, replika kapandı ya da hedefi değişti, bir log kaynağı kapatıldı ya da silindi, üretimden teste dönüldü, Kamu SM kimlik bilgileri değişti, bir kök ya da yasal parmak izi eklendi, bir Zamane istemcisi yüklendi ya da onaylandı (yüksek); SMTP ya da yedekleme kapatıldı (orta). Değişikliği yapan siz değilseniz **Geçmiş** sayfasından iptal edin ve denetim kaydına bakın |
+  | `R20-admin` | Tarayıcıdan yönetim sorunu: yönetim hizmeti (ArciAdmin) 2 dakikadan uzun süredir yanıt vermiyor, imzası ya da kurulumu tutmayan bir istek reddedildi (olası kurcalama), bir değişiklik geri alındı, elle müdahale gerekiyor, dosya izinleri değişmiş (konsoldan bir `secret set` sonrası: `Set-ArciVaultAcl.ps1`), `ApplySystem` güvenlik duvarını, saati veya Zamane istemcisini eşitleyemedi ya da politika ağlarının dışında bir log kaynağı buldu. 5651 işlevleri sürer; [AYARLAR.md](AYARLAR.md) bölüm 8 |
+  | `R20-config-change` | Önemli yapılandırma değişikliği (korumalı bir ayar): saklama açıldı ya da gün sayısı düştü, replika kapandı ya da hedefi değişti, bir log kaynağı kapatıldı ya da silindi, üretimden teste dönüldü, Kamu SM kimlik bilgileri değişti, bir kök ya da yasal parmak izi eklendi, bir Zamane istemcisi yüklendi ya da onaylandı (yüksek); SMTP ya da yedekleme kapatıldı (orta). Değişikliği bilinen bir yönetici yapmadıysa **Değişiklik geçmişi** sayfasında bekleyeni **İptal et**, uygulanmışı **Geri al** ile geri alın ve denetim kaydına bakın |
   | `new-log-source` | Yapılandırmada olmayan bir gönderici (güvenlik duvarı izin verdiyse) |
   | `wrong-transport` | Bir kaynaktan izin verilmeyen taşıma yoluyla mesaj geldi (`[[sources]] transport`); taklit edilmiş bir UDP gönderimi ya da yanlış cihaz ayarı olabilir, mesaj kaydedilmedi |
 

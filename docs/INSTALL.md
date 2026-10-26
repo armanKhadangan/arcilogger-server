@@ -377,7 +377,9 @@ installation), `-NtpServer` (no default; empty: the fallback time server only), 
 (no default; addresses or networks such as `10.0.0.10` or `10.0.0.0/24`; remembered) — the last
 three in section 7.1, `-DataRoot` (D:\ARCILOGGER on a fixed NTFS `D:`, otherwise
 C:\ARCILOGGER; first install only), `-StrictOutbound` (remembered; `-StrictOutbound:$false` switches
-it off), `-SkipFirewall`, `-SkipTimeSetup`, `-SkipDatabase`, `-SkipPower` (desktop Windows: leave the
+it off), `-SkipFirewall`, `-SkipTimeSetup` (only the installer's time step: with the browser
+administration on, `ApplySystem` sets Windows Time from `[clock]`; [SETTINGS.md](SETTINGS.md)
+section 2), `-SkipDatabase`, `-SkipPower` (desktop Windows: leave the
 power settings alone, section 17), `-AllowUnsupportedWindows` (Windows 10 / Windows 11 Home: warn
 instead of stopping; not supported), `-HealthWaitSeconds` (90), `-DryRun`/`-WhatIf` with
 `-PlanPath plan.json`, and for the licence ([LICENSING.md](LICENSING.md)) `-LicenseFile` (no
@@ -676,8 +678,7 @@ Decide **beforehand** whether the Seal task may seal days with test stamps durin
    (the value recorded in step 1); with an empty list nothing is shown as legal grade.
 4. The API loads the changed configuration by itself within 2 seconds; the red "test stamp"
    banner and the report stamps follow the new setting (scheduled tasks read it on every run). On
-   a version before this one, or when the Settings page shows "a hand edit has not been loaded
-   yet": `Restart-Service ArciApi`.
+   a version before this one, or when the Settings page shows "A change waits for a restart": `Restart-Service ArciApi`.
 5. Check with `& $core credit` and `& $core status` (`legal_grade`); the red banner on the sealing
    page must be gone.
 

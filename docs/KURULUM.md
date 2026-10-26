@@ -459,7 +459,7 @@ olmaz; anahtar için bölüm 9'daki komut kullanılır.
 | `-AdminChangeHoldHours` | `0` | Saklama ve replika değişikliklerinin tarayıcıda bekleme süresi, 0–168 saat (bölüm 7.2); hatırlanır |
 | `-ZamaneHoldHours` | `24` | Bilinmeyen bir Zamane istemcisinin en erken onaylanabileceği süre, 1–168 saat (bölüm 7.2); hatırlanır |
 | `-DisableBrowserAdministration` | kapalı | Sunucu ayarlarının tarayıcıdan değiştirilmesini kapatır (bölüm 7.2); 5651 işlevleri etkilenmez; hatırlanır, açmak için `-DisableBrowserAdministration:$false` |
-| `-SkipFirewall`, `-SkipTimeSetup`, `-SkipDatabase` | — | İlgili adımı atlar |
+| `-SkipFirewall`, `-SkipTimeSetup`, `-SkipDatabase` | — | İlgili adımı atlar (`-SkipTimeSetup` yalnızca kurulumun saat adımını atlar: tarayıcı yönetimi açıkken `ApplySystem` Windows Saati'ni `[clock]` değerlerinden kurar; [AYARLAR.md](AYARLAR.md) bölüm 2) |
 | `-SkipPower` | — | Masaüstü Windows'ta güç ayarlarına dokunmaz (bölüm 17) |
 | `-AllowUnsupportedWindows` | — | Windows 10 ve Windows 11 Home'da durmak yerine uyarır (desteklenmez) |
 | `-DryRun` / `-WhatIf` | — | Yalnızca plan; `-PlanPath plan.json` ile JSON olarak yazar |
@@ -793,8 +793,7 @@ Test sırasında Seal görevinin günleri test damgasıyla mühürlemesini istey
    geçirdiğiniz değer); liste boşsa hiçbir damga yasal nitelikli gösterilmez.
 4. API değişen yapılandırmayı 2 saniye içinde kendisi yükler; kırmızı "test damgası" uyarısı ve
    rapor damgaları yeni ayarı izler (zamanlanmış görevler her çalıştırmada yeniden okur). Bu
-   sürümden önceki bir sürümde ya da Ayarlar sayfası "Elle yapılan bir değişiklik henüz
-   yüklenmedi" gösteriyorsa: `Restart-Service ArciApi`.
+   sürümden önceki bir sürümde ya da Ayarlar sayfası "Yeniden başlatma bekleyen değişiklik" gösteriyorsa: `Restart-Service ArciApi`.
 5. `& $core credit` ve `& $core status` (`legal_grade`) ile denetleyin; Mühürleme sayfasında kırmızı
    uyarı kalkmış olmalıdır.
 

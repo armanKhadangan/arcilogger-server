@@ -71,14 +71,15 @@ the newest `C:\Program Files\PostgreSQL\<version>\bin`, then `PATH`), `[backup] 
 If you change `dir`, set the new folder's rights yourself (the installer sets them on the default
 folder only). `enabled = false` (another product backs up the database, for example) makes the
 task do nothing and switches the worker's `R20-backup` alerts off (the worker reloads the
-configuration within a minute; on a version before this one `Restart-Service ArciWorker`;
+configuration within seconds; on a version before this one `Restart-Service ArciWorker`;
 [ALERTS.md](ALERTS.md)).
 
 **From the browser:** the **Ayarlar → Yedekleme** (Settings → Backup) page of the web interface
 changes `[backup] enabled`, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`
-and `[backup] min_free_gb` and shows the result of the last backup (`state\backup\last.json`).
-Switching the backup off asks for the password again and raises an `R20-config-change` (medium)
-alert. `[backup] dir`, `[backup] pg_dump` and `[backup] pg_restore` change on the console only: the
+and `[backup] min_free_gb`. This version does not show the last backup's details on the page
+(`state\backup\last.json`, below): a failed or missing backup shows as an `R20-backup` alert on
+the Security page. Every change asks for the password again; switching the backup off also
+raises an `R20-config-change` (medium) alert. `[backup] dir`, `[backup] pg_dump` and `[backup] pg_restore` change on the console only: the
 task runs programs from trusted places only, and a `pg_dump` or `pg_restore` path outside Program
 Files is recorded with its SHA-256 by the installer ([SETTINGS.md](SETTINGS.md) section 6). A
 restore and the drill (sections 5 and 6) always stay on the console.

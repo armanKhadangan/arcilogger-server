@@ -14,22 +14,23 @@ Remote Desktop session.
 
 ## 1. What changes from the browser?
 
-The **Settings** pages are open to the **Administrator** role only (`settings.manage`;
-`seal.manage` for **Seal now** and **Query credits**). Each page changes only the values below;
-every other field is shown with a lock ("only the server console can change this value, for
-security reasons", section 5).
+The **Settings** pages are open to the **Administrator** role only (`settings.manage`; **Sources**
+also needs `sources.manage`). **Seal now** and **Query credit** on the **Sealing** page need
+`seal.manage`. Each page changes only the values below; every other field is shown with a lock
+("only the server console can change this value, for security reasons", section 5). The API
+endpoints the pages use are in section 10.
 
-| Page | Changed from the browser | Deliberately console only |
+| Page (address) | Changed from the browser | Deliberately console only |
 |---|---|---|
-| **General** | organisation name (`site_name`), local and fallback time source (`[clock] ntp_server`, `[clock] fallback_server`), clock alert threshold (`[clock] alert_offset_ms`) | `[clock] ntp_port` |
-| **Application settings** | every database setting (work hours, holidays, privacy, usage, alert e-mail recipients …) | — |
-| **Kamu SM** | test / production server, Java (one of those found on the server), Zamane client (upload), root certificates (add), legal root fingerprints (add, installed roots only), customer number and password, credit alert threshold, timeout; `[seal]` read-only | the mock or another provider, a free URL or port, the digest, removing a root or a fingerprint, a free `java` path |
-| **Sources** | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
-| **E-mail** | `[smtp]` (on/off, server, port, security, user, sender, timeout, CA file upload), the SMTP password, the alert e-mail settings; **Send test e-mail** | — |
-| **Replica** | on/off, target (`\\SERVER\share` only), user, password; **Test the connection** | a local folder as target |
-| **Retention and deletion** | on/off, number of days (at least 730) | — |
-| **Backup** | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb` | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
-| **History** | the requests and their states, versions, a link to the audit log | — |
+| **General** (`/settings/general`) | organisation name (`site_name`), local and fallback time source (`[clock] ntp_server`, `[clock] fallback_server`), clock offset alert threshold (`[clock] alert_offset_ms`); the last measured offset is shown, a new time server is tried before it is saved | `[clock] ntp_port` |
+| **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
+| **Kamu SM** (`/settings/kamusm`) | a wizard: Java (one of those the administration service found on the server), Zamane client (upload), root certificates (add) and legal root fingerprints (installed roots only), customer number and password (tried with a credit query when saved), **Stamp test (uses 1 credit)**, **Switch to production** (and back to test), credit alert threshold and timeout; `[seal]` read-only | the mock or another provider, a free URL or port, the digest, removing a root or a fingerprint, a free `java` path, approving an unknown Zamane release (`approve-jar`, section 4) |
+| **Sources** (`/settings/sources`) | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it (typing its name); the table shows the last message and the firewall state | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
+| **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour) | — |
+| **Replica** (`/settings/replica`) | on/off, target (`\\SERVER\share` only), user, password; the connection is tried when saving; **Test the connection** (the saved target, at most once a minute) | a local folder as target |
+| **Retention** (`/settings/retention`) | deleting expired days on/off, the retention period (at least 730 days); the number of days it deletes is shown first and typed to confirm | — |
+| **Backup** (`/settings/backup`) | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; this version does not show the last backup's details on the page, a failed backup is an `R20-backup` alert | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
+| **Change history** (`/settings/history`) | the requests, their states and changes, a link to the audit log; **Cancel**, **Revert**; the configuration versions; **Download the diagnostics package** (a ZIP for support, no secrets) | restoring a version (`versions restore`, the page shows the command) |
 
 No page changes `data_dir`, `secrets_dir`, `[database]`, `[api]`, `[ingest]`, `[worker]`,
 `[seal]`, the database password or the usage pseudonym key. They belong to the installer and the
@@ -40,24 +41,30 @@ the silent-source alert (R15) and the sealer's gap check no longer expect it. A 
 still arrives from it is **recorded** (raw logs are never dropped). A switched-off source still
 counts for the licence's source number.
 
-**Secret values** (the Kamu SM password, the SMTP and replica passwords) never reach the screen:
-the fields show "Stored ✓" and the time of the last change; **Change** writes a new one. The password is
-asked again (within the last 5 minutes) for the Kamu SM settings (except the credit threshold and
-the timeout; the customer number and password included), every SMTP and replica change, the
-retention settings, a clock source, switching the backup off, and switching a log source off or
-removing it ([SECURITY.md](SECURITY.md) section 7).
+**Secret values** (the Kamu SM customer number and password, the SMTP and replica passwords)
+never reach the screen: the fields show "Stored ✓" and the time of the last change; **Change**
+writes a new one. The password is asked again (within the last 5 minutes) for the Kamu SM settings
+(except the credit threshold and the timeout; the customer number and password included), every
+SMTP, replica, retention and backup change, the clock sources and alert threshold, switching a
+log source off or removing it; the application settings of sessions and passwords (`auth.*`),
+privacy (`privacy.*`), the retention periods and the pseudonyms of the anonymous role, the alert
+e-mail recipients and lowest severity; cancelling a held change, **Revert** and the diagnostics
+package ([SECURITY.md](SECURITY.md) section 7).
 
 ## 2. How it works
 
-1. **Save** makes the API check the change (field limits; the Kamu SM and SMTP connections are
-   tried first where needed) and drop it as a signed request into
-   `C:\ProgramData\ARCILOGGER\admin\inbox`. The API **cannot write** the configuration file, the
-   secret store or the certificate folders.
+1. The page first shows the change for review (the changes, their effects, warnings: a dry run
+   of the API, nothing is queued). **Save** makes the API check the change with the same rules
+   (field limits, permission, a re-entered password where needed) and drop it as a signed
+   request into `C:\ProgramData\ARCILOGGER\admin\inbox`. The API **cannot write** the
+   configuration file, the secret store or the certificate folders.
 2. The **ArciAdmin** service (`NT SERVICE\ArciAdmin`, "ARCILOGGER Yönetim (Admin)") checks the
-   request's signature, expiry and rules again, keeps the previous version (`admin\versions`),
-   writes the change and follows the services taking it. The services take it without a restart:
-   the collector and ingest the log sources within 5 seconds, the API within 2 seconds, the worker
-   within a minute; the scheduled tasks at their next run.
+   request's signature, expiry and rules again; where needed it first tries the connection with
+   the new values (a Kamu SM credit query, a trial e-mail, the replica share, the time server:
+   "Testing the connection"), keeps the previous version (`admin\versions`), writes the change
+   and follows the services taking it. The services take it within seconds without a restart
+   (the collector and ingest the log sources, the API and the worker the sections they read);
+   the scheduled tasks at their next run.
 3. The firewall, Windows Time and activating a Zamane client are the work of the task
    `\ARCILOGGER\ApplySystem`, which runs as **SYSTEM**. It takes no data from a request: it derives
    everything itself from the validated `arcilogger.toml` and from `admin\policy.json`, which only
@@ -65,8 +72,11 @@ removing it ([SECURITY.md](SECURITY.md) section 7).
    and it also runs every 5 minutes on its own. In the firewall only the `ARCILOGGER Syslog UDP/TCP`
    rules (in strict outbound mode the `ARCILOGGER Out …` rules) are updated in place; no other
    rule, no profile, nor 443, 3389 or 5985 changes. For a new source, 514 opens once the collector
-   knows it; for a source switched off or removed, it closes at once.
-4. **Seal now** (Sealing page) and **Query credits** take the same channel: ArciAdmin writes a
+   knows it; for a source switched off or removed, it closes at once. The task sets the Windows
+   Time peer list from `[clock]` at its first run too, even after an installation with
+   `-SkipTimeSetup`; on a server whose time is managed another way (a domain, for example), switch
+   the browser administration off with `-DisableBrowserAdministration` (section 6).
+4. **Seal now** (Sealing page) and **Query credit** take the same channel: ArciAdmin writes a
    signed task request, and the task `\ARCILOGGER\Seal` (event 4110) or `\ARCILOGGER\Requests`
    (event 4111, LOCAL SERVICE) does the work. Sealing stays in its own task as always; the browser
    only brings the oldest unsealed day forward.
@@ -76,22 +86,29 @@ removing it ([SECURITY.md](SECURITY.md) section 7).
 
 ## 3. Status chip and request states
 
-The chip in the Settings header gives ArciAdmin's state: **administration service: running /
-late / not running**. While the service is not running, or the browser administration is
-switched off (section 6), the machine settings are read-only and the page names the console path;
-the application settings (database) can always be changed.
+The chip in the Settings header gives ArciAdmin's state: **Administration service: running /
+late / not running / switched off** (last answer younger than 30 seconds / younger than 2 minutes
+/ older or none / browser administration switched off). While the service is not running, or the
+browser administration is switched off (section 6), the machine settings are read-only and the
+page names the console path; the application settings (database), the test e-mail and the lease
+rebuild (worker) always work.
 
 A request's state is shown on the page. The important ones:
 
 | State | Meaning | What to do |
 |---|---|---|
+| **Written, services loading** | the file is written, the services are taking the new setting | wait (at most 2 minutes) |
 | **Applied** | every service runs with the new setting | — |
+| **Done** | an action (sealing, credit query, a test) has finished; its result is in the request | — |
 | **Held** | a guarded change, applied when the countdown ends (section 4) | **Cancel** if needed |
 | **Partly applied** | a service did not take the setting within 2 minutes, or the firewall could not be updated | the services and the **Security** page; ApplySystem tries again at its next run |
-| **Not applied, the previous settings are in use** | a step failed, ArciAdmin put the previous version back | read the reason on the page, fix and save again |
+| **Connection test failed, nothing changed** | the server could not be reached with the new values | read the reason on the page, correct the value |
+| **Not applied, the previous settings are in use** | a step failed, ArciAdmin put the previous version back | read the reason on the page, fix and save again; **Revert** for a change that was applied |
 | **Manual action needed** | putting it back failed too | section 8; note the version number |
 | **Conflict: changed elsewhere** | the file changed meanwhile, by hand or by another request | reload the page and save again |
+| **Rejected** | ArciAdmin did not accept the request (signature, expiry, a rule) | read the reason; a signature or installation error is an `R20-admin` alert |
 | **Expired, nothing changed** | ArciAdmin did not take the request in time | check the service (section 8) |
+| **Timed out** | the task (Seal, Requests) wrote no result within 15 minutes | the task's last result (Task Scheduler, `\ARCILOGGER\`) |
 
 The short request number on the page is for support.
 
@@ -107,7 +124,8 @@ Most changes apply at once. These are **guarded**: they ask for a typed confirma
 | a Zamane client that is not a known release | `approve-jar` on the console, at the earliest after `jar_hold_hours` (default 24) |
 
 The holds are chosen at installation with `-AdminChangeHoldHours` and `-ZamaneHoldHours`
-(section 6). A held change is stopped with **Cancel** on the **History** page or on its own page.
+(section 6). A held change is stopped with **Cancel** on the **Change history** page or on its own
+page.
 First-time setup is never held (switching the replica on the first time, test → production).
 
 **Zamane client:** a file uploaded in the Kamu SM wizard first waits in `zamane\web` and **never**
@@ -181,8 +199,9 @@ changes.
 at the next save ("Conflict") and does not overwrite it. Hand edits are reloaded live too: the log
 sources (collector, ingest) and the sections the API and the worker read need no restart. For the
 sections that are not reloaded live (`[database]`, `[api]`, `[collector]`, `[ingest]`,
-`[worker]`, `data_dir`, `secrets_dir`), restart the service concerned; the page shows "a hand edit
-has not been loaded yet".
+`[worker]`, `data_dir`, `secrets_dir`), restart the service concerned; the page shows "A change
+waits for a restart". A hand edit is not listed on the **Change history** page ("The configuration
+was changed by hand").
 The first browser change of sources moves every `[[sources]]` table into a marked block; comment
 lines inside those tables are lost then (the previous file stays in `admin\versions`).
 
@@ -200,8 +219,9 @@ the first installation).
 $py  = "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe"
 $cfg = "C:\ProgramData\ARCILOGGER\arcilogger.toml"
 Get-Service ArciAdmin                                    # running?
-& $py -I -m arcilogger_core.admin status --config $cfg   # last requests, heartbeat
+& $py -I -m arcilogger_core.admin status --config $cfg   # heartbeat, held changes, versions
 & $py -I -m arcilogger_core.admin versions list --config $cfg
+& $py -I -m arcilogger_core.admin recover --config $cfg  # finish an apply a crash interrupted
 Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'ARCILOGGER-Admin' } -MaxEvents 20
 Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # bring the firewall in step now
 ```
@@ -210,15 +230,20 @@ Start-ScheduledTask -TaskPath \ARCILOGGER\ -TaskName ApplySystem   # bring the f
   `D:\ARCILOGGER\logs`. While it is stopped the 5651 functions go on; only the browser cannot
   change settings.
 - **"Manual action needed":** put the previous version back on the console with the version
-  number from the page (`versions restore <N>`), then
-  `Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker`.
+  number from the page (`& $py -I -m arcilogger_core.admin versions restore <N> --config $cfg`);
+  the services load the restored file by themselves. Restart a service that shows "A change waits
+  for a restart".
+- **For support:** **Download the diagnostics package** on the **Change history** page (with the
+  password re-entered): the services' status files, the last log lines and the configuration,
+  every secret replaced by `***`; no raw log, no vault, no export.
 - **`acl_drift`:** ArciAdmin cannot write `arcilogger.toml` or `secrets.json` (most often after
   a console `secret set`, section 7): run `Set-ArciVaultAcl.ps1`, then save the change again.
 - **The firewall could not be updated:** the last result of the ApplySystem task and event 4106;
   after an installation with `-SkipFirewall` the firewall is not ARCILOGGER's
   (`firewall_not_managed`) and its rules are kept by hand.
-- Alerts: `R20-admin` (a refused request, a stopped service, a failed sync, manual action needed)
-  and `R20-config-change` (guarded changes) — [ALERTS.md](ALERTS.md) section 2.
+- Alerts: `R20-admin` ("Browser administration problem": a refused request, a stopped service, a
+  failed sync, a rollback, manual action needed) and `R20-config-change` ("Significant
+  configuration change": guarded changes) — [ALERTS.md](ALERTS.md) section 2.
 
 Event IDs (source `ARCILOGGER-Admin`, Application log): 4100/4199 service started/stopping, 4101
 system sync requested, 4102 applied, 4103 failed, 4104 held or a client recorded, 4105 cancelled,
@@ -228,10 +253,45 @@ signed request.
 
 ## 9. Verify on site
 
-- that ArciAdmin can add and delete only its own files in `kamusm-roots`, and that a virtual
-  account can write the Application log;
-- that event triggers wake LOCAL SERVICE and SYSTEM tasks;
-- that no syslog message is lost while the firewall rule is updated in place;
-- that a credit query costs no credit on the Kamu SM test server;
+Windows CI (the end-to-end job of the installer workflow, on a clean Windows server) tries:
+ArciAdmin running as `NT SERVICE\ArciAdmin` and writing the Application log, the rights of 2.2
+(the API cannot write the configuration, the secret store, `zamane` or the vault; ArciAdmin's own
+entry stays on `arcilogger.toml` after it replaced the file), a site name change through Caddy
+reaching "Applied", a source added in the browser reaching both syslog rules within 2 minutes,
+**Seal now** making the Seal task (LOCAL SERVICE) seal a day, **Query credit** running in the
+Requests task, and sealing going on after a rollback to a version without ArciAdmin. On site
+also:
+
+- that ArciAdmin can add and delete only its own files in `kamusm-roots`;
+- that the event triggers wake the tasks without waiting for their 5-minute run (Seal, Requests,
+  ApplySystem);
+- that no syslog message is lost while the firewall rule is updated in place (with real devices);
+- that a credit query costs no credit on the Kamu SM test server, and the customer number format;
 - the format of the Zamane distribution (jar or zip), and that Java is found under
   `NT SERVICE\ArciAdmin`.
+
+## 10. The API endpoints the pages use
+
+The web interface uses only the endpoints below (all under `/api/v1`, with the session and CSRF
+protection; the formats in detail: [MVP-CONTRACTS.md](MVP-CONTRACTS.md) section 16). Every
+endpoint that changes a machine setting or starts an action answers `202` with the request's
+number and its `status_url`; the state is followed with `GET /admin/requests/{id}`. Every error
+carries `code`, `message_tr` and `message_en`.
+
+| Page | Endpoints |
+|---|---|
+| Status chip, every page | `GET /admin/status`, `GET /admin/config` (values, `etag`s, locked fields) |
+| General | `POST /admin/config/general/check`, `PUT /admin/config/general` |
+| Application settings | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `POST /admin/actions/lease-rebuild` |
+| Kamu SM | `POST /admin/config/tsa/check`, `PUT /admin/config/tsa`; `POST /admin/uploads?kind=…` then `POST /admin/config/tsa/zamane`, `POST /admin/config/tsa/roots`, `POST /admin/config/tsa/legal-roots`; `POST /admin/actions/tsa-test` |
+| Sources | `POST /admin/config/sources/check`, `POST /admin/config/sources`, `PUT /admin/config/sources/{name}`, `DELETE /admin/config/sources/{name}` |
+| E-mail | `POST /admin/config/smtp/check`, `PUT /admin/config/smtp`, `POST /admin/config/smtp/ca`, `DELETE /admin/config/smtp/ca`; `POST /admin/actions/test-email`; the alert e-mail settings `PATCH /settings` |
+| Replica | `POST /admin/config/replica/check`, `PUT /admin/config/replica`, `POST /admin/actions/replica-test` |
+| Retention | `POST /admin/config/retention/check`, `PUT /admin/config/retention` |
+| Backup | `POST /admin/config/backup/check`, `PUT /admin/config/backup` |
+| Change history | `GET /admin/requests`, `GET /admin/requests/{id}`, `DELETE /admin/requests/{id}` (Cancel), `POST /admin/requests/{id}/revert` (Revert), `GET /admin/config/versions`, `GET /admin/diagnostics` |
+| Sealing | `POST /seals/{day}/seal` (Seal now), `GET /credits`, `POST /credits/query` (Query credit) |
+
+The application settings and the worker's actions (the test e-mail, the lease rebuild) go
+through the database and do not wait for the administration service; everything else reaches
+ArciAdmin as a signed request.

@@ -24,9 +24,11 @@
   15 dakika hareketsizlik veya 12 saat sonunda oturum kapanır. TOTP adımından ve parola
   değişikliğinden sonra **yeni oturum anahtarı** verilir; parola değişince diğer oturumlar kapanır.
 - Her değiştirici istek **CSRF** anahtarı ister. Hassas işlemler (kullanıcı yönetimi, isteğe bağlı
-  TOTP kurulumu, kanıt paketi oluşturma ve indirme; Ayarlar sayfalarında Kamu SM, SMTP ve replika
-  ayarları, saat kaynağı, saklama süresi, yedeklemeyi kapatmak, bir log kaynağını kapatmak ya da
-  silmek) son 5 dakika içinde **parolanın yeniden girilmesini** ister.
+  TOTP kurulumu, kanıt paketi oluşturma ve indirme; Ayarlar sayfalarında Kamu SM, SMTP, replika,
+  saklama ve yedekleme ayarları, saat kaynakları ve uyarı eşiği, bir log kaynağını kapatmak ya da
+  silmek, bekletilen bir değişikliği iptal etmek, **Geri al** ve tanılama paketi; oturum, gizlilik
+  ve saklama sürelerine ilişkin uygulama ayarları) son 5 dakika içinde **parolanın yeniden
+  girilmesini** ister.
 - **Tarayıcıdan yönetim** (bölüm 14, [AYARLAR.md](AYARLAR.md)): API yapılandırmayı, gizli depoyu
   ve sertifika klasörlerini **yazamaz**; imzalı istekleri ayrı bir sanal hesap
   (`NT SERVICE\ArciAdmin`) yeniden denetleyip uygular. Güvenlik duvarı, Windows Saati ve Zamane
@@ -258,8 +260,11 @@ recent=True)`).
 The Settings pages (browser administration, section 14) ask for it (spec 13) for every change of
 `[tsa]` except the credit alert threshold and the timeout (this covers the Kamu SM customer number
 and password), every `[smtp]` and `[replica]` change (their passwords included), every retention
-change, a clock source change, switching the backup off, and switching a log source off or
-removing it. The API checks it before it writes the request; the signed request carries the time
+and backup change, a change of `[clock]` (the time sources and the alert threshold), switching a
+log source off or removing it, cancelling a held change, **Revert** and the diagnostics package;
+among the database settings `auth.*`, `privacy.*`, the retention periods, the pseudonyms of the
+anonymous role and the alert e-mail recipients and lowest severity (`REAUTH_KEYS`). The API
+checks it before it writes the request; the signed request carries the time
 of the confirmation (`actor.reauth_at`), and the administration agent refuses a request whose
 confirmation is older than 5 minutes (`reauth_missing`), so a request made without it is refused
 even if it reaches the inbox another way.

@@ -149,7 +149,13 @@ is installed. On a Windows administrator runner it also applies the NTFS rights 
 auditing to temporary folders and reads them back. CI: `.github/workflows/installer.yml`
 (Windows); its end-to-end job builds a real bundle with `Build-ArciBundle.ps1` and installs,
 upgrades, rolls back, survives a broken upgrade and removes ARCILOGGER on the throw-away runner
-(`ARCILOGGER_E2E_BUNDLE`; never set it on a machine you care about). Locally:
+(`ARCILOGGER_E2E_BUNDLE`; never set it on a machine you care about). With the runner's
+PostgreSQL it also drives the browser administration through Caddy: "Şimdi mühürle" wakes the
+Seal task (LOCAL SERVICE), a site name change reaches "active" and the rights of contract 2.2 are
+read back (ArciAdmin's entry on `arcilogger.toml` kept by `ReplaceFileW`), a source added in the
+browser reaches both syslog rules within 2 minutes, "Kontör sorgula" runs in the Requests task,
+ArciAdmin's events are in the Application log, and the rollback to a program without ArciAdmin
+removes it and its two tasks while the Seal task keeps running. Locally:
 `ARCILOGGER_PWSH=<pwsh>`, `ARCILOGGER_CADDY=<caddy>` and `ARCILOGGER_ISCC=<ISCC.exe>` enable those
 parts.
 

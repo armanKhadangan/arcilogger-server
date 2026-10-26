@@ -5,11 +5,19 @@
 # [[sources]] below are commented-out examples. Add those of your own devices and run the
 # installer again (its firewall opens 514 only for them). An existing arcilogger.toml is never
 # replaced (an upgrade changes only a given -SiteName / -NtpServer line).
-# Secrets (Kamu SM customer number and password, database password) do NOT belong here:
+# After the installation the web interface changes most of what follows (Ayarlar / Settings,
+# docs/SETTINGS.md): the administration service ArciAdmin edits this file, keeps its comments
+# (not those inside [[sources]] tables) and the services load the change without a restart.
+# It never changes data_dir, secrets_dir, [collector], [seal], [database], [api], [ingest],
+# [worker], nor the paths and programs of [tsa] and [backup]. Use one way at a time (the browser
+# or a text editor); a hand edit is loaded live too.
+# Secrets (Kamu SM customer number and password, database password) do NOT belong here: the
+# Settings pages store the Kamu SM, SMTP and replica passwords; on the console
 #   arcilogger-core secret init
 #   arcilogger-core secret set kamusm.customer
 #   arcilogger-core secret set kamusm.password
 #   arcilogger-core secret set database.password
+# and after a console "secret set" scripts\Set-ArciVaultAcl.ps1 (docs/SETTINGS.md section 7).
 
 site_name = ""                 # the organisation's name (reports, e-mails); required: -SiteName
 data_dir = "D:/ARCILOGGER"
@@ -21,9 +29,12 @@ data_dir = "D:/ARCILOGGER"
 # recorded as "unknown-<ip>" (parser chosen by content, alert "new log source") and no source is
 # watched for silence (R15). Add one [[sources]] table for every device that sends syslog, at
 # least the firewall and the core router (the DHCP server), with the address it sends from.
-# Then run the installer again (it applies the firewall and restarts the services), or
-# Set-ArciFirewall.ps1 and Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker
-# (docs/DEVICE-SETUP.md section 4). `arcilogger-core config-check` warns while there is none.
+# Then run the installer again, or let the services take the edit: the collector and ingest load
+# the sources within seconds and the ApplySystem task brings the firewall's 514 rules in step
+# within 5 minutes (with the browser administration switched off, run Set-ArciFirewall.ps1
+# yourself; after a change of [collector], Restart-Service ArciCollector, ArciIngest, ArciApi,
+# ArciWorker; docs/DEVICE-SETUP.md section 4).
+# `arcilogger-core config-check` warns while there is none.
 # After the installation, Ayarlar -> Kaynaklar (Settings -> Sources) in the web interface adds,
 # switches off and removes sources without a restart (docs/SETTINGS.md); its first change moves
 # all [[sources]] tables into one marked block and drops the comments inside them.

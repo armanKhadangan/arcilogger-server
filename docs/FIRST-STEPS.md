@@ -135,16 +135,15 @@ interface ([SETTINGS.md](SETTINGS.md)) or, on the console, [INSTALL.md](INSTALL.
 roots (fingerprint comparison), `secret set`, `credit`, `tsa-test` in that order; for production:
 buy kontör, the production credentials, `url = "http://zd.kamusm.gov.tr"`, `[tsa]
 legal_root_fingerprints`. The API loads the new setting by itself within 2 seconds; when the
-Settings page shows "a hand edit has not been loaded yet", or on a version before this one,
+Settings page shows "A change waits for a restart", or on a version before this one,
 `Restart-Service ArciApi` (until it is loaded the red "test stamp" banner and the report stamps
 keep the old setting).
 
 ## 4. After editing `arcilogger.toml`
 
 The services take changes made on the Settings pages without a restart ([SETTINGS.md](SETTINGS.md)
-section 2). After a hand edit too, the collector and ingest load the log sources within 5
-seconds, the API the sections it reads within 2 seconds and the worker within a minute; scheduled
-tasks read the file on every run; the `ApplySystem` task brings the firewall in step within 5
+section 2). After a hand edit too, the collector and ingest load the log sources, and the API
+and the worker the sections they read, within seconds; scheduled tasks read the file on every run; the `ApplySystem` task brings the firewall in step within 5
 minutes. **Use one way at a time** (the browser or a hand edit). For the sections that are not
 reloaded live (`[collector]`, `[api]`, `[ingest]`, `[worker]`, `[database]`) and while the browser
 administration is off:
@@ -345,8 +344,8 @@ Every day:
   | `R20-license` | Paid modules ending or off: the trial ends within 3 days, a time-limited licence within 14 days, or the paid modules are off because of the licence state (trial over, licence invalid or for another server, expired, version not covered); the 5651 functions keep working. Settings → Licence ([LICENSING.md](LICENSING.md)) |
   | `R20-license-limit` | Users (no new user can be added) or log sources (still collected and sealed) above the licence's limit |
   | `R20-license-maintenance` | Maintenance ends within 30 days or has ended (`info`: upgrades and support only, the licence stays valid) |
-  | `R20-admin` | A problem of the browser administration: the administration service (ArciAdmin) has not answered for more than 2 minutes, a request whose signature or installation does not match was refused (possible tampering), a change was rolled back, manual action is needed, the file rights changed (after a console `secret set`: `Set-ArciVaultAcl.ps1`), `ApplySystem` could not bring the firewall, the time or the Zamane client in step, or it found a log source outside the policy networks. The 5651 functions go on; [SETTINGS.md](SETTINGS.md) section 8 |
-  | `R20-config-change` | A guarded settings change: retention switched on or its days lowered, the replica switched off or retargeted, a log source switched off or removed, production → test, the Kamu SM credentials changed, a root or a legal fingerprint added, a Zamane client uploaded or promoted (high); SMTP or the backup switched off (medium). If you did not make the change, cancel it on the **History** page and look at the audit log |
+  | `R20-admin` | Browser administration problem: the administration service (ArciAdmin) has not answered for more than 2 minutes, a request whose signature or installation does not match was refused (possible tampering), a change was rolled back, manual action is needed, the file rights changed (after a console `secret set`: `Set-ArciVaultAcl.ps1`), `ApplySystem` could not bring the firewall, the time or the Zamane client in step, or it found a log source outside the policy networks. The 5651 functions go on; [SETTINGS.md](SETTINGS.md) section 8 |
+  | `R20-config-change` | Significant configuration change (a guarded setting): retention switched on or its days lowered, the replica switched off or retargeted, a log source switched off or removed, production → test, the Kamu SM credentials changed, a root or a legal fingerprint added, a Zamane client uploaded or promoted (high); SMTP or the backup switched off (medium). If no known administrator made it, **Cancel** a held change or **Revert** an applied one on the **Change history** page and look at the audit log |
   | `new-log-source` | A sender that is not in the configuration (if the firewall let it through) |
   | `wrong-transport` | A message arrived over a transport its source does not allow (`[[sources]] transport`): a forged UDP message or a wrong device setting; the message was not recorded |
 
