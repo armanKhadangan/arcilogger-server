@@ -54,6 +54,7 @@ from pydantic import ValidationError
 
 from arcilogger_core import PRODUCT_NAME, __version__
 from arcilogger_core.admin.contract import (
+    ActionResult,
     AdminLayout,
     CreditResult,
     ReplicaTestResult,
@@ -514,7 +515,7 @@ class TaskDone:
     (Turkish, English); ``result`` holds the facts (never a secret or a file path)."""
 
     code: str | None
-    result: Any = None
+    result: ActionResult | None = None
     texts: tuple[str, str] | None = None
 
 
@@ -533,6 +534,27 @@ def _not_started(exc: Exception, kind: TaskKind) -> TaskDone:
     log.error("%s request: %s", kind, exc)
     refused = isinstance(exc, TsaExecutableError)
     return TaskDone("executable_refused" if refused else FAILURE_CODES[kind])
+
+
+def run_credit_request(app: App) -> TaskDone:
+    """The credit query ("Kontör sorgula"): the daily credit check, now (``credit.jsonl``,
+    ``R20-credit``)."""
+    threshold = app.config.tsa.credit_alert_threshold
+    try:
+        provider = app.provider()
+    except (TsaError, SecretStoreError) as exc:
+        return _not_started(exc, "credit")
+    credits = check_credit(provider, app.layout, threshold)
+    if credits is None:
+        return TaskDone("credit_query_failed")
+    return TaskDone(
+        None,
+        CreditResult(credits=credits, threshold=threshold, below_threshold=credits < threshold),
+        (
+            f"Kalan kontör: {credits} (uyarı eşiği {threshold}).",
+            f"Credits left: {credits} (alert threshold {threshold}).",
+        ),
+    )
 
 
 def run_tsa_test_request(app: App) -> TaskDone:
@@ -556,27 +578,6 @@ def run_tsa_test_request(app: App) -> TaskDone:
         (
             "Zaman damgası alındı ve bağımsız olarak doğrulandı.",
             "A time stamp was obtained and verified independently.",
-        ),
-    )
-
-
-def run_credit_request(app: App) -> TaskDone:
-    """The credit query ("Kontör sorgula"): the daily credit check, now (``credit.jsonl``,
-    ``R20-credit``)."""
-    threshold = app.config.tsa.credit_alert_threshold
-    try:
-        provider = app.provider()
-    except (TsaError, SecretStoreError) as exc:
-        return _not_started(exc, "credit")
-    credits = check_credit(provider, app.layout, threshold)
-    if credits is None:
-        return TaskDone("credit_query_failed")
-    return TaskDone(
-        None,
-        CreditResult(credits=credits, threshold=threshold, below_threshold=credits < threshold),
-        (
-            f"Kalan kontör: {credits} (uyarı eşiği {threshold}).",
-            f"Credits left: {credits} (alert threshold {threshold}).",
         ),
     )
 
@@ -631,11 +632,10 @@ def cmd_requests(_: argparse.Namespace, app: App) -> int:
         "replica_test": run_replica_test_request,
     }
     failed = 0
-    for request in take(app.layout, "tasks", app.keys_dir):
+    for request in take(app.layout, "tasks", app.keys_dir):  # never a seal request (its queue)
         started = utc_now()
-        runner = runners.get(request.kind)
         try:
-            done = TaskDone(FAILURE_CODES[request.kind]) if runner is None else runner(app)
+            done = runners[request.kind](app)
         except Exception:  # one broken request must not keep the next one from running
             log.exception("task request %s (%s) failed", request.id, request.kind)
             done = TaskDone(FAILURE_CODES[request.kind])

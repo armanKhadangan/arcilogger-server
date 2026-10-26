@@ -69,7 +69,8 @@ def make_provider(
     password = secrets.get(KAMUSM_PASSWORD)
     if not customer or not password:
         raise TsaConfigurationError("Kamu SM customer number / password not stored")
-    anchors = anchors or TrustAnchors.of(default_config_path())
+    if anchors is None:
+        anchors = TrustAnchors.of(default_config_path())
     try:
         java = check_java(settings.java, anchors)
         jar = check_zamane_jar(settings.zamane_jar, anchors)
