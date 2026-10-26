@@ -277,6 +277,38 @@
     "/api/v1/seals/{day}/verify": [
       "post"
     ],
+    "/api/v1/search": [
+      "post"
+    ],
+    "/api/v1/search/event": [
+      "get"
+    ],
+    "/api/v1/search/export": [
+      "post"
+    ],
+    "/api/v1/search/fields": [
+      "get"
+    ],
+    "/api/v1/search/page": [
+      "post"
+    ],
+    "/api/v1/search/parse": [
+      "post"
+    ],
+    "/api/v1/search/refs": [
+      "post"
+    ],
+    "/api/v1/search/saved": [
+      "get",
+      "post"
+    ],
+    "/api/v1/search/saved/{saved_id}": [
+      "delete",
+      "put"
+    ],
+    "/api/v1/search/stats": [
+      "post"
+    ],
     "/api/v1/settings": [
       "get",
       "patch"
@@ -2216,6 +2248,160 @@
         "replica"
       ],
       "title": "CalendarDay",
+      "type": "object"
+    },
+    "CatalogueField": {
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Examples",
+          "type": "array"
+        },
+        "help_en": {
+          "title": "Help En",
+          "type": "string"
+        },
+        "help_tr": {
+          "title": "Help Tr",
+          "type": "string"
+        },
+        "indexed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Indexed",
+          "type": "array"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "label_en": {
+          "title": "Label En",
+          "type": "string"
+        },
+        "label_tr": {
+          "title": "Label Tr",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tables",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "aliases",
+        "kind",
+        "label_tr",
+        "label_en",
+        "help_tr",
+        "help_en",
+        "tables",
+        "indexed",
+        "examples"
+      ],
+      "title": "CatalogueField",
+      "type": "object"
+    },
+    "CatalogueKind": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "label_en": {
+          "title": "Label En",
+          "type": "string"
+        },
+        "label_tr": {
+          "title": "Label Tr",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label_tr",
+        "label_en"
+      ],
+      "title": "CatalogueKind",
+      "type": "object"
+    },
+    "CatalogueLimits": {
+      "properties": {
+        "max_chars": {
+          "title": "Max Chars",
+          "type": "integer"
+        },
+        "max_clauses": {
+          "title": "Max Clauses",
+          "type": "integer"
+        },
+        "max_days": {
+          "title": "Max Days",
+          "type": "integer"
+        },
+        "max_terms": {
+          "title": "Max Terms",
+          "type": "integer"
+        },
+        "max_values": {
+          "title": "Max Values",
+          "type": "integer"
+        },
+        "page_size_max": {
+          "title": "Page Size Max",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_chars",
+        "max_clauses",
+        "max_values",
+        "max_terms",
+        "max_days",
+        "page_size_max"
+      ],
+      "title": "CatalogueLimits",
+      "type": "object"
+    },
+    "CatalogueSource": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "network": {
+          "title": "Network",
+          "type": "boolean"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "network"
+      ],
+      "title": "CatalogueSource",
       "type": "object"
     },
     "CategoryDetail": {
@@ -4506,6 +4692,101 @@
       "title": "EvidencePage",
       "type": "object"
     },
+    "Facet": {
+      "properties": {
+        "other": {
+          "title": "Other",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "sampled",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "$ref": "#/components/schemas/FacetValue"
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status",
+        "values",
+        "other"
+      ],
+      "title": "Facet",
+      "type": "object"
+    },
+    "FacetValue": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "label_en": {
+          "title": "Label En",
+          "type": "string"
+        },
+        "label_tr": {
+          "title": "Label Tr",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label_tr",
+        "label_en",
+        "count"
+      ],
+      "title": "FacetValue",
+      "type": "object"
+    },
+    "FieldCatalogue": {
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/components/schemas/CatalogueField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "kinds": {
+          "items": {
+            "$ref": "#/components/schemas/CatalogueKind"
+          },
+          "title": "Kinds",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/components/schemas/CatalogueLimits"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/components/schemas/CatalogueSource"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fields",
+        "kinds",
+        "sources",
+        "limits"
+      ],
+      "title": "FieldCatalogue",
+      "type": "object"
+    },
     "FirewallOut": {
       "properties": {
         "managed": {
@@ -4530,6 +4811,27 @@
         "syslog_addresses"
       ],
       "title": "FirewallOut",
+      "type": "object"
+    },
+    "FixedRange": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "format": "date-time",
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "format": "date-time",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "FixedRange",
       "type": "object"
     },
     "GeneralBody": {
@@ -5989,6 +6291,35 @@
       "title": "MinuteCount",
       "type": "object"
     },
+    "Notice": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message_en": {
+          "title": "Message En",
+          "type": "string"
+        },
+        "message_tr": {
+          "title": "Message Tr",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "message_tr",
+        "message_en",
+        "params"
+      ],
+      "title": "Notice",
+      "type": "object"
+    },
     "OpenBySeverity": {
       "properties": {
         "critical": {
@@ -6020,6 +6351,96 @@
         "info"
       ],
       "title": "OpenBySeverity",
+      "type": "object"
+    },
+    "ParseErrorItem": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "message_en": {
+          "title": "Message En",
+          "type": "string"
+        },
+        "message_tr": {
+          "title": "Message Tr",
+          "type": "string"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "message_tr",
+        "message_en",
+        "start",
+        "end"
+      ],
+      "title": "ParseErrorItem",
+      "type": "object"
+    },
+    "ParseRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "q": {
+          "maxLength": 10000,
+          "title": "Q",
+          "type": "string"
+        }
+      },
+      "required": [
+        "q"
+      ],
+      "title": "ParseRequest",
+      "type": "object"
+    },
+    "ParseResult": {
+      "properties": {
+        "clauses": {
+          "items": {
+            "$ref": "#/components/schemas/SearchClause"
+          },
+          "title": "Clauses",
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/components/schemas/ParseErrorItem"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "kinds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Kinds",
+          "type": "array"
+        },
+        "normalized": {
+          "title": "Normalized",
+          "type": "string"
+        },
+        "selective": {
+          "title": "Selective",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "normalized",
+        "clauses",
+        "kinds",
+        "selective",
+        "errors"
+      ],
+      "title": "ParseResult",
       "type": "object"
     },
     "PasswordBody": {
@@ -6572,6 +6993,29 @@
       "title": "PersonUpdate",
       "type": "object"
     },
+    "PresetRange": {
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "enum": [
+            "15m",
+            "1h",
+            "24h",
+            "today",
+            "yesterday",
+            "7d",
+            "30d"
+          ],
+          "title": "Preset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset"
+      ],
+      "title": "PresetRange",
+      "type": "object"
+    },
     "PrivacyBody": {
       "additionalProperties": false,
       "properties": {
@@ -6890,6 +7334,36 @@
         "sender"
       ],
       "title": "RawLineOut",
+      "type": "object"
+    },
+    "RawRef": {
+      "description": "A raw line: line ``line`` of ``spool/<source>/<day>.log`` (or the sealed file), which\nstarts at byte ``offset``.",
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "day",
+        "line",
+        "offset"
+      ],
+      "title": "RawRef",
       "type": "object"
     },
     "Readiness": {
@@ -7966,6 +8440,116 @@
       "title": "RunRequest",
       "type": "object"
     },
+    "SavedSearch": {
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "last_run_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Run At"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "q": {
+          "title": "Q",
+          "type": "string"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/PresetRange"
+            },
+            {
+              "$ref": "#/components/schemas/FixedRange"
+            }
+          ],
+          "title": "Range"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "q",
+        "range",
+        "created_at",
+        "updated_at",
+        "last_run_at"
+      ],
+      "title": "SavedSearch",
+      "type": "object"
+    },
+    "SavedSearchIn": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "q": {
+          "maxLength": 1000,
+          "title": "Q",
+          "type": "string"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/PresetRange"
+            },
+            {
+              "$ref": "#/components/schemas/FixedRange"
+            }
+          ],
+          "title": "Range"
+        }
+      },
+      "required": [
+        "name",
+        "q",
+        "range"
+      ],
+      "title": "SavedSearchIn",
+      "type": "object"
+    },
+    "SavedSearchList": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/SavedSearch"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "SavedSearchList",
+      "type": "object"
+    },
     "ScheduleCreate": {
       "additionalProperties": false,
       "properties": {
@@ -8506,6 +9090,1045 @@
         "verified"
       ],
       "title": "SealYesterday",
+      "type": "object"
+    },
+    "SearchBucket": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "count"
+      ],
+      "title": "SearchBucket",
+      "type": "object"
+    },
+    "SearchClause": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "negated": {
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "op": {
+          "enum": [
+            "match",
+            "present",
+            "text"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "values": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "field",
+        "op",
+        "values",
+        "negated",
+        "start",
+        "end"
+      ],
+      "title": "SearchClause",
+      "type": "object"
+    },
+    "SearchEvent": {
+      "properties": {
+        "extra": {
+          "additionalProperties": true,
+          "title": "Extra",
+          "type": "object"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "title": "Fields",
+          "type": "object"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/SearchEventMessage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": {
+          "$ref": "#/components/schemas/RawRef"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "kind",
+        "fields",
+        "extra",
+        "message",
+        "raw"
+      ],
+      "title": "SearchEvent",
+      "type": "object"
+    },
+    "SearchEventMessage": {
+      "properties": {
+        "facility": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Facility"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Host"
+        },
+        "parse_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parse Error"
+        },
+        "program": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Program"
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Severity"
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subtype"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "subtype",
+        "severity",
+        "facility",
+        "program",
+        "host",
+        "text",
+        "parse_error"
+      ],
+      "title": "SearchEventMessage",
+      "type": "object"
+    },
+    "SearchExportRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "csv",
+            "xlsx"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "search_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Search Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "format"
+      ],
+      "title": "SearchExportRequest",
+      "type": "object"
+    },
+    "SearchFacets": {
+      "properties": {
+        "action": {
+          "$ref": "#/components/schemas/Facet"
+        },
+        "department": {
+          "$ref": "#/components/schemas/Facet"
+        },
+        "kind": {
+          "$ref": "#/components/schemas/Facet"
+        },
+        "source": {
+          "$ref": "#/components/schemas/Facet"
+        },
+        "vlan": {
+          "$ref": "#/components/schemas/Facet"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "action",
+        "vlan",
+        "department"
+      ],
+      "title": "SearchFacets",
+      "type": "object"
+    },
+    "SearchHistogram": {
+      "properties": {
+        "bucket_seconds": {
+          "title": "Bucket Seconds",
+          "type": "integer"
+        },
+        "buckets": {
+          "items": {
+            "$ref": "#/components/schemas/SearchBucket"
+          },
+          "title": "Buckets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "bucket_seconds",
+        "buckets"
+      ],
+      "title": "SearchHistogram",
+      "type": "object"
+    },
+    "SearchIdRequest": {
+      "additionalProperties": false,
+      "description": "``POST /search/stats``.",
+      "properties": {
+        "search_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Search Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id"
+      ],
+      "title": "SearchIdRequest",
+      "type": "object"
+    },
+    "SearchPage": {
+      "properties": {
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/SearchRow"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Cursor"
+        },
+        "notices": {
+          "items": {
+            "$ref": "#/components/schemas/Notice"
+          },
+          "title": "Notices",
+          "type": "array"
+        },
+        "plan": {
+          "$ref": "#/components/schemas/SearchPlan"
+        },
+        "query": {
+          "$ref": "#/components/schemas/SearchQuery"
+        },
+        "range": {
+          "$ref": "#/components/schemas/SearchRange"
+        },
+        "scan": {
+          "$ref": "#/components/schemas/SearchScan"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "expires_at",
+        "query",
+        "range",
+        "plan",
+        "items",
+        "next_cursor",
+        "scan",
+        "notices"
+      ],
+      "title": "SearchPage",
+      "type": "object"
+    },
+    "SearchPageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Cursor",
+          "type": "string"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "maximum": 1000.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Limit"
+        },
+        "search_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Search Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id",
+        "cursor"
+      ],
+      "title": "SearchPageRequest",
+      "type": "object"
+    },
+    "SearchPlan": {
+      "properties": {
+        "driver": {
+          "enum": [
+            "messages",
+            "typed"
+          ],
+          "title": "Driver",
+          "type": "string"
+        },
+        "kinds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Kinds",
+          "type": "array"
+        },
+        "rollup_eligible": {
+          "title": "Rollup Eligible",
+          "type": "boolean"
+        },
+        "selective": {
+          "title": "Selective",
+          "type": "boolean"
+        },
+        "tables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tables",
+          "type": "array"
+        }
+      },
+      "required": [
+        "driver",
+        "tables",
+        "kinds",
+        "selective",
+        "rollup_eligible"
+      ],
+      "title": "SearchPlan",
+      "type": "object"
+    },
+    "SearchQuery": {
+      "properties": {
+        "clauses": {
+          "items": {
+            "$ref": "#/components/schemas/SearchClause"
+          },
+          "title": "Clauses",
+          "type": "array"
+        },
+        "normalized": {
+          "title": "Normalized",
+          "type": "string"
+        },
+        "text": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Text",
+          "type": "array"
+        }
+      },
+      "required": [
+        "normalized",
+        "clauses",
+        "text"
+      ],
+      "title": "SearchQuery",
+      "type": "object"
+    },
+    "SearchRange": {
+      "properties": {
+        "from": {
+          "format": "date-time",
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "format": "date-time",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "SearchRange",
+      "type": "object"
+    },
+    "SearchRefs": {
+      "properties": {
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "refs": {
+          "items": {
+            "$ref": "#/components/schemas/RawRef"
+          },
+          "title": "Refs",
+          "type": "array"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "unsealed_days": {
+          "items": {
+            "format": "date",
+            "type": "string"
+          },
+          "title": "Unsealed Days",
+          "type": "array"
+        }
+      },
+      "required": [
+        "refs",
+        "truncated",
+        "complete",
+        "unsealed_days",
+        "sha256"
+      ],
+      "title": "SearchRefs",
+      "type": "object"
+    },
+    "SearchRefsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 10000,
+          "maximum": 10000.0,
+          "minimum": 1.0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "search_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Search Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_id"
+      ],
+      "title": "SearchRefsRequest",
+      "type": "object"
+    },
+    "SearchRequest": {
+      "additionalProperties": false,
+      "description": "``POST /search``. With ``saved_id`` the saved search's query and range are used (its\npreset resolved against now); ``q``, ``from`` and ``to`` may then be left out.",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "maximum": 1000.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Limit"
+        },
+        "q": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Q",
+          "type": "string"
+        },
+        "saved_id": {
+          "anyOf": [
+            {
+              "maximum": 9.223372036854776e+18,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Saved Id"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To"
+        }
+      },
+      "title": "SearchRequest",
+      "type": "object"
+    },
+    "SearchRow": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "parse_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parse Error"
+        },
+        "raw": {
+          "$ref": "#/components/schemas/RawRef"
+        },
+        "sender": {
+          "title": "Sender",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subtype"
+        },
+        "summary": {
+          "$ref": "#/components/schemas/SearchSummary"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Text"
+        },
+        "time": {
+          "format": "date-time",
+          "title": "Time",
+          "type": "string"
+        },
+        "time_received": {
+          "format": "date-time",
+          "title": "Time Received",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Type"
+        }
+      },
+      "required": [
+        "key",
+        "table",
+        "time",
+        "time_received",
+        "source",
+        "sender",
+        "kind",
+        "type",
+        "subtype",
+        "summary",
+        "text",
+        "raw",
+        "parse_error"
+      ],
+      "title": "SearchRow",
+      "type": "object"
+    },
+    "SearchScan": {
+      "properties": {
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "elapsed_ms": {
+          "title": "Elapsed Ms",
+          "type": "integer"
+        },
+        "scanned_from": {
+          "format": "date-time",
+          "title": "Scanned From",
+          "type": "string"
+        },
+        "scanned_to": {
+          "format": "date-time",
+          "title": "Scanned To",
+          "type": "string"
+        },
+        "windows": {
+          "title": "Windows",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "complete",
+        "scanned_from",
+        "scanned_to",
+        "windows",
+        "elapsed_ms"
+      ],
+      "title": "SearchScan",
+      "type": "object"
+    },
+    "SearchStats": {
+      "properties": {
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "covered_from": {
+          "format": "date-time",
+          "title": "Covered From",
+          "type": "string"
+        },
+        "covered_to": {
+          "format": "date-time",
+          "title": "Covered To",
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "title": "Elapsed Ms",
+          "type": "integer"
+        },
+        "facets": {
+          "$ref": "#/components/schemas/SearchFacets"
+        },
+        "histogram": {
+          "$ref": "#/components/schemas/SearchHistogram"
+        },
+        "mode": {
+          "enum": [
+            "rollup",
+            "hybrid",
+            "direct"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "notices": {
+          "items": {
+            "$ref": "#/components/schemas/Notice"
+          },
+          "title": "Notices",
+          "type": "array"
+        },
+        "sample_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sample Rows"
+        },
+        "sampled": {
+          "title": "Sampled",
+          "type": "boolean"
+        },
+        "search_id": {
+          "title": "Search Id",
+          "type": "string"
+        },
+        "total": {
+          "$ref": "#/components/schemas/SearchTotal"
+        }
+      },
+      "required": [
+        "search_id",
+        "mode",
+        "complete",
+        "covered_from",
+        "covered_to",
+        "total",
+        "histogram",
+        "facets",
+        "sampled",
+        "sample_rows",
+        "notices",
+        "elapsed_ms"
+      ],
+      "title": "SearchStats",
+      "type": "object"
+    },
+    "SearchSummary": {
+      "description": "The typed fields of a row, for the \"Özet\" column (only those the row has).",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Action"
+        },
+        "app": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "App"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Domain"
+        },
+        "dstip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dstip"
+        },
+        "dstport": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dstport"
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Interface"
+        },
+        "mac": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mac"
+        },
+        "natip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Natip"
+        },
+        "natport": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Natport"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Policy"
+        },
+        "proto": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Proto"
+        },
+        "srcip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Srcip"
+        },
+        "srcport": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Srcport"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Url"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User"
+        },
+        "vlan_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Vlan Id"
+        }
+      },
+      "title": "SearchSummary",
+      "type": "object"
+    },
+    "SearchTotal": {
+      "properties": {
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "value": {
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "value",
+        "exact"
+      ],
+      "title": "SearchTotal",
       "type": "object"
     },
     "SecretMeta": {
