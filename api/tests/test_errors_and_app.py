@@ -48,6 +48,8 @@ EXPECTED_ROUTERS = {
     "/admin/requests": "admin",
     "/admin/actions": "admin",
     "/settings": "settings",
+    # Arama (ADR-0015, docs/MVP-CONTRACTS.md section 17).
+    "/search": "search",
 }
 
 
