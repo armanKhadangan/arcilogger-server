@@ -7,6 +7,8 @@ is replaced by ``***`` before a message is kept.
 
 from __future__ import annotations
 
+import email
+import email.policy
 import json
 import os
 import socket
@@ -17,6 +19,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -26,12 +29,16 @@ from arcilogger_core.admin.probe import (
     ChildProber,
     ProbeResult,
     probe_credit,
+    probe_replica,
+    probe_smtp,
     probe_sntp,
     redact,
     run_probe,
 )
+from arcilogger_core.admin.testing import SmtpState, SmtpTestServer
 from arcilogger_core.clockcheck import NTP_EPOCH_OFFSET
 from arcilogger_core.config import TsaConfig
+from arcilogger_core.smbshare import ShareError
 
 FAKE_JAVA = Path(__file__).parent / "fake_zamane" / "fake_java.py"
 SECRET = "gizli-parola-örnek"
@@ -222,3 +229,75 @@ def test_redact_replaces_every_secret_and_caps_the_text() -> None:
     secrets = {"a": "uzun-parola", "b": "ab", "c": ""}  # too short to replace safely: kept
     assert redact("x uzun-parola y uzun-parola ab", secrets) == "x *** y *** ab"
     assert len(redact("y" * 10_000, {})) == MAX_MESSAGE
+
+
+# -- the trial e-mail and the replica share --------------------------------------------------------
+
+
+def smtp_params(state: SmtpState, **values: Any) -> dict[str, Any]:
+    smtp = {
+        "enabled": True,
+        "host": state.host,
+        "port": state.port,
+        "security": "none",
+        "from_address": "arcilogger@ornek.example",
+        "timeout_seconds": 5,
+        **values,
+    }
+    return {"smtp": smtp, "to": "bt@ornek.example", "web_url": "https://arcilogger.ornek.example"}
+
+
+def test_the_trial_email_goes_to_the_chosen_recipient() -> None:
+    with SmtpTestServer() as state:
+        result = probe_smtp(smtp_params(state), {})
+        child = ChildProber().run("smtp", smtp_params(state), {})
+    assert result.ok, result.message
+    assert result.message == f"accepted by {state.host}:{state.port}"
+    assert child.ok, child.message
+    assert [mail.recipients for mail in state.received] == [["bt@ornek.example"]] * 2
+    mail = email.message_from_bytes(state.received[0].data, policy=email.policy.default)
+    assert mail["Subject"] == "[ARCILOGGER] Deneme e-postası / Test e-mail"
+
+
+def test_a_refused_login_fails_the_trial_without_the_password() -> None:
+    with SmtpTestServer() as state:
+        state.credentials = ("arcilogger", "dogru-parola")
+        state.echo = "yanlis-parola"  # the server repeats what it was sent
+        params = smtp_params(state, username="arcilogger")
+        result = ChildProber().run("smtp", params, {"smtp.password": "yanlis-parola"})
+    assert (result.ok, result.code) == (False, "smtp_test_failed")
+    assert "yanlis-parola" not in result.message
+    assert state.received == []
+
+
+class FakeShare:
+    """``smbshare.ShareApi`` that refuses with a text naming the password it was given."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def add(self, remote: str, user: str, password: str) -> None:
+        self.calls.append((remote, user))
+        raise ShareError(f"{remote}: refused for {user} / {password}")
+
+    def cancel(self, remote: str) -> None:
+        self.calls.append((remote, "cancel"))
+
+
+def test_the_replica_probe_writes_reads_and_removes(tmp_path: Path) -> None:
+    result = probe_replica({"target": str(tmp_path), "user": None}, {})
+    assert result.ok, result.message
+    assert "yazma, okuma ve silme" in result.message
+    assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
+
+
+def test_a_share_that_refuses_the_candidate_user(tmp_path: Path) -> None:
+    share = FakeShare()
+    params = {"target": "\\\\NAS-01\\arcilogger-worm", "user": "NAS-01\\arcireplica"}
+    result = probe_replica(params, {"replica.password": SECRET}, api=share)
+    assert (result.ok, result.code) == (False, "replica_test_failed")
+    assert SECRET not in result.message
+    assert share.calls == [("\\\\NAS-01\\arcilogger-worm", "NAS-01\\arcireplica")]
+    missing = probe_replica(params, {}, api=share)  # a user without a password
+    assert (missing.ok, missing.code) == (False, "replica_test_failed")
+    assert "replica.password" in missing.message

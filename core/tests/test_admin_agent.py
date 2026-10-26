@@ -865,3 +865,110 @@ def test_removing_a_source_needs_reauthentication_and_raises_an_alert(
     raised = [a for a in alerts(installed) if a.get("rule") == "R20-config-change"]
     assert raised
     assert raised[-1]["severity"] == "high"
+
+
+# -- SMTP and the replica --------------------------------------------------------------------------
+
+
+def smtp_ops(installed: Installed, password: str) -> list[dict[str, Any]]:
+    return [
+        {"op": "set", "path": "smtp.enabled", "expect": False, "value": True},
+        {"op": "set", "path": "smtp.host", "expect": None, "value": "smtp.ornek.example"},
+        {"op": "set", "path": "smtp.username", "expect": None, "value": "arcilogger"},
+        {"op": "set", "path": "smtp.from_address", "expect": None,
+         "value": "arcilogger@ornek.example"},
+        {"op": "secret_set", "name": "smtp.password", "expect": "unset",
+         "token": installed.store.encrypt_value(password)},
+    ]  # fmt: skip
+
+
+def test_an_smtp_change_sends_the_trial_email_with_the_candidate_values(
+    installed: Installed,
+) -> None:
+    prober = FakeProber()
+    agent = FakeAgent(installed, prober=prober)
+    request = installed.request(
+        section="smtp",
+        ops=smtp_ops(installed, "smtp-parola"),
+        options={"test_to": "bt@ornek.example"},
+    )
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied", status
+    [call] = prober.calls
+    assert call.kind == "smtp"
+    assert call.params["to"] == "bt@ornek.example"
+    smtp = call.params["smtp"]
+    assert isinstance(smtp, dict)
+    assert (smtp["host"], smtp["username"]) == ("smtp.ornek.example", "arcilogger")
+    assert call.secrets == {"smtp.password": "smtp-parola"}
+    config = installed.config()
+    assert config.smtp.enabled
+    assert installed.store.get("smtp.password") == "smtp-parola"
+
+
+def test_an_smtp_change_without_a_trial_recipient_is_refused(installed: Installed) -> None:
+    agent = FakeAgent(installed)
+    request = installed.request(section="smtp", ops=smtp_ops(installed, "smtp-parola"))
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.error is not None
+    assert (status.state, status.error.code) == ("failed", "smtp_test_recipient_required")
+    assert not installed.config().smtp.enabled
+    skipped = installed.request(section="smtp", ops=smtp_ops(installed, "smtp-parola"), probe=False)
+    installed.submit(skipped)
+    agent.process()
+    assert installed.status(skipped.id).state == "applied"  # type: ignore[union-attr]
+
+
+def test_a_failed_trial_email_changes_nothing(installed: Installed) -> None:
+    failure = ProbeResult(False, "smtp_test_failed", "535 authentication failed smtp-parola")
+    agent = FakeAgent(installed, prober=FakeProber({"smtp": failure}))
+    request = installed.request(
+        section="smtp",
+        ops=smtp_ops(installed, "smtp-parola"),
+        options={"test_to": "bt@ornek.example"},
+    )
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "probe_failed"
+    assert installed.store.get("smtp.password") is None
+    assert not installed.config().smtp.enabled
+
+
+def test_turning_the_replica_off_is_held(installed: Installed) -> None:
+    installed.write_policy(hold_hours=2)
+    agent = FakeAgent(installed, now=datetime(2026, 10, 25, 10, 15, tzinfo=SITE_TZ))
+    on = installed.request(
+        section="replica",
+        ops=[
+            {"op": "set", "path": "replica.enabled", "expect": False, "value": True},
+            {"op": "set", "path": "replica.target", "expect": None, "value": "\\\\NAS-01\\worm"},
+        ],
+        now=agent.now(),
+    )
+    installed.submit(on)
+    agent.process()
+    assert installed.status(on.id).state == "applied"  # type: ignore[union-attr]
+    off = installed.request(
+        section="replica",
+        ops=[{"op": "set", "path": "replica.enabled", "expect": True, "value": False}],
+        now=agent.now(),
+    )
+    installed.submit(off)
+    agent.process()
+    status = installed.status(off.id)
+    assert status is not None
+    assert status.state == "pending"
+    assert status.effective_at == agent.now() + timedelta(hours=2)
+    assert installed.config().replica.enabled
+    agent.advance(timedelta(hours=2, minutes=1))
+    agent.process()
+    assert installed.status(off.id).state == "applied"  # type: ignore[union-attr]
+    assert not installed.config().replica.enabled

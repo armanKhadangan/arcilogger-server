@@ -1333,7 +1333,7 @@ class _Body:
 
     def set(self, path: str, value: Any) -> None:
         expect = current_value(self.current, path)
-        if value != expect:
+        if value != expect or type(value) is not type(expect):  # 1 is no "true", 800.0 no 800
             self.ops.append(SetOp(op="set", path=path, expect=expect, value=value))
 
     def secret(self, name: BrowserSecret, value: Any) -> None:
@@ -1632,7 +1632,14 @@ def validate_section(
             or confirmed != preview(check.candidate).days_to_delete
         ):
             errors.append(Problem("retention_confirm_mismatch", "retention.days"))
-    errors += [problem for problem in check.errors if problem not in errors]
+    # A field the form check already refused is named once (``test_to``: not allowed, then
+    # not "required").
+    refused = {problem.field for problem in errors if problem.field is not None}
+    errors += [
+        problem
+        for problem in check.errors
+        if problem not in errors and (problem.field is None or problem.field not in refused)
+    ]
     if errors:
         return replace(
             check,

@@ -163,20 +163,19 @@ def test_an_smtp_ca_file_holds_one_to_ten_certificates() -> None:
 # -- Zamane clients --------------------------------------------------------------------------------
 
 
-def jar(content: bytes = b"\xca\xfe\xba\xbe") -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
-        archive.writestr("ornek/Client.class", content)
-    return buffer.getvalue()
-
-
 def archive(*members: tuple[str, bytes], method: int = zipfile.ZIP_DEFLATED) -> bytes:
+    """A ZIP of ``members`` with a fixed time stamp (the same bytes on every run)."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", method) as handle:
         for name, data in members:
-            handle.writestr(name, data)
+            info = zipfile.ZipInfo(name, date_time=(2026, 10, 25, 10, 15, 0))
+            handle.writestr(info, data, compress_type=method)
     return buffer.getvalue()
+
+
+def jar(content: bytes = b"\xca\xfe\xba\xbe") -> bytes:
+    return archive(("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\n"),
+                   ("ornek/Client.class", content))  # fmt: skip
 
 
 def written(tmp_path: Path, data: bytes, name: str = "upload.bin") -> Path:
@@ -237,6 +236,18 @@ def test_a_distribution_zip_gives_its_one_client(
             archive(("tss-client-console-1.jar", b"\x00" * (2 * 1024 * 1024))),
             "compressed more than 20 times",
         ),
+    ],
+    ids=[
+        "not-a-zip",
+        "no-client",
+        "two-clients",
+        "dot-dot",
+        "absolute",
+        "drive",
+        "member-not-a-zip",
+        "member-without-manifest",
+        "too-many-entries",
+        "zip-bomb",
     ],
 )
 def test_what_is_not_a_client(tmp_path: Path, data: bytes, reason: str) -> None:

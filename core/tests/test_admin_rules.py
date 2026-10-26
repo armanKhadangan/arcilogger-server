@@ -1018,3 +1018,470 @@ def test_one_source_per_request(root: Path, config: Config) -> None:
         {"op": "source_add", "source": {**SOURCE, "name": "fw-02", "address": "172.20.10.23"}},
     ]
     assert codes(check_request(signed("sources", ops), config, context(root))) == ["source_invalid"]
+
+
+def with_tables(root: Path, extra: str) -> Config:
+    """The configuration of ``root`` with ``extra`` tables appended."""
+    path = root / "arcilogger.toml"
+    path.write_text(path.read_text(encoding="utf-8") + "\n" + extra, encoding="utf-8")
+    return parse_config(path.read_bytes(), path)
+
+
+SMTP_ON = """\
+[smtp]
+enabled = true
+host = "smtp.ornek.example"
+port = 587
+security = "starttls"
+username = "arcilogger"
+from_address = "arcilogger@ornek.example"
+"""
+
+SMTP_BODY = {
+    "enabled": True,
+    "host": "smtp.ornek.example",
+    "port": 587,
+    "security": "starttls",
+    "username": "arcilogger",
+    "from_address": "arcilogger@ornek.example",
+    "password": "smtp-parola",
+    "test_to": "bt@ornek.example",
+}
+
+REPLICA_ON = """\
+[replica]
+enabled = true
+target = '\\\\NAS-01\\arcilogger-worm'
+user = 'NAS-01\\arcireplica'
+"""
+
+
+# -- smtp ------------------------------------------------------------------------------------------
+
+
+def test_smtp_is_switched_on_with_a_trial_email(root: Path, config: Config) -> None:
+    check = validate_section("smtp", config, SMTP_BODY, context(root))
+    assert check.ok, check.errors
+    assert check.probes == (rules.Probe("smtp", None),)
+    assert check.options == {"test_to": "bt@ornek.example"}
+    assert check.reauth
+    assert "reload.worker" in check.effects
+    assert check.changes["smtp.password"]["new"] == "set"
+    assert check.candidate is not None
+    assert check.candidate.smtp.host == "smtp.ornek.example"
+    no_recipient = {key: value for key, value in SMTP_BODY.items() if key != "test_to"}
+    assert [(p.code, p.field) for p in validate_section("smtp", config, no_recipient,
+                                                        context(root)).errors] == [
+        ("smtp_test_recipient_required", "test_to")
+    ]  # fmt: skip
+    assert validate_section("smtp", config, {**no_recipient, "probe": False}, context(root)).ok
+
+
+def test_the_trial_recipient_is_one_the_api_allows(root: Path, config: Config) -> None:
+    allowed = context(root, test_recipients=frozenset({"BT@ornek.example"}))
+    assert validate_section("smtp", config, SMTP_BODY, allowed).ok  # case-insensitive
+    other = {**SMTP_BODY, "test_to": "baska@ornek.example"}
+    assert codes(validate_section("smtp", config, other, allowed)) == [
+        "test_email_recipient_not_allowed"
+    ]
+    invalid = validate_section(
+        "smtp", config, {**SMTP_BODY, "test_to": "not an address"}, context(root)
+    )
+    assert [(p.code, p.field) for p in invalid.errors] == [("config_invalid", "test_to")]
+
+
+@pytest.mark.parametrize(
+    ("body", "code", "field"),
+    [
+        ({"host": "kötü host"}, "config_invalid", "smtp.host"),
+        ({"host": "10.0.3"}, "config_invalid", "smtp.host"),
+        ({"port": 0}, "config_invalid", "smtp.port"),
+        ({"port": 65536}, "config_invalid", "smtp.port"),
+        ({"security": "tls"}, "config_invalid", "smtp.security"),
+        ({"from_address": "arcilogger"}, "config_invalid", "smtp.from_address"),
+        ({"timeout_seconds": 301}, "config_invalid", "smtp.timeout_seconds"),
+        ({"enabled": "yes"}, "config_invalid", "smtp.enabled"),
+        ({"username": "satır\nsonu"}, "config_invalid", "smtp.username"),
+    ],
+)  # fmt: skip
+def test_smtp_values_out_of_range(
+    root: Path, config: Config, body: Mapping[str, Any], code: str, field: str
+) -> None:
+    check = validate_section("smtp", config, body, context(root))
+    assert [(p.code, p.field) for p in check.errors] == [(code, field)]
+
+
+def test_an_enabled_smtp_needs_its_host_and_sender(root: Path, config: Config) -> None:
+    check = validate_section("smtp", config, {"enabled": True, "test_to": "bt@ornek.example"},
+                             context(root))  # fmt: skip
+    assert [(p.code, p.field) for p in check.errors] == [
+        ("config_invalid", "smtp.host"),
+        ("config_invalid", "smtp.from_address"),
+    ]
+
+
+def test_a_password_is_never_sent_in_plain_text_to_another_host(root: Path, config: Config) -> None:
+    plain = {**SMTP_BODY, "security": "none", "port": 25}
+    assert [(p.code, p.field) for p in validate_section("smtp", config, plain,
+                                                        context(root)).errors] == [
+        ("smtp_plaintext_auth_refused", "smtp.security")
+    ]  # fmt: skip
+    local = {**plain, "host": "localhost"}
+    assert validate_section("smtp", config, local, context(root)).ok
+    anonymous = {key: value for key, value in plain.items() if key not in ("username", "password")}
+    check = validate_section("smtp", config, anonymous, context(root))
+    assert check.ok
+    assert warnings(check) == ["smtp_plaintext"]
+
+
+def test_a_new_endpoint_needs_the_password_again(root: Path) -> None:
+    config = with_tables(root, SMTP_ON)
+    stored = context(root, stored_secrets=frozenset({"smtp.password"}))
+    for change in ({"host": "smtp2.ornek.example"}, {"port": 465, "security": "ssl"},
+                   {"username": "baska"}):  # fmt: skip
+        body = {**change, "test_to": "bt@ornek.example"}
+        check = validate_section("smtp", config, body, stored)
+        assert [(p.code, p.field) for p in check.errors] == [
+            ("secret_rebind_required", "smtp.password")
+        ], change
+        assert validate_section("smtp", config, {**body, "password": "yeni"}, stored).ok
+    sender = {"from_address": "uyari@ornek.example", "test_to": "bt@ornek.example"}
+    check = validate_section("smtp", config, sender, stored)
+    assert check.ok  # the server and the account stay: the stored password still fits
+    assert check.probes == (rules.Probe("smtp", None),)
+
+
+def test_a_user_name_needs_a_stored_password(root: Path, config: Config) -> None:
+    body = {key: value for key, value in SMTP_BODY.items() if key != "password"}
+    assert [(p.code, p.field) for p in validate_section("smtp", config, body,
+                                                        context(root)).errors] == [
+        ("smtp_password_required", "smtp.password")
+    ]  # fmt: skip
+
+
+def test_removing_the_user_name_deletes_the_password(root: Path) -> None:
+    config = with_tables(root, SMTP_ON)
+    stored = context(root, stored_secrets=frozenset({"smtp.password"}))
+    check = validate_section(
+        "smtp", config, {"username": "", "test_to": "bt@ornek.example"}, stored
+    )
+    assert check.ok, check.errors
+    assert [op["op"] for op in check.ops] == ["set", "secret_delete"]
+    assert check.secret_changes == {"smtp.password": None}
+
+
+def test_switching_smtp_off_warns(root: Path) -> None:
+    config = with_tables(root, SMTP_ON)
+    stored = context(root, stored_secrets=frozenset({"smtp.password"}))
+    check = validate_section("smtp", config, {"enabled": False}, stored)
+    assert check.ok
+    assert warnings(check) == ["smtp_disabled"]
+    assert check.alert == "medium"
+    assert check.probes == ()
+
+
+def test_strict_outbound_mode_syncs_the_firewall_for_a_new_smtp_host(root: Path) -> None:
+    config = with_tables(root, SMTP_ON)
+    strict = context(root, stored_secrets=frozenset({"smtp.password"}), strict_outbound=True)
+    body = {"host": "smtp2.ornek.example", "password": "yeni", "test_to": "bt@ornek.example"}
+    check = validate_section("smtp", config, body, strict)
+    assert check.ok
+    assert "system.firewall" in check.effects
+
+
+def test_a_company_ca_file_is_installed_by_its_hash(
+    root: Path, config: Config, tmp_path: Path
+) -> None:
+    bundle = root_certificate() + root_certificate()
+    item = uploaded(tmp_path, "smtp_ca", bundle)
+    body = {**SMTP_BODY, "ca": {"upload_id": item.id}}
+    check = validate_section("smtp", config, body, context(root, uploads={item.id: item}))
+    assert check.ok, check.errors
+    target = root / "smtp-ca" / f"{sha256(bundle)}.pem"
+    assert [(i.target, i.data) for i in check.installs] == [(target, bundle)]
+    assert check.candidate is not None
+    assert check.candidate.smtp.ca_file == target
+    bad = uploaded(tmp_path, "smtp_ca", b"not a certificate file")
+    refused = validate_section(
+        "smtp", config, {**SMTP_BODY, "ca": {"upload_id": bad.id}},
+        context(root, uploads={bad.id: bad}),
+    )  # fmt: skip
+    assert [(p.code, p.field) for p in refused.errors] == [
+        ("root_certificate_invalid", "smtp.ca_file")
+    ]
+
+
+def test_clearing_the_ca_file(root: Path) -> None:
+    config = with_tables(root, SMTP_ON + f'ca_file = "{(root / "smtp-ca" / "x.pem").as_posix()}"\n')
+    stored = context(root, stored_secrets=frozenset({"smtp.password"}))
+    check = validate_section("smtp", config, {"clear_ca": True, "test_to": "bt@ornek.example"},
+                             stored)  # fmt: skip
+    assert check.ok, check.errors
+    assert check.ops[0]["op"] == "smtp_ca_clear"
+    assert check.candidate is not None
+    assert check.candidate.smtp.ca_file is None
+    assert check.probes == (rules.Probe("smtp", None),)
+
+
+# -- replica ---------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "\\\\NAS-01\\arcilogger-worm",
+        "\\\\nas.ornek.example\\arci$\\gunluk",
+        "\\\\172.20.10.40\\worm\\a\\b\\",
+        "//NAS-01/arcilogger-worm",
+    ],
+)
+def test_replica_targets_that_are_shares(target: str) -> None:
+    assert rules.unc_ok(target)
+    assert rules.unc_host(target) == target.replace("/", "\\")[2:].split("\\")[0].lower()
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "D:\\replica",
+        "\\\\NAS-01",
+        "\\\\NAS-01\\",
+        "\\\\?\\C:\\replica",
+        "\\\\.\\pipe\\x",
+        "\\\\?\\UNC\\NAS-01\\worm",
+        "\\\\NAS-01\\worm\\..\\yukari",
+        "\\\\NAS-01\\worm\\.\\x",
+        "\\\\NAS-01\\worm\\a\\\\b",
+        "\\\\NAS-01\\worm\\son.",
+        "\\\\NAS-01\\worm\\x:y",
+        "\\\\NAS-01\\wo rm",
+        "\\\\kötü host\\worm",
+        "\\\\10.0.3\\worm",
+        "\\\\NAS-01\\worm\\a*b",
+        "\\\\NAS-01\\worm\\satır\nsonu",
+        "\\\\NAS-01\\" + "x" * 81,
+        "\\\\NAS-01\\worm\\" + "a\\" * 130,
+    ],
+)
+def test_replica_targets_that_are_refused(target: str) -> None:
+    assert not rules.unc_ok(target)
+
+
+@given(st.text(alphabet="\\/.:?*<>|$ aN0-é", max_size=40))
+def test_any_accepted_target_is_a_plain_share_path(target: str) -> None:
+    if rules.unc_ok(target):
+        text = target.replace("/", "\\")
+        assert text.startswith("\\\\")
+        assert ".." not in text.split("\\")
+        assert not text.startswith(("\\\\?\\", "\\\\.\\"))
+        assert ":" not in text
+
+
+def test_replica_users(root: Path, config: Config) -> None:
+    for user in ("NAS-01\\arcireplica", "ORNEK\\yedek $", "arcireplica@ornek.example"):
+        assert rules.replica_user_ok(user)
+    for user in ("arcireplica", "\\arci", "NAS-01\\", "a@b", "x" * 257):
+        assert not rules.replica_user_ok(user)
+    body = {"enabled": True, "target": "\\\\NAS-01\\worm", "user": "arcireplica", "password": "p"}
+    assert [(p.code, p.field) for p in validate_section("replica", config, body,
+                                                        context(root)).errors] == [
+        ("replica_user_invalid", "replica.user")
+    ]  # fmt: skip
+
+
+def test_a_replica_is_switched_on_and_probed(root: Path, config: Config) -> None:
+    body = {"enabled": True, "target": " \\\\NAS-01\\arcilogger-worm ", "user": "NAS-01\\arci",
+            "password": "replika-parola"}  # fmt: skip
+    check = validate_section("replica", config, body, context(root))
+    assert check.ok, check.errors
+    assert check.probes == (rules.Probe("replica", "nas-01"),)
+    assert check.reauth
+    assert not check.guarded
+    assert {"task.next_run:Replica", "reload.worker"} <= set(check.effects)
+    assert codes(validate_section("replica", config, {"enabled": True}, context(root))) == [
+        "config_invalid"
+    ]
+    target = {"enabled": True, "target": "D:\\replica"}
+    assert [(p.code, p.field) for p in validate_section("replica", config, target,
+                                                        context(root)).errors] == [
+        ("replica_target_invalid", "replica.target")
+    ]  # fmt: skip
+
+
+def test_a_new_share_host_or_user_needs_the_password_again(root: Path) -> None:
+    config = with_tables(root, REPLICA_ON)
+    stored = context(root, stored_secrets=frozenset({"replica.password"}))
+    folder = validate_section(
+        "replica", config, {"target": "\\\\NAS-01\\arcilogger-worm\\yeni"}, stored
+    )
+    assert folder.ok  # the same host: the stored password still fits
+    for change in ({"target": "\\\\NAS-02\\arcilogger-worm"}, {"user": "NAS-01\\baska"}):
+        check = validate_section("replica", config, change, stored)
+        assert [(p.code, p.field) for p in check.errors] == [
+            ("secret_rebind_required", "replica.password")
+        ], change
+        assert validate_section("replica", config, {**change, "password": "yeni"}, stored).ok
+    no_password = validate_section("replica", config, {"user": "NAS-01\\baska"}, context(root))
+    assert codes(no_password) == ["replica_password_required"]
+
+
+def test_turning_a_replica_off_or_moving_it_is_guarded(root: Path) -> None:
+    config = with_tables(root, REPLICA_ON)
+    stored = context(root, stored_secrets=frozenset({"replica.password"}))
+    off = validate_section("replica", config, {"enabled": False}, stored)
+    assert off.ok
+    assert off.guarded
+    assert off.alert == "high"
+    assert off.probes == ()
+    moved = validate_section("replica", config, {"target": "\\\\NAS-01\\baska"}, stored)
+    assert moved.guarded
+    assert moved.probes == (rules.Probe("replica", "nas-01"),)
+    policy = POLICY.model_copy(update={"hold_hours": 4})
+    assert off.effective_at(policy, NOW) == NOW + timedelta(hours=4)
+    assert off.effective_at(POLICY, NOW) is None  # no hold configured
+
+
+def test_strict_outbound_mode_tests_a_new_share_after_the_firewall(root: Path) -> None:
+    config = with_tables(root, REPLICA_ON)
+    strict = context(root, stored_secrets=frozenset({"replica.password"}), strict_outbound=True)
+    body = {"target": "\\\\NAS-02\\worm", "password": "yeni"}
+    check = validate_section("replica", config, body, strict)
+    assert check.ok
+    assert check.probes == ()
+    assert warnings(check) == ["probe_skipped"]
+    assert check.followups == ("replica_test",)
+    assert "system.firewall" in check.effects
+
+
+# -- retention -------------------------------------------------------------------------------------
+
+
+@given(st.integers(min_value=-(10**6), max_value=729))
+def test_every_retention_below_two_years_is_refused(days: int) -> None:
+    config = Config.model_validate({"data_dir": "/srv/data", "secrets_dir": "/srv/arci"})
+    check = rules._run(
+        "retention",
+        config,
+        [SetOp(op="set", path="retention.days", expect=config.retention.days, value=days)],
+        RuleContext(
+            policy=POLICY,
+            anchors=TrustAnchors(Path("/srv/arci"), POLICY),
+            stored_secrets=frozenset(),
+            now=NOW,
+        ),
+        test_to=None,
+        probe=True,
+    )
+    assert codes(check) == ["retention_below_minimum"]
+
+
+@pytest.mark.parametrize("days", [36_501, True, "800", 800.0])
+def test_retention_values_that_are_not_days(root: Path, config: Config, days: Any) -> None:
+    check = validate_section("retention", config, {"days": days}, context(root))
+    assert [(p.code, p.field) for p in check.errors] == [("config_invalid", "retention.days")]
+
+
+def preview(days: int) -> Any:
+    return lambda config: rules.RetentionPreview(
+        cutoff=NOW.date(), days_to_delete=days, oldest=None, newest=None
+    )
+
+
+def test_switching_retention_on_needs_the_typed_number_of_days(root: Path, config: Config) -> None:
+    preview_context = context(root, retention_preview=preview(12))
+    body: dict[str, Any] = {"enabled": True, "days": 760}
+    assert [(p.code, p.field) for p in validate_section("retention", config, body,
+                                                        preview_context).errors] == [
+        ("retention_confirm_mismatch", "retention.days")
+    ]  # fmt: skip
+    wrong = validate_section("retention", config, {**body, "confirm_delete_days": 11},
+                             preview_context)  # fmt: skip
+    assert codes(wrong) == ["retention_confirm_mismatch"]
+    check = validate_section("retention", config, {**body, "confirm_delete_days": 12},
+                             preview_context)  # fmt: skip
+    assert check.ok
+    assert check.guarded
+    assert check.alert == "high"
+    assert check.reauth
+    assert {"task.next_run:Retention", "reload.api"} <= set(check.effects)
+
+
+def test_lowering_retention_is_guarded_and_raising_it_is_not(root: Path) -> None:
+    config = with_tables(root, "[retention]\nenabled = true\ndays = 1000\n")
+    lower = validate_section("retention", config, {"days": 800, "confirm_delete_days": 0},
+                             context(root, retention_preview=preview(0)))  # fmt: skip
+    assert lower.ok
+    assert lower.guarded
+    higher = validate_section("retention", config, {"days": 1200}, context(root))
+    assert higher.ok
+    assert not higher.guarded
+    assert higher.alert is None
+    off = validate_section("retention", config, {"enabled": False}, context(root))
+    assert off.ok
+    assert not off.guarded
+
+
+# -- backup ----------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        ({"keep_daily": 0}, "backup.keep_daily"),
+        ({"keep_daily": 3661}, "backup.keep_daily"),
+        ({"keep_weekly": -1}, "backup.keep_weekly"),
+        ({"keep_monthly": 1201}, "backup.keep_monthly"),
+        ({"min_free_gb": 100_001}, "backup.min_free_gb"),
+        ({"enabled": 1}, "backup.enabled"),
+    ],
+)
+def test_backup_values_out_of_range(
+    root: Path, config: Config, body: Mapping[str, Any], field: str
+) -> None:
+    check = validate_section("backup", config, body, context(root))
+    assert [(p.code, p.field) for p in check.errors] == [("config_invalid", field)]
+
+
+def test_backup_changes(root: Path, config: Config) -> None:
+    keep = validate_section("backup", config, {"keep_daily": 30, "keep_weekly": 10}, context(root))
+    assert keep.ok
+    assert keep.reauth
+    assert set(keep.effects) == {"task.next_run:Backup"}
+    off = validate_section("backup", config, {"enabled": False}, context(root))
+    assert off.ok
+    assert warnings(off) == ["backup_disabled"]
+    assert off.alert == "medium"
+
+
+# -- re-authentication and guarded changes (contract 2.3) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("section", "body", "reauth", "guarded"),
+    [
+        ("general", {"site_name": "Örnek Holding"}, False, False),
+        ("general", {"clock": {"ntp_server": "172.20.10.2"}}, True, False),
+        ("tsa", {"credit_alert_threshold": 100}, False, False),
+        ("tsa", {"server": "test"}, True, False),
+        ("smtp", {"enabled": True, "host": "localhost", "security": "none",
+                  "from_address": "arcilogger@ornek.example", "probe": False}, True, False),
+        ("replica", {"enabled": True, "target": "\\\\NAS-01\\worm", "probe": False}, True, False),
+        ("retention", {"days": 900}, True, False),
+        ("retention", {"enabled": True}, True, True),
+        ("backup", {"keep_daily": 10}, True, False),
+        ("sources", {"source": {"name": "fw-01", "type": "fortigate",
+                                "address": "172.20.10.22"}}, False, False),
+        ("sources", {"name": "aps", "remove": True, "confirm": "aps"}, True, False),
+    ],
+)  # fmt: skip
+def test_which_changes_need_reauthentication_or_a_hold(
+    root: Path,
+    config: Config,
+    section: Any,
+    body: Mapping[str, Any],
+    reauth: bool,
+    guarded: bool,
+) -> None:
+    check = validate_section(section, config, body, context(root))
+    assert check.ok, check.errors
+    assert (check.reauth, check.guarded) == (reauth, guarded)
