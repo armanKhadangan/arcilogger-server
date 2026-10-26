@@ -18,6 +18,11 @@ Box         Permission                       Read from
 ``alerts``  ``alerts.read``                  ``alerts`` (as ``GET /alerts/summary``)
 ==========  ===============================  ===================================================
 
+``parse_failures`` ("Ayrıştırma hataları", contract 2.17) has the permission of ``ingest``: today's
+loaded lines (``ingest_offsets``) and parse failures (``parse_failures``) by source and pattern,
+with an example line per pattern, and the totals of the 6 days before — patterns and counts
+only.
+
 **Messages per minute** count ``messages`` by ``time`` over the 60 whole minutes before the
 current one (the current minute is still filling): one index-only range scan of the primary key
 ``(time, id)`` of the month's partition, grouped per minute — no extra index and no counter
@@ -45,13 +50,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
+from arcilogger_api.live.schemas import RawRef
 from arcilogger_api.routers.alerts import AlertOut, OpenBySeverity, latest_active, open_by_severity
 from arcilogger_api.sealinfo import VaultView, credit_history, on_demand_verifications
 from arcilogger_api.security import CurrentUser, require
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, to_site, utc_now
-from arcilogger_db.models import Message
+from arcilogger_db.models import IngestOffset, Message, ParseFailure
 from arcilogger_worker.alerts.r15 import newest_message, watched_sources
 from arcilogger_worker.correlation.watermark import collector_received
 
@@ -71,6 +77,10 @@ CLOCK_STALE: Final = timedelta(hours=3)
 DEFAULT_STAMPS_PER_DAY: Final = 1.0
 #: History the credit consumption is measured over.
 CREDIT_WINDOW: Final = timedelta(days=30)
+#: The parse-failure box: sources and patterns shown, days of history (today included).
+FAILURE_SOURCES: Final = 5
+FAILURE_PATTERNS: Final = 3
+FAILURE_DAYS: Final = 7
 
 SealStatus = Literal["sealed", "pending", "failed", "no_data"]
 #: Day state of the sealing page → the dashboard's four.
@@ -160,6 +170,44 @@ class DashboardAlerts(BaseModel):
     latest: list[AlertOut]
 
 
+class SourceFailures(BaseModel):
+    source: str
+    #: Lines ingest loaded today from the source's file.
+    lines: int
+    failures: int
+    #: Failures per 1,000 loaded lines, one decimal (``null`` without lines).
+    permille: float | None
+
+
+class FailurePattern(BaseModel):
+    source: str
+    pattern: str
+    count: int
+    #: One line of the pattern (the raw-line view opens it).
+    example: RawRef
+
+
+class FailureDay(BaseModel):
+    day: date
+    lines: int
+    failures: int
+
+
+class DashboardParseFailures(BaseModel):
+    """Today's parse failures ("Ayrıştırma hataları"): counts and patterns, never content."""
+
+    day: date
+    lines: int
+    failures: int
+    permille: float | None
+    #: The sources with the most failures today (at most 5).
+    by_source: list[SourceFailures]
+    #: Today's most frequent patterns (at most 3).
+    top_patterns: list[FailurePattern]
+    #: Today and the 6 days before, oldest first.
+    last7: list[FailureDay]
+
+
 class DashboardSummary(BaseModel):
     generated_at: datetime
     ingest: DashboardIngest | None
@@ -167,6 +215,7 @@ class DashboardSummary(BaseModel):
     credit: DashboardCredit | None
     clock: DashboardClock | None
     alerts: DashboardAlerts | None
+    parse_failures: DashboardParseFailures | None
 
 
 # -- ingest ---------------------------------------------------------------------------------------
@@ -211,6 +260,85 @@ def ingest_box(db: Session, layout: Layout, now: datetime) -> DashboardIngest:
         silent=silent,
         messages_per_minute=per_minute,
         sparkline=sparkline,
+    )
+
+
+def _permille(failures: int, lines: int) -> float | None:
+    return round(1000 * failures / lines, 1) if lines else None
+
+
+def parse_failures_box(db: Session, now: datetime) -> DashboardParseFailures:
+    """Today's parse failures by source and pattern, and the last 7 days' totals.
+
+    ``rawlog.invalid`` lines (not in the collector's format) have no ``messages`` row: the web
+    app offers only their example line, not a search.
+    """
+    today = site_day(now)
+    first = today - timedelta(days=FAILURE_DAYS - 1)
+    lines: dict[tuple[date, str], int] = {
+        (day, source): int(count)
+        for day, source, count in db.execute(
+            select(IngestOffset.day, IngestOffset.source, IngestOffset.line_number).where(
+                IngestOffset.day >= first, IngestOffset.day <= today
+            )
+        )
+    }
+    failures: dict[tuple[date, str], int] = {
+        (day, source): int(count)
+        for day, source, count in db.execute(
+            select(ParseFailure.day, ParseFailure.source, func.sum(ParseFailure.count))
+            .where(ParseFailure.day >= first, ParseFailure.day <= today)
+            .group_by(ParseFailure.day, ParseFailure.source)
+        )
+    }
+    patterns = db.scalars(
+        select(ParseFailure)
+        .where(ParseFailure.day == today)
+        .order_by(ParseFailure.count.desc(), ParseFailure.source, ParseFailure.pattern)
+        .limit(FAILURE_PATTERNS)
+    ).all()
+    sources = {source for day, source in lines | failures if day == today}
+    by_source = sorted(
+        (
+            SourceFailures(
+                source=source,
+                lines=lines.get((today, source), 0),
+                failures=failures.get((today, source), 0),
+                permille=_permille(failures.get((today, source), 0), lines.get((today, source), 0)),
+            )
+            for source in sources
+            if failures.get((today, source), 0)
+        ),
+        key=lambda row: (-row.failures, row.source),
+    )[:FAILURE_SOURCES]
+    days = [first + timedelta(days=n) for n in range(FAILURE_DAYS)]
+    last7 = [
+        FailureDay(
+            day=day,
+            lines=sum(count for (d, _), count in lines.items() if d == day),
+            failures=sum(count for (d, _), count in failures.items() if d == day),
+        )
+        for day in days
+    ]
+    total = last7[-1]
+    return DashboardParseFailures(
+        day=today,
+        lines=total.lines,
+        failures=total.failures,
+        permille=_permille(total.failures, total.lines),
+        by_source=by_source,
+        top_patterns=[
+            FailurePattern(
+                source=row.source,
+                pattern=row.pattern,
+                count=int(row.count),
+                example=RawRef(
+                    source=row.source, day=row.day, line=row.example_line, offset=row.example_offset
+                ),
+            )
+            for row in patterns
+        ],
+        last7=last7,
     )
 
 
@@ -332,11 +460,10 @@ def dashboard_summary(
 ) -> DashboardSummary:
     """Every box the user may see (see the module text); the others are ``null``."""
     now = utc_now()
+    ingest_visible = user.has("sources.read") or user.has("dashboard.view")
     return DashboardSummary(
         generated_at=to_site(now),
-        ingest=ingest_box(db, layout, now)
-        if user.has("sources.read") or user.has("dashboard.view")
-        else None,
+        ingest=ingest_box(db, layout, now) if ingest_visible else None,
         seal=seal_box(db, layout, config, now) if user.has("seal.read") else None,
         credit=credit_box(layout, config) if user.has("seal.read") else None,
         clock=clock_box(layout, config, now)
@@ -345,4 +472,5 @@ def dashboard_summary(
         alerts=DashboardAlerts(open_by_severity=open_by_severity(db), latest=latest_active(db))
         if user.has("alerts.read")
         else None,
+        parse_failures=parse_failures_box(db, now) if ingest_visible else None,
     )
