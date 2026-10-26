@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,8 @@ from arcilogger_core.admin.contract import (
     TrustedExecutable,
     dump_document,
 )
+from arcilogger_core.alerts import read_alerts
+from arcilogger_core.cli import main as cli_main
 from arcilogger_core.config import load_config
 from arcilogger_core.execpolicy import (
     CheckedJar,
@@ -29,8 +32,12 @@ from arcilogger_core.execpolicy import (
     check_java,
     check_zamane_jar,
 )
+from arcilogger_core.layout import Layout
+from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
 from arcilogger_core.timeutil import SITE_TZ, utc_now
-from arcilogger_core.tsa import zamane_releases
+from arcilogger_core.tsa import TsaExecutableError, make_provider, zamane_releases
+from arcilogger_core.tsa.base import TsaConfigurationError
+from arcilogger_core.tsa.zamane import ZamaneCliProvider
 from arcilogger_core.tsa.zamane_releases import KNOWN_RELEASES, ZamaneRelease, find_release
 
 
@@ -433,3 +440,79 @@ def test_a_release_is_found_by_its_jar_or_its_archive(monkeypatch: pytest.Monkey
     assert find_release("a" * 64) is release
     assert find_release("B" * 64) is release
     assert find_release("c" * 64) is None
+
+
+# -- at run time: the time-stamp provider and the tasks -----------------------------------------
+
+
+def zamane_config(machine: Machine, *, java: tuple[str, ...], jar: Path) -> Path:
+    """``arcilogger.toml`` of the installation for the Zamane client, credentials stored."""
+    config_path = machine.programdata / "arcilogger.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    java_list = ", ".join(json.dumps(element) for element in java)
+    config_path.write_text(
+        f'data_dir = "{(machine.outside / "data").as_posix()}"\n'
+        f'[tsa]\nprovider = "zamane"\nurl = "http://tzd.kamusm.gov.tr"\njava = [{java_list}]\n'
+        f"zamane_jar = {json.dumps(str(jar))}\n",
+        encoding="utf-8",
+    )
+    SecretStore.create_key(machine.programdata / "secret.key")
+    secrets = SecretStore(machine.programdata / "secret.key", machine.programdata / "secrets.json")
+    secrets.set(KAMUSM_CUSTOMER, "123456")
+    secrets.set(KAMUSM_PASSWORD, "Deneme-Parola-7")  # gitleaks:allow
+    return config_path
+
+
+def provider_of(config_path: Path) -> Any:
+    config = load_config(config_path)
+    secrets = SecretStore(config.secrets_dir / "secret.key", config.secrets_dir / "secrets.json")
+    anchors = TrustAnchors.of(config_path)
+    return make_provider(config, Layout(config.data_dir), secrets, anchors=anchors)
+
+
+def test_the_provider_runs_the_defaults_that_pass_the_policy(machine: Machine) -> None:
+    """After an upgrade nothing stops sealing: ``java`` from the PATH and the installer's jar,
+    with no policy.json written yet."""
+    jar = installed_jar(machine)
+    provider = provider_of(zamane_config(machine, java=("java",), jar=jar))
+    assert isinstance(provider, ZamaneCliProvider)
+    assert provider.java == ("java",)
+    assert provider.jar == jar
+
+
+@pytest.mark.parametrize(
+    ("java", "reason"),
+    [(("java", "-XX:OnError=cmd /c calc"), "extra arguments"), (("cmd",), "bare program name")],
+)
+def test_the_provider_refuses_a_java_the_policy_refuses(
+    machine: Machine, java: tuple[str, ...], reason: str
+) -> None:
+    config_path = zamane_config(machine, java=java, jar=installed_jar(machine))
+    with pytest.raises(TsaExecutableError, match=reason) as caught:
+        provider_of(config_path)
+    assert isinstance(caught.value, TsaConfigurationError)  # every caller already handles it
+    assert caught.value.refusal.what == "tsa.java"
+
+
+def test_the_provider_refuses_a_jar_the_policy_refuses(machine: Machine) -> None:
+    installed_jar(machine)
+    staged = program(machine.zamane.staging / f"{'d' * 64}.jar", b"PK\x03\x04 uploaded")
+    with pytest.raises(TsaExecutableError) as caught:
+        provider_of(zamane_config(machine, java=("java",), jar=staged))
+    assert caught.value.refusal.what == "tsa.zamane_jar"
+
+
+def test_the_seal_task_reports_a_refused_program_as_its_own_cause(
+    machine: Machine, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jar = program(machine.outside / "Zamane" / "tss-client-console-3.1.33.jar")
+    config_path = zamane_config(machine, java=("java",), jar=jar)
+    assert cli_main(["--config", str(config_path), "seal"]) == 1
+    assert "tsa.zamane_jar" in capsys.readouterr().err
+    (alert,) = read_alerts(Layout(machine.outside / "data").alerts)
+    assert alert["rule"] == "R20-seal-config"
+    assert alert["details"]["cause"] == "executable"
+    assert "güvenilir bir konumda değil" in alert["message"]
+    assert "is not in a trusted location" in alert["message"]
+    assert cli_main(["--config", str(config_path), "credit"]) == 1  # the other tasks refuse too
+    assert "tsa.zamane_jar" in capsys.readouterr().err

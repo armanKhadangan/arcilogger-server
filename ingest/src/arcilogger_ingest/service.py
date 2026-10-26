@@ -23,6 +23,13 @@ If the database is unavailable the same batch is retried with capped exponential
 everything (they are the durable queue). ``state/ingest-status.json`` is rewritten every few
 seconds for the dashboard.
 
+A changed ``[[sources]]`` in ``arcilogger.toml`` is taken without a restart (ADR-0014): between
+two batches the service drops what it read but did not load (it is read again), re-resolves
+every open stream for the new sources (offsets stay) and writes the sources, ``enabled``
+included, to the ``sources`` table. A file that does not load keeps the running sources; a
+change of a key ingest reads only at start-up is reported in the status file's ``config``
+block, which also names the SHA-256 of the file in use.
+
 Only one instance works on a database at a time (:mod:`arcilogger_ingest.instance`): a second
 one waits — and writes no status file — until the first stops (``--once``: exits with code 4).
 """
@@ -45,6 +52,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from arcilogger_core.config import Config
+from arcilogger_core.configwatch import INGEST_HOT, INGEST_RESTART, ConfigWatch, ConfigWatcher
 from arcilogger_core.layout import AUDIT_SOURCE, SPOOL_SUFFIX, Layout
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.models import IngestOffset, Source
@@ -87,6 +95,9 @@ BACKOFF_FIRST: Final = 0.5
 BACKOFF_MAX: Final = 30.0
 #: How often a second instance checks whether the first one has stopped.
 LOCK_RETRY_SECONDS: Final = 5.0
+#: ``arcilogger.toml`` is looked at at most this often (a stat; it is read when it changed), so
+#: new sources are taken within this plus one batch (contract: 5 s).
+RELOAD_SECONDS: Final = 2.0
 
 
 def count_lines(data: bytes) -> int:
@@ -191,7 +202,11 @@ class IngestService:
         backoff_max: float = BACKOFF_MAX,
         step_hook: StepHook | None = None,
         single_instance: bool = True,
+        config_path: Path | None = None,
+        reload_seconds: float = RELOAD_SECONDS,
     ) -> None:
+        """``config_path``: the file ``config`` was loaded from, watched for new
+        ``[[sources]]`` (None: no live reload, e.g. a test with a configuration of its own)."""
         self.config = config
         self.layout = Layout(config.data_dir)
         self.engine = engine
@@ -229,6 +244,24 @@ class IngestService:
         self.started_at = utc_now()
         self.status = StatusWriter(self.layout.ingest_status)
         self._next_status = 0.0
+        self._watcher = (
+            None
+            if config_path is None
+            else ConfigWatcher(
+                config_path,
+                config,
+                hot=INGEST_HOT,
+                restart=INGEST_RESTART,
+                min_interval=reload_seconds,
+            )
+        )
+        #: What the configuration watch last found (the status file's ``config`` block).
+        self.config_watch: ConfigWatch | None = None
+        if self._watcher is not None:
+            self.config_watch = self._watcher.poll()  # the file as it is now
+            self.config = self.config_watch.config
+        #: New ``[[sources]]`` were taken but are not in the ``sources`` table yet.
+        self._sources_unsynced = False
 
     # -- entry point --------------------------------------------------------------------------
 
@@ -249,6 +282,7 @@ class IngestService:
             self._preparer = Preparer(self.workers)
             self.state = "running"
             while not self.stop.is_set():
+                self._reload()
                 self._discover()
                 read = self._fill()
                 if self._flush_due(read, once=once) and not self._flush(retry=not once):
@@ -388,7 +422,8 @@ class IngestService:
             self._retention_days = value
 
     def _sync_configured_sources(self) -> None:
-        """Every configured exact source has a ``sources`` row, even before its first line."""
+        """Every configured exact source has a ``sources`` row, even before its first line, with
+        its configured values (``enabled = false``: R15 and the dashboard leave it out)."""
         with self.engine.begin() as connection:
             for source in self.config.sources:
                 if source.is_network:
@@ -396,6 +431,7 @@ class IngestService:
                 values = {
                     "type": source.type,
                     "address": source.address,
+                    "enabled": source.enabled,
                     "expected": source.expected,
                     "heartbeat_minutes": source.heartbeat_minutes,
                     "unknown": False,
@@ -404,6 +440,47 @@ class IngestService:
                 connection.execute(
                     statement.on_conflict_do_update(index_elements=["name"], set_=values)
                 )
+
+    # -- live reload of [[sources]] (ADR-0014) --------------------------------------------------
+
+    def _reload(self) -> None:
+        """Between two batches: take a changed ``[[sources]]`` of the configuration file.
+
+        What was read but not loaded is dropped and read again (the spool is the queue), so
+        every line is prepared with the sources in use when it is loaded; the open streams are
+        resolved again with their committed offsets, and the ``sources`` table follows (retried
+        before the next batch while the database is unavailable)."""
+        if self._watcher is None:
+            return
+        watch = self._watcher.poll()
+        before, self.config_watch = self.config_watch, watch
+        if before is None or before.status_block() != watch.status_block():
+            self._next_status = 0.0  # the browser administration waits for the new SHA-256
+        if watch.changed:
+            self._discard_batches()
+            self.config = watch.config
+            self._resolve_streams()
+            self._sources_unsynced = True
+            log.info(
+                "sources reloaded (%d configured, configuration %s)",
+                len(self.config.sources),
+                (watch.sha256 or "?")[:12],
+            )
+        if self._sources_unsynced:
+            try:
+                self._sync_configured_sources()
+            except DBAPIError as exc:
+                self._database_down(exc)
+                return
+            self._sources_unsynced = False
+
+    def _resolve_streams(self) -> None:
+        """Every open stream as the configuration now describes its folder (parser type,
+        expected, heartbeat); the offsets do not move."""
+        for stream in self.streams.values():
+            source = resolve_source(self.config, stream.info.source)
+            stream.source = source
+            stream.info = StreamInfo(stream.info.source, source.configured_type, stream.info.day)
 
     # -- discovery ----------------------------------------------------------------------------
 

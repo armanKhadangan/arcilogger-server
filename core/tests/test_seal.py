@@ -533,6 +533,25 @@ def test_a_non_critical_eku_is_accepted_only_when_the_site_says_so(
     assert not sv.verify_timestamp(token, manifest_bytes, standalone_roots).ok
 
 
+def test_a_disabled_source_is_no_longer_expected(world: Any, days: list[date]) -> None:
+    """``[[sources]] enabled = false`` (ADR-0014): no gap for it; its raw log is still sealed."""
+    sources = [
+        {**source.model_dump(), "enabled": source.name != "switch-1"}
+        for source in world.config.sources
+    ]
+    world.reconfigure(sources=sources)
+    assert [s.enabled for s in world.config.sources] == [True, True, False]
+    world.busy_day(days[0])
+    world.set_now(days[0] + timedelta(days=1))
+    assert [o.status for o in world.sealer().seal_due()] == ["sealed"]
+    manifest = _manifest(world, days[0])
+    assert {gap["source"] for gap in manifest["gaps"]} == {"core-r1"}
+    world.write_spool("switch-1", days[1], [(time(9, 0), b"<30>system,info still sending")])
+    world.set_now(days[1] + timedelta(days=1))
+    assert [o.status for o in world.sealer().seal_due()] == ["sealed"]
+    assert [f["source"] for f in _manifest(world, days[1])["files"]] == ["switch-1"]
+
+
 # -- seal requests of the browser administration ("Şimdi mühürle", ADR-0014) --------------------
 
 REQUEST = "5e" * 16

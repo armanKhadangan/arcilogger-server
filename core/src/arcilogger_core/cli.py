@@ -60,6 +60,7 @@ from arcilogger_core.admin.contract import (
     TaskKind,
     TaskRequest,
     TaskResult,
+    TsaTestResult,
 )
 from arcilogger_core.alerts import raise_alert
 from arcilogger_core.chain import sealed_days, verify_range
@@ -105,7 +106,7 @@ from arcilogger_core.secretstore import (
 from arcilogger_core.smbshare import connected
 from arcilogger_core.taskrequests import clean, finish, take, task_result
 from arcilogger_core.timeutil import SITE_TZ_NAME, isoformat_site, site_day, utc_now
-from arcilogger_core.tsa import make_provider, trusted_roots
+from arcilogger_core.tsa import TsaExecutableError, make_provider, trusted_roots
 from arcilogger_core.tsa.base import TsaConfigurationError, TsaError
 from arcilogger_core.tsa.verify import confirmed_legal_grade, verify_token
 
@@ -157,7 +158,7 @@ class App:
         return AdminLayout(self.anchors.root / "admin").keys
 
     def provider(self) -> Any:
-        return make_provider(self.config, self.layout, self.secrets)
+        return make_provider(self.config, self.layout, self.secrets, anchors=self.anchors)
 
     def roots(self) -> Any:
         return trusted_roots(self.config, self.layout)
@@ -215,6 +216,8 @@ def _sealer(app: App) -> Sealer:
         provider = app.provider()
     except SecretStoreError as exc:
         raise SealConfigError("secret-store", exc) from exc
+    except TsaExecutableError as exc:
+        raise SealConfigError("executable", exc) from exc
     except TsaConfigurationError as exc:
         raise SealConfigError(_provider_cause(app), exc) from exc
     try:
@@ -432,8 +435,23 @@ def cmd_clock(_: argparse.Namespace, app: App) -> int:
     return 0 if sample.get("ok") and within else 1
 
 
-def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
-    """Connection test: stamp a random 1 KB file and verify it (uses 1 credit)."""
+@dataclass(frozen=True)
+class TsaTest:
+    """One stamp test: ``report`` is the JSON of ``arcilogger-core tsa-test``, None when no
+    stamp was obtained (``error`` says why)."""
+
+    report: dict[str, Any] | None
+    error: str | None = None
+
+    @property
+    def verified(self) -> bool:
+        return self.report is not None and self.report["verified"] is True
+
+
+def run_tsa_test(app: App) -> TsaTest:
+    """Stamp a random 1 KB file and verify the token independently (uses 1 credit). Shared by
+    ``tsa-test`` and the browser's "Damga testi" (Requests task). A configuration that cannot
+    stamp at all (no provider, no pinned roots) raises, as before."""
     folder = app.layout.state / "tsa-test"
     folder.mkdir(parents=True, exist_ok=True)
     stamp_name = utc_now().strftime("%Y%m%dT%H%M%SZ")
@@ -443,8 +461,7 @@ def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
     try:
         stamp = provider.stamp(sample)
     except TsaError as exc:
-        print(f"Zaman damgası alınamadı: {exc}")
-        return 1
+        return TsaTest(None, str(exc))
     result = verify_token(
         stamp.token_path.read_bytes(),
         roots=app.roots(),
@@ -452,7 +469,7 @@ def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
         require_critical_eku=app.config.tsa.require_critical_eku,
     )
     info = result.info
-    _print_json(
+    return TsaTest(
         {
             "provider": provider.name,
             # The configuration points at the Kamu SM production server …
@@ -475,7 +492,16 @@ def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
             "token": str(stamp.token_path),
         }
     )
-    return 0 if result.ok else 1
+
+
+def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
+    """Connection test: stamp a random 1 KB file and verify it (uses 1 credit)."""
+    test = run_tsa_test(app)
+    if test.report is None:
+        print(f"Zaman damgası alınamadı: {test.error}")
+        return 1
+    _print_json(test.report)
+    return 0 if test.verified else 1
 
 
 # -- the Requests task (ADR-0014; contract 2.9) ---------------------------------------------------
@@ -500,6 +526,39 @@ FAILURE_CODES: dict[TaskKind, str] = {
 }
 
 
+def _not_started(exc: Exception, kind: TaskKind) -> TaskDone:
+    """A request whose provider could not be built: refused by the executable policy, or the
+    kind's own failure (credentials, secret store, configuration; the log has the detail)."""
+    log.error("%s request: %s", kind, exc)
+    refused = isinstance(exc, TsaExecutableError)
+    return TaskDone("executable_refused" if refused else FAILURE_CODES[kind])
+
+
+def run_tsa_test_request(app: App) -> TaskDone:
+    """The stamp test ("Damga testi", 1 credit): ``tsa-test``, its JSON without the token's
+    path as the result."""
+    try:
+        test = run_tsa_test(app)
+    except (TsaError, SecretStoreError) as exc:
+        return _not_started(exc, "tsa_test")
+    if test.report is None:
+        log.warning("tsa_test request: no time stamp: %s", test.error)
+        return TaskDone("tsa_test_failed")
+    facts = TsaTestResult.model_validate(
+        {key: value for key, value in test.report.items() if key != "token"}
+    )
+    if not test.verified:
+        return TaskDone("tsa_test_failed", facts)
+    return TaskDone(
+        None,
+        facts,
+        (
+            "Zaman damgası alındı ve bağımsız olarak doğrulandı.",
+            "A time stamp was obtained and verified independently.",
+        ),
+    )
+
+
 def run_credit_request(app: App) -> TaskDone:
     """The credit query ("Kontör sorgula"): the daily credit check, now (``credit.jsonl``,
     ``R20-credit``)."""
@@ -507,8 +566,7 @@ def run_credit_request(app: App) -> TaskDone:
     try:
         provider = app.provider()
     except (TsaError, SecretStoreError) as exc:
-        log.error("credit request: %s", exc)
-        return TaskDone("credit_query_failed")
+        return _not_started(exc, "credit")
     credits = check_credit(provider, app.layout, threshold)
     if credits is None:
         return TaskDone("credit_query_failed")
@@ -526,7 +584,7 @@ def cmd_requests(_: argparse.Namespace, app: App) -> int:
     """``requests run``: every valid request of ``state\\requests\\tasks``, oldest first (the
     task ``\\ARCILOGGER\\Requests``, woken by Event 4111 and every 5 minutes). Exit 0 when there
     is none or all succeeded, 1 when one failed (its result says why)."""
-    runners = {"credit": run_credit_request}
+    runners = {"credit": run_credit_request, "tsa_test": run_tsa_test_request}
     failed = 0
     for request in take(app.layout, "tasks", app.keys_dir):
         started = utc_now()

@@ -15,6 +15,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
+from arcilogger_core import cli
 from arcilogger_core.admin.contract import (
     TaskKind,
     TaskParams,
@@ -39,6 +40,7 @@ from arcilogger_core.config import (
 )
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
+from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
 from arcilogger_core.taskrequests import clean, take
 from arcilogger_core.timeutil import SITE_TZ, isoformat_site, site_day, utc_now
 from arcilogger_core.tsa.mock import MockTsa
@@ -514,6 +516,88 @@ def test_a_credit_request_that_fails_says_why(site: Site) -> None:
     assert result.message_tr is not None
     assert result.message_tr.startswith("Kamu SM kontör sorgusu başarısız")
     assert result.result is None
+
+
+def _zamane_outside_the_policy(site: Site) -> None:
+    """The Zamane client with credentials stored, but a jar the executable policy refuses."""
+    jar = site.programdata.parent / "Downloads" / "tss-client-console-3.1.33.jar"
+    jar.parent.mkdir(parents=True)
+    jar.write_bytes(b"PK\x03\x04 a client nobody installed")
+    site.config.write_text(
+        site.config.read_text(encoding="utf-8").replace(
+            'provider = "mock"', f'provider = "zamane"\nzamane_jar = "{jar.as_posix()}"'
+        ),
+        encoding="utf-8",
+    )
+    SecretStore.create_key(site.programdata / "secret.key")
+    secrets = SecretStore(site.programdata / "secret.key", site.programdata / "secrets.json")
+    secrets.set(KAMUSM_CUSTOMER, "123456")
+    secrets.set(KAMUSM_PASSWORD, "Deneme-Parola-7")  # gitleaks:allow
+
+
+def test_a_program_the_policy_refuses_is_reported_as_such(site: Site) -> None:
+    _zamane_outside_the_policy(site)
+    requests = [site.request(kind) for kind in ("credit", "tsa_test")]
+    seal = site.request("seal", day=site.days[0])
+    assert site.run("requests", "run") == 1
+    assert site.run("seal") == 1
+    for request in (*requests, seal):
+        result = site.result(request)
+        assert result.code == "executable_refused", request.kind
+        assert (
+            result.message_tr == "Bu program yolu güvenilir bir konumda değil; görev çalıştırmadı."
+        )
+        assert result.message_en == (
+            "This program path is not in a trusted location; the task did not run it."
+        )
+    assert not (site.layout.state / "tsa-test").exists() or not any(
+        path.suffix == ".zd" for path in (site.layout.state / "tsa-test").iterdir()
+    )
+
+
+def test_a_tsa_test_request_stamps_and_verifies(site: Site) -> None:
+    tsa = mock_tsa(site)
+    before = tsa.credits
+    request = site.request("tsa_test")
+    assert site.run("requests", "run") == 0
+    assert mock_tsa(site).credits == before - 1  # one credit, as the console's tsa-test
+    result = site.result(request)
+    assert result.ok
+    assert result.message_tr == "Zaman damgası alındı ve bağımsız olarak doğrulandı."
+    assert result.result is not None
+    facts = result.result.model_dump(mode="json")
+    assert facts["provider"] == "mock"
+    assert facts["verified"] is True
+    assert facts["legal_grade"] is False
+    assert facts["serial"]
+    assert "token" not in facts
+    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
+    assert str(site.data) not in raw
+    assert ".zd" not in raw
+
+
+def test_a_tsa_test_request_without_a_stamp_fails(site: Site) -> None:
+    mock_tsa(site).credits = 0
+    request = site.request("tsa_test")
+    assert site.run("requests", "run") == 1
+    result = site.result(request)
+    assert result.code == "tsa_test_failed"
+    assert result.message_tr == "Zaman damgası alınamadı ya da doğrulanamadı."
+    assert result.result is None
+
+
+def test_one_failing_request_does_not_stop_the_next(
+    site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(app: Any) -> Any:
+        raise RuntimeError("a bug")
+
+    monkeypatch.setattr(cli, "run_credit_request", broken)
+    first = site.request("credit", issued=utc_now() - timedelta(minutes=2))
+    second = site.request("tsa_test", issued=utc_now() - timedelta(minutes=1))
+    assert site.run("requests", "run") == 1
+    assert site.result(first).code == "credit_query_failed"
+    assert site.result(second).ok
 
 
 # -- the installation's own folders (D0-2) --------------------------------------------------------

@@ -109,7 +109,8 @@ SKIP_ALERT = "R20-seal-skip"
 WITHDRAW_DATA = "data"
 WITHDRAW_NOT_ENDED = "not-ended"
 WITHDRAW_SHORT_RUN = "short-run"
-#: The Seal task could not start sealing at all: credentials, roots or client missing
+#: The Seal task could not start sealing at all: credentials, roots or client missing, a
+#: program the executable policy refuses, a configuration that moves the installation's folders
 #: (:func:`config_alert`). Raised at most once per site day and cause.
 CONFIG_ALERT = "R20-seal-config"
 #: Cause → (Turkish, English) text of :data:`CONFIG_ALERT`.
@@ -135,6 +136,12 @@ CONFIG_CAUSES: dict[str, tuple[str, str]] = {
     "provider": (
         "zaman damgası sağlayıcısının yapılandırması geçersiz ([tsa])",
         "the time-stamp provider configuration is invalid ([tsa])",
+    ),
+    "executable": (
+        "[tsa] java ya da zamane_jar güvenilir bir konumda değil (Program Files, kurulumun "
+        "kaydı ya da onaylanmış bir Zamane istemcisi); program çalıştırılmadı",
+        "[tsa] java or zamane_jar is not in a trusted location (Program Files, the "
+        "installer's record or an approved Zamane client); the program was not run",
     ),
     "location": (
         "arcilogger.toml içindeki secrets_dir ya da data_dir kurulumun klasörü değil (olası "
@@ -1338,7 +1345,8 @@ class Sealer:
         gaps: list[dict[str, str]] = []
         minutes = self.config.seal.gap_minutes
         for source in self.config.sources:
-            if not source.expected or source.is_network:
+            # A source switched off (``enabled = false``) is no longer expected to send.
+            if not source.expected or not source.enabled or source.is_network:
                 continue
             summary = by_source.get(source.name)
             spans = [window] if summary is None or summary.lines == 0 else summary.gaps
