@@ -20,13 +20,19 @@
          before any change (system_plan_invalid).
       4. Firewall: Set-ArciFirewall.ps1 -SyncFromConfig with the plan's syslog senders and, in
          strict outbound mode, its outbound hosts (in place; never another rule, never a profile).
+         An enabled source the policy leaves out (the plan's problems: source_outside_policy)
+         stays in the syslog rules while they hold it (an administrator opened it), is never
+         added, and is reported: status.json code source_outside_policy, an R20-admin alert.
          Without install\firewall-state.json (-SkipFirewall) the step is skipped
          (firewall_not_managed).
       5. Windows Time: Set-ArciTime.ps1 when the plan says the peers changed.
       6. Zamane clients: a staged client that is a known release is copied into zamane\approved
-         after its hash is checked (a reparse point is refused) and recorded in jars.json
-         (approved_by "known"); a newly staged client is recorded with first_seen (Event 4104):
-         it runs only after "approve-jar" on the console.
+         after its hash is checked (a reparse point is refused; Copy-ArciApprovedJar checks the
+         copy) and recorded in jars.json (approved_by "known"); a newly staged client is recorded
+         with first_seen (Event 4104): it runs only after "approve-jar" on the console. A staged
+         file whose SHA-256 is not its name is not recorded (payload_mismatch, R20-admin).
+         jars.json is read again right before it is written and both lists are merged
+         (Merge-ArciJarsDocument): an approval approve-jar wrote meanwhile stays.
       7. admin\system\status.json, a journal line per change (journal.jsonl, imported into the
          audit log as admin.system), Event 4106 (and 4107 per promoted client), an R20-admin
          alert when a step failed. A failed step leaves its own rules or files as they were
@@ -163,6 +169,25 @@ function Get-StagedClients {
     <# The staged clients: zamane\web\<sha256>.jar by name (the fast path compares them). #>
     if (-not (Test-Path -LiteralPath $StagingDir -PathType Container)) { return , @() }
     , @(Get-ChildItem -LiteralPath $StagingDir -File -Force | Where-Object { $_.Name -cmatch '^[0-9a-f]{64}\.jar$' } | ForEach-Object { $_.Name } | Sort-Object)
+}
+
+function Read-SyncJars {
+    <# The entries of admin\system\jars.json (staged, approved), their times as text; empty lists without the file. #>
+    $jars = Read-SyncJson $JarsPath
+    $staged = New-Object System.Collections.Generic.List[object]
+    $approved = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @(Get-ArciJsonField -Object $jars -Name 'staged')) {
+        if ($null -eq $entry) { continue }
+        $staged.Add([pscustomobject][ordered]@{ sha256 = [string]$entry.sha256; first_seen = (Format-SyncTime $entry.first_seen) })
+    }
+    foreach ($entry in @(Get-ArciJsonField -Object $jars -Name 'approved')) {
+        if ($null -eq $entry) { continue }
+        $approved.Add([pscustomobject][ordered]@{
+                sha256 = [string]$entry.sha256; path = [string]$entry.path
+                approved_at = (Format-SyncTime $entry.approved_at); approved_by = [string]$entry.approved_by
+            })
+    }
+    [pscustomobject]@{ staged = $staged; approved = $approved }
 }
 
 function Test-ReparsePoint([string]$Path) {
@@ -319,6 +344,14 @@ Add-SyncStep 'check' 'done' $null
 
 $failed = $false
 $warningCode = $null
+# What system-plan left out (warning codes): reported, never applied. A source outside the
+# policy that the syslog rules hold now stays open (Set-ArciFirewall.ps1 -KeepSourceAddress).
+$planProblems = @(Get-ArciJsonField -Object $plan -Name 'problems' | Where-Object { $null -ne $_ } | ForEach-Object {
+        [pscustomobject][ordered]@{ code = [string](Get-ArciJsonField -Object $_ -Name 'code'); value = [string](Get-ArciJsonField -Object $_ -Name 'value') }
+    })
+$outsidePolicy = @($planProblems | Where-Object { $_.code -ceq 'source_outside_policy' } | ForEach-Object { $_.value })
+$report['plan_problems'] = $planProblems
+$kept = @()
 
 # --- 4. firewall -------------------------------------------------------------------------------------
 
@@ -326,6 +359,7 @@ $managed = [bool](Get-ArciJsonField -Object $firewallPlan -Name 'managed') -and 
 $firewallState = $lastFirewall
 if ($managed) {
     $arguments = @{ SyncFromConfig = $true; SourceAddress = $senders; Outbound = $outbound; StateFile = $FirewallStatePath; PolicyPath = $PolicyPath }
+    if ($outsidePolicy.Count -gt 0) { $arguments['KeepSourceAddress'] = $outsidePolicy }
     $firewallReport = Join-Path ([System.IO.Path]::GetTempPath()) ('arcilogger-sync-firewall-{0}.json' -f [guid]::NewGuid().ToString('N'))
     $arguments['PlanPath'] = $firewallReport
     if ($DryRun) { $arguments['DryRun'] = $true }
@@ -347,11 +381,16 @@ if ($managed) {
     if ($code -eq 0) {
         $hosts = @($outbound | ForEach-Object { [string](Get-ArciJsonField -Object $_ -Name 'host') } | Select-Object -Unique)
         $strict = $false
-        if ($null -ne $report.firewall) { $strict = [bool]$report.firewall.strict_outbound }
+        if ($null -ne $report.firewall) {
+            $strict = [bool]$report.firewall.strict_outbound
+            $kept = @(Get-ArciJsonField -Object $report.firewall -Name 'kept' | Where-Object { $_ } | ForEach-Object { [string]$_ })
+        }
         if (-not $strict) { $hosts = @() }
-        $firewallState = [pscustomobject][ordered]@{ managed = $true; strict_outbound = $strict; syslog_addresses = $senders; outbound_hosts = $hosts }
-        $changed = ((@($lastFirewall.syslog_addresses) -join ',') -ne ($senders -join ',')) -or ((@($lastFirewall.outbound_hosts) -join ',') -ne ($hosts -join ','))
-        if ($changed) { Add-SyncJournal 'firewall' ([pscustomobject][ordered]@{ syslog_addresses_count = $senders.Count; outbound_rules = @($outbound | ForEach-Object { [string](Get-ArciJsonField -Object $_ -Name 'rule') } | Select-Object -Unique).Count }) }
+        # What the syslog rules hold now: the plan's senders and the kept ones.
+        $held = @($senders) + @($kept)
+        $firewallState = [pscustomobject][ordered]@{ managed = $true; strict_outbound = $strict; syslog_addresses = $held; outbound_hosts = $hosts }
+        $changed = ((@($lastFirewall.syslog_addresses) -join ',') -ne ($held -join ',')) -or ((@($lastFirewall.outbound_hosts) -join ',') -ne ($hosts -join ','))
+        if ($changed) { Add-SyncJournal 'firewall' ([pscustomobject][ordered]@{ syslog_addresses_count = $held.Count; outbound_rules = @($outbound | ForEach-Object { [string](Get-ArciJsonField -Object $_ -Name 'rule') } | Select-Object -Unique).Count }) }
         Add-SyncStep 'system.firewall' 'done' $null
     }
     elseif ($code -eq 3) {
@@ -398,23 +437,10 @@ else {
 
 # --- 6. Zamane clients -------------------------------------------------------------------------------
 
-$jars = Read-SyncJson $JarsPath
-$stagedEntries = New-Object System.Collections.Generic.List[object]
-$approvedEntries = New-Object System.Collections.Generic.List[object]
-if ($null -ne $jars) {
-    # The entries of both writers (this script and the console's approve-jar) stay as they are.
-    foreach ($entry in @(Get-ArciJsonField -Object $jars -Name 'staged')) {
-        if ($null -eq $entry) { continue }
-        $stagedEntries.Add([pscustomobject][ordered]@{ sha256 = [string]$entry.sha256; first_seen = (Format-SyncTime $entry.first_seen) })
-    }
-    foreach ($entry in @(Get-ArciJsonField -Object $jars -Name 'approved')) {
-        if ($null -eq $entry) { continue }
-        $approvedEntries.Add([pscustomobject][ordered]@{
-                sha256 = [string]$entry.sha256; path = [string]$entry.path
-                approved_at = (Format-SyncTime $entry.approved_at); approved_by = [string]$entry.approved_by
-            })
-    }
-}
+# The entries of both writers (this script and the console's approve-jar) stay as they are.
+$jars = Read-SyncJars
+$stagedEntries = $jars.staged
+$approvedEntries = $jars.approved
 $known = @($stagedEntries | ForEach-Object { [string]$_.sha256 }) + @($approvedEntries | ForEach-Object { [string]$_.sha256 })
 $jarsChanged = $false
 $jarFailed = $false
@@ -444,17 +470,12 @@ foreach ($entry in $promotions) {
         continue
     }
     if (-not $DryRun) {
-        try {
-            if (-not (Test-Path -LiteralPath $ApprovedDir)) { [void](New-Item -ItemType Directory -Path $ApprovedDir -Force) }
-            if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $source -Destination $target }
-            if ((Get-ArciFileSha256 -Path $target) -ne $sha) {
-                Remove-Item -LiteralPath $target -Force
-                throw ('kopya tutmuyor, silindi [the copy does not match, deleted]: {0}' -f $target)
-            }
-        }
-        catch {
+        $why = $null
+        try { $why = Copy-ArciApprovedJar -Source $source -Target $target -Sha256 $sha }
+        catch { $why = $_.Exception.Message }
+        if ($why) {
             $item.result = 'failed'
-            $report.problems.Add($_.Exception.Message)
+            $report.problems.Add($why)
             $report.jars.promote += [pscustomobject]$item
             $jarFailed = $true
             continue
@@ -465,11 +486,15 @@ foreach ($entry in $promotions) {
     $promoted.Add($sha)
     $report.jars.promote += [pscustomobject]$item
 }
+$mismatched = New-Object System.Collections.Generic.List[string]
 foreach ($name in @($staged)) {
     $sha = $name.Substring(0, 64)
     if ($known -contains $sha -or $promoted.Contains($sha)) { continue }
     $file = Join-Path $StagingDir $name
     if ((Test-ReparsePoint $file) -or (Get-ArciFileSha256 -Path $file) -ne $sha) {
+        # Not the file its name promises (or a link): never recorded, never run; reported once
+        # per change of the staged files (the fast path compares their names).
+        $mismatched.Add($sha)
         $report.problems.Add(('{0}: kaydedilmedi, SHA-256 adıyla aynı değil ya da bir bağlantı [not recorded: its SHA-256 differs from its name, or a link]' -f $file))
         continue
     }
@@ -479,11 +504,13 @@ foreach ($name in @($staged)) {
     $after = [DateTime]::UtcNow.AddHours($policy.JarHoldHours).ToString('yyyy-MM-ddTHH:mm:ssZ')
     Send-SyncEvent 4104 'Warning' ('Zamane istemcisi bekletiliyor [Zamane client staged]: {0}; en erken {1} sonra konsolda approve-jar ile onaylanır [can be approved with approve-jar on the console from {1}]' -f $sha, $after)
 }
-$script:JarCounts = [pscustomobject]@{ staged = $stagedEntries.Count; promoted = $approvedEntries.Count }
+$document = Merge-ArciJarsDocument -Written $null -Staged $stagedEntries.ToArray() -Approved $approvedEntries.ToArray()
 if ($jarsChanged -and -not $DryRun) {
-    $document = [pscustomobject][ordered]@{ schema = 'arcilogger.admin-jars/1'; staged = $stagedEntries.ToArray(); approved = $approvedEntries.ToArray() }
+    # Read again right before the write: approve-jar may have written since step 6 began.
+    $document = Merge-ArciJarsDocument -Written (Read-SyncJars) -Staged $stagedEntries.ToArray() -Approved $approvedEntries.ToArray()
     Write-SyncFile $JarsPath (($document | ConvertTo-Json -Depth 5) + "`n")
 }
+$script:JarCounts = [pscustomobject]@{ staged = @($document.staged).Count; promoted = @($document.approved).Count }
 foreach ($sha in $promoted) {
     Add-SyncJournal 'jar' ([pscustomobject][ordered]@{ sha256 = $sha; approved_by = 'known' })
     Send-SyncEvent 4107 'Warning' ('Zamane istemcisi onaylandı (bilinen sürüm) [Zamane client promoted, a known release]: {0}' -f $sha)
@@ -500,9 +527,30 @@ else { Add-SyncStep 'jar.promotion' 'skipped' $null }
 
 $applied = $configSha
 if ($failed) { $applied = [string](Get-ArciJsonField -Object $previous -Name 'applied_config_sha256') }
-$code = $(if ($failed) { 'system_sync_failed' } else { $warningCode })
+# One code in status.json, the weightiest first. A successful run raises an R20-admin alert per
+# warning of its own (a failed one raises system_sync_failed alone and is tried again); the fast
+# path keeps it from repeating until the inputs change.
+$warnings = New-Object System.Collections.Generic.List[string]
+$warningAlerts = New-Object System.Collections.Generic.List[object]
+if ($managed -and $outsidePolicy.Count -gt 0) {
+    $warnings.Add('source_outside_policy')
+    $what = @($outsidePolicy | ForEach-Object { $(if ($kept -contains $_) { '{0} (açık bırakıldı [kept open])' -f $_ } else { '{0} (açılmadı [not opened])' -f $_ }) })
+    $warningAlerts.Add(@('source_outside_policy', ('Sistem eşitlemesi: log kaynakları yönetim politikasının ağlarının dışında [system sync: log sources outside the policy networks]: {0}' -f ($what -join ', '))))
+}
+if ($mismatched.Count -gt 0) {
+    $warnings.Add('payload_mismatch')
+    $warningAlerts.Add(@('payload_mismatch', ('Sistem eşitlemesi: bekleyen Zamane istemcisi adındaki SHA-256 ile uyuşmuyor, kaydedilmedi [system sync: a staged Zamane client does not match the SHA-256 of its name, not recorded]: {0}' -f ($mismatched -join ', '))))
+}
+foreach ($problem in $planProblems) {
+    if ($problem.code -cne 'source_outside_policy' -and -not $warnings.Contains($problem.code)) { $warnings.Add($problem.code) }
+}
+if ($warningCode) { $warnings.Add($warningCode) }
+$code = $(if ($failed) { 'system_sync_failed' } elseif ($warnings.Count -gt 0) { $warnings[0] } else { $null })
 $report.code = $code
 Write-SyncStatus (-not $failed) $code $firewallState $timeState $applied $ackSha
+if (-not $failed) {
+    foreach ($alert in $warningAlerts) { Add-SyncAlert 'R20-admin' 'high' $alert[1] @{ code = $alert[0] } }
+}
 if ($failed) {
     Send-SyncEvent 4106 'Error' ('Sistem eşitlemesi başarısız, önceki kurallar geçerli [system sync failed, the previous rules stay]: {0}' -f ($report.problems -join '; '))
     Add-SyncAlert 'R20-admin' 'high' 'Sistem eşitlemesi başarısız [system sync failed]' @{ code = 'system_sync_failed' }

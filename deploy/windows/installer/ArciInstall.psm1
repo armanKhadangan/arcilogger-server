@@ -652,6 +652,126 @@ function Get-ArciConfiguredDataDir {
     $value
 }
 
+function Read-ArciDataRootRecord {
+    <#
+    .SYNOPSIS
+        The data root the installer recorded (data-root.txt next to arcilogger.toml, Day 0 notes
+        D0-2 and WP2-1), read as the core reads it (config.recorded_data_root): Exists, Value
+        and Problem.
+    .DESCRIPTION
+        Value is the record's one line, an absolute path (UTF-8; a BOM and a final newline are
+        accepted). Problem says why a record that exists cannot be used: unreadable, not UTF-8,
+        not one line with an absolute path, or an owner other than SYSTEM, Administrators or
+        TrustedInstaller (only administrators write the record; an owner can change its rights,
+        and ArciAdmin may create files in that folder). -Owner: the owner's SID; by default read
+        from the file on Windows and not checked elsewhere. A missing record is no problem (an
+        installation from before the browser administration).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path, [string]$Owner)
+    $record = [pscustomobject]@{ Path = $Path; Exists = $false; Value = $null; Problem = $null }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $record }
+    $record.Exists = $true
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        if (-not $Owner -and (Test-ArciWindows)) {
+            $security = Get-ArciAccessControl -Item (Get-Item -LiteralPath $Path -Force) -Sections 'Owner'
+            $Owner = $security.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        }
+    }
+    catch {
+        $record.Problem = 'okunamadı [unreadable]: {0}' -f $_.Exception.Message
+        return $record
+    }
+    if ($Owner -and $script:TrustedWriterSids -notcontains $Owner) {
+        $record.Problem = 'sahibi yöneticiler ya da SYSTEM değil [not owned by Administrators or SYSTEM]: {0}' -f $Owner
+        return $record
+    }
+    try { $text = (New-Object System.Text.UTF8Encoding -ArgumentList $false, $true).GetString($bytes) }
+    catch {
+        $record.Problem = 'UTF-8 değil [not UTF-8]'
+        return $record
+    }
+    $lines = @(($text.TrimStart([char]0xFEFF).Trim() -split '\r\n|\r|\n') | Where-Object { $_ -ne '' })
+    $absolute = $(if (Test-ArciWindows) { '^([A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)' } else { '^/' })
+    if ($lines.Count -ne 1 -or $lines[0].Trim() -notmatch $absolute) {
+        $record.Problem = 'tek satırda mutlak bir yol değil [not one line with an absolute path]'
+        return $record
+    }
+    $record.Value = $lines[0].Trim()
+    $record
+}
+
+function Resolve-ArciDataRoot {
+    <#
+    .SYNOPSIS
+        The data root of an installer run and where it comes from (Source: parameter, record,
+        config or auto), or the Problem that stops the run before any change. Pure.
+    .DESCRIPTION
+        The record (Read-ArciDataRootRecord) anchors data_dir: ArciAdmin can write
+        arcilogger.toml, and every service and task refuses a data_dir other than the recorded
+        one (Day 0 note D0-2). A run therefore never takes a changed data_dir from the
+        configuration and never moves the record on its own:
+        - -Given (-DataRoot) is a deliberate choice: it must equal the configuration's data_dir
+          when there is one, and it replaces the record (Replaces: the root recorded before, or
+          why the record could not be used);
+        - otherwise the record: one that cannot be used, or a data_dir that differs from it,
+          stops the run (put data_dir back, or move deliberately with -DataRoot);
+        - without a record, the configuration's data_dir (an installation from before the
+          browser administration, whose configuration only administrators could change), unless
+          -AdminInstalled: then the record was removed, and only -DataRoot names the data root;
+        - otherwise Path is $null and Source 'auto': the caller chooses a drive.
+        The caller passes full paths; case and a trailing or forward separator do not count.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Record,
+        [AllowNull()][AllowEmptyString()][string]$Configured,
+        [AllowNull()][AllowEmptyString()][string]$Given,
+        [switch]$AdminInstalled
+    )
+    $separators = [char[]]@([char]92, [char]47)
+    $same = { param([string]$A, [string]$B) $A.Replace('/', '\').TrimEnd($separators) -ieq $B.Replace('/', '\').TrimEnd($separators) }
+    $result = [pscustomobject]@{ Path = $null; Source = 'auto'; Problem = $null; Replaces = $null }
+    $exists = $null -ne $Record -and [bool]$Record.Exists
+    $recordProblem = $(if ($exists) { [string]$Record.Problem } else { '' })
+    $recorded = $(if ($exists -and -not $recordProblem) { [string]$Record.Value } else { '' })
+    $where = $(if ($null -ne $Record) { [string]$Record.Path } else { 'data-root.txt' })
+    if ($Given) {
+        if ($Configured -and -not (& $same $Given $Configured)) {
+            $result.Problem = '-DataRoot ({0}) arcilogger.toml içindeki data_dir ({1}) ile aynı değil [differs from data_dir in arcilogger.toml].' -f $Given, $Configured
+            return $result
+        }
+        $result.Path = $Given
+        $result.Source = 'parameter'
+        if ($recordProblem) { $result.Replaces = '({0})' -f $recordProblem }
+        elseif ($recorded -and -not (& $same $Given $recorded)) { $result.Replaces = $recorded }
+        return $result
+    }
+    if ($recordProblem) {
+        $result.Problem = '{0} kullanılamıyor [cannot be used] ({1}); yönetici olarak düzeltin ya da kurulumun veri klasörünü -DataRoot ile verin [fix it as an administrator or give the installation''s data folder with -DataRoot].' -f $where, $recordProblem
+        return $result
+    }
+    if ($recorded) {
+        if ($Configured -and -not (& $same $Configured $recorded)) {
+            $result.Problem = 'arcilogger.toml içindeki data_dir ({0}) kayıtlı veri klasörü {1} ({2}) ile aynı değil; hizmetler ve görevler bu yapılandırmayı reddeder. data_dir''i {1} olarak düzeltin; veri klasörünü bilerek taşıdıysanız kurulumu -DataRoot "{0}" ile çalıştırın [data_dir differs from the recorded data root, which the services and tasks refuse: set data_dir back to {1}, or run the installer with -DataRoot "{0}" to move it deliberately].' -f $Configured, $recorded, $where
+            return $result
+        }
+        $result.Path = $recorded
+        $result.Source = 'record'
+        return $result
+    }
+    if ($Configured) {
+        if ($AdminInstalled) {
+            $result.Problem = '{0} yok ama tarayıcıdan yönetim kurulu; kurulumun veri klasörünü -DataRoot ile verin (arcilogger.toml: data_dir = {1}) [the data root record is missing although the browser administration is installed: give the installation''s data folder with -DataRoot].' -f $where, $Configured
+            return $result
+        }
+        $result.Path = $Configured
+        $result.Source = 'config'
+    }
+    $result
+}
+
 function Read-ArciTomlFile {
     <#
     .SYNOPSIS
@@ -1746,8 +1866,12 @@ function Get-ArciAclPlan {
           SYSTEM (ApplySystem) and administrators only. It writes its own admin\ folders,
           state\requests (task requests) and its logs, and reads the state of the services.
           No access to the spool, the vault, the exports, the backups or the evidence-job state.
+          "arcilogger-core secret set" replaces secrets.json with a new file that has only the
+          inherited entries: whoever stores a secret on the console applies these entries again
+          (the installer does it after its own, Set-ArciVaultAcl.ps1 at any time).
         - ApplySystem (SYSTEM) and administrators: full control everywhere (the owners entry of
-          every protected path); admin\policy.json is written by administrators only.
+          every protected path); admin\policy.json and data-root.txt are written by
+          administrators only.
         - Ingest: reads the spool and the vault (catching up on days sealed while the database
           was down, ADR-0002), writes its own state.
         - Worker: reads the vault and the job state; may only list the spool and its source
@@ -1829,6 +1953,16 @@ function Get-ArciAclPlan {
                 (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
         (New-Entry ($ProgramDataDir + $p + 'secrets.json') 'File' $false @(
                 (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights $modify))),
+        # The data root every service and task checks data_dir against (Day 0 notes D0-2, WP2-1):
+        # protected, written by the installer only; ArciAdmin may create files in this folder,
+        # so the installer re-creates the record (owner: Administrators) on every run.
+        (New-Entry ($ProgramDataDir + $p + 'data-root.txt') 'File' $true ($owners + @(
+                    (New-ArciAce -Sid $collector -Who 'NT SERVICE\ArciCollector' -Rights 'Read'),
+                    (New-ArciAce -Sid $ingest -Who 'NT SERVICE\ArciIngest' -Rights 'Read'),
+                    (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights 'Read'),
+                    (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights 'Read'),
+                    (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'Read'),
+                    (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights 'Read')))),
         # The encryption key of the secret store: not for the collector (it never needs a secret).
         # Nobody but administrators may write or delete it.
         (New-Entry ($ProgramDataDir + $p + 'secret.key') 'File' $true ($owners + @(
@@ -1865,11 +1999,12 @@ function Get-ArciAclPlan {
                     (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights $listOnly -ThisFolderOnly),
                     (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights $listOnly -ThisFolderOnly),
                     (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights $listOnly -ThisFolderOnly)))),
-        # The guard rails: read by the agent, the API, the tasks and SYSTEM; written by the
-        # installer (administrators) only.
+        # The guard rails: read by the agent, the API, the worker (whether to expect the agent's
+        # heartbeat), the tasks and SYSTEM; written by the installer (administrators) only.
         (New-Entry ($adminDir + $p + 'policy.json') 'File' $false @(
                 (New-ArciAce -Sid $agent -Who 'NT SERVICE\ArciAdmin' -Rights 'Read'),
                 (New-ArciAce -Sid $api -Who 'NT SERVICE\ArciApi' -Rights 'Read'),
+                (New-ArciAce -Sid $worker -Who 'NT SERVICE\ArciWorker' -Rights 'Read'),
                 (New-ArciAce -Sid $localService -Who 'LOCAL SERVICE (tasks)' -Rights 'Read'))),
         # The channel's keys: protected before "keys init" creates them (Install-Arcilogger.ps1);
         # each private key is readable by its one service, the public keys by every reader.
@@ -2113,10 +2248,17 @@ $script:DefaultExecutableRoots = @('C:\Program Files', 'C:\Program Files (x86)')
 # itself.
 $script:TrustedWriterSids = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
 $script:OwnerPlaceholderSids = @('S-1-3-0', 'S-1-3-4')
-# FileSystemRights that change a file or what a folder holds: WriteData (CreateFiles),
-# AppendData (CreateDirectories), WriteExtendedAttributes, DeleteSubdirectoriesAndFiles,
-# WriteAttributes, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE.
-$script:WriteRightsMask = [int64](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+# FileSystemRights that let someone change a recorded program (Get-ArciUnsafeWriters), by
+# where the entry is. On the file: WriteData, AppendData, WriteExtendedAttributes,
+# WriteAttributes, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE. On its
+# folder (a file or a library planted next to it): CreateFiles, CreateDirectories,
+# DeleteSubdirectoriesAndFiles, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL,
+# GENERIC_WRITE. On a folder above it (renamed away and created anew): Delete,
+# DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership, GENERIC_ALL; creating a
+# sub-folder there (the AppendData of C:\ for Authenticated Users) changes nothing on the path.
+$script:FileWriteMask = [int64](0x2 -bor 0x4 -bor 0x10 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+$script:FolderWriteMask = [int64](0x2 -bor 0x4 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+$script:AncestorWriteMask = [int64](0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000)
 # What the system plan may name (arcilogger_core.admin.contract: OutboundRule, HostName).
 $script:OutboundRulePattern = '^ARCILOGGER Out (NTP|Kamu SM|SMTP( [2-9])?|Replica)$'
 $script:HostNamePattern = '^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
@@ -2382,6 +2524,27 @@ function Get-ArciSyslogSenderProblem {
     'izin verilen ağların dışında [outside the allowed networks]: {0}' -f (@($SourceNetwork) -join ', ')
 }
 
+function ConvertTo-ArciSyslogSender {
+    <#
+    .SYNOPSIS
+        The canonical text of a [[sources]] address as system-plan hands it to the firewall
+        (arcilogger_core.admin.systemplan): the host bits of a network cleared, a /32 written as
+        the address alone; $null for anything that is not an IPv4 address or network.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Value)
+    $network = ConvertTo-ArciNetwork -Value $Value
+    if ($null -eq $network -or $network.Bytes.Length -ne 4) { return $null }
+    if (-not $network.Text.Contains('/') -or $network.Prefix -eq 32) { return [string]$network.Address }
+    $bytes = [byte[]]$network.Bytes.Clone()
+    for ($i = 0; $i -lt 4; $i++) {
+        $bits = [Math]::Max(0, [Math]::Min(8, $network.Prefix - 8 * $i))
+        $bytes[$i] = [byte]([int]$bytes[$i] -band ((0xFF -shl (8 - $bits)) -band 0xFF))
+    }
+    '{0}/{1}' -f (New-Object System.Net.IPAddress -ArgumentList (, $bytes)), $network.Prefix
+}
+
 function Get-ArciOutboundProblem {
     <#
     .SYNOPSIS
@@ -2527,11 +2690,30 @@ function Test-ArciProgramConfig {
 }
 
 function Test-ArciPathBelow([string]$Path, [string]$Folder) {
-    <# True when -Path is -Folder or lies below it (case-insensitive, either separator, no ".." resolved). #>
+    <#
+    True when -Path is -Folder or lies below it (case-insensitive, either separator). "." and
+    ".." segments are resolved first, as Windows resolves them when the path is opened:
+    zamane\..\admin\work\x.bin is not below zamane\. A ".." above the root is never below.
+    #>
     if (-not $Path -or -not $Folder) { return $false }
-    $separators = [char[]]@([char]92, [char]47)
-    $p = $Path.Replace('/', '\').TrimEnd($separators)
-    $f = $Folder.Replace('/', '\').TrimEnd($separators)
+    $normal = {
+        param([string]$Text)
+        $segments = New-Object System.Collections.Generic.List[string]
+        foreach ($segment in $Text.Replace('/', '\').Split('\')) {
+            if ($segment -eq '.') { continue }
+            if ($segment -eq '..') {
+                # The first segment is the drive (or empty before a leading separator): never popped.
+                if ($segments.Count -le 1) { return $null }
+                $segments.RemoveAt($segments.Count - 1)
+                continue
+            }
+            $segments.Add($segment)
+        }
+        ($segments -join '\').TrimEnd([char]92)
+    }
+    $p = & $normal $Path
+    $f = & $normal $Folder
+    if ($null -eq $p -or $null -eq $f) { return $false }
     ($p -ieq $f) -or $p.StartsWith($f + '\', [System.StringComparison]::OrdinalIgnoreCase)
 }
 
@@ -2578,25 +2760,34 @@ function Get-ArciExecutableRecords {
 function Get-ArciUnsafeWriters {
     <#
     .SYNOPSIS
-        Who other than SYSTEM, Administrators and TrustedInstaller could change a program or a
-        folder above it: one "<path>: <SID>" per finding (an empty list: nobody). Pure: -Facts is
-        what Get-ArciPathAclFacts read (Path, Owner, Rules with Sid, Rights as a number, Allow).
+        Who other than SYSTEM, Administrators and TrustedInstaller could change a program, plant
+        a file next to it or replace a folder above it: one "<path>: <SID>" per finding (an empty
+        list: nobody). Pure: -Facts is what Get-ArciPathAclFacts read, the program first, then
+        its folder, then each folder above it (Path, Owner, Rules with Sid, Rights as a number,
+        Allow, InheritOnly, ObjectInherit).
     .DESCRIPTION
         A recorded program must stay the file the installer hashed: execpolicy trusts a SHA-256
         only at its recorded path, and whoever can write the folder could replace the file or
         put a library next to it (Day 0 note D0-3: the installer records only paths in folders
-        that only administrators and SYSTEM can write). Every allow entry with a write, delete,
-        permission or owner right counts, on the file and on every folder above it (an
-        inherit-only entry too: it reaches what is created below), and so does an owner outside
-        the trusted accounts (an owner can change the rights). CREATOR OWNER and OWNER RIGHTS
-        stand for the owner and are covered by that check.
+        that only administrators and SYSTEM can write). What counts depends on the place (see
+        $script:FileWriteMask): a write, delete, permission or owner right on the file; the
+        right to create or delete files in its folder, to delete or re-permission that folder,
+        and an inherit-only entry of that folder that files inherit (it reaches the program's
+        libraries); a delete, permission or owner right on a folder above it. An inherit-only
+        entry of a folder above is left out: what it passes on shows as an inherited entry on
+        the folders of the path, which are checked themselves (C:\ grants Authenticated Users
+        Modify that way, for new folders that do not block it, and only AppendData itself). An
+        owner outside the trusted accounts counts everywhere (an owner can change the rights).
+        CREATOR OWNER and OWNER RIGHTS stand for the owner and are covered by that check.
     #>
     [CmdletBinding()]
     [OutputType([string[]])]
     param([AllowNull()][AllowEmptyCollection()][object[]]$Facts)
     $found = New-Object System.Collections.Generic.List[string]
+    $level = -1
     foreach ($fact in @($Facts)) {
         if ($null -eq $fact) { continue }
+        $level++
         $owner = [string]$fact.Owner
         if ($owner -and $script:TrustedWriterSids -notcontains $owner) {
             $found.Add(('{0}: {1} (sahip [owner])' -f $fact.Path, $owner))
@@ -2605,7 +2796,13 @@ function Get-ArciUnsafeWriters {
             if ($null -eq $rule -or -not $rule.Allow) { continue }
             $sid = [string]$rule.Sid
             if ($script:TrustedWriterSids -contains $sid -or $script:OwnerPlaceholderSids -contains $sid) { continue }
-            if (([int64]$rule.Rights -band $script:WriteRightsMask) -eq 0) { continue }
+            $inheritOnly = ($rule.PSObject.Properties.Name -contains 'InheritOnly') -and [bool]$rule.InheritOnly
+            $toFiles = ($rule.PSObject.Properties.Name -contains 'ObjectInherit') -and [bool]$rule.ObjectInherit
+            $mask = [int64]0
+            if ($level -eq 0) { $mask = $script:FileWriteMask }
+            elseif ($level -eq 1) { $mask = $(if (-not $inheritOnly) { $script:FolderWriteMask } elseif ($toFiles) { $script:FileWriteMask } else { [int64]0 }) }
+            elseif (-not $inheritOnly) { $mask = $script:AncestorWriteMask }
+            if (([int64]$rule.Rights -band $mask) -eq 0) { continue }
             $text = '{0}: {1}' -f $fact.Path, $sid
             if (-not $found.Contains($text)) { $found.Add($text) }
         }
@@ -2616,8 +2813,9 @@ function Get-ArciUnsafeWriters {
 function Get-ArciPathAclFacts {
     <#
     .SYNOPSIS
-        The owner and the access entries of -Path and of every folder above it, as plain data
-        for Get-ArciUnsafeWriters; $null where Windows rights cannot be read (not Windows).
+        The owner and the access entries of -Path and of every folder above it (the path first,
+        each with its inheritance flags), as plain data for Get-ArciUnsafeWriters; $null where
+        Windows rights cannot be read (not Windows).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -2633,6 +2831,8 @@ function Get-ArciPathAclFacts {
             $rules.Add([pscustomobject]@{
                     Sid = $rule.IdentityReference.Value; Rights = [int64][int]$rule.FileSystemRights
                     Allow = ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow)
+                    InheritOnly = (($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0)
+                    ObjectInherit = (($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ObjectInherit) -ne 0)
                 })
         }
         $facts.Add([pscustomobject]@{ Path = $current; Owner = $security.GetOwner($sidType).Value; Rules = $rules.ToArray() })
@@ -2712,6 +2912,77 @@ function Get-ArciZamaneJarPlan {
     $plan.Action = 'copy'
     $plan.Reason = ('Zamane istemcisi zamane\ dışında; görevler yalnızca zamane\ içinden çalıştırır: {0} klasörüne kopyalanıyor, tsa.zamane_jar kopyayı gösterecek, özgün dosya yerinde kalır [the client is outside zamane\, which is where the tasks run it from: copied there, tsa.zamane_jar will name the copy, the original stays]' -f $ZamaneDir)
     $plan
+}
+
+function Copy-ArciApprovedJar {
+    <#
+    .SYNOPSIS
+        Promote a staged Zamane client (ApplySystem, contract 2.8.3 step 6): -Source copied to
+        -Target (zamane\approved\<sha256>.jar) and the copy's SHA-256 compared with -Sha256.
+        $null when the copy is in place, otherwise why not ("Türkçe [English]").
+    .DESCRIPTION
+        The copy is written under a temporary name in the target folder, hashed and only then
+        renamed to -Target, so no other content ever carries that name; a copy that does not
+        match is deleted (the staged file may have changed after the caller hashed it: ArciAdmin
+        writes zamane\web). A -Target that holds the right content already is kept; one with
+        other content is replaced (a file named after a hash it does not have is never run).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][string]$Sha256
+    )
+    $expected = $Sha256.ToLowerInvariant()
+    if ((Test-Path -LiteralPath $Target -PathType Leaf) -and (Get-ArciFileSha256 -Path $Target) -eq $expected) { return $null }
+    $folder = Split-Path -Parent $Target
+    if (-not (Test-Path -LiteralPath $folder)) { [void](New-Item -ItemType Directory -Path $folder -Force) }
+    $temp = Join-Path $folder ('.{0}.tmp' -f (Split-Path -Leaf $Target))
+    Copy-Item -LiteralPath $Source -Destination $temp -Force
+    $actual = Get-ArciFileSha256 -Path $temp
+    if ($actual -ne $expected) {
+        Remove-Item -LiteralPath $temp -Force
+        return ('kopya tutmuyor, silindi [the copy does not match, deleted]: {0} (SHA-256 {1})' -f $Target, $actual)
+    }
+    Move-Item -LiteralPath $temp -Destination $Target -Force
+    $null
+}
+
+function Merge-ArciJarsDocument {
+    <#
+    .SYNOPSIS
+        admin\system\jars.json as ApplySystem writes it: its own -Staged and -Approved entries
+        merged with -Written, the document as it is on disk right before the write. Pure.
+    .DESCRIPTION
+        The file has two writers, ApplySystem and the console's approve-jar (Day 0 note D0-16),
+        and neither may drop the other's entries: every entry of either side stays, one per
+        SHA-256 and list; where both sides list a SHA-256 the entry on disk wins (an approval
+        approve-jar recorded meanwhile keeps its approved_by). -Written $null: no file.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Written,
+        [AllowEmptyCollection()][object[]]$Staged = @(),
+        [AllowEmptyCollection()][object[]]$Approved = @()
+    )
+    $merge = {
+        param([object[]]$Disk, [object[]]$Ours)
+        $list = New-Object System.Collections.Generic.List[object]
+        $seen = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($entry in @($Disk) + @($Ours)) {
+            if ($null -eq $entry -or -not $seen.Add([string]$entry.sha256)) { continue }
+            $list.Add($entry)
+        }
+        , $list.ToArray()
+    }
+    $diskStaged = @(Get-ArciJsonField -Object $Written -Name 'staged' | Where-Object { $null -ne $_ })
+    $diskApproved = @(Get-ArciJsonField -Object $Written -Name 'approved' | Where-Object { $null -ne $_ })
+    [pscustomobject][ordered]@{
+        schema   = 'arcilogger.admin-jars/1'
+        staged   = (& $merge $diskStaged @($Staged))
+        approved = (& $merge $diskApproved @($Approved))
+    }
 }
 
 # --- data drive -----------------------------------------------------------------------------------
@@ -3059,7 +3330,7 @@ Export-ModuleMember -Function @(
     'Get-ArciServiceSid', 'New-ArciRandomPassword', 'Rename-ArciFolder',
     'ConvertTo-ArciScramVerifier', 'Get-ArciFileSha256', 'Write-ArciUtf8File', 'Read-ArciSha256Sums',
     'Test-ArciBundle', 'Resolve-ArciComponentSource', 'Expand-ArciTemplate', 'ConvertTo-ArciArgumentString', 'Invoke-ArciProcess',
-    'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
+    'Invoke-ArciExe', 'Get-ArciConfiguredDataDir', 'Read-ArciDataRootRecord', 'Resolve-ArciDataRoot', 'Read-ArciTomlFile', 'Get-ArciConfigValue', 'Get-ArciApiEndpoint', 'Test-ArciProxyTrust', 'Get-ArciSourceAddresses', 'Get-ArciSourceTables',
     'ConvertTo-ArciTomlString', 'Get-ArciTomlString', 'Set-ArciTomlString', 'Get-ArciSiteNameProblem', 'Get-ArciTimeServerProblem',
     'Get-ArciTimePeerList', 'Read-ArciAdminAddress',
     'ConvertTo-ArciNetwork', 'Test-ArciAddressSpec', 'Test-ArciAddressInNetwork', 'Get-ArciForeignRdpSession',
@@ -3070,9 +3341,9 @@ Export-ModuleMember -Function @(
     'New-ArciAce', 'Get-ArciAclPlan', 'Get-ArciAceFlags',
     'Get-ArciAccessControl', 'Set-ArciAccessControl', 'Set-ArciAclEntry', 'Set-ArciVaultAudit',
     'Get-ArciDefaultSourceNetworks', 'ConvertTo-ArciSourceNetwork', 'New-ArciAdminPolicy', 'Read-ArciAdminPolicy',
-    'Get-ArciSyslogSenderProblem', 'Get-ArciOutboundProblem', 'Test-ArciHostName',
+    'ConvertTo-ArciSyslogSender', 'Get-ArciSyslogSenderProblem', 'Get-ArciOutboundProblem', 'Test-ArciHostName',
     'Get-ArciEventLogApi', 'Register-ArciEventSource', 'Unregister-ArciEventSource', 'Write-ArciEvent', 'Test-ArciProgramConfig', 'Test-ArciPathBelow',
-    'Get-ArciExecutableRecords', 'Get-ArciUnsafeWriters', 'Get-ArciPathAclFacts', 'Read-ArciInstallerHashes', 'Get-ArciZamaneJarPlan',
+    'Get-ArciExecutableRecords', 'Get-ArciUnsafeWriters', 'Get-ArciPathAclFacts', 'Read-ArciInstallerHashes', 'Get-ArciZamaneJarPlan', 'Copy-ArciApprovedJar', 'Merge-ArciJarsDocument',
     'Get-ArciDriveFacts', 'Get-ArciDiskBusType', 'Select-ArciDataRoot', 'Get-ArciDataDriveChecks',
     'Get-ArciOsSupport', 'Get-ArciPowerSchemeGuid', 'ConvertFrom-ArciPowercfgQuery',
     'Test-ArciHttpsHealth'

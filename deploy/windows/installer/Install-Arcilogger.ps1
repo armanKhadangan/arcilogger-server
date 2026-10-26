@@ -218,6 +218,7 @@ $script:NtpServerSource = $(if ($script:NtpServerGiven) { 'parameter' } else { '
 $script:FallbackServer = 'time.ume.tubitak.gov.tr'   # [clock] fallback_server of the configuration in use
 $script:ConfigReadError = $null        # site_name or [clock] of the configuration is not readable
 $script:SourceCount = $null           # [[sources]] of the configuration in use; $null: not read (Invoke-SourcesPreflight)
+$script:SourceSenders = @()           # their enabled sender addresses (Invoke-AdminPolicyPreflight checks them)
 # -ServerAddress / -ServerName: given, else remembered or detected (Resolve-ServerIdentity).
 $script:ServerAddressGiven = $PSBoundParameters.ContainsKey('ServerAddress') -and [bool]$ServerAddress
 $script:ServerNameGiven = $PSBoundParameters.ContainsKey('ServerName') -and [bool]$ServerName
@@ -261,6 +262,7 @@ $script:TasksRegistered = $false     # the tasks were registered from the new pr
 $script:MigrationStarted = $false    # arcilogger-db upgrade was started (the schema may have changed)
 $script:RestoreStarted = $false      # pg_restore was started (the database content may have changed)
 $script:LastDump = $null
+$script:ConfigRestored = $false      # Restore-ConfigForProgram put the copy from before the upgrade back
 $PreviousDir = $null
 $ConfigPath = $null
 $transcript = $null
@@ -446,15 +448,29 @@ function Get-ConfiguredDataRoot {
 $separators = [char[]]@([char]92, [char]47)
 $configured = Get-ConfiguredDataRoot
 $dataRootGiven = $PSBoundParameters.ContainsKey('DataRoot') -and [bool]$DataRoot
-if ($configured) {
-    if ($dataRootGiven -and ((ConvertTo-FullPath $DataRoot).TrimEnd($separators) -ne (ConvertTo-FullPath $configured).TrimEnd($separators))) {
-        Stop-Installer 2 ("-DataRoot ({0}) arcilogger.toml içindeki data_dir ({1}) ile aynı değil [differs from data_dir in arcilogger.toml]." -f $DataRoot, $configured)
-    }
-    $DataRoot = $configured
-    $script:DataRootFromConfig = $true
-    $script:DataRootSource = 'config'
+# The record (data-root.txt) first: ArciAdmin can write data_dir, so a run never takes a changed
+# one from the configuration and never moves the record unless -DataRoot says so (Day 0 note
+# D0-2). A problem stops the run in the preflight, before any change (Invoke-Preflight).
+$script:DataRootRecordFacts = Read-ArciDataRootRecord -Path $DataRootRecord
+$script:DataRootResolution = Resolve-ArciDataRoot -Record $script:DataRootRecordFacts `
+    -Configured $(if ($configured) { (ConvertTo-FullPath $configured).TrimEnd($separators) } else { '' }) `
+    -Given $(if ($dataRootGiven) { (ConvertTo-FullPath $DataRoot).TrimEnd($separators) } else { '' }) `
+    -AdminInstalled:(Test-Path -LiteralPath $AdminDir)
+if ($script:DataRootResolution.Path) {
+    $DataRoot = $script:DataRootResolution.Path
+    $script:DataRootSource = $script:DataRootResolution.Source
+    $script:DataRootFromConfig = $script:DataRootSource -in @('record', 'config')
 }
-elseif (-not $dataRootGiven) {
+elseif ($script:DataRootResolution.Problem) {
+    # Only to finish the preflight, which stops the run: the record when it can be read, else data_dir.
+    $fallback = @([string]$script:DataRootRecordFacts.Value, [string]$configured, [string]$DataRoot) | Where-Object { $_ } | Select-Object -First 1
+    if ($fallback) {
+        $DataRoot = $fallback
+        $script:DataRootFromConfig = $true
+        $script:DataRootSource = 'record'
+    }
+}
+if (-not $DataRoot) {
     # A new installation without -DataRoot (the setup .exe never passes it): a fixed NTFS D:,
     # otherwise the system drive; the preflight checks the drive and warns about the latter.
     $script:DataRootChoice = Select-ArciDataRoot -DataDrive (Get-ArciDriveFacts -Root 'D:\') -SystemDrive $env:SystemDrive
@@ -1239,9 +1255,13 @@ function Invoke-ConfigSteps {
         } ([pscustomobject]@{ data_dir = $dataDirValue; collector_bind = $bindValue; site_name = $siteValue; ntp_server = $ntpValue })
     }
     # The data root every task and service checks the configuration's data_dir against
-    # (data-root.txt, Day 0 note D0-2): written on every run, before ArciAdmin gets its right to
-    # create files in this folder (Invoke-AclSteps). Nothing the browser changes can move it.
+    # (data-root.txt, Day 0 note D0-2): written on every run from the record itself, -DataRoot
+    # or the choice of a first installation (Resolve-ArciDataRoot), before ArciAdmin gets its
+    # right to create files in this folder (Invoke-AclSteps). Deleted and created anew, never
+    # rewritten in place: a record someone else created would keep its owner, and an owner can
+    # change the rights. Nothing the browser changes can move it.
     Invoke-Step 'config.data-root' ("Veri klasörü kaydı [data root record]: {0}" -f $DataRootRecord) {
+        if (Test-Path -LiteralPath $DataRootRecord) { Remove-Item -LiteralPath $DataRootRecord -Force }
         Write-ArciUtf8File -Path $DataRootRecord -Text ($DataRoot + "`n")
     } $DataRoot
     Invoke-Step 'config.database-section' '[database] bölümü (bu sürüm destekliyorsa ve yoksa) [added if supported and missing]' {
@@ -1386,6 +1406,28 @@ function Invoke-AdminPolicyPreflight {
     if ($problems.Count -gt 0) {
         Add-Check 'admin-policy' 'fail' ("Tarayıcı yönetimi ayarları geçersiz [invalid browser administration settings]: {0}" -f ($problems -join '; '))
         return
+    }
+    # Every enabled log source must lie in these networks: ApplySystem gives the firewall's 514
+    # rule only the senders the policy allows (contract 2.8.3), so a source outside them would
+    # lose its opening at its first run, without any change in the browser. Checked before any
+    # change; where ApplySystem cannot narrow the rule (browser administration off, a firewall
+    # ARCILOGGER does not manage) it is a warning.
+    $outside = New-Object System.Collections.Generic.List[string]
+    $networks = New-Object System.Collections.Generic.List[string]
+    foreach ($network in @($choice.SourceNetworks)) { $networks.Add([string]$network) }
+    foreach ($value in @($script:SourceSenders)) {
+        # As system-plan reads it (host bits of a network cleared, a /32 as the address).
+        $sender = ConvertTo-ArciSyslogSender -Value ([string]$value)
+        $why = Get-ArciSyslogSenderProblem -Value $(if ($sender) { $sender } else { [string]$value }) -SourceNetwork @($choice.SourceNetworks) -MinPrefixV4 $choice.MinPrefixV4
+        if (-not $why) { continue }
+        $outside.Add(('{0}: {1}' -f $value, $why))
+        $parsed = ConvertTo-ArciNetwork -Value $sender
+        if ($null -ne $parsed -and $parsed.Prefix -ge $choice.MinPrefixV4 -and -not $networks.Contains($sender)) { $networks.Add($sender) }
+    }
+    if ($outside.Count -gt 0) {
+        $text = "Log kaynakları tarayıcı yönetiminin kaynak ağlarının dışında [log sources outside the browser administration's source networks] ({0}): ApplySystem bu göndericileri güvenlik duvarının 514 kuralından çıkarırdı, logları kaybolurdu [ApplySystem would take these senders out of the firewall's 514 rule and their logs would be lost]. Kurulumu ağlarıyla yeniden çalıştırın (liste varsayılanın yerine geçer) [run the installer again with their networks; the list replaces the default]: -SourceNetwork {1}. /{2} ağından geniş bir kaynağı daraltın ya da admin\policy.json içindeki min_prefix_v4 değerini elle küçültün [narrow a source wider than /{2}, or lower min_prefix_v4 in admin\policy.json by hand]." -f ($outside -join '; '), ($networks -join ','), $choice.MinPrefixV4
+        $narrows = $choice.Enabled -and ((-not $SkipFirewall) -or (Test-Path -LiteralPath $FirewallStatePath))
+        Add-Check 'admin-policy-sources' $(if ($narrows) { 'fail' } else { 'warn' }) $text
     }
     if ($choice.Existing.Exists -and -not $choice.Existing.Valid) {
         Add-Check 'admin-policy-file' 'warn' ("{0} geçersiz, yeniden yazılacak; elle yazılan değerler varsayılana döner [invalid, rewritten with the defaults]: {1}" -f $PolicyPath, $choice.Existing.Problem)
@@ -1629,11 +1671,48 @@ function Restore-ConfigForProgram {
     $refused = '{0}.refused-{1}' -f $ConfigPath, [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
     Copy-Item -LiteralPath $ConfigPath -Destination $refused -Force
     [System.IO.File]::WriteAllBytes($ConfigPath, [System.IO.File]::ReadAllBytes($copy))
+    $script:ConfigRestored = $true
     $still = Test-ArciProgramConfig -Python $VenvPython -ConfigPath $ConfigPath
     if ($still) { throw ("Yükseltme öncesi kopya da yüklenmiyor [the copy from before the upgrade does not load either]: {0}" -f $still) }
-    $message = 'Tarayıcıdan yapılan sonraki değişiklikler geri alındı; denetim kaydında duruyorlar [later browser changes were rolled back; they remain in the audit log]. Önceki sürüm arcilogger.toml''u yükleyemedi [the previous version could not load arcilogger.toml] ({0}); yükseltme öncesi kopya geri kondu [the copy from before the upgrade is back]: {1}; reddedilen dosya [the refused file]: {2}' -f $problem, $copy, $refused
+    $message = 'Tarayıcıdan yapılan sonraki değişiklikler geri alındı; denetim kaydında duruyorlar [later browser changes were rolled back; they remain in the audit log]. Önceki sürüm arcilogger.toml''u yükleyemedi [the previous version could not load arcilogger.toml] ({0}); yükseltme öncesi kopya geri kondu [the copy from before the upgrade is back]: {1}; reddedilen dosya [the refused file]: {2}. Güvenlik duvarı ve Windows Saati bu yapılandırmaya göre yeniden ayarlanır [the firewall and Windows Time are set again from this configuration]' -f $problem, $copy, $refused
     Write-ArciWarn $message
     $script:Warnings.Add($message)
+}
+
+function Sync-SystemAfterRollback {
+    <#
+    After a rollback, or a failed upgrade whose configuration had to be put back: the firewall's
+    syslog and outbound rules and the Windows Time peers follow the configuration as the program
+    in $InstallDir reads it. ApplySystem set them from the newer configuration and is gone with
+    the newer tasks; a configuration put back by Restore-ConfigForProgram lists sources again (a
+    source switched off or removed in the browser) that the rules no longer let through. The
+    restored program's own scripts run: Set-ArciFirewall.ps1 in its full mode with the choices
+    its state file remembers (only where ARCILOGGER manages the firewall), Set-ArciTime.ps1 with
+    [clock]. A failure is a warning naming the command to run by hand, never a failed rollback:
+    the services and the evidence path come back either way.
+    #>
+    $scripts = Join-Path $InstallDir 'scripts'
+    if (-not $SkipFirewall -and (Test-Path -LiteralPath $FirewallStatePath)) {
+        $firewall = Join-Path $scripts 'Set-ArciFirewall.ps1'
+        try { & $firewall -ConfigPath $ConfigPath -Python $VenvPython -StateFile $FirewallStatePath -Force:$Force }
+        catch {
+            $message = 'Güvenlik duvarı geri alınan yapılandırmayla eşitlenemedi, 514 kuralı eski olabilir [firewall not brought in line with the restored configuration, the 514 rule may be stale]: {0}. Yönetici PowerShell''inde çalıştırın [run in an administrator PowerShell]: powershell -ExecutionPolicy Bypass -File "{1}"' -f $_.Exception.Message, $firewall
+            Write-ArciWarn $message
+            $script:Warnings.Add($message)
+        }
+    }
+    if (-not $SkipTimeSetup) {
+        $time = Join-Path $scripts 'Set-ArciTime.ps1'
+        try {
+            $config = Read-ArciTomlFile -Python $VenvPython -ConfigPath $ConfigPath
+            & $time -Primary (Get-ArciConfigValue -Config $config -Path 'clock.ntp_server' -Default '') -Fallback (Get-ArciConfigValue -Config $config -Path 'clock.fallback_server' -Default 'time.ume.tubitak.gov.tr')
+        }
+        catch {
+            $message = 'Windows Saati geri alınan yapılandırmayla eşitlenemedi [Windows Time not brought in line with the restored configuration]: {0}. Çalıştırın [run]: powershell -ExecutionPolicy Bypass -File "{1}" -Primary <[clock] ntp_server>' -f $_.Exception.Message, $time
+            Write-ArciWarn $message
+            $script:Warnings.Add($message)
+        }
+    }
 }
 
 function Test-JavaForZamane {
@@ -1682,6 +1761,21 @@ function Invoke-AclSteps {
         & (Join-Path $ScriptsDir 'Set-ArciVaultAcl.ps1') -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir
         Set-PostgresDataAccess
     } $aclPlan
+}
+
+function Restore-ConfigFileAccess {
+    <#
+    The entries of arcilogger.toml and secrets.json of the ACL plan once more, after this run
+    stored a secret (contract 2.2): "arcilogger-core secret set" writes a new secrets.json and
+    renames it over the old one, and the new file carries only the inherited entries. Without
+    the explicit ArciAdmin entry the agent could not replace the file it applies the browser's
+    changes to (acl_drift after the first change). Off Windows (the tests) there is nothing to set.
+    #>
+    if (-not (Test-ArciWindows)) { return }
+    $entries = @(Get-ArciAclPlan -DataRoot $DataRoot -ProgramDataDir $ProgramDataDir -InstallDir $InstallDir | Where-Object { $_.Path -eq $ConfigPath -or $_.Path -eq $SecretsFile })
+    foreach ($entry in $entries) {
+        if (Test-Path -LiteralPath $entry.Path) { Set-ArciAclEntry -Entry $entry }
+    }
 }
 
 # --- health ------------------------------------------------------------------------------------------
@@ -1808,6 +1902,7 @@ function Show-NextSteps {
     }
     Write-Host ('      & "{0}" secret set kamusm.customer' -f $CoreExe)
     Write-Host ('      & "{0}" secret set kamusm.password' -f $CoreExe)
+    Write-Host ('      & "{0}"   # secret set / secret delete sonrası: ArciAdmin''in secrets.json hakkı geri gelir [after a console secret set / secret delete: gives ArciAdmin its right on secrets.json back]' -f (Join-Path $InstallDir 'scripts\Set-ArciVaultAcl.ps1'))
     Write-Host ('      & "{0}" credit ; & "{0}" tsa-test' -f $CoreExe)
     Write-Host '   4. Cihaz ayarları [device setup]: docs\DEVICE-SETUP.md'
     if ($script:SourceCount -eq 0) {
@@ -1955,6 +2050,8 @@ function Read-KamuSmCredentials {
             if ($result.ExitCode -ne 0) { Write-Host ('    {0}: çıkış kodu {1} [exit code]: {2}' -f $pair[0], $result.ExitCode, $result.StdErr.Trim()) -ForegroundColor Yellow }
             else { $stored++ }
         }
+        # Each "secret set" replaced secrets.json: ArciAdmin's entry back on it (contract 2.2).
+        if ($stored -gt 0) { Restore-ConfigFileAccess }
         if ($stored -eq 2) {
             Write-Host '    Bağlantı testinden önce Kamu SM kök sertifikalarını koyun, sonra credit ve tsa-test (docs\KURULUM.md bölüm 10) [roots first, then credit and tsa-test].'
         }
@@ -2090,6 +2187,7 @@ function Invoke-SourcesPreflight {
         $script:SourceCount = $tables.Tables
         $unread = $tables.Tables - $senders.Count
     }
+    $script:SourceSenders = @($senders)
     if ($script:SourceCount -eq 0) {
         $where = $(if ($existing) { '{0} içinde [[sources]] yok [no [[sources]] in it]' -f $ConfigPath } else { 'yeni arcilogger.toml [[sources]] olmadan oluşturulur; örnekteki cihazlar yalnızca yorum satırıdır [the new arcilogger.toml has no [[sources]]; the example''s devices are comments only]' })
         $effect = $(if ($SkipFirewall) { 'her gönderici bilinmeyen gönderici sayılır (unknown-<ip>) ve hiçbir kaynak sessizlik için izlenmez (R15) [every sender counts as unknown, no source is watched for silence]' } else { 'güvenlik duvarı 514''ü hiçbir göndericiye açmaz, hiçbir log kaydedilmez [the firewall opens 514 to no sender, no log is recorded]' })
@@ -2356,7 +2454,18 @@ function Invoke-Preflight {
             Add-Check 'programdata' 'fail' ("Zamanlanmış görevler yapılandırmayı {0} içinde arar; -ProgramDataDir yalnızca deneme için [scheduled tasks read the default config path]" -f $defaultProgramData)
         }
     }
-    if (-not $script:DataRootFromConfig -and $Mode -eq 'install') {
+    # The data root record (Resolve-ArciDataRoot): a data_dir that differs from it, or a record
+    # that cannot be used, stops the run; -DataRoot moves it deliberately.
+    if ($script:DataRootResolution.Problem) {
+        Add-Check 'data-root' 'fail' $script:DataRootResolution.Problem
+    }
+    elseif ($script:DataRootResolution.Replaces) {
+        Add-Check 'data-root' 'warn' ("Kayıtlı veri klasörü [recorded data root] {0} -> {1} (-DataRoot, {2}); hizmetler ve görevler yalnızca yeni klasörü kabul eder [the services and tasks accept only the new folder]" -f $script:DataRootResolution.Replaces, $DataRoot, $DataRootRecord)
+    }
+    elseif ($script:DataRootSource -eq 'record') {
+        Add-Check 'data-root' 'ok' ("Veri klasörü [data folder] {0} ({1})" -f $DataRoot, $DataRootRecord)
+    }
+    elseif (-not $script:DataRootFromConfig -and $Mode -eq 'install') {
         if ($script:DataRootSource -eq 'auto' -and $null -ne $script:DataRootChoice -and $script:DataRootChoice.Fallback) {
             Add-Check 'data-root' 'info' ("Veri klasörü otomatik seçildi [data folder chosen automatically]: {0} ({1}); başka bir disk için -DataRoot [another disk: -DataRoot]" -f $DataRoot, $script:DataRootChoice.Reason)
         }
@@ -2658,7 +2767,11 @@ function Invoke-CommonTail {
     if (-not $SkipDatabase) {
         # Versions without the database package (arcilogger-db) need no database yet.
         Invoke-Step 'database.provision' 'PostgreSQL rolü ve veritabanı [role and database]' {
-            if (Test-Path -LiteralPath $DbExe) { Invoke-DatabaseProvision }
+            if (Test-Path -LiteralPath $DbExe) {
+                Invoke-DatabaseProvision
+                # "secret set database.password" replaced secrets.json after Invoke-AclSteps.
+                Restore-ConfigFileAccess
+            }
             else {
                 $message = 'arcilogger-db bu sürümde yok; veritabanı adımları atlandı [no database package in this version, database steps skipped].'
                 Write-ArciWarn $message
@@ -2794,6 +2907,9 @@ function Restore-ArciRuntime {
         }
         # Before its services start: the previous version must load the configuration.
         & $step 'Yapılandırma önceki sürümle yükleniyor [the configuration loads with the previous version]' { Restore-ConfigForProgram }
+        if ($script:ConfigRestored) {
+            & $step 'Güvenlik duvarı ve saat geri konan yapılandırmayla [firewall and time follow the configuration put back]' { Sync-SystemAfterRollback }
+        }
     }
     & $step 'Hizmetler kayıtlı [services registered]' { Install-ArciServices -MissingOnly }
     if ($script:TasksRegistered) {
@@ -3025,6 +3141,14 @@ function Invoke-RollbackMode {
         }
         # A version from before the browser administration refuses what the browser added.
         Invoke-Step 'config.compatible' 'Yapılandırma önceki sürümle yükleniyor, gerekirse yükseltme öncesi kopya geri konuyor [the configuration must load with the previous version, else the copy from before the upgrade is put back]' { Restore-ConfigForProgram }
+        # ApplySystem leaves with the newer tasks: the rules and the time peers it set follow the
+        # configuration as the restored program reads it, before the collector starts again.
+        $restoreDetail = [pscustomobject]@{
+            firewall   = $(if (-not $SkipFirewall -and (Test-Path -LiteralPath $FirewallStatePath)) { Join-Path $InstallDir 'scripts\Set-ArciFirewall.ps1' } else { $null })
+            time       = $(if (-not $SkipTimeSetup) { Join-Path $InstallDir 'scripts\Set-ArciTime.ps1' } else { $null })
+            state_file = $FirewallStatePath
+        }
+        Invoke-Step 'system.restore' 'Güvenlik duvarı ve Windows Saati geri alınan sürümün betikleriyle yapılandırmaya göre [firewall and Windows Time from the configuration, with the restored version''s scripts]' { Sync-SystemAfterRollback } $restoreDetail
         # Services the previous version does not have (ArciAdmin) stay removed.
         Invoke-Step 'services.install' 'Windows hizmetleri [Windows services]' { Install-ArciServices }
         Invoke-Step 'tasks.register' 'Zamanlanmış görevler [scheduled tasks]' {

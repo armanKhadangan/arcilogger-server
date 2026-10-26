@@ -58,6 +58,9 @@
     profile, needs no -AdminAddress, skips the remote desktop check and never prompts. Exit codes:
     0 done, 2 refused (nothing changed), 3 not managed (no state file: an installation with
     -SkipFirewall). The full mode above stays for the installer and the console.
+    -KeepSourceAddress: enabled sources the policy leaves out (system-plan's
+    source_outside_policy). One that both syslog rules hold now stays in them (an administrator
+    opened it, and narrowing it away would drop its logs); one they do not hold is never added.
 
     All ARCILOGGER rules are in the rule group "ARCILOGGER". Safe to run again (idempotent).
 
@@ -98,6 +101,9 @@ param(
     # system-plan, admin\policy.json bounds them.
     [switch]$SyncFromConfig,
     [object[]]$Outbound,
+    [string[]]$KeepSourceAddress,
+    # Tests only (refused without -SyncFromConfig -DryRun): the addresses the syslog rules hold now.
+    [string[]]$LiveSourceAddress,
     [string]$PolicyPath = $(if ($env:ProgramData) { Join-Path $env:ProgramData 'ARCILOGGER\admin\policy.json' } else { 'C:\ProgramData\ARCILOGGER\admin\policy.json' }),
     [switch]$DryRun,
     [string]$PlanPath,
@@ -185,6 +191,35 @@ function Get-OtherAllowRules([string]$Direction) {
 
 # --- -SyncFromConfig (ApplySystem, ADR-0014) --------------------------------------------------------
 
+function ConvertFrom-RuleAddress([string]$Value) {
+    <# A RemoteAddress of a firewall rule ("172.20.20.0/255.255.255.0", "172.20.10.1") as system-plan writes it, or $null (Any, a range, IPv6). #>
+    $match = [regex]::Match($Value, '^(?<ip>[0-9.]+)/(?<mask>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)$')
+    if ($match.Success) {
+        $mask = $null
+        if (-not [System.Net.IPAddress]::TryParse($match.Groups['mask'].Value, [ref]$mask)) { return $null }
+        $bits = (@($mask.GetAddressBytes() | ForEach-Object { [Convert]::ToString([int]$_, 2).PadLeft(8, '0') }) -join '')
+        if ($bits -notmatch '^1*0*$') { return $null }
+        $prefix = $bits.IndexOf('0')
+        $Value = $(if ($prefix -lt 0) { $match.Groups['ip'].Value } else { '{0}/{1}' -f $match.Groups['ip'].Value, $prefix })
+    }
+    ConvertTo-ArciSyslogSender -Value $Value
+}
+
+function Get-LiveSyslogSenders {
+    <# The senders both ARCILOGGER syslog rules hold now (-LiveSourceAddress in a test's dry run); none off Windows. #>
+    if ($script:LiveGiven) {
+        return , @($LiveSourceAddress | Where-Object { $_ } | ForEach-Object { ConvertFrom-RuleAddress $_ } | Where-Object { $_ })
+    }
+    if (-not (Test-ArciWindows)) { return , @() }
+    $held = $null
+    foreach ($name in @('ARCILOGGER Syslog UDP', 'ARCILOGGER Syslog TCP')) {
+        $rules = @(Get-NetFirewallRule -Group $Group -ErrorAction SilentlyContinue | Where-Object { $_ -and [string]$_.DisplayName -eq $name })
+        $addresses = @($rules | Get-NetFirewallAddressFilter | ForEach-Object { @($_.RemoteAddress) } | ForEach-Object { ConvertFrom-RuleAddress ([string]$_) } | Where-Object { $_ })
+        if ($null -eq $held) { $held = $addresses } else { $held = @($held | Where-Object { $addresses -contains $_ }) }
+    }
+    , @($held)
+}
+
 function Invoke-SyncFromConfig {
     <#
     The input-free firewall step of ApplySystem (contract 2.8.3 step 4). The syslog senders
@@ -221,10 +256,22 @@ function Invoke-SyncFromConfig {
         $why = Get-ArciOutboundProblem -Rule ([string]$entry.rule) -HostName ([string]$entry.host) -Port $entry.port
         if ($why) { $problems.Add($why) }
     }
+    # Sources outside the policy: kept where both rules hold them now, never added.
+    $wanted = @($KeepSourceAddress | Where-Object { $_ } | ForEach-Object { ConvertTo-ArciSyslogSender -Value $_ } | Where-Object { $_ -and $senders -notcontains $_ } | Select-Object -Unique)
+    $kept = @()
+    $notKept = @()
+    if ($wanted.Count -gt 0) {
+        $live = Get-LiveSyslogSenders
+        $kept = @($wanted | Where-Object { $live -contains $_ })
+        $notKept = @($wanted | Where-Object { $live -notcontains $_ })
+    }
+    foreach ($value in $kept) { $warnings.Add(('{0}: politika ağlarının dışında, kuralda zaten açık; açık bırakıldı [outside the policy networks, open in the rule already: kept]' -f $value)) }
+    foreach ($value in $notKept) { $warnings.Add(('{0}: politika ağlarının dışında, açılmadı [outside the policy networks: not opened]' -f $value)) }
+    $remote = @($senders) + @($kept)
     $changes = New-Object System.Collections.Generic.List[object]
     foreach ($pair in @(@('ARCILOGGER Syslog UDP', 'UDP'), @('ARCILOGGER Syslog TCP', 'TCP'))) {
-        $operation = $(if ($senders.Count -gt 0) { 'set' } else { 'remove' })
-        $changes.Add([pscustomobject]@{ rule = $pair[0]; direction = 'Inbound'; protocol = $pair[1]; ports = @("$SyslogPort"); remote_address = $senders; hosts = @(); operation = $operation; reason = $null })
+        $operation = $(if ($remote.Count -gt 0) { 'set' } else { 'remove' })
+        $changes.Add([pscustomobject]@{ rule = $pair[0]; direction = 'Inbound'; protocol = $pair[1]; ports = @("$SyslogPort"); remote_address = $remote; hosts = @(); operation = $operation; reason = $null })
     }
     if ($strict) {
         foreach ($name in @($outbound | ForEach-Object { [string]$_.rule } | Select-Object -Unique)) {
@@ -263,6 +310,8 @@ function Invoke-SyncFromConfig {
         strict_outbound = $strict
         policy          = [pscustomobject]@{ valid = $policy.Valid; enabled = $policy.Enabled; source_networks = @($policy.SourceNetworks); min_prefix_v4 = $policy.MinPrefixV4 }
         changes         = @(if ($code -eq 0) { $changes.ToArray() })
+        kept            = @(if ($code -eq 0) { $kept })
+        not_kept        = @($notKept)
         profiles        = 'unchanged'
         other_rules     = 'unchanged'
         would_disable   = $null
@@ -315,6 +364,11 @@ function Invoke-SyncFromConfig {
     }
     Write-ArciStep 'Güvenlik duvarı eşitlendi [firewall in step with the configuration].'
     0
+}
+
+$script:LiveGiven = $PSBoundParameters.ContainsKey('LiveSourceAddress')
+if ($script:LiveGiven -and -not ($SyncFromConfig -and $DryRun)) {
+    throw '-LiveSourceAddress yalnızca -SyncFromConfig -DryRun ile [only with -SyncFromConfig -DryRun]: kuralların adresleri her zaman kuralların kendisinden okunur [the rules'' addresses are always read from the rules].'
 }
 
 if ($SyncFromConfig) {

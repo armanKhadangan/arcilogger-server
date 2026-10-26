@@ -92,14 +92,16 @@ installer prepares it on every run, idempotently:
 
 | Step | Effect |
 |---|---|
-| `config.data-root` | `data-root.txt`: the data root every service and task checks `data_dir` against (Day 0 note D0-2) |
+| `config.data-root` | `data-root.txt`: the data root every service and task checks `data_dir` against (Day 0 note D0-2), deleted and written anew from the record itself, `-DataRoot` or the choice of a first installation (`Resolve-ArciDataRoot`: a `data_dir` that differs from the record stops the preflight); protected by the ACL step |
 | `executables.record` | the programs the tasks run outside the trusted folders (`tsa.java` with its whole command when it has more than one element, `backup.pg_dump`, `backup.pg_restore`) go into `policy.trusted_executables` with their SHA-256, only from folders nobody but administrators, SYSTEM and TrustedInstaller can write (else the preflight stops); a Zamane client outside `zamane\` is copied in and `tsa.zamane_jar` pointed at the copy; its hash is appended to `zamane\zamane-jar.sha256` |
 | `secrets.file` | `secrets.json` (`{}`) before its file entry for ArciAdmin |
 | `admin.protect`, `admin.keys` | `admin\` and `admin\keys\` protected (administrators and SYSTEM only) **before** `python -I -m arcilogger_core.admin keys init` writes the channel's keys (never replaced); the ACL step then grants each key its one reader |
 | `admin.policy` | `admin\policy.json` (`New-ArciAdminPolicy`): the parameters, else the values of a valid existing file (hand edits are kept), else those remembered in `install\state.json`, else the defaults; an invalid file is rewritten with a warning |
 | `admin.event-source` | the Application log source `ARCILOGGER-Admin` (`Register-ArciEventSource`; removed by `-Uninstall`) |
 | `config.before-upgrade` | before an upgrade changes anything: `arcilogger.toml.before-upgrade-<UTC>`, its name in `state.json` (`config_before_upgrade`) |
+| `acl.apply`, then `database.provision` | after the ACL step `secret set database.password` replaces `secrets.json`: `Restore-ConfigFileAccess` puts ArciAdmin's file entries back (also after the Kamu SM credentials at the end of a first installation) |
 | `config.compatible` | a rollback (and the automatic recovery) first loads the configuration with the previous program's Python (`Test-ArciProgramConfig`); when that refuses it, the copy from before the upgrade is put back and the refused file kept as `arcilogger.toml.refused-<time>` |
+| `system.restore` | a rollback (and the automatic recovery when the configuration was put back) runs the restored program's `Set-ArciFirewall.ps1` (full mode, the remembered choices) and `Set-ArciTime.ps1`: ApplySystem leaves with the newer tasks; a failure is a warning with the command to run |
 
 ## Server requirements
 
