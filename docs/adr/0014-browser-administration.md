@@ -9,7 +9,11 @@
   [MVP-CONTRACTS.md](../MVP-CONTRACTS.md) as §16 with the API work. The channel's names, limits
   and file formats are code: `arcilogger_core.admin.contract`, `arcilogger_core.admin.envelope`,
   `arcilogger_core.admin.keys`, `arcilogger_core.admin.messages`, `arcilogger_core.execpolicy`,
-  `arcilogger_core.configwatch`.
+  `arcilogger_core.configwatch`. The agent and what it checks: `arcilogger_core.admin.agent`
+  (the request pipeline), `.rules` (every rule of a section; the API imports it too),
+  `.tomledit` (the narrow TOML editor), `.apply` (the transaction, versions and recovery),
+  `.probe` (connection tests in a child process), `.systemplan` (ApplySystem's plan) and
+  `.__main__` (the console commands); `arcilogger_core.tsa.preflight` and `arcilogger_core.smtp`.
 
 ## Context
 

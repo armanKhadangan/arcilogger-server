@@ -20,6 +20,7 @@ from arcilogger_core.admin.contract import (
     JarsFile,
     TaskRequest,
     TaskResult,
+    ValueChange,
     new_id,
     parse_document,
 )
@@ -971,4 +972,106 @@ def test_turning_the_replica_off_is_held(installed: Installed) -> None:
     agent.advance(timedelta(hours=2, minutes=1))
     agent.process()
     assert installed.status(off.id).state == "applied"  # type: ignore[union-attr]
+    assert not installed.config().replica.enabled
+
+
+# -- revert (contract 2.7.2) -----------------------------------------------------------------------
+
+
+def apply(installed: Installed, agent: FakeAgent, section: Any, ops: list[dict[str, Any]]) -> str:
+    request = installed.request(section=section, ops=ops, now=agent.now())
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.state == "applied", status
+    return request.id
+
+
+def revert(installed: Installed, agent: FakeAgent, target: str) -> Any:
+    request = installed.request("config.revert", options={"target": target}, now=agent.now())
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    return status
+
+
+def test_a_revert_brings_back_the_values_of_the_target_only(installed: Installed) -> None:
+    agent = FakeAgent(installed)
+    target = apply(installed, agent, "general", [SITE])
+    clock = {"op": "set", "path": "clock.alert_offset_ms", "expect": 1000, "value": 2000}
+    apply(installed, agent, "general", [clock])
+    status = revert(installed, agent, target)
+    assert (status.state, status.kind, status.section) == ("applied", "config.revert", "general")
+    config = installed.config()
+    assert config.site_name == "Örnek A.Ş."
+    assert config.clock.alert_offset_ms == 2000  # another request's path stays
+    line = installed.journal()[-1]
+    assert line.kind == "config.revert"
+    assert line.changes["site_name"] == ValueChange(old="Örnek Holding", new="Örnek A.Ş.")
+
+
+def test_a_revert_restores_the_stored_ciphertext_of_a_secret(installed: Installed) -> None:
+    agent = FakeAgent(installed)
+    store = installed.store
+    first = {"op": "secret_set", "name": "kamusm.customer", "expect": "unset",
+             "token": store.encrypt_value("4812")}  # fmt: skip
+    apply(installed, agent, "tsa", [first])
+    second = {"op": "secret_set", "name": "kamusm.customer", "expect": "set",
+              "token": store.encrypt_value("9999")}  # fmt: skip
+    target = apply(installed, agent, "tsa", [second])
+    assert installed.store.get("kamusm.customer") == "9999"
+    status = revert(installed, agent, target)
+    assert status.state == "applied", status
+    assert installed.store.get("kamusm.customer") == "4812"
+    again = revert(installed, agent, apply(installed, agent, "tsa", [
+        {"op": "secret_delete", "name": "kamusm.customer", "expect": "set"},
+    ]))  # fmt: skip
+    assert again.state == "applied"
+    assert installed.store.get("kamusm.customer") == "4812"
+
+
+def test_a_source_added_is_removed_by_its_revert(installed: Installed) -> None:
+    agent = FakeAgent(installed)
+    source = {"name": "fw-01", "type": "fortigate", "address": "172.20.10.22"}
+    target = apply(installed, agent, "sources", [{"op": "source_add", "source": source}])
+    status = revert(installed, agent, target)
+    assert status.state == "applied", status
+    assert len(installed.config().sources) == 0
+
+
+def test_what_cannot_be_reverted(installed: Installed) -> None:
+    agent = FakeAgent(installed)
+    assert revert(installed, agent, new_id()).error.code == "request_not_revertible"
+    seal = installed.request("action.seal", options={"day": date(2026, 10, 24)}, now=agent.now())
+    installed.submit(seal)
+    agent.process()
+    assert revert(installed, agent, seal.id).error.code == "request_not_revertible"
+    secret = {"op": "secret_set", "name": "kamusm.customer", "expect": "unset",
+              "token": installed.store.encrypt_value("4812")}  # fmt: skip
+    target = apply(installed, agent, "tsa", [secret])
+    for number in range(5):  # the secret store of the target's version is no longer kept
+        site = {"op": "set", "path": "site_name", "expect": installed.config().site_name,
+                "value": f"Örnek {number}"}  # fmt: skip
+        apply(installed, agent, "general", [site])
+    assert revert(installed, agent, target).error.code == "request_not_revertible"
+    assert installed.store.get("kamusm.customer") == "4812"
+
+
+def test_a_guarded_revert_is_held(installed: Installed) -> None:
+    agent = FakeAgent(installed, now=datetime(2026, 10, 25, 10, 15, tzinfo=SITE_TZ))
+    on: list[dict[str, Any]] = [
+        {"op": "set", "path": "replica.enabled", "expect": False, "value": True},
+        {"op": "set", "path": "replica.target", "expect": None, "value": "\\\\NAS-01\\worm"},
+    ]
+    target = apply(installed, agent, "replica", on)
+    installed.write_policy(hold_hours=1)
+    status = revert(installed, agent, target)  # turns the replica off: guarded
+    assert status.state == "pending"
+    assert status.kind == "config.revert"
+    assert installed.config().replica.enabled
+    agent.advance(timedelta(hours=1, minutes=1))
+    agent.process()
+    assert installed.status(status.id).state == "applied"  # type: ignore[union-attr]
     assert not installed.config().replica.enabled
