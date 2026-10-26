@@ -5,6 +5,18 @@ configuration (e.g. ``uvicorn --factory`` in development) the configuration file
 the first request that needs it (``ARCILOGGER_CONFIG`` or the default path); the health
 endpoint never needs it.
 
+**Live reload** (ADR-0014; contract 2.8.2): with the configuration file it was started with
+(``config_path``, the fixed ``--config`` path of ``arcilogger-api serve``), the API looks at the
+file at most every :data:`RELOAD_SECONDS` seconds in :meth:`AppState.require_config` and takes
+every key except its own process settings (``database``, ``api``, ``data_dir``,
+``secrets_dir``: ``configwatch.API_HOT``) without a restart; the database engine is never
+rebuilt. A file that does not load keeps the configuration in use; one that moves
+``secrets_dir`` or ``data_dir`` away from the installation's folders is not taken at all
+(contract Day 0 note D0-2). ``config_watch`` is what the API reports as its ``config`` block
+(``GET /admin/status``). The same path locates the browser administration's folder
+(:mod:`arcilogger_api.admin_channel`); without it the API runs as before and browser
+administration is unavailable.
+
 Use :data:`DbSession` in endpoints: **one session per request**, committed after the endpoint
 returned and *before* the response is sent (so a failed commit is a 5xx, not a silent loss),
 rolled back when the endpoint raised.
@@ -20,7 +32,8 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Annotated, Final
 
 from fastapi import Depends, Request
@@ -29,7 +42,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.errors import ApiError
-from arcilogger_core.config import Config, load_config
+from arcilogger_core.config import Config, check_fixed_location, default_config_path, load_config
+from arcilogger_core.configwatch import API_HOT, ConfigWatch, ConfigWatcher
 from arcilogger_core.layout import Layout
 from arcilogger_db.engine import make_engine, session_factory
 from arcilogger_db.license_guard import GuardedStatus
@@ -40,6 +54,10 @@ log = logging.getLogger("arcilogger.api")
 LAYOUT_INFO_KEY = "arci.layout"
 #: How long the API keeps a computed licence status (contract 4.3).
 LICENSE_CACHE_SECONDS: Final = 30.0
+#: The API looks at its configuration file at most this often (contract 2.8.1: "API ≤ 2 s").
+RELOAD_SECONDS: Final = 2.0
+#: Keys a reloaded file must not change: they choose the secret store and the data root.
+LOCATION_KEYS: Final = frozenset({"secrets_dir", "data_dir"})
 
 
 @dataclass
@@ -93,22 +111,66 @@ class TtlCache[T]:
 class AppState:
     config: Config | None = None
     engine: Engine | None = None
+    #: The configuration file the API was started with (None: a configuration given in
+    #: memory, as most tests do; it is then never reloaded).
+    config_path: Path | None = None
     _factory: sessionmaker[Session] | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _watcher: ConfigWatcher | None = None
+    _watch: ConfigWatch | None = None
     #: The guarded licence status (``arcilogger_db.license_guard.GuardedStatus``).
     license_cache: TtlCache[GuardedStatus] = field(
         default_factory=lambda: TtlCache[GuardedStatus](LICENSE_CACHE_SECONDS)
     )
 
     def require_config(self) -> Config:
+        """The configuration in use, reloaded from ``config_path`` when it changed."""
         with self._lock:
             if self.config is None:
+                path = self.config_path or default_config_path()
                 try:
-                    self.config = load_config()
+                    config = load_config(path)
+                    check_fixed_location(config, path)
                 except (OSError, ValidationError, ValueError) as exc:
                     log.error("configuration not available: %s", exc)
                     raise ApiError(503, "unavailable") from exc
+                self.config, self.config_path = config, path
+            self._reload(self.config)
             return self.config
+
+    def _reload(self, current: Config) -> None:
+        if self.config_path is None:
+            return
+        if self._watcher is None:
+            self._watcher = ConfigWatcher(
+                self.config_path, current, hot=API_HOT, min_interval=RELOAD_SECONDS
+            )
+        watch = self._watcher.poll()
+        moved = sorted(LOCATION_KEYS & set(watch.restart_keys))
+        if moved:
+            # The browser never changes these keys: a file that does is not followed at all,
+            # and the API goes on reporting the file it runs on.
+            error = f"{', '.join(moved)}: not the installation's folder; the file is not used"
+            previous = self._watch
+            if previous is None or previous.error != error:
+                log.error("configuration %s not taken: %s", self.config_path, error)
+            self._watch = replace(
+                watch,
+                config=current,
+                changed=False,
+                sha256=previous.sha256 if previous else None,
+                loaded_at=previous.loaded_at if previous else watch.loaded_at,
+                error=error,
+            )
+            return
+        self._watch = watch
+        self.config = watch.config
+
+    @property
+    def config_watch(self) -> ConfigWatch | None:
+        """What the last look at the configuration file found (None without a file)."""
+        with self._lock:
+            return self._watch
 
     @property
     def layout(self) -> Layout:

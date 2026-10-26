@@ -42,6 +42,7 @@ RULES: dict[tuple[str, str], Rule] = {
     ("POST", "/api/v1/seals/{day}/verify"): Rule(SEAL_ROLES),
     ("POST", "/api/v1/seals/{day}/seal"): Rule(ADMIN_ONLY),
     ("GET", "/api/v1/credits"): Rule(SEAL_ROLES),
+    ("POST", "/api/v1/credits/query"): Rule(ADMIN_ONLY),
 }
 BODIES: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/api/v1/evidence"): {"from": DAY, "to": DAY},

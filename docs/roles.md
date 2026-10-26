@@ -243,6 +243,36 @@ enters the sealed audit log (docs/MVP-CONTRACTS.md section 14). `api/tests/test_
 lists every route of the area and checks each role against `ROLE_PERMISSIONS`;
 `api/tests/test_dashboard_api.py` checks the boxes per role.
 
+## Ayarlar / Settings — sunucu yönetimi ve uygulama ayarları / browser administration
+
+Sunucu yapılandırması (`/admin/...`, ADR-0014) ve uygulama ayarları (`/settings`) bugün yalnızca
+**Yönetici**dedir (`settings.manage`, `sources.manage`, `seal.manage`; şartname 13 tablosunda
+"Ayarlar" yalnızca yöneticiye açıktır). Kimlik bilgisi, saklama süresi, saat sunucusu ve güvenlik
+ayarlarının değişikliği ayrıca son 5 dakika içinde parolanın yeniden girilmesini ister. Hiçbir
+lisans durumu bu uç noktaları kapatmaz. "Şimdi mühürle" ve "Kontör sorgula" `seal.manage` ister;
+bu izni olan kişi kendi başlattığı isteği izleyebilir.
+
+The machine configuration (`/admin/...`, ADR-0014) and the database settings (`/settings`) are
+administrator-only today (`settings.manage`, `sources.manage`, `seal.manage`; "Ayarlar" is
+administrator-only in the spec 13 table). Changes of credentials, retention, the time servers
+and security settings also need a re-authentication within the last 5 minutes. No licence state
+closes these endpoints. "Şimdi mühürle" and "Kontör sorgula" need `seal.manage`; a user with it
+may follow the request they started.
+
+| Endpoint | Access | admin | auditor | hr | viewer |
+|---|---|---|---|---|---|
+| `GET /admin/config`, `/admin/status`, `/admin/requests…` | `settings.manage` | ✔ | — | — | — |
+| `POST /admin/config/<section>/check`, `PUT /admin/config/general` | `settings.manage` (clock: + re-auth) | ✔ | — | — | — |
+| `GET /admin/requests/{id}` of one's own seal now / credit query | `seal.manage` | ✔ | — | — | — |
+| `POST /seals/{day}/seal`, `POST /credits/query` | `seal.manage` | ✔ | — | — | — |
+| `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset` | `settings.manage` (+ re-auth for `REAUTH_KEYS`) | ✔ | — | — | — |
+
+Every request is audited `admin.request` when it is queued and its outcome is imported from the
+agent's journal (`admin.applied`, `admin.failed`, …); a refused change is audited
+`admin.refused` with its codes only; a setting change is `settings.change` with the user's id
+and address (docs/MVP-CONTRACTS.md section 16). `api/tests/test_admin_config.py`,
+`test_admin_actions.py` and `test_settings_api.py` check the roles.
+
 ## Kararlar / Decisions
 
 - **Denetçi ve kanıt paketi** (karar 2026-10-12, [ASSUMPTIONS.md](ASSUMPTIONS.md) D4): şartname 13

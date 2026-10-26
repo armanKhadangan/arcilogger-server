@@ -16,24 +16,30 @@ Permission ``seal.read`` (administrators, auditors) unless noted:
 * ``POST /seals/{day}/verify?deep=true`` (``seal.verify``) — the core day check in a child
   process with a time limit (:mod:`arcilogger_api.sealcheck`); the result is stored in
   ``seal_verifications`` (the API may not write ``state/verify``) and audited ``seal.verify``.
-* ``POST /seals/{day}/seal`` (``seal.manage``) — "Şimdi mühürle" is **not available through the
-  API** in this version: the API service account may not write the vault (ADR-0007). It answers
-  ``501`` and points to the scheduled task. Planned: a signed request file that the Seal task
-  picks up.
+* ``POST /seals/{day}/seal`` (``seal.manage``) — "Şimdi mühürle" (ADR-0014; contract 2.9): the
+  API asks the administration agent for one sealing attempt of the day; the agent signs a seal
+  request for the Seal task (LOCAL SERVICE), which takes it at its next start (woken at once) and
+  ignores the day's retry wait once — the quiet window after midnight, the order of the days and
+  the empty-day rules stay as they are. Only the oldest closed unsealed day in state ``failed`` or
+  ``pending`` can be asked for (409 ``seal_not_due``; ``seal_day_sealed``,
+  ``seal_not_applicable``, ``seal_request_pending``). Answer 202 with the request to follow
+  (``GET /admin/requests/{id}``); its result is the day's outcome.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from pathlib import Path as FsPath
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from arcilogger_api.admin_channel import AdminAccepted, Channel, ChannelDep, admin_error
 from arcilogger_api.audit import record_audit
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
 from arcilogger_api.errors import ApiError
@@ -45,11 +51,14 @@ from arcilogger_api.sealinfo import (
     VaultView,
     month_days,
     on_demand_verifications,
+    read_seal_state,
 )
 from arcilogger_api.security import CurrentUser, client_ip, require
+from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
-from arcilogger_core.seal import sha256_file
-from arcilogger_core.timeutil import site_day, utc_now
+from arcilogger_core.seal import Sealer, sha256_file
+from arcilogger_core.timeutil import day_window, site_day, utc_now
+from arcilogger_core.tsa.base import StampResult, TsaError
 from arcilogger_db.models import SealVerification
 
 log = logging.getLogger("arcilogger.api.seals")
@@ -323,18 +332,66 @@ def verify_day(
     )
 
 
-@router.post("/{day}/seal")
-def seal_now(day: DayParam, user: ManagerDep) -> None:
-    """ "Şimdi mühürle": not through the API in this version (the API cannot write the vault)."""
-    raise ApiError(
-        501,
-        "seal_now_unavailable",
-        "Şimdi mühürle bu sürümde web arayüzünden yapılamaz: web hizmetinin kasaya yazma izni "
-        "yoktur. Mühürleme, zamanlanmış \\ARCILOGGER\\Seal görevi ile her gece 00:10'dan "
-        "itibaren 5 dakikada bir çalışır ve başarısız denemeleri kendiliğinden tekrarlar. Hemen "
-        "mühürlemek için sunucuda Görev Zamanlayıcı'dan bu görevi çalıştırın.",
-        "Seal now is not available from the web interface in this version: the web service may "
-        "not write to the vault. Sealing runs as the scheduled task \\ARCILOGGER\\Seal every "
-        "5 minutes from 00:10 and retries failed attempts by itself. To seal at once, run that "
-        "task in Task Scheduler on the server.",
+class _NoStamps:
+    """The sealer only answers which day is due here; it never stamps."""
+
+    name = "none"
+    legal_grade = False
+
+    def stamp(self, file_path: FsPath) -> StampResult:  # pragma: no cover - never called
+        raise TsaError("the API does not stamp")
+
+    def credits(self) -> int | None:  # pragma: no cover - never called
+        return None
+
+
+#: Calendar states of a day that is sealed (a failed verification still is).
+_SEALED_STATES: Final = ("verified", "sealed", "late")
+
+
+def _check_seal_now(
+    db: Session, channel: Channel, config: Config, layout: Layout, day: date
+) -> None:
+    """The 409s of "Şimdi mühürle" (contract 2.9); the Seal task checks again."""
+    state, _ = read_seal_state(layout, day)
+    status = state.get("status") if state else None
+    shown = VaultView(layout, config).summary(day)["state"]
+    if status == "sealed" or shown in _SEALED_STATES:
+        raise admin_error("seal_day_sealed")
+    if status in ("skipped", "deleted") or shown in ("no_data", "deleted"):
+        raise admin_error("seal_not_applicable")
+    due = Sealer(config, provider=_NoStamps(), roots=[]).closed_unsealed_days()
+    quiet = timedelta(seconds=config.seal.quiet_seconds)
+    if (
+        not due
+        or due[0] != day
+        or shown not in ("failed", "pending")
+        or channel.now < day_window(day)[1] + quiet
+    ):
+        raise admin_error("seal_not_due")
+    for row in channel.open_rows(db, kind="action.seal"):
+        if (row.params or {}).get("day") == day.isoformat():
+            raise admin_error("seal_request_pending")
+
+
+@router.post("/{day}/seal", status_code=status.HTTP_202_ACCEPTED)
+def seal_now(
+    day: DayParam,
+    request: Request,
+    db: DbSession,
+    user: ManagerDep,
+    layout: LayoutDep,
+    config: ConfigDep,
+    channel: ChannelDep,
+) -> AdminAccepted:
+    """ "Şimdi mühürle": one sealing attempt of the oldest due day through the Seal task."""
+    _check_day(day)
+    _check_seal_now(db, channel, config, layout, day)
+    return channel.submit(
+        db,
+        user,
+        request,
+        kind="action.seal",
+        options={"day": day.isoformat()},
+        params={"day": day.isoformat()},
     )

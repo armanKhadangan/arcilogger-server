@@ -104,7 +104,7 @@ from sqlalchemy import Engine, event, inspect, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from arcilogger_api import evidence_limits, rawlines
+from arcilogger_api import deps, evidence_limits, rawlines
 from arcilogger_api.app import create_app
 from arcilogger_api.auth.accounts import accept_privacy, privacy_version
 from arcilogger_api.deps import AppState
@@ -118,7 +118,8 @@ from arcilogger_api.security import hash_token
 from arcilogger_api.testing import LoggedIn, login, make_user
 import arcilogger_core
 from arcilogger_core import timeutil
-from arcilogger_core.config import Config
+from arcilogger_core.admin.testing import FakeAgent, make_installation
+from arcilogger_core.config import Config, load_config
 from arcilogger_core.credit import check_credit
 from arcilogger_core.layout import Layout
 from arcilogger_core.license import revoked as license_revoked
@@ -218,6 +219,37 @@ USAGE_PSEUDONYM_VALUE = "ornek-takma-ad-anahtari-yalnizca-test"  # gitleaks:allo
 REPLICA_TARGET = "//NAS-01/arcilogger-worm"
 PASSWORD_PLACEHOLDER = "ornek-parola-yalnizca-test"  # noqa: S105  # gitleaks:allow — replaces the real one
 
+#: The capture's configuration file (an installation folder: the browser administration reads
+#: it, its agent writes it); ``{data_dir}`` and ``{replica}`` are filled in.
+SITE_TOML = """\
+# The capture's site (web/scripts/capture_api_samples.py): the repository's fictional world.
+site_name = "Örnek A.Ş."
+data_dir = "{data_dir}"
+
+[api]
+secure_cookies = false
+
+[seal]
+quiet_seconds = 0
+
+[tsa]
+provider = "mock"
+
+[replica]
+enabled = true
+target = "{replica}"
+
+[[sources]]
+name = "fortigate"
+type = "fortigate"
+address = "172.31.255.1"
+
+[[sources]]
+name = "core-r1"
+type = "mikrotik"
+address = "172.20.10.1"
+"""
+
 REQUEST = {
     "authority": "İzmir Cumhuriyet Başsavcılığı",
     "file_no": "2026/48213 Soruşturma",
@@ -242,25 +274,23 @@ class Capture:
     def __init__(self, root: Path, engine: Engine) -> None:
         self.root = root
         self.engine = engine
-        self.config = Config.model_validate(
-            {
-                "site_name": "Örnek A.Ş.",
-                "data_dir": str(root / "data"),
-                "secrets_dir": str(root),
-                "api": {"secure_cookies": False},
-                "sources": [
-                    {"name": "fortigate", "type": "fortigate", "address": FIREWALL},
-                    {"name": "core-r1", "type": "mikrotik", "address": "172.20.10.1"},
-                ],
-                "seal": {"quiet_seconds": 0},
-                "tsa": {"provider": "mock"},
-                "replica": {"enabled": True, "target": str(root / "replica")},
-            }
-        )
+        # An installation folder as the installer leaves it: the configuration file, the
+        # secret store, the administration channel's keys and policy (ADR-0014).
+        toml = SITE_TOML.replace("{replica}", (root / "replica").as_posix())
+        self.installed = make_installation(root, toml=toml)
+        self.config = load_config(self.installed.config_path)
+        if self.config.sources[0].address != FIREWALL:
+            raise SystemExit("SITE_TOML must name the example firewall")
         self.layout = Layout(self.config.data_dir)
-        self.app = create_app(self.config, engine, audit_flush_seconds=None)
+        self.app = create_app(
+            self.config,
+            engine,
+            config_path=self.installed.config_path,
+            audit_flush_seconds=None,
+        )
         state: AppState = self.app.state.arci
         self.factory: sessionmaker[Session] = state.session_factory()
+        self._agent: FakeAgent | None = None
         self.samples: dict[str, dict[str, Any]] = {
             "lookups": {},
             "raw": {},
@@ -271,7 +301,18 @@ class Capture:
             "alerts": {},
             "dashboard": {},
             "reports": {},
+            "admin": {},
+            "settings": {},
         }
+
+    def agent(self) -> FakeAgent:
+        """The site's administration agent (the real one, run synchronously), its heartbeat
+        fresh."""
+        if self._agent is None:
+            self._agent = FakeAgent(self.installed)
+            self._agent.start()
+        self._agent.agent.heartbeat()
+        return self._agent
 
     # -- users ----------------------------------------------------------------------------------
 
@@ -970,12 +1011,26 @@ def capture_seals(capture: Capture, admin: Any, auditor: Any) -> None:
         "base64": base64.b64encode(token.content).decode("ascii"),
     }
     errors = out.setdefault("errors", {})
-    errors["seal_now_unavailable"] = capture.error(
-        admin.post(f"{API}/seals/{WAITING.isoformat()}/seal"), 501, "seal_now_unavailable"
-    )
     errors["seal_now_forbidden"] = capture.error(
         auditor.post(f"{API}/seals/{WAITING.isoformat()}/seal"), 403, "forbidden"
     )
+    # "Şimdi mühürle" (ADR-0014): the oldest due day through the agent and the Seal task (the
+    # task's answer is the test helper's; the vault stays as it is).
+    agent = capture.agent()
+    errors["seal_day_sealed"] = capture.error(
+        admin.post(f"{API}/seals/{VERIFIED.isoformat()}/seal"), 409, "seal_day_sealed"
+    )
+    errors["seal_not_due"] = capture.error(
+        admin.post(f"{API}/seals/{WAITING.isoformat()}/seal"), 409, "seal_not_due"
+    )
+    accepted = capture.json(admin.post(f"{API}/seals/{FAILED.isoformat()}/seal"), 202)
+    out["seal_now"] = accepted
+    errors["seal_request_pending"] = capture.error(
+        admin.post(f"{API}/seals/{FAILED.isoformat()}/seal"), 409, "seal_request_pending"
+    )
+    out["seal_now_queued"] = capture.json(admin.get(accepted["status_url"]), 200)
+    agent.process()
+    out["seal_now_done"] = capture.json(admin.get(accepted["status_url"]), 200)
     errors["verify_not_sealed"] = capture.error(
         admin.post(f"{API}/seals/{WAITING.isoformat()}/verify"), 404, "not_found"
     )
@@ -1001,8 +1056,16 @@ def _fixed(moment: datetime) -> Callable[[], datetime]:
     return lambda: moment
 
 
-def capture_credits(capture: Capture) -> None:
+def capture_credits(capture: Capture, admin: Any) -> None:
     out = capture.samples["credits"]
+    # "Kontör sorgula" (ADR-0014): through the agent and the Requests task, once a minute.
+    agent = capture.agent()
+    out["query"] = capture.json(admin.post(f"{API}/credits/query"), 202)
+    out["query_limited"] = capture.error(
+        admin.post(f"{API}/credits/query"), 429, "admin_rate_limited"
+    )
+    agent.process()
+    out["query_done"] = capture.json(admin.get(out["query"]["status_url"]), 200)
     layout = capture.layout
     first = _local(date(2026, 9, 14), 6, 30)
 
@@ -2469,6 +2532,108 @@ def placeholder_token_hashes(value: Any, seen: dict[str, str]) -> Any:
     return value
 
 
+# -- the browser administration (ADR-0014) --------------------------------------------------------
+
+
+def capture_settings(capture: Capture, admin: Any, auditor: Any) -> None:
+    """``settings.json``: "Uygulama ayarları" (contract 2.13), changed and put back."""
+    out = capture.samples["settings"]
+    url = f"{API}/settings"
+    out["list"] = capture.json(admin.get(url), 200)
+    change = {"key": "lookup.max_candidates", "old": 100, "value": 150}
+    out["patch"] = capture.json(admin.patch(url, json={"changes": [change]}), 200)
+    out["list_changed"] = capture.json(admin.get(url), 200)
+    out["reset"] = capture.json(admin.post(f"{url}/lookup.max_candidates/reset"), 200)
+    errors = out.setdefault("errors", {})
+    bad = {"changes": [{"key": "lookup.max_candidates", "old": 100, "value": 0}]}
+    errors["setting_invalid"] = capture.error(admin.patch(url, json=bad), 422, "setting_invalid")
+    stale = {"changes": [{"key": "lookup.max_candidates", "old": 99, "value": 150}]}
+    errors["setting_conflict"] = capture.error(
+        admin.patch(url, json=stale), 409, "setting_conflict"
+    )
+    unknown = {"changes": [{"key": "yok.boyle", "old": 1, "value": 2}]}
+    errors["setting_unknown"] = capture.error(
+        admin.patch(url, json=unknown), 422, "setting_unknown"
+    )
+    locked = {"changes": [{"key": "devices.oui_file", "old": "", "value": "C:/oui.csv"}]}
+    errors["setting_locked"] = capture.error(admin.patch(url, json=locked), 422, "setting_locked")
+    idle = {"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
+    capture.recent(admin, minutes_ago=10)
+    errors["reauth_required"] = capture.error(admin.patch(url, json=idle), 403, "reauth_required")
+    errors["forbidden"] = capture.error(auditor.get(url), 403, "forbidden")
+
+
+def capture_admin(capture: Capture, admin: Any, auditor: Any) -> None:
+    """``admin.json``: the machine configuration, the administration service's status and a
+    change of the site name from the 202 to ``active`` (last: it changes the site's name), with
+    the refusals the settings pages show."""
+    out = capture.samples["admin"]
+    agent = capture.agent()
+    config = capture.json(admin.get(f"{API}/admin/config"), 200)
+    out["config"] = config
+    out["status"] = capture.json(admin.get(f"{API}/admin/status"), 200)
+    errors = out.setdefault("errors", {})
+    general = f"{API}/admin/config/general"
+    tag = config["etags"]["general"]
+    body = {"etag": tag, "site_name": "Örnek Lojistik A.Ş.", "probe": True}
+    out["check_general"] = capture.json(admin.post(f"{general}/check", json=body), 200)
+    clock = {"etag": tag, "clock": {"ntp_server": "172.20.10.254"}, "probe": False}
+    out["check_clock"] = capture.json(admin.post(f"{general}/check", json=clock), 200)
+    errors["reauth_required"] = capture.error(
+        admin.put(general, json=clock), 403, "reauth_required"
+    )
+    errors["config_conflict"] = capture.error(
+        admin.put(general, json={**body, "etag": "general:0"}), 409, "config_conflict"
+    )
+    errors["site_name_required"] = capture.error(
+        admin.put(general, json={**body, "site_name": " "}), 422, "site_name_required"
+    )
+    errors["host_invalid"] = capture.error(
+        admin.post(f"{general}/check", json={"etag": tag, "clock": {"ntp_server": "a b"}}),
+        422,
+        "host_invalid",
+    )
+    errors["config_unchanged"] = capture.error(
+        admin.put(general, json={**body, "site_name": "Örnek A.Ş."}), 422, "config_unchanged"
+    )
+    errors["forbidden"] = capture.error(auditor.get(f"{API}/admin/config"), 403, "forbidden")
+    errors["admin_request_not_found"] = capture.error(
+        admin.get(f"{API}/admin/requests/{'0' * 32}"), 404, "admin_request_not_found"
+    )
+    accepted = capture.json(admin.put(general, json=body), 202)
+    out["accepted"] = accepted
+    errors["admin_section_busy"] = capture.error(
+        admin.put(general, json={**body, "site_name": "Örnek Holding A.Ş."}),
+        409,
+        "admin_section_busy",
+    )
+    out["request_queued"] = capture.json(admin.get(accepted["status_url"]), 200)
+    agent.process()
+    out["request_active"] = capture.json(admin.get(accepted["status_url"]), 200)
+    out["requests"] = capture.json(admin.get(f"{API}/admin/requests"), 200)
+    out["status_after"] = capture.json(admin.get(f"{API}/admin/status"), 200)
+    # Without the administration service, and with browser administration switched off.
+    status = capture.installed.layout.agent_status
+    kept = status.read_bytes()
+    status.unlink()
+    out["status_agent_missing"] = capture.json(admin.get(f"{API}/admin/status"), 200)
+    tag = capture.json(admin.get(f"{API}/admin/config"), 200)["etags"]["general"]
+    errors["admin_agent_unavailable"] = capture.error(
+        admin.put(general, json={**body, "etag": tag, "site_name": "Örnek Holding A.Ş."}),
+        503,
+        "admin_agent_unavailable",
+    )
+    status.write_bytes(kept)
+    capture.installed.write_policy(enabled=False)
+    out["status_disabled"] = capture.json(admin.get(f"{API}/admin/status"), 200)
+    errors["admin_disabled"] = capture.error(
+        admin.put(general, json={**body, "etag": tag, "site_name": "Örnek Holding A.Ş."}),
+        503,
+        "admin_disabled",
+    )
+    capture.installed.write_policy()
+
+
 def capture_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
     """Steps 1-7 of the module text: the lookup site and its pages, then the usage site."""
     build_site(capture)
@@ -2481,12 +2646,14 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
     capture_raw(capture, admin, odd)
     capture_evidence(capture, admin, auditor, vault, lookup_ids)
     capture_seals(capture, admin, auditor)
-    capture_credits(capture)
+    capture_credits(capture, admin)
     capture_devices(capture, admin, auditor, newcomer)
     build_operations(capture)
     capture_alerts(capture, admin, auditor)
     capture_dashboard(capture, admin, auditor)
     capture_reports(capture, admin, auditor, newcomer)
+    capture_settings(capture, admin, auditor)
+    capture_admin(capture, admin, auditor)
     vault.unlock_all()
     capture.samples["usage"] = capture_usage(server, template, root)
 
@@ -2494,7 +2661,13 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
 def capture_all(server: TestServer) -> dict[str, dict[str, Any]]:
     template = server.create_template(timescale="off")
     try:
-        with server.database(template) as name, _workdir() as root, frozen_clock(CLOCK):
+        with (
+            server.database(template) as name,
+            _workdir() as root,
+            frozen_clock(CLOCK),
+            # The API takes the agent's changes at once (not after its 2 seconds).
+            mock.patch.object(deps, "RELOAD_SECONDS", 0.0),
+        ):
             engine = engine_from_url(
                 server.url_for(name), application="capture", poolclass=NullPool
             )

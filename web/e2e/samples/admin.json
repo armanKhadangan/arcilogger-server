@@ -1,0 +1,1151 @@
+{
+  "accepted": {
+    "changes": {
+      "site_name": {
+        "new": "Örnek Lojistik A.Ş.",
+        "old": "Örnek A.Ş."
+      }
+    },
+    "effective_at": null,
+    "effects": [
+      "reload.api",
+      "reload.worker"
+    ],
+    "guarded": false,
+    "request_id": "7be2c98d576a94946b0e889b304c577e",
+    "short_id": "7be2c98d",
+    "state": "queued",
+    "status_url": "/api/v1/admin/requests/7be2c98d576a94946b0e889b304c577e",
+    "warnings": []
+  },
+  "check_clock": {
+    "changes": {
+      "clock.ntp_server": {
+        "new": "172.20.10.254",
+        "old": ""
+      }
+    },
+    "effective_at": null,
+    "effects": [
+      "system.time",
+      "task.next_run:ClockCheck"
+    ],
+    "guarded": false,
+    "readiness": null,
+    "reauth_required": true,
+    "retention_preview": null,
+    "warnings": []
+  },
+  "check_general": {
+    "changes": {
+      "site_name": {
+        "new": "Örnek Lojistik A.Ş.",
+        "old": "Örnek A.Ş."
+      }
+    },
+    "effective_at": null,
+    "effects": [
+      "reload.api",
+      "reload.worker"
+    ],
+    "guarded": false,
+    "readiness": null,
+    "reauth_required": false,
+    "retention_preview": null,
+    "warnings": []
+  },
+  "config": {
+    "config_sha256": "cfea118dec21b498e90109140c7e3dd3d10b13213d35d1132a0c91dd4ec4338e",
+    "etags": {
+      "backup": "backup:0ab481e774ecb6c0b1e7ae04e00d26743f21d40d423422ee36243d3a52ec6dfb",
+      "general": "general:aeca3599ae7cfcfc4bcf6c38e9506cbfd6cdb374763574c0436b622e63b4e157",
+      "replica": "replica:f82af5d89dbeb968d7ed569b5f43247d8a427e54240c75ea43b3b8180db847f4",
+      "retention": "retention:9e0f52160a0b0bf3741420822b9fc29e74c1d36b862eba7f46bc8b48fc411d9a",
+      "smtp": "smtp:7cb0ab6789535c7632dc21d2460a8c1f9026de68d17e7089b974a89c6cc264f7",
+      "sources": "sources:1b04f72958855af408acf2b790098dd632f9e8b8edc840c5a095ce5511c6c267",
+      "tsa": "tsa:56c4e0ee500cb7db460331703a0af3037eb660cf0d2dd63cc75763d8c78d6fb6"
+    },
+    "locked": [
+      {
+        "path": "data_dir",
+        "reason": "security"
+      },
+      {
+        "path": "secrets_dir",
+        "reason": "security"
+      },
+      {
+        "path": "collector.bind",
+        "reason": "collector"
+      },
+      {
+        "path": "collector.udp_port",
+        "reason": "collector"
+      },
+      {
+        "path": "collector.tcp_port",
+        "reason": "collector"
+      },
+      {
+        "path": "collector.unknown_senders",
+        "reason": "collector"
+      },
+      {
+        "path": "collector.max_message_bytes",
+        "reason": "collector"
+      },
+      {
+        "path": "collector.fsync_interval_seconds",
+        "reason": "collector"
+      },
+      {
+        "path": "collector.udp_receive_buffer_bytes",
+        "reason": "collector"
+      },
+      {
+        "path": "collector.status_interval_seconds",
+        "reason": "collector"
+      },
+      {
+        "path": "seal.gzip_level",
+        "reason": "evidence"
+      },
+      {
+        "path": "seal.quiet_seconds",
+        "reason": "evidence"
+      },
+      {
+        "path": "seal.gap_minutes",
+        "reason": "evidence"
+      },
+      {
+        "path": "seal.retry_minutes",
+        "reason": "evidence"
+      },
+      {
+        "path": "seal.late_after_hours",
+        "reason": "evidence"
+      },
+      {
+        "path": "seal.first_day",
+        "reason": "evidence"
+      },
+      {
+        "path": "seal.max_consecutive_empty_days",
+        "reason": "evidence"
+      },
+      {
+        "path": "tsa.digest",
+        "reason": "expert"
+      },
+      {
+        "path": "tsa.zamane_verify_flag",
+        "reason": "expert"
+      },
+      {
+        "path": "tsa.credit_regex",
+        "reason": "expert"
+      },
+      {
+        "path": "tsa.roots_dir",
+        "reason": "expert"
+      },
+      {
+        "path": "tsa.require_critical_eku",
+        "reason": "expert"
+      },
+      {
+        "path": "clock.ntp_port",
+        "reason": "expert"
+      },
+      {
+        "path": "database.host",
+        "reason": "security"
+      },
+      {
+        "path": "database.port",
+        "reason": "security"
+      },
+      {
+        "path": "database.name",
+        "reason": "security"
+      },
+      {
+        "path": "database.user",
+        "reason": "security"
+      },
+      {
+        "path": "database.sslmode",
+        "reason": "security"
+      },
+      {
+        "path": "database.connect_timeout_seconds",
+        "reason": "security"
+      },
+      {
+        "path": "database.pool_size",
+        "reason": "security"
+      },
+      {
+        "path": "database.timescale",
+        "reason": "security"
+      },
+      {
+        "path": "api.host",
+        "reason": "service"
+      },
+      {
+        "path": "api.port",
+        "reason": "service"
+      },
+      {
+        "path": "api.secure_cookies",
+        "reason": "service"
+      },
+      {
+        "path": "api.forwarded_allow_ips",
+        "reason": "service"
+      },
+      {
+        "path": "ingest.batch_rows",
+        "reason": "service"
+      },
+      {
+        "path": "ingest.batch_seconds",
+        "reason": "service"
+      },
+      {
+        "path": "ingest.poll_seconds",
+        "reason": "service"
+      },
+      {
+        "path": "ingest.workers",
+        "reason": "service"
+      },
+      {
+        "path": "worker.interval_seconds",
+        "reason": "service"
+      },
+      {
+        "path": "backup.dir",
+        "reason": "security"
+      },
+      {
+        "path": "backup.pg_dump",
+        "reason": "security"
+      },
+      {
+        "path": "backup.pg_restore",
+        "reason": "security"
+      },
+      {
+        "path": "database.password",
+        "reason": "security"
+      },
+      {
+        "path": "usage.pseudonym_key",
+        "reason": "security"
+      }
+    ],
+    "pending": [],
+    "policy": {
+      "enabled": true,
+      "hold_hours": 0,
+      "jar_hold_hours": 24,
+      "max_sources": 500,
+      "min_prefix_v4": 16,
+      "source_networks": [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16"
+      ],
+      "tsa_test_per_day": 3
+    },
+    "problems": [
+      {
+        "key": "clock.ntp_server",
+        "level": "warning",
+        "message_en": "no local time source (clock.ntp_server) is set: the clock follows only the fallback server (time.ume.tubitak.gov.tr); enter it with -NtpServer",
+        "message_tr": "Yerel saat kaynağı (clock.ntp_server) ayarlanmamış: saat yalnızca yedek sunucuyla (time.ume.tubitak.gov.tr) eşitlenir; kurulumda -NtpServer ile girin"
+      }
+    ],
+    "restart_required": false,
+    "sections": {
+      "backup": {
+        "enabled": true,
+        "keep_daily": 14,
+        "keep_monthly": 12,
+        "keep_weekly": 8,
+        "min_free_gb": 10
+      },
+      "general": {
+        "clock": {
+          "alert_offset_ms": 1000,
+          "fallback_server": "time.ume.tubitak.gov.tr",
+          "ntp_server": ""
+        },
+        "site_name": "Örnek A.Ş."
+      },
+      "replica": {
+        "enabled": true,
+        "secrets": {
+          "replica.password": {
+            "changed_at": null,
+            "changed_by": null,
+            "set": false
+          }
+        },
+        "target": "//NAS-01/arcilogger-worm",
+        "user": null
+      },
+      "retention": {
+        "days": 760,
+        "enabled": false,
+        "minimum_days": 730,
+        "preview": {
+          "cutoff": "2024-09-13",
+          "days_to_delete": 0,
+          "first_run_at": null,
+          "newest": null,
+          "oldest": null
+        }
+      },
+      "smtp": {
+        "ca": {
+          "sha256": null
+        },
+        "enabled": false,
+        "from_address": null,
+        "host": null,
+        "port": 587,
+        "secrets": {
+          "smtp.password": {
+            "changed_at": null,
+            "changed_by": null,
+            "set": false
+          }
+        },
+        "security": "starttls",
+        "timeout_seconds": 30,
+        "username": null
+      },
+      "sources": [
+        {
+          "address": "172.31.255.1",
+          "enabled": true,
+          "expected": true,
+          "firewall": "not_managed",
+          "heartbeat_minutes": 15,
+          "last_seen": "2026-10-13T04:00:07.965183Z",
+          "name": "fortigate",
+          "transport": "any",
+          "type": "fortigate"
+        },
+        {
+          "address": "172.20.10.1",
+          "enabled": true,
+          "expected": true,
+          "firewall": "not_managed",
+          "heartbeat_minutes": 15,
+          "last_seen": "2026-10-13T03:58:19.965183Z",
+          "name": "core-r1",
+          "transport": "any",
+          "type": "mikrotik"
+        }
+      ],
+      "tsa": {
+        "credit_alert_threshold": 500,
+        "java": "java",
+        "java_choices": [],
+        "provider": "mock",
+        "readiness": {
+          "missing": [
+            "credentials",
+            "zamane_jar",
+            "roots"
+          ],
+          "production": false
+        },
+        "roots": [],
+        "seal_ready": {
+          "causes": [],
+          "ok": true
+        },
+        "secrets": {
+          "kamusm.customer": {
+            "changed_at": null,
+            "changed_by": null,
+            "set": false
+          },
+          "kamusm.password": {
+            "changed_at": null,
+            "changed_by": null,
+            "set": false
+          }
+        },
+        "server": null,
+        "timeout_seconds": 60,
+        "zamane": {
+          "present": false,
+          "release": null,
+          "sha256": null,
+          "staged": [],
+          "trusted": false
+        }
+      }
+    }
+  },
+  "errors": {
+    "admin_agent_unavailable": {
+      "body": {
+        "error": {
+          "code": "admin_agent_unavailable",
+          "message_en": "The administration service (ArciAdmin) is not responding; the change was not queued. Start the \"ARCILOGGER Yönetim\" service on the server.",
+          "message_tr": "Yönetim hizmeti (ArciAdmin) yanıt vermiyor; değişiklik kuyruğa alınmadı. Sunucuda \"ARCILOGGER Yönetim\" hizmetini başlatın."
+        }
+      },
+      "headers": {},
+      "status": 503
+    },
+    "admin_disabled": {
+      "body": {
+        "error": {
+          "code": "admin_disabled",
+          "message_en": "Browser administration is switched off on this installation; make the change on the server console.",
+          "message_tr": "Tarayıcıdan sunucu yönetimi bu kurulumda kapalı; değişikliği sunucu konsolunda yapın."
+        }
+      },
+      "headers": {},
+      "status": 503
+    },
+    "admin_request_not_found": {
+      "body": {
+        "error": {
+          "code": "admin_request_not_found",
+          "message_en": "Change request not found.",
+          "message_tr": "Değişiklik isteği bulunamadı."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "admin_section_busy": {
+      "body": {
+        "error": {
+          "code": "admin_section_busy",
+          "message_en": "A change to this section is still open; wait for it to finish or cancel it.",
+          "message_tr": "Bu bölüm için bekleyen bir değişiklik var; bitmesini bekleyin ya da iptal edin."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "config_conflict": {
+      "body": {
+        "error": {
+          "code": "config_conflict",
+          "details": {
+            "current_etag": "general:aeca3599ae7cfcfc4bcf6c38e9506cbfd6cdb374763574c0436b622e63b4e157"
+          },
+          "message_en": "These settings were changed elsewhere while you were editing; reload the page and try again.",
+          "message_tr": "Bu ayarlar siz düzenlerken başka bir yerden değiştirildi; sayfayı yenileyip tekrar deneyin."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "config_unchanged": {
+      "body": {
+        "error": {
+          "code": "config_unchanged",
+          "message_en": "There is nothing to save; the settings already have these values.",
+          "message_tr": "Kaydedilecek bir değişiklik yok; ayarlar zaten bu değerlerde."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "host_invalid": {
+      "body": {
+        "error": {
+          "code": "host_invalid",
+          "details": [
+            {
+              "code": "host_invalid",
+              "field": "clock.ntp_server",
+              "message_en": "Enter a valid host name or IPv4 address.",
+              "message_tr": "Geçerli bir sunucu adı ya da IPv4 adresi girin."
+            }
+          ],
+          "message_en": "Enter a valid host name or IPv4 address.",
+          "message_tr": "Geçerli bir sunucu adı ya da IPv4 adresi girin."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "reauth_required": {
+      "body": {
+        "error": {
+          "code": "reauth_required",
+          "message_en": "Please confirm your password to continue with this action.",
+          "message_tr": "Bu işlem için parolanızı yeniden girmeniz gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "site_name_required": {
+      "body": {
+        "error": {
+          "code": "site_name_required",
+          "details": [
+            {
+              "code": "site_name_required",
+              "field": "site_name",
+              "message_en": "The organisation name cannot be empty.",
+              "message_tr": "Kuruluş adı boş olamaz."
+            }
+          ],
+          "message_en": "The organisation name cannot be empty.",
+          "message_tr": "Kuruluş adı boş olamaz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:00:42.051954+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "request_active": {
+    "changes": {
+      "site_name": {
+        "new": "Örnek Lojistik A.Ş.",
+        "old": "Örnek A.Ş."
+      }
+    },
+    "created_at": "2026-10-13T04:00:27.718051Z",
+    "effective_at": null,
+    "error": null,
+    "id": "7be2c98d576a94946b0e889b304c577e",
+    "kind": "config.apply",
+    "label_en": "Applied",
+    "label_tr": "Uygulandı",
+    "manual_steps_en": null,
+    "manual_steps_tr": null,
+    "requested_by": "tolga",
+    "result": null,
+    "rolled_back": false,
+    "section": "general",
+    "short_id": "7be2c98d",
+    "state": "active",
+    "steps": [
+      {
+        "at": "2026-10-13T07:00:27.891491+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "done",
+        "step": "received"
+      },
+      {
+        "at": "2026-10-13T07:00:27.897930+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "done",
+        "step": "validate"
+      },
+      {
+        "at": "2026-10-13T07:00:27.897989+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "skipped",
+        "step": "hold"
+      },
+      {
+        "at": "2026-10-13T07:00:27.908267+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "done",
+        "step": "backup"
+      },
+      {
+        "at": "2026-10-13T07:00:27.908292+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "skipped",
+        "step": "write_secrets"
+      },
+      {
+        "at": "2026-10-13T07:00:27.908299+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "done",
+        "step": "write_config"
+      },
+      {
+        "at": "2026-10-13T07:00:27.908304+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "skipped",
+        "step": "install_files"
+      },
+      {
+        "at": "2026-10-13T07:00:27.908308+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "done",
+        "step": "verify"
+      },
+      {
+        "at": "2026-10-13T07:00:27.909199+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "done",
+        "step": "journal"
+      },
+      {
+        "at": "2026-10-13T07:00:27.944663+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "skipped",
+        "step": "reload.worker"
+      },
+      {
+        "at": "2026-10-13T07:00:27.944663+03:00",
+        "code": null,
+        "message_en": null,
+        "message_tr": null,
+        "state": "done",
+        "step": "reload.api"
+      }
+    ],
+    "terminal": true,
+    "updated_at": "2026-10-13T07:00:27.944663+03:00",
+    "version": {
+      "from": "cfea118dec21b498e90109140c7e3dd3d10b13213d35d1132a0c91dd4ec4338e",
+      "number": 1,
+      "to": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5"
+    },
+    "warnings": []
+  },
+  "request_queued": {
+    "changes": {
+      "site_name": {
+        "new": "Örnek Lojistik A.Ş.",
+        "old": "Örnek A.Ş."
+      }
+    },
+    "created_at": "2026-10-13T04:00:27.718051Z",
+    "effective_at": null,
+    "error": null,
+    "id": "7be2c98d576a94946b0e889b304c577e",
+    "kind": "config.apply",
+    "label_en": "Queued",
+    "label_tr": "Sırada",
+    "manual_steps_en": null,
+    "manual_steps_tr": null,
+    "requested_by": "tolga",
+    "result": null,
+    "rolled_back": false,
+    "section": "general",
+    "short_id": "7be2c98d",
+    "state": "queued",
+    "steps": [],
+    "terminal": false,
+    "updated_at": "2026-10-13T04:00:27.718051Z",
+    "version": null,
+    "warnings": []
+  },
+  "requests": {
+    "items": [
+      {
+        "changes": {
+          "site_name": {
+            "new": "Örnek Lojistik A.Ş.",
+            "old": "Örnek A.Ş."
+          }
+        },
+        "created_at": "2026-10-13T04:00:27.718051Z",
+        "effective_at": null,
+        "error": null,
+        "id": "7be2c98d576a94946b0e889b304c577e",
+        "kind": "config.apply",
+        "label_en": "Applied",
+        "label_tr": "Uygulandı",
+        "manual_steps_en": null,
+        "manual_steps_tr": null,
+        "requested_by": "tolga",
+        "result": null,
+        "rolled_back": false,
+        "section": "general",
+        "short_id": "7be2c98d",
+        "state": "active",
+        "steps": [
+          {
+            "at": "2026-10-13T07:00:27.891491+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "received"
+          },
+          {
+            "at": "2026-10-13T07:00:27.897930+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "validate"
+          },
+          {
+            "at": "2026-10-13T07:00:27.897989+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "skipped",
+            "step": "hold"
+          },
+          {
+            "at": "2026-10-13T07:00:27.908267+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "backup"
+          },
+          {
+            "at": "2026-10-13T07:00:27.908292+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "skipped",
+            "step": "write_secrets"
+          },
+          {
+            "at": "2026-10-13T07:00:27.908299+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "write_config"
+          },
+          {
+            "at": "2026-10-13T07:00:27.908304+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "skipped",
+            "step": "install_files"
+          },
+          {
+            "at": "2026-10-13T07:00:27.908308+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "verify"
+          },
+          {
+            "at": "2026-10-13T07:00:27.909199+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "journal"
+          },
+          {
+            "at": "2026-10-13T07:00:27.996797+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "skipped",
+            "step": "reload.worker"
+          },
+          {
+            "at": "2026-10-13T07:00:27.996797+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "reload.api"
+          }
+        ],
+        "terminal": true,
+        "updated_at": "2026-10-13T04:00:27.944663Z",
+        "version": {
+          "from": "cfea118dec21b498e90109140c7e3dd3d10b13213d35d1132a0c91dd4ec4338e",
+          "number": 1,
+          "to": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5"
+        },
+        "warnings": []
+      },
+      {
+        "changes": {},
+        "created_at": "2026-10-13T04:00:16.210869Z",
+        "effective_at": null,
+        "error": null,
+        "id": "2a0d1a5f5bbf3b1c8b32bb100cda137b",
+        "kind": "action.credit",
+        "label_en": "Done",
+        "label_tr": "Tamamlandı",
+        "manual_steps_en": null,
+        "manual_steps_tr": null,
+        "requested_by": "tolga",
+        "result": {
+          "below_threshold": false,
+          "credits": 1000,
+          "threshold": 500
+        },
+        "rolled_back": false,
+        "section": null,
+        "short_id": "2a0d1a5f",
+        "state": "succeeded",
+        "steps": [
+          {
+            "at": "2026-10-13T07:00:16.324917+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "received"
+          },
+          {
+            "at": "2026-10-13T07:00:16.329325+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "dispatch"
+          },
+          {
+            "at": "2026-10-13T07:00:16.337775+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "task"
+          }
+        ],
+        "terminal": true,
+        "updated_at": "2026-10-13T04:00:16.375104Z",
+        "version": null,
+        "warnings": []
+      },
+      {
+        "changes": {},
+        "created_at": "2026-10-13T04:00:15.934065Z",
+        "effective_at": null,
+        "error": null,
+        "id": "8e909b4a823b16f8d9267192bc9e0028",
+        "kind": "action.seal",
+        "label_en": "Done",
+        "label_tr": "Tamamlandı",
+        "manual_steps_en": null,
+        "manual_steps_tr": null,
+        "requested_by": "tolga",
+        "result": {
+          "day": "2026-10-11",
+          "gen_time": null,
+          "message": "sealed",
+          "serial": null,
+          "status": "sealed"
+        },
+        "rolled_back": false,
+        "section": null,
+        "short_id": "8e909b4a",
+        "state": "succeeded",
+        "steps": [
+          {
+            "at": "2026-10-13T07:00:16.092754+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "received"
+          },
+          {
+            "at": "2026-10-13T07:00:16.096008+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "dispatch"
+          },
+          {
+            "at": "2026-10-13T07:00:16.102534+03:00",
+            "code": null,
+            "message_en": null,
+            "message_tr": null,
+            "state": "done",
+            "step": "task"
+          }
+        ],
+        "terminal": true,
+        "updated_at": "2026-10-13T04:00:16.132242Z",
+        "version": null,
+        "warnings": []
+      }
+    ],
+    "next_cursor": null
+  },
+  "status": {
+    "agent": {
+      "heartbeat_at": "2026-10-13T07:00:27.157063+03:00",
+      "java_candidates": [],
+      "pending": [],
+      "queue": 0,
+      "seal_ready": {
+        "causes": [],
+        "ok": true
+      },
+      "state": "ok",
+      "system_task": {
+        "checked_at": null,
+        "error": null,
+        "ok": true
+      },
+      "version": "0.1.0"
+    },
+    "config_origin": "outside",
+    "config_sha256": "cfea118dec21b498e90109140c7e3dd3d10b13213d35d1132a0c91dd4ec4338e",
+    "restart_required": false,
+    "services": {
+      "ArciApi": {
+        "error": null,
+        "loaded_at": "2026-10-13T04:00:00.454667Z",
+        "restart_keys": [],
+        "running": true,
+        "sha256": "cfea118dec21b498e90109140c7e3dd3d10b13213d35d1132a0c91dd4ec4338e"
+      },
+      "ArciCollector": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": true,
+        "sha256": null
+      },
+      "ArciIngest": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      },
+      "ArciWorker": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      }
+    },
+    "system": {
+      "applied_config_sha256": null,
+      "at": null,
+      "code": null,
+      "firewall": null,
+      "state": "never",
+      "time": null
+    }
+  },
+  "status_after": {
+    "agent": {
+      "heartbeat_at": "2026-10-13T07:00:27.914799+03:00",
+      "java_candidates": [],
+      "pending": [],
+      "queue": 0,
+      "seal_ready": {
+        "causes": [],
+        "ok": true
+      },
+      "state": "ok",
+      "system_task": {
+        "checked_at": null,
+        "error": null,
+        "ok": true
+      },
+      "version": "0.1.0"
+    },
+    "config_origin": "browser",
+    "config_sha256": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5",
+    "restart_required": false,
+    "services": {
+      "ArciApi": {
+        "error": null,
+        "loaded_at": "2026-10-13T04:00:27.920292Z",
+        "restart_keys": [],
+        "running": true,
+        "sha256": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5"
+      },
+      "ArciCollector": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": true,
+        "sha256": null
+      },
+      "ArciIngest": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      },
+      "ArciWorker": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      }
+    },
+    "system": {
+      "applied_config_sha256": null,
+      "at": null,
+      "code": null,
+      "firewall": null,
+      "state": "never",
+      "time": null
+    }
+  },
+  "status_agent_missing": {
+    "agent": {
+      "heartbeat_at": null,
+      "java_candidates": [],
+      "pending": [],
+      "queue": 0,
+      "seal_ready": null,
+      "state": "missing",
+      "system_task": null,
+      "version": null
+    },
+    "config_origin": "browser",
+    "config_sha256": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5",
+    "restart_required": false,
+    "services": {
+      "ArciApi": {
+        "error": null,
+        "loaded_at": "2026-10-13T04:00:27.920292Z",
+        "restart_keys": [],
+        "running": true,
+        "sha256": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5"
+      },
+      "ArciCollector": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": true,
+        "sha256": null
+      },
+      "ArciIngest": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      },
+      "ArciWorker": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      }
+    },
+    "system": {
+      "applied_config_sha256": null,
+      "at": null,
+      "code": null,
+      "firewall": null,
+      "state": "never",
+      "time": null
+    }
+  },
+  "status_disabled": {
+    "agent": {
+      "heartbeat_at": "2026-10-13T07:00:27.914799+03:00",
+      "java_candidates": [],
+      "pending": [],
+      "queue": 0,
+      "seal_ready": {
+        "causes": [],
+        "ok": true
+      },
+      "state": "disabled",
+      "system_task": {
+        "checked_at": null,
+        "error": null,
+        "ok": true
+      },
+      "version": "0.1.0"
+    },
+    "config_origin": "browser",
+    "config_sha256": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5",
+    "restart_required": false,
+    "services": {
+      "ArciApi": {
+        "error": null,
+        "loaded_at": "2026-10-13T04:00:27.920292Z",
+        "restart_keys": [],
+        "running": true,
+        "sha256": "0420ca25d5cd47cdc85bc5a09bdaf0f1be02c17b789b15e49d4219eda8022bd5"
+      },
+      "ArciCollector": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": true,
+        "sha256": null
+      },
+      "ArciIngest": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      },
+      "ArciWorker": {
+        "error": null,
+        "loaded_at": null,
+        "restart_keys": [],
+        "running": false,
+        "sha256": null
+      }
+    },
+    "system": {
+      "applied_config_sha256": null,
+      "at": null,
+      "code": null,
+      "firewall": null,
+      "state": "never",
+      "time": null
+    }
+  }
+}

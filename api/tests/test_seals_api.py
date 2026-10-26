@@ -620,14 +620,17 @@ def test_verify_refusals(
 # -- seal now and permissions ---------------------------------------------------------------------
 
 
-def test_seal_now_is_not_available_through_the_api(
+def test_seal_now_goes_through_the_administration_service(
     client: TestClient, login_as: Login, vault: SealedVault
 ) -> None:
+    """The day is checked first; without browser administration (no installation folder of
+    the API) nothing is queued. The whole path: ``test_admin_actions.py``."""
     login_as(client, "admin")
-    response = client.post(f"{API}/{D14.isoformat()}/seal")
-    assert error_code(response) == (501, "seal_now_unavailable")
-    assert "\\ARCILOGGER\\Seal" in response.json()["error"]["message_tr"]
-    assert "Task Scheduler" in response.json()["error"]["message_en"]
+    assert error_code(client.post(f"{API}/{D10.isoformat()}/seal")) == (409, "seal_day_sealed")
+    assert error_code(client.post(f"{API}/{D14.isoformat()}/seal")) == (409, "seal_not_due")
+    response = client.post(f"{API}/{D13.isoformat()}/seal")
+    assert error_code(response) == (503, "admin_disabled")
+    assert "konsol" in response.json()["error"]["message_tr"]
 
 
 def test_permissions_per_role(app: Any, login_as: Login, vault: SealedVault) -> None:

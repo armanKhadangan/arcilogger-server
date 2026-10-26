@@ -97,13 +97,15 @@ vermez.
 | `/lookups` | Kaydedilmiş 5651 sorguları | 5651 Temel |
 | `/raw` | Ham log satırları | 5651 Temel |
 | `/evidence` | Kanıt paketleri | 5651 Temel |
-| `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama | 5651 Temel |
-| `/credits` | Kamu SM kontörü | 5651 Temel |
+| `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama, "Şimdi mühürle" | 5651 Temel |
+| `/credits` | Kamu SM kontörü, "Kontör sorgula" | 5651 Temel |
 | `/devices` | Cihazlar ve cihaz-kişi atamaları | 5651 Temel |
 | `/persons` | Kişiler | 5651 Temel |
 | `/departments` | Departmanlar | 5651 Temel |
 | `/vlans` | VLAN'lar ve alt ağlar | 5651 Temel |
 | `/license` | Lisans durumu, lisans dosyası yükleme ve kaldırma | 5651 Temel |
+| `/admin` | Ayarlar: sunucu yapılandırması, yönetim hizmetinin durumu, değişiklik istekleri ve geçmişi | 5651 Temel |
+| `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |

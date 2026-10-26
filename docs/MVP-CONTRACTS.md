@@ -183,9 +183,11 @@ final rows. *Verify on site that FortiGate interim logs carry the cumulative `du
 
 ## 6. API (B5 and later packages)
 
-- **App:** `create_app(config=None, engine=None)`. Endpoints go into
+- **App:** `create_app(config=None, engine=None, *, config_path=None)`. Endpoints go into
   `api/src/arcilogger_api/routers/<module>.py` (`router = APIRouter(prefix=…, tags=[…])`); every
-  module there is mounted under `/api/v1` automatically — never edit `app.py`.
+  module there is mounted under `/api/v1` automatically — never edit `app.py`. With
+  `config_path` (the fixed `--config` of `arcilogger-api serve`) the API reloads the file without a
+  restart and finds the browser administration's folder next to it (section 16).
 - **Database:** `db: DbSession` (`arcilogger_api.deps`) = one session per request, committed
   before the response is sent, rolled back on error. Own transaction (e.g. auditing a failed
   login that is then refused): `factory: SessionFactoryDep`.
@@ -994,3 +996,144 @@ configuration, 3 database unreachable; `--json`: `status` the admin `LicenseOut`
 Response schema names: `LicenseOut`, `LicenseModuleOut`, `LicenseTrialOut`,
 `LicenseMaintenanceOut`, `LicenseLimitsOut`, `LicenseLimitOut`, `LicenseProductOut`,
 `LicensorOut`, `LicenseDetailsOut`, `LicenseTimeOut`, `LicenseEventOut`.
+
+## 16. Browser administration API (ADR-0014)
+
+Decision: [ADR-0014](adr/0014-browser-administration.md). Base `/api/v1`; nothing here is
+licence-gated (`api/tests/test_license_routes.py`, `test_license_5651.py`) and every change is
+CSRF-checked (`api/tests/test_auth_security.py`). The API never writes `arcilogger.toml`,
+`secrets.json` or the vault: a change of the machine configuration and an evidence action are a
+request of the administration agent `ArciAdmin`, an Ed25519-signed file in `admin\inbox`
+(`arcilogger_core.admin.envelope`); the test e-mail and the lease rebuild are worker rows of
+`admin_requests` (`channel = 'worker'`). The channel's code is `api/src/arcilogger_api/
+admin_channel.py`; its files come from the folder of the API's fixed configuration path
+(`AppState.config_path`), never from a key of the configuration (ADR-0014 Day 0 note D0-2).
+Without that path (a configuration given in memory) browser administration is off
+(`admin_disabled`).
+
+**Live reload** (`deps.AppState.require_config`): with `config_path` the API looks at the file
+at most every `RELOAD_SECONDS` = 2 s and takes every key except `database`, `api`, `data_dir`,
+`secrets_dir` (`configwatch.API_HOT`); the engine is never rebuilt; an invalid file keeps the
+configuration in use; a file whose `secrets_dir` or `data_dir` is not the installation's folder
+is not taken at all (the API keeps reporting the file it runs on, with the error).
+`arcilogger-api serve` refuses such a file at start (`config.check_fixed_location`, exit 2).
+`AppState.config_watch` is the API's `config` block in `GET /admin/status`.
+
+**Writing a request** (`Channel.submit`, contract 2.5.1): after the endpoint's own checks (the
+section rules `arcilogger_core.admin.rules` with the section's `etag`, the re-authentication,
+the permission) browser administration must be on (`policy.json`, else 503 `admin_disabled`),
+the API key readable (503 `admin_channel_key_missing`) and the agent's heartbeat younger than
+120 s (else 503 `admin_agent_unavailable`, nothing queued; older than 30 s: queued with the
+warning `agent_stale`); at most 20 requests and 100 MiB in the inbox (429 `admin_queue_full`);
+one open configuration request per section (409 `admin_section_busy`; a held change keeps its
+section busy until it is applied or cancelled). One transaction then writes the audit entry
+`admin.request` (target `admin-request:<id>`, details `kind`, `section`, `changes` (secrets only
+`{secret, old, new, changed}`), `files [{kind, sha256, size}]`, `guarded`, `effective_at`,
+`reauth_at`, `effects`, plus `day` of a seal request) and the `admin_requests` row (`params`:
+the changes as a list of `{path, …}`, `effects`, `warnings`, `files`; `audit_id`; `expires_at`
+= issued + 10 min), and commits; only then `<id>.req.tmp` is written, flushed and renamed to
+`<id>.req`. A failed write marks the row `failed` (`write_failed`) and answers 503
+`admin_inbox_write_failed`. The signed payload's `actor` is the user, the session reference
+(first 12 hex digits of the token hash), the client address (`0.0.0.0` when unknown) and the
+last re-authentication. Answer **202 `AdminAccepted`** `{request_id, short_id, state: "queued",
+status_url, guarded, effective_at, changes, effects, warnings}`.
+
+**Reading a request** (`Channel.view`): the agent's `admin\status\<id>.json` (codes only) and
+the row; the API decides `waiting_for_agent` (queued > 60 s or heartbeat not fresh), `expired`
+(not taken by `expires_at` + 2 min: the inbox file is removed), and for `applied` the services:
+each `reload.*` effect is `done` when the service's status file (`state\<service>-status.json`,
+younger than 2 min = running; the API: its own watch) reports the new SHA-256 (or a file loaded
+after the change), `skipped` when it does not run, `warning` `service_not_reloaded` after 2 min;
+`system.firewall` / `system.time` follow `admin\system\status.json` (`applied_config_sha256`,
+for a sources change also the collector's acknowledgement; `failed` `system_sync_failed`, or
+`system_sync_timeout` after 5 min; `skipped` with `firewall_not_managed`). All done or skipped:
+`active`; a warning or failure: `partially_active`. Every state seen is mirrored into the row
+(`state`, `terminal`, `error_code`, `result`, `rolled_back`, `effective_at`); once terminal, the
+row's state stands. Texts: `admin_channel.texts(code)` (the API's `TEXTS`, then
+`arcilogger_core.admin.messages`); state labels `messages.STATE_LABELS`.
+
+| Endpoint | Access | Does |
+|---|---|---|
+| `GET /admin/config` | `settings.manage` | 200 `AdminConfig` (below) |
+| `GET /admin/status` | `settings.manage` | 200 `AdminStatus` (below) |
+| `POST /admin/config/general/check` | `settings.manage` | dry run of the `PUT`: 200 `AdminCheck`, nothing queued |
+| `PUT /admin/config/general` | `settings.manage`; re-auth for a clock change | `{etag, site_name?, clock?: {ntp_server?, fallback_server?, alert_offset_ms?}, probe = true}` → 202 |
+| `GET /admin/requests?kind=&cursor=&limit=50` | `settings.manage` | `AdminRequestPage {items: [AdminRequestOut], next_cursor}`, newest first (cursor: the last id; `limit` 1-200) |
+| `GET /admin/requests/{id}` | `settings.manage`; `seal.manage` for one's own `action.seal` / `action.credit` | `AdminRequestOut`; 404 `admin_request_not_found` |
+| `POST /seals/{day}/seal` | `seal.manage` | "Şimdi mühürle" → 202 (`action.seal`, `params.day`) |
+| `POST /credits/query` | `seal.manage` | "Kontör sorgula" → 202 (`action.credit`); 429 `admin_rate_limited` within a minute |
+| `GET /settings` | `settings.manage` | `SettingsOut` (below) |
+| `PATCH /settings` | `settings.manage`; re-auth for `REAUTH_KEYS` | `SettingsPatch {changes: [{key, old, value}]}` → `SettingsPatchResult {changed: [{key, old, new}], unchanged: [key]}` |
+| `POST /settings/{key}/reset` | `settings.manage`; re-auth for `REAUTH_KEYS` | the shipped default → `SettingsPatchResult` |
+
+**A change of a section** (`routers/admin_config.py`): a field left out of the body stays as it
+is. The `etag` (`"<section>:<sha256 of the canonical editable values>"`, `rules.etag`) must
+equal the section's in the file now, else 409 `config_conflict` with `details.current_etag`.
+The file must load and keep the installation's folders (else 409 `config_unreadable`). The
+rules refuse with the first problem's code and status (`rules.HTTP_STATUS`, else 422);
+`details` is the list of `{field, code, message_tr, message_en}` (field: the configuration path,
+e.g. `clock.ntp_server`, `sources.<name>.address`, or the body field such as `test_to`), or the
+first problem's facts (`details.missing` of `tsa_not_ready`, `details.causes` of
+`tsa_would_break`); never a submitted value. Such a refusal is audited `admin.refused`
+(target `admin-config:<section>`, `{kind, section, codes}`) in a transaction of its own. A body
+that changes nothing is 422 `config_unchanged`. A change the rules mark is re-authenticated
+(403 `reauth_required`). `AdminCheck {changes, effects, warnings: [{code, message_tr,
+message_en}], guarded, effective_at, reauth_required, retention_preview?, readiness?}`.
+
+`AdminConfig {config_sha256, etags: {section: etag}, sections: AdminSections {general:
+GeneralSection {site_name, clock: ClockSection}, tsa: TsaSection {provider, server: test |
+production | null, credit_alert_threshold, timeout_seconds, java, java_choices (the agent's),
+zamane: ZamaneClient {present, sha256, release, trusted: installer | known | approved | false,
+staged: [StagedJar {sha256, effective_at}]}, roots: [RootCertificate {sha256, subject,
+not_after, legal, source: installer | web}], secrets: {name: SecretMeta {set, changed_at,
+changed_by}}, readiness: Readiness {production, missing}, seal_ready: SealReady {ok, causes}},
+smtp: SmtpSection {enabled, host, port, security, username, from_address, timeout_seconds, ca:
+{sha256}, secrets}, replica: ReplicaSection {enabled, target, user, secrets}, retention:
+RetentionSection {enabled, days, minimum_days: 730, preview: RetentionPreview {cutoff,
+days_to_delete, oldest, newest}}, backup: BackupSection {enabled, keep_daily, keep_weekly,
+keep_monthly, min_free_gb}, sources: [SourceOut {name, type, address, heartbeat_minutes,
+expected, transport, enabled, firewall: open | closed | pending | not_managed, last_seen}]},
+locked: [LockedPath {path, reason}] (`rules.locked_paths()`), policy: AdminPolicyOut {enabled,
+source_networks, min_prefix_v4, max_sources, hold_hours, jar_hold_hours, tsa_test_per_day},
+pending: [PendingChange {request_id, section, effective_at}], problems: [SetupProblem {level,
+key, message_tr, message_en}] (`config.setup_problems`, and `arcilogger.toml` when the file is
+not usable: then the sections show the API's configuration), restart_required}`. A secret is
+never a value: `set` from the names of `secrets.json`, `changed_at` / `changed_by` from
+`admin\status\secret-meta.json`.
+
+`AdminStatus {agent: AgentOut {state: ok | stale | missing | disabled, version, heartbeat_at,
+queue, pending, java_candidates, seal_ready, system_task}, system: SystemOut {state: ok |
+error | never | stale, at, applied_config_sha256, firewall, time, code}, services: {ArciCollector
+| ArciIngest | ArciWorker | ArciApi: ServiceConfigOut {sha256, loaded_at, error, restart_keys,
+running}}, config_sha256, config_origin: browser | outside, restart_required}`.
+`config_origin` is `browser` when the file's SHA-256 is the `to` of the newest applied line of
+the agent's journal, else `outside` (a hand edit, a console restore, or no browser change yet).
+
+`AdminRequestOut {id, short_id, kind, section, state, terminal, label_tr, label_en,
+requested_by, created_at, updated_at, effective_at, version: RequestVersion {number, from, to} |
+null, steps: [RequestStepOut {step, state, at, code, message_tr, message_en}], changes, result
+(the action's: `{day, status, message, serial, gen_time}`, `{credits, threshold,
+below_threshold}`, …), error: RequestError {code, message_tr, message_en, field} | null,
+rolled_back, warnings, manual_steps_tr, manual_steps_en}` (the manual steps name `versions
+restore <n>` for `needs_attention`).
+
+**"Şimdi mühürle"** (`routers/seals.py`): 409 `seal_day_sealed` (sealed), `seal_not_applicable`
+(skipped, deleted, no data), `seal_not_due` (not `Sealer.closed_unsealed_days()[0]`, not
+`failed`/`pending` on the calendar, or in the quiet window after midnight),
+`seal_request_pending` (an open `action.seal` of that day); the agent signs a seal request for
+the Seal task, whose result is the request's `result`.
+
+**Database settings** (`routers/settings.py`, contract 2.13): `SettingsOut {groups:
+[SettingGroup {id, label_tr, label_en, settings: [SettingOut {key, value, default, is_default,
+type, min, max, reauth, locked, label_tr, label_en, help_tr, help_en, updated_by,
+updated_at}]}]}` (the groups and texts of `arcilogger_db.settings_meta`; `updated_by` null for
+the shipped value). `PATCH` is all or nothing: 422 `setting_unknown` (the key is not repeated),
+`setting_locked` (`LOCKED_KEYS`, `details [{key}]`), `setting_invalid` (`details [{key, code,
+message_tr, message_en}]` from `SettingValueError`), 409 `setting_conflict` (`details [{key,
+current}]` when `old` is not the value in force), then 403 `reauth_required`; each change goes
+through `settings_admin.change_setting(actor=username, actor_id=, ip=)` (audit `settings.change
+{old, new}`; a reset adds `reset: true`); a value equal to the one in force is `unchanged` and
+not written.
+
+Captured answers: `web/e2e/samples/admin.json`, `settings.json`, the seal now and credit query
+samples in `seals.json` / `credits.json`.

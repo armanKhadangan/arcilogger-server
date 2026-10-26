@@ -1472,7 +1472,11 @@ def _api_areas() -> dict[str, str | None]:
         }
         assert len(modules) <= 1, router.prefix
         if router.routes:
-            areas[router.prefix] = next(iter(modules), None)
+            # One area per first path segment (``/admin`` holds ``/admin/requests``, …).
+            area = "/" + router.prefix.split("/")[1]
+            module = next(iter(modules), None)
+            assert areas.get(area, module) == module, router.prefix
+            areas[area] = module
     return areas
 
 
