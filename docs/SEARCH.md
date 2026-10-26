@@ -60,7 +60,7 @@ Examples: `srcip:172.20.41.105 type:web action:blocked` · `domain:example.com -
 | Domain (`domain`) | `example.com` (the name and its subdomains), `*.example.com` (subdomains only); lowercased, international names in punycode | |
 | DNS name (`qname`) | the exact name | |
 | Token (`action`, `qtype`, `level`, `logid`) | the exact value, compared after lowercasing | |
-| Text (`app`, `category`, `service`, `user`, `host` …) | exact value (case ignored for English letters), `foo*` prefix, `*foo` suffix, `*foo*` contains | `*`, `%` and `_` inside a value are searched as themselves |
+| Text (`app`, `category`, `service`, `user`, `host` …) | exact value (case ignored for English letters), `foo*` prefix, `*foo` suffix, `*foo*` contains | `%` and `_` inside a value are searched as themselves |
 | Kind (`type`) | the kinds of section 6, several with commas | |
 | Severity (`severity`) | `emerg` … `debug` or 0–7, with comparisons (`<=err`) | |
 | Parse error (`error`) | pattern name, `prefix*` or `*` alone | |
@@ -242,8 +242,9 @@ runs.
   (results) and "Bilgi", every cell text. Columns: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür,
   Alt tür, Kaynak IP, Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL,
   Kullanıcı, Uygulama, Kategori, MAC, Metin (at most 2,000 characters), Ham kayıt
-  (`source/day/line/offset`). Values starting with `=`, `+`, `-`, `@` get a leading `'` so they
-  never run as formulas; control characters are written as visible escapes.
+  (`source/day/line/offset`). In the CSV, values starting with `=`, `+`, `-`, `@`, a tab or a
+  carriage return get a leading `'` so they never run as formulas; in Excel every cell is text.
+  Control and invisible characters are written as visible escapes (`\u0007`) in both.
 - **The file is not sealed.** The "Bilgi" sheet says so: "This file is not sealed; use an
   evidence package for integrity." Use an evidence package for an official answer (section 10).
 - The file is built, its SHA-256 computed and written to the audit log **before it is sent**

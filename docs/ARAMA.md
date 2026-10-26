@@ -61,7 +61,7 @@ hızlı olduğunu açar.
 | Alan adı (`domain`) | `example.com` (ad ve alt alan adları), `*.example.com` (yalnızca alt alan adları); küçük harfe çevrilir, uluslararası adlar punycode'a | |
 | DNS adı (`qname`) | tam ad | |
 | Sabit değer (`action`, `qtype`, `level`, `logid`) | tam değer; küçük harfe çevrilerek karşılaştırılır | |
-| Metin (`app`, `category`, `service`, `user`, `host` …) | tam değer (İngilizce harflerde büyük/küçük ayrımı yok), `foo*` önek, `*foo` sonek, `*foo*` içerir | `*`, `%` ve `_` değerin içinde kendileri olarak aranır |
+| Metin (`app`, `category`, `service`, `user`, `host` …) | tam değer (İngilizce harflerde büyük/küçük ayrımı yok), `foo*` önek, `*foo` sonek, `*foo*` içerir | `%` ve `_` değerin içinde kendileri olarak aranır |
 | Tür (`type`) | bölüm 6'daki türler, virgülle birden çok | |
 | Önem (`severity`) | `emerg` … `debug` ya da 0–7, karşılaştırmayla (`<=err`) | |
 | Ayrıştırma hatası (`error`) | kalıp adı, `onek*` ya da tek başına `*` | |
@@ -242,8 +242,9 @@ adlar büyük/küçük harf ayırmadan tekildir. Kayıtlı bir aramayı çalış
   her hücre metin. Sütunlar: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür, Alt tür, Kaynak IP,
   Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL, Kullanıcı,
   Uygulama, Kategori, MAC, Metin (en fazla 2.000 karakter), Ham kayıt
-  (`kaynak/gün/satır/konum`). `=`, `+`, `-`, `@` ile başlayan değerler formül olarak
-  çalışmasın diye başına `'` alır; denetim karakterleri görünür kaçışlarla yazılır.
+  (`kaynak/gün/satır/konum`). CSV'de `=`, `+`, `-`, `@`, sekme (TAB) ya da satır başı karakteri
+  (CR) ile başlayan değerler formül olarak çalışmasın diye başına `'` alır; Excel'de her hücre
+  metindir. Denetim ve görünmez karakterler iki biçimde de görünür kaçışlarla (`\u0007`) yazılır.
 - **Dosya mühürlü değildir.** "Bilgi" sayfası bunu söyler: "Bu dosya mühürlü değildir; bütünlük
   için Kanıt Paketi'ni kullanın." Resmi bir yanıt için Kanıt Paketi kullanın (bölüm 10).
 - Dosya oluşturulur, SHA-256 değeri hesaplanır ve **gönderilmeden önce** denetim kaydına yazılır
