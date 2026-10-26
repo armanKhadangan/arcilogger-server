@@ -942,7 +942,12 @@ FIELDS: Final[Mapping[str, Field]] = {
             "typed",
             {"fg_dns": ("qtype",)},
             (),
-            ("DNS sorgu tipi", "DNS query type", "A, AAAA, MX …", "A, AAAA, MX …"),
+            (
+                "DNS sorgu tipi",
+                "DNS query type",
+                "DNS sorgusunun tipi (A, AAAA, MX …).",
+                "The type of the DNS query (A, AAAA, MX …).",
+            ),
             ("qtype:aaaa",),
         ),
         _field(
