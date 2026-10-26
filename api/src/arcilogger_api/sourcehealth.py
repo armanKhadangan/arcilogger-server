@@ -548,13 +548,10 @@ def gaps(
     return found
 
 
-def failures(
-    db: Session, names: list[str], now: datetime, *, with_errors: bool
-) -> list[dict[str, Any]]:
-    """The 50 most frequent parse-failure patterns of the last 7 days with an example line.
-
-    ``error`` (the parser's detail, which can echo a value of the line) only ``with_errors``.
-    """
+def failures(db: Session, names: list[str], now: datetime) -> list[dict[str, Any]]:
+    """The 50 most frequent parse-failure patterns of the last 7 days with an example line
+    (``error``, the parser's detail, can echo a value of the line: the endpoint shows it only
+    to users who may read raw lines)."""
     first = site_day(now) - timedelta(days=FAILURE_DAYS - 1)
     rows = db.scalars(
         select(ParseFailure)
@@ -569,7 +566,7 @@ def failures(
             "count": int(row.count),
             "first_seen": to_site(row.first_seen),
             "last_seen": to_site(row.last_seen),
-            "error": row.error if with_errors else None,
+            "error": row.error,
             "example": {
                 "source": row.source,
                 "day": row.day,
@@ -582,24 +579,23 @@ def failures(
 
 
 def detail(
-    db: Session, config: Config, layout: Layout, name: str, now: datetime, *, with_errors: bool
-) -> dict[str, Any] | None:
-    """``SourceDetail`` (``None``: no such source)."""
-    if not known(db, config, name):
-        return None
-    summary = overview(db, config, layout, now)
-    entry = next((item for item in summary["items"] if item["name"] == name), None)
-    if entry is None:  # pragma: no cover - known() and the overview read the same rows
-        return None
-    names = [item["name"] for item in summary["items"] if item["network_of"] == name] or [name]
+    db: Session,
+    config: Config,
+    layout: Layout,
+    entry: Mapping[str, Any],
+    members: list[str],
+    now: datetime,
+) -> dict[str, Any]:
+    """``SourceDetail`` of the overview's ``entry`` (``members``: a network's member names)."""
+    names = members or [entry["name"]]
     # Only an expected source has gaps (the sealer's rule); a live one while it is silent.
     open_since = entry["last_message"] if entry["expected"] and entry["enabled"] else None
     return {
         **entry,
         "hourly": hourly(db, names, now),
         "daily": daily(db, layout, config, names, now),
-        "gaps": gaps(layout, config, [name, *names], open_since, now),
-        "parse_failures": failures(db, names, now, with_errors=with_errors),
+        "gaps": gaps(layout, config, [entry["name"], *names], open_since, now),
+        "parse_failures": failures(db, names, now),
     }
 
 

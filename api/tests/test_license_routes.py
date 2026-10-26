@@ -176,6 +176,10 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/live/streams/{{stream_id}}"): None,
     ("DELETE", f"{V}/live/streams/{{stream_id}}"): None,
     ("GET", f"{V}/live/status"): None,
+    # Kaynaklar (contract 2.16): 5651 Temel
+    ("GET", f"{V}/sources"): None,
+    ("GET", f"{V}/sources/{{name}}"): None,
+    ("GET", f"{V}/sources/{{name}}/tail"): None,
     ("GET", f"{V}/settings"): None,
     ("PATCH", f"{V}/settings"): None,
     ("POST", f"{V}/settings/{{key}}/reset"): None,
@@ -238,7 +242,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 107
+    assert len(ROUTES) - len(gated) == 110
 
 
 def test_the_module_markers_equal_the_table() -> None:
