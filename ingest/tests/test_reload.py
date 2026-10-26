@@ -166,6 +166,13 @@ def test_read_but_unloaded_lines_are_read_again_with_the_new_sources(
 ) -> None:
     """The reload drops the batch being built (read for the old sources); its lines are read
     again and loaded once, prepared for the new sources."""
+
+    def slow(text: str) -> str:
+        # A batch that waits 5 s for more lines is still being built when the file changes
+        # (with 50 ms a slow fill alone could make it due before the reload).
+        return text.replace("batch_seconds = 0.05", "batch_seconds = 5")
+
+    rewrite(config_path, slow(toml_of(world, SOURCES)))
     world.append("switch-2", DAY, (dhcp_message(i) for i in range(300)), sender="172.20.10.22")
     service = IngestService(
         load_config(config_path),
@@ -181,7 +188,7 @@ def test_read_but_unloaded_lines_are_read_again_with_the_new_sources(
         read = fill()
         if not reads:  # the batch holds the lines now, not loaded yet
             assert service._head.lines == 300
-            rewrite(config_path, toml_of(world, [*SOURCES, SWITCH]))
+            rewrite(config_path, slow(toml_of(world, [*SOURCES, SWITCH])))
         reads.append(read)
         return read
 
