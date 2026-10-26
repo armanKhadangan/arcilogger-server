@@ -15,9 +15,12 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
+from fastapi.testclient import TestClient
 from sqlalchemy import insert
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_api.auth.accounts import accept_privacy, privacy_version
+from arcilogger_api.testing import LoggedIn, login, make_user
 from arcilogger_core.timeutil import site_day
 from arcilogger_db.models import Base
 
@@ -159,3 +162,20 @@ class Lines:
     ) -> list[Written]:
         """``count`` lines ``step`` apart (newest last)."""
         return [self.add(start + i * step, table, **values) for i in range(count)]
+
+
+def sign_in(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    role: str = "admin",
+    *,
+    notice: bool = True,
+    **user: Any,
+) -> LoggedIn:
+    """A user of ``role`` signed in on ``client`` (``notice``: the KVKK notice accepted)."""
+    who = login(client, factory, make_user(factory, role, **user))
+    if notice:
+        with factory() as session:
+            accept_privacy(session, who.user_id, privacy_version(session), ip=None)
+            session.commit()
+    return who

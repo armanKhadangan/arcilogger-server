@@ -28,6 +28,7 @@ Errors are ``search.messages`` (Turkish first, with the span of a refused query 
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -35,7 +36,7 @@ from datetime import datetime
 from time import monotonic
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, Path, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
 from sqlalchemy import func, select, text, update
@@ -155,16 +156,25 @@ class SearchState:
     hook: WindowHook | None = None
 
 
-def search_state(request: Request) -> SearchState:
-    """The application's search state, created on first use."""
-    state = request.app.state
-    found = getattr(state, _STATE_ATTRIBUTE, None)
+_create_lock = threading.Lock()
+
+
+def state_of(app: FastAPI) -> SearchState:
+    """The application's search state, created on first use (tests set its clock and hook)."""
+    found = getattr(app.state, _STATE_ATTRIBUTE, None)
     if found is None:
-        found = SearchState()
-        setattr(state, _STATE_ATTRIBUTE, found)
+        with _create_lock:
+            found = getattr(app.state, _STATE_ATTRIBUTE, None)
+            if found is None:
+                found = SearchState()
+                setattr(app.state, _STATE_ATTRIBUTE, found)
     if not isinstance(found, SearchState):  # pragma: no cover - misconfiguration
         raise TypeError("app.state.arci_search must be SearchState")
     return found
+
+
+def search_state(request: Request) -> SearchState:
+    return state_of(request.app)
 
 
 StateDep = Annotated[SearchState, Depends(search_state)]
