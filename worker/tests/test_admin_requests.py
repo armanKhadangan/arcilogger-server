@@ -16,8 +16,10 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.admin.contract import TERMINAL_STATES, new_id
+from arcilogger_core.admin.messages import MESSAGES
 from arcilogger_core.config import Config, SmtpConfig
 from arcilogger_core.layout import Layout
+from arcilogger_core.secretstore import SMTP_PASSWORD, SecretStore
 from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import AdminRequest, AuditLog, JobRun, Lease, User
@@ -32,6 +34,7 @@ from arcilogger_worker.admin_jobs import (
     mask_addresses,
     process_requests,
 )
+from arcilogger_worker.alerts.commands import trial_email
 from arcilogger_worker.alerts.smtptesting import FakeSmtp
 from arcilogger_worker.correlation.rebuild import DayRebuild, rebuild_lease_day
 from arcilogger_worker.correlation.watermark import set_watermark
@@ -52,7 +55,8 @@ def sessions(db_engine: Engine) -> sessionmaker[Session]:
 
 @pytest.fixture
 def requester(db_session: Session) -> User:
-    user = User(username="ayse", display_name="Ayşe", role="admin", password_hash="!")
+    """The administrator who asks; a test e-mail may go to her own address (contract 2.9)."""
+    user = User(username="ayse", display_name="Ayşe", role="admin", password_hash="!", email=TO)
     db_session.add(user)
     db_session.commit()
     return user
@@ -203,6 +207,72 @@ def test_addresses_are_masked_also_inside_smtp_replies() -> None:
     )
 
 
+def test_a_test_email_goes_only_to_a_listed_recipient_or_the_requester(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    requester: User,
+) -> None:
+    """The worker checks the address again (contract 2.9): a row written past the API never
+    makes the SMTP server mail an address of its choosing, nor one with a broken header."""
+    config = smtp_config(layout, smtp_server)
+    duty = "nobet@ornek.example"
+    unlisted = queue(db_session, requester, TEST_EMAIL, {"to": duty})
+    newline = queue(db_session, requester, TEST_EMAIL, {"to": f"{TO}\n"})
+    process_requests(sessions, config, now=NOW)
+    assert smtp_server.received == []
+    assert {request(db_session, key).error_code for key in (unlisted, newline)} == {
+        "validation_failed"
+    }
+    assert request(db_session, unlisted).result == {
+        "ok": False,
+        "to": "n***@ornek.example",
+        "smtp_code": None,
+        "error_text": None,
+    }
+    set_setting(db_session, "alerts.email_recipients", [duty], updated_by="tolga")
+    db_session.commit()
+    listed = queue(db_session, requester, TEST_EMAIL, {"to": duty})
+    own = queue(db_session, requester, TEST_EMAIL, {"to": "Bora@Ornek.Example"})
+    process_requests(sessions, config, now=NOW)
+    assert {request(db_session, key).state for key in (listed, own)} == {"succeeded"}
+    assert sorted(to for r in smtp_server.received for to in r.recipients) == [
+        "Bora@Ornek.Example",
+        duty,
+    ]
+
+
+def test_an_unreadable_password_keeps_the_server_paths_out_of_the_result(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    requester: User,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The secret store's error names its files: it stays in the worker's log, the result the
+    browser sees has a fixed sentence (contract 2.4.6)."""
+    layout.root.mkdir(parents=True, exist_ok=True)
+    key = layout.root / "secret.key"
+    SecretStore.create_key(key)
+    SecretStore(key, layout.root / "secrets.json").set(SMTP_PASSWORD, "Gizli-1")
+    key.unlink()
+    base = smtp_config(layout, smtp_server)
+    config = base.model_copy(update={"smtp": base.smtp.model_copy(update={"username": "arci"})})
+    request_id = queue(db_session, requester, TEST_EMAIL, {"to": TO})
+    with caplog.at_level("WARNING", logger="arcilogger_worker.admin"):
+        process_requests(sessions, config, now=NOW)
+    row = request(db_session, request_id)
+    assert (row.state, row.error_code) == ("failed", "smtp_test_failed")
+    assert row.result is not None
+    assert row.result["error_text"] == "smtp.password okunamadı / cannot read smtp.password"
+    (entry,) = audit(db_session, "smtp.test")
+    assert str(layout.root) not in json.dumps([row.result, entry.details])
+    assert str(key) in caplog.text  # the detail is in the log, for the administrator
+    assert smtp_server.received == []
+
+
 # -- refused and expired requests -----------------------------------------------------------------
 
 
@@ -234,6 +304,130 @@ def test_an_invalid_or_expired_request_changes_nothing(
     (rebuild,) = audit(db_session, "leases.rebuild")
     assert rebuild.details["code"] == "validation_failed"
     assert verify_audit_chain(db_session).ok
+
+
+def test_an_unexpected_error_fails_only_its_own_request(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    requester: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A step that raises is rolled back and recorded as that request's failure, in a
+    transaction of its own; the requests queued after it still run in the same run (it would
+    otherwise stay queued at the head of the queue for ever)."""
+    poisoned = "kirik@ornek.example"
+    set_setting(db_session, "alerts.email_recipients", [poisoned], updated_by="tolga")
+    db_session.commit()
+    first = queue(
+        db_session, requester, TEST_EMAIL, {"to": poisoned}, created_at=NOW - timedelta(minutes=1)
+    )
+    rebuild_id = queue(
+        db_session, requester, LEASE_REBUILD, {"from": "2026-10-12", "to": "2026-10-13"}
+    )
+    second = queue(db_session, requester, TEST_EMAIL, {"to": TO})
+    trial = trial_email
+    rebuild = rebuild_lease_day
+
+    def broken_mail(config: Config, recipient: str, **kwargs: Any) -> Any:
+        if recipient == poisoned:
+            raise RuntimeError("Gizli-1 is not for the log")
+        return trial(config, recipient, **kwargs)
+
+    def broken_day(sessions: sessionmaker[Session], day: date, **kwargs: Any) -> DayRebuild:
+        if day == DAY:
+            raise RuntimeError("not recorded either")
+        return rebuild(sessions, day, **kwargs)
+
+    monkeypatch.setattr(admin_jobs, "trial_email", broken_mail)
+    monkeypatch.setattr(admin_jobs, "rebuild_lease_day", broken_day)
+    report = process_requests(sessions, smtp_config(layout, smtp_server), now=NOW)
+    assert report.steps == [
+        f"{first} {TEST_EMAIL} failed",
+        f"{second} {TEST_EMAIL} succeeded",
+        f"{rebuild_id} {LEASE_REBUILD} running",
+        f"{rebuild_id} {LEASE_REBUILD} running",  # its first day raised: counted as failed
+        f"{rebuild_id} {LEASE_REBUILD} failed",
+    ]
+    row = request(db_session, first)
+    assert (row.state, row.terminal, row.error_code) == ("failed", True, "smtp_test_failed")
+    assert row.result == {
+        "ok": False,
+        "to": "k***@ornek.example",
+        "smtp_code": None,
+        "error_text": "beklenmeyen hata / unexpected error: RuntimeError",
+    }
+    assert [r.recipients for r in smtp_server.received] == [[TO]]
+    rebuilt = request(db_session, rebuild_id)
+    assert (rebuilt.state, rebuilt.error_code) == ("failed", "lease_rebuild_failed")
+    assert rebuilt.result == {"done_days": 1, "total_days": 2, "failed_days": ["2026-10-12"]}
+    codes = [e.details.get("code") for e in audit(db_session, "smtp.test")]
+    assert codes == ["smtp_test_failed", None]
+    assert audit(db_session, "leases.rebuild")[0].details["failed_days"] == ["2026-10-12"]
+    stored = json.dumps([row.result, *(e.details for e in audit(db_session, "smtp.test"))])
+    assert "Gizli-1" not in stored
+    assert verify_audit_chain(db_session).ok
+
+
+def test_a_password_smtplib_cannot_send_fails_the_test_email(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    requester: User,
+) -> None:
+    """smtplib's AUTH PLAIN sends ASCII only: a Turkish password is a failed test e-mail
+    (contract Day 0 note WP1-9), not an error that leaves the request queued."""
+    layout.root.mkdir(parents=True, exist_ok=True)
+    store = SecretStore(layout.root / "secret.key", layout.root / "secrets.json")
+    SecretStore.create_key(layout.root / "secret.key")
+    store.set(SMTP_PASSWORD, "Gizli-şifre-1")
+    base = smtp_config(layout, smtp_server)
+    config = base.model_copy(update={"smtp": base.smtp.model_copy(update={"username": "arci"})})
+    request_id = queue(db_session, requester, TEST_EMAIL, {"to": TO})
+    rebuild_id = queue(
+        db_session, requester, LEASE_REBUILD, {"from": "2026-10-12", "to": "2026-10-12"}
+    )
+    process_requests(sessions, config, now=NOW)
+    row = request(db_session, request_id)
+    assert (row.state, row.error_code) == ("failed", "smtp_test_failed")
+    assert row.result is not None
+    assert "ASCII" in row.result["error_text"]
+    assert "Gizli" not in json.dumps(row.result)
+    assert request(db_session, rebuild_id).state == "succeeded"
+
+
+def test_every_code_a_worker_request_ends_with_has_its_texts(
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    requester: User,
+) -> None:
+    """The API shows ``error_code`` with the texts of ``arcilogger_core.admin.messages``
+    (contract Day 0 note D0-9): every code the worker writes must have them."""
+    set_setting(db_session, "lease.timeout_percent", 1, updated_by="tolga")  # every day fails
+    db_session.commit()
+    queue(db_session, requester, TEST_EMAIL, {"to": "bora at ornek"})
+    queue(db_session, requester, TEST_EMAIL, {"to": TO}, expires_at=NOW)
+    queue(db_session, requester, TEST_EMAIL, {"to": TO})
+    queue(db_session, requester, LEASE_REBUILD, {"from": "2026-10-12", "to": "2026-10-12"})
+    queue(db_session, requester, LEASE_REBUILD, {"from": "2026-10-13", "to": "2026-10-12"})
+    process_requests(sessions, smtp_config(layout, None), now=NOW)  # no SMTP server set
+    smtp_server.refuse.add(TO)
+    queue(db_session, requester, TEST_EMAIL, {"to": TO})
+    process_requests(sessions, smtp_config(layout, smtp_server), now=NOW)
+    db_session.expire_all()
+    codes = {row.error_code for row in db_session.scalars(select(AdminRequest))}
+    assert codes == {
+        "validation_failed",
+        "request_expired",
+        "smtp_not_configured",
+        "lease_rebuild_failed",
+        "smtp_test_failed",
+    }
+    assert codes <= set(MESSAGES)
 
 
 @pytest.mark.parametrize(
@@ -325,7 +519,7 @@ def test_a_failed_day_is_listed_and_fails_the_request(
     )
     process_requests(sessions, smtp_config(layout, None), now=NOW)
     row = request(db_session, request_id)
-    assert (row.state, row.terminal) == ("failed", True)
+    assert (row.state, row.terminal, row.error_code) == ("failed", True, "lease_rebuild_failed")
     assert row.result == {
         "done_days": 0,
         "total_days": 2,
@@ -338,9 +532,10 @@ def test_a_failed_day_is_listed_and_fails_the_request(
     ]
     assert all(r.finished_at is not None for r in runs)
     (entry,) = audit(db_session, "leases.rebuild")
-    assert (entry.details["done_days"], entry.details["failed_days"]) == (
+    assert (entry.details["done_days"], entry.details["failed_days"], entry.details["code"]) == (
         0,
         ["2026-10-12", "2026-10-13"],
+        "lease_rebuild_failed",
     )
 
 
@@ -404,6 +599,8 @@ def test_two_workers_send_each_test_email_once(
 ) -> None:
     smtp_server.delay = 0.2  # every e-mail takes a while: the workers overlap
     recipients = [f"nobet{n}@ornek.example" for n in range(6)]
+    set_setting(db_session, "alerts.email_recipients", recipients, updated_by="tolga")
+    db_session.commit()
     ids = [queue(db_session, requester, TEST_EMAIL, {"to": to}) for to in recipients]
     config = smtp_config(layout, smtp_server)
     reports: list[RequestsReport] = []

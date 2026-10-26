@@ -52,12 +52,15 @@ def _web_url(engine: Engine | None, config: Config) -> str:
 
 class TrialEmailRefusedError(ValueError):
     """No test e-mail can be sent with this configuration (``not_configured``: no SMTP server
-    or sender; else the password is unreadable); the text says why, Turkish and English, never
-    with a password."""
+    or sender; else the password is unreadable). ``text`` says why, Turkish and English, in a
+    fixed sentence; ``detail`` is the underlying error (it may name a file of the server, never
+    the password), which ``str()`` adds for the console."""
 
-    def __init__(self, text: str, *, not_configured: bool) -> None:
-        super().__init__(text)
+    def __init__(self, text: str, *, not_configured: bool, detail: str | None = None) -> None:
+        super().__init__(text if detail is None else f"{text}: {detail}")
+        self.text = text
         self.not_configured = not_configured
+        self.detail = detail
 
 
 @dataclass(frozen=True)
@@ -120,7 +123,9 @@ def trial_email(config: Config, recipient: str, *, web_url: str) -> TrialEmail:
         password = smtp_password(config)
     except (SecretStoreError, OSError, ValueError) as exc:
         raise TrialEmailRefusedError(
-            f"smtp.password okunamadı / cannot read smtp.password: {exc}", not_configured=False
+            "smtp.password okunamadı / cannot read smtp.password",
+            not_configured=False,
+            detail=str(exc),
         ) from exc
     message = trial_message(
         sender=smtp.from_address, recipient=recipient, web_url=web_url, now=utc_now()
@@ -133,7 +138,7 @@ def send_test_email(
     config: Config, recipient: str, *, engine: Engine | None = None, out: TextIO | None = None
 ) -> int:
     out = out or sys.stdout
-    if not _ADDRESS.match(recipient):
+    if not _ADDRESS.fullmatch(recipient):  # ``$`` alone would let a final newline through
         print(f"Geçersiz e-posta adresi / invalid e-mail address: {recipient!r}", file=sys.stderr)
         return EXIT_CONFIG
     try:

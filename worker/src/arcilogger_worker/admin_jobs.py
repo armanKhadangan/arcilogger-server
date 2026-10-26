@@ -36,16 +36,28 @@ The worker also works the **worker channel** (contract 2.9): requests the API st
 * ``worker.test_email`` (``params.to``) — the test e-mail of ``alerts test-email`` through
   ``[smtp]``; the result is ``{ok, to, smtp_code, error_text}`` with every address masked
   (``b***@ornek.example``) and the audit entry ``smtp.test``. ``smtp_not_configured`` when the
-  server or the sender is not set, ``smtp_test_failed`` when the e-mail was not accepted.
+  server or the sender is not set, ``smtp_test_failed`` when the e-mail was not accepted or the
+  password cannot be read (``error_text`` is then a fixed sentence: the error itself may name a
+  file of the server and stays in the worker's log).
 * ``worker.lease_rebuild`` (``params.from``, ``params.to``) — the lease timeline of each day
   rebuilt in order (:func:`.correlation.rebuild.rebuild_lease_day`, a ``leases.rebuild`` job
   run per day with the request's id). The row is ``running`` with ``{done_days, total_days,
-  failed_days}`` after every day; the last day finishes it (``succeeded``, or ``failed`` when a
-  day failed) with the audit entry ``leases.rebuild``.
+  failed_days}`` after every day; the last day finishes it (``succeeded``, or ``failed`` with
+  ``lease_rebuild_failed`` when a day failed) with the audit entry ``leases.rebuild``.
 
 A row is claimed with ``FOR UPDATE SKIP LOCKED`` and stays locked while its step runs, so two
 workers never work on one request; the final state and its audit entry are one transaction. A
-range or an address the API would not have accepted fails with ``validation_failed``; a request
+step that raises (an error of the SMTP library, say) is rolled back and recorded in a
+transaction of its own, with the error's type only: the test e-mail fails
+(``smtp_test_failed``), the lease rebuild counts the day as failed and goes on. One request
+therefore never holds up the ones queued after it.
+
+The API checks every request before it queues it (contract 2.9); the worker checks again what
+decides where an e-mail goes and how much is rebuilt, so a row written past the API never lets
+the organisation's SMTP server mail an address of its choosing: the address must be one
+address, listed in ``alerts.email_recipients`` or the requester's own e-mail; the range at most
+:data:`LEASE_REBUILD_DAYS` days, in order and not in the future. Anything else fails with
+``validation_failed``. The rate limits and "not before the first log" stay the API's. A request
 still queued at its ``expires_at`` is ``expired`` (``request_expired``) and nothing is done.
 """
 
@@ -78,7 +90,7 @@ from arcilogger_core.admin.contract import (
 from arcilogger_core.config import EMAIL_ADDRESS, Config
 from arcilogger_core.timeutil import site_day
 from arcilogger_db.audit import append_audit
-from arcilogger_db.models import AdminRequest
+from arcilogger_db.models import AdminRequest, User
 from arcilogger_db.settings import get_setting
 from arcilogger_worker.alerts.commands import TrialEmailRefusedError, trial_email
 from arcilogger_worker.alerts.notify import web_base_url
@@ -325,17 +337,38 @@ def _finish(
     append_audit(session, action=action, details=audit)
 
 
+def _masked(to: Any) -> str:
+    return mask_address(to) if isinstance(to, str) else "***"
+
+
+def _recipient_allowed(session: Session, row: AdminRequest, to: str) -> bool:
+    """``to`` is one of ``alerts.email_recipients`` or the requester's own e-mail (contract 2.9;
+    compared without regard to case)."""
+    listed = get_setting(session, "alerts.email_recipients")
+    allowed = {str(address).lower() for address in listed} if isinstance(listed, list) else set()
+    if row.requested_by_id is not None:
+        own = session.scalar(select(User.email).where(User.id == row.requested_by_id))
+        if own:
+            allowed.add(own.strip().lower())
+    return to.lower() in allowed
+
+
 def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
     """Send the test e-mail of ``row`` and record the outcome with its ``smtp.test`` entry."""
     to = row.params.get("to")
-    if not isinstance(to, str) or not _ADDRESS.match(to):
+    if (
+        not isinstance(to, str)
+        or not _ADDRESS.fullmatch(to)  # ``$`` alone would let a final newline through
+        or not _recipient_allowed(session, row, to)
+    ):
+        masked = _masked(to)
         _finish(
             session,
             row,
             "failed",
             action=SMTP_TEST_ACTION,
-            details={"to": "***", "ok": False, "smtp_code": None},
-            result={"ok": False, "to": "***", "smtp_code": None, "error_text": None},
+            details={"to": masked, "ok": False, "smtp_code": None},
+            result={"ok": False, "to": masked, "smtp_code": None, "error_text": None},
             code="validation_failed",
         )
         return
@@ -346,7 +379,8 @@ def _test_email(session: Session, row: AdminRequest, config: Config) -> None:
     try:
         outcome = trial_email(config, to, web_url=web_url).send()
     except TrialEmailRefusedError as exc:
-        ok, smtp_code, text = False, None, str(exc)
+        log.warning("test e-mail request %s: %s", row.id, exc)  # the detail stays in this log
+        ok, smtp_code, text = False, None, exc.text
         code = "smtp_not_configured" if exc.not_configured else "smtp_test_failed"
     else:
         ok, smtp_code, text = outcome.ok, outcome.smtp_code, outcome.error_text
@@ -380,47 +414,34 @@ def lease_rebuild_range(params: Mapping[str, Any], *, now: datetime) -> tuple[da
     return first, last
 
 
-def _lease_rebuild(
-    sessions: sessionmaker[Session], session: Session, row: AdminRequest, *, now: datetime
-) -> None:
-    """One step of the lease rebuild of ``row``: start it, or rebuild its next day in that
-    day's own transaction while the row stays locked. The last day finishes the request with
-    its ``leases.rebuild`` entry."""
-    span = lease_rebuild_range(row.params, now=now)
-    if span is None:
-        _finish(
-            session,
-            row,
-            "failed",
-            action=LEASES_REBUILD_ACTION,
-            details={"from": row.params.get("from"), "to": row.params.get("to")},
-            result={"done_days": 0, "total_days": 0, "failed_days": []},
-            code="validation_failed",
-        )
-        return
-    first, last = span
-    total = (last - first).days + 1
-    if row.state == "queued":  # committed at once: "running" shows before the first day is done
-        row.state = "running"
-        row.result = {"done_days": 0, "total_days": total, "failed_days": []}
-        return
+def _lease_refused(session: Session, row: AdminRequest) -> None:
+    _finish(
+        session,
+        row,
+        "failed",
+        action=LEASES_REBUILD_ACTION,
+        details={"from": row.params.get("from"), "to": row.params.get("to")},
+        result={"done_days": 0, "total_days": 0, "failed_days": []},
+        code="validation_failed",
+    )
+
+
+def _progress(row: AdminRequest) -> tuple[int, list[str]]:
+    """The days rebuilt and the days failed so far (``result`` of a running rebuild)."""
     progress = row.result or {}
     done = int(progress.get("done_days", 0))
-    failed = [str(day) for day in progress.get("failed_days", [])]
-    position = done + len(failed)
-    if position < total:
-        day = first + timedelta(days=position)
-        outcome = rebuild_lease_day(
-            sessions, day, lookahead=day == last, details={"request": row.id}
-        )
-        if outcome.ok:
-            done += 1
-        else:
-            failed.append(day.isoformat())
-            log.warning("lease rebuild request %s: %s %s", row.id, day, outcome.error_text)
-        position += 1
+    return done, [str(day) for day in progress.get("failed_days", [])]
+
+
+def _lease_progress(
+    session: Session, row: AdminRequest, first: date, last: date, done: int, failed: list[str]
+) -> None:
+    """Record the days worked on so far; after the last day the request ends (``succeeded``, or
+    ``failed`` with ``lease_rebuild_failed``) with its ``leases.rebuild`` entry."""
+    total = (last - first).days + 1
     result = {"done_days": done, "total_days": total, "failed_days": failed}
-    if position < total:
+    if done + len(failed) < total:
+        row.state = "running"
         row.result = result
         return
     _finish(
@@ -435,20 +456,110 @@ def _lease_rebuild(
             "failed_days": failed,
         },
         result=result,
+        code="lease_rebuild_failed" if failed else None,
     )
+
+
+def _lease_rebuild(
+    sessions: sessionmaker[Session], session: Session, row: AdminRequest, *, now: datetime
+) -> None:
+    """One step of the lease rebuild of ``row``: start it, or rebuild its next day in that
+    day's own transaction while the row stays locked. The last day finishes the request with
+    its ``leases.rebuild`` entry."""
+    span = lease_rebuild_range(row.params, now=now)
+    if span is None:
+        _lease_refused(session, row)
+        return
+    first, last = span
+    if row.state == "queued":  # committed at once: "running" shows before the first day is done
+        row.state = "running"
+        row.result = {"done_days": 0, "total_days": (last - first).days + 1, "failed_days": []}
+        return
+    done, failed = _progress(row)
+    day = first + timedelta(days=done + len(failed))
+    if day <= last:
+        outcome = rebuild_lease_day(
+            sessions, day, lookahead=day == last, details={"request": row.id}
+        )
+        if outcome.ok:
+            done += 1
+        else:
+            failed.append(day.isoformat())
+            log.warning("lease rebuild request %s: %s %s", row.id, day, outcome.error_text)
+    _lease_progress(session, row, first, last, done, failed)
 
 
 def _expire(session: Session, row: AdminRequest) -> None:
     """A queued request whose time ran out: nothing was done (``request_expired``)."""
     details: dict[str, Any]
     if row.kind == TEST_EMAIL:
-        to = row.params.get("to")
-        details = {"to": mask_address(to) if isinstance(to, str) else "***", "ok": False}
+        details = {"to": _masked(row.params.get("to")), "ok": False}
         action = SMTP_TEST_ACTION
     else:
         details = {"from": row.params.get("from"), "to": row.params.get("to")}
         action = LEASES_REBUILD_ACTION
     _finish(session, row, "expired", action=action, details=details, code="request_expired")
+
+
+def _work(
+    sessions: sessionmaker[Session],
+    session: Session,
+    row: AdminRequest,
+    config: Config,
+    *,
+    now: datetime,
+) -> None:
+    """One step of the claimed ``row``, in ``session``'s transaction."""
+    if row.state == "queued" and row.expires_at is not None and now >= row.expires_at:
+        _expire(session, row)
+    elif row.kind == TEST_EMAIL:
+        _test_email(session, row, config)
+    else:
+        _lease_rebuild(sessions, session, row, now=now)
+
+
+def _record_error(
+    sessions: sessionmaker[Session], request_id: str, error: str, *, now: datetime
+) -> str:
+    """After a step of ``request_id`` raised ``error`` (the exception's type; its transaction
+    was rolled back), in a transaction of its own: a test e-mail fails with
+    ``smtp_test_failed``, a lease rebuild counts the day it was at as failed and goes on with
+    the next. The row is claimed again (``SKIP LOCKED``); one another worker holds by now, or
+    one that has ended, is left alone. Returns the state, ``skipped`` for a row left alone."""
+    with sessions() as session:
+        row = session.scalars(
+            select(AdminRequest)
+            .where(AdminRequest.id == request_id, AdminRequest.state.in_(OPEN_STATES))
+            .with_for_update(skip_locked=True)
+        ).first()
+        if row is None:
+            return "skipped"
+        if row.kind == TEST_EMAIL:
+            masked = _masked(row.params.get("to"))
+            _finish(
+                session,
+                row,
+                "failed",
+                action=SMTP_TEST_ACTION,
+                details={"to": masked, "ok": False, "smtp_code": None},
+                result={
+                    "ok": False,
+                    "to": masked,
+                    "smtp_code": None,
+                    "error_text": f"beklenmeyen hata / unexpected error: {error}",
+                },
+                code="smtp_test_failed",
+            )
+        elif (span := lease_rebuild_range(row.params, now=now)) is None:
+            _lease_refused(session, row)
+        else:
+            first, last = span
+            done, failed = _progress(row)
+            failed.append((first + timedelta(days=done + len(failed))).isoformat())
+            _lease_progress(session, row, first, last, done, failed)
+        state = row.state
+        session.commit()
+    return state
 
 
 def process_requests(
@@ -461,21 +572,28 @@ def process_requests(
     """``admin.requests``: the browser's test e-mails and lease rebuilds (``admin_requests``,
     ``channel = 'worker'``), one step per claimed row and transaction, until none is left or
     ``budget`` is used up. Several workers share the queue: a row another one holds is
-    skipped, so no request is worked on twice at the same time."""
+    skipped, so no request is worked on twice at the same time. A step that raises is recorded
+    as the request's failure (:func:`_record_error`) and the run goes on with the next row; a
+    database that is gone stops the run (the job is retried)."""
     report = RequestsReport()
     started = time.monotonic()
     while time.monotonic() - started <= budget.total_seconds():
+        error: str | None = None
         with sessions() as session:
             row = _claim(session)
             if row is None:
                 return report
-            if row.state == "queued" and row.expires_at is not None and now >= row.expires_at:
-                _expire(session, row)
-            elif row.kind == TEST_EMAIL:
-                _test_email(session, row, config)
-            else:
-                _lease_rebuild(sessions, session, row, now=now)
-            report.steps.append(f"{row.id} {row.kind} {row.state}")
-            session.commit()
+            request_id, kind = row.id, row.kind
+            try:
+                _work(sessions, session, row, config, now=now)
+                state = row.state
+                session.commit()
+            except Exception as exc:  # recorded below: one request never holds up the others
+                session.rollback()
+                error = type(exc).__name__
+        if error is not None:
+            log.warning("admin request %s (%s) failed: %s", request_id, kind, error)
+            state = _record_error(sessions, request_id, error, now=now)
+        report.steps.append(f"{request_id} {kind} {state}")
     report.more = True
     return report
