@@ -215,6 +215,43 @@ function matches(code: string, openapi: string): boolean {
   );
 }
 
+/**
+ * Endpoints of the Wave 1 contract (2.11, 2.13: browser administration and database settings)
+ * the app calls before the API that serves them is merged; their types are in
+ * `settings-types.ts`, written from the contract. Each entry leaves this list when the generated
+ * document has it (the final sync), and the test below fails until it does.
+ */
+const CONTRACT_PENDING: Record<string, string[]> = {
+  '/api/v1/admin/status': ['get'],
+  '/api/v1/admin/config': ['get'],
+  '/api/v1/admin/config/{section}/check': ['post'],
+  '/api/v1/admin/config/general': ['put'],
+  '/api/v1/admin/config/tsa': ['put'],
+  '/api/v1/admin/config/smtp': ['put'],
+  '/api/v1/admin/config/replica': ['put'],
+  '/api/v1/admin/config/retention': ['put'],
+  '/api/v1/admin/config/backup': ['put'],
+  '/api/v1/admin/config/sources': ['post'],
+  '/api/v1/admin/config/sources/{name}': ['put', 'delete'],
+  '/api/v1/admin/uploads': ['post'],
+  '/api/v1/admin/config/tsa/roots': ['post'],
+  '/api/v1/admin/config/tsa/legal-roots': ['post'],
+  '/api/v1/admin/config/tsa/zamane': ['post'],
+  '/api/v1/admin/config/smtp/ca': ['post', 'delete'],
+  '/api/v1/admin/config/versions': ['get'],
+  '/api/v1/admin/diagnostics': ['get'],
+  '/api/v1/admin/requests': ['get'],
+  '/api/v1/admin/requests/{request_id}': ['get', 'delete'],
+  '/api/v1/admin/requests/{request_id}/revert': ['post'],
+  '/api/v1/admin/actions/tsa-test': ['post'],
+  '/api/v1/admin/actions/replica-test': ['post'],
+  '/api/v1/admin/actions/test-email': ['post'],
+  '/api/v1/admin/actions/lease-rebuild': ['post'],
+  '/api/v1/credits/query': ['post'],
+  '/api/v1/settings': ['get', 'patch'],
+  '/api/v1/settings/{key}/reset': ['post'],
+};
+
 describe('endpoints the app calls exist in the API', () => {
   const calls = apiCalls();
 
@@ -226,10 +263,19 @@ describe('endpoints the app calls exist in the API', () => {
   it.each(calls.map((call) => [`${call.method.toUpperCase()} ${call.path}`, call] as const))(
     '%s',
     (_, call) => {
-      const found = Object.entries(PATHS).find(
+      const found = [...Object.entries(PATHS), ...Object.entries(CONTRACT_PENDING)].find(
         ([path, methods]) => matches(call.path, path) && methods.includes(call.method),
       );
       expect(found, `${call.file}: ${call.method} ${call.path}`).toBeDefined();
     },
   );
+
+  it('waits only for contract endpoints the generated document does not have yet', () => {
+    const arrived = Object.entries(CONTRACT_PENDING).flatMap(([path, methods]) =>
+      methods
+        .filter((method) => PATHS[path]?.includes(method))
+        .map((method) => `${method} ${path}`),
+    );
+    expect(arrived, 'remove them from CONTRACT_PENDING (final sync)').toEqual([]);
+  });
 });

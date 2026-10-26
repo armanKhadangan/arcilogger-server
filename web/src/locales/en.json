@@ -375,8 +375,8 @@
   "settings": {
     "description": "System settings and user management.",
     "usersHint": "Accounts, roles, password and two-factor resets.",
-    "laterTitle": "In a later version",
-    "laterHint": "These sections arrive in a later version; until then these settings are made on the server (FIRST-STEPS.md, INSTALL.md).",
+    "laterTitle": "In later steps",
+    "laterHint": "These sections come with the next steps of browser administration.",
     "sections": {
       "general": "General",
       "sources": "Sources",
@@ -389,7 +389,580 @@
       "rules": "Security rules",
       "privacy": "Privacy",
       "backup": "Backup",
-      "about": "About"
+      "about": "About",
+      "application": "Application settings",
+      "history": "Change history"
+    },
+    "hints": {
+      "general": "The organisation's name, the time sources and the clock offset alert threshold.",
+      "application": "Alerts, 5651 lookup, usage (work hours and holidays), reports, sessions and privacy.",
+      "history": "Changes and actions made in the browser, with their state.",
+      "kamusm": "Kamu SM time stamps: Java, the Zamane client, root certificates, customer credentials, test and production server.",
+      "sources": "Devices that send logs: address, type, expected heartbeat and firewall state.",
+      "email": "The SMTP server of the alert e-mails, the recipients and a test e-mail.",
+      "replica": "The network share the sealed days are copied to, with a connection test.",
+      "retention": "The retention period and the deletion of expired days.",
+      "backup": "How many database backups are kept and the free space they need."
+    },
+    "general": {
+      "title": "General",
+      "description": "The organisation's name and the time sources. The administration service on the server applies the change; no service is restarted.",
+      "siteTitle": "Organisation",
+      "siteDescription": "The name shown in reports, e-mails and evidence packages.",
+      "siteName": "Organisation name",
+      "siteNameHint": "One line, at most 200 characters.",
+      "errors": {
+        "siteNameRequired": "The organisation name cannot be empty.",
+        "siteNameTooLong": "The organisation name can be at most 200 characters.",
+        "clockServersRequired": "At least one time server is required (the local source or the fallback)."
+      },
+      "clockTitle": "Clock",
+      "clockDescription": "The sources the server synchronises its clock with and the threshold of the clock offset alert. The system task updates the Windows Time service.",
+      "ntpServer": "Local time source",
+      "ntpServerHint": "An NTP server in your network (e.g. the core router); may be left empty.",
+      "fallbackServer": "Fallback time server",
+      "fallbackServerHint": "Used when the local source cannot be reached (e.g. time.ume.tubitak.gov.tr).",
+      "alertOffset": "Clock offset alert threshold (ms)",
+      "alertOffsetHint": "1–60,000 milliseconds. An alert is raised when the measured offset exceeds it.",
+      "ntpPort": "NTP port",
+      "ntpEmpty": "The local time source is empty: the server uses only the fallback time server.",
+      "systemTask": "The system task is not running: the setting is saved, but the Windows Time service and the firewall rule are not updated until the system task runs again.",
+      "probe": "Try the new time server before saving",
+      "clockReauth": "Changing the clock settings asks for your password again.",
+      "probing": "Trying the time server…",
+      "offset": "Last measured offset: {{offset}} ms ({{server}}, {{time}})",
+      "offsetUnknown": "The clock offset has not been measured yet."
+    },
+    "application": {
+      "title": "Application settings",
+      "description": "Settings kept in the database. Changes apply at once, no service is restarted; every change is written to the audit log.",
+      "loadFailed": "The settings could not be read",
+      "groups": "Setting groups",
+      "unsaved": "has unsaved changes",
+      "on": "On",
+      "off": "Off",
+      "reauth": "Needs password confirmation",
+      "min": "At least {{min}}.",
+      "range": "Between {{min}} and {{max}}.",
+      "onePerLine": "One value per line.",
+      "default": "Default: {{value}}",
+      "changed": "Last changed: {{by}}, {{time}}",
+      "reset": "Back to the default",
+      "resetDone": "The default value is back.",
+      "saved_one": "{{count}} setting saved.",
+      "saved_other": "{{count}} settings saved.",
+      "changedCount_one": "{{count}} change",
+      "changedCount_other": "{{count}} changes",
+      "conflictTitle": "Someone else changed a setting",
+      "takeCurrent": "Take the current values",
+      "workDays": "Work days",
+      "workStart": "Work starts",
+      "workEnd": "Work ends",
+      "weekdays": {
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday",
+        "7": "Sunday"
+      },
+      "everyYear": "{{day}} (every year)",
+      "noHolidays": "No holidays.",
+      "holidayList": "Holidays",
+      "removeHoliday": "Remove: {{day}}",
+      "addHoliday": "Add a holiday",
+      "holidayPlaceholder": "MM-DD or YYYY-MM-DD",
+      "holidayHint": "MM-DD for the same day every year (e.g. 10-29), YYYY-MM-DD for once (e.g. 2026-03-20). Religious holidays move every year: enter that year's dates.",
+      "add": "Add",
+      "noServers": "No DHCP server with its own lease time; all use the default.",
+      "serverName": "DHCP server",
+      "serverSeconds": "Lease time (seconds)",
+      "removeServer": "Remove: {{server}}",
+      "addServer": "Add a server",
+      "errors": {
+        "workDays": "Choose at least one work day.",
+        "workTime": "Enter the times as HH:MM (e.g. 08:00).",
+        "workOrder": "Work must start before it ends.",
+        "holiday": "Enter the date as MM-DD or YYYY-MM-DD.",
+        "totpRoles": "Two-factor authentication is mandatory for the administrator and auditor roles.",
+        "serverName": "The DHCP server's name cannot be empty.",
+        "serverSeconds": "The lease time must be at least 60 seconds.",
+        "integerList": "Write one whole number of 0 or more per line.",
+        "object": "Enter a valid JSON object."
+      }
+    },
+    "history": {
+      "title": "Change history",
+      "description": "Configuration changes and actions made in the browser (sealing, credit query, tests), newest first.",
+      "outsideTitle": "The configuration was changed by hand",
+      "outside": "arcilogger.toml was last changed outside the administration service (by hand on the server); that change is not listed here.",
+      "listTitle": "Requests",
+      "kind": "Kind",
+      "allKinds": "All kinds",
+      "empty": "No requests yet",
+      "emptyHint": "Changes and actions made in the browser are listed here.",
+      "caption": "Change requests, newest first",
+      "columns": {
+        "time": "Time",
+        "request": "Request",
+        "state": "State",
+        "user": "Requested by",
+        "number": "Request no."
+      },
+      "effective": "To be applied at: {{time}}",
+      "requested": "{{user}}, {{time}}",
+      "changes": "Changes",
+      "changesCaption": "Changes of the request",
+      "version": "The previous settings are kept as version {{number}}.",
+      "audit": "Audit log",
+      "auditHint": "The audit log entries of this request have this target:",
+      "auditTarget": "Target",
+      "openAudit": "Open the audit log",
+      "versions": {
+        "title": "Configuration versions",
+        "description": "The configuration versions the administration service keeps, newest first. Each version is the settings from just before a change was applied; the settings in use are not listed. The time, user, settings and request of a row belong to that change. The last applied change is undone by opening its request and choosing \"Revert\".",
+        "caption": "Kept configuration versions, newest first",
+        "empty": "No version is kept yet.",
+        "number": "Version",
+        "paths": "Changed settings",
+        "beforeLatest": "Before the latest change",
+        "restores": "Restore",
+        "withSecrets": "Settings; secrets are restored too",
+        "withoutSecrets": "Settings only; the secrets are no longer kept",
+        "openRequest": "Open the request of version {{number}}",
+        "console": "Server console",
+        "restore": "A version is restored on the server console only and brings back the settings from before its change. For example, to undo the latest change:",
+        "command": "Server console command"
+      },
+      "diagnostics": {
+        "title": "Diagnostics package",
+        "description": "A ZIP file for support: the services' status files, the last log lines with secrets removed, the configuration without secrets and the last requests. It holds no raw log line. Your password is asked again.",
+        "download": "Download the diagnostics package",
+        "saved": "{{name}} saved ({{size}})."
+      }
+    },
+    "kamusm": {
+      "title": "Kamu SM time stamps",
+      "description": "Setting up the Kamu SM Zamane time-stamp service used for the daily sealing, step by step. A change that would stop sealing is not applied.",
+      "provider": "The time-stamp provider in use: {{provider}}. Every change saved on this page switches to the Kamu SM Zamane server; a change that would stop sealing is not applied.",
+      "stepsLabel": "Setup steps",
+      "probing": "Connecting to Kamu SM…",
+      "unsaved": "Other steps have unsaved changes; save them on their step or discard them.",
+      "status": {
+        "ok": "OK",
+        "missing": "Missing",
+        "error": "Error",
+        "pending": "Waiting",
+        "optional": "Optional"
+      },
+      "steps": {
+        "java": {
+          "title": "Java",
+          "description": "The Java 8 that runs the Zamane client, chosen from the installations the administration service found on the server."
+        },
+        "zamane": {
+          "title": "Zamane client",
+          "description": "The Zamane client Kamu SM publishes (.jar or .zip). An unknown release is not used until it is approved on the server console."
+        },
+        "roots": {
+          "title": "Root certificates",
+          "description": "The Kamu SM root certificates that verify the stamps. Removing one is done on the server console only."
+        },
+        "credentials": {
+          "title": "Customer credentials",
+          "description": "The Kamu SM customer number and password. Stored values are never sent to the browser; saving runs a credit query with the new values."
+        },
+        "test": {
+          "title": "Stamp test",
+          "description": "One time stamp is obtained from the configured server and verified on the server."
+        },
+        "production": {
+          "title": "Switch to production",
+          "description": "Once everything is in place, switch to the production server. Switching back to the test server stops production stamps."
+        },
+        "credit": {
+          "title": "Credit alert threshold",
+          "description": "An alert is raised when the remaining credits drop below this number; the time limit of a stamp request."
+        }
+      },
+      "java": {
+        "choose": "Java installation",
+        "hint": "Only installations the administration service found can be chosen; another path is set on the server console.",
+        "noneTitle": "No Java 8 found",
+        "none": "The administration service found no Java 8 on the server. Install Eclipse Temurin (Adoptium) JRE 8 or Oracle Java 8; the list is updated at the next check.",
+        "notListed": "The configured Java ({{java}}) is not among the installations found."
+      },
+      "zamane": {
+        "current": "Client in use",
+        "none": "No Zamane client.",
+        "unknownRelease": "unknown release",
+        "trusted": {
+          "installer": "from the installer",
+          "known": "a known Kamu SM release",
+          "approved": "approved on the console",
+          "false": "may not run"
+        },
+        "staged": "Client {{sha}} waits for its approval",
+        "approve": "This client is used once an administrator runs the command below on the server console. Before running it, check that the SHA-256 in the command is that of the client .jar you downloaded from Kamu SM (the .jar inside the .zip, if it came as one).",
+        "approveAfter": "This client is used from {{time}} at the earliest, once an administrator runs the command below on the server console. Before running it, check that the SHA-256 in the command is that of the client .jar you downloaded from Kamu SM (the .jar inside the .zip, if it came as one).",
+        "command": "Server console command",
+        "upload": "Zamane client file",
+        "uploadHint": "A .jar, or a .zip holding exactly one tss-client-console-*.jar; at most 25 MiB.",
+        "file": "{{kind}} file: {{name}} ({{size}})",
+        "sha": "The file's SHA-256",
+        "refused": "The file was not accepted as a Zamane client.",
+        "known": "A known Kamu SM release: {{release}}. It is used once the system task has copied it.",
+        "unknownTitle": "Unknown release",
+        "unknownBody": "This release is not a known one. Enter the SHA-256 from the Kamu SM download page; this screen deliberately does not show the file's value. The client is used {{hours}} hours later at the earliest, once an administrator approves it on the server console.",
+        "expected": "SHA-256 from the Kamu SM page",
+        "expectedHint": "The value on the Kamu SM download page: 64 hexadecimal characters; spaces and case do not matter.",
+        "use": "Use this client"
+      },
+      "roots": {
+        "caption": "Installed Kamu SM root certificates",
+        "none": "No root certificate is installed.",
+        "subject": "Subject",
+        "issuer": "Issuer",
+        "notAfter": "Valid until",
+        "validity": "Validity",
+        "key": "Key",
+        "fingerprint": "SHA-256 fingerprint",
+        "legal": "Legal root",
+        "isLegal": "Legal root",
+        "source": {
+          "installer": "from the installer",
+          "web": "added in the browser"
+        },
+        "mark": "Mark as legal root",
+        "markLabel": "Mark {{subject}} as a legal root",
+        "markTitle": "Mark as a legal root?",
+        "markBody": "This fingerprint is added to the legal root fingerprints. Removing it is done on the server console only.",
+        "noLegal": "No legal root is marked yet: stamps are verified but not counted as legal grade.",
+        "upload": "Root certificate file",
+        "uploadHint": "PEM or DER, one certificate, at most 64 KiB.",
+        "installed": "This certificate is already installed.",
+        "legalSwitch": "Also mark it as a legal root",
+        "compared": "I compared the fingerprint with the value Kamu SM publishes",
+        "install": "Install the certificate"
+      },
+      "credentials": {
+        "customer": "Customer number",
+        "customerHint": "1–64 characters, no spaces.",
+        "password": "Password",
+        "clear": "The customer number and the password are deleted together. If sealing needs them, the change is not applied.",
+        "probe": "Run a credit query with the new credentials before saving"
+      },
+      "test": {
+        "server": {
+          "test": "The stamp comes from the Kamu SM test server.",
+          "production": "The stamp comes from the Kamu SM production server.",
+          "other": "The stamp comes from the configured provider ({{provider}})."
+        },
+        "button": "Stamp test (uses 1 credit)",
+        "limit_one": "At most {{count}} test a day.",
+        "limit_other": "At most {{count}} tests a day.",
+        "confirmTitle": "Run a stamp test?",
+        "confirmBody": "One time stamp is obtained and verified on the server; it uses 1 credit.",
+        "confirm": "Start the test",
+        "verified": "Verification",
+        "verifiedYes": "Verified",
+        "verifiedNo": "Not verified",
+        "provider": "Provider",
+        "serial": "Serial number",
+        "genTime": "Stamp time",
+        "tsa": "Issued by",
+        "legal": "Legal grade",
+        "legalYes": "Verified from a legal root",
+        "legalNo": "Not verified from a legal root",
+        "errors": "Errors"
+      },
+      "production": {
+        "current": {
+          "test": "The Kamu SM test server is in use.",
+          "production": "The Kamu SM production server is in use.",
+          "other": "The {{provider}} provider is in use."
+        },
+        "checklist": "What production needs",
+        "items": {
+          "credentials": "Customer number and password stored",
+          "zamane_jar": "An approved Zamane client",
+          "java": "Java chosen",
+          "roots": "At least one root certificate installed"
+        },
+        "legal": "A legal root is marked",
+        "noLegal": "No legal root is marked (does not block the switch)",
+        "tested": "A stamp test succeeded",
+        "notTested": "No stamp test has succeeded yet (does not block the switch)",
+        "toProduction": "Switch to the production server",
+        "toTest": "Back to the test server",
+        "notReady": "Complete the missing items above to switch to production.",
+        "saveFirst": "Save or discard the changes on the other steps first.",
+        "confirmTitle": "Switch to the production server?",
+        "confirmBody": "From now on sealing uses stamps of the Kamu SM production server; every stamp uses a credit.",
+        "testTitle": "Back to the test server?",
+        "testBody": "Production stamps stop; sealing uses stamps of the test server. The change raises a high-severity alert."
+      },
+      "credit": {
+        "threshold": "Credit alert threshold",
+        "thresholdHint": "0–1,000,000. An alert is raised when the remaining credits drop below it.",
+        "timeout": "Stamp request timeout (s)",
+        "timeoutHint": "5–600 seconds."
+      },
+      "seal": {
+        "title": "Sealing",
+        "description": "The [seal] section and the expert [tsa] settings are changed on the server console only.",
+        "ready": "The Seal task can seal with the current settings.",
+        "notReady": "The Seal task cannot seal with the current settings",
+        "unplacedTitle": "The Seal task cannot seal; the cause is not one of the wizard's steps",
+        "unplacedBody": "This cannot be fixed in the wizard; it must be resolved on the server console."
+      },
+      "causes": {
+        "zamane_jar": "The Zamane client is not set or may not run.",
+        "credentials": "The Kamu SM customer number or password is not stored.",
+        "roots": "No root certificate is installed.",
+        "secret_store": "The secret store cannot be read.",
+        "provider": "The time-stamp provider's settings are invalid.",
+        "executable": "Java or the Zamane client is not in a trusted location, or its hash is not recognised.",
+        "location": "secrets_dir or data_dir in the configuration is not this installation's folder; sealing does not run with it. Correct arcilogger.toml on the server console."
+      },
+      "errors": {
+        "customer": "The customer number must be 1–64 characters without spaces or control characters.",
+        "password": "The password must be 1–128 characters without control characters.",
+        "sha": "Enter a SHA-256 value of 64 hexadecimal characters.",
+        "shaMismatch": "The SHA-256 you entered does not match the file's. Download the file from the Kamu SM page again or compare the value again."
+      }
+    },
+    "sources": {
+      "title": "Sources",
+      "description": "Devices that send logs. The collector and ingest take a change without a restart; the system task opens or closes the syslog port for each source's address.",
+      "tableTitle": "Configured sources",
+      "tableDescription": "{{count}} sources (at most {{max}}).",
+      "caption": "Configured log sources",
+      "empty": "No source yet. Add your firewall and your core router.",
+      "add": "Add a source",
+      "addTitle": "Add a source",
+      "editTitle": "Edit the source {{name}}",
+      "dialogDescription": "The changes and their effects are shown before anything is saved.",
+      "review": "Review the changes",
+      "nameHint": "Lower-case letters, digits and hyphens; at most 63 characters. It cannot be changed later.",
+      "nameFixed": "A source's name cannot be changed.",
+      "addressHint": "One IPv4 address (172.20.10.1) or a network (172.20.10.0/24).",
+      "heartbeat": "Expected heartbeat (min)",
+      "heartbeatHint": "1–1440 minutes. A silent-source alert is raised when nothing arrives for this long.",
+      "expectedHint": "The silent-source alert watches this source.",
+      "enabledHint": "Records of a disabled source are not collected.",
+      "minutes_one": "{{count}} min",
+      "minutes_other": "{{count}} min",
+      "yes": "Yes",
+      "no": "No",
+      "never": "None yet",
+      "enabledFor": "{{name}} enabled",
+      "editFor": "Edit the source {{name}}",
+      "removeFor": "Remove the source {{name}}",
+      "remove": "Remove the source",
+      "removeTitle": "Remove {{name}}?",
+      "removeBody": "The source is taken out of the configuration and its firewall rule is closed. Its stored and sealed records do not change. Your password is asked again.",
+      "removeType": "Type the source's name to confirm: {{name}}",
+      "systemTask": "The system task is not running: changes are saved, but the firewall rules are not updated until the system task runs again.",
+      "lockedTitle": "Settings changed on the server console",
+      "columns": {
+        "name": "Name",
+        "type": "Type",
+        "address": "Address",
+        "transport": "Transport",
+        "heartbeat": "Heartbeat",
+        "expected": "Expected",
+        "enabled": "Enabled",
+        "lastSeen": "Last record",
+        "firewall": "Firewall",
+        "actions": "Actions"
+      },
+      "types": {
+        "fortigate": "FortiGate",
+        "mikrotik": "MikroTik",
+        "generic": "Generic syslog"
+      },
+      "transports": {
+        "any": "UDP and TCP",
+        "udp": "UDP",
+        "tcp": "TCP"
+      },
+      "firewall": {
+        "open": "Open",
+        "closed": "Closed",
+        "pending": "Updating",
+        "not_managed": "Not managed"
+      },
+      "errors": {
+        "name": "The name must start with a lower-case letter or a digit and hold only lower-case letters, digits and hyphens (at most 63 characters).",
+        "nameUnknown": "Names starting with \"unknown-\" are reserved for unknown senders.",
+        "nameTaken": "A source with this name already exists.",
+        "ipv6": "IPv6 addresses are not supported yet; enter an IPv4 address.",
+        "address": "Enter a valid IPv4 address or network (e.g. 172.20.10.1 or 172.20.10.0/24).",
+        "hostBits": "A network must be written with its first address (e.g. 172.20.10.0/24).",
+        "reserved": "This address cannot be used for a source (loopback, multicast, link-local or reserved).",
+        "prefix": "The network is too wide; use a longer prefix.",
+        "notAllowed": "The address is outside the networks the administration policy allows.",
+        "addressTaken": "Another source uses this address.",
+        "overlap": "This network overlaps another source's network.",
+        "limit": "The number of sources has reached its limit."
+      }
+    },
+    "email": {
+      "title": "E-mail",
+      "description": "The SMTP server that sends the alert e-mails, and the alert e-mail settings. The administration service on the server applies the SMTP settings.",
+      "smtpTitle": "SMTP connection",
+      "smtpDescription": "Enabling it or changing the server sends a trial e-mail first. A stored password is never sent to the browser.",
+      "enabled": "Sending e-mail is on",
+      "enabledHint": "While it is off, alerts show on the dashboard only.",
+      "disabling": "Sending e-mail is switched off: alerts are no longer e-mailed.",
+      "host": "SMTP server",
+      "hostHint": "A host name or an IPv4 address.",
+      "port": "Port",
+      "security": "Connection security",
+      "securities": {
+        "starttls": "STARTTLS",
+        "ssl": "SSL/TLS",
+        "none": "Unencrypted"
+      },
+      "plaintext": "Over an unencrypted connection e-mails cross the network in plain text.",
+      "timeout": "Timeout (s)",
+      "timeoutHint": "1–300 seconds.",
+      "from": "Sender address",
+      "fromHint": "The sender address of the alert e-mails.",
+      "username": "User name",
+      "usernameHint": "Leave it empty when the server needs no authentication.",
+      "password": "Password",
+      "passwordHint": "When the server, port, security or user name changes, the password must be entered again.",
+      "testTo": "Recipient of the trial e-mail",
+      "testToHint": "One of the alert recipients or your own address.",
+      "chooseRecipient": "Choose a recipient",
+      "noRecipients": "No recipient for a trial e-mail: add an alert recipient below or an e-mail address to your account.",
+      "probe": "Send a trial e-mail before saving",
+      "probing": "Sending a trial e-mail…",
+      "alertsTitle": "Alert e-mails",
+      "alertsDescription": "Recipients, the lowest severity and the hourly limit (database settings; they apply at once).",
+      "ca": {
+        "title": "Server certificate",
+        "description": "When the SMTP server's certificate comes from an internal CA, upload that CA.",
+        "system": "The Windows certificate store is used.",
+        "custom": "The uploaded CA is used:",
+        "clear": "Back to the Windows certificate store",
+        "upload": "CA file",
+        "uploadHint": "PEM, 1–10 certificates, at most 256 KiB.",
+        "use": "Use this CA"
+      },
+      "test": {
+        "title": "Test e-mail",
+        "description": "One trial e-mail is sent with the saved SMTP settings (at most 5 an hour).",
+        "to": "Recipient",
+        "send": "Send a test e-mail",
+        "sent": "The test e-mail was sent.",
+        "failed": "The test e-mail could not be sent: {{error}}"
+      },
+      "errors": {
+        "username": "The user name can be at most 256 characters.",
+        "passwordRequired": "A user name needs a password.",
+        "rebind": "The server or the user changed; the stored password is not sent to the new server, enter the password again.",
+        "plaintextAuth": "Over an unencrypted connection a user name can be sent only to this server itself.",
+        "testTo": "Choose a recipient for the trial e-mail."
+      }
+    },
+    "replica": {
+      "title": "Replica",
+      "description": "The network share the sealed days are copied to. The administration service on the server applies the change.",
+      "cardTitle": "Replica target",
+      "cardDescription": "Saving tries the connection with the new values. A stored password is never sent to the browser.",
+      "enabled": "Replica is on",
+      "enabledHint": "Every night the sealed days are also copied to this share.",
+      "disabling": "The replica is switched off: sealed days are no longer copied to a second place.",
+      "target": "Share",
+      "targetHint": "As \\\\server\\share, e.g. \\\\backup-server\\arcilogger-worm.",
+      "user": "User",
+      "userHint": "SERVER\\user, DOMAIN\\user or user@domain.",
+      "password": "Password",
+      "held_one": "This change is held for {{count}} hour; it can be cancelled until then.",
+      "held_other": "This change is held for {{count}} hours; it can be cancelled until then.",
+      "probe": "Try the connection before saving",
+      "probing": "Connecting to the replica target…",
+      "test": {
+        "title": "Connection test",
+        "description": "Connects to the saved share and writes and removes a test file (at most once a minute).",
+        "button": "Test the connection",
+        "ok": "Connection succeeded",
+        "failed": "Connection failed"
+      },
+      "errors": {
+        "target": "The share must be written as \\\\server\\share (no drive letter, \\\\?\\ or ..).",
+        "user": "The user must be SERVER\\user, DOMAIN\\user or user@domain (at most 256 characters).",
+        "passwordRequired": "The user needs a password.",
+        "rebind": "The server or the user changed; the stored password is not sent to the new target, enter the password again."
+      }
+    },
+    "retention": {
+      "title": "Retention",
+      "description": "Deleting sealed days whose retention period has ended. Raw logs inside the period are never touched.",
+      "cardTitle": "Retention period",
+      "cardDescription": "Switching it on or shortening it shows how many days would be deleted, and that number is typed to confirm.",
+      "currentOn_one": "Retention is on: days older than {{count}} day are deleted.",
+      "currentOn_other": "Retention is on: days older than {{count}} days are deleted.",
+      "currentOff": "Retention is off: no day is deleted.",
+      "enabled": "Delete expired days",
+      "enabledHint": "The Retention task runs every night at 02:00.",
+      "days": "Retention period (days)",
+      "daysHint": "At least {{min}} days; a shorter period is refused.",
+      "deletes": "This change deletes days. Saving shows how many and asks you to confirm.",
+      "preview_one": "{{days}} day will be deleted (oldest {{oldest}}, newest {{newest}}; {{cutoff}} and later are kept).",
+      "preview_other": "{{days}} days will be deleted (oldest {{oldest}}, newest {{newest}}; {{cutoff}} and later are kept).",
+      "previewNone": "No day to delete ({{cutoff}} and later are kept).",
+      "firstRun": "First deletion: {{time}}.",
+      "confirmType_one": "Type the number of days to delete to confirm: {{count}}",
+      "confirmType_other": "Type the number of days to delete to confirm: {{count}}"
+    },
+    "backup": {
+      "title": "Backup",
+      "description": "How long database backups are kept. The backup folder and the tools are changed on the server console only.",
+      "cardTitle": "Backup task",
+      "cardDescription": "How many daily, weekly and monthly backups are kept, and the free space needed on the backup disk.",
+      "enabled": "Database backup is on",
+      "enabledHint": "The Backup task runs every night.",
+      "disabling": "Backups are switched off: no new backup of the database is taken.",
+      "fields": {
+        "keep_daily": "Daily backups",
+        "keep_weekly": "Weekly backups",
+        "keep_monthly": "Monthly backups",
+        "min_free_gb": "Free space needed (GB)"
+      },
+      "hints": {
+        "keep_daily": "{{min}}–{{max}} backups.",
+        "keep_weekly": "{{min}}–{{max}} backups.",
+        "keep_monthly": "{{min}}–{{max}} backups.",
+        "min_free_gb": "{{min}}–{{max}} GB. With less free space no backup is taken and an alert is raised."
+      },
+      "stateTitle": "Last backup",
+      "stateNote": "This version does not show the details of the last backup in the web interface; a failed or refused backup shows as an alert.",
+      "noAlerts": "No open backup alert.",
+      "alertsLink": "Alerts on the Security page",
+      "stateHidden": "You may not see the backup alerts."
+    },
+    "leaseRebuild": {
+      "title": "Rebuild the leases",
+      "description": "The lease timeline of the chosen days is rebuilt from the raw logs (at most 31 past days, today included). The raw logs are only read.",
+      "from": "First day",
+      "to": "Last day",
+      "dayHint": "DD.MM.YYYY",
+      "button": "Rebuild the leases",
+      "confirmTitle": "Rebuild the leases?",
+      "confirmBody": "The lease timeline of {{from}} – {{to}} is rebuilt. Meanwhile 5651 lookups of these days use the previous timeline.",
+      "progress": "{{done}} / {{total}} days done.",
+      "failedDays": "Days that could not be rebuilt: {{days}}",
+      "errors": {
+        "day": "Enter the day as DD.MM.YYYY.",
+        "future": "A day in the future cannot be chosen.",
+        "order": "The last day cannot be before the first day.",
+        "tooLong": "At most 31 days can be chosen."
+      }
     }
   },
   "audit": {
@@ -954,7 +1527,11 @@
         "credits": "Remaining",
         "note": "Note"
       },
-      "note": "The credit is checked once a day by the \\ARCILOGGER\\Credit task; the web interface does not connect to Kamu SM."
+      "note": "The \\ARCILOGGER\\Credit task queries the credit once a day; \"Query credit\" runs the task on the server once, now. The web service never connects to Kamu SM itself.",
+      "query": "Query credit",
+      "queryResult": "Credit left: {{credits}} (alert threshold {{threshold}}).",
+      "queryLow": "Credit left {{credits}}: below the alert threshold ({{threshold}}).",
+      "retryAfter": "Try again in {{seconds}} seconds."
     },
     "day": {
       "title": "{{day}}",
@@ -992,7 +1569,25 @@
     },
     "sealNow": {
       "button": "Seal now",
-      "explanation": "Seal now is not available from the web interface in this version: the web service may not write to the vault. Sealing runs as the scheduled task \\ARCILOGGER\\Seal every 5 minutes from 00:10 and retries failed attempts by itself. To seal at once, run that task in Task Scheduler on the server."
+      "explanation": "Seal now is not available from the web interface in this version: the web service may not write to the vault. Sealing runs as the scheduled task \\ARCILOGGER\\Seal every 5 minutes from 00:10 and retries failed attempts by itself. To seal at once, run that task in Task Scheduler on the server.",
+      "hint": "The sealing task tries this day once without waiting for its retry time; the wait after midnight, the empty-day rule and the order of days still apply.",
+      "blocked": {
+        "sealed": "This day is already sealed.",
+        "open": "The day has not ended yet; it is sealed after it ends.",
+        "notApplicable": "This day is not sealed (no data, skipped or deleted).",
+        "notOldest": "Only the next (oldest) unsealed day can be sealed now: {{day}} first."
+      },
+      "confirmTitle": "Seal {{day}} now?",
+      "confirmBody": "The \\ARCILOGGER\\Seal task on the server tries to seal this day once, now, with a time stamp from the configured provider (1 credit with Kamu SM). The wait after midnight and the empty-day rule are not skipped.",
+      "outcome": {
+        "sealed": "{{day}} is sealed.",
+        "pending": "{{day}} is not sealed yet; the task tries again later.",
+        "failed": "The sealing attempt failed; the error is on the day page.",
+        "waiting": "{{day}} is waiting; the task seals it later.",
+        "skipped": "{{day}} was skipped (no data).",
+        "deleted": "{{day}} was deleted after the retention period."
+      },
+      "serial": "Serial: {{serial}}"
     },
     "state": {
       "title": "Sealing task",
@@ -2490,6 +3085,275 @@
     },
     "errors": {
       "tooLarge": "The licence file is too large (at most 64 KiB)."
+    }
+  },
+  "admin": {
+    "agent": {
+      "chip": "Administration service: {{state}}",
+      "heartbeat": "Last answer: {{time}}",
+      "states": {
+        "ok": "running",
+        "stale": "late",
+        "missing": "not running",
+        "disabled": "switched off"
+      }
+    },
+    "unavailable": {
+      "missing": {
+        "title": "The administration service is not running",
+        "body": "The administration service (ArciAdmin) is not responding; server settings cannot be saved from the browser now. The values are shown read-only. Start the \"ARCILOGGER Yönetim\" service on the server."
+      },
+      "disabled": {
+        "title": "Browser administration is switched off",
+        "body": "Browser administration is switched off on this installation; the values are shown read-only."
+      },
+      "console": "Make the change on the server console: the file C:\\ProgramData\\ARCILOGGER\\arcilogger.toml, and arcilogger-core secret set for stored secrets.",
+      "stale": "The administration service is answering late; the change may be delayed."
+    },
+    "restart": {
+      "title": "A change waits for a restart",
+      "body": "arcilogger.toml was changed by hand on the server; that change takes effect only when the service concerned is restarted."
+    },
+    "progress": {
+      "sending": "Sending…",
+      "services": "Services loading the new settings",
+      "appliedToast": "Applied",
+      "probing": "Testing the connection with the new values…",
+      "queued": "Queued: the administration service takes the request within seconds.",
+      "waitingForAgent": "The administration service has not answered yet; it may be stopped. The request waits until it expires.",
+      "applying": "Applying…",
+      "applied": "Written; the services are loading the new settings.",
+      "actionRunning": "Running…",
+      "heldUntil": "This change is held: it is applied at {{time}} ({{left}} left). It can be cancelled until then.",
+      "held": "This change is held; it is applied when the hold ends.",
+      "active": "Applied: the services run with the new settings.",
+      "actionDone": "Done.",
+      "partiallyActive": "Partly applied: the configuration was written, but not everything has taken it.",
+      "notReloaded": "{{service}} has not loaded the new settings yet.",
+      "systemFailed": {
+        "system_firewall": "The firewall could not be updated; the previous rules are in force.",
+        "system_time": "The Windows Time service could not be updated.",
+        "jar_promotion": "The Zamane client could not be approved."
+      },
+      "failed": "Not applied, the previous settings are in use.",
+      "actionFailed": "The action did not complete; no setting was changed.",
+      "conflict": "Another change was made; reload the page.",
+      "expired": "The request expired; nothing changed.",
+      "cancelled": "Cancelled; nothing changed.",
+      "rolledBack": "The written change was undone.",
+      "needsAttention": "Manual action is needed.",
+      "needsAttentionVersion": "Manual action is needed. The previous settings are kept as version {{version}}.",
+      "requestNumber": "Request no. {{id}}",
+      "warnings": "Warnings",
+      "cancel": "Cancel",
+      "retry": "Try again",
+      "reload": "Reload the page",
+      "revert": "Revert",
+      "steps_one": "Steps ({{count}})",
+      "steps_other": "Steps ({{count}})"
+    },
+    "steps": {
+      "received": "Request received",
+      "validate": "Check",
+      "probe": "Connection test",
+      "hold": "Hold",
+      "backup": "Previous version kept",
+      "write_secrets": "Secrets written",
+      "write_config": "Configuration written",
+      "install_files": "Files installed",
+      "verify": "Verification",
+      "reload": {
+        "collector": "ArciCollector loaded the new settings",
+        "ingest": "ArciIngest loaded the new settings",
+        "worker": "ArciWorker loaded the new settings",
+        "api": "The web service loaded the new settings"
+      },
+      "system": {
+        "firewall": "Firewall",
+        "time": "Windows Time service"
+      },
+      "jar": {
+        "promotion": "Zamane client approval"
+      },
+      "dispatch": "Passed to the task",
+      "task": "Task",
+      "journal": "Journal",
+      "rollback": "Rollback"
+    },
+    "stepStates": {
+      "pending": "waiting",
+      "running": "running",
+      "done": "done",
+      "skipped": "not needed",
+      "warning": "warning",
+      "failed": "failed"
+    },
+    "kinds": {
+      "config": {
+        "apply": "Configuration change",
+        "revert": "Revert",
+        "cancel": "Cancellation"
+      },
+      "action": {
+        "seal": "Seal now",
+        "credit": "Credit query",
+        "tsa_test": "Stamp test",
+        "replica_test": "Replica test"
+      },
+      "worker": {
+        "test_email": "Test e-mail",
+        "lease_rebuild": "Lease rebuild"
+      }
+    },
+    "sections": {
+      "general": "General",
+      "tsa": "Kamu SM",
+      "smtp": "E-mail (SMTP)",
+      "replica": "Replica",
+      "retention": "Retention",
+      "backup": "Database backup",
+      "sources": "Sources"
+    },
+    "secret": {
+      "byWeb": "web: {{user}}",
+      "byCli": "server console",
+      "byInstaller": "installation",
+      "keep": "Keep",
+      "willDelete": "Deleted when saved",
+      "stored": "Stored",
+      "changedAt": "last changed {{time}}",
+      "notStored": "Not stored",
+      "change": "Change",
+      "enter": "Enter",
+      "delete": "Delete"
+    },
+    "locked": {
+      "hint": "For security reasons this value can only be changed on the server console.",
+      "reasons": {
+        "security": "security",
+        "service": "service setting",
+        "evidence": "evidence chain",
+        "expert": "expert setting",
+        "collector": "log collector"
+      }
+    },
+    "console": {
+      "refused": "The value the server reported is not in the expected form, so no command is shown. Check the state on the server console."
+    },
+    "review": {
+      "title": "Confirm the changes",
+      "description": "The server's check is below. When you confirm, the change goes to the administration service.",
+      "caption": "Changes to be saved",
+      "none": "No changes.",
+      "setting": "Setting",
+      "old": "Before",
+      "new": "After",
+      "secret": {
+        "set": "stored",
+        "unset": "not stored",
+        "deleted": "deleted",
+        "replaced": "will be replaced with a new one"
+      },
+      "effects": "Effect",
+      "warnings": "Warnings",
+      "heldUntil": "This change is held: it is applied at {{time}} and can be cancelled until then.",
+      "held": "This change is held; it is applied when the hold ends.",
+      "reauth": "You will be asked for your password again when saving.",
+      "confirm": "Confirm and save",
+      "source": "Source {{name}}",
+      "sourceField": "{{name}} · {{field}}"
+    },
+    "effects": {
+      "reload": {
+        "collector": "ArciCollector loads the new settings (no restart)",
+        "ingest": "ArciIngest loads the new settings",
+        "worker": "ArciWorker loads the new settings",
+        "api": "The web service loads the new settings"
+      },
+      "system": {
+        "firewall": "The firewall rule is updated",
+        "time": "The Windows Time service is updated"
+      },
+      "jar": {
+        "promotion": "The Zamane client is used once it is approved"
+      },
+      "taskNextRun": "The {{task}} task uses it at its next run"
+    },
+    "paths": {
+      "site_name": "Organisation name",
+      "clock": {
+        "ntp_server": "Local time source",
+        "fallback_server": "Fallback time server",
+        "alert_offset_ms": "Clock offset alert threshold (ms)"
+      },
+      "tsa": {
+        "server": "Time-stamp server",
+        "provider": "Time-stamp provider",
+        "url": "Time-stamp address",
+        "credit_alert_threshold": "Credit alert threshold",
+        "timeout_seconds": "Stamp request timeout (s)",
+        "java": "Java",
+        "zamane_jar": "Zamane client",
+        "roots": "Root certificates",
+        "legal_root_fingerprints": "Legal root fingerprints"
+      },
+      "kamusm": {
+        "customer": "Kamu SM customer number",
+        "password": "Kamu SM password"
+      },
+      "smtp": {
+        "enabled": "Sending e-mail",
+        "host": "SMTP server",
+        "port": "SMTP port",
+        "security": "Connection security",
+        "username": "SMTP user name",
+        "password": "SMTP password",
+        "from_address": "Sender address",
+        "timeout_seconds": "SMTP timeout (s)",
+        "ca_file": "CA certificate of the SMTP server"
+      },
+      "replica": {
+        "enabled": "Replica",
+        "target": "Replica target",
+        "user": "Replica user",
+        "password": "Replica password"
+      },
+      "retention": {
+        "enabled": "Deleting at the end of the retention period",
+        "days": "Retention period (days)"
+      },
+      "backup": {
+        "enabled": "Database backup",
+        "keep_daily": "Daily backups kept",
+        "keep_weekly": "Weekly backups kept",
+        "keep_monthly": "Monthly backups kept",
+        "min_free_gb": "Free space needed (GB)"
+      }
+    },
+    "section": {
+      "readOnly": "You may not change this section; the values are shown read-only.",
+      "conflictTitle": "The settings changed elsewhere",
+      "conflict": "These settings were changed elsewhere while you were editing; reload the page and try again.",
+      "invalid": "Some values are invalid; correct the marked fields.",
+      "restore": "Discard changes",
+      "agentUnavailable": "Cannot be saved while the administration service is not running."
+    },
+    "unsaved": {
+      "title": "Unsaved changes",
+      "body": "This page has unsaved changes. They are lost if you leave the page.",
+      "leave": "Leave the page"
+    },
+    "errors": {
+      "hostInvalid": "Enter a valid host name or IPv4 address.",
+      "integer": "Enter a whole number.",
+      "min": "Must be at least {{min}}.",
+      "max": "Must be at most {{max}}.",
+      "emailInvalid": "Enter a valid e-mail address."
+    },
+    "upload": {
+      "send": "Send the file",
+      "chosen": "{{name}} ({{size}}) chosen; press the button to send it. The server inspects the file; nothing is installed yet.",
+      "tooLarge": "The file is too large; at most {{size}}."
     }
   }
 }

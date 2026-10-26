@@ -189,6 +189,74 @@ export const routes: RouteObject[] = [
               },
             ],
           },
+          // The browser administration (ADR-0014): machine configuration, database settings,
+          // the change history. Each page loads when it is opened.
+          {
+            element: <PermissionGate anyOf={['settings.manage']} />,
+            children: [
+              {
+                path: 'settings/general',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/general-page')).GeneralPage,
+                }),
+              },
+              {
+                path: 'settings/application',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/application-page')).ApplicationPage,
+                }),
+              },
+              {
+                path: 'settings/kamusm',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/kamusm-page')).KamusmPage,
+                }),
+              },
+              {
+                path: 'settings/email',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/email-page')).EmailPage,
+                }),
+              },
+              {
+                path: 'settings/replica',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/replica-page')).ReplicaPage,
+                }),
+              },
+              {
+                path: 'settings/retention',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/retention-page')).RetentionPage,
+                }),
+              },
+              {
+                path: 'settings/backup',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/backup-page')).BackupPage,
+                }),
+              },
+              {
+                path: 'settings/history',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/history-page')).HistoryPage,
+                }),
+              },
+              // The sources need `sources.manage` too (the configuration is read with
+              // `settings.manage`).
+              {
+                element: <PermissionGate anyOf={['sources.manage']} />,
+                children: [
+                  {
+                    path: 'settings/sources',
+                    lazy: async () => ({
+                      Component: (await import('@/pages/settings/sources-page')).SourcesPage,
+                    }),
+                  },
+                ],
+              },
+            ],
+          },
           // Developer page: not in the bundle the installer ships (`UI_KIT_ITEM` is null there).
           ...(UI_KIT_ITEM
             ? [

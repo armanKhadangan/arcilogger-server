@@ -24,13 +24,14 @@ import type {
 } from '../src/lib/api-types';
 
 import { API_SCHEMAS, AUDIT_VECTORS, ROLE_CONTRACT } from './generated';
+import { AdminMock, type AdminOptions } from './mock-admin';
 import { AlertsMock } from './mock-alerts';
 import { DevicesMock } from './mock-devices';
 import { LicenseMock, type LicenseOptions } from './mock-license';
 import { RecordsMock, type Answer, type RecordsOptions } from './mock-records';
 import { ReportsMock } from './mock-reports';
 import { UsageMock, type UsageOptions } from './mock-usage';
-import { ALERTS, EVIDENCE, LOOKUPS, RAW, REPORTS, SEALS } from './samples';
+import { ALERTS, CREDITS, EVIDENCE, LOOKUPS, RAW, REPORTS, SEALS } from './samples';
 
 export const CSRF_TOKEN = 'e2e-csrf-token';
 export const VALID_TOTP = '123456';
@@ -284,6 +285,11 @@ export interface MockOptions {
   usage?: UsageOptions;
   /** The licence state at start (default: the trial, every module on). */
   license?: LicenseOptions;
+  /**
+   * Browser administration: the administration service's heartbeat, the hold of guarded
+   * changes, the speed of the requests, a fresh Kamu SM section (`mock-admin.ts`).
+   */
+  admin?: AdminOptions;
 }
 
 function user(
@@ -355,6 +361,11 @@ export class MockApi {
   readonly usage: UsageMock;
   /** The licence (`/license`), the module gates and the users limit. */
   readonly license: LicenseMock;
+  /**
+   * Browser administration (`/admin/*`, `/settings`, "Şimdi mühürle", "Kontör sorgula"): asked
+   * before the captured seal and credit samples, which it changes once a request succeeded.
+   */
+  readonly admin: AdminMock;
   readonly grant: Partial<Record<Role, string[]>>;
   readonly revoke: Partial<Record<Role, string[]>>;
 
@@ -364,6 +375,7 @@ export class MockApi {
       () => this.users.filter((item) => item.active).length,
     );
     this.records = new RecordsMock(options.records);
+    this.admin = new AdminMock(options.admin, () => CREDITS[this.records.credits]);
     this.devices = new DevicesMock();
     this.alerts = new AlertsMock();
     this.reports = new ReportsMock();
@@ -686,6 +698,7 @@ export class MockApi {
       default:
         return (
           this.license.answer(call, this) ??
+          this.admin.answer(call, this) ??
           this.records.answer(call, this) ??
           this.devices.answer(call, this) ??
           this.usage.answer(call, this) ??

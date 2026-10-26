@@ -8,27 +8,32 @@ import {
   Unlink,
   type LucideIcon,
 } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useId, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
+import { RequestProgress } from '@/components/admin/request-progress';
 import { Alert, type AlertTone } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CodeBlock } from '@/components/ui/code-block';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiDownload, errorMessage } from '@/lib/api';
-import { useSealDay, useVerifySeal } from '@/lib/api-hooks';
-import type { VerifyResult } from '@/lib/api-types';
+import { queryKeys, useSealDay, useSealNow, useVerifySeal } from '@/lib/api-hooks';
+import type { Calendar, VerifyResult } from '@/lib/api-types';
 import { useAuth } from '@/lib/auth';
 import { formatDay, shortHash } from '@/lib/display';
 import { saveBlob } from '@/lib/download';
 import { formatBytes, formatDateTime, formatDuration, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import type { SealDayDetail, SealVerification } from '@/lib/seal-types';
+import type { AdminRequestOut, SealActionResult } from '@/lib/settings-types';
 
 import { gapReason, legalGrade, toneOf } from './seal-states';
 
@@ -301,12 +306,135 @@ function FilesTable({ detail }: { detail: SealDayDetail }) {
   );
 }
 
+/** Day states "Şimdi mühürle" may ask for (the API checks again: 409 `seal_not_due`, …). */
+const SEALABLE = new Set(['failed', 'pending']);
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
+ * Why "Şimdi mühürle" cannot be asked for this day, or `null` when it can: only the oldest
+ * closed unsealed day in state `failed` or `pending` (contract 2.9). The calendar on screen
+ * (the page's query, read from the cache: the page re-renders this panel whenever it changes)
+ * tells whether an earlier day still waits; days before its month are the API's to check.
+ */
+function sealNowBlock(detail: SealDayDetail, calendar: Calendar | undefined): string | null {
+  if (detail.sealed) return 'sealing.sealNow.blocked.sealed';
+  if (detail.state === 'open' || detail.state === 'future') return 'sealing.sealNow.blocked.open';
+  if (!SEALABLE.has(detail.state)) return 'sealing.sealNow.blocked.notApplicable';
+  const earlier = calendar?.days.find((cell) => cell.day < detail.day && SEALABLE.has(cell.state));
+  return earlier ? 'sealing.sealNow.blocked.notOldest' : null;
+}
+
+function useShownCalendar(): Calendar | undefined {
+  const client = useQueryClient();
+  const [params] = useSearchParams();
+  const month = params.get('month');
+  return client.getQueryData<Calendar>(
+    queryKeys.sealCalendar(month && MONTH.test(month) ? month : null),
+  );
+}
+
+/** The Seal task's outcome of a "Şimdi mühürle" request. */
+function SealOutcome({ request }: { request: AdminRequestOut }) {
+  const { t } = useTranslation();
+  const result = request.result as SealActionResult | null;
+  if (!result) return null;
+  return (
+    <p className="text-13 text-foreground" data-testid="seal-now-result">
+      {t(`sealing.sealNow.outcome.${result.status}`, {
+        day: formatDay(result.day),
+        defaultValue: result.message,
+      })}
+      {result.serial ? (
+        <span className="block font-mono text-xs text-muted-strong">
+          {t('sealing.sealNow.serial', { serial: result.serial })}
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
+/**
+ * "Şimdi mühürle" (`seal.manage`; contract 2.9): asks the Seal task, through the administration
+ * service, to seal the oldest closed unsealed day once without waiting for its retry time. The
+ * quiet window after midnight, the empty-day rule and the order of days are never bypassed.
+ * The request is followed until the task reports; the calendar and the day are read again.
+ */
+function SealNow({ detail, calendar }: { detail: SealDayDetail; calendar: Calendar | undefined }) {
+  const { t } = useTranslation();
+  const id = useId();
+  const client = useQueryClient();
+  const sealNow = useSealNow();
+  const [confirming, setConfirming] = useState(false);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const blocked = sealNowBlock(detail, calendar);
+  const earliest = calendar?.days.find((cell) => cell.day < detail.day && SEALABLE.has(cell.state));
+
+  async function start() {
+    setProblem(null);
+    try {
+      const accepted = await sealNow.mutateAsync(detail.day);
+      setRequestId(accepted.request_id);
+      setConfirming(false);
+    } catch (error) {
+      setConfirming(false);
+      setProblem(errorMessage(error));
+    }
+  }
+
+  const settled = useCallback(() => {
+    void client.invalidateQueries({ queryKey: queryKeys.sealsAll });
+    void client.invalidateQueries({ queryKey: queryKeys.credits });
+  }, [client]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div>
+        <Button
+          variant="secondary"
+          disabled={blocked !== null}
+          busy={sealNow.isPending}
+          aria-describedby={`${id}-seal-now`}
+          onClick={() => {
+            setConfirming(true);
+          }}
+        >
+          <Stamp aria-hidden="true" />
+          {t('sealing.sealNow.button')}
+        </Button>
+      </div>
+      <p id={`${id}-seal-now`} className="text-xs text-muted">
+        {blocked
+          ? t(blocked, { day: earliest ? formatDay(earliest.day) : '' })
+          : t('sealing.sealNow.hint')}
+      </p>
+      {problem ? <Alert tone="danger">{problem}</Alert> : null}
+      {requestId ? (
+        <RequestProgress
+          requestId={requestId}
+          quiet
+          onTerminal={settled}
+          renderResult={(request) => <SealOutcome request={request} />}
+        />
+      ) : null}
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={t('sealing.sealNow.confirmTitle', { day: formatDay(detail.day) })}
+        description={t('sealing.sealNow.confirmBody')}
+        confirmLabel={t('sealing.sealNow.button')}
+        busy={sealNow.isPending}
+        onConfirm={() => void start()}
+      />
+    </div>
+  );
+}
+
 /**
  * One day of the sealing page (spec 12.3 page 9): its state, the manifest, the time-stamp token
  * (genTime, serial, TSA, certificate validity, legal grade — a red banner when the stamp is not
  * legally valid, spec 21), the files exactly as sealed, the chain link, verifications, replica;
- * "Doğrula", "Manifesti indir", "Belirteci indir", and "Şimdi mühürle" disabled with the reason
- * the API gives (not available through the web service in this version).
+ * "Doğrula", "Manifesti indir", "Belirteci indir", and "Şimdi mühürle" for the day that is due.
  */
 export function SealDayPanel({ day }: { day: string }) {
   const { t } = useTranslation();
@@ -314,6 +442,7 @@ export function SealDayPanel({ day }: { day: string }) {
   const id = useId();
   const { can } = useAuth();
   const detail = useSealDay(day);
+  const calendar = useShownCalendar();
   const verify = useVerifySeal();
   const [deep, setDeep] = useState(true);
   const [download, setDownload] = useState<{ busy: string | null; problem: string | null }>({
@@ -441,11 +570,6 @@ export function SealDayPanel({ day }: { day: string }) {
             <Stamp aria-hidden="true" />
             {t('sealing.downloadToken')}
           </Button>
-          {can('seal.manage') ? (
-            <Button variant="secondary" disabled aria-describedby={`${id}-seal-now`}>
-              {t('sealing.sealNow.button')}
-            </Button>
-          ) : null}
         </div>
         {verify.isPending ? (
           <p className="text-xs text-muted" role="status">
@@ -455,11 +579,7 @@ export function SealDayPanel({ day }: { day: string }) {
         {result ? <VerifyOutcome result={result} /> : null}
         {verify.isError ? <Alert tone="danger">{errorMessage(verify.error)}</Alert> : null}
         {download.problem ? <Alert tone="danger">{download.problem}</Alert> : null}
-        {can('seal.manage') ? (
-          <p id={`${id}-seal-now`} className="text-xs text-muted">
-            {t('sealing.sealNow.explanation')}
-          </p>
-        ) : null}
+        {can('seal.manage') ? <SealNow detail={data} calendar={calendar} /> : null}
       </div>
 
       {data.seal_state ? (

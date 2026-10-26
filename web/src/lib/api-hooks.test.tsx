@@ -11,14 +11,18 @@ import {
   LICENSE_POLL_MS,
   LICENSE_STALE_MS,
   queryKeys,
+  useAdminRequest,
+  useApplySection,
   useAuditEntries,
   useImportCsv,
   useLicense,
+  usePatchSettings,
   usePollingQuery,
   useUpdatePerson,
   useUploadLicense,
   useUsers,
 } from './api-hooks';
+import type { AdminRequestOut } from './settings-types';
 
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={testQueryClient()}>{children}</QueryClientProvider>;
@@ -250,6 +254,103 @@ describe('person changes', () => {
       await result.current.update.mutateAsync({ id: 1, usage_excluded: true });
     });
     expect(stale()).toBe(true);
+    setCsrfCookie(null);
+  });
+});
+
+describe('browser administration (contract 2.10, 2.13)', () => {
+  function request(state: AdminRequestOut['state'], terminal: boolean): AdminRequestOut {
+    return {
+      id: '6f1c1a2b3c4d5e6f708192a3b4c5d6e7',
+      short_id: '6f1c1a2b',
+      kind: 'config.apply',
+      section: 'general',
+      state,
+      terminal,
+      label_tr: state,
+      label_en: state,
+      requested_by: 'tolga',
+      created_at: '2026-10-13T12:00:00Z',
+      updated_at: '2026-10-13T12:00:00Z',
+      effective_at: null,
+      version: null,
+      steps: [],
+      changes: {},
+      result: null,
+      error: null,
+      rolled_back: false,
+      warnings: [],
+      manual_steps_tr: null,
+      manual_steps_en: null,
+    };
+  }
+
+  it('follows a request in the background and stops at its terminal state', async () => {
+    let answered = 0;
+    const calls = installFetch(() => {
+      answered += 1;
+      return jsonResponse(
+        200,
+        answered >= 2 ? request('active', true) : request('applying', false),
+      );
+    });
+    const { result } = renderHook(() => useAdminRequest('6f1c1a2b3c4d5e6f708192a3b4c5d6e7'), {
+      wrapper,
+    });
+    await waitFor(
+      () => {
+        expect(result.current.data?.state).toBe('active');
+      },
+      { timeout: 4_000 },
+    );
+    const seen = calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(calls.length).toBe(seen);
+    expect(calls.map((call) => call.path)).toEqual(
+      Array.from({ length: seen }, () => '/api/v1/admin/requests/6f1c1a2b3c4d5e6f708192a3b4c5d6e7'),
+    );
+    expect(calls.every((call) => call.headers.get(BACKGROUND_HEADER) === '1')).toBe(true);
+  });
+
+  it('asks for nothing without a request id', async () => {
+    const calls = installFetch(() => jsonResponse(200, request('queued', false)));
+    renderHook(() => useAdminRequest(null), { wrapper });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toEqual([]);
+  });
+
+  it('sends each section to its own PUT and the settings as one PATCH', async () => {
+    setCsrfCookie('csrf-1');
+    const calls = installFetch((call) =>
+      call.method === 'PUT'
+        ? jsonResponse(202, { request_id: 'x', short_id: 'x', state: 'queued' })
+        : jsonResponse(200, { changed: [], unchanged: [] }),
+    );
+    const { result } = renderHook(() => ({ apply: useApplySection(), patch: usePatchSettings() }), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.apply.mutateAsync({
+        section: 'backup',
+        body: {
+          etag: 'backup:1',
+          enabled: true,
+          keep_daily: 7,
+          keep_weekly: 4,
+          keep_monthly: 6,
+          min_free_gb: 10,
+        },
+      });
+      await result.current.patch.mutateAsync({
+        changes: [{ key: 'auth.idle_minutes', old: 15, value: 20 }],
+      });
+    });
+    const sent = calls.filter((call) => call.method !== 'GET');
+    expect(sent.map((call) => `${call.method} ${call.path}`)).toEqual([
+      'PUT /api/v1/admin/config/backup',
+      'PATCH /api/v1/settings',
+    ]);
+    expect(sent.every((call) => call.headers.get('X-CSRF-Token') === 'csrf-1')).toBe(true);
     setCsrfCookie(null);
   });
 });
