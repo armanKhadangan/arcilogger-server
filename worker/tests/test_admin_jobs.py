@@ -36,14 +36,17 @@ from arcilogger_core.admin.contract import (
 )
 from arcilogger_core.admin.messages import MESSAGES
 from arcilogger_core.alerts import raise_alert
-from arcilogger_core.config import Config, ReplicaConfig
+from arcilogger_core.config import Config, ReplicaConfig, SmtpConfig
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, isoformat_site
 from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import Alert, AuditImport, AuditLog, Setting
+from arcilogger_db.settings import set_setting
 from arcilogger_worker.admin_jobs import import_admin_events, journal_events
 from arcilogger_worker.alerts.importer import ADMIN_FILES, OFFSET_KEY, import_alerts
+from arcilogger_worker.alerts.notify import run_notify
+from arcilogger_worker.alerts.smtptesting import FakeSmtp
 from arcilogger_worker.alerts.system import ADMIN_HEARTBEAT_KEY, AGENT_GRACE, run_system_checks
 from arcilogger_worker.alerts.texts import CONFIG_SECTIONS, describe, rule_text, runbook
 from arcilogger_worker.evidence_jobs import ImportReport, import_job_events
@@ -512,6 +515,53 @@ def test_a_configuration_change_names_the_section_and_fields_only() -> None:
     many = {"section": "sources", "paths": [f"sources.s{n}.enabled" for n in range(12)]}
     assert describe("R20-config-change", many)[0].endswith(", sources.s9.enabled, …).")
     assert describe("R20-config-change", {"section": "database"}) == describe("R20-x", {})
+
+
+def test_the_configuration_change_email_carries_only_whitelisted_facts(
+    admin: AdminLayout,
+    layout: Layout,
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    smtp_server: FakeSmtp,
+) -> None:
+    """The agent's alert goes through ``alerts.import`` and ``alerts.notify``: the e-mail names
+    the section and the field, never the values or who changed them."""
+    raise_alert(
+        admin.alerts,
+        "R20-config-change",
+        "high",
+        "SMTP sunucusu eski-sunucu.ornek.example oldu",
+        {
+            "section": "smtp",
+            "paths": ["smtp.host"],
+            "old": "eski-sunucu.ornek.example",
+            "new": "yeni-sunucu.ornek.example",
+            "requested_by": {"user_id": 3, "username": "ayse"},
+        },
+    )
+    import_alerts(sessions, layout, now=NOW, admin=admin)
+    for key, value in {
+        "alerts.email_recipients": ["nobet@ornek.example"],
+        "alerts.email_digest_seconds": 0,
+    }.items():
+        set_setting(db_session, key, value, updated_by="tolga")
+    db_session.commit()
+    smtp = SmtpConfig(
+        enabled=True,
+        host=smtp_server.host,
+        port=smtp_server.port,
+        security="none",
+        from_address="arcilogger@ornek.example",
+        timeout_seconds=2,
+    )
+    config = Config(data_dir=layout.root, secrets_dir=layout.root, smtp=smtp)
+    run_notify(sessions, config, now=NOW)
+    (mail,) = smtp_server.messages_to("nobet@ornek.example")
+    text, page = mail.part("plain"), mail.part("html")
+    assert "Yapılandırma değişti: E-posta" in text
+    assert "Configuration changed: E-mail (SMTP) (smtp.host)." in text
+    for leak in ("eski-sunucu", "yeni-sunucu", "ayse"):
+        assert leak not in text + page + str(mail.message["Subject"])
 
 
 def test_an_administration_problem_is_told_by_its_code() -> None:
