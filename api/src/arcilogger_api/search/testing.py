@@ -88,8 +88,26 @@ class Lines:
     _lines: dict[tuple[str, date], int] = field(default_factory=dict)
     written: list[Written] = field(default_factory=list)
 
-    def add(
+    def add(self, time: datetime, table: str | None = None, **values: Any) -> Written:
+        """One line of ``source`` at device time ``time``; ``table`` and the typed values: its
+        typed row (``None``: a ``messages`` row only). See :meth:`write`."""
+        with self.factory() as session:
+            written = self.write(session, time, table, **values)
+            session.commit()
+        return written
+
+    def many(
+        self, start: datetime, count: int, step: timedelta, table: str | None, **values: Any
+    ) -> list[Written]:
+        """``count`` lines ``step`` apart (newest last), in one transaction."""
+        with self.factory() as session:
+            found = [self.write(session, start + i * step, table, **values) for i in range(count)]
+            session.commit()
+        return found
+
+    def write(
         self,
+        session: Session,
         time: datetime,
         table: str | None = None,
         *,
@@ -105,8 +123,7 @@ class Lines:
         parse_error: str | None = None,
         **typed: Any,
     ) -> Written:
-        """One line of ``source`` at device time ``time``; ``table`` and ``typed``: its typed
-        row (``None``: a ``messages`` row only)."""
+        """One line in ``session`` (the caller commits)."""
         received = received or time
         day = site_day(received)
         number = self._lines.get((source, day), 0) + 1
@@ -128,40 +145,33 @@ class Lines:
             "raw_line": number,
             "raw_offset": (number - 1) * LINE_BYTES,
         }
-        with self.factory() as session:
-            message_id = session.execute(
-                insert(Base.metadata.tables["messages"])
-                .values(
-                    **common,
-                    type=type,
-                    subtype=subtype,
-                    text=text,
-                    host=host,
-                    severity=severity,
-                    program=program,
-                    parse_error=parse_error,
-                )
-                .returning(Base.metadata.tables["messages"].c.id)
+        messages = Base.metadata.tables["messages"]
+        message_id = session.execute(
+            insert(messages)
+            .values(
+                **common,
+                type=type,
+                subtype=subtype,
+                text=text,
+                host=host,
+                severity=severity,
+                program=program,
+                parse_error=parse_error,
+            )
+            .returning(messages.c.id)
+        ).scalar_one()
+        row_id = None
+        if table is not None:
+            values = {**REQUIRED.get(table, {}), **typed, **common}
+            found = Base.metadata.tables[table]
+            row_id = session.execute(
+                insert(found).values(**values).returning(found.c.id)
             ).scalar_one()
-            row_id = None
-            if table is not None:
-                values = {**REQUIRED.get(table, {}), **typed, **common}
-                found = Base.metadata.tables[table]
-                row_id = session.execute(
-                    insert(found).values(**values).returning(found.c.id)
-                ).scalar_one()
-            session.commit()
         written = Written(
             table, row_id, message_id, time, source, day, number, common["raw_offset"]
         )
         self.written.append(written)
         return written
-
-    def many(
-        self, start: datetime, count: int, step: timedelta, table: str | None, **values: Any
-    ) -> list[Written]:
-        """``count`` lines ``step`` apart (newest last)."""
-        return [self.add(start + i * step, table, **values) for i in range(count)]
 
 
 def sign_in(
