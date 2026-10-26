@@ -1,0 +1,5 @@
+{
+  "live": {
+    "description": "Kaynaklardan gelen satırlar, geldikleri anda: ham kayıttan okunur, veritabanını beklemez."
+  }
+}

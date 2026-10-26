@@ -1,0 +1,5 @@
+{
+  "live": {
+    "description": "Lines from the sources as they arrive, read from the raw log without waiting for the database."
+  }
+}

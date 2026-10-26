@@ -1,0 +1,5 @@
+{
+  "search": {
+    "description": "Kayıtlarda IP, MAC, alan adı, kullanıcı ve metinle arama; her sonuç ham satırına götürür."
+  }
+}

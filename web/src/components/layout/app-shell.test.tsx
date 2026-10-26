@@ -56,20 +56,37 @@ describe('AppShell', () => {
   });
 
   it.each(['admin', 'auditor'] as const)(
-    'shows %s no global search box while the Search page is a placeholder',
+    'shows %s the global search box (search.read): the Search page exists',
     async (role) => {
-      // The box would put IPs, MACs and names into the URL of a page that ignores them.
-      expect(BUILT_PAGES.has('search')).toBe(false);
+      expect(BUILT_PAGES.has('search')).toBe(true);
       signedInAs(role);
       renderApp('/');
-      await screen.findByRole('navigation', { name: 'Ana menü' });
-      expect(screen.queryByRole('search')).not.toBeInTheDocument();
-      expect(screen.queryByPlaceholderText(/IP, MAC, kişi/)).not.toBeInTheDocument();
+      const banner = await screen.findByRole('banner');
+      const search = within(banner).getByRole('search');
+      expect(within(search).getByRole('searchbox', { name: 'Genel arama' })).toBeInTheDocument();
     },
   );
 
-  it.each(['/', '/audit', '/lookup', '/evidence', '/sealing'])(
-    'shows no global time range on %s (no page reads it yet)',
+  it('shows hr no global search box (no search.read)', async () => {
+    signedInAs('hr');
+    renderApp('/');
+    await screen.findByRole('navigation', { name: 'Ana menü' });
+    expect(screen.queryByRole('search')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['/sources', 'Kaynaklar'],
+    ['/live', 'Canlı Akış'],
+    ['/search', 'Arama'],
+  ])('opens %s as a page of its own, not a placeholder', async (path, heading) => {
+    signedInAs('admin');
+    renderApp(path);
+    expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
+    expect(screen.queryByText('Bu sayfa sonraki bir sürümde eklenecek.')).not.toBeInTheDocument();
+  });
+
+  it.each(['/', '/sources', '/live', '/audit', '/lookup', '/evidence', '/sealing'])(
+    'shows no global time range on %s (only Arama has one)',
     async (path) => {
       signedInAs('admin');
       renderApp(path);
@@ -80,9 +97,16 @@ describe('AppShell', () => {
     },
   );
 
-  it('refuses a page the role may not open, even by URL', async () => {
-    signedInAs('hr');
-    renderApp('/audit');
+  it.each([
+    ['hr', '/audit'],
+    ['hr', '/search'],
+    ['hr', '/live'],
+    ['viewer', '/sources'],
+    // Kaynaklar is for administrators (`sources.read`); the auditor reads Arama and Canlı Akış.
+    ['auditor', '/sources'],
+  ] as const)('refuses %s the page %s, even by URL', async (role, path) => {
+    signedInAs(role);
+    renderApp(path);
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
     ).toBeInTheDocument();

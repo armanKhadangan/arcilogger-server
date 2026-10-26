@@ -1,4 +1,4 @@
-import { NAV_ITEMS, UI_KIT_ITEM, visibleNavItems } from '@/nav';
+import { BUILT_PAGES, NAV_ITEMS, UI_KIT_ITEM, visibleNavItems } from '@/nav';
 import { hasAny, isRole, PERMISSIONS, roleHas, roleLabel, ROLES } from '@/lib/permissions';
 
 function menuFor(role: string): string[] {
@@ -11,7 +11,7 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
     expect(menuFor('admin')).toEqual(NAV_ITEMS.map((item) => item.key));
   });
 
-  it('auditor: panel, search, lookup, usage (anonymous), sealing, evidence, audit', () => {
+  it('auditor: panel, live tail, search, lookup, usage (anonymous), sealing, evidence, audit', () => {
     expect(menuFor('auditor')).toEqual([
       'dashboard',
       'live',
@@ -46,6 +46,26 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
       (item) => item.permissions,
     );
     expect(used.filter((permission) => !known.has(permission))).toEqual([]);
+  });
+});
+
+describe('pages with content', () => {
+  it('leaves only Uyum Durumu and Sistem as placeholders', () => {
+    expect(NAV_ITEMS.filter((item) => !BUILT_PAGES.has(item.key)).map((item) => item.key)).toEqual([
+      'compliance',
+      'system',
+    ]);
+    const keys = new Set(NAV_ITEMS.map((item) => item.key));
+    expect([...BUILT_PAGES].filter((key) => !keys.has(key))).toEqual([]);
+  });
+
+  it('keeps Kaynaklar, Canlı Akış and Arama in 5651 Temel: no licence module locks them', () => {
+    const pages = NAV_ITEMS.filter((item) => ['sources', 'live', 'search'].includes(item.key));
+    expect(pages.map((item) => [item.key, item.path, item.module])).toEqual([
+      ['sources', '/sources', undefined],
+      ['live', '/live', undefined],
+      ['search', '/search', undefined],
+    ]);
   });
 });
 

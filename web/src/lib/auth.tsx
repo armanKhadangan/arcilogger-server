@@ -7,8 +7,9 @@
  * - `RequirePermission` guards one page; the menu hides what the user may not open
  *   (`visibleNavItems`). Both are conveniences: the API refuses with 403 anyway.
  * - `ApiEventsBridge` installs the global reactions of `lib/api.ts`: a 401 empties the query cache
- *   (no personal data stays in memory) and goes to the sign-in page — with "Oturumunuz zaman
- *   aşımına uğradı" when the server reports an idle or expired session.
+ *   and the hand-overs between pages (`lib/handoff.ts`), so no personal data stays in memory, and
+ *   goes to the sign-in page — with "Oturumunuz zaman aşımına uğradı" when the server reports an
+ *   idle or expired session. "Çıkış" (`useSignOut`) empties both too.
  * - The idle watch asks the server (in the background, so the question itself is not activity)
  *   once the idle time has passed without a request from the user: an unattended screen then
  *   closes itself instead of showing personal data until the next click.
@@ -28,6 +29,7 @@ import { ForbiddenPage } from '@/pages/forbidden-page';
 import { api, errorMessage, isApiError, lastForegroundRequestAt, setApiEventHandlers } from './api';
 import { queryKeys, useMe } from './api-hooks';
 import type { Me } from './api-types';
+import { handoff } from './handoff';
 import { hasAny } from './permissions';
 import { loginUrl, reasonFor } from './redirect';
 import { writePreference } from './storage';
@@ -193,6 +195,7 @@ export function ApiEventsBridge() {
         // Cancel first: a request still running must not put data back into the cache.
         void client.cancelQueries();
         client.clear();
+        handoff.clear();
         toLogin(sessionEndReason);
       },
       passwordChangeRequired: () => {
@@ -212,7 +215,10 @@ export function ApiEventsBridge() {
   return null;
 }
 
-/** "Çıkış": end the session on the server, forget every cached answer, go to sign-in. */
+/**
+ * "Çıkış": end the session on the server, forget every cached answer and hand-over, go to
+ * sign-in.
+ */
 export function useSignOut() {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -224,6 +230,7 @@ export function useSignOut() {
     }
     await client.cancelQueries();
     client.clear();
+    handoff.clear();
     void navigate('/login', { replace: true });
   }, [client, navigate]);
 }
