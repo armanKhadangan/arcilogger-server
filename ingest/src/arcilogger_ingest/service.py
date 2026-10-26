@@ -26,7 +26,8 @@ seconds for the dashboard.
 A changed ``[[sources]]`` in ``arcilogger.toml`` is taken without a restart (ADR-0014): between
 two batches the service drops what it read but did not load (it is read again), re-resolves
 every open stream for the new sources (offsets stay) and writes the sources, ``enabled``
-included, to the ``sources`` table. While the database is unavailable the file is looked at
+included, to the ``sources`` table (a removed source keeps its row, disabled and no longer
+expected). While the database is unavailable the file is looked at
 before every retry, so a change is taken (and its SHA-256 reported) within one retry interval;
 the batch waiting for the database is dropped and read again for the new sources, and the
 ``sources`` table follows once the database is back. A file that does not load keeps the
@@ -49,7 +50,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -427,7 +428,12 @@ class IngestService:
 
     def _sync_configured_sources(self) -> None:
         """Every configured exact source has a ``sources`` row, even before its first line, with
-        its configured values (``enabled = false``: R15 and the dashboard leave it out)."""
+        its configured values (``enabled = false``: R15 and the dashboard leave it out).
+
+        A row whose source is no longer configured (removed in the browser or by hand; neither
+        an ``unknown-<ip>`` sender nor a member of a configured network) is kept for its
+        history with ``enabled = false, expected = false``, in the same transaction: R15, the
+        dashboard and the lease watermark stop waiting for it."""
         with self.engine.begin() as connection:
             for source in self.config.sources:
                 if source.is_network:
@@ -444,6 +450,24 @@ class IngestService:
                 connection.execute(
                     statement.on_conflict_do_update(index_elements=["name"], set_=values)
                 )
+            watched = connection.scalars(
+                select(Source.name).where(
+                    Source.unknown.is_(False), Source.enabled.is_(True) | Source.expected.is_(True)
+                )
+            ).all()
+            removed = [name for name in watched if not self._configured(name)]
+            if removed:
+                connection.execute(
+                    update(Source)
+                    .where(Source.name.in_(removed))
+                    .values(enabled=False, expected=False)
+                )
+                log.info("sources no longer configured: %s", ", ".join(sorted(removed)))
+
+    def _configured(self, name: str) -> bool:
+        """A configured exact source, a member of a configured network or an unknown sender."""
+        info = resolve_source(self.config, name)
+        return info.config is not None or info.unknown or info.configured_type is not None
 
     # -- live reload of [[sources]] (ADR-0014) --------------------------------------------------
 

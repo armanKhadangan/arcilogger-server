@@ -10,14 +10,18 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, select, text
+from sqlalchemy.orm import Session
 
 from arcilogger_core.config import load_config
+from arcilogger_core.timeutil import utc_now
 from arcilogger_db.engine import engine_from_url
+from arcilogger_db.models import Alert
 from arcilogger_ingest.service import IngestService
 from arcilogger_ingest.status import read_status
 from arcilogger_ingest.testing import (
@@ -30,6 +34,7 @@ from arcilogger_ingest.testing import (
     fortigate_message,
     offsets,
 )
+from arcilogger_worker.alerts.r15 import check_silent_sources
 
 SWITCH: dict[str, Any] = {"name": "switch-2", "type": "mikrotik", "address": "172.20.10.22"}
 
@@ -202,6 +207,44 @@ def test_read_but_unloaded_lines_are_read_again_with_the_new_sources(
             text("SELECT DISTINCT type FROM messages WHERE source = 'switch-2'")
         ).all()
     assert [row[0] for row in kinds] == ["dhcp"]  # parsed as MikroTik lines
+
+
+def test_a_removed_source_is_no_longer_watched_by_r15(
+    world: World, db_engine: Engine, config_path: Path
+) -> None:
+    """A source removed from ``[[sources]]`` (the browser's ``source_remove``) keeps its row for
+    the history, disabled and no longer expected: R15 resolves its alert and opens none again.
+    Members of a configured network and unknown senders keep their rows as they were."""
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(10)))
+    world.append("ap-172.20.10.23", DAY, (dhcp_message(i) for i in range(5)), sender="172.20.10.23")
+    world.append("unknown-172.20.19.9", DAY, (dhcp_message(i) for i in range(5)))
+    later = utc_now() + timedelta(days=2)  # every watched source is silent by then
+    with running(world, db_engine, config_path):
+        wait_for(lambda: lines_loaded(db_engine, "unknown-172.20.19.9") == 5)
+        wait_for(lambda: lines_loaded(db_engine, "ap-172.20.10.23") == 5)
+        wait_for(lambda: lines_loaded(db_engine, "core-r1") == 10)
+        with Session(db_engine) as session:
+            report = check_silent_sources(
+                session, world.layout, now=later, started_at=later - timedelta(hours=1)
+            )
+            session.commit()
+        assert "core-r1" in report.opened
+        before = sources_table(db_engine)
+        rewrite(config_path, toml_of(world, [s for s in SOURCES if s["name"] != "core-r1"]))
+        wait_for(lambda: sources_table(db_engine)["core-r1"] == ("mikrotik", False, False))
+    after = sources_table(db_engine)
+    for name in ("fortigate", "ap-172.20.10.23", "unknown-172.20.19.9"):
+        assert after[name] == before[name]
+    with Session(db_engine) as session:
+        report = check_silent_sources(
+            session, world.layout, now=later, started_at=later - timedelta(hours=1)
+        )
+        session.commit()
+        assert report.resolved == ["core-r1"]
+        assert "core-r1" not in report.silent
+        state = session.scalar(select(Alert.state).where(Alert.dedup_key == "R15:core-r1"))
+    assert state == "resolved"
+    assert check_exactly_once(db_engine, world) == []
 
 
 @pytest.fixture
