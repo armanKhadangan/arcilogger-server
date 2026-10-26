@@ -56,7 +56,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -135,6 +135,12 @@ CONFIG_CAUSES: dict[str, tuple[str, str]] = {
     "provider": (
         "zaman damgası sağlayıcısının yapılandırması geçersiz ([tsa])",
         "the time-stamp provider configuration is invalid ([tsa])",
+    ),
+    "location": (
+        "arcilogger.toml içindeki secrets_dir ya da data_dir kurulumun klasörü değil (olası "
+        "kurcalama; dosyayı sunucuda denetleyin)",
+        "secrets_dir or data_dir in arcilogger.toml is not the installation's folder (possible "
+        "tampering; check the file on the server)",
     ),
 }
 #: Site day of the last :data:`CONFIG_ALERT` per cause, one ``<cause> <day>`` line each
@@ -923,7 +929,7 @@ class Sealer:
 
     # -- entry points ---------------------------------------------------------------------------
 
-    def seal_due(self) -> list[SealOutcome]:
+    def seal_due(self, requested: Mapping[date, str] | None = None) -> list[SealOutcome]:
         """Seal every closed day whose retry time has come, oldest first; stop at a failure.
 
         Provisional skips are reviewed first (:meth:`review_skips`), then signs of a clock
@@ -932,7 +938,13 @@ class Sealer:
         An empty day in a run of more than ``seal.max_consecutive_empty_days`` days is skipped
         instead of stamped. A day that ended less than ``seal.quiet_seconds`` ago is not due
         yet: the run stops there with ``waiting`` (no failed attempt, no alert).
+
+        ``requested`` maps a day to the signed seal request ("Şimdi mühürle", ADR-0014) that
+        asks for it: this run does not wait for that day's next retry time, and its attempt
+        records the request id (``requested``). Nothing else changes: the order, the quiet
+        window, the empty-run skip and the skipped and deleted days stay as they are.
         """
+        requested = requested or {}
         self.review_skips()
         self.check_clock_and_spool()
         outcomes = []
@@ -953,16 +965,19 @@ class Sealer:
                 )
                 break
             next_attempt = self.state(day).get("next_attempt_at")
-            if next_attempt and datetime.fromisoformat(next_attempt) > now:
+            waits = next_attempt and datetime.fromisoformat(next_attempt) > now
+            if waits and day not in requested:
                 outcomes.append(SealOutcome(day, "waiting", f"next attempt {next_attempt}"))
                 break
-            outcome = self.seal_day(day)
+            outcome = self.seal_day(day, requested=requested.get(day))
             outcomes.append(outcome)
             if outcome.status != SEALED:
                 break
         return outcomes
 
-    def seal_day(self, day: date) -> SealOutcome:
+    def seal_day(self, day: date, *, requested: str | None = None) -> SealOutcome:
+        """One attempt to seal ``day``; ``requested``: the id of the seal request it serves
+        (recorded with the attempt, otherwise an earlier attempt's id is removed)."""
         state = self.state(day)
         if state.get("status") == SEALED:
             return SealOutcome(day, SEALED, "already sealed")
@@ -971,6 +986,9 @@ class Sealer:
             return SealOutcome(day, status, f"{day} is {status}; it is not sealed on its own")
         state["attempts"] = int(state.get("attempts", 0)) + 1
         state["last_attempt_at"] = isoformat_site(self._clock(), "seconds")
+        state.pop("requested", None)
+        if requested is not None:
+            state["requested"] = requested
         try:
             result = self._seal(day, state)
         except (SealError, TsaError, OSError) as exc:

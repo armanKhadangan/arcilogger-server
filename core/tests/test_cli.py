@@ -148,6 +148,19 @@ def test_credit_tsa_test_and_retention(
     assert "kapalı" in capsys.readouterr().out
 
 
+def test_the_requests_task_command(
+    setup: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``python -I -m arcilogger_core requests run`` (task ``\\ARCILOGGER\\Requests``, every 5
+    minutes and on Event 4111): nothing to do is success, and it does nothing."""
+    assert run(setup, "requests", "run") == 0
+    assert capsys.readouterr().out == ""
+    assert not setup["layout"].requests.exists()
+    with pytest.raises(SystemExit) as caught:
+        main(["--config", setup["config"], "requests"])  # the action is required
+    assert caught.value.code == 2
+
+
 def test_replica_command(setup: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
     assert run(setup, "replica") == 0
     assert "kapalı" in capsys.readouterr().out

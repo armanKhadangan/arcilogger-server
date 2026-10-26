@@ -10,6 +10,9 @@ or the web application::
     arcilogger-core credit                           Kamu SM credit (kontör)
     arcilogger-core clock-check                      SNTP offset sample
     arcilogger-core tsa-test                         stamp and verify a random 1 KB file
+    arcilogger-core requests run                     the browser administration's signed
+                                                     requests: credit query, TSA test,
+                                                     replica test (ADR-0014)
     arcilogger-core secret init|set|list|delete      encrypted credentials (Kamu SM, database,
                                                      replica, SMTP)
     arcilogger-core status                           summary for monitoring
@@ -21,6 +24,10 @@ or the web application::
     arcilogger-core evidence verify PATH [--quick] [--json]  standalone verifier, no config
     arcilogger-core evidence purge [--keep-days 30]  delete old packages from exports/
     arcilogger-core version | info
+
+``seal`` also runs the browser administration's signed seal requests ("Şimdi mühürle"). Every
+command refuses a configuration whose ``secrets_dir`` or ``data_dir`` is not the installation's
+own folder (:func:`arcilogger_core.config.check_fixed_location`).
 
 Exit codes: 0 success, 1 a problem that needs attention, 2 usage or configuration error.
 """
@@ -37,18 +44,34 @@ import sys
 import tempfile
 import zipfile
 from collections.abc import Sequence
-from dataclasses import asdict
-from datetime import date, timedelta
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from arcilogger_core import PRODUCT_NAME, __version__
+from arcilogger_core.admin.contract import (
+    AdminLayout,
+    CreditResult,
+    SealResult,
+    TaskKind,
+    TaskRequest,
+    TaskResult,
+)
 from arcilogger_core.alerts import raise_alert
 from arcilogger_core.chain import sealed_days, verify_range
 from arcilogger_core.clockcheck import check_clock
-from arcilogger_core.config import Config, default_config_path, load_config, setup_problems
+from arcilogger_core.config import (
+    Config,
+    ConfigLocationError,
+    check_fixed_location,
+    default_config_path,
+    load_config,
+    setup_problems,
+)
 from arcilogger_core.credit import check_credit
 from arcilogger_core.evidence import (
     DEFAULT_KEEP_DAYS,
@@ -61,12 +84,13 @@ from arcilogger_core.evidence import (
     purge_expired,
     run_verifier,
 )
+from arcilogger_core.execpolicy import TrustAnchors
 from arcilogger_core.fmt import format_bytes, format_datetime
 from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.replica import probe, replicate_day, replicate_due
 from arcilogger_core.retention import run_retention
-from arcilogger_core.seal import Sealer, config_alert
+from arcilogger_core.seal import DELETED, SEALED, SKIPPED, Sealer, SealOutcome, config_alert
 from arcilogger_core.secretstore import (
     DATABASE_PASSWORD,
     KAMUSM_CUSTOMER,
@@ -79,6 +103,7 @@ from arcilogger_core.secretstore import (
     record_change,
 )
 from arcilogger_core.smbshare import connected
+from arcilogger_core.taskrequests import clean, finish, take, task_result
 from arcilogger_core.timeutil import SITE_TZ_NAME, isoformat_site, site_day, utc_now
 from arcilogger_core.tsa import make_provider, trusted_roots
 from arcilogger_core.tsa.base import TsaConfigurationError, TsaError
@@ -114,10 +139,22 @@ class App:
     def __init__(self, config_path: Path | None) -> None:
         self.config_path = config_path or default_config_path()
         self.config: Config = load_config(self.config_path)
+        check_fixed_location(self.config, self.config_path)
         self.layout = Layout(self.config.data_dir)
         self.secrets = SecretStore(
             self.config.secrets_dir / "secret.key", self.config.secrets_dir / "secrets.json"
         )
+
+    @cached_property
+    def anchors(self) -> TrustAnchors:
+        """What the executable policy trusts: the folder of the fixed configuration path and
+        its ``admin\\policy.json``, read once per run (ADR-0014, Day 0 note D0-2)."""
+        return TrustAnchors.of(self.config_path)
+
+    @property
+    def keys_dir(self) -> Path:
+        """``admin\\keys`` of the installation folder: they verify the task requests."""
+        return AdminLayout(self.anchors.root / "admin").keys
 
     def provider(self) -> Any:
         return make_provider(self.config, self.layout, self.secrets)
@@ -188,6 +225,9 @@ def _sealer(app: App) -> Sealer:
 
 
 def cmd_seal(args: argparse.Namespace, app: App) -> int:
+    # The browser's seal requests ("Şimdi mühürle"); a run for one --day leaves them waiting.
+    requests = [] if args.day else take(app.layout, "seal", app.keys_dir)
+    started = utc_now()
     try:
         sealer = _sealer(app)
     except SealConfigError as exc:
@@ -198,15 +238,61 @@ def cmd_seal(args: argparse.Namespace, app: App) -> int:
             config_alert(app.layout, exc.cause, exc.error)
         except OSError as write_error:
             log.error("could not write alert R20-seal-config: %s", write_error)
+        code = "executable_refused" if exc.cause == "executable" else "seal_failed"
+        for request in requests:
+            finish(app.layout, request, task_result(request, started_at=started, code=code))
         print(f"Hata: {exc}", file=sys.stderr)
         return 1
-    outcomes = [sealer.seal_day(args.day)] if args.day else sealer.seal_due()
+    if args.day:
+        outcomes = [sealer.seal_day(args.day)]
+    else:
+        wanted = {request.params.day: request.id for request in requests if request.params.day}
+        outcomes = sealer.seal_due(requested=wanted)
+        for request in requests:
+            finish(app.layout, request, _seal_result(sealer, request, outcomes, started))
+        clean(app.layout)
     if not outcomes:
         print("Mühürlenecek kapanmış gün yok.")
         return 0
     for outcome in outcomes:
         print(f"{outcome.day.isoformat()}  {outcome.status:8}  {outcome.message}")
     return 0 if all(o.status == "sealed" for o in outcomes) else 1
+
+
+def _seal_result(
+    sealer: Sealer, request: TaskRequest, outcomes: Sequence[SealOutcome], started: datetime
+) -> TaskResult:
+    """What this run did with the requested day; when it did not reach the day, why: the day
+    was sealed (or skipped, deleted) before, or an earlier day still waits."""
+    day = request.params.day
+    if day is None:  # pragma: no cover - a seal request always names its day (the model)
+        raise ValueError(f"seal request {request.id} names no day")
+    state = sealer.state(day)
+    outcome = next((o for o in outcomes if o.day == day), None)
+    if outcome is None:
+        status = str(state.get("status"))
+        outcome = (
+            SealOutcome(day, status, f"{day} is {status}")
+            if status in (SEALED, SKIPPED, DELETED)
+            else SealOutcome(day, "waiting", "an earlier day is not sealed yet")
+        )
+    sealed = outcome.status == SEALED
+    result = SealResult.model_validate(
+        {
+            "day": day,
+            "status": outcome.status,
+            "message": outcome.message,
+            "serial": state.get("serial") if sealed else None,
+            "gen_time": state.get("gen_time") if sealed else None,
+        }
+    )
+    if not sealed:
+        return task_result(request, started_at=started, code="seal_failed", result=result)
+    texts = (
+        f"{day.strftime('%d.%m.%Y')} günü mühürlendi ve doğrulandı.",
+        f"{day.isoformat()} was sealed and verified.",
+    )
+    return task_result(request, started_at=started, result=result, texts=texts)
 
 
 def cmd_verify(args: argparse.Namespace, app: App) -> int:
@@ -390,6 +476,75 @@ def cmd_tsa_test(_: argparse.Namespace, app: App) -> int:
         }
     )
     return 0 if result.ok else 1
+
+
+# -- the Requests task (ADR-0014; contract 2.9) ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TaskDone:
+    """What a task request did: ``code`` is None when it succeeded, ``texts`` then say what
+    (Turkish, English); ``result`` holds the facts (never a secret or a file path)."""
+
+    code: str | None
+    result: Any = None
+    texts: tuple[str, str] | None = None
+
+
+#: The code of a request of each kind that failed for a reason of its own.
+FAILURE_CODES: dict[TaskKind, str] = {
+    "seal": "seal_failed",
+    "credit": "credit_query_failed",
+    "tsa_test": "tsa_test_failed",
+    "replica_test": "replica_test_failed",
+}
+
+
+def run_credit_request(app: App) -> TaskDone:
+    """The credit query ("Kontör sorgula"): the daily credit check, now (``credit.jsonl``,
+    ``R20-credit``)."""
+    threshold = app.config.tsa.credit_alert_threshold
+    try:
+        provider = app.provider()
+    except (TsaError, SecretStoreError) as exc:
+        log.error("credit request: %s", exc)
+        return TaskDone("credit_query_failed")
+    credits = check_credit(provider, app.layout, threshold)
+    if credits is None:
+        return TaskDone("credit_query_failed")
+    return TaskDone(
+        None,
+        CreditResult(credits=credits, threshold=threshold, below_threshold=credits < threshold),
+        (
+            f"Kalan kontör: {credits} (uyarı eşiği {threshold}).",
+            f"Credits left: {credits} (alert threshold {threshold}).",
+        ),
+    )
+
+
+def cmd_requests(_: argparse.Namespace, app: App) -> int:
+    """``requests run``: every valid request of ``state\\requests\\tasks``, oldest first (the
+    task ``\\ARCILOGGER\\Requests``, woken by Event 4111 and every 5 minutes). Exit 0 when there
+    is none or all succeeded, 1 when one failed (its result says why)."""
+    runners = {"credit": run_credit_request}
+    failed = 0
+    for request in take(app.layout, "tasks", app.keys_dir):
+        started = utc_now()
+        runner = runners.get(request.kind)
+        try:
+            done = TaskDone(FAILURE_CODES[request.kind]) if runner is None else runner(app)
+        except Exception:  # one broken request must not keep the next one from running
+            log.exception("task request %s (%s) failed", request.id, request.kind)
+            done = TaskDone(FAILURE_CODES[request.kind])
+        result = task_result(
+            request, started_at=started, code=done.code, result=done.result, texts=done.texts
+        )
+        finish(app.layout, request, result)
+        log.info("task request %s (%s): %s", request.id, request.kind, done.code or "ok")
+        print(f"{request.id}  {request.kind:12}  {done.code or 'ok'}")
+        failed += done.code is not None
+    clean(app.layout)
+    return 1 if failed else 0
 
 
 def cmd_secret(args: argparse.Namespace, app: App) -> int:
@@ -628,6 +783,13 @@ def _build_parser() -> argparse.ArgumentParser:
     commands.add_parser("credit", help="query the Kamu SM credit")
     commands.add_parser("clock-check", help="measure the clock offset (SNTP)")
     commands.add_parser("tsa-test", help="stamp and verify a random file (uses 1 credit)")
+    requests = commands.add_parser(
+        "requests", help="signed requests of the browser administration (Requests task)"
+    )
+    request_commands = requests.add_subparsers(dest="requests_command", required=True)
+    request_commands.add_parser(
+        "run", help="run the waiting credit query, TSA test and replica test requests"
+    )
     commands.add_parser("status", help="summary for monitoring")
     config_check = commands.add_parser(
         "config-check", help="what a production configuration still lacks (exit 1: incomplete)"
@@ -695,6 +857,7 @@ HANDLERS = {
     "credit": cmd_credit,
     "clock-check": cmd_clock,
     "tsa-test": cmd_tsa_test,
+    "requests": cmd_requests,
     "secret": cmd_secret,
     "status": cmd_status,
     "config-check": cmd_config_check,
@@ -739,6 +902,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         app = App(args.config)
+    except ConfigLocationError as exc:
+        print(f"Hata: {exc}", file=sys.stderr)
+        if args.command == "seal":  # sealing stops: R20-seal-config, once a day
+            try:
+                config_alert(Layout(exc.data_root), "location", exc)
+            except OSError as write_error:
+                print(f"R20-seal-config yazılamadı: {write_error}", file=sys.stderr)
+        return 2
     except (OSError, ValidationError, ValueError) as exc:
         print(f"Yapılandırma okunamadı: {exc}", file=sys.stderr)
         return 2
