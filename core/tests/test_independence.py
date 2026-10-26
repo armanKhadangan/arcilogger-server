@@ -29,6 +29,12 @@ import sys
 import arcilogger_core.admin.contract, arcilogger_core.admin.envelope, arcilogger_core.admin.keys
 import arcilogger_core.admin.messages, arcilogger_core.execpolicy, arcilogger_core.configwatch
 import arcilogger_core.tsa.zamane_releases
+import arcilogger_core.admin.rules, arcilogger_core.admin.tomledit, arcilogger_core.admin.policy
+import arcilogger_core.admin.roots, arcilogger_core.admin.zamane, arcilogger_core.admin.store
+import arcilogger_core.admin.apply, arcilogger_core.admin.agent, arcilogger_core.admin.dispatch
+import arcilogger_core.admin.probe, arcilogger_core.admin.systemplan, arcilogger_core.admin.winapi
+import arcilogger_core.admin.testing, arcilogger_core.admin.__main__
+import arcilogger_core.tsa.preflight, arcilogger_core.smtp
 loaded = sorted(
     name for name in sys.modules
     if name.split(".")[0]
