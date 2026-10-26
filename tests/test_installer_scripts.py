@@ -54,6 +54,7 @@ from arcilogger_core import cli, timeutil
 from arcilogger_core.admin.contract import (
     AdminPolicy,
     DocumentError,
+    Event,
     JarsFile,
     SystemJournalLine,
     SystemPlan,
@@ -6503,10 +6504,17 @@ def test_database_provision_sql_on_a_timescaledb_server(engine: str, tmp_path: P
 # the installation includes the database, and the test checks what only the real accounts and
 # NTFS rights show: ingest, API and worker running as NT SERVICE\<name>; the API, through Caddy,
 # reading today's raw spool line and the sealing calendar (with no "problems": the calendar answers
-# 200 even when it may not list the spool); the Seal task, run by Task Scheduler as LOCAL SERVICE,
-# sealing yesterday (vault files, token, state, deny entry, spool day removed), and the API then
-# reading that day (raw line from the vault, its calendar state and day page from state\seal).
-# Without it the database steps are skipped (-SkipDatabase) as before.
+# 200 even when it may not list the spool); "Şimdi mühürle" through Caddy, the API and ArciAdmin
+# waking the Seal task, run by Task Scheduler as LOCAL SERVICE, which seals yesterday (vault
+# files, token, state, deny entry, spool day removed), and the API then reading that day (raw
+# line from the vault, its calendar state and day page from state\seal). Then the browser
+# administration of contract 3 (ADR-0014): a site name change reaching "active" (ArciAdmin
+# replaces arcilogger.toml and keeps its own entry on it), a log source the collector takes
+# without a restart and ApplySystem lets through the syslog rule within 2 minutes, "Kontör
+# sorgula" in the Requests task, the agent's entries in the Application log. The rollback goes
+# to a program without ArciAdmin, as to a version from before the browser administration: the
+# agent and its two tasks are removed, sealing goes on. Without the database the database steps
+# are skipped (-SkipDatabase) as before.
 
 E2E_BUNDLE = os.environ.get("ARCILOGGER_E2E_BUNDLE")
 E2E_DB = os.environ.get("ARCILOGGER_E2E_DB") == "1"
@@ -6515,10 +6523,11 @@ E2E_DB = os.environ.get("ARCILOGGER_E2E_DB") == "1"
 # a -File command line) or with -SkipDatabase.
 _E2E_INSTALL_SCRIPT = r"""
 param([string]$Installer, [string]$Mode, [string]$PlanPath, [string]$ServerAddress,
-    [string]$AdminAddress)
+    [string]$AdminAddress, [string]$SourceNetwork)
 $ErrorActionPreference = 'Stop'
 $parameters = @{ SkipTimeSetup = $true; MinFreeGB = 1; HealthWaitSeconds = 60 }
 if ($Mode) { $parameters[$Mode] = $true }
+if ($SourceNetwork) { $parameters['SourceNetwork'] = @($SourceNetwork -split ',') }
 if ($PlanPath) { $parameters['PlanPath'] = $PlanPath }
 if ($ServerAddress) { $parameters['ServerAddress'] = $ServerAddress }
 if ($AdminAddress) { $parameters['AdminAddress'] = @($AdminAddress) }
@@ -6537,9 +6546,10 @@ exit $LASTEXITCODE
 """
 
 # Runs \ARCILOGGER\Seal through Task Scheduler (as LOCAL SERVICE, from its registered definition)
-# and reports its result and the ACL of a sealed file.
+# and reports its result and the ACL of a sealed file. -NoStart: a run something else started
+# ("Şimdi mühürle": Event 4110 of ARCILOGGER-Admin), only waited for.
 _E2E_SEAL_SCRIPT = r"""
-param([string]$SealedFile, [string]$OutputPath, [int]$TimeoutSeconds = 600)
+param([string]$SealedFile, [string]$OutputPath, [int]$TimeoutSeconds = 600, [switch]$NoStart)
 $ErrorActionPreference = 'Stop'
 Remove-TypeData -TypeName System.Array -ErrorAction SilentlyContinue
 $path = '\ARCILOGGER\'
@@ -6551,18 +6561,21 @@ while ((Get-ScheduledTask -TaskPath $path -TaskName 'Seal').State -eq 'Running')
     if ([DateTime]::UtcNow -gt $deadline) { throw 'Seal is still running' }
     Start-Sleep -Seconds 2
 }
-$started = Get-Date
-Start-ScheduledTask -TaskPath $path -TaskName 'Seal'
-while ($true) {
-    $info = Get-ScheduledTaskInfo -TaskPath $path -TaskName 'Seal'
-    $state = [string](Get-ScheduledTask -TaskPath $path -TaskName 'Seal').State
-    $ran = $info.LastRunTime -ge $started.AddSeconds(-1) -and $info.LastRunTime -ne $before
-    if ($ran -and $state -ne 'Running') { break }
-    if ([DateTime]::UtcNow -gt $deadline) {
-        throw ('Seal did not finish: state {0}, last run {1}' -f $state, $info.LastRunTime)
+if (-not $NoStart) {
+    $started = Get-Date
+    Start-ScheduledTask -TaskPath $path -TaskName 'Seal'
+    while ($true) {
+        $info = Get-ScheduledTaskInfo -TaskPath $path -TaskName 'Seal'
+        $state = [string](Get-ScheduledTask -TaskPath $path -TaskName 'Seal').State
+        $ran = $info.LastRunTime -ge $started.AddSeconds(-1) -and $info.LastRunTime -ne $before
+        if ($ran -and $state -ne 'Running') { break }
+        if ([DateTime]::UtcNow -gt $deadline) {
+            throw ('Seal did not finish: state {0}, last run {1}' -f $state, $info.LastRunTime)
+        }
+        Start-Sleep -Seconds 2
     }
-    Start-Sleep -Seconds 2
 }
+$info = Get-ScheduledTaskInfo -TaskPath $path -TaskName 'Seal'
 $task = Get-ScheduledTask -TaskPath $path -TaskName 'Seal'
 $denies = @()
 if (Test-Path -LiteralPath $SealedFile) {
@@ -6647,10 +6660,48 @@ def _https_get(path: str, cafile: Path, cookie: str) -> tuple[int, str]:
         return error.code, error.read().decode("utf-8", "replace")
 
 
+def _https_send(
+    method: str, path: str, cafile: Path, cookie: str, body: Any = None
+) -> tuple[int, str]:
+    """POST/PUT/DELETE https://localhost<path> through Caddy as the web interface sends it: a
+    JSON body and the session's CSRF token in its header (double submit); (status, body)."""
+    from arcilogger_api.security import CSRF_COOKIE, CSRF_HEADER
+
+    csrf = next(
+        part.split("=", 1)[1] for part in cookie.split("; ") if part.startswith(f"{CSRF_COOKIE}=")
+    )
+    headers = {"Cookie": cookie, CSRF_HEADER: csrf, "Content-Type": "application/json"}
+    data = b"" if body is None else json.dumps(body).encode("utf-8")
+    context = ssl.create_default_context(cafile=str(cafile))
+    request = urllib.request.Request(
+        f"https://localhost{path}", data=data, headers=headers, method=method
+    )
+    try:
+        with urllib.request.urlopen(request, context=context, timeout=60) as response:
+            return response.status, response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode("utf-8", "replace")
+
+
+def _e2e_follow(accepted: str, cafile: Path, cookie: str, timeout: int) -> dict[str, Any]:
+    """The request a 202 answered (its ``status_url``) until it ends or ``timeout`` seconds
+    passed: the last answer of ``GET /admin/requests/{id}``."""
+    status_url = json.loads(accepted)["status_url"]
+    deadline = time.monotonic() + timeout
+    while True:
+        status, body = _https_get(status_url, cafile, cookie)
+        assert status == 200, (status_url, status, body)
+        request: dict[str, Any] = json.loads(body)
+        if request["terminal"] or time.monotonic() > deadline:
+            return request
+        time.sleep(3)
+
+
 def _e2e_database_checks(
     powershell: str, tmp_path: Path, data: Path, program_data: Path, marker: str, last: str
-) -> None:
-    """The database services, the API's rights and the Seal task under their real accounts."""
+) -> str:
+    """The database services, the API's rights and the Seal task under their real accounts.
+    Returns the Cookie header of the administrator's session."""
     state = _e2e_state(powershell, tmp_path)
     services = {service["name"]: service for service in state["services"]}
     for name in ("ArciIngest", "ArciApi", "ArciWorker"):
@@ -6675,8 +6726,23 @@ def _e2e_database_checks(
     for month in (today.strftime("%Y-%m"), previous_month):
         _e2e_calendar(month, cafile, cookie)
 
-    # Yesterday's spool day, sealed by the Seal task as LOCAL SERVICE.
+    # Yesterday's spool day, sealed by "Şimdi mühürle" (contract 3, Windows CI): its last
+    # attempt failed and the next one is hours away, so the Seal task's own 5-minute runs leave
+    # it alone. The API checks the day, ArciAdmin signs the task request and wakes the Seal task
+    # (Event 4110), which runs as LOCAL SERVICE and takes the request once.
     yesterday = today - timedelta(days=1)
+    now = timeutil.utc_now()
+    state_file = data / "state" / "seal" / f"{yesterday}.json"
+    failed_attempt = {
+        "day": yesterday.isoformat(),
+        "status": "pending",
+        "attempts": 1,
+        "last_attempt_at": timeutil.isoformat_site(now - timedelta(minutes=5), "seconds"),
+        "last_error": "the time-stamp server did not answer",
+        "last_error_code": "tsa_unavailable",
+        "next_attempt_at": timeutil.isoformat_site(now + timedelta(hours=3), "seconds"),
+    }
+    state_file.write_text(json.dumps(failed_attempt), encoding="utf-8")
     received = datetime(
         yesterday.year, yesterday.month, yesterday.day, 12, 0, tzinfo=timeutil.SITE_TZ
     )
@@ -6687,22 +6753,31 @@ def _e2e_database_checks(
     os.utime(day_file, (quiet.timestamp(), quiet.timestamp()))
     vault_day = data / "vault" / f"{yesterday:%Y}" / f"{yesterday:%m}" / f"{yesterday:%d}"
     sealed = vault_day / "local.log.gz"
+    _e2e_wait_for_agent(cafile, cookie, last)
+    status, body = _https_send("POST", f"/api/v1/seals/{yesterday}/seal", cafile, cookie)
+    assert status == 202, ("seal now", status, body, last)
+    # The Seal task takes a request at once, or in its next 5-minute run when one was busy.
+    seal_now = _e2e_follow(body, cafile, cookie, timeout=900)
+    alerts = data / "state" / "alerts.jsonl"
+    detail = alerts.read_text(encoding="utf-8")[-4000:] if alerts.is_file() else "(no alerts)"
+    assert seal_now["state"] == "succeeded", (seal_now, detail)
+    assert seal_now["result"]["status"] == "sealed", seal_now
     script = write_script(tmp_path / "e2e-seal.ps1", _E2E_SEAL_SCRIPT)
     out = tmp_path / "e2e-seal.json"
     result = run_powershell(
-        powershell, script, "-SealedFile", str(sealed), "-OutputPath", str(out), timeout=900
-    )
+        powershell, script, "-SealedFile", str(sealed), "-OutputPath", str(out), "-NoStart",
+        timeout=900,
+    )  # fmt: skip
     assert result.returncode == 0, result.stdout + result.stderr
     report = read_json(out)
     assert report["user_sid"] == "S-1-5-19", report  # LOCAL SERVICE
-    alerts = data / "state" / "alerts.jsonl"
-    detail = alerts.read_text(encoding="utf-8")[-4000:] if alerts.is_file() else "(no alerts)"
     assert report["last_result"] == 0, (report, detail)
     assert sealed.is_file(), (sorted(p.name for p in vault_day.glob("*")), detail)
     assert (vault_day / f"manifest-{yesterday}.json").is_file()
     assert (vault_day / f"manifest-{yesterday}.json.zd").is_file()
-    seal_state = json.loads((data / "state" / "seal" / f"{yesterday}.json").read_text("utf-8"))
+    seal_state = json.loads(state_file.read_text("utf-8"))
     assert seal_state["status"] == "sealed", seal_state
+    assert seal_state["requested"], "the day records the seal request it served"
     assert not day_file.exists(), "the sealed spool day is removed"
     assert "S-1-1-0" in report["deny_sids"], "the sealed file carries the Everyone deny entry"
     # The API reads the sealed day from the vault, and its seal state from state\seal.
@@ -6714,6 +6789,7 @@ def _e2e_database_checks(
     status, body = _https_get(f"/api/v1/seals/{yesterday}", cafile, cookie)
     assert status == 200, ("sealed day", status, body)
     assert json.loads(body)["problems"] == [], body
+    return cookie
 
 
 def _e2e_calendar(month: str, cafile: Path, cookie: str) -> dict[str, dict[str, Any]]:
@@ -6757,7 +6833,8 @@ $report = [ordered]@{ services = $services; tasks = $tasks; rules = $rules }
 
 # The rights and registrations of the browser administration (contract 2.2, 2.16) as Windows
 # reports them: the allow entries of each path, whether it is protected, the event source and the
-# accounts of the Requests and ApplySystem tasks.
+# events written under it, the accounts and last results of the Requests, ApplySystem and Seal
+# tasks, and the senders of the two syslog rules (RemoteAddress).
 _E2E_ADMIN_SCRIPT = r"""
 param([string[]]$Paths, [string]$OutputPath)
 $ErrorActionPreference = 'Stop'
@@ -6785,18 +6862,38 @@ $log = $null
 if ([System.Diagnostics.EventLog]::SourceExists($source)) {
     $log = [System.Diagnostics.EventLog]::LogNameFromSourceName($source, '.')
 }
+$events = @()
+if ($log) {
+    $events = @(Get-WinEvent -FilterHashtable @{ LogName = $log; ProviderName = $source } `
+            -MaxEvents 1000 -ErrorAction SilentlyContinue | Where-Object { $_ } |
+            ForEach-Object { [int]$_.Id })
+}
 $principals = [ordered]@{}
+$results = [ordered]@{}
 foreach ($name in @('Requests', 'ApplySystem', 'Seal')) {
     $task = Get-ScheduledTask -TaskPath '\ARCILOGGER\' -TaskName $name -ErrorAction SilentlyContinue
-    if (-not $task) { $principals[$name] = $null; continue }
+    if (-not $task) { $principals[$name] = $null; $results[$name] = $null; continue }
     $user = [string]$task.Principal.UserId
     if ($user -notmatch '^S-1-') {
         $account = New-Object System.Security.Principal.NTAccount -ArgumentList $user
         $user = $account.Translate($sid).Value
     }
     $principals[$name] = $user
+    $info = Get-ScheduledTaskInfo -TaskPath '\ARCILOGGER\' -TaskName $name
+    $results[$name] = [int64]$info.LastTaskResult
 }
-$report = [ordered]@{ acl = $acl; event_log = $log; principals = $principals }
+$syslog = [ordered]@{}
+foreach ($name in @('ARCILOGGER Syslog UDP', 'ARCILOGGER Syslog TCP')) {
+    $rules = @(Get-NetFirewallRule -Group 'ARCILOGGER' -ErrorAction SilentlyContinue |
+            Where-Object { $_ -and [string]$_.DisplayName -eq $name })
+    $syslog[$name] = @($rules | Get-NetFirewallAddressFilter |
+            ForEach-Object { @($_.RemoteAddress) } | Where-Object { $_ } |
+            ForEach-Object { [string]$_ })
+}
+$report = [ordered]@{
+    acl = $acl; event_log = $log; events = $events; principals = $principals; results = $results
+    syslog = $syslog
+}
 [System.IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 6))
 """
 
@@ -6809,8 +6906,9 @@ E2E_WRITE_RIGHTS = (
 def _e2e_admin_state(powershell: str, tmp_path: Path, paths: list[Path]) -> dict[str, Any]:
     script = write_script(tmp_path / "e2e-admin.ps1", _E2E_ADMIN_SCRIPT)
     out = tmp_path / f"e2e-admin-{time.monotonic_ns()}.json"
-    names = ",".join(str(path) for path in paths)
-    result = run_powershell(powershell, script, "-Paths", names, "-OutputPath", str(out))
+    # An empty text after -Paths would not reach a -File script as an argument at all.
+    names = ["-Paths", ",".join(str(path) for path in paths)] if paths else []
+    result = run_powershell(powershell, script, *names, "-OutputPath", str(out))
     assert result.returncode == 0, result.stdout + result.stderr
     state: dict[str, Any] = read_json(out)
     return state
@@ -6872,6 +6970,106 @@ def _e2e_check_admin_rights(
         "ApplySystem": WELL_KNOWN["system"],
         "Seal": WELL_KNOWN["local_service"],
     }, (state, log)
+
+
+#: The organisation's name and the log source the real installation test sets in the browser
+#: (the fictional example network's firewall: nothing sends from it on the runner).
+E2E_SITE_NAME = "Örnek A.Ş. (Windows CI)"
+E2E_SOURCE = {
+    "name": "firewall-01",
+    "type": "fortigate",
+    "address": "172.20.10.1",
+    "heartbeat_minutes": 15,
+    "expected": False,
+    "transport": "any",
+    "enabled": True,
+}
+#: The senders the runner's installation allows (-SourceNetwork, admin\policy.json): its one
+#: source sends from 127.0.0.1, which RFC 1918 alone would leave out of the syslog rules.
+E2E_SOURCE_NETWORKS = "127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+
+def _e2e_json(path: str, cafile: Path, cookie: str) -> dict[str, Any]:
+    status, body = _https_get(path, cafile, cookie)
+    assert status == 200, (path, status, body)
+    found: dict[str, Any] = json.loads(body)
+    return found
+
+
+def _e2e_wait_for_agent(cafile: Path, cookie: str, log: str) -> None:
+    """ArciAdmin's heartbeat is fresh (``GET /admin/status``): until then the API answers
+    ``admin_agent_unavailable`` (contract 2.16)."""
+    deadline = time.monotonic() + 120
+    while (agent := _e2e_json("/api/v1/admin/status", cafile, cookie)["agent"])["state"] != "ok":
+        assert time.monotonic() < deadline, (agent, log)
+        time.sleep(5)
+
+
+def _e2e_browser_administration(
+    powershell: str, tmp_path: Path, data: Path, program_data: Path, cookie: str, log: str
+) -> None:
+    """Contract 3, Windows CI: the browser administration through Caddy and the API, applied
+    by ArciAdmin, ApplySystem and the Requests task under their real accounts and rights."""
+    cafile = program_data / "caddy-root.crt"
+    config = program_data / "arcilogger.toml"
+    _e2e_wait_for_agent(cafile, cookie, log)
+
+    def submit(method: str, path: str, body: Any = None) -> str:
+        status, text = _https_send(method, path, cafile, cookie, body)
+        assert status == 202, (method, path, status, text, log)
+        return text
+
+    def etag(section: str) -> str:
+        found: str = _e2e_json("/api/v1/admin/config", cafile, cookie)["etags"][section]
+        return found
+
+    # 1. The site name: ArciAdmin replaces arcilogger.toml (ReplaceFileW), the API and the worker
+    #    load it without a restart, and the file keeps ArciAdmin's explicit entry.
+    before = sha256_bytes(config.read_bytes())
+    accepted = submit(
+        "PUT", "/api/v1/admin/config/general",
+        {"etag": etag("general"), "site_name": E2E_SITE_NAME},
+    )  # fmt: skip
+    done = _e2e_follow(accepted, cafile, cookie, timeout=300)
+    assert done["state"] == "active", (done, log)
+    assert tomllib.loads(config.read_text(encoding="utf-8"))["site_name"] == E2E_SITE_NAME
+    assert sha256_bytes(config.read_bytes()) != before
+    assert _e2e_json("/api/v1/auth/me", cafile, cookie)["site_name"] == E2E_SITE_NAME
+    _e2e_check_admin_rights(powershell, tmp_path, program_data, data, log)
+    # NT SERVICE\ArciAdmin writes the Application log: its start and the applied change.
+    events = set(_e2e_admin_state(powershell, tmp_path, [])["events"])
+    assert {int(Event.AGENT_STARTED), int(Event.CHANGE_APPLIED)} <= events, (events, log)
+
+    # 2. A log source: the collector takes it without a restart (its status reports the new
+    #    file), and ApplySystem then adds the sender to both syslog rules, in place, within two
+    #    minutes of the request.
+    address = str(E2E_SOURCE["address"])
+    syslog = _e2e_admin_state(powershell, tmp_path, [])["syslog"]
+    assert all(address not in senders for senders in syslog.values()), (syslog, log)
+    started = time.monotonic()
+    accepted = submit(
+        "POST", "/api/v1/admin/config/sources", {"etag": etag("sources"), "source": E2E_SOURCE}
+    )
+    while not all(address in senders for senders in syslog.values()):
+        assert time.monotonic() - started < 120, (syslog, log)
+        time.sleep(5)
+        syslog = _e2e_admin_state(powershell, tmp_path, [])["syslog"]
+    assert all("127.0.0.1" in senders for senders in syslog.values()), (syslog, log)
+    collector = json.loads((data / "state" / "collector-status.json").read_bytes())
+    assert collector["config"]["sha256"] == sha256_bytes(config.read_bytes()), collector
+    done = _e2e_follow(accepted, cafile, cookie, timeout=300)
+    assert done["state"] == "active", (done, log)
+    steps = {step["step"]: step["state"] for step in done["steps"]}
+    assert (steps["reload.collector"], steps["system.firewall"]) == ("done", "done"), steps
+
+    # 3. "Kontör sorgula": the Requests task (LOCAL SERVICE, Event 4111) asks the mock provider.
+    done = _e2e_follow(submit("POST", "/api/v1/credits/query"), cafile, cookie, timeout=900)
+    assert done["state"] == "succeeded", (done, log)
+    assert done["result"]["credits"] >= 0, done
+    state = _e2e_admin_state(powershell, tmp_path, [])
+    assert state["results"]["Requests"] == 0, (state["results"], log)
+    expected = {int(Event.SEAL_REQUESTED), int(Event.TASK_REQUESTED), int(Event.SYSTEM_SYNC_RESULT)}
+    assert expected <= set(state["events"]), (state["events"], log)
 
 
 def _e2e_state(powershell: str, tmp_path: Path) -> dict[str, Any]:
@@ -6939,7 +7137,7 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         return text
 
     def run(
-        bundle: Path, mode: str = "", server: str = "", admin: str = ""
+        bundle: Path, mode: str = "", server: str = "", admin: str = "", networks: str = ""
     ) -> subprocess.CompletedProcess[str]:
         script = bundle / "installer" / "Install-Arcilogger.ps1"
         plan = tmp_path / f"e2e-plan-{len(plans)}.json"
@@ -6950,6 +7148,8 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
             arguments += ["-ServerAddress", server]
         if admin:
             arguments += ["-AdminAddress", admin]
+        if networks:
+            arguments += ["-SourceNetwork", networks]
         result = run_powershell(powershell, wrapper, *arguments, timeout=1800)
         record(f"-{mode}" if mode else "(install)", result)
         plans.append(read_json(plan) if plan.is_file() else {"warnings": [], "missing": True})
@@ -6986,8 +7186,9 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
     try:
         # 1. Fresh installation from the bundle the build produced. The runner's adapters are not
         #    known in advance, so the address is given (later runs use the remembered one); the
-        #    admin PC has no default either (a documentation address: nobody connects from it).
-        result = run(first, server="127.0.0.1", admin="192.0.2.10")
+        #    admin PC has no default either (a documentation address: nobody connects from it);
+        #    the source networks of the browser administration include the local sender.
+        result = run(first, server="127.0.0.1", admin="192.0.2.10", networks=E2E_SOURCE_NETWORKS)
         assert result.returncode in (0, 1), last()
         assert check("site-name")["status"] == "ok", last()
         assert check("ntp-server")["status"] == "warn", last()
@@ -7015,6 +7216,7 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         _e2e_check_admin_rights(powershell, tmp_path, program_data, data, last())
         policy = parse_document(AdminPolicy, (program_data / "admin" / "policy.json").read_bytes())
         assert policy.enabled is True, last()
+        assert ",".join(policy.source_networks) == E2E_SOURCE_NETWORKS, last()
         recorded = (program_data / "data-root.txt").read_text(encoding="utf-8").strip()
         assert Path(recorded) == data, (recorded, last())
         assert {"ARCILOGGER Syslog UDP", "ARCILOGGER HTTPS"} <= set(state["rules"]), last()
@@ -7032,7 +7234,8 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
         if E2E_DB:
             # With the database every service must be healthy (a version warning is fine).
             assert health_warnings() == [], last()
-            _e2e_database_checks(powershell, tmp_path, data, program_data, marker, last())
+            cookie = _e2e_database_checks(powershell, tmp_path, data, program_data, marker, last())
+            _e2e_browser_administration(powershell, tmp_path, data, program_data, cookie, last())
 
         # 2. Upgrade to another bundle: the previous version is kept.
         second = _bundle_variant(first, tmp_path / "second", "second")
@@ -7049,11 +7252,37 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
             assert list((data / "backups" / "db").glob("*.dump")), last()
             assert health_warnings() == [], last()
 
-        # 3. Rollback to it.
+        # 3. Rollback to it, as to a version from before the browser administration (contract
+        #    2.16): the kept program loses the agent's service definition, its two tasks and
+        #    ApplySystem's script. The rollback stops and removes ArciAdmin, the tasks follow the
+        #    restored program, and sealing goes on.
+        kept = Path(f"{program}.previous")
+        for part in (
+            "services/ArciAdmin.exe", "services/ArciAdmin.xml", "tasks/Requests.xml",
+            "tasks/ApplySystem.xml", "scripts/Sync-ArciSystem.ps1",
+        ):  # fmt: skip
+            (kept / part).unlink()
         result = run(second, "Rollback")
         assert result.returncode in (0, 1), last()
         assert fingerprint() == first_fingerprint, last()
         assert siblings("rolled-back-"), last()
+        warnings = [str(warning) for warning in plans[-1].get("warnings", [])]
+        assert any(warning.startswith("ArciAdmin:") for warning in warnings), last()
+        state = _e2e_state(powershell, tmp_path)
+        services = {service["name"]: service for service in state["services"]}
+        assert "ArciAdmin" not in services, (services, last())
+        assert services["ArciCollector"]["state"] == "Running", last()
+        tasks = {task["name"]: task["state"] for task in state["tasks"]}
+        assert not {"Requests", "ApplySystem"} & set(tasks), (tasks, last())
+        assert tasks["Seal"] != "Disabled", (tasks, last())
+        script = write_script(tmp_path / "e2e-seal.ps1", _E2E_SEAL_SCRIPT)
+        out = tmp_path / "e2e-seal-rollback.json"
+        sealing = run_powershell(
+            powershell, script, "-SealedFile", str(tmp_path / "none"), "-OutputPath", str(out),
+            timeout=900,
+        )  # fmt: skip
+        assert sealing.returncode == 0, sealing.stdout + sealing.stderr
+        assert read_json(out)["last_result"] == 0, (read_json(out), last())
 
         # 4. A broken upgrade puts the running version back by itself.
         third = _bundle_variant(first, tmp_path / "third", "third", broken=True)
