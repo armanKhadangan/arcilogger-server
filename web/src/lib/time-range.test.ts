@@ -100,9 +100,9 @@ describe('the range in the address', () => {
       preset: '1h',
     });
     // No time zone: refused (the API needs one).
-    expect(rangeFromParams(new URLSearchParams('from=2026-10-09T10:00&to=2026-10-09T11:00'))).toEqual(
-      { preset: '24h' },
-    );
+    expect(
+      rangeFromParams(new URLSearchParams('from=2026-10-09T10:00&to=2026-10-09T11:00')),
+    ).toEqual({ preset: '24h' });
   });
 
   it('writes a range and keeps the other parameters (a saved search)', () => {

@@ -79,7 +79,10 @@ function dayBefore(day: string): string {
  * others ending now — rounded up to the next whole second, so nothing logged in this second is
  * left out.
  */
-export function resolvePreset(preset: RangePreset, now: Date = new Date()): {
+export function resolvePreset(
+  preset: RangePreset,
+  now: Date = new Date(),
+): {
   from: string;
   to: string;
 } {
@@ -93,7 +96,10 @@ export function resolvePreset(preset: RangePreset, now: Date = new Date()): {
 }
 
 /** The absolute range a search runs on. */
-export function resolveRange(range: TimeRange, now: Date = new Date()): { from: string; to: string } {
+export function resolveRange(
+  range: TimeRange,
+  now: Date = new Date(),
+): { from: string; to: string } {
   return 'preset' in range ? resolvePreset(range.preset, now) : { from: range.from, to: range.to };
 }
 

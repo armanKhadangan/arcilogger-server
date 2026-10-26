@@ -1,12 +1,14 @@
 import { ApiError } from '@/lib/api';
+import {
+  SEARCH_AUTO_CONTINUES as AUTO_CONTINUES,
+  SEARCH_VIEW_ROWS as MAX_VIEW_ROWS,
+} from '@/lib/search-hooks';
 
 import {
   addClause,
-  AUTO_CONTINUES,
   completions,
   evidenceHandoff,
   fieldNames,
-  MAX_VIEW_ROWS,
   normalizeMac,
   problemOf,
   quoteValue,
@@ -57,8 +59,11 @@ describe('clauses of the query text', () => {
   });
 
   it('finds the clauses, quotes and escapes respected', () => {
-    const q = 'srcip:172.20.42.57 -action:deny "login failure" NOT type:web department:"İdari \\"İşler\\""';
-    expect(splitClauses(q).map(({ text, negated, field, value }) => [text, negated, field, value])).toEqual([
+    const q =
+      'srcip:172.20.42.57 -action:deny "login failure" NOT type:web department:"İdari \\"İşler\\""';
+    expect(
+      splitClauses(q).map(({ text, negated, field, value }) => [text, negated, field, value]),
+    ).toEqual([
       ['srcip:172.20.42.57', false, 'srcip', '172.20.42.57'],
       ['-action:deny', true, 'action', 'deny'],
       ['"login failure"', false, null, '"login failure"'],
@@ -116,11 +121,9 @@ describe('completions', () => {
 
   it('offers the values found for a field, the kinds and the sources', () => {
     const facets = stats().facets;
-    expect(completions('type:', 5, CATALOGUE, facets, 'tr')?.items.map((item) => item.insert)).toEqual([
-      'type:traffic',
-      'type:dhcp',
-      'type:web',
-    ]);
+    expect(
+      completions('type:', 5, CATALOGUE, facets, 'tr')?.items.map((item) => item.insert),
+    ).toEqual(['type:traffic', 'type:dhcp', 'type:web']);
     expect(completions('kaynak:co', 9, CATALOGUE, facets, 'tr')?.items).toEqual([
       { insert: 'kaynak:core-r1', label: 'core-r1' },
     ]);
@@ -202,7 +205,15 @@ describe('refusals', () => {
       end: 13,
     });
     expect(
-      problemOf(new ApiError({ status: 422, code: 'validation_error', messageTr: '', messageEn: '', details: [] })),
+      problemOf(
+        new ApiError({
+          status: 422,
+          code: 'validation_error',
+          messageTr: '',
+          messageEn: '',
+          details: [],
+        }),
+      ),
     ).toBeNull();
     expect(problemOf(new Error('x'))).toBeNull();
   });
@@ -210,16 +221,19 @@ describe('refusals', () => {
 
 describe('the hand-over to the evidence wizard', () => {
   it('lists the lines and the days they span', () => {
-    const handed = evidenceHandoff(page({ query: { normalized: 'type:dhcp', clauses: [], text: [] } }), {
-      refs: [
-        { source: 'fortigate', day: '2026-10-09', line: 27, offset: 10260 },
-        { source: 'core-r1', day: '2026-10-08', line: 5, offset: 635 },
-      ],
-      truncated: true,
-      complete: false,
-      unsealed_days: ['2026-10-09', '2026-10-08'],
-      sha256: 'a'.repeat(64),
-    });
+    const handed = evidenceHandoff(
+      page({ query: { normalized: 'type:dhcp', clauses: [], text: [] } }),
+      {
+        refs: [
+          { source: 'fortigate', day: '2026-10-09', line: 27, offset: 10260 },
+          { source: 'core-r1', day: '2026-10-08', line: 5, offset: 635 },
+        ],
+        truncated: true,
+        complete: false,
+        unsealed_days: ['2026-10-09', '2026-10-08'],
+        sha256: 'a'.repeat(64),
+      },
+    );
     expect(handed).toEqual({
       extract: [
         { day: '2026-10-09', source: 'fortigate', line: 27 },

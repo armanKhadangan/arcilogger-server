@@ -12,6 +12,7 @@ import { isApiError } from '@/lib/api';
 import type { DateString, RawLine } from '@/lib/api-types';
 import { endpoint, siteDateTime, visibleText } from '@/lib/display';
 import type { HandoffPayloads } from '@/lib/handoff';
+import { SEARCH_AUTO_CONTINUES, SEARCH_VIEW_ROWS } from '@/lib/search-hooks';
 import type {
   CatalogueField,
   FieldCatalogue,
@@ -21,18 +22,13 @@ import type {
   SearchRow,
 } from '@/lib/search-types';
 
-/** Rows a page asks for (contract R30: requests up to `search.page_size_max`, the web 100). */
-export const PAGE_SIZE = 100;
-/** Most rows kept in view; beyond them the query should be narrowed (or exported). */
-export const MAX_VIEW_ROWS = 2_000;
-/** Times a partial scan continues on its own before it waits for "Devam et". */
-export const AUTO_CONTINUES = 5;
 /** The evidence extract's maximum (`routers.evidence.MAX_EXTRACT_LINES`). */
 export const MAX_REFS = 10_000;
 
 // -- the top bar's term ---------------------------------------------------------------------------
 
-const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(\/([12]?\d|3[0-2]))?$/;
+const IPV4 =
+  /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(\/([12]?\d|3[0-2]))?$/;
 const MAC_HEX = /^[0-9a-f]{12}$/i;
 const MAC_FORMS = [
   /^[0-9a-f]{2}([:-])[0-9a-f]{2}(\1[0-9a-f]{2}){4}$/i,
@@ -149,7 +145,7 @@ const FOLD_TO = 'abcdefghijklmnopqrstuvwxyziişğüöçâîû';
  * (`arcilogger_api.textfold.fold`): ASCII capitals to lower case, `İ I ı` → `i`, `Ş` → `ş`, …
  */
 export function fold(text: string): string {
-  return [...text].map((char) => FOLD_TO[FOLD_FROM.indexOf(char)] ?? char).join('');
+  return text.replace(/[A-ZİıŞĞÜÖÇÂÎÛ]/g, (char) => FOLD_TO[FOLD_FROM.indexOf(char)] ?? char);
 }
 
 /** The text of a written value without its quotes and escapes. */
@@ -292,7 +288,8 @@ function valuesOf(
     for (const kind of catalogue.kinds)
       if (!seen.has(kind.key)) seen.set(kind.key, lang === 'en' ? kind.label_en : kind.label_tr);
   if (field === 'source')
-    for (const source of catalogue.sources) if (!seen.has(source.name)) seen.set(source.name, undefined);
+    for (const source of catalogue.sources)
+      if (!seen.has(source.name)) seen.set(source.name, undefined);
   return [...seen].map(([value, detail]) =>
     detail && detail !== value ? { value, detail } : { value },
   );
@@ -327,16 +324,16 @@ export function rowSummary(row: SearchRow): string {
 /**
  * What the newest page means for the list: `complete` (nothing more), `more` (a full page: "Daha
  * fazla"), `continuing` (the time budget ended before the range did; the scan goes on by itself
- * up to {@link AUTO_CONTINUES} times), `paused` (then "Devam et"), `capped` (the view holds
- * {@link MAX_VIEW_ROWS} rows).
+ * up to {@link SEARCH_AUTO_CONTINUES} times), `paused` (then "Devam et"), `capped` (the view
+ * holds {@link SEARCH_VIEW_ROWS} rows).
  */
 export type ScanState = 'complete' | 'more' | 'continuing' | 'paused' | 'capped';
 
 export function scanState(last: SearchPage, continues: number, rows: number): ScanState {
   if (last.next_cursor === null) return 'complete';
-  if (rows >= MAX_VIEW_ROWS) return 'capped';
+  if (rows >= SEARCH_VIEW_ROWS) return 'capped';
   if (last.scan.complete) return 'more';
-  return continues < AUTO_CONTINUES ? 'continuing' : 'paused';
+  return continues < SEARCH_AUTO_CONTINUES ? 'continuing' : 'paused';
 }
 
 // -- errors -------------------------------------------------------------------------------------------

@@ -43,7 +43,12 @@ export const CATALOGUE: FieldCatalogue = {
     field('action', 'token', ['eylem'], ['Eylem', 'Action']),
     field('domain', 'domain', ['alanadi', 'site'], ['Alan adı', 'Domain'], ['fg_web']),
     field('vlan', 'vlan', [], ['VLAN', 'VLAN'], ['fg_traffic']),
-    field('department', 'department', ['departman'], ["Departman (VLAN'a göre)", 'Department (by VLAN)']),
+    field(
+      'department',
+      'department',
+      ['departman'],
+      ["Departman (VLAN'a göre)", 'Department (by VLAN)'],
+    ),
     field('text', 'freetext', ['metin'], ['Metin', 'Text']),
   ],
   kinds: [
@@ -125,7 +130,13 @@ export function page(overrides: Partial<SearchPage> = {}): SearchPage {
     expires_at: '2026-10-09T12:00:00Z',
     query: { normalized: 'srcip:172.20.42.57', clauses: [], text: [] },
     range: { from: '2026-10-09T00:00:00+03:00', to: '2026-10-10T00:00:00+03:00' },
-    plan: { driver: 'typed', tables: ['fg_traffic'], kinds: ['traffic'], selective: true, rollup_eligible: false },
+    plan: {
+      driver: 'typed',
+      tables: ['fg_traffic'],
+      kinds: ['traffic'],
+      selective: true,
+      rollup_eligible: false,
+    },
     items: [row()],
     next_cursor: null,
     scan: {
@@ -148,7 +159,12 @@ export function stats(overrides: Partial<SearchStats> = {}): SearchStats {
   }));
   const facet = (values: [string, string, string, number][]) => ({
     status: 'ok' as const,
-    values: values.map(([value, label_tr, label_en, count]) => ({ value, label_tr, label_en, count })),
+    values: values.map(([value, label_tr, label_en, count]) => ({
+      value,
+      label_tr,
+      label_en,
+      count,
+    })),
     other: 0,
   });
   return {
