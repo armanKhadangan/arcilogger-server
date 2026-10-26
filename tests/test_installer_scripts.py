@@ -2570,13 +2570,14 @@ def test_acl_script_takes_the_recorded_data_root(engine: str, tmp_path: Path) ->
     config.write_text(f'data_dir = "{elsewhere.as_posix()}"\n', "utf-8")
     result = run_powershell(engine, script, *arguments)
     assert result.returncode != 0
-    assert "-DataRoot" in result.stdout + result.stderr
+    # The thrown message: pwsh 7 breaks it at the console width, a long path inside a word.
+    assert "-DataRoot" in _unwrapped(result.stdout + result.stderr)
     assert not plan.exists(), "nothing is planned for a data_dir the record does not name"
     # A removed record with the administration installed: only -DataRoot names the data root.
     (programdata / "data-root.txt").unlink()
     result = run_powershell(engine, script, *arguments)
     assert result.returncode != 0
-    assert "data-root.txt" in result.stdout + result.stderr
+    assert "data-root.txt" in _unwrapped(result.stdout + result.stderr)
 
 
 def _entries_by_leaf(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -3106,9 +3107,12 @@ def dry_run(
     site_name: str | None = SITE_NAME,
     admin_address: str | None = ADMIN_ADDRESS,
     data_root: bool = True,
+    incomplete: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     """``data_root`` False: no -DataRoot (the installer takes it from its record or the
-    configuration)."""
+    configuration). ``incomplete`` True: the plan may stop at an error after failed preflight
+    checks (plan.incomplete, exit 2, what the real run returns); otherwise that error fails the
+    test, which its exit code alone no longer shows."""
     plan = tmp_path / f"plan-{len(list(tmp_path.glob('plan-*.json')))}.json"
     server = ["-ServerAddress", server_address] if server_address else []
     server += _setup_arguments(extra, site_name, admin_address)
@@ -3130,6 +3134,8 @@ def dry_run(
     )
     assert plan.is_file(), result.stdout + result.stderr
     document: dict[str, Any] = read_json(plan)
+    if not incomplete:
+        assert "plan.incomplete" not in _ids(document), result.stdout + result.stderr
     return result, document
 
 
@@ -4482,10 +4488,50 @@ def test_dry_run_damaged_status_file_counts_as_no_licence(
     )
 
 
+#: A terminal escape sequence (colour): PowerShell 7 writes them into redirected output too.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+#: The margin of an error record PowerShell 7 writes (ConciseView): ``Line |``, `` 371 | `` and
+#: ``     | `` in front of each line the message is broken onto at the console width.
+_ERROR_MARGIN = re.compile(r"(?m)^(?:Line| *\d*) *\|")
+
+
 def _unwrapped(text: str) -> str:
     """Windows PowerShell 5.1 hard-wraps host output at the console width, even inside a word
-    (``ARCILOG`` / ``GER``): compare texts without any whitespace."""
-    return "".join(text.split())
+    (``ARCILOG`` / ``GER``), and PowerShell 7 breaks an uncaught error's message onto lines that
+    start with ``     | ``, in colour: compare texts without colour codes, those margins and any
+    whitespace."""
+    return "".join(_ERROR_MARGIN.sub("", _ANSI_ESCAPE.sub("", text)).split())
+
+
+_RED, _CYAN, _RESET = "\x1b[31;1m", "\x1b[36;1m", "\x1b[0m"
+#: How pwsh 7 on a Linux runner (no terminal, 80 columns) wrote the error of a thrown message:
+#: colour codes and the message broken onto ``     | `` lines (Set-ArciFirewall.ps1, Linux CI).
+_PWSH_ERROR_RECORD = "\n".join(
+    [
+        f"{_RED}Exception: {_RESET}/home/runner/work/x/scripts/Set-ArciFirewall.ps1:371{_RESET}",
+        f"{_RED}{_RESET}{_CYAN}Line |{_RESET}",
+        f"{_RED}{_RESET}{_CYAN}{_CYAN} 371 | {_RESET}     {_CYAN}throw '-LiveSourceAddress "
+        f"yalnızca -SyncFromConfig -DryRun ile [o{_RESET} …{_RESET}",
+        f"{_RED}{_RESET}{_CYAN}{_CYAN}{_RESET}{_CYAN}{_RESET}{_CYAN}     | {_RED}     "
+        + "~" * 65
+        + _RESET,
+        f"{_RED}{_RESET}{_CYAN}{_CYAN}{_RESET}{_CYAN}{_RESET}{_CYAN}{_RED}{_RED}{_CYAN}     | "
+        f"{_RED}-LiveSourceAddress yalnızca -SyncFromConfig -DryRun ile [only with{_RESET}",
+        f"{_RED}{_RESET}{_CYAN}{_CYAN}{_RESET}{_CYAN}{_RESET}{_CYAN}{_RED}{_RED}{_CYAN}{_RED}{_CYAN}"
+        f"     | {_RED}-SyncFromConfig -DryRun]: kuralların adresleri her zaman kuralların{_RESET}",
+    ]
+)
+
+
+def test_unwrapped_reads_an_error_record_of_powershell_7() -> None:
+    """The error texts the tests look for are found in pwsh 7's coloured, wrapped error record
+    whatever the console width (a Linux runner has 80 columns, a local terminal often more)."""
+    assert "[only with -SyncFromConfig -DryRun]" not in _PWSH_ERROR_RECORD, "split by the wrap"
+    assert _unwrapped("[only with -SyncFromConfig -DryRun]") in _unwrapped(_PWSH_ERROR_RECORD)
+    assert _unwrapped("-DryRun]: kuralların adresleri") in _unwrapped(_PWSH_ERROR_RECORD)
+    assert "|" not in _unwrapped(_PWSH_ERROR_RECORD), "no margin is left between the words"
+    # Windows PowerShell 5.1's hard wrap inside a word, as before.
+    assert _unwrapped("[only with -DryRun]") in _unwrapped("[only with -Dry\nRun]")
 
 
 def test_dry_run_upgrade_without_a_licence_warns_about_old_sealed_days(
@@ -7586,7 +7632,7 @@ def test_firewall_remembers_the_smtp_server(engine: str, tmp_path: Path) -> None
     invalid = ("-StrictOutbound", *SMTP_FREE_ARGS, "-SmtpServer", "10.0.0.3:99999")
     result, _ = _firewall(engine, tmp_path, STRICT_CONFIG, *invalid)
     assert result.returncode != 0
-    assert "[invalid SMTP port]" in result.stdout + result.stderr
+    assert _unwrapped("[invalid SMTP port]") in _unwrapped(result.stdout + result.stderr)
 
 
 _FORGET_SMTP = (
@@ -7760,8 +7806,8 @@ def test_firewall_needs_the_admin_pc_and_has_no_default(engine: str, tmp_path: P
     output = result.stdout + result.stderr
     assert result.returncode != 0
     assert plan is None, "nothing planned without the admin PC"
-    assert "[no admin PC address]" in output
-    assert "-AdminAddress 10.0.0.10" in output
+    assert _unwrapped("[no admin PC address]") in _unwrapped(output)
+    assert _unwrapped("-AdminAddress 10.0.0.10") in _unwrapped(output)
     assert "172.20." not in output, "no address of the example network as a default"
     result, plan = _firewall(engine, tmp_path, text, "-Remove", admin_address=None)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -8456,6 +8502,127 @@ def test_acl_entries_become_the_windows_inheritance_flags(engine: str, tmp_path:
         "ContainerInherit, ObjectInherit",
         "None",
     )
+
+
+_ACL_PIPELINE_SCRIPT = r"""
+param([string]$ModulePath, [string]$Root, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$parameters = @{
+    DataRoot = (Join-Path $Root 'data'); ProgramDataDir = (Join-Path $Root 'programdata')
+    InstallDir = (Join-Path $Root 'program')
+}
+function Get-Shape($Object) {
+    $pathType = $(if ($null -eq $Object.Path) { $null } else { $Object.Path.GetType().FullName })
+    [ordered]@{ type = $Object.GetType().FullName; path_type = $pathType; path = $Object.Path }
+}
+$config = Join-Path $parameters.ProgramDataDir 'arcilogger.toml'
+$assigned = Get-ArciAclPlan @parameters
+$out = [ordered]@{
+    # As Restore-ConfigFileAccess uses it: straight into the pipeline.
+    piped = @(Get-ArciAclPlan @parameters | ForEach-Object { Get-Shape $_ })
+    selected = @(Get-ArciAclPlan @parameters | Where-Object { $_.Path -eq $config } |
+            ForEach-Object { Get-Shape $_ })
+    # As Invoke-AdminSteps and Set-ArciVaultAcl.ps1 use it: assigned first.
+    assigned = @(foreach ($entry in $assigned) { Get-Shape $entry })
+    config = $config
+}
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $out -Depth 4))
+"""
+
+
+def test_acl_plan_goes_down_the_pipeline_one_entry_with_one_path_at_a_time(
+    engine: str, tmp_path: Path
+) -> None:
+    """Get-ArciAclPlan | Where-Object selects plan entries. Written as one array (``, $entries``)
+    the pipeline carried the whole plan as a single object: $_.Path was every path, the -eq
+    filter let the plan through, and Set-ArciAclEntry's Get-Item returned an array (the first
+    real installation stopped in Restore-ConfigFileAccess: "Cannot convert System.Object[] to
+    System.IO.FileSystemInfo"). Every entry has one path, and no path has two entries."""
+    output = tmp_path / "pipeline.json"
+    script = write_script(tmp_path / "pipeline.ps1", _ACL_PIPELINE_SCRIPT)
+    result = run_powershell(
+        engine, script, "-ModulePath", str(MODULE), "-Root", str(tmp_path),
+        "-OutputPath", str(output),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    shapes = read_json(output)
+    piped = shapes["piped"]
+    assert len(piped) > 30, "one pipeline object per entry, not the plan as one object"
+    assert piped == shapes["assigned"], "the same entries however the plan is taken"
+    for shape in piped:
+        assert shape["type"] == "System.Management.Automation.PSCustomObject", shape
+        assert shape["path_type"] == "System.String", shape
+    paths = [shape["path"] for shape in piped]
+    assert len(set(paths)) == len(paths), "one entry per path"
+    assert shapes["selected"] == [
+        {"type": "System.Management.Automation.PSCustomObject", "path_type": "System.String",
+         "path": shapes["config"]},
+    ]  # fmt: skip
+
+
+_CONFIG_FILE_ACCESS_SCRIPT = r"""
+param([string]$Installer, [string]$Base, [string]$OutputPath)
+$ErrorActionPreference = 'Stop'
+$programData = [System.IO.Path]::Combine($Base, 'programdata', 'ARCILOGGER')
+$dataRoot = [System.IO.Path]::Combine($Base, 'data', 'ARCILOGGER')
+[void](New-Item -ItemType Directory -Path (Join-Path $programData 'install') -Force)
+. $Installer -InstallDir ([System.IO.Path]::Combine($Base, 'program', 'ARCILOGGER')) `
+    -ProgramDataDir $programData -DataRoot $dataRoot -BundleRoot (Join-Path $Base 'bundle') `
+    -SkipFirewall -SkipTimeSetup
+# The two files a "secret set" has just replaced, on Windows (elsewhere the function returns).
+[System.IO.File]::WriteAllText($ConfigPath, '')
+[System.IO.File]::WriteAllText($SecretsFile, '{}')
+function Test-ArciWindows { $true }
+# The real Set-ArciAclEntry hands what Get-Item returns for the entry's path to
+# Get-ArciAccessControl, whose -Item is a [System.IO.FileSystemInfo]: the same two steps, without
+# the Windows ACL calls. An entry with more than one path fails here as it did on Windows.
+function Get-BoundItem {
+    param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
+    $Item
+}
+$script:Applied = New-Object System.Collections.Generic.List[object]
+function Set-ArciAclEntry {
+    param([Parameter(Mandatory = $true)]$Entry)
+    $item = Get-BoundItem -Item (Get-Item -LiteralPath $Entry.Path -Force)
+    $aces = @($Entry.Aces | ForEach-Object { [ordered]@{ sid = $_.Sid; rights = $_.Rights } })
+    $script:Applied.Add([ordered]@{
+            path = $Entry.Path; path_type = $Entry.Path.GetType().FullName; item = $item.FullName
+            kind = $Entry.Kind; aces = $aces
+        })
+}
+Restore-ConfigFileAccess
+$out = [ordered]@{
+    config = $ConfigPath; secrets = $SecretsFile; applied = $script:Applied.ToArray()
+}
+[System.IO.File]::WriteAllText($OutputPath, (ConvertTo-Json -InputObject $out -Depth 5))
+"""
+
+
+def test_config_file_access_is_restored_one_file_at_a_time(engine: str, tmp_path: Path) -> None:
+    """Restore-ConfigFileAccess (after "secret set" replaced secrets.json) applies exactly the
+    plan's two file entries, arcilogger.toml and secrets.json with ArciAdmin's Modify, each as
+    one entry with one path (the real installation's dot-sourced function; only the Windows ACL
+    calls are left out)."""
+    output = tmp_path / "access.json"
+    script = write_script(tmp_path / "access.ps1", _CONFIG_FILE_ACCESS_SCRIPT)
+    base = tmp_path / "base"
+    base.mkdir()
+    result = run_powershell(
+        engine, script, "-Installer", str(INSTALL_SCRIPT), "-Base", str(base),
+        "-OutputPath", str(output),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    document = read_json(output)
+    assert [entry["path"] for entry in document["applied"]] == [
+        document["config"],
+        document["secrets"],
+    ]
+    for entry in document["applied"]:
+        assert entry["path_type"] == "System.String", entry
+        assert entry["item"] == entry["path"]
+        assert entry["kind"] == "File"
+        assert entry["aces"] == [{"sid": AGENT, "rights": "Modify"}]
 
 
 _POLICY_SCRIPT = r"""
@@ -9548,7 +9715,7 @@ def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
     assert (
         "[browser administration off or policy.json invalid]" in found["disabled"][1]["problems"][0]
     )
-    assert "[firewall not managed by ARCILOGGER]" in result.stdout
+    assert _unwrapped("[firewall not managed by ARCILOGGER]") in _unwrapped(result.stdout)
     strict = {c["rule"]: c for c in found["strict"][1]["changes"] if c["direction"] == "Outbound"}
     assert strict["ARCILOGGER Out NTP"]["operation"] == "set"
     assert strict["ARCILOGGER Out NTP"]["remote_address"] == ["172.20.10.1"]
@@ -9578,7 +9745,8 @@ def test_firewall_sync_updates_the_syslog_rules_in_place_and_nothing_else(
         "-LiveSourceAddress", "198.51.100.7",
     )  # fmt: skip
     assert refused.returncode != 0
-    assert "[only with -SyncFromConfig -DryRun]" in refused.stdout + refused.stderr
+    needle = _unwrapped("[only with -SyncFromConfig -DryRun]")
+    assert needle in _unwrapped(refused.stdout + refused.stderr)
     source = (WINDOWS / "scripts" / "Set-ArciFirewall.ps1").read_text(encoding="utf-8-sig")
     sync = source[
         source.index("function Invoke-SyncFromConfig") : source.index("if ($SyncFromConfig)")
@@ -10319,6 +10487,14 @@ def test_installer_creates_the_data_root_record_anew() -> None:
     )
 
 
+# The preflight reads the sources with the installed venv's python.exe. On Windows a link to the
+# test interpreter cannot run as one (exit 106, "No pyvenv.cfg file"): the sources check fails
+# and the check this test is about never runs. The dry run's exit code in that case is checked
+# on every platform by test_dry_run_upgrade_with_a_venv_python_that_cannot_start.
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a symbolic link to the test interpreter acts as the venv python",
+)
 @pytest.mark.parametrize(
     ("sources", "extra", "status"),
     [
@@ -10370,3 +10546,62 @@ def test_dry_run_stops_for_a_source_outside_the_policy_networks(
         if status == "fail":
             assert "-SourceNetwork 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,198.51.100.7" in text
     assert (text in plan["failures"]) == (status == "fail")
+
+
+def test_dry_run_upgrade_with_a_venv_python_that_cannot_start(engine: str, tmp_path: Path) -> None:
+    """The installed venv's python.exe does not run (here a file that is no program; on Windows
+    also a venv that lost its pyvenv.cfg, exit 106): the preflight cannot read arcilogger.toml,
+    so a real upgrade stops there with exit 2 before any change. The dry run plans on past its
+    preflight failures and trips over the same file (the API's address for the service
+    definitions): it names the error and still returns 2, what the real run would, never 3 (a
+    change that failed)."""
+    bundle = make_fake_bundle(tmp_path, version="9.9.10")
+    program = write_version(tmp_path / "program" / "ARCILOGGER", "9.9.9", "1" * 64)
+    (program / "venv" / "Scripts").mkdir(parents=True)
+    (program / "venv" / "Scripts" / "python.exe").write_bytes(b"not a program\n")
+    body = 'site_name = "Kurum A.Ş."\n[clock]\nntp_server = "10.0.0.1"\n'
+    _existing_config(tmp_path, body + _FW_SOURCE.format("172.20.10.1"))
+    result, plan = dry_run(engine, tmp_path, bundle, "-Upgrade", site_name=None, incomplete=True)
+    assert_dry_run_exit(result, plan)
+    assert result.returncode == 2, "the preflight failed"
+    items = {item["id"]: item for item in plan["items"]}
+    assert items["preflight.sources"]["status"] == "fail"
+    assert items["preflight.sources"]["text"].startswith("arcilogger.toml okunamadı [unreadable]: ")
+    assert items["preflight.sources"]["text"] in plan["failures"]
+    stop = items["plan.incomplete"]
+    assert stop["status"] == "fail"
+    assert stop["text"], "the error the plan stopped at"
+    stdout = _unwrapped(result.stdout)
+    assert _unwrapped(f"HATA [error]: {stop['text']}") in stdout
+    assert _unwrapped("[dry run stopped at this error; a real run would stop at the preflight") in (
+        stdout
+    )
+    assert _unwrapped("[failed; fix the error and run again]") not in stdout
+
+
+def test_dry_run_returns_3_for_an_error_in_its_preflight(engine: str, tmp_path: Path) -> None:
+    """An error the preflight itself does not catch (here in the data drive checks; on Windows
+    also a CIM call or the port owners) stops the real run with 3 (failed, run again), whether
+    or not a check failed before it. The dry run runs the same preflight and returns the same:
+    only planning on past the preflight's failures returns 2 when it stops at an error."""
+    bundle = make_fake_bundle(tmp_path)
+    module = bundle / "installer" / "ArciInstall.psm1"
+    anchor = "\nExport-ModuleMember -Function @("
+    text = module.read_text(encoding="utf-8-sig")
+    assert text.count(anchor) == 1
+    broken = "\nfunction Get-ArciDataDriveChecks { throw 'simulated drive error' }\n"
+    module.write_text(text.replace(anchor, broken + anchor), encoding="utf-8-sig")
+    write_sums(bundle)
+    # A first installation without -SiteName: that check fails before the drive checks run.
+    result, plan = dry_run(engine, tmp_path, bundle, site_name=None)
+    items = {item["id"]: item for item in plan["items"]}
+    assert items["preflight.site-name"]["status"] == "fail"
+    assert items["preflight.site-name"]["text"] in plan["failures"]
+    assert "preflight.drive" not in items
+    assert "preflight.postgresql" not in items, "the preflight stopped at the error"
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert plan["exit_code"] == 3
+    stdout = _unwrapped(result.stdout)
+    assert _unwrapped("HATA [error]: simulated drive error") in stdout
+    assert _unwrapped("[failed; fix the error and run again]") in stdout
+    assert _unwrapped("[dry run stopped at this error") not in stdout
