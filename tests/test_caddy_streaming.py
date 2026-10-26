@@ -8,6 +8,9 @@ browser at once and uncompressed, and a closed tab does not keep the API's strea
   release): a stub upstream sends one event a second through the real Caddyfile; the first one
   arrives within a second and the response has no ``Content-Encoding``, while other API answers
   are still compressed.
+* **With** ``ARCILOGGER_CADDY`` **and the test database** (the Windows end-to-end job): the real
+  API behind the real Caddyfile — a stream is opened and read through Caddy, a line appended to
+  the spool afterwards arrives within 3 s, uncompressed.
 """
 
 from __future__ import annotations
@@ -26,7 +29,16 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx2 as httpx
 import pytest
+from sqlalchemy import Engine
+
+from arcilogger_api.app import create_app
+from arcilogger_api.live.testing import LiveServer, read_events, sign_in, spool_line
+from arcilogger_core.config import Config
+from arcilogger_core.layout import Layout
+from arcilogger_core.timeutil import site_day, utc_now
+from arcilogger_db.engine import session_factory
 
 REPO = Path(__file__).parents[1]
 CADDYFILE = REPO / "deploy" / "windows" / "caddy" / "Caddyfile"
@@ -194,3 +206,57 @@ def test_events_pass_caddy_at_once_and_uncompressed(tmp_path: Path, upstream: in
         connection.close()
     finally:
         stop_caddy(process)
+
+
+@needs_caddy
+def test_a_spool_line_reaches_the_live_tail_through_caddy(
+    tmp_path: Path, db_engine: Engine
+) -> None:
+    config = Config.model_validate(
+        {
+            "site_name": "Test",
+            "data_dir": str(tmp_path / "data"),
+            "secrets_dir": str(tmp_path),
+            "api": {"secure_cookies": False},
+            "sources": [{"name": "fortigate", "type": "fortigate", "address": "172.31.255.1"}],
+        }
+    )
+    layout = Layout(config.data_dir)
+    spool = layout.spool_file("fortigate", site_day(utc_now()))
+    spool.parent.mkdir(parents=True)
+    spool.write_bytes(spool_line('logid="0000000013" type="traffic" srcip=172.20.41.105'))
+    app = create_app(config, db_engine, audit_flush_seconds=None)
+    with LiveServer(app) as api:
+        port = free_port()
+        process, context = start_caddy(tmp_path, port, f"127.0.0.1:{api.port}")
+        try:
+            with httpx.Client(
+                base_url=f"https://localhost:{port}", verify=context, timeout=10
+            ) as client:
+                sign_in(client, session_factory(db_engine))
+                opened = client.post("/api/v1/live/streams", json={"q": "", "backfill": 0})
+                assert opened.status_code == 201, opened.text
+                url = f"/api/v1/live/streams/{opened.json()['stream_id']}"
+                headers = {"X-Arci-Background": "1", "Accept-Encoding": "zstd, gzip"}
+                with client.stream("GET", url, headers=headers) as response:
+                    assert response.status_code == 200
+                    assert "content-encoding" not in response.headers
+                    events = read_events(response)
+                    hello = next(event for event in events if event is not None)
+                    assert hello.event == "hello"
+                    written = time.monotonic()
+                    with spool.open("ab") as handle:
+                        handle.write(
+                            spool_line('logid="0000000013" type="traffic" srcip=172.20.41.7')
+                        )
+                    line = next(event for event in events if event is not None)
+                    assert time.monotonic() - written <= 3.0
+                    assert (line.event, line.data["line"], line.data["source"]) == (
+                        "line",
+                        2,
+                        "fortigate",
+                    )
+                    assert "srcip=172.20.41.7" in line.data["text"]
+                assert client.delete(url).status_code == 204
+        finally:
+            stop_caddy(process)

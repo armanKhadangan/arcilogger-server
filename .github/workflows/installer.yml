@@ -16,7 +16,9 @@ name: Windows installer
 # Caddy too: "Şimdi mühürle" wakes the Seal task, a site name change reaches "active" with the
 # rights of contract 2.2 read back, a log source added in the browser reaches the syslog firewall
 # rule (ApplySystem, SYSTEM) within 2 minutes, "Kontör sorgula" runs in the Requests task; the
-# rollback goes to a program without ArciAdmin and sealing goes on.
+# rollback goes to a program without ArciAdmin and sealing goes on. Before the installation, the
+# live tail (Canlı Akış) is read through the pinned Caddy from the real API on the runner's
+# PostgreSQL: a spool line written after the stream opened arrives within 3 s, uncompressed.
 #
 # The end-to-end job checks what the Python services and tasks do under the installed rights, so
 # it also runs when their code or their locked dependencies change: a change in api/, core/,
@@ -34,6 +36,7 @@ on:
     paths:
       - 'deploy/windows/**'
       - 'tests/test_installer_scripts.py'
+      - 'tests/test_caddy_streaming.py'
       - 'tests/test_windows_tasks.py'
       - '.github/workflows/installer.yml'
       - 'api/**'
@@ -91,7 +94,7 @@ jobs:
         env:
           ARCILOGGER_REQUIRE_PWSH: '1'
           POWERSHELL_TELEMETRY_OPTOUT: '1'
-        run: uv run pytest tests/test_installer_scripts.py tests/test_windows_tasks.py -v
+        run: uv run pytest tests/test_installer_scripts.py tests/test_windows_tasks.py tests/test_caddy_streaming.py -v
 
   installer-e2e:
     name: Installer end to end (Windows, real bundle)
@@ -154,6 +157,34 @@ jobs:
           "ARCILOGGER_E2E_PGUSER=$user" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ARCILOGGER_E2E_PGPASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ARCILOGGER_E2E_PGBIN=$env:PGBIN" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Download the pinned Caddy (SHA-256 from components.json)
+        shell: pwsh
+        run: |
+          $components = (Get-Content -Raw deploy/windows/installer/components.json | ConvertFrom-Json).components
+          $caddy = $components | Where-Object { $_.name -eq 'caddy' }
+          $zip = Join-Path $env:RUNNER_TEMP $caddy.file
+          Invoke-WebRequest -Uri $caddy.url -OutFile $zip
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $caddy.sha256) { throw "Caddy SHA-256 mismatch: $actual" }
+          $folder = Join-Path $env:RUNNER_TEMP 'caddy'
+          Expand-Archive -LiteralPath $zip -DestinationPath $folder
+          "ARCILOGGER_CADDY=$(Join-Path $folder 'caddy.exe')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # Canlı Akış through Caddy on Windows (contract 3.6): the real API behind the real
+      # Caddyfile on the runner's PostgreSQL; a spool line written after the stream opened must
+      # arrive within 3 s, uncompressed. The pg_trgm line is informational only (Wave 2 does not
+      # use the extension; contract 2.24).
+      - name: Live tail through Caddy, and pg_trgm on this PostgreSQL
+        shell: pwsh
+        env:
+          ARCILOGGER_REQUIRE_DB: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false  # exit codes are checked below
+          $env:PGPASSWORD = $env:ARCILOGGER_E2E_PGPASSWORD
+          & (Join-Path $env:ARCILOGGER_E2E_PGBIN 'psql.exe') -h 127.0.0.1 -U $env:ARCILOGGER_E2E_PGUSER -d postgres -w -c "SELECT name, default_version, installed_version FROM pg_available_extensions WHERE name = 'pg_trgm';"
+          $env:ARCILOGGER_TEST_PG = "postgresql://$($env:ARCILOGGER_E2E_PGUSER):$($env:ARCILOGGER_E2E_PGPASSWORD)@127.0.0.1:5432/postgres"
+          uv run pytest tests/test_caddy_streaming.py -v -rA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the offline bundle (Windows PowerShell 5.1)
         shell: powershell
         run: |
