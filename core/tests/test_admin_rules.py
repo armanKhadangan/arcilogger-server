@@ -1211,13 +1211,28 @@ def test_a_company_ca_file_is_installed_by_its_hash(
     ]
 
 
+def test_a_new_ca_file_needs_the_password_again(root: Path, tmp_path: Path) -> None:
+    """The CA file decides which server may pose as the destination (contract 2.6 smtp)."""
+    config = with_tables(root, SMTP_ON)
+    item = uploaded(tmp_path, "smtp_ca", root_certificate())
+    stored = context(root, stored_secrets=frozenset({"smtp.password"}), uploads={item.id: item})
+    body = {"ca": {"upload_id": item.id}, "test_to": "bt@ornek.example"}
+    assert [(p.code, p.field) for p in validate_section("smtp", config, body, stored).errors] == [
+        ("secret_rebind_required", "smtp.password")
+    ]
+    check = validate_section("smtp", config, {**body, "password": "yeni"}, stored)
+    assert check.ok, check.errors
+    assert check.probes == (rules.Probe("smtp", None),)
+
+
 def test_clearing_the_ca_file(root: Path) -> None:
     config = with_tables(root, SMTP_ON + f'ca_file = "{(root / "smtp-ca" / "x.pem").as_posix()}"\n')
     stored = context(root, stored_secrets=frozenset({"smtp.password"}))
-    check = validate_section("smtp", config, {"clear_ca": True, "test_to": "bt@ornek.example"},
-                             stored)  # fmt: skip
+    body = {"clear_ca": True, "test_to": "bt@ornek.example"}
+    assert codes(validate_section("smtp", config, body, stored)) == ["secret_rebind_required"]
+    check = validate_section("smtp", config, {**body, "password": "yeni"}, stored)
     assert check.ok, check.errors
-    assert check.ops[0]["op"] == "smtp_ca_clear"
+    assert [op["op"] for op in check.ops] == ["secret_set", "smtp_ca_clear"]
     assert check.candidate is not None
     assert check.candidate.smtp.ca_file is None
     assert check.probes == (rules.Probe("smtp", None),)
@@ -1306,6 +1321,17 @@ def test_a_replica_is_switched_on_and_probed(root: Path, config: Config) -> None
                                                         context(root)).errors] == [
         ("replica_target_invalid", "replica.target")
     ]  # fmt: skip
+
+
+def test_a_share_without_a_user_is_tested_by_the_requests_task(root: Path, config: Config) -> None:
+    """The agent would reach it as the computer account, not as the Replica task's LOCAL
+    SERVICE: no probe from the agent, a replica test after the apply."""
+    body = {"enabled": True, "target": "\\\\NAS-01\\worm"}
+    check = validate_section("replica", config, body, context(root))
+    assert check.ok, check.errors
+    assert check.probes == ()
+    assert warnings(check) == ["probe_skipped"]
+    assert check.followups == ("replica_test",)
 
 
 def test_a_new_share_host_or_user_needs_the_password_again(root: Path) -> None:

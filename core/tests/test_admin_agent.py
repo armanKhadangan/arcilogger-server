@@ -14,7 +14,10 @@ from typing import Any
 import pytest
 
 from arcilogger_core.admin import __main__ as console
+from arcilogger_core.admin.apply import Applier
 from arcilogger_core.admin.contract import (
+    MAX_REQUEST_BYTES,
+    UPLOAD_LIMITS,
     AgentStatus,
     Event,
     JarsFile,
@@ -26,7 +29,13 @@ from arcilogger_core.admin.contract import (
 )
 from arcilogger_core.admin.envelope import ADMIN_REQUEST, sign_payload
 from arcilogger_core.admin.probe import ProbeResult
-from arcilogger_core.admin.store import Installation, read_pending, read_txn, read_waits
+from arcilogger_core.admin.store import (
+    Installation,
+    VersionStore,
+    read_pending,
+    read_txn,
+    read_waits,
+)
 from arcilogger_core.admin.testing import (
     DEFAULT_TOML,
     FakeAgent,
@@ -239,6 +248,56 @@ def test_a_replay_is_rejected_and_keeps_the_first_status(
     assert installed.journal()[-1].code == "request_replayed"
 
 
+def test_a_file_named_after_an_earlier_request_leaves_its_outcome(
+    installed: Installed, agent: FakeAgent
+) -> None:
+    request = site_request(installed)
+    installed.submit(request)
+    agent.process()
+    first = installed.status(request.id)
+    assert first is not None
+    assert first.state == "applied"
+    installed.submit(request, data=b"not an envelope\n")
+    agent.process()
+    other = site_request(installed)  # signed, but under the name of the applied request
+    installed.submit(request, data=_signed(installed, other))
+    agent.process()
+    assert installed.status(request.id) == first
+    assert installed.status(other.id) is None
+    lines = [line for line in installed.journal() if line.request == request.id]
+    assert [(line.state, line.code) for line in lines] == [
+        ("applied", None),
+        ("rejected", "schema_invalid"),
+        ("rejected", "schema_invalid"),
+    ]
+    assert installed.config().site_name == "Örnek Holding"
+
+
+def test_the_agent_reads_no_more_than_its_limits(installed: Installed, agent: FakeAgent) -> None:
+    request = site_request(installed)
+    path = installed.submit(request, data=b"{}")
+    os.truncate(path, 64 * MAX_REQUEST_BYTES)  # sparse: the agent reads 1 MiB and a byte
+    agent.process()
+    assert installed.status(request.id).error.code == "schema_invalid"  # type: ignore[union-attr]
+    grown = installed.upload("kamusm_root", b"-----BEGIN CERTIFICATE-----\nabc\n")
+    with installed.layout.upload_data(grown["upload"]).open("ab") as handle:
+        handle.write(b"\0" * 4096)  # larger than the size the request was signed with
+    large = b"-----BEGIN CERTIFICATE-----\n" + b"A" * UPLOAD_LIMITS["kamusm_root"]
+    upload_id = new_id()
+    installed.layout.upload_data(upload_id).write_bytes(large)  # not by the API
+    digest = hashlib.sha256(large).hexdigest()
+    oversized = {"upload": upload_id, "sha256": digest, "size": len(large)}
+    for upload in (grown, oversized):
+        root = installed.request(section="tsa", ops=[{"op": "root_add", **upload, "legal": False}])
+        installed.submit(root)
+        agent.process()
+        status = installed.status(root.id)
+        assert status is not None
+        assert status.error is not None
+        assert status.error.code == "payload_mismatch"
+        assert not installed.layout.work_dir(root.id).exists()
+
+
 def test_the_ledger_is_written_before_any_effect(installed: Installed) -> None:
     def crash(step: str) -> None:
         if step == "versions":
@@ -318,6 +377,33 @@ def test_a_change_made_elsewhere_meanwhile_is_a_conflict(
         "site_name",
     )
     assert installed.journal()[-1].state == "failed"
+
+
+def test_an_edit_made_during_the_probe_is_never_overwritten(installed: Installed) -> None:
+    class HandEdit(FakeProber):
+        """An administrator edits the file on the console while the agent probes."""
+
+        def run(self, *args: Any, **kwargs: Any) -> ProbeResult:
+            text = installed.config_path.read_text(encoding="utf-8")
+            installed.config_path.write_text(text.replace("days = 760", "days = 900"), "utf-8")
+            return super().run(*args, **kwargs)
+
+    agent = FakeAgent(installed, prober=HandEdit())
+    op = {"op": "set", "path": "clock.ntp_server", "expect": "172.20.10.1", "value": "172.20.10.2"}
+    request = installed.request(section="general", ops=[op])
+    installed.submit(request)
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.error is not None
+    assert (status.state, status.error.code, status.version) == ("conflict", "conflict", None)
+    config = installed.config()
+    assert (config.retention.days, config.clock.ntp_server) == (900, "172.20.10.1")
+    line = installed.journal()[-1]
+    assert (line.state, line.code, line.config_sha256) == ("failed", "conflict", None)
+    assert VersionStore(installed.layout).index().versions == ()
+    assert read_txn(installed.layout) is None
+    assert int(Event.CHANGE_FAILED) not in agent.events.ids()
 
 
 @pytest.mark.parametrize(
@@ -464,6 +550,39 @@ def test_a_held_change_can_be_cancelled(installed: Installed) -> None:
     assert installed.status(again.id).error.code == "request_not_cancellable"  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize("policy", ["off", "damaged"])
+def test_a_held_change_is_not_applied_once_browser_administration_is_off(
+    installed: Installed, policy: str
+) -> None:
+    installed.write_policy(hold_hours=1)
+    agent = FakeAgent(installed, now=datetime(2026, 10, 25, 10, 15, tzinfo=SITE_TZ))
+    request = installed.request(section="retention", ops=RETENTION, now=agent.now())
+    installed.submit(request)
+    agent.process()
+    assert installed.status(request.id).state == "pending"  # type: ignore[union-attr]
+    if policy == "off":
+        installed.write_policy(enabled=False, hold_hours=1)
+    else:
+        installed.layout.policy.write_text('{"schema": ', encoding="utf-8")  # fails closed
+    agent.advance(timedelta(hours=2))
+    agent.process()
+    status = installed.status(request.id)
+    assert status is not None
+    assert status.error is not None
+    assert (status.state, status.error.code) == ("failed", "admin_disabled")
+    assert not installed.config().retention.enabled
+    assert read_pending(installed.layout) == []
+    lines = installed.journal(date(2026, 10, 25))
+    assert [(line.state, line.code) for line in lines] == [
+        ("pending", None),
+        ("failed", "admin_disabled"),
+    ]
+    installed.write_policy(hold_hours=1)  # on again: nothing is left to take effect
+    agent.advance(timedelta(minutes=1))
+    agent.process()
+    assert not installed.config().retention.enabled
+
+
 # -- actions ---------------------------------------------------------------------------------------
 
 
@@ -598,6 +717,33 @@ def test_an_interrupted_apply_is_finished_at_the_next_start(installed: Installed
     assert status.state == "applied"
     assert [line.state for line in installed.journal()] == ["recovered"]
     assert not installed.layout.work_dir(request.id).exists()
+
+
+def test_a_crash_after_the_journal_line_reports_the_apply_once(
+    installed: Installed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def crash(self: Applier) -> None:
+        raise _Crash
+
+    monkeypatch.setattr(Applier, "commit", crash)  # txn.json stays, the line is written
+    request = installed.request(
+        section="tsa",
+        ops=[{"op": "secret_set", "name": "kamusm.customer", "expect": "unset",
+              "token": installed.store.encrypt_value("4812")}],
+    )  # fmt: skip
+    installed.submit(request)
+    with pytest.raises(_Crash):
+        FakeAgent(installed).process()
+    monkeypatch.undo()
+    assert read_txn(installed.layout) is not None
+    assert [line.state for line in installed.journal()] == ["applied"]
+    second = FakeAgent(installed)
+    second.start()
+    assert [line.state for line in installed.journal()] == ["applied"]
+    assert installed.status(request.id).state == "applied"  # type: ignore[union-attr]
+    assert read_txn(installed.layout) is None
+    assert second.events.ids().count(int(Event.CHANGE_APPLIED)) == 1
+    assert second.events.ids().count(int(Event.SECRET_CHANGED)) == 1
 
 
 def test_an_interrupted_probe_fails_at_the_next_start(installed: Installed) -> None:
@@ -998,6 +1144,27 @@ def test_turning_the_replica_off_is_held(installed: Installed) -> None:
     assert not installed.config().replica.enabled
 
 
+def test_a_share_without_a_user_is_tested_by_the_requests_task(
+    installed: Installed, agent: FakeAgent
+) -> None:
+    on = installed.request(
+        section="replica",
+        ops=[
+            {"op": "set", "path": "replica.enabled", "expect": False, "value": True},
+            {"op": "set", "path": "replica.target", "expect": None, "value": "\\\\NAS-01\\worm"},
+        ],
+    )
+    installed.submit(on)
+    agent.process()
+    status = installed.status(on.id)
+    assert status is not None
+    assert status.state == "applied"
+    assert [w.code for w in status.warnings] == ["probe_skipped"]
+    assert agent.prober.calls == []  # never as the computer account
+    assert agent.tasks is not None
+    assert [task.kind for task in agent.tasks.taken] == ["replica_test"]
+
+
 # -- revert (contract 2.7.2) -----------------------------------------------------------------------
 
 
@@ -1080,6 +1247,28 @@ def test_what_cannot_be_reverted(installed: Installed) -> None:
         apply(installed, agent, "general", [site])
     assert revert(installed, agent, target).error.code == "request_not_revertible"
     assert installed.store.get("kamusm.customer") == "4812"
+
+
+def test_a_change_that_was_not_applied_is_not_reverted(installed: Installed) -> None:
+    failed: list[str] = []
+
+    def fail_once(step: str) -> None:
+        if step == "verify" and not failed:
+            failed.append(step)
+            raise OSError("injected")
+
+    agent = FakeAgent(installed, checkpoint=fail_once)
+    alfa = installed.request(section="general", ops=[{**SITE, "value": "Alfa"}], now=agent.now())
+    installed.submit(alfa)
+    agent.process()
+    assert installed.status(alfa.id).rolled_back  # type: ignore[union-attr]
+    assert agent.agent.applier.versions.for_request(alfa.id) is not None  # saved at step 7
+    beta = apply(installed, agent, "general", [{**SITE, "value": "Beta"}])
+    status = revert(installed, agent, alfa.id)
+    assert (status.state, status.error.code) == ("failed", "request_not_revertible")
+    assert installed.config().site_name == "Beta"  # the later change stays
+    assert revert(installed, agent, beta).state == "applied"
+    assert installed.config().site_name == "Örnek A.Ş."
 
 
 def test_a_guarded_revert_is_held(installed: Installed) -> None:

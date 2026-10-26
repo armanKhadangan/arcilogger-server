@@ -3,6 +3,7 @@ contract 2.7.1, 2.7.2)."""
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from collections.abc import Callable
 from datetime import datetime
@@ -102,6 +103,72 @@ def test_a_failure_at_any_step_leaves_the_old_pair(installed: Installed, step: s
     assert not (installed.root / "kamusm-roots" / "web.pem").exists()
     assert read_txn(installed.layout) is None
     assert no_temporary_files(installed)
+
+
+@pytest.mark.parametrize("when", ["before", "during"])
+def test_a_file_edited_meanwhile_is_never_overwritten(installed: Installed, when: str) -> None:
+    """The agent read the pair before its probes: an edit made on the console since then is a
+    conflict, found before the version is saved or again right before the replace."""
+    plan = make_plan(installed, install=True)
+    edited = plan.old_toml + b"# edited on the console\n"
+
+    def edit(at: str) -> None:
+        if at == "install_files":
+            installed.config_path.write_bytes(edited)
+
+    if when == "before":
+        installed.config_path.write_bytes(edited)
+    tool = applier(installed, checkpoint=edit)
+    outcome = tool.apply(plan)
+    assert (outcome.state, outcome.code, outcome.rolled_back) == ("conflict", "conflict", False)
+    assert pair(installed) == (edited, plan.old_secrets)
+    assert (outcome.version is None) == (when == "before")
+    assert not (installed.root / "kamusm-roots" / "web.pem").exists()
+    assert read_txn(installed.layout) is None
+    assert no_temporary_files(installed)
+
+
+def two_roots(installed: Installed) -> tuple[ChangePlan, Path, Path]:
+    roots = installed.root / "kamusm-roots"
+    first, second = roots / "a.pem", roots / "b.pem"
+    installs = (Install(first, b"-----BEGIN CERTIFICATE-----\na\n"),
+                Install(second, b"-----BEGIN CERTIFICATE-----\nb\n"))  # fmt: skip
+    return dataclasses.replace(make_plan(installed), installs=installs), first, second
+
+
+def test_a_failed_install_removes_the_files_installed_before_it(installed: Installed) -> None:
+    plan, first, second = two_roots(installed)
+    second.parent.mkdir()
+    second.write_bytes(b"another root\n")
+    outcome = applier(installed).apply(plan)
+    assert (outcome.state, outcome.code) == ("failed", "write_failed")
+    assert not first.exists()
+    assert second.read_bytes() == b"another root\n"  # never one this apply installed
+    assert pair(installed) == (plan.old_toml, plan.old_secrets)
+    assert not [p for p in first.parent.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_a_crash_between_two_installs_removes_the_first_at_recovery(
+    installed: Installed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan, first, second = two_roots(installed)
+    write_new = Applier._write_new
+
+    def crash_at_the_second(self: Applier, path: Path, data: bytes) -> None:
+        if path.name.startswith(f".{second.name}."):
+            raise Crash(path.name)
+        write_new(self, path, data)
+
+    monkeypatch.setattr(Applier, "_write_new", crash_at_the_second)
+    with pytest.raises(Crash):
+        applier(installed).apply(plan)
+    monkeypatch.undo()
+    assert first.exists()
+    outcome = applier(installed).recover()
+    assert outcome is not None
+    assert (outcome.state, outcome.code) == ("failed", "interrupted")
+    assert not first.exists()
+    assert not second.exists()
 
 
 def test_a_file_that_does_not_verify_is_rolled_back(installed: Installed) -> None:

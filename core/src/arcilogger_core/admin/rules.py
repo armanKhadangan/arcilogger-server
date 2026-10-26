@@ -1127,7 +1127,10 @@ def _smtp(run: _Run) -> None:
                 run.error("config_invalid", f"smtp.{key}")
     has_password = "smtp.password" in run.secrets_after
     new_password = run.secret_changes.get("smtp.password") is not None
-    endpoint = any(smtp[key] != before[key] for key in ("host", "port", "security", "username"))
+    # The CA file decides which server may pose as the destination: part of the endpoint.
+    endpoint = any(
+        smtp[key] != before[key] for key in ("host", "port", "security", "username", "ca_file")
+    )
     if smtp["username"]:
         if not has_password:
             run.error("smtp_password_required", "smtp.password")
@@ -1193,7 +1196,10 @@ def _replica(run: _Run) -> None:
         run.effects.add("system.firewall")
     renewed = target != before["target"] or user != before["user"] or new_password
     if replica["enabled"] and (not before["enabled"] or renewed):
-        if run.context.strict_outbound and host_changed:
+        # Without a user the agent would reach the share as the computer account, which is
+        # neither the identity the Replica task writes with (LOCAL SERVICE) nor one to offer
+        # any host: the Requests task tests it instead, as the Replica task would.
+        if not user or (run.context.strict_outbound and host_changed):
             run.warn("probe_skipped", "replica.target")
             run.followups.append("replica_test")
         else:

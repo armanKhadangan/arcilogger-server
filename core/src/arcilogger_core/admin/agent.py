@@ -16,7 +16,8 @@ put into ``admin\\inbox\\`` and works through it in this order (the first failur
    change needs, the edited file (:mod:`~arcilogger_core.admin.tomledit`) and the new store;
 5. **probe** — the candidate values are tested (:mod:`~arcilogger_core.admin.probe`);
 6. **hold** — a guarded change waits for ``policy.hold_hours``; a Zamane client is staged and
-   waits for its approval (``jars.json``);
+   waits for its approval (``jars.json``); one that is due while browser administration is
+   off fails (``admin_disabled``);
 7. **apply** and **verify** — one transaction (:mod:`~arcilogger_core.admin.apply`);
 8. **journal** — the outcome, with old and new values, secrets as ``set``/``unset`` only.
 
@@ -39,12 +40,11 @@ import json
 import logging
 import os
 import re
-import shutil
 import socket
 import sys
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -57,12 +57,15 @@ from arcilogger_core.admin.apply import Applier, ApplyOutcome, ChangePlan
 from arcilogger_core.admin.contract import (
     ACTION_TASKS,
     HEARTBEAT_INTERVAL,
+    JOURNAL_DAYS,
+    MAX_REQUEST_BYTES,
     REAUTH_WINDOW,
     SYSTEM_TASK_TIMEOUT,
     TASK_TIMEOUT,
     TERMINAL_STATES,
     TMP_MAX_AGE,
     UPLOAD_LIFETIME,
+    UPLOAD_LIMITS,
     AdminRequest,
     AgentStatus,
     DocumentError,
@@ -180,6 +183,8 @@ _UPLOAD_KINDS: Final[Mapping[str, UploadKind]] = {
     "zamane_stage": "zamane_client",
     "smtp_ca_set": "smtp_ca",
 }
+#: The journal states that report the apply of a configuration change.
+_APPLY_OUTCOMES: Final = frozenset({"applied", "recovered", "needs_attention"})
 Clock = Callable[[], datetime]
 
 
@@ -749,19 +754,31 @@ class Agent:
         """Steps 2-4 and the upload copies (5): the request, or None when it was rejected."""
         repeat = target.name != "request.req"
         try:
-            data = target.read_bytes()
+            with target.open("rb") as handle:  # one byte more than allowed: the envelope refuses
+                data = handle.read(MAX_REQUEST_BYTES + 1)
         except OSError:
             return None
+        # A file named by an id taken before is rejected without touching that request's
+        # status: whoever can write the inbox cannot rewrite the outcome of an earlier request.
+        taken = (
+            repeat or request_id in self.ledger or read_status(self.layout, request_id) is not None
+        )
         now = self.now()
         try:
             request = open_admin_request(data, keys, now=now)
         except EnvelopeError as exc:
             known = self._after_signature(data, keys) if exc.code != "signature_invalid" else None
-            self._reject(request_id, exc.code, known, reason=exc.reason, status=not repeat)
+            self._reject(request_id, exc.code, known, reason=exc.reason, status=not taken)
             self._drop(target, repeat)
             return None
         if request.id != request_id:
-            self._reject(request_id, "schema_invalid", None, reason="file name and id differ")
+            self._reject(
+                request_id,
+                "schema_invalid",
+                None,
+                reason="file name and id differ",
+                status=not taken,
+            )
             self._drop(target, repeat)
             return None
         if repeat or request_id in self.ledger:
@@ -797,17 +814,22 @@ class Agent:
             return None
 
     def _copy_uploads(self, request: AdminRequest, folder: Path) -> bool:
+        """Each upload into the work folder, read no further than its signed size (the API's
+        quota is not the agent's limit) and checked there against its SHA-256."""
         for op in request.ops:
             if not isinstance(op, RootAddOp | ZamaneStageOp | SmtpCaSetOp):
                 continue
-            source = self.layout.upload_data(op.upload)
-            copy = folder / f"{op.upload}.bin"
-            try:
-                shutil.copyfile(source, copy)
-            except OSError:
+            if op.size > UPLOAD_LIMITS[_UPLOAD_KINDS[op.op]]:
                 return False
-            data = copy.read_bytes()
-            if len(data) != op.size or hashlib.sha256(data).hexdigest() != op.sha256:
+            try:
+                with self.layout.upload_data(op.upload).open("rb") as source:
+                    if os.fstat(source.fileno()).st_size != op.size:
+                        return False
+                    data = source.read(op.size + 1)
+                if len(data) != op.size or hashlib.sha256(data).hexdigest() != op.sha256:
+                    return False
+                (folder / f"{op.upload}.bin").write_bytes(data)
+            except OSError:
                 return False
         return True
 
@@ -1182,9 +1204,16 @@ class Agent:
         return None
 
     def _finish(
-        self, request_id: str, outcome: ApplyOutcome, finish: _Finish, progress: _Progress
+        self,
+        request_id: str,
+        outcome: ApplyOutcome,
+        finish: _Finish,
+        progress: _Progress,
+        *,
+        journaled: bool = False,
     ) -> None:
-        """Steps 12 and the reports of an apply's outcome."""
+        """Steps 12 and the reports of an apply's outcome. ``journaled``: a recovery whose
+        journal line was written before the crash (it is not written twice)."""
         version: VersionRef | None = None
         if outcome.version is not None:
             version = VersionRef.model_validate(
@@ -1193,6 +1222,7 @@ class Agent:
         number = outcome.version.n if outcome.version else None
         transition = (outcome.from_sha256, outcome.to_sha256)
         written = outcome.state == "applied" or outcome.code == "acl_drift"
+        conflict = outcome.state == "conflict"  # the files changed while it was probed
         applicable: dict[Step, bool] = {
             "backup": True,
             "write_secrets": bool(finish.secrets),
@@ -1200,8 +1230,10 @@ class Agent:
             "install_files": finish.installs > 0,
             "verify": True,
         }
+        if conflict:
+            progress.step("validate", "failed", outcome.code)
         for step, used in applicable.items():
-            if not used:
+            if not used or conflict:
                 progress.step(step, "skipped")
             elif written:
                 progress.step(step, "done")
@@ -1212,21 +1244,24 @@ class Agent:
         journal_state: JournalState
         if outcome.state == "applied":
             journal_state = "recovered" if outcome.recovered else "applied"
+        elif outcome.state == "conflict":
+            journal_state = "failed"
         else:
             journal_state = outcome.state
-        self._journal(
-            request_id,
-            journal_state,
-            kind=finish.status_kind,
-            section=finish.section,
-            requested_by=finish.requested_by,
-            version=number,
-            transition=transition,
-            changes=finish.changes if written else {},
-            secrets=finish.secrets if written else (),
-            code=outcome.code,
-            rolled_back=outcome.rolled_back,
-        )
+        if not journaled:
+            self._journal(
+                request_id,
+                journal_state,
+                kind=finish.status_kind,
+                section=finish.section,
+                requested_by=finish.requested_by,
+                version=number,
+                transition=None if conflict else transition,
+                changes=finish.changes if written else {},
+                secrets=finish.secrets if written else (),
+                code=outcome.code,
+                rolled_back=outcome.rolled_back,
+            )
         progress.step("journal", "done")
         if written:
             self.applier.commit()
@@ -1236,7 +1271,7 @@ class Agent:
                 changed_by=f"web:{finish.requested_by.username}",
                 at=self.now(),
             )
-        state: State = "applied" if outcome.state == "applied" else outcome.state
+        state: State = outcome.state
         progress.write(
             state,
             error=outcome.code,
@@ -1266,6 +1301,8 @@ class Agent:
                     self._wait_sync(request_id, outcome.to_sha256)
             for kind in finish.followups:
                 self._followup(request_id, kind)
+            return
+        if conflict:
             return
         self._event(
             Event.CHANGE_FAILED,
@@ -1331,8 +1368,27 @@ class Agent:
             return outcome
         finish = _Finish.load(txn.journal)
         progress = _Progress(self, txn.request, finish.status_kind, finish.section)
-        self._finish(txn.request, outcome, finish, progress)
+        # A crash between the journal line and the removal of txn.json: the outcome was
+        # journaled already (an audit row, secret records); the rest is reported once.
+        earlier = (
+            self._outcome_line(txn.request, txn.started_at) if outcome.state == "applied" else None
+        )
+        if earlier is not None and earlier.state == "needs_attention":
+            outcome = replace(outcome, state="needs_attention", code=earlier.code, recovered=False)
+        self._finish(txn.request, outcome, finish, progress, journaled=earlier is not None)
         return outcome
+
+    def _outcome_line(self, request_id: str, since: datetime) -> JournalLine | None:
+        """The journal line that reported the apply of ``request_id`` (``applied``,
+        ``recovered`` or ``needs_attention``), looked for from the day of ``since`` on."""
+        today = site_day(self.now())
+        day = max(min(site_day(since), today), today - timedelta(days=JOURNAL_DAYS))
+        while day <= today:
+            for line in read_journal(self.layout, day):
+                if line.request == request_id and line.state in _APPLY_OUTCOMES:
+                    return line
+            day += timedelta(days=1)
+        return None
 
     def _abandoned_work(self) -> None:
         """Work folders of requests the agent took but never finished (it stopped): failed
@@ -1378,6 +1434,7 @@ class Agent:
     def _due_pending(self) -> None:
         now = self.now()
         approved: frozenset[str] | None = None
+        enabled: bool | None = None
         for item in read_pending(self.layout):
             if item.kind == "hold" and now < item.effective_at:
                 continue
@@ -1385,23 +1442,64 @@ class Agent:
                 approved = self.approved_jars() if approved is None else approved
                 if item.jar_sha256 not in approved:
                     continue
+            if enabled is None:
+                enabled = read_policy(self.layout.policy).enabled
             self._busy = item.id
             status = read_status(self.layout, item.id)
             kind = status.kind if status is not None and status.kind else item.request.kind
             work = self.layout.work_dir(item.id)
-            try:
-                self._config(
-                    item.request,
-                    work=work if work.is_dir() else None,
-                    pending=item,
-                    status_kind=kind,
-                )
-            except Exception:
-                log.exception("held request %s failed", item.id)
-                self._fail_unexpected(item.request)
+            if not enabled:
+                # Switched off (or a damaged policy.json, which fails closed) while it was held:
+                # turning browser administration off stops what it holds too.
+                self._fail_held(item, kind)
+            else:
+                try:
+                    self._config(
+                        item.request,
+                        work=work if work.is_dir() else None,
+                        pending=item,
+                        status_kind=kind,
+                    )
+                except Exception:
+                    log.exception("held request %s failed", item.id)
+                    self._fail_unexpected(item.request)
             remove_pending(self.layout, item.id)  # not on a stop: the hold is taken up again
             remove_tree(work)
+            if not enabled:
+                self._unstage(item)
             self._busy = None
+
+    def _fail_held(self, held: PendingFile, kind: RequestKind) -> None:
+        """A held change that is due while browser administration is off: ``failed``
+        (``admin_disabled``), so switching it on again leaves nothing to take effect."""
+        log.warning("held request %s not applied: browser administration is off", held.id)
+        progress = _Progress(self, held.id, kind, held.request.section)
+        progress.step("hold", "failed", "admin_disabled")
+        progress.write("failed", error="admin_disabled")
+        self._journal(
+            held.id,
+            "failed",
+            kind=kind,
+            section=held.request.section,
+            requested_by=Requester(
+                user_id=held.request.actor.user_id, username=held.request.actor.username
+            ),
+            code="admin_disabled",
+        )
+        self._event(
+            Event.CHANGE_FAILED,
+            "error",
+            f"Bekletilen değişiklik uygulanmadı [held change not applied]: admin_disabled "
+            f"({held.id[:8]})",
+        )
+
+    def _unstage(self, held: PendingFile) -> None:
+        """The staged Zamane client of a held change that ended, unless another one waits
+        for it."""
+        if held.jar_sha256 and not any(
+            item.jar_sha256 == held.jar_sha256 for item in read_pending(self.layout)
+        ):
+            (self.installation.zamane.staging / f"{held.jar_sha256}.jar").unlink(missing_ok=True)
 
     def _cancel(self, request: AdminRequest) -> None:
         target = request.options.target
@@ -1428,10 +1526,7 @@ class Agent:
             return
         remove_pending(self.layout, held.id)
         remove_tree(self.layout.work_dir(held.id))
-        if held.jar_sha256 and not any(
-            item.jar_sha256 == held.jar_sha256 for item in read_pending(self.layout)
-        ):
-            (self.installation.zamane.staging / f"{held.jar_sha256}.jar").unlink(missing_ok=True)
+        self._unstage(held)
         status = read_status(self.layout, held.id)
         kind = status.kind if status is not None and status.kind else held.request.kind
         cancelled = _Progress(self, held.id, kind, held.request.section)
@@ -1450,10 +1545,16 @@ class Agent:
 
     def _revert(self, request: AdminRequest) -> None:
         """``config.revert``: the inverse ops of the target's paths from its version, through
-        the same rules (contract 2.7.2)."""
+        the same rules (contract 2.7.2). The version is saved before the files are replaced,
+        so a request that failed, was rolled back or needs attention has one as well: only a
+        target its journal reports applied is reverted."""
         target = request.options.target
         requester = Requester(user_id=request.actor.user_id, username=request.actor.username)
         entry = self.applier.versions.for_request(target) if target else None
+        if entry is not None and entry.request is not None:
+            line = self._outcome_line(entry.request, entry.at)
+            if line is None or line.state not in ("applied", "recovered"):
+                entry = None
         inverse = self._inverse(entry) if entry is not None else None
         if inverse is None:
             progress = _Progress(self, request.id, request.kind, None)

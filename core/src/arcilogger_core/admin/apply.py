@@ -4,11 +4,15 @@
 :meth:`Applier.apply` runs steps 6-12 of contract 2.7.1 for a :class:`ChangePlan` whose new
 bytes were built and validated already (steps 1-5, the agent):
 
-6. the write-ahead record ``admin\\state\\txn.json`` (``prepared``), fsync;
-7. the current pair saved as the next version (``admin\\versions\\<n>\\``);
+6. the files on disk must still be the ones the change was built from (a hand edit made while
+   the agent probed is never overwritten: ``conflict``, nothing changed); the write-ahead record
+   ``admin\\state\\txn.json`` (``prepared``), fsync;
+7. the pair read in step 6 saved as the next version (``admin\\versions\\<n>\\``);
 8. the new files written as ``.<name>.<id>.tmp`` next to them (same volume), fsync;
-9. roots and CA files installed under new names (``.tmp``, then rename);
-10. ``txn.json`` stage ``written``, then ``secrets.json`` replaced, then ``arcilogger.toml``
+9. roots and CA files installed under new names (``.tmp``, then rename), each recorded in
+   ``txn.json`` before its rename;
+10. the files checked once more as in step 6, ``txn.json`` stage ``written``, then
+    ``secrets.json`` replaced, then ``arcilogger.toml``
     (:func:`~arcilogger_core.admin.winapi.replace_file`; a sharing violation is retried for up to
     10 seconds). ``arcilogger.toml`` is the commit point;
 11. verified: both hashes as planned, ``load_config`` succeeds, every changed secret decrypts;
@@ -73,7 +77,7 @@ CHECKPOINTS: Final = (
     "restore",
 )
 
-Outcome = Literal["applied", "failed", "needs_attention"]
+Outcome = Literal["applied", "failed", "needs_attention", "conflict"]
 
 
 def sha256(data: bytes) -> str:
@@ -81,7 +85,8 @@ def sha256(data: bytes) -> str:
 
 
 class ApplyError(RuntimeError):
-    """A step of the transaction failed (``code``: ``write_failed`` or ``verify_failed``)."""
+    """A step of the transaction failed (``code``: ``write_failed``, ``verify_failed`` or
+    ``conflict``)."""
 
     def __init__(self, code: str, reason: str) -> None:
         super().__init__(f"{code}: {reason}")
@@ -126,7 +131,8 @@ class ChangePlan:
 @dataclass(frozen=True)
 class ApplyOutcome:
     state: Outcome
-    #: ``write_failed``, ``verify_failed``, ``rollback_failed``, ``acl_drift``, ``interrupted``.
+    #: ``write_failed``, ``verify_failed``, ``rollback_failed``, ``acl_drift``, ``interrupted``,
+    #: ``conflict``.
     code: str | None
     version: VersionEntry | None
     rolled_back: bool
@@ -200,20 +206,23 @@ class Applier:
         finally:
             temp.unlink(missing_ok=True)
 
-    def _install(self, installs: Sequence[Install], txn_id: str) -> list[str]:
-        created: list[str] = []
-        for item in installs:
-            if item.target.exists():
-                if item.target.read_bytes() == item.data:
-                    continue
-                raise ApplyError("write_failed", f"{item.target.name} exists with other content")
-            item.target.parent.mkdir(parents=True, exist_ok=True)
-            temp = item.target.with_name(f".{item.target.name}.{txn_id}.tmp")
+    def _install(self, item: Install, txn: TxnFile, installed: list[str]) -> None:
+        """Step 9 for one file. It is recorded in ``installed`` and ``txn.json`` before it is
+        renamed into place, so a failure or a crash from then on removes it again."""
+        if item.target.exists():
+            if item.target.read_bytes() == item.data:
+                return
+            raise ApplyError("write_failed", f"{item.target.name} exists with other content")
+        item.target.parent.mkdir(parents=True, exist_ok=True)
+        installed.append(str(item.target))
+        write_txn(self.layout, txn.model_copy(update={"files": tuple(installed)}))
+        temp = item.target.with_name(f".{item.target.name}.{txn.id}.tmp")
+        try:
             self._write_new(temp, item.data)
             temp.replace(item.target)
-            fsync_dir(item.target.parent)
-            created.append(str(item.target))
-        return created
+        finally:
+            temp.unlink(missing_ok=True)
+        fsync_dir(item.target.parent)
 
     def _discard_temps(self, txn_id: str) -> None:
         for target in (self.installation.toml, self.installation.secrets):
@@ -227,6 +236,18 @@ class Applier:
     def _digest_on_disk(self, path: Path) -> str | None:
         data = read_bytes_or_none(path)
         return sha256(data) if data is not None else None
+
+    def _unchanged(self, old: Digests) -> tuple[bytes, bytes | None]:
+        """The pair on disk, which must still be the one the change was built from: the agent
+        read it before the probes, and an edit made on the console meanwhile is never
+        overwritten (:class:`ApplyError` ``conflict``)."""
+        toml = self.installation.toml.read_bytes()
+        secrets = read_bytes_or_none(self.installation.secrets)
+        if sha256(toml) != old.toml_sha256 or (
+            (sha256(secrets) if secrets is not None else None) != old.secrets_sha256
+        ):
+            raise ApplyError("conflict", "the configuration changed after it was read")
+        return toml, secrets
 
     def verify(self, new: Digests, secret_names: Sequence[str]) -> None:
         """Step 11: the files are the planned ones, load and decrypt (:class:`ApplyError`)."""
@@ -259,6 +280,20 @@ class Applier:
     def apply(self, plan: ChangePlan) -> ApplyOutcome:
         """Steps 6-11; the caller journals the outcome and then calls :meth:`commit`."""
         old, new = plan.digests
+        try:
+            old_toml, old_secrets = self._unchanged(old)
+        except (OSError, ApplyError) as exc:
+            code = exc.code if isinstance(exc, ApplyError) else "write_failed"
+            log.error("apply %s refused (%s): %s", plan.id, code, exc)
+            return ApplyOutcome(
+                "conflict" if code == "conflict" else "failed",
+                code,
+                None,
+                False,
+                old.toml_sha256,
+                new.toml_sha256,
+                reason=str(exc),
+            )
         number = max((v.n for v in self.versions.index().versions), default=0) + 1
         txn = TxnFile(
             id=plan.id,
@@ -274,11 +309,12 @@ class Applier:
         write_txn(self.layout, txn)
         entry: VersionEntry | None = None
         replaced = False
+        installed: list[str] = []
         try:
             self._checkpoint("versions")
             entry = self.versions.save(
-                toml=plan.old_toml,
-                secrets=plan.old_secrets,
+                toml=old_toml,
+                secrets=old_secrets,
                 request=plan.request,
                 actor=plan.actor,
                 paths=plan.paths,
@@ -295,10 +331,10 @@ class Applier:
             if plan.new_secrets is not None:
                 self._write_new(temp_secrets, plan.new_secrets)
             self._checkpoint("install_files")
-            txn = txn.model_copy(update={"files": tuple(self._install(plan.installs, plan.id))})
-            if txn.files:
-                write_txn(self.layout, txn)  # a crash from here removes them again
-            txn = txn.model_copy(update={"stage": "written"})
+            for item in plan.installs:
+                self._install(item, txn, installed)
+            self._unchanged(old)  # once more: nothing is replaced over an edit made meanwhile
+            txn = txn.model_copy(update={"files": tuple(installed), "stage": "written"})
             write_txn(self.layout, txn)
             replaced = True
             if plan.new_secrets is not None:
@@ -311,6 +347,7 @@ class Applier:
         except (OSError, ApplyError, ValueError) as exc:
             code = exc.code if isinstance(exc, ApplyError) else "write_failed"
             log.error("apply %s failed (%s): %s", plan.id, code, exc)
+            txn = txn.model_copy(update={"files": tuple(installed)})
             return self._rollback(txn, entry, code, str(exc), replaced=replaced)
         finally:
             self._discard_temps(plan.id)
@@ -361,7 +398,7 @@ class Applier:
             )
         remove_txn(self.layout)
         return ApplyOutcome(
-            "failed",
+            "conflict" if code == "conflict" else "failed",
             code,
             entry,
             replaced,

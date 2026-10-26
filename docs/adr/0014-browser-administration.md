@@ -100,8 +100,8 @@ The constraints that shape the design:
     ApplySystem also write the Windows Application log (source `ARCILOGGER-Admin`). Secrets appear
     only as `set`/`unset`.
 12. **Off switch.** `-DisableBrowserAdministration` writes `enabled: false` into `policy.json`; the
-    agent then refuses every request and the web shows the console path. No licence state ever
-    affects any of this.
+    agent then refuses every request, fails every held change that falls due and the web shows
+    the console path. No licence state ever affects any of this.
 
 ## Consequences
 
