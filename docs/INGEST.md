@@ -12,6 +12,11 @@
 - Her (kaynak, gün) için **kaldığı yer** (`ingest_offsets`: bayt konumu + satır numarası)
   yüklenen satırlarla **aynı veritabanı işleminde** kaydedilir. Bu yüzden servis çökse, elektrik
   kesilse veya süreç öldürülse bile bir satır **ne iki kez yüklenir ne de atlanır**.
+- Arama'nın özet tablosu `search_counts` (saat, ham dosya, kayıt türü, tablo, eylem ve özel /24
+  ağı başına **kesin** satır sayıları) da satırlarla **aynı işlemde** yazılır: yüklenen her satır
+  tam bir kez sayılır. Bu sürüme yükseltmeden önce yüklenmiş dosyaları worker işi
+  `search.counts_backfill` gün bitince sayar; o zamana kadar o günlerin istatistikleri doğrudan
+  sayılır. Ek maliyet ölçüldü: aşağıda "Measured throughput".
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -49,7 +54,7 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
     once the sealer deleted the spool file)             ▼
                                          one transaction: offsets (compare-and-set) → COPY rows
                                          → parse_failures upsert → sources (+ new_source alert)
-                                         → COMMIT → in-memory offsets move
+                                         → search_counts upsert → COMMIT → in-memory offsets move
 ```
 
 | Module | Role |
@@ -57,7 +62,7 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
 | `service.py` | the loop: discover streams, read, batch, load, finish, back off, status |
 | `files.py` | `read_complete` (spool, opened and closed per read), `VaultReader` (sealed `.log.gz`), `open_shared` (Windows delete sharing) |
 | `prepare.py` | one raw line → rows (pure function; runs in a worker process unchanged) |
-| `loader.py` | the load transaction, compare-and-set offsets, bisecting a batch `COPY` refuses |
+| `loader.py` | the load transaction (rows, failures, sources, search counts), compare-and-set offsets, bisecting a batch `COPY` refuses |
 | `instance.py` | single-instance lock (PostgreSQL session-level advisory lock) |
 | `sealed.py` | which days the sealer finished (`state/seal/<day>.json` + manifest) |
 | `sources.py` | spool folder → configured type (`fortigate`, `ap-<ip>` → network entry, `unknown-<ip>` → content detection) |
@@ -121,13 +126,50 @@ worker that imports that file should use the same key.)
 3. In-memory offsets move only after `COMMIT`; after a restart they come only from the database.
 
 Tests: an interruption at every step of the transaction (`offsets`, `copy`, `failures`,
-`sources`, `commit`), a second instance moving the offsets mid-batch, two instances racing on
-the same files (lock switched off), the real process killed three times with
+`sources`, `counts`, `commit`), a second instance moving the offsets mid-batch, two instances
+racing on the same files (lock switched off), the real process killed three times with
 `SIGKILL`/`TerminateProcess` during loading, re-runs over the same files, and database outages
 (a TCP proxy that drops every connection): before the `COPY`, **while `COPY` is streaming rows**,
 **as `COMMIT` is sent**, and a `COMMIT` that **succeeded but whose answer was lost** (the retry
 finds the offsets already moved and continues from the database) — every time each line is in
-`messages` exactly once and rows and offsets agree.
+`messages` exactly once and rows and offsets agree; after the interruptions, the second instance,
+the race and the kills the search counts agree with them too (`searchcounts.verify` in the
+same snapshot).
+
+## Search counts
+
+The step `counts` writes the summary table `search_counts` of Arama's statistics
+([ADR-0015](adr/0015-search-live-sources.md), `arcilogger_db.searchcounts`) in the load
+transaction, from exactly the lines whose rows loaded in it:
+
+- One key per hour of the device time (`messages.time`, UTC), spool file (`source`, `raw_day`),
+  kind of the `messages` row (`kinds.kind_of`), typed table (`''` for none), the typed row's
+  `action` (lower-cased) and the /24 of its client address when that is a private IPv4 address;
+  `count_key` is the one definition, also used by `rebuild_stream`, so what ingest counted equals
+  a recount of the rows (tested on every path below).
+- A line whose typed row is not loaded — dropped by the row check (`rowcheck.<table>`) or refused
+  by `COPY` and salvaged with its `messages` row alone (`copy.<table>`) — counts with `tbl = ''`:
+  the search over the typed tables does not find it either. A line without a `messages` row
+  (`rawlog.invalid`, `copy.messages`, a `rowcheck.messages` without generic view) is not
+  counted: it is in neither search nor statistics, only in `parse_failures`.
+- One `INSERT … ON CONFLICT … DO UPDATE SET n = search_counts.n + EXCLUDED.n` per 500 keys, keys
+  in sorted order. A batch of 5,000 lines has tens to a few hundred keys; the load-generator day
+  below (217,875 lines) has 800. No lock of its own: one ingest writes a file (instance lock and
+  compare-and-set), and a finished file is never written again.
+- **Files loaded before revision `0016_search`.** The migration sets
+  `ingest_offsets.counts_from_line = line_number + 1` on every file with loaded lines. Ingest
+  counts what it loads from then on and leaves the mark; the worker job `search.counts_backfill`
+  (every 10 minutes, no new file after 60 s, newest day first; [CORRELATION.md](CORRELATION.md))
+  recounts a file once it is finished and clears the mark. Until then the statistics of the days
+  around that file are counted directly (slower, same result). `arcilogger-db search-counts
+  status` lists the files still to count, `rebuild --source S --day YYYY-MM-DD` recounts one at
+  once (also one still being loaded: it locks the file's `ingest_offsets` row, so ingest's next
+  batch of that file waits until the recount commits), `verify --hours 2` recounts the recent
+  hours from the rows and exits 1 on a difference.
+
+Tests: `ingest/tests/test_loader_counts.py` (shared batches over three sources and two days, a
+damaged line, a dropped typed row, the `COPY` salvage, vault continuation, a file half loaded
+before the upgrade, a device clock almost a day behind) and the exactly-once matrix above.
 
 ## One instance per database
 
@@ -267,5 +309,9 @@ its timeout): it watches the parent's process sentinel, so no orphaned worker st
 - Throughput with the real parsers and the production database (TimescaleDB or partitions):
   `bench_throughput.py --repeat 3 --workers 0 2 3` and a live feed at 10,000 lines/s (spec 14
   acceptance; not met on the development VM).
+- The search counts after the first days: `arcilogger-db search-counts verify --hours 24` must
+  report no difference (rows and counts are written in one transaction), and its line on names
+  not stored in lower case should read 0 for `fg_dns.qname` and `fg_web.hostname` (`domain:`
+  assumes lower case, ADR-0015).
 - Readers of `ingest-status.json` (API) should open, read and close it quickly: on Windows an
   atomic replace fails while a reader holds the file; ingest logs that once and retries.

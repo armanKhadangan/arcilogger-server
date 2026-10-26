@@ -138,6 +138,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
+| `search.counts_backfill` | 5651 Temel | her zaman çalışır |
 
 Komut satırında yalnızca `arcilogger-worker usage rebuild` Kullanım analizi kapalıyken reddedilir
 (çıkış kodu 1, `module_not_licensed` iletisi). `arcilogger-worker run`, `rebuild` (kira zaman
