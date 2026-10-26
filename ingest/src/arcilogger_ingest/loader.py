@@ -1,4 +1,5 @@
-"""Load one batch in **one transaction**: rows, failures, sources, alerts and the offsets.
+"""Load one batch in **one transaction**: rows, failures, sources, alerts, the search counts and
+the offsets.
 
 Exactly-once rests on two things done here:
 
@@ -9,6 +10,13 @@ Exactly-once rests on two things done here:
    batch was read from> AND line_number = … AND finished_at IS NULL``. It runs first (and takes
    the row locks), so if anything else moved the offset — a second ingest instance by mistake,
    an operator — the batch is refused (:class:`OffsetConflictError`) instead of loading lines twice.
+
+The search summary table ``search_counts`` (:mod:`arcilogger_db.searchcounts`, ADR-0015) is
+written in the same transaction (step ``counts``), from exactly the lines whose rows loaded, so the
+counts are exactly-once like the rows: a line whose typed row ``COPY`` refused counts with
+``tbl = ''`` (the search over typed tables does not find it either), a line without a ``messages``
+row (``rawlog.invalid``, or a ``messages`` row ``COPY`` refused) does not count. One ingest writes
+a file, and a finished file is never written again, so the counts need no lock of their own.
 
 A row that passed :func:`~arcilogger_db.rowcheck.check_row` should always load. If ``COPY``
 still rejects something (``DataError``/``IntegrityError``, or a value the driver cannot encode),
@@ -22,6 +30,7 @@ and the caller retries the same batch later.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -35,6 +44,7 @@ from arcilogger_core.timeutil import isoformat_site, utc_now
 from arcilogger_db.bulk import copy_rows
 from arcilogger_db.models import Alert, IngestOffset, ParseFailure, Source
 from arcilogger_db.rowcheck import check_row
+from arcilogger_db.searchcounts import CountKey, count_key, upsert_counts
 from arcilogger_ingest.prepare import DETAIL_MAX, Failure, PreparedLine
 
 log = logging.getLogger("arcilogger.ingest")
@@ -46,7 +56,7 @@ DATA_ERRORS: Final = (DataError, IntegrityError, UnicodeError, ValueError, TypeE
 
 #: Called with the step name before each step (tests interrupt the transaction there).
 StepHook = Callable[[str], None]
-STEPS: Final = ("offsets", "copy", "failures", "sources", "commit")
+STEPS: Final = ("offsets", "copy", "failures", "sources", "counts", "commit")
 
 
 class OffsetConflictError(RuntimeError):
@@ -58,6 +68,11 @@ class _CopyFailedError(Exception):
         super().__init__(f"{table}: {error}")
         self.table = table
         self.error = error
+
+
+#: A line whose rows loaded, and whether its typed row loaded too (``False``: its ``messages`` row
+#: was salvaged alone).
+_Loaded = tuple[PreparedLine, bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +177,8 @@ class Loader:
             self._update_offsets(connection, batch.offsets.values())
             self._step("copy")
             counts: dict[str, int] = {}
-            refused = self._copy_bisect(connection, batch.lines, counts, batch)
+            loaded: list[_Loaded] = []
+            refused = self._copy_bisect(connection, batch.lines, counts, batch, loaded)
             if refused and not batch.load_failures:
                 # Not one bad line but something about the batch as a whole: every line loaded
                 # on its own, after up to 2 x lines extra COPYs. Silent, that would only show
@@ -177,6 +193,8 @@ class Loader:
             failures = self._record_failures(connection, batch)
             self._step("sources")
             new_sources = self._update_sources(connection, batch.sources.values())
+            self._step("counts")
+            upsert_counts(connection, _count_keys(loaded))
             self._step("commit")
         return LoadResult(rows=counts, failures=failures, new_sources=new_sources)
 
@@ -221,8 +239,11 @@ class Loader:
         lines: Sequence[PreparedLine],
         counts: dict[str, int],
         batch: Batch,
+        loaded: list[_Loaded],
     ) -> int:
-        """Load ``lines``; returns how many ``COPY`` attempts were refused on the way."""
+        """Load ``lines``; returns how many ``COPY`` attempts were refused on the way.
+
+        Every line whose rows loaded goes into ``loaded``, for the ``counts`` step."""
         if not lines:
             return 0
         attempt: dict[str, int] = {}
@@ -231,18 +252,19 @@ class Loader:
                 _copy_lines(connection, lines, attempt)
         except _CopyFailedError as failed:
             if len(lines) == 1:
-                self._salvage(connection, lines[0], failed, counts, batch)
+                self._salvage(connection, lines[0], failed, counts, batch, loaded)
                 return 1
             middle = len(lines) // 2
             # the line responsible is logged by _salvage; this only traces the bisection
             log.debug("COPY rejected %d lines, narrowing it down", len(lines))
             return (
                 1
-                + self._copy_bisect(connection, lines[:middle], counts, batch)
-                + self._copy_bisect(connection, lines[middle:], counts, batch)
+                + self._copy_bisect(connection, lines[:middle], counts, batch, loaded)
+                + self._copy_bisect(connection, lines[middle:], counts, batch, loaded)
             )
         for table, count in attempt.items():
             counts[table] = counts.get(table, 0) + count
+        loaded.extend((line, True) for line in lines)
         return 0
 
     def _salvage(
@@ -252,6 +274,7 @@ class Loader:
         failed: _CopyFailedError,
         counts: dict[str, int],
         batch: Batch,
+        loaded: list[_Loaded],
     ) -> None:
         """The line that ``COPY`` refuses: count it; keep its ``messages`` row if that loads."""
         pattern = PATTERN_COPY + failed.table
@@ -281,6 +304,7 @@ class Loader:
         except _CopyFailedError:
             return
         counts["messages"] = counts.get("messages", 0) + attempt.get("messages", 0)
+        loaded.append((line, False))  # without its typed row: counted with tbl = ''
 
     # -- parse failures ---------------------------------------------------------------------------
 
@@ -408,6 +432,24 @@ class Loader:
                 index_where=text("state = 'open' AND dedup_key IS NOT NULL"),
             )
         )
+
+
+def _count_keys(loaded: Iterable[_Loaded]) -> Counter[CountKey]:
+    """The ``search_counts`` keys of the loaded lines: ``count_key`` of the ``messages`` row and,
+    when it loaded, of the typed row (a line has at most one)."""
+    keys: Counter[CountKey] = Counter()
+    for line, typed_loaded in loaded:
+        message: dict[str, Any] | None = None
+        table: str | None = None
+        typed: dict[str, Any] | None = None
+        for name, values in line.rows:
+            if name == "messages":
+                message = values
+            elif typed_loaded and table is None:
+                table, typed = name, values
+        if message is not None:
+            keys[count_key(message, table, typed)] += 1
+    return keys
 
 
 def _copy_lines(
