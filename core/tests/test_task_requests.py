@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -109,6 +110,14 @@ class Site:
         path = self.layout.request_results / f"{request.id}.json"
         return parse_document(TaskResult, path.read_bytes())
 
+    def result_names(self, request: TaskRequest, path: Path) -> bool:
+        """Whether a text of the request's result names ``path`` in any form a message could
+        give it. The texts are read decoded: in the file a Windows path's backslashes are
+        escaped, so a search of the raw bytes would never find it there."""
+        document = json.loads((self.layout.request_results / f"{request.id}.json").read_bytes())
+        forms = {str(path), path.as_posix(), as_oserror_names(path)}
+        return any(form in text for text in texts(document) for form in forms)
+
     def state(self, day: date) -> dict[str, Any]:
         data: dict[str, Any] = json.loads(self.layout.seal_state(day).read_bytes())
         return data
@@ -127,6 +136,25 @@ class Site:
         path = self.layout.seal_state(day)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(state), encoding="utf-8")
+
+
+def as_oserror_names(path: Path) -> str:
+    """``path`` as the message of an ``OSError`` names it: its repr, which doubles the
+    backslashes of a Windows path (``'C:\\\\ProgramData\\\\ARCILOGGER\\\\vault'``)."""
+    return repr(str(path))[1:-1]
+
+
+def texts(value: Any) -> Iterator[str]:
+    """Every text of a JSON document (keys too)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from texts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from texts(item)
 
 
 def task_request(
@@ -217,9 +245,7 @@ def test_a_seal_request_seals_a_day_that_waits_for_its_retry(
     # The request is gone, its id stays in the ledger; nothing in the result names a path.
     assert list(site.layout.request_dir("seal").iterdir()) == []
     assert (site.layout.request_seen / request.id).is_file()
-    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
-    assert str(site.data) not in raw
-    assert site.data.as_posix() not in raw
+    assert not site.result_names(request, site.data)
 
 
 def test_the_request_is_honoured_once(site: Site, capsys: pytest.CaptureFixture[str]) -> None:
@@ -261,16 +287,16 @@ def test_a_failed_attempt_names_no_path_in_the_result(site: Site) -> None:
     request = site.request("seal", day=site.days[0])
     site.layout.vault.write_text("a file where the vault should be", encoding="utf-8")
     assert site.run("seal") == 1
-    assert site.layout.vault.as_posix() in site.state(site.days[0])["last_error"]
+    # The error's own text (Windows: "[WinError 183] … 'C:\\…\\vault'", elsewhere "[Errno 20]
+    # Not a directory: '/…/vault/2026/10/23'").
+    assert as_oserror_names(site.layout.vault) in site.state(site.days[0])["last_error"]
     result = site.result(request)
     assert result.code == "seal_failed"
     assert result.result is not None
     assert result.result.model_dump(mode="json")["message"] == (
         "the sealing attempt failed (unknown); the day's details have the error"
     )
-    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
-    assert str(site.data) not in raw
-    assert site.data.as_posix() not in raw
+    assert not site.result_names(request, site.data)
 
 
 def test_a_request_never_jumps_the_queue(site: Site, capsys: pytest.CaptureFixture[str]) -> None:
@@ -668,8 +694,8 @@ def test_a_tsa_test_request_stamps_and_verifies(site: Site) -> None:
     assert facts["legal_grade"] is False
     assert facts["serial"]
     assert "token" not in facts
+    assert not site.result_names(request, site.data)
     raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
-    assert str(site.data) not in raw
     assert ".zd" not in raw
 
 
@@ -723,8 +749,7 @@ def test_a_replica_test_request_probes_the_share(site: Site, enabled: bool) -> N
         "Replika paylaşımına bağlanıldı; deneme dosyası yazıldı, okundu ve silindi."
     )
     assert [path.name for path in nas.rglob("*") if path.is_file()] == []  # the probe is gone
-    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
-    assert nas.as_posix() not in raw
+    assert not site.result_names(request, nas)
 
 
 def test_a_replica_test_that_fails_names_no_path(site: Site) -> None:
@@ -740,9 +765,7 @@ def test_a_replica_test_that_fails_names_no_path(site: Site) -> None:
     facts = result.result.model_dump(mode="json")
     assert facts["ok"] is False
     assert facts["message"]
-    raw = (site.layout.request_results / f"{request.id}.json").read_text(encoding="utf-8")
-    assert str(site.programdata.parent) not in raw
-    assert site.programdata.parent.as_posix() not in raw
+    assert not site.result_names(request, site.programdata.parent)
 
 
 def test_a_replica_test_without_a_target_or_password_fails(site: Site) -> None:
