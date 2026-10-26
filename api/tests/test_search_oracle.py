@@ -31,7 +31,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from hypothesis import HealthCheck, event, given, settings
+from hypothesis import HealthCheck, currently_in_test_context, event, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -485,9 +485,15 @@ def ranges(draw: st.DrawFn) -> tuple[datetime, datetime]:
 # -- the properties -------------------------------------------------------------------------------
 
 
+def note(value: str) -> None:
+    """A Hypothesis statistics event (the hand-picked queries run outside Hypothesis)."""
+    if currently_in_test_context():
+        event(value)
+
+
 def check(oracle: Oracle, text_: str, start: datetime, end: datetime) -> None:
     status, answer = run(oracle, text_, start, end)
-    event(f"status {status}")
+    note(f"status {status}")
     refused: SearchQueryError | None = None
     try:
         query = parse_query(text_)
@@ -501,7 +507,7 @@ def check(oracle: Oracle, text_: str, start: datetime, end: datetime) -> None:
         return
     assert status == 200, (text_, answer)
     expected = expected_rows(oracle, text_, start, end)
-    event("rows" if expected else "no rows")
+    note("rows" if expected else "no rows")
     assert all_rows(oracle, answer) == as_keys(expected), text_
     check_stats(stats(oracle, answer["search_id"]), expected_stats(oracle, text_, start, end))
 
