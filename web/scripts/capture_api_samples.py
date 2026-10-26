@@ -125,7 +125,7 @@ from arcilogger_api.security import hash_token
 from arcilogger_api.testing import LoggedIn, login, make_user
 import arcilogger_core
 from arcilogger_core import timeutil
-from arcilogger_core.admin.testing import FakeAgent, make_installation
+from arcilogger_core.admin.testing import FakeAgent, SmtpTestServer, make_installation
 from arcilogger_core.config import Config, load_config
 from arcilogger_core.credit import check_credit
 from arcilogger_core.layout import Layout
@@ -167,6 +167,7 @@ from arcilogger_db.models import (
 from arcilogger_db.seed import seed
 from arcilogger_db.settings import set_setting
 from arcilogger_db.testing import TestServer, admin_dsn_from_env
+from arcilogger_worker.admin_jobs import process_requests as process_admin_requests
 from arcilogger_worker.alerts.importer import import_alerts
 from arcilogger_worker.alerts.r15 import check_silent_sources
 from arcilogger_worker.alerts.store import open_alert, resolve
@@ -2793,7 +2794,9 @@ def capture_admin_sources(capture: Capture, admin: Any) -> None:
         "enabled": True,
     }
     body = {"etag": tag(), "source": source}
-    out["check_add"] = capture.json(admin.post(f"{url}/check", json={**body, "operation": "add"}), 200)
+    out["check_add"] = capture.json(
+        admin.post(f"{url}/check", json={**body, "operation": "add"}), 200
+    )
     errors["source_network_not_allowed"] = capture.error(
         admin.post(url, json={**body, "source": {**source, "address": "203.0.113.7"}}),
         422,
@@ -2832,6 +2835,126 @@ def capture_admin_sources(capture: Capture, admin: Any) -> None:
     out["remove_active"] = capture.json(admin.get(removed["status_url"]), 200)
 
 
+def capture_admin_sections(capture: Capture, admin: Any) -> None:
+    """``admin.json`` ``sections``: the e-mail server (probed with a test e-mail), its CA file,
+    the replica, retention with the days it deletes, the backups, and the worker's test e-mail
+    and lease rebuild."""
+    out = capture.samples["admin"].setdefault("sections", {})
+    errors = capture.samples["admin"].setdefault("errors", {})
+    agent = capture.agent()
+    config = f"{API}/admin/config"
+    actions = f"{API}/admin/actions"
+    recipient = "bilgi-islem@ornek.example"
+    capture.setting("alerts.email_recipients", [recipient])
+
+    def tag(section: str) -> str:
+        found: str = capture.json(admin.get(config), 200)["etags"][section]
+        return found
+
+    def follow(response: Any, name: str) -> None:
+        accepted = capture.json(response, 202)
+        out[f"{name}_accepted"] = accepted
+        agent.process()
+        out[f"{name}_done"] = capture.json(admin.get(accepted["status_url"]), 200)
+
+    errors["smtp_not_configured"] = capture.error(
+        admin.post(f"{actions}/test-email", json={"to": recipient}), 409, "smtp_not_configured"
+    )
+    errors["test_email_recipient_not_allowed"] = capture.error(
+        admin.post(f"{actions}/test-email", json={"to": "yabanci@baska.example"}),
+        422,
+        "test_email_recipient_not_allowed",
+    )
+    capture.recent(admin)
+    with SmtpTestServer() as mail:
+        smtp = {
+            "etag": tag("smtp"),
+            "enabled": True,
+            "host": "127.0.0.1",
+            "port": mail.port,
+            "security": "none",
+            "username": None,
+            "from_address": "arcilogger@ornek.example",
+            "timeout_seconds": 10,
+            "test_to": recipient,
+        }
+        errors["smtp_password_required"] = capture.error(
+            admin.put(f"{config}/smtp", json={**smtp, "username": "arcilogger"}),
+            422,
+            "smtp_password_required",
+        )
+        out["check_smtp"] = capture.json(admin.post(f"{config}/smtp/check", json=smtp), 200)
+        follow(admin.put(f"{config}/smtp", json=smtp), "smtp")
+        sent = capture.json(admin.post(f"{actions}/test-email", json={"to": recipient}), 202)
+        out["test_email_accepted"] = sent
+        process_admin_requests(
+            capture.factory, load_config(capture.installed.config_path), now=utc_now()
+        )
+        out["test_email_done"] = capture.json(admin.get(sent["status_url"]), 200)
+
+    ca = capture.json(upload_file(admin, "smtp_ca", "posta-ca.pem", example_root()), 201)
+    out["upload_smtp_ca"] = ca
+    follow(
+        admin.post(
+            f"{config}/smtp/ca",
+            json={"etag": tag("smtp"), "upload_id": ca["upload_id"], "test_to": recipient},
+        ),
+        "smtp_ca",
+    )
+
+    replica = {
+        "etag": tag("replica"),
+        "enabled": True,
+        "target": "\\\\NAS-01\\arcilogger-worm",
+        "user": "NAS-01\\arcireplica",
+        "password": "Örnek-Paylaşım-2026",
+    }
+    errors["replica_target_invalid"] = capture.error(
+        admin.put(f"{config}/replica", json={**replica, "target": "NAS-01/paylasim"}),
+        422,
+        "replica_target_invalid",
+    )
+    out["check_replica"] = capture.json(admin.post(f"{config}/replica/check", json=replica), 200)
+    follow(admin.put(f"{config}/replica", json=replica), "replica")
+
+    retention = {"etag": tag("retention"), "enabled": True, "days": 760}
+    out["check_retention"] = capture.json(
+        admin.post(f"{config}/retention/check", json=retention), 200
+    )
+    errors["retention_confirm_mismatch"] = capture.error(
+        admin.put(f"{config}/retention", json=retention), 422, "retention_confirm_mismatch"
+    )
+    errors["retention_below_minimum"] = capture.error(
+        admin.put(f"{config}/retention", json={**retention, "days": 365}),
+        422,
+        "retention_below_minimum",
+    )
+    confirm = out["check_retention"]["retention_preview"]["days_to_delete"]
+    follow(
+        admin.put(f"{config}/retention", json={**retention, "confirm_delete_days": confirm}),
+        "retention",
+    )
+
+    backup = {"etag": tag("backup"), "enabled": True, "keep_daily": 21, "min_free_gb": 20}
+    out["check_backup"] = capture.json(admin.post(f"{config}/backup/check", json=backup), 200)
+    follow(admin.put(f"{config}/backup", json=backup), "backup")
+
+    follow(admin.post(f"{actions}/replica-test", json={}), "replica_test")
+    errors["lease_rebuild_range"] = capture.error(
+        admin.post(f"{actions}/lease-rebuild", json={"from": "2026-01-01", "to": "2026-03-01"}),
+        422,
+        "lease_rebuild_range",
+    )
+    span = {"from": SITE_DAY.isoformat(), "to": (SITE_DAY + timedelta(days=1)).isoformat()}
+    rebuild = capture.json(admin.post(f"{actions}/lease-rebuild", json=span), 202)
+    out["lease_rebuild_accepted"] = rebuild
+    process_admin_requests(
+        capture.factory, load_config(capture.installed.config_path), now=utc_now()
+    )
+    out["lease_rebuild_done"] = capture.json(admin.get(rebuild["status_url"]), 200)
+    out["config"] = capture.json(admin.get(config), 200)
+
+
 def capture_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
     """Steps 1-7 of the module text: the lookup site and its pages, then the usage site."""
     build_site(capture)
@@ -2854,6 +2977,7 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
     capture_admin(capture, admin, auditor)
     capture_kamusm(capture, admin)
     capture_admin_sources(capture, admin)
+    capture_admin_sections(capture, admin)
     vault.unlock_all()
     capture.samples["usage"] = capture_usage(server, template, root)
 

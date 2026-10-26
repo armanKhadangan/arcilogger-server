@@ -28,6 +28,11 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.oid import NameOID
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select, update
@@ -98,6 +103,31 @@ def reauthenticate(app_session_factory: sessionmaker[Session]) -> Callable[[Logg
             session.commit()
 
     return mark
+
+
+def _ca_certificate(name: str = "Örnek Test Kök") -> bytes:
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    start = datetime.now(UTC) - timedelta(days=1)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(start)
+        .not_valid_after(start + timedelta(days=3650))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+        .sign(key, hashes.SHA256())
+    )
+    return certificate.public_bytes(Encoding.PEM)
+
+
+@pytest.fixture
+def ca_pem() -> Callable[..., bytes]:
+    """A new self-signed CA certificate in PEM (a Kamu SM root or an SMTP CA file of a test;
+    never a real one): ``ca_pem()`` or ``ca_pem("Ad")``."""
+    return _ca_certificate
 
 
 @pytest.fixture

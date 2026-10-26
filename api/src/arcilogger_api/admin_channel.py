@@ -847,6 +847,21 @@ class Channel:
         if len(made) >= limit:
             raise rate_limited(code, until - self.now)
 
+    def check_window(
+        self, db: Session, kind: str, *, limit: int, window: timedelta, code: str
+    ) -> None:
+        """429: ``limit`` requests of ``kind`` within the last ``window`` (retry once the oldest
+        of them is older)."""
+        made = sorted(
+            db.scalars(
+                select(AdminRequestRow.created_at).where(
+                    AdminRequestRow.kind == kind, AdminRequestRow.created_at > self.now - window
+                )
+            )
+        )
+        if len(made) >= limit:
+            raise rate_limited(code, made[-limit] + window - self.now)
+
     # -- writing a request -----------------------------------------------------------------------
 
     def _write(self, request_id: str, data: bytes) -> bool:

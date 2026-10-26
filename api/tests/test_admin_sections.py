@@ -1,0 +1,211 @@
+"""E-mail, replica, retention and backups through the browser (ADR-0014; contract 2.6,
+2.11.1).
+
+The real API and agent on a real installation: each change needs a re-authentication, is tested
+first where it reaches a server (the agent's probe gets the typed password, the API never sees
+it again), and is refused with the rules' field codes otherwise. The SMTP CA file is uploaded,
+trusted and cleared; a retention change shows the sealed days it deletes and must be confirmed
+with their number; a change the installer's policy holds waits as ``pending``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from arcilogger_api.testing import LoggedIn
+from arcilogger_core.admin.testing import FakeAgent, Installed
+
+pytestmark = pytest.mark.usefixtures("installed")
+
+Login = Callable[..., LoggedIn]
+Reauth = Callable[[LoggedIn], None]
+Pem = Callable[..., bytes]
+V = "/api/v1"
+CONFIG = f"{V}/admin/config"
+#: The administrator's own address: the probe's test e-mail may go there.
+OWN = "tolga@ornek.example"
+SMTP = {
+    "enabled": True,
+    "host": "smtp.ornek.example",
+    "port": 587,
+    "security": "starttls",
+    "username": "arcilogger",
+    "from_address": "arcilogger@ornek.example",
+    "timeout_seconds": 30,
+    "test_to": OWN,
+}
+
+
+def etag(client: TestClient, section: str) -> str:
+    tag: str = client.get(CONFIG).json()["etags"][section]
+    return tag
+
+
+def error(response: Any) -> tuple[int, str]:
+    return response.status_code, response.json()["error"]["code"]
+
+
+def fields(response: Any) -> list[tuple[str, str]]:
+    return [(item["field"], item["code"]) for item in response.json()["error"]["details"]]
+
+
+def settle(client: TestClient, agent: FakeAgent, response: Any) -> dict[str, Any]:
+    assert response.status_code == 202, response.text
+    agent.process()
+    found: dict[str, Any] = client.get(response.json()["status_url"]).json()
+    return found
+
+
+@pytest.fixture
+def admin(client: TestClient, login_as: Login, reauthenticate: Reauth) -> LoggedIn:
+    """An administrator who re-authenticated just now."""
+    who = login_as(client, "admin", email=OWN)
+    reauthenticate(who)
+    return who
+
+
+def test_the_mail_server_is_probed_with_the_typed_password(
+    client: TestClient, login_as: Login, reauthenticate: Reauth, agent: FakeAgent
+) -> None:
+    who = login_as(client, "admin", email=OWN)
+    body = {"etag": etag(client, "smtp"), **SMTP, "password": "Örnek-Posta-Parola-3"}
+    checked = client.post(f"{CONFIG}/smtp/check", json=body)
+    assert checked.status_code == 200, checked.text
+    assert checked.json()["reauth_required"] is True
+    assert checked.json()["changes"]["smtp.password"]["new"] == "set"
+    assert "reload.worker" in checked.json()["effects"]
+    assert error(client.put(f"{CONFIG}/smtp", json=body)) == (403, "reauth_required")
+
+    reauthenticate(who)
+    done = settle(client, agent, client.put(f"{CONFIG}/smtp", json=body))
+    assert done["state"] == "active", done
+    steps = {step["step"]: step["state"] for step in done["steps"]}
+    assert steps["probe"] == "done"
+    (call,) = agent.prober.calls
+    assert call.kind == "smtp"
+    assert call.secrets == {"smtp.password": "Örnek-Posta-Parola-3"}
+    assert call.params["to"] == OWN
+    smtp = client.get(CONFIG).json()["sections"]["smtp"]
+    assert (smtp["enabled"], smtp["host"], smtp["username"]) == (
+        True,
+        "smtp.ornek.example",
+        "arcilogger",
+    )
+    assert smtp["secrets"]["smtp.password"]["set"] is True
+
+
+def test_mail_server_refusals_name_their_fields(
+    client: TestClient, admin: LoggedIn, agent: FakeAgent
+) -> None:
+    tag = etag(client, "smtp")
+    no_password = client.put(f"{CONFIG}/smtp", json={"etag": tag, **SMTP})
+    assert error(no_password) == (422, "smtp_password_required")
+    assert fields(no_password) == [("smtp.password", "smtp_password_required")]
+    plain = {**SMTP, "security": "none", "password": "x-Parola-1"}
+    refused = client.put(f"{CONFIG}/smtp", json={"etag": tag, **plain})
+    assert error(refused) == (422, "smtp_plaintext_auth_refused")
+    stranger = {"etag": tag, **SMTP, "password": "x-Parola-1", "test_to": "yabanci@baska.example"}
+    response = client.put(f"{CONFIG}/smtp", json=stranger)
+    assert error(response) == (422, "test_email_recipient_not_allowed")
+    assert fields(response) == [("test_to", "test_email_recipient_not_allowed")]
+    assert "yabanci@baska.example" not in response.text
+
+
+def test_the_smtp_ca_file_is_trusted_and_cleared(
+    client: TestClient, admin: LoggedIn, installed: Installed, agent: FakeAgent, ca_pem: Pem
+) -> None:
+    pem = ca_pem("Örnek Posta Kökü")
+    staged = client.post(
+        f"{V}/admin/uploads",
+        params={"kind": "smtp_ca"},
+        files={"file": ("posta-ca.pem", pem, "application/x-pem-file")},
+    )
+    assert staged.status_code == 201, staged.text
+    preview = staged.json()
+    assert preview["certificate"]["subject"].endswith("Örnek Posta Kökü")
+    body = {"etag": etag(client, "smtp"), "upload_id": preview["upload_id"]}
+    done = settle(client, agent, client.post(f"{CONFIG}/smtp/ca", json={**body, "test_to": OWN}))
+    assert done["state"] == "active", done
+    assert client.get(CONFIG).json()["sections"]["smtp"]["ca"]["sha256"] == preview["sha256"]
+    assert installed.config().smtp.ca_file is not None
+
+    params = {"etag": etag(client, "smtp")}
+    clear = client.request("DELETE", f"{CONFIG}/smtp/ca", params=params, json={"test_to": OWN})
+    cleared = settle(client, agent, clear)
+    assert cleared["state"] == "active", cleared
+    assert client.get(CONFIG).json()["sections"]["smtp"]["ca"]["sha256"] is None
+    again = client.delete(f"{CONFIG}/smtp/ca", params={"etag": etag(client, "smtp")})
+    assert error(again) == (422, "config_unchanged")
+
+
+def test_the_replica_share_is_probed_and_a_switch_off_is_held(
+    client: TestClient, admin: LoggedIn, installed: Installed, agent: FakeAgent
+) -> None:
+    body = {
+        "etag": etag(client, "replica"),
+        "enabled": True,
+        "target": "\\\\NAS-01\\arcilogger-worm",
+        "user": "NAS-01\\arcireplica",
+        "password": "Örnek-Paylaşım-Parola-4",
+    }
+    done = settle(client, agent, client.put(f"{CONFIG}/replica", json=body))
+    assert done["state"] == "active", done
+    assert [call.kind for call in agent.prober.calls] == ["replica"]
+    replica = client.get(CONFIG).json()["sections"]["replica"]
+    assert replica["target"] == "\\\\NAS-01\\arcilogger-worm"
+    bad = client.put(
+        f"{CONFIG}/replica", json={"etag": etag(client, "replica"), "target": "NAS-01/paylasim"}
+    )
+    assert error(bad) == (422, "replica_target_invalid")
+
+    installed.write_policy(hold_hours=12)
+    off = client.put(f"{CONFIG}/replica", json={"etag": etag(client, "replica"), "enabled": False})
+    assert off.status_code == 202, off.text
+    assert off.json()["guarded"] is True
+    assert off.json()["effective_at"] is not None
+    held = settle(client, agent, off)
+    assert held["state"] == "pending", held
+    assert installed.config().replica.enabled is True  # nothing changed yet
+    assert [item["section"] for item in client.get(CONFIG).json()["pending"]] == ["replica"]
+
+
+def test_retention_shows_and_confirms_the_days_it_deletes(
+    client: TestClient, admin: LoggedIn, installed: Installed, agent: FakeAgent
+) -> None:
+    body = {"etag": etag(client, "retention"), "enabled": True, "days": 760}
+    checked = client.post(f"{CONFIG}/retention/check", json=body)
+    assert checked.status_code == 200, checked.text
+    preview = checked.json()["retention_preview"]
+    assert preview["days_to_delete"] == 0
+    assert preview["first_run_at"] is not None
+    unconfirmed = client.put(f"{CONFIG}/retention", json=body)
+    assert error(unconfirmed) == (422, "retention_confirm_mismatch")
+    short = client.put(f"{CONFIG}/retention", json={**body, "days": 365, "confirm_delete_days": 0})
+    assert error(short) == (422, "retention_below_minimum")
+    done = settle(
+        client, agent, client.put(f"{CONFIG}/retention", json={**body, "confirm_delete_days": 0})
+    )
+    assert done["state"] == "active", done
+    assert installed.config().retention.enabled is True
+
+
+def test_backups_are_kept_as_set(client: TestClient, admin: LoggedIn, agent: FakeAgent) -> None:
+    tag = etag(client, "backup")
+    refused = client.put(f"{CONFIG}/backup", json={"etag": tag, "keep_daily": 0})
+    assert fields(refused) == [("backup.keep_daily", "config_invalid")]
+    done = settle(
+        client, agent, client.put(f"{CONFIG}/backup", json={"etag": tag, "keep_daily": 21})
+    )
+    assert done["state"] == "active", done
+    assert client.get(CONFIG).json()["sections"]["backup"]["keep_daily"] == 21
+
+
+def test_only_administrators_change_the_sections(client: TestClient, login_as: Login) -> None:
+    login_as(client, "auditor")
+    for section in ("smtp", "replica", "retention", "backup"):
+        response = client.put(f"{CONFIG}/{section}", json={"etag": f"{section}:0"})
+        assert error(response) == (403, "forbidden")

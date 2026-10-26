@@ -20,11 +20,6 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.serialization import Encoding
-from cryptography.x509.oid import NameOID
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -42,6 +37,7 @@ pytestmark = pytest.mark.usefixtures("installed")
 
 Login = Callable[..., LoggedIn]
 Reauth = Callable[[LoggedIn], None]
+Pem = Callable[..., bytes]
 V = "/api/v1"
 CUSTOMER = "998877"
 PASSWORD = "Örnek-Kontör-Parola-7"
@@ -54,24 +50,6 @@ def etag(client: TestClient, section: str = "tsa") -> str:
 
 def error(response: Any) -> tuple[int, str]:
     return response.status_code, response.json()["error"]["code"]
-
-
-def root_pem(name: str = "Örnek Test Kök") -> bytes:
-    key = ec.generate_private_key(ec.SECP256R1())
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
-    start = datetime.now().astimezone() - timedelta(days=1)
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(subject)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(start)
-        .not_valid_after(start + timedelta(days=3650))
-        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
-        .sign(key, hashes.SHA256())
-    )
-    return certificate.public_bytes(Encoding.PEM)
 
 
 def client_jar(content: bytes) -> bytes:
@@ -191,9 +169,10 @@ def test_a_root_certificate_is_previewed_installed_and_made_legal(
     installed: Installed,
     agent: FakeAgent,
     app_session_factory: sessionmaker[Session],
+    ca_pem: Pem,
 ) -> None:
     reauthenticate(login_as(client, "admin"))
-    pem = root_pem()
+    pem = ca_pem()
     staged = upload(client, "kamusm_root", pem, "kok.pem")
     assert staged.status_code == 201, staged.text
     preview = staged.json()
@@ -231,7 +210,12 @@ def test_a_root_certificate_is_previewed_installed_and_made_legal(
 
 
 def test_uploads_that_are_not_what_they_claim(
-    app: FastAPI, client: TestClient, login_as: Login, installed: Installed, agent: FakeAgent
+    app: FastAPI,
+    client: TestClient,
+    login_as: Login,
+    installed: Installed,
+    agent: FakeAgent,
+    ca_pem: Pem,
 ) -> None:
     login_as(client, "admin")
     assert error(upload(client, "kamusm_root", b"bir sertifika degil")) == (
@@ -248,7 +232,7 @@ def test_uploads_that_are_not_what_they_claim(
     assert error(upload(client, "kamusm_root", large)) == (413, "upload_too_large")
 
     # Someone else's upload cannot be installed.
-    staged = upload(client, "kamusm_root", root_pem()).json()
+    staged = upload(client, "kamusm_root", ca_pem()).json()
     with TestClient(app) as other:
         login_as(other, "admin", username="mehmet")
         body = {"etag": etag(other), "upload_id": staged["upload_id"]}

@@ -1,10 +1,15 @@
 """The evidence actions of the browser administration (ADR-0014; contract 2.9, 2.11.3).
 
-"Şimdi mühürle" (``POST /seals/{day}/seal``) and "Kontör sorgula" (``POST /credits/query``) go
-through the real agent (``FakeAgent``), which signs a task request that the Seal or Requests task
-answers (``FakeTasks``); the API follows the request to ``succeeded`` with the task's result. The
-409s of seal now come from the calendar state; the credit query is limited to one a minute.
-Users with ``seal.manage`` follow their own action; nobody else without ``settings.manage``.
+"Şimdi mühürle" (``POST /seals/{day}/seal``), "Kontör sorgula" (``POST /credits/query``) and the
+replica test go through the real agent (``FakeAgent``), which signs a task request that the Seal
+or Requests task answers (``FakeTasks``); the API follows the request to ``succeeded`` with the
+task's result. The 409s of seal now come from the calendar state; the credit query and the
+replica test are limited to one a minute. The test e-mail and the lease rebuild are rows of the
+worker channel that the worker's own job works (``admin_jobs.process_requests``, a real SMTP
+server of the test): five e-mails an hour, only to the alert recipients or one's own address,
+the address masked in the audit log; a rebuild of at most 31 days that are not in the future and
+not before the first DHCP record. Users with ``seal.manage`` follow their own action; nobody else
+without ``settings.manage``.
 """
 
 from __future__ import annotations
@@ -21,10 +26,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.admin.contract import CreditResult, TaskRequest, TaskResult
-from arcilogger_core.admin.testing import FakeAgent, Installed
+from arcilogger_core.admin.testing import FakeAgent, Installed, SmtpTestServer
 from arcilogger_core.config import Config
+from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.models import AdminRequest, AuditLog
+from arcilogger_db.settings import set_setting
+from arcilogger_worker.admin_jobs import process_requests
+from arcilogger_worker.testing import Evidence
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 pytestmark = pytest.mark.usefixtures("installed")
@@ -229,3 +238,104 @@ def test_credit_result_model_is_the_contract_one() -> None:
         "threshold": 0,
         "below_threshold": False,
     }
+
+
+def test_the_replica_test_runs_in_the_requests_task_once_a_minute(
+    client: TestClient, login_as: Login, agent: FakeAgent
+) -> None:
+    login_as(client, "admin")
+    response = client.post(f"{V}/admin/actions/replica-test", json={})
+    assert response.status_code == 202, response.text
+    assert error(client.post(f"{V}/admin/actions/replica-test", json={})) == (
+        429,
+        "admin_rate_limited",
+    )
+    agent.process()
+    done = client.get(response.json()["status_url"]).json()
+    assert (done["kind"], done["state"]) == ("action.replica_test", "succeeded")
+    assert done["result"]["ok"] is True
+
+
+def mail_server(installed: Installed, port: int) -> None:
+    """``[smtp]`` of the installation: the test's SMTP server (a hand edit the API reloads)."""
+    text = installed.config_path.read_text(encoding="utf-8").replace(
+        'port = 587\nsecurity = "starttls"',
+        f'host = "127.0.0.1"\nport = {port}\nsecurity = "none"\n'
+        'from_address = "arcilogger@ornek.example"',
+    )
+    installed.config_path.write_text(text, encoding="utf-8")
+
+
+def test_a_test_email_is_sent_by_the_worker_to_an_allowed_address(
+    client: TestClient,
+    login_as: Login,
+    installed: Installed,
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    login_as(client, "admin", email="tolga@ornek.example")
+    url = f"{V}/admin/actions/test-email"
+    stranger = client.post(url, json={"to": "yabanci@baska.example"})
+    assert error(stranger) == (422, "test_email_recipient_not_allowed")
+    assert "yabanci@baska.example" not in stranger.text
+    unset = client.post(url, json={"to": "tolga@ornek.example"})
+    assert error(unset) == (409, "smtp_not_configured")
+    with app_session_factory() as session:
+        set_setting(
+            session, "alerts.email_recipients", ["bilgi-islem@ornek.example"], updated_by="test"
+        )
+        session.commit()
+
+    with SmtpTestServer() as smtp:
+        mail_server(installed, smtp.port)
+        response = client.post(url, json={"to": "bilgi-islem@ornek.example"})
+        assert response.status_code == 202, response.text
+        accepted = response.json()
+        assert client.get(accepted["status_url"]).json()["state"] == "queued"
+        process_requests(app_session_factory, installed.config(), now=utc_now())
+        done = client.get(accepted["status_url"]).json()
+        assert (done["kind"], done["state"]) == ("worker.test_email", "succeeded"), done
+        assert done["result"]["to"] == "b***@ornek.example"
+        (mail,) = smtp.received
+        assert mail.recipients == ["bilgi-islem@ornek.example"]
+    with app_session_factory() as session:
+        (entry,) = session.scalars(select(AuditLog).where(AuditLog.action == "admin.request"))
+        assert entry.details["to"] == "b***@ornek.example"
+        assert entry.details["kind"] == "worker.test_email"
+
+    backdate(client, timedelta(minutes=1))
+    for _ in range(4):
+        assert client.post(url, json={"to": "tolga@ornek.example"}).status_code == 202
+    limited = client.post(url, json={"to": "tolga@ornek.example"})
+    assert error(limited) == (429, "admin_rate_limited")
+    assert 3500 <= limited.json()["error"]["details"]["retry_after"] <= 3600
+
+
+def test_a_lease_rebuild_is_worked_day_by_day_within_its_range(
+    client: TestClient,
+    login_as: Login,
+    api_config: Config,
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    login_as(client, "admin")
+    url = f"{V}/admin/actions/lease-rebuild"
+    span = {"from": (TODAY - timedelta(days=2)).isoformat(), "to": TODAY.isoformat()}
+    assert error(client.post(url, json=span)) == (422, "lease_rebuild_range")  # no log yet
+    with app_session_factory() as session:
+        evidence = Evidence(session, Layout(api_config.data_dir))
+        evidence.dhcp(
+            at_site(TODAY - timedelta(days=2)), "assigned", "172.20.60.21", "02:00:00:00:00:21"
+        )
+        session.commit()
+    for refused in (
+        {"from": (TODAY - timedelta(days=3)).isoformat(), "to": TODAY.isoformat()},
+        {"from": TODAY.isoformat(), "to": (TODAY + timedelta(days=1)).isoformat()},
+        {"from": TODAY.isoformat(), "to": (TODAY - timedelta(days=1)).isoformat()},
+    ):
+        assert error(client.post(url, json=refused)) == (422, "lease_rebuild_range"), refused
+    response = client.post(url, json=span)
+    assert response.status_code == 202, response.text
+    for _ in range(5):
+        process_requests(app_session_factory, api_config, now=utc_now())
+    done = client.get(response.json()["status_url"]).json()
+    assert (done["kind"], done["state"]) == ("worker.lease_rebuild", "succeeded"), done
+    assert done["result"] == {"done_days": 3, "total_days": 3, "failed_days": []}

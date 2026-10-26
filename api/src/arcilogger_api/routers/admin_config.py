@@ -1211,3 +1211,193 @@ def remove_source(
     form = {"name": name, "remove": True, "confirm": confirm}
     check = checked(channel, db, user, "sources", Body(etag=etag), encrypt=True, form=form)
     return queue(channel, db, user, request, "sources", check)
+
+
+# -- e-mail, replica, retention and backup --------------------------------------------------------
+
+
+class SmtpBody(Body):
+    """``[smtp]``: a text field sent as null or empty is removed (no server, no user)."""
+
+    enabled: bool | None = None
+    host: str | None = None
+    port: int | None = None
+    security: Literal["starttls", "ssl", "none"] | None = None
+    username: str | None = None
+    from_address: str | None = None
+    timeout_seconds: int | None = None
+    #: Write-only (a Fernet token to the agent); a changed server or user needs it again.
+    password: str | None = None
+    clear_password: bool = False
+    #: The probe sends its test e-mail here (``alerts.email_recipients`` or one's own address).
+    test_to: str | None = None
+    #: Test the server first (connect, log in, send to ``test_to``).
+    probe: bool = True
+
+
+class ReplicaBody(Body):
+    enabled: bool | None = None
+    #: ``\\\\host\\share[\\path]``.
+    target: str | None = None
+    #: ``HOST\\user`` or ``user@domain``.
+    user: str | None = None
+    password: str | None = None
+    clear_password: bool = False
+    #: Connect to the share first with the candidate values.
+    probe: bool = True
+
+
+class RetentionBody(Body):
+    enabled: bool | None = None
+    days: int | None = None
+    #: The number of sealed days the change deletes (``retention_preview.days_to_delete``).
+    confirm_delete_days: int | None = None
+
+
+class BackupBody(Body):
+    enabled: bool | None = None
+    keep_daily: int | None = None
+    keep_weekly: int | None = None
+    keep_monthly: int | None = None
+    min_free_gb: int | None = None
+
+
+class SmtpCaBody(Body):
+    upload_id: str
+    #: The server is tried with the new trust first: its test e-mail goes here.
+    test_to: str | None = None
+    probe: bool = True
+
+    def form(self) -> dict[str, Any]:
+        return {"ca": {"upload_id": self.upload_id}, "test_to": self.test_to, "probe": self.probe}
+
+
+class SmtpCaClear(BaseModel):
+    """The optional body of ``DELETE /admin/config/smtp/ca``: the probe's recipient (an address
+    never goes into a URL, which the service log records)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    test_to: str | None = None
+    probe: bool = True
+
+
+@router.post("/config/smtp/check")
+def check_smtp(body: SmtpBody, db: DbSession, user: SettingsDep, channel: ChannelDep) -> AdminCheck:
+    """Dry run of an e-mail server change."""
+    return dry_run(channel, "smtp", checked(channel, db, user, "smtp", body, encrypt=False))
+
+
+@router.put("/config/smtp", status_code=status.HTTP_202_ACCEPTED)
+def put_smtp(
+    body: SmtpBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """The e-mail server of the alerts and reports (re-authentication)."""
+    channel.require_enabled()
+    check = checked(channel, db, user, "smtp", body, encrypt=True)
+    return queue(channel, db, user, request, "smtp", check, probe=body.probe)
+
+
+@router.post("/config/smtp/ca", status_code=status.HTTP_202_ACCEPTED)
+def set_smtp_ca(
+    body: SmtpCaBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """Trust an uploaded CA file for the e-mail server (``smtp.ca_file``; re-authentication)."""
+    channel.require_enabled()
+    uploads = channel.uploads(user, [body.upload_id])
+    check = checked(channel, db, user, "smtp", body, encrypt=True, uploads=uploads)
+    return queue(
+        channel, db, user, request, "smtp", check, probe=body.probe, files=files_of(check.ops)
+    )
+
+
+@router.delete("/config/smtp/ca", status_code=status.HTTP_202_ACCEPTED)
+def clear_smtp_ca(
+    request: Request,
+    db: DbSession,
+    user: SettingsDep,
+    channel: ChannelDep,
+    etag: Annotated[str, Query(max_length=100)],
+    body: SmtpCaClear | None = None,
+) -> AdminAccepted:
+    """Back to the system's trust store for the e-mail server (re-authentication)."""
+    channel.require_enabled()
+    options = body or SmtpCaClear()
+    form = {"clear_ca": True, "test_to": options.test_to, "probe": options.probe}
+    check = checked(channel, db, user, "smtp", Body(etag=etag), encrypt=True, form=form)
+    return queue(channel, db, user, request, "smtp", check, probe=options.probe)
+
+
+@router.post("/config/replica/check")
+def check_replica(
+    body: ReplicaBody, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminCheck:
+    """Dry run of a replica change."""
+    return dry_run(channel, "replica", checked(channel, db, user, "replica", body, encrypt=False))
+
+
+@router.put("/config/replica", status_code=status.HTTP_202_ACCEPTED)
+def put_replica(
+    body: ReplicaBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """The replica share (re-authentication; switching it off or moving it is held for
+    ``policy.hold_hours``)."""
+    channel.require_enabled()
+    check = checked(channel, db, user, "replica", body, encrypt=True)
+    return queue(channel, db, user, request, "replica", check, probe=body.probe)
+
+
+@router.post("/config/retention/check")
+def check_retention(
+    body: RetentionBody, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminCheck:
+    """Dry run of a retention change, with the sealed days it would delete
+    (``retention_preview``). Without ``confirm_delete_days`` the dry run takes the preview's
+    number: it is what the person is then asked to confirm."""
+    form = body.form()
+    if body.confirm_delete_days is None:
+        form["confirm_delete_days"] = _days_to_delete(channel, body)
+    return dry_run(
+        channel,
+        "retention",
+        checked(channel, db, user, "retention", body, encrypt=False, form=form),
+    )
+
+
+def _days_to_delete(channel: Channel, body: RetentionBody) -> int:
+    config = channel.usable_files().config
+    changed = {"enabled": body.enabled, "days": body.days}
+    retention = config.retention.model_copy(
+        update={key: value for key, value in changed.items() if value is not None}
+    )
+    candidate = config.model_copy(update={"retention": retention})
+    return channel.retention_preview(candidate).days_to_delete
+
+
+@router.put("/config/retention", status_code=status.HTTP_202_ACCEPTED)
+def put_retention(
+    body: RetentionBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """Retention of the sealed days (re-authentication; at least 730 days; a change that
+    deletes sealed days needs ``confirm_delete_days`` and is held for ``policy.hold_hours``)."""
+    channel.require_enabled()
+    check = checked(channel, db, user, "retention", body, encrypt=True)
+    return queue(channel, db, user, request, "retention", check)
+
+
+@router.post("/config/backup/check")
+def check_backup(
+    body: BackupBody, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminCheck:
+    """Dry run of a change of the database backups."""
+    return dry_run(channel, "backup", checked(channel, db, user, "backup", body, encrypt=False))
+
+
+@router.put("/config/backup", status_code=status.HTTP_202_ACCEPTED)
+def put_backup(
+    body: BackupBody, request: Request, db: DbSession, user: SettingsDep, channel: ChannelDep
+) -> AdminAccepted:
+    """The database backups: kept copies and the free space they need (re-authentication)."""
+    channel.require_enabled()
+    check = checked(channel, db, user, "backup", body, encrypt=True)
+    return queue(channel, db, user, request, "backup", check)

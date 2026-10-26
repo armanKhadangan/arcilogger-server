@@ -68,7 +68,7 @@ ROUTES: dict[tuple[str, str], str | None] = {
     # Module bulk_import: 2 routes
     ("POST", f"{V}/imports/{{kind}}"): BI,
     ("GET", f"{V}/imports/{{kind}}/template.csv"): BI,
-    # 5651 Temel, never gated: 62 routes, the 3 of the licence and the 21 of the browser
+    # 5651 Temel, never gated: 62 routes, the 3 of the licence and the 34 of the browser
     # administration (ADR-0014)
     ("GET", f"{V}/health"): None,
     ("GET", f"{V}/alerts"): None,
@@ -150,7 +150,20 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("POST", f"{V}/admin/config/sources"): None,
     ("PUT", f"{V}/admin/config/sources/{{name}}"): None,
     ("DELETE", f"{V}/admin/config/sources/{{name}}"): None,
+    ("POST", f"{V}/admin/config/smtp/check"): None,
+    ("PUT", f"{V}/admin/config/smtp"): None,
+    ("POST", f"{V}/admin/config/smtp/ca"): None,
+    ("DELETE", f"{V}/admin/config/smtp/ca"): None,
+    ("POST", f"{V}/admin/config/replica/check"): None,
+    ("PUT", f"{V}/admin/config/replica"): None,
+    ("POST", f"{V}/admin/config/retention/check"): None,
+    ("PUT", f"{V}/admin/config/retention"): None,
+    ("POST", f"{V}/admin/config/backup/check"): None,
+    ("PUT", f"{V}/admin/config/backup"): None,
     ("POST", f"{V}/admin/actions/tsa-test"): None,
+    ("POST", f"{V}/admin/actions/replica-test"): None,
+    ("POST", f"{V}/admin/actions/test-email"): None,
+    ("POST", f"{V}/admin/actions/lease-rebuild"): None,
     ("GET", f"{V}/admin/requests"): None,
     ("GET", f"{V}/admin/requests/{{request_id}}"): None,
     ("POST", f"{V}/credits/query"): None,
@@ -215,7 +228,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 86
+    assert len(ROUTES) - len(gated) == 99
 
 
 def test_the_module_markers_equal_the_table() -> None:

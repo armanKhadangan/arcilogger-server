@@ -1063,11 +1063,20 @@ row's state stands. Texts: `admin_channel.texts(code)` (the API's `TEXTS`, then
 | `POST /admin/config/tsa/roots` | `settings.manage`; re-auth | `{etag, upload_id, legal = false, confirmed = false}` → 202 (`kamusm-roots\<sha256>.pem`; `legal` also adds it to `tsa.legal_root_fingerprints` and needs `confirmed`: 422 `legal_root_confirm_required`) |
 | `POST /admin/config/tsa/legal-roots` | `settings.manage`; re-auth | `{etag, sha256, confirmed}` → 202 (an installed root made a legal root) |
 | `POST /admin/config/tsa/zamane` | `settings.manage`; re-auth | `{etag, upload_id, expected_sha256?}` → 202, held (`guarded`, `effective_at` = now + `policy.jar_hold_hours`) unless a known release; 422 `zamane_sha256_required` / `zamane_sha256_mismatch` for another one |
+| `POST /admin/config/smtp/check`, `PUT /admin/config/smtp` | `settings.manage`; re-auth | `{etag, enabled?, host?, port?, security?: starttls \| ssl \| none, username?, from_address?, timeout_seconds?, password?, clear_password?, test_to?, probe = true}` (a text field sent as null or empty is removed) → 200 `AdminCheck` / 202 |
+| `POST /admin/config/smtp/ca` | `settings.manage`; re-auth | `{etag, upload_id, test_to?, probe = true}` → 202 (`smtp.ca_file`) |
+| `DELETE /admin/config/smtp/ca?etag=` | `settings.manage`; re-auth | optional body `{test_to?, probe = true}` → 202 (back to the system's trust store) |
+| `POST /admin/config/replica/check`, `PUT /admin/config/replica` | `settings.manage`; re-auth | `{etag, enabled?, target?, user?, password?, clear_password?, probe = true}` → 200 / 202 (switching it off or moving it is held for `policy.hold_hours`) |
+| `POST /admin/config/retention/check`, `PUT /admin/config/retention` | `settings.manage`; re-auth | `{etag, enabled?, days?, confirm_delete_days?}` → 200 `AdminCheck` with `retention_preview` / 202 |
+| `POST /admin/config/backup/check`, `PUT /admin/config/backup` | `settings.manage`; re-auth | `{etag, enabled?, keep_daily?, keep_weekly?, keep_monthly?, min_free_gb?}` → 200 / 202 |
 | `POST /admin/config/sources/check` | `sources.manage` | `{etag, source, operation: add \| update}` → 200 `AdminCheck` |
 | `POST /admin/config/sources` | `sources.manage` | `{etag, source: SourceIn}` → 202 |
 | `PUT /admin/config/sources/{name}` | `sources.manage`; re-auth to switch one off | `{etag, source: SourceIn}` (the name cannot change: 422 `source_rename_not_allowed`) → 202 |
 | `DELETE /admin/config/sources/{name}?etag=&confirm=<name>` | `sources.manage`; re-auth | → 202; 422 `source_confirm_mismatch` |
 | `POST /admin/actions/tsa-test` | `settings.manage` | `{confirm_credit: true}` (else 422 `tsa_test_confirm_required`) → 202 (`action.tsa_test`); 429 `admin_rate_limited` within 5 min, `tsa_test_limit` after `policy.tsa_test_per_day` per site day |
+| `POST /admin/actions/replica-test` | `settings.manage` | `{}` → 202 (`action.replica_test`, `{ok, message}`); 429 `admin_rate_limited` within a minute |
+| `POST /admin/actions/test-email` | `settings.manage` | `{to}` → 202 (`worker.test_email`, `{ok, to, smtp_code, error_text}`, the address masked); 422 `test_email_recipient_not_allowed`, 409 `smtp_not_configured`, 429 `admin_rate_limited` after five an hour |
+| `POST /admin/actions/lease-rebuild` | `settings.manage` | `{from, to}` → 202 (`worker.lease_rebuild`, `{done_days, total_days, failed_days}`); 422 `lease_rebuild_range` |
 | `GET /admin/requests?kind=&cursor=&limit=50` | `settings.manage` | `AdminRequestPage {items: [AdminRequestOut], next_cursor}`, newest first (cursor: the last id; `limit` 1-200) |
 | `GET /admin/requests/{id}` | `settings.manage`; `seal.manage` for one's own `action.seal` / `action.credit` | `AdminRequestOut`; 404 `admin_request_not_found` |
 | `POST /seals/{day}/seal` | `seal.manage` | "Şimdi mühürle" → 202 (`action.seal`, `params.day`) |
@@ -1163,6 +1172,26 @@ one source per request; the address must lie in `policy.source_networks` (422
 once the collector reports the new file (a new sender is let in after the collector knows it).
 Switching a source off or removing it warns `source_disable_gaps` (the sealer no longer expects
 it); its raw logs and sealed days stay.
+
+**E-mail, replica, retention, backups** (contract 2.6): every change is re-authenticated. A
+change of the e-mail server is first tried by the agent (connect, log in, a test e-mail to
+`test_to`, which must be one of `alerts.email_recipients` or the user's own address: 422
+`smtp_test_recipient_required` without one); a user needs the password again when the server,
+port, security, user or CA file changes (`secret_rebind_required`); a password over an
+unencrypted connection is refused (`smtp_plaintext_auth_refused`). The replica share is tried
+the same way (`probe` `replica`; without a user the Requests task tests it afterwards). A
+retention change that enables it or shortens it must name the number of sealed days it deletes
+(`confirm_delete_days` = `retention_preview.days_to_delete`, else 422
+`retention_confirm_mismatch`); the dry run without it shows that number. Retention never goes
+under 730 days (`retention_below_minimum`). Switching the replica off or moving it and a
+retention change that deletes are held for `policy.hold_hours` (state `pending`, `effective_at`).
+
+**Worker actions**: the test e-mail and the lease rebuild are `admin_requests` rows with
+`channel = 'worker'` (no file, no secret; they need neither the agent nor `policy.enabled`),
+worked by the worker's job `admin.requests` (every 15 s). The row's `params` keep the address
+for the worker; `admin.request` and the result hold it masked (`b***@ornek.example`). A test
+e-mail not sent within 10 minutes is `expired`. The lease rebuild takes at most 31 days, not in
+the future and not before the first DHCP or ARP record (`leases.first_evidence_time`).
 
 **"Şimdi mühürle"** (`routers/seals.py`): 409 `seal_day_sealed` (sealed), `seal_not_applicable`
 (skipped, deleted, no data), `seal_not_due` (not `Sealer.closed_unsealed_days()[0]`, not
