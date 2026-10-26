@@ -53,7 +53,7 @@ from arcilogger_core.admin.contract import (
 from arcilogger_core.fsutil import atomic_write_bytes
 
 KEY_FILES: Final[Mapping[KeyRole, str]] = MappingProxyType(
-    {"api": "api-ed25519.key", "agent": "agent-ed25519.key"}
+    {"api": "api-ed25519.key", "agent": "agent-ed25519.key"}  # gitleaks:allow (file names)
 )
 KEYS_FILE: Final = "keys.json"
 #: The order of the keys in keys.json.
@@ -157,7 +157,7 @@ else:
 class SigningKey:
     role: KeyRole
     key_id: str
-    private_key: Ed25519PrivateKey = field(repr=False)
+    private_key: Ed25519PrivateKey = field(repr=False)  # gitleaks:allow (a type name, no key)
 
 
 def key_file(keys_dir: Path, role: KeyRole) -> Path:

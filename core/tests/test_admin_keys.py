@@ -72,12 +72,19 @@ def icacls(path: Path) -> str:
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
 def test_private_keys_inherit_no_access_on_windows(tmp_path: Path) -> None:
     """The key file is created with its protected descriptor: none of the folder's inheritable
-    entries (Read for the services and LOCAL SERVICE under ProgramData) ever reaches it."""
+    entries (Read for the services and LOCAL SERVICE under ProgramData) ever reaches it.
+
+    pytest's base folder on Windows is itself protected (``mkdir(mode=0o700)``), so the folder
+    gets the inheritable LOCAL SERVICE entry ProgramData gives it on a real server."""
     folder = keys_dir(tmp_path)
+    folder.mkdir(parents=True)
+    subprocess.run(
+        ["icacls", str(folder), "/grant", "*S-1-5-19:(OI)(CI)(RX)"], capture_output=True, check=True
+    )
     init_keys(folder)
     for name in KEY_FILES.values():
-        assert "(I)" not in icacls(folder / name)
-    assert "(I)" in icacls(keys_file(folder)), "keys.json (public keys) inherits as before"
+        assert "LOCAL SERVICE" not in icacls(folder / name)
+    assert "LOCAL SERVICE:(I)" in icacls(keys_file(folder)), "keys.json (public keys) inherits"
 
 
 def test_init_is_idempotent_and_never_overwrites_a_key(tmp_path: Path) -> None:
