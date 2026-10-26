@@ -53,12 +53,14 @@ Key                              Problem (setting)
                                  server unreachable) resolved by a later clock sample within the
                                  limit. A clock step or stray spool file seen by sealing
                                  (``R20-clock:<key>``) is left to a person
-``R20-admin:heartbeat``          browser administration on (``admin\\policy.json``) and the
-                                 agent ArciAdmin's heartbeat (``admin\\status\\agent.json``)
+``R20-admin:heartbeat``          the agent ArciAdmin's heartbeat (``admin\\status\\agent.json``)
                                  older than 2 minutes or missing, from 5 minutes after the
                                  worker's start (ADR-0014; the agent starts after the other
-                                 services) — high. Resolved by a fresh heartbeat, or when the
-                                 browser administration is switched off
+                                 services) — high. Not judged while ``admin\\policy.json``
+                                 switches the browser administration off (or is missing or
+                                 invalid), nor, when the worker may not read that file, before
+                                 the agent ever wrote a heartbeat. Resolved by a fresh
+                                 heartbeat, or when the browser administration is switched off
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -83,10 +85,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.admin.contract import (
     AdminLayout,
+    AdminPolicy,
     AgentStatus,
     DocumentError,
     heartbeat_state,
-    load_policy,
     parse_document,
 )
 from arcilogger_core.config import Config
@@ -794,6 +796,31 @@ def agent_heartbeat(admin: AdminLayout) -> datetime | None:
         return None
 
 
+def admin_enabled(admin: AdminLayout) -> bool | None:
+    """Whether ``admin\\policy.json`` switches the browser administration on: its ``enabled``,
+    ``False`` for a missing or invalid file (as :func:`~arcilogger_core.admin.contract.load_policy`
+    reads it, contract D0-13), ``None`` when the worker may not read it (contract 2.2 gave the
+    worker no right on it before Day 0 note WP3-5)."""
+    try:
+        data = admin.policy.read_bytes()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    try:
+        return parse_document(AdminPolicy, data).enabled
+    except DocumentError:
+        return False
+
+
+def _agent_seen(admin: AdminLayout) -> bool:
+    """The agent has written its heartbeat file at least once (it never deletes it)."""
+    try:
+        return admin.agent_status.is_file()
+    except OSError:
+        return True  # there, but it cannot be looked at: judged like a missing heartbeat
+
+
 def _heartbeat_key(key: str) -> bool:
     return key == ADMIN_HEARTBEAT_KEY
 
@@ -802,12 +829,15 @@ def check_admin(ctx: CheckContext) -> Outcome:
     owns = _heartbeat_key
     if ctx.admin is None:
         return Outcome([], owns, lambda alert: None)
-    if not load_policy(ctx.admin.policy).enabled:  # off (or no valid policy): no agent expected
+    enabled = admin_enabled(ctx.admin)
+    if enabled is False:  # off (or no valid policy): no agent expected
         return Outcome([], owns, lambda alert: "admin_disabled")
     heartbeat = agent_heartbeat(ctx.admin)
     if heartbeat_state(heartbeat, ctx.now) != "missing":
         return Outcome([], owns, lambda alert: "agent_ok")
     if ctx.started_at is not None and ctx.now - ctx.started_at < AGENT_GRACE:
+        return Outcome([], owns, lambda alert: None)
+    if enabled is None and not _agent_seen(ctx.admin):  # policy unknown, agent never ran
         return Outcome([], owns, lambda alert: None)
     minutes = None if heartbeat is None else int((ctx.now - heartbeat) // timedelta(minutes=1))
     since_tr = "hiç yanıt vermedi" if minutes is None else f"{minutes} dakikadır yanıt vermiyor"

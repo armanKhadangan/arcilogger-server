@@ -450,6 +450,40 @@ def test_without_a_policy_no_agent_is_expected(
     assert _admin_alerts(db_session) == []
 
 
+def test_a_policy_the_worker_may_not_read_leaves_the_heartbeat_to_decide(
+    admin: AdminLayout,
+    layout: Layout,
+    sessions: sessionmaker[Session],
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Until the installer grants ArciWorker Read on ``admin\\policy.json`` (contract Day 0 note
+    WP3-5), the file is "access denied" for the worker. That is no "switched off": once the
+    agent has written a heartbeat, a stale one raises R20-admin as with an enabled policy; an
+    agent that never ran is not judged."""
+    _policy(admin, enabled=True)
+    policy = admin.policy
+    read_bytes = Path.read_bytes
+
+    def denied(path: Path) -> bytes:
+        if path == policy:
+            raise PermissionError(13, "Access is denied", str(path))
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
+    config = Config(data_dir=layout.root, secrets_dir=layout.root)
+    started = NOW - timedelta(hours=1)
+    run_system_checks(sessions, layout, config, now=NOW, started_at=started, admin=admin)
+    assert _admin_alerts(db_session) == []  # no heartbeat ever written: nothing to judge
+    _heartbeat(admin, NOW - timedelta(minutes=4))
+    run_system_checks(sessions, layout, config, now=NOW, started_at=started, admin=admin)
+    (alert,) = _admin_alerts(db_session)
+    assert (alert.rule, alert.state, alert.details["minutes"]) == ("R20-admin", "open", 4)
+    _heartbeat(admin, NOW)
+    run_system_checks(sessions, layout, config, now=NOW, started_at=started, admin=admin)
+    assert _admin_alerts(db_session)[0].details["auto_resolved"]["reason"] == "agent_ok"
+
+
 def test_a_replica_switched_on_by_a_reload_first_copies_the_old_days(
     layout: Layout, sessions: sessionmaker[Session], db_session: Session
 ) -> None:
