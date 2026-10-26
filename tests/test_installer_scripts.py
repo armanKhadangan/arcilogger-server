@@ -3107,9 +3107,12 @@ def dry_run(
     site_name: str | None = SITE_NAME,
     admin_address: str | None = ADMIN_ADDRESS,
     data_root: bool = True,
+    incomplete: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     """``data_root`` False: no -DataRoot (the installer takes it from its record or the
-    configuration)."""
+    configuration). ``incomplete`` True: the plan may stop at an error after failed preflight
+    checks (plan.incomplete, exit 2, what the real run returns); otherwise that error fails the
+    test, which its exit code alone no longer shows."""
     plan = tmp_path / f"plan-{len(list(tmp_path.glob('plan-*.json')))}.json"
     server = ["-ServerAddress", server_address] if server_address else []
     server += _setup_arguments(extra, site_name, admin_address)
@@ -3131,6 +3134,8 @@ def dry_run(
     )
     assert plan.is_file(), result.stdout + result.stderr
     document: dict[str, Any] = read_json(plan)
+    if not incomplete:
+        assert "plan.incomplete" not in _ids(document), result.stdout + result.stderr
     return result, document
 
 
@@ -10556,7 +10561,7 @@ def test_dry_run_upgrade_with_a_venv_python_that_cannot_start(engine: str, tmp_p
     (program / "venv" / "Scripts" / "python.exe").write_bytes(b"not a program\n")
     body = 'site_name = "Kurum A.Ş."\n[clock]\nntp_server = "10.0.0.1"\n'
     _existing_config(tmp_path, body + _FW_SOURCE.format("172.20.10.1"))
-    result, plan = dry_run(engine, tmp_path, bundle, "-Upgrade", site_name=None)
+    result, plan = dry_run(engine, tmp_path, bundle, "-Upgrade", site_name=None, incomplete=True)
     assert_dry_run_exit(result, plan)
     assert result.returncode == 2, "the preflight failed"
     items = {item["id"]: item for item in plan["items"]}
@@ -10572,3 +10577,31 @@ def test_dry_run_upgrade_with_a_venv_python_that_cannot_start(engine: str, tmp_p
         stdout
     )
     assert _unwrapped("[failed; fix the error and run again]") not in stdout
+
+
+def test_dry_run_returns_3_for_an_error_in_its_preflight(engine: str, tmp_path: Path) -> None:
+    """An error the preflight itself does not catch (here in the data drive checks; on Windows
+    also a CIM call or the port owners) stops the real run with 3 (failed, run again), whether
+    or not a check failed before it. The dry run runs the same preflight and returns the same:
+    only planning on past the preflight's failures returns 2 when it stops at an error."""
+    bundle = make_fake_bundle(tmp_path)
+    module = bundle / "installer" / "ArciInstall.psm1"
+    anchor = "\nExport-ModuleMember -Function @("
+    text = module.read_text(encoding="utf-8-sig")
+    assert text.count(anchor) == 1
+    broken = "\nfunction Get-ArciDataDriveChecks { throw 'simulated drive error' }\n"
+    module.write_text(text.replace(anchor, broken + anchor), encoding="utf-8-sig")
+    write_sums(bundle)
+    # A first installation without -SiteName: that check fails before the drive checks run.
+    result, plan = dry_run(engine, tmp_path, bundle, site_name=None)
+    items = {item["id"]: item for item in plan["items"]}
+    assert items["preflight.site-name"]["status"] == "fail"
+    assert items["preflight.site-name"]["text"] in plan["failures"]
+    assert "preflight.drive" not in items
+    assert "preflight.postgresql" not in items, "the preflight stopped at the error"
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert plan["exit_code"] == 3
+    stdout = _unwrapped(result.stdout)
+    assert _unwrapped("HATA [error]: simulated drive error") in stdout
+    assert _unwrapped("[failed; fix the error and run again]") in stdout
+    assert _unwrapped("[dry run stopped at this error") not in stdout
