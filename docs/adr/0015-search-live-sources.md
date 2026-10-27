@@ -129,6 +129,16 @@ these columns is indexed).
   rows. The Linux TimescaleDB CI job runs the same test; should a later TimescaleDB refuse the
   statement, the index is built after the upgrade's transaction instead, and this record is
   amended.
+- **Plans on TimescaleDB** (2026-10-27, TimescaleDB 2.30.2, the search performance test on a
+  tenth of its tier-1 data, chunks older than 7 days compressed): every query met its budget
+  (`domain:` 30 days 235 ms, the 10,000-row export 6.7 s of 10 s), but for a rare value the
+  planner reads two of them differently than on native partitions: `domain:` (fg_web) and
+  `type:dhcp mac:` (mt_dhcp) scan the uncompressed chunks' primary keys backwards (TimescaleDB's
+  ordered chunk append with the page's `LIMIT`) instead of `ix_fg_web_rhost_time` and the MAC
+  index, so the test's plan check fails there. The time-budgeted windows bound such a scan, but
+  at a million lines a day a 30-day domain search may come back partial. Tier 1 on the Linux CI
+  job decides; if it fails there too, the remedy is in the query (an index-ordered branch per
+  chunk or `enable_*` settings for the search's read-only transaction), not in the guard.
 - Free text is slow by nature: the answer is honest about a partial scan, and the syntax help
   points to the fast fields (`srcip:`, `domain:`, `mac:`, `qname:`). `ip:` on the UTM tables is a
   scan, because their destination addresses have no index.

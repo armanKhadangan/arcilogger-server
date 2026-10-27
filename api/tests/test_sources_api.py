@@ -841,8 +841,11 @@ def test_the_suggestion_reads_only_the_newest_messages(db_engine: Engine, tmp_pa
         )
     print(plan)
     assert found == {"unknown-198.51.100.23": {"name": "firewall-02", "type": "fortigate"}}
-    # a short backward scan, whichever index the planner takes (here every row is the sender's)
+    # a short backward scan, whichever index the planner takes (here every row is the sender's);
+    # a TimescaleDB chunk's index is named after the hypertable's (``2_pk_messages``)
     assert "Limit" in plan
     assert "Seq Scan" not in plan
-    assert re.search(r"Index (Only )?Scan Backward using \S*(source_time|pkey)", plan), plan
+    assert re.search(
+        r"Index (Only )?Scan Backward using \S*(source_time|pkey|pk_messages)", plan
+    ), plan
     assert min(timings) < SUGGESTION_BUDGET_SECONDS
