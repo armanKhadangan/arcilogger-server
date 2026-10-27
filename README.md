@@ -19,6 +19,12 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
   resmi PDF rapor ve bağımsız doğrulanabilen kanıt paketi üretir. Kişi, cihazın **olay anında**
   kime atanmış olduğuna göre (atama geçmişi) adlandırılır; atanmamış cihazda sonuç cihaz ve
   VLAN'dan türetilen departmanda biter.
+- **Arama:** veritabanındaki bütün kayıtlarda alan sözdizimiyle arama (`srcip:`, `mac:`,
+  `domain:`, `type:` …), zaman histogramı ve dağılımlar, kayıtlı aramalar, CSV/Excel dışa aktarma ve
+  aramanın satırlarından kanıt paketi; **Canlı Akış** gelen satırları süzgeçle anında gösterir,
+  **Kaynaklar** her log kaynağının durumunu, boşluklarını ve ayrıştırma hatalarını gösterir
+  ([docs/ARAMA.md](docs/ARAMA.md), English: [docs/SEARCH.md](docs/SEARCH.md)). Arama ve okuma
+  işlemleri KVKK bilgilendirmesi onaylanınca açılır ve denetim kaydına yazılır.
 - Kullanıcılar, roller, iki adımlı doğrulama (TOTP) ve değiştirilemez (zincirli) denetim kaydı.
 - **Tarayıcıdan yönetim:** kuruluş adı ve saat, uygulama ayarları, Kamu SM sihirbazı, log
   kaynakları, e-posta, replika, saklama ve yedekleme Ayarlar sayfalarından değişir; **Şimdi
@@ -87,19 +93,19 @@ ve Windows kurulum programı (M7'den). Tablo, 0.1.0'dan sonra eklenenleri de gö
 |---|---|---|
 | M0 | Depo iskeleti, CI, kod standartları, tasarım belirteçleri, bileşen kiti | ✅ |
 | M1 | Syslog toplayıcı, ham kayıt, mühürleme (Kamu SM), doğrulama, zincir, replika, saklama | ✅ |
-| M2 | Ayrıştırıcılar, veritabanı, arama, canlı akış, kaynaklar | kısmen — ✅ FortiGate/MikroTik ayrıştırıcıları, veritabanı, ingest (spool → PostgreSQL), Panel; Kaynaklar, Canlı Akış ve Arama sayfaları yapım aşamasında |
+| M2 | Ayrıştırıcılar, veritabanı, arama, canlı akış, kaynaklar | ✅ FortiGate/MikroTik ayrıştırıcıları, veritabanı, ingest (spool → PostgreSQL), Panel, Arama, Canlı Akış ve Kaynaklar sayfaları ([docs/ARAMA.md](docs/ARAMA.md)); TimescaleDB ve Windows üzerindeki arama hız ölçümleri CI'da bekleniyor |
 | M3 | Kira zaman çizelgesi, NAT dizini, 5651 sorgu, PDF rapor, kanıt paketi | kısmen — ✅ kira zaman çizelgesi, 5651 Sorgu + resmi PDF rapor, Kanıt Paketleri, Mühürleme sayfası, Cihazlar ve Kişiler sayfası, bağımsız doğrulayıcı |
 | M4 | Kullanım analitiği, zamanlanmış raporlar, e-posta | kısmen — ✅ kullanım analizi motoru ve API'si ([docs/KULLANIM.md](docs/KULLANIM.md)), zamanlanmış kullanım raporları (HTML e-posta, PDF, Excel; [docs/KULLANIM-RAPORLARI.md](docs/KULLANIM-RAPORLARI.md)), Raporlar sayfası (zamanlamalar, şimdi çalıştır, önizleme, gönderim geçmişi), Kullanım sayfası |
 | M5 | Güvenlik kuralları (20 kural), uyarılar | kısmen — ✅ R15 (log kaynağı sessiz) ve R20 sistem denetimleri, uyarı e-postası, Güvenlik sayfası (uyarı listesi, durum akışı, notlar; [docs/UYARILAR.md](docs/UYARILAR.md)); kural motoru, kural düzenleyici ve webhook'lar yok |
 | M6 | Yetkilendirme, 2FA, denetim kaydı, uyum sayfası, ayarlar, ilk kurulum sihirbazı | kısmen — ✅ kullanıcılar ve roller, TOTP, zincirli denetim kaydı (Denetim Kaydı sayfası), ilk yönetici kurulumu, tarayıcıdan yönetim (Ayarlar sayfaları, Kamu SM sihirbazı, Şimdi mühürle, Kontör sorgula; [docs/AYARLAR.md](docs/AYARLAR.md)); yer tutucu: Uyum Durumu, Sistem; ilk kurulum sihirbazı yok |
 | M7 | Sağlamlaştırma, Windows kurulum programı, yedekleme/geri yükleme, belgeler | kısmen — ✅ Windows kurulum programı (çevrimdışı paket, yükseltme, geri alma), yük üreteci, gece veritabanı yedeği ve geri yükleme ([docs/YEDEKLEME.md](docs/YEDEKLEME.md)); `ISLETIM.md` yok |
 
-Yer tutucu sayfalar: **Uyum Durumu, Sistem**. Çalışan sayfalar: Panel, 5651 Sorgu, Kullanım,
-Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler, Raporlar, Denetim Kaydı, Ayarlar
-(Genel, Uygulama ayarları, Kamu SM, Kaynaklar, E-posta, Replika, Saklama, Yedekleme, Değişiklik
-geçmişi, Kullanıcılar ve Roller, Lisans). Kaynaklar, Canlı Akış ve Arama menüden açılır; içerikleri
-yapım aşamasındadır. Ana menüdeki Kaynaklar sayfası kaynakların durumunu yalnızca gösterir;
-kaynaklar Ayarlar → Kaynaklar'da düzenlenir.
+Yer tutucu sayfalar: **Uyum Durumu, Sistem**. Çalışan sayfalar: Panel, Arama, Canlı Akış,
+Kaynaklar, 5651 Sorgu, Kullanım, Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler,
+Raporlar, Denetim Kaydı, Ayarlar (Genel, Uygulama ayarları, Kamu SM, Kaynaklar, E-posta, Replika,
+Saklama, Yedekleme, Değişiklik geçmişi, Kullanıcılar ve Roller, Lisans). Ana menüdeki Kaynaklar
+sayfası kaynakların durumunu yalnızca gösterir; kaynaklar Ayarlar → Kaynaklar'da düzenlenir
+(bilinmeyen bir göndericide "Kaynak olarak tanımla" bu sayfayı doldurarak açar).
 
 ## Geliştirme / Development
 

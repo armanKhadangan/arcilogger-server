@@ -222,6 +222,24 @@ described in the linked document and waits for the owner's confirmation.
 | V3 | **Deleting a VLAN** is allowed without a check of its devices (no history depends on the row): its devices lose the VLAN name and the VLAN's department, raw logs, leases and stored 5651 results keep what they hold; the confirmation says so | [ILK-ADIMLAR.md](ILK-ADIMLAR.md) §12 |
 | V4 | The audit entries of VLANs keep subnets, VLAN ids, department ids and the guest flag; the texts (name, purpose, DHCP server, notes) only as field names, like a department's name | [MVP-CONTRACTS.md](MVP-CONTRACTS.md) §11 |
 
+## Arama, Canlı Akış, Kaynaklar: defaults of 2026-10-26 (not yet confirmed)
+
+The owner decisions D1–D10 of the Wave 2 contract, with the default that is implemented
+([ADR-0015](adr/0015-search-live-sources.md)); changing one is a small follow-up.
+
+| # | Default | Alternative | Where |
+|---|---|---|---|
+| AR1 | `department:` means the **default department of the VLAN** of the client address (`vlans.department_id`), labelled "Departman (VLAN'a göre)"; a notice says it is not the person's assignment | the person attributed at the row's time (leases, assignments, persons; no rollup facet) | [ARAMA.md](ARAMA.md) |
+| AR2 | Exporting search results needs a **re-authentication** within 5 minutes (as a 5651 lookup's evidence package) | no re-authentication | [roles.md](roles.md) |
+| AR3 | The **auditor has Canlı Akış**: `search.read` is "Arama ve canlı akış" | a separate `live.read` | [roles.md](roles.md) |
+| AR4 | The **auditor has no Kaynaklar**: `sources.read` stays administrator-only (the Panel's parse-failure box is shown with `dashboard.view` too) | grant `sources.read` to the auditor | [roles.md](roles.md) |
+| AR5 | A search filters on the **device time** `time` only (the partition key, indexed); every row shows the receive time too | a receive-time index later | [ARAMA.md](ARAMA.md) |
+| AR6 | Domain input is **lower-cased**; verify on site that host and query names are stored in lower case (`arcilogger-db search-counts verify` prints the mixed-case counts) | `lower()` expression indexes | [INSTALL.md](INSTALL.md), [ARAMA.md](ARAMA.md) |
+| AR7 | **No text index** in Wave 2: free text is scanned in time windows with honest partial results ("Devam et"); the ingest path keeps its throughput | an index built outside the ingest path later | [ADR-0015](adr/0015-search-live-sources.md) |
+| AR8 | `search.run` stores the **normalised query** in the audit log (it can hold an IP, a MAC address or text), like `lookup.run` | store only the field names and a hash | [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) §9 |
+| AR9 | An idle viewer of Canlı Akış is **signed out** after `auth.idle_minutes` (the stream's requests are background requests, so an unattended screen ends the session) | none recommended | [ARAMA.md](ARAMA.md) |
+| AR10 | Saved searches are **personal** only | administrators may share them | [ARAMA.md](ARAMA.md) |
+
 ## Technical assumptions to verify on site
 
 - MikroTik remote syslog wire format (BSD header, ISO-8601 time, topics string) — parser stays
