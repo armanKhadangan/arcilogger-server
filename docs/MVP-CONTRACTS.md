@@ -1514,7 +1514,8 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
 ### 17.10 Performance guards (`poe test-perf`)
 
 `api/tests/test_search_perf.py`, tier `ARCILOGGER_SEARCH_PERF` = `1` (default: the newest day
-2,000,000 lines plus 29 days of 100,000, written with `generate_series`, `search_counts` rebuilt,
+2,000,000 lines plus 29 days of 100,000, and 4,320 `mt_event` rows a day (heartbeats, Wi-Fi,
+1 % DHCP offers), written with `generate_series`, `search_counts` rebuilt,
 `VACUUM ANALYZE`, TimescaleDB chunks older than 7 days compressed), `heavy` (30 × 1,000,000, on
 site) or `0` (skipped). Budgets (best of three after a warm-up, through the API): Q1 browse first
 page 1 d / 30 d < 0.5 s; Q2 `srcip:<needle>` 1 d < 2 s, 30 d < 10 s; Q3 `srcip:<a /24>` 1 d
@@ -1524,5 +1525,6 @@ equal to direct counting; Q9 direct statistics 1 d < 2 s; Q10 export of 10,000 r
 S1–S3 scans within the request budget + 0.5 s with an honest `complete`. For Q2 and Q4–Q7 the
 whole-range plan (`EXPLAIN (FORMAT JSON)`, scans resolved to their table through partitions and
 chunks) has no `Seq Scan` and no primary-key range scan of `messages`, `fg_traffic`, `fg_web`,
-`fg_dns`, `fg_app` (compressed chunks excepted) and uses the field's index; Q3 refuses only a
-`Seq Scan`. The measured numbers: ARAMA.md / SEARCH.md section 13.
+`fg_dns`, `fg_app` (compressed chunks excepted) and uses the field's index (Q6: `mt_dhcp`'s MAC
+index and `mt_event`'s event index); Q3 refuses only a `Seq Scan`; Q10's rows all have their
+client address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.

@@ -326,6 +326,9 @@ Süreler API üzerinden (tarayıcı olmadan), bir ısınma çalıştırmasından
 iyisidir.
 
 Ölçüm (2026-10-26): 4 işlemcili, başka işlerle paylaşılan bir Linux geliştirme makinesi, PostgreSQL 16 yerel aylık bölümlerle (TimescaleDB yok); 4.913.180 `messages` satırı 130 saniyede yazıldı, özet tablo ve istatistiklerle birlikte veri 689 saniyede hazırdı. TimescaleDB'li CI işi aynı testi 7 günden eski parçalar sıkıştırılmış olarak çalıştırır.
+Bu ölçümden sonra veriye günde 4.320 MikroTik olayı (`mt_event`; Q6 artık olay indeksini de
+denetler) eklendi; aşağıdaki sayılar bu ekten önceki veriyle alınmıştır ve TimescaleDB'li ile
+Windows CI işlerinin sayıları henüz kaydedilmedi.
 
 | # | Sorgu | Aralık | Bütçe | İlk çalıştırma | En iyi | Not |
 |---|---|---|---|---|---|---|

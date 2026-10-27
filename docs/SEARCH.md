@@ -326,6 +326,9 @@ it 100,000 lines (4.9 million lines and their typed rows), about 150 clients, ra
 find. Times through the API (no browser), the best of three after one warm-up run.
 
 Measured (2026-10-26) on a 4-CPU Linux development machine shared with other work, PostgreSQL 16 with native monthly partitions (no TimescaleDB); 4,913,180 `messages` rows were written in 130 seconds, ready with the summary table and statistics in 689 seconds. The TimescaleDB CI job runs the same test with the chunks older than 7 days compressed.
+After this measurement the data gained 4,320 MikroTik events a day (`mt_event`; Q6 now checks
+the event index too); the numbers below are from the data before that addition, and the
+TimescaleDB and Windows CI jobs' numbers are not recorded yet.
 
 | # | Query | Range | Budget | First run | Best | Note |
 |---|---|---|---|---|---|---|
