@@ -158,8 +158,10 @@ transaction, from exactly the lines whose rows loaded in it:
   the search over the typed tables does not find it either. A line without a `messages` row
   (`rawlog.invalid`, `copy.messages`, a `rowcheck.messages` without generic view) is not
   counted: it is in neither search nor statistics, only in `parse_failures`.
-- One `INSERT … ON CONFLICT … DO UPDATE SET n = search_counts.n + EXCLUDED.n` per 500 keys, keys
-  in sorted order. A batch of 5,000 lines has tens to a few hundred keys; the load-generator day
+- One fixed statement per 500 keys, `INSERT … SELECT FROM unnest(:hours, :sources, …) ON
+  CONFLICT … DO UPDATE SET n = search_counts.n + EXCLUDED.n`, the keys as parallel arrays in
+  sorted order (a multi-row `INSERT` built and compiled per batch cost 7.2–7.3 ms of the service
+  process's CPU for 57 keys; the cached statement 1.0–1.1 ms, wall 8.7–8.9 → 2.0–2.5 ms). A batch of 5,000 lines has tens to a few hundred keys; the load-generator day
   below (217,875 lines) has 800. No lock of its own: one ingest writes a file (instance lock and
   compare-and-set), and a finished file is never written again.
 - **Files loaded before revision `0016_search`.** The migration sets

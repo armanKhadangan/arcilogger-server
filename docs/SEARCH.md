@@ -261,12 +261,14 @@ runs.
 
 ## 10. An evidence package from a search
 
-"Kanıt paketine aktar" (add to an evidence package; only with `evidence.create`, administrators)
+"Kanıt paketine aktar" (make an evidence package from these lines; only with `evidence.create`, administrators)
 takes the search's raw line references (`POST /search/refs`, at most 10,000 lines, the line limit
 of an evidence package), writes the count and the SHA-256 of the list to the audit log
 (`search.refs`) and fills the evidence packages page with these lines. If the search did not
 complete, hit the line limit, or some lines are on days not sealed yet, the page says so before
-the package is made. The package itself is made as always ([KANIT-PAKETI.md](KANIT-PAKETI.md)).
+the package is made; "Mühürlenmemiş günlerin satırlarını çıkar" (leave out the lines of unsealed
+days) drops those lines and narrows the scope to the (sealed) days of the lines left. A search
+that reaches today, such as "Son 24 saat", always has today's lines unsealed. The package itself is made as always ([KANIT-PAKETI.md](KANIT-PAKETI.md)).
 
 ## 11. Who sees what, what is audited
 
@@ -274,7 +276,7 @@ the package is made. The package itself is made as always ([KANIT-PAKETI.md](KAN
 |---|---|---|---|---|
 | Search, pages, statistics, record details, saved searches, live tail | ✔ | ✔ | — | — |
 | Export (re-authentication 5 min) | ✔ | — | — | — |
-| Add to an evidence package | ✔ | — | — | — |
+| Make an evidence package from the lines | ✔ | — | — | — |
 
 Search and the live tail show personal data: they do not open before the privacy notice is
 accepted (`privacy_notice_required`). Written to the audit log:

@@ -266,7 +266,9 @@ satır başvurularını alır (`POST /search/refs`, en fazla 10.000 satır, Kan�
 sınırı), denetim kaydına sayı ve listenin SHA-256 değeriyle yazar (`search.refs`) ve Kanıt
 Paketleri sayfasını bu satırlarla doldurur. Arama tamamlanmadıysa, satır sınırına takıldıysa ya
 da satırların bir kısmı henüz mühürlenmemiş günlerdeyse sayfa bunu paket oluşturulmadan önce
-söyler. Paketin kendisi her zamanki gibi oluşturulur ([KANIT-PAKETI.md](KANIT-PAKETI.md)).
+söyler; "Mühürlenmemiş günlerin satırlarını çıkar" o satırları bırakır ve kapsamı kalan
+satırların (mühürlü) günleriyle sınırlar. "Son 24 saat" gibi bugüne uzanan bir aramada bugünün
+satırları her zaman mühürlenmemiştir. Paketin kendisi her zamanki gibi oluşturulur ([KANIT-PAKETI.md](KANIT-PAKETI.md)).
 
 ## 11. Kim ne görür, ne denetlenir
 

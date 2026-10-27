@@ -296,7 +296,7 @@ Search and the live tail show personal data: **administrators** and **auditors**
 (`search.read`) search, see pages and statistics, open a record's details, keep their own saved
 searches and watch the live tail once they accepted the KVKK notice. Export is
 **administrator**-only (`search.export`) and needs a re-authentication within the last
-5 minutes; "Kanıt paketine aktar" (add to an evidence package) needs `evidence.create`
+5 minutes; "Kanıt paketine aktar" (make an evidence package from the lines) needs `evidence.create`
 (administrators). The sources page needs `sources.read` (administrators); its "Son satırlar"
 (latest lines) also needs `search.read` or `lookup.run` and the KVKK notice, because it shows raw
 lines (the rule of the raw line view). HR and viewers cannot open these pages. No licence state
