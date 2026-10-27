@@ -126,7 +126,10 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await assign.getByRole('combobox', { name: 'Kişi' }).click();
       await expect(page.getByRole('option', { name: /Can Öztürk/ })).toBeVisible();
       await expectNoA11yViolations(page);
+      // The first Escape closes the list, the second the dialog: pressed back to back, the second
+      // can reach the list before it has closed.
       await page.keyboard.press('Escape');
+      await expect(page.getByRole('option', { name: /Can Öztürk/ })).toBeHidden();
       await page.keyboard.press('Escape');
       await expect(assign).toBeHidden();
 
