@@ -10,7 +10,8 @@ browser at once and uncompressed, and a closed tab does not keep the API's strea
   are still compressed.
 * **With** ``ARCILOGGER_CADDY`` **and the test database** (the Windows end-to-end job): the real
   API behind the real Caddyfile — a stream is opened and read through Caddy, a line appended to
-  the spool afterwards arrives within 3 s, uncompressed.
+  the spool afterwards arrives within 3 s, uncompressed; when the client closes its connection,
+  Caddy cancels the upstream request and the API detaches the stream within 2 s (R15).
 """
 
 from __future__ import annotations
@@ -257,6 +258,14 @@ def test_a_spool_line_reaches_the_live_tail_through_caddy(
                         "fortigate",
                     )
                     assert "srcip=172.20.41.7" in line.data["text"]
+                # the tab goes away: Caddy cancels the upstream request and the API lets the
+                # stream go at once (it lingers, paused, until it is closed)
+                stream = app.state.arci_live.streams[opened.json()["stream_id"]]
+                deadline = time.monotonic() + 2.0
+                while stream.connection is not None and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                assert stream.connection is None, "the API still streams to a closed tab"
+                assert stream.closed is None
                 assert client.delete(url).status_code == 204
         finally:
             stop_caddy(process)
