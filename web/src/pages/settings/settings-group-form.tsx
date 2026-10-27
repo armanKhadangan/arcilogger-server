@@ -171,6 +171,7 @@ export function SettingsGroupForm({
   }
 
   const busy = patch.isPending;
+  const group = { draft: (key: string) => values[key], edit };
   return (
     <SettingsCard title={title} description={description} testId={testId}>
       <div className="flex flex-col gap-5">
@@ -184,6 +185,7 @@ export function SettingsGroupForm({
             }}
             error={errors[setting.key]}
             errorCode={codes[setting.key]}
+            group={group}
             disabled={!canEdit || busy}
             onReset={() => void resetKey(setting)}
             resetting={resetting === setting.key}

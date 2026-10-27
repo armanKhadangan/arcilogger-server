@@ -64,6 +64,51 @@
     },
     "settings": {
       "rebuildHint": "A change applies to past days only once the leases are rebuilt (at the end of this group: Rebuild the leases)."
+    },
+    "observed": {
+      "title": "NAT addresses seen in the logs (last 24 hours)",
+      "refresh": "Refresh",
+      "failed": "The NAT addresses seen in the logs could not be read",
+      "exitsInvalid": "The stored exit definition cannot be read; the exit column is empty. Correct the value and save it (alert R20-nat:invalid).",
+      "empty": "No session with a source-NAT address (transip) was logged in the last 24 hours.",
+      "caption": "Source-NAT addresses seen in the FortiGate's session records",
+      "columns": {
+        "transip": "NAT address (transip)",
+        "dstintf": "Interface (dstintf)",
+        "trandisp": "NAT type (trandisp)",
+        "sessions": "Sessions",
+        "seen": "First / last seen",
+        "egress": "Exit",
+        "action": "Action"
+      },
+      "unknownTrandisp": "Not in the settings",
+      "unknownTrandispNote": "NAT types that are not in the settings were seen: {{values}}. These sessions are not taken into the candidate search for unclaimed addresses; verify the nat.snat_trandisp setting on site.",
+      "unmapped": "Unclaimed",
+      "inDraft": "In the draft: {{name}} (not saved)",
+      "inDraftShort": "In the draft (not saved)",
+      "add": "Add as exit",
+      "addInternal": "Add as not an internet exit",
+      "internalHint": "Choose this for the address of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch; no session is searched on such addresses.",
+      "join": {
+        "transips": "Add to the NAT addresses of {{name}}",
+        "public": "Add to the public addresses of {{name}}"
+      },
+      "truncated": "The 100 addresses with the most sessions are shown.",
+      "srcmacTitle": "Interfaces with srcmac (last hour)",
+      "srcmacCaption": "FortiGate interfaces whose session records carry srcmac",
+      "srcmacEmpty": "No session record with srcmac in the last hour (device identification may be off).",
+      "srcmacColumns": {
+        "srcintf": "Interface (srcintf)",
+        "rows": "Records",
+        "macs": "Distinct MACs",
+        "maxIps": "Most IPs per MAC",
+        "action": "Action"
+      },
+      "srcmacUsed": "srcmac in use",
+      "srcmacAdd": "Use for srcmac",
+      "srcmacShared": "One MAC address was seen with {{count}} distinct IP addresses (limit {{limit}}): a router or switch may sit behind the interface.",
+      "srcmacTruncated": "At most 50 interfaces are shown.",
+      "srcmacHint": "Never add an interface that faces a routed (L3) network; when layer-2 switches sit in between, add the interface only after checking it on site with two known clients (DEVICE-SETUP.md section 2.5)."
     }
   }
 }
