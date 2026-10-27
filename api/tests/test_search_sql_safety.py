@@ -235,6 +235,7 @@ LABELS = {
     "page",
     "rows",
     "newest",
+    "split",
     "counted",
     "typed",
     "m",
@@ -291,6 +292,13 @@ def statements(text_: str) -> list[Select[Any]]:
         sql.page_statement(plan, start, bounds(None, end, plan.ranks), 101),
         sql.page_statement(
             plan, start, bounds(Cursor.last(NOW, max(plan.ranks), 7), end, plan.ranks), 11
+        ),
+        sql.page_statement(  # TimescaleDB: each branch split at its compression horizon
+            plan,
+            start,
+            bounds(None, end, plan.ranks),
+            101,
+            dict.fromkeys(plan.tables, NOW - timedelta(days=1)),
         ),
         sql.count_statement(plan, start, end, 3600),
         sql.count_statement(plan, start, end, 3600, keys=True, limit=1000),

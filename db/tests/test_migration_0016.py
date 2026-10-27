@@ -5,7 +5,6 @@ key and the saved searches' rules."""
 from __future__ import annotations
 
 import os
-import time
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -20,7 +19,7 @@ from sqlalchemy.pool import NullPool
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import alembic_config, upgrade
 from arcilogger_db.models import SavedSearch, User
-from arcilogger_db.testing import TestServer
+from arcilogger_db.testing import TestServer, pause_compression_jobs
 
 BEFORE = "0015_admin_requests"
 REVISION = "0016_search"
@@ -76,28 +75,6 @@ def _old_data(engine: Engine, days_ago: int) -> datetime:
                 },
             )
     return at
-
-
-def _pause_compression_jobs(engine: Engine) -> None:
-    """The baseline's compression policies first run a few seconds after the database is created
-    and may compress the old chunk while the test does (``compress_chunk`` then fails with
-    "already compressed"): pause them and wait for a running one, so the test alone compresses."""
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs "
-                "WHERE proc_name = 'policy_compression'"
-            )
-        )
-    deadline = time.monotonic() + 30
-    while _scalar(
-        engine,
-        "SELECT count(*) FROM timescaledb_information.job_stats s "
-        "JOIN timescaledb_information.jobs j USING (job_id) "
-        "WHERE j.proc_name = 'policy_compression' AND s.job_status = 'Running'",
-    ):
-        assert time.monotonic() < deadline, "a compression job is still running"
-        time.sleep(0.1)
 
 
 def _domain_rows(engine: Engine) -> list[int]:
@@ -197,7 +174,7 @@ def test_up_and_down_on_timescaledb_with_compressed_chunks(empty_engine: Engine)
         if expected:
             pytest.fail(f"TimescaleDB expected with compression: {status}")
         pytest.skip(f"no compression in this TimescaleDB edition: {status}")
-    _pause_compression_jobs(empty_engine)
+    pause_compression_jobs(empty_engine)
     old = _old_data(empty_engine, 30)
     with empty_engine.begin() as connection:
         compressed = connection.execute(

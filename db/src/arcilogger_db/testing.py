@@ -77,6 +77,34 @@ def timescale_mode_from_env() -> TimescaleMode:
     return cast(TimescaleMode, value)
 
 
+def pause_compression_jobs(engine: Engine, timeout: float = 30.0) -> None:
+    """TimescaleDB: pause the compression policies and wait for a running one. They first run a
+    few seconds after a database is created from the template and compress, against today's
+    date, whichever chunks exist by then; a test that compresses chunks itself pauses them."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs "
+                "WHERE proc_name = 'policy_compression'"
+            )
+        )
+    deadline = time.monotonic() + timeout
+    while True:
+        with engine.connect() as connection:
+            running = connection.scalar(
+                text(
+                    "SELECT count(*) FROM timescaledb_information.job_stats s "
+                    "JOIN timescaledb_information.jobs j USING (job_id) "
+                    "WHERE j.proc_name = 'policy_compression' AND s.job_status = 'Running'"
+                )
+            )
+        if not running:
+            return
+        if time.monotonic() >= deadline:
+            raise TestDatabaseError("a compression job is still running")
+        time.sleep(0.1)
+
+
 def _pid_alive(pid: int) -> bool:
     """Whether a process of this host is still running.
 

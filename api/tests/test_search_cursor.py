@@ -7,12 +7,16 @@
 * A cursor is parsed strictly: anything changed is 422 ``search_cursor_invalid``.
 * A first window that times out is halved down to 5 minutes; when even that times out the
   search fails with 504 ``search_timeout``, audited with ``outcome: "timeout"``.
+* A branch split at a compression horizon (TimescaleDB) pages exactly like one that is not, on
+  any storage mode (the horizons are set by the test); on TimescaleDB the horizon of a table is
+  the end of its newest compressed chunk, and nothing anywhere else.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -20,20 +24,21 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.errors import ApiError
-from arcilogger_api.routers.search import state_of
+from arcilogger_api.routers.search import Horizons, state_of
 from arcilogger_api.search import parse_query
 from arcilogger_api.search.cursor import Bound, Cursor, bounds, decode, encode, utc_text
 from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.testing import Lines, sign_in
-from arcilogger_api.search.windows import run_page
+from arcilogger_api.search.windows import compression_horizons, run_page
 from arcilogger_api.testing import LoggedIn
-from arcilogger_db.models import AuditLog
-from arcilogger_db.settings import set_setting
+from arcilogger_db.models import TIME_SERIES_TABLES, AuditLog
+from arcilogger_db.settings import get_setting, set_setting
+from arcilogger_db.testing import pause_compression_jobs
 
 API = "/api/v1/search"
 T = datetime(2026, 10, 26, 9, 30, 0, 123456, tzinfo=UTC)
@@ -214,6 +219,88 @@ def test_frontier_cursors_continue_where_the_budget_stopped(
             partial.append(page)
     assert len(partial) >= 3
     assert found == whole
+
+
+# -- a split at the compression horizon -----------------------------------------------------------
+
+
+def _set_horizon(app: FastAPI, horizon: datetime) -> None:
+    """The search's horizons as if every table's compressed chunks ended at ``horizon``."""
+    cache = state_of(app).horizons
+    cache.invalidate()
+    cache.get_or_compute(lambda: Horizons(dict.fromkeys(TIME_SERIES_TABLES, horizon)))
+
+
+@pytest.mark.parametrize(
+    "horizon",
+    [
+        T + timedelta(microseconds=1),  # the ten rows at T are older than it
+        T - timedelta(minutes=61, seconds=1),  # rows at exactly the horizon are newer
+        T - timedelta(minutes=30),
+    ],
+)
+@pytest.mark.parametrize("q", [f"srcip:{CLIENT}", "type:traffic,web,dns,dhcp"])
+def test_a_split_at_a_compression_horizon_pages_the_same(
+    app: FastAPI,
+    client: TestClient,
+    searcher: LoggedIn,
+    lines: Lines,
+    db_engine: Engine,
+    q: str,
+    horizon: datetime,
+) -> None:
+    whole = keys(client, q, 500)
+    _set_horizon(app, horizon)
+    sent: list[str] = []
+
+    def record(_c: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        sent.append(statement)
+
+    event.listen(db_engine, "before_cursor_execute", record)
+    try:
+        for limit in (500, 1, 2, 3, 5, 11):
+            assert keys(client, q, limit) == whole, limit
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record)
+    assert any(" AS split" in statement for statement in sent)
+
+
+def test_compression_horizons_are_where_the_compressed_chunks_end(
+    app_session_factory: sessionmaker[Session], db_engine: Engine
+) -> None:
+    with app_session_factory() as session:
+        assert compression_horizons(session, 5.0) == {}  # nothing compressed (yet)
+        storage = get_setting(session, "db.timescale") or {}
+    if not storage.get("compression"):
+        assert os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") != "1", storage
+        return  # native partitions: never anything to split
+    pause_compression_jobs(db_engine)
+    found = Lines(app_session_factory)
+    old = T - timedelta(days=20)
+    for moment in (old, T):
+        found.add(moment, "fg_web", srcip=CLIENT)
+    with db_engine.begin() as connection:
+        connection.execute(
+            text(
+                "SELECT compress_chunk(c, if_not_compressed => true) FROM show_chunks("
+                "'fg_web', older_than => CAST(:before AS timestamptz)) AS c"
+            ),
+            {"before": T - timedelta(days=10)},
+        )
+        end = connection.scalar(
+            text(
+                "SELECT range_end FROM timescaledb_information.chunks "
+                "WHERE hypertable_name = 'fg_web' AND is_compressed"
+            )
+        )
+    plan = plan_query(parse_query(f"srcip:{CLIENT}"), SiteNetwork())
+    with app_session_factory() as session:
+        horizons = compression_horizons(session, 5.0)
+        assert horizons == {"fg_web": end}
+        page = run_page(
+            session, plan, T - timedelta(days=30), END, None, 10, 5.0, horizons=horizons
+        )
+    assert [row["time"] for row in page.rows] == [T, old]
 
 
 # -- the cursor itself ----------------------------------------------------------------------------

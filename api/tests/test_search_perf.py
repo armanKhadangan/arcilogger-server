@@ -65,6 +65,7 @@ from arcilogger_db.models import Message
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.searchcounts import rebuild_stream
 from arcilogger_db.settings import set_setting
+from arcilogger_db.testing import pause_compression_jobs
 
 TIER = os.environ.get("ARCILOGGER_SEARCH_PERF", "1").strip().lower()
 pytestmark = [
@@ -371,32 +372,6 @@ def _timescale(engine: Engine) -> bool:
         )
 
 
-def _pause_compression_jobs(engine: Engine) -> None:
-    """The policies first run a few seconds after the database is created: pause them and wait
-    for a running one, so that only ``_compress_old_chunks`` compresses."""
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs "
-                "WHERE proc_name = 'policy_compression'"
-            )
-        )
-    deadline = time.monotonic() + 30
-    while True:
-        with engine.connect() as connection:
-            running = connection.scalar(
-                text(
-                    "SELECT count(*) FROM timescaledb_information.job_stats s "
-                    "JOIN timescaledb_information.jobs j USING (job_id) "
-                    "WHERE j.proc_name = 'policy_compression' AND s.job_status = 'Running'"
-                )
-            )
-        if not running:
-            return
-        assert time.monotonic() < deadline, "a compression job is still running"
-        time.sleep(0.1)
-
-
 def _compress_old_chunks(engine: Engine, before: datetime) -> int:
     compressed = 0
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
@@ -432,7 +407,7 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
     began = time.perf_counter()
     timescale = _timescale(db_engine)
     if timescale:
-        _pause_compression_jobs(db_engine)
+        pause_compression_jobs(db_engine)
     with db_engine.begin() as connection:
         ensure_partitions(connection, today=NEWEST, months_back=2)
     for day in days:
