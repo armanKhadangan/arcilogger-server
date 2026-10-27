@@ -7,6 +7,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -121,14 +122,13 @@ export function LiveFilters({
             {filter.sources.length > 0 ? (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem
-                  checked={false}
-                  onCheckedChange={() => {
+                <DropdownMenuItem
+                  onSelect={() => {
                     onChange({ ...filter, sources: [] });
                   }}
                 >
                   {t('live.filters.sourcesClear')}
-                </DropdownMenuCheckboxItem>
+                </DropdownMenuItem>
               </>
             ) : null}
           </DropdownMenuContent>
