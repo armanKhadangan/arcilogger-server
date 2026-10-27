@@ -173,7 +173,12 @@ test.describe('Arama', () => {
     const box = queryBox(page);
     await box.fill('kay');
     const list = page.getByRole('listbox', { name: 'Öneriler' });
-    await expect(list.getByRole('option')).toHaveText([/^kaynak:/, /^kaynakip:/, /^kaynakport:/]);
+    await expect(list.getByRole('option')).toHaveText([
+      /^kaynak:/,
+      /^kaynakip:/,
+      /^kaynakport:/,
+      /^kaynakmac:/, // srcmac: (ADR-0016), in catalogue order
+    ]);
     await box.press('ArrowDown');
     await expect(list.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
     await box.press('Enter');
