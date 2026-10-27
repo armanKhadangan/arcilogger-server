@@ -42,13 +42,7 @@ export type EgressMode = 'direct' | 'isp_nat' | 'not_logged' | 'internal';
 export type PortPreservation = 'unknown' | 'preserved' | 'not_preserved';
 /** How a public-IP lookup resolved its address against the internet exits. */
 export type EgressResolution =
-  | 'public'
-  | 'transip'
-  | 'fallback'
-  | 'observed'
-  | 'public_unknown'
-  | 'unconfigured'
-  | 'no_egress';
+  'public' | 'transip' | 'fallback' | 'observed' | 'public_unknown' | 'unconfigured' | 'no_egress';
 
 /** Line `line` (1-based) of `spool/<source>/<day>.log` = the same line of the sealed file. */
 export interface RawRef {
