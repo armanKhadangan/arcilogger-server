@@ -11,6 +11,7 @@ yesterday's file, a replaced file (``gap``), network members and new unknown sen
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import secrets
 import time
 from collections.abc import Callable, Coroutine
@@ -24,11 +25,12 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_api.live import events
 from arcilogger_api.live import hub as hub_module
 from arcilogger_api.live.events import Entry
 from arcilogger_api.live.hub import Connection, Hub, LiveSettings, Stream, Timing
 from arcilogger_api.live.testing import spool_line
-from arcilogger_api.search import SiteNetwork, compile_matcher, parse_query
+from arcilogger_api.search import SiteNetwork, compile_matcher, parse_query, windows
 from arcilogger_api.testing import EXAMPLE_SITE_NAME
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
@@ -499,3 +501,19 @@ def test_the_hub_stops_after_the_last_stream(hub: Hub, spool: Spool) -> None:
 def test_settings_load_every_live_key(app_session_factory: sessionmaker[Session]) -> None:
     with app_session_factory() as session:
         assert LiveSettings.load(session) == LiveSettings()
+
+
+def test_a_live_line_names_the_most_specific_vlan_as_arama_does() -> None:
+    # The wider subnet first, as an unordered SELECT of the VLANs may give it; a search row of
+    # the same line names VLAN 41 (``search.windows.vlan_of``), so the live line must too.
+    site = SiteNetwork(
+        vlans={
+            90: ipaddress.ip_network("172.20.0.0/16"),
+            41: ipaddress.ip_network("172.20.41.0/24"),
+        }
+    )
+    row = {"srcip": "172.20.41.5", "hostname": "ornek.example", "action": "passthrough"}
+    shown = events.summary("fg_web", row, site)
+    assert shown == windows.summary("fg_web", row, site)
+    assert shown["vlan_id"] == 41
+    assert events.summary("fg_web", {**row, "srcip": "172.20.99.5"}, site)["vlan_id"] == 90

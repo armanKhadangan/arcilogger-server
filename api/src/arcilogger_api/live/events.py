@@ -14,18 +14,16 @@ only, and the comment ``: ka`` as keep-alive.
 
 from __future__ import annotations
 
-import ipaddress
 import json
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Final, Literal
 
 from arcilogger_api.rawlines import display_text
-from arcilogger_api.search.fields import FIELDS, PROTOCOL_NAMES, SiteNetwork
+from arcilogger_api.search import windows
+from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.matcher import Record
-from arcilogger_db.kinds import ascii_lower
 
 #: The message of a ``line`` event is cut to this many bytes (``truncated``); ``GET /raw``
 #: has the whole line.
@@ -36,7 +34,6 @@ RAW_KEEP_BYTES: Final = 16 * 1024
 #: Characters of one summary field.
 SUMMARY_TEXT_MAX: Final = 500
 KEEPALIVE: Final = b": ka\n\n"
-_UNSAFE: Final = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp", "Co", "Cn"})
 
 #: ``parsed``: ``prepare_line`` ran (``record`` is ``None`` only when even the generic row
 #: failed); ``skipped``: not parsed (parse budget, or no open stream could match it);
@@ -105,73 +102,10 @@ def message_part(raw: bytes) -> bytes:
     return parts[2] if len(parts) == 3 else raw
 
 
-def display(text: str, limit: int = SUMMARY_TEXT_MAX) -> str:
-    """``text`` safe to show (invisible and control characters as ``\\uXXXX``), cut to
-    ``limit`` characters."""
-    out: list[str] = []
-    length = 0
-    for char in text:
-        piece = f"\\u{ord(char):04x}" if unicodedata.category(char) in _UNSAFE else char
-        if length + len(piece) > limit:
-            break
-        out.append(piece)
-        length += len(piece)
-    return "".join(out)
-
-
-def _text(value: Any) -> str | None:
-    return None if value is None else str(value)
-
-
-def _first(table: str, row: Mapping[str, Any], field: str) -> Any:
-    for name in FIELDS[field].columns.get(table, ()):
-        value = row.get(name)
-        if value is not None:
-            return value
-    return None
-
-
-def _vlan_of(site: SiteNetwork, address: Any) -> int | None:
-    if address is None:
-        return None
-    try:
-        ip = ipaddress.ip_interface(str(address)).ip
-    except ValueError:
-        return None
-    for vlan_id, subnet in site.vlans.items():
-        if ip.version == subnet.version and ip in subnet:
-            return vlan_id
-    return None
-
-
 def summary(table: str | None, row: Mapping[str, Any] | None, site: SiteNetwork) -> dict[str, Any]:
-    """The ``summary`` of a typed row, as Arama's rows have it (only the fields it has)."""
-    if table is None or row is None:
-        return {}
-    found: dict[str, Any] = {}
-    for key in ("srcip", "dstip", "natip", "mac"):
-        found[key] = _text(_first(table, row, key))
-    for key in ("srcport", "dstport", "natport"):
-        found[key] = _first(table, row, key)
-    for key in ("action", "domain", "url", "app", "category", "user"):
-        value = _first(table, row, key)
-        found[key] = None if value is None else display(str(value))
-    proto = _first(table, row, "proto")
-    if isinstance(proto, int):
-        found["proto"] = PROTOCOL_NAMES.get(proto, str(proto))
-    else:
-        found["proto"] = None if proto is None else ascii_lower(str(proto))
-    if table == "fg_traffic":
-        name, number = row.get("policyname"), row.get("policyid")
-        found["policy"] = display(str(name)) if name is not None else _text(number)
-    shown = [
-        display(str(value))
-        for value in (row.get(name) for name in FIELDS["interface"].columns.get(table, ()))
-        if value is not None
-    ]
-    found["interface"] = " → ".join(shown) if shown else None
-    found["vlan_id"] = _vlan_of(site, found["srcip"])
-    return {key: value for key, value in found.items() if value is not None}
+    """The ``summary`` of a typed row: Arama's own (``search.windows.summary``), so a live line
+    and a search row of the same line agree, the VLAN included."""
+    return windows.summary(table, row, site, SUMMARY_TEXT_MAX)
 
 
 def line_data(entry: Entry, site: SiteNetwork) -> dict[str, Any]:
