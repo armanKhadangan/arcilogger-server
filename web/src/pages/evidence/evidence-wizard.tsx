@@ -52,6 +52,7 @@ import {
   toEvidenceBody,
   validateContent,
   validateScope,
+  leaveOutUnsealed,
   wizardFromSearch,
   type SearchExtract,
   type WizardDraft,
@@ -121,9 +122,21 @@ function failureDetails(error: unknown, t: TFunction): string[] {
 }
 
 /** What the wizard says about the lines a search handed over: where they came from, and why a
- * package may refuse them (cut at the extract's maximum, an incomplete scan, unsealed days). */
-function FromSearch({ extract }: { extract: SearchExtract }) {
+ * package may refuse them (cut at the extract's maximum, an incomplete scan, unsealed days). The
+ * lines of unsealed days can be left out with one button (`leaveOutUnsealed`). */
+function FromSearch({
+  extract,
+  leftOut,
+  onLeaveOut,
+}: {
+  extract: SearchExtract;
+  /** Lines of unsealed days left out so far. */
+  leftOut: number;
+  onLeaveOut: () => void;
+}) {
   const { t } = useTranslation();
+  const lang = currentLang();
+  const canLeaveOut = extract.unsealed_days.length > 0 && leaveOutUnsealed(extract) !== null;
   const warnings = [
     extract.truncated
       ? t('evidence.wizard.fromSearchTruncated', {
@@ -148,12 +161,25 @@ function FromSearch({ extract }: { extract: SearchExtract }) {
           {t('evidence.wizard.fromSearchQuery', { query: extract.query || '—' })}
         </p>
         <p>{t('evidence.wizard.fromSearchBody')}</p>
+        {leftOut > 0 ? (
+          <p>
+            {t('evidence.wizard.leftOutUnsealed', {
+              count: leftOut,
+              formatted: formatNumber(leftOut, 0, lang),
+            })}
+          </p>
+        ) : null}
       </Alert>
       {warnings.length > 0 ? (
         <Alert tone="warning">
           {warnings.map((text) => (
             <p key={text}>{text}</p>
           ))}
+          {canLeaveOut ? (
+            <Button size="sm" variant="secondary" className="mt-2" onClick={onLeaveOut}>
+              {t('evidence.wizard.leaveOutUnsealed')}
+            </Button>
+          ) : null}
         </Alert>
       ) : null}
     </div>
@@ -203,7 +229,11 @@ export function EvidenceWizard({
   const { reset } = create;
   /** The lines a search handed over (the wizard is open while they are). */
   const [fromSearch, setFromSearch] = useState<SearchExtract | null>(null);
-  useHandoff('/evidence', setFromSearch);
+  const [leftOut, setLeftOut] = useState(0);
+  useHandoff('/evidence', (extract) => {
+    setLeftOut(0);
+    setFromSearch(extract);
+  });
   const isOpen = open || fromSearch !== null;
 
   useEffect(() => {
@@ -414,7 +444,18 @@ export function EvidenceWizard({
               current={step}
               steps={STEPS.map((name) => ({ id: name, title: t(`evidence.wizard.steps.${name}`) }))}
             />
-            {fromSearch ? <FromSearch extract={fromSearch} /> : null}
+            {fromSearch ? (
+              <FromSearch
+                extract={fromSearch}
+                leftOut={leftOut}
+                onLeaveOut={() => {
+                  const narrowed = leaveOutUnsealed(fromSearch);
+                  if (!narrowed) return;
+                  setLeftOut((count) => count + narrowed.leftOut);
+                  setFromSearch(narrowed.extract); // the scope and the lines follow (wizardFromSearch)
+                }}
+              />
+            ) : null}
 
             {step === 0 ? (
               <div className="flex flex-col gap-4">
@@ -661,7 +702,7 @@ export function EvidenceWizard({
                         set('lines', event.target.value);
                       }}
                     />
-                    <p className="text-xs text-muted">{t('evidence.wizard.fromSearchHint')}</p>
+                    <p className="text-xs text-muted">{t('evidence.wizard.fromSearchHintMake')}</p>
                   </Field>
                 ) : null}
                 {mayAddAuditLog ? (

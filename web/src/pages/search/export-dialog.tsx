@@ -24,6 +24,12 @@ import { cn } from '@/lib/utils';
 
 import { truncationOf } from './search-model';
 
+/** What each file format is like (its hint under the choice). */
+const FORMAT_HINTS: Record<ExportFormat, string> = {
+  xlsx: 'search.export.formatHints.xlsx',
+  csv: 'search.export.formatHints.csvSemicolons',
+};
+
 /**
  * "Dışa aktar" (`search.export`, administrators): the whole search as CSV or Excel. The API asks
  * for the password again within {@link RECENT_AUTH_MINUTES} minutes (`withReauth`); the file is
@@ -120,7 +126,7 @@ export function ExportDialog({
                 <span className="font-medium text-foreground">
                   {t(`search.export.formats.${value}`)}
                 </span>
-                <span className="text-muted">{t(`search.export.formatHints.${value}`)}</span>
+                <span className="text-muted">{t(FORMAT_HINTS[value])}</span>
               </span>
             </label>
           ))}

@@ -312,8 +312,8 @@ Her gün:
   uyarılar bir bakışta. **Güvenlik** sayfası: Yeni uyarıları inceleyin, ilgilendiklerinizi
   İnceleniyor yapın.
 - **Kaynaklar** sayfası (yönetici): her beklenen kaynak "Etkin" mi? "Sessiz" ya da "Hiç mesaj
-  gelmedi" görünen bir kaynağın cihazını ve ağ bağlantısını denetleyin ("Sessiz (beklenmiyor)":
-  kaynak sessiz kalabilir, R15 onu beklemez). Bugünkü satır sayısı, son bir saatin mesaj/dk eğrisi
+  gelmedi" görünen bir kaynağın cihazını ve ağ bağlantısını denetleyin ("Sessiz (izlenmiyor)":
+  kaynak sessiz kalabilir, R15 onu izlemez). Bugünkü satır sayısı, son bir saatin mesaj/dk eğrisi
   ve ayrıştırma hatası oranı da buradadır; bir satır kaynağın son 48 saatini, son 14 gününü,
   kayıt boşluklarını ve ayrıştırma hatalarını açar. **Bilinmeyen** süzgeci yapılandırmada olmayan
   göndericileri gösterir: tanıdığınız bir cihazsa **Kaynak olarak tanımla**, Ayarlar →

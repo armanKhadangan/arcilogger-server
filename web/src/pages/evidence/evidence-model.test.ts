@@ -15,6 +15,7 @@ import {
   toEvidenceBody,
   validateContent,
   validateScope,
+  leaveOutUnsealed,
   wizardFromSearch,
   type WizardDraft,
 } from './evidence-model';
@@ -161,6 +162,21 @@ describe('the lines of a search ("Kanıt paketine aktar")', () => {
   it('are checked like typed ones: a day that is not closed yet is refused', () => {
     const draft = wizardFromSearch({ ...extract, to_day: TODAY });
     expect(validateScope(draft, TODAY)).toEqual({ to: 'evidence.validation.notClosed' });
+  });
+
+  it('can leave out the lines of unsealed days, the scope then ends on a sealed day', () => {
+    const lastDay = { ...extract, to_day: TODAY, unsealed_days: [TODAY] };
+    lastDay.extract = [...extract.extract, { day: TODAY, source: 'fortigate', line: 3 }];
+    const narrowed = leaveOutUnsealed(lastDay);
+    expect(narrowed).toEqual({
+      extract: { ...extract, unsealed_days: [] },
+      leftOut: 1,
+    });
+    expect(validateScope(wizardFromSearch(narrowed?.extract ?? extract), TODAY)).toEqual({});
+    // Nothing on a sealed day: nothing to offer.
+    expect(
+      leaveOutUnsealed({ ...extract, unsealed_days: ['2026-10-09', '2026-10-10'] }),
+    ).toBeNull();
   });
 });
 

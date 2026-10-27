@@ -433,6 +433,9 @@ export class SourcesMock {
       if (!this.rawAllowed(account)) return this.error(403, 'forbidden');
       if (!account.privacy_accepted) return this.error(403, 'privacy_notice_required');
       if (!item) return this.error(404, 'source_not_found');
+      // A configured network has no folder of its own: its lines are under its members.
+      if (this.items.some((entry) => entry.network_of === item.name))
+        return [200, { ...tailOf(''), source: item.name, reason: 'network_source' }];
       const tail = tailOf(item.name);
       const limit = Number(call.query.get('limit') ?? 50);
       return [200, { ...tail, lines: tail.lines.slice(-limit) }];

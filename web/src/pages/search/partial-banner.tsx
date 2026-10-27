@@ -38,7 +38,7 @@ export function PartialBanner({
     return (
       <p role="status" className="flex items-center gap-2 text-13 text-muted">
         <Loader2 aria-hidden="true" className="size-4 animate-spin" />
-        {t('search.partial.continuing', values)}
+        {t('search.partial.continuingUpTo', values)}
       </p>
     );
   return (

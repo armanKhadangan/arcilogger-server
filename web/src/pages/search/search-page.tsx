@@ -359,9 +359,11 @@ export function SearchPage() {
                     variant="secondary"
                     size="sm"
                     className="font-mono text-xs"
+                    aria-label={t('search.help.useExample', { query: example })}
                     onClick={() => {
+                      // Like the syntax help's "Kullan": only "Ara" runs (and audits) a search,
+                      // so an example's address is never searched by a click alone.
                       setText(example);
-                      submit(example);
                     }}
                   >
                     {example}
@@ -442,6 +444,7 @@ export function SearchPage() {
       ) : null}
       <EventSheet
         row={selected}
+        catalogue={fields.data}
         onClose={() => {
           setSelected(null);
         }}

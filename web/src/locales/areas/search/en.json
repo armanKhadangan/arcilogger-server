@@ -56,7 +56,7 @@
       "other": "Other: {{formatted}}",
       "sampled": "Counted from a sample ({{formatted}} rows)",
       "sampledSome": "Counted from a sample",
-      "unavailable": "Not available for this search.",
+      "chooseType": "Not available for this search: choose a type (e.g. type:web).",
       "none": "No values"
     },
     "results": {
@@ -64,7 +64,7 @@
       "count_one": "{{formatted}} record shown",
       "count_other": "{{formatted}} records shown",
       "time": "Time",
-      "received": "Received: {{time}}",
+      "receivedColumn": "Received",
       "source": "Source",
       "kind": "Type",
       "summary": "Summary",
@@ -76,18 +76,35 @@
     },
     "partial": {
       "title": "The search could not scan the whole range",
-      "continuing": "Scanning… records up to {{reached}} are shown (the range starts {{from}}).",
+      "continuingUpTo": "Scanning… records up to {{reached}} are shown (the range starts {{from}}).",
       "body": "The search went on {{times}} times by itself and reached {{reached}}; continue for older records (back to {{from}}).",
       "stopped": "The scan reached {{reached}}, then the next part could not be read (the error is below); continue for older records (back to {{from}}).",
       "continue": "Continue"
     },
     "event": {
       "title": "Record details",
-      "subtitle": "{{source}} · {{time}} · {{table}}",
+      "subtitleKind": "{{source}} · {{time}} · {{kind}}",
       "fields": "Fields",
       "emptyLeftOut": "Empty fields are not shown.",
       "extra": "Other fields",
       "message": "Message record",
+      "columns": {
+        "id": "Record id",
+        "time": "Time (device)",
+        "time_received": "Received",
+        "source": "Source",
+        "sender": "Sender",
+        "raw_day": "Day of the raw file",
+        "raw_line": "Raw line number",
+        "raw_offset": "Byte offset",
+        "type": "Type",
+        "subtype": "Subtype",
+        "severity": "Severity",
+        "facility": "Facility",
+        "program": "Program",
+        "host": "Host name",
+        "parse_error": "Parse error"
+      },
       "text": "The record's text",
       "rawRef": "Raw line: {{source}} · {{day}} · line {{line}} · byte {{offset}}",
       "openRaw": "Raw line",
@@ -127,7 +144,7 @@
       },
       "formatHints": {
         "xlsx": "Sheets “Sonuçlar” and “Bilgi” (query, range, row count); every cell is text.",
-        "csv": "UTF-8, separated by ;; opens in Excel."
+        "csvSemicolons": "UTF-8, separated by semicolons; opens in Excel."
       },
       "limit": "The file holds at most the rows (default 100,000) or the time the settings allow; a file cut short has a name ending in “-kismi”.",
       "privacy": "The file contains personal data: keep it only as long as needed and do not share it. The export is written to the audit log.",
@@ -142,7 +159,7 @@
       }
     },
     "evidence": {
-      "action": "Add to an evidence package",
+      "makePackage": "Make an evidence package from these lines",
       "hint": "The search's raw lines (at most 10,000) are taken to the evidence package wizard.",
       "none": "This search has no lines to take.",
       "failed": "The lines could not be taken"
@@ -172,9 +189,9 @@
       "useExample": "Write this example into the query: {{query}}",
       "speedTitle": "Which queries are fast",
       "speed": {
-        "indexed": "Fields marked “Indexed” (srcip:, domain:, mac:, qname:, sessionid: …) use an index and stay fast over long ranges.",
-        "srcip": "For a client write srcip: rather than ip: — ip: cannot use an index in every table.",
-        "scan": "Free text and fields without an index are scanned in time slices, newest first; when the time is used up the results are partial and “Continue” goes on.",
+        "indexedFields": "Fields marked “Indexed” (srcip:, domain:, mac:, qname:, sessionid: …) use an index and stay fast over long ranges.",
+        "srcipIndex": "For a client write srcip: rather than ip: — ip: cannot use an index in every table.",
+        "scanUnindexed": "Free text and fields without an index are scanned in time slices, newest first; when the time is used up the results are partial and “Continue” goes on.",
         "case": "Free text ignores case for English letters only; İ/ı, Ş/ş, Ğ/ğ, Ü/ü, Ö/ö, Ç/ç are matched as typed.",
         "truncated": "Free text is matched in the first 2,000 characters of each record; the whole line is in the raw record.",
         "time": "The time range applies to the record's device time; the receive time is shown on every row as well."
@@ -187,7 +204,7 @@
         "example": "Example",
         "speed": "Speed"
       },
-      "indexed": "Indexed",
+      "indexedLabel": "Indexed",
       "scanned": "Scanned",
       "kindsTitle": "Record types (type:)"
     }
@@ -196,8 +213,8 @@
     "searchPlaceholderLogs": "Search IP, MAC, domain or text…"
   },
   "timeRange": {
-    "label": "Time range",
-    "button": "Time range: {{range}}",
+    "labelRange": "Time range",
+    "buttonRange": "Time range: {{range}}",
     "presets": {
       "15m": "Last 15 min",
       "1h": "Last hour",
@@ -230,7 +247,10 @@
       "fromSearchTruncated": "The search found more than {{max}} lines; only the first {{max}} were taken.",
       "fromSearchIncomplete": "The search could not scan the whole range in time; some lines may be missing.",
       "fromSearchUnsealed": "These days are not sealed yet: {{days}}. A package cannot hold their lines; try again once the day is sealed.",
-      "fromSearchHint": "Run a search on the Search page and press “Add to an evidence package”"
+      "leaveOutUnsealed": "Leave out the lines of unsealed days",
+      "leftOutUnsealed_one": "{{formatted}} line of unsealed days was left out; the scope covers the sealed days only.",
+      "leftOutUnsealed_other": "{{formatted}} lines of unsealed days were left out; the scope covers the sealed days only.",
+      "fromSearchHintMake": "Run a search on the Search page and press “Make an evidence package from these lines”"
     }
   },
   "auditActions": {

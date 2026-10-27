@@ -30,10 +30,10 @@ export type SourceFilter = 'all' | 'silent' | 'unknown';
 export const SOURCE_FILTERS: readonly SourceFilter[] = ['all', 'silent', 'unknown'];
 
 /** The state as shown: a silent source that is not expected to send says so. */
-export type ShownState = SourceState | 'silentUnexpected';
+export type ShownState = SourceState | 'silentUnwatched';
 
 export function shownState(item: Pick<SourceHealth, 'state' | 'expected'>): ShownState {
-  return item.state === 'silent' && !item.expected ? 'silentUnexpected' : item.state;
+  return item.state === 'silent' && !item.expected ? 'silentUnwatched' : item.state;
 }
 
 /** Badge of each state: tone and icon (a state is never shown by colour alone). */
@@ -43,7 +43,7 @@ export const STATE_STYLE: Record<
 > = {
   active: { tone: 'success', icon: Signal },
   silent: { tone: 'danger', icon: SignalZero },
-  silentUnexpected: { tone: 'neutral', icon: SignalZero },
+  silentUnwatched: { tone: 'neutral', icon: SignalZero },
   never: { tone: 'warning', icon: CircleDashed },
   disabled: { tone: 'neutral', icon: Ban },
   unknown: { tone: 'info', icon: CircleHelp },

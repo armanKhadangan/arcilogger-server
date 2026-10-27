@@ -13,9 +13,11 @@ import { rowSummary, type ScanState } from './search-model';
 
 /**
  * The search's records, newest first (virtualised: `DataTable` with `@tanstack/react-virtual`):
- * Zaman, Kaynak, Tür, Özet (by kind, from the row's summary), Ham satır. A row opens the record's
- * drawer; "Ham satır" opens the raw line itself. Up to {@link SEARCH_VIEW_ROWS} rows are kept in
- * view ("Daha fazla" reads the next page); the order is the server's (no sorting here).
+ * Zaman (the device's time, which the range applies to), Alınma zamanı (when the collector
+ * received the line: a device clock that is wrong shows as the difference), Kaynak, Tür, Özet (by
+ * kind, from the row's summary), Ham satır. A row opens the record's drawer; "Ham satır" opens the
+ * raw line itself. Up to {@link SEARCH_VIEW_ROWS} rows are kept in view ("Daha fazla" reads the
+ * next page); the order is the server's (no sorting here).
  */
 export function ResultsTable({
   rows,
@@ -49,25 +51,27 @@ export function ResultsTable({
         id: 'time',
         accessorKey: 'time',
         header: t('search.results.time'),
-        size: 170,
+        size: 160,
         enableSorting: false,
         meta: { label: t('search.results.time') },
+        cell: (info) => <span className="tabular">{formatDateTime(info.getValue<string>())}</span>,
+      },
+      {
+        id: 'received',
+        accessorKey: 'time_received',
+        header: t('search.results.receivedColumn'),
+        size: 160,
+        enableSorting: false,
+        meta: { label: t('search.results.receivedColumn') },
         cell: (info) => (
-          <span
-            className="tabular"
-            title={t('search.results.received', {
-              time: formatDateTime(info.row.original.time_received),
-            })}
-          >
-            {formatDateTime(info.getValue<string>())}
-          </span>
+          <span className="text-muted tabular">{formatDateTime(info.getValue<string>())}</span>
         ),
       },
       {
         id: 'source',
         accessorKey: 'source',
         header: t('search.results.source'),
-        size: 150,
+        size: 140,
         enableSorting: false,
         meta: { label: t('search.results.source'), mono: true },
       },
@@ -75,7 +79,7 @@ export function ResultsTable({
         id: 'kind',
         accessorFn: (row) => kindLabels.get(row.kind) ?? row.kind,
         header: t('search.results.kind'),
-        size: 150,
+        size: 130,
         enableSorting: false,
         meta: { label: t('search.results.kind') },
       },

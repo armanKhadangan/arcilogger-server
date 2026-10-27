@@ -154,6 +154,26 @@ export function wizardFromSearch(extract: SearchExtract): WizardDraft {
   };
 }
 
+/**
+ * The extract without the lines of its unsealed days (a package cannot hold them), the scope
+ * narrowed to the days of the lines left; `null` when no line is on a sealed day. A search of the
+ * last 24 hours almost always reaches today, which is never sealed yet.
+ */
+export function leaveOutUnsealed(
+  extract: SearchExtract,
+): { extract: SearchExtract; leftOut: number } | null {
+  const unsealed = new Set(extract.unsealed_days);
+  const kept = extract.extract.filter((line) => !unsealed.has(line.day));
+  const days = kept.map((line) => line.day).sort();
+  const first = days[0];
+  const last = days.at(-1);
+  if (first === undefined || last === undefined) return null;
+  return {
+    extract: { ...extract, extract: kept, from_day: first, to_day: last, unsealed_days: [] },
+    leftOut: extract.extract.length - kept.length,
+  };
+}
+
 /** Problems of the scope step (`today`: the site day, `YYYY-MM-DD`). */
 export function validateScope(draft: WizardDraft, today: string): FieldErrors<WizardField> {
   const errors: FieldErrors<WizardField> = {};

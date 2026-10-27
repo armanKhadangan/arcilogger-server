@@ -242,6 +242,18 @@ export function loadRules(storage: () => Storage = () => window.sessionStorage):
   }
 }
 
+/**
+ * Forget the tab's rules: the session ended ("Çıkış" or a 401), and the next person signing in in
+ * this tab must not get the previous user's terms (R14). Never throws.
+ */
+export function clearRules(storage: () => Storage = () => window.sessionStorage): void {
+  try {
+    storage().removeItem(RULES_KEY);
+  } catch {
+    // Storage unavailable: nothing was kept either.
+  }
+}
+
 /** Keep `rules` for this tab; `false` when the browser refused (they still apply until reload). */
 export function saveRules(
   rules: readonly HighlightRule[],

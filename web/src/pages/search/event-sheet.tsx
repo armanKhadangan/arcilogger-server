@@ -17,20 +17,49 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/lib/api';
 import { formatDay, visibleText } from '@/lib/display';
 import { formatDateTime } from '@/lib/format';
+import { currentLang } from '@/lib/i18n';
 import { useSearchEvent } from '@/lib/search-hooks';
-import type { SearchEventMessage, SearchRow } from '@/lib/search-types';
+import type { FieldCatalogue, SearchEventMessage, SearchRow } from '@/lib/search-types';
 
 import { filledFields } from './search-model';
 
-function List({ items }: { items: [string, string][] }) {
+/**
+ * Columns with a name people read: the drawer's own labels (`search.event.columns.<column>`), else
+ * the query field of that name (the catalogue's label), else none (the column name alone).
+ */
+function useColumnLabel(catalogue: FieldCatalogue | undefined): (column: string) => string | null {
+  const { t, i18n } = useTranslation();
+  const lang = currentLang();
+  return (column) => {
+    const key = `search.event.columns.${column}`;
+    if (i18n.exists(key)) return t(key);
+    const field = catalogue?.fields.find((entry) => entry.name === column);
+    if (!field) return null;
+    return lang === 'en' ? field.label_en : field.label_tr;
+  };
+}
+
+function List({
+  items,
+  label,
+}: {
+  items: [string, string][];
+  label: (column: string) => string | null;
+}) {
   return (
-    <dl className="grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-4 gap-y-1.5 text-13">
-      {items.map(([name, value]) => (
-        <div key={name} className="contents">
-          <dt className="font-mono text-xs leading-5 text-muted">{name}</dt>
-          <dd className="font-mono text-xs leading-5 break-all text-foreground">{value}</dd>
-        </div>
-      ))}
+    <dl className="grid grid-cols-[minmax(9rem,auto)_1fr] gap-x-4 gap-y-1.5 text-13">
+      {items.map(([name, value]) => {
+        const shown = label(name);
+        return (
+          <div key={name} className="contents">
+            <dt className="flex flex-wrap items-baseline gap-x-1.5 text-xs leading-5 text-muted-strong">
+              {shown ?? <span className="font-mono text-muted">{name}</span>}
+              {shown ? <span className="font-mono text-[11px] text-muted">{name}</span> : null}
+            </dt>
+            <dd className="font-mono text-xs leading-5 break-all text-foreground">{value}</dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }
@@ -50,20 +79,29 @@ function messageItems(message: SearchEventMessage): [string, string][] {
 /**
  * One record (`GET /search/event`, audited `search.event`): "Alanlar", every column of its
  * typed row (or of `messages`), the `messages` row it came from, and "Ham satır", which opens the
- * raw line itself over this drawer (`RawLineSheet`: byte-exact, SHA-256, file, offset).
+ * raw line itself over this drawer (`RawLineSheet`: byte-exact, SHA-256, file, offset). Columns
+ * are named in the interface language with the column name beside them; times are in site time,
+ * so the device's time and the receive time can be compared.
  */
 export function EventSheet({
   row,
+  catalogue,
   onClose,
   onRaw,
 }: {
   row: SearchRow | null;
+  /** `GET /search/fields`: the labels of the query fields and of the kinds. */
+  catalogue: FieldCatalogue | undefined;
   onClose: () => void;
   onRaw: (row: SearchRow) => void;
 }) {
   const { t } = useTranslation();
+  const lang = currentLang();
   const event = useSearchEvent(row);
   const data = event.data;
+  const label = useColumnLabel(catalogue);
+  const kind = catalogue?.kinds.find((entry) => entry.key === row?.kind);
+  const kindLabel = kind ? (lang === 'en' ? kind.label_en : kind.label_tr) : (row?.kind ?? '');
 
   return (
     <Sheet
@@ -79,10 +117,10 @@ export function EventSheet({
           </SheetTitle>
           <SheetDescription className="text-13 text-muted">
             {row
-              ? t('search.event.subtitle', {
+              ? t('search.event.subtitleKind', {
                   source: row.source,
                   time: formatDateTime(row.time),
-                  table: row.table,
+                  kind: kindLabel,
                 })
               : ''}
           </SheetDescription>
@@ -102,7 +140,7 @@ export function EventSheet({
                   <h3 id="search-event-fields" className="text-sm font-semibold text-foreground">
                     {t('search.event.fields')}
                   </h3>
-                  <List items={filledFields(data.fields)} />
+                  <List items={filledFields(data.fields)} label={label} />
                   <p className="text-xs text-muted">{t('search.event.emptyLeftOut')}</p>
                 </section>
                 {Object.keys(data.extra).length > 0 ? (
@@ -117,7 +155,7 @@ export function EventSheet({
                     <h3 id="search-event-message" className="text-sm font-semibold text-foreground">
                       {t('search.event.message')}
                     </h3>
-                    <List items={messageItems(data.message)} />
+                    <List items={messageItems(data.message)} label={label} />
                     <CodeBlock
                       label={t('search.event.text')}
                       code={visibleText(data.message.text)}

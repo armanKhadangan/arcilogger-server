@@ -147,7 +147,7 @@ test.describe('Arama', () => {
     const help = page.getByRole('dialog', { name: 'Sorgu söz dizimi' });
     await expect(help).toBeVisible();
     await expect(help.getByRole('row', { name: /^srcip kaynakip, istemci/ })).toContainText(
-      'Dizinli',
+      'İndeksli',
     );
     await expect(help.getByRole('row', { name: /^url/ })).toContainText('Taranır');
     await expect(help.getByText('type:dhcp', { exact: true })).toBeVisible();
@@ -246,7 +246,7 @@ test.describe('Arama', () => {
     expect(Date.parse(to ?? '')).toBeLessThan(Date.parse(first.to));
     expect(runs()[2]).toEqual({ q: 'srcip:172.20.42.57', from, to });
     await expect(
-      page.getByRole('button', { name: /^Tarih aralığı: \d{2}\.\d{2}\.2026/ }),
+      page.getByRole('button', { name: /^Zaman aralığı: \d{2}\.\d{2}\.2026/ }),
     ).toBeVisible();
     expect(await keptAnywhere(page, '172.20.42.57')).toBe(false);
   });
@@ -255,9 +255,9 @@ test.describe('Arama', () => {
     const { api } = await openSearch(page);
     await runQuery(page, 'type:web');
     await expect(resultRows(page)).toHaveCount(1);
-    await page.getByRole('button', { name: 'Tarih aralığı: Son 24 saat' }).click();
+    await page.getByRole('button', { name: 'Zaman aralığı: Son 24 saat' }).click();
     await page.getByRole('button', { name: 'Son 1 saat' }).click();
-    await expect(page.getByRole('button', { name: 'Tarih aralığı: Son 1 saat' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Zaman aralığı: Son 1 saat' })).toBeVisible();
     expect(new URL(page.url()).search).toBe('?range=1h');
     await expect.poll(() => api.callsTo('POST', '/search').length).toBe(2);
     expect(api.callsTo('POST', '/search')[1]?.body).toEqual({
@@ -266,7 +266,7 @@ test.describe('Arama', () => {
       to: `${SAMPLE_TODAY}T15:00:00+03:00`,
     });
 
-    await page.getByRole('button', { name: 'Tarih aralığı: Son 1 saat' }).click();
+    await page.getByRole('button', { name: 'Zaman aralığı: Son 1 saat' }).click();
     await page.getByRole('button', { name: 'Özel' }).click();
     await page.getByLabel('Başlangıç').fill('01.09.2026 00:00');
     await page.getByLabel('Bitiş').fill(`${SAMPLE_TODAY.split('-').reverse().join('.')} 10:00`);
@@ -580,7 +580,7 @@ test.describe('Arama', () => {
       path: '/search?range=30d',
     });
     // "Son 30 gün" in the address reads as the default.
-    const picker = page.getByRole('button', { name: 'Tarih aralığı: Son 24 saat' });
+    const picker = page.getByRole('button', { name: 'Zaman aralığı: Son 24 saat' });
     await expect(picker).toBeVisible();
     await picker.click();
     await expect(page.getByRole('button', { name: 'Son 7 gün' })).toBeVisible();
@@ -719,7 +719,7 @@ test.describe('Arama — accessibility', () => {
       await expectNoA11yViolations(page);
       await page.keyboard.press('Escape');
 
-      await page.getByRole('button', { name: 'Tarih aralığı: Son 24 saat' }).click();
+      await page.getByRole('button', { name: 'Zaman aralığı: Son 24 saat' }).click();
       await page.getByRole('button', { name: 'Özel' }).click();
       await expect(page.getByLabel('Başlangıç')).toBeVisible();
       await expectNoA11yViolations(page);

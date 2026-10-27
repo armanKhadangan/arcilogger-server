@@ -101,7 +101,7 @@ describe('rows of the table', () => {
 
 describe('state and summary', () => {
   it('a silent source that is not expected to send says so', () => {
-    expect(shownState({ state: 'silent', expected: false })).toBe('silentUnexpected');
+    expect(shownState({ state: 'silent', expected: false })).toBe('silentUnwatched');
     expect(shownState({ state: 'silent', expected: true })).toBe('silent');
     expect(shownState({ state: 'never', expected: false })).toBe('never');
   });

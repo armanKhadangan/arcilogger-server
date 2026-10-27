@@ -11,6 +11,8 @@ import {
 } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 
+import { RULES_KEY } from '@/pages/live/live-model';
+
 import type { Me } from './api-types';
 import { BACKGROUND_HEADER } from './api';
 import { IDLE_CHECK_MS } from './auth';
@@ -111,6 +113,39 @@ describe('global reactions inside the app', () => {
       await screen.findByText(/Oturumunuz zaman aşımına uğradı \(en uzun oturum süresi doldu\)/),
     ).toBeInTheDocument();
     expect(client.getQueryData(['audit', 'entries', {}])).toBeUndefined();
+  });
+
+  it('signing out or a 401 leaves no Canlı Akış highlight rule in the tab (R14)', async () => {
+    const rules = JSON.stringify([{ match: 'srcip:172.20.41.105', color: 'amber' }]);
+    window.sessionStorage.setItem(RULES_KEY, rules);
+    let ended = false;
+    fakeApi(makeMe('admin'), (request) => {
+      if (request.path === '/api/v1/auth/logout') {
+        ended = true;
+        return new Response(null, { status: 204 });
+      }
+      if (ended && request.path === '/api/v1/auth/me') return errorResponse(401, 'not_authenticated');
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const first = renderApp('/');
+    await user.click(await screen.findByRole('button', { name: /Kullanıcı menüsü/ }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Çıkış yap' }));
+    await waitFor(() => {
+      expect(first.router.state.location.pathname).toBe('/login');
+    });
+    expect(window.sessionStorage.getItem(RULES_KEY)).toBeNull();
+    first.unmount();
+
+    window.sessionStorage.setItem(RULES_KEY, rules);
+    fakeApi(makeMe('admin'), (request) =>
+      request.path === '/api/v1/audit' ? errorResponse(401, 'session_idle') : undefined,
+    );
+    const second = renderApp('/audit');
+    await waitFor(() => {
+      expect(second.router.state.location.pathname).toBe('/login');
+    });
+    expect(window.sessionStorage.getItem(RULES_KEY)).toBeNull();
   });
 
   it('403 password_change_required goes to the password change', async () => {

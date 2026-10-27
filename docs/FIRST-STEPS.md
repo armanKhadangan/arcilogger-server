@@ -315,7 +315,7 @@ Every day:
   İnceleniyor.
 - **Kaynaklar** page (administrators): is every expected source "Etkin" (active)? For a source
   shown "Sessiz" (silent) or "Hiç mesaj gelmedi" (never sent), check the device and its network
-  path ("Sessiz (beklenmiyor)": the source may stay silent, R15 does not expect it). Today's line
+  path ("Sessiz (izlenmiyor)", not watched: the source may stay silent, R15 does not watch it). Today's line
   count, the messages-per-minute curve of the last hour and the parse-failure rate are here too;
   a row opens the source's last 48 hours, last 14 days, gaps and parse failures. The
   **Bilinmeyen** (unknown) filter shows senders that are not in the configuration: if you know the

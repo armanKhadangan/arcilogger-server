@@ -6,10 +6,11 @@
  *   the target URL. Inside it, `useAuth()` returns the user and the permission checks.
  * - `RequirePermission` guards one page; the menu hides what the user may not open
  *   (`visibleNavItems`). Both are conveniences: the API refuses with 403 anyway.
- * - `ApiEventsBridge` installs the global reactions of `lib/api.ts`: a 401 empties the query cache
- *   and the hand-overs between pages (`lib/handoff.ts`), so no personal data stays in memory, and
- *   goes to the sign-in page — with "Oturumunuz zaman aşımına uğradı" when the server reports an
- *   idle or expired session. "Çıkış" (`useSignOut`) empties both too.
+ * - `ApiEventsBridge` installs the global reactions of `lib/api.ts`: a 401 empties the query cache,
+ *   the hand-overs between pages (`lib/handoff.ts`) and Canlı Akış's highlight rules (kept in
+ *   `sessionStorage`), so no personal data stays behind for the next person in this tab, and goes
+ *   to the sign-in page — with "Oturumunuz zaman aşımına uğradı" when the server reports an idle
+ *   or expired session. "Çıkış" (`useSignOut`) empties all three too.
  * - The idle watch asks the server (in the background, so the question itself is not activity)
  *   once the idle time has passed without a request from the user: an unattended screen then
  *   closes itself instead of showing personal data until the next click.
@@ -25,6 +26,7 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ForbiddenPage } from '@/pages/forbidden-page';
+import { clearRules } from '@/pages/live/live-model';
 
 import { api, errorMessage, isApiError, lastForegroundRequestAt, setApiEventHandlers } from './api';
 import { queryKeys, useMe } from './api-hooks';
@@ -196,6 +198,7 @@ export function ApiEventsBridge() {
         void client.cancelQueries();
         client.clear();
         handoff.clear();
+        clearRules();
         toLogin(sessionEndReason);
       },
       passwordChangeRequired: () => {
@@ -216,8 +219,8 @@ export function ApiEventsBridge() {
 }
 
 /**
- * "Çıkış": end the session on the server, forget every cached answer and hand-over, go to
- * sign-in.
+ * "Çıkış": end the session on the server, forget every cached answer, hand-over and highlight
+ * rule, go to sign-in.
  */
 export function useSignOut() {
   const client = useQueryClient();
@@ -231,6 +234,7 @@ export function useSignOut() {
     await client.cancelQueries();
     client.clear();
     handoff.clear();
+    clearRules();
     void navigate('/login', { replace: true });
   }, [client, navigate]);
 }

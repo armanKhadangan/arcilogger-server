@@ -11,7 +11,8 @@
 
 import { isApiError, type DownloadedFile } from '@/lib/api';
 import type { DateString, RawLine } from '@/lib/api-types';
-import { endpoint, siteDateTime, visibleText } from '@/lib/display';
+import { endpoint, formatDay, siteDateTime, visibleText } from '@/lib/display';
+import { formatDateTime } from '@/lib/format';
 import type { HandoffPayloads } from '@/lib/handoff';
 import { SEARCH_AUTO_CONTINUES, SEARCH_VIEW_ROWS } from '@/lib/search-hooks';
 import type {
@@ -411,11 +412,28 @@ export function fieldText(value: unknown): string {
   return visibleText(JSON.stringify(value));
 }
 
+/** A date and time as the API sends it (`2026-10-13T11:23:00Z`, `…+03:00`). */
+const API_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const API_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A column's value as the record drawer shows it: a time in site time (`13.10.2026 14:23:00`,
+ * as the table and the subtitle write it), a day as `13.10.2026`, anything else as
+ * {@link fieldText}.
+ */
+export function shownValue(value: unknown): string {
+  if (typeof value === 'string') {
+    if (API_DATE_TIME.test(value)) return formatDateTime(value);
+    if (API_DAY.test(value)) return formatDay(value);
+  }
+  return fieldText(value);
+}
+
 /** The columns with a value (empty ones are left out), in the API's order. */
 export function filledFields(fields: Record<string, unknown>): [string, string][] {
   return Object.entries(fields)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
-    .map(([name, value]) => [name, fieldText(value)]);
+    .map(([name, value]) => [name, shownValue(value)]);
 }
 
 /** Why a file was cut short (`X-Arci-Export-Truncated`: `rows` or `time`), `null` when whole. */

@@ -43,6 +43,8 @@ import {
 } from './sources-model';
 
 type Tab = 'volume' | 'tail' | 'gaps' | 'failures';
+/** Members of a network offered in its "Son satırlar" tab. */
+const MEMBERS_SHOWN = 6;
 const TABS: readonly Tab[] = ['volume', 'tail', 'gaps', 'failures'];
 
 const HEAD =
@@ -143,11 +145,16 @@ function VolumeTab({ detail }: { detail: SourceDetail }) {
 function TailTab({
   name,
   active,
+  members,
   onRaw,
+  onOpenSource,
 }: {
   name: string;
   active: boolean;
+  /** A configured network's members (`<name>-<ip>`), whose folders hold its lines. */
+  members: readonly SourceHealth[];
   onRaw: (target: RawLineTarget) => void;
+  onOpenSource: (name: string) => void;
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
@@ -183,6 +190,38 @@ function TailTab({
       {t('sources.sheet.tail.refresh')}
     </Button>
   );
+  if (data.reason === 'network_source') {
+    // Newest first: the member that sent last is the one to look at.
+    const newest = [...members]
+      .sort((a, b) => (b.last_message ?? '').localeCompare(a.last_message ?? ''))
+      .slice(0, MEMBERS_SHOWN);
+    return (
+      <div className="flex flex-col items-start gap-2" data-testid="tail-network">
+        <p className="text-13 text-muted">{t('sources.sheet.tail.networkSource')}</p>
+        {newest.length === 0 ? (
+          <p className="text-13 text-muted">{t('sources.sheet.tail.noMembers')}</p>
+        ) : (
+          <ul className="flex flex-wrap gap-2">
+            {newest.map((member) => (
+              <li key={member.name}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="font-mono text-xs"
+                  aria-label={t('sources.sheet.tail.openMember', { name: member.name })}
+                  onClick={() => {
+                    onOpenSource(member.name);
+                  }}
+                >
+                  {member.name}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
   if (data.day === null)
     return (
       <div className="flex flex-col items-start gap-2" data-testid="tail-no-file">
@@ -441,15 +480,21 @@ function FailuresTab({
  */
 export function SourceSheet({
   item,
+  members,
   onClose,
   onRaw,
   onPromote,
+  onOpenSource,
 }: {
   /** The overview's row of the source; `null`: closed. */
   item: SourceHealth | null;
+  /** The members of `item` when it is a configured network. */
+  members: readonly SourceHealth[];
   onClose: () => void;
   onRaw: (target: RawLineTarget) => void;
   onPromote: (item: SourceHealth) => void;
+  /** Open another source's drawer (a network's member). */
+  onOpenSource: (name: string) => void;
 }) {
   const { t } = useTranslation();
   const { can } = useAuth();
@@ -515,7 +560,13 @@ export function SourceSheet({
                   <VolumeTab detail={detail.data} />
                 </TabsContent>
                 <TabsContent value="tail">
-                  <TailTab name={item.name} active={tab === 'tail'} onRaw={onRaw} />
+                  <TailTab
+                    name={item.name}
+                    active={tab === 'tail'}
+                    members={members}
+                    onRaw={onRaw}
+                    onOpenSource={onOpenSource}
+                  />
                 </TabsContent>
                 <TabsContent value="gaps">
                   <GapsTab detail={detail.data} />

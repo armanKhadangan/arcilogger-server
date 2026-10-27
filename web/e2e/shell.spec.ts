@@ -127,17 +127,17 @@ test.describe('application shell', () => {
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       await expect(page.locator('header').getByRole('search')).toHaveCount(1);
       await expect(
-        page.locator('header').getByRole('button', { name: /^Tarih aralığı/ }),
+        page.locator('header').getByRole('button', { name: /^Zaman aralığı/ }),
       ).toHaveCount(0);
     }
     await page.goto('/search');
     await expect(page.getByRole('heading', { level: 1, name: 'Arama' })).toBeVisible();
     await expect(
-      page.locator('header').getByRole('button', { name: 'Tarih aralığı: Son 24 saat' }),
+      page.locator('header').getByRole('button', { name: 'Zaman aralığı: Son 24 saat' }),
     ).toBeVisible();
     await page.goto('/search?range=7d');
     await expect(
-      page.locator('header').getByRole('button', { name: 'Tarih aralığı: Son 7 gün' }),
+      page.locator('header').getByRole('button', { name: 'Zaman aralığı: Son 7 gün' }),
     ).toBeVisible();
   });
 

@@ -366,6 +366,23 @@ describe('EvidenceWizard', () => {
     expect(
       within(wizard).getByText('Arama sayfasında bir arama yapıp “Kanıt paketine aktar”a basın'),
     ).toBeInTheDocument();
+    // One button leaves out the unsealed day's lines: the scope then ends on the sealed day.
+    await user.click(
+      within(wizard).getByRole('button', { name: 'Mühürlenmemiş günlerin satırlarını çıkar' }),
+    );
+    expect(
+      within(wizard).getByText(
+        'Mühürlenmemiş günlerin 1 satırı çıkarıldı; kapsam mühürlü günlerle sınırlandı.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(wizard).queryByText(/^Şu günler henüz mühürlenmedi/)).not.toBeInTheDocument();
+    expect(within(wizard).getByText('Arama sonucundan 1 satır aktarıldı')).toBeInTheDocument();
+    expect(within(wizard).getByLabelText('İlk gün')).toHaveValue('09.10.2026');
+    expect(within(wizard).getByLabelText('Son gün')).toHaveValue('09.10.2026');
+    await user.click(within(wizard).getByRole('button', { name: 'İleri' }));
+    expect(within(wizard).getByLabelText('Alıntılanacak satırlar')).toHaveValue(
+      '2026-10-09 fortigate 27',
+    );
     // The entry was taken once: cancelling closes the wizard for good.
     await user.click(within(wizard).getByRole('button', { name: 'İptal' }));
     await waitFor(() => {

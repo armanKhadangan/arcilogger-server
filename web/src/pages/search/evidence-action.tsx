@@ -54,7 +54,7 @@ export function EvidenceAction({
       onClick={() => void start()}
     >
       <PackagePlus aria-hidden="true" />
-      {refs.isPending ? t('common.working') : t('search.evidence.action')}
+      {refs.isPending ? t('common.working') : t('search.evidence.makePackage')}
     </Button>
   );
 }

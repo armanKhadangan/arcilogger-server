@@ -80,7 +80,7 @@ test.describe('Kaynaklar', () => {
     await expect(row(page, 'fortigate')).toContainText('%2,5');
     await expect(row(page, 'ap-172.20.10.3').getByLabel('ap ağının üyesi')).toBeVisible();
     await expect(row(page, 'ap-172.20.10.4')).toContainText('Hiç mesaj gelmedi');
-    await expect(row(page, 'switch-3')).toContainText('Sessiz (beklenmiyor)');
+    await expect(row(page, 'switch-3')).toContainText('Sessiz (izlenmiyor)');
     await expect(row(page, 'switch-3')).toContainText('180 dk');
     await expect(row(page, 'lab-fw')).toContainText('Kapalı');
     await expect(row(page, 'unknown-172.20.10.40')).toContainText('Bilinmeyen');
@@ -347,6 +347,21 @@ test.describe('Kaynaklar', () => {
     await expect(page).toHaveURL(/\/search$/);
   });
 
+  test('a network: its lines are in its members\' folders, one click opens a member', async ({
+    page,
+  }) => {
+    await open(page);
+    await page.goto('/sources?source=ap');
+    const sheet = page.getByRole('dialog', { name: 'ap' });
+    await sheet.getByRole('tab', { name: 'Son satırlar' }).click();
+    const network = sheet.getByTestId('tail-network');
+    await expect(network).toContainText('Ağ kaynağı: satırlar üyelerinin klasörlerindedir.');
+    await expect(sheet.getByTestId('tail-no-file')).toHaveCount(0);
+    await network.getByRole('button', { name: 'Üyenin son satırları: ap-172.20.10.3' }).click();
+    await expect(page).toHaveURL(/\?source=ap-172\.20\.10\.3$/);
+    await expect(page.getByRole('dialog', { name: 'ap-172.20.10.3' })).toBeVisible();
+  });
+
   test('"Kaynak olarak tanımla" opens Ayarlar → Kaynaklar with the sender filled in', async ({
     page,
   }) => {
@@ -409,4 +424,59 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     ).toBeVisible();
     await expectNoA11yViolations(page);
   });
+}
+
+/**
+ * The table fits a normal desktop width: no sideways scrolling, no header cut with an ellipsis,
+ * the state and "Kaynak olarak tanımla" in view (DEVICE-SETUP §4 and ILK-ADIMLAR §9 send the
+ * operator there; the Panel's titles were checked the same way, contract 2.17).
+ */
+for (const lang of ['tr', 'en'] as const) {
+  for (const width of [1280, 1440, 1920]) {
+    test(`the sources table fits at ${width} px (${lang})`, async ({ page }) => {
+      await usePreferences(page, { lang });
+      await useSampleClock(page, SAMPLE_TODAY);
+      await page.setViewportSize({ width, height: 1000 });
+      await open(page);
+      await page.goto('/sources');
+      const grid = page.getByRole('table');
+      await expect(grid.getByTitle('core-r1', { exact: true })).toBeVisible();
+      const fit = await grid.evaluate((element) => {
+        const box = element.parentElement;
+        const cut = Array.from(element.querySelectorAll<HTMLElement>('th, th *')).flatMap(
+          (header) =>
+            getComputedStyle(header).textOverflow === 'ellipsis' &&
+            header.scrollWidth > header.clientWidth
+              ? [header.textContent]
+              : [],
+        );
+        return {
+          overflow: box ? box.scrollWidth - box.clientWidth : -1,
+          right: box?.getBoundingClientRect().right ?? 0,
+          cut,
+        };
+      });
+      expect(fit.overflow).toBeLessThanOrEqual(0);
+      expect(fit.cut).toEqual([]);
+      const promote = page
+        .getByRole('button', {
+          name:
+            lang === 'tr'
+              ? 'unknown-172.20.10.40 göndericisini kaynak olarak tanımla'
+              : 'Add the sender unknown-172.20.10.40 as a source',
+        })
+        .first();
+      await expect(promote).toBeVisible();
+      const button = await promote.boundingBox();
+      expect((button?.x ?? 0) + (button?.width ?? 0)).toBeLessThanOrEqual(
+        Math.min(width, fit.right),
+      );
+      const active = grid
+        .getByRole('row')
+        .filter({ has: page.getByTitle('core-r1', { exact: true }) })
+        .getByText(lang === 'tr' ? 'Etkin' : 'Active', { exact: true });
+      const badge = await active.boundingBox();
+      expect((badge?.x ?? 0) + (badge?.width ?? 0)).toBeLessThanOrEqual(Math.min(width, fit.right));
+    });
+  }
 }

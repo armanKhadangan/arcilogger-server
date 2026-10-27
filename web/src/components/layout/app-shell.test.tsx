@@ -93,7 +93,7 @@ describe('AppShell', () => {
       // Lazy pages: the shell renders once the page module is loaded.
       const banner = await screen.findByRole('banner');
       await screen.findByRole('heading', { level: 1 });
-      expect(within(banner).queryByRole('button', { name: /Tarih aralığı/ })).toBeNull();
+      expect(within(banner).queryByRole('button', { name: /Zaman aralığı/ })).toBeNull();
     },
   );
 

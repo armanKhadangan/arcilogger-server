@@ -40,7 +40,7 @@ function FacetBlock({
     <section className="flex flex-col gap-1.5" aria-label={title}>
       <h3 className="text-13 font-semibold text-foreground">{title}</h3>
       {facet.status === 'unavailable' ? (
-        <p className="text-xs text-muted">{t('search.facets.unavailable')}</p>
+        <p className="text-xs text-muted">{t('search.facets.chooseType')}</p>
       ) : facet.values.length === 0 ? (
         <p className="text-xs text-muted">{t('search.facets.none')}</p>
       ) : (

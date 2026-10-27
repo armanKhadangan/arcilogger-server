@@ -143,6 +143,9 @@ export interface SourceTail {
   /** SHA-256 of the file's bytes `[from_offset, to_offset)`. */
   range_sha256: string | null;
   lines: TailLine[];
-  /** `no_file_today`: neither today's nor yesterday's spool file exists. */
+  /**
+   * `no_file_today`: neither today's nor yesterday's spool file exists; `network_source`: a
+   * configured network, whose lines are in its members' folders (`<name>-<ip>`).
+   */
   reason?: string | null;
 }

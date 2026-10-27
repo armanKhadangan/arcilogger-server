@@ -27,7 +27,7 @@ export const EXAMPLES = [
 /** The rules of the language, in the help's order (`search.help.rules.<key>`). */
 const RULES = ['and', 'or', 'not', 'quotes', 'present', 'none'] as const;
 /** What makes a query fast or slow (`search.help.speed.<key>`). */
-const SPEED = ['indexed', 'srcip', 'scan', 'case', 'truncated', 'time'] as const;
+const SPEED = ['indexedFields', 'srcipIndex', 'scanUnindexed', 'case', 'truncated', 'time'] as const;
 
 /**
  * "?" of the query bar: the language (AND by spaces, OR by commas inside one field, `-` to
@@ -158,7 +158,7 @@ export function SyntaxHelp({
                         <td className="px-3 py-1.5">
                           {field.indexed.length > 0 ? (
                             <Badge tone="success" icon={Zap} title={field.indexed.join(', ')}>
-                              {t('search.help.indexed')}
+                              {t('search.help.indexedLabel')}
                             </Badge>
                           ) : (
                             <span className="text-muted">{t('search.help.scanned')}</span>

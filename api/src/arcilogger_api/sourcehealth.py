@@ -8,7 +8,7 @@ switched off or removed from the configuration). A network entry is listed with 
 **State** — the rule of R15 and the Panel (:mod:`arcilogger_worker.alerts.r15`): the newest
 message is the later of what ingest loaded (``sources.last_seen``) and what the collector received
 (``state/collector-status.json`` while fresh). ``active`` within the heartbeat, else ``silent``
-(an ``expected = false`` source is shown "Sessiz (beklenmiyor)"); ``never`` without any message;
+(an ``expected = false`` source is shown "Sessiz (izlenmiyor)"); ``never`` without any message;
 ``disabled`` when switched off; ``unknown`` for an ``unknown-<ip>`` sender not in the
 configuration, ``promoted`` once its address is configured (``promoted_to``: the name the
 collector now writes it under; the old folder and its evidence stay where they are).

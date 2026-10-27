@@ -56,7 +56,7 @@
       "other": "Diğer: {{formatted}}",
       "sampled": "Örneklemden hesaplandı ({{formatted}} satır)",
       "sampledSome": "Örneklemden hesaplandı",
-      "unavailable": "Bu arama için hesaplanamadı.",
+      "chooseType": "Bu arama için hesaplanamadı: bir tür seçin (ör. type:web).",
       "none": "Değer yok"
     },
     "results": {
@@ -64,7 +64,7 @@
       "count_one": "{{formatted}} kayıt gösteriliyor",
       "count_other": "{{formatted}} kayıt gösteriliyor",
       "time": "Zaman",
-      "received": "Alınma zamanı: {{time}}",
+      "receivedColumn": "Alınma zamanı",
       "source": "Kaynak",
       "kind": "Tür",
       "summary": "Özet",
@@ -76,18 +76,35 @@
     },
     "partial": {
       "title": "Arama aralığın tamamını tarayamadı",
-      "continuing": "Taranıyor… {{reached}} ile şimdiye kadar bulunanlar gösteriliyor (aralık {{from}} başlangıçlı).",
+      "continuingUpTo": "Taranıyor… {{reached}} zamanına kadar bulunanlar gösteriliyor (aralığın başı {{from}}).",
       "body": "Arama {{times}} kez kendiliğinden sürdü ve {{reached}} zamanına kadar geldi; daha eski kayıtlar ({{from}} başlangıcına kadar) için devam edin.",
       "stopped": "Tarama {{reached}} zamanına kadar geldi, sonraki bölüm okunamadı (hata aşağıda); daha eski kayıtlar ({{from}} başlangıcına kadar) için devam edin.",
       "continue": "Devam et"
     },
     "event": {
       "title": "Kayıt ayrıntısı",
-      "subtitle": "{{source}} · {{time}} · {{table}}",
+      "subtitleKind": "{{source}} · {{time}} · {{kind}}",
       "fields": "Alanlar",
       "emptyLeftOut": "Boş alanlar gösterilmez.",
       "extra": "Diğer alanlar",
       "message": "Mesaj kaydı",
+      "columns": {
+        "id": "Kayıt numarası",
+        "time": "Zaman (cihaz)",
+        "time_received": "Alınma zamanı",
+        "source": "Kaynak",
+        "sender": "Gönderici",
+        "raw_day": "Ham dosyanın günü",
+        "raw_line": "Ham satır numarası",
+        "raw_offset": "Bayt konumu",
+        "type": "Tür",
+        "subtype": "Alt tür",
+        "severity": "Önem",
+        "facility": "Tesis (facility)",
+        "program": "Program",
+        "host": "Cihaz adı",
+        "parse_error": "Ayrıştırma hatası"
+      },
       "text": "Kaydın metni",
       "rawRef": "Ham satır: {{source}} · {{day}} · satır {{line}} · bayt {{offset}}",
       "openRaw": "Ham satır",
@@ -127,7 +144,7 @@
       },
       "formatHints": {
         "xlsx": "“Sonuçlar” ve “Bilgi” sayfaları (sorgu, aralık, satır sayısı); hücreler metindir.",
-        "csv": "UTF-8, ; ayraçlı; Excel ile açılır."
+        "csvSemicolons": "UTF-8, noktalı virgülle ayrılmış; Excel ile açılır."
       },
       "limit": "Dosya en fazla ayarlardaki satır sayısı (varsayılan 100.000) ya da süre kadar satır içerir; kesilen dosyanın adı “-kismi” ile biter.",
       "privacy": "Dosya kişisel veri içerir: yalnızca gerektiği kadar saklayın ve paylaşmayın. Dışa aktarma denetim kaydına yazılır.",
@@ -142,7 +159,7 @@
       }
     },
     "evidence": {
-      "action": "Kanıt paketine aktar",
+      "makePackage": "Kanıt paketine aktar",
       "hint": "Aramanın ham satırları (en fazla 10.000) kanıt paketi sihirbazına aktarılır.",
       "none": "Bu aramada aktarılacak satır yok.",
       "failed": "Satırlar aktarılamadı"
@@ -172,9 +189,9 @@
       "useExample": "Bu örneği sorguya yaz: {{query}}",
       "speedTitle": "Hangi sorgular hızlıdır",
       "speed": {
-        "indexed": "“Dizinli” işaretli alanlar (srcip:, domain:, mac:, qname:, sessionid: …) dizin kullanır ve uzun aralıklarda da hızlıdır.",
-        "srcip": "Bir istemci için ip: yerine srcip: yazın: ip: her tabloda dizin kullanamaz.",
-        "scan": "Serbest metin ve dizinsiz alanlar zaman dilimleri halinde, en yeniden geriye taranır; süre dolarsa sonuçlar kısmi olur ve “Devam et” ile sürer.",
+        "indexedFields": "“İndeksli” işaretli alanlar (srcip:, domain:, mac:, qname:, sessionid: …) indeks kullanır ve uzun aralıklarda da hızlıdır.",
+        "srcipIndex": "Bir istemci için ip: yerine srcip: yazın: ip: her tabloda indeks kullanamaz.",
+        "scanUnindexed": "Serbest metin ve indekssiz alanlar zaman dilimleri halinde, en yeniden geriye taranır; süre dolarsa sonuçlar kısmi olur ve “Devam et” ile sürer.",
         "case": "Serbest metinde büyük/küçük harf farkı yalnızca İngilizce harflerde yok sayılır; İ/ı, Ş/ş, Ğ/ğ, Ü/ü, Ö/ö, Ç/ç yazıldığı gibi aranır.",
         "truncated": "Serbest metin her kaydın ilk 2.000 karakterinde aranır; satırın tamamı ham kayıttadır.",
         "time": "Zaman aralığı kaydın cihaz zamanına uygulanır; alınma zamanı her satırda ayrıca gösterilir."
@@ -187,7 +204,7 @@
         "example": "Örnek",
         "speed": "Hız"
       },
-      "indexed": "Dizinli",
+      "indexedLabel": "İndeksli",
       "scanned": "Taranır",
       "kindsTitle": "Kayıt türleri (type:)"
     }
@@ -196,8 +213,8 @@
     "searchPlaceholderLogs": "IP, MAC, alan adı veya metin ara…"
   },
   "timeRange": {
-    "label": "Tarih aralığı",
-    "button": "Tarih aralığı: {{range}}",
+    "labelRange": "Zaman aralığı",
+    "buttonRange": "Zaman aralığı: {{range}}",
     "presets": {
       "15m": "Son 15 dk",
       "1h": "Son 1 saat",
@@ -230,7 +247,10 @@
       "fromSearchTruncated": "Arama {{max}} satırdan fazlasını buldu; yalnızca ilk {{max}} satır aktarıldı.",
       "fromSearchIncomplete": "Arama aralığın tamamını süresi içinde tarayamadı; bazı satırlar eksik olabilir.",
       "fromSearchUnsealed": "Şu günler henüz mühürlenmedi: {{days}}. Bu günlerin satırlarıyla paket oluşturulamaz; gün mühürlendikten sonra yeniden deneyin.",
-      "fromSearchHint": "Arama sayfasında bir arama yapıp “Kanıt paketine aktar”a basın"
+      "leaveOutUnsealed": "Mühürlenmemiş günlerin satırlarını çıkar",
+      "leftOutUnsealed_one": "Mühürlenmemiş günlerin {{formatted}} satırı çıkarıldı; kapsam mühürlü günlerle sınırlandı.",
+      "leftOutUnsealed_other": "Mühürlenmemiş günlerin {{formatted}} satırı çıkarıldı; kapsam mühürlü günlerle sınırlandı.",
+      "fromSearchHintMake": "Arama sayfasında bir arama yapıp “Kanıt paketine aktar”a basın"
     }
   },
   "auditActions": {
