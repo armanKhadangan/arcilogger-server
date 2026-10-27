@@ -49,9 +49,9 @@ from sqlalchemy import (
     literal,
     null,
     select,
+    text,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import insert
 
 from arcilogger_core.timeutil import day_window, site_day, utc_now
 from arcilogger_db.kinds import (
@@ -68,6 +68,17 @@ from arcilogger_db.models import Base, IngestOffset, Message, SearchCount
 COUNTS_TIME_MARGIN: Final = timedelta(days=1, hours=1)
 #: Keys per ``INSERT`` statement of :func:`upsert_counts`.
 UPSERT_CHUNK: Final = 500
+#: :func:`upsert_counts`' one statement: the keys as parallel arrays, so its text is the same for
+#: every batch (a multi-row ``INSERT`` built and compiled per batch cost about 5 ms of the
+#: ingest's service process; INGEST.md).
+UPSERT: Final = text(
+    "INSERT INTO search_counts (hour, source, raw_day, kind, tbl, action, net, n) "
+    "SELECT * FROM unnest(CAST(:hours AS timestamptz[]), CAST(:sources AS text[]), "
+    "CAST(:days AS date[]), CAST(:kinds AS text[]), CAST(:tbls AS text[]), "
+    "CAST(:actions AS text[]), CAST(:nets AS cidr[]), CAST(:ns AS bigint[])) "
+    "ON CONFLICT ON CONSTRAINT uq_search_counts_key "
+    "DO UPDATE SET n = search_counts.n + EXCLUDED.n"
+)
 #: Rows fetched at a time while recounting.
 FETCH_ROWS: Final = 20_000
 #: Private IPv4 ranges whose /24 is counted (RFC 1918 and the shared address space RFC 6598).
@@ -155,14 +166,18 @@ def upsert_counts(connection: Connection, counts: Mapping[CountKey, int]) -> int
     keys = sorted((key for key, n in counts.items() if n > 0), key=CountKey.sort_key)
     for start in range(0, len(keys), UPSERT_CHUNK):
         chunk = keys[start : start + UPSERT_CHUNK]
-        statement = insert(SearchCount).values(
-            [{**key._asdict(), "n": counts[key]} for key in chunk]
-        )
         connection.execute(
-            statement.on_conflict_do_update(
-                constraint="uq_search_counts_key",
-                set_={"n": SearchCount.n + statement.excluded.n},
-            )
+            UPSERT,
+            {
+                "hours": [key.hour for key in chunk],
+                "sources": [key.source for key in chunk],
+                "days": [key.raw_day for key in chunk],
+                "kinds": [key.kind for key in chunk],
+                "tbls": [key.tbl for key in chunk],
+                "actions": [key.action for key in chunk],
+                "nets": [key.net for key in chunk],
+                "ns": [counts[key] for key in chunk],
+            },
         )
     return len(keys)
 
