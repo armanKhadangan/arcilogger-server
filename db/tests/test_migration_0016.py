@@ -5,6 +5,7 @@ key and the saved searches' rules."""
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -50,14 +51,14 @@ def _timescale(engine: Engine) -> bool:
 
 def _old_data(engine: Engine, days_ago: int) -> datetime:
     """Rows written before the upgrade: two files' offsets and web filter rows ``days_ago``."""
-    time = (datetime.now(UTC) - timedelta(days=days_ago)).replace(microsecond=0)
+    at = (datetime.now(UTC) - timedelta(days=days_ago)).replace(microsecond=0)
     with engine.begin() as connection:
         connection.execute(
             text(
                 "INSERT INTO ingest_offsets (source, day, byte_offset, line_number) VALUES "
                 "('fortigate', :day, 4096, 10), ('core-r1', :day, 0, 0)"
             ),
-            {"day": time.date()},
+            {"day": at.date()},
         )
         for number, host in enumerate(("www.example.com", "Example.COM", "my-example.com"), 1):
             connection.execute(
@@ -67,14 +68,36 @@ def _old_data(engine: Engine, days_ago: int) -> datetime:
                     "'fortigate', '172.31.255.1', :day, :line, :offset, :host, 'blocked')"
                 ),
                 {
-                    "time": time + timedelta(seconds=number),
-                    "day": time.date(),
+                    "time": at + timedelta(seconds=number),
+                    "day": at.date(),
                     "line": number,
                     "offset": 100 * number,
                     "host": host,
                 },
             )
-    return time
+    return at
+
+
+def _pause_compression_jobs(engine: Engine) -> None:
+    """The baseline's compression policies first run a few seconds after the database is created
+    and may compress the old chunk while the test does (``compress_chunk`` then fails with
+    "already compressed"): pause them and wait for a running one, so the test alone compresses."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs "
+                "WHERE proc_name = 'policy_compression'"
+            )
+        )
+    deadline = time.monotonic() + 30
+    while _scalar(
+        engine,
+        "SELECT count(*) FROM timescaledb_information.job_stats s "
+        "JOIN timescaledb_information.jobs j USING (job_id) "
+        "WHERE j.proc_name = 'policy_compression' AND s.job_status = 'Running'",
+    ):
+        assert time.monotonic() < deadline, "a compression job is still running"
+        time.sleep(0.1)
 
 
 def _domain_rows(engine: Engine) -> list[int]:
@@ -128,23 +151,23 @@ def _check_upgraded(engine: Engine, day: date, *, plan: bool = True) -> None:
         assert _uses_the_index(engine)
 
 
-def _check_downgraded(engine: Engine) -> None:
+def _check_downgraded(engine: Engine, rows: int = 3) -> None:
     with engine.begin() as connection:
         command.downgrade(alembic_config(connection), BEFORE)
     inspector = inspect(engine)
     assert not NEW_TABLES & set(inspector.get_table_names())
     assert "counts_from_line" not in {c["name"] for c in inspector.get_columns("ingest_offsets")}
     assert "ix_fg_web_rhost_time" not in {i["name"] for i in inspector.get_indexes("fg_web")}
-    assert _scalar(engine, "SELECT count(*) FROM fg_web") == 3  # the rows stay
+    assert _scalar(engine, "SELECT count(*) FROM fg_web") == rows  # the rows stay
     assert upgrade(engine).after == (REVISION,)  # and up again
 
 
 def test_up_and_down_on_native_partitions(empty_engine: Engine) -> None:
     upgrade(empty_engine, revision=BEFORE, timescale="off")
     assert not NEW_TABLES & set(inspect(empty_engine).get_table_names())
-    time = _old_data(empty_engine, 20)
+    old = _old_data(empty_engine, 20)
     assert upgrade(empty_engine, timescale="off").after == (REVISION,)
-    _check_upgraded(empty_engine, time.date())
+    _check_upgraded(empty_engine, old.date())
     partitions = _scalar(
         empty_engine,
         "SELECT count(*) FROM pg_inherits i JOIN pg_index x ON x.indrelid = i.inhrelid "
@@ -174,7 +197,8 @@ def test_up_and_down_on_timescaledb_with_compressed_chunks(empty_engine: Engine)
         if expected:
             pytest.fail(f"TimescaleDB expected with compression: {status}")
         pytest.skip(f"no compression in this TimescaleDB edition: {status}")
-    time = _old_data(empty_engine, 30)
+    _pause_compression_jobs(empty_engine)
+    old = _old_data(empty_engine, 30)
     with empty_engine.begin() as connection:
         compressed = connection.execute(
             text(
@@ -184,7 +208,7 @@ def test_up_and_down_on_timescaledb_with_compressed_chunks(empty_engine: Engine)
         ).scalar_one()
     assert compressed >= 1
     assert upgrade(empty_engine).after == (REVISION,)
-    _check_upgraded(empty_engine, time.date(), plan=False)  # one chunk, compressed
+    _check_upgraded(empty_engine, old.date(), plan=False)  # one chunk, compressed
     chunks = _scalar(
         empty_engine,
         "SELECT count(*) FROM timescaledb_information.chunks c WHERE c.hypertable_name = 'fg_web' "
@@ -207,7 +231,7 @@ def test_up_and_down_on_timescaledb_with_compressed_chunks(empty_engine: Engine)
         "WHERE hypertable_name = 'fg_web' AND is_compressed",
     )
     assert still >= 1  # the index was built with the compressed chunks in place
-    _check_downgraded(empty_engine)
+    _check_downgraded(empty_engine, rows=4)  # the three old rows and the new chunk's
 
 
 # -- saved searches -------------------------------------------------------------------------------

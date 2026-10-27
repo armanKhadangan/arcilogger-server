@@ -25,11 +25,13 @@ ADR-0015 (Arama, Canlı Akış, Kaynaklar):
   hypertable, inside the upgrade's one transaction (``timescaledb.transaction_per_chunk`` cannot
   run in a transaction and is not used). TimescaleDB 2.30's source creates such an index on every
   chunk and checks a compressed chunk apart only for a unique index; on a compressed chunk the
-  index holds just the rows not compressed (compressed rows are read by decompression). That the
-  statement is accepted with compressed chunks present is not yet shown: the Linux
-  TimescaleDB CI job runs ``db/tests/test_migration_0016.py``, and this revision is not released
-  before that job is green. The build reads all of ``fg_web`` once: the installer stops the
-  services for an upgrade and the spool keeps every incoming line meanwhile.
+  index holds just the rows not compressed (compressed rows are read by decompression). Shown on
+  TimescaleDB 2.30.2 with PostgreSQL 16 (the CI image's version; 2026-10-27,
+  ``db/tests/test_migration_0016.py``): the statement is accepted with a compressed chunk present,
+  every chunk gets the index (the compressed one included), a new chunk inherits it, and the
+  downgrade drops it and keeps the rows. The Linux TimescaleDB CI job runs the same test. The
+  build reads all of ``fg_web`` once: the installer stops the services for an upgrade and the
+  spool keeps every incoming line meanwhile.
 
 No partition and no hypertable is created: the new tables are small (``search_counts`` about
 450 keys an hour for 150 users, about 4 M rows over 400 days).

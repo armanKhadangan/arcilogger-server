@@ -122,11 +122,13 @@ these columns is indexed).
   per 10 M rows. On TimescaleDB it is a plain `CREATE INDEX` on the hypertable inside the
   upgrade's one transaction. TimescaleDB's source creates it on every chunk; on a compressed chunk
   it holds only the rows not compressed, so `domain:` reads compressed chunks (older than 7 days)
-  by decompression, within the search's time budget. **Pending:** that the statement is accepted
-  with compressed chunks present is checked by the Linux TimescaleDB CI job
-  (`db/tests/test_migration_0016.py`) and not yet shown; the revision is not released before it
-  is green. Should TimescaleDB refuse it, the index is built after the upgrade's transaction
-  instead, and this record is amended.
+  by decompression, within the search's time budget. **Shown** on TimescaleDB 2.30.2 with
+  PostgreSQL 16 (the CI image's version; 2026-10-27, `db/tests/test_migration_0016.py`): the
+  statement is accepted with a compressed chunk present, every chunk gets the index (the
+  compressed one included), a new chunk inherits it, and the downgrade drops it and keeps the
+  rows. The Linux TimescaleDB CI job runs the same test; should a later TimescaleDB refuse the
+  statement, the index is built after the upgrade's transaction instead, and this record is
+  amended.
 - Free text is slow by nature: the answer is honest about a partial scan, and the syntax help
   points to the fast fields (`srcip:`, `domain:`, `mac:`, `qname:`). `ip:` on the UTM tables is a
   scan, because their destination addresses have no index.
