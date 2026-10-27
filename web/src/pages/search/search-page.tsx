@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { Histogram } from '@/components/charts/histogram';
+import { clipSpan } from '@/components/charts/histogram-data';
 import { RawLineSheet, type RawLineTarget } from '@/components/evidence/raw-line-sheet';
 import { PageHeader } from '@/components/layout/page-header';
 import { Alert } from '@/components/ui/alert';
@@ -24,6 +25,8 @@ import {
 } from '@/lib/search-hooks';
 import type { Notice, SavedSearch, SearchFacets, SearchRow } from '@/lib/search-types';
 import {
+  DEFAULT_MAX_DAYS,
+  fitRange,
   rangeKey,
   rangeToParams,
   resolveRange,
@@ -81,8 +84,9 @@ export function SearchPage() {
   const { can, me } = useAuth();
   const privacyPending = me.privacy_notice.required && !me.privacy_notice.accepted;
   const [params, setParams] = useSearchParams();
-  const { range, setRange } = useTimeRange();
   const fields = useSearchFields();
+  const maxDays = fields.data?.limits.max_days ?? DEFAULT_MAX_DAYS;
+  const { range, setRange } = useTimeRange(maxDays);
   const session = useSearchSession();
   const { state, run, next, renew, withSearch } = session;
   const stats = useSearchStats(privacyPending ? null : (state.first?.search_id ?? null));
@@ -160,25 +164,26 @@ export function SearchPage() {
   useHandoff('/search', (payload) => {
     setText(payload.q);
     dropSaved();
-    const on = payload.range ?? range;
+    const on = payload.range ? fitRange(payload.range, maxDays) : range;
     if (payload.range) {
-      ranWith.current = rangeKey(payload.range);
-      setRange(payload.range);
+      ranWith.current = rangeKey(on);
+      setRange(on);
     }
     search(payload.q, on);
   });
 
-  // `?saved=<id>` when the page opens (a reload after choosing a saved search).
+  // `?saved=<id>` when the page opens (a reload after choosing a saved search), once the field
+  // catalogue says how long a range may be (the address's preset may not fit it).
   const openedWith = useRef(parseId(params.get('saved')));
   useEffect(() => {
     const id = openedWith.current;
+    if (id === null || fields.isPending) return;
     openedWith.current = null;
-    if (id === null) return;
     ranWith.current = rangeKey(range);
     searchSaved(id);
-    // Only once, when the page opens.
+    // Only once, when the page opens and the catalogue has answered.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fields.isPending]);
 
   // The picker or a zoom changed the range: the same query, a new search.
   const key = rangeKey(range);
@@ -216,7 +221,9 @@ export function SearchPage() {
   }
 
   function runSaved(item: SavedSearch) {
-    ranWith.current = rangeKey(item.range);
+    // The address reads a preset too long for the site as the default; the server refuses the
+    // saved search itself with `search_range_too_long`.
+    ranWith.current = rangeKey(fitRange(item.range, maxDays));
     setParams(
       (current) => {
         const nextParams = rangeToParams(item.range, current);
@@ -379,7 +386,9 @@ export function SearchPage() {
                 }
                 total={stats.data.total}
                 onZoom={(span) => {
-                  setRange(span);
+                  // Whole buckets may start before the search's range and end after it.
+                  const zoom = clipSpan(span, first.range);
+                  if (zoom) setRange(zoom);
                 }}
               />
             ) : stats.isError && !isApiError(stats.error, 'search_expired') ? (

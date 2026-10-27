@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { Histogram } from './histogram';
-import { bucketLabel, histogramRows, zoomSpan } from './histogram-data';
+import { bucketLabel, clipSpan, histogramRows, zoomSpan } from './histogram-data';
 
 const HOURS = Array.from({ length: 4 }, (_, hour) => ({
   start: `2026-10-09T${String(hour + 10).padStart(2, '0')}:00:00+03:00`,
@@ -45,6 +45,22 @@ describe('histogram data', () => {
     expect(zoomSpan(rows, 1, 3)).toEqual(span);
     expect(zoomSpan(rows, 3, 1)).toEqual(span);
     expect(zoomSpan(rows, 0, 9)).toBeNull();
+  });
+
+  it("cuts a zoom to the search's range: its first and last buckets are whole", () => {
+    // "Son 24 saat" at 14:23:17: the hourly buckets run from 14:00 the day before to 15:00.
+    const range = { from: '2026-10-08T14:23:17+03:00', to: '2026-10-09T14:23:17+03:00' };
+    expect(
+      clipSpan({ from: '2026-10-08T14:00:00+03:00', to: '2026-10-09T15:00:00+03:00' }, range),
+    ).toEqual(range);
+    expect(
+      clipSpan({ from: '2026-10-09T10:00:00+03:00', to: '2026-10-09T15:00:00+03:00' }, range),
+    ).toEqual({ from: '2026-10-09T10:00:00+03:00', to: '2026-10-09T14:23:17+03:00' });
+    const inside = { from: '2026-10-09T10:00:00+03:00', to: '2026-10-09T12:00:00+03:00' };
+    expect(clipSpan(inside, range)).toEqual(inside);
+    expect(
+      clipSpan({ from: '2026-10-09T15:00:00+03:00', to: '2026-10-09T16:00:00+03:00' }, range),
+    ).toBeNull();
   });
 });
 

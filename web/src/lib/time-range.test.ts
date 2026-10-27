@@ -1,6 +1,9 @@
 import {
   customRange,
+  fitRange,
   parseRangeText,
+  presetFits,
+  RANGE_PRESETS,
   rangeFromParams,
   rangeKey,
   rangeText,
@@ -105,6 +108,21 @@ describe('the range in the address', () => {
     ).toEqual({ preset: '24h' });
   });
 
+  it('reads a preset longer than search.max_days as the default', () => {
+    expect(rangeFromParams(new URLSearchParams('range=30d'), 7)).toEqual({ preset: '24h' });
+    expect(rangeFromParams(new URLSearchParams('range=7d'), 7)).toEqual({ preset: '7d' });
+    expect(rangeFromParams(new URLSearchParams('range=7d'), 1)).toEqual({ preset: '24h' });
+    expect(rangeFromParams(new URLSearchParams('range=yesterday'), 1)).toEqual({
+      preset: 'yesterday',
+    });
+    // A fixed span is the server's to refuse (`search_range_too_long` names the limit).
+    const fixed = new URLSearchParams('from=2026-09-01T00:00:00Z&to=2026-10-09T00:00:00Z');
+    expect(rangeFromParams(fixed, 7)).toEqual({
+      from: '2026-09-01T00:00:00Z',
+      to: '2026-10-09T00:00:00Z',
+    });
+  });
+
   it('writes a range and keeps the other parameters (a saved search)', () => {
     const fixed = rangeToParams(
       { from: '2026-10-09T10:00:00+03:00', to: '2026-10-09T11:00:00+03:00' },
@@ -119,6 +137,29 @@ describe('the range in the address', () => {
     const preset = rangeToParams({ preset: '1h' }, fixed);
     expect(preset.toString()).toBe('saved=3&range=1h');
     expect(rangeKey({ preset: '1h' })).not.toBe(rangeKey(rangeFromParams(fixed)));
+  });
+});
+
+describe('presets and search.max_days', () => {
+  it('offer only the presets that fit', () => {
+    expect(RANGE_PRESETS.filter((preset) => presetFits(preset, 31))).toEqual(RANGE_PRESETS);
+    expect(RANGE_PRESETS.filter((preset) => presetFits(preset, 7))).toEqual([
+      '15m',
+      '1h',
+      '24h',
+      'today',
+      'yesterday',
+      '7d',
+    ]);
+    expect(RANGE_PRESETS.filter((preset) => presetFits(preset, 1))).toEqual([
+      '15m',
+      '1h',
+      '24h',
+      'today',
+      'yesterday',
+    ]);
+    expect(fitRange({ preset: '30d' }, 29)).toEqual({ preset: '24h' });
+    expect(fitRange({ preset: '30d' }, 30)).toEqual({ preset: '30d' });
   });
 });
 

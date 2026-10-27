@@ -6,7 +6,9 @@
  * personal data, and a reload or a shared link keeps it. It is a preset until the page runs a
  * search; then it is resolved against the clock to an absolute half-open `[from, to)` on device
  * time (`resolveRange`), like the API resolves a saved search's preset (`search/saved.py`).
- * Every bound is a site time with its offset (`2026-10-09T14:30:00+03:00`).
+ * Every bound is a site time with its offset (`2026-10-09T14:30:00+03:00`). No range is longer
+ * than the site's `search.max_days` (1–92 days): the picker offers only the presets that fit, and
+ * a preset in the address that does not fit reads as the default.
  */
 
 import { CalendarClock, Check } from 'lucide-react';
@@ -54,6 +56,18 @@ const SPANS: Partial<Record<RangePreset, number>> = {
   '7d': 7 * 86_400_000,
   '30d': 30 * 86_400_000,
 };
+
+/** Whether a preset fits in `maxDays` ("Bugün" and "Dün" are one site day at most). */
+export function presetFits(preset: RangePreset, maxDays: number): boolean {
+  return (SPANS[preset] ?? 86_400_000) <= maxDays * 86_400_000;
+}
+
+/** `range`, or the default when it is a preset longer than `maxDays`. */
+export function fitRange(range: TimeRange, maxDays: number): TimeRange {
+  return 'preset' in range && !presetFits(range.preset, maxDays)
+    ? { preset: DEFAULT_PRESET }
+    : range;
+}
 
 /** `2026-10-09T14:30:00+03:00`: the site time of a moment (to the second, below it dropped). */
 export function siteIso(moment: Date | number): string {
@@ -114,13 +128,19 @@ function bound(value: string | null): string | null {
   return Number.isNaN(Date.parse(value)) ? null : value;
 }
 
-/** The range in the address; the default (`24h`) when it is missing or cannot be read. */
-export function rangeFromParams(params: URLSearchParams): TimeRange {
+/**
+ * The range in the address; the default (`24h`) when it is missing, cannot be read or is a preset
+ * longer than `maxDays` (a fixed span too long is left to the server's refusal, which says so).
+ */
+export function rangeFromParams(
+  params: URLSearchParams,
+  maxDays: number = DEFAULT_MAX_DAYS,
+): TimeRange {
   const from = bound(params.get('from'));
   const to = bound(params.get('to'));
   if (from && to && Date.parse(from) < Date.parse(to)) return { from, to };
   const preset = params.get('range');
-  return { preset: isPreset(preset) ? preset : DEFAULT_PRESET };
+  return fitRange({ preset: isPreset(preset) ? preset : DEFAULT_PRESET }, maxDays);
 }
 
 /** `params` with `range` written in (the other parameters, e.g. `saved`, are kept). */
@@ -188,10 +208,17 @@ export function customRange(
   return { range: { from, to } };
 }
 
-/** The range of the current address, and a setter that writes it there (replacing the entry). */
-export function useTimeRange(): { range: TimeRange; setRange: (range: TimeRange) => void } {
+/**
+ * The range of the current address (at most `maxDays` long: the site's `search.max_days`, its
+ * default until the field catalogue is read), and a setter that writes it there (replacing the
+ * entry).
+ */
+export function useTimeRange(maxDays: number = DEFAULT_MAX_DAYS): {
+  range: TimeRange;
+  setRange: (range: TimeRange) => void;
+} {
   const [params, setParams] = useSearchParams();
-  const range = useMemo(() => rangeFromParams(params), [params]);
+  const range = useMemo(() => rangeFromParams(params, maxDays), [params, maxDays]);
   const setRange = useCallback(
     (next: TimeRange) => {
       setParams((current) => rangeToParams(next, current), { replace: true });
@@ -202,14 +229,15 @@ export function useTimeRange(): { range: TimeRange; setRange: (range: TimeRange)
 }
 
 /**
- * The top bar's picker: the presets, and "Özel" with a start and an end typed in the site's
- * format (24 hours; the browser's own date inputs follow its UI language, `lib/dates.ts`), at
- * most `maxDays` apart.
+ * The top bar's picker: the presets that fit in `maxDays`, and "Özel" with a start and an end
+ * typed in the site's format (24 hours; the browser's own date inputs follow its UI language,
+ * `lib/dates.ts`), at most `maxDays` apart.
  */
 export function TimeRangePicker({ maxDays = DEFAULT_MAX_DAYS }: { maxDays?: number }) {
   const { t } = useTranslation();
   const id = useId();
-  const { range, setRange } = useTimeRange();
+  const { range, setRange } = useTimeRange(maxDays);
+  const presets = RANGE_PRESETS.filter((preset) => presetFits(preset, maxDays));
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState(false);
   const [fromText, setFromText] = useState('');
@@ -259,7 +287,7 @@ export function TimeRangePicker({ maxDays = DEFAULT_MAX_DAYS }: { maxDays?: numb
       <PopoverContent align="end" className="w-80">
         <div className="flex flex-col gap-3">
           <div role="group" aria-label={t('timeRange.label')} className="flex flex-col gap-0.5">
-            {RANGE_PRESETS.map((preset) => {
+            {presets.map((preset) => {
               const chosen = !custom && 'preset' in range && range.preset === preset;
               return (
                 <button

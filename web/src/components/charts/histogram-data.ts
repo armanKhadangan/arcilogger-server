@@ -1,6 +1,6 @@
 /**
  * The bars of the search histogram (`histogram.tsx`): their spans, labels and whether the
- * statistics counted them, and the span a drag across bars zooms to.
+ * statistics counted them, and the span a drag across bars zooms to (cut to the search's range).
  */
 
 import { formatDate, formatTime } from '@/lib/format';
@@ -48,6 +48,19 @@ export function histogramRows(
       label: bucketLabel(bucket.start, bucketSeconds, severalDays),
     };
   });
+}
+
+/**
+ * `span` cut to `within` (the search's range: its first and last buckets are whole, aligned to
+ * the site midnight, so they may reach outside it); `null` when nothing is left.
+ */
+export function clipSpan(
+  span: { from: string; to: string },
+  within: { from: string; to: string },
+): { from: string; to: string } | null {
+  const from = Date.parse(span.from) < Date.parse(within.from) ? within.from : span.from;
+  const to = Date.parse(span.to) > Date.parse(within.to) ? within.to : span.to;
+  return Date.parse(from) < Date.parse(to) ? { from, to } : null;
 }
 
 /** The span from bar `a` to bar `b` (either order), ends included: a zoom's new range. */
