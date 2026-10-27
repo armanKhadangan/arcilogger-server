@@ -225,12 +225,12 @@
       "body": {
         "error": {
           "code": "search_rate_limited",
-          "message_en": "Too many searches in a short time; try again in 56 s.",
-          "message_tr": "Kısa sürede çok fazla arama yaptınız; 56 saniye sonra yeniden deneyin."
+          "message_en": "Too many searches in a short time; try again in 55 s.",
+          "message_tr": "Kısa sürede çok fazla arama yaptınız; 55 saniye sonra yeniden deneyin."
         }
       },
       "headers": {
-        "retry-after": "56"
+        "retry-after": "55"
       },
       "status": 429
     },
@@ -488,6 +488,7 @@
         "source": "fortigate",
         "srcintf": null,
         "srcip": "172.20.42.57",
+        "srcmac": null,
         "srcport": 61001,
         "subtype": "forward",
         "time": "2026-10-09T10:30:00+00:00",
@@ -522,12 +523,12 @@
       "headers": {
         "cache-control": "no-store",
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.csv\"",
-        "content-length": "3366",
+        "content-length": "3377",
         "content-type": "text/csv; charset=utf-8",
-        "repr-digest": "sha-256=:k2TcErRv12F8P7jGi66TntUgmTJYpVkdCAwS/sevJKU=:"
+        "repr-digest": "sha-256=:a7bWiMSRX4tknfu6L9eSTJeZQx8eyeWgkr9r76B479I=:"
       },
-      "sha256": "9364dc12b46fd7617c3fb8c68bae939ed520993258a5591d080c12fec7af24a5",
-      "size": 3366
+      "sha256": "6bb6d688c4915f8b649dfbba2fd7924c9799431f1ec9e5a092bf6befa078efd2",
+      "size": 3377
     },
     "truncated": {
       "headers": {
@@ -545,12 +546,12 @@
       "headers": {
         "cache-control": "no-store",
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.xlsx\"",
-        "content-length": "7132",
+        "content-length": "7149",
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "repr-digest": "sha-256=:v6fTr0YYIy/7MEWL/oK3Jd9aFnnd2Qkntumf8ZUHQLY=:"
+        "repr-digest": "sha-256=:RBU2slyBXrFsNRKT4wSO3H1vMqw4FXtnkieOkTiUY58=:"
       },
-      "sha256": "bfa7d3af4618232ffb30458bfe82b725df5a1679ddd90927b6e99ff1950740b6",
-      "size": 7132
+      "sha256": "441536b25c815eb16c351293e3048edc7d6f32ac38157b6792278e913894639f",
+      "size": 7149
     }
   },
   "fields": {
@@ -590,7 +591,8 @@
           "mt_account",
           "mt_interface",
           "mt_config",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -622,7 +624,8 @@
           "mt_account",
           "mt_interface",
           "mt_config",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -660,7 +663,8 @@
           "mt_account",
           "mt_interface",
           "mt_config",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -777,7 +781,8 @@
           "mt_dhcp",
           "mt_arp",
           "mt_fw",
-          "mt_account"
+          "mt_account",
+          "fg_dhcp"
         ],
         "kind": "ip",
         "label_en": "Source IP (client)",
@@ -795,7 +800,8 @@
           "mt_arp",
           "mt_fw",
           "mt_account",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -860,7 +866,8 @@
           "mt_fw",
           "mt_dhcp",
           "mt_arp",
-          "mt_account"
+          "mt_account",
+          "fg_dhcp"
         ],
         "kind": "ip",
         "label_en": "Any IP",
@@ -878,7 +885,8 @@
           "mt_arp",
           "mt_fw",
           "mt_account",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -1250,7 +1258,8 @@
         "help_tr": "Cihazın MAC adresi (her ayraçla) ya da üretici öneki.",
         "indexed": [
           "mt_dhcp",
-          "mt_arp"
+          "mt_arp",
+          "fg_dhcp"
         ],
         "kind": "mac",
         "label_en": "MAC address",
@@ -1260,7 +1269,26 @@
           "mt_dhcp",
           "mt_arp",
           "mt_fw",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
+        ]
+      },
+      {
+        "aliases": [
+          "kaynakmac"
+        ],
+        "examples": [
+          "srcmac:00:00:5e:00:53:57"
+        ],
+        "help_en": "Source MAC of the FortiGate session record (filled only on interfaces with device detection; not indexed, scanned in time slices).",
+        "help_tr": "FortiGate oturum kaydındaki kaynak MAC adresi (yalnızca aygıt tanıma açık arayüzlerde dolu; dizinsiz, zaman dilimleriyle taranır).",
+        "indexed": [],
+        "kind": "mac",
+        "label_en": "Source MAC (FortiGate session)",
+        "label_tr": "Kaynak MAC (FortiGate oturumu)",
+        "name": "srcmac",
+        "tables": [
+          "fg_traffic"
         ]
       },
       {
@@ -1281,7 +1309,8 @@
           "mt_dhcp",
           "mt_arp",
           "mt_fw",
-          "mt_account"
+          "mt_account",
+          "fg_dhcp"
         ],
         "kind": "vlan",
         "label_en": "VLAN",
@@ -1299,7 +1328,8 @@
           "mt_arp",
           "mt_fw",
           "mt_account",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -1321,7 +1351,8 @@
           "mt_dhcp",
           "mt_arp",
           "mt_fw",
-          "mt_account"
+          "mt_account",
+          "fg_dhcp"
         ],
         "kind": "department",
         "label_en": "Department (by VLAN)",
@@ -1339,7 +1370,8 @@
           "mt_arp",
           "mt_fw",
           "mt_account",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -1361,7 +1393,8 @@
           "mt_arp",
           "mt_fw",
           "mt_interface",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -1433,7 +1466,8 @@
           "fg_app",
           "fg_ips",
           "fg_virus",
-          "fg_event"
+          "fg_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -1450,7 +1484,8 @@
         "name": "level",
         "tables": [
           "fg_event",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       {
@@ -1516,8 +1551,8 @@
       },
       {
         "key": "dhcp",
-        "label_en": "DHCP",
-        "label_tr": "DHCP"
+        "label_en": "DHCP (MikroTik)",
+        "label_tr": "DHCP (MikroTik)"
       },
       {
         "key": "arp",
@@ -1602,7 +1637,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:30.426962+00:00",
+    "captured_at": "2026-10-13T04:01:17.069404+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1781,7 +1816,7 @@
       "items": []
     },
     "created": {
-      "created_at": "2026-10-13T04:00:30.272493Z",
+      "created_at": "2026-10-13T04:00:30.090089Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC trafiği",
@@ -1790,10 +1825,10 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:30.272526Z"
+      "updated_at": "2026-10-13T04:00:30.090125Z"
     },
     "created_preset": {
-      "created_at": "2026-10-13T04:00:30.321983Z",
+      "created_at": "2026-10-13T04:00:30.151493Z",
       "id": 2,
       "last_run_at": null,
       "name": "Son 24 saat engellenen web",
@@ -1801,13 +1836,13 @@
       "range": {
         "preset": "24h"
       },
-      "updated_at": "2026-10-13T04:00:30.322017Z"
+      "updated_at": "2026-10-13T04:00:30.151529Z"
     },
     "deleted_status": 204,
     "list": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:30.272493Z",
+          "created_at": "2026-10-13T04:00:30.090089Z",
           "id": 1,
           "last_run_at": null,
           "name": "Planlama PC trafiği",
@@ -1816,10 +1851,10 @@
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-13T04:00:30.272526Z"
+          "updated_at": "2026-10-13T04:00:30.090125Z"
         },
         {
-          "created_at": "2026-10-13T04:00:30.321983Z",
+          "created_at": "2026-10-13T04:00:30.151493Z",
           "id": 2,
           "last_run_at": null,
           "name": "Son 24 saat engellenen web",
@@ -1827,28 +1862,28 @@
           "range": {
             "preset": "24h"
           },
-          "updated_at": "2026-10-13T04:00:30.322017Z"
+          "updated_at": "2026-10-13T04:00:30.151529Z"
         }
       ]
     },
     "list_after_delete": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:30.272493Z",
+          "created_at": "2026-10-13T04:00:30.090089Z",
           "id": 1,
-          "last_run_at": "2026-10-13T04:00:30.486148Z",
+          "last_run_at": "2026-10-13T04:00:30.416010Z",
           "name": "Planlama PC — oturumlar",
           "q": "srcip:172.20.42.57 type:traffic",
           "range": {
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-27T22:21:10.683979Z"
+          "updated_at": "2026-10-27T23:45:15.786909Z"
         }
       ]
     },
     "run": {
-      "expires_at": "2026-10-13T04:30:30.500497Z",
+      "expires_at": "2026-10-13T04:30:30.455255Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T10:30:00.000000+00:00:25",
@@ -2057,7 +2092,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 10,
+        "elapsed_ms": 13,
         "scanned_from": "2026-10-08T21:00:00Z",
         "scanned_to": "2026-10-09T21:00:00Z",
         "windows": 5
@@ -2065,7 +2100,7 @@
       "search_id": "ornek-arama-11"
     },
     "updated": {
-      "created_at": "2026-10-13T04:00:30.272493Z",
+      "created_at": "2026-10-13T04:00:30.090089Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC — oturumlar",
@@ -2074,12 +2109,12 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:30.401694Z"
+      "updated_at": "2026-10-13T04:00:30.277873Z"
     }
   },
   "search": {
     "auditor": {
-      "expires_at": "2026-10-13T04:30:28.654889Z",
+      "expires_at": "2026-10-13T04:30:27.802004Z",
       "items": [
         {
           "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
@@ -2174,7 +2209,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 10,
+        "elapsed_ms": 18,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2182,7 +2217,7 @@
       "search_id": "ornek-arama-06"
     },
     "empty": {
-      "expires_at": "2026-10-13T04:30:27.844788Z",
+      "expires_at": "2026-10-13T04:30:26.951110Z",
       "items": [],
       "next_cursor": null,
       "notices": [
@@ -2233,7 +2268,8 @@
           "mt_arp",
           "mt_fw",
           "mt_account",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       "query": {
@@ -2258,7 +2294,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 43,
+        "elapsed_ms": 55,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2266,7 +2302,7 @@
       "search_id": "ornek-arama-04"
     },
     "first_page": {
-      "expires_at": "2026-10-13T04:30:27.666966Z",
+      "expires_at": "2026-10-13T04:30:26.743527Z",
       "items": [
         {
           "key": "messages:2026-10-09T11:00:00.000000+00:00:103107",
@@ -2519,7 +2555,7 @@
       "search_id": "ornek-arama-03"
     },
     "next_page": {
-      "expires_at": "2026-10-13T04:30:27.701162Z",
+      "expires_at": "2026-10-13T04:30:26.783709Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:24:36.000000+00:00:103114",
@@ -2772,7 +2808,7 @@
       "search_id": "ornek-arama-03"
     },
     "partial": {
-      "expires_at": "2026-10-13T04:30:28.549112Z",
+      "expires_at": "2026-10-13T04:30:27.678147Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
@@ -2976,7 +3012,8 @@
           "mt_arp",
           "mt_fw",
           "mt_account",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       "query": {
@@ -3001,7 +3038,7 @@
       },
       "scan": {
         "complete": false,
-        "elapsed_ms": 603,
+        "elapsed_ms": 604,
         "scanned_from": "2026-10-09T10:30:00+03:00",
         "scanned_to": "2026-10-09T11:30:00+03:00",
         "windows": 1
@@ -3009,7 +3046,7 @@
       "search_id": "ornek-arama-05"
     },
     "text": {
-      "expires_at": "2026-10-13T04:30:27.569142Z",
+      "expires_at": "2026-10-13T04:30:26.635862Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:14:56.003000+00:00:103108",
@@ -3127,7 +3164,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 10,
+        "elapsed_ms": 14,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3135,7 +3172,7 @@
       "search_id": "ornek-arama-02"
     },
     "typed": {
-      "expires_at": "2026-10-13T04:30:27.475780Z",
+      "expires_at": "2026-10-13T04:30:26.522759Z",
       "items": [
         {
           "key": "mt_arp:2026-10-09T11:00:00.000000+00:00:2",
@@ -3491,7 +3528,8 @@
           "mt_arp",
           "mt_fw",
           "mt_account",
-          "mt_event"
+          "mt_event",
+          "fg_dhcp"
         ]
       },
       "query": {
@@ -3516,7 +3554,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 41,
+        "elapsed_ms": 55,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3529,7 +3567,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 14,
+      "elapsed_ms": 16,
       "facets": {
         "action": {
           "other": 0,
@@ -3700,7 +3738,7 @@
       "complete": true,
       "covered_from": "2026-10-09T11:00:00+03:00",
       "covered_to": "2026-10-09T12:00:00+03:00",
-      "elapsed_ms": 27,
+      "elapsed_ms": 30,
       "facets": {
         "action": {
           "other": 0,
@@ -4028,7 +4066,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:30:00+03:00",
       "covered_to": "2026-10-09T23:30:00+03:00",
-      "elapsed_ms": 34,
+      "elapsed_ms": 27,
       "facets": {
         "action": {
           "other": 0,
@@ -4386,7 +4424,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 8,
+      "elapsed_ms": 6,
       "facets": {
         "action": {
           "other": 0,
@@ -4442,8 +4480,8 @@
             },
             {
               "count": 5,
-              "label_en": "DHCP",
-              "label_tr": "DHCP",
+              "label_en": "DHCP (MikroTik)",
+              "label_tr": "DHCP (MikroTik)",
               "value": "dhcp"
             },
             {

@@ -108,7 +108,7 @@
     "dropped": [
       {
         "data": {
-          "epoch": "_3Eh6VdUrxX0",
+          "epoch": "koq1opd2NlmW",
           "folders": [
             {
               "day": "2026-10-13",
@@ -123,7 +123,7 @@
             "max_minutes": 60
           },
           "notice_version": "1",
-          "stream_id": "FuBnoLB0FYLlcjvDXcv5cw"
+          "stream_id": "ASz1LC6gce_Fmy_WQoaX-w"
         },
         "event": "hello",
         "id": null
@@ -137,7 +137,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635839+03:00",
+          "received": "2026-10-13T07:00:43.781304+03:00",
           "sender": "172.31.255.1",
           "seq": 12,
           "source": "fortigate",
@@ -158,7 +158,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:12"
+        "id": "koq1opd2NlmW:12"
       },
       {
         "data": {
@@ -169,7 +169,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635872+03:00",
+          "received": "2026-10-13T07:00:43.781323+03:00",
           "sender": "172.31.255.1",
           "seq": 13,
           "source": "fortigate",
@@ -190,7 +190,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:13"
+        "id": "koq1opd2NlmW:13"
       },
       {
         "data": {
@@ -201,7 +201,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635883+03:00",
+          "received": "2026-10-13T07:00:43.781330+03:00",
           "sender": "172.31.255.1",
           "seq": 14,
           "source": "fortigate",
@@ -222,7 +222,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:14"
+        "id": "koq1opd2NlmW:14"
       },
       {
         "data": {
@@ -233,7 +233,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635891+03:00",
+          "received": "2026-10-13T07:00:43.781335+03:00",
           "sender": "172.31.255.1",
           "seq": 15,
           "source": "fortigate",
@@ -254,7 +254,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:15"
+        "id": "koq1opd2NlmW:15"
       },
       {
         "data": {
@@ -265,7 +265,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635899+03:00",
+          "received": "2026-10-13T07:00:43.781339+03:00",
           "sender": "172.31.255.1",
           "seq": 16,
           "source": "fortigate",
@@ -286,7 +286,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:16"
+        "id": "koq1opd2NlmW:16"
       },
       {
         "data": {
@@ -297,7 +297,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635908+03:00",
+          "received": "2026-10-13T07:00:43.781343+03:00",
           "sender": "172.31.255.1",
           "seq": 17,
           "source": "fortigate",
@@ -318,7 +318,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:17"
+        "id": "koq1opd2NlmW:17"
       },
       {
         "data": {
@@ -329,7 +329,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635917+03:00",
+          "received": "2026-10-13T07:00:43.781348+03:00",
           "sender": "172.31.255.1",
           "seq": 18,
           "source": "fortigate",
@@ -350,7 +350,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:18"
+        "id": "koq1opd2NlmW:18"
       },
       {
         "data": {
@@ -361,7 +361,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635925+03:00",
+          "received": "2026-10-13T07:00:43.781352+03:00",
           "sender": "172.31.255.1",
           "seq": 19,
           "source": "fortigate",
@@ -382,7 +382,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:19"
+        "id": "koq1opd2NlmW:19"
       },
       {
         "data": {
@@ -393,7 +393,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635932+03:00",
+          "received": "2026-10-13T07:00:43.781357+03:00",
           "sender": "172.31.255.1",
           "seq": 20,
           "source": "fortigate",
@@ -414,7 +414,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:20"
+        "id": "koq1opd2NlmW:20"
       },
       {
         "data": {
@@ -425,7 +425,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635941+03:00",
+          "received": "2026-10-13T07:00:43.781361+03:00",
           "sender": "172.31.255.1",
           "seq": 21,
           "source": "fortigate",
@@ -446,7 +446,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:21"
+        "id": "koq1opd2NlmW:21"
       },
       {
         "data": {
@@ -455,7 +455,7 @@
           "message_tr": "15 satır gösterilmedi: saniyede en fazla 10 satır gösterilir.",
           "parse_budget": 0,
           "rate_limited": 15,
-          "since": "2026-10-13T07:00:44.153267+03:00",
+          "since": "2026-10-13T07:00:44.300896+03:00",
           "slow_client": 0
         },
         "event": "dropped",
@@ -465,7 +465,7 @@
     "end": [
       {
         "data": {
-          "epoch": "_3Eh6VdUrxX0",
+          "epoch": "koq1opd2NlmW",
           "folders": [
             {
               "day": "2026-10-13",
@@ -485,7 +485,7 @@
             "max_minutes": 60
           },
           "notice_version": "1",
-          "stream_id": "0Xu5VKMaxu115bNSgyv5YA"
+          "stream_id": "kCpspZClvTpKWHGcV2fXAA"
         },
         "event": "hello",
         "id": null
@@ -499,7 +499,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635839+03:00",
+          "received": "2026-10-13T07:00:43.781304+03:00",
           "sender": "172.31.255.1",
           "seq": 12,
           "source": "fortigate",
@@ -520,7 +520,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:12"
+        "id": "koq1opd2NlmW:12"
       },
       {
         "data": {
@@ -531,7 +531,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635872+03:00",
+          "received": "2026-10-13T07:00:43.781323+03:00",
           "sender": "172.31.255.1",
           "seq": 13,
           "source": "fortigate",
@@ -552,7 +552,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:13"
+        "id": "koq1opd2NlmW:13"
       },
       {
         "data": {
@@ -563,7 +563,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635883+03:00",
+          "received": "2026-10-13T07:00:43.781330+03:00",
           "sender": "172.31.255.1",
           "seq": 14,
           "source": "fortigate",
@@ -584,7 +584,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:14"
+        "id": "koq1opd2NlmW:14"
       },
       {
         "data": {
@@ -595,7 +595,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635891+03:00",
+          "received": "2026-10-13T07:00:43.781335+03:00",
           "sender": "172.31.255.1",
           "seq": 15,
           "source": "fortigate",
@@ -616,7 +616,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:15"
+        "id": "koq1opd2NlmW:15"
       },
       {
         "data": {
@@ -627,7 +627,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635899+03:00",
+          "received": "2026-10-13T07:00:43.781339+03:00",
           "sender": "172.31.255.1",
           "seq": 16,
           "source": "fortigate",
@@ -648,7 +648,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:16"
+        "id": "koq1opd2NlmW:16"
       },
       {
         "data": {
@@ -659,7 +659,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635908+03:00",
+          "received": "2026-10-13T07:00:43.781343+03:00",
           "sender": "172.31.255.1",
           "seq": 17,
           "source": "fortigate",
@@ -680,7 +680,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:17"
+        "id": "koq1opd2NlmW:17"
       },
       {
         "data": {
@@ -691,7 +691,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635917+03:00",
+          "received": "2026-10-13T07:00:43.781348+03:00",
           "sender": "172.31.255.1",
           "seq": 18,
           "source": "fortigate",
@@ -712,7 +712,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:18"
+        "id": "koq1opd2NlmW:18"
       },
       {
         "data": {
@@ -723,7 +723,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635925+03:00",
+          "received": "2026-10-13T07:00:43.781352+03:00",
           "sender": "172.31.255.1",
           "seq": 19,
           "source": "fortigate",
@@ -744,7 +744,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:19"
+        "id": "koq1opd2NlmW:19"
       },
       {
         "data": {
@@ -755,7 +755,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635932+03:00",
+          "received": "2026-10-13T07:00:43.781357+03:00",
           "sender": "172.31.255.1",
           "seq": 20,
           "source": "fortigate",
@@ -776,7 +776,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:20"
+        "id": "koq1opd2NlmW:20"
       },
       {
         "data": {
@@ -787,7 +787,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635941+03:00",
+          "received": "2026-10-13T07:00:43.781361+03:00",
           "sender": "172.31.255.1",
           "seq": 21,
           "source": "fortigate",
@@ -808,7 +808,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:21"
+        "id": "koq1opd2NlmW:21"
       },
       {
         "data": {
@@ -819,7 +819,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635950+03:00",
+          "received": "2026-10-13T07:00:43.781365+03:00",
           "sender": "172.31.255.1",
           "seq": 22,
           "source": "fortigate",
@@ -840,7 +840,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:22"
+        "id": "koq1opd2NlmW:22"
       },
       {
         "data": {
@@ -851,7 +851,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635987+03:00",
+          "received": "2026-10-13T07:00:43.781389+03:00",
           "sender": "172.31.255.1",
           "seq": 23,
           "source": "fortigate",
@@ -872,7 +872,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:23"
+        "id": "koq1opd2NlmW:23"
       },
       {
         "data": {
@@ -883,7 +883,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.635997+03:00",
+          "received": "2026-10-13T07:00:43.781394+03:00",
           "sender": "172.31.255.1",
           "seq": 24,
           "source": "fortigate",
@@ -904,7 +904,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:24"
+        "id": "koq1opd2NlmW:24"
       },
       {
         "data": {
@@ -915,7 +915,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636005+03:00",
+          "received": "2026-10-13T07:00:43.781398+03:00",
           "sender": "172.31.255.1",
           "seq": 25,
           "source": "fortigate",
@@ -936,7 +936,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:25"
+        "id": "koq1opd2NlmW:25"
       },
       {
         "data": {
@@ -947,7 +947,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636013+03:00",
+          "received": "2026-10-13T07:00:43.781403+03:00",
           "sender": "172.31.255.1",
           "seq": 26,
           "source": "fortigate",
@@ -968,7 +968,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:26"
+        "id": "koq1opd2NlmW:26"
       },
       {
         "data": {
@@ -979,7 +979,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636020+03:00",
+          "received": "2026-10-13T07:00:43.781407+03:00",
           "sender": "172.31.255.1",
           "seq": 27,
           "source": "fortigate",
@@ -1000,7 +1000,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:27"
+        "id": "koq1opd2NlmW:27"
       },
       {
         "data": {
@@ -1011,7 +1011,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636028+03:00",
+          "received": "2026-10-13T07:00:43.781412+03:00",
           "sender": "172.31.255.1",
           "seq": 28,
           "source": "fortigate",
@@ -1032,7 +1032,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:28"
+        "id": "koq1opd2NlmW:28"
       },
       {
         "data": {
@@ -1043,7 +1043,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636035+03:00",
+          "received": "2026-10-13T07:00:43.781416+03:00",
           "sender": "172.31.255.1",
           "seq": 29,
           "source": "fortigate",
@@ -1064,7 +1064,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:29"
+        "id": "koq1opd2NlmW:29"
       },
       {
         "data": {
@@ -1075,7 +1075,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636043+03:00",
+          "received": "2026-10-13T07:00:43.781420+03:00",
           "sender": "172.31.255.1",
           "seq": 30,
           "source": "fortigate",
@@ -1096,7 +1096,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:30"
+        "id": "koq1opd2NlmW:30"
       },
       {
         "data": {
@@ -1107,7 +1107,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636050+03:00",
+          "received": "2026-10-13T07:00:43.781424+03:00",
           "sender": "172.31.255.1",
           "seq": 31,
           "source": "fortigate",
@@ -1128,7 +1128,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:31"
+        "id": "koq1opd2NlmW:31"
       },
       {
         "data": {
@@ -1139,7 +1139,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636057+03:00",
+          "received": "2026-10-13T07:00:43.781429+03:00",
           "sender": "172.31.255.1",
           "seq": 32,
           "source": "fortigate",
@@ -1160,7 +1160,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:32"
+        "id": "koq1opd2NlmW:32"
       },
       {
         "data": {
@@ -1171,7 +1171,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636094+03:00",
+          "received": "2026-10-13T07:00:43.781437+03:00",
           "sender": "172.31.255.1",
           "seq": 33,
           "source": "fortigate",
@@ -1192,7 +1192,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:33"
+        "id": "koq1opd2NlmW:33"
       },
       {
         "data": {
@@ -1203,7 +1203,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636105+03:00",
+          "received": "2026-10-13T07:00:43.781443+03:00",
           "sender": "172.31.255.1",
           "seq": 34,
           "source": "fortigate",
@@ -1224,7 +1224,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:34"
+        "id": "koq1opd2NlmW:34"
       },
       {
         "data": {
@@ -1235,7 +1235,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636229+03:00",
+          "received": "2026-10-13T07:00:43.781447+03:00",
           "sender": "172.31.255.1",
           "seq": 35,
           "source": "fortigate",
@@ -1256,7 +1256,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:35"
+        "id": "koq1opd2NlmW:35"
       },
       {
         "data": {
@@ -1267,7 +1267,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:43.636246+03:00",
+          "received": "2026-10-13T07:00:43.781482+03:00",
           "sender": "172.31.255.1",
           "seq": 36,
           "source": "fortigate",
@@ -1288,7 +1288,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:36"
+        "id": "koq1opd2NlmW:36"
       },
       {
         "data": {
@@ -1303,7 +1303,7 @@
     "gap": [
       {
         "data": {
-          "epoch": "_3Eh6VdUrxX0",
+          "epoch": "koq1opd2NlmW",
           "folders": [
             {
               "day": "2026-10-13",
@@ -1318,7 +1318,7 @@
             "max_minutes": 60
           },
           "notice_version": "1",
-          "stream_id": "FuBnoLB0FYLlcjvDXcv5cw"
+          "stream_id": "ASz1LC6gce_Fmy_WQoaX-w"
         },
         "event": "hello",
         "id": null
@@ -1337,7 +1337,7 @@
     "stream": [
       {
         "data": {
-          "epoch": "_3Eh6VdUrxX0",
+          "epoch": "koq1opd2NlmW",
           "folders": [
             {
               "day": "2026-10-13",
@@ -1357,7 +1357,7 @@
             "max_minutes": 60
           },
           "notice_version": "1",
-          "stream_id": "0Xu5VKMaxu115bNSgyv5YA"
+          "stream_id": "kCpspZClvTpKWHGcV2fXAA"
         },
         "event": "hello",
         "id": null
@@ -1371,7 +1371,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:32.314456+03:00",
+          "received": "2026-10-13T07:00:32.501721+03:00",
           "sender": "172.31.255.1",
           "seq": 6,
           "source": "fortigate",
@@ -1392,7 +1392,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:6"
+        "id": "koq1opd2NlmW:6"
       },
       {
         "data": {
@@ -1403,7 +1403,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:32.314464+03:00",
+          "received": "2026-10-13T07:00:32.501726+03:00",
           "sender": "172.31.255.1",
           "seq": 7,
           "source": "fortigate",
@@ -1424,7 +1424,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:7"
+        "id": "koq1opd2NlmW:7"
       },
       {
         "data": {
@@ -1435,7 +1435,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:32.314472+03:00",
+          "received": "2026-10-13T07:00:32.501732+03:00",
           "sender": "172.31.255.1",
           "seq": 8,
           "source": "fortigate",
@@ -1456,7 +1456,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:8"
+        "id": "koq1opd2NlmW:8"
       },
       {
         "data": {
@@ -1478,7 +1478,7 @@
           "type": null
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:9"
+        "id": "koq1opd2NlmW:9"
       },
       {
         "data": {
@@ -1489,7 +1489,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:32.514740+03:00",
+          "received": "2026-10-13T07:00:32.654285+03:00",
           "sender": "172.31.255.1",
           "seq": 10,
           "source": "fortigate",
@@ -1510,7 +1510,7 @@
           "type": "traffic"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:10"
+        "id": "koq1opd2NlmW:10"
       },
       {
         "data": {
@@ -1521,7 +1521,7 @@
           "parse_error": null,
           "parse_skipped": false,
           "parsed": true,
-          "received": "2026-10-13T07:00:32.514966+03:00",
+          "received": "2026-10-13T07:00:32.654437+03:00",
           "sender": "198.51.100.23",
           "seq": 11,
           "source": "unknown-198.51.100.23",
@@ -1532,12 +1532,12 @@
           "type": "syslog"
         },
         "event": "line",
-        "id": "_3Eh6VdUrxX0:11"
+        "id": "koq1opd2NlmW:11"
       }
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:30.426962+00:00",
+    "captured_at": "2026-10-13T04:01:17.069404+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1546,8 +1546,8 @@
   },
   "open": {
     "admin": {
-      "epoch": "_3Eh6VdUrxX0",
-      "expires_at": "2026-10-13T05:00:32.477698Z",
+      "epoch": "koq1opd2NlmW",
+      "expires_at": "2026-10-13T05:00:32.604480Z",
       "folders": [
         {
           "day": "2026-10-13",
@@ -1566,11 +1566,11 @@
         "max_lines_per_second": 100,
         "max_minutes": 60
       },
-      "stream_id": "0Xu5VKMaxu115bNSgyv5YA"
+      "stream_id": "kCpspZClvTpKWHGcV2fXAA"
     },
     "auditor": {
-      "epoch": "_3Eh6VdUrxX0",
-      "expires_at": "2026-10-13T05:00:43.610665Z",
+      "epoch": "koq1opd2NlmW",
+      "expires_at": "2026-10-13T05:00:43.755824Z",
       "folders": [
         {
           "day": "2026-10-13",
@@ -1584,7 +1584,7 @@
         "max_lines_per_second": 10,
         "max_minutes": 60
       },
-      "stream_id": "FuBnoLB0FYLlcjvDXcv5cw"
+      "stream_id": "ASz1LC6gce_Fmy_WQoaX-w"
     }
   },
   "status": {
