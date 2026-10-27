@@ -12,7 +12,7 @@ from sqlalchemy import Connection, Engine, insert, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
-from arcilogger_core.timeutil import site_day, utc_now
+from arcilogger_core.timeutil import site_day
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import upgrade
 from arcilogger_db.models import TIME_SERIES_TABLES, Message, MtDhcp, SearchCount
@@ -37,11 +37,17 @@ from arcilogger_db.settings import set_setting
 from arcilogger_db.testing import TestServer
 
 TODAY = date(2026, 10, 12)
+#: The moment plain_engine's upgrade makes its partitions for (12:00 site time on TODAY). Tests
+#: compute what to expect from the same moment: with the real clock a site midnight between the
+#: fixture's upgrade and the test body could change the month count (13 <-> 14 months back).
+MOMENT = datetime(2026, 10, 12, 9, tzinfo=UTC)
 
 
 @pytest.fixture
-def plain_engine(pg_server: TestServer) -> Iterator[Engine]:
-    """A database migrated without TimescaleDB (works on a TimescaleDB server too)."""
+def plain_engine(pg_server: TestServer, monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
+    """A database migrated without TimescaleDB (works on a TimescaleDB server too), its
+    partitions made around :data:`MOMENT` instead of the real clock."""
+    monkeypatch.setattr("arcilogger_db.partitions.utc_now", lambda: MOMENT)
     name = pg_server.new_name("t")
     pg_server.create_database(name)
     engine = engine_from_url(pg_server.url_for(name), poolclass=NullPool)
@@ -119,8 +125,8 @@ def test_plain_upgrade_partitions_every_time_series_table(plain_engine: Engine) 
             assert partitions[-1].is_default
             assert partitions[-1].name == f"{table}_default"
             months = [p.month for p in partitions if p.month is not None]
-            # The whole db.retention_days window (400 days: 13 or 14 months) and 3 ahead.
-            back = months_back_for(site_day(utc_now()), 400)
+            # The whole db.retention_days window (400 days before MOMENT: 13 months) and 3 ahead.
+            back = months_back_for(site_day(MOMENT), 400)
             assert len(months) == back + 1 + MONTHS_AHEAD
             assert months == sorted(months)
         overview = partition_status(connection)

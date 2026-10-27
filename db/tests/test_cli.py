@@ -8,7 +8,7 @@ import subprocess
 import sys
 from collections import Counter
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -122,8 +122,14 @@ def test_check_upgrade_current_on_an_empty_database(
 
 
 def test_partitions_command_and_missing_horizon_warning(
-    setup: Path, capsys: pytest.CaptureFixture[str]
+    setup: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # One mid-month moment for the CLI (upgrade, partitions, check) and this test: on the real
+    # clock a site midnight on a 1st (or on a day whose today-400 is a 1st) passing between
+    # `upgrade` and the recomputation below changed the expected count and the months dropped.
+    now = datetime(2026, 10, 15, 9, tzinfo=UTC)
+    monkeypatch.setattr("arcilogger_db.partitions.utc_now", lambda: now)
+    monkeypatch.setattr("arcilogger_db.cli.utc_now", lambda: now)
     config = str(setup)
     assert main(["upgrade", "--config", config]) == 0
     out = capsys.readouterr().out
@@ -132,12 +138,12 @@ def test_partitions_command_and_missing_horizon_warning(
     if "Aylık bölümler" not in out:  # TimescaleDB: hypertables, nothing to partition
         assert "TimescaleDB hypertable" in second
         return
-    back = months_back_for(site_day(utc_now()), 400)  # the db.retention_days window
+    back = months_back_for(site_day(now), 400)  # the db.retention_days window
     assert f"15 tablo, {15 * (back + 1 + 3)} yeni bölüm" in out  # … + current + 3 ahead
     assert "15 tablo, 0 yeni bölüm" in second  # idempotent
     # Without next month's partitions `check` asks for attention.
     engine = make_engine(load_config(setup))
-    future = [add_months(month_of(site_day(utc_now())), n) for n in (1, 2, 3)]
+    future = [add_months(month_of(site_day(now)), n) for n in (1, 2, 3)]
     with engine.begin() as connection:
         for month in future:
             connection.execute(text(f'DROP TABLE "{partition_name("mt_dhcp", month)}"'))
