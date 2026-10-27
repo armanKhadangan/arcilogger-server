@@ -20,6 +20,7 @@
 6. [Doğrulama neyi gösterir, neyi göstermez?](#6-doğrulama-neyi-gösterir-neyi-göstermez)
 7. [Doğrulayıcı çıktısını yorumlamak](#7-doğrulayıcı-çıktısını-yorumlamak)
 8. [Sahada netleşecek konular](#8-sahada-netleşecek-konular)
+9. [Arama, Canlı Akış ve Kaynaklar denetim kayıtları](#9-arama-canlı-akış-ve-kaynaklar-denetim-kayıtları)
 
 ## 1. Delil zinciri nasıl çalışır?
 
@@ -90,6 +91,8 @@ Manifestin alanları:
 | ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
 | Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Hedef 400 gün (`db.retention_days`), ancak bu sürümde bu tabloların **imha işi yoktur**: ayrıştırılmış kayıtlardan hiçbir şey silinmez |
 | Kullanım özetleri (kişi, cihaz ve departman bazında, adlarla: siteler, URL'ler, engellenen denemeler, saatlik satırlar) | PostgreSQL `usage_*` tabloları, `domain_categories` | **400 gün** (`usage.retention_days`): worker işi `usage.retention` her gece 03:30'dan sonra daha eski günleri siler; biten yeniden hesaplama istekleri (`usage_rebuilds`) 90 gün sonra silinir. İmha tutanağı tutulmaz, silinen satır sayıları işin çalışma kaydına (`job_runs`) yazılır. Ayrıştırılmış kayıtlar veritabanında durdukça yeniden hesaplanabilir |
+| Kayıtlı aramalar (ad, sorgu, zaman aralığı; yalnızca sahibine görünür) | PostgreSQL `saved_searches` | Sahibi silene ya da kullanıcı silinene kadar |
+| Arama dışa aktarımları (CSV, Excel) ve canlı akış satırları | Sunucuda dosya olarak saklanmaz: dışa aktarma bellekte hazırlanıp indirilir, canlı akış son satırları yalnızca bellekte tutar | Dışa aktarmanın boyutu ve SHA-256 özeti denetim kaydındadır (`search.export`, bölüm 9) |
 | Kullanım raporları (HTML, PDF, Excel; kişi adlarıyla) | `D:\ARCILOGGER\exports\usage-reports\` | **400 gün** (`reports.keep_days`; worker her gece 03:20'den sonra siler). E-postayla gönderilen kopyalar alıcılarda kalır |
 
 Saklama ve imha kararları için hukuk müşavirine verilecek taslaklar:
@@ -431,6 +434,57 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 - `verify.py` özetinin alıcıya paketten ayrı iletileceği kanal (teslim tutanağı, indirme sayfası,
   sürüm notları) ve `verify.py`'nin lisansı: işletme sahibinin kararı.
 
+## 9. Arama, Canlı Akış ve Kaynaklar denetim kayıtları
+
+Arama, Canlı Akış ve Kaynaklar sayfaları kişisel veri gösterir (istemci adresleri, MAC adresleri,
+alan adları, kullanıcı adları). Bu yüzden KVKK bilgilendirme metni onaylanmadan açılmazlar ve
+kayıt okuyan her işlem, yanıt gönderilmeden önce ARCILOGGER denetim kaydına (`audit_log`, web
+arayüzünde Denetim Kaydı sayfası) yazılır. Ayrıntılarda (`details`) girdiler, sayılar, satır
+aralıkları ve özetler bulunur; bulunan satırların içeriği yazılmaz. Aramanın sorgusu (`q`)
+normalleştirilmiş hâliyle yazılır: 5651 sorgusunda olduğu gibi bir IP, MAC adresi ya da metin
+içerebilir.
+
+| Eylem | Ne zaman yazılır | `details` |
+|---|---|---|
+| `search.run` | Her arama (zaman aşımına uğrayan da: `outcome: "timeout"`, `search_id: null`) | `search_id`, `q`, `from`, `to`, `kinds`, `driver`, `tables`, `rows` (ilk sayfadaki satır sayısı), `complete`, `outcome`, `elapsed_ms`, `saved_id` |
+| `search.event` | Bir kaydın bütün alanları açıldığında | `table`, `id`, `time`, `raw` (kaynak, gün, satır, bayt konumu) |
+| `search.refs` | "Kanıt paketine aktar" | `search_id`, `q`, `from`, `to`, `refs` (satır sayısı), `truncated`, `complete`, `sha256` (referans listesinin kanonik JSON'unun özeti) |
+| `search.export` | CSV ya da Excel indirme (yalnızca yönetici, parolayı yeniden girerek) | `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`, `sha256` (dosyanın) |
+| `search.saved_create`, `search.saved_update` | Kayıtlı arama eklenince ya da değişince | `saved_id`, `name`, `q` |
+| `search.saved_delete` | Kayıtlı arama silinince | `saved_id`, `name` |
+| `live.open` | Canlı akış açılınca | `stream_id`, `q`, `folders` (izlenen klasörler), `backfill` |
+| `live.close` | Akış kapanınca (`reason`: kullanıcı kapattı `closed`, duraklatılmış akışın süresi doldu `lingered`, sunucu durdu `server_stopping`, akışı bitiren durumun kodu, ör. `time_limit`, `session_idle`) | `stream_id`, `seconds`, `delivered` (gönderilen satır), `dropped` (nedenlerine göre gösterilemeyen satırlar), `reason`, `ranges` (klasör, gün, ilk ve son satır numarası) |
+| `raw.tail` | Kaynaklar → bir kaynağın "Son satırlar" sekmesi | `source`, `day`, `origin` (`spool`), `from_line`, `to_line`, `from_offset`, `to_offset`, `count`, `range_sha256` |
+
+Yazılmayanlar: bir aramanın sonraki sayfaları (`POST /search/page`) ve istatistikleri
+(`POST /search/stats`) — ikisi de yalnızca kaydı yazılmış bir `search_id` ile çalışır —, sorgu
+çözümleme (`POST /search/parse`), alan listesi (`GET /search/fields`), canlı akışın durumu
+(`GET /live/status`), Kaynaklar listesi ve bir kaynağın ayrıntısı (sayılar; bir hata kalıbının
+örnek değeri yalnızca `search.read` ya da `lookup.run` yetkisi ve onaylanmış KVKK metniyle
+gösterilir). Bir satırın tamamı üç sayfada da `GET /raw` ile açılır ve `raw.view` olarak yazılır.
+
+**Bir `raw.tail` girdisini yeniden hesaplamak.** `range_sha256`, kaynağın o günkü dosyasının
+`[from_offset, to_offset)` bayt aralığının (gösterilen satırlar, satır sonlarıyla birlikte) SHA-256
+özetidir. Gün mühürlenmeden önce bu baytlar `D:\ARCILOGGER\spool\<kaynak>\<gün>.log`
+dosyasında, mühürlendikten sonra kasadaki `vault\YYYY\MM\DD\<kaynak>.log.gz` dosyasının açılmış
+içeriğinde ve o günün o kaynağını içeren her kanıt paketindedir (dosyalar mühürlenirken
+değiştirilmez). Python ile (örnekte `from_offset` 0, `to_offset` 498):
+
+```powershell
+python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read(); print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" core-r1.log.gz 0 498
+```
+
+Çıkan değer girdideki `range_sha256` ile aynı olmalıdır; satır sayısı `to_line - from_line + 1`,
+yani `count` olmalıdır. Spool dosyası için `gzip.open` yerine `open(sys.argv[1], 'rb')` kullanın.
+
+**Dışa aktarma ve aramadan kanıt paketi.** `search.export` girdisindeki `sha256`, indirilen
+dosyanın özetidir (`Get-FileHash -Algorithm SHA256 <dosya>` aynı değeri verir; yanıt da
+`Repr-Digest` başlığıyla gönderilir). Dışa aktarılan dosya mühürlü değildir; dosyanın "Bilgi"
+sayfası da bunu söyler: bütünlük kanıtı kanıt paketidir. Arama'dan kanıt paketi oluşturulduğunda
+denetim kaydında sırayla `search.refs` (satır sayısı ve listenin özeti), ardından aynı kullanıcının
+`evidence.request` ve `evidence.create` girdileri görünür; paket her paket gibi bölüm 5'e göre
+doğrulanır.
+
 ---
 
 <a id="english"></a>
@@ -458,8 +512,11 @@ URLs, blocked attempts, hourly rows; `usage_*` tables, `domain_categories`): 400
 (`usage.retention_days`), deleted every night after 03:30 by the worker job `usage.retention`,
 finished rebuild requests (`usage_rebuilds`) after 90 days; no deletion record is kept, the job's
 run (`job_runs`) holds the deleted row counts. Usage report files (`exports\usage-reports\`, with
-names): 400 days (`reports.keep_days`); copies sent by e-mail stay with the recipients. Drafts for
-the lawyer: `docs/legal/`.
+names): 400 days (`reports.keep_days`); copies sent by e-mail stay with the recipients. Saved
+searches (`saved_searches`, visible to their owner only): until the owner deletes them or the user
+is deleted. Search exports and live tail lines are not kept as files on the server (the export is
+built in memory and downloaded; its size and SHA-256 are in the audit log). Drafts for the lawyer:
+`docs/legal/`.
 
 **Evidence package.** `arcilogger-core.exe evidence build --from D --to D [--source S] [--extract F]
 [--password] [--pdf F] [--include-audit-log]` (on the server, by its full path) creates a ZIP with
@@ -532,3 +589,36 @@ the extract equals the sealed lines, and how long after the end of the day each 
 this trace). It does not show who produced the logs, that nothing changed before sealing, that
 receive times were correct, that an IP belonged to a person, that the verify.py inside the package
 is genuine, or the online revocation status; test (mock) stamps have no legal validity.
+
+**Search, live tail and sources in the audit log (section 9).** Arama, Canlı Akış and Kaynaklar
+show personal data, so they wait for the KVKK notice, and every call that reads records is written
+to ARCILOGGER's audit log (`audit_log`, the Denetim Kaydı page) before the answer is sent. The
+details hold inputs, counts, line ranges and hashes, never the content of the lines found; the
+search query (`q`) is stored normalised and can hold an IP, a MAC address or text, as a 5651 lookup
+does. `search.run` (every run, a timed-out one too with `outcome: "timeout"`): `search_id`, `q`,
+`from`, `to`, `kinds`, `driver`, `tables`, `rows`, `complete`, `outcome`, `elapsed_ms`,
+`saved_id`; `search.event` (a record's fields opened): `table`, `id`, `time`, `raw`; `search.refs`
+("Kanıt paketine aktar"): `search_id`, `q`, `from`, `to`, `refs`, `truncated`, `complete`,
+`sha256` of the reference list as canonical JSON; `search.export` (administrators, with
+re-authentication): `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`,
+`sha256` of the file; `search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
+`search.saved_delete`: `saved_id`, `name`; `live.open`: `stream_id`, `q`, `folders`, `backfill`;
+`live.close`: `stream_id`, `seconds`, `delivered`, `dropped` by reason, `reason` (`closed`,
+`lingered`, `server_stopping` or the code that ended the stream, e.g. `time_limit`,
+`session_idle`), `ranges` (folder, day, first and last line); `raw.tail` (Kaynaklar, "Son
+satırlar"): `source`, `day`, `origin`, `from_line`, `to_line`, `from_offset`, `to_offset`,
+`count`, `range_sha256`. Not audited: further pages and the statistics of an audited search, the
+parser, the field list, the live tail's status, the sources list and detail (counts). A whole line
+opens through `GET /raw` on all three pages and is audited as `raw.view`.
+
+`range_sha256` is the SHA-256 of the bytes `[from_offset, to_offset)` of the source's file of that
+day (the lines shown, with their line feeds): before sealing in `D:\ARCILOGGER\spool\<source>\<day>.log`,
+after sealing in the decompressed `vault\YYYY\MM\DD\<source>.log.gz` and in every evidence
+package holding that day of that source (sealing does not change the bytes). Recompute it with
+`python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read();
+print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source>.log.gz <from_offset>
+<to_offset>` (`open(path, 'rb')` for the spool file); `count` is `to_line - from_line + 1`. The
+`sha256` of `search.export` is the downloaded file's (`Get-FileHash -Algorithm SHA256`; the answer
+carries it as `Repr-Digest`); an export is not sealed, as its "Bilgi" sheet says: the evidence
+package is the integrity proof. A package built from a search shows `search.refs`, then the same
+user's `evidence.request` and `evidence.create`, and verifies like any package (section 5).
