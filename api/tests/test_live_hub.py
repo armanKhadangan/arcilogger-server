@@ -299,6 +299,26 @@ def test_midnight_hand_over_and_the_sealer_deleting_yesterday(
     run(scenario())
 
 
+def test_a_stream_opened_in_the_first_cycle_after_midnight_starts_at_line_0(
+    hub: Hub, spool: Spool, clock: Clock
+) -> None:
+    clock.at = datetime(2026, 10, 25, 23, 59, 59, tzinfo=SITE_TZ)
+    yesterday, today = date(2026, 10, 25), date(2026, 10, 26)
+
+    async def scenario() -> None:
+        await connect(hub, stream(hub))
+        spool.write("fortigate", *(traffic(tag=f"dün {n}") for n in range(3)), day=yesterday)
+        await until(lambda: hub.seq >= 3)
+        clock.at += timedelta(seconds=2)  # no read cycle between midnight and the new stream
+        later = stream(hub)
+        folders = await hub.open(later, later.settings, SiteNetwork())
+        # Yesterday's 3 lines are not "already there" in today's file.
+        assert folders == [{"folder": "fortigate", "day": today, "start_line": 0}]
+        await hub.stop()
+
+    run(scenario())
+
+
 def test_a_replaced_file_is_announced_and_followed_from_its_end(hub: Hub, spool: Spool) -> None:
     async def scenario() -> None:
         opened = stream(hub)
@@ -368,6 +388,25 @@ def test_backfill_comes_from_the_end_of_the_file(hub: Hub, spool: Spool) -> None
         assert folders == [{"folder": "fortigate", "day": site_day(hub.now()), "start_line": 20}]
         items = hub.attach(opened, Connection(), None)
         assert [item.line for item in items if isinstance(item, Entry)] == [17, 18, 19]
+        await hub.stop()
+
+    run(scenario())
+
+
+def test_a_folder_attached_again_is_never_buffered_twice(hub: Hub, spool: Spool) -> None:
+    async def scenario() -> None:
+        spool.write("fortigate", *(traffic(tag=f"satır {n}") for n in range(1, 6)))
+        first = stream(hub, "source:fortigate", backfill=5)
+        connection = await connect(hub, first)
+        await hub.close(first, "closed")
+        hub.detach(first, connection)
+        await until(lambda: hub.status()["hub"]["files"] == 0)  # no stream wants the folder
+        assert len(hub.buffer) == 5  # its lines stay until the hub stops
+        second = stream(hub, "source:fortigate", backfill=10)
+        await hub.open(second, second.settings, SiteNetwork())
+        items = hub.attach(second, Connection(), None)
+        assert [item.line for item in items if isinstance(item, Entry)] == [1, 2, 3, 4, 5]
+        assert [entry.line for entry in hub.buffer] == [1, 2, 3, 4, 5]
         await hub.stop()
 
     run(scenario())

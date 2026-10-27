@@ -18,7 +18,8 @@ stream of the process with one asyncio task:
   sealer may delete yesterday's file at any time, which ends that file cleanly. A file that
   shrank or was replaced is announced as ``gap {file_replaced}``;
 * when a stream needs a file the hub did not follow yet, it seeds its buffer with the lines of
-  the file's last 256 KiB (they serve as the stream's ``backfill``), parsed newest first;
+  the file's last 256 KiB (they serve as the stream's ``backfill``), parsed newest first; lines
+  of that folder still buffered from an earlier stream are dropped first, so none is sent twice;
 * lines are parsed with ingest's own ``prepare_line`` (the rows pass ingest's row checks) within
   a hub-wide budget of ``live.parse_lines_per_second``; a line beyond it is kept unparsed and
   goes out with ``parse_skipped: true`` to streams that filter on the folder and the sender
@@ -370,6 +371,9 @@ class ReadResult:
     behind: dict[str, int] = field(default_factory=dict)
     gaps: list[str] = field(default_factory=list)
     starts: dict[str, tuple[date, int]] = field(default_factory=dict)
+    #: Folders attached afresh this cycle: their older buffer entries are dropped before the
+    #: seed is added, so a line is never in the buffer twice.
+    attached: set[str] = field(default_factory=set)
     parsed: int = 0
 
 
@@ -780,6 +784,13 @@ class Hub:
         for stream, folders in result.folders.items():
             if stream in self.streams.values():
                 stream.folders = folders
+        if result.attached:
+            # A folder no stream wanted was forgotten (``_read``) while its lines stayed in the
+            # buffer; attaching it again seeds the same lines with new sequence numbers.
+            self.buffer = deque(
+                (entry for entry in self.buffer if entry.folder not in result.attached),
+                maxlen=self.buffer.maxlen,
+            )
         for entry in result.seeded:
             self._append(entry)
         for stream, future in opens:
@@ -910,8 +921,10 @@ class Hub:
         for folder in sorted(wanted):
             state = self._files.get(folder)
             if folder in news and state is not None:  # followed already: new from here on
-                line = state.follower.line if state.follower is not None else 0
-                result.starts[folder] = (plan.today, line)
+                # After midnight the follower still reads yesterday's file (handed over in
+                # ``_follow``): every line of today's file is new.
+                follower = state.follower if state.day == plan.today else None
+                result.starts[folder] = (plan.today, follower.line if follower else 0)
             try:
                 self._follow(result, layout, config, plan, folder, folder in seeds, anchors)
             except OSError as exc:
@@ -948,6 +961,7 @@ class Hub:
         info = StreamInfo(folder, resolve_source(config, folder).configured_type, today)
         if state is None:
             state = self._files[folder] = FileState(folder, today)
+            result.attached.add(folder)
             path = layout.spool_file(folder, today)
             if seed:
                 try:
