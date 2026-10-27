@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime, timedelta, timezone
+from ipaddress import IPv4Network
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ import pytest
 
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.layout import Layout
+from arcilogger_db.egress import IMPLICIT_CATCH_ALL, Egress
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.testing import EXAMPLE_SETTINGS
 from arcilogger_worker.lookup import (
@@ -36,6 +38,12 @@ from arcilogger_worker.lookup.sessions import (
     SessionGroup,
     TrafficRow,
     destination_match,
+)
+from arcilogger_worker.lookup.types import (
+    EgressChange,
+    EgressEntry,
+    EgressSearched,
+    LookupEgress,
 )
 
 TR = timezone(timedelta(hours=3))
@@ -434,3 +442,282 @@ def test_destination_match_keeps_weak_kinds_apart(
     domain = None if hits is None else DomainHits(addresses=hits)
     group = SessionGroup([_row(**row_fields)])
     assert destination_match(group, request, domain) == expected
+
+
+# -- ADR-0016: FortiGate DHCP evidence, srcmac and the internet exits -----------------------------
+
+
+def _wave3_outcome() -> LookupOutcome:
+    """The example outcome with every field of ADR-0016 filled (values of the example world)."""
+    outcome = _outcome()
+    match = outcome.matches[0]
+    assert match.chain is not None
+    assert match.chain.lease is not None
+    ack = EvidenceRef(
+        table="fg_dhcp",
+        row_id=77,
+        time=datetime(2026, 10, 12, 8, 41, 10, tzinfo=TR),
+        raw=RawRef("fortigate", date(2026, 10, 12), 9, 2048),
+        summary="vlan42 assigned 172.20.42.57 for 00:00:5e:00:53:57 PLN-PC14 (FortiGate DHCP, "
+        "logid 0100026001, lease 604800)",
+    )
+    lease = LeaseInfo(
+        **{
+            **match.chain.lease.__dict__,
+            "evidence": (ack,),
+            "source_table": "fg_dhcp",
+            "lease_seconds": 604800,
+            "last_dhcp_evidence": ack.time,
+        }
+    )
+    chain = AttributionChain(**{**match.chain.__dict__, "lease": lease, "mac_source": "srcmac"})
+    traffic = TrafficInfo(
+        **{
+            **match.traffic.__dict__,
+            "srcintf": "vlan42",
+            "dstintf": "wan2",
+            "srcmac": "00:00:5e:00:53:57",
+        }
+    )
+    marked = NatMatch(
+        **{
+            **match.__dict__,
+            "traffic": traffic,
+            "chain": chain,
+            "egress": "hat-2",
+            "untrusted_sources": ("unknown-192.0.2.7",),
+        }
+    )
+    egress = LookupEgress(
+        resolution="public",
+        egresses=(
+            EgressEntry(
+                name="hat-2",
+                label="Yedek hat",
+                mode="isp_nat",
+                public=("198.51.100.77",),
+                public_dynamic=True,
+                transips=("100.64.13.9",),
+                interfaces=("wan2",),
+                port_preservation="unknown",
+            ),
+        ),
+        searched=EgressSearched(
+            transips=("100.64.13.9",),
+            unclaimed=False,
+            unclaimed_seen=("100.64.12.9",),
+            outside_seen=(),
+            interfaces=("wan2",),
+            interface_filter=True,
+        ),
+        changes=(
+            EgressChange(
+                name="hat-2",
+                changed_at=datetime(2026, 10, 20, 8, 12, tzinfo=UTC),
+                changed_by="yonetici",
+                deleted=False,
+                after_event=True,
+            ),
+        ),
+        changed_after_event=True,
+    )
+    return LookupOutcome(
+        **{
+            **outcome.__dict__,
+            "matches": (marked,),
+            "egress": egress,
+            "unconverted_dhcp": (ack,),
+        }
+    )
+
+
+def test_every_new_outcome_field_round_trips_through_json() -> None:
+    outcome = _wave3_outcome()
+    data = outcome.to_dict()
+    restored = LookupOutcome.from_dict(json.loads(json.dumps(data)))
+    assert restored == outcome
+    assert restored.to_dict() == data
+    assert canonical_json(data)
+    match = data["matches"][0]
+    assert (match["egress"], match["untrusted_sources"]) == ("hat-2", ["unknown-192.0.2.7"])
+    assert (match["traffic"]["srcintf"], match["traffic"]["dstintf"]) == ("vlan42", "wan2")
+    assert match["traffic"]["srcmac"] == "00:00:5e:00:53:57"
+    assert match["chain"]["mac_source"] == "srcmac"
+    lease = match["chain"]["lease"]
+    assert (lease["source_table"], lease["lease_seconds"]) == ("fg_dhcp", 604800)
+    assert lease["last_dhcp_evidence"] == "2026-10-12T05:41:10+00:00"
+    assert data["unconverted_dhcp"][0]["table"] == "fg_dhcp"
+
+
+def test_the_egress_json_has_the_contract_shape() -> None:
+    """Contract 2.10: the keys of ``outcome.egress`` and of its parts, in this order."""
+    egress = _wave3_outcome().to_dict()["egress"]
+    assert list(egress) == [
+        "resolution",
+        "egresses",
+        "searched",
+        "changes",
+        "changed_after_event",
+    ]
+    assert egress["egresses"] == [
+        {
+            "name": "hat-2",
+            "label": "Yedek hat",
+            "mode": "isp_nat",
+            "public": ["198.51.100.77"],
+            "public_dynamic": True,
+            "transips": ["100.64.13.9"],
+            "interfaces": ["wan2"],
+            "port_preservation": "unknown",
+        }
+    ]
+    assert egress["searched"] == {
+        "transips": ["100.64.13.9"],
+        "unclaimed": False,
+        "unclaimed_seen": ["100.64.12.9"],
+        "outside_seen": [],
+        "interfaces": ["wan2"],
+        "interface_filter": True,
+    }
+    assert egress["changes"] == [
+        {
+            "name": "hat-2",
+            "changed_at": "2026-10-20T08:12:00+00:00",
+            "changed_by": "yonetici",
+            "deleted": False,
+            "after_event": True,
+        }
+    ]
+    assert egress["changed_after_event"] is True
+
+
+def test_outcomes_stored_before_the_new_fields_still_load() -> None:
+    """Every field of ADR-0016 has a default, so a Wave 2 outcome loads unchanged."""
+    data = _outcome().to_dict()
+    old = json.loads(json.dumps(data))
+    for name in ("egress", "unconverted_dhcp"):
+        del old[name]
+    match = old["matches"][0]
+    for name in ("egress", "untrusted_sources"):
+        del match[name]
+    for name in ("srcintf", "dstintf", "srcmac"):
+        del match["traffic"][name]
+    del match["chain"]["mac_source"]
+    for name in ("source_table", "lease_seconds", "last_dhcp_evidence"):
+        del match["chain"]["lease"][name]
+    restored = LookupOutcome.from_dict(old)
+    assert restored == _outcome()
+    assert restored.egress is None
+    assert restored.unconverted_dhcp == ()
+    loaded = restored.matches[0]
+    assert (loaded.egress, loaded.untrusted_sources) == (None, ())
+    assert (loaded.traffic.srcintf, loaded.traffic.dstintf, loaded.traffic.srcmac) == (
+        None,
+        None,
+        None,
+    )
+    assert loaded.chain is not None
+    assert loaded.chain.mac_source == "lease"
+    assert loaded.chain.lease is not None
+    assert loaded.chain.lease.source_table is None
+    assert loaded.chain.lease.last_dhcp_evidence is None
+    # A minimal egress (a resolution only) takes the defaults of its parts.
+    minimal = LookupEgress.from_dict({"resolution": "no_egress"})
+    assert minimal == LookupEgress(resolution="no_egress")
+    assert minimal.searched == EgressSearched()
+    assert minimal.changes == ()
+
+
+def test_an_exit_entry_writes_single_addresses_without_a_prefix() -> None:
+    entry = EgressEntry.from_egress(
+        Egress(
+            name="hat-1",
+            label="Ana hat",
+            mode="direct",
+            public=(IPv4Network("203.0.113.200/32"), IPv4Network("203.0.113.208/29")),
+            public_dynamic=False,
+            transips=(),
+            interfaces=("wan1",),
+            port_preservation="unknown",
+        )
+    )
+    assert entry.public == ("203.0.113.200", "203.0.113.208/29")
+    assert EgressEntry.from_egress(IMPLICIT_CATCH_ALL).name == ""  # the implicit exit
+
+
+def test_the_new_settings_have_the_shipped_defaults() -> None:
+    shipped = LookupSettings.from_settings(DEFAULT_SETTINGS)
+    assert shipped == LookupSettings()  # the dataclass defaults are the shipped ones
+    assert shipped.nat_egresses == {}
+    assert shipped.snat_trandisp == ("snat",)
+    assert shipped.srcmac_interfaces == ()
+    assert shipped.srcmac_max_ips == 1
+    assert shipped.fortigate_logids == DEFAULT_SETTINGS["dhcp.fortigate_logids"]
+    assert shipped.fortigate_dhcp_msgs == {"0100026001": ("Ack",)}
+    assert shipped.use_logged_lease is True
+    assert shipped.fortigate_traffic_extends is False
+    assert shipped.fortigate_interfaces_excluded == ()
+    assert shipped.fortigate_format_verified is False
+    assert shipped.egresses() == ()  # no exits: one implicit double-NAT exit
+
+
+def test_the_new_settings_are_read() -> None:
+    settings = LookupSettings.from_settings(
+        {
+            **DEFAULT_SETTINGS,
+            "dhcp.fortigate_logids": {},
+            "dhcp.fortigate_dhcp_msgs": {"0100026001": ["Ack", "Inform"]},
+            "dhcp.fortigate_use_logged_lease": False,
+            "dhcp.fortigate_traffic_extends": True,
+            "dhcp.fortigate_interfaces_excluded": ["ipsec-dhcp"],
+            "dhcp.fortigate_format_verified": True,
+            "lookup.srcmac_interfaces": ["vlan42"],
+            "lookup.srcmac_max_ips": 2,
+            "nat.snat_trandisp": ["snat", "dnat+snat"],
+        }
+    )
+    assert settings.fortigate_logids == {}  # FortiGate DHCP evidence switched off
+    assert settings.fortigate_dhcp_msgs == {"0100026001": ("Ack", "Inform")}
+    assert (settings.use_logged_lease, settings.fortigate_traffic_extends) == (False, True)
+    assert settings.fortigate_interfaces_excluded == ("ipsec-dhcp",)
+    assert settings.fortigate_format_verified is True
+    assert (settings.srcmac_interfaces, settings.srcmac_max_ips) == (("vlan42",), 2)
+    assert settings.snat_trandisp == ("snat", "dnat+snat")
+
+
+@pytest.mark.parametrize(
+    ("values", "message"),
+    [
+        ({"dhcp.fortigate_logids": ["0100026001"]}, "dhcp.fortigate_logids must be an object"),
+        ({"dhcp.fortigate_dhcp_msgs": {"0100026001": "Ack"}}, "dhcp.fortigate_dhcp_msgs"),
+        ({"lookup.srcmac_interfaces": "vlan42"}, "lookup.srcmac_interfaces must be a list"),
+        ({"nat.snat_trandisp": "snat"}, "nat.snat_trandisp must be a list"),
+    ],
+)
+def test_the_new_settings_refuse_values_of_another_shape(
+    values: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        LookupSettings.from_settings(values)
+
+
+def test_the_exits_are_parsed_only_when_asked_for_and_kept() -> None:
+    """A stored ``nat.egresses`` that cannot be parsed never stops the lease timeline or the
+    usage rollups (they never ask for the exits); a caller that asks gets ``ValueError``."""
+    broken = LookupSettings.from_settings({**DEFAULT_SETTINGS, "nat.egresses": ["hat-1"]})
+    assert broken.nat_egresses == ["hat-1"]
+    with pytest.raises(ValueError, match="must be an object"):
+        broken.egresses()
+    empty = LookupSettings.from_settings(DEFAULT_SETTINGS)
+    assert empty.egresses() is empty.egresses()  # parsed once
+
+
+def test_a_logged_fortigate_lease_ends_the_lease_itself() -> None:
+    """ADR-0016 D6: a logged lease time is the FortiGate's own end, without the timeout margin
+    of the configured times (which stay estimates)."""
+    settings = LookupSettings.from_settings({**DEFAULT_SETTINGS, **EXAMPLE_SETTINGS})
+    assert settings.lease_timeout_seconds("vlan61", 604800) == 604800
+    assert settings.lease_timeout_seconds("dhcp61", 3600) == 3600
+    assert settings.lease_timeout_seconds("dhcp61") == 3960  # configured: x 1.1
+    assert settings.lease_timeout_seconds("dhcp61", None) == 3960
+    assert settings.lease_timeout_seconds(None) == 95040
