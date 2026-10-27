@@ -36,7 +36,7 @@ from arcilogger_api.search.cursor import Bound, Cursor, bounds, decode, encode, 
 from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.testing import Lines, sign_in
-from arcilogger_api.search.windows import Storage, read_storage, run_page
+from arcilogger_api.search.windows import Storage, WindowHook, read_storage, run_page
 from arcilogger_api.testing import LoggedIn
 from arcilogger_db.models import TIME_SERIES_TABLES, AuditLog
 from arcilogger_db.settings import get_setting, set_setting
@@ -235,7 +235,7 @@ def _set_storage(app: FastAPI, storage: Storage) -> None:
     cache.get_or_compute(lambda: storage)
 
 
-def _recorder(windows: list[Window]) -> Any:
+def _recorder(windows: list[Window]) -> WindowHook:
     """A window hook that adds each window's ``(lower, upper)`` to ``windows``."""
 
     def record(_session: Session, lower: datetime, upper: datetime) -> None:
@@ -300,17 +300,10 @@ def test_a_page_the_rows_above_a_compression_horizon_fill_reads_nothing_below_it
     whole = _paged(app_session_factory, f"srcip:{CLIENT}", 500)
     for limit, below in ((12, False), (16, False), (17, True), (500, True)):
         windows: list[Window] = []
+        hook = _recorder(windows)
         with app_session_factory() as session:
             page = run_page(
-                session,
-                plan,
-                START,
-                END,
-                None,
-                limit,
-                10.0,
-                hook=_recorder(windows),
-                horizons=horizons,
+                session, plan, START, END, None, limit, 10.0, hook=hook, horizons=horizons
             )
         assert [(row["time"], int(row["b"]), int(row["id"])) for row in page.rows] == whole[:limit]
         assert windows[1] == (horizon, T), windows
