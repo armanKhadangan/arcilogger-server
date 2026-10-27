@@ -5,8 +5,9 @@
   cursors when the time budget ran out (a clock the test controls); a budget gone before any
   window gives the cursor back.
 * A cursor is parsed strictly: anything changed is 422 ``search_cursor_invalid``.
-* A first window that times out is halved down to 5 minutes; when even that times out the
-  search fails with 504 ``search_timeout``, audited with ``outcome: "timeout"``.
+* A first window that times out is halved down to 5 minutes; when even that times out, or the
+  budget is used up while it is being halved, the search fails with 504 ``search_timeout``,
+  audited with ``outcome: "timeout"``.
 * Windows that end at a compression horizon (TimescaleDB) page exactly like windows that do not,
   on any storage mode (the horizons are set by the test), and no window holds one; a page that
   the rows above a horizon fill reads nothing below it. On TimescaleDB the horizon of a table is
@@ -36,7 +37,13 @@ from arcilogger_api.search.cursor import Bound, Cursor, bounds, decode, encode, 
 from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.testing import Lines, sign_in
-from arcilogger_api.search.windows import Storage, WindowHook, read_storage, run_page
+from arcilogger_api.search.windows import (
+    SearchTimeoutError,
+    Storage,
+    WindowHook,
+    read_storage,
+    run_page,
+)
 from arcilogger_api.testing import LoggedIn
 from arcilogger_db.models import TIME_SERIES_TABLES, AuditLog
 from arcilogger_db.settings import get_setting, set_setting
@@ -499,10 +506,11 @@ def test_when_even_five_minutes_time_out_the_search_fails_and_is_audited(
         spans.append(upper - lower)
         session.execute(text("SELECT pg_sleep(5)"))
 
-    _setting(app_session_factory, "search.request_budget_ms", 500)
+    # The five tries get 1000, 500, 250, 125 and 125 ms of the 2 s: room for cancelling a
+    # statement on a slow runner. A full collection of a long test run's heap (260 ms measured in
+    # an xdist worker) must not fall inside them either.
+    _setting(app_session_factory, "search.request_budget_ms", 2000)
     state_of(app).hook = always_slow
-    # The five tries leave the last one about 30 ms of the 500; a full collection of a long test
-    # run's heap (260 ms measured in an xdist worker) must not fall inside them.
     gc.collect()
     response = client.post(
         API, json={"q": f"srcip:{CLIENT}", "from": START.isoformat(), "to": END.isoformat()}
@@ -510,7 +518,7 @@ def test_when_even_five_minutes_time_out_the_search_fails_and_is_audited(
     assert response.status_code == 504
     error = response.json()["error"]
     assert error["code"] == "search_timeout"
-    assert "0.5" in error["message_en"]
+    assert "2 s" in error["message_en"]
     assert spans == [timedelta(minutes=m) for m in (60, 30, 15, 7.5, 5)]
     with app_session_factory() as session:
         entry = session.scalars(select(AuditLog).where(AuditLog.action == "search.run")).one()
@@ -518,6 +526,25 @@ def test_when_even_five_minutes_time_out_the_search_fails_and_is_audited(
     assert entry.details["search_id"] is None
     assert entry.details["q"] == f"srcip:{CLIENT}"
     assert entry.details["rows"] == 0
+
+
+def test_a_budget_used_up_while_the_first_window_is_halved_fails_the_search(
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    """A slow server can use up the budget before the 5-minute try: still a timeout, never an
+    empty page whose frontier would make the browser repeat the same scan."""
+    plan = plan_query(parse_query(f"srcip:{CLIENT}"), SiteNetwork())
+    spans: list[timedelta] = []
+
+    def slow(session: Session, lower: datetime, upper: datetime) -> None:
+        spans.append(upper - lower)
+        session.execute(text("SELECT pg_sleep(5)"))
+
+    # Each reading moves the clock 0.3 s: the first try gets half of the 1 s budget, and after
+    # the second try nothing is left for a third.
+    with app_session_factory() as session, pytest.raises(SearchTimeoutError):
+        run_page(session, plan, START, END, None, 5, 1.0, clock=FakeClock(0.3), hook=slow)
+    assert spans == [timedelta(minutes=60), timedelta(minutes=30)]
 
 
 def test_a_later_window_that_times_out_ends_the_page_with_a_frontier(

@@ -169,7 +169,7 @@ test-core = "pytest -n auto core/tests tests --cov=arcilogger_core --cov-report=
 # Coverage gates of the specification (17): ingest >= 85 %, api >= 80 % (with test-core >= 90 %);
 # all three run in CI (.github/workflows/ci.yml, Linux job).
 test-ingest = "pytest -n auto ingest/tests -m 'not perf' --cov=arcilogger_ingest --cov-report=term --cov-fail-under=85"
-test-api = "pytest -n auto api/tests --cov=arcilogger_api --cov-report=term --cov-fail-under=80"
+test-api = "pytest -n auto api/tests -m 'not perf' --cov=arcilogger_api --cov-report=term --cov-fail-under=80"
 test-db = "pytest -n auto db/tests --cov=arcilogger_db --cov-report=term"
 api-dev = "uvicorn arcilogger_api.app:create_app --factory --reload --host 127.0.0.1 --port 8000"
 check = ["lint", "test"]

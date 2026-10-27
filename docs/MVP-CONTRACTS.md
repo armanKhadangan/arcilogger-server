@@ -1341,7 +1341,8 @@ performance). Base `/api/v1`; nothing here is licence-gated (5651 Temel,
   newest first, 1 h, doubling while a window took less than a quarter of the budget left,
   clipped to `from`; `LIMIT` = rows missing + 1; stop when the page is full, `from` is reached
   or `search.request_budget_ms` is used. A first window that times out is halved down to 5 min
-  (each try gets half the budget left); 5 min timing out → 504 `search_timeout` (audited,
+  (each try gets half the budget left); 5 min timing out, or the budget used up before a
+  halved try could run → 504 `search_timeout` (audited,
   `outcome: "timeout"`, `search_id: null`); a later window that times out ends the page with a
   frontier. After a `last` cursor the first window always runs, also when its time is `from`
   itself (rows still due at that instant); a budget gone before any window returns the same

@@ -147,8 +147,8 @@ karşılaştırır). "Hızlı" sütunu, alanın tek başına bir indeksle okundu
   başına ulaşılırsa tarama **tamamdır** (`complete`). Süre biterse sayfa o ana kadar bulunanları
   gösterir ve "… tarihine kadar tarandı" der; sayfa taramayı 5 kez kendiliğinden sürdürür, sonra
   "Devam et" düğmesini gösterir. İlk dilim süreyi aşarsa yarıya indirilir (en az 5 dakika); 5
-  dakikalık dilim bile aşarsa arama `search_timeout` (504) ile biter ve denetim kaydına
-  `outcome: "timeout"` olarak yazılır.
+  dakikalık dilim bile aşarsa ya da süre küçültülmüş dilime sıra gelmeden biterse arama
+  `search_timeout` (504) ile biter ve denetim kaydına `outcome: "timeout"` olarak yazılır.
 - **Sayfalar:** bir arama bir `search_id` alır; sonraki sayfalar, istatistikler, dışa aktarma ve
   kanıt aktarımı yalnızca bu numarayla istenir. Numara son kullanımdan sonra 30 dakika geçerlidir
   (kullanıcı başına en fazla 20 arama tutulur); süresi dolmuş ya da başka bir oturumun aramasıysa

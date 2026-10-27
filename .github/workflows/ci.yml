@@ -31,11 +31,14 @@ jobs:
           TIMESCALEDB_TELEMETRY: 'off'
         ports:
           - 5432:5432
+        # --shm-size: Docker's default 64 MB of /dev/shm is too small for the parallel workers of
+        # VACUUM ANALYZE and of the search performance test's queries on tier-1 data.
         options: >-
           --health-cmd "pg_isready -U arci_test -d postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30
+          --shm-size 1g
     env:
       ARCILOGGER_TEST_PG: postgresql://arci_test:arci_test@127.0.0.1:5432/postgres
       ARCILOGGER_REQUIRE_DB: '1'

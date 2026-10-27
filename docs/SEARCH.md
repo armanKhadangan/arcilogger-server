@@ -145,8 +145,9 @@ the catalogue). "Fast" names the tables where the field alone is read from an in
   start of the range is reached the scan is **complete** (`complete`). When the time runs out the
   page shows what was found so far and says "scanned up to …"; the page continues the scan on its
   own up to 5 times, then shows a "Devam et" (continue) button. If the first slice runs out of
-  time it is halved (down to 5 minutes); if even 5 minutes do, the search ends with
-  `search_timeout` (504) and is audited with `outcome: "timeout"`.
+  time it is halved (down to 5 minutes); if even 5 minutes do, or the time is used up before a
+  halved slice could run, the search ends with `search_timeout` (504) and is audited with
+  `outcome: "timeout"`.
 - **Pages:** a search gets a `search_id`; the next pages, the statistics, the export and the
   evidence hand-over are asked for with that id only. The id stays valid for 30 minutes after its
   last use (at most 20 searches are kept per user); when it has expired or belongs to another

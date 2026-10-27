@@ -16,8 +16,10 @@ PostgreSQL ``statement_timeout``). It stops when the page is full, ``from`` is r
   itself (the rows still due at that instant: later branches, lower ids), and a budget that ran
   out before any window gives the same cursor back;
 * if the **first** window of a request times out it is halved, down to 5 minutes — each try of
-  it gets half the time left, so a smaller one can still run; when even 5 minutes time out the
-  request fails with :class:`SearchTimeoutError` (504 ``search_timeout``);
+  it gets half the time left, so a smaller one can still run; when even 5 minutes time out, or
+  the budget is used up before a halved try could run, the request fails with
+  :class:`SearchTimeoutError` (504 ``search_timeout``): no window was scanned, so there is no
+  frontier to give back;
 * on TimescaleDB (:func:`read_storage`) a window ends at a table's compression horizon that it
   would hold (``sql.horizons_statement``): the uncompressed chunks are read first and planned
   with their own statistics, the compressed ones only by the next window, when the page is not
@@ -206,11 +208,14 @@ def run_page(
     size = FIRST_WINDOW
     windows = 0
     budget_left = True
+    timed_out = False
     # Rows at the cursor's own time may still be due, also when that time is ``from``.
     due = cursor is not None and cursor.kind == "last"
     while len(rows) < limit and (upper > start or (due and windows == 0)):
         left = deadline - clock()
         if left <= 0:
+            if timed_out and windows == 0:
+                raise SearchTimeoutError(budget_seconds)
             budget_left = False
             break
         lower = max(start, upper - size)
@@ -227,6 +232,7 @@ def run_page(
                 break
             if size <= MIN_WINDOW:
                 raise SearchTimeoutError(budget_seconds) from None
+            timed_out = True
             size = max(MIN_WINDOW, size / 2)
             continue
         windows += 1
