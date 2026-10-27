@@ -22,7 +22,7 @@ Statements:
   is two such selects, newer and older than the horizon, ordered and limited again (see
   :func:`page_statement`).
 * :func:`typed_rows`, :func:`message_rows` — the fields of a page's rows, one keyed query per
-  table, the page's keys bound as arrays (``unnest``).
+  table, the page's keys bound as arrays (``unnest``) and their time range as a constant.
 * :func:`count_statement`, :func:`rollup_statement` — the statistics (``stats.py``): buckets
   (``date_bin`` aligned to site midnight) and the five facets in one ``GROUPING SETS`` query.
 """
@@ -457,6 +457,15 @@ def _array(values: Iterable[Any], type_: Any) -> Any:
     return literal(list(values), ARRAY(type_))
 
 
+def _within(found: Any, times: Sequence[datetime]) -> ColumnElement[bool]:
+    """``time`` between the keys' earliest and latest: implied by the keys, but a constant range,
+    so only the partitions or chunks that hold them are planned (joined with the keys alone,
+    TimescaleDB reads every chunk, the compressed ones decompressed)."""
+    if not times:
+        return false()
+    return found.c.time.between(literal(min(times), TZ), literal(max(times), TZ))
+
+
 def typed_rows(table: str, keys: Sequence[tuple[datetime, int]]) -> Select[Any]:
     """The rows ``(time, id)`` of a typed table (a typed page)."""
     found = _table(table)
@@ -465,8 +474,10 @@ def typed_rows(table: str, keys: Sequence[tuple[datetime, int]]) -> Select[Any]:
         .table_valued(column("time", TZ), column("id", BigInteger))
         .render_derived(name="k")
     )
-    return select(found).join(
-        wanted, and_(found.c.time == wanted.c.time, found.c.id == wanted.c.id)
+    return (
+        select(found)
+        .join(wanted, and_(found.c.time == wanted.c.time, found.c.id == wanted.c.id))
+        .where(_within(found, [k[0] for k in keys]))
     )
 
 
@@ -494,6 +505,7 @@ def _by_reference(found: Any, keys: Sequence[RawKey]) -> Any:
         found.c.source == wanted.c.source,
         found.c.raw_day == wanted.c.raw_day,
         found.c.raw_line == wanted.c.raw_line,
+        _within(found, [k[0] for k in keys]),
     ), wanted
 
 
