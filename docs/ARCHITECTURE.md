@@ -52,7 +52,7 @@ Windows services (automatic start, restart on failure, each under its own virtua
 |---|---|---|---|---|
 | `ArciCollector` | `arcilogger_collector` (Python) | Receives syslog, writes the raw spool **first** | UDP/TCP 514 (and TLS 6514, optional) on the server address (`[collector] bind`) | M1 |
 | `ArciIngest` | `arcilogger_ingest` | Tails the spool (or the sealed vault copy), parses, loads PostgreSQL | — | MVP (M2) |
-| `ArciApi` | `arcilogger_api` (FastAPI, Uvicorn) | HTTP API for the web interface: auth/TOTP, users, audit log, 5651 lookup + PDF report, evidence packages, seals, devices and persons, alerts (state workflow, notes) and the dashboard summary | 127.0.0.1:8000 | MVP; more pages M4–M6 |
+| `ArciApi` | `arcilogger_api` (FastAPI, Uvicorn) | HTTP API for the web interface: auth/TOTP, users, audit log, 5651 lookup + PDF report, evidence packages, seals, devices and persons, alerts (state workflow, notes), the dashboard summary, Arama (search), Canlı Akış (the live tail of the spool) and Kaynaklar (source health) | 127.0.0.1:8000 | MVP; Wave 2; more pages M4–M6 |
 | `ArciWorker` | `arcilogger_worker` | Today: lease timeline, devices and IP conflicts, partitions, evidence purge, audit import, alerts (import of `alerts.jsonl`, R15/R20 checks, alert e-mail; ADR-0010), usage rollups (`usage.*` jobs, estimated time per person/site/category; ADR-0011, docs/USAGE.md), the licence check (`license.check`, ADR-0013). Later: NAT index, the rule engine and its detections (M5) | — | MVP (M3); M4–M5 |
 | `ArciWeb` | Caddy | HTTPS (internal CA), serves the web interface, proxies `/api` | server address:443 | MVP (installer) |
 | `ArciAdmin` | `arcilogger_core.admin` (Python) | The administration agent of the browser administration ([ADR-0014](adr/0014-browser-administration.md)): checks the API's signed requests in `admin\inbox` again and applies them (the only writer of `arcilogger.toml` and `secrets.json`), keeps the versions, follows the services reloading, writes signed task requests (Seal now, credit query, tests) | — (no listener, no database) | Wave 1 |
@@ -144,6 +144,30 @@ switches, APs ─┘ ───────────────────�
                         ▼                                  D:\ARCILOGGER\vault\YYYY\MM\DD\…
          ArciApi ◄── Caddy (HTTPS 443) ◄── browser on the admin PC
 ```
+
+**Canlı Akış (live tail)** reads the raw spool, not the database
+([ADR-0015](adr/0015-search-live-sources.md), `arcilogger_api.live`): one reader per API process
+(the hub) follows today's spool files of the folders the open streams want — at most 1 MiB a file
+every 0.5 s, a file far behind skipped with its lines counted — lists `spool\` every 5 s (new
+`unknown-<ip>` folders appear at once), parses with ingest's own `prepare_line` within a budget
+and keeps the newest lines with their exact raw references (folder, day, line, byte offset; the
+raw-line view opens them). It never writes and never keeps a file open between polls, so it is
+never in the sealer's way, and it works while ingest lags or is stopped: the database is needed
+only for sign-in, the stream's session check every 30 s and an optional line-number anchor
+(`ingest_offsets`). A stream is opened with `POST /api/v1/live/streams` (JSON refusals, audited
+`live.open`) and read with `GET /api/v1/live/streams/{id}` (server-sent events; the request's
+database session is closed before the body streams); each stream has its own rate limit and
+queue and ends after `live.max_minutes`. **Caddy** compresses every answer except
+`/api/v1/live/*` (compression would hold events back) and has no `flush_interval`, so a closed
+browser tab also ends the stream; `arcilogger-api serve` stops within 5 s
+(`timeout_graceful_shutdown`) even with streams open.
+
+**Arama and Kaynaklar** read the database: searches are read-only, under a statement deadline
+and a time budget, scanning time windows newest first; their statistics, and Kaynaklar's hours,
+come from the exact hourly summary table `search_counts` that ingest writes in the transaction
+that loads the rows (counted directly where it is not complete yet). Kaynaklar's state of a
+source is the rule of R15 and the Panel (newest of what ingest loaded and what the collector
+received); its "Son satırlar" tab reads the spool like the live tail and is audited (`raw.tail`).
 
 ## Directories
 

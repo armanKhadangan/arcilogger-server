@@ -217,14 +217,23 @@ address = "<switch>"
 enabled = false             # kapalı: 514 izni yok, R15 beklemez
 ```
 
-Her cihazdan bir test mesajı gönderin:
+**Test mesajı ve Canlı Akış.** Web arayüzünde **Canlı Akış** sayfasını açın, filtrede cihazın
+kaynağını seçin (yapılandırmada olmayan göndericiler için "Bilinmeyen göndericiler" çipini; bu
+göndericiler yalnızca güvenlik duvarı onları geçiriyorsa gelir, aşağıya bakın) ya da sorgu
+kutusuna `sender:<cihaz-ip>` yazın ve **Başlat**'a basın. Sonra her cihazdan bir test mesajı
+gönderin:
 
 - FortiGate: `diagnose log test`
 - MikroTik: `:log info "ARCI-TEST"`
 
-Sunucuda (web arayüzündeki "Canlı Akış" ve "Kaynaklar" sayfaları bu sürümde yer tutucudur),
-**her beklenen kaynağın** bugünkü dosyası olmalı ve `collector-status.json` içindeki `sources`
-listesinde görünmelidir:
+Satır birkaç saniye içinde listede görünür. Canlı Akış satırları veritabanından değil ham kayıt
+klasöründen (spool) okur: ingest geride kalsa ya da dursa da toplayıcının yazdığı her satır
+görünür ve satıra tıklayınca ham kaydı (bayt bayt, SHA-256 ile) açılır. **Kaynaklar** sayfası
+cihazın satırını "Etkin" gösterir (son mesaj heartbeat süresi içinde). Hiçbir satır gelmiyorsa
+cihaz başka bir adresten gönderiyordur ya da güvenlik duvarı göndericiyi geçirmiyordur (aşağıda).
+
+Web arayüzüne ulaşılamıyorsa aynı denetim sunucuda yapılır: **her beklenen kaynağın** bugünkü
+dosyası olmalı ve `collector-status.json` içindeki `sources` listesinde görünmelidir:
 
 ```powershell
 Get-ChildItem D:\ARCILOGGER\spool\*\$(Get-Date -Format yyyy-MM-dd).log | Format-Table Directory, Length, LastWriteTime

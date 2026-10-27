@@ -9,7 +9,9 @@
     arcilogger-api version
 
 Serves the API with Uvicorn on ``[api] host:port`` (default 127.0.0.1:8000) — never with
-auto-reload. ``X-Forwarded-For`` is trusted only from ``[api] forwarded_allow_ips`` (Caddy).
+auto-reload. ``X-Forwarded-For`` is trusted only from ``[api] forwarded_allow_ips`` (Caddy). A stop
+waits at most 5 s for open connections (``timeout_graceful_shutdown``): an open Canlı Akış stream
+never ends by itself, and Uvicorn waits for open connections before the application shuts down.
 ``setup-token`` and ``create-admin`` are run on the server console
 (:mod:`arcilogger_api.auth.admin_cli`, docs/SECURITY.md).
 """
@@ -103,6 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         forwarded_allow_ips=config.api.forwarded_allow_ips,
         server_header=False,
         log_level="info",
+        # An open Canlı Akış stream must not hold a service stop: after 5 s Uvicorn cancels it.
+        timeout_graceful_shutdown=5,
     )
     return 0
 

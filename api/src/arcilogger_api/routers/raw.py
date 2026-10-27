@@ -12,8 +12,10 @@ stored — from ``spool/<source>/<day>.log`` while the day is not sealed, else f
   the reference and the line's SHA-256, never its content).
 * **Path safety:** the source must be a valid spool folder name (no separators, no leading dot,
   not ``_audit``) **and** a known source — configured in ``arcilogger.toml`` (also
-  ``<network source>-<ip>`` for address ranges) or seen by the ingest service (``sources``);
-  the file must lie inside ``spool/`` or ``vault/``.
+  ``<network source>-<ip>`` for address ranges), seen by the ingest service (``sources``) or an
+  unknown sender's ``unknown-<ip>`` folder that exists in ``spool/`` (Canlı Akış shows a new
+  sender's lines before ingest has loaded a batch of them and added its ``sources`` row); the
+  file must lie inside ``spool/`` or ``vault/``.
 * **Errors:** ``raw_unreadable`` (409) — the sealed file's compressed data is damaged before the
   line; ``raw_access_denied`` (503) — the API service has no read right on the file (Windows
   folder permissions; the file itself is fine); ``raw_io_error`` (503) — any other read error.
@@ -43,6 +45,7 @@ from arcilogger_api.errors import ApiError
 from arcilogger_api.rawlines import RawReferenceError, read_line, valid_source_name
 from arcilogger_api.security import CurrentUser, CurrentUserDep, client_ip
 from arcilogger_core.config import Config
+from arcilogger_core.layout import Layout
 from arcilogger_db.models import Source
 
 router = APIRouter(prefix="/raw", tags=["raw"])
@@ -50,6 +53,8 @@ log = logging.getLogger("arcilogger.api.raw")
 
 #: Either permission opens the raw-line view (search results and lookup evidence link to it).
 READ_PERMISSIONS: Final = ("search.read", "lookup.run")
+#: Spool folder of an unknown sender: ``unknown-<ip>`` (the collector; ``:`` written as ``-``).
+UNKNOWN_PREFIX: Final = "unknown-"
 MAX_LINE_NUMBER: Final = 2**31 - 1
 
 MESSAGES: Final = {
@@ -119,8 +124,26 @@ def get_raw_reader(db: DbSession, user: CurrentUserDep) -> CurrentUser:
 ReaderDep = Annotated[CurrentUser, Depends(get_raw_reader)]
 
 
-def known_source(db: Session, config: Config, source: str) -> bool:
-    """Configured (exactly, or ``<network source>-<ip>`` of a configured range) or seen."""
+def _unknown_sender_folder(layout: Layout, source: str) -> bool:
+    """``unknown-<ip>`` (the collector's name for an unknown sender) with a folder in ``spool/``."""
+    address = source.removeprefix(UNKNOWN_PREFIX)
+    if address == source:
+        return False
+    try:
+        ipaddress.ip_address(address if "." in address else address.replace("-", ":"))
+    except ValueError:
+        return False
+    try:
+        return (layout.spool / source).is_dir()
+    except OSError:
+        return False
+
+
+def known_source(db: Session, config: Config, source: str, layout: Layout | None = None) -> bool:
+    """Configured (exactly, or ``<network source>-<ip>`` of a configured range), seen, or —
+    with ``layout`` — an unknown sender's ``unknown-<ip>`` spool folder."""
+    if layout is not None and _unknown_sender_folder(layout, source):
+        return True
     if any(configured.name == source for configured in config.sources):
         return True
     for configured in config.sources:
@@ -170,7 +193,7 @@ def raw_line(
     """One raw log line, byte-exact, with its position verified."""
     if not valid_source_name(source):
         raise _error("raw_source_invalid")
-    if not known_source(db, config, source):
+    if not known_source(db, config, source, layout):
         raise _error("raw_source_unknown")
     try:
         found = read_line(layout, source, day, line, offset)

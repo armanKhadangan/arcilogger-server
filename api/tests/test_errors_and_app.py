@@ -34,6 +34,8 @@ EXPECTED_ROUTERS = {
     "/vlans": "devices",
     "/imports": "devices",
     "/sources": "sources",
+    # Canlı Akış, the live tail of the raw spool (contract 2.14).
+    "/live": "live",
     # Kullanım (spec 10, docs/MVP-CONTRACTS.md section 12).
     "/usage": "usage",
     # The "Güvenlik" page and the "Panel" (docs/MVP-CONTRACTS.md section 14).
@@ -182,6 +184,7 @@ def test_serve_uses_configuration(
     assert seen["reload"] is False
     assert seen["proxy_headers"] is True
     assert seen["forwarded_allow_ips"] == "127.0.0.1"
+    assert seen["timeout_graceful_shutdown"] == 5  # an open live tail never holds a stop
     assert isinstance(seen["app"], FastAPI)
     assert cli.main(["--config", str(config), "serve", "--port", "9000"]) == 0
     assert seen["port"] == 9000

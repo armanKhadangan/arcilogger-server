@@ -80,6 +80,8 @@ VAULT_CHECKPOINT_BYTES: Final = 64 * 1024 * 1024
 VAULT_INDEXED_FILES: Final = 8
 #: Sealed files decompressed at the same time; further views wait for a free slot.
 VAULT_SCANS: Final = 2
+#: Larger than any line number a spool file reaches (``raw_line`` is a 32-bit integer).
+MAX_LINE_NUMBER: Final = 2**31 - 1
 #: A vault checkpoint keeps the decompressed start of the line it falls into; where that is
 #: longer, the checkpoint moves on to a later piece (bounds the index's memory).
 CHECKPOINT_TAIL_BYTES: Final = 64 * 1024
@@ -353,6 +355,17 @@ class SpoolIndex:
 
 
 SPOOL_INDEX: Final = SpoolIndex()
+
+
+def spool_anchor(path: Path, identity: tuple[int, int], size: int) -> tuple[int, int]:
+    """The furthest line start :data:`SPOOL_INDEX` knows in a spool file of ``size`` bytes:
+    ``(offset, complete lines before it)``, ``(0, 0)`` without a checkpoint.
+
+    Opens the file's index entry, so checkpoints the caller finds counting on from there can be
+    kept with ``SPOOL_INDEX.record`` (the live tail, :mod:`arcilogger_api.rawtail`).
+    """
+    offset, line = SPOOL_INDEX.start(path, identity, size, MAX_LINE_NUMBER)
+    return offset, line - 1
 
 
 @dataclass(frozen=True)
