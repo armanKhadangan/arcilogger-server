@@ -81,12 +81,15 @@ export interface LeaseInfo {
   end_reason: string;
   confidence: Confidence;
   evidence: EvidenceRef[];
-  /** `mt_dhcp` | `fg_dhcp` | `mt_arp`; `null` in lookups stored before ADR-0016. */
-  source_table: string | null;
+  /**
+   * `mt_dhcp` | `fg_dhcp` | `mt_arp`. Optional, as the next two: `GET /lookup/{id}` returns the
+   * outcome as stored, and lookups stored before ADR-0016 have none of the three (read `null`).
+   */
+  source_table?: string | null;
   /** The lease time the FortiGate logged (seconds; `fg_dhcp` leases only). */
-  lease_seconds: number | null;
+  lease_seconds?: number | null;
   /** The lease's own newest DHCP record at or before the chain's moment. */
-  last_dhcp_evidence: DateTimeString | null;
+  last_dhcp_evidence?: DateTimeString | null;
 }
 
 export interface DeviceInfo {
@@ -144,7 +147,8 @@ export interface AttributionChain {
   confidence: Confidence;
   explanations: Explanation[];
   alternatives: AttributionChain[];
-  mac_source: MacSource;
+  /** Optional: absent in lookups stored before ADR-0016 (read `lease`). */
+  mac_source?: MacSource;
 }
 
 /** The FortiGate session behind a match (from `fg_traffic`). */
@@ -160,10 +164,11 @@ export interface TrafficInfo {
   start: DateTimeString;
   end: DateTimeString;
   evidence: EvidenceRef[];
-  srcintf: string | null;
-  dstintf: string | null;
+  /** Optional, as the next two: absent in lookups stored before ADR-0016 (read `null`). */
+  srcintf?: string | null;
+  dstintf?: string | null;
   /** Only for interfaces listed in `lookup.srcmac_interfaces`. */
-  srcmac: string | null;
+  srcmac?: string | null;
 }
 
 export interface NatMatch {
@@ -175,10 +180,13 @@ export interface NatMatch {
   destination_match: DestinationMatch;
   traffic: TrafficInfo;
   chain: AttributionChain | null;
-  /** The internet exit of the match (from its session row nearest the requested moment). */
-  egress: string | null;
+  /**
+   * The internet exit of the match (from its session row nearest the requested moment).
+   * Optional, as `untrusted_sources`: absent in lookups stored before ADR-0016 (`null`, `[]`).
+   */
+  egress?: string | null;
   /** Sources of its rows that are not configured FortiGate senders (shown as a badge). */
-  untrusted_sources: string[];
+  untrusted_sources?: string[];
 }
 
 /** One internet exit as the lookup used it (the normalised fields of `nat.egresses`). */
@@ -276,10 +284,13 @@ export interface LookupOutcome {
   generated_at: DateTimeString;
   /** More candidates existed than `lookup.max_candidates`. */
   truncated: boolean;
-  /** `null` without a public IP in the request. */
-  egress: LookupEgress | null;
+  /**
+   * `null` without a public IP in the request. Optional, as `unconverted_dhcp`: absent in
+   * lookups stored before ADR-0016 (`null`, `[]`).
+   */
+  egress?: LookupEgress | null;
   /** FortiGate DHCP records of the moment that never entered the lease timeline (cited). */
-  unconverted_dhcp: EvidenceRef[];
+  unconverted_dhcp?: EvidenceRef[];
   result_count: number;
 }
 

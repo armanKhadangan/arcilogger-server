@@ -681,6 +681,38 @@ describe('captured API answers match the TypeScript types', () => {
     }
   });
 
+  it('describes a lookup stored before ADR-0016 (GET /lookup/{id} returns it as stored)', () => {
+    // A lookup stored before the upgrade has none of the fields ADR-0016 added (contract 2.10;
+    // only the PDF and the evidence package read the outcome through `from_dict` defaults), so
+    // the types declare them optional and the result page reads an absent one as its default.
+    const added = new Set([
+      'egress',
+      'unconverted_dhcp',
+      'untrusted_sources',
+      'mac_source',
+      'srcintf',
+      'dstintf',
+      'srcmac',
+      'source_table',
+      'lease_seconds',
+      'last_dhcp_evidence',
+    ]);
+    const removed = new Set<string>();
+    const stored = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(stored);
+      if (!isObject(value)) return value;
+      const kept = Object.entries(value).filter(([key]) => {
+        if (added.has(key)) removed.add(key);
+        return !added.has(key);
+      });
+      return Object.fromEntries(kept.map(([key, item]) => [key, stored(item)]));
+    };
+    const lookups = load('lookups');
+    for (const name of ['exact', 'internal'])
+      expect(lookupSample(stored(lookups[name]), name)).toEqual([]);
+    expect([...removed].sort()).toEqual([...added].sort()); // every field was there to remove
+  });
+
   it('notices a wrong field (the checker itself works)', () => {
     const lookups = load('lookups');
     const broken = structuredClone(lookups.exact) as Record<string, unknown>;
