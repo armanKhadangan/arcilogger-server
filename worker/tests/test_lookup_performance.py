@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from arcilogger_core.timeutil import day_window
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.settings import get_settings
+from arcilogger_db.testing import pause_compression_jobs
 from arcilogger_worker.correlation.leases import rebuild_day
 from arcilogger_worker.lookup import LookupRequest, LookupSettings, run_lookup
 from arcilogger_worker.lookup.sessions import Window, explain_rows
@@ -72,7 +73,15 @@ def _load(engine: Engine) -> dict[str, float]:
     start, _ = (t.astimezone(UTC) for t in day_window(DAY))
     timings: dict[str, float] = {}
     with engine.begin() as connection:
+        timescale = connection.scalar(text("SELECT value FROM settings WHERE key = 'db.timescale'"))
         ensure_partitions(connection, today=DAY)
+    if (timescale or {}).get("compression"):
+        # The compression policies compress every chunk older than 7 days by the server's now(),
+        # and DAY is a fixed past day: a policy the template left due runs when this database's
+        # TimescaleDB scheduler starts (up to a minute after the copy was created) and would
+        # compress the rows loaded here under the lookups. The plans below are those of
+        # uncompressed chunks (their btree indexes), so the policies are paused before the load.
+        pause_compression_jobs(engine)
     params = {
         "day": DAY,
         "rows": SIZE.rows,
