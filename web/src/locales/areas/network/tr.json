@@ -109,6 +109,59 @@
       "srcmacShared": "Bir MAC adresi {{count}} farklı IP adresiyle görüldü (sınır {{limit}}): arayüzün arkasında bir yönlendirici ya da anahtar olabilir.",
       "srcmacTruncated": "En çok 50 arayüz gösterildi.",
       "srcmacHint": "Yönlendirilmiş (L3) bir ağa bakan arayüzü eklemeyin; arada katman 2 anahtarlar varsa arayüzü iki bilinen istemciyle sahada doğruladıktan sonra ekleyin (DEVICE-SETUP.md bölüm 2.5)."
+    },
+    "leaseEvidence": {
+      "title": "Kira kanıtı",
+      "states": {
+        "ok": "Kayıtlar geliyor",
+        "none": "Kayıt gelmiyor",
+        "refused": "Kayıtlar kullanılmıyor"
+      },
+      "refused": "FortiGate DHCP kayıtları geliyor ama son 24 saatte {{refused}} tanesi kullanılmadı; nedenler uyarıda.",
+      "toAlert": "Uyarıyı aç (Güvenlik)",
+      "toSettings": "FortiGate DHCP ayarları",
+      "toAlerts": "Uyarılar",
+      "noneTable": "Kullanılabilir {{evidence}} kaydı gelmiyor (daha önce geliyordu): bu kayıtlara dayanan 5651 sorguları iç IP adresinde durabilir. Kaynağın kayıt göndermesini sağlayın (DEVICE-SETUP.md bölüm 2.4 ve 3).",
+      "noneMikrotikDhcp": "Son 24 saatte yeni MikroTik DHCP kaydı gelmedi; mevcut MikroTik kiraları trafikle sürer, yeni istemciler zincirsiz kalabilir; kayıtların geldiğini denetleyin (DEVICE-SETUP.md bölüm 3).",
+      "absent": "Kullanılabilir DHCP ya da ARP-LOG kaydı gelmiyor: 5651 sorguları iç IP adresinde durur (Kurulum kılavuzu bölüm 0.1). Kira kanıtı isteniyorsa DHCP sunucusunun kayıt göndermesini sağlayın (DEVICE-SETUP.md bölüm 2.4 ve 3).",
+      "evidence": {
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG",
+        "mt_dhcp": "MikroTik DHCP"
+      },
+      "tables": {
+        "mt_dhcp": "MikroTik DHCP",
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG"
+      },
+      "rows_one": "Son 24 saatte {{formatted}} kullanılabilir kayıt",
+      "rows_other": "Son 24 saatte {{formatted}} kullanılabilir kayıt",
+      "leases_one": "{{formatted}} güncel kira",
+      "leases_other": "{{formatted}} güncel kira",
+      "lastHour": "Son kayıt {{time}}",
+      "noneLastHour": "Son bir saatte kayıt yok",
+      "refusedRows_one": "Son 24 saatte {{formatted}} FortiGate DHCP kaydı kira kanıtı olarak kullanılmadı.",
+      "refusedRows_other": "Son 24 saatte {{formatted}} FortiGate DHCP kaydı kira kanıtı olarak kullanılmadı.",
+      "excluded": "Hariç tutulan arayüzler: {{excluded}} kayıt (kira kanıtı sayılmaz)",
+      "unverified": "FortiGate DHCP kayıt biçimi sahada doğrulanmadı (DEVICE-SETUP.md bölüm 2.4).",
+      "srcmac": "srcmac kısmi kanıt arayüzleri: {{interfaces}} · son bir saatte {{rows}} kayıt",
+      "srcmacUncounted": "srcmac kısmi kanıt arayüzleri: {{interfaces}} · son bir saatin kayıtları sayılamadı"
+    },
+    "topology": {
+      "title": "Desteklenen ağ yapıları",
+      "items": {
+        "site": "Tek yerleşke ve internete çıkışta bir FortiGate.",
+        "leases": "Kira kanıtı: MikroTik DHCP ve ARP-LOG kayıtları, FortiGate DHCP olay kayıtları (sahada doğrulanmalı) ya da ikisi (farklı ağlarda).",
+        "statics": "Yalnız-FortiGate ağlarda statik IP'li cihazların kira kaydı olmaz; zincir iç IP adresinde biter. İsteğe bağlı srcmac yalnızca ağ geçidi FortiGate olan ve sahada denetlenmiş ağlarda kısmi kanıt verir.",
+        "otherDhcp": "Başka bir DHCP sunucusu (ör. Windows): kira kaydı yalnızca MikroTik ARP-LOG ile, orta güvenle.",
+        "lines": "Birden çok internet hattı: her hat, arayüzleriyle birlikte, Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlanır.",
+        "doubleNat": "Servis sağlayıcı ikinci bir NAT yapıyorsa sorgu aday listesi verir; genel IP başka müşterilerle paylaşılıyorsa (CGNAT) liste doğru oturumu içermeyebilir.",
+        "unsupported": "Desteklenmeyenler: IPv6 sorguları; aynı ağa iki DHCP sunucusu; FortiGate'in DHCP aktarıcı (relay) olduğu ağlarda FortiGate kira kaydı; aynı adres aralığını kullanan birden çok şube; FortiGate'ten geçmeyen hatlarda sorgu; bir yönlendiricinin ya da L3 anahtarın arkasındaki ağlarda srcmac."
+      },
+      "details": "Ayrıntılar: Kurulum kılavuzu bölüm 0.1"
+    },
+    "sources": {
+      "fortigateHint": "FortiGate'in DHCP sunucusunu kullanıyorsanız sistem olay kayıtları syslog'a gönderilmelidir (DEVICE-SETUP.md bölüm 2.4)."
     }
   }
 }

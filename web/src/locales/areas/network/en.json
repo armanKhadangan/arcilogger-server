@@ -109,6 +109,59 @@
       "srcmacShared": "One MAC address was seen with {{count}} distinct IP addresses (limit {{limit}}): a router or switch may sit behind the interface.",
       "srcmacTruncated": "At most 50 interfaces are shown.",
       "srcmacHint": "Never add an interface that faces a routed (L3) network; when layer-2 switches sit in between, add the interface only after checking it on site with two known clients (DEVICE-SETUP.md section 2.5)."
+    },
+    "leaseEvidence": {
+      "title": "Lease evidence",
+      "states": {
+        "ok": "Records arrive",
+        "none": "No records arrive",
+        "refused": "Records are not used"
+      },
+      "refused": "FortiGate DHCP records arrive but {{refused}} of the last 24 hours were not used; the reasons are in the alert.",
+      "toAlert": "Open the alert (Security)",
+      "toSettings": "FortiGate DHCP settings",
+      "toAlerts": "Alerts",
+      "noneTable": "No usable {{evidence}} record arrives (it did before): 5651 lookups that rest on these records may stop at the internal IP. Make the source send its records (DEVICE-SETUP.md sections 2.4 and 3).",
+      "noneMikrotikDhcp": "No new MikroTik DHCP record in the last 24 hours; existing MikroTik leases continue with traffic, new clients may have no chain; check that the records arrive (DEVICE-SETUP.md section 3).",
+      "absent": "No usable DHCP or ARP-LOG record arrives: 5651 lookups stop at the internal IP (installation guide section 0.1). For lease evidence, make the DHCP server send its records (DEVICE-SETUP.md sections 2.4 and 3).",
+      "evidence": {
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG",
+        "mt_dhcp": "MikroTik DHCP"
+      },
+      "tables": {
+        "mt_dhcp": "MikroTik DHCP",
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG"
+      },
+      "rows_one": "{{formatted}} usable record in the last 24 hours",
+      "rows_other": "{{formatted}} usable records in the last 24 hours",
+      "leases_one": "{{formatted}} current lease",
+      "leases_other": "{{formatted}} current leases",
+      "lastHour": "Latest record {{time}}",
+      "noneLastHour": "No record in the last hour",
+      "refusedRows_one": "{{formatted}} FortiGate DHCP record of the last 24 hours was not used as lease evidence.",
+      "refusedRows_other": "{{formatted}} FortiGate DHCP records of the last 24 hours were not used as lease evidence.",
+      "excluded": "Excluded interfaces: {{excluded}} records (not lease evidence)",
+      "unverified": "FortiGate DHCP record format not verified on site (DEVICE-SETUP.md section 2.4).",
+      "srcmac": "srcmac partial-evidence interfaces: {{interfaces}} · {{rows}} records in the last hour",
+      "srcmacUncounted": "srcmac partial-evidence interfaces: {{interfaces}} · the records of the last hour could not be counted"
+    },
+    "topology": {
+      "title": "Supported network setups",
+      "items": {
+        "site": "One site with one FortiGate at the internet edge.",
+        "leases": "Lease evidence: MikroTik DHCP and ARP-LOG records, FortiGate DHCP event records (to be verified on site), or both (on different networks).",
+        "statics": "On FortiGate-only networks static-IP devices have no lease; the chain ends at the internal IP. Optional srcmac gives partial evidence only on networks whose gateway is the FortiGate, after a site check.",
+        "otherDhcp": "Another DHCP server (e.g. Windows): leases only through MikroTik ARP-LOG, with medium confidence.",
+        "lines": "Several internet lines: each line is defined, with its interfaces, in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+        "doubleNat": "When the ISP does a second NAT, lookups give a candidate list; when the public IP is shared with other customers (CGNAT), the list may not contain the right session.",
+        "unsupported": "Not supported: IPv6 lookups; two DHCP servers on one network; FortiGate leases where the FortiGate is a DHCP relay; several branches with the same address range; lookups for lines that do not pass the FortiGate; srcmac behind a router or an L3 switch."
+      },
+      "details": "Details: installation guide section 0.1"
+    },
+    "sources": {
+      "fortigateHint": "If you use the FortiGate's DHCP server, its system event records must go to syslog (DEVICE-SETUP.md section 2.4)."
     }
   }
 }
