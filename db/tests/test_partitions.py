@@ -127,7 +127,7 @@ def test_plain_upgrade_partitions_every_time_series_table(plain_engine: Engine) 
     assert status["storage"] == "partitions"
     assert status["partitioned"] == list(TIME_SERIES_TABLES)
     assert status["hypertables"] == []
-    assert overview.tables == 15
+    assert overview.tables == 16
     assert overview.default_rows == dict.fromkeys(TIME_SERIES_TABLES, False)
 
 

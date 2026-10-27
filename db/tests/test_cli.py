@@ -101,7 +101,7 @@ def test_check_upgrade_current_on_an_empty_database(
     assert status == (1 if report["warnings"] else 0)
     partitioned = report["timescale"]["storage"] == "partitions"
     if partitioned:
-        assert report["partitions"]["tables"] == 15
+        assert report["partitions"]["tables"] == 16
         assert report["partitions"]["default_rows"] == []
         assert not any("bölüm" in w for w in report["warnings"])
     # Only these fields are reported; the password is not among them.
@@ -133,8 +133,8 @@ def test_partitions_command_and_missing_horizon_warning(
         assert "TimescaleDB hypertable" in second
         return
     back = months_back_for(site_day(utc_now()), 400)  # the db.retention_days window
-    assert f"15 tablo, {15 * (back + 1 + 3)} yeni bölüm" in out  # … + current + 3 ahead
-    assert "15 tablo, 0 yeni bölüm" in second  # idempotent
+    assert f"16 tablo, {16 * (back + 1 + 3)} yeni bölüm" in out  # … + current + 3 ahead
+    assert "16 tablo, 0 yeni bölüm" in second  # idempotent
     # Without next month's partitions `check` asks for attention.
     engine = make_engine(load_config(setup))
     future = [add_months(month_of(site_day(utc_now())), n) for n in (1, 2, 3)]
@@ -146,7 +146,7 @@ def test_partitions_command_and_missing_horizon_warning(
     report = json.loads(capsys.readouterr().out)
     assert any("arcilogger-db partitions" in w for w in report["warnings"])
     assert main(["partitions", "--config", config]) == 0
-    assert "15 tablo, 3 yeni bölüm" in capsys.readouterr().out
+    assert "16 tablo, 3 yeni bölüm" in capsys.readouterr().out
 
 
 def test_check_warns_when_timescaledb_is_installed_but_unused(
