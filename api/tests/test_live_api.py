@@ -16,6 +16,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -745,6 +746,9 @@ def test_concurrent_opens_never_overshoot_the_limits(
 ) -> None:
     """Two tabs (or two automatic re-opens) at once: the limit is checked where the stream is
     registered, with no ``await`` between, so exactly the allowed number open."""
+    # The streams are never read, so they linger from the moment they open: FAST's 1.5 s could
+    # run out before the four requests of a round have finished on a slow runner (Windows).
+    hub.timing = replace(FAST, linger=60.0)
     spool.write("fortigate", traffic())
     client, who = clients()
     for _ in range(5):
