@@ -334,7 +334,7 @@ and 1.1–1.2 s, 5–6 % of a run with 2 workers: there it runs in the service p
 
 **After the cached upsert (2026-10-27).** `upsert_counts` now sends one fixed `unnest`
 statement instead of building a multi-row `INSERT` per batch (above). The same load-generator
-day, ABBA twice, 8 runs per tree and worker count (load average 2.9–4.2, another agent's work
+day, ABBA twice, 8 runs per tree and worker count (load average 2.0–4.0, another agent's work
 sharing the machine); min–max (median) lines/s:
 
 | Load-generator day | in-process | `--workers 2` |
