@@ -627,6 +627,35 @@ def test_the_stream_holds_no_database_connection(
         reader.close()
 
 
+def test_a_server_stop_ends_the_stream_and_audits_it(
+    app: FastAPI, hub: Hub, spool: Spool, app_session_factory: sessionmaker[Session]
+) -> None:
+    """The service stopping (contract 2.15, R16): the open stream gets ``end {server_stopping}``,
+    the server is down within its graceful timeout plus the 1 s of that last write, and
+    ``live.close`` records ``server_stopping``."""
+    spool.write("fortigate", traffic())
+    graceful = 1
+    stopping = LiveServer(app, graceful_seconds=graceful)
+    with stopping, httpx.Client(base_url=stopping.url, timeout=10) as client:
+        sign_in(client, app_session_factory)
+        opened = open_stream(client)
+        reader = Reader(client, opened["stream_id"])
+        reader.wait(lambda r: bool(r.of("hello")))
+        began = time.monotonic()
+        stopping.__exit__(None, None, None)  # what the service stop does (repeating it is harmless)
+        took = time.monotonic() - began
+        reader.done.wait(5)
+        reader.close()
+    assert not stopping.thread.is_alive()
+    assert [LiveEnd.model_validate(event.data).code for event in reader.of("end")] == [
+        "server_stopping"
+    ]
+    assert took < graceful + 1, took
+    closes = audits(app_session_factory, "live.close")
+    assert [entry.details["reason"] for entry in closes] == ["server_stopping"]
+    assert closes[0].details["stream_id"] == opened["stream_id"]
+
+
 # -- refusals ------------------------------------------------------------------------------------
 
 
