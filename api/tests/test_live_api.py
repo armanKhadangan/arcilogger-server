@@ -55,6 +55,12 @@ FAST = Timing(
 FIREWALL = "172.31.255.1"
 ROUTER = "172.20.10.1"
 STREAM_HEADERS = {"X-Arci-Background": "1", "Accept": "text/event-stream"}
+LIVE_ENDPOINTS = (
+    ("POST", "/api/v1/live/streams"),
+    ("GET", "/api/v1/live/streams/ornek-akis"),
+    ("DELETE", "/api/v1/live/streams/ornek-akis"),
+    ("GET", "/api/v1/live/status"),
+)
 
 
 def traffic(srcip: str = "172.20.41.105", action: str = "accept", dstport: int = 443) -> str:
@@ -748,16 +754,41 @@ def test_permissions_and_the_kvkk_notice(
     client, _ = clients(role, notice=notice)
     response = client.post("/api/v1/live/streams", json={})
     assert (response.status_code, response.json()["error"]["code"]) == (403, code)
-    for path in ("/api/v1/live/status",):
-        if role in ("hr", "viewer"):
-            assert client.get(path).status_code == 403
+    if role in ("hr", "viewer"):
+        for method, path in LIVE_ENDPOINTS:
+            response = client.request(method, path, headers=STREAM_HEADERS)
+            assert (response.status_code, response.json()["error"]["code"]) == (
+                403,
+                "forbidden",
+            ), path
 
 
-def test_csrf_is_required_to_open_and_close(clients: Clients) -> None:
+@pytest.mark.parametrize(("method", "path"), LIVE_ENDPOINTS)
+def test_a_password_change_comes_first(
+    clients: Clients, spool: Spool, method: str, path: str
+) -> None:
+    client, _ = clients(must_change_password=True)
+    response = client.request(
+        method, path, json={} if method == "POST" else None, headers=STREAM_HEADERS
+    )
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        403,
+        "password_change_required",
+    )
+
+
+def test_csrf_is_required_to_open_and_close(clients: Clients, spool: Spool) -> None:
     client, _ = clients()
-    del client.headers["X-CSRF-Token"]
+    spool.write("fortigate", traffic())
+    opened = open_stream(client)
+    token = client.headers.pop("X-CSRF-Token")
     response = client.post("/api/v1/live/streams", json={})
     assert (response.status_code, response.json()["error"]["code"]) == (403, "csrf_failed")
+    url = f"/api/v1/live/streams/{opened['stream_id']}"
+    response = client.delete(url)
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "csrf_failed")
+    client.headers["X-CSRF-Token"] = token
+    assert client.delete(url).status_code == 204  # it was still open
 
 
 # -- texts and the session check -----------------------------------------------------------------

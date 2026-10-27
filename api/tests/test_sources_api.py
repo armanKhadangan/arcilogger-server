@@ -485,6 +485,25 @@ def test_unknown_names_and_permissions(
             )
 
 
+@pytest.mark.parametrize(
+    "path", ["/api/v1/sources", "/api/v1/sources/fortigate", "/api/v1/sources/fortigate/tail"]
+)
+def test_a_password_change_comes_first(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    site: None,
+    path: str,
+) -> None:
+    who = login_as(client, "admin", must_change_password=True)
+    accept_privacy(app_session_factory, who.user_id)
+    response = client.get(path)
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        403,
+        "password_change_required",
+    )
+
+
 def test_failure_details_and_the_tail_need_raw_access(
     client: TestClient,
     login_as: Login,
