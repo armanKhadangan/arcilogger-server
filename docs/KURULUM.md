@@ -1017,6 +1017,33 @@ tamamlanır, çıkış kodu `1` olur ve betik elle çalıştırılacak komutu ya
 powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
 ```
 
+**Arama'lı sürüme yükseltme (şema revizyonu `0016_search`).** Şema yükseltmesi web filtresi
+tablosu `fg_web` üzerinde yeni bir indeks oluşturur: `ix_fg_web_rhost_time` ("bu alan adı ve alt
+alan adları" araması). Geliştirme makinesinde (4 vCPU, varsayılan `maintenance_work_mem` değeri
+64 MB olan PostgreSQL 16, aylık bölümler) **10 milyon `fg_web` satırı başına yaklaşık 15 saniye**
+sürdü (13–15 sn, indeks 553 MiB; 2026-10-26 ölçümü, makinede başka işler de çalışırken ve 3,6 GiB
+tablo bellekteyken: diskten okunan bir tabloda ya da yavaş bir diskte daha uzun sürer). Günde 1
+milyon log satırında, bunların yaklaşık %18'i web filtresi satırıyken, 400 gün yaklaşık 72 milyon
+`fg_web` satırı eder: yaklaşık 2 dakika, belleğe sığmıyorsa daha uzun; günde 5 milyon satırda beş
+katı. Şema yükseltilirken ingest durur; toplayıcı spool'a yazmayı sürdürür, hiçbir şey kaybolmaz
+ve ingest ardından yetişir ([INGEST.md](INGEST.md)). Yükseltmeden sonra worker işi
+`search.counts_backfill`, yükseltmeden önce yüklenmiş günleri Arama'nın özet tablosuna 10
+dakikada bir, en yeni gün önce sayar: bir dakikadan sonra yeni dosyaya başlamaz; bir dosyanın
+yeniden sayımı milyon satır başına yaklaşık 9 sn sürer (geliştirme makinesi) ve worker'ın öteki
+işleri onu bekler. Bir gün sayılana kadar Arama o günün istatistiklerini doğrudan sayar (daha
+yavaş, sonuç aynı). Sayılmayı bekleyenler:
+
+```powershell
+& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" search-counts status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
+```
+
+**Aynı anda çok kişi arama yapıyorsa.** Aramalar, canlı akışlar, raporlar ve web arayüzünün bütün
+sayfaları API'nin veritabanı bağlantılarını paylaşır (`[database] pool_size`, varsayılan 5).
+Arama'yı aynı anda birkaç kişinin kullandığı bir kurumda `arcilogger.toml` içinde `pool_size`
+10'a, `search.max_concurrent` ayarı da onunla birlikte yükseltilir (en çok `pool_size` eksi 2;
+Ayarlar → Arama ve canlı akış, [AYARLAR.md](AYARLAR.md)), ardından hizmetler yeniden başlatılır
+(bölüm 12).
+
 ## 14. Kaldırma
 
 ```powershell
@@ -1107,6 +1134,10 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   tarama mı).
 - Gece veritabanı yedeği: ilk gecenin `D:\ARCILOGGER\state\backup\last.json` sonucu, yedeğin
   süresi ve boyutu, ilk geri yükleme tatbikatı ([YEDEKLEME.md](YEDEKLEME.md) bölüm 6 ve 8).
+- Arama'lı sürüme yükseltmede `ix_fg_web_rhost_time` indeksiyle şema yükseltmesinin gerçek
+  veritabanında ne kadar sürdüğü (bölüm 13) ve ilk günlerden sonra
+  `arcilogger-db search-counts verify` sonucu: özet tablosu satırlarla aynı olmalı; küçük harfle
+  saklanmayan ad sayıları (`fg_dns.qname`, `fg_web.hostname`) 0 olmalı.
 - Tarayıcı yönetimi ([AYARLAR.md](AYARLAR.md) bölüm 9): `arcilogger.toml` değiştirildikten sonra
   ArciAdmin'in dosyaya özel izninin yerinde kalması (`Get-Acl`), ArciAdmin'in `kamusm-roots`
   klasörüne yalnızca kendi dosyalarını ekleyip silebilmesi, `ARCILOGGER-Admin` olaylarının

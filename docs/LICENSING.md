@@ -137,6 +137,7 @@ data of a module that is off is not deleted.
 | `usage.retention` | — (deletion of personal data) | always runs |
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
+| `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off
 (exit code 1, the `module_not_licensed` message). `arcilogger-worker run`, `rebuild` (the lease

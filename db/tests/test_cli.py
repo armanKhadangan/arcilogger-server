@@ -6,12 +6,14 @@ import io
 import json
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Iterator
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import insert, select, text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.config import load_config
@@ -22,8 +24,9 @@ from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.cli import main
 from arcilogger_db.engine import make_engine
 from arcilogger_db.migrate import head_revisions
-from arcilogger_db.models import AuditLog, Setting
+from arcilogger_db.models import AuditLog, IngestOffset, Message, Setting
 from arcilogger_db.partitions import add_months, month_of, months_back_for, partition_name
+from arcilogger_db.searchcounts import count_key, hour_of, upsert_counts
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.testing import TestServer
 
@@ -351,3 +354,125 @@ def test_settings_commands_need_a_reachable_database_and_a_known_key(
     assert main(["settings", "set", "no.such.key", "1", "--by", "a", "--config", str(path)]) == 2
     assert main(["settings", "--config", str(path)]) == 2  # no action: help
     capsys.readouterr()
+
+
+# -- search-counts: the search summary table (ADR-0015) -------------------------------------------
+
+
+def _half_counted_file(path: Path, source: str, day: date, lines: int) -> None:
+    """A file as an upgrade leaves it while ingest goes on: ``lines`` rows of the previous full
+    hour, its ``ingest_offsets`` row with ``counts_from_line = 3`` and the counts of lines 3 on."""
+    hour = hour_of(utc_now()) - timedelta(hours=1)
+    rows = [
+        {
+            "time": hour + timedelta(minutes=5 * number),
+            "time_received": hour + timedelta(minutes=5 * number),
+            "source": source,
+            "sender": "172.31.255.1",
+            "raw_day": day,
+            "raw_line": number,
+            "raw_offset": 100 * (number - 1),
+            "type": "traffic",
+            "subtype": "forward",
+            "text": f"line {number}",
+        }
+        for number in range(1, lines + 1)
+    ]
+    engine = make_engine(load_config(path))
+    try:
+        with engine.begin() as connection:
+            connection.execute(insert(Message), rows)
+            connection.execute(
+                insert(IngestOffset).values(
+                    source=source,
+                    day=day,
+                    byte_offset=100 * len(rows),
+                    line_number=len(rows),
+                    counts_from_line=3,
+                )
+            )
+            upsert_counts(connection, Counter(count_key(row, None, None) for row in rows[2:]))
+    finally:
+        engine.dispose()
+
+
+def _sql(path: Path, statement: str) -> Any:
+    engine = make_engine(load_config(path))
+    try:
+        with engine.begin() as connection:
+            result = connection.execute(text(statement))
+            return result.scalar() if result.returns_rows else None
+    finally:
+        engine.dispose()
+
+
+def test_search_counts_status_rebuild_and_verify(
+    setup: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = str(setup)
+    assert main(["upgrade", "--config", config]) == 0
+    day = site_day(utc_now())
+    _half_counted_file(setup, "fortigate", day, 4)
+    capsys.readouterr()
+
+    assert main(["search-counts", "status", "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert "1 anahtar [keys], 2 satır [lines]" in out
+    assert "Sayılmayı bekleyen dosyalar [files waiting to be counted]: 1 (0 bitmiş" in out
+    assert f"fortigate {day}: ilk 2 satır sayılmadı [lines not counted], yükleniyor" in out
+
+    # The file waiting for its recount is left out of the comparison.
+    assert main(["search-counts", "verify", "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert "Henüz sayılmamış 1 dosya karşılaştırılmadı [files not counted yet were left out]" in out
+    assert f"left out]: fortigate {day}\n" in out
+    assert "fg_dns.qname 0, fg_web.hostname 0" in out
+
+    args = ["search-counts", "rebuild", "--source", "fortigate", "--day", day.isoformat()]
+    assert main([*args, "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert f"fortigate {day}: 4 satır yeniden sayıldı [lines recounted], 1 anahtar [keys]" in out
+    assert "Yükseltmeden önce yüklenen satırlar da sayıldı" in out
+    assert _sql(setup, "SELECT counts_from_line FROM ingest_offsets") is None
+    assert _sql(setup, "SELECT sum(n) FROM search_counts") == 4
+
+    assert main(["search-counts", "status", "--config", config]) == 0
+    assert "Sayılmayı bekleyen dosya yok" in capsys.readouterr().out
+    assert main(["search-counts", "verify", "--hours", "2", "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert "1 anahtar [keys], 4 satır [lines]" in out
+    assert "Özet tablosu satırlarla aynı [the summary table matches the rows]." in out
+
+    _sql(setup, "UPDATE search_counts SET n = n + 1")
+    assert main(["search-counts", "verify", "--config", config]) == 1
+    captured = capsys.readouterr()
+    assert "FARK [difference]: 1 anahtar" in captured.err
+    assert "satırlar [rows] 4, tablo [table] 5" in captured.err
+    assert f"arcilogger-db search-counts rebuild --source fortigate --day {day}" in captured.err
+    assert main([*args, "--config", config]) == 0  # the repair it names
+    assert "Yükseltmeden" not in capsys.readouterr().out
+    assert main(["search-counts", "verify", "--config", config]) == 0
+
+
+def test_search_counts_refuses_bad_input_and_needs_the_database(
+    setup: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = str(setup)
+    bad_day = ["search-counts", "rebuild", "--source", "fortigate", "--day", "2026-13-01"]
+    assert main([*bad_day, "--config", config]) == 2
+    assert "Geçersiz gün [invalid day]: 2026-13-01" in capsys.readouterr().err
+    for hours in ("-1", "745"):
+        assert main(["search-counts", "verify", "--hours", hours, "--config", config]) == 2
+        assert "--hours 0 ile 744 arasında olmalı" in capsys.readouterr().err
+    assert main(["search-counts", "--config", config]) == 2  # no action: help
+    path = tmp_path / "unreachable.toml"
+    path.write_text(
+        CONFIG.format(
+            data=(tmp_path / "data").as_posix(), host="127.0.0.1", port=1, name="x", user="x"
+        ),
+        encoding="utf-8",
+    )
+    day = ["--source", "fortigate", "--day", "2026-10-25"]
+    for action in (["status"], ["rebuild", *day], ["verify"]):
+        assert main(["search-counts", *action, "--config", str(path)]) == 3
+        assert "Veritabanına bağlanılamadı" in capsys.readouterr().err

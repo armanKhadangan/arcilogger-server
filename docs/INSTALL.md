@@ -877,6 +877,32 @@ The pre-upgrade dumps (`backups\db`) are separate from the nightly dumps (`backu
 [BACKUP.md](BACKUP.md)) and never deleted automatically; delete old ones by hand. An upgrade waits
 for running tasks: do not start it while the nightly dump (01:40) runs.
 
+**Upgrading to the version with Arama (search; schema revision `0016_search`).** The migration
+builds one new index, `ix_fg_web_rhost_time` on the web filter table `fg_web` (the search for "this
+domain and its subdomains"). On the development machine (4 vCPU, PostgreSQL 16 with its default
+`maintenance_work_mem` of 64 MB, monthly partitions) it took **about 15 seconds per 10 million
+`fg_web` rows** (13–15 s, index 553 MiB; measured 2026-10-26 while other work ran on the machine,
+with the 3.6 GiB table in memory: a table read from disk, or a slower disk, takes longer). At 1
+million log lines a day, about 18 % of them web filter lines, 400 days hold about 72 million
+`fg_web` rows: about 2 minutes, more when they do not fit in memory; at 5 million lines a day five
+times as long. Ingest is stopped while the schema is migrated; the collector keeps writing the
+spool, so nothing is lost and ingest catches up afterwards ([INGEST.md](INGEST.md)). After the
+upgrade the worker job `search.counts_backfill` counts the days loaded before it into Arama's
+summary table every 10 minutes, newest day first: it starts no new file after a minute; one
+file's recount takes about 9 s per million lines (development machine), and the worker's other
+jobs wait for it. Until a day is counted, Arama counts that day's statistics directly (slower,
+same result). What is still to count:
+
+```powershell
+& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" search-counts status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
+```
+
+**Many people searching at once.** Searches, live streams, reports and every page of the web
+interface share the API's database connections (`[database] pool_size`, default 5). A site where
+several people use Arama at the same time raises `pool_size` to 10 in `arcilogger.toml` and the
+setting `search.max_concurrent` with it (at most `pool_size` minus 2; Ayarlar → Arama ve canlı
+akış, [SETTINGS.md](SETTINGS.md)), then restarts the services (section 12).
+
 ## 14. Removal
 
 `Install-Arcilogger.ps1 -Uninstall` first pauses the scheduled tasks and waits for a running one
@@ -947,7 +973,11 @@ Core Networking's rules; Microsoft Defender's state and the two exclusions of se
 after the installation (`Get-MpPreference`), and the owner's decision on `spool` and `vault`
 (exclusion or scheduled scan only); the first night's `D:\ARCILOGGER\state\backup\last.json`, the
 duration and size of the nightly database dump and the first restore drill ([BACKUP.md](BACKUP.md)
-sections 6 and 8); that the Python services start with the isolated interpreter (`Get-CimInstance
+sections 6 and 8); on the upgrade to the version with Arama, how long the schema migration with
+`ix_fg_web_rhost_time` takes on the real database (section 13) and, after the first days,
+`arcilogger-db search-counts verify`: the summary table must match the rows and the counts of
+names not stored in lower case (`fg_dns.qname`, `fg_web.hostname`) must be 0; that the Python
+services start with the isolated interpreter (`Get-CimInstance
 Win32_Process -Filter "Name = 'python.exe'" | Format-List CommandLine`: `python.exe -I -X utf8 -u
 -m arcilogger_api serve …`; `sc.exe qc` shows the service wrapper) and that the server id reads the
 same under the ArciApi service's virtual account and in an administrator PowerShell (the server
