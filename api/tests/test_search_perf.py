@@ -7,8 +7,10 @@ generate_series`` (the technique of ``test_dashboard_api.py``) into ``messages``
 tables with the same time and raw reference; the mix of docs/INGEST.md (35 % DNS, 27 % traffic,
 18 % web, 17 % application control, 1 % FortiGate events, 2 % MikroTik DHCP/ARP/firewall), 150
 clients on the example network's VLANs, 5 % of the web rows blocked, a templated key=value text
-of about 700 characters per line, and needles: one client with about 13,000 rows over the 30
-days, one rare domain, one rare DNS name, one rare MAC address and one rare free-text token.
+of about 700 characters per line, plus 4,320 MikroTik events a day in ``mt_event`` (heartbeats
+and Wi-Fi, one in a hundred a DHCP offer), and needles: one client with about 13,000 rows over
+the 30 days, one rare domain, one rare DNS name, one rare MAC address (DHCP leases and offers)
+and one rare free-text token.
 ``search_counts`` is filled with ``searchcounts.rebuild_stream``; ``VACUUM ANALYZE``; on
 TimescaleDB the chunks older than 7 days are compressed before timing.
 
@@ -18,14 +20,17 @@ printed too. The numbers are recorded in docs/ARAMA.md / docs/SEARCH.md ("Perfor
 **Plans:** for Q2-Q7 the statement of a whole-range window is explained (``EXPLAIN (FORMAT
 JSON)``, each scan's table resolved from its partition or chunk): no ``Seq Scan`` and no
 primary-key range scan of a high-volume table (``messages``, ``fg_traffic``, ``fg_web``,
-``fg_dns``, ``fg_app``) — a compressed chunk's ``DecompressChunk`` is allowed — and the index
-the query is meant to use appears. Q3's /24 holds about a fifth of the clients, so reading the
-primary key backwards until the page is full is the cheapest plan there: only a ``Seq Scan`` is
-refused.
+``fg_dns``, ``fg_app``) — a compressed chunk's ``DecompressChunk`` is allowed — and the indexes
+the query is meant to use appear (Q6: ``mt_dhcp``'s MAC index and ``mt_event``'s event index).
+Q3's /24 holds about a fifth of the clients, so reading the primary key backwards until the page
+is full is the cheapest plan there: only a ``Seq Scan`` is refused. Q10 checks that every
+exported row has its typed and ``messages`` columns.
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 import re
 import time
@@ -73,6 +78,9 @@ RARE_DOMAIN = "nadir-alan.example.com"
 RARE_MAC = "00:00:5e:00:53:fe"
 RARE_TOKEN = "zzqnadirjeton"
 HIGH_VOLUME = ("messages", "fg_traffic", "fg_web", "fg_dns", "fg_app")
+#: MikroTik events a day (one every 20 s), with raw line numbers after the needles'.
+EVENTS_PER_DAY = 4_320
+EVENT_LINES = 1_000
 #: Budgets in seconds (contract 3.5).
 BROWSE = 0.5
 DAY_ROWS = 2.0
@@ -182,6 +190,38 @@ TYPED_SQL = {
 }
 
 
+#: Heartbeats and Wi-Fi of the router, one in a hundred a DHCP offer; MACs of the documentation
+#: range, never ``RARE_MAC``.
+_EVENT = (
+    "CASE WHEN n % 100 = 0 THEN 'dhcp_offering' WHEN n % 3 = 0 THEN 'heartbeat' "
+    "WHEN n % 2 = 0 THEN 'wifi_connect' ELSE 'wifi_disconnect' END"
+)
+_EVENT_SERIES = (
+    "WITH g AS (SELECT n, CAST(:start AS timestamptz) + n * CAST(:step AS interval) AS t, "  # noqa: S608 - fixed SQL fragments
+    "CAST(:first AS bigint) + n AS line, (n * 7919) % 150 AS c "
+    "FROM generate_series(CAST(1 AS bigint), CAST(:rows AS bigint)) AS n), "
+    f"e AS (SELECT g.*, {_EVENT} AS event FROM g) "
+)
+_EVENT_COMMON = "t, t, 'core-r1', CAST('172.20.10.1' AS inet), :day, line, line * 750"
+EVENT_MESSAGES_SQL = text(
+    _EVENT_SERIES  # noqa: S608 - fixed SQL fragments
+    + f"INSERT INTO messages ({_COLUMNS}, severity, facility, host, type, text) "
+    + f"SELECT {_EVENT_COMMON}, 6, 23, 'core-r1', "
+    + "CASE WHEN event = 'dhcp_offering' THEN 'dhcp' WHEN event = 'heartbeat' THEN 'heartbeat' "
+    + "ELSE 'wifi' END, 'mikrotik ' || event || ' ' || host("
+    + _CLIENT
+    + ") FROM e"
+)
+EVENT_SQL = text(
+    _EVENT_SERIES  # noqa: S608 - fixed SQL fragments
+    + f"INSERT INTO mt_event ({_COLUMNS}, event, interface, mac, ip) "
+    + f"SELECT {_EVENT_COMMON}, event, 'wlan1', "
+    + "CAST('00:00:5e:00:53:' || lpad(to_hex(c), 2, '0') AS macaddr), "
+    + _CLIENT
+    + " FROM e"
+)
+
+
 def _step(span: timedelta, rows: int) -> str:
     return f"{span.total_seconds() * 1_000_000 / (rows + 1):.3f} microseconds"
 
@@ -192,6 +232,15 @@ def _load_day(connection: Any, day: date, rows: int) -> None:
     connection.execute(MESSAGES_SQL, {**params, "padding": _PADDING})
     for statement in TYPED_SQL.values():
         connection.execute(text(_SERIES + statement), params)
+    events = {
+        "start": start,
+        "step": _step(end - start, EVENTS_PER_DAY),
+        "rows": EVENTS_PER_DAY,
+        "day": day,
+        "first": rows + EVENT_LINES,
+    }
+    connection.execute(EVENT_MESSAGES_SQL, events)
+    connection.execute(EVENT_SQL, events)
 
 
 _ROW = (
@@ -251,6 +300,18 @@ def _needles(connection: Any, day: date, rows: int, newest: bool) -> None:
                 },
             )
         )
+        lines.append(
+            (
+                "mt_event",
+                {
+                    "time": moment + timedelta(seconds=3),
+                    "event": "dhcp_offering",
+                    "ip": "172.20.41.77",
+                    "mac": RARE_MAC,
+                    "interface": "vlan41",
+                },
+            )
+        )
     if newest:
         for index in range(10):
             lines.append(
@@ -260,7 +321,7 @@ def _needles(connection: Any, day: date, rows: int, newest: bool) -> None:
         number = first + offset
         moment = values.pop("time")
         token = values.pop("token", False)
-        mikrotik = table == "mt_dhcp"
+        mikrotik = table in ("mt_dhcp", "mt_event")
         common = {
             "time": moment,
             "time_received": moment,
@@ -276,6 +337,7 @@ def _needles(connection: Any, day: date, rows: int, newest: bool) -> None:
             "fg_dns": ("utm", "dns"),
             "fg_app": ("utm", "app-ctrl"),
             "mt_dhcp": ("dhcp", None),
+            "mt_event": ("dhcp", None),
             None: ("syslog", None),
         }[table]
         body = f"needle {RARE_TOKEN} " if token else "needle "
@@ -307,7 +369,7 @@ def _timescale(engine: Engine) -> bool:
 def _compress_old_chunks(engine: Engine, before: datetime) -> int:
     compressed = 0
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-        for table in ("messages", *TYPED_SQL):
+        for table in ("messages", *TYPED_SQL, "mt_event"):
             compressed += len(
                 connection.execute(
                     text(
@@ -551,23 +613,26 @@ def test_search_performance(site: Site) -> None:
     check_plan(q3, primary=True)
 
     # Q4-Q7 over 30 days.
-    for name, q, index in (
+    for name, q, indexes in (
         (
             "Q4",
             f"srcip:{NEEDLE} type:web action:blocked",
-            r"srcip_time",
+            (r"srcip_time",),
         ),
         # a partition's own index is named after the expression: ``…_reverse_time_idx``
-        ("Q5", f"domain:{RARE_DOMAIN} type:web", r"rhost_time|reverse_time"),
-        ("Q6", f"type:dhcp mac:{RARE_MAC}", r"mac_time"),
-        ("Q7", f"qname:{RARE_DOMAIN}", r"qname_time"),
+        ("Q5", f"domain:{RARE_DOMAIN} type:web", (r"rhost_time|reverse_time",)),
+        # ``mt_event`` has no MAC index: its DHCP events are found by the event index
+        ("Q6", f"type:dhcp mac:{RARE_MAC}", (r"mac_time", r"mt_event\w*_event_time")),
+        ("Q7", f"qname:{RARE_DOMAIN}", (r"qname_time",)),
     ):
         cold, best, page = measure(partial(search, site, q, *month))
         report(f"{name} 30 d", q, cold, best, MONTH_ROWS)
         assert page["items"], q
         assert page["scan"]["complete"] is True
         assert best < MONTH_ROWS
-        check_plan(explain(site, q, *month), index)
+        check_plan(explain(site, q, *month), *indexes)
+    q6 = {item["table"] for item in search(site, f"type:dhcp mac:{RARE_MAC}", *month)["items"]}
+    assert q6 == {"mt_dhcp", "mt_event"}
 
     # Q8 statistics from the summary table, equal to direct counting.
     q8 = "type:web action:blocked department:Finans"
@@ -621,6 +686,13 @@ def test_search_performance(site: Site) -> None:
     assert response.status_code == 200, response.text
     assert response.headers.get("X-Arci-Export-Truncated") == "rows"
     assert response.content.count(b"\r\n") == 10_001
+    exported = list(
+        csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"), newline=""), delimiter=";")
+    )
+    assert len(exported) == 10_000
+    # Every row has its typed and its ``messages`` columns: none was written half filled.
+    assert all(row["Kaynak IP"] == NEEDLE for row in exported)
+    assert all(row["Metin"].startswith("needle ") for row in exported)
     assert best < EXPORT
 
     # S1-S3 scans stop at the budget and say honestly how far they got.
