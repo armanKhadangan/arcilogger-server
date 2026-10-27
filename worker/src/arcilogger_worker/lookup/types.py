@@ -999,9 +999,7 @@ def _object(
     return list(value.items())
 
 
-def _lookup_texts(
-    values: Mapping[str, Any], key: str, default: tuple[str, ...]
-) -> tuple[str, ...]:
+def _lookup_texts(values: Mapping[str, Any], key: str, default: tuple[str, ...]) -> tuple[str, ...]:
     """The texts of a list setting only the lookup reads; ``default`` for any other value."""
     items = values.get(key, default)
     return tuple(str(item) for item in items) if isinstance(items, list | tuple) else default
