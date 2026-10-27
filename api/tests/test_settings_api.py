@@ -282,6 +282,6 @@ def test_the_fortigate_and_nat_settings_are_accepted_and_refused(
     assert value(app_session_factory, "lookup.srcmac_interfaces") == ["vlan42"]
     assert value(app_session_factory, "lookup.srcmac_max_ips") == 2
     assert value(app_session_factory, "nat.snat_trandisp") == ["snat", "dnat+snat"]
-    assert sorted(entry.target for entry in changes(app_session_factory)) == [
+    assert sorted(str(entry.target) for entry in changes(app_session_factory)) == [
         f"setting:{key}" for key in sorted(defaults)
     ]
