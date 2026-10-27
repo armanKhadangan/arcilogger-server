@@ -59,7 +59,11 @@
         "setting_egress_public_private": "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit.",
         "setting_egress_isp_nat_direct": "A line whose NAT address is its public address is direct: set its type to Direct.",
         "egress_duplicate_name": "Two exits cannot have the same name."
-      }
+      },
+      "removeShort": "Remove"
+    },
+    "settings": {
+      "rebuildHint": "A change applies to past days only once the leases are rebuilt (at the end of this group: Rebuild the leases)."
     }
   }
 }

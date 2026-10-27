@@ -476,7 +476,7 @@
       "holidayHint": "Her yıl aynı gün için AA-GG (ör. 10-29), bir kez için YYYY-AA-GG (ör. 2026-03-20). Dini bayramların tarihi her yıl değişir: o yılın tarihlerini girin.",
       "add": "Ekle",
       "noServers": "Özel kira süresi olan DHCP sunucusu yok; hepsi varsayılan süreyi kullanır.",
-      "serverName": "DHCP sunucusu",
+      "serverName": "DHCP sunucusu ya da FortiGate arayüz adı",
       "serverSeconds": "Kira süresi (saniye)",
       "removeServer": "Kaldır: {{server}}",
       "addServer": "Sunucu ekle",

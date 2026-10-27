@@ -5,13 +5,15 @@
  * draft (text for numbers and lists, so a half-typed value stays as typed) and turns it into the
  * value `PATCH /settings` sends, or names the problem. A few settings have their own editors:
  * the work hours (`usage.work_hours`), the holidays (`usage.holidays`), the lease time per DHCP
- * server (`lease.server_seconds`), the alert e-mail's lowest severity and the roles that must
- * use two-factor authentication. The server validates every value again (`validate_setting`).
+ * server (`lease.server_seconds`), the internet exits (`nat.egresses`, `egress-model.ts`), the
+ * alert e-mail's lowest severity and the roles that must use two-factor authentication. The
+ * server validates every value again (`validate_setting`).
  */
 
 import type { SettingOut, SettingValue } from '@/lib/settings-types';
 import { EMAIL_PATTERN } from '@/lib/validation';
 
+import { EGRESSES_KEY, rowsFromValue, valueFromRows, type EgressRow } from './egress-model';
 import { integerError, parseInteger } from './settings-validation';
 
 export interface WorkHours {
@@ -26,7 +28,7 @@ export interface ServerSeconds {
   seconds: string;
 }
 
-export type Draft = boolean | string | string[] | WorkHours | ServerSeconds[];
+export type Draft = boolean | string | string[] | WorkHours | ServerSeconds[] | EgressRow[];
 
 /** Settings with an editor of their own. */
 export const WORK_HOURS_KEY = 'usage.work_hours';
@@ -82,6 +84,7 @@ export function toDraft(setting: Pick<SettingOut, 'key' | 'type' | 'value'>): Dr
       server,
       seconds: String(seconds as number),
     }));
+  if (key === EGRESSES_KEY) return rowsFromValue(value);
   switch (type) {
     case 'boolean':
       return value === true;
@@ -109,7 +112,9 @@ export function validHoliday(text: string): boolean {
 }
 
 export type Parsed =
-  { value: SettingValue; error?: undefined } | { value?: undefined; error: string };
+  | { value: SettingValue; error?: undefined }
+  /** `params` fill the placeholders of the error's text (a limit, a type name). */
+  | { value?: undefined; error: string; params?: Record<string, string | number> };
 
 /** The value a draft stands for, or the i18n key of its problem. */
 export function fromDraft(
@@ -154,6 +159,12 @@ export function fromDraft(
       value[server] = seconds;
     }
     return { value };
+  }
+  if (key === EGRESSES_KEY && Array.isArray(draft)) {
+    const result = valueFromRows(draft as EgressRow[]);
+    return result.refusal
+      ? { error: `network.egress.codes.${result.refusal.code}`, params: result.refusal.facts }
+      : { value: result.value };
   }
   switch (type) {
     case 'boolean':

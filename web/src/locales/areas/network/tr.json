@@ -59,7 +59,11 @@
         "setting_egress_public_private": "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin.",
         "setting_egress_isp_nat_direct": "NAT adresi genel adresiyle aynı olan hat doğrudandır: türünü Doğrudan yapın.",
         "egress_duplicate_name": "İki çıkış aynı adı taşıyamaz."
-      }
+      },
+      "removeShort": "Kaldır"
+    },
+    "settings": {
+      "rebuildHint": "Değişiklik geçmiş günlere ancak kiralar yeniden oluşturulunca uygulanır (bu grubun sonunda: Kiraları yeniden oluştur)."
     }
   }
 }

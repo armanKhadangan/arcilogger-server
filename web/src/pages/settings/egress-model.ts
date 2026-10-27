@@ -10,6 +10,8 @@
  * The observed panel's "Çıkış olarak ekle" prefills a row by the fixed rule of `prefillOptions`.
  */
 
+import type { TFunction } from 'i18next';
+
 import type { DateTimeString } from '@/lib/api-types';
 import type { EgressMode, PortPreservation } from '@/lib/lookup-types';
 import { codePointLength } from '@/lib/validation';
@@ -145,6 +147,14 @@ export interface EgressRefusal {
   /** The exit (its name as given) and the field, when the rule concerns one. */
   exit?: string;
   field?: EgressField | 'name';
+}
+
+/** The text of a refusal of the exit rules (`network.egress.codes.*`, the server's texts). */
+export function refusalText(refusal: Pick<EgressRefusal, 'code' | 'facts'>, t: TFunction): string {
+  return t(`network.egress.codes.${refusal.code}`, {
+    ...refusal.facts,
+    defaultValue: refusal.code,
+  });
 }
 
 export type EgressResult =

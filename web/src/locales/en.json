@@ -476,7 +476,7 @@
       "holidayHint": "MM-DD for the same day every year (e.g. 10-29), YYYY-MM-DD for once (e.g. 2026-03-20). Religious holidays move every year: enter that year's dates.",
       "add": "Add",
       "noServers": "No DHCP server with its own lease time; all use the default.",
-      "serverName": "DHCP server",
+      "serverName": "DHCP server or FortiGate interface name",
       "serverSeconds": "Lease time (seconds)",
       "removeServer": "Remove: {{server}}",
       "addServer": "Add a server",
