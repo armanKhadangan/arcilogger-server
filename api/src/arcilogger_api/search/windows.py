@@ -18,10 +18,11 @@ PostgreSQL ``statement_timeout``). It stops when the page is full, ``from`` is r
 * if the **first** window of a request times out it is halved, down to 5 minutes — each try of
   it gets half the time left, so a smaller one can still run; when even 5 minutes time out the
   request fails with :class:`SearchTimeoutError` (504 ``search_timeout``);
-* on TimescaleDB (:func:`read_storage`) a window that holds a table's compression horizon reads
-  that branch on both sides of it in one statement (``sql.page_statement``), so the uncompressed
-  chunks are planned with their own statistics, and every statement of the search's transaction
-  is planned with its own values (:func:`plan_with_values`).
+* on TimescaleDB (:func:`read_storage`) a window ends at a table's compression horizon that it
+  would hold (``sql.horizons_statement``): the uncompressed chunks are read first and planned
+  with their own statistics, the compressed ones only by the next window, when the page is not
+  full yet; every statement of the search's transaction is planned with its own values
+  (:func:`plan_with_values`).
 
 :func:`page_rows` then fills the page in: the typed fields of a ``messages``-driven page and the
 ``messages`` fields of a typed page, one keyed query per table (``sql.typed_rows``,
@@ -123,7 +124,7 @@ class Storage:
 
     #: TimescaleDB hypertables (else native partitions).
     timescale: bool
-    #: Per table, the end of its newest compressed chunk (``sql.page_statement``).
+    #: Per table, the end of its newest compressed chunk (:func:`run_page` ends a window there).
     horizons: Mapping[str, datetime]
 
 
@@ -200,6 +201,7 @@ def run_page(
     ranks = sorted(plan.ranks)
     upper = end if cursor is None else cursor.time
     limits: dict[int, Bound] = bounds(cursor, end, ranks)
+    edges = (horizons or {}).values()
     rows: list[RowMapping] = []
     size = FIRST_WINDOW
     windows = 0
@@ -212,9 +214,10 @@ def run_page(
             budget_left = False
             break
         lower = max(start, upper - size)
+        lower = max([lower, *(edge for edge in edges if lower < edge < upper)])
         first = windows == 0
         seconds = left / 2 if first and size > MIN_WINDOW else left
-        statement = sql.page_statement(plan, lower, limits, limit - len(rows) + 1, horizons)
+        statement = sql.page_statement(plan, lower, limits, limit - len(rows) + 1)
         asked = clock()
         try:
             found = run_statement(session, statement, seconds, hook=hook, window=(lower, upper))

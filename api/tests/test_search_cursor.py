@@ -7,8 +7,9 @@
 * A cursor is parsed strictly: anything changed is 422 ``search_cursor_invalid``.
 * A first window that times out is halved down to 5 minutes; when even that times out the
   search fails with 504 ``search_timeout``, audited with ``outcome: "timeout"``.
-* A branch split at a compression horizon (TimescaleDB) pages exactly like one that is not, on
-  any storage mode (the horizons are set by the test); on TimescaleDB the horizon of a table is
+* Windows that end at a compression horizon (TimescaleDB) page exactly like windows that do not,
+  on any storage mode (the horizons are set by the test), and no window holds one; a page that
+  the rows above a horizon fill reads nothing below it. On TimescaleDB the horizon of a table is
   the end of its newest compressed chunk, and nothing anywhere else.
 """
 
@@ -25,7 +26,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, event, select, text
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.errors import ApiError
@@ -222,7 +223,9 @@ def test_frontier_cursors_continue_where_the_budget_stopped(
     assert found == whole
 
 
-# -- a split at the compression horizon -----------------------------------------------------------
+# -- windows that end at a compression horizon ----------------------------------------------------
+
+Window = tuple[datetime, datetime]
 
 
 def _set_storage(app: FastAPI, storage: Storage) -> None:
@@ -232,19 +235,32 @@ def _set_storage(app: FastAPI, storage: Storage) -> None:
     cache.get_or_compute(lambda: storage)
 
 
+def _recorder(windows: list[Window]) -> Any:
+    """A window hook that adds each window's ``(lower, upper)`` to ``windows``."""
+
+    def record(_session: Session, lower: datetime, upper: datetime) -> None:
+        windows.append((lower, upper))
+
+    return record
+
+
 def _paged(
     factory: sessionmaker[Session],
     q: str,
     limit: int,
     horizons: dict[str, datetime] | None = None,
+    windows: list[Window] | None = None,
 ) -> list[tuple[datetime, int, int]]:
     """``(time, rank, id)`` of every row of ``q``, page after page of ``limit`` rows."""
     plan = plan_query(parse_query(q), SiteNetwork())
+    hook = _recorder([] if windows is None else windows)
     found: list[tuple[datetime, int, int]] = []
     cursor: Cursor | None = None
     with factory() as session:
         while True:
-            page = run_page(session, plan, START, END, cursor, limit, 10.0, horizons=horizons)
+            page = run_page(
+                session, plan, START, END, cursor, limit, 10.0, hook=hook, horizons=horizons
+            )
             found += [(row["time"], int(row["b"]), int(row["id"])) for row in page.rows]
             if page.next_cursor is None:
                 return found
@@ -257,36 +273,62 @@ def _paged(
         T + timedelta(microseconds=1),  # the ten rows at T are older than it
         T - timedelta(minutes=61, seconds=1),  # rows at exactly the horizon are newer
         T - timedelta(minutes=30),
+        T - timedelta(minutes=1300, seconds=2),  # every row of the range is newer
     ],
 )
 @pytest.mark.parametrize("q", [f"srcip:{CLIENT}", "type:traffic,web,dns,dhcp"])
-def test_a_split_at_a_compression_horizon_pages_the_same(
+def test_windows_that_end_at_a_compression_horizon_page_the_same(
     app_session_factory: sessionmaker[Session], lines: Lines, q: str, horizon: datetime
 ) -> None:
     whole = _paged(app_session_factory, q, 500)
     assert len(whole) == len(set(whole)) > 20
     horizons = dict.fromkeys(TIME_SERIES_TABLES, horizon)
     for limit in (500, 1, 2, 3, 5, 11):
-        assert _paged(app_session_factory, q, limit, horizons) == whole, limit
+        windows: list[Window] = []
+        assert _paged(app_session_factory, q, limit, horizons, windows) == whole, limit
+        assert not [(lower, upper) for lower, upper in windows if lower < horizon < upper]
+        assert any(lower == horizon for lower, _ in windows), windows
 
 
-def test_the_search_splits_at_the_horizons_of_its_storage(
-    app: FastAPI, client: TestClient, searcher: LoggedIn, lines: Lines, db_engine: Engine
+def test_a_page_the_rows_above_a_compression_horizon_fill_reads_nothing_below_it(
+    app_session_factory: sessionmaker[Session], lines: Lines
+) -> None:
+    # 16 rows of the client from T - 30 min on: 10 at T, 6 in the 61 s before it.
+    horizon = T - timedelta(minutes=30)
+    horizons = dict.fromkeys(TIME_SERIES_TABLES, horizon)
+    plan = plan_query(parse_query(f"srcip:{CLIENT}"), SiteNetwork())
+    whole = _paged(app_session_factory, f"srcip:{CLIENT}", 500)
+    for limit, below in ((12, False), (16, False), (17, True), (500, True)):
+        windows: list[Window] = []
+        with app_session_factory() as session:
+            page = run_page(
+                session,
+                plan,
+                START,
+                END,
+                None,
+                limit,
+                10.0,
+                hook=_recorder(windows),
+                horizons=horizons,
+            )
+        assert [(row["time"], int(row["b"]), int(row["id"])) for row in page.rows] == whole[:limit]
+        assert windows[1] == (horizon, T), windows
+        assert any(upper <= horizon for _, upper in windows) is below, (limit, windows)
+
+
+def test_the_search_ends_its_windows_at_the_horizons_of_its_storage(
+    app: FastAPI, client: TestClient, searcher: LoggedIn, lines: Lines
 ) -> None:
     q = f"srcip:{CLIENT}"
     whole = keys(client, q, 3)
-    _set_storage(app, Storage(False, dict.fromkeys(TIME_SERIES_TABLES, T - timedelta(minutes=30))))
-    sent: list[str] = []
-
-    def record(_c: Any, _cursor: Any, statement: str, *_args: Any) -> None:
-        sent.append(statement)
-
-    event.listen(db_engine, "before_cursor_execute", record)
-    try:
-        assert keys(client, q, 3) == whole
-    finally:
-        event.remove(db_engine, "before_cursor_execute", record)
-    assert any(" AS split" in statement for statement in sent)
+    horizon = T - timedelta(minutes=30)
+    _set_storage(app, Storage(False, dict.fromkeys(TIME_SERIES_TABLES, horizon)))
+    windows: list[Window] = []
+    state_of(app).hook = _recorder(windows)
+    assert keys(client, q, 3) == whole
+    assert not [(lower, upper) for lower, upper in windows if lower < horizon < upper]
+    assert (horizon, T) in windows
 
 
 def test_compression_horizons_are_where_the_compressed_chunks_end(

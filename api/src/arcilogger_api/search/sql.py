@@ -18,9 +18,8 @@ Statements:
   ORDER BY time DESC, id DESC LIMIT :n)``, several branches ``UNION ALL``\\ ed and ordered ``time
   DESC, b ASC, id DESC``; a typed branch with ``messages``-only conditions joins ``messages`` by
   the raw reference (one probe of ``ix_messages_source_time`` per candidate row). On TimescaleDB
-  a branch whose window holds its table's **compression horizon** (:func:`horizons_statement`)
-  is two such selects, newer and older than the horizon, ordered and limited again (see
-  :func:`page_statement`).
+  a window never holds a table's **compression horizon** (:func:`horizons_statement`; the window
+  scan ends a window there), so a branch reads either uncompressed chunks or compressed ones.
 * :func:`typed_rows`, :func:`message_rows` — the fields of a page's rows, one keyed query per
   table, the page's keys bound as arrays (``unnest``) and their time range as a constant.
 * :func:`count_statement`, :func:`rollup_statement` — the statistics (``stats.py``): buckets
@@ -369,7 +368,7 @@ def branch_where(
     return source, columns, where
 
 
-def _branch_rows(
+def _branch_page(
     plan: Plan, branch: Branch, lower: datetime, bound: Bound, limit: int
 ) -> Select[Any]:
     source, columns, where = branch_where(plan, branch, lower, bound)
@@ -386,48 +385,12 @@ def _branch_rows(
     )
 
 
-def _branch_page(
-    plan: Plan,
-    branch: Branch,
-    lower: datetime,
-    bound: Bound,
-    limit: int,
-    horizon: datetime | None,
-) -> Select[Any]:
-    if horizon is None or not lower < horizon < bound.time:
-        return _branch_rows(plan, branch, lower, bound, limit)
-    newer = _branch_rows(plan, branch, horizon, bound, limit)
-    older = _branch_rows(plan, branch, lower, Bound(horizon), limit)
-    split = union_all(newer, older).subquery("split")
-    return (
-        select(split)
-        .order_by(split.c.time.desc(), split.c.id.desc())
-        .limit(literal(limit, Integer))
-    )
-
-
 def page_statement(
-    plan: Plan,
-    lower: datetime,
-    bounds: Mapping[int, Bound],
-    limit: int,
-    horizons: Mapping[str, datetime] | None = None,
+    plan: Plan, lower: datetime, bounds: Mapping[int, Bound], limit: int
 ) -> Select[Any]:
-    """The newest ``limit`` rows of the plan in ``[lower, bound)`` (``bounds``: per rank).
-
-    ``horizons`` (TimescaleDB, :func:`horizons_statement`): per table, the end of its newest
-    compressed chunk. A branch whose window holds it reads ``[horizon, bound)`` and ``[lower,
-    horizon)`` in two selects, each ``ORDER BY time DESC, id DESC LIMIT :n``, and keeps the
-    newest ``limit`` of both: the same rows in the same order. TimescaleDB estimates a compressed
-    chunk at up to 1,000 rows a compressed batch, leaving out the conditions on its other columns,
-    so in one select the page's ``LIMIT`` looks soon reached and the uncompressed chunks are read
-    backwards along the primary key instead of by the selective index; the newer select holds
-    only uncompressed chunks and is planned with their statistics, as a native partition is
-    (ADR-0015)."""
-    found = horizons or {}
+    """The newest ``limit`` rows of the plan in ``[lower, bound)`` (``bounds``: per rank)."""
     parts = [
-        _branch_page(plan, branch, lower, bounds[branch.rank], limit, found.get(branch.table))
-        for branch in plan.branches
+        _branch_page(plan, branch, lower, bounds[branch.rank], limit) for branch in plan.branches
     ]
     if len(parts) == 1:
         return parts[0]
@@ -449,7 +412,14 @@ def custom_plans_statement() -> Select[Any]:
 
 def horizons_statement() -> Select[Any]:
     """Per time-series table with a compressed chunk, the end of its newest one (``tbl``,
-    ``horizon``; TimescaleDB only)."""
+    ``horizon``; TimescaleDB only).
+
+    TimescaleDB estimates a compressed chunk at up to 1,000 rows a compressed batch, leaving out
+    the conditions on its other columns: in a window that holds both kinds of chunk the page's
+    ``LIMIT`` looks soon reached, and the uncompressed chunks are read backwards along the
+    primary key instead of by the selective index. A window that ends at the horizon holds only
+    uncompressed chunks of the table, planned with their statistics as a native partition is,
+    and the compressed ones are read only when its rows did not fill the page (ADR-0015)."""
     return (
         select(CHUNKS.c.hypertable_name.label("tbl"), func.max(CHUNKS.c.range_end).label("horizon"))
         .where(

@@ -20,9 +20,9 @@ existed when they started).
 printed too. The numbers are recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
 
 **Plans:** for Q2-Q7 the statement of a whole-range window, as the search sends it (on
-TimescaleDB split at each table's compression horizon, ``sql.page_statement``), is explained
-(``EXPLAIN (FORMAT JSON)``, each scan's table resolved from its partition or chunk): no ``Seq
-Scan`` and no
+TimescaleDB one window on each side of a compression horizon, where ``windows.run_page`` ends a
+window), is explained (``EXPLAIN (FORMAT JSON)``, each scan's table resolved from its partition
+or chunk): no ``Seq Scan`` and no
 primary-key range scan of a high-volume table (``messages``, ``fg_traffic``, ``fg_web``,
 ``fg_dns``, ``fg_app``) — a compressed chunk's ``DecompressChunk`` is allowed — and the indexes
 the query is meant to use appear (Q6: ``mt_dhcp``'s MAC index and ``mt_event``'s event index).
@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 import os
 import re
 import time
@@ -541,19 +542,24 @@ def _scans(connection: Any, node: dict[str, Any], compressed: bool) -> Iterator[
 
 
 def explain(site: Site, q: str, start: datetime, end: datetime) -> list[Scan]:
-    """The scans of the plan of the whole-range window of ``q``."""
+    """The scans of the plans of the whole-range window of ``q``: on TimescaleDB the windows
+    above and below each compression horizon in it, as ``run_page`` reads them."""
     with site.factory() as session:
         plan = plan_query(parse_query(q), SiteNetwork.load(session, site.config))
         horizons = read_storage(session, 10.0).horizons
-    statement = sql.page_statement(plan, start, bounds(None, end, plan.ranks), 101, horizons)
-    compiled = statement.compile(
-        dialect=site.engine.dialect, compile_kwargs={"render_postcompile": True}
-    )
+    edges = sorted({start, end, *(edge for edge in horizons.values() if start < edge < end)})
+    scans: list[Scan] = []
     with site.engine.connect() as connection:
-        found: Any = connection.exec_driver_sql(
-            "EXPLAIN (FORMAT JSON, VERBOSE) " + compiled.string, compiled.params
-        ).scalar()
-        return list(_scans(connection, found[0]["Plan"], False))
+        for lower, upper in itertools.pairwise(edges):
+            statement = sql.page_statement(plan, lower, bounds(None, upper, plan.ranks), 101)
+            compiled = statement.compile(
+                dialect=site.engine.dialect, compile_kwargs={"render_postcompile": True}
+            )
+            found: Any = connection.exec_driver_sql(
+                "EXPLAIN (FORMAT JSON, VERBOSE) " + compiled.string, compiled.params
+            ).scalar()
+            scans += _scans(connection, found[0]["Plan"], False)
+    return scans
 
 
 def check_plan(scans: list[Scan], *indexes: str, primary: bool = False) -> None:
