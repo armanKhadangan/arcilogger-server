@@ -490,19 +490,23 @@ export class LiveMock {
           type: 'string_type',
           msg: 'Input should be a valid string',
         });
-      if (
-        backfill !== undefined &&
-        backfill !== null &&
-        (typeof backfill !== 'number' ||
-          !Number.isInteger(backfill) ||
-          backfill < 0 ||
-          backfill > 200)
-      )
-        problems.push({
-          loc: ['body', 'backfill'],
-          type: 'int_type',
-          msg: 'Input should be a valid integer',
-        });
+      if (backfill !== undefined && backfill !== null) {
+        const loc = ['body', 'backfill'];
+        if (typeof backfill !== 'number' || !Number.isInteger(backfill))
+          problems.push({ loc, type: 'int_type', msg: 'Input should be a valid integer' });
+        else if (backfill < 0)
+          problems.push({
+            loc,
+            type: 'greater_than_equal',
+            msg: 'Input should be greater than or equal to 0',
+          });
+        else if (backfill > 200)
+          problems.push({
+            loc,
+            type: 'less_than_equal',
+            msg: 'Input should be less than or equal to 200',
+          });
+      }
     }
     if (problems.length > 0) return this.api.error(422, 'validation_error', problems);
     if (this.refuseNext) {
@@ -511,19 +515,16 @@ export class LiveMock {
       return this.error(status, code);
     }
     const { q = '', backfill = null } = body as { q?: string; backfill?: number | null };
-    for (const match of q.matchAll(/(?:^|\s)-?([A-Za-z_]\w*):/g)) {
-      const field = match[1] ?? '';
+    for (const match of q.matchAll(/(?:^|\s)-?(([A-Za-z_]\w*):\S*)/g)) {
+      const [clause = '', field = ''] = match.slice(1);
       if (!FIELDS.has(field.toLowerCase())) {
-        const start = match.index + (match[0].length - field.length - 1);
+        // The whole `field:value` clause, as the API marks it (`samples/live.json`).
+        const start = match.index + match[0].length - clause.length;
         return this.error(
           422,
           'search_unknown_field',
           { field },
-          {
-            start,
-            end: start + field.length + 1,
-            params: { field },
-          },
+          { start, end: start + clause.length, params: { field } },
         );
       }
     }
