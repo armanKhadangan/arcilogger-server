@@ -612,7 +612,7 @@ FIELDS: Final[Mapping[str, Field]] = {
             "ip",
             "typed",
             _address_columns(),
-            ("fg_traffic", "mt_fw", "mt_dhcp", "mt_arp", "mt_account"),
+            ("fg_traffic", "mt_fw", "mt_dhcp", "mt_arp", "mt_account", "fg_dhcp"),
             (
                 "Herhangi bir IP",
                 "Any IP",
@@ -874,13 +874,16 @@ FIELDS: Final[Mapping[str, Field]] = {
             (),
             "mac",
             "typed",
+            # fg_traffic.srcmac is deliberately not here: a mac: search never scans the largest
+            # table (the field srcmac: does, ADR-0016)
             {
                 "mt_dhcp": ("mac",),
                 "mt_arp": ("mac",),
                 "mt_fw": ("src_mac",),
                 "mt_event": ("mac",),
+                "fg_dhcp": ("mac",),
             },
-            ("mt_dhcp", "mt_arp"),
+            ("mt_dhcp", "mt_arp", "fg_dhcp"),
             (
                 "MAC adresi",
                 "MAC address",
@@ -888,6 +891,23 @@ FIELDS: Final[Mapping[str, Field]] = {
                 "The device's MAC address (any separator) or a vendor prefix.",
             ),
             ("mac:00:00:5e:00:53:21", "mac:00:00:5e:*"),
+        ),
+        _field(
+            "srcmac",
+            ("kaynakmac",),
+            "mac",
+            "typed",
+            {"fg_traffic": ("srcmac",)},
+            (),
+            (
+                "Kaynak MAC (FortiGate oturumu)",
+                "Source MAC (FortiGate session)",
+                "FortiGate oturum kaydındaki kaynak MAC adresi (yalnızca aygıt tanıma açık "
+                "arayüzlerde dolu; dizinsiz, zaman dilimleriyle taranır).",
+                "Source MAC of the FortiGate session record (filled only on interfaces with "
+                "device detection; not indexed, scanned in time slices).",
+            ),
+            ("srcmac:00:00:5e:00:53:57",),
         ),
         _field(
             "vlan",
@@ -930,6 +950,7 @@ FIELDS: Final[Mapping[str, Field]] = {
                 "mt_fw": ("in_if", "out_if"),
                 "mt_interface": ("interface",),
                 "mt_event": ("interface",),
+                "fg_dhcp": ("interface",),
             },
             (),
             (
@@ -980,7 +1001,8 @@ FIELDS: Final[Mapping[str, Field]] = {
             (),
             "token",
             "typed",
-            _on(_FG_ALL, "logid"),
+            # fg_dhcp is not in _FG_ALL, which drives dstip: and action: too (ADR-0016)
+            {**_on(_FG_ALL, "logid"), "fg_dhcp": ("logid",)},
             (),
             (
                 "FortiGate log numarası",
@@ -995,7 +1017,7 @@ FIELDS: Final[Mapping[str, Field]] = {
             (),
             "token",
             "typed",
-            _on(("fg_event", "mt_event"), "level"),
+            _on(("fg_event", "mt_event", "fg_dhcp"), "level"),
             (),
             (
                 "Seviye",

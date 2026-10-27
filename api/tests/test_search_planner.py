@@ -63,7 +63,9 @@ def refused(text_: str) -> SearchQueryError:
         ("srcip:172.20.41.105 type:web action:blocked", "typed", ("fg_web",)),
         ("-type:web srcip:172.20.41.5", "typed", tuple(t for t in CLIENT_IP if t != "fg_web")),
         ("domain:example.com", "typed", ("fg_web", "fg_dns", "fg_app", "fg_virus")),
-        ("mac:00:00:5e:00:53:21", "typed", ("mt_dhcp", "mt_arp", "mt_fw", "mt_event")),
+        ("mac:00:00:5e:00:53:21", "typed", ("mt_dhcp", "mt_arp", "mt_fw", "mt_event", "fg_dhcp")),
+        ("type:event mac:00:00:5e:00:53:57", "typed", ("fg_dhcp",)),
+        ("srcmac:00:00:5e:00:53:57", "typed", ("fg_traffic",)),
         ("type:dhcp mac:00:00:5e:*", "typed", ("mt_dhcp", "mt_event")),
         ("user:admin", "typed", ("fg_event", "mt_account", "mt_config")),
         (
@@ -103,6 +105,7 @@ def test_ranks_are_the_time_series_order() -> None:
     assert rank_of("messages") == 0
     assert [rank_of(table) for table in TYPED_TABLES] == list(range(1, len(TIME_SERIES_TABLES)))
     assert rank_of("mt_event") == 14
+    assert rank_of("fg_dhcp") == 15  # appended (0017_fortigate_dhcp): nothing existing moved
 
 
 @pytest.mark.parametrize(
@@ -129,7 +132,8 @@ def test_kinds_follow_type_clauses() -> None:
     dhcp = plan("type:dhcp mac:00:00:5e:*")
     assert dhcp.branches[-1].events == ("dhcp_offering", "dhcp_pool_empty", "dhcp_failed")
     every = plan("mac:00:00:5e:*")
-    assert every.branches[-1].events == (
+    (mt_event,) = [branch for branch in every.branches if branch.table == "mt_event"]
+    assert mt_event.events == (
         "dhcp_offering",
         "dhcp_pool_empty",
         "dhcp_failed",
@@ -138,7 +142,7 @@ def test_kinds_follow_type_clauses() -> None:
         "heartbeat",
         "log",
     )
-    assert all(branch.events is None for branch in every.branches[:-1])
+    assert all(branch.events is None for branch in every.branches if branch is not mt_event)
 
 
 def test_messages_only_conditions_join_messages_in_a_typed_branch() -> None:
@@ -177,7 +181,8 @@ def test_srcip_is_indexed_except_in_the_small_event_tables() -> None:
 
 
 def test_ip_is_indexed_only_where_every_address_column_is() -> None:
-    """R27: fg_traffic, mt_fw, mt_dhcp, mt_arp, mt_account; a scan in the UTM tables."""
+    """R27: fg_traffic, mt_fw, mt_dhcp, mt_arp, mt_account, fg_dhcp; a scan in the UTM
+    tables."""
     found = _selective("ip:203.0.113.10")
     assert {t for t, s in found.items() if s} == {
         "fg_traffic",
@@ -185,6 +190,7 @@ def test_ip_is_indexed_only_where_every_address_column_is() -> None:
         "mt_dhcp",
         "mt_arp",
         "mt_account",
+        "fg_dhcp",
     }
 
 
@@ -197,6 +203,7 @@ def test_ip_is_indexed_only_where_every_address_column_is() -> None:
         "youtube",
         "-type:heartbeat",
         "url:login",
+        "srcmac:00:00:5e:00:53:57",  # not indexed (ADR-0016)
     ],
 )
 def test_queries_no_index_serves_get_the_notice(text_: str) -> None:
