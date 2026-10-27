@@ -95,6 +95,7 @@ licence state.
 | `/lookup` | 5651 lookup, official PDF report and time stamp | 5651 Core |
 | `/lookups` | Saved 5651 lookups | 5651 Core |
 | `/raw` | Raw log lines | 5651 Core |
+| `/search` | Arama (log search): searches, statistics, saved searches, export | 5651 Core |
 | `/evidence` | Evidence packages | 5651 Core |
 | `/seals` | Sealed days, manifest, time stamp, verification, "Şimdi mühürle" (seal now) | 5651 Core |
 | `/credits` | Kamu SM credit, "Kontör sorgula" (query now) | 5651 Core |
@@ -102,6 +103,8 @@ licence state.
 | `/persons` | Persons | 5651 Core |
 | `/departments` | Departments | 5651 Core |
 | `/vlans` | VLANs and subnets | 5651 Core |
+| `/live` | Canlı Akış (live tail): lines from the raw spool as they arrive | 5651 Core |
+| `/sources` | Kaynaklar (sources): the state, history and last lines of every log source | 5651 Core |
 | `/license` | Licence state, upload and removal of the licence file | 5651 Core |
 | `/admin` | Settings: the machine configuration, the administration service's state, change requests and their history | 5651 Core |
 | `/settings` | Application settings (the database settings) | 5651 Core |
@@ -137,6 +140,7 @@ data of a module that is off is not deleted.
 | `usage.retention` | — (deletion of personal data) | always runs |
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
+| `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off
 (exit code 1, the `module_not_licensed` message). `arcilogger-worker run`, `rebuild` (the lease

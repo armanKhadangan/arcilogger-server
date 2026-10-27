@@ -92,19 +92,31 @@ recovery codes, sign-out), `/settings` → `/settings/users` (users and read-onl
   downloads return person data and sit behind the KVKK notice (`require_privacy_notice`)
   (`src/pages/reports/`).
 
+- `/search` — **Arama** (`search.read`): the query language of the search API (fields, commas
+  for OR, `-` to exclude, quotes) read by the server 250 ms after typing (`POST /search/parse`;
+  a problem is underlined at its characters), completions from the field catalogue and the
+  statistics, the syntax help; the histogram (drag to zoom: a new search), the facets (a value or
+  "Hariç tut" edits the query), the virtualised results with "Daha fazla" up to 2,000 rows, a scan
+  cut by its time budget going on five times by itself and then "Devam et"; the record drawer
+  (`GET /search/event`) and the raw line (`RawLineSheet`); personal saved searches; the export
+  (`search.export`, re-authentication, `Repr-Digest` checked) and "Kanıt paketine aktar"
+  (`evidence.create`: the search's raw lines go to the evidence wizard in memory). Nothing is
+  searched when the page opens; every run is a `POST`, so the query is in no address, history
+  entry or storage — the address holds only the time range and a saved search's id
+  (`src/pages/search/`, `src/lib/search-hooks.ts`).
+
 Device-provided text (host names, raw lines) goes through `visibleText` (`src/lib/display.ts`):
 bidi overrides and other invisible characters appear as `\uXXXX`. Other menu entries are
 placeholders ("Bu sayfa sonraki bir sürümde eklenecek.", no milestone code), already
 permission-filtered (`BUILT_PAGES` in `src/nav.ts`).
-Two top-bar controls of spec 12.2 come with the pages that use them: the global search box
-appears once "Arama" is built (M2; its term goes to the page as router state, so not into the URL,
-`?next=` or the web server's access log — but router state lives in the tab's session history
-(`history.state`), which the browser may keep for session restore: if the term must not reach the
-browser history at all, M2 hands it over in memory, e.g. a context or the query cache), and the
-global time range ("[Bugün ▾]")
-with the first page that reads it (Panel / Arama, M2) — until then a picker that filters nothing
-would make pages such as Denetim Kaydı look limited to "today". "Kullanım" keeps its own period in
-its address (`?from=&to=`).
+The top bar's two controls of spec 12.2: the global search box (with `search.read`) turns its
+term into a query (an IPv4 address → `ip:`, a MAC address → `mac:`, a host name → `domain:`,
+anything else quoted text) and hands it to Arama in memory (`src/lib/handoff.ts`), so not into
+the URL, `?next=`, the web server's access log or the tab's session history (`history.state`),
+which the browser may keep for session restore; the global time range ("[Son 24 saat ▾]",
+`src/lib/time-range.tsx`) appears only on routes whose handle asks for it (`handle.timeRange`:
+Arama) — a picker that filters nothing would make pages such as Denetim Kaydı look limited to a
+range. "Kullanım" keeps its own period in its address (`?from=&to=`).
 
 ## Licence (offline licensing)
 

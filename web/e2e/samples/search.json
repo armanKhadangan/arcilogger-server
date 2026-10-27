@@ -1,0 +1,4630 @@
+{
+  "errors": {
+    "forbidden_export": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "forbidden_refs": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "privacy_notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "reauth_required": {
+      "body": {
+        "error": {
+          "code": "reauth_required",
+          "message_en": "Please confirm your password to continue with this action.",
+          "message_tr": "Bu işlem için parolanızı yeniden girmeniz gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "saved_search_limit": {
+      "body": {
+        "error": {
+          "code": "saved_search_limit",
+          "message_en": "At most 1 saved searches can be kept.",
+          "message_tr": "En fazla 1 kayıtlı arama saklanabilir."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "saved_search_name_taken": {
+      "body": {
+        "error": {
+          "code": "saved_search_name_taken",
+          "message_en": "You already have a saved search with this name.",
+          "message_tr": "Bu adla kayıtlı bir aramanız zaten var."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "saved_search_not_found": {
+      "body": {
+        "error": {
+          "code": "saved_search_not_found",
+          "message_en": "Saved search not found.",
+          "message_tr": "Kayıtlı arama bulunamadı."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "search_busy": {
+      "body": {
+        "error": {
+          "code": "search_busy",
+          "message_en": "Too many searches are running; try again in a few seconds.",
+          "message_tr": "Şu anda çok sayıda arama çalışıyor; birkaç saniye sonra yeniden deneyin."
+        }
+      },
+      "headers": {
+        "retry-after": "2"
+      },
+      "status": 429
+    },
+    "search_cursor_invalid": {
+      "body": {
+        "error": {
+          "code": "search_cursor_invalid",
+          "message_en": "The page position does not belong to this search; start the search again.",
+          "message_tr": "Sayfa konumu bu aramaya ait değil; aramayı yeniden başlatın."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_department_unknown": {
+      "body": {
+        "error": {
+          "code": "search_department_unknown",
+          "details": {
+            "end": 15,
+            "params": {
+              "department": "Depo"
+            },
+            "start": 0
+          },
+          "message_en": "There is no department named “Depo”.",
+          "message_tr": "“Depo” adında bir departman yok."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_event_not_found": {
+      "body": {
+        "error": {
+          "code": "search_event_not_found",
+          "message_en": "The record was not found in the database.",
+          "message_tr": "Kayıt veritabanında bulunamadı."
+        }
+      },
+      "headers": {},
+      "status": 404
+    },
+    "search_expired": {
+      "body": {
+        "error": {
+          "code": "search_expired",
+          "message_en": "This search has expired; it is being run again.",
+          "message_tr": "Bu aramanın süresi doldu; arama yeniden çalıştırılıyor."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "search_export_rate_limited": {
+      "body": {
+        "error": {
+          "code": "search_export_rate_limited",
+          "message_en": "At most 3 exports per hour; try again in 60 min.",
+          "message_tr": "Saatte en fazla 3 dışa aktarma yapılabilir; 60 dakika sonra yeniden deneyin."
+        }
+      },
+      "headers": {
+        "retry-after": "3599"
+      },
+      "status": 429
+    },
+    "search_export_running": {
+      "body": {
+        "error": {
+          "code": "search_export_running",
+          "message_en": "Your previous export is still being prepared.",
+          "message_tr": "Önceki dışa aktarmanız hâlâ hazırlanıyor."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "search_fields_incompatible": {
+      "body": {
+        "error": {
+          "code": "search_fields_incompatible",
+          "details": {
+            "end": 31,
+            "params": {
+              "fields": "type, qname"
+            },
+            "start": 0
+          },
+          "message_en": "No record type has all of these fields: type, qname.",
+          "message_tr": "Bu alanlar hiçbir kayıt türünde birlikte bulunmuyor: type, qname."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_or_unsupported": {
+      "body": {
+        "error": {
+          "code": "search_or_unsupported",
+          "details": {
+            "end": 21,
+            "params": {},
+            "start": 19
+          },
+          "message_en": "OR works only between values of one field, written with commas (e.g. action:deny,blocked); parentheses are not supported.",
+          "message_tr": "VEYA yalnızca aynı alanın değerleri arasında virgülle yazılır (ör. action:deny,blocked); parantez kullanılamaz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_range_invalid": {
+      "body": {
+        "error": {
+          "code": "search_range_invalid",
+          "message_en": "Invalid time range: the start must be before the end, and both need a time zone.",
+          "message_tr": "Zaman aralığı geçersiz: başlangıç bitişten önce olmalı ve ikisinde de saat dilimi bulunmalı."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_range_too_long": {
+      "body": {
+        "error": {
+          "code": "search_range_too_long",
+          "message_en": "The search range may span at most 31 days.",
+          "message_tr": "Arama aralığı en fazla 31 gün olabilir."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_rate_limited": {
+      "body": {
+        "error": {
+          "code": "search_rate_limited",
+          "message_en": "Too many searches in a short time; try again in 56 s.",
+          "message_tr": "Kısa sürede çok fazla arama yaptınız; 56 saniye sonra yeniden deneyin."
+        }
+      },
+      "headers": {
+        "retry-after": "56"
+      },
+      "status": 429
+    },
+    "search_syntax": {
+      "body": {
+        "error": {
+          "code": "search_syntax",
+          "details": {
+            "end": 13,
+            "params": {
+              "position": 7,
+              "reason": "unclosed_quote"
+            },
+            "start": 6
+          },
+          "message_en": "The query cannot be read: a quotation mark is not closed (character 7).",
+          "message_tr": "Sorgu okunamadı: kapanmamış tırnak işareti (7. karakter)."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_term_too_short": {
+      "body": {
+        "error": {
+          "code": "search_term_too_short",
+          "details": {
+            "end": 2,
+            "params": {},
+            "start": 0
+          },
+          "message_en": "Free text must be at least 3 characters long.",
+          "message_tr": "Serbest metin en az 3 karakter olmalı."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_timeout": {
+      "body": {
+        "error": {
+          "code": "search_timeout",
+          "message_en": "The search could not scan even the shortest time slice (5 minutes) within 0.5 s. Add a selective field (e.g. srcip:, domain:) or try again a little later.",
+          "message_tr": "Arama 0.5 saniyede en kısa zaman dilimini (5 dakika) bile tarayamadı. Seçici bir alan ekleyin (ör. srcip:, domain:) ya da biraz sonra yeniden deneyin."
+        }
+      },
+      "headers": {},
+      "status": 504
+    },
+    "search_too_complex": {
+      "body": {
+        "error": {
+          "code": "search_too_complex",
+          "details": {
+            "end": 237,
+            "params": {},
+            "start": 224
+          },
+          "message_en": "The query is too long: at most 1,000 characters, 16 conditions, 20 values per condition, 256 characters per value and 5 free-text terms.",
+          "message_tr": "Sorgu çok uzun: en fazla 1.000 karakter, 16 koşul, koşul başına 20 değer, değer başına 256 karakter ve 5 serbest metin terimi olabilir."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_unknown_field": {
+      "body": {
+        "error": {
+          "code": "search_unknown_field",
+          "details": {
+            "end": 22,
+            "params": {
+              "field": "istemciip"
+            },
+            "start": 0
+          },
+          "message_en": "There is no field “istemciip”. Press “?” for the list of fields; put it in quotes to search for it as text.",
+          "message_tr": "“istemciip” diye bir alan yok. Alan listesi için “?” düğmesine basın; metin olarak aramak için tırnak içine alın."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_value_invalid": {
+      "body": {
+        "error": {
+          "code": "search_value_invalid",
+          "details": {
+            "end": 19,
+            "params": {
+              "field": "srcip",
+              "format": "ip",
+              "value": "172.20.42.999"
+            },
+            "start": 6
+          },
+          "message_en": "“172.20.42.999” is not valid for “srcip” (expected: an IP address or network, e.g. 172.20.41.5, 172.20.41.0/24, 172.20.41.*).",
+          "message_tr": "“srcip” alanı için “172.20.42.999” geçerli değil (beklenen: IP adresi ya da ağ, ör. 172.20.41.5, 172.20.41.0/24, 172.20.41.*)."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "search_vlan_unknown": {
+      "body": {
+        "error": {
+          "code": "search_vlan_unknown",
+          "details": {
+            "end": 8,
+            "params": {
+              "vlan": 999
+            },
+            "start": 0
+          },
+          "message_en": "No VLAN 999 is defined (Devices and persons → VLANs).",
+          "message_tr": "999 numaralı bir VLAN tanımlı değil (Cihazlar ve Kişiler → VLAN'lar)."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
+    "validation_error": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "limit"
+              ],
+              "msg": "Input should be less than or equal to 500",
+              "type": "less_than_equal"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "event": {
+    "dhcp": {
+      "extra": {},
+      "fields": {
+        "action": "assigned",
+        "hostname": "PLN-PC14",
+        "id": 5,
+        "ip": "172.20.42.57",
+        "mac": "00:00:5e:00:53:57",
+        "raw_day": "2026-10-09",
+        "raw_line": 5,
+        "raw_offset": 635,
+        "sender": "172.20.10.1",
+        "server": "dhcp42",
+        "source": "core-r1",
+        "time": "2026-10-09T07:42:18+00:00",
+        "time_received": "2026-10-09T07:42:18.003000+00:00",
+        "vlan": null
+      },
+      "kind": "dhcp",
+      "message": {
+        "facility": 3,
+        "host": "CORE-R1",
+        "parse_error": null,
+        "program": "dhcp,info",
+        "severity": 6,
+        "subtype": "assigned",
+        "text": "dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14",
+        "type": "dhcp"
+      },
+      "raw": {
+        "day": "2026-10-09",
+        "line": 5,
+        "offset": 635,
+        "source": "core-r1"
+      },
+      "table": "mt_dhcp"
+    },
+    "message": {
+      "extra": {},
+      "fields": {
+        "facility": 23,
+        "host": null,
+        "id": 103108,
+        "parse_error": null,
+        "program": null,
+        "raw_day": "2026-10-09",
+        "raw_line": 1,
+        "raw_offset": 0,
+        "sender": "172.31.255.1",
+        "severity": 5,
+        "source": "fortigate",
+        "subtype": "dns",
+        "text": "logid=\"1501054802\" type=\"utm\" subtype=\"dns\" srcip=172.20.60.142 qname=\"www.google.com\" ipaddr=\"203.0.113.20\"",
+        "time": "2026-10-09T08:14:56.003000+00:00",
+        "time_received": "2026-10-09T08:14:56.003000+00:00",
+        "type": "utm"
+      },
+      "kind": "dns",
+      "message": {
+        "facility": 23,
+        "host": null,
+        "parse_error": null,
+        "program": null,
+        "severity": 5,
+        "subtype": "dns",
+        "text": "logid=\"1501054802\" type=\"utm\" subtype=\"dns\" srcip=172.20.60.142 qname=\"www.google.com\" ipaddr=\"203.0.113.20\"",
+        "type": "utm"
+      },
+      "raw": {
+        "day": "2026-10-09",
+        "line": 1,
+        "offset": 0,
+        "source": "fortigate"
+      },
+      "table": "messages"
+    },
+    "traffic": {
+      "extra": {},
+      "fields": {
+        "action": "accept",
+        "app": null,
+        "appcat": null,
+        "appid": null,
+        "apprisk": null,
+        "crscore": null,
+        "dstcountry": null,
+        "dstinetsvc": null,
+        "dstintf": null,
+        "dstip": "93.184.216.34",
+        "dstport": 443,
+        "duration": 12,
+        "durationdelta": null,
+        "id": 25,
+        "is_interim": false,
+        "logid": "0000000013",
+        "policyid": null,
+        "policyname": null,
+        "proto": 6,
+        "raw_day": "2026-10-09",
+        "raw_line": 27,
+        "raw_offset": 10260,
+        "rcvdbyte": null,
+        "rcvddelta": null,
+        "rcvdpkt": null,
+        "sender": "172.31.255.1",
+        "sentbyte": null,
+        "sentdelta": null,
+        "sentpkt": null,
+        "service": null,
+        "sessionid": 61001,
+        "source": "fortigate",
+        "srcintf": null,
+        "srcip": "172.20.42.57",
+        "srcport": 61001,
+        "subtype": "forward",
+        "time": "2026-10-09T10:30:00+00:00",
+        "time_received": "2026-10-09T10:30:00.003000+00:00",
+        "trandisp": "snat",
+        "transip": "100.64.12.9",
+        "transport": 61001,
+        "utmaction": null
+      },
+      "kind": "traffic",
+      "message": {
+        "facility": 23,
+        "host": "FIREWALL-01",
+        "parse_error": null,
+        "program": null,
+        "severity": 5,
+        "subtype": "forward",
+        "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+        "type": "traffic"
+      },
+      "raw": {
+        "day": "2026-10-09",
+        "line": 27,
+        "offset": 10260,
+        "source": "fortigate"
+      },
+      "table": "fg_traffic"
+    }
+  },
+  "export": {
+    "csv": {
+      "headers": {
+        "cache-control": "no-store",
+        "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.csv\"",
+        "content-length": "3366",
+        "content-type": "text/csv; charset=utf-8",
+        "repr-digest": "sha-256=:k2TcErRv12F8P7jGi66TntUgmTJYpVkdCAwS/sevJKU=:"
+      },
+      "sha256": "9364dc12b46fd7617c3fb8c68bae939ed520993258a5591d080c12fec7af24a5",
+      "size": 3366
+    },
+    "truncated": {
+      "headers": {
+        "cache-control": "no-store",
+        "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000-kismi.csv\"",
+        "content-length": "1186",
+        "content-type": "text/csv; charset=utf-8",
+        "repr-digest": "sha-256=:FKBUmXugiHIYENKPqJv14YdixlcBFfmyYJaJTkGe7vk=:",
+        "x-arci-export-truncated": "rows"
+      },
+      "sha256": "14a054997ba088721810d28fa89bf5e18762c6570115f9b26096894e419eeef9",
+      "size": 1186
+    },
+    "xlsx": {
+      "headers": {
+        "cache-control": "no-store",
+        "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.xlsx\"",
+        "content-length": "7135",
+        "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "repr-digest": "sha-256=:A2ssmRL3TcuohDGUw7yNXvPkb6YAgClSpKh1kPfRbbY=:"
+      },
+      "sha256": "036b2c9912f74dcba8843194c3bc8d5ef3e46fa600802952a4a87590f7d16db6",
+      "size": 7135
+    }
+  },
+  "fields": {
+    "fields": [
+      {
+        "aliases": [
+          "kaynak"
+        ],
+        "examples": [
+          "source:fortigate",
+          "source:core-*"
+        ],
+        "help_en": "The log source's name (spool folder), with * at its end if needed. A source defined as a network (e.g. ap) also finds its members (ap-<ip>).",
+        "help_tr": "Log kaynağının adı (spool klasörü); sonunda * olabilir. Ağ olarak tanımlı bir kaynak (ör. ap) üyelerini de bulur (ap-<ip>).",
+        "indexed": [
+          "messages",
+          "mt_interface",
+          "mt_config",
+          "mt_event"
+        ],
+        "kind": "source",
+        "label_en": "Source",
+        "label_tr": "Kaynak",
+        "name": "source",
+        "tables": [
+          "messages",
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_interface",
+          "mt_config",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "gonderen"
+        ],
+        "examples": [
+          "sender:172.20.10.2"
+        ],
+        "help_en": "The address of the device that sent the line (unknown senders included).",
+        "help_tr": "Satırı gönderen cihazın adresi (bilinmeyen göndericiler dahil).",
+        "indexed": [],
+        "kind": "ip",
+        "label_en": "Sender IP",
+        "label_tr": "Gönderici IP",
+        "name": "sender",
+        "tables": [
+          "messages",
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_interface",
+          "mt_config",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "tur",
+          "tip"
+        ],
+        "examples": [
+          "type:web",
+          "type:dhcp,arp",
+          "-type:heartbeat"
+        ],
+        "help_en": "The kind of record (traffic, web filter, DHCP …); the types are in the field list.",
+        "help_tr": "Kaydın türü (trafik, web filtresi, DHCP …); türler alan listesindedir.",
+        "indexed": [
+          "messages",
+          "mt_event"
+        ],
+        "kind": "kind",
+        "label_en": "Record type",
+        "label_tr": "Kayıt türü",
+        "name": "type",
+        "tables": [
+          "messages",
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_interface",
+          "mt_config",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "alttur"
+        ],
+        "examples": [
+          "subtype:forward"
+        ],
+        "help_en": "The subtype the device sent (e.g. FortiGate forward, local; MikroTik login).",
+        "help_tr": "Cihazın gönderdiği alt tür (ör. FortiGate forward, local; MikroTik login).",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Subtype",
+        "label_tr": "Alt tür",
+        "name": "subtype",
+        "tables": [
+          "messages"
+        ]
+      },
+      {
+        "aliases": [
+          "cihaz"
+        ],
+        "examples": [
+          "host:core-r1"
+        ],
+        "help_en": "The host name of the syslog header or the FortiGate devname field.",
+        "help_tr": "Syslog başlığındaki ya da FortiGate devname alanındaki cihaz adı.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Host name",
+        "label_tr": "Cihaz adı",
+        "name": "host",
+        "tables": [
+          "messages"
+        ]
+      },
+      {
+        "aliases": [
+          "konu"
+        ],
+        "examples": [
+          "program:dhcp*"
+        ],
+        "help_en": "The syslog program or the MikroTik topics (e.g. dhcp,info).",
+        "help_tr": "Syslog programı ya da MikroTik konuları (ör. dhcp,info).",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Program / topics",
+        "label_tr": "Program / konu",
+        "name": "program",
+        "tables": [
+          "messages"
+        ]
+      },
+      {
+        "aliases": [
+          "onem"
+        ],
+        "examples": [
+          "severity:<=err",
+          "severity:warning"
+        ],
+        "help_en": "The syslog severity: emerg … debug or 0-7; comparisons work (<=err: errors and more severe).",
+        "help_tr": "Syslog önemi: emerg … debug ya da 0-7; karşılaştırma yazılabilir (<=err: hata ve daha önemli).",
+        "indexed": [],
+        "kind": "severity",
+        "label_en": "Severity",
+        "label_tr": "Önem",
+        "name": "severity",
+        "tables": [
+          "messages"
+        ]
+      },
+      {
+        "aliases": [
+          "hata"
+        ],
+        "examples": [
+          "error:fortigate.*",
+          "error:*"
+        ],
+        "help_en": "The pattern a line could not be parsed with, with * at its end if needed; * alone finds every error.",
+        "help_tr": "Satırın ayrıştırılamayan kalıbı; sonunda * olabilir, * tek başına her hatayı bulur.",
+        "indexed": [],
+        "kind": "error",
+        "label_en": "Parse error",
+        "label_tr": "Ayrıştırma hatası",
+        "name": "error",
+        "tables": [
+          "messages"
+        ]
+      },
+      {
+        "aliases": [
+          "kaynakip",
+          "istemci"
+        ],
+        "examples": [
+          "srcip:172.20.41.105",
+          "srcip:172.20.41.0/24",
+          "srcip:172.20.*"
+        ],
+        "help_en": "The client's address or network; the fastest field.",
+        "help_tr": "İstemcinin adresi ya da ağı; en hızlı alan budur.",
+        "indexed": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account"
+        ],
+        "kind": "ip",
+        "label_en": "Source IP (client)",
+        "label_tr": "Kaynak IP (istemci)",
+        "name": "srcip",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "hedefip"
+        ],
+        "examples": [
+          "dstip:203.0.113.10"
+        ],
+        "help_en": "The address or network connected to.",
+        "help_tr": "Bağlanılan adres ya da ağ.",
+        "indexed": [
+          "fg_traffic",
+          "mt_fw"
+        ],
+        "kind": "ip",
+        "label_en": "Destination IP",
+        "label_tr": "Hedef IP",
+        "name": "dstip",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_fw"
+        ]
+      },
+      {
+        "aliases": [
+          "transip"
+        ],
+        "examples": [
+          "natip:198.51.100.7"
+        ],
+        "help_en": "The FortiGate's address after source NAT (transip).",
+        "help_tr": "FortiGate'in kaynak NAT sonrası adresi (transip).",
+        "indexed": [
+          "fg_traffic"
+        ],
+        "kind": "ip",
+        "label_en": "NAT IP",
+        "label_tr": "NAT IP",
+        "name": "natip",
+        "tables": [
+          "fg_traffic"
+        ]
+      },
+      {
+        "aliases": [
+          "adres"
+        ],
+        "examples": [
+          "ip:203.0.113.10"
+        ],
+        "help_en": "Any of the source, destination or NAT addresses; scanned in UTM records, srcip: is faster for a client.",
+        "help_tr": "Kaynak, hedef ya da NAT adreslerinden biri; UTM kayıtlarında taranır, istemci için srcip: daha hızlıdır.",
+        "indexed": [
+          "fg_traffic",
+          "mt_fw",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_account"
+        ],
+        "kind": "ip",
+        "label_en": "Any IP",
+        "label_tr": "Herhangi bir IP",
+        "name": "ip",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "kaynakport"
+        ],
+        "examples": [
+          "srcport:>=49152"
+        ],
+        "help_en": "The client's port.",
+        "help_tr": "İstemcinin portu.",
+        "indexed": [],
+        "kind": "port",
+        "label_en": "Source port",
+        "label_tr": "Kaynak port",
+        "name": "srcport",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "mt_fw"
+        ]
+      },
+      {
+        "aliases": [
+          "hedefport"
+        ],
+        "examples": [
+          "dstport:80,443",
+          "dstport:1000-2000"
+        ],
+        "help_en": "The port connected to; read from an index together with dstip:.",
+        "help_tr": "Bağlanılan port; dstip: ile birlikte indeksten okunur.",
+        "indexed": [],
+        "kind": "port",
+        "label_en": "Destination port",
+        "label_tr": "Hedef port",
+        "name": "dstport",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "mt_fw"
+        ]
+      },
+      {
+        "aliases": [
+          "transport"
+        ],
+        "examples": [
+          "natport:40123"
+        ],
+        "help_en": "The port after source NAT; read from an index together with natip:.",
+        "help_tr": "Kaynak NAT sonrası port; natip: ile birlikte indeksten okunur.",
+        "indexed": [],
+        "kind": "port",
+        "label_en": "NAT port",
+        "label_tr": "NAT port",
+        "name": "natport",
+        "tables": [
+          "fg_traffic"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "port:3389"
+        ],
+        "help_en": "The source or the destination port.",
+        "help_tr": "Kaynak ya da hedef port.",
+        "indexed": [],
+        "kind": "port",
+        "label_en": "Any port",
+        "label_tr": "Herhangi bir port",
+        "name": "port",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "mt_fw"
+        ]
+      },
+      {
+        "aliases": [
+          "protokol"
+        ],
+        "examples": [
+          "proto:udp"
+        ],
+        "help_en": "tcp, udp, icmp or the protocol number.",
+        "help_tr": "tcp, udp, icmp ya da protokol numarası.",
+        "indexed": [],
+        "kind": "proto",
+        "label_en": "Protocol",
+        "label_tr": "Protokol",
+        "name": "proto",
+        "tables": [
+          "fg_traffic",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "mt_fw"
+        ]
+      },
+      {
+        "aliases": [
+          "eylem"
+        ],
+        "examples": [
+          "action:deny,blocked",
+          "-action:passthrough"
+        ],
+        "help_en": "The device's action (deny, blocked, passthrough, assigned, login …). -action:accept finds records whose action is not accept, including those without one.",
+        "help_tr": "Cihazın eylemi (deny, blocked, passthrough, assigned, login …). -action:accept eylemi accept olmayan kayıtları bulur (eylemi boş olanlar dahil).",
+        "indexed": [],
+        "kind": "token",
+        "label_en": "Action",
+        "label_tr": "Eylem",
+        "name": "action",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_account",
+          "mt_config"
+        ]
+      },
+      {
+        "aliases": [
+          "alanadi",
+          "site"
+        ],
+        "examples": [
+          "domain:example.com",
+          "domain:*.example.com"
+        ],
+        "help_en": "The domain and its subdomains; *.example.com finds only the subdomains.",
+        "help_tr": "Alan adı ve alt alan adları; *.example.com yalnızca alt alan adlarını bulur.",
+        "indexed": [
+          "fg_web"
+        ],
+        "kind": "domain",
+        "label_en": "Domain",
+        "label_tr": "Alan adı",
+        "name": "domain",
+        "tables": [
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_virus"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "qname:www.example.com"
+        ],
+        "help_en": "The exact name asked in DNS (read from an index).",
+        "help_tr": "DNS'te sorulan tam ad (indeksten okunur).",
+        "indexed": [
+          "fg_dns"
+        ],
+        "kind": "name",
+        "label_en": "DNS query name",
+        "label_tr": "DNS sorgu adı",
+        "name": "qname",
+        "tables": [
+          "fg_dns"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "url:login"
+        ],
+        "help_en": "Text the URL contains.",
+        "help_tr": "URL'nin içerdiği metin.",
+        "indexed": [],
+        "kind": "url",
+        "label_en": "URL",
+        "label_tr": "URL",
+        "name": "url",
+        "tables": [
+          "fg_web",
+          "fg_app",
+          "fg_virus"
+        ]
+      },
+      {
+        "aliases": [
+          "uygulama"
+        ],
+        "examples": [
+          "app:YouTube"
+        ],
+        "help_en": "The FortiGate application.",
+        "help_tr": "FortiGate uygulama adı.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Application",
+        "label_tr": "Uygulama",
+        "name": "app",
+        "tables": [
+          "fg_traffic",
+          "fg_app"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "appcat:Video/Audio"
+        ],
+        "help_en": "The FortiGate application category.",
+        "help_tr": "FortiGate uygulama kategorisi.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Application category",
+        "label_tr": "Uygulama kategorisi",
+        "name": "appcat",
+        "tables": [
+          "fg_traffic",
+          "fg_app"
+        ]
+      },
+      {
+        "aliases": [
+          "kategori"
+        ],
+        "examples": [
+          "category:*Social*"
+        ],
+        "help_en": "The FortiGuard category name (web and DNS filter).",
+        "help_tr": "FortiGuard kategori adı (web ve DNS filtresi).",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Web category",
+        "label_tr": "Web kategorisi",
+        "name": "category",
+        "tables": [
+          "fg_web",
+          "fg_dns"
+        ]
+      },
+      {
+        "aliases": [
+          "servis"
+        ],
+        "examples": [
+          "service:HTTPS"
+        ],
+        "help_en": "The FortiGate service.",
+        "help_tr": "FortiGate servis adı (HTTPS, DNS …).",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Service",
+        "label_tr": "Servis",
+        "name": "service",
+        "tables": [
+          "fg_traffic",
+          "fg_ips",
+          "fg_virus"
+        ]
+      },
+      {
+        "aliases": [
+          "ulke"
+        ],
+        "examples": [
+          "country:Reserved"
+        ],
+        "help_en": "The destination's country.",
+        "help_tr": "Hedefin ülkesi.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Destination country",
+        "label_tr": "Hedef ülke",
+        "name": "country",
+        "tables": [
+          "fg_traffic"
+        ]
+      },
+      {
+        "aliases": [
+          "politika"
+        ],
+        "examples": [
+          "policy:12",
+          "policy:Internet*"
+        ],
+        "help_en": "The FortiGate policy number or name.",
+        "help_tr": "FortiGate politika numarası ya da adı.",
+        "indexed": [],
+        "kind": "policy",
+        "label_en": "Policy",
+        "label_tr": "Politika",
+        "name": "policy",
+        "tables": [
+          "fg_traffic"
+        ]
+      },
+      {
+        "aliases": [
+          "oturum"
+        ],
+        "examples": [
+          "sessionid:123456"
+        ],
+        "help_en": "The FortiGate session id.",
+        "help_tr": "FortiGate oturum numarası.",
+        "indexed": [
+          "fg_traffic",
+          "fg_web",
+          "fg_app"
+        ],
+        "kind": "int",
+        "label_en": "Session id",
+        "label_tr": "Oturum numarası",
+        "name": "sessionid",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus"
+        ]
+      },
+      {
+        "aliases": [
+          "kullanici"
+        ],
+        "examples": [
+          "user:admin"
+        ],
+        "help_en": "The user who signed in to a device or changed it.",
+        "help_tr": "Cihaza giriş yapan ya da değişiklik yapan kullanıcı.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "User name",
+        "label_tr": "Kullanıcı adı",
+        "name": "user",
+        "tables": [
+          "fg_event",
+          "mt_account",
+          "mt_config"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "mac:00:00:5e:00:53:21",
+          "mac:00:00:5e:*"
+        ],
+        "help_en": "The device's MAC address (any separator) or a vendor prefix.",
+        "help_tr": "Cihazın MAC adresi (her ayraçla) ya da üretici öneki.",
+        "indexed": [
+          "mt_dhcp",
+          "mt_arp"
+        ],
+        "kind": "mac",
+        "label_en": "MAC address",
+        "label_tr": "MAC adresi",
+        "name": "mac",
+        "tables": [
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "vlan:41",
+          "vlan:41,42"
+        ],
+        "help_en": "The VLAN of the client address (Devices and persons → VLANs).",
+        "help_tr": "İstemci adresinin VLAN'ı (Cihazlar ve Kişiler → VLAN'lar).",
+        "indexed": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account"
+        ],
+        "kind": "vlan",
+        "label_en": "VLAN",
+        "label_tr": "VLAN",
+        "name": "vlan",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "departman"
+        ],
+        "examples": [
+          "department:Finans"
+        ],
+        "help_en": "The default department of the client address's VLAN, not the person's assignment.",
+        "help_tr": "İstemci adresinin VLAN'ına tanımlı varsayılan departman; kişi ataması değildir.",
+        "indexed": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account"
+        ],
+        "kind": "department",
+        "label_en": "Department (by VLAN)",
+        "label_tr": "Departman (VLAN'a göre)",
+        "name": "department",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "arayuz"
+        ],
+        "examples": [
+          "interface:ether1"
+        ],
+        "help_en": "The incoming or the outgoing interface.",
+        "help_tr": "Gelen ya da giden arayüz.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Interface",
+        "label_tr": "Arayüz",
+        "name": "interface",
+        "tables": [
+          "fg_traffic",
+          "mt_arp",
+          "mt_fw",
+          "mt_interface",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "qtype:aaaa"
+        ],
+        "help_en": "The type of the DNS query (A, AAAA, MX …).",
+        "help_tr": "DNS sorgusunun tipi (A, AAAA, MX …).",
+        "indexed": [],
+        "kind": "token",
+        "label_en": "DNS query type",
+        "label_tr": "DNS sorgu tipi",
+        "name": "qtype",
+        "tables": [
+          "fg_dns"
+        ]
+      },
+      {
+        "aliases": [
+          "saldiri"
+        ],
+        "examples": [
+          "attack:*Shell*"
+        ],
+        "help_en": "The name of the IPS signature.",
+        "help_tr": "IPS imzasının adı.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Attack name",
+        "label_tr": "Saldırı adı",
+        "name": "attack",
+        "tables": [
+          "fg_ips"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "virus:EICAR*"
+        ],
+        "help_en": "The name of the virus found.",
+        "help_tr": "Bulunan virüsün adı.",
+        "indexed": [],
+        "kind": "text",
+        "label_en": "Virus name",
+        "label_tr": "Virüs adı",
+        "name": "virus",
+        "tables": [
+          "fg_virus"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "logid:0000000013"
+        ],
+        "help_en": "The FortiGate logid field.",
+        "help_tr": "FortiGate logid alanı.",
+        "indexed": [],
+        "kind": "token",
+        "label_en": "FortiGate log id",
+        "label_tr": "FortiGate log numarası",
+        "name": "logid",
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event"
+        ]
+      },
+      {
+        "aliases": [],
+        "examples": [
+          "level:warning"
+        ],
+        "help_en": "The event's level (FortiGate level, MikroTik topic level).",
+        "help_tr": "Olayın seviyesi (FortiGate level, MikroTik konu seviyesi).",
+        "indexed": [],
+        "kind": "token",
+        "label_en": "Level",
+        "label_tr": "Seviye",
+        "name": "level",
+        "tables": [
+          "fg_event",
+          "mt_event"
+        ]
+      },
+      {
+        "aliases": [
+          "metin"
+        ],
+        "examples": [
+          "\"login failure\"",
+          "text:youtube"
+        ],
+        "help_en": "Text in the first 2,000 characters of a record (at least 3 characters); also searched without a field name.",
+        "help_tr": "Kaydın ilk 2.000 karakterinde geçen metin (en az 3 karakter); alan adı yazmadan da aranır.",
+        "indexed": [],
+        "kind": "freetext",
+        "label_en": "Free text",
+        "label_tr": "Serbest metin",
+        "name": "text",
+        "tables": [
+          "messages"
+        ]
+      }
+    ],
+    "kinds": [
+      {
+        "key": "traffic",
+        "label_en": "Traffic",
+        "label_tr": "Trafik"
+      },
+      {
+        "key": "web",
+        "label_en": "Web filter",
+        "label_tr": "Web filtresi"
+      },
+      {
+        "key": "dns",
+        "label_en": "DNS",
+        "label_tr": "DNS"
+      },
+      {
+        "key": "app",
+        "label_en": "Application and SSL",
+        "label_tr": "Uygulama ve SSL"
+      },
+      {
+        "key": "ips",
+        "label_en": "Intrusion prevention",
+        "label_tr": "Saldırı önleme"
+      },
+      {
+        "key": "virus",
+        "label_en": "Antivirus",
+        "label_tr": "Virüs"
+      },
+      {
+        "key": "utm",
+        "label_en": "Other UTM",
+        "label_tr": "Diğer UTM"
+      },
+      {
+        "key": "event",
+        "label_en": "FortiGate event",
+        "label_tr": "FortiGate olayı"
+      },
+      {
+        "key": "dhcp",
+        "label_en": "DHCP",
+        "label_tr": "DHCP"
+      },
+      {
+        "key": "arp",
+        "label_en": "ARP",
+        "label_tr": "ARP"
+      },
+      {
+        "key": "fw",
+        "label_en": "MikroTik firewall",
+        "label_tr": "MikroTik güvenlik duvarı"
+      },
+      {
+        "key": "account",
+        "label_en": "Logins",
+        "label_tr": "Oturum açma"
+      },
+      {
+        "key": "interface",
+        "label_en": "Interface",
+        "label_tr": "Arayüz"
+      },
+      {
+        "key": "config",
+        "label_en": "Configuration",
+        "label_tr": "Yapılandırma"
+      },
+      {
+        "key": "wifi",
+        "label_en": "Wireless",
+        "label_tr": "Kablosuz"
+      },
+      {
+        "key": "heartbeat",
+        "label_en": "Heartbeat",
+        "label_tr": "Heartbeat"
+      },
+      {
+        "key": "log",
+        "label_en": "MikroTik log",
+        "label_tr": "MikroTik günlüğü"
+      },
+      {
+        "key": "syslog",
+        "label_en": "Generic syslog",
+        "label_tr": "Genel syslog"
+      },
+      {
+        "key": "unknown",
+        "label_en": "Unrecognised",
+        "label_tr": "Tanınmayan"
+      },
+      {
+        "key": "other",
+        "label_en": "Other",
+        "label_tr": "Diğer"
+      }
+    ],
+    "limits": {
+      "max_chars": 1000,
+      "max_clauses": 16,
+      "max_days": 31,
+      "max_terms": 5,
+      "max_values": 20,
+      "page_size_max": 500
+    },
+    "sources": [
+      {
+        "name": "core-r1",
+        "network": false,
+        "type": "mikrotik"
+      },
+      {
+        "name": "fortigate",
+        "network": false,
+        "type": "fortigate"
+      },
+      {
+        "name": "switch-3",
+        "network": false,
+        "type": "mikrotik"
+      }
+    ]
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:15.256359+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "parse": {
+    "refused": {
+      "clauses": [],
+      "errors": [
+        {
+          "code": "search_value_invalid",
+          "end": 19,
+          "message_en": "“172.20.42.999” is not valid for “srcip” (expected: an IP address or network, e.g. 172.20.41.5, 172.20.41.0/24, 172.20.41.*).",
+          "message_tr": "“srcip” alanı için “172.20.42.999” geçerli değil (beklenen: IP adresi ya da ağ, ör. 172.20.41.5, 172.20.41.0/24, 172.20.41.*).",
+          "start": 6
+        }
+      ],
+      "kinds": [],
+      "normalized": "",
+      "selective": false
+    },
+    "text": {
+      "clauses": [
+        {
+          "end": 10,
+          "field": "text",
+          "negated": false,
+          "op": "text",
+          "start": 0,
+          "values": [
+            "PLN-PC14"
+          ]
+        },
+        {
+          "end": 18,
+          "field": "text",
+          "negated": true,
+          "op": "text",
+          "start": 11,
+          "values": [
+            "dhcp42"
+          ]
+        }
+      ],
+      "errors": [],
+      "kinds": [
+        "traffic",
+        "web",
+        "dns",
+        "app",
+        "ips",
+        "virus",
+        "utm",
+        "event",
+        "dhcp",
+        "arp",
+        "fw",
+        "account",
+        "interface",
+        "config",
+        "wifi",
+        "heartbeat",
+        "log",
+        "syslog",
+        "unknown",
+        "other"
+      ],
+      "normalized": "PLN-PC14 -dhcp42",
+      "selective": false
+    },
+    "typed": {
+      "clauses": [
+        {
+          "end": 18,
+          "field": "srcip",
+          "negated": false,
+          "op": "match",
+          "start": 0,
+          "values": [
+            "172.20.42.57"
+          ]
+        },
+        {
+          "end": 31,
+          "field": "type",
+          "negated": false,
+          "op": "match",
+          "start": 19,
+          "values": [
+            "traffic"
+          ]
+        }
+      ],
+      "errors": [],
+      "kinds": [
+        "traffic"
+      ],
+      "normalized": "srcip:172.20.42.57 type:traffic",
+      "selective": true
+    },
+    "unknown_field": {
+      "clauses": [],
+      "errors": [
+        {
+          "code": "search_unknown_field",
+          "end": 22,
+          "message_en": "There is no field “istemciip”. Press “?” for the list of fields; put it in quotes to search for it as text.",
+          "message_tr": "“istemciip” diye bir alan yok. Alan listesi için “?” düğmesine basın; metin olarak aramak için tırnak içine alın.",
+          "start": 0
+        }
+      ],
+      "kinds": [],
+      "normalized": "",
+      "selective": false
+    }
+  },
+  "refs": {
+    "complete": true,
+    "refs": [
+      {
+        "day": "2026-10-09",
+        "line": 7,
+        "offset": 937,
+        "source": "core-r1"
+      },
+      {
+        "day": "2026-10-09",
+        "line": 27,
+        "offset": 10260,
+        "source": "fortigate"
+      },
+      {
+        "day": "2026-10-09",
+        "line": 6,
+        "offset": 792,
+        "source": "core-r1"
+      },
+      {
+        "day": "2026-10-09",
+        "line": 26,
+        "offset": 9847,
+        "source": "fortigate"
+      },
+      {
+        "day": "2026-10-09",
+        "line": 7,
+        "offset": 2010,
+        "source": "fortigate"
+      },
+      {
+        "day": "2026-10-09",
+        "line": 6,
+        "offset": 1822,
+        "source": "fortigate"
+      },
+      {
+        "day": "2026-10-09",
+        "line": 2,
+        "offset": 160,
+        "source": "fortigate"
+      },
+      {
+        "day": "2026-10-09",
+        "line": 5,
+        "offset": 635,
+        "source": "core-r1"
+      }
+    ],
+    "sha256": "1493e1f891c9d8c1b4ff8a522db7f554df739fbb3e7f19e7f73e465db8488d1d",
+    "truncated": false,
+    "unsealed_days": []
+  },
+  "saved": {
+    "auditor_list": {
+      "items": []
+    },
+    "created": {
+      "created_at": "2026-10-13T04:00:30.077275Z",
+      "id": 1,
+      "last_run_at": null,
+      "name": "Planlama PC trafiği",
+      "q": "srcip:172.20.42.57 type:traffic",
+      "range": {
+        "from": "2026-10-08T21:00:00Z",
+        "to": "2026-10-09T21:00:00Z"
+      },
+      "updated_at": "2026-10-13T04:00:30.077313Z"
+    },
+    "created_preset": {
+      "created_at": "2026-10-13T04:00:30.135098Z",
+      "id": 2,
+      "last_run_at": null,
+      "name": "Son 24 saat engellenen web",
+      "q": "type:web action:blocked",
+      "range": {
+        "preset": "24h"
+      },
+      "updated_at": "2026-10-13T04:00:30.135131Z"
+    },
+    "deleted_status": 204,
+    "list": {
+      "items": [
+        {
+          "created_at": "2026-10-13T04:00:30.077275Z",
+          "id": 1,
+          "last_run_at": null,
+          "name": "Planlama PC trafiği",
+          "q": "srcip:172.20.42.57 type:traffic",
+          "range": {
+            "from": "2026-10-08T21:00:00Z",
+            "to": "2026-10-09T21:00:00Z"
+          },
+          "updated_at": "2026-10-13T04:00:30.077313Z"
+        },
+        {
+          "created_at": "2026-10-13T04:00:30.135098Z",
+          "id": 2,
+          "last_run_at": null,
+          "name": "Son 24 saat engellenen web",
+          "q": "type:web action:blocked",
+          "range": {
+            "preset": "24h"
+          },
+          "updated_at": "2026-10-13T04:00:30.135131Z"
+        }
+      ]
+    },
+    "list_after_delete": {
+      "items": [
+        {
+          "created_at": "2026-10-13T04:00:30.077275Z",
+          "id": 1,
+          "last_run_at": "2026-10-13T04:00:30.336742Z",
+          "name": "Planlama PC — oturumlar",
+          "q": "srcip:172.20.42.57 type:traffic",
+          "range": {
+            "from": "2026-10-08T21:00:00Z",
+            "to": "2026-10-09T21:00:00Z"
+          },
+          "updated_at": "2026-10-27T06:11:53.233211Z"
+        }
+      ]
+    },
+    "run": {
+      "expires_at": "2026-10-13T04:30:30.362735Z",
+      "items": [
+        {
+          "key": "fg_traffic:2026-10-09T10:30:00.000000+00:00:25",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 27,
+            "offset": 10260,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "93.184.216.34",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 61001,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 61001,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+          "time": "2026-10-09T10:30:00Z",
+          "time_received": "2026-10-09T10:30:00.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "fg_traffic:2026-10-09T08:34:56.000000+00:00:24",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 26,
+            "offset": 9847,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.40",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 62099,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 62099,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:34:56 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534896000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=62099 dstip=203.0.113.40 dstport=443 sessionid=62099 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=62099 duration=5",
+          "time": "2026-10-09T08:34:56Z",
+          "time_received": "2026-10-09T08:34:56.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 7,
+            "offset": 2010,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.40",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51005,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 51005,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:24:36 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534276000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51005 dstip=203.0.113.40 dstport=443 sessionid=51005 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51005 duration=5",
+          "time": "2026-10-09T08:24:36Z",
+          "time_received": "2026-10-09T08:24:36.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "fg_traffic:2026-10-09T08:23:41.000000+00:00:1",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 2,
+            "offset": 160,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51001,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:23:41 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534221000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51001 dstip=203.0.113.10 dstport=443 sessionid=51001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51001 duration=10",
+          "time": "2026-10-09T08:23:41Z",
+          "time_received": "2026-10-09T08:23:41.003000Z",
+          "type": "traffic"
+        }
+      ],
+      "next_cursor": null,
+      "notices": [
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "typed",
+        "kinds": [
+          "traffic"
+        ],
+        "rollup_eligible": false,
+        "selective": true,
+        "tables": [
+          "fg_traffic"
+        ]
+      },
+      "query": {
+        "clauses": [
+          {
+            "end": 18,
+            "field": "srcip",
+            "negated": false,
+            "op": "match",
+            "start": 0,
+            "values": [
+              "172.20.42.57"
+            ]
+          },
+          {
+            "end": 31,
+            "field": "type",
+            "negated": false,
+            "op": "match",
+            "start": 19,
+            "values": [
+              "traffic"
+            ]
+          }
+        ],
+        "normalized": "srcip:172.20.42.57 type:traffic",
+        "text": []
+      },
+      "range": {
+        "from": "2026-10-08T21:00:00Z",
+        "to": "2026-10-09T21:00:00Z"
+      },
+      "scan": {
+        "complete": true,
+        "elapsed_ms": 11,
+        "scanned_from": "2026-10-08T21:00:00Z",
+        "scanned_to": "2026-10-09T21:00:00Z",
+        "windows": 5
+      },
+      "search_id": "ornek-arama-11"
+    },
+    "updated": {
+      "created_at": "2026-10-13T04:00:30.077275Z",
+      "id": 1,
+      "last_run_at": null,
+      "name": "Planlama PC — oturumlar",
+      "q": "srcip:172.20.42.57 type:traffic",
+      "range": {
+        "from": "2026-10-08T21:00:00Z",
+        "to": "2026-10-09T21:00:00Z"
+      },
+      "updated_at": "2026-10-13T04:00:30.224513Z"
+    }
+  },
+  "search": {
+    "auditor": {
+      "expires_at": "2026-10-13T04:30:28.270859Z",
+      "items": [
+        {
+          "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
+          "kind": "web",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 6,
+            "offset": 1822,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": null,
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": "static.portal.example",
+            "dstip": "203.0.113.40",
+            "dstport": null,
+            "interface": null,
+            "mac": null,
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_web",
+          "text": null,
+          "time": "2026-10-09T08:24:32Z",
+          "time_received": "2026-10-09T08:24:32.003000Z",
+          "type": null
+        }
+      ],
+      "next_cursor": null,
+      "notices": [
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "typed",
+        "kinds": [
+          "web"
+        ],
+        "rollup_eligible": false,
+        "selective": true,
+        "tables": [
+          "fg_web"
+        ]
+      },
+      "query": {
+        "clauses": [
+          {
+            "end": 18,
+            "field": "srcip",
+            "negated": false,
+            "op": "match",
+            "start": 0,
+            "values": [
+              "172.20.42.57"
+            ]
+          },
+          {
+            "end": 27,
+            "field": "type",
+            "negated": false,
+            "op": "match",
+            "start": 19,
+            "values": [
+              "web"
+            ]
+          }
+        ],
+        "normalized": "srcip:172.20.42.57 type:web",
+        "text": []
+      },
+      "range": {
+        "from": "2026-10-09T00:00:00+03:00",
+        "to": "2026-10-10T00:00:00+03:00"
+      },
+      "scan": {
+        "complete": true,
+        "elapsed_ms": 15,
+        "scanned_from": "2026-10-09T00:00:00+03:00",
+        "scanned_to": "2026-10-10T00:00:00+03:00",
+        "windows": 5
+      },
+      "search_id": "ornek-arama-06"
+    },
+    "empty": {
+      "expires_at": "2026-10-13T04:30:27.429201Z",
+      "items": [],
+      "next_cursor": null,
+      "notices": [
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "typed",
+        "kinds": [
+          "traffic",
+          "web",
+          "dns",
+          "app",
+          "ips",
+          "virus",
+          "utm",
+          "event",
+          "dhcp",
+          "arp",
+          "fw",
+          "account",
+          "interface",
+          "config",
+          "wifi",
+          "heartbeat",
+          "log",
+          "syslog",
+          "unknown",
+          "other"
+        ],
+        "rollup_eligible": false,
+        "selective": true,
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_event"
+        ]
+      },
+      "query": {
+        "clauses": [
+          {
+            "end": 19,
+            "field": "srcip",
+            "negated": false,
+            "op": "match",
+            "start": 0,
+            "values": [
+              "172.20.42.250"
+            ]
+          }
+        ],
+        "normalized": "srcip:172.20.42.250",
+        "text": []
+      },
+      "range": {
+        "from": "2026-10-09T00:00:00+03:00",
+        "to": "2026-10-10T00:00:00+03:00"
+      },
+      "scan": {
+        "complete": true,
+        "elapsed_ms": 34,
+        "scanned_from": "2026-10-09T00:00:00+03:00",
+        "scanned_to": "2026-10-10T00:00:00+03:00",
+        "windows": 5
+      },
+      "search_id": "ornek-arama-04"
+    },
+    "first_page": {
+      "expires_at": "2026-10-13T04:30:27.258468Z",
+      "items": [
+        {
+          "key": "messages:2026-10-09T11:00:00.000000+00:00:103107",
+          "kind": "arp",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 7,
+            "offset": 937,
+            "source": "core-r1"
+          },
+          "sender": "172.20.10.1",
+          "source": "core-r1",
+          "subtype": null,
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": "vlan42",
+            "mac": "00:0c:29:00:00:99",
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "messages",
+          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "time": "2026-10-09T11:00:00Z",
+          "time_received": "2026-10-09T11:00:00.003000Z",
+          "type": "arp"
+        },
+        {
+          "key": "messages:2026-10-09T10:30:00.000000+00:00:103134",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 27,
+            "offset": 10260,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "93.184.216.34",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 61001,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 61001,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "messages",
+          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+          "time": "2026-10-09T10:30:00Z",
+          "time_received": "2026-10-09T10:30:00.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "messages:2026-10-09T10:00:00.000000+00:00:103106",
+          "kind": "arp",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 6,
+            "offset": 792,
+            "source": "core-r1"
+          },
+          "sender": "172.20.10.1",
+          "source": "core-r1",
+          "subtype": null,
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": "vlan42",
+            "mac": "00:0c:29:00:00:99",
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "messages",
+          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "time": "2026-10-09T10:00:00Z",
+          "time_received": "2026-10-09T10:00:00.003000Z",
+          "type": "arp"
+        },
+        {
+          "key": "messages:2026-10-09T08:34:56.000000+00:00:103133",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 26,
+            "offset": 9847,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.40",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 62099,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 62099,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "messages",
+          "text": "date=2026-10-09 time=11:34:56 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534896000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=62099 dstip=203.0.113.40 dstport=443 sessionid=62099 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=62099 duration=5",
+          "time": "2026-10-09T08:34:56Z",
+          "time_received": "2026-10-09T08:34:56.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "messages:2026-10-09T08:25:26.000000+00:00:103112",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 5,
+            "offset": 1406,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.20",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51002,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.60.142",
+            "srcport": 51002,
+            "url": null,
+            "user": null,
+            "vlan_id": 60
+          },
+          "table": "messages",
+          "text": "date=2026-10-09 time=11:25:26 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534326000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.60.142 srcport=51002 dstip=203.0.113.20 dstport=443 sessionid=51002 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51002 duration=370",
+          "time": "2026-10-09T08:25:26Z",
+          "time_received": "2026-10-09T08:25:26.003000Z",
+          "type": "traffic"
+        }
+      ],
+      "next_cursor": "eyJ2IjoxLCJrIjoibGFzdCIsInQiOiIyMDI2LTEwLTA5VDA4OjI1OjI2LjAwMDAwMCswMDowMCIsImIiOjAsImkiOjEwMzExMn0",
+      "notices": [
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "messages",
+        "kinds": [
+          "traffic",
+          "web",
+          "dns",
+          "app",
+          "ips",
+          "virus",
+          "utm",
+          "event",
+          "dhcp",
+          "arp",
+          "fw",
+          "account",
+          "interface",
+          "config",
+          "wifi",
+          "heartbeat",
+          "log",
+          "syslog",
+          "unknown",
+          "other"
+        ],
+        "rollup_eligible": true,
+        "selective": true,
+        "tables": [
+          "messages"
+        ]
+      },
+      "query": {
+        "clauses": [],
+        "normalized": "",
+        "text": []
+      },
+      "range": {
+        "from": "2026-10-09T00:00:00+03:00",
+        "to": "2026-10-10T00:00:00+03:00"
+      },
+      "scan": {
+        "complete": true,
+        "elapsed_ms": 8,
+        "scanned_from": "2026-10-09T08:25:26Z",
+        "scanned_to": "2026-10-10T00:00:00+03:00",
+        "windows": 4
+      },
+      "search_id": "ornek-arama-03"
+    },
+    "next_page": {
+      "expires_at": "2026-10-13T04:30:27.287724Z",
+      "items": [
+        {
+          "key": "messages:2026-10-09T08:24:36.000000+00:00:103114",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 7,
+            "offset": 2010,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.40",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51005,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 51005,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "messages",
+          "text": "date=2026-10-09 time=11:24:36 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534276000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51005 dstip=203.0.113.40 dstport=443 sessionid=51005 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51005 duration=5",
+          "time": "2026-10-09T08:24:36Z",
+          "time_received": "2026-10-09T08:24:36.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "messages:2026-10-09T08:24:32.003000+00:00:103113",
+          "kind": "web",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 6,
+            "offset": 1822,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "webfilter",
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": null,
+            "mac": null,
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": null,
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": null
+          },
+          "table": "messages",
+          "text": "logid=\"0316013056\" type=\"utm\" subtype=\"webfilter\" srcip=172.20.42.57 dstip=203.0.113.40 sessionid=51005 hostname=\"static.portal.example\"",
+          "time": "2026-10-09T08:24:32.003000Z",
+          "time_received": "2026-10-09T08:24:32.003000Z",
+          "type": "utm"
+        },
+        {
+          "key": "messages:2026-10-09T08:24:00.000000+00:00:103132",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 25,
+            "offset": 9435,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "104.18.32.7",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 50117,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.43.44",
+            "srcport": 50117,
+            "url": null,
+            "user": null,
+            "vlan_id": 43
+          },
+          "table": "messages",
+          "text": "date=2026-10-09 time=11:24:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534240000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.43.44 srcport=50117 dstip=104.18.32.7 dstport=443 sessionid=50117 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50117 duration=4",
+          "time": "2026-10-09T08:24:00Z",
+          "time_received": "2026-10-09T08:24:00.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "messages:2026-10-09T08:23:53.000000+00:00:103131",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 24,
+            "offset": 9022,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "151.101.1.69",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 50116,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.41.15",
+            "srcport": 50116,
+            "url": null,
+            "user": null,
+            "vlan_id": 41
+          },
+          "table": "messages",
+          "text": "date=2026-10-09 time=11:23:53 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534233000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.41.15 srcport=50116 dstip=151.101.1.69 dstport=443 sessionid=50116 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50116 duration=3",
+          "time": "2026-10-09T08:23:53Z",
+          "time_received": "2026-10-09T08:23:53.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "messages:2026-10-09T08:23:46.000000+00:00:103130",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 23,
+            "offset": 8608,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 50115,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.165",
+            "srcport": 50115,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "messages",
+          "text": "date=2026-10-09 time=11:23:46 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534226000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.165 srcport=50115 dstip=203.0.113.10 dstport=443 sessionid=50115 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=50115 duration=6",
+          "time": "2026-10-09T08:23:46Z",
+          "time_received": "2026-10-09T08:23:46.003000Z",
+          "type": "traffic"
+        }
+      ],
+      "next_cursor": "eyJ2IjoxLCJrIjoibGFzdCIsInQiOiIyMDI2LTEwLTA5VDA4OjIzOjQ2LjAwMDAwMCswMDowMCIsImIiOjAsImkiOjEwMzEzMH0",
+      "notices": [
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "messages",
+        "kinds": [
+          "traffic",
+          "web",
+          "dns",
+          "app",
+          "ips",
+          "virus",
+          "utm",
+          "event",
+          "dhcp",
+          "arp",
+          "fw",
+          "account",
+          "interface",
+          "config",
+          "wifi",
+          "heartbeat",
+          "log",
+          "syslog",
+          "unknown",
+          "other"
+        ],
+        "rollup_eligible": true,
+        "selective": true,
+        "tables": [
+          "messages"
+        ]
+      },
+      "query": {
+        "clauses": [],
+        "normalized": "",
+        "text": []
+      },
+      "range": {
+        "from": "2026-10-09T00:00:00+03:00",
+        "to": "2026-10-10T00:00:00+03:00"
+      },
+      "scan": {
+        "complete": true,
+        "elapsed_ms": 3,
+        "scanned_from": "2026-10-09T08:23:46Z",
+        "scanned_to": "2026-10-09T08:25:26Z",
+        "windows": 1
+      },
+      "search_id": "ornek-arama-03"
+    },
+    "partial": {
+      "expires_at": "2026-10-13T04:30:28.143944Z",
+      "items": [
+        {
+          "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 7,
+            "offset": 2010,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.40",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51005,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 51005,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:24:36 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534276000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51005 dstip=203.0.113.40 dstport=443 sessionid=51005 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51005 duration=5",
+          "time": "2026-10-09T08:24:36Z",
+          "time_received": "2026-10-09T08:24:36.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
+          "kind": "web",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 6,
+            "offset": 1822,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": null,
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": "static.portal.example",
+            "dstip": "203.0.113.40",
+            "dstport": null,
+            "interface": null,
+            "mac": null,
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_web",
+          "text": null,
+          "time": "2026-10-09T08:24:32Z",
+          "time_received": "2026-10-09T08:24:32.003000Z",
+          "type": null
+        },
+        {
+          "key": "fg_traffic:2026-10-09T08:23:41.000000+00:00:1",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 2,
+            "offset": 160,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51001,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:23:41 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534221000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51001 dstip=203.0.113.10 dstport=443 sessionid=51001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51001 duration=10",
+          "time": "2026-10-09T08:23:41Z",
+          "time_received": "2026-10-09T08:23:41.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "mt_dhcp:2026-10-09T07:42:18.000000+00:00:5",
+          "kind": "dhcp",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 5,
+            "offset": 635,
+            "source": "core-r1"
+          },
+          "sender": "172.20.10.1",
+          "source": "core-r1",
+          "subtype": "assigned",
+          "summary": {
+            "action": "assigned",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": null,
+            "mac": "00:00:5e:00:53:57",
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "mt_dhcp",
+          "text": "dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14",
+          "time": "2026-10-09T07:42:18Z",
+          "time_received": "2026-10-09T07:42:18.003000Z",
+          "type": "dhcp"
+        }
+      ],
+      "next_cursor": "eyJ2IjoxLCJrIjoiZnJvbnRpZXIiLCJ0IjoiMjAyNi0xMC0wOVQwNzozMDowMC4wMDAwMDArMDA6MDAifQ",
+      "notices": [
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "typed",
+        "kinds": [
+          "traffic",
+          "web",
+          "dns",
+          "app",
+          "ips",
+          "virus",
+          "utm",
+          "event",
+          "dhcp",
+          "arp",
+          "fw",
+          "account",
+          "interface",
+          "config",
+          "wifi",
+          "heartbeat",
+          "log",
+          "syslog",
+          "unknown",
+          "other"
+        ],
+        "rollup_eligible": false,
+        "selective": true,
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_event"
+        ]
+      },
+      "query": {
+        "clauses": [
+          {
+            "end": 18,
+            "field": "srcip",
+            "negated": false,
+            "op": "match",
+            "start": 0,
+            "values": [
+              "172.20.42.57"
+            ]
+          }
+        ],
+        "normalized": "srcip:172.20.42.57",
+        "text": []
+      },
+      "range": {
+        "from": "2026-10-09T00:00:00+03:00",
+        "to": "2026-10-09T11:30:00+03:00"
+      },
+      "scan": {
+        "complete": false,
+        "elapsed_ms": 604,
+        "scanned_from": "2026-10-09T10:30:00+03:00",
+        "scanned_to": "2026-10-09T11:30:00+03:00",
+        "windows": 1
+      },
+      "search_id": "ornek-arama-05"
+    },
+    "text": {
+      "expires_at": "2026-10-13T04:30:27.171034Z",
+      "items": [
+        {
+          "key": "messages:2026-10-09T08:14:56.003000+00:00:103108",
+          "kind": "dns",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 1,
+            "offset": 0,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "dns",
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": null,
+            "mac": null,
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": null,
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": null
+          },
+          "table": "messages",
+          "text": "logid=\"1501054802\" type=\"utm\" subtype=\"dns\" srcip=172.20.60.142 qname=\"www.google.com\" ipaddr=\"203.0.113.20\"",
+          "time": "2026-10-09T08:14:56.003000Z",
+          "time_received": "2026-10-09T08:14:56.003000Z",
+          "type": "utm"
+        }
+      ],
+      "next_cursor": null,
+      "notices": [
+        {
+          "code": "text_truncated",
+          "message_en": "Free text is matched in the first 2,000 characters of each record; the whole line is in the raw record.",
+          "message_tr": "Serbest metin her kaydın ilk 2.000 karakterinde aranır; satırın tamamı ham kayıttadır.",
+          "params": {}
+        },
+        {
+          "code": "query_not_selective",
+          "message_en": "This query cannot use an index and is scanned in time slices. Add a field such as srcip:, domain:, mac: or qname: for faster results.",
+          "message_tr": "Bu sorgu indeks kullanamıyor ve zaman dilimleri halinde taranıyor. Daha hızlı sonuç için srcip:, domain:, mac: veya qname: gibi bir alan ekleyin.",
+          "params": {}
+        },
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "messages",
+        "kinds": [
+          "traffic",
+          "web",
+          "dns",
+          "app",
+          "ips",
+          "virus",
+          "utm",
+          "event",
+          "dhcp",
+          "arp",
+          "fw",
+          "account",
+          "interface",
+          "config",
+          "wifi",
+          "heartbeat",
+          "log",
+          "syslog",
+          "unknown",
+          "other"
+        ],
+        "rollup_eligible": false,
+        "selective": false,
+        "tables": [
+          "messages"
+        ]
+      },
+      "query": {
+        "clauses": [
+          {
+            "end": 14,
+            "field": "text",
+            "negated": false,
+            "op": "text",
+            "start": 0,
+            "values": [
+              "www.google.com"
+            ]
+          }
+        ],
+        "normalized": "www.google.com",
+        "text": [
+          "www.google.com"
+        ]
+      },
+      "range": {
+        "from": "2026-10-09T00:00:00+03:00",
+        "to": "2026-10-10T00:00:00+03:00"
+      },
+      "scan": {
+        "complete": true,
+        "elapsed_ms": 10,
+        "scanned_from": "2026-10-09T00:00:00+03:00",
+        "scanned_to": "2026-10-10T00:00:00+03:00",
+        "windows": 5
+      },
+      "search_id": "ornek-arama-02"
+    },
+    "typed": {
+      "expires_at": "2026-10-13T04:30:27.087659Z",
+      "items": [
+        {
+          "key": "mt_arp:2026-10-09T11:00:00.000000+00:00:2",
+          "kind": "arp",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 7,
+            "offset": 937,
+            "source": "core-r1"
+          },
+          "sender": "172.20.10.1",
+          "source": "core-r1",
+          "subtype": null,
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": "vlan42",
+            "mac": "00:0c:29:00:00:99",
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "mt_arp",
+          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "time": "2026-10-09T11:00:00Z",
+          "time_received": "2026-10-09T11:00:00.003000Z",
+          "type": "arp"
+        },
+        {
+          "key": "fg_traffic:2026-10-09T10:30:00.000000+00:00:25",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 27,
+            "offset": 10260,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "93.184.216.34",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 61001,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 61001,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=13:30:00 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791541800000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=61001 dstip=93.184.216.34 dstport=443 sessionid=61001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=61001 duration=12",
+          "time": "2026-10-09T10:30:00Z",
+          "time_received": "2026-10-09T10:30:00.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "mt_arp:2026-10-09T10:00:00.000000+00:00:1",
+          "kind": "arp",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 6,
+            "offset": 792,
+            "source": "core-r1"
+          },
+          "sender": "172.20.10.1",
+          "source": "core-r1",
+          "subtype": null,
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": "vlan42",
+            "mac": "00:0c:29:00:00:99",
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "mt_arp",
+          "text": "ARP-LOG 172.20.42.57 00:0C:29:00:00:99 vlan42",
+          "time": "2026-10-09T10:00:00Z",
+          "time_received": "2026-10-09T10:00:00.003000Z",
+          "type": "arp"
+        },
+        {
+          "key": "fg_traffic:2026-10-09T08:34:56.000000+00:00:24",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 26,
+            "offset": 9847,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.40",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 62099,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 62099,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:34:56 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534896000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=62099 dstip=203.0.113.40 dstport=443 sessionid=62099 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=62099 duration=5",
+          "time": "2026-10-09T08:34:56Z",
+          "time_received": "2026-10-09T08:34:56.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 7,
+            "offset": 2010,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.40",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51005,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 51005,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:24:36 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534276000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51005 dstip=203.0.113.40 dstport=443 sessionid=51005 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51005 duration=5",
+          "time": "2026-10-09T08:24:36Z",
+          "time_received": "2026-10-09T08:24:36.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
+          "kind": "web",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 6,
+            "offset": 1822,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": null,
+          "summary": {
+            "action": null,
+            "app": null,
+            "category": null,
+            "domain": "static.portal.example",
+            "dstip": "203.0.113.40",
+            "dstport": null,
+            "interface": null,
+            "mac": null,
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_web",
+          "text": null,
+          "time": "2026-10-09T08:24:32Z",
+          "time_received": "2026-10-09T08:24:32.003000Z",
+          "type": null
+        },
+        {
+          "key": "fg_traffic:2026-10-09T08:23:41.000000+00:00:1",
+          "kind": "traffic",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 2,
+            "offset": 160,
+            "source": "fortigate"
+          },
+          "sender": "172.31.255.1",
+          "source": "fortigate",
+          "subtype": "forward",
+          "summary": {
+            "action": "accept",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": "203.0.113.10",
+            "dstport": 443,
+            "interface": null,
+            "mac": null,
+            "natip": "100.64.12.9",
+            "natport": 51001,
+            "policy": null,
+            "proto": "tcp",
+            "srcip": "172.20.42.57",
+            "srcport": 51001,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "fg_traffic",
+          "text": "date=2026-10-09 time=11:23:41 devname=\"FIREWALL-01\" devid=\"FGT0000000000000\" eventtime=1791534221000000000 tz=\"+0300\" logid=\"0000000013\" type=\"traffic\" subtype=\"forward\" level=\"notice\" vd=\"root\" srcip=172.20.42.57 srcport=51001 dstip=203.0.113.10 dstport=443 sessionid=51001 proto=6 action=\"accept\" trandisp=\"snat\" transip=100.64.12.9 transport=51001 duration=10",
+          "time": "2026-10-09T08:23:41Z",
+          "time_received": "2026-10-09T08:23:41.003000Z",
+          "type": "traffic"
+        },
+        {
+          "key": "mt_dhcp:2026-10-09T07:42:18.000000+00:00:5",
+          "kind": "dhcp",
+          "parse_error": null,
+          "raw": {
+            "day": "2026-10-09",
+            "line": 5,
+            "offset": 635,
+            "source": "core-r1"
+          },
+          "sender": "172.20.10.1",
+          "source": "core-r1",
+          "subtype": "assigned",
+          "summary": {
+            "action": "assigned",
+            "app": null,
+            "category": null,
+            "domain": null,
+            "dstip": null,
+            "dstport": null,
+            "interface": null,
+            "mac": "00:00:5e:00:53:57",
+            "natip": null,
+            "natport": null,
+            "policy": null,
+            "proto": null,
+            "srcip": "172.20.42.57",
+            "srcport": null,
+            "url": null,
+            "user": null,
+            "vlan_id": 42
+          },
+          "table": "mt_dhcp",
+          "text": "dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14",
+          "time": "2026-10-09T07:42:18Z",
+          "time_received": "2026-10-09T07:42:18.003000Z",
+          "type": "dhcp"
+        }
+      ],
+      "next_cursor": null,
+      "notices": [
+        {
+          "code": "vault_only_before",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "params": {
+            "date": "2026-10-09"
+          }
+        }
+      ],
+      "plan": {
+        "driver": "typed",
+        "kinds": [
+          "traffic",
+          "web",
+          "dns",
+          "app",
+          "ips",
+          "virus",
+          "utm",
+          "event",
+          "dhcp",
+          "arp",
+          "fw",
+          "account",
+          "interface",
+          "config",
+          "wifi",
+          "heartbeat",
+          "log",
+          "syslog",
+          "unknown",
+          "other"
+        ],
+        "rollup_eligible": false,
+        "selective": true,
+        "tables": [
+          "fg_traffic",
+          "fg_web",
+          "fg_dns",
+          "fg_app",
+          "fg_ips",
+          "fg_virus",
+          "fg_event",
+          "mt_dhcp",
+          "mt_arp",
+          "mt_fw",
+          "mt_account",
+          "mt_event"
+        ]
+      },
+      "query": {
+        "clauses": [
+          {
+            "end": 18,
+            "field": "srcip",
+            "negated": false,
+            "op": "match",
+            "start": 0,
+            "values": [
+              "172.20.42.57"
+            ]
+          }
+        ],
+        "normalized": "srcip:172.20.42.57",
+        "text": []
+      },
+      "range": {
+        "from": "2026-10-09T00:00:00+03:00",
+        "to": "2026-10-10T00:00:00+03:00"
+      },
+      "scan": {
+        "complete": true,
+        "elapsed_ms": 40,
+        "scanned_from": "2026-10-09T00:00:00+03:00",
+        "scanned_to": "2026-10-10T00:00:00+03:00",
+        "windows": 5
+      },
+      "search_id": "ornek-arama-01"
+    }
+  },
+  "stats": {
+    "auditor": {
+      "complete": true,
+      "covered_from": "2026-10-09T00:00:00+03:00",
+      "covered_to": "2026-10-10T00:00:00+03:00",
+      "elapsed_ms": 16,
+      "facets": {
+        "action": {
+          "other": 0,
+          "status": "ok",
+          "values": []
+        },
+        "department": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 1,
+              "label_en": "Planlama",
+              "label_tr": "Planlama",
+              "value": "Planlama"
+            }
+          ]
+        },
+        "kind": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 1,
+              "label_en": "Web filter",
+              "label_tr": "Web filtresi",
+              "value": "web"
+            }
+          ]
+        },
+        "source": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 1,
+              "label_en": "fortigate",
+              "label_tr": "fortigate",
+              "value": "fortigate"
+            }
+          ]
+        },
+        "vlan": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 1,
+              "label_en": "VLAN 42 (Planlama)",
+              "label_tr": "VLAN 42 (Planlama)",
+              "value": "42"
+            }
+          ]
+        }
+      },
+      "histogram": {
+        "bucket_seconds": 3600,
+        "buckets": [
+          {
+            "count": 0,
+            "start": "2026-10-09T00:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T01:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T02:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T03:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T04:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T05:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T06:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T07:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T08:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T09:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T10:00:00+03:00"
+          },
+          {
+            "count": 1,
+            "start": "2026-10-09T11:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T12:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T13:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T14:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T15:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T16:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T17:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T18:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T19:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T20:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T21:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T22:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T23:00:00+03:00"
+          }
+        ]
+      },
+      "mode": "direct",
+      "notices": [],
+      "sample_rows": null,
+      "sampled": false,
+      "search_id": "ornek-arama-06",
+      "total": {
+        "exact": true,
+        "value": 1
+      }
+    },
+    "direct": {
+      "complete": true,
+      "covered_from": "2026-10-09T11:00:00+03:00",
+      "covered_to": "2026-10-09T12:00:00+03:00",
+      "elapsed_ms": 17,
+      "facets": {
+        "action": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 3,
+              "label_en": "accept",
+              "label_tr": "accept",
+              "value": "accept"
+            }
+          ]
+        },
+        "department": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 4,
+              "label_en": "Planlama",
+              "label_tr": "Planlama",
+              "value": "Planlama"
+            }
+          ]
+        },
+        "kind": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 3,
+              "label_en": "Traffic",
+              "label_tr": "Trafik",
+              "value": "traffic"
+            },
+            {
+              "count": 1,
+              "label_en": "Web filter",
+              "label_tr": "Web filtresi",
+              "value": "web"
+            }
+          ]
+        },
+        "source": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 4,
+              "label_en": "fortigate",
+              "label_tr": "fortigate",
+              "value": "fortigate"
+            }
+          ]
+        },
+        "vlan": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 4,
+              "label_en": "VLAN 42 (Planlama)",
+              "label_tr": "VLAN 42 (Planlama)",
+              "value": "42"
+            }
+          ]
+        }
+      },
+      "histogram": {
+        "bucket_seconds": 60,
+        "buckets": [
+          {
+            "count": 0,
+            "start": "2026-10-09T11:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:01:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:02:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:03:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:04:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:05:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:06:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:07:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:08:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:09:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:10:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:11:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:12:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:13:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:14:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:15:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:16:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:17:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:18:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:19:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:20:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:21:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:22:00+03:00"
+          },
+          {
+            "count": 1,
+            "start": "2026-10-09T11:23:00+03:00"
+          },
+          {
+            "count": 2,
+            "start": "2026-10-09T11:24:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:25:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:26:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:27:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:28:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:29:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:30:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:31:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:32:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:33:00+03:00"
+          },
+          {
+            "count": 1,
+            "start": "2026-10-09T11:34:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:35:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:36:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:37:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:38:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:39:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:40:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:41:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:42:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:43:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:44:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:45:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:46:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:47:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:48:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:49:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:50:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:51:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:52:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:53:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:54:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:55:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:56:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:57:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:58:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:59:00+03:00"
+          }
+        ]
+      },
+      "mode": "direct",
+      "notices": [],
+      "sample_rows": null,
+      "sampled": false,
+      "search_id": "ornek-arama-09",
+      "total": {
+        "exact": true,
+        "value": 4
+      }
+    },
+    "hybrid": {
+      "complete": true,
+      "covered_from": "2026-10-09T00:30:00+03:00",
+      "covered_to": "2026-10-09T23:30:00+03:00",
+      "elapsed_ms": 37,
+      "facets": {
+        "action": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 25,
+              "label_en": "accept",
+              "label_tr": "accept",
+              "value": "accept"
+            }
+          ]
+        },
+        "department": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 10,
+              "label_en": "Planlama",
+              "label_tr": "Planlama",
+              "value": "Planlama"
+            },
+            {
+              "count": 9,
+              "label_en": "İdari İşler",
+              "label_tr": "İdari İşler",
+              "value": "İdari İşler"
+            },
+            {
+              "count": 6,
+              "label_en": "Finans",
+              "label_tr": "Finans",
+              "value": "Finans"
+            }
+          ]
+        },
+        "kind": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 25,
+              "label_en": "Traffic",
+              "label_tr": "Trafik",
+              "value": "traffic"
+            }
+          ]
+        },
+        "source": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 25,
+              "label_en": "fortigate",
+              "label_tr": "fortigate",
+              "value": "fortigate"
+            }
+          ]
+        },
+        "vlan": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 10,
+              "label_en": "VLAN 42 (Planlama)",
+              "label_tr": "VLAN 42 (Planlama)",
+              "value": "42"
+            },
+            {
+              "count": 6,
+              "label_en": "VLAN 41 (Finans)",
+              "label_tr": "VLAN 41 (Finans)",
+              "value": "41"
+            },
+            {
+              "count": 6,
+              "label_en": "VLAN 43 (İdari İşler)",
+              "label_tr": "VLAN 43 (İdari İşler)",
+              "value": "43"
+            },
+            {
+              "count": 3,
+              "label_en": "VLAN 60 (Wi-Fi Personel)",
+              "label_tr": "VLAN 60 (Wi-Fi Personel)",
+              "value": "60"
+            }
+          ]
+        }
+      },
+      "histogram": {
+        "bucket_seconds": 3600,
+        "buckets": [
+          {
+            "count": 0,
+            "start": "2026-10-09T00:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T01:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T02:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T03:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T04:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T05:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T06:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T07:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T08:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T09:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T10:00:00+03:00"
+          },
+          {
+            "count": 24,
+            "start": "2026-10-09T11:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T12:00:00+03:00"
+          },
+          {
+            "count": 1,
+            "start": "2026-10-09T13:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T14:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T15:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T16:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T17:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T18:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T19:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T20:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T21:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T22:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T23:00:00+03:00"
+          }
+        ]
+      },
+      "mode": "hybrid",
+      "notices": [],
+      "sample_rows": null,
+      "sampled": false,
+      "search_id": "ornek-arama-08",
+      "total": {
+        "exact": true,
+        "value": 25
+      }
+    },
+    "partial": {
+      "complete": false,
+      "covered_from": "2026-10-09T22:00:00+03:00",
+      "covered_to": "2026-10-10T00:00:00+03:00",
+      "elapsed_ms": 1499,
+      "facets": {
+        "action": {
+          "other": 0,
+          "status": "ok",
+          "values": []
+        },
+        "department": {
+          "other": 0,
+          "status": "ok",
+          "values": []
+        },
+        "kind": {
+          "other": 0,
+          "status": "ok",
+          "values": []
+        },
+        "source": {
+          "other": 0,
+          "status": "ok",
+          "values": []
+        },
+        "vlan": {
+          "other": 0,
+          "status": "ok",
+          "values": []
+        }
+      },
+      "histogram": {
+        "bucket_seconds": 3600,
+        "buckets": [
+          {
+            "count": 0,
+            "start": "2026-10-09T00:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T01:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T02:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T03:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T04:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T05:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T06:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T07:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T08:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T09:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T10:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T11:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T12:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T13:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T14:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T15:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T16:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T17:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T18:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T19:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T20:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T21:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T22:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T23:00:00+03:00"
+          }
+        ]
+      },
+      "mode": "direct",
+      "notices": [
+        {
+          "code": "query_not_selective",
+          "message_en": "This query cannot use an index and is scanned in time slices. Add a field such as srcip:, domain:, mac: or qname: for faster results.",
+          "message_tr": "Bu sorgu indeks kullanamıyor ve zaman dilimleri halinde taranıyor. Daha hızlı sonuç için srcip:, domain:, mac: veya qname: gibi bir alan ekleyin.",
+          "params": {}
+        }
+      ],
+      "sample_rows": null,
+      "sampled": false,
+      "search_id": "ornek-arama-10",
+      "total": {
+        "exact": false,
+        "value": 0
+      }
+    },
+    "rollup": {
+      "complete": true,
+      "covered_from": "2026-10-09T00:00:00+03:00",
+      "covered_to": "2026-10-10T00:00:00+03:00",
+      "elapsed_ms": 12,
+      "facets": {
+        "action": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 25,
+              "label_en": "accept",
+              "label_tr": "accept",
+              "value": "accept"
+            },
+            {
+              "count": 5,
+              "label_en": "assigned",
+              "label_tr": "assigned",
+              "value": "assigned"
+            }
+          ]
+        },
+        "department": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 14,
+              "label_en": "Planlama",
+              "label_tr": "Planlama",
+              "value": "Planlama"
+            },
+            {
+              "count": 11,
+              "label_en": "İdari İşler",
+              "label_tr": "İdari İşler",
+              "value": "İdari İşler"
+            },
+            {
+              "count": 7,
+              "label_en": "Finans",
+              "label_tr": "Finans",
+              "value": "Finans"
+            }
+          ]
+        },
+        "kind": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 25,
+              "label_en": "Traffic",
+              "label_tr": "Trafik",
+              "value": "traffic"
+            },
+            {
+              "count": 5,
+              "label_en": "DHCP",
+              "label_tr": "DHCP",
+              "value": "dhcp"
+            },
+            {
+              "count": 2,
+              "label_en": "ARP",
+              "label_tr": "ARP",
+              "value": "arp"
+            },
+            {
+              "count": 1,
+              "label_en": "DNS",
+              "label_tr": "DNS",
+              "value": "dns"
+            },
+            {
+              "count": 1,
+              "label_en": "Web filter",
+              "label_tr": "Web filtresi",
+              "value": "web"
+            }
+          ]
+        },
+        "source": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 27,
+              "label_en": "fortigate",
+              "label_tr": "fortigate",
+              "value": "fortigate"
+            },
+            {
+              "count": 7,
+              "label_en": "core-r1",
+              "label_tr": "core-r1",
+              "value": "core-r1"
+            }
+          ]
+        },
+        "vlan": {
+          "other": 0,
+          "status": "ok",
+          "values": [
+            {
+              "count": 14,
+              "label_en": "VLAN 42 (Planlama)",
+              "label_tr": "VLAN 42 (Planlama)",
+              "value": "42"
+            },
+            {
+              "count": 7,
+              "label_en": "VLAN 41 (Finans)",
+              "label_tr": "VLAN 41 (Finans)",
+              "value": "41"
+            },
+            {
+              "count": 7,
+              "label_en": "VLAN 43 (İdari İşler)",
+              "label_tr": "VLAN 43 (İdari İşler)",
+              "value": "43"
+            },
+            {
+              "count": 4,
+              "label_en": "VLAN 60 (Wi-Fi Personel)",
+              "label_tr": "VLAN 60 (Wi-Fi Personel)",
+              "value": "60"
+            }
+          ]
+        }
+      },
+      "histogram": {
+        "bucket_seconds": 3600,
+        "buckets": [
+          {
+            "count": 0,
+            "start": "2026-10-09T00:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T01:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T02:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T03:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T04:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T05:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T06:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T07:00:00+03:00"
+          },
+          {
+            "count": 3,
+            "start": "2026-10-09T08:00:00+03:00"
+          },
+          {
+            "count": 1,
+            "start": "2026-10-09T09:00:00+03:00"
+          },
+          {
+            "count": 1,
+            "start": "2026-10-09T10:00:00+03:00"
+          },
+          {
+            "count": 26,
+            "start": "2026-10-09T11:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T12:00:00+03:00"
+          },
+          {
+            "count": 2,
+            "start": "2026-10-09T13:00:00+03:00"
+          },
+          {
+            "count": 1,
+            "start": "2026-10-09T14:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T15:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T16:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T17:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T18:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T19:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T20:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T21:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T22:00:00+03:00"
+          },
+          {
+            "count": 0,
+            "start": "2026-10-09T23:00:00+03:00"
+          }
+        ]
+      },
+      "mode": "rollup",
+      "notices": [],
+      "sample_rows": null,
+      "sampled": false,
+      "search_id": "ornek-arama-07",
+      "total": {
+        "exact": true,
+        "value": 34
+      }
+    }
+  }
+}

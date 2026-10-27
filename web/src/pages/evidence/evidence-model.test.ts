@@ -4,6 +4,7 @@ import {
   daySpan,
   downloadBlockedReason,
   emptyWizard,
+  extractText,
   isExpiredUnpurged,
   isUnfinished,
   parseLines,
@@ -14,6 +15,8 @@ import {
   toEvidenceBody,
   validateContent,
   validateScope,
+  leaveOutUnsealed,
+  wizardFromSearch,
   type WizardDraft,
 } from './evidence-model';
 
@@ -112,6 +115,68 @@ describe('raw lines of an extract', () => {
     expect(validateContent(range({ content: 'extract', lines: '2026-10-05 fortigate 2' }))).toEqual(
       {},
     );
+  });
+});
+
+describe('the lines of a search ("Kanıt paketine aktar")', () => {
+  const extract = {
+    extract: [
+      { day: '2026-10-09', source: 'fortigate', line: 1234 },
+      { day: '2026-10-10', source: 'core-r1', line: 7 },
+    ],
+    from_day: '2026-10-09',
+    to_day: '2026-10-10',
+    truncated: false,
+    complete: true,
+    unsealed_days: [],
+    query: 'srcip:172.20.42.57',
+  };
+
+  it('fill the line box in the form typed lines have', () => {
+    expect(extractText(extract.extract)).toBe('2026-10-09 fortigate 1234\n2026-10-10 core-r1 7');
+    expect(parseLines(extractText(extract.extract))).toEqual({ lines: extract.extract, bad: [] });
+    expect(extractText([])).toBe('');
+  });
+
+  it('open the wizard on their days with an extract of exactly these lines', () => {
+    const draft = wizardFromSearch(extract);
+    expect(draft).toMatchObject({
+      scope: 'range',
+      from: '09.10.2026',
+      to: '10.10.2026',
+      content: 'extract',
+      allSources: true,
+      password: false,
+    });
+    expect(validateScope(draft, TODAY)).toEqual({});
+    expect(validateContent(draft)).toEqual({});
+    expect(toEvidenceBody(draft)).toMatchObject({
+      from: '2026-10-09',
+      to: '2026-10-10',
+      sources: null,
+      extract: extract.extract,
+      content: 'extract',
+    });
+  });
+
+  it('are checked like typed ones: a day that is not closed yet is refused', () => {
+    const draft = wizardFromSearch({ ...extract, to_day: TODAY });
+    expect(validateScope(draft, TODAY)).toEqual({ to: 'evidence.validation.notClosed' });
+  });
+
+  it('can leave out the lines of unsealed days, the scope then ends on a sealed day', () => {
+    const lastDay = { ...extract, to_day: TODAY, unsealed_days: [TODAY] };
+    lastDay.extract = [...extract.extract, { day: TODAY, source: 'fortigate', line: 3 }];
+    const narrowed = leaveOutUnsealed(lastDay);
+    expect(narrowed).toEqual({
+      extract: { ...extract, unsealed_days: [] },
+      leftOut: 1,
+    });
+    expect(validateScope(wizardFromSearch(narrowed?.extract ?? extract), TODAY)).toEqual({});
+    // Nothing on a sealed day: nothing to offer.
+    expect(
+      leaveOutUnsealed({ ...extract, unsealed_days: ['2026-10-09', '2026-10-10'] }),
+    ).toBeNull();
   });
 });
 

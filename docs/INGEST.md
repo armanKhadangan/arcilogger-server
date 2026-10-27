@@ -12,6 +12,15 @@
 - Her (kaynak, gün) için **kaldığı yer** (`ingest_offsets`: bayt konumu + satır numarası)
   yüklenen satırlarla **aynı veritabanı işleminde** kaydedilir. Bu yüzden servis çökse, elektrik
   kesilse veya süreç öldürülse bile bir satır **ne iki kez yüklenir ne de atlanır**.
+- Arama'nın özet tablosu `search_counts` (saat, ham dosya, kayıt türü, tablo, eylem ve özel /24
+  ağı başına **kesin** satır sayıları) da satırlarla **aynı işlemde** yazılır: yüklenen her satır
+  tam bir kez sayılır. Bu sürüme yükseltmeden önce yüklenmiş dosyaları worker işi
+  `search.counts_backfill` gün bitince sayar; o zamana kadar o günlerin istatistikleri doğrudan
+  sayılır. Bu adımın kendi maliyeti tek süreçli yüklemenin işlemci süresinin yaklaşık %1,4'üdür;
+  `bench_throughput.py --repeat 3` ile Wave 1'e göre yavaşlama ölçülemedi (medyanlar +%0,2 ve
+  2 worker ile +%1,6). Bu ölçümde web filtresi satırı yoktur; %18'i web filtresi olan yük
+  üreteci gününde iki karşılaştırmalı ölçümün medyanı Wave 1'den %1,9 (tek süreç) ve %3,8
+  (2 worker) yavaştır: %5 sınırının içinde, ama sıfır değil (aşağıda "Measured throughput").
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -49,7 +58,7 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
     once the sealer deleted the spool file)             ▼
                                          one transaction: offsets (compare-and-set) → COPY rows
                                          → parse_failures upsert → sources (+ new_source alert)
-                                         → COMMIT → in-memory offsets move
+                                         → search_counts upsert → COMMIT → in-memory offsets move
 ```
 
 | Module | Role |
@@ -57,7 +66,7 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
 | `service.py` | the loop: discover streams, read, batch, load, finish, back off, status |
 | `files.py` | `read_complete` (spool, opened and closed per read), `VaultReader` (sealed `.log.gz`), `open_shared` (Windows delete sharing) |
 | `prepare.py` | one raw line → rows (pure function; runs in a worker process unchanged) |
-| `loader.py` | the load transaction, compare-and-set offsets, bisecting a batch `COPY` refuses |
+| `loader.py` | the load transaction (rows, failures, sources, search counts), compare-and-set offsets, bisecting a batch `COPY` refuses |
 | `instance.py` | single-instance lock (PostgreSQL session-level advisory lock) |
 | `sealed.py` | which days the sealer finished (`state/seal/<day>.json` + manifest) |
 | `sources.py` | spool folder → configured type (`fortigate`, `ap-<ip>` → network entry, `unknown-<ip>` → content detection) |
@@ -121,13 +130,54 @@ worker that imports that file should use the same key.)
 3. In-memory offsets move only after `COMMIT`; after a restart they come only from the database.
 
 Tests: an interruption at every step of the transaction (`offsets`, `copy`, `failures`,
-`sources`, `commit`), a second instance moving the offsets mid-batch, two instances racing on
-the same files (lock switched off), the real process killed three times with
+`sources`, `counts`, `commit`), a second instance moving the offsets mid-batch, two instances
+racing on the same files (lock switched off), the real process killed three times with
 `SIGKILL`/`TerminateProcess` during loading, re-runs over the same files, and database outages
 (a TCP proxy that drops every connection): before the `COPY`, **while `COPY` is streaming rows**,
 **as `COMMIT` is sent**, and a `COMMIT` that **succeeded but whose answer was lost** (the retry
 finds the offsets already moved and continues from the database) — every time each line is in
-`messages` exactly once and rows and offsets agree.
+`messages` exactly once and rows and offsets agree; after the interruptions, the second instance,
+the race and the kills the search counts agree with them too (`searchcounts.verify` in the
+same snapshot).
+
+## Search counts
+
+The step `counts` writes the summary table `search_counts` of Arama's statistics
+([ADR-0015](adr/0015-search-live-sources.md), `arcilogger_db.searchcounts`) in the load
+transaction, from exactly the lines whose rows loaded in it:
+
+- One key per hour of the device time (`messages.time`, UTC), spool file (`source`, `raw_day`),
+  kind of the `messages` row (`kinds.kind_of`), typed table (`''` for none), the typed row's
+  `action` (lower-cased) and the /24 of its client address when that is a private IPv4 address;
+  `count_key` is the one definition, also used by `rebuild_stream`, so what ingest counted equals
+  a recount of the rows (tested on every path below). The loader groups a batch's lines by what
+  `count_key` reads and makes each key once per group (about 1.8 µs a line instead of 5); until
+  the step it keeps the runs of lines `COPY` loaded, not one object per line.
+- A line whose typed row is not loaded — dropped by the row check (`rowcheck.<table>`) or refused
+  by `COPY` and salvaged with its `messages` row alone (`copy.<table>`) — counts with `tbl = ''`:
+  the search over the typed tables does not find it either. A line without a `messages` row
+  (`rawlog.invalid`, `copy.messages`, a `rowcheck.messages` without generic view) is not
+  counted: it is in neither search nor statistics, only in `parse_failures`.
+- One fixed statement per 500 keys, `INSERT … SELECT FROM unnest(:hours, :sources, …) ON
+  CONFLICT … DO UPDATE SET n = search_counts.n + EXCLUDED.n`, the keys as parallel arrays in
+  sorted order (a multi-row `INSERT` built and compiled per batch cost 7.2–7.3 ms of the service
+  process's CPU for 57 keys; the cached statement 1.0–1.1 ms, wall 8.7–8.9 → 2.0–2.5 ms). A batch of 5,000 lines has tens to a few hundred keys; the load-generator day
+  below (217,875 lines) has 800. No lock of its own: one ingest writes a file (instance lock and
+  compare-and-set), and a finished file is never written again.
+- **Files loaded before revision `0016_search`.** The migration sets
+  `ingest_offsets.counts_from_line = line_number + 1` on every file with loaded lines. Ingest
+  counts what it loads from then on and leaves the mark; the worker job `search.counts_backfill`
+  (every 10 minutes, no new file after 60 s, newest day first; [CORRELATION.md](CORRELATION.md))
+  recounts a file once it is finished and clears the mark. Until then the statistics of the days
+  around that file are counted directly (slower, same result). `arcilogger-db search-counts
+  status` lists the files still to count, `rebuild --source S --day YYYY-MM-DD` recounts one at
+  once (also one still being loaded: it locks the file's `ingest_offsets` row, so ingest's next
+  batch of that file waits until the recount commits), `verify --hours 2` recounts the recent
+  hours from the rows and exits 1 on a difference.
+
+Tests: `ingest/tests/test_loader_counts.py` (shared batches over three sources and two days, a
+damaged line, a dropped typed row, the `COPY` salvage, vault continuation, a file half loaded
+before the upgrade, a device clock almost a day behind) and the exactly-once matrix above.
 
 ## One instance per database
 
@@ -231,6 +281,91 @@ were not faster than the single runs below: report the minimum and median of
 | realistic load-generator mix (`tools/loadgen`, 2 days, 431,000–441,000 lines: 35 % DNS, 27 % traffic, 18 % web filter, 17 % application control), workers 0 / 2 / 3 | **3,755–3,809 / 7,191–7,941 / 7,477–8,729 lines/s** |
 | live feed **10,000 lines/s for 30 s**, real parsers, `--workers 2` | **did not keep up**: backlog 52,285 lines (≈ 5.2 s) and growing; caught up 5.7 s after the feed stopped |
 
+**Wave 2: the `counts` step and the `fg_web` index (2026-10-26).** The gate of the Wave 2
+contract: `bench_throughput.py --repeat 3` before (Wave 1) and after, at most 5 % slower. The same
+VM, `--lines 200000 --batch-rows 5000 --workers 0 2 --repeat 3`, the two trees alternating
+(Wave 1, Wave 2, Wave 2, Wave 1, twice: 12 runs each; load average 1.3–2.8); min–max (median)
+lines/s:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Wave 1 (no `fg_web` index, no `counts` step) | 5,713–6,345 (6,156) | 9,668–12,368 (11,680) |
+| **Wave 2 (the index and the `counts` step)** | **5,657–6,407 (6,171)** | **11,513–12,346 (11,866)** |
+
+The medians differ by +0.2 % and +1.6 %: no slowdown is measurable, the gate as the contract
+sets it holds (ingest process CPU, median: 30.98 / 30.99 s in-process, 8.68 / 8.82 s with 2
+workers). This benchmark loads **no web filter line** (its FortiGate format samples have none,
+the rest is DHCP): it measures the `counts` step with few keys a batch and not the `fg_web`
+index at all; both are measured on the load-generator day below. The step's own
+cost, measured inside such a run: 1.8 µs a line to make the keys (5 µs before the lines were
+grouped by what `count_key` reads) and 0.1 s CPU for the 40 upserts (2–7 keys each), together
+0.45 s of the 31 s an in-process run takes (1.4 %); with 2 workers the service process, at about
+50 % of one core, has that time spare. A first version kept a tuple per loaded line until the
+step: the garbage collector then ran about 300 times more per 200,000 lines (0.3 s), and single
+runs alternating with Wave 1 on a busy machine were 3.5–4.6 % slower in-process; the loader now
+keeps the runs of lines `COPY` loaded.
+
+**The load-generator day (2026-10-27).** One site day of `tools/loadgen` (217,875 lines: 35 % DNS,
+27 % traffic, 18 % web filter, 17 % application control; 800 summary keys, about 57 a batch),
+loaded into a fresh database per run (`run(once=True)`, `batch_rows` 5,000), 2 runs per tree and
+worker count in each turn, the trees alternating in two campaigns: Wave 1, Wave 2, Wave 2, Wave 1,
+twice; then Wave 1, the `fg_web` index alone (the tree before the `counts` step), Wave 2, Wave 2,
+the index alone, Wave 1, twice. 8 runs per tree and campaign, load average 0.1–4.2 (another
+agent's work shared the machine); min–max (median) lines/s, the difference of the medians to
+Wave 1 of the same campaign:
+
+| Load-generator day | in-process | `--workers 2` |
+|---|---|---|
+| 1st campaign: Wave 1 | 5,095–5,711 (5,429) | 9,322–11,924 (10,921) |
+| 1st campaign: **Wave 2** | **4,919–5,415 (5,130), −5.5 %** | **8,516–11,062 (10,192), −6.7 %** |
+| 2nd campaign: Wave 1 | 5,303–5,760 (5,538) | 10,144–11,612 (10,770) |
+| 2nd campaign: the `fg_web` index alone | 5,312–5,783 (5,667), +2.3 % | 8,388–11,368 (10,542), −2.1 % |
+| 2nd campaign: **Wave 2** | **5,343–5,596 (5,462), −1.4 %** | **10,213–11,487 (10,746), −0.2 %** |
+| both campaigns, 16 runs each: Wave 1 / **Wave 2** | 5,471 / **5,366, −1.9 %** | 10,921 / **10,506, −3.8 %** |
+
+On the realistic mix Wave 2 is slower, but over both campaigns within the 5 % of the gate
+(−1.9 % in-process, −3.8 % with 2 workers); one campaign of 8 runs ranges from −0.2 % to
+−6.7 % and cannot tell 5 % apart on this machine. The index alone shows no cost beyond that noise
+(+2.3 %, −2.1 %). The step's own time in such a run, instrumented (2 runs per worker count):
+2.0–2.4 µs a line to make the keys and 0.42–0.71 s for the 44 upserts (2,529 keys; about 5 ms of
+each is SQLAlchemy building the multi-row `INSERT`), together 0.9 s, 2.2 % of an in-process run,
+and 1.1–1.2 s, 5–6 % of a run with 2 workers: there it runs in the service process, at about
+50–60 % of one core, so it is partly hidden. Re-measure on site with the real mix (below).
+
+**After the cached upsert (2026-10-27).** `upsert_counts` now sends one fixed `unnest`
+statement instead of building a multi-row `INSERT` per batch (above). The same load-generator
+day, ABBA twice, 8 runs per tree and worker count (load average 2.0–4.0, another agent's work
+sharing the machine); min–max (median) lines/s:
+
+| Load-generator day | in-process | `--workers 2` |
+|---|---|---|
+| Wave 2 before the change / after it | 5,220–5,742 (5,562) / 4,930–5,757 (5,548), −0.3 % | 9,635–10,674 (9,887) / 9,219–10,384 (9,886), −0.0 % |
+| Wave 1 / Wave 2 after the change | 5,026–5,520 (5,340) / 4,781–5,466 (5,132), −3.9 % | 9,043–10,428 (9,654) / 9,177–10,396 (9,622), −0.3 % |
+
+The change saves CPU in the service process but no throughput measurable on this machine.
+**The 5 % gate is met on average, but not shown with margin:** with 2 workers (the default) one
+8-run campaign ranged −0.2 % to −6.7 % before the change and −0.3 % after it, in-process −1.4 %
+to −5.5 % and now −3.9 %; this shared 4-vCPU VM cannot tell such differences apart. It stays an
+on-site acceptance item with the real mix (`bench_throughput.py --repeat 3` and a day of the
+site's own spool, Wave 1 against Wave 2).
+
+Earlier rounds, while the test runs of the other Wave 2 packages shared the machine (load average
+2–9, 30–100 % busy): one run per tree and round, and one load-generator day of 217,875 lines
+(18 % web filter lines, 800 summary keys) besides; min–max (median) lines/s:
+
+| Trees compared | `bench_throughput.py` in-process / `--workers 2` | load-generator day in-process / `--workers 2` |
+|---|---|---|
+| Wave 1 (no index, no counts), 3 rounds | 4,445–4,997 (4,993) / 6,416–8,670 (8,162) | 3,953–4,370 (4,348) / 5,226–8,348 (7,662) |
+| with the `fg_web` index, same rounds (6 / 3) | 4,400–5,091 (4,815) / 6,506–9,904 (8,204) | 4,008–4,535 (4,332) / 6,392–8,412 (7,153) |
+| with the index, 4 later rounds | 4,153–5,298 (4,856) / 5,225–7,136 (6,316) | 4,000–4,892 (4,544) / 6,216–7,917 (6,654) |
+| with the index and the first version of the `counts` step, the same 4 rounds | 4,486–5,614 (4,997) / 4,329–8,673 (7,278) | 4,090–4,718 (4,372) / 5,777–6,734 (6,142) |
+
+The index costs nothing measurable (the benchmark has no web filter lines; the load-generator day
+has 18 %). The differences of these rounds (−8 % to +15 %) lie inside a spread of up to 27 %
+between two runs of one round. The upsert of the load-generator day, with its 37–247 keys a
+batch, took 15 ms a batch measured alone with a commit of its own (3 µs a line; in the load
+transaction there is no commit of its own). Re-measure on site with the rest (below).
+
 Default `[ingest] workers = 2`: about 1.7× the in-process speed; a third worker adds 10–13 %
 on 4 vCPU but competes with PostgreSQL, the API and the collector on the same cores. **Spec 14
 (≥ 10,000 messages/s sustained on 4 vCPU) has not been shown with the real parsers**; it stays
@@ -266,6 +401,12 @@ its timeout): it watches the parent's process sentinel, so no orphaned worker st
   `messages` row, see the table above).
 - Throughput with the real parsers and the production database (TimescaleDB or partitions):
   `bench_throughput.py --repeat 3 --workers 0 2 3` and a live feed at 10,000 lines/s (spec 14
-  acceptance; not met on the development VM).
+  acceptance; not met on the development VM); the cost of Wave 2 (the `counts` step and
+  `ix_fg_web_rhost_time`) on the site's own mix, with its web filter lines, which
+  `bench_throughput.py` does not have (the load-generator day above: −1.9 % / −3.8 %).
+- The search counts after the first days: `arcilogger-db search-counts verify --hours 24` must
+  report no difference (rows and counts are written in one transaction), and its line on names
+  not stored in lower case should read 0 for `fg_dns.qname` and `fg_web.hostname` (`domain:`
+  assumes lower case, ADR-0015).
 - Readers of `ingest-status.json` (API) should open, read and close it quickly: on Windows an
   atomic replace fails while a reader holds the file; ingest logs that once and retries.

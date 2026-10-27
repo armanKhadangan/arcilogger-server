@@ -16,3 +16,4 @@
 | [0012](0012-scheduled-usage-reports.md) | Scheduled usage reports: made and sent by the worker, shared PDF building blocks |
 | [0013](0013-offline-licensing.md) | Offline licensing: Ed25519-signed licence files, request codes, paid modules (usage analytics, scheduled reports, bulk CSV import), 5651 Temel never locked, trusted time, threat model |
 | [0014](0014-browser-administration.md) | Browser administration: an unprivileged administration agent (ArciAdmin) applies Ed25519-signed request files of the API, an input-free SYSTEM step (ApplySystem) syncs the firewall and the clock, executables checked at run time, live reload without a restart |
+| [0015](0015-search-live-sources.md) | Search, live tail and sources: one query language compiled to bound SQL and a Python predicate, typed tables drive typed queries, time-budgeted scans, an exact hourly summary table written by ingest, a spool-tail hub for the live tail |

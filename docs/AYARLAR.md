@@ -23,7 +23,7 @@ değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 
 | Sayfa (adres) | Tarayıcıdan değişen | Bilerek konsolda kalan |
 |---|---|---|
 | **Genel** (`/settings/general`) | kuruluş adı (`site_name`), yerel ve yedek saat kaynağı (`[clock] ntp_server`, `[clock] fallback_server`), saat sapması uyarı eşiği (`[clock] alert_offset_ms`); son ölçülen sapma gösterilir, yeni saat sunucusu kaydetmeden önce denenir | `[clock] ntp_port` |
-| **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
+| **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, arama ve canlı akış, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
 | **Kamu SM** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği ve zaman aşımı; `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port, özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4) |
 | **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
 | **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5) | — |
@@ -51,6 +51,33 @@ silmek; oturum ve parola (`auth.*`), gizlilik (`privacy.*`), saklama süreleri v
 takma adlandırılmasıyla ilgili uygulama ayarları, uyarı e-postası alıcıları ve en düşük önem
 derecesi; bekletilen bir değişikliğin iptali, **Geri al** ve tanılama paketi
 ([SECURITY.md](SECURITY.md) bölüm 7).
+
+**Arama ve canlı akış** grubu (`search.*`, `live.*`; [ADR-0015](adr/0015-search-live-sources.md))
+Arama ve Canlı Akış sayfalarının sınırlarıdır: hiçbir arama ya da akış log yüklemeyle (ingest)
+yarışmasın diye her isteğin bir süresi ve her kullanıcının bir payı vardır. Değerler başlangıç
+değerleridir, ölçülmüş gerçekler değildir; hiçbir değer bir sınırı ya da süreyi kapatamaz. Her
+istek ayarları yeniden okur (canlı akış, açıldığında):
+
+| Ayar | Varsayılan | Sınırlar | Anlamı |
+|---|---|---|---|
+| `search.max_days` | 31 | 1–92 | bir aramanın en uzun aralığı (gün, cihaz zamanı) |
+| `search.page_size_max` | 500 | 50–1000 | bir isteğin en çok satırı (web arayüzü 100 ister) |
+| `search.request_budget_ms` | 4000 | 500–30000 | satır aramasının süresi; dolunca o ana kadar bulunanlar taranan aralıkla gösterilir |
+| `search.stats_budget_ms` | 8000 | 1000–60000 | grafik ve dağılımların süresi |
+| `search.facet_sample_rows` | 100000 | 1000–1000000 | doğrudan sayılan dağılımlar için en çok eşleşme |
+| `search.max_concurrent` | 3 | 1–10 | aynı anda çalışan arama istekleri; `[database] pool_size` değerinin 2 eksiğini geçmemeli |
+| `search.runs_per_minute` | 30 | 1–600 | kullanıcı başına dakikada yeni arama |
+| `search.export_max_rows` | 100000 | 1–1000000 | bir dışa aktarma dosyasının en çok satırı |
+| `search.export_max_per_hour` | 10 | 1–100 | kullanıcı başına saatte dışa aktarma |
+| `search.export_budget_seconds` | 120 | 10–900 | bir dışa aktarma dosyasının hazırlanma süresi |
+| `search.saved_max_per_user` | 100 | 1–1000 | kullanıcı başına kayıtlı arama (kişisel) |
+| `live.max_streams_total` | 4 | 1–20 | sunucuda aynı anda açık canlı akış |
+| `live.max_streams_per_user` | 2 | 1–10 | kullanıcı başına açık canlı akış |
+| `live.max_lines_per_second` | 100 | 10–500 | akış başına saniyede gösterilen satır; fazlası sayılıp bildirilir |
+| `live.parse_lines_per_second` | 1000 | 50–10000 | canlı akışlar için saniyede ayrıştırılan satır |
+| `live.buffer_lines` | 5000 | 500–50000 | sürdürme için sunucuda tutulan en yeni satırlar |
+| `live.max_minutes` | 60 | 5–480 | bir akışın süresi (gözetimsiz ekran); Sürdür ile yeniden başlar |
+| `live.backfill_lines` | 50 | 0–200 | akış açılırken hemen gösterilen son satırlar |
 
 ## 2. Nasıl çalışır?
 

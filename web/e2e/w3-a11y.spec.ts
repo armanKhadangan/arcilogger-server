@@ -2,11 +2,16 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi } from './mock-api';
-import { copy, EVIDENCE, SAMPLE_TODAY } from './samples';
+import { mockLive } from './mock-live';
+import { mockSearch } from './mock-search';
+import { mockSources } from './mock-sources';
+import { copy, EVIDENCE, SAMPLE_TODAY, SEARCH, SOURCES } from './samples';
 
 /**
  * WCAG 2.1 AA scans of the 5651 lookup, evidence package, sealing, devices/persons, dashboard
- * (Panel), security, reports and usage pages, light and dark.
+ * (Panel), security, reports and usage pages, light and dark; and of Arama, Canlı Akış and
+ * Kaynaklar with their drawers open and the Panel's parse-failure card, on the captured answers
+ * where the capture has them (each page's own spec scans its other states).
  */
 for (const theme of ['light', 'dark'] as Theme[]) {
   test.describe(`accessibility — ${theme}`, () => {
@@ -403,6 +408,84 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       hr.get('mehmet.kaya').privacy_accepted = false;
       await page.goto('/usage?tab=persons');
       await expect(page.getByText('KVKK bilgilendirmesinin onayı bekleniyor')).toBeVisible();
+      await expectNoA11yViolations(page);
+    });
+  });
+}
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test.describe(`accessibility of the Wave 2 pages — ${theme}`, () => {
+    test.beforeEach(async ({ page }) => {
+      test.setTimeout(90_000);
+      await usePreferences(page, { theme });
+    });
+
+    test('Arama on the captured answers: results, record drawer, raw line', async ({ page }) => {
+      await page.clock.setFixedTime(new Date(`${SAMPLE_TODAY}T15:00:00+03:00`));
+      const api = await mockApi(page, { signedInAs: 'tolga' });
+      await mockSearch(page, api, { captured: true });
+      const day = SEARCH.search.typed.range;
+      await page.goto(
+        `/search?from=${encodeURIComponent(day.from)}&to=${encodeURIComponent(day.to)}`,
+      );
+      const box = page.getByRole('combobox', { name: 'Sorgu' });
+      await box.fill(SEARCH.search.typed.query.normalized);
+      await box.press('Enter');
+      const rows = page
+        .getByRole('table', { name: 'Arama sonuçları' })
+        .locator('tbody tr:not([aria-hidden])');
+      await expect(rows).toHaveCount(SEARCH.search.typed.items.length);
+      await expectNoA11yViolations(page);
+      await rows.nth(1).click();
+      const sheet = page.getByRole('dialog', { name: 'Kayıt ayrıntısı' });
+      await expect(sheet.getByRole('definition').filter({ hasText: '100.64.12.9' })).toBeVisible();
+      await expectNoA11yViolations(page);
+      await sheet.getByRole('button', { name: 'Ham satır' }).click();
+      await expect(page.getByRole('dialog', { name: 'Ham kayıt satırı' })).toBeVisible();
+      await expectNoA11yViolations(page);
+    });
+
+    test('Canlı Akış: streamed lines and a line drawer', async ({ page }) => {
+      await useSampleClock(page, SAMPLE_TODAY);
+      const api = await mockApi(page, { signedInAs: 'tolga' });
+      await mockSearch(page, api);
+      const live = await mockLive(page, api);
+      await page.goto('/live');
+      await page.getByRole('button', { name: 'Başlat', exact: true }).click();
+      await expect.poll(() => live.connections()).toBe(1);
+      live.send(8);
+      const lines = page.getByRole('list', { name: 'Canlı satırlar' }).getByRole('listitem');
+      await expect(lines).toHaveCount(8);
+      await expectNoA11yViolations(page);
+      await lines.first().getByRole('button').click();
+      await expect(page.getByRole('dialog', { name: 'Canlı satır' })).toBeVisible();
+      await expectNoA11yViolations(page);
+    });
+
+    test('Kaynaklar on the captured overview, a source drawer, the Panel card', async ({
+      page,
+    }) => {
+      await useSampleClock(page, SAMPLE_TODAY);
+      const api = await mockApi(page, { signedInAs: 'tolga' });
+      await mockSources(page, api);
+      await page.route('**/api/v1/sources', (route) => route.fulfill({ json: SOURCES.overview }));
+      await page.goto('/sources');
+      const [first] = SOURCES.overview.items;
+      await expect(
+        page
+          .getByRole('table')
+          .getByText(first?.name ?? '-')
+          .first(),
+      ).toBeVisible();
+      await expectNoA11yViolations(page);
+      await page.goto('/sources?source=fortigate');
+      await expect(page.getByRole('dialog', { name: 'fortigate' })).toBeVisible();
+      await expectNoA11yViolations(page);
+      await page.route('**/api/v1/dashboard/summary', (route) =>
+        route.fulfill({ json: SOURCES.dashboard }),
+      );
+      await page.goto('/');
+      await expect(page.getByTestId('card-parse-failures')).toBeVisible();
       await expectNoA11yViolations(page);
     });
   });

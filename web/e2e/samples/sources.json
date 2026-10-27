@@ -1,0 +1,2226 @@
+{
+  "dashboard": {
+    "alerts": {
+      "latest": [
+        {
+          "auto_resolved": false,
+          "created_at": "2026-10-13T04:00:18.684943Z",
+          "id": 8,
+          "notes_count": 0,
+          "resolved_at": null,
+          "rule": "R20-report",
+          "rule_name_en": "Usage report could not be delivered",
+          "rule_name_tr": "Kullanım raporu gönderilemedi",
+          "severity": "medium",
+          "state": "open",
+          "summary_en": "A usage report could not be sent to 1 recipient(s) (run 3).",
+          "summary_tr": "Kullanım raporu 1 alıcıya gönderilemedi (çalıştırma 3).",
+          "time": "2026-10-13T04:00:18.684943Z",
+          "title": "Kullanım raporu gönderilemedi (çalıştırma 3, alıcı i***@ornek.example): recipient refused: 550 5.1.1 mailbox unavailable",
+          "updated_at": "2026-10-13T04:00:19.165777Z"
+        },
+        {
+          "auto_resolved": false,
+          "created_at": "2026-10-13T04:00:15.895924Z",
+          "id": 7,
+          "notes_count": 1,
+          "resolved_at": null,
+          "rule": "R20-disk",
+          "rule_name_en": "Disk almost full",
+          "rule_name_tr": "Disk dolmak üzere",
+          "severity": "high",
+          "state": "acknowledged",
+          "summary_en": "Drive D: is 84% full (threshold 80%).",
+          "summary_tr": "D: diski %84 dolu (eşik %80).",
+          "time": "2026-10-13T04:00:15.882751Z",
+          "title": "Disk dolmak üzere: D: %84 dolu (eşik %80)",
+          "updated_at": "2026-10-13T04:00:15.966651Z"
+        },
+        {
+          "auto_resolved": false,
+          "created_at": "2026-10-13T04:00:15.751697Z",
+          "id": 4,
+          "notes_count": 0,
+          "resolved_at": null,
+          "rule": "R15",
+          "rule_name_en": "Log source silent",
+          "rule_name_tr": "Log kaynağı sessiz",
+          "severity": "high",
+          "state": "open",
+          "summary_en": "No message from switch-3 for more than 15 minutes. Last message: 13.10.2026 06:42:15.",
+          "summary_tr": "switch-3 kaynağından 15 dakikadan uzun süredir mesaj gelmedi. Son mesaj: 13.10.2026 06:42:15.",
+          "time": "2026-10-13T04:00:15.751697Z",
+          "title": "Log kaynağı sessiz: switch-3 15 dakikadan uzun süredir mesaj göndermedi (son mesaj 2026-10-13T06:42:15+03:00)",
+          "updated_at": "2026-10-13T04:00:15.797978Z"
+        },
+        {
+          "auto_resolved": false,
+          "created_at": "2026-10-13T04:00:15.751697Z",
+          "id": 2,
+          "notes_count": 0,
+          "resolved_at": null,
+          "rule": "R20-seal",
+          "rule_name_en": "Day not sealed",
+          "rule_name_tr": "Gün mühürlenmedi",
+          "severity": "high",
+          "state": "open",
+          "summary_en": "11.10.2026 could not be sealed (attempt 1).",
+          "summary_tr": "11.10.2026 günü mühürlenemedi (1. deneme).",
+          "time": "2026-10-13T04:00:01Z",
+          "title": "Mühürleme başarısız (11.10.2026): mock TSA unreachable (injected). 5 dk sonra tekrar denenecek.",
+          "updated_at": "2026-10-13T04:00:15.771477Z"
+        },
+        {
+          "auto_resolved": false,
+          "created_at": "2026-10-12T23:00:15.751697Z",
+          "id": 6,
+          "notes_count": 2,
+          "resolved_at": null,
+          "rule": "new-log-source",
+          "rule_name_en": "New log source",
+          "rule_name_tr": "Yeni log kaynağı",
+          "severity": "medium",
+          "state": "open",
+          "summary_en": "Sender address: 172.20.10.77.",
+          "summary_tr": "Gönderici adresi: 172.20.10.77.",
+          "time": "2026-10-12T23:00:15.751697Z",
+          "title": "Yeni log kaynağı: 172.20.10.77 (kaydediliyor)",
+          "updated_at": "2026-10-13T04:00:16.235954Z"
+        }
+      ],
+      "open_by_severity": {
+        "critical": 0,
+        "high": 2,
+        "info": 0,
+        "low": 0,
+        "medium": 2
+      }
+    },
+    "clock": {
+      "checked_at": "2026-10-13T03:10:15Z",
+      "ntp_server": "172.20.10.1",
+      "offset_ms": 3.2,
+      "ok": true
+    },
+    "credit": {
+      "estimated_days": 2276,
+      "remaining": 9612,
+      "threshold": 500
+    },
+    "generated_at": "2026-10-13T07:01:05.464950+03:00",
+    "ingest": {
+      "messages_per_minute": 1296.5,
+      "silent": [
+        {
+          "last_seen": "2026-10-13T06:42:15.224393+03:00",
+          "name": "switch-3"
+        }
+      ],
+      "sources_active": 2,
+      "sources_total": 3,
+      "sparkline": [
+        {
+          "count": 1297,
+          "minute": "2026-10-13T06:01:00+03:00"
+        },
+        {
+          "count": 1334,
+          "minute": "2026-10-13T06:02:00+03:00"
+        },
+        {
+          "count": 1370,
+          "minute": "2026-10-13T06:03:00+03:00"
+        },
+        {
+          "count": 1408,
+          "minute": "2026-10-13T06:04:00+03:00"
+        },
+        {
+          "count": 1186,
+          "minute": "2026-10-13T06:05:00+03:00"
+        },
+        {
+          "count": 1222,
+          "minute": "2026-10-13T06:06:00+03:00"
+        },
+        {
+          "count": 1259,
+          "minute": "2026-10-13T06:07:00+03:00"
+        },
+        {
+          "count": 1296,
+          "minute": "2026-10-13T06:08:00+03:00"
+        },
+        {
+          "count": 1333,
+          "minute": "2026-10-13T06:09:00+03:00"
+        },
+        {
+          "count": 1369,
+          "minute": "2026-10-13T06:10:00+03:00"
+        },
+        {
+          "count": 1407,
+          "minute": "2026-10-13T06:11:00+03:00"
+        },
+        {
+          "count": 1185,
+          "minute": "2026-10-13T06:12:00+03:00"
+        },
+        {
+          "count": 1221,
+          "minute": "2026-10-13T06:13:00+03:00"
+        },
+        {
+          "count": 1258,
+          "minute": "2026-10-13T06:14:00+03:00"
+        },
+        {
+          "count": 1295,
+          "minute": "2026-10-13T06:15:00+03:00"
+        },
+        {
+          "count": 1332,
+          "minute": "2026-10-13T06:16:00+03:00"
+        },
+        {
+          "count": 1368,
+          "minute": "2026-10-13T06:17:00+03:00"
+        },
+        {
+          "count": 1406,
+          "minute": "2026-10-13T06:18:00+03:00"
+        },
+        {
+          "count": 1184,
+          "minute": "2026-10-13T06:19:00+03:00"
+        },
+        {
+          "count": 1220,
+          "minute": "2026-10-13T06:20:00+03:00"
+        },
+        {
+          "count": 1257,
+          "minute": "2026-10-13T06:21:00+03:00"
+        },
+        {
+          "count": 1294,
+          "minute": "2026-10-13T06:22:00+03:00"
+        },
+        {
+          "count": 1331,
+          "minute": "2026-10-13T06:23:00+03:00"
+        },
+        {
+          "count": 1367,
+          "minute": "2026-10-13T06:24:00+03:00"
+        },
+        {
+          "count": 1405,
+          "minute": "2026-10-13T06:25:00+03:00"
+        },
+        {
+          "count": 1183,
+          "minute": "2026-10-13T06:26:00+03:00"
+        },
+        {
+          "count": 1219,
+          "minute": "2026-10-13T06:27:00+03:00"
+        },
+        {
+          "count": 1256,
+          "minute": "2026-10-13T06:28:00+03:00"
+        },
+        {
+          "count": 1293,
+          "minute": "2026-10-13T06:29:00+03:00"
+        },
+        {
+          "count": 1330,
+          "minute": "2026-10-13T06:30:00+03:00"
+        },
+        {
+          "count": 1366,
+          "minute": "2026-10-13T06:31:00+03:00"
+        },
+        {
+          "count": 1404,
+          "minute": "2026-10-13T06:32:00+03:00"
+        },
+        {
+          "count": 1182,
+          "minute": "2026-10-13T06:33:00+03:00"
+        },
+        {
+          "count": 1218,
+          "minute": "2026-10-13T06:34:00+03:00"
+        },
+        {
+          "count": 1255,
+          "minute": "2026-10-13T06:35:00+03:00"
+        },
+        {
+          "count": 1292,
+          "minute": "2026-10-13T06:36:00+03:00"
+        },
+        {
+          "count": 1329,
+          "minute": "2026-10-13T06:37:00+03:00"
+        },
+        {
+          "count": 1365,
+          "minute": "2026-10-13T06:38:00+03:00"
+        },
+        {
+          "count": 1403,
+          "minute": "2026-10-13T06:39:00+03:00"
+        },
+        {
+          "count": 1181,
+          "minute": "2026-10-13T06:40:00+03:00"
+        },
+        {
+          "count": 1217,
+          "minute": "2026-10-13T06:41:00+03:00"
+        },
+        {
+          "count": 1254,
+          "minute": "2026-10-13T06:42:00+03:00"
+        },
+        {
+          "count": 1291,
+          "minute": "2026-10-13T06:43:00+03:00"
+        },
+        {
+          "count": 1328,
+          "minute": "2026-10-13T06:44:00+03:00"
+        },
+        {
+          "count": 1364,
+          "minute": "2026-10-13T06:45:00+03:00"
+        },
+        {
+          "count": 1402,
+          "minute": "2026-10-13T06:46:00+03:00"
+        },
+        {
+          "count": 1180,
+          "minute": "2026-10-13T06:47:00+03:00"
+        },
+        {
+          "count": 1216,
+          "minute": "2026-10-13T06:48:00+03:00"
+        },
+        {
+          "count": 1253,
+          "minute": "2026-10-13T06:49:00+03:00"
+        },
+        {
+          "count": 1290,
+          "minute": "2026-10-13T06:50:00+03:00"
+        },
+        {
+          "count": 1327,
+          "minute": "2026-10-13T06:51:00+03:00"
+        },
+        {
+          "count": 1363,
+          "minute": "2026-10-13T06:52:00+03:00"
+        },
+        {
+          "count": 1401,
+          "minute": "2026-10-13T06:53:00+03:00"
+        },
+        {
+          "count": 1179,
+          "minute": "2026-10-13T06:54:00+03:00"
+        },
+        {
+          "count": 1215,
+          "minute": "2026-10-13T06:55:00+03:00"
+        },
+        {
+          "count": 1252,
+          "minute": "2026-10-13T06:56:00+03:00"
+        },
+        {
+          "count": 1289,
+          "minute": "2026-10-13T06:57:00+03:00"
+        },
+        {
+          "count": 1326,
+          "minute": "2026-10-13T06:58:00+03:00"
+        },
+        {
+          "count": 1362,
+          "minute": "2026-10-13T06:59:00+03:00"
+        },
+        {
+          "count": 1400,
+          "minute": "2026-10-13T07:00:00+03:00"
+        }
+      ]
+    },
+    "parse_failures": {
+      "by_source": [
+        {
+          "failures": 2,
+          "lines": 31,
+          "permille": 64.5,
+          "source": "fortigate"
+        },
+        {
+          "failures": 1,
+          "lines": 4,
+          "permille": 250.0,
+          "source": "core-r1"
+        }
+      ],
+      "day": "2026-10-13",
+      "failures": 3,
+      "last7": [
+        {
+          "day": "2026-10-07",
+          "failures": 0,
+          "lines": 0
+        },
+        {
+          "day": "2026-10-08",
+          "failures": 0,
+          "lines": 0
+        },
+        {
+          "day": "2026-10-09",
+          "failures": 0,
+          "lines": 34
+        },
+        {
+          "day": "2026-10-10",
+          "failures": 0,
+          "lines": 0
+        },
+        {
+          "day": "2026-10-11",
+          "failures": 0,
+          "lines": 0
+        },
+        {
+          "day": "2026-10-12",
+          "failures": 0,
+          "lines": 0
+        },
+        {
+          "day": "2026-10-13",
+          "failures": 3,
+          "lines": 35
+        }
+      ],
+      "lines": 35,
+      "permille": 85.7,
+      "top_patterns": [
+        {
+          "count": 2,
+          "example": {
+            "day": "2026-10-13",
+            "line": 3,
+            "offset": 0,
+            "source": "fortigate"
+          },
+          "pattern": "fortigate.kv",
+          "source": "fortigate"
+        },
+        {
+          "count": 1,
+          "example": {
+            "day": "2026-10-13",
+            "line": 4,
+            "offset": 0,
+            "source": "core-r1"
+          },
+          "pattern": "rawlog.invalid",
+          "source": "core-r1"
+        }
+      ]
+    },
+    "seal": {
+      "calendar": [
+        {
+          "day": "2026-09-13",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-14",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-15",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-16",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-17",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-18",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-19",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-20",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-21",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-22",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-23",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-24",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-25",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-26",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-27",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-28",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-29",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-09-30",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-10-01",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-10-02",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-10-03",
+          "status": "no_data"
+        },
+        {
+          "day": "2026-10-04",
+          "status": "sealed"
+        },
+        {
+          "day": "2026-10-05",
+          "status": "sealed"
+        },
+        {
+          "day": "2026-10-06",
+          "status": "sealed"
+        },
+        {
+          "day": "2026-10-07",
+          "status": "sealed"
+        },
+        {
+          "day": "2026-10-08",
+          "status": "sealed"
+        },
+        {
+          "day": "2026-10-09",
+          "status": "sealed"
+        },
+        {
+          "day": "2026-10-10",
+          "status": "sealed"
+        },
+        {
+          "day": "2026-10-11",
+          "status": "failed"
+        },
+        {
+          "day": "2026-10-12",
+          "status": "pending"
+        }
+      ],
+      "yesterday": {
+        "day": "2026-10-12",
+        "sealed_at": null,
+        "serial_short": null,
+        "status": "pending",
+        "verified": null
+      }
+    }
+  },
+  "detail": {
+    "core-r1": {
+      "address": "172.20.10.1",
+      "configured": true,
+      "daily": [
+        {
+          "day": "2026-10-13",
+          "failures": 1,
+          "lines": 4,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-12",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-11",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-10",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-09",
+          "failures": 0,
+          "lines": 7,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-08",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-07",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-06",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-05",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-04",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-03",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-02",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-01",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-09-30",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        }
+      ],
+      "enabled": true,
+      "expected": true,
+      "first_seen": "2026-09-03T07:00:15.224393+03:00",
+      "gaps": [
+        {
+          "from": "2026-10-09T14:00:00.003000+03:00",
+          "minutes": 599,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-10T00:00:00+03:00"
+        },
+        {
+          "from": "2026-10-09T10:42:18.003000+03:00",
+          "minutes": 137,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-09T13:00:00.003000+03:00"
+        },
+        {
+          "from": "2026-10-09T09:37:52.003000+03:00",
+          "minutes": 64,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-09T10:42:18.003000+03:00"
+        },
+        {
+          "from": "2026-10-09T08:12:00.003000+03:00",
+          "minutes": 85,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-09T09:37:52.003000+03:00"
+        },
+        {
+          "from": "2026-10-09T00:00:00+03:00",
+          "minutes": 492,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-09T08:12:00.003000+03:00"
+        }
+      ],
+      "heartbeat_minutes": 15,
+      "hourly": [
+        {
+          "count": 0,
+          "hour": "2026-10-11T08:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T09:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T10:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T11:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T12:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T13:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T14:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T15:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T16:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T17:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T18:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T19:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T20:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T21:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T22:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T23:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T00:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T01:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T02:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T03:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T04:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T05:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T06:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T07:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T08:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T09:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T10:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T11:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T12:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T13:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T14:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T15:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T16:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T17:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T18:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T19:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T20:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T21:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T22:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T23:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T00:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T01:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T02:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T03:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T04:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T05:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T06:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T07:00:00+03:00"
+        }
+      ],
+      "last_message": "2026-10-13T06:59:25.224393+03:00",
+      "last_message_origin": "collector",
+      "lines_today": 4,
+      "messages_per_minute": 143.6,
+      "name": "core-r1",
+      "network_of": null,
+      "parse_failure_permille": 250.0,
+      "parse_failures": [
+        {
+          "count": 1,
+          "day": "2026-10-13",
+          "error": null,
+          "example": {
+            "day": "2026-10-13",
+            "line": 4,
+            "offset": 0,
+            "source": "core-r1"
+          },
+          "first_seen": "2026-10-13T07:01:04.861388+03:00",
+          "last_seen": "2026-10-13T07:01:04.861388+03:00",
+          "pattern": "rawlog.invalid"
+        }
+      ],
+      "parse_failures_today": 1,
+      "pending_bytes": 3354,
+      "promoted_to": null,
+      "silent_minutes": null,
+      "sparkline": [
+        144,
+        148,
+        152,
+        156,
+        132,
+        135,
+        139,
+        143,
+        148,
+        152,
+        156,
+        132,
+        135,
+        139,
+        143,
+        147,
+        152,
+        156,
+        132,
+        135,
+        139,
+        143,
+        147,
+        151,
+        156,
+        131,
+        136,
+        139,
+        143,
+        147,
+        151,
+        155,
+        131,
+        135,
+        140,
+        143,
+        147,
+        151,
+        155,
+        130,
+        135,
+        139,
+        144,
+        147,
+        151,
+        155,
+        130,
+        135,
+        139,
+        143,
+        148,
+        151,
+        155,
+        130,
+        134,
+        139,
+        143,
+        147,
+        151,
+        156
+      ],
+      "state": "active",
+      "suggested": null,
+      "type": "mikrotik",
+      "unknown": false
+    },
+    "fortigate": {
+      "address": "172.31.255.1",
+      "configured": true,
+      "daily": [
+        {
+          "day": "2026-10-13",
+          "failures": 2,
+          "lines": 31,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-12",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-11",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-10",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-09",
+          "failures": 0,
+          "lines": 27,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-08",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-07",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-06",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-05",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-04",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-03",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-02",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-01",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-09-30",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        }
+      ],
+      "enabled": true,
+      "expected": true,
+      "first_seen": "2026-09-03T07:00:15.224393+03:00",
+      "gaps": [
+        {
+          "from": "2026-10-09T13:30:00.003000+03:00",
+          "minutes": 629,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-10T00:00:00+03:00"
+        },
+        {
+          "from": "2026-10-09T11:34:56.003000+03:00",
+          "minutes": 115,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-09T13:30:00.003000+03:00"
+        },
+        {
+          "from": "2026-10-09T00:00:00+03:00",
+          "minutes": 674,
+          "origin": "manifest",
+          "reason": "no messages > 60 min",
+          "to": "2026-10-09T11:14:56.003000+03:00"
+        }
+      ],
+      "heartbeat_minutes": 15,
+      "hourly": [
+        {
+          "count": 0,
+          "hour": "2026-10-11T08:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T09:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T10:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T11:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T12:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T13:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T14:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T15:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T16:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T17:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T18:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T19:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T20:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T21:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T22:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T23:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T00:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T01:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T02:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T03:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T04:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T05:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T06:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T07:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T08:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T09:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T10:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T11:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T12:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T13:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T14:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T15:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T16:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T17:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T18:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T19:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T20:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T21:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T22:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T23:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T00:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T01:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T02:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T03:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T04:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T05:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T06:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T07:00:00+03:00"
+        }
+      ],
+      "last_message": "2026-10-13T07:00:11.224393+03:00",
+      "last_message_origin": "collector",
+      "lines_today": 31,
+      "messages_per_minute": 1152.8,
+      "name": "fortigate",
+      "network_of": null,
+      "parse_failure_permille": 64.5,
+      "parse_failures": [
+        {
+          "count": 2,
+          "day": "2026-10-13",
+          "error": "value was not key=value",
+          "example": {
+            "day": "2026-10-13",
+            "line": 3,
+            "offset": 0,
+            "source": "fortigate"
+          },
+          "first_seen": "2026-10-13T07:01:04.861388+03:00",
+          "last_seen": "2026-10-13T07:01:04.861388+03:00",
+          "pattern": "fortigate.kv"
+        }
+      ],
+      "parse_failures_today": 2,
+      "pending_bytes": 23873,
+      "promoted_to": null,
+      "silent_minutes": null,
+      "sparkline": [
+        1153,
+        1186,
+        1218,
+        1252,
+        1054,
+        1087,
+        1120,
+        1153,
+        1185,
+        1217,
+        1251,
+        1053,
+        1086,
+        1119,
+        1152,
+        1185,
+        1216,
+        1250,
+        1052,
+        1085,
+        1118,
+        1151,
+        1184,
+        1216,
+        1249,
+        1052,
+        1083,
+        1117,
+        1150,
+        1183,
+        1215,
+        1249,
+        1051,
+        1083,
+        1115,
+        1149,
+        1182,
+        1214,
+        1248,
+        1051,
+        1082,
+        1115,
+        1147,
+        1181,
+        1213,
+        1247,
+        1050,
+        1081,
+        1114,
+        1147,
+        1179,
+        1212,
+        1246,
+        1049,
+        1081,
+        1113,
+        1146,
+        1179,
+        1211,
+        1244
+      ],
+      "state": "active",
+      "suggested": null,
+      "type": "fortigate",
+      "unknown": false
+    },
+    "unknown-198.51.100.23": {
+      "address": "198.51.100.23",
+      "configured": false,
+      "daily": [
+        {
+          "day": "2026-10-13",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-12",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-11",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-10",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-09",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-08",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-07",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-06",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-05",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-04",
+          "failures": 0,
+          "lines": 0,
+          "sealed": true
+        },
+        {
+          "day": "2026-10-03",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-02",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-10-01",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        },
+        {
+          "day": "2026-09-30",
+          "failures": 0,
+          "lines": 0,
+          "sealed": false
+        }
+      ],
+      "enabled": true,
+      "expected": true,
+      "first_seen": "2026-10-13T06:41:04.861388+03:00",
+      "gaps": [],
+      "heartbeat_minutes": 15,
+      "hourly": [
+        {
+          "count": 0,
+          "hour": "2026-10-11T08:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T09:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T10:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T11:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T12:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T13:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T14:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T15:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T16:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T17:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T18:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T19:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T20:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T21:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T22:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-11T23:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T00:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T01:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T02:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T03:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T04:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T05:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T06:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T07:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T08:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T09:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T10:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T11:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T12:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T13:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T14:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T15:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T16:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T17:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T18:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T19:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T20:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T21:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T22:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-12T23:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T00:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T01:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T02:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T03:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T04:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T05:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T06:00:00+03:00"
+        },
+        {
+          "count": 0,
+          "hour": "2026-10-13T07:00:00+03:00"
+        }
+      ],
+      "last_message": "2026-10-13T07:00:04.861388+03:00",
+      "last_message_origin": "database",
+      "lines_today": 0,
+      "messages_per_minute": 0.0,
+      "name": "unknown-198.51.100.23",
+      "network_of": null,
+      "parse_failure_permille": null,
+      "parse_failures": [],
+      "parse_failures_today": 0,
+      "pending_bytes": 88,
+      "promoted_to": null,
+      "silent_minutes": null,
+      "sparkline": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "state": "unknown",
+      "suggested": {
+        "name": "kaynak-23",
+        "type": "generic"
+      },
+      "type": "generic",
+      "unknown": true
+    }
+  },
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "privacy_notice_required": {
+      "body": {
+        "error": {
+          "code": "privacy_notice_required",
+          "message_en": "Read and accept the KVKK privacy notice before opening this section with personal data.",
+          "message_tr": "Kişisel veri içeren bu bölümü açmadan önce KVKK bilgilendirme metnini okuyup onaylamanız gerekiyor."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "source_not_found": {
+      "body": {
+        "error": {
+          "code": "source_not_found",
+          "message_en": "No log source with this name is configured or has been seen.",
+          "message_tr": "Bu adla bir log kaynağı tanımlı değil veya hiç görülmedi."
+        }
+      },
+      "headers": {},
+      "status": 404
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:15.256359+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "overview": {
+    "collector": {
+      "fresh": true,
+      "updated_at": "2026-10-13T07:00:15.224393+03:00"
+    },
+    "generated_at": "2026-10-13T07:01:04.909272+03:00",
+    "items": [
+      {
+        "address": "172.20.10.1",
+        "configured": true,
+        "enabled": true,
+        "expected": true,
+        "first_seen": "2026-09-03T07:00:15.224393+03:00",
+        "heartbeat_minutes": 15,
+        "last_message": "2026-10-13T06:59:25.224393+03:00",
+        "last_message_origin": "collector",
+        "lines_today": 4,
+        "messages_per_minute": 143.6,
+        "name": "core-r1",
+        "network_of": null,
+        "parse_failure_permille": 250.0,
+        "parse_failures_today": 1,
+        "pending_bytes": 3354,
+        "promoted_to": null,
+        "silent_minutes": null,
+        "sparkline": [
+          144,
+          148,
+          152,
+          156,
+          132,
+          135,
+          139,
+          143,
+          148,
+          152,
+          156,
+          132,
+          135,
+          139,
+          143,
+          147,
+          152,
+          156,
+          132,
+          135,
+          139,
+          143,
+          147,
+          151,
+          156,
+          131,
+          136,
+          139,
+          143,
+          147,
+          151,
+          155,
+          131,
+          135,
+          140,
+          143,
+          147,
+          151,
+          155,
+          130,
+          135,
+          139,
+          144,
+          147,
+          151,
+          155,
+          130,
+          135,
+          139,
+          143,
+          148,
+          151,
+          155,
+          130,
+          134,
+          139,
+          143,
+          147,
+          151,
+          156
+        ],
+        "state": "active",
+        "suggested": null,
+        "type": "mikrotik",
+        "unknown": false
+      },
+      {
+        "address": "172.31.255.1",
+        "configured": true,
+        "enabled": true,
+        "expected": true,
+        "first_seen": "2026-09-03T07:00:15.224393+03:00",
+        "heartbeat_minutes": 15,
+        "last_message": "2026-10-13T07:00:11.224393+03:00",
+        "last_message_origin": "collector",
+        "lines_today": 31,
+        "messages_per_minute": 1152.8,
+        "name": "fortigate",
+        "network_of": null,
+        "parse_failure_permille": 64.5,
+        "parse_failures_today": 2,
+        "pending_bytes": 23873,
+        "promoted_to": null,
+        "silent_minutes": null,
+        "sparkline": [
+          1153,
+          1186,
+          1218,
+          1252,
+          1054,
+          1087,
+          1120,
+          1153,
+          1185,
+          1217,
+          1251,
+          1053,
+          1086,
+          1119,
+          1152,
+          1185,
+          1216,
+          1250,
+          1052,
+          1085,
+          1118,
+          1151,
+          1184,
+          1216,
+          1249,
+          1052,
+          1083,
+          1117,
+          1150,
+          1183,
+          1215,
+          1249,
+          1051,
+          1083,
+          1115,
+          1149,
+          1182,
+          1214,
+          1248,
+          1051,
+          1082,
+          1115,
+          1147,
+          1181,
+          1213,
+          1247,
+          1050,
+          1081,
+          1114,
+          1147,
+          1179,
+          1212,
+          1246,
+          1049,
+          1081,
+          1113,
+          1146,
+          1179,
+          1211,
+          1244
+        ],
+        "state": "active",
+        "suggested": null,
+        "type": "fortigate",
+        "unknown": false
+      },
+      {
+        "address": "172.20.10.24",
+        "configured": false,
+        "enabled": true,
+        "expected": true,
+        "first_seen": "2026-09-03T07:00:15.224393+03:00",
+        "heartbeat_minutes": 15,
+        "last_message": "2026-10-13T06:42:15.224393+03:00",
+        "last_message_origin": "database",
+        "lines_today": 0,
+        "messages_per_minute": 0.0,
+        "name": "switch-3",
+        "network_of": null,
+        "parse_failure_permille": null,
+        "parse_failures_today": 0,
+        "pending_bytes": 0,
+        "promoted_to": null,
+        "silent_minutes": 18,
+        "sparkline": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "state": "silent",
+        "suggested": null,
+        "type": "mikrotik",
+        "unknown": false
+      },
+      {
+        "address": "198.51.100.23",
+        "configured": false,
+        "enabled": true,
+        "expected": true,
+        "first_seen": "2026-10-13T06:41:04.861388+03:00",
+        "heartbeat_minutes": 15,
+        "last_message": "2026-10-13T07:00:04.861388+03:00",
+        "last_message_origin": "database",
+        "lines_today": 0,
+        "messages_per_minute": 0.0,
+        "name": "unknown-198.51.100.23",
+        "network_of": null,
+        "parse_failure_permille": null,
+        "parse_failures_today": 0,
+        "pending_bytes": 88,
+        "promoted_to": null,
+        "silent_minutes": null,
+        "sparkline": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "state": "unknown",
+        "suggested": {
+          "name": "kaynak-23",
+          "type": "generic"
+        },
+        "type": "generic",
+        "unknown": true
+      }
+    ],
+    "today": "2026-10-13"
+  },
+  "tail": {
+    "core-r1": {
+      "day": "2026-10-13",
+      "from_line": 1,
+      "from_offset": 0,
+      "lines": [
+        {
+          "line": 1,
+          "offset": 0,
+          "received": "2026-10-13T07:00:32.256909+03:00",
+          "sender": "172.20.10.1",
+          "sha256": "2ee8b2838eca5803f515dd052863ff1266041342665ee4dc2dffaba956a0132a",
+          "text": "<30>2026-10-13T07:00:00.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14"
+        },
+        {
+          "line": 2,
+          "offset": 157,
+          "received": "2026-10-13T07:00:32.256919+03:00",
+          "sender": "172.20.10.1",
+          "sha256": "acd527d96b1b940362879e0d7c78a8bf3e95effb0d38a8c028fe641173f89296",
+          "text": "<30>2026-10-13T07:00:01.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14"
+        },
+        {
+          "line": 3,
+          "offset": 314,
+          "received": "2026-10-13T07:00:32.256925+03:00",
+          "sender": "172.20.10.1",
+          "sha256": "fc2b41a0b409580a8c927d2d4aea4d7382def1fe67712c64749acc876fb9e098",
+          "text": "<30>2026-10-13T07:00:02.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172.20.42.57 for 00:00:5E:00:53:57 PLN-PC14"
+        },
+        {
+          "line": 4,
+          "offset": 471,
+          "received": null,
+          "sender": null,
+          "sha256": "408fff46d19c5111d0920a0a26f81e9da7d716c0d45fd4f0f0620f1bee7d582f",
+          "text": "\\u0000\\u0000 torn fragment of a line"
+        }
+      ],
+      "origin": "spool",
+      "range_sha256": "2c9d79ccb02f25a6c8afdccf1dab8a7feaaed0e638d2a548ef42c61478c9910b",
+      "reason": null,
+      "source": "core-r1",
+      "to_line": 4,
+      "to_offset": 498
+    },
+    "no_file_today": {
+      "day": null,
+      "from_line": null,
+      "from_offset": null,
+      "lines": [],
+      "origin": null,
+      "range_sha256": null,
+      "reason": "no_file_today",
+      "source": "switch-3",
+      "to_line": null,
+      "to_offset": null
+    }
+  }
+}

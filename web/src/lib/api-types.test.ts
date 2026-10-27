@@ -1,6 +1,7 @@
 /**
- * The TypeScript API types (`api-types.ts`, `settings-types.ts`) and the endpoints the app calls
- * must match the API's OpenAPI document (`src/generated/api-schemas.json`, made by
+ * The TypeScript API types (`api-types.ts`, `settings-types.ts`, `search-types.ts`,
+ * `live-types.ts`, `sources-types.ts`) and the endpoints the app calls must match the API's
+ * OpenAPI document (`src/generated/api-schemas.json`, made by
  * `web/scripts/export_api_contract.py` from the FastAPI app). A renamed, retyped, newly required
  * or removed field — or a call to an endpoint that does not exist — fails here.
  */
@@ -18,7 +19,13 @@ const PATHS = contract.paths as Record<string, string[]>;
 
 /** `src/` (the tests run from `web/`, like every npm script). */
 const SRC = join(process.cwd(), 'src');
-const TYPES_FILES = ['api-types.ts', 'settings-types.ts'].map((name) => join(SRC, 'lib', name));
+const TYPES_FILES = [
+  'api-types.ts',
+  'settings-types.ts',
+  'search-types.ts',
+  'live-types.ts',
+  'sources-types.ts',
+].map((name) => join(SRC, 'lib', name));
 
 /**
  * Interfaces of api-types.ts that are not OpenAPI schemas (error body, query parameters, the
@@ -90,7 +97,7 @@ for (const file of TYPES_FILES) {
   );
 }
 
-/** The text of a node (its own source file: the types come from two files). */
+/** The text of a node (its own source file: the types come from several files). */
 function text(node: ts.Node): string {
   return node.getText(node.getSourceFile());
 }

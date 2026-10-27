@@ -80,7 +80,7 @@ Independent of the role:
 |---|---|
 | Second factor (TOTP) required | roles in `auth.totp_required_roles` (default `admin`, `auditor`); others may enrol voluntarily |
 | KVKK privacy notice required | roles with `usage.person`, `usage.anonymous`, `lookup.run` or `search.read` — all four roles (admin, auditor, hr, viewer); enforced on every person-level endpoint with `arcilogger_api.auth.privacy.require_privacy_notice` (403 `privacy_notice_required`) |
-| Recent re-authentication (5 min) | creating users, changing role/active state/name/e-mail, password and TOTP resets, new recovery codes, voluntary TOTP enrolment, **evidence package creation** (`evidence.create`) and **download** (`evidence.download`, together with the KVKK notice); later: credentials and retention settings (`require_recent_auth`) |
+| Recent re-authentication (5 min) | creating users, changing role/active state/name/e-mail, password and TOTP resets, new recovery codes, voluntary TOTP enrolment, **evidence package creation** (`evidence.create`) and **download** (`evidence.download`, together with the KVKK notice), **search export** (`search.export`, together with the KVKK notice); later: credentials and retention settings (`require_recent_auth`) |
 | Own lookups only | administrators see every 5651 lookup; every other role with `lookup.run` (the auditor) sees only its own — another user's lookup answers 404, and evidence packages built from it are hidden as well (owner decision, ASSUMPTIONS D5; `routers.lookup.sees_all_lookups`) |
 | Everything blocked while `must_change_password` | except `/auth/me`, `/auth/password`, `/auth/logout` |
 
@@ -280,6 +280,47 @@ and address (docs/MVP-CONTRACTS.md section 16). `api/tests/test_admin_config.py`
 `test_admin_kamusm.py`, `test_admin_sources.py`, `test_admin_sections.py`,
 `test_admin_actions.py`, `test_admin_history.py` and `test_settings_api.py` check the roles;
 `tests/test_admin_end_to_end.py` runs the whole channel on Linux.
+
+## Arama, Canlı Akış ve Kaynaklar / Search, live tail and sources
+
+Arama ve Canlı Akış kişisel veri gösterir: **Yönetici** ve **Denetçi** (`search.read`) KVKK
+bilgilendirmesini onayladıktan sonra arar, sayfaları ve istatistikleri görür, kayıt ayrıntısını
+açar, kendi kayıtlı aramalarını tutar ve canlı akışı izler. Dışa aktarma yalnızca **Yönetici**
+içindir (`search.export`) ve son 5 dakika içinde parolanın yeniden girilmesini ister; "Kanıt
+paketine aktar" `evidence.create` ister (Yönetici). Kaynaklar sayfası `sources.read` ister
+(Yönetici); sayfadaki "Son satırlar" ham satır gösterdiği için ayrıca `search.read` ya da
+`lookup.run` ve KVKK onayı ister (ham satır görünümünün kuralı). İK ve Rapor İzleyici bu
+sayfaları açamaz. Hiçbir lisans durumu bunları kapatmaz (5651 Temel).
+
+Search and the live tail show personal data: **administrators** and **auditors**
+(`search.read`) search, see pages and statistics, open a record's details, keep their own saved
+searches and watch the live tail once they accepted the KVKK notice. Export is
+**administrator**-only (`search.export`) and needs a re-authentication within the last
+5 minutes; "Kanıt paketine aktar" (make an evidence package from the lines) needs `evidence.create`
+(administrators). The sources page needs `sources.read` (administrators); its "Son satırlar"
+(latest lines) also needs `search.read` or `lookup.run` and the KVKK notice, because it shows raw
+lines (the rule of the raw line view). HR and viewers cannot open these pages. No licence state
+closes them (5651 Core).
+
+| Endpoint | Access | admin | auditor | hr | viewer |
+|---|---|---|---|---|---|
+| `POST /search`, `POST /search/page`, `POST /search/stats`, `GET /search/event` | `search.read` + KVKK | ✔ | ✔ | — | — |
+| `POST /search/parse`, `GET /search/fields` | `search.read` (no database rows) | ✔ | ✔ | — | — |
+| `GET` / `POST /search/saved`, `PUT` / `DELETE /search/saved/{id}` | `search.read` + KVKK (own saved searches only; another user's id: 404) | ✔ | ✔ | — | — |
+| `POST /search/export` | `search.read` + `search.export` + KVKK + re-auth (5 min) | ✔ | — | — | — |
+| `POST /search/refs` | `search.read` + `evidence.create` + KVKK | ✔ | — | — | — |
+| `POST /live/streams`, `GET` / `DELETE /live/streams/{id}`, `GET /live/status` | `search.read` (+ KVKK to open a stream; a stream belongs to its user and session) | ✔ | ✔ | — | — |
+| `GET /sources`, `GET /sources/{name}` | `sources.read` (parse error texts only with `search.read` or `lookup.run` + KVKK) | ✔ | — | — | — |
+| `GET /sources/{name}/tail` | `sources.read` + (`search.read` or `lookup.run`) + KVKK | ✔ | — | — | — |
+| Panel box `parse_failures` | `sources.read` or `dashboard.view` | ✔ | ✔ | — | ✔ |
+| Raw line drawer on these pages (`GET /raw`) | `search.read` or `lookup.run` + KVKK | ✔ | ✔ | — | — |
+
+Audited: `search.run`, `search.event`, `search.refs`, `search.export`, `search.saved_*`,
+`live.open`, `live.close`, `raw.tail`, `raw.view`; not audited: the next pages and the
+statistics of an audited search, the query check and the field list ([SEARCH.md](SEARCH.md)
+section 11). `api/tests/test_search_permissions.py` runs every search endpoint with every role,
+without the notice, without a session, with a pending password change and in every licence
+state.
 
 ## Kararlar / Decisions
 

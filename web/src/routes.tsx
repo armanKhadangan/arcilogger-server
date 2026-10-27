@@ -59,6 +59,43 @@ export const routes: RouteObject[] = [
               },
             ],
           },
+          // Kaynaklar, Canlı Akış and Arama belong to 5651 Temel: no licence module gates them.
+          {
+            element: <PermissionGate anyOf={navItem('sources').permissions} />,
+            children: [
+              {
+                path: 'sources',
+                // Reads the sources' state; they are edited in Ayarlar → Kaynaklar.
+                lazy: async () => ({
+                  Component: (await import('@/pages/sources/sources-page')).SourcesHealthPage,
+                }),
+              },
+            ],
+          },
+          {
+            element: <PermissionGate anyOf={navItem('live').permissions} />,
+            children: [
+              {
+                path: 'live',
+                lazy: async () => ({
+                  Component: (await import('@/pages/live/live-page')).LivePage,
+                }),
+              },
+            ],
+          },
+          {
+            element: <PermissionGate anyOf={navItem('search').permissions} />,
+            children: [
+              {
+                path: 'search',
+                // The top bar shows the global time range only on routes with this handle.
+                handle: { timeRange: true },
+                lazy: async () => ({
+                  Component: (await import('@/pages/search/search-page')).SearchPage,
+                }),
+              },
+            ],
+          },
           {
             element: <PermissionGate anyOf={navItem('security').permissions} />,
             children: [

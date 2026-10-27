@@ -96,6 +96,7 @@ vermez.
 | `/lookup` | 5651 sorgusu, resmi PDF raporu ve zaman damgası | 5651 Temel |
 | `/lookups` | Kaydedilmiş 5651 sorguları | 5651 Temel |
 | `/raw` | Ham log satırları | 5651 Temel |
+| `/search` | Arama: log araması, istatistikler, kayıtlı aramalar, dışa aktarma | 5651 Temel |
 | `/evidence` | Kanıt paketleri | 5651 Temel |
 | `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama, "Şimdi mühürle" | 5651 Temel |
 | `/credits` | Kamu SM kontörü, "Kontör sorgula" | 5651 Temel |
@@ -103,6 +104,8 @@ vermez.
 | `/persons` | Kişiler | 5651 Temel |
 | `/departments` | Departmanlar | 5651 Temel |
 | `/vlans` | VLAN'lar ve alt ağlar | 5651 Temel |
+| `/live` | Canlı Akış: ham kayıt klasöründen anlık satırlar | 5651 Temel |
+| `/sources` | Kaynaklar: log kaynaklarının durumu, geçmişi ve son satırları | 5651 Temel |
 | `/license` | Lisans durumu, lisans dosyası yükleme ve kaldırma | 5651 Temel |
 | `/admin` | Ayarlar: sunucu yapılandırması, yönetim hizmetinin durumu, değişiklik istekleri ve geçmişi | 5651 Temel |
 | `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |
@@ -138,6 +141,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
+| `search.counts_backfill` | 5651 Temel | her zaman çalışır |
 
 Komut satırında yalnızca `arcilogger-worker usage rebuild` Kullanım analizi kapalıyken reddedilir
 (çıkış kodu 1, `module_not_licensed` iletisi). `arcilogger-worker run`, `rebuild` (kira zaman

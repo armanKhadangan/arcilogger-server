@@ -134,6 +134,13 @@ ADMIN_REQUEST_CHANNELS: Final = ("agent", "worker")
 #: the database (ADR-0009 §6), checked by the database itself (``ck_admin_requests_*_masked``).
 SECRET_KEY_PATTERN: Final = "password|customer|token"  # noqa: S105 - key names, no secret
 
+#: Search (ADR-0015, revision ``0016_search``): the time ranges a saved search may keep instead
+#: of a fixed ``range_from``/``range_to`` (resolved against the current time when it runs).
+SAVED_SEARCH_PRESETS: Final = ("15m", "1h", "24h", "today", "yesterday", "7d", "30d")
+SAVED_SEARCH_NAME_MAX: Final = 80
+#: The longest query text (the search request's ``q`` has the same limit).
+SAVED_SEARCH_QUERY_MAX: Final = 1000
+
 
 def _in(column: str, values: tuple[str, ...]) -> str:
     quoted = ", ".join(f"'{value}'" for value in values)
@@ -277,13 +284,18 @@ class FgTraffic(TimeSeries, Base):
 
 
 class FgWeb(TimeSeries, Base):
-    """FortiGate web filter logs (``type="utm" subtype="webfilter"``)."""
+    """FortiGate web filter logs (``type="utm" subtype="webfilter"``).
+
+    ``ix_fg_web_rhost_time`` (revision ``0016_search``) serves the search field ``domain:``: "this
+    name and its subdomains" is a prefix range on the reversed, lower-cased host name.
+    """
 
     __tablename__ = "fg_web"
     __table_args__ = _ts_args(
         "fg_web",
         Index("ix_fg_web_sessionid", "sessionid"),
         Index("ix_fg_web_srcip_time", "srcip", "time"),
+        Index("ix_fg_web_rhost_time", text("reverse(lower(hostname))"), "time"),
         comment="FortiGate web filter logs (host name, URL, category).",
     )
 
@@ -653,6 +665,10 @@ class IngestOffset(Base):
     updated_at: Mapped[datetime] = _updated()
     #: Set when the day is closed and every line was loaded.
     finished_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: ``NULL``: every loaded line of the file is in ``search_counts``. A number: the lines before
+    #: it were loaded before revision ``0016_search`` and are not counted yet (the worker job
+    #: ``search.counts_backfill`` recounts the file once it is finished, then clears this).
+    counts_from_line: Mapped[int | None] = mapped_column(Integer)
 
 
 # =================================================================================================
@@ -1861,6 +1877,97 @@ class AdminRequest(Base):
     rolled_back: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     #: The ``admin.request`` entry of the audit log (no foreign key, as ``audit_imports``).
     audit_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+# =================================================================================================
+# Search (ADR-0015; revision 0016_search)
+# =================================================================================================
+
+
+class SearchCount(Base):
+    """Exact hourly line counts for the search statistics (``arcilogger_db.searchcounts``).
+
+    One row per key ``(hour, source, raw_day, kind, tbl, action, net)`` with its number of
+    ``messages`` rows ``n``. The ingest loader adds a batch's counts in the transaction that
+    loads its rows (exactly once, like the rows); the worker job ``search.counts_backfill``
+    recounts the files loaded before this table existed (``ingest_offsets.counts_from_line``).
+    Derived data, like every table: ``searchcounts.rebuild_stream`` recounts one file from its
+    rows. ``action`` and ``net`` are ``NULL`` for a line without them; the unique key treats two
+    ``NULL``\\ s as equal (``NULLS NOT DISTINCT``), so the upsert finds the row.
+    """
+
+    __tablename__ = "search_counts"
+    __table_args__ = (
+        CheckConstraint("n > 0", name="n"),
+        UniqueConstraint(
+            "hour",
+            "source",
+            "raw_day",
+            "kind",
+            "tbl",
+            "action",
+            "net",
+            name="uq_search_counts_key",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("ix_search_counts_source_hour", "source", "hour"),
+        Index("ix_search_counts_raw_day_source", "raw_day", "source"),
+        {"comment": "Exact hourly line counts per source file, kind, table, action and /24."},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    #: ``date_trunc('hour', messages.time)`` (device time, UTC).
+    hour: Mapped[datetime] = mapped_column(TZ, nullable=False)
+    #: The spool file ``(source, raw_day)`` the lines are in.
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_day: Mapped[date] = mapped_column(Date, nullable=False)
+    #: ``arcilogger_db.kinds.kind_of(type, subtype)`` of the ``messages`` row.
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The line's typed table (``fg_web``, ``mt_dhcp`` …), ``''`` when it has none.
+    tbl: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    #: The typed row's ``action``, lower-cased.
+    action: Mapped[str | None] = mapped_column(Text)
+    #: The /24 of the typed row's client address when it is a private IPv4 address.
+    net: Mapped[str | None] = mapped_column(CIDR)
+    n: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class SavedSearch(Base):
+    """A personal saved search (ADR-0015): a name, the query text and a time range.
+
+    The range is a preset (:data:`SAVED_SEARCH_PRESETS`, resolved when the search runs) or a
+    fixed ``[range_from, range_to)``, never both (``ck_saved_searches_range``). Names are unique
+    per owner ignoring case; the owner's rows go with the user.
+    """
+
+    __tablename__ = "saved_searches"
+    __table_args__ = (
+        CheckConstraint(f"length(name) BETWEEN 1 AND {SAVED_SEARCH_NAME_MAX}", name="name"),
+        CheckConstraint(f"length(query) <= {SAVED_SEARCH_QUERY_MAX}", name="query"),
+        CheckConstraint(_in("range_preset", SAVED_SEARCH_PRESETS), name="range_preset"),
+        CheckConstraint(
+            "(range_preset IS NOT NULL AND range_from IS NULL AND range_to IS NULL) "
+            "OR (range_preset IS NULL AND range_from IS NOT NULL AND range_to > range_from)",
+            name="range",
+        ),
+        Index("uq_saved_searches_owner_name", "owner_id", text("lower(name)"), unique=True),
+        {"comment": "Personal saved searches: name, query text, preset or fixed time range."},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The query as the user saved it (parsed again on every run).
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    range_preset: Mapped[str | None] = mapped_column(Text)
+    range_from: Mapped[datetime | None] = mapped_column(TZ)
+    #: End of a fixed range (exclusive).
+    range_to: Mapped[datetime | None] = mapped_column(TZ)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+    last_run_at: Mapped[datetime | None] = mapped_column(TZ, sort_order=902)
 
 
 # =================================================================================================

@@ -9,6 +9,7 @@ import {
   setCsrfCookie,
   type RecordedRequest,
 } from '@/test/api-mock';
+import { handoff } from '@/lib/handoff';
 import { renderApp } from '@/test/render';
 import { EVIDENCE, need } from '@/test/samples';
 
@@ -321,5 +322,101 @@ describe('EvidenceWizard', () => {
       expect(lines).toHaveFocus();
     });
     expect(lines).toHaveAccessibleDescription('Alıntı için en az bir satır girin.');
+  });
+
+  it('opens by itself with the lines a search handed over, and warns before the API refuses', async () => {
+    const created = need(EVIDENCE.created, 'created package');
+    const calls = fakeApi(() => jsonResponse(202, created));
+    handoff.put('/evidence', {
+      extract: [
+        { day: '2026-10-09', source: 'fortigate', line: 27 },
+        { day: '2026-10-12', source: 'core-r1', line: 5 },
+      ],
+      from_day: '2026-10-09',
+      to_day: '2026-10-12',
+      truncated: true,
+      complete: false,
+      unsealed_days: ['2026-10-12'],
+      query: 'srcip:172.20.42.57',
+    });
+    renderApp('/evidence');
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    const wizard = await screen.findByRole('dialog', { name: 'Yeni kanıt paketi' });
+    expect(within(wizard).getByText('Arama sonucundan 2 satır aktarıldı')).toBeInTheDocument();
+    expect(within(wizard).getByText('Sorgu: srcip:172.20.42.57')).toBeInTheDocument();
+    expect(
+      within(wizard).getByText(
+        'Arama 10.000 satırdan fazlasını buldu; yalnızca ilk 10.000 satır aktarıldı.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(wizard).getByText(
+        'Arama aralığın tamamını süresi içinde tarayamadı; bazı satırlar eksik olabilir.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(wizard).getByText(/^Şu günler henüz mühürlenmedi: 12\.10\.2026\./),
+    ).toBeInTheDocument();
+    expect(within(wizard).getByLabelText('İlk gün')).toHaveValue('09.10.2026');
+    expect(within(wizard).getByLabelText('Son gün')).toHaveValue('12.10.2026');
+    await user.click(within(wizard).getByRole('button', { name: 'İleri' }));
+    expect(within(wizard).getByLabelText('Alıntılanacak satırlar')).toHaveValue(
+      '2026-10-09 fortigate 27\n2026-10-12 core-r1 5',
+    );
+    expect(
+      within(wizard).getByText('Arama sayfasında bir arama yapıp “Kanıt paketine aktar”a basın'),
+    ).toBeInTheDocument();
+    // One button leaves out the unsealed day's lines: the scope then ends on the sealed day.
+    await user.click(
+      within(wizard).getByRole('button', { name: 'Mühürlenmemiş günlerin satırlarını çıkar' }),
+    );
+    expect(
+      within(wizard).getByText(
+        'Mühürlenmemiş günlerin 1 satırı çıkarıldı; kapsam mühürlü günlerle sınırlandı.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(wizard).queryByText(/^Şu günler henüz mühürlenmedi/)).not.toBeInTheDocument();
+    expect(within(wizard).getByText('Arama sonucundan 1 satır aktarıldı')).toBeInTheDocument();
+    expect(within(wizard).getByLabelText('İlk gün')).toHaveValue('09.10.2026');
+    expect(within(wizard).getByLabelText('Son gün')).toHaveValue('09.10.2026');
+    await user.click(within(wizard).getByRole('button', { name: 'İleri' }));
+    expect(within(wizard).getByLabelText('Alıntılanacak satırlar')).toHaveValue(
+      '2026-10-09 fortigate 27',
+    );
+    // The entry was taken once: cancelling closes the wizard for good.
+    await user.click(within(wizard).getByRole('button', { name: 'İptal' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Yeni kanıt paketi' })).not.toBeInTheDocument();
+    });
+    expect(handoff.take('/evidence')).toBeNull();
+    expect(posted(calls)).toBeUndefined();
+  });
+
+  it('sends the handed-over lines as the extract', async () => {
+    const created = need(EVIDENCE.created, 'created package');
+    const calls = fakeApi(() => jsonResponse(202, created));
+    handoff.put('/evidence', {
+      extract: [{ day: '2026-10-09', source: 'fortigate', line: 27 }],
+      from_day: '2026-10-09',
+      to_day: '2026-10-09',
+      truncated: false,
+      complete: true,
+      unsealed_days: [],
+      query: 'type:traffic',
+    });
+    renderApp('/evidence');
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    const wizard = await screen.findByRole('dialog', { name: 'Yeni kanıt paketi' });
+    for (let step = 0; step < 3; step += 1)
+      await user.click(within(wizard).getByRole('button', { name: 'İleri' }));
+    await user.click(within(wizard).getByRole('button', { name: 'Paketi oluştur' }));
+    await waitFor(() => {
+      expect(posted(calls)).toMatchObject({
+        from: '2026-10-09',
+        to: '2026-10-09',
+        content: 'extract',
+        extract: [{ day: '2026-10-09', source: 'fortigate', line: 27 }],
+      });
+    });
   });
 });

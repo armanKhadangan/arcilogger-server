@@ -16,10 +16,11 @@ from arcilogger_db.settings import (
 )
 from arcilogger_db.settings_meta import GROUPS, SETTINGS, group_settings, setting_meta
 
-#: Contract 2.13: which keys belong to which group.
+#: Contract 2.13 (and Wave 2 contract 2.19 for "search"): which keys belong to which group.
 GROUP_PREFIXES = {
     "alerts": ("alerts.",),
     "lookup": ("nat.", "lookup.", "lease.", "dhcp.", "arp.", "devices.", "worker.leases_lag_"),
+    "search": ("search.", "live."),
     "usage": ("usage.",),
     "reports": ("reports.",),
     "evidence": ("evidence.",),

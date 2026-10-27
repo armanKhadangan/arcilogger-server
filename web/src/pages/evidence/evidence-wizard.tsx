@@ -34,6 +34,8 @@ import type { EvidenceCreated } from '@/lib/api-types';
 import { useAuth } from '@/lib/auth';
 import { parseDay } from '@/lib/dates';
 import { formatDay, siteToday } from '@/lib/display';
+import { useHandoff } from '@/lib/handoff';
+import { formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import { isReauthCancelled, useReauth } from '@/lib/reauth';
 import { RECENT_AUTH_MINUTES } from '@/lib/permissions';
@@ -43,12 +45,16 @@ import { focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 import {
   emptyWizard,
   MAX_DAYS,
+  MAX_EXTRACT_LINES,
   parseLines,
   REFERENCE_MAX,
   sourcesSummary,
   toEvidenceBody,
   validateContent,
   validateScope,
+  leaveOutUnsealed,
+  wizardFromSearch,
+  type SearchExtract,
   type WizardDraft,
   type WizardField,
 } from './evidence-model';
@@ -115,12 +121,81 @@ function failureDetails(error: unknown, t: TFunction): string[] {
   return lines;
 }
 
+/** What the wizard says about the lines a search handed over: where they came from, and why a
+ * package may refuse them (cut at the extract's maximum, an incomplete scan, unsealed days). The
+ * lines of unsealed days can be left out with one button (`leaveOutUnsealed`). */
+function FromSearch({
+  extract,
+  leftOut,
+  onLeaveOut,
+}: {
+  extract: SearchExtract;
+  /** Lines of unsealed days left out so far. */
+  leftOut: number;
+  onLeaveOut: () => void;
+}) {
+  const { t } = useTranslation();
+  const lang = currentLang();
+  const canLeaveOut = extract.unsealed_days.length > 0 && leaveOutUnsealed(extract) !== null;
+  const warnings = [
+    extract.truncated
+      ? t('evidence.wizard.fromSearchTruncated', {
+          max: formatNumber(MAX_EXTRACT_LINES, 0, currentLang()),
+        })
+      : null,
+    extract.complete ? null : t('evidence.wizard.fromSearchIncomplete'),
+    extract.unsealed_days.length > 0
+      ? t('evidence.wizard.fromSearchUnsealed', {
+          days: extract.unsealed_days.map(formatDay).join(', '),
+        })
+      : null,
+  ].filter((text): text is string => text !== null);
+  return (
+    <div className="flex flex-col gap-2">
+      <Alert
+        tone="info"
+        assertive={false}
+        title={t('evidence.wizard.fromSearchTitle', { count: extract.extract.length })}
+      >
+        <p className="font-mono text-xs break-all">
+          {t('evidence.wizard.fromSearchQuery', { query: extract.query || '—' })}
+        </p>
+        <p>{t('evidence.wizard.fromSearchBody')}</p>
+        {leftOut > 0 ? (
+          <p>
+            {t('evidence.wizard.leftOutUnsealed', {
+              count: leftOut,
+              formatted: formatNumber(leftOut, 0, lang),
+            })}
+          </p>
+        ) : null}
+      </Alert>
+      {warnings.length > 0 ? (
+        <Alert tone="warning">
+          {warnings.map((text) => (
+            <p key={text}>{text}</p>
+          ))}
+          {canLeaveOut ? (
+            <Button size="sm" variant="secondary" className="mt-2" onClick={onLeaveOut}>
+              {t('evidence.wizard.leaveOutUnsealed')}
+            </Button>
+          ) : null}
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * "Yeni kanıt paketi" (spec 9.6, 12.3 page 10): scope (a 5651 lookup, or days and sources),
  * content (full days or an extract), password protection, summary. Creating needs a
  * re-authentication within 5 minutes (`withReauth`). A generated password is shown exactly once
  * here — never stored in the browser — and the dialog stays open until the user confirmed that
  * it was saved.
+ *
+ * Arama's "Kanıt paketine aktar" hands a search's raw lines over in memory (`lib/handoff.ts`):
+ * the wizard then opens by itself, the scope being their days and the content an extract of
+ * these lines (still editable), with the search's warnings (Wave 2 contract 2.13).
  */
 export function EvidenceWizard({
   open,
@@ -152,23 +227,41 @@ export function EvidenceWizard({
   const [created, setCreated] = useState<EvidenceCreated | null>(null);
   const [saved, setSaved] = useState(false);
   const { reset } = create;
+  /** The lines a search handed over (the wizard is open while they are). */
+  const [fromSearch, setFromSearch] = useState<SearchExtract | null>(null);
+  const [leftOut, setLeftOut] = useState(0);
+  useHandoff('/evidence', (extract) => {
+    setLeftOut(0);
+    setFromSearch(extract);
+  });
+  const isOpen = open || fromSearch !== null;
 
   useEffect(() => {
-    if (open) {
+    if (isOpen) {
       setStep(0);
-      setDraft(emptyWizard(lookupId));
+      setDraft(fromSearch ? wizardFromSearch(fromSearch) : emptyWizard(lookupId));
       setErrors({});
       setFailure(null);
       setCreated(null);
       setSaved(false);
       reset();
     }
-  }, [open, lookupId, reset]);
+  }, [isOpen, lookupId, fromSearch, reset]);
 
-  const lookups = useLookups({}, open && draft.scope === 'lookup');
+  function close() {
+    setFromSearch(null);
+    onClose();
+  }
+
+  function finishCreated(packageId: number) {
+    setFromSearch(null);
+    onCreated(packageId);
+  }
+
+  const lookups = useLookups({}, isOpen && draft.scope === 'lookup');
   const lookupItems = useMemo(() => lookups.data?.pages[0]?.items ?? [], [lookups.data]);
   const suggestionDay =
-    open && can('seal.read') && draft.scope === 'range' && !draft.allSources
+    isOpen && can('seal.read') && draft.scope === 'range' && !draft.allSources
       ? parseDay(draft.to)
       : null;
   const sealDay = useSealDay(suggestionDay);
@@ -191,8 +284,8 @@ export function EvidenceWizard({
     setCreated(null);
     setSaved(false);
     reset();
-    if (packageId !== undefined) onCreated(packageId);
-    else onClose();
+    if (packageId !== undefined) finishCreated(packageId);
+    else close();
   }
 
   /** Keyboard and screen-reader users land on the first field with a problem. */
@@ -230,7 +323,7 @@ export function EvidenceWizard({
         setCreated(result);
       } else {
         reset();
-        onCreated(result.package.id);
+        finishCreated(result.package.id);
       }
     } catch (error) {
       if (isReauthCancelled(error)) return;
@@ -284,9 +377,9 @@ export function EvidenceWizard({
 
   return (
     <Dialog
-      open={open}
+      open={isOpen}
       onOpenChange={(next) => {
-        if (!next && !showingPassword) onClose();
+        if (!next && !showingPassword) close();
       }}
     >
       <DialogContent
@@ -351,6 +444,18 @@ export function EvidenceWizard({
               current={step}
               steps={STEPS.map((name) => ({ id: name, title: t(`evidence.wizard.steps.${name}`) }))}
             />
+            {fromSearch ? (
+              <FromSearch
+                extract={fromSearch}
+                leftOut={leftOut}
+                onLeaveOut={() => {
+                  const narrowed = leaveOutUnsealed(fromSearch);
+                  if (!narrowed) return;
+                  setLeftOut((count) => count + narrowed.leftOut);
+                  setFromSearch(narrowed.extract); // the scope and the lines follow (wizardFromSearch)
+                }}
+              />
+            ) : null}
 
             {step === 0 ? (
               <div className="flex flex-col gap-4">
@@ -597,6 +702,7 @@ export function EvidenceWizard({
                         set('lines', event.target.value);
                       }}
                     />
+                    <p className="text-xs text-muted">{t('evidence.wizard.fromSearchHintMake')}</p>
                   </Field>
                 ) : null}
                 {mayAddAuditLog ? (
@@ -670,7 +776,7 @@ export function EvidenceWizard({
             ) : null}
 
             <DialogFooter className="justify-between">
-              <Button variant="secondary" onClick={onClose}>
+              <Button variant="secondary" onClick={close}>
                 {t('common.cancel')}
               </Button>
               <div className="flex gap-2">

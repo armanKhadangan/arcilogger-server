@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
 import { mockApi } from './mock-api';
+import { mockSources } from './mock-sources';
 
 /**
  * Ayarlar → Kaynaklar (contract 2.17, `sources.manage`): the `[[sources]]` table with the last
@@ -179,6 +180,64 @@ test.describe('Ayarlar → Kaynaklar', () => {
     expect(call?.query.get('etag')).toMatch(/^sources:/);
   });
 
+  test('an unknown sender handed over from Kaynaklar opens the add dialog filled in', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await mockSources(page, api);
+    await page.goto('/sources?filter=unknown');
+    await page
+      .getByRole('button', { name: 'unknown-172.20.10.40 göndericisini kaynak olarak tanımla' })
+      .click();
+    await expect(page).toHaveURL(/\/settings\/sources$/);
+    const dialog = page.getByRole('dialog', { name: 'Kaynak ekle' });
+    await expect(dialog.getByTestId('source-prefilled')).toHaveText(
+      'Kaynaklar sayfasındaki bilinmeyen gönderici 172.20.10.40 için dolduruldu. Adı gözden geçirin; unknown-172.20.10.40 klasörü ve eski kayıtları yerinde kalır.',
+    );
+    await expect(dialog.getByLabel('Ad', { exact: true })).toHaveValue('kaynak-40');
+    await expect(dialog.getByLabel('Adres')).toHaveValue('172.20.10.40');
+    await expect(dialog.getByLabel('Tür')).toContainText('MikroTik');
+    await expect(dialog.getByLabel('Beklenen sinyal aralığı (dk)')).toHaveValue('15');
+    // The administrator reviews the suggested name before it is sent.
+    await dialog.getByLabel('Ad', { exact: true }).fill('ap-40');
+    await dialog.getByRole('button', { name: 'Değişiklikleri gözden geçir' }).click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await applied(page);
+    await expect(table(page).getByRole('row', { name: /ap-40/ })).toContainText('172.20.10.40');
+    expect(api.callsTo('POST', '/admin/config/sources').at(-1)?.body).toEqual({
+      etag: expect.stringMatching(/^sources:[0-9a-f]{64}$/) as unknown,
+      source: {
+        name: 'ap-40',
+        type: 'mikrotik',
+        address: '172.20.10.40',
+        heartbeat_minutes: 15,
+        expected: true,
+        transport: 'any',
+        enabled: true,
+      },
+    });
+    // An ordinary addition: no re-authentication (Wave 1).
+    expect(api.callsTo('POST', '/auth/reauth')).toHaveLength(0);
+    // Taken once: the page opened again shows no dialog.
+    await page.reload();
+    await expect(table(page)).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Kaynak ekle' })).toHaveCount(0);
+  });
+
+  test('a hand-over while the administration service is down says why nothing opens', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga', admin: { agent: 'disabled' } });
+    await mockSources(page, api);
+    await page.goto('/sources?filter=unknown');
+    await page
+      .getByRole('button', { name: 'unknown-172.20.10.40 göndericisini kaynak olarak tanımla' })
+      .click();
+    await expect(page.getByTestId('source-prefill-blocked')).toContainText('172.20.10.40');
+    await expect(page.getByRole('dialog', { name: 'Kaynak ekle' })).toHaveCount(0);
+  });
+
   test('read-only while the administration service is not running', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga', admin: { agent: 'disabled' } });
     await page.goto('/settings/sources');
@@ -190,6 +249,18 @@ test.describe('Ayarlar → Kaynaklar', () => {
 });
 
 for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`Kaynaklar: the filled-in dialog's accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await mockSources(page, api);
+    await page.goto('/sources?filter=unknown');
+    await page
+      .getByRole('button', { name: 'unknown-172.20.10.40 göndericisini kaynak olarak tanımla' })
+      .click();
+    await expect(page.getByTestId('source-prefilled')).toBeVisible();
+    await expectNoA11yViolations(page);
+  });
+
   test(`Kaynaklar accessibility — ${theme}`, async ({ page }) => {
     await usePreferences(page, { theme });
     await mockApi(page, { signedInAs: 'tolga' });

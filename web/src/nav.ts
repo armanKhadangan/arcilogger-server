@@ -118,6 +118,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
  */
 export const BUILT_PAGES: ReadonlySet<string> = new Set([
   'dashboard',
+  'sources',
+  'live',
+  'search',
   'security',
   'reports',
   'audit',

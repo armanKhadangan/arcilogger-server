@@ -3,10 +3,11 @@
  * real API sends. `web/e2e/samples/*.json` are answers captured from the real API
  * (`web/scripts/capture_api_samples.py`, whose `--check` compares them with the API again); here
  * every sample is checked field by field against the interfaces of `api-types.ts`,
- * `lookup-types.ts`, `seal-types.ts` and `settings-types.ts` — required fields present, no unknown
- * fields, value types and string literal unions as declared. The untyped parts of the OpenAPI
- * document (`outcome`, `query`, the seal day detail, the `result` of an administration request)
- * are covered only here.
+ * `lookup-types.ts`, `seal-types.ts`, `settings-types.ts`, `search-types.ts`, `live-types.ts` and
+ * `sources-types.ts` — required fields present, no unknown fields, value types and string literal
+ * unions as declared. The untyped parts of the OpenAPI document (`outcome`, `query`, the seal day
+ * detail, the `result` of an administration request, the events of a live stream) are covered
+ * only here.
  */
 
 import { readFileSync } from 'node:fs';
@@ -26,7 +27,15 @@ interface Named<T> {
 
 const interfaces = new Map<string, Named<ts.InterfaceDeclaration>>();
 const aliases = new Map<string, Named<ts.TypeNode>>();
-for (const file of ['api-types.ts', 'lookup-types.ts', 'seal-types.ts', 'settings-types.ts']) {
+for (const file of [
+  'api-types.ts',
+  'lookup-types.ts',
+  'seal-types.ts',
+  'settings-types.ts',
+  'search-types.ts',
+  'live-types.ts',
+  'sources-types.ts',
+]) {
   const path = join(LIB, file);
   const source = ts.createSourceFile(
     path,
@@ -286,6 +295,27 @@ const group =
     }
     return problems;
   };
+
+/**
+ * A captured live stream: its events in order (`{event, id, data}`), each `data` of the type
+ * `LiveEvents` gives its event; only a `line` has an `id` (`<epoch>:<seq>`).
+ */
+function liveEvents(value: unknown, path: string): string[] {
+  if (!Array.isArray(value)) return [`${path}: expected an array`];
+  const events = interfaceMembers('LiveEvents');
+  return value.flatMap((item, index) => {
+    const at = `${path}[${index}]`;
+    if (!isObject(item)) return [`${at}: expected an object`];
+    const problems = Object.keys(item)
+      .filter((key) => !['event', 'id', 'data'].includes(key))
+      .map((key) => `${at}.${key}: not part of an event`);
+    const event = events.get(String(item.event));
+    if (!event) return [...problems, `${at}.event: ${describe_(item.event)} is no live event`];
+    const id = item.event === 'line' ? typeof item.id === 'string' : item.id === null;
+    if (!id) problems.push(`${at}.id: ${describe_(item.id)} (only a line has an id)`);
+    return [...problems, ...check(item.data, event.type, event.source, `${at}.data`)];
+  });
+}
 
 const FILE_SAMPLE = null; // downloads: headers, size and hash only
 const RULES: Record<string, Record<string, Rule>> = {
@@ -556,6 +586,48 @@ const RULES: Record<string, Record<string, Rule>> = {
     export_category_csv: FILE_SAMPLE,
     errors,
   },
+  // Arama (contract 2.10): runs and pages, statistics in every mode, the parser, the catalogue,
+  // records, references, saved searches; the exports are downloads.
+  search: {
+    search: each('SearchPage'),
+    stats: each('SearchStats'),
+    parse: each('ParseResult'),
+    fields: 'FieldCatalogue',
+    event: each('SearchEvent'),
+    refs: 'SearchRefs',
+    export: group({ csv: FILE_SAMPLE, xlsx: FILE_SAMPLE, truncated: FILE_SAMPLE }),
+    saved: group({
+      list: 'SavedSearchList',
+      auditor_list: 'SavedSearchList',
+      created: 'SavedSearch',
+      created_preset: 'SavedSearch',
+      updated: 'SavedSearch',
+      run: 'SearchPage',
+      deleted_status: null,
+      list_after_delete: 'SavedSearchList',
+    }),
+    errors,
+  },
+  // Canlı Akış (contract 2.14.4): opened streams, the hub's status and four captured streams.
+  live: {
+    open: each('LiveStreamOut'),
+    status: 'LiveStatus',
+    events: group({
+      stream: liveEvents,
+      dropped: liveEvents,
+      gap: liveEvents,
+      end: liveEvents,
+    }),
+    errors,
+  },
+  // Kaynaklar (contract 2.16) and the Panel with today's parse failures (2.17).
+  sources: {
+    overview: 'SourcesOverview',
+    detail: each('SourceDetail'),
+    tail: each('SourceTail'),
+    dashboard: 'DashboardSummary',
+    errors,
+  },
   // Every licence document is `GET /license` (also the answer of `POST /license`), every other
   // key an error answer (refusals, re-authentication, locked modules, users limit, 503).
   license: {
@@ -625,6 +697,26 @@ describe('captured API answers match the TypeScript types', () => {
     );
     expect(conforms({ score: 1.5 }, 'NatMatch', 'm')).toContain(
       'm.score: expected an integer (no floats)',
+    );
+    const live = load('live').events as Record<string, Record<string, unknown>[]>;
+    const line = structuredClone(live.stream?.find((event) => event.event === 'line'));
+    expect(line).toBeDefined();
+    const shown = line?.data as Record<string, unknown>;
+    delete shown.seq;
+    expect(
+      liveEvents(
+        [
+          { ...line, id: null },
+          { event: 'paused', id: null, data: {} },
+        ],
+        'e',
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        'e[0].id: null (only a line has an id)',
+        'e[0].data.seq: required, missing in the sample',
+        'e[1].event: "paused" is no live event',
+      ]),
     );
   });
 });

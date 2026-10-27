@@ -281,6 +281,12 @@ tutmadığından bu sütunlar yoktur. Ayrıntı ekranı en çok süresi olan 200
 100 siteyi ve sitede 50 ana bilgisayar adını gösterir; kısaltılmış bir kullanıcı ya da site
 listesi toplam sayıyı söyler. Dışa aktarılan dosyada hepsi vardır.
 
+**Tek tek kayıtlar: Arama.** Kullanım sayfaları özet ve tahmindir; bireysel kayıtlar (bir IP'nin,
+MAC adresinin ya da alan adının satırları, her biri ham satırıyla) **Arama** sayfasındadır
+([ARAMA.md](ARAMA.md)). Departman iki sayfada farklı yerden gelir: Kullanım'da kişinin atamasından
+(kişinin departmanı yoksa VLAN'dan, bölüm 2.1), Arama'da ise istemci adresinin VLAN'ına tanımlı
+varsayılan departmandır ("Departman (VLAN'a göre)"; kişi ataması değildir).
+
 ## 8. Performans
 
 Geliştirme makinesinde (4 çekirdek paylaşımlı, PostgreSQL 16, TimescaleDB yok) yük üreteciyle bir

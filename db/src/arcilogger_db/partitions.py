@@ -15,7 +15,7 @@ the 4-core Windows server). This module
 * moves rows that landed in the default partition before their month existed into the new
   partition (the default partition otherwise only holds outliers, e.g. a device clock in 2001);
 * drops whole months for retention (:func:`drop_before`) — no DELETE of hundreds of millions of
-  rows, no vacuum storm.
+  rows, no vacuum storm — and the search summary counts (``search_counts``) of those months.
 
 Callers: ``arcilogger-db upgrade`` and ``arcilogger-db partitions`` (both run
 :func:`ensure_partitions`), and the worker once a day. With TimescaleDB (hypertables) every
@@ -40,10 +40,10 @@ from datetime import date, datetime, timedelta
 from typing import Final
 
 from alembic.runtime.environment import NameFilterParentNames, NameFilterType
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, delete, text
 
 from arcilogger_core.timeutil import day_window, site_day, utc_now
-from arcilogger_db.models import TIME_SERIES_TABLES
+from arcilogger_db.models import TIME_SERIES_TABLES, SearchCount
 from arcilogger_db.settings import DEFAULT_SETTINGS
 
 #: Months created ahead of the current one (the worker runs daily; this is the safety margin).
@@ -185,6 +185,8 @@ class PartitionReport:
     dropped: list[str] = field(default_factory=list)
     #: Rows older than the cutoff deleted from default partitions.
     purged: int = 0
+    #: ``search_counts`` rows deleted with the months they count (:func:`drop_before`).
+    counts_deleted: int = 0
 
 
 def ensure_partitions(
@@ -266,10 +268,13 @@ def _create_partition(
 
 def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
     """Retention: drop every monthly partition that ends on or before ``cutoff`` (a site day)
-    and delete older rows from the default partitions.
+    and delete older rows from the default partitions, and the search summary counts of the
+    months that went (``search_counts``, ADR-0015).
 
     The month containing ``cutoff`` is kept whole, so the database holds up to one month more
-    than the retention setting; the retention job may delete the remainder of that month.
+    than the retention setting; the retention job may delete the remainder of that month. Its
+    counts stay too: a count goes only with its rows (``hour`` before the first day of the
+    cutoff's month), so the summary table keeps counting exactly the rows that are left.
     """
     report = PartitionReport(tables=partitioned_tables(connection))
     if not report.tables:
@@ -290,6 +295,11 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
                 connection.execute(text(f"LOCK TABLE {_quoted(table)} IN ACCESS EXCLUSIVE MODE"))
                 connection.execute(text(f"DROP TABLE {_quoted(partition.name)}"))
                 report.dropped.append(partition.name)
+    # Hours are UTC and the month bounds local midnights (+03:00): whole hours, no hour is split.
+    counted = connection.execute(
+        delete(SearchCount).where(SearchCount.hour < month_bounds(cutoff)[0])
+    )
+    report.counts_deleted = int(counted.rowcount or 0)
     return report
 
 

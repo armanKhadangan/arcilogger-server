@@ -6,6 +6,8 @@
  * enums, nested types). Times are ISO 8601 strings with offset (UTC from the server).
  */
 
+import type { RawRef } from './live-types';
+
 /** ISO 8601 date-time with offset, e.g. `2026-10-12T06:44:07.123456Z`. */
 export type DateTimeString = string;
 
@@ -1054,6 +1056,47 @@ export interface DashboardAlerts {
   latest: AlertOut[];
 }
 
+/** A source with parse failures today. */
+export interface SourceFailures {
+  source: string;
+  /** Lines ingest loaded today from the source's file. */
+  lines: number;
+  failures: number;
+  /** Failures per 1,000 loaded lines, one decimal (`null` without lines). */
+  permille: Float | null;
+}
+
+export interface FailurePattern {
+  source: string;
+  pattern: string;
+  count: number;
+  /** One line of the pattern (the raw-line view opens it). */
+  example: RawRef;
+}
+
+export interface FailureDay {
+  day: DateString;
+  lines: number;
+  failures: number;
+}
+
+/**
+ * "Ayrıştırma hataları" (the permission of `ingest`): today's parse failures by source and
+ * pattern, and the totals of the last 7 days — counts and patterns only, never content.
+ */
+export interface DashboardParseFailures {
+  day: DateString;
+  lines: number;
+  failures: number;
+  permille: Float | null;
+  /** The sources with the most failures today (at most 5). */
+  by_source: SourceFailures[];
+  /** Today's most frequent patterns (at most 3). */
+  top_patterns: FailurePattern[];
+  /** Today and the 6 days before, oldest first. */
+  last7: FailureDay[];
+}
+
 /** `GET /dashboard/summary`: each block is `null` when the user lacks its permission. */
 export interface DashboardSummary {
   generated_at: DateTimeString;
@@ -1062,6 +1105,7 @@ export interface DashboardSummary {
   credit: DashboardCredit | null;
   clock: DashboardClock | null;
   alerts: DashboardAlerts | null;
+  parse_failures: DashboardParseFailures | null;
 }
 
 // -- usage, company totals (`GET /usage/company`, read by the Panel) -----------------------------

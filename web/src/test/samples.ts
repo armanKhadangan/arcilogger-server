@@ -31,6 +31,15 @@ import type {
   ScheduleOut,
   VlanOut,
 } from '@/lib/api-types';
+import type { LiveStatus, LiveStreamOut } from '@/lib/live-types';
+import type {
+  FieldCatalogue,
+  ParseResult,
+  SearchEvent,
+  SearchPage,
+  SearchRefs,
+  SearchStats,
+} from '@/lib/search-types';
 import type { SealDayDetail } from '@/lib/seal-types';
 import type {
   AdminAccepted,
@@ -39,6 +48,7 @@ import type {
   AdminRequestOut,
   AdminStatus,
 } from '@/lib/settings-types';
+import type { SourceDetail, SourcesOverview, SourceTail } from '@/lib/sources-types';
 
 import {
   viewerForm,
@@ -158,6 +168,44 @@ export const REPORTS = load('reports') as {
   schedules: ScheduleOut[];
   runs: RunPage;
   run_partial: RunOut;
+  errors: Record<string, ErrorSample>;
+};
+
+/** Arama (`POST /search` and its pages, statistics, parse, catalogue, records, references). */
+export const SEARCH = load('search') as {
+  search: Record<
+    'typed' | 'text' | 'first_page' | 'next_page' | 'empty' | 'partial' | 'auditor',
+    SearchPage
+  >;
+  stats: Record<'rollup' | 'hybrid' | 'direct' | 'partial' | 'auditor', SearchStats>;
+  parse: Record<'typed' | 'text' | 'refused' | 'unknown_field', ParseResult>;
+  fields: FieldCatalogue;
+  event: Record<'traffic' | 'dhcp' | 'message', SearchEvent>;
+  refs: SearchRefs;
+  errors: Record<string, ErrorSample>;
+};
+
+/** One server-sent event of a captured live stream (`{event, id, data}`). */
+export interface LiveEventSample {
+  event: string;
+  id: string | null;
+  data: unknown;
+}
+
+/** Canlı Akış: opened streams, the hub's status and four whole captured streams. */
+export const LIVE = load('live') as {
+  open: { admin: LiveStreamOut; auditor: LiveStreamOut };
+  status: LiveStatus;
+  events: Record<'stream' | 'dropped' | 'gap' | 'end', LiveEventSample[]>;
+  errors: Record<string, ErrorSample>;
+};
+
+/** Kaynaklar: the overview, details, last lines and the Panel with today's parse failures. */
+export const SOURCES = load('sources') as {
+  overview: SourcesOverview;
+  detail: Record<string, SourceDetail>;
+  tail: { 'core-r1': SourceTail; no_file_today: SourceTail };
+  dashboard: DashboardSummary;
   errors: Record<string, ErrorSample>;
 };
 

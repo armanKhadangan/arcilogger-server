@@ -8,6 +8,7 @@ import {
   clockVerdict,
   creditDuration,
   dashboardRequests,
+  failureLevel,
   formatTotalTime,
   hourlyRows,
   lastDays,
@@ -16,14 +17,18 @@ import {
   sealStatus,
   visibleBlocks,
 } from './dashboard-model';
+import { withParseFailures } from './test-data';
 
 function granted(role: string): Set<string> {
   return new Set(ROLES.find((item) => item.id === role)?.permissions ?? []);
 }
 
-/** The summary the API sent to `role` (captured: the blocks a role may not see are `null`). */
+/**
+ * The summary the API sent to `role` (captured: the blocks a role may not see are `null`), with a
+ * known parse-failure box beside the ingest box.
+ */
 function summaryFor(role: 'admin' | 'auditor' | 'viewer'): DashboardSummary {
-  return structuredClone(DASHBOARD[role]);
+  return withParseFailures(structuredClone(DASHBOARD[role]));
 }
 
 const usage = { data: USAGE.company, error: null };
@@ -53,6 +58,7 @@ describe('visible blocks', () => {
         'clock',
         'credit',
         'ingest',
+        'parseFailures',
         'seal',
         'sites',
         'usage',
@@ -64,16 +70,27 @@ describe('visible blocks', () => {
     const blocks = visibleBlocks(granted('auditor'), summaryFor('auditor'), usage);
     expect(blocks.has('alerts')).toBe(false);
     expect(blocks.has('ingest')).toBe(true);
+    expect(blocks.has('parseFailures')).toBe(true);
     expect(blocks.has('seal')).toBe(true);
     expect(blocks.has('credit')).toBe(true);
     expect(blocks.has('clock')).toBe(true);
     expect(blocks.has('usage')).toBe(true);
   });
 
-  it('viewer: ingest and usage only (the API leaves the rest out)', () => {
+  it('viewer: ingest, its parse failures and usage only (the API leaves the rest out)', () => {
     expect([...visibleBlocks(granted('viewer'), summaryFor('viewer'), usage)].sort()).toEqual(
-      ['categories', 'ingest', 'sites', 'usage'].sort(),
+      ['categories', 'ingest', 'parseFailures', 'sites', 'usage'].sort(),
     );
+  });
+
+  it('no parse-failure box from an API that does not send one', () => {
+    const summary = { ...summaryFor('admin'), parse_failures: null };
+    expect(visibleBlocks(granted('admin'), summary, usage).has('parseFailures')).toBe(false);
+    const older = { ...summaryFor('admin') } as Partial<DashboardSummary>;
+    delete older.parse_failures;
+    expect(
+      visibleBlocks(granted('admin'), older as DashboardSummary, usage).has('parseFailures'),
+    ).toBe(false);
   });
 
   it('HR: the usage blocks only, without asking the summary', () => {
@@ -124,6 +141,14 @@ describe('visible blocks', () => {
 });
 
 describe('card values', () => {
+  it('parse failures: none, some, or above 1 % of the lines (R20-parse)', () => {
+    expect(failureLevel({ failures: 0, permille: 0 })).toBe('none');
+    expect(failureLevel({ failures: 0, permille: null })).toBe('none');
+    expect(failureLevel({ failures: 3, permille: 2.4 })).toBe('some');
+    expect(failureLevel({ failures: 31, permille: 10 })).toBe('high');
+    expect(failureLevel({ failures: 2, permille: null })).toBe('some');
+  });
+
   it('credit lasts in days, months or years', () => {
     expect(creditDuration(12)).toEqual({ unit: 'days', count: 12 });
     expect(creditDuration(74)).toEqual({ unit: 'months', count: 2 });

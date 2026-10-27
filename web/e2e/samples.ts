@@ -47,6 +47,17 @@ import type {
   VerifyResult,
   VlanOut,
 } from '../src/lib/api-types';
+import type { LiveStatus, LiveStreamOut } from '../src/lib/live-types';
+import type {
+  FieldCatalogue,
+  ParseResult,
+  SavedSearch,
+  SavedSearchList,
+  SearchEvent,
+  SearchPage,
+  SearchRefs,
+  SearchStats,
+} from '../src/lib/search-types';
 import type { SealDayDetail } from '../src/lib/seal-types';
 import type {
   AdminAccepted,
@@ -60,6 +71,7 @@ import type {
   SettingsPatchResult,
   UploadPreview,
 } from '../src/lib/settings-types';
+import type { SourceDetail, SourcesOverview, SourceTail } from '../src/lib/sources-types';
 import type { LicenseSamples } from '../src/test/license-samples';
 
 function load(name: string): unknown {
@@ -417,6 +429,75 @@ export const REPORTS = load('reports') as {
  * refusals, `DELETE`, the locked modules' 403 answers and the users limit's 409.
  */
 export const LICENSE = load('license') as LicenseSamples;
+
+/**
+ * Arama (captured, Wave 2 contract 2.10, `samples_search.py`, the sealed day 2026-10-09 of the
+ * main site): runs (`typed`, `text`, `first_page` and its `next_page`, `empty`, `partial`, the
+ * auditor's), statistics in every mode, `POST /search/parse`, the field catalogue, records of
+ * three tables, references, the exports' headers, saved searches and the refusals. The search
+ * ids are `ornek-arama-NN`.
+ */
+export const SEARCH = load('search') as {
+  meta: SampleMeta;
+  search: Record<
+    'typed' | 'text' | 'first_page' | 'next_page' | 'empty' | 'partial' | 'auditor',
+    SearchPage
+  >;
+  stats: Record<'rollup' | 'hybrid' | 'direct' | 'partial' | 'auditor', SearchStats>;
+  parse: Record<'typed' | 'text' | 'refused' | 'unknown_field', ParseResult>;
+  fields: FieldCatalogue;
+  event: Record<'traffic' | 'dhcp' | 'message', SearchEvent>;
+  refs: SearchRefs;
+  export: Record<'csv' | 'xlsx' | 'truncated', FileSample>;
+  saved: {
+    list: SavedSearchList;
+    auditor_list: SavedSearchList;
+    created: SavedSearch;
+    created_preset: SavedSearch;
+    updated: SavedSearch;
+    run: SearchPage;
+    deleted_status: number;
+    list_after_delete: SavedSearchList;
+  };
+  errors: Record<string, ErrorSample>;
+};
+
+/** One server-sent event of a captured stream, as the page reads it. */
+export interface LiveEventSample {
+  event: string;
+  id: string | null;
+  data: unknown;
+}
+
+/**
+ * Canlı Akış (captured, Wave 2 contract 2.14.4, `samples_live_sources.py`): `POST /live/streams`
+ * of the administrator and the auditor, `GET /live/status`, the events of whole streams —
+ * `stream` (hello, backfill and new lines: the firewall's traffic, a line not in the spool format,
+ * an unknown sender's first line), `dropped` (the rate limit), `gap` (a resume the hub cannot
+ * serve), `end` (`time_limit`) — and the refusals.
+ */
+export const LIVE = load('live') as {
+  meta: SampleMeta;
+  open: { admin: LiveStreamOut; auditor: LiveStreamOut };
+  status: LiveStatus;
+  events: Record<'stream' | 'dropped' | 'gap' | 'end', LiveEventSample[]>;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Kaynaklar (captured, Wave 2 contract 2.16 and 2.17): the overview (the core router, the firewall,
+ * a silent switch, an unknown sender), the detail of the firewall, the core router and the
+ * unknown sender, the core router's last lines and a source without a file today, the Panel's
+ * summary with today's parse failures, and the refusals.
+ */
+export const SOURCES = load('sources') as {
+  meta: SampleMeta;
+  overview: SourcesOverview;
+  detail: Record<string, SourceDetail>;
+  tail: { 'core-r1': SourceTail; no_file_today: SourceTail };
+  dashboard: DashboardSummary;
+  errors: Record<string, ErrorSample>;
+};
 
 /** "Today" of the captured samples (the E2E browser clock is set to it). */
 export const SAMPLE_TODAY = SEALS.meta.site_today;

@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Connection, Engine, insert, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import upgrade
-from arcilogger_db.models import TIME_SERIES_TABLES, MtDhcp
+from arcilogger_db.models import TIME_SERIES_TABLES, Message, MtDhcp, SearchCount
 from arcilogger_db.partitions import (
     MONTHS_AHEAD,
     MONTHS_BACK,
@@ -31,6 +32,7 @@ from arcilogger_db.partitions import (
     partition_status,
     partitioned_tables,
 )
+from arcilogger_db.searchcounts import CountKey, count_key, upsert_counts
 from arcilogger_db.settings import set_setting
 from arcilogger_db.testing import TestServer
 
@@ -190,6 +192,65 @@ def test_retention_drops_whole_months_and_purges_old_default_rows(plain_engine: 
     assert {"mt_dhcp_p202609", "mt_dhcp_p202610", "mt_dhcp_default"} <= left
     assert report.purged == 1  # the 2001 outlier
     assert [where for _, where in _where(plain_engine)] == ["mt_dhcp_p202609"]
+
+
+def _counts_of_the_rows(connection: Connection) -> Counter[CountKey]:
+    rows = connection.execute(
+        select(Message.time, Message.source, Message.raw_day, Message.type, Message.subtype)
+    ).mappings()
+    return Counter(count_key(row, None, None) for row in rows)
+
+
+def _stored_counts(connection: Connection) -> Counter[CountKey]:
+    stored: Counter[CountKey] = Counter()
+    c = SearchCount
+    for hour, source, raw_day, kind, tbl, action, net, n in connection.execute(
+        select(c.hour, c.source, c.raw_day, c.kind, c.tbl, c.action, c.net, c.n)
+    ):
+        net_text = None if net is None else str(net)
+        stored[CountKey(hour, source, raw_day, kind, tbl, action, net_text)] += n
+    return stored
+
+
+def test_retention_deletes_the_search_counts_of_what_it_drops(plain_engine: Engine) -> None:
+    """``search_counts`` follows the rows (contract R6): the counts of the dropped months and of
+    the purged outliers go; the month holding the cutoff keeps its rows and so its counts."""
+    with plain_engine.begin() as connection:
+        ensure_partitions(connection, today=TODAY, months_back=3, months_ahead=0)
+    times = [
+        datetime(2001, 1, 1, 9, tzinfo=UTC),  # default partition: purged
+        datetime(2026, 7, 20, 9, tzinfo=UTC),  # July: dropped
+        datetime(2026, 8, 31, 20, 59, tzinfo=UTC),  # 31.08. 23:59 site time: August, dropped
+        datetime(2026, 8, 31, 21, 0, tzinfo=UTC),  # 01.09. 00:00 site time: September, kept
+        datetime(2026, 9, 10, 9, tzinfo=UTC),  # before the cutoff, in its month: kept
+        datetime(2026, 10, 1, 9, tzinfo=UTC),  # after the cutoff
+    ]
+    with plain_engine.begin() as connection:
+        connection.execute(
+            insert(Message),
+            [
+                {
+                    "time": when,
+                    "time_received": when,
+                    "source": "core-r1",
+                    "sender": "172.20.10.1",
+                    "raw_day": site_day(when),
+                    "raw_line": number,
+                    "raw_offset": 100 * number,
+                    "type": "heartbeat",
+                    "text": "ARCI-HEARTBEAT CORE-R1",
+                }
+                for number, when in enumerate(times, start=1)
+            ],
+        )
+        upsert_counts(connection, _counts_of_the_rows(connection))
+        assert sum(_stored_counts(connection).values()) == 6
+    with plain_engine.begin() as connection:
+        report = drop_before(connection, date(2026, 9, 15))
+        assert report.counts_deleted == 3
+        assert report.purged == 1
+        assert sum(_counts_of_the_rows(connection).values()) == 3
+        assert _stored_counts(connection) == _counts_of_the_rows(connection)
 
 
 def test_template_storage_matches_partitioned_tables(db_engine: Engine) -> None:
