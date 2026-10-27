@@ -70,6 +70,9 @@ def _in(column: str, values: tuple[str, ...]) -> str:
 def upgrade() -> None:
     bind = op.get_bind()
     hypertables = _messages_is_hypertable(bind)
+    storage_options: dict[str, Any] = (
+        {} if hypertables else {"postgresql_partition_by": "RANGE (time)"}
+    )
     op.create_table(
         TABLE,
         sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
@@ -100,7 +103,7 @@ def upgrade() -> None:
         sa.Column("raw_offset", sa.BigInteger(), nullable=False),
         sa.PrimaryKeyConstraint("time", "id", name="pk_fg_dhcp"),
         comment="FortiGate DHCP server events (ACK/RELEASE by logid): which MAC got which IP when.",
-        **({} if hypertables else {"postgresql_partition_by": "RANGE (time)"}),
+        **storage_options,
     )
     op.create_index("ix_fg_dhcp_ip_time", TABLE, ["ip", "time"], unique=False)
     op.create_index("ix_fg_dhcp_mac_time", TABLE, ["mac", "time"], unique=False)
