@@ -80,7 +80,8 @@ sessions, INET as `str`, parameters hidden in logs); sessions:
   case), `ingest_offsets.counts_from_line` (lines before it were loaded before the upgrade and
   are not in `search_counts` yet), the expression index `ix_fg_web_rhost_time`
   (`reverse(lower(hostname)), time`) for `domain:`. `partitions.drop_before` also deletes the
-  `search_counts` rows before the cutoff. The kind of a line (`traffic`, `web`, `dhcp` …) is
+  `search_counts` rows before the first day of the cutoff's month (the month it keeps whole
+  keeps its counts). The kind of a line (`traffic`, `web`, `dhcp` …) is
   `arcilogger_db.kinds.kind_of(type, subtype)` everywhere (ingest, search, live tail).
 - **Schema changes:** the baseline `0001_baseline` is frozen. If your package needs a column or
   table, add the model change **and** one new revision file
@@ -133,7 +134,7 @@ outcome.error / outcome.detail -> pattern name / detail for parse_failures (None
   after a crash at any step. Streams loaded before the upgrade carry
   `ingest_offsets.counts_from_line`; the worker job `search.counts_backfill` recounts them
   (`rebuild_stream`) and clears it, and `arcilogger-db search-counts status | rebuild | verify`
-  does the same by hand.
+  does the same by hand (section 17.5).
 
 ## 5. 5651 lookup (B3)
 
@@ -1410,6 +1411,22 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   `rebuild_stream(conn, source, day)`, `counts_complete(conn, from, to)`, `verify`). Filled by
   ingest's `counts` step (section 4), by the worker job `search.counts_backfill` for streams with
   `ingest_offsets.counts_from_line` set, and by `arcilogger-db search-counts rebuild`.
+  `partitions.drop_before` deletes the rows with `hour` before the first day of the cutoff's
+  month, in its transaction (the month it keeps whole keeps its counts; with TimescaleDB it drops
+  nothing, so the counts stay too; `PartitionReport.counts_deleted`).
+- **Backfill job** `search.counts_backfill` (listed last in `default_jobs`): each file in its own
+  transaction with its `ingest_offsets` row locked `FOR UPDATE` and read again (a second worker
+  or the command never counts a file twice); at least one file per run, no new file after 60 s,
+  but the file in hand is always finished (about 9 s per million lines here; the worker's other
+  jobs wait for it). Details `{files: [{source, day, lines, keys}], lines, waiting}` plus `more:
+  true, left` when the time ended the run; `skipped` when nothing was counted and nothing is left.
+- **Command** `arcilogger-db search-counts`: `status` (keys, lines, hours held, the files still
+  marked with their lines not counted), `rebuild --source S --day YYYY-MM-DD` (locks the file's
+  `ingest_offsets` row first, so a file still being loaded can be recounted; clears
+  `counts_from_line`), `verify [--hours 2]` (0–744; one `REPEATABLE READ` read-only snapshot;
+  prints the mixed-case name counts of D6 every time; on a difference lists at most 20 keys and
+  the `rebuild` commands that repair them). Exit codes as the other commands: 0, 1 a difference,
+  2 a usage error (a bad day), 3 the database cannot be reached.
 - `search.stats.run_stats(session, plan, from, to, labels, budget_seconds, sample_rows)`:
   **rollup** when `Plan.rollup_eligible` (only `source`, `type`, `action`, `vlan`, `department`
   and negations, no free text, VLAN subnets private IPv4 ≤ /24, range > 12 h) and
@@ -1457,34 +1474,61 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   `arcilogger_ingest.prepare.prepare_line` within `live.parse_lines_per_second` and filters with
   `search/matcher.py` (the planner's semantics, property-tested). Buffer `live.buffer_lines` with
   a sequence number and an `epoch`.
-- `POST /live/streams` (`require_privacy_notice("search.read")`, CSRF) `{q, backfill:
-  0..live.backfill_lines}` → 201 `{stream_id, epoch, expires_at, folders, limits}` (422 query
-  errors, 429 `live_stream_limit`, 503 `live_unavailable`), audited `live.open`;
+- `POST /live/streams` (`require_privacy_notice("search.read")`, CSRF) `{q, backfill?}` (`backfill`
+  absent or `null`: `live.backfill_lines`; 0..200 by the schema, above the setting 422
+  `validation_error`) → 201 `{stream_id, epoch, expires_at, folders, limits}` (422 query
+  errors first, then 429 `live_stream_limit`, 503 `live_unavailable`), audited `live.open`; the
+  endpoints are `async` (the hub lives on the event loop), their database work runs in the
+  thread pool, and the GET holds no database connection while it streams;
   `GET /live/streams/{id}` (the user's and session's own, else 404 `live_stream_not_found`) →
   `text/event-stream` (`hello`, `line` with `id: <epoch>:<seq>`, `dropped` at most once a
   second, `gap`, `end`, a keep-alive comment every 15 s; `Last-Event-ID` resumes);
   `DELETE /live/streams/{id}` → 204, audited `live.close` (also on `end`, lingering out and
-  shutdown); `GET /live/status` (`search.read`, no person data).
+  shutdown; `reason` `closed`, `lingered`, `server_stopping` or the `end` code);
+  `GET /live/status` (`search.read`, no person data).
+- **Resume:** the first connection of a stream always gets its backfill and ignores a
+  `Last-Event-ID` (nothing of the stream was sent yet); the oldest sequence number sent then
+  (`first_seq`: the oldest backfill line, else the one after the stream opened) bounds every later
+  resume, so `backfill` holds and `dropped`/`live.close` count only the stream's own lines.
+  `gap.missed` is the number of matching lines counted as lost while the stream was paused,
+  `null` for `hub_restarted` and when lines between `Last-Event-ID` and the pause left the buffer
+  unseen; `dropped` counts since the previous `dropped` event.
+- **Parse budget:** a seeded file end is parsed newest first; lines the budget left unparsed that
+  the backfill could hold are counted `parse_budget` (never hidden); a line no open stream can
+  match (free-text byte search) is kept unparsed, and a stream opened later whose terms occur in
+  it counts it as `parse_budget`. A stream judges only the lines of the folders it reads.
 - Limits: `live.max_lines_per_second` per stream (token bucket; the rest `rate_limited`), a
   queue of 500 (`slow_client`; full for 30 s ends the stream), `live.max_streams_total` and
-  `live.max_streams_per_user`, `live.max_minutes` (`end time_limit`); a paused stream lingers
-  120 s. Every 30 s the stream checks the session (`session_problem`: revoked, expired, idle,
-  inactive), `search.read` and the KVKK notice; the GET and its reconnects send
-  `X-Arci-Background: 1`. Caddy does not compress `/api/v1/live/*`.
+  `live.max_streams_per_user` (checked and the stream registered with no `await` in between, so
+  concurrent opens never overshoot), `live.max_minutes` (`end time_limit`); a paused stream
+  lingers 120 s. Every 30 s the stream checks the session (`security.session_problem`: every code
+  the authentication refuses with — `session_invalid`, `session_revoked`, `session_expired`,
+  `session_idle`, `user_inactive`, `mfa_required` — plus `permission_changed`,
+  `password_change_required`, `privacy_notice_required`), `search.read` and the KVKK notice; the
+  GET and its reconnects send `X-Arci-Background: 1`. Caddy does not compress `/api/v1/live/*`;
+  the API waits at most 5 s for open connections on shutdown (`timeout_graceful_shutdown`), and
+  an open stream ends with `end server_stopping`.
 
 ### 17.8 Sources and the Panel box (`routers/sources.py`, `sourcehealth.py`)
 
 - `GET /sources` (`sources.read`, counts only, cached 15 s) → `SourcesOverview {generated_at,
   today, collector, items: SourceHealth[]}` with the state (`active`, `silent`, `never`,
   `disabled`, `unknown`, `promoted`; the R15 definition), `messages_per_minute`, a 60-minute
-  `sparkline`, `lines_today`, `pending_bytes`, parse failures, `suggested` for unknown senders.
+  `sparkline`, `lines_today`, `pending_bytes`, parse failures, `suggested` for unknown senders
+  (the kinds and the most common host of the sender's newest 1,000 messages of the last 24 h).
+  Items by name; a configured network is followed by its members (both `configured: true`, the
+  members with `network_of`; the network sums them and is `active` when a member is).
 - `GET /sources/{name}` (cached 30 s) → `SourceDetail` (+ `hourly` 48 h from `search_counts`
-  when complete, `daily` 14 days, `gaps` 30 days from the manifests and today, `parse_failures`
-  7 days; `error` only for `search.read` or `lookup.run`); unknown → 404 `source_not_found`.
+  when complete, `daily` 14 days, `gaps` 30 days from the manifests of sealed days and, today, the
+  open gap of an enabled, expected source silent longer than `[seal] gap_minutes`,
+  `parse_failures` 7 days; a pattern's `error` only for `search.read` or `lookup.run` with the
+  current KVKK notice accepted, else `null`; not audited); unknown → 404 `source_not_found`.
 - `GET /sources/{name}/tail?limit=50` (≤ 200; `sources.read` and `search.read` or `lookup.run`
-  and the KVKK notice; 30 a minute) → today's (else yesterday's) spool lines with offsets and
-  SHA-256 and `range_sha256` of the exact byte range; `lines: []` with `reason: "no_file_today"`
-  without a file; audited `raw.tail`.
+  and the KVKK notice; 30 a minute, then 429 `rate_limited` with `Retry-After`) → today's (else
+  yesterday's) spool lines with offsets, `text` (the message part, display-safe), `sha256` of the
+  whole line (as `GET /raw`) and `range_sha256` of the exact byte range `[from_offset,
+  to_offset)`; `lines: []` with `reason: "no_file_today"` without a file (nothing read, nothing
+  audited); audited `raw.tail` (range, count and `range_sha256`, never content).
 - **Panel:** `GET /dashboard/summary` gains the box `parse_failures` (`sources.read` or
   `dashboard.view`; patterns and counts only): `{day, lines, failures, permille, by_source,
   top_patterns, last7} | null`.
@@ -1513,8 +1557,12 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   `outcome`, `elapsed_ms`, `saved_id`), `search.event` (`table`, `id`, `time`, `raw`),
   `search.refs` (`search_id`, `q`, `from`, `to`, `refs`, `truncated`, `complete`, `sha256`),
   `search.export` (`search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`,
-  `sha256`), `search.saved_create` / `_update` / `_delete` (`saved_id`, `name`, `q`),
-  `live.open`, `live.close`, `raw.tail`. Not audited: `/search/page`, `/search/stats` (they serve
+  `sha256`), `search.saved_create` / `_update` (`saved_id`, `name`, `q`), `search.saved_delete`
+  (`saved_id`, `name`), `live.open` (`stream_id`, `q`, `folders`, `backfill`), `live.close`
+  (`stream_id`, `seconds`, `delivered`, `dropped`, `reason`, `ranges`), `raw.tail` (`source`,
+  `day`, `origin`, `from_line`, `to_line`, `from_offset`, `to_offset`, `count`,
+  `range_sha256`); how an auditor reads them: [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md)
+  section 9. Not audited: `/search/page`, `/search/stats` (they serve
   an audited `search_id` only), `/search/parse`, `/search/fields`, `/live/status`, the sources
   list and detail.
 
@@ -1535,3 +1583,35 @@ chunks) has no `Seq Scan` and no primary-key range scan of `messages`, `fg_traff
 `fg_dns`, `fg_app` (compressed chunks excepted) and uses the field's index (Q6: `mt_dhcp`'s MAC
 index and `mt_event`'s event index); Q3 refuses only a `Seq Scan`; Q10's rows all have their
 client address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
+
+### 17.11 Decided while building (where the Wave 2 plan of ADR-0015 was refined)
+
+- **Query language:** `action`, `qtype`, `level` and `logid` compare ASCII case-insensitively
+  (`lower(col) = :p`; the format fixtures hold `qtype="AAAA"` and `action="Edit"`, and the summary
+  table lower-cases `action`), in the SQL and the matcher alike. `type:*`, `vlan:*` and
+  `department:*` are refused (`search_value_invalid`); a quoted all-digit `policy:"12"` is a
+  policy name, `policy:12` the number.
+- **Summary table:** `drop_before` prunes by the months it drops, not by the cutoff day
+  (section 17.5); the backfill job starts no new file after 60 s but finishes the file in hand.
+- **Search API:** `SearchRequest.q` defaults to `""` and `from`/`to` may be left out with
+  `saved_id` (without it a missing bound is 422 `search_range_invalid`); the `today` preset is
+  `[site midnight, max(now, midnight + 1 s))`; direct statistics never answer 504 (a cut count is
+  `complete: false` with `covered_from`); `GET /search/event` answers 404
+  `search_event_not_found` for an unknown table too and 504 `search_event_timeout` when the read
+  runs out of time; the export's fill-in queries run under the export's remaining budget, and a
+  fill-in timeout cuts the file (`truncated: "time"`) rather than writing a row with empty
+  columns; saved-search names refuse control, format and surrogate characters (422
+  `validation_error`); a row's `vlan_id` is the most specific VLAN subnet holding the address, as
+  the VLAN facet counts it (a live line takes the same summary).
+- **Live tail and sources:** `backfill` is optional; the stream's session check returns every
+  refusal code of the authentication; stream limits hold under concurrent opens; the first
+  connection always gets the backfill and later resumes never reach back before it; `live.close`
+  names `closed`, `lingered`, `server_stopping` or the `end` code; an unknown sender's `suggested`
+  is read from its newest 1,000 messages of the last 24 h; a parse failure's `error` needs the
+  KVKK notice besides `search.read` or `lookup.run` (sections 17.7, 17.8).
+- **Still to be shown on the CI jobs:** the `ix_fg_web_rhost_time` build on TimescaleDB with
+  compressed chunks (`db/tests/test_migration_0016.py`, [ADR-0015](adr/0015-search-live-sources.md)
+  "Consequences": pending; if TimescaleDB refuses the plain statement, the index is built
+  `WITH (timescaledb.transaction_per_chunk)` after the upgrade's transaction), and
+  `test_search_perf.py`, `test_live_perf.py` and the sources sparkline guard on the TimescaleDB
+  and Windows jobs (the recorded numbers are from native partitions).
