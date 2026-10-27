@@ -332,8 +332,8 @@ iyisidir.
 
 Ölçüm (2026-10-26): 4 işlemcili, başka işlerle paylaşılan bir Linux geliştirme makinesi, PostgreSQL 16 yerel aylık bölümlerle (TimescaleDB yok); 4.913.180 `messages` satırı 130 saniyede yazıldı, özet tablo ve istatistiklerle birlikte veri 689 saniyede hazırdı. TimescaleDB'li CI işi aynı testi 7 günden eski parçalar sıkıştırılmış olarak çalıştırır.
 Bu ölçümden sonra veriye günde 4.320 MikroTik olayı (`mt_event`; Q6 artık olay indeksini de
-denetler) eklendi; aşağıdaki sayılar bu ekten önceki veriyle alınmıştır ve TimescaleDB'li ile
-Windows CI işlerinin sayıları henüz kaydedilmedi.
+denetler) eklendi; aşağıdaki sayılar bu ekten önceki veriyle alınmıştır. TimescaleDB'nin
+sayıları tablonun ardındadır; Windows CI işininkiler henüz kaydedilmedi.
 
 | # | Sorgu | Aralık | Bütçe | İlk çalıştırma | En iyi | Not |
 |---|---|---|---|---|---|---|
@@ -355,6 +355,35 @@ Windows CI işlerinin sayıları henüz kaydedilmedi.
 
 Ayrıca her sorgunun planı denetlenir: indeksli alanlarla (`srcip:`, `domain:`, `mac:`, `qname:`)
 yüksek hacimli tablolar sırayla taranmaz.
+
+**TimescaleDB** (2026-10-27, PostgreSQL 16 ile TimescaleDB 2.30.2, aynı makine, yük yaklaşık
+2): yukarıdaki verinin onda biri ve yarısı (en yeni gün 200.000 ve 1.000.000 satır, önceki 29
+günün her biri 10.000 ve 50.000), 7 günden eski parçalar sıkıştırılmış; verinin tamamı
+yüklenirken makinede bulunandan fazla disk ister. Her bütçe ve her plan denetimi tutar. Bunu
+aramadaki üç şey sağlar ([ADR-0015](adr/0015-search-live-sources.md), "Plans on TimescaleDB"):
+her tablo en yeni sıkıştırılmış parçasının bittiği anın iki yanından ayrı okunur (yoksa bir
+`domain:` ya da `type:dhcp mac:` aramasında sıkıştırılmamış parçalar birincil anahtar boyunca
+okunur), bir sayfanın satırları öbür alanlarını yalnızca kendi zaman aralıklarının
+parçalarından alır ve aramanın sorguları kendi değerleriyle planlanır. Nadir bir değer
+sıkıştırılmış günlerde onları açarak aranır; süresi onların hacmiyle büyür.
+
+| # | Sorgu | Aralık | Bütçe | Onda bir | Yarı |
+|---|---|---|---|---|---|
+| Q1 | boş sorgu, ilk sayfa | 1 gün | 500 ms | 73 ms | 79 ms |
+| Q1 | boş sorgu, ilk sayfa | 30 gün | 500 ms | 58 ms | 81 ms |
+| Q2 | `srcip:<aranan istemci>` | 1 gün | 2.000 ms | 92 ms | 87 ms |
+| Q2 | `srcip:<aranan istemci>` | 30 gün | 10.000 ms | 96 ms | 79 ms |
+| Q3 | `srcip:172.20.41.0/24` | 1 gün | 2.000 ms | 88 ms | 65 ms |
+| Q4 | `srcip:<aranan> type:web action:blocked` | 30 gün | 10.000 ms | 65 ms | 62 ms |
+| Q5 | `domain:<nadir alan adı> type:web` | 30 gün | 10.000 ms | 265 ms | 787 ms |
+| Q6 | `type:dhcp mac:<nadir MAC>` | 30 gün | 10.000 ms | 292 ms | 683 ms |
+| Q7 | `qname:<nadir ad>` | 30 gün | 10.000 ms | 289 ms | 732 ms |
+| Q8 | istatistik `type:web action:blocked department:Finans` | 30 gün | 500 ms | 21 ms | 23 ms |
+| Q9 | istatistik `srcip:<aranan>` (doğrudan) | 1 gün | 2.000 ms | 78 ms | 67 ms |
+| Q10 | 10.000 satırlık dışa aktarma (Q2) | 30 gün | 10.000 ms | 4.443 ms | 4.573 ms |
+| S1 | nadir serbest metin terimi | 1 gün | 4.500 ms | 335 ms | 1.470 ms |
+| S2 | `dstport:3389 action:deny` | 1 gün | 4.500 ms | 82 ms | 78 ms |
+| S3 | `ip:<aranan>` | 30 gün | 4.500 ms | 107 ms | 139 ms |
 
 ## 14. Hata kodları
 

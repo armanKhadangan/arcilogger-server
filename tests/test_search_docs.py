@@ -56,13 +56,18 @@ def _section(text: str, heading: str) -> str:
 
 
 def _rows(section: str) -> list[list[str]]:
-    """The cells of the table rows of ``section`` (header and separator rows left out)."""
+    """The cells of the table rows of ``section`` (header and separator rows left out; a
+    section may hold several tables)."""
     rows = []
-    for line in section.splitlines():
+    lines = section.splitlines()
+    for index, line in enumerate(lines):
         if not line.startswith("| ") or set(line) <= {"|", "-", " "}:
             continue
+        following = lines[index + 1] if index + 1 < len(lines) else ""
+        if following.startswith("|") and set(following) <= {"|", "-", " ", ":"}:
+            continue  # the header of a table
         rows.append([cell.strip() for cell in line.strip().strip("|").split(" | ")])
-    return rows[1:]  # the header
+    return rows
 
 
 @pytest.mark.parametrize("name", GUIDES)

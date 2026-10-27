@@ -1571,20 +1571,21 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
 ### 17.10 Performance guards (`poe test-perf`)
 
 `api/tests/test_search_perf.py`, tier `ARCILOGGER_SEARCH_PERF` = `1` (default: the newest day
-2,000,000 lines plus 29 days of 100,000, and 4,320 `mt_event` rows a day (heartbeats, Wi-Fi,
-1 % DHCP offers), written with `generate_series`, `search_counts` rebuilt,
-`VACUUM ANALYZE`, TimescaleDB chunks older than 7 days compressed), `heavy` (30 × 1,000,000, on
-site) or `0` (skipped). Budgets (best of three after a warm-up, through the API): Q1 browse first
-page 1 d / 30 d < 0.5 s; Q2 `srcip:<needle>` 1 d < 2 s, 30 d < 10 s; Q3 `srcip:<a /24>` 1 d
-< 2 s; Q4 `srcip:<needle> type:web action:blocked`, Q5 `domain:<rare> type:web`, Q6 `type:dhcp
+2,000,000 lines plus 29 days of 100,000, and 4,320 `mt_event` rows a day (heartbeats, Wi-Fi, 1 %
+DHCP offers), written with `generate_series`, `search_counts` rebuilt, `VACUUM ANALYZE`, TimescaleDB
+chunks older than 7 days compressed, its compression policies paused while loading), `heavy` (30 ×
+1,000,000, on site) or `0` (skipped). Budgets (best of three after a warm-up, through the API): Q1
+browse first page 1 d / 30 d < 0.5 s; Q2 `srcip:<needle>` 1 d < 2 s, 30 d < 10 s; Q3 `srcip:<a /24>`
+1 d < 2 s; Q4 `srcip:<needle> type:web action:blocked`, Q5 `domain:<rare> type:web`, Q6 `type:dhcp
 mac:<rare>`, Q7 `qname:<rare>` 30 d < 10 s; Q8 statistics from the summary table 30 d < 0.5 s and
-equal to direct counting; Q9 direct statistics 1 d < 2 s; Q10 export of 10,000 rows < 10 s;
-S1–S3 scans within the request budget + 0.5 s with an honest `complete`. For Q2 and Q4–Q7 the
-whole-range plan (`EXPLAIN (FORMAT JSON)`, scans resolved to their table through partitions and
+equal to direct counting; Q9 direct statistics 1 d < 2 s; Q10 export of 10,000 rows < 10 s; S1–S3
+scans within the request budget + 0.5 s with an honest `complete`. For Q2 and Q4–Q7 the plan of the
+whole-range statement as the search sends it (on TimescaleDB each branch split at its table's
+compression horizon; `EXPLAIN (FORMAT JSON)`, scans resolved to their table through partitions and
 chunks) has no `Seq Scan` and no primary-key range scan of `messages`, `fg_traffic`, `fg_web`,
 `fg_dns`, `fg_app` (compressed chunks excepted) and uses the field's index (Q6: `mt_dhcp`'s MAC
-index and `mt_event`'s event index); Q3 refuses only a `Seq Scan`; Q10's rows all have their
-client address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
+index and `mt_event`'s event index); Q3 refuses only a `Seq Scan`; Q10's rows all have their client
+address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
 
 ### 17.11 Decided while building (where the Wave 2 plan of ADR-0015 was refined)
 
@@ -1595,16 +1596,20 @@ client address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
   policy name, `policy:12` the number.
 - **Summary table:** `drop_before` prunes by the months it drops, not by the cutoff day
   (section 17.5); the backfill job starts no new file after 60 s but finishes the file in hand.
-- **Search API:** `SearchRequest.q` defaults to `""` and `from`/`to` may be left out with
-  `saved_id` (without it a missing bound is 422 `search_range_invalid`); the `today` preset is
-  `[site midnight, max(now, midnight + 1 s))`; direct statistics never answer 504 (a cut count is
-  `complete: false` with `covered_from`); `GET /search/event` answers 404
+- **Search API:** `SearchRequest.q` defaults to `""` and `from`/`to` may be left out with `saved_id`
+  (without it a missing bound is 422 `search_range_invalid`); the `today` preset is `[site midnight,
+  max(now, midnight + 1 s))`; on TimescaleDB a page's branch whose window holds the end of its
+  table's newest compressed chunk (`timescaledb_information.chunks`, kept 60 s) is two selects,
+  newer and older than that horizon, and the search's transaction plans every statement with its
+  values (`plan_cache_mode = force_custom_plan`, transaction-local); a page's fill-in queries carry
+  its rows' time range as a constant (ADR-0015, "Plans on TimescaleDB"); direct statistics never
+  answer 504 (a cut count is `complete: false` with `covered_from`); `GET /search/event` answers 404
   `search_event_not_found` for an unknown table too and 504 `search_event_timeout` when the read
   runs out of time; the export's fill-in queries run under the export's remaining budget, and a
-  fill-in timeout cuts the file (`truncated: "time"`) rather than writing a row with empty
-  columns; saved-search names refuse control, format and surrogate characters (422
-  `validation_error`); a row's `vlan_id` is the most specific VLAN subnet holding the address, as
-  the VLAN facet counts it (a live line takes the same summary).
+  fill-in timeout cuts the file (`truncated: "time"`) rather than writing a row with empty columns;
+  saved-search names refuse control, format and surrogate characters (422 `validation_error`); a
+  row's `vlan_id` is the most specific VLAN subnet holding the address, as the VLAN facet counts it
+  (a live line takes the same summary).
 - **Live tail and sources:** `backfill` is optional; the stream's session check returns every
   refusal code of the authentication; stream limits hold under concurrent opens; the first
   connection always gets the backfill and later resumes never reach back before it; `live.close`
@@ -1616,4 +1621,5 @@ client address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
   "Consequences": pending; if TimescaleDB refuses the plain statement, the index is built
   `WITH (timescaledb.transaction_per_chunk)` after the upgrade's transaction), and
   `test_search_perf.py`, `test_live_perf.py` and the sources sparkline guard on the TimescaleDB
-  and Windows jobs (the recorded numbers are from native partitions).
+  and Windows jobs at tier 1 (recorded: native partitions at tier 1, TimescaleDB at a tenth and
+  at half of it).

@@ -129,16 +129,53 @@ these columns is indexed).
   rows. The Linux TimescaleDB CI job runs the same test; should a later TimescaleDB refuse the
   statement, the index is built after the upgrade's transaction instead, and this record is
   amended.
-- **Plans on TimescaleDB** (2026-10-27, TimescaleDB 2.30.2, the search performance test on a
-  tenth of its tier-1 data, chunks older than 7 days compressed): every query met its budget
-  (`domain:` 30 days 235 ms, the 10,000-row export 6.7 s of 10 s), but for a rare value the
-  planner reads two of them differently than on native partitions: `domain:` (fg_web) and
-  `type:dhcp mac:` (mt_dhcp) scan the uncompressed chunks' primary keys backwards (TimescaleDB's
-  ordered chunk append with the page's `LIMIT`) instead of `ix_fg_web_rhost_time` and the MAC
-  index, so the test's plan check fails there. The time-budgeted windows bound such a scan, but
-  at a million lines a day a 30-day domain search may come back partial. Tier 1 on the Linux CI
-  job decides; if it fails there too, the remedy is in the query (an index-ordered branch per
-  chunk or `enable_*` settings for the search's read-only transaction), not in the guard.
+- **Plans on TimescaleDB** (2026-10-27, TimescaleDB 2.30.2 with PostgreSQL 16, the search
+  performance test on a tenth and on half of its tier-1 data, chunks older than 7 days
+  compressed). Three things made the plans differ from native partitions, all mended in the
+  query layer:
+  1. *Compressed chunks' estimates.* TimescaleDB estimates a compressed chunk at up to 1,000
+     rows a compressed batch and leaves out the conditions on its other columns
+     (`domain:<rare>` on a chunk of two batches: 1,911 rows estimated, 2 found). Over 30 days
+     the page's `LIMIT 101` then looked reached after a twentieth of the newest chunk, and the
+     ordered chunk append read the uncompressed chunks' primary keys backwards (`domain:` on
+     `fg_web`, `type:dhcp mac:` on `mt_dhcp` and `mt_event`) instead of `ix_fg_web_rhost_time`,
+     the MAC index and the event index; at a million lines a day such a scan reads most of
+     every chunk, and a 30-day domain search may come back partial. Planner settings were
+     measured and rejected: `timescaledb.enable_ordered_append` or `enable_chunk_append` off
+     keep the same plans (PostgreSQL's merge append makes the same choice); `enable_indexscan`
+     off mends these two but turns common values into whole-window reads (`srcip:<a /24>`
+     1 day 0.9 → 51 ms, `domain:example.com` 1 day 0.4 → 110 ms, with sequential scans).
+     **Decision:** the search reads where each table's compressed chunks end
+     (`timescaledb_information.chunks`, kept a minute), and a branch whose window holds that
+     horizon is two selects, newer and older than it, each ordered and limited, of which the
+     newest `LIMIT` rows are kept: the same rows in the same order, the cursor unchanged. The
+     newer select holds only uncompressed chunks and is planned with their statistics, as a
+     native partition is: the field's index for a rare value, the primary key for a common one.
+  2. *Fill-in queries.* A page's rows got their other table's fields by joining the page's keys
+     with the whole table; TimescaleDB read every chunk for it, the compressed ones
+     decompressed (a browse page on half of tier 1: 412 ms of fill-ins, over its 500 ms
+     budget). The keys' earliest and latest time are now a constant range in those queries
+     (34 ms).
+  3. *Generic plans.* psycopg prepares a statement sent five times, and PostgreSQL may then keep
+     a generic plan, made without the values, which on TimescaleDB plans every chunk instead of
+     those of the time range (an export of 10,000 rows on half of tier 1: 4.5 s with custom
+     plans, cut at 30 s with the generic ones). On TimescaleDB the search's read-only
+     transaction sets `plan_cache_mode = force_custom_plan` with `set_config(…, true)`, so it
+     ends with that transaction; a test checks that the pooled connection is back to `auto`.
+
+  Native partitions have no horizon and keep their statements and their plan caching; the
+  fill-in range only narrows the partitions they read. After the changes the plan check passes
+  on both storage modes (load about 2: one of the 4 cores was taken by an unrelated process);
+  a tenth of tier 1: TimescaleDB `domain:` 30 days 265 ms, `type:dhcp mac:` 292 ms, the
+  10,000-row export 4.4 s (7.5 s without 2 and 3), the browse page 73 ms (210 ms); native
+  partitions 76 ms, 90 ms, 3.3 s, 66 ms; half of tier 1 on TimescaleDB: 787 ms, 683 ms, 4.6 s,
+  79 ms (518 ms without 2 and 3, over budget). The perf test pauses the
+  compression policies while it loads: run against today's date they compressed whichever
+  chunks existed when they started, the newest day's first chunk among them. Left as before:
+  an uncompressed chunk older than the newest compressed one (a day loaded late, a chunk the
+  policy has not reached yet) is planned with the compressed ones. Tier 1 itself needs about
+  8.4 GB while it loads (twice the half's 4.2 GB), more than this machine could spare with
+  3 GB left over; the Linux CI job runs it.
 - Free text is slow by nature: the answer is honest about a partial scan, and the syntax help
   points to the fast fields (`srcip:`, `domain:`, `mac:`, `qname:`). `ip:` on the UTM tables is a
   scan, because their destination addresses have no index.
