@@ -362,29 +362,30 @@ about 2): a tenth and half of the data above (the newest day 200,000 and 1,000,0
 of the 29 days before it 10,000 and 50,000), the chunks older than 7 days compressed; the whole
 data needs more disk while it loads than the machine had. Every budget and every plan check is
 met. Three things in the search make it so ([ADR-0015](adr/0015-search-live-sources.md), "Plans
-on TimescaleDB"): each table is read on both sides of the end of its newest compressed chunk
+on TimescaleDB"): a window of the scan ends where a table's newest compressed chunk ends
 (otherwise the uncompressed chunks of a `domain:` or `type:dhcp mac:` search are read along the
-primary key), a page's rows get their other fields from the chunks of their own time range, and
-the search's statements are planned with their values. A rare value is looked for in the
+primary key) and the compressed chunks are read only when the newer rows did not fill the page,
+a page's rows get their other fields from the chunks of their own time range, and the search's
+statements are planned with their values. A rare value is looked for in the
 compressed days by decompressing them, so its time grows with their volume.
 
 | # | Query | Range | Budget | Tenth | Half |
 |---|---|---|---|---|---|
-| Q1 | empty query, first page | 1 day | 500 ms | 73 ms | 79 ms |
-| Q1 | empty query, first page | 30 days | 500 ms | 58 ms | 81 ms |
-| Q2 | `srcip:<needle client>` | 1 day | 2,000 ms | 92 ms | 87 ms |
-| Q2 | `srcip:<needle client>` | 30 days | 10,000 ms | 96 ms | 79 ms |
-| Q3 | `srcip:172.20.41.0/24` | 1 day | 2,000 ms | 88 ms | 65 ms |
-| Q4 | `srcip:<needle> type:web action:blocked` | 30 days | 10,000 ms | 65 ms | 62 ms |
-| Q5 | `domain:<rare domain> type:web` | 30 days | 10,000 ms | 265 ms | 787 ms |
-| Q6 | `type:dhcp mac:<rare MAC>` | 30 days | 10,000 ms | 292 ms | 683 ms |
-| Q7 | `qname:<rare name>` | 30 days | 10,000 ms | 289 ms | 732 ms |
-| Q8 | statistics `type:web action:blocked department:Finans` | 30 days | 500 ms | 21 ms | 23 ms |
-| Q9 | statistics `srcip:<needle>` (direct) | 1 day | 2,000 ms | 78 ms | 67 ms |
-| Q10 | export of 10,000 rows (Q2) | 30 days | 10,000 ms | 4,443 ms | 4,573 ms |
-| S1 | rare free-text term | 1 day | 4,500 ms | 335 ms | 1,470 ms |
-| S2 | `dstport:3389 action:deny` | 1 day | 4,500 ms | 82 ms | 78 ms |
-| S3 | `ip:<needle>` | 30 days | 4,500 ms | 107 ms | 139 ms |
+| Q1 | empty query, first page | 1 day | 500 ms | 72 ms | 59 ms |
+| Q1 | empty query, first page | 30 days | 500 ms | 72 ms | 69 ms |
+| Q2 | `srcip:<needle client>` | 1 day | 2,000 ms | 95 ms | 93 ms |
+| Q2 | `srcip:<needle client>` | 30 days | 10,000 ms | 98 ms | 82 ms |
+| Q3 | `srcip:172.20.41.0/24` | 1 day | 2,000 ms | 99 ms | 77 ms |
+| Q4 | `srcip:<needle> type:web action:blocked` | 30 days | 10,000 ms | 71 ms | 60 ms |
+| Q5 | `domain:<rare domain> type:web` | 30 days | 10,000 ms | 274 ms | 889 ms |
+| Q6 | `type:dhcp mac:<rare MAC>` | 30 days | 10,000 ms | 253 ms | 640 ms |
+| Q7 | `qname:<rare name>` | 30 days | 10,000 ms | 237 ms | 712 ms |
+| Q8 | statistics `type:web action:blocked department:Finans` | 30 days | 500 ms | 23 ms | 21 ms |
+| Q9 | statistics `srcip:<needle>` (direct) | 1 day | 2,000 ms | 68 ms | 72 ms |
+| Q10 | export of 10,000 rows (Q2) | 30 days | 10,000 ms | 3,745 ms | 4,582 ms |
+| S1 | rare free-text term | 1 day | 4,500 ms | 325 ms | 1,294 ms |
+| S2 | `dstport:3389 action:deny` | 1 day | 4,500 ms | 76 ms | 66 ms |
+| S3 | `ip:<needle>` | 30 days | 4,500 ms | 102 ms | 132 ms |
 
 ## 14. Error codes
 

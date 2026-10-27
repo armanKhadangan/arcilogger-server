@@ -1580,12 +1580,12 @@ browse first page 1 d / 30 d < 0.5 s; Q2 `srcip:<needle>` 1 d < 2 s, 30 d < 10 s
 mac:<rare>`, Q7 `qname:<rare>` 30 d < 10 s; Q8 statistics from the summary table 30 d < 0.5 s and
 equal to direct counting; Q9 direct statistics 1 d < 2 s; Q10 export of 10,000 rows < 10 s; S1–S3
 scans within the request budget + 0.5 s with an honest `complete`. For Q2 and Q4–Q7 the plan of the
-whole-range statement as the search sends it (on TimescaleDB each branch split at its table's
-compression horizon; `EXPLAIN (FORMAT JSON)`, scans resolved to their table through partitions and
-chunks) has no `Seq Scan` and no primary-key range scan of `messages`, `fg_traffic`, `fg_web`,
-`fg_dns`, `fg_app` (compressed chunks excepted) and uses the field's index (Q6: `mt_dhcp`'s MAC
-index and `mt_event`'s event index); Q3 refuses only a `Seq Scan`; Q10's rows all have their client
-address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
+whole-range window as the search sends it (on TimescaleDB one statement on each side of a
+table's compression horizon; `EXPLAIN (FORMAT JSON)`, scans resolved to their table through
+partitions and chunks) has no `Seq Scan` and no primary-key range scan of `messages`,
+`fg_traffic`, `fg_web`, `fg_dns`, `fg_app` (compressed chunks excepted) and uses the field's index
+(Q6: `mt_dhcp`'s MAC index and `mt_event`'s event index); Q3 refuses only a `Seq Scan`; Q10's rows
+all have their client address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
 
 ### 17.11 Decided while building (where the Wave 2 plan of ADR-0015 was refined)
 
@@ -1598,11 +1598,12 @@ address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.
   (section 17.5); the backfill job starts no new file after 60 s but finishes the file in hand.
 - **Search API:** `SearchRequest.q` defaults to `""` and `from`/`to` may be left out with `saved_id`
   (without it a missing bound is 422 `search_range_invalid`); the `today` preset is `[site midnight,
-  max(now, midnight + 1 s))`; on TimescaleDB a page's branch whose window holds the end of its
-  table's newest compressed chunk (`timescaledb_information.chunks`, kept 60 s) is two selects,
-  newer and older than that horizon, and the search's transaction plans every statement with its
-  values (`plan_cache_mode = force_custom_plan`, transaction-local); a page's fill-in queries carry
-  its rows' time range as a constant (ADR-0015, "Plans on TimescaleDB"); direct statistics never
+  max(now, midnight + 1 s))`; on TimescaleDB a page's window ends at the end of a table's newest
+  compressed chunk that it would hold (`timescaledb_information.chunks`, kept 60 s), so the
+  compressed chunks are read by the next window only when the page is not full yet, and the
+  search's transaction plans every statement with its values
+  (`plan_cache_mode = force_custom_plan`, transaction-local); a page's fill-in queries carry its
+  rows' time range as a constant (ADR-0015, "Plans on TimescaleDB"); direct statistics never
   answer 504 (a cut count is `complete: false` with `covered_from`); `GET /search/event` answers 404
   `search_event_not_found` for an unknown table too and 504 `search_event_timeout` when the read
   runs out of time; the export's fill-in queries run under the export's remaining budget, and a

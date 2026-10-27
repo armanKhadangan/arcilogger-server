@@ -146,11 +146,22 @@ these columns is indexed).
      off mends these two but turns common values into whole-window reads (`srcip:<a /24>`
      1 day 0.9 → 51 ms, `domain:example.com` 1 day 0.4 → 110 ms, with sequential scans).
      **Decision:** the search reads where each table's compressed chunks end
-     (`timescaledb_information.chunks`, kept a minute), and a branch whose window holds that
-     horizon is two selects, newer and older than it, each ordered and limited, of which the
-     newest `LIMIT` rows are kept: the same rows in the same order, the cursor unchanged. The
-     newer select holds only uncompressed chunks and is planned with their statistics, as a
-     native partition is: the field's index for a rare value, the primary key for a common one.
+     (`timescaledb_information.chunks`, kept a minute), and the window scan ends a window at
+     such a horizon when the window would hold it: the same rows in the same order, the cursor
+     unchanged. The window above the horizon holds only uncompressed chunks and is planned with
+     their statistics, as a native partition is: the field's index for a rare value, the primary
+     key for a common one. The compressed chunks are read by the next window, only when the page
+     is not full yet, with the rows still missing as its `LIMIT` and a deadline of its own.
+     First each branch was split inside one statement, into a select newer and one older than
+     the horizon under one more `ORDER BY … LIMIT`; the merge append above them fetches the
+     first row of each, so the older select decompressed the window's compressed chunks even
+     when the newer rows filled the page, every one of them for a value that occurs only after
+     the horizon (319 `fg_web` rows of a domain just after it, a window of 12 days,
+     `LIMIT 101`: 10–13 ms with all 12 compressed chunks read, 1–2 ms unsplit, 0.4 ms for the
+     window that ends at the horizon). Starting the older select only when the newer one fell short (a
+     `MATERIALIZED` CTE and its count as a one-time filter) avoids that, but PostgreSQL 16 then
+     sorts both instead of merging them: the older select reads its whole `LIMIT`, and the page's
+     merge of several tables can no longer stop it early.
   2. *Fill-in queries.* A page's rows got their other table's fields by joining the page's keys
      with the whole table; TimescaleDB read every chunk for it, the compressed ones
      decompressed (a browse page on half of tier 1: 412 ms of fill-ins, over its 500 ms
@@ -166,10 +177,10 @@ these columns is indexed).
   Native partitions have no horizon and keep their statements and their plan caching; the
   fill-in range only narrows the partitions they read. After the changes the plan check passes
   on both storage modes (load about 2: one of the 4 cores was taken by an unrelated process);
-  a tenth of tier 1: TimescaleDB `domain:` 30 days 265 ms, `type:dhcp mac:` 292 ms, the
-  10,000-row export 4.4 s (7.5 s without 2 and 3), the browse page 73 ms (210 ms); native
-  partitions 76 ms, 90 ms, 3.3 s, 66 ms; half of tier 1 on TimescaleDB: 787 ms, 683 ms, 4.6 s,
-  79 ms (518 ms without 2 and 3, over budget). The perf test pauses the
+  a tenth of tier 1: TimescaleDB `domain:` 30 days 274 ms, `type:dhcp mac:` 253 ms, the
+  10,000-row export 3.7 s (7.5 s without 2 and 3), the browse page 72 ms (210 ms); native
+  partitions 65 ms, 89 ms, 3.2 s, 67 ms; half of tier 1 on TimescaleDB: 889 ms, 640 ms, 4.6 s,
+  59 ms (518 ms without 2 and 3, over budget). The perf test pauses the
   compression policies while it loads: run against today's date they compressed whichever
   chunks existed when they started, the newest day's first chunk among them. Left as before:
   an uncompressed chunk older than the newest compressed one (a day loaded late, a chunk the
