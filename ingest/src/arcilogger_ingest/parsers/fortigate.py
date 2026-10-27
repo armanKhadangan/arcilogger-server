@@ -4,20 +4,34 @@ Spec 2.5 (format samples and notes), 7.2, 7.3; field mapping tables in ``docs/PA
 
 One line gives one ``messages`` row and at most one typed row:
 
-==========================  ==============  ================================================
-FortiGate ``type/subtype``  Table           Notes
-==========================  ==============  ================================================
-``traffic/*``               ``fg_traffic``  ``is_interim`` for the interim logids (default
-                                            ``0000000020``); deltas and source NAT as columns
-``utm/webfilter``           ``fg_web``      ``url`` ≤ 2,000 characters
-``utm/dns``                 ``fg_dns``      ``ipaddr`` → ``answers`` (``INET[]``)
-``utm/app-ctrl``            ``fg_app``
-``utm/ssl``                 ``fg_app``      ``hostname`` (else ``sni``); ``extra.subtype="ssl"``
-``utm/ips``                 ``fg_ips``
-``utm/virus``               ``fg_virus``
-``event/*``                 ``fg_event``    admin logins, configuration changes, perf, VPN …
-anything else               —               ``messages`` only; fields in ``extra["fields"]``
-==========================  ==============  ================================================
+================================  ==============  ==========================================
+FortiGate ``type/subtype``        Table           Notes
+================================  ==============  ==========================================
+``traffic/*``                     ``fg_traffic``  ``is_interim`` for the interim logids (default
+                                                  ``0000000020``); deltas and source NAT as
+                                                  columns; ``srcmac`` (device identification)
+``utm/webfilter``                 ``fg_web``      ``url`` ≤ 2,000 characters
+``utm/dns``                       ``fg_dns``      ``ipaddr`` → ``answers`` (``INET[]``)
+``utm/app-ctrl``                  ``fg_app``
+``utm/ssl``                       ``fg_app``      ``hostname`` (else ``sni``);
+                                                  ``extra.subtype="ssl"``
+``utm/ips``                       ``fg_ips``
+``utm/virus``                     ``fg_virus``
+``event/*``                       ``fg_event``    admin logins, configuration changes, perf, VPN …
+``event/*`` with ip+mac+dhcp_msg  ``fg_dhcp``     FortiGate DHCP server (ACK/RELEASE; meaning by
+                                                  logid in the worker); ``device_time``
+anything else                     —               ``messages`` only; fields in ``extra["fields"]``
+================================  ==============  ==========================================
+
+**FortiGate DHCP** (ADR-0016, D3): an ``event`` line with the keys ``ip``, ``mac`` and
+``dhcp_msg`` (of the documented messages only 26001 ACK and 26002 RELEASE carry all three) is an
+``fg_dhcp`` row when ``ip`` converts to an address and ``mac`` to a MAC. When the three keys are
+there but a value does not convert, the row stays ``fg_event`` and the line is a
+``fortigate.dhcp`` failure; it is never silently an ordinary event. The rule uses the shape of
+the line only, never a setting: the report cross-check re-parses each cited line with the
+shipped parser, so old rows always agree with their raw lines. ``fg_dhcp.device_time`` says
+whether ``time`` is the FortiGate's event time (``False``: the receive time, ``fortigate.time``
+or no time field); the worker never uses such a row as lease evidence.
 
 SSL inspection logs go to ``fg_app``, not ``fg_web``: spec 10.2 ranks ``fg_web.hostname`` first
 (web filter verdict, categories, blocked counts) and puts the SSL ``sni``/``hostname`` in the
@@ -27,11 +41,12 @@ rows have no ``app``/``appid``/``appcat`` and carry ``extra.subtype = "ssl"``.
 **Nothing is lost.** Every field of the line is a typed column, or in the typed row's ``extra``
 under its own key, or represented by the ``messages`` row / ``time``: ``type`` (the table),
 ``devname`` (``messages.host``), and ``eventtime``/``date``/``time``/``tz`` *when the event
-time was derived from them*. ``subtype`` is a column of ``fg_traffic``/``fg_event``, implied by
-the table for ``fg_web``/``fg_dns``/``fg_ips``/``fg_virus`` and kept in ``extra`` for ``fg_app``
-(which holds two subtypes). A value that does not fit its column (e.g. ``srcip="n/a"``) stays in
-``extra`` as text and the line is reported as ``fortigate.value``; an empty value (``key=``,
-``key=""``) is ``NULL`` in every column kind — text included — and kept in ``extra`` as ``""``.
+time was derived from them*. ``subtype`` is a column of ``fg_traffic``/``fg_event``/``fg_dhcp``,
+implied by the table for ``fg_web``/``fg_dns``/``fg_ips``/``fg_virus`` and kept in ``extra`` for
+``fg_app`` (which holds two subtypes). A value that does not fit its column (e.g.
+``srcip="n/a"``, ``srcmac="n/a"``) stays in ``extra`` as text and the line is reported as
+``fortigate.value``; an empty value (``key=``, ``key=""``) is ``NULL`` in every column kind —
+text included — and kept in ``extra`` as ``""``.
 A key that occurs twice keeps its first value in the column and **all** values as a JSON list in
 ``extra[key]`` (extra values are otherwise always strings, so a list always means "duplicate
 key"). Findings about the line go to ``messages.extra``: ``prefix`` (text before the first
@@ -74,7 +89,7 @@ from arcilogger_ingest.parsers.base import (
 from arcilogger_ingest.parsers.generic import parse_generic
 from arcilogger_ingest.parsers.kv import Tokens, tokenize, tokenize_reference
 from arcilogger_ingest.parsers.syslog import DEFAULT_MAX_CLOCK_SKEW, plausible_time, split_pri
-from arcilogger_ingest.parsers.values import BIGINT, INTEGER, SMALLINT, to_int, to_ip
+from arcilogger_ingest.parsers.values import BIGINT, INTEGER, SMALLINT, to_int, to_ip, to_mac
 
 #: Logids of interim traffic logs (spec 2.5: ``0000000020`` = interim update of a long session).
 DEFAULT_INTERIM_LOGIDS: Final = frozenset({"0000000020"})
@@ -94,7 +109,7 @@ LEVELS: Final = {
     "debug": 7,
 }
 
-Kind = Literal["text", "smallint", "integer", "bigint", "inet"]
+Kind = Literal["text", "smallint", "integer", "bigint", "inet", "mac"]
 #: (column, FortiGate key, kind) — the readable form of a table mapping.
 Spec = tuple[tuple[str, str, Kind], ...]
 
@@ -115,6 +130,7 @@ FG_TRAFFIC: Final[Spec] = (
     ("proto", "proto", "smallint"),
     *_SESSION,
     ("srcintf", "srcintf", "text"),
+    ("srcmac", "srcmac", "mac"),
     ("dstintf", "dstintf", "text"),
     ("transip", "transip", "inet"),
     ("transport", "transport", "integer"),
@@ -213,6 +229,23 @@ FG_EVENT: Final[Spec] = (
     ("cfgattr", "cfgattr", "text"),
     ("msg", "msg", "text"),
 )
+#: FortiOS 26001 ``LOG_ID_DHCP_ACK`` / 26002 ``LOG_ID_DHCP_RELEASE`` (FortiOS 7.6 log reference;
+#: ``mastersrcmac``, ``devid``, ``vd``, 8.0's ``vendor`` … stay in ``extra``). Verify on site.
+FG_DHCP: Final[Spec] = (
+    ("logid", "logid", "text"),
+    ("subtype", "subtype", "text"),
+    ("level", "level", "text"),
+    ("logdesc", "logdesc", "text"),
+    ("dhcp_msg", "dhcp_msg", "text"),
+    ("interface", "interface", "text"),
+    ("ip", "ip", "inet"),
+    ("mac", "mac", "mac"),
+    ("hostname", "hostname", "text"),
+    ("lease", "lease", "bigint"),
+    ("msg", "msg", "text"),
+)
+#: The keys that make an ``event`` line a DHCP server record (D3; the 26001/26002 field list).
+DHCP_KEYS: Final = ("ip", "mac", "dhcp_msg")
 SPECS: Final[dict[str, Spec]] = {
     "fg_traffic": FG_TRAFFIC,
     "fg_web": FG_WEB,
@@ -221,6 +254,7 @@ SPECS: Final[dict[str, Spec]] = {
     "fg_ips": FG_IPS,
     "fg_virus": FG_VIRUS,
     "fg_event": FG_EVENT,
+    "fg_dhcp": FG_DHCP,
 }
 
 #: ``(type, subtype)`` → table (``subtype`` ``None`` = every subtype of the type).
@@ -246,6 +280,9 @@ _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 #: Validated addresses (srcip/transip/dstip repeat constantly); bounded, cleared when full.
 _ADDRESSES: dict[str, str] = {}
 _ADDRESSES_MAX: Final = 65536
+#: Validated MAC addresses (``srcmac`` repeats like the addresses); bounded, cleared when full.
+_MACS: dict[str, str] = {}
+_MACS_MAX: Final = 65536
 _TIMEZONES: dict[str, timezone | None] = {}
 
 
@@ -253,6 +290,7 @@ _TIMEZONES: dict[str, timezone | None] = {}
 _DERIVED: Final[dict[str, dict[str, Any]]] = {
     "fg_traffic": {"is_interim": False},
     "fg_dns": {"answers": None},
+    "fg_dhcp": {"device_time": False},
 }
 
 
@@ -266,6 +304,7 @@ class _Compiled:
     text: tuple[tuple[str, str], ...]
     integers: tuple[tuple[str, str, int, tuple[int, int]], ...]
     addresses: tuple[tuple[str, str], ...]
+    macs: tuple[tuple[str, str], ...]
 
 
 def compile_spec(table: str, spec: Spec) -> _Compiled:
@@ -278,6 +317,7 @@ def compile_spec(table: str, spec: Spec) -> _Compiled:
             if kind in _BOUNDS
         ),
         addresses=tuple((column, key) for column, key, kind in spec if kind == "inet"),
+        macs=tuple((column, key) for column, key, kind in spec if kind == "mac"),
     )
 
 
@@ -369,6 +409,25 @@ def _address(text: str) -> str | None:
     return address
 
 
+def _mac(text: str) -> str | None:
+    mac = _MACS.get(text)
+    if mac is None:
+        mac = to_mac(text)
+        if mac is not None:
+            if len(_MACS) >= _MACS_MAX:
+                _MACS.clear()
+            _MACS[text] = mac
+    return mac
+
+
+def _validity(text: str, converted: str | None) -> str:
+    """``valid``, ``invalid`` or ``empty``: what a ``fortigate.dhcp`` detail says of a value
+    (never the value itself)."""
+    if not text:
+        return "empty"
+    return "valid" if converted is not None else "invalid"
+
+
 def answers_of(text: str) -> tuple[list[str] | None, bool]:
     """``ipaddr`` → (valid answer addresses or ``None``, every token was valid)."""
     tokens = text.translate(_ANSWER_SEPARATORS).split()
@@ -417,6 +476,17 @@ def map_fields(table: str, fields: dict[str, Any]) -> tuple[dict[str, Any], list
             fields[key] = raw
             if raw:
                 invalid.append(key)
+    for column, key in compiled.macs:
+        raw = pop(key, None)
+        if raw is None:
+            continue
+        mac = _mac(raw)
+        if mac is not None:
+            values[column] = mac
+        else:
+            fields[key] = raw
+            if raw:
+                invalid.append(key)
     return values, invalid
 
 
@@ -430,6 +500,9 @@ class _Issues:
     implausible: str | None = None
     #: Envelope keys that occur more than once (two messages glued into one line).
     glued: frozenset[str] = frozenset()
+    #: A DHCP-shaped event whose ``ip``/``mac`` do not convert: their validity
+    #: (``fortigate.dhcp``; the row stays ``fg_event``).
+    dhcp: str | None = None
 
 
 class FortiGateParser(Parser):
@@ -437,7 +510,16 @@ class FortiGateParser(Parser):
 
     name: ClassVar[str] = "fortigate"
     tables: ClassVar[frozenset[str]] = frozenset(
-        {"fg_traffic", "fg_web", "fg_dns", "fg_app", "fg_ips", "fg_virus", "fg_event"}
+        {
+            "fg_traffic",
+            "fg_web",
+            "fg_dns",
+            "fg_app",
+            "fg_ips",
+            "fg_virus",
+            "fg_event",
+            "fg_dhcp",
+        }
     )
 
     def __init__(
@@ -500,6 +582,8 @@ class FortiGateParser(Parser):
             "extra": meta,
         }
         table = table_for(log_type, subtype)
+        if table == "fg_event" and all(key in fields for key in DHCP_KEYS):
+            table = _dhcp_table(fields, issues)  # about 1 % of the lines are events
         rows: tuple[ParsedRow, ...] = ()
         if table is None:
             if subtype is not None:
@@ -512,7 +596,9 @@ class FortiGateParser(Parser):
                 del fields["subtype"]
             values, invalid = map_fields(table, fields)
             issues.invalid.extend(invalid)
-            self._table_specific(table, values, fields, issues.invalid, meta)
+            self._table_specific(
+                table, values, fields, issues.invalid, meta, device_time=time is not None
+            )
             fields.update(tokens.duplicates)
             values["extra"] = fields
             rows = (ParsedRow(table, values),)
@@ -574,9 +660,15 @@ class FortiGateParser(Parser):
         fields: dict[str, Any],
         invalid: list[str],
         meta: dict[str, Any],
+        *,
+        device_time: bool,
     ) -> None:
         if table == "fg_traffic":
             values["is_interim"] = values.get("logid") in self.interim_logids
+            return
+        if table == "fg_dhcp":
+            # Deterministic, so the report cross-check's re-parse gives the same value.
+            values["device_time"] = device_time
             return
         if table == "fg_dns":
             ipaddr = fields.pop("ipaddr", None)
@@ -594,6 +686,17 @@ class FortiGateParser(Parser):
         if url is not None and len(url) > URL_MAX:
             values["url"] = url[:URL_MAX]  # spec 7.3; the raw line keeps the full URL
             meta["truncated"] = ["url"]
+
+
+def _dhcp_table(fields: dict[str, Any], issues: _Issues) -> str:
+    """``fg_dhcp`` for a DHCP-shaped event whose ``ip`` and ``mac`` convert, else ``fg_event``
+    with ``issues.dhcp`` set (module docstring, "FortiGate DHCP")."""
+    ip_text, mac_text = fields["ip"], fields["mac"]
+    address, mac = _address(ip_text), _mac(mac_text)
+    if address is not None and mac is not None:
+        return "fg_dhcp"
+    issues.dhcp = f"ip={_validity(ip_text, address)}, mac={_validity(mac_text, mac)}"
+    return "fg_event"
 
 
 def _tokenize(text: str, meta: dict[str, Any]) -> Tokens:
@@ -648,6 +751,8 @@ def _verdict(
         return "fortigate.unparsed", f"{len(tokens.strays)} token(s) without key=value"
     if log_type is None:
         return "fortigate.type", "no type= field"
+    if issues.dhcp is not None:
+        return "fortigate.dhcp", f"DHCP event without a usable ip/mac: {issues.dhcp}"
     if issues.invalid:
         return "fortigate.value", ("invalid value: " + ", ".join(issues.invalid))[:400]
     if issues.implausible is not None:

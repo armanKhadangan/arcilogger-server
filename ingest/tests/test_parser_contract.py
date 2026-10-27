@@ -119,7 +119,9 @@ def test_declared_tables_exist_with_raw_reference_columns() -> None:
         "fg_ips",
         "fg_virus",
         "fg_event",
+        "fg_dhcp",
     }
+    assert {t for t in TIME_SERIES_TABLES if t.startswith("fg_")} == PARSERS["fortigate"].tables
     assert {t for t in TIME_SERIES_TABLES if t.startswith("mt_")} == PARSERS["mikrotik"].tables
 
 
@@ -189,6 +191,73 @@ def test_synthetic_lines_cover_every_typed_table() -> None:
     for message in MIKROTIK_SYNTHETIC:
         emitted |= {row.table for row in parse_raw(record(message), position("mikrotik")).rows}
     assert emitted == PARSERS["fortigate"].tables | PARSERS["mikrotik"].tables
+
+
+def test_dhcp_shaped_events_are_fg_dhcp_rows() -> None:
+    """ADR-0016 D3 (contract 2.3): an ``event`` with ``ip``, ``mac`` and ``dhcp_msg`` is an
+    ``fg_dhcp`` row when both values convert, for a configured FortiGate and an unknown sender
+    alike; ``device_time`` says whether ``time`` is the device's (synthetic lines)."""
+    dhcp = [line for line in FORTIGATE_SYNTHETIC if b"dhcp_msg=" in line]
+    for source_type in ("fortigate", None):
+        found = [parse_raw(record(line), position(source_type)) for line in dhcp]
+        rows = [outcome.rows[0] for outcome in found]
+        assert [row.table for row in rows] == [*["fg_dhcp"] * 6, "fg_event", *["fg_dhcp"] * 3]
+        assert [row.values.get("device_time") for row in rows] == [
+            *[True] * 6,
+            None,  # DHCPv6 (no mac): an ordinary event
+            True,
+            True,
+            False,  # two days before the receive time: the receive time is used
+        ]
+        assert [outcome.error for outcome in found] == [*[None] * 9, "fortigate.time"]
+    first = parse_raw(record(dhcp[0]), position("fortigate")).rows[0].values
+    assert (first["ip"], first["mac"], first["lease"]) == (
+        "172.20.42.57",
+        "00:00:5e:00:53:57",
+        86400,
+    )
+    assert (first["logid"], first["dhcp_msg"], first["interface"]) == (
+        "0100026001",
+        "Ack",
+        "vlan42",
+    )
+    assert first["extra"] == {"devid": "FGT0000000000000", "vd": "root"}
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "validity"),
+    [
+        (b"ip=172.20.42.57", b'ip="n/a"', "ip=invalid, mac=valid"),
+        (b'mac="00:00:5E:00:53:57"', b'mac=""', "ip=valid, mac=empty"),
+        (b'mac="00:00:5E:00:53:57"', b'mac="00:00:5E:00:53"', "ip=valid, mac=invalid"),
+    ],
+)
+def test_a_dhcp_shaped_event_without_a_usable_ip_or_mac_stays_an_event(
+    old: bytes, new: bytes, validity: str
+) -> None:
+    """Never silently an ordinary event: ``fortigate.dhcp``, and the detail names only the
+    validity of a value, never the value."""
+    line = next(line for line in FORTIGATE_SYNTHETIC if b"dhcp_msg=" in line).replace(old, new)
+    outcome = parse_raw(record(line), position("fortigate"))
+    (row,) = outcome.rows
+    assert row.table == "fg_event"
+    assert outcome.error == "fortigate.dhcp"
+    assert outcome.detail == f"DHCP event without a usable ip/mac: {validity}"
+    assert {"ip", "mac", "dhcp_msg"} <= set(row.values["extra"])  # nothing is lost
+    for value in (b"n/a", b"00:00:5E:00:53"):
+        assert value.decode() not in (outcome.detail or "")
+
+
+def test_srcmac_is_a_mac_column_of_fg_traffic() -> None:
+    lines = [line for line in FORTIGATE_SYNTHETIC if b"srcmac=" in line]
+    rows = [parse_raw(record(line), position("fortigate")).rows[0].values for line in lines]
+    assert [row["srcmac"] for row in rows] == ["00:00:5e:00:53:57", None]
+    assert rows[0]["extra"]["mastersrcmac"] == "00:00:5e:00:53:57"
+    assert rows[0]["extra"]["srcmacvendor"] == "sentetik"
+    assert rows[1]["extra"]["srcmac"] == ""  # empty: NULL, kept as sent
+    invalid = parse_raw(record(lines[0].replace(b'srcmac="00:00:5e', b'srcmac="n/a')), position())
+    assert invalid.error == "fortigate.value"
+    assert invalid.rows[0].values["srcmac"] is None
 
 
 def test_rows_of_one_table_always_have_the_same_columns() -> None:

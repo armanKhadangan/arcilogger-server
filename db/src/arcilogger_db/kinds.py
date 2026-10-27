@@ -51,6 +51,7 @@ CLIENT_IP: Final[Mapping[str, str]] = {
     "mt_fw": "src",
     "mt_account": "ip",
     "mt_event": "ip",
+    "fg_dhcp": "ip",
 }
 
 #: Typed tables with an ``action`` column (the summary table's ``action``).
@@ -197,18 +198,21 @@ KINDS: Final[Mapping[str, Kind]] = {
             family="fortigate",
         ),
         _kind("utm", "Diğer UTM", "Other UTM", "utm", family="fortigate"),
+        # FortiGate DHCP server lines are events (messages type event/system): their typed
+        # table fg_dhcp belongs here, not to the MikroTik kind dhcp (ADR-0016, contract 2.4)
         _kind(
             "event",
             "FortiGate olayı",
             "FortiGate event",
             "event",
             KindTable("fg_event"),
+            KindTable("fg_dhcp"),
             family="fortigate",
         ),
         _kind(
             "dhcp",
-            "DHCP",
-            "DHCP",
+            "DHCP (MikroTik)",
+            "DHCP (MikroTik)",
             "dhcp",
             KindTable("mt_dhcp"),
             KindTable("mt_event", _events("dhcp")),

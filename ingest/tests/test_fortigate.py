@@ -26,6 +26,7 @@ from arcilogger_ingest.parsers.fortigate import (
     table_for,
 )
 from arcilogger_ingest.parsers.kv import tokenize
+from arcilogger_ingest.parsers.values import to_mac
 
 FIXTURES = Path(__file__).parents[2] / "tests" / "fixtures"
 SAMPLES = (FIXTURES / "format" / "fortigate-sample.log").read_bytes().splitlines()
@@ -71,6 +72,8 @@ def columns(table: str, **values: Any) -> dict[str, Any]:
         base["is_interim"] = False
     if table == "fg_dns":
         base["answers"] = None
+    if table == "fg_dhcp":
+        base["device_time"] = False
     unknown = set(values) - set(base) - {"extra"}
     assert not unknown, unknown
     return {**base, **values}
@@ -434,9 +437,12 @@ def test_no_field_is_lost(raw: bytes) -> None:
         return
     table, values = typed(outcome)
     mapped = {key: column for column, key, _ in SPECS[table]}
+    macs = {key for _, key, kind in SPECS[table] if kind == "mac"}
     for key, value in fields.items():
         if key in values["extra"]:
             assert values["extra"][key] == value
+        elif key in macs:  # normalised: lower case with colons (values.to_mac)
+            assert values[mapped[key]] == to_mac(value), key
         elif key in mapped:
             column_value = values[mapped[key]]
             assert str(column_value) == value or column_value == value, key
@@ -1014,11 +1020,12 @@ def test_every_spec_column_exists_in_the_model() -> None:
     for table, spec in SPECS.items():
         model_columns = set(Base.metadata.tables[table].columns.keys())
         assert {column for column, _, _ in spec} <= model_columns, table
-    # Spec 7.3 fg_traffic list, all present as columns (the rest of the line goes to extra).
+    # Spec 7.3 fg_traffic list and srcmac (ADR-0016), all present as columns (the rest of the
+    # line goes to extra).
     assert {column for column, _, _ in FG_TRAFFIC} | {"is_interim"} == {
         "logid", "subtype", "action", "policyid", "policyname", "sessionid", "proto", "srcip",
-        "srcport", "srcintf", "dstip", "dstport", "dstintf", "transip", "transport", "trandisp",
-        "service", "dstinetsvc", "app", "appid", "appcat", "apprisk", "dstcountry", "duration",
-        "sentbyte", "rcvdbyte", "sentpkt", "rcvdpkt", "sentdelta", "rcvddelta", "durationdelta",
-        "is_interim", "utmaction", "crscore",
+        "srcport", "srcintf", "srcmac", "dstip", "dstport", "dstintf", "transip", "transport",
+        "trandisp", "service", "dstinetsvc", "app", "appid", "appcat", "apprisk", "dstcountry",
+        "duration", "sentbyte", "rcvdbyte", "sentpkt", "rcvdpkt", "sentdelta", "rcvddelta",
+        "durationdelta", "is_interim", "utmaction", "crscore",
     }  # fmt: skip
