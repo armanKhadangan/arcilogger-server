@@ -152,8 +152,14 @@ def test_work_and_off_hours_split_the_day(admin: TestClient) -> None:
     assert work["off_hours_active_seconds"] == 0
 
 
-def test_a_period_without_an_end_runs_to_today(admin: TestClient) -> None:
-    today = site_day(utc_now())
+def test_a_period_without_an_end_runs_to_today(
+    admin: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The router reads the test's moment: a site midnight (21:00 UTC) between the test's `today`
+    # and a request would otherwise move the default `to` (and the refused `from`) a day on.
+    moment = utc_now()
+    monkeypatch.setattr("arcilogger_api.routers.usage.utc_now", lambda: moment)
+    today = site_day(moment)
     since = today - timedelta(days=3)
     period = admin.get(f"{API}/company", params={"from": since.isoformat()}).json()["period"]
     assert period == {"from": since.isoformat(), "to": today.isoformat(), "hours": "all"}
@@ -475,11 +481,19 @@ def test_no_rebuild_before_the_oldest_log(
 
 
 def test_without_any_log_only_today_can_be_rebuilt(
-    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session]
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No ``fg_traffic`` row at all: every day before today is refused, today is not."""
     _signed_in(client, login_as, app_session_factory, "admin")
-    today = site_day(utc_now())
+    # The router reads the test's moment: a site midnight (21:00 UTC) between here and a
+    # request would otherwise put the router's "today" (and its first rebuildable day) one day
+    # after the test's.
+    moment = utc_now()
+    monkeypatch.setattr("arcilogger_api.routers.usage.utc_now", lambda: moment)
+    today = site_day(moment)
     yesterday = (today - timedelta(days=1)).isoformat()
     early = client.post(f"{API}/rebuild", json={"from": yesterday, "to": yesterday})
     assert (early.status_code, early.json()["error"]["code"]) == (422, "usage_rebuild_no_logs")
