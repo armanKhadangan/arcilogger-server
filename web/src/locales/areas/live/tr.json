@@ -1,5 +1,117 @@
 {
   "live": {
-    "description": "Kaynaklardan gelen satırlar, geldikleri anda: ham kayıttan okunur, veritabanını beklemez."
+    "description": "Kaynaklardan gelen satırlar, geldikleri anda: ham kayıttan okunur, veritabanını beklemez.",
+    "privacy": "Bu sayfa kişisel veri gösterir; başlatılan her akış (süzgeciyle) ve açılan ham satırlar denetim kaydına yazılır.",
+    "privacyWait": {
+      "title": "KVKK bilgilendirme metni bekleniyor",
+      "body": "Canlı akış kişisel veri gösterir: başlatmak için önce bilgilendirme metnini okuyup onaylayın."
+    },
+    "filters": {
+      "label": "Canlı akış süzgeci",
+      "sourcesAll": "Kaynaklar: tümü",
+      "sourcesSome_one": "Kaynaklar: {{count}} seçili",
+      "sourcesSome_other": "Kaynaklar: {{count}} seçili",
+      "sourcesTitle": "Yapılandırılmış kaynaklar",
+      "noSources": "Yapılandırılmış kaynak yok.",
+      "network": "ağ",
+      "sourcesClear": "Seçimi temizle",
+      "unknown": "Bilinmeyen göndericiler",
+      "kinds": "Kayıt türleri",
+      "text": "Metin veya sorgu",
+      "textPlaceholder": "ör. \"login failure\" ya da srcip:172.20.41.0/24 action:deny",
+      "query": "Sorgu:",
+      "everything": "Süzgeç yok: bütün kaynakların bütün yeni satırları gelir."
+    },
+    "actions": {
+      "start": "Başlat",
+      "apply": "Süzgeci uygula",
+      "resume": "Sürdür",
+      "pause": "Duraklat",
+      "stop": "Durdur",
+      "clear": "Temizle",
+      "highlight": "Vurgulama kuralları",
+      "highlightCount": "Vurgulama kuralları ({{count}})"
+    },
+    "state": {
+      "idle": "Başlatılmadı",
+      "connecting": "Bağlanıyor",
+      "connected": "Bağlı",
+      "reconnecting": "Yeniden bağlanıyor",
+      "paused": "Duraklatıldı",
+      "stopped": "Durdu"
+    },
+    "status": {
+      "rate": "{{rate}} satır/sn",
+      "lines_one": "{{formatted}} satır gösteriliyor",
+      "lines_other": "{{formatted}} satır gösteriliyor",
+      "dropped_one": "{{formatted}} satır gösterilmedi",
+      "dropped_other": "{{formatted}} satır gösterilmedi"
+    },
+    "banner": {
+      "failed": "Canlı akış başlatılamadı",
+      "retryAfter": "{{seconds}} saniye sonra yeniden deneyin.",
+      "reopened": "Aradaki satırlar gösterilmemiş olabilir; bu aralığı Arama'da açın.",
+      "openInSearch": "Bu aralığı Arama'da aç"
+    },
+    "dropped": {
+      "rate_limited_one": "hız sınırı: {{formatted}}",
+      "rate_limited_other": "hız sınırı: {{formatted}}",
+      "slow_client_one": "bağlantı yetişemedi: {{formatted}}",
+      "slow_client_other": "bağlantı yetişemedi: {{formatted}}",
+      "parse_budget_one": "ayrıştırılamadı: {{formatted}}",
+      "parse_budget_other": "ayrıştırılamadı: {{formatted}}",
+      "behind_one": "dosya çok hızlı büyüdü: {{formatted}}",
+      "behind_other": "dosya çok hızlı büyüdü: {{formatted}}"
+    },
+    "list": {
+      "label": "Canlı satırlar",
+      "unseen_one": "{{formatted}} yeni satır",
+      "unseen_other": "{{formatted}} yeni satır",
+      "waiting": "Süzgece uyan yeni bir satır bekleniyor.",
+      "empty": "Başlat'a basınca süzgece uyan yeni satırlar burada görünür (en yenisi altta, en fazla 2.000 satır)."
+    },
+    "line": {
+      "invalid": "biçim dışı",
+      "skipped": "ayrıştırılmadı"
+    },
+    "sheet": {
+      "title": "Canlı satır",
+      "subtitle": "{{source}} · {{day}} · satır {{line}}",
+      "preview": "önizleme",
+      "truncated": "Metin kısaltıldı (8 KiB)",
+      "previewHint": "Alanlar satır gelirken ayrıştırıldı; veritabanına yüklenen kayıt ayrıntılarda farklı olabilir. Satırın tamamı ham satırdadır.",
+      "skippedHint": "Sunucu bu kadar satırı ayrıştıramadı; satır alanları olmadan gösterildi.",
+      "invalidHint": "Satır toplayıcının biçiminde değil (ör. yarım kalmış bir satır); veritabanına yüklenmez.",
+      "received": "Alınma zamanı",
+      "sender": "Gönderen",
+      "text": "Mesaj (görünmeyen karakterler kaçış olarak gösterilir)",
+      "openRaw": "Ham satır",
+      "search": "Arama'da aç (±5 dk)"
+    },
+    "highlight": {
+      "title": "Vurgulama kuralları",
+      "description": "Bir metin yazın (geçtiği yer işaretlenir) ya da alan:değer (ör. action:deny; satırın tamamı işaretlenir). En fazla 10 kural.",
+      "empty": "Henüz kural yok.",
+      "list": "Kurallar",
+      "match": "Kural {{number}}",
+      "placeholder": "ör. deny ya da srcip:172.20.41.5",
+      "kindField": "Alan kuralı: satırın tamamı işaretlenir.",
+      "kindText": "Metin kuralı: geçtiği yer işaretlenir.",
+      "color": "Renk",
+      "colors": {
+        "yellow": "Sarı",
+        "red": "Kırmızı",
+        "green": "Yeşil",
+        "blue": "Mavi",
+        "sky": "Açık mavi",
+        "teal": "Turkuaz"
+      },
+      "remove": "Kural {{number}} kaldır",
+      "add": "Kural ekle",
+      "limit": "En fazla {{max}} kural olabilir.",
+      "storage": "Kurallar yalnızca bu sekmede saklanır: sayfa yenilenince kalır, sekme kapanınca silinir.",
+      "save": "Kaydet",
+      "unsaved": "Tarayıcı kuralları saklayamadı; sayfa yenilenene kadar geçerlidir."
+    }
   }
 }
