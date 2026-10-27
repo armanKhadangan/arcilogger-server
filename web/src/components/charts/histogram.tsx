@@ -93,12 +93,14 @@ export function Histogram({
   const totalText = total.exact
     ? t('search.histogram.total', { count: total.value, formatted })
     : t('search.histogram.totalAtLeast', { count: total.value, formatted });
-  const dragged = drag ? zoomSpan(rows, drag.from, drag.to) : null;
   const first = drag ? rows[Math.min(drag.from, drag.to)] : undefined;
   const last = drag ? rows[Math.max(drag.from, drag.to)] : undefined;
 
-  function finish() {
-    if (drag && drag.from !== drag.to && dragged) onZoom?.(dragged);
+  /** The drag ends on the bar under the pointer (the chart throttles the moves before it). */
+  function finish(index: number | undefined) {
+    const to = index ?? drag?.to;
+    const span = drag && to !== undefined ? zoomSpan(rows, drag.from, to) : null;
+    if (drag && drag.from !== to && span) onZoom?.(span);
     setDrag(null);
   }
 
@@ -200,7 +202,9 @@ export function Histogram({
                   if (drag && index !== undefined && index !== drag.to)
                     setDrag({ from: drag.from, to: index });
                 }}
-                onMouseUp={finish}
+                onMouseUp={(state: { activeTooltipIndex?: number } | null) => {
+                  finish(state?.activeTooltipIndex);
+                }}
                 onMouseLeave={() => {
                   setDrag(null);
                 }}
