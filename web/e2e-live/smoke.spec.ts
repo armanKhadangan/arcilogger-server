@@ -14,11 +14,18 @@
  * goes on: a 5651 lookup through the browser (exact chain WAN → internal IP → MAC → device →
  * person), a raw line from the sealed vault, the official PDF report (its SHA-256 checked here
  * and in the browser), an evidence package from that lookup (built by the API, downloaded and
- * checked against `Repr-Digest`), and the day on the sealing page verified again.
+ * checked against `Repr-Digest`), and the day on the sealing page verified again. Then Wave 2:
+ * Arama finds the seeded firewall session on the sealed day, its record and raw line open, and
+ * "Kanıt paketine aktar" builds a package that the standalone verifier accepts (`verify.py`, run
+ * here); Canlı Akış shows a line written to today's spool file after the stream opened;
+ * Kaynaklar lists the configured sources and reads that line back with its SHA-256; every read is
+ * in the audit log.
  */
 
+import { execFileSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
@@ -215,6 +222,7 @@ test('first administrator, TOTP, KVKK, audit log, a second user — against the 
   // The administrator signed in a moment ago: that counts as the recent re-authentication the
   // package request and download need (5 minutes).
   await fiveSixFiveOne(page, seed);
+  await waveTwo(page, seed);
 });
 
 async function fiveSixFiveOne(page: Page, seed: Seed) {
@@ -322,5 +330,130 @@ async function fiveSixFiveOne(page: Page, seed: Seed) {
   ]) {
     await expect(audit.getByText(label, { exact: true }).first()).toBeVisible();
   }
+  await expect(page.getByText(/^Zincir doğrulandı · \d+ kayıt$/)).toBeVisible();
+}
+
+/** Site time (Europe/Istanbul, UTC+3 all year) of `moment` as `YYYY-MM-DDTHH:MM:SS.ffffff+03:00`. */
+function siteStamp(moment: Date): string {
+  return new Date(moment.getTime() + 3 * 3_600_000).toISOString().replace('Z', '000+03:00');
+}
+
+/** The day after `day` (`YYYY-MM-DD`). */
+function nextDay(day: string): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Extract an evidence package and run its standalone verifier (exit 0, or this throws). */
+function verifyPackage(zipPath: string): string {
+  const folder = mkdtempSync(join(tmpdir(), 'arci-smoke-'));
+  execFileSync('python3', [
+    '-I',
+    '-c',
+    'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])',
+    zipPath,
+    folder,
+  ]);
+  const root = existsSync(join(folder, 'verify.py'))
+    ? folder
+    : join(
+        folder,
+        readdirSync(folder).find((name) => existsSync(join(folder, name, 'verify.py'))) ?? '',
+      );
+  return execFileSync('python3', ['-I', '-S', 'verify.py'], { cwd: root, encoding: 'utf8' });
+}
+
+async function waveTwo(page: Page, seed: Seed) {
+  // 15. Arama on the sealed day: the seeded firewall session, its record and raw line.
+  const from = `${seed.day}T00:00:00+03:00`;
+  const to = `${nextDay(seed.day)}T00:00:00+03:00`;
+  await page.goto(`/search?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  const box = page.getByRole('combobox', { name: 'Sorgu' });
+  await box.fill(`srcip:${seed.pc} type:traffic`);
+  await box.press('Enter');
+  const rows = page
+    .getByRole('table', { name: 'Arama sonuçları' })
+    .locator('tbody tr:not([aria-hidden])');
+  const session = rows.filter({ hasText: `${seed.pc}:${String(seed.port)}` });
+  await expect(session).toHaveCount(1);
+  await session.click();
+  const record = page.getByRole('dialog', { name: 'Kayıt ayrıntısı' });
+  await expect(record.getByRole('definition').filter({ hasText: seed.wan }).first()).toBeVisible();
+  await record.getByRole('button', { name: 'Ham satır' }).click();
+  const raw = page.getByRole('dialog', { name: 'Ham kayıt satırı' });
+  await expect(raw.locator('pre').first()).toContainText(`sessionid=${String(seed.port)}`);
+  await page.keyboard.press('Escape');
+  await expect(raw).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(record).toBeHidden();
+
+  // 16. "Kanıt paketine aktar": the search's lines in an evidence package that verifies.
+  const count = await rows.count();
+  await page.getByRole('button', { name: 'Kanıt paketine aktar' }).click();
+  const wizard = page.getByRole('dialog', { name: 'Yeni kanıt paketi' });
+  await expect(wizard.getByText(`Arama sonucundan ${String(count)} satır aktarıldı`)).toBeVisible();
+  const build = wizard.getByRole('button', { name: 'Paketi oluştur' });
+  for (let step = 0; step < 4 && !(await build.isVisible()); step += 1)
+    await wizard.getByRole('button', { name: 'İleri' }).click();
+  await build.click();
+  const sheet = page.getByRole('dialog', { name: /^(Paket #\d+|KP-.+)$/ });
+  await expect(sheet.getByText('Hazır', { exact: true })).toBeVisible({ timeout: 90_000 });
+  const zip = page.waitForEvent('download');
+  await sheet.getByRole('button', { name: 'İndir' }).click();
+  const zipPath = await (await zip).path();
+  await expect(
+    sheet.getByText('İndirilen dosyanın özeti bu tarayıcıda yeniden hesaplandı: eşleşiyor'),
+  ).toBeVisible();
+  verifyPackage(zipPath);
+  await page.keyboard.press('Escape');
+
+  // 17. Canlı Akış: a line written to today's spool file after the stream opened.
+  await page.goto('/live');
+  await page.getByRole('button', { name: 'Başlat', exact: true }).click();
+  await expect(page.getByTestId('live-status')).toContainText('Bağlı');
+  const now = new Date();
+  const stamp = siteStamp(now);
+  const today = stamp.slice(0, 10);
+  const port = 51999;
+  const message =
+    `<189>date=${today} time=${stamp.slice(11, 19)} devname="FIREWALL-01" ` +
+    `devid="FGT0000000000000" logid="0000000013" type="traffic" subtype="forward" ` +
+    `level="notice" vd="root" srcip=${seed.pc} srcport=${String(port)} dstip=203.0.113.10 ` +
+    `dstport=443 sessionid=${String(port)} proto=6 action="accept" trandisp="snat" ` +
+    `transip=${seed.wan} transport=${String(port)} duration=1`;
+  appendFileSync(
+    join(LIVE_DIR, 'data', 'spool', 'fortigate', `${today}.log`),
+    `${stamp} 172.31.255.1 ${message}\n`,
+  );
+  const lines = page.getByRole('list', { name: 'Canlı satırlar' }).getByRole('listitem');
+  await expect(lines.filter({ hasText: String(port) })).toHaveCount(1, { timeout: 20_000 });
+  await page.getByRole('button', { name: 'Durdur' }).click();
+
+  // 18. Kaynaklar: the configured sources, and that line read back from the spool.
+  await page.goto('/sources');
+  const sources = page.getByRole('table').first();
+  for (const name of ['fortigate', 'core-r1'])
+    await expect(sources.getByText(name, { exact: true }).first()).toBeVisible();
+  await page.goto('/sources?source=fortigate');
+  const drawer = page.getByRole('dialog', { name: 'fortigate' });
+  await drawer.getByRole('tab', { name: 'Son satırlar' }).click();
+  await expect(drawer.getByText(`sessionid=${String(port)}`, { exact: false })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // 19. Every read of Wave 2 is in the audit log (the stream's close is written after it ends).
+  await expect(async () => {
+    await page.goto('/audit');
+    const audit = page.getByRole('table', { name: 'Denetim kaydı, en yeni kayıt önce' });
+    for (const label of [
+      'Arama yapıldı',
+      'Arama kaydı açıldı',
+      'Arama satırları kanıt paketine aktarıldı',
+      'Canlı akış açıldı',
+      'Canlı akış kapandı',
+      'Kaynağın son satırları görüntülendi',
+    ])
+      await expect(audit.getByText(label, { exact: true }).first()).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(page.getByText(/^Zincir doğrulandı · \d+ kayıt$/)).toBeVisible();
 }
