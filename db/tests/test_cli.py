@@ -295,6 +295,36 @@ def test_settings_set_accepts_a_bare_string_and_stdin(
     assert [e.details["new"] for e in audit] == ["100.64.12.9", ["203.0.113.200"]]
 
 
+def test_settings_set_takes_the_fortigate_and_nat_keys_normalised(
+    setup: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR-0016: the new keys go through the same validation, normalisation and audit."""
+    config = str(setup)
+    assert main(["upgrade", "--config", config]) == 0
+    capsys.readouterr()
+    changes = {
+        "dhcp.fortigate_dhcp_msgs": (
+            '{"0100026001": ["Ack", "ACK"], "0100026002": ["Release"]}',
+            {"0100026001": ["Ack"], "0100026002": ["Release"]},
+        ),
+        "dhcp.fortigate_logids": ("{}", {}),
+        "lookup.srcmac_interfaces": ('["vlan42", "vlan42", "port 1"]', ["vlan42", "port 1"]),
+        "lookup.srcmac_max_ips": ("2", 2),
+        "nat.snat_trandisp": ('["snat", "snat"]', ["snat"]),
+    }
+    for key, (given, _stored) in changes.items():
+        assert main(["settings", "set", key, given, "--by", "tolga", "--config", config]) == 0
+    for key, (_text, stored) in changes.items():
+        value, author, audit = _settings_state(setup, key)
+        assert (value, author) == (stored, "tolga")
+        assert [e.details["new"] for e in audit if e.target == f"setting:{key}"] == [stored]
+    assert main(["settings", "list", "--config", config]) == 0
+    listing = capsys.readouterr().out
+    assert "dhcp.fortigate_logids = {}  (tolga)" in listing
+    assert "dhcp.fortigate_format_verified = false  (:seed)" in listing
+    assert "nat.egresses = {}  (:seed)" in listing
+
+
 @pytest.mark.parametrize(
     ("key", "value", "by", "message"),
     [
@@ -315,6 +345,15 @@ def test_settings_set_accepts_a_bare_string_and_stdin(
         ("auth.lockout_attempts", "1000000", "tolga", "en çok 20"),
         ("auth.idle_minutes", "525600", "tolga", "en çok 120"),
         ("dhcp.server_vlan_regex", '"^dhcp$"', "tolga", "ilk grup"),
+        # ADR-0016 keys (FortiGate DHCP evidence, srcmac, internet exits).
+        ("dhcp.fortigate_logids", '{"26001": "assigned"}', "tolga", "logid 10 rakam"),
+        ("dhcp.fortigate_dhcp_msgs", '{"0100026001": []}', "tolga", "ileti türünden"),
+        ("dhcp.fortigate_format_verified", '"yes"', "tolga", "true/false bekleniyor"),
+        ("dhcp.fortigate_interfaces_excluded", '["ipsec "]', "tolga", "geçersiz arayüz adı"),
+        ("lookup.srcmac_interfaces", '"vlan42"', "tolga", "liste bekleniyor"),
+        ("lookup.srcmac_max_ips", "17", "tolga", "en çok 16"),
+        ("nat.snat_trandisp", "[]", "tolga", "küçük harfle başlayan"),
+        ("nat.egresses", "[]", "tolga", "nesne bekleniyor"),
         ("auth.idle_minutes", "5", ":seed", "--by"),
         ("auth.idle_minutes", "5", " ", "--by"),
     ],

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from arcilogger_db.audit import verify_audit_chain
+from arcilogger_db.egress import ERROR_CODES as EGRESS_ERROR_CODES
 from arcilogger_db.models import ROLES, AuditLog, Setting, User
 from arcilogger_db.settings import (
     DEFAULT_SETTINGS,
@@ -207,6 +208,46 @@ REFUSALS: list[tuple[str, Any, str, str]] = [
         "setting_holiday_invalid",
         "usage.holidays: geçersiz tarih '02-30' (AA-GG ya da YYYY-AA-GG)",
     ),
+    # ADR-0016: FortiGate DHCP evidence, srcmac and the internet exits.
+    (
+        "dhcp.fortigate_logids",
+        {"26001": "assigned"},
+        "setting_logid_invalid",
+        "dhcp.fortigate_logids: logid 10 rakam, anlamı assigned ya da deassigned olmalı (en çok "
+        "16 kayıt)",
+    ),
+    (
+        "dhcp.fortigate_dhcp_msgs",
+        {"0100026001": []},
+        "setting_dhcp_msg_invalid",
+        "dhcp.fortigate_dhcp_msgs: her logid 10 rakam, değeri 1-8 ileti türünden (her biri 1-32 "
+        "karakter) oluşan bir liste olmalı (en çok 16 kayıt)",
+    ),
+    (
+        "lookup.srcmac_interfaces",
+        [" vlan42"],
+        "setting_interface_invalid",
+        "lookup.srcmac_interfaces: geçersiz arayüz adı ' vlan42'",
+    ),
+    (
+        "dhcp.fortigate_interfaces_excluded",
+        [f"ipsec{n}" for n in range(33)],
+        "setting_too_many",
+        "dhcp.fortigate_interfaces_excluded: en çok 32 arayüz",
+    ),
+    (
+        "nat.snat_trandisp",
+        [],
+        "setting_trandisp_invalid",
+        "nat.snat_trandisp: 1-8 değer, her biri küçük harfle başlayan en çok 16 karakter (ör. "
+        "snat)",
+    ),
+    (
+        "nat.egresses",
+        [],
+        "setting_type",
+        "nat.egresses: nesne bekleniyor (varsayılan {}), verilen: liste",
+    ),
 ]
 
 
@@ -233,7 +274,10 @@ def test_every_refusal_has_a_code_and_both_texts(
 
 
 def test_every_code_of_the_catalogue_is_a_refusal() -> None:
-    assert {code for _, _, code, _ in REFUSALS} == set(SETTING_ERRORS)
+    # The codes of the exit rules of nat.egresses (arcilogger_db.egress) are refusals of
+    # validate_egresses, which the settings module wraps; they are produced by its own tests.
+    assert set(SETTING_ERRORS) >= EGRESS_ERROR_CODES
+    assert {code for _, _, code, _ in REFUSALS} | EGRESS_ERROR_CODES == set(SETTING_ERRORS)
     for message_tr, message_en in SETTING_ERRORS.values():
         assert message_tr.endswith(".")
         assert message_en.endswith(".")
@@ -278,6 +322,9 @@ def test_reauth_and_locked_keys() -> None:
     assert "lookup.tolerance_seconds" not in REAUTH_KEYS
     assert {"devices.oui_file", "usage.psl_file"} == LOCKED_KEYS
     assert not LOCKED_KEYS & REAUTH_KEYS
+    # ADR-0016 (owner point O8): the NAT, FortiGate DHCP and srcmac settings need no password.
+    wave3 = {key for key in DEFAULT_SETTINGS if key.startswith(("nat.", "dhcp.", "lookup.srcmac"))}
+    assert not wave3 & (REAUTH_KEYS | LOCKED_KEYS)
 
 
 def _entries(session: Session) -> list[AuditLog]:

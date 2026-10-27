@@ -185,3 +185,103 @@ def test_only_administrators_change_settings(client: TestClient, login_as: Login
     )
     assert (response.status_code, response.json()["error"]["code"]) == (403, "forbidden")
     assert client.post(f"{URL}/lookup.tolerance_seconds/reset").status_code == 403
+
+
+def test_the_fortigate_and_nat_settings_are_accepted_and_refused(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session]
+) -> None:
+    """ADR-0016: the FortiGate DHCP, srcmac and NAT keys are listed in the lookup group, take
+    their normalised values without a re-authentication and are refused with their codes."""
+    login_as(client, "admin")
+    listed = {
+        item["key"]: item
+        for group in client.get(URL).json()["groups"]
+        for item in group["settings"]
+        if group["id"] == "lookup"
+    }
+    assert listed["dhcp.fortigate_logids"]["type"] == "object"
+    assert listed["dhcp.fortigate_logids"]["value"] == {
+        "0100026001": "assigned",
+        "0100026002": "deassigned",
+    }
+    assert listed["nat.egresses"]["type"] == "object"
+    assert listed["nat.snat_trandisp"]["type"] == "string_list"
+    assert listed["lookup.srcmac_interfaces"]["type"] == "string_list"
+    max_ips = listed["lookup.srcmac_max_ips"]
+    assert (max_ips["type"], max_ips["min"], max_ips["max"]) == ("integer", 1, 16)
+    new_keys = [key for key in listed if key.startswith(("dhcp.fortigate_", "lookup.srcmac_"))]
+    new_keys += ["nat.egresses", "nat.snat_trandisp"]
+    assert len(new_keys) == 10
+    assert not any(listed[key]["reauth"] or listed[key]["locked"] for key in new_keys)
+
+    refused = client.patch(
+        URL,
+        json={
+            "changes": [
+                {"key": "dhcp.fortigate_logids", "old": None, "value": {"26001": "assigned"}},
+                {"key": "dhcp.fortigate_dhcp_msgs", "old": None, "value": {"0100026001": []}},
+                {"key": "dhcp.fortigate_interfaces_excluded", "old": [], "value": ["ipsec "]},
+                {
+                    "key": "lookup.srcmac_interfaces",
+                    "old": [],
+                    "value": [f"v{n}" for n in range(40)],
+                },
+                {"key": "lookup.srcmac_max_ips", "old": 1, "value": 17},
+                {"key": "nat.snat_trandisp", "old": ["snat"], "value": ["SNAT"]},
+                {"key": "nat.egresses", "old": {}, "value": ["hat-1"]},
+                {"key": "dhcp.fortigate_format_verified", "old": False, "value": "yes"},
+            ]
+        },
+    )
+    assert refused.status_code == 422
+    codes = {problem["key"]: problem["code"] for problem in refused.json()["error"]["details"]}
+    assert codes == {
+        "dhcp.fortigate_logids": "setting_logid_invalid",
+        "dhcp.fortigate_dhcp_msgs": "setting_dhcp_msg_invalid",
+        "dhcp.fortigate_interfaces_excluded": "setting_interface_invalid",
+        "lookup.srcmac_interfaces": "setting_too_many",
+        "lookup.srcmac_max_ips": "setting_out_of_range",
+        "nat.snat_trandisp": "setting_trandisp_invalid",
+        "nat.egresses": "setting_type",
+        "dhcp.fortigate_format_verified": "setting_type",
+    }
+    assert "ipsec " not in refused.text
+    assert "SNAT" not in refused.text
+    assert not changes(app_session_factory)
+
+    defaults = {
+        key: DEFAULT_SETTINGS[key]
+        for key in (
+            "dhcp.fortigate_dhcp_msgs",
+            "dhcp.fortigate_format_verified",
+            "lookup.srcmac_interfaces",
+            "lookup.srcmac_max_ips",
+            "nat.snat_trandisp",
+        )
+    }
+    accepted = client.patch(
+        URL,
+        json={
+            "changes": [
+                {
+                    "key": "dhcp.fortigate_dhcp_msgs",
+                    "old": defaults["dhcp.fortigate_dhcp_msgs"],
+                    "value": {"0100026001": ["Ack", "ACK", "Inform"]},
+                },
+                {"key": "dhcp.fortigate_format_verified", "old": False, "value": True},
+                {"key": "lookup.srcmac_interfaces", "old": [], "value": ["vlan42", "vlan42"]},
+                {"key": "lookup.srcmac_max_ips", "old": 1, "value": 2},
+                {"key": "nat.snat_trandisp", "old": ["snat"], "value": ["snat", "dnat+snat"]},
+            ]
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    stored = {"0100026001": ["Ack", "Inform"]}  # repeats dropped case-insensitively
+    assert value(app_session_factory, "dhcp.fortigate_dhcp_msgs") == stored
+    assert value(app_session_factory, "dhcp.fortigate_format_verified") is True
+    assert value(app_session_factory, "lookup.srcmac_interfaces") == ["vlan42"]
+    assert value(app_session_factory, "lookup.srcmac_max_ips") == 2
+    assert value(app_session_factory, "nat.snat_trandisp") == ["snat", "dnat+snat"]
+    assert sorted(entry.target for entry in changes(app_session_factory)) == [
+        f"setting:{key}" for key in sorted(defaults)
+    ]

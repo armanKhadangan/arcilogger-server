@@ -37,6 +37,12 @@ from sqlalchemy.orm import Session
 from arcilogger_core.canonical import CanonicalJsonError, canonical_json
 from arcilogger_core.config import EMAIL_ADDRESS
 from arcilogger_core.iputil import canonical_ip
+from arcilogger_db.egress import (
+    EgressValueError,
+    has_control_characters,
+    interface_name_ok,
+    validate_egresses,
+)
 from arcilogger_db.models import ALERT_SEVERITIES, ROLES, Setting
 
 #: Internal authors of ``settings.updated_by`` (never a valid user name).
@@ -52,6 +58,13 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     # The FortiGate's own WAN address as seen in ``transip`` (e.g. a private address behind the
     # ISP router). Unknown until configured on site; never assumed.
     "nat.wan_transip": "",
+    # ADR-0016 internet exits: one entry per line (direct, ISP NAT, not through the FortiGate,
+    # or an internal NAT address that is no internet exit); arcilogger_db.egress. Empty = one
+    # implicit double-NAT exit. Entered on site, never assumed.
+    "nat.egresses": {},
+    # The FortiGate trandisp values a candidate search takes for addresses no exit claims (only
+    # "snat" was seen in logs; verify on site).
+    "nat.snat_trandisp": ["snat"],
     # 9.5 lookup tolerance (± seconds) and the maximum number of candidates returned.
     "lookup.tolerance_seconds": 60,
     "lookup.max_candidates": 100,
@@ -69,6 +82,11 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     # 9.5 time-stamp the SHA-256 of every official PDF report with the configured [tsa]
     # provider (1 kontör per report with Kamu SM).
     "lookup.report_timestamp": False,
+    # ADR-0016 srcmac: the srcintf names whose FortiGate srcmac may name a chain's MAC (low
+    # confidence, partial evidence, never a lease; [] = off), and the most IPv4 addresses one
+    # srcmac may show within an hour of the moment before it counts as a router's or switch's.
+    "lookup.srcmac_interfaces": [],
+    "lookup.srcmac_max_ips": 1,
     # 9.1 lease timeline: lease time per DHCP server (default 1 day; a server with shorter
     # leases, e.g. a guest network's, is entered on site: {"<server name>": seconds}) and the
     # factor (x 1.1, as an integer percentage) applied after the last evidence before an open
@@ -78,6 +96,21 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "lease.timeout_percent": 110,
     # 2.2 "the DHCP server name contains the VLAN": dhcp60 -> 60 (first group = VLAN id).
     "dhcp.server_vlan_regex": r"^dhcp(\d+)$",
+    # ADR-0016 FortiGate DHCP as lease evidence. The logid of each DHCP server event that counts
+    # and its meaning (the ACK logid is documented, the RELEASE logid derived from the numbering
+    # rule; verify on site); {} = FortiGate DHCP records are not used.
+    "dhcp.fortigate_logids": {"0100026001": "assigned", "0100026002": "deassigned"},
+    # Per logid, the dhcp_msg values its records may carry (case-insensitive); a logid without
+    # an entry is not restricted.
+    "dhcp.fortigate_dhcp_msgs": {"0100026001": ["Ack"]},
+    # The lease time logged in the ACK ends the lease (300-8640000 s; else the times above).
+    "dhcp.fortigate_use_logged_lease": True,
+    # Traffic does not keep a FortiGate lease open (FortiOS most likely logs renewals).
+    "dhcp.fortigate_traffic_extends": False,
+    # FortiGate DHCP interfaces whose records are no lease evidence (DHCP over IPsec).
+    "dhcp.fortigate_interfaces_excluded": [],
+    # Set by the administrator once the record format is verified on site (DEVICE-SETUP 2.4).
+    "dhcp.fortigate_format_verified": False,
     # 9.1 ARP-LOG interval of the MikroTik router's scheduler script.
     "arp.interval_seconds": 3600,
     # 9.1 ARP sightings this many seconds after a DHCP release of the same IP+MAC are stale ARP
@@ -365,6 +398,103 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
         "Geçersiz tarih (AA-GG ya da YYYY-AA-GG).",
         "Invalid date (MM-DD or YYYY-MM-DD).",
     ),
+    # ADR-0016: FortiGate DHCP evidence, srcmac and the internet exits (arcilogger_db.egress).
+    "setting_logid_invalid": (
+        "logid 10 rakamdan oluşmalı ve anlamı assigned ya da deassigned olmalı (en çok 16 kayıt).",
+        "A logid has 10 digits and its meaning is assigned or deassigned (at most 16 entries).",
+    ),
+    "setting_dhcp_msg_invalid": (
+        "Her logid 10 rakamdan oluşmalı; değeri 1-8 ileti türünden (her biri 1-32 karakter, "
+        "kontrol karakteri yok) oluşan bir liste olmalı.",
+        "Each logid has 10 digits; its value is a list of 1-8 message types (each 1-32 "
+        "characters, no control characters).",
+    ),
+    "setting_interface_invalid": (
+        "Arayüz adı 1-35 karakter olmalı; kontrol karakteri ve baş/son boşluk içeremez.",
+        "An interface name has 1-35 characters, without control characters or leading/trailing "
+        "spaces.",
+    ),
+    "setting_trandisp_invalid": (
+        "trandisp değerleri küçük harfle başlamalı (en çok 16 karakter); liste boş olamaz, en "
+        "çok 8 değer.",
+        "trandisp values start with a lower-case letter (at most 16 characters); the list cannot "
+        "be empty, at most 8 values.",
+    ),
+    "setting_egress_name": (
+        "Çıkış adı küçük harf, rakam ve tire içermeli (en çok 32 karakter), ör. hat-1.",
+        "An exit name has lower-case letters, digits and hyphens (at most 32 characters), e.g. "
+        "hat-1.",
+    ),
+    "setting_egress_field": (
+        "Çıkışta bilinmeyen ya da eksik bir alan var; alanlar: label, mode (zorunlu), public, "
+        "public_dynamic, transips, interfaces, port_preservation.",
+        "An exit has an unknown or missing field; the fields are label, mode (required), public, "
+        "public_dynamic, transips, interfaces, port_preservation.",
+    ),
+    "setting_egress_dynamic": (
+        '"Genel IP değişebilir" yalnızca servis sağlayıcı NAT\'ı olan çıkışlarda seçilebilir.',
+        '"Public IP may change" can only be chosen for an ISP NAT exit.',
+    ),
+    "setting_egress_mode": (
+        "NAT türü direct, isp_nat, not_logged ya da internal olmalı.",
+        "The NAT type must be direct, isp_nat, not_logged or internal.",
+    ),
+    "setting_egress_label": (
+        "Açıklama en çok 64 karakter olabilir ve kontrol karakteri içeremez.",
+        "A label has at most 64 characters and no control characters.",
+    ),
+    "setting_egress_address": (
+        "Geçersiz adres: IPv4 adresi ya da en az /24 bir IPv4 ağı bekleniyor (ağ adresi, ör. "
+        "203.0.113.208/29).",
+        "Invalid address: an IPv4 address or an IPv4 network of at least /24 is expected (the "
+        "network address, e.g. 203.0.113.208/29).",
+    ),
+    "setting_ipv6_not_supported": (
+        "IPv6 adresleri bu sürümde desteklenmiyor.",
+        "IPv6 addresses are not supported in this version.",
+    ),
+    "setting_egress_overlap": (
+        "Bir genel adres ya da NAT adresi iki çıkışta birden olamaz; aynı transip yalnızca iki "
+        "çıkışın arayüzleri ayrıysa kullanılabilir.",
+        "A public or NAT address cannot be in two exits; the same transip is allowed only when "
+        "the two exits have separate interfaces.",
+    ),
+    "setting_egress_direct": (
+        "Doğrudan çıkış en az bir genel adres ister; transip girilmez (FortiGate genel adresi "
+        "kendisi kullanır) ve port koruma 'unknown' kalır.",
+        "A direct exit needs at least one public address; it has no transip (the FortiGate uses "
+        "the public address itself) and port preservation stays 'unknown'.",
+    ),
+    "setting_egress_not_logged": (
+        "FortiGate'ten geçmeyen çıkışa yalnızca genel adres ve açıklama girilir.",
+        "An exit that does not pass the FortiGate has only public addresses and a label.",
+    ),
+    "setting_egress_internal": (
+        "İnternet çıkışı olmayan NAT tanımına yalnızca NAT adresleri (en az bir), arayüzler ve "
+        "açıklama girilir.",
+        "An exit that is not an internet exit has only NAT addresses (at least one), interfaces "
+        "and a label.",
+    ),
+    "setting_egress_port_preservation": (
+        "Port koruma unknown, preserved ya da not_preserved olmalı.",
+        "Port preservation must be unknown, preserved or not_preserved.",
+    ),
+    "setting_egress_catch_all": (
+        "NAT adresi boş (tanımsız adresleri kapsayan) en çok bir çıkış olabilir.",
+        "At most one exit may have no NAT address (the one that covers unclaimed addresses).",
+    ),
+    "setting_egress_public_private": (
+        "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; "
+        "FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı "
+        "NAT'ı çıkışının NAT adresi olarak girin.",
+        "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; "
+        "enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT "
+        "exit.",
+    ),
+    "setting_egress_isp_nat_direct": (
+        "NAT adresi genel adresiyle aynı olan hat doğrudandır: türünü Doğrudan yapın.",
+        "A line whose NAT address is its public address is direct: set its type to Direct.",
+    ),
 }
 
 
@@ -433,6 +563,7 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "lookup.max_candidates": (1, 10_000),
     "lookup.max_session_seconds": (60, None),
     "lookup.timeout_seconds": (1, 300),
+    "lookup.srcmac_max_ips": (1, 16),
     "lease.default_seconds": (60, None),
     "lease.timeout_percent": (100, 1000),
     "arp.interval_seconds": (60, None),
@@ -630,6 +761,13 @@ def validate_setting(key: str, value: Any) -> Any:
                 )
     if key == "privacy.notice_version" and not value.strip():
         raise SettingValueError(key, "setting_empty", f"{key}: boş olamaz")
+    if key == "nat.egresses":
+        try:
+            return validate_egresses(value)
+        except EgressValueError as exc:
+            raise SettingValueError(key, exc.code, str(exc), **exc.facts) from exc
+    if key in _FORTIGATE_KEYS:
+        return _validate_fortigate_setting(key, value)
     if key.startswith("alerts."):
         return _validate_alert_setting(key, value)
     if key.startswith("usage."):
@@ -686,6 +824,104 @@ def _validate_alert_setting(key: str, value: Any) -> Any:
             )
         return url
     return value
+
+
+#: ADR-0016: a FortiGate logid (10 ASCII digits) and the two meanings a mapped logid may have.
+_LOGID = re.compile(r"[0-9]{10}")
+LOGID_MEANINGS: Final = ("assigned", "deassigned")
+#: ADR-0016: a FortiGate ``trandisp`` value of ``nat.snat_trandisp``.
+_TRANDISP = re.compile(r"[a-z][a-z0-9+_-]{0,15}")
+#: ADR-0016: most entries of the logid maps, of a dhcp_msg list, of an interface list and of
+#: ``nat.snat_trandisp``; longest dhcp_msg value (FortiGate DHCP records, interface names).
+MAX_LOGIDS: Final = 16
+MAX_DHCP_MSGS: Final = 8
+MAX_DHCP_MSG_LENGTH: Final = 32
+MAX_INTERFACE_LIST: Final = 32
+MAX_TRANDISP: Final = 8
+_FORTIGATE_KEYS: Final = frozenset(
+    {
+        "dhcp.fortigate_logids",
+        "dhcp.fortigate_dhcp_msgs",
+        "dhcp.fortigate_interfaces_excluded",
+        "lookup.srcmac_interfaces",
+        "nat.snat_trandisp",
+    }
+)
+
+
+def _validate_fortigate_setting(key: str, value: Any) -> Any:
+    """ADR-0016: the FortiGate DHCP logid maps, the interface lists and the NAT types."""
+    if key == "dhcp.fortigate_logids":
+        if len(value) > MAX_LOGIDS or any(
+            not _LOGID.fullmatch(logid) or meaning not in LOGID_MEANINGS
+            for logid, meaning in value.items()
+        ):
+            raise SettingValueError(
+                key,
+                "setting_logid_invalid",
+                f"{key}: logid 10 rakam, anlamı assigned ya da deassigned olmalı (en çok "
+                f"{MAX_LOGIDS} kayıt)",
+            )
+        return dict(value)
+    if key == "dhcp.fortigate_dhcp_msgs":
+        messages = {logid: _dhcp_msgs(items) for logid, items in value.items()}
+        if (
+            len(messages) > MAX_LOGIDS
+            or any(not _LOGID.fullmatch(logid) for logid in messages)
+            or any(items is None for items in messages.values())
+        ):
+            raise SettingValueError(
+                key,
+                "setting_dhcp_msg_invalid",
+                f"{key}: her logid 10 rakam, değeri 1-{MAX_DHCP_MSGS} ileti türünden (her biri "
+                f"1-{MAX_DHCP_MSG_LENGTH} karakter) oluşan bir liste olmalı (en çok {MAX_LOGIDS} "
+                "kayıt)",
+            )
+        return messages
+    if key in ("dhcp.fortigate_interfaces_excluded", "lookup.srcmac_interfaces"):
+        for item in value:
+            if not interface_name_ok(item):
+                raise SettingValueError(
+                    key, "setting_interface_invalid", f"{key}: geçersiz arayüz adı {item!r}"
+                )
+        names = _unique(value)
+        if len(names) > MAX_INTERFACE_LIST:
+            raise SettingValueError(
+                key,
+                "setting_too_many",
+                f"{key}: en çok {MAX_INTERFACE_LIST} arayüz",
+                limit=MAX_INTERFACE_LIST,
+            )
+        return names
+    if key == "nat.snat_trandisp":
+        values = _unique(value) if all(isinstance(item, str) for item in value) else []
+        if not 1 <= len(values) <= MAX_TRANDISP or not all(
+            _TRANDISP.fullmatch(item) for item in values
+        ):
+            raise SettingValueError(
+                key,
+                "setting_trandisp_invalid",
+                f"{key}: 1-{MAX_TRANDISP} değer, her biri küçük harfle başlayan en çok 16 "
+                "karakter (ör. snat)",
+            )
+        return values
+    return value
+
+
+def _dhcp_msgs(items: Any) -> list[str] | None:
+    """A dhcp_msg list without its case-insensitive repeats (the first spelling kept); ``None``
+    when it is not 1-8 texts of 1-32 characters without control characters."""
+    if not isinstance(items, list) or not all(
+        isinstance(item, str)
+        and 1 <= len(item) <= MAX_DHCP_MSG_LENGTH
+        and not has_control_characters(item)
+        for item in items
+    ):
+        return None
+    kept: dict[str, str] = {}
+    for item in items:
+        kept.setdefault(item.lower(), item)  # as the lease job compares: lower(dhcp_msg)
+    return list(kept.values()) if 1 <= len(kept) <= MAX_DHCP_MSGS else None
 
 
 #: Area U: a host name pattern of ``usage.background_domains`` (``fnmatch`` wildcards ``*``
