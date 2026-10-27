@@ -18,7 +18,7 @@ stream of the process with one asyncio task:
   sealer may delete yesterday's file at any time, which ends that file cleanly. A file that
   shrank or was replaced is announced as ``gap {file_replaced}``;
 * when a stream needs a file the hub did not follow yet, it seeds its buffer with the lines of
-  the file's last 256 KiB (they serve as the stream's ``backfill``);
+  the file's last 256 KiB (they serve as the stream's ``backfill``), parsed newest first;
 * lines are parsed with ingest's own ``prepare_line`` (the rows pass ingest's row checks) within
   a hub-wide budget of ``live.parse_lines_per_second``; a line beyond it is kept unparsed and
   goes out with ``parse_skipped: true`` to streams that filter on the folder and the sender
@@ -267,6 +267,8 @@ class Stream:
 
     def judge(self, entry: Entry) -> Verdict:
         """Whether ``entry`` matches the stream's query (``parse_budget``: cannot tell)."""
+        if entry.folder not in self.folders:
+            return "no"
         if entry.state == "parsed" and entry.record is not None:
             return "match" if self.matcher(entry.record) else "no"
         if self.needs_parse:
@@ -536,13 +538,9 @@ class Hub:
         open_seq = stream.open_seq or 0
         if not stream.connected_once:
             # No ``Last-Event-ID`` can name a line of this stream yet: nothing was sent.
-            backfill = [
-                entry
-                for entry in reversed(self.buffer)
-                if entry.seq <= open_seq and stream.judge(entry) == "match"
-            ][: stream.backfill]
-            items.extend(reversed(backfill))
-            stream.first_seq = backfill[-1].seq if backfill else open_seq + 1
+            backfill = self._backfill(stream, open_seq)
+            items.extend(backfill)
+            stream.first_seq = backfill[0].seq if backfill else open_seq + 1
             after = open_seq
         elif last is None:
             after = stream.detach_seq
@@ -579,6 +577,25 @@ class Hub:
         stream.backlog.clear()
         stream.backlog_lost = 0
         return items
+
+    def _backfill(self, stream: Stream, open_seq: int) -> list[Entry]:
+        """The newest ``stream.backfill`` lines from before the stream opened that match it,
+        oldest first. Lines the parse budget left unparsed that could be among them are counted
+        as ``parse_budget`` (R9: nothing is hidden silently)."""
+        found: list[Entry] = []
+        unknown = 0
+        for entry in reversed(self.buffer):
+            if len(found) >= stream.backfill:
+                break
+            if entry.seq > open_seq:
+                continue
+            verdict = stream.judge(entry)
+            if verdict == "match":
+                found.append(entry)
+            elif verdict == "parse_budget":
+                unknown += 1
+        stream.count("parse_budget", unknown, at=self.now())
+        return found[::-1]
 
     def detach(self, stream: Stream, connection: Connection) -> None:
         """``connection`` ended (paused, gone, or the stream ended)."""
@@ -949,8 +966,12 @@ class Hub:
                         path, tail.end_offset, tail.end_line, identity=tail.identity
                     )
                     result.starts[folder] = (today, tail.end_line)
-                    for line in tail.lines:
-                        result.seeded.append(self._entry(result, info, line, plan, seeded=True))
+                    # Newest first: the parse budget goes to the lines a backfill shows.
+                    seeded = [
+                        self._entry(result, info, line, plan, seeded=True)
+                        for line in reversed(tail.lines)
+                    ]
+                    result.seeded.extend(reversed(seeded))
                 else:
                     result.starts[folder] = (today, 0)
             elif regular_file(path):

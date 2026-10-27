@@ -371,6 +371,37 @@ def test_backfill_comes_from_the_end_of_the_file(hub: Hub, spool: Spool) -> None
     run(scenario())
 
 
+def test_the_backfill_shows_the_newest_lines_within_the_parse_budget(
+    hub: Hub, spool: Spool
+) -> None:
+    """Seeding parses the file's end newest first, so a typed stream's backfill shows the newest
+    matches; older lines the budget left unparsed are counted, never hidden (R9)."""
+    settings = LiveSettings(parse_lines_per_second=100)
+
+    async def scenario() -> None:
+        spool.write("fortigate", *(traffic(tag=f"n{n}") for n in range(600)))
+        typed = stream(hub, "type:traffic", settings=settings, backfill=50)
+        await hub.open(typed, settings, SiteNetwork())
+        shown = [item.line for item in hub.attach(typed, Connection(), None)]
+        assert shown == list(range(551, 601))
+        assert typed.dropped == {}
+        parsed = [entry.line for entry in hub.buffer if entry.state == "parsed"]
+        assert parsed[-100:] == list(range(501, 601))  # the budget went to the newest
+        assert len(parsed) < 300  # (and what refilled while the rest was read)
+        wide = stream(hub, "type:traffic", settings=settings, backfill=600)
+        await hub.open(wide, settings, SiteNetwork())
+        shown = [item.line for item in hub.attach(wide, Connection(), None)]
+        assert shown == parsed
+        assert wide.dropped == {"parse_budget": 600 - len(parsed)}
+        other = stream(hub, "source:ap type:traffic", settings=settings, user_id=2, backfill=50)
+        await hub.open(other, settings, SiteNetwork())
+        assert hub.attach(other, Connection(), None) == []
+        assert other.dropped == {}  # another folder's lines are not its own
+        await hub.stop()
+
+    run(scenario())
+
+
 def test_a_resume_never_reaches_back_before_the_stream(hub: Hub, spool: Spool) -> None:
     """``Last-Event-ID: <epoch>:0`` replays nothing older than the stream's first line (its
     oldest backfill line, else the first one after it opened): the backfill bound holds and
