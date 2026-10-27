@@ -119,7 +119,7 @@ export function LivePage() {
 
   const start = useCallback(() => {
     const q = liveQuery(filter);
-    void connection.current?.close();
+    const previous = connection.current;
     pending.current = [];
     setDrops(NO_DROPS);
     setLastDropped(null);
@@ -162,7 +162,8 @@ export function LivePage() {
     });
     connection.current = stream;
     setRunning(q);
-    void stream.open();
+    // The old stream gives its slot back first (its DELETE is answered before the new POST).
+    void stream.open(previous);
   }, [filter, t]);
 
   // Lines are added to the list a few times a second (one render for many lines).

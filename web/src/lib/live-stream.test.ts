@@ -255,6 +255,15 @@ function harness(): Harness {
   return h;
 }
 
+/** A promise the test settles itself. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function lastBody(h: Harness): Body {
   const body = h.gets.at(-1)?.body;
   if (!body) throw new Error('no open stream');
@@ -498,6 +507,72 @@ describe('LiveConnection', () => {
     expect(removed[0]?.headers.get(CSRF_HEADER)).toBe('csrf-1');
     expect(h.gets).toHaveLength(1);
     expect(h.states.at(-1)).toBe('stopped');
+  });
+
+  it('a stream that replaces another is opened once the old one is deleted', async () => {
+    // The API counts a user's open streams when it handles the POST (at most 2): a DELETE still
+    // on its way would count, and a changed filter would be refused with live_stream_limit.
+    const h = harness();
+    await h.connection.open();
+    await settle();
+    const removed = deferred<Response>();
+    const calls = installFetch((request) =>
+      request.method === 'DELETE'
+        ? removed.promise
+        : jsonResponse(201, { ...OPENED, stream_id: 'akis-2' }),
+    );
+    const states: LiveConnectionState[] = [];
+    const next = new LiveConnection({
+      q: 'source:core-r1',
+      fetch: (_input, init) => Promise.resolve(new Body(init?.signal).response),
+      on: { state: (state) => states.push(state) },
+    });
+    const opening = next.open(h.connection);
+    await settle(5_000);
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      'DELETE /api/v1/live/streams/akis-1',
+    ]);
+    expect(h.states.at(-1)).toBe('stopped');
+    expect(states).toEqual(['connecting']);
+
+    removed.resolve(jsonResponse(204, null));
+    await opening;
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      'DELETE /api/v1/live/streams/akis-1',
+      'POST /api/v1/live/streams',
+    ]);
+    expect(calls[1]?.body).toEqual({ q: 'source:core-r1' });
+    expect(next.streamId).toBe('akis-2');
+    await next.close();
+  });
+
+  it('a stream closed while its POST is on the way is deleted once it is answered', async () => {
+    const h = harness();
+    const created = deferred<Response>();
+    const calls = installFetch((request) =>
+      request.method === 'POST' ? created.promise : jsonResponse(204, null),
+    );
+    void h.connection.open();
+    await settle();
+    let closed = false;
+    const closing = h.connection.close().then(() => {
+      closed = true;
+    });
+    await settle(1_000);
+    expect(closed).toBe(false);
+    expect(calls.map((call) => call.method)).toEqual(['POST']);
+
+    created.resolve(jsonResponse(201, OPENED));
+    await closing;
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      'POST /api/v1/live/streams',
+      'DELETE /api/v1/live/streams/akis-1',
+    ]);
+    expect(h.gets).toHaveLength(0);
+    expect(h.failures).toEqual([]);
+    // Opening a closed connection again does nothing.
+    await h.connection.open();
+    expect(calls).toHaveLength(2);
   });
 
   it('a refused POST is reported and nothing is read', async () => {

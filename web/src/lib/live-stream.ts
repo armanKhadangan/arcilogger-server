@@ -17,7 +17,9 @@
  *   out or the API restarted) opens one new stream on its own (a new `live.open`) and reports
  *   `reopened`: the lines in between may be missing.
  * - Pause aborts the GET (the server keeps the stream 120 s); resume asks again with
- *   `Last-Event-ID`. Close aborts it and sends `DELETE` (audited `live.close`).
+ *   `Last-Event-ID`. Close aborts it and sends `DELETE` (audited `live.close`). A stream that
+ *   replaces another (a changed filter) is opened once that `DELETE` is answered: the server
+ *   counts a user's open streams when it opens one (`live.max_streams_per_user`).
  *
  * The SSE frame parser ({@link SseParser}) and the waits ({@link reconnectDelay}) are separate,
  * so `live-stream.test.ts` checks them on their own.
@@ -236,6 +238,8 @@ export class LiveConnection {
   /** A 404 already opened a new stream since the last `hello` (the next one is a refusal). */
   private reopened = false;
   private closed = false;
+  /** The `POST` of this stream (or of a new one after a 404) until it is answered. */
+  private opening: Promise<void> | null = null;
 
   constructor(options: LiveConnectionOptions) {
     this.q = options.q;
@@ -244,20 +248,30 @@ export class LiveConnection {
     this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
   }
 
-  /** Open the stream (`POST`) and start reading it. A refusal is reported as `failed`. */
-  async open(): Promise<void> {
+  /**
+   * Open the stream (`POST`) and start reading it. A refusal is reported as `failed`. `previous`:
+   * the stream this one replaces, closed first: the server counts a user's open streams when it
+   * opens one, so the `POST` waits until the old stream's `DELETE` is answered.
+   */
+  open(previous?: LiveConnection | null): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    const closing = previous?.close();
     this.setState('connecting');
+    this.opening = this.begin(closing);
+    return this.opening;
+  }
+
+  private async begin(closing: Promise<void> | undefined): Promise<void> {
+    await closing;
+    if (this.isClosed()) return;
     try {
       await this.create(this.backfill, false);
     } catch (error) {
       if (!this.isClosed()) this.fail(error);
       return;
     }
-    if (this.isClosed()) {
-      // Closed while the stream was being opened: close it on the server too.
-      await this.remove(true);
-      return;
-    }
+    // Closed while the stream was being opened: `close` deletes it now that its id is known.
+    if (this.isClosed()) return;
     if (this.state !== 'paused') void this.connect();
   }
 
@@ -285,7 +299,10 @@ export class LiveConnection {
     this.closed = true;
     this.disconnect();
     this.setState('stopped');
-    if (open) await this.remove(background);
+    if (!open) return;
+    // A stream still being opened is deleted once the server has said which one it is.
+    await this.opening;
+    await this.remove(background);
   }
 
   private async remove(background: boolean): Promise<void> {
@@ -439,20 +456,8 @@ export class LiveConnection {
     if (this.closed) return;
     if (response.status === 404 && !this.reopened) {
       this.reopened = true;
-      try {
-        // Not the user's doing; lines from before are not sent again (they are on screen or in
-        // the gap the page reports).
-        await this.create(0, true);
-      } catch (cause) {
-        this.fail(cause);
-        return;
-      }
-      if (this.isClosed()) {
-        await this.remove(true);
-        return;
-      }
-      this.on.reopened?.();
-      if (this.state !== 'paused') void this.connect();
+      this.opening = this.reopen();
+      await this.opening;
       return;
     }
     if (response.status >= 500) {
@@ -462,6 +467,21 @@ export class LiveConnection {
     }
     if (response.status === 401 || response.status === 403) reactGlobally(error);
     this.fail(error);
+  }
+
+  /** The stream was gone (404): open a new one, as `begin` does. */
+  private async reopen(): Promise<void> {
+    try {
+      // Not the user's doing; lines from before are not sent again (they are on screen or in
+      // the gap the page reports).
+      await this.create(0, true);
+    } catch (cause) {
+      this.fail(cause);
+      return;
+    }
+    if (this.isClosed()) return;
+    this.on.reopened?.();
+    if (this.state !== 'paused') void this.connect();
   }
 
   /** Read after an `await`: a pause or close may have happened meanwhile. */

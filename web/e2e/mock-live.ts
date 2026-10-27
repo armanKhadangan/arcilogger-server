@@ -229,6 +229,11 @@ export class LiveMock {
   epoch = 'e2e-epoch-1';
   /** The next `POST /live/streams` is refused with this (e.g. 429 `live_stream_limit`). */
   refuseNext: { status: number; code: string } | null = null;
+  /**
+   * Milliseconds the API takes to handle a `DELETE`: the stream keeps its slot until then, so a
+   * `POST` sent before the answer is counted against the limits with it (as by the real API).
+   */
+  deleteDelay = 0;
   private seq = 0;
   private nextLine = 1;
   private nextId = 1;
@@ -315,6 +320,15 @@ export class LiveMock {
       for (const response of responses) response.destroy();
   }
 
+  /** A stream the signed-in user has open in another tab (it takes one of their 2 slots). */
+  openElsewhere(): void {
+    const owner = this.api.session?.userId;
+    if (owner === undefined) throw new Error('nobody is signed in');
+    const id = `akis-${this.nextId}`;
+    this.nextId += 1;
+    this.streams.set(id, { id, owner, q: '', backfill: null, closed: false, history: [] });
+  }
+
   /** The API restarted: a new epoch, every stream forgotten (the next GET is a 404). */
   restart(): void {
     this.epoch = `e2e-epoch-${Number(this.epoch.split('-').pop()) + 1}`;
@@ -370,6 +384,8 @@ export class LiveMock {
       await this.fulfill(route, status, payload);
       return;
     }
+    if (call.method === 'DELETE' && this.deleteDelay > 0)
+      await new Promise((resolve) => setTimeout(resolve, this.deleteDelay));
     const [status, payload] = this.answer(call, stream?.[1] ? decodeURIComponent(stream[1]) : null);
     await this.fulfill(route, status, payload);
   }

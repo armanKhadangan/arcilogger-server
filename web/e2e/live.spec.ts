@@ -287,6 +287,29 @@ test.describe('Canlı Akış', () => {
     expect(live.gets).toHaveLength(0);
   });
 
+  test('a changed filter opens its stream once the old one is closed (2 per user)', async ({
+    page,
+  }) => {
+    const { api, live } = await open(page);
+    // Another tab holds one of the user's 2 streams; the API frees a slot only when it has
+    // handled the DELETE, so a POST sent alongside it would be refused (429).
+    live.openElsewhere();
+    live.deleteDelay = 500;
+    await page.goto('/live');
+    await start(page, live);
+    await page.getByLabel('Metin veya sorgu').fill('action:deny');
+    await page.getByRole('button', { name: 'Süzgeci uygula' }).click();
+    await expect.poll(() => api.callsTo('POST', '/live/streams').length).toBe(2);
+    await expect.poll(() => live.gets.at(-1)?.id).toBe('akis-3');
+    await expect(status(page)).toContainText('Bağlı');
+    await expect(page.getByTestId('live-failure')).toHaveCount(0);
+    expect(api.callsTo('POST', '/live/streams').map((call) => call.body)).toEqual([
+      { q: '' },
+      { q: 'action:deny' },
+    ]);
+    expect(api.callsTo('DELETE', '/live/streams/akis-2')).toHaveLength(1);
+  });
+
   test('the line drawer: preview fields, the raw line and Arama five minutes around it', async ({
     page,
   }) => {
