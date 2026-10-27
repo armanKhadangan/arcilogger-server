@@ -1,4 +1,12 @@
-import { CircleCheck, CircleDashed, ListChecks, SearchX, Target } from 'lucide-react';
+import {
+  CircleCheck,
+  CircleDashed,
+  FileWarning,
+  ListChecks,
+  SearchX,
+  ShieldAlert,
+  Target,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -13,10 +21,12 @@ import {
   outcomeOf,
   queryOf,
   type DataWindow,
+  type EgressEntry,
   type LookupMode,
   type NatMatch,
 } from '@/lib/lookup-types';
 
+import { egressLine } from './chain-text';
 import { ChainView, EvidenceLinks, ExplanationList, type OpenEvidence } from './chain-view';
 
 const MODE: Record<
@@ -55,6 +65,8 @@ function RequestSummary({ lookup }: { lookup: LookupOut }) {
   const { t } = useTranslation();
   const query = queryOf(lookup);
   const input = query.time_input;
+  // A lookup stored before ADR-0016 has no `egress` (read `null`): no exit line.
+  const egress = outcomeOf(lookup)?.egress ?? null;
   const protocol = protocolName(query.protocol);
   const destination =
     query.dest_ip || query.dest_port !== null || query.dest_domain
@@ -92,6 +104,11 @@ function RequestSummary({ lookup }: { lookup: LookupOut }) {
             {endpoint(query.public_ip, query.public_port)}
             {protocol ? ` · ${protocol}` : ''}
           </span>
+        </Fact>
+      ) : null}
+      {egress ? (
+        <Fact label={t('network.lookup.exit')}>
+          <span data-testid="lookup-exit">{egressLine(egress, t)}</span>
         </Fact>
       ) : null}
       {destination ? (
@@ -134,19 +151,35 @@ function DataWindowNote({ window }: { window: DataWindow }) {
   );
 }
 
+/**
+ * "Çıkış: hat-2 (Yedek hat) · dstintf wan2", as the PDF prints it on every match (contract 2.12);
+ * "-" for a session no exit claims. `null` for a lookup stored before ADR-0016.
+ */
+function matchExit(match: NatMatch, exits: readonly EgressEntry[], shown: boolean): string | null {
+  const name = match.egress ?? null;
+  const dstintf = match.traffic.dstintf ?? null;
+  if (!shown && name === null && dstintf === null) return null;
+  const exit = exits.find((item) => item.name === name);
+  const label = exit?.label ? ` (${visibleText(exit.label)})` : '';
+  return `${name === null ? '-' : `${name}${label}`} · dstintf ${dstintf ?? '-'}`;
+}
+
 function MatchCard({
   match,
   rank,
+  exitText,
   onOpen,
 }: {
   match: NatMatch;
   rank: number;
+  exitText: string | null;
   onOpen: OpenEvidence;
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
   const traffic = match.traffic;
   const protocol = protocolName(traffic.proto);
+  const untrusted = match.untrusted_sources ?? [];
   const distance =
     match.time_distance_ms === 0
       ? t('lookup.match.inside')
@@ -171,6 +204,11 @@ function MatchCard({
         <span className="text-13 text-muted-strong">
           {t(`lookup.destinationMatch.${match.destination_match}`)}
         </span>
+        {untrusted.length > 0 ? (
+          <Badge tone="danger" icon={ShieldAlert} data-testid="untrusted-sender">
+            {t('network.lookup.untrusted', { sources: untrusted.join(', ') })}
+          </Badge>
+        ) : null}
       </header>
       <section className="flex flex-col gap-1">
         <h4 className="text-xs font-medium tracking-wide text-muted-strong uppercase">
@@ -190,6 +228,11 @@ function MatchCard({
             ? ` · ${t('lookup.match.sessionId', { id: traffic.sessionid })}`
             : ''}
         </p>
+        {exitText ? (
+          <p className="text-xs text-muted-strong" data-testid="match-exit">
+            {t('network.lookup.matchExit', { exit: exitText })}
+          </p>
+        ) : null}
         <EvidenceLinks refs={traffic.evidence} onOpen={onOpen} />
       </section>
       {match.chain ? (
@@ -247,6 +290,11 @@ export function LookupResults({ lookup, onOpen }: { lookup: LookupOut; onOpen: O
                   key={`${match.traffic.sessionid ?? 'x'}-${match.traffic.end}-${index}`}
                   match={match}
                   rank={index + 1}
+                  exitText={matchExit(
+                    match,
+                    outcome.egress?.egresses ?? [],
+                    (outcome.egress ?? null) !== null,
+                  )}
                   onOpen={onOpen}
                 />
               ))}
@@ -258,6 +306,16 @@ export function LookupResults({ lookup, onOpen }: { lookup: LookupOut; onOpen: O
                 {t('lookup.result.internal', { ip: outcome.attribution.internal_ip })}
               </h3>
               <ChainView chain={outcome.attribution} traffic={null} onOpen={onOpen} />
+            </Card>
+          ) : null}
+          {(outcome.unconverted_dhcp ?? []).length > 0 ? (
+            <Card className="flex flex-col gap-2 p-4" data-testid="unconverted-dhcp">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <FileWarning aria-hidden="true" className="size-4 text-warning-ink" />
+                {t('network.lookup.unconvertedTitle')}
+              </h3>
+              <p className="text-13 text-muted-strong">{t('network.lookup.unconvertedNote')}</p>
+              <EvidenceLinks refs={outcome.unconverted_dhcp ?? []} onOpen={onOpen} />
             </Card>
           ) : null}
           {outcome.matches.length === 0 && !outcome.attribution ? (

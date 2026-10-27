@@ -5,7 +5,13 @@ import type { TFunction } from 'i18next';
 import type { AlertTone } from '@/components/ui/alert';
 import { endpoint, visibleText } from '@/lib/display';
 import { formatDateTime } from '@/lib/format';
-import type { AttributionChain, PersonInfo, TrafficInfo } from '@/lib/lookup-types';
+import type {
+  AttributionChain,
+  EgressEntry,
+  LookupEgress,
+  PersonInfo,
+  TrafficInfo,
+} from '@/lib/lookup-types';
 
 /** Explanation keys shown as warnings or errors; everything else is information. */
 const EXPLANATION_TONE: Record<string, AlertTone> = {
@@ -24,7 +30,79 @@ const EXPLANATION_TONE: Record<string, AlertTone> = {
   wan_transip_not_seen: 'warning',
   exact_domain_unverified: 'warning',
   exact_nat: 'success',
+  // ADR-0016 (contract 2.11): FortiGate DHCP, srcmac and the internet exits. `no_lease`,
+  // `no_lease_for_mac`, `srcmac_agrees`, `srcmac_infrastructure`, `egress_search`,
+  // `egress_unconfigured`, `fortigate_format_unverified`, `fortigate_format_verified` and
+  // `source_configured_later` are information by design.
+  chain_missing: 'warning',
+  fortigate_dhcp_not_converted: 'warning',
+  srcmac_only: 'warning',
+  srcmac_mismatch: 'warning',
+  srcmac_ambiguous: 'warning',
+  srcmac_shared: 'warning',
+  srcmac_other_lease: 'warning',
+  egress_public_unknown: 'warning',
+  public_ip_no_egress: 'warning',
+  egress_not_logged: 'warning',
+  egress_transip_not_seen: 'warning',
+  egress_interface_not_seen: 'warning',
+  egress_interface_not_seen_kept: 'warning',
+  egress_unmapped_seen: 'warning',
+  nat_unknown_trandisp: 'warning',
+  lease_renewal_not_seen: 'warning',
+  fortigate_dhcp_not_converted_since_lease: 'warning',
+  fortigate_dhcp_no_network: 'warning',
+  egress_observed_not_configured: 'warning',
+  egress_changed_after_event: 'warning',
+  session_changed_exit: 'warning',
+  egress_not_logged_but_seen: 'warning',
+  dhcp_sources_overlap: 'warning',
+  session_from_unknown_source: 'warning',
+  egress_public_dynamic: 'warning',
+  egress_internal: 'warning',
+  source_clock_offset: 'warning',
 };
+
+/**
+ * Why a chain is `low` that the page shows beside its lease step (contract 2.13), not above the
+ * chain: the lease's own record is the reason.
+ */
+export const LEASE_STEP_EXPLANATIONS: readonly string[] = [
+  'lease_renewal_not_seen',
+  'fortigate_dhcp_not_converted_since_lease',
+  'fortigate_dhcp_no_network',
+];
+
+/**
+ * The label of an exit resolution (contract 2.12, one table with the PDF's section-4 row and the
+ * reading table): eight labels for the seven resolutions, `fallback` split by the exit whose
+ * check failed (the first of `egresses`).
+ */
+export function resolutionLabelKey(egress: Pick<LookupEgress, 'resolution' | 'egresses'>): string {
+  if (egress.resolution !== 'fallback') return `network.lookup.resolution.${egress.resolution}`;
+  return egress.egresses[0]?.mode === 'direct'
+    ? 'network.lookup.resolution.fallback_direct'
+    : 'network.lookup.resolution.fallback_transip';
+}
+
+/** "hat-2 (Yedek hat), Servis sağlayıcı NAT'ı"; the implicit exit of no exits has no name. */
+export function exitText(exit: EgressEntry, t: TFunction): string {
+  const name = exit.label ? `${exit.name} (${visibleText(exit.label)})` : exit.name;
+  return `${name}, ${t(`network.lookup.mode.${exit.mode}`)}`;
+}
+
+/**
+ * The "Çıkış" line of a public-IP lookup: "Genel IP — hat-1 (Ana hat), Doğrudan". No exit names
+ * for `unconfigured` (the implicit exit) and `no_egress` (the configured exits P is in none of).
+ */
+export function egressLine(egress: LookupEgress, t: TFunction): string {
+  const label = t(resolutionLabelKey(egress));
+  if (egress.resolution === 'unconfigured' || egress.resolution === 'no_egress') return label;
+  const exits = egress.egresses.filter((exit) => exit.name !== '');
+  return exits.length === 0
+    ? label
+    : `${label} — ${exits.map((exit) => exitText(exit, t)).join('; ')}`;
+}
 
 export function explanationTone(key: string): AlertTone {
   return EXPLANATION_TONE[key] ?? 'info';
@@ -72,6 +150,8 @@ export function chainSummary(
   if (chain.lease) {
     const host = chain.lease.hostname ? ` (${visibleText(chain.lease.hostname)})` : '';
     parts.push(`MAC ${chain.lease.mac}${host}`);
+  } else if (chain.mac_source === 'srcmac' && chain.device) {
+    parts.push(`MAC ${chain.device.mac} (${t('network.lookup.srcmacBadge')})`);
   }
   if (chain.device?.name)
     parts.push(`${t('lookup.chain.device')} "${visibleText(chain.device.name)}"`);

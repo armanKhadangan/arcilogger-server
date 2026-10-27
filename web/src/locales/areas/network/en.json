@@ -162,6 +162,42 @@
     },
     "sources": {
       "fortigateHint": "If you use the FortiGate's DHCP server, its system event records must go to syslog (DEVICE-SETUP.md section 2.4)."
+    },
+    "lookup": {
+      "exit": "Exit",
+      "matchExit": "Exit: {{exit}}",
+      "resolution": {
+        "public": "Public IP",
+        "transip": "NAT address",
+        "fallback_direct": "Direct line not confirmed",
+        "fallback_transip": "NAT address not confirmed",
+        "observed": "Address seen in the logs",
+        "public_unknown": "Lines with unknown public address",
+        "unconfigured": "No exits defined",
+        "no_egress": "No exit"
+      },
+      "mode": {
+        "direct": "Direct",
+        "isp_nat": "ISP NAT",
+        "not_logged": "Does not pass the FortiGate",
+        "internal": "Not an internet exit"
+      },
+      "untrusted": "Unconfigured sender: {{sources}}",
+      "srcmacStep": "MAC (srcmac)",
+      "srcmacBadge": "Partial evidence: srcmac",
+      "srcmacDetail": "srcmac field of the FortiGate session record (interface {{interface}}); no lease",
+      "srcmacConflictTitle_one": "srcmac differs: {{count}} possible device",
+      "srcmacConflictTitle_other": "srcmac differs: {{count}} possible devices",
+      "srcmacConflictBody": "The srcmac of the FortiGate session record differs from the lease's MAC address. No single device or person can be named with certainty; the chain by the lease and the possible chain by srcmac are listed below with the same weight.",
+      "srcmacOption": "Possibility {{number}} (srcmac, partial evidence)",
+      "leaseSource": "Source: {{source}}",
+      "fortigateLease": "lease time (FortiGate record): {{lease}} s · last DHCP evidence: {{last}}",
+      "fortigateLeaseConfigured": "lease time: configured time · last DHCP evidence: {{last}}",
+      "unconvertedTitle": "FortiGate DHCP record not in the lease timeline",
+      "unconvertedNote": "not in the lease timeline; no chain built; no confidence given"
     }
+  },
+  "evidenceTables": {
+    "fg_event": "FortiGate event record"
   }
 }

@@ -26,11 +26,18 @@ import type {
   Confidence,
   EvidenceRef,
   Explanation,
+  LeaseInfo,
   TrafficInfo,
 } from '@/lib/lookup-types';
 import { cn } from '@/lib/utils';
 
-import { assignmentText, chainSummary, explanationTone, personText } from './chain-text';
+import {
+  assignmentText,
+  chainSummary,
+  explanationTone,
+  LEASE_STEP_EXPLANATIONS,
+  personText,
+} from './chain-text';
 
 export type OpenEvidence = (target: RawLineTarget) => void;
 
@@ -138,10 +145,21 @@ interface StepProps {
   detail?: ReactNode;
   confidence?: Confidence | undefined;
   evidence?: readonly EvidenceRef[];
+  /** Explanations that belong to this step (why the lease makes the chain `low`). */
+  notes?: readonly Explanation[];
   onOpen: OpenEvidence;
 }
 
-function Step({ icon: Icon, label, value, detail, confidence, evidence = [], onOpen }: StepProps) {
+function Step({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  confidence,
+  evidence = [],
+  notes = [],
+  onOpen,
+}: StepProps) {
   return (
     <li className="group/step relative flex gap-3 pb-4 last:pb-0">
       <span
@@ -160,9 +178,49 @@ function Step({ icon: Icon, label, value, detail, confidence, evidence = [], onO
         </div>
         <div className="text-sm wrap-anywhere text-foreground">{value}</div>
         {detail ? <div className="text-xs text-muted-strong">{detail}</div> : null}
+        <ExplanationList explanations={notes} />
         <EvidenceLinks refs={evidence} onOpen={onOpen} />
       </div>
     </li>
+  );
+}
+
+/**
+ * The span of a lease with its end reason, its source (`evidenceTables`) and, for a FortiGate
+ * lease, the lease time of its record and its last DHCP evidence at the requested moment.
+ */
+function LeaseDetail({ lease }: { lease: LeaseInfo }) {
+  const { t } = useTranslation();
+  const span = lease.end
+    ? t('lookup.chain.leaseSpan', {
+        start: formatDateTime(lease.start),
+        end: formatDateTime(lease.end),
+        reason: t(`lookup.endReason.${lease.end_reason}`, { defaultValue: lease.end_reason }),
+      })
+    : // Still running: "– hâlâ açık", not "– açık (hâlâ açık)".
+      t('lookup.chain.leaseSpanOpen', { start: formatDateTime(lease.start) });
+  const source = lease.source_table ?? null;
+  return (
+    <>
+      <span className="block">{span}</span>
+      {source ? (
+        <span className="block" data-testid="lease-source">
+          {t('network.lookup.leaseSource', { source: evidenceTableLabel(source, t) })}
+        </span>
+      ) : null}
+      {source === 'fg_dhcp' ? (
+        <span className="block" data-testid="lease-fortigate">
+          {lease.lease_seconds !== null && lease.lease_seconds !== undefined
+            ? t('network.lookup.fortigateLease', {
+                lease: lease.lease_seconds,
+                last: lease.last_dhcp_evidence ? formatDateTime(lease.last_dhcp_evidence) : '—',
+              })
+            : t('network.lookup.fortigateLeaseConfigured', {
+                last: lease.last_dhcp_evidence ? formatDateTime(lease.last_dhcp_evidence) : '—',
+              })}
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -209,37 +267,42 @@ function ChainSteps({
         }
         onOpen={onOpen}
       />
-      <Step
-        icon={ArrowRight}
-        label={t('lookup.chain.lease')}
-        value={
-          lease ? (
-            <span className="font-mono">
-              MAC {lease.mac}
-              {lease.hostname ? ` (${visibleText(lease.hostname)})` : ''}
+      {chain.mac_source === 'srcmac' && !lease ? (
+        <Step
+          icon={ArrowRight}
+          label={t('network.lookup.srcmacStep')}
+          value={
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-mono">MAC {device?.mac ?? traffic?.srcmac ?? '—'}</span>
+              <Badge tone="warning" icon={ShieldQuestionMark}>
+                {t('network.lookup.srcmacBadge')}
+              </Badge>
             </span>
-          ) : (
-            t('lookup.chain.noLease')
-          )
-        }
-        detail={
-          lease
-            ? lease.end
-              ? t('lookup.chain.leaseSpan', {
-                  start: formatDateTime(lease.start),
-                  end: formatDateTime(lease.end),
-                  reason: t(`lookup.endReason.${lease.end_reason}`, {
-                    defaultValue: lease.end_reason,
-                  }),
-                })
-              : // Still running: "– hâlâ açık", not "– açık (hâlâ açık)".
-                t('lookup.chain.leaseSpanOpen', { start: formatDateTime(lease.start) })
-            : undefined
-        }
-        confidence={lease?.confidence}
-        evidence={lease?.evidence}
-        onOpen={onOpen}
-      />
+          }
+          detail={t('network.lookup.srcmacDetail', { interface: traffic?.srcintf ?? '—' })}
+          onOpen={onOpen}
+        />
+      ) : (
+        <Step
+          icon={ArrowRight}
+          label={t('lookup.chain.lease')}
+          value={
+            lease ? (
+              <span className="font-mono">
+                MAC {lease.mac}
+                {lease.hostname ? ` (${visibleText(lease.hostname)})` : ''}
+              </span>
+            ) : (
+              t('lookup.chain.noLease')
+            )
+          }
+          detail={lease ? <LeaseDetail lease={lease} /> : undefined}
+          confidence={lease?.confidence}
+          evidence={lease?.evidence}
+          notes={chain.explanations.filter((item) => LEASE_STEP_EXPLANATIONS.includes(item.key))}
+          onOpen={onOpen}
+        />
+      )}
       <Step
         icon={MonitorSmartphone}
         label={t('lookup.chain.device')}
@@ -315,6 +378,17 @@ export function ChainView({
   const { t } = useTranslation();
   const all = [chain, ...chain.alternatives];
   const conflict = chain.alternatives.length > 0;
+  const optionLabel = (item: AttributionChain, index: number) =>
+    item.mac_source === 'srcmac'
+      ? t('network.lookup.srcmacOption', { number: index + 1 })
+      : t('lookup.conflict.option', { number: index + 1 });
+  // A srcmac that differs from the lease's MAC (D10): the same side by side view, its own words.
+  const srcmac = chain.alternatives.some((item) => item.mac_source === 'srcmac');
+  const above = (item: AttributionChain) =>
+    item.explanations.filter(
+      (explanation) =>
+        explanation.key !== 'ip_conflict' && !LEASE_STEP_EXPLANATIONS.includes(explanation.key),
+    );
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -323,25 +397,28 @@ export function ChainView({
       </div>
       {conflict ? (
         <div className="flex flex-col gap-3" data-testid="ip-conflict">
-          <Alert tone="danger" title={t('lookup.conflict.title', { count: all.length })}>
-            {t('lookup.conflict.body')}
+          <Alert
+            tone="danger"
+            title={t(srcmac ? 'network.lookup.srcmacConflictTitle' : 'lookup.conflict.title', {
+              count: all.length,
+            })}
+          >
+            {t(srcmac ? 'network.lookup.srcmacConflictBody' : 'lookup.conflict.body')}
           </Alert>
           <div className="grid gap-3 xl:grid-cols-2">
             {all.map((item, index) => (
               <section
-                key={`${item.lease?.mac ?? 'none'}-${index}`}
-                aria-label={t('lookup.conflict.option', { number: index + 1 })}
+                key={`${item.lease?.mac ?? item.device?.mac ?? 'none'}-${index}`}
+                aria-label={optionLabel(item, index)}
                 className="flex flex-col gap-3 rounded-lg border border-danger/40 p-3"
               >
                 <h4 className="text-13 font-semibold text-foreground">
-                  {t('lookup.conflict.option', { number: index + 1 })}
+                  {optionLabel(item, index)}
                 </h4>
                 <p className="font-mono text-xs wrap-anywhere text-muted-strong">
                   {chainSummary(item, traffic, t)}
                 </p>
-                <ExplanationList
-                  explanations={item.explanations.filter((e) => e.key !== 'ip_conflict')}
-                />
+                <ExplanationList explanations={above(item)} />
                 <ChainSteps chain={item} traffic={traffic} onOpen={onOpen} />
               </section>
             ))}
@@ -355,7 +432,7 @@ export function ChainView({
           >
             {chainSummary(chain, traffic, t)}
           </p>
-          <ExplanationList explanations={chain.explanations} />
+          <ExplanationList explanations={above(chain)} />
           <ChainSteps chain={chain} traffic={traffic} onOpen={onOpen} />
         </>
       )}

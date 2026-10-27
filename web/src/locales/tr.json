@@ -1105,7 +1105,8 @@
     "fg_dns": "FortiGate DNS kaydı",
     "fg_app": "FortiGate uygulama kaydı",
     "mt_dhcp": "DHCP kaydı (MikroTik)",
-    "mt_arp": "ARP kaydı (MikroTik)"
+    "mt_arp": "ARP kaydı (MikroTik)",
+    "fg_dhcp": "DHCP kaydı (FortiGate)"
   },
   "deviceTypes": {
     "pc": "PC",
@@ -1278,7 +1279,7 @@
       "session": "FortiGate oturumu",
       "span": "{{start}} – {{end}}",
       "sessionId": "oturum no {{id}}",
-      "noChain": "Bu oturumun kaynak adresi için atama zinciri kurulamadı."
+      "noChain": "Zincir kurulamadı: o anda bu iç IP için kira kaydı yok"
     },
     "destinationMatch": {
       "ip_port": "Hedef IP ve port eşleşti",
@@ -2004,7 +2005,7 @@
       "subnetHint": "Ağ adresi ve önek uzunluğu, ör. 10.0.20.0/24",
       "subnetEditHint": "Ağı düzeltmek VLAN'ın adını, departmanını ve işaretini korur; cihazlar yeni ağa göre eşleşir.",
       "dhcpServer": "DHCP sunucusu",
-      "dhcpServerHint": "Yönlendiricideki adı, ör. dhcp20; statik ağda boş",
+      "dhcpServerHint": "DHCP sunucusunun adı (MikroTik: ör. dhcp20; FortiGate: arayüz adı)",
       "departmentHint": "Kimseye atanmamış cihazların departmanı",
       "guestLabel": "Misafir ağı",
       "guestHint": "FortiGate'ten değil başka bir çıkıştan (ör. ayrı hat, VPN tüneli) çıkan misafir ağı: 5651 sonucu FortiGate kaydı olmadığını, yalnızca DHCP/ARP kaydı olduğunu belirtir.",

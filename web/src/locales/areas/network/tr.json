@@ -162,6 +162,42 @@
     },
     "sources": {
       "fortigateHint": "FortiGate'in DHCP sunucusunu kullanıyorsanız sistem olay kayıtları syslog'a gönderilmelidir (DEVICE-SETUP.md bölüm 2.4)."
+    },
+    "lookup": {
+      "exit": "Çıkış",
+      "matchExit": "Çıkış: {{exit}}",
+      "resolution": {
+        "public": "Genel IP",
+        "transip": "NAT adresi",
+        "fallback_direct": "Doğrudan hat doğrulanamadı",
+        "fallback_transip": "NAT adresi doğrulanamadı",
+        "observed": "Kayıtlarda görülen adres",
+        "public_unknown": "Genel adresi bilinmeyen hatlar",
+        "unconfigured": "Çıkış tanımlı değil",
+        "no_egress": "Çıkış yok"
+      },
+      "mode": {
+        "direct": "Doğrudan",
+        "isp_nat": "Servis sağlayıcı NAT'ı",
+        "not_logged": "FortiGate'ten geçmiyor",
+        "internal": "İnternet çıkışı değil"
+      },
+      "untrusted": "Tanımsız gönderici: {{sources}}",
+      "srcmacStep": "MAC (srcmac)",
+      "srcmacBadge": "Kısmi kanıt: srcmac",
+      "srcmacDetail": "FortiGate oturum kaydının srcmac alanı ({{interface}} arayüzü); kira kaydı yok",
+      "srcmacConflictTitle_one": "srcmac farklı: {{count}} olası cihaz",
+      "srcmacConflictTitle_other": "srcmac farklı: {{count}} olası cihaz",
+      "srcmacConflictBody": "FortiGate oturum kaydındaki srcmac kira kaydındaki MAC adresinden farklı. Tek bir cihaz veya kişi kesin olarak belirlenemez; kira kaydına göre kurulan zincir ve srcmac'e göre olası zincir aşağıda eşit ağırlıkta listelenmiştir.",
+      "srcmacOption": "Olasılık {{number}} (srcmac, kısmi kanıt)",
+      "leaseSource": "Kaynak: {{source}}",
+      "fortigateLease": "kira süresi (FortiGate kaydı): {{lease}} sn · son DHCP kanıtı: {{last}}",
+      "fortigateLeaseConfigured": "kira süresi: ayarlardaki süre · son DHCP kanıtı: {{last}}",
+      "unconvertedTitle": "Kira zaman çizelgesine girmemiş FortiGate DHCP kaydı",
+      "unconvertedNote": "kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez"
     }
+  },
+  "evidenceTables": {
+    "fg_event": "FortiGate olay kaydı"
   }
 }
