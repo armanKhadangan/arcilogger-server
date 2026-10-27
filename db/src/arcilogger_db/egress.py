@@ -15,11 +15,12 @@ An ``isp_nat`` exit without ``transips`` is the catch-all: every private or shar
 address that no other exit claims. ``{}`` (the shipped default) behaves as one implicit
 catch-all, the pure double NAT of earlier versions.
 
-This module is a leaf (``ipaddress`` and ``re`` only), so :mod:`arcilogger_db.settings` can
-validate the setting with it, the lookup engine can parse it and the migration of the legacy
-NAT keys can keep a frozen copy, without an import cycle. A refusal is an
-:class:`EgressValueError` with a code of :data:`arcilogger_db.settings.SETTING_ERRORS`; the
-settings module wraps it into its ``SettingValueError``.
+This module is a leaf (``ipaddress`` and ``unicodedata`` only), so
+:mod:`arcilogger_db.settings` can validate the setting with it, the lookup engine can parse it
+and the migration of the legacy NAT keys can keep a frozen copy, without an import cycle. A
+refusal is an :class:`EgressValueError` with a code of
+:data:`arcilogger_db.settings.SETTING_ERRORS`; the settings module wraps it into its
+``SettingValueError``.
 
 The exit rules themselves (names, fields, addresses, modes, overlaps) are not checked yet:
 :func:`validate_egresses` checks only that the value is an object, and :func:`parse_egresses`
