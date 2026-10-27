@@ -382,7 +382,8 @@ def test_the_backfill_shows_the_newest_lines_within_the_parse_budget(
         spool.write("fortigate", *(traffic(tag=f"n{n}") for n in range(600)))
         typed = stream(hub, "type:traffic", settings=settings, backfill=50)
         await hub.open(typed, settings, SiteNetwork())
-        shown = [item.line for item in hub.attach(typed, Connection(), None)]
+        items = hub.attach(typed, Connection(), None)
+        shown = [item.line for item in items if isinstance(item, Entry)]
         assert shown == list(range(551, 601))
         assert typed.dropped == {}
         parsed = [entry.line for entry in hub.buffer if entry.state == "parsed"]
@@ -390,7 +391,8 @@ def test_the_backfill_shows_the_newest_lines_within_the_parse_budget(
         assert len(parsed) < 300  # (and what refilled while the rest was read)
         wide = stream(hub, "type:traffic", settings=settings, backfill=600)
         await hub.open(wide, settings, SiteNetwork())
-        shown = [item.line for item in hub.attach(wide, Connection(), None)]
+        items = hub.attach(wide, Connection(), None)
+        shown = [item.line for item in items if isinstance(item, Entry)]
         assert shown == parsed
         assert wide.dropped == {"parse_budget": 600 - len(parsed)}
         other = stream(hub, "source:ap type:traffic", settings=settings, user_id=2, backfill=50)
