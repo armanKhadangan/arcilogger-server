@@ -26,7 +26,7 @@ export const UNKNOWN_SENDERS_QUERY = 'source:unknown-*';
 // -- the filter -----------------------------------------------------------------------------------
 
 export interface LiveFilter {
-  /** Configured sources (a network's name also follows its `<name>-<ip>` members). */
+  /** Sources of the catalogue (a network's name also follows its `<name>-<ip>` members). */
   sources: string[];
   /** "Bilinmeyen göndericiler": the `unknown-<ip>` folders. */
   unknown: boolean;
@@ -50,6 +50,30 @@ export function liveQuery(filter: LiveFilter): string {
   const text = filter.text.trim();
   if (text) clauses.push(text);
   return clauses.join(' ');
+}
+
+/** What follows `<network>-` in a member's folder: its address (an IPv6 one with `-` for `:`). */
+const MEMBER_ADDRESS =
+  /^(?:\d{1,3}(?:\.\d{1,3}){3}|[\da-f]*(?:-[\da-f]*){2,7}(?:\.\d{1,3}){0,3})$/i;
+
+/**
+ * The sources the filter's menu offers. The catalogue (`GET /search/fields`) lists the configured
+ * sources and every source ingest has seen; the menu leaves out the `unknown-<ip>` folders (the
+ * chip "Bilinmeyen göndericiler" covers them) and the `<network>-<ip>` members of a network
+ * source (its name follows them), so a site with many senders still gets a short list.
+ */
+export function menuSources<T extends { name: string; network: boolean }>(
+  sources: readonly T[],
+): T[] {
+  const networks = sources.filter((source) => source.network).map((source) => `${source.name}-`);
+  return sources.filter(
+    (source) =>
+      !source.name.startsWith('unknown-') &&
+      !networks.some(
+        (prefix) =>
+          source.name.startsWith(prefix) && MEMBER_ADDRESS.test(source.name.slice(prefix.length)),
+      ),
+  );
 }
 
 // -- the list -------------------------------------------------------------------------------------

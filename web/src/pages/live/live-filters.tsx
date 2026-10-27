@@ -18,7 +18,7 @@ import { currentLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 import type { LiveCatalogue } from './live-hooks';
-import { liveQuery, type LiveFilter } from './live-model';
+import { liveQuery, menuSources, type LiveFilter } from './live-model';
 
 function toggled(list: readonly string[], value: string): string[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -52,9 +52,9 @@ function Chip({
 }
 
 /**
- * Canlı Akış's filter: configured sources (from the field catalogue; a network's name follows
- * its members too), the chip "Bilinmeyen göndericiler" (`unknown-<ip>` folders), kind chips and
- * a box for free text or any query of the search language. Together they are one query
+ * Canlı Akış's filter: the sources of the field catalogue (`menuSources`: a network's name
+ * follows its members too), the chip "Bilinmeyen göndericiler" (`unknown-<ip>` folders), kind
+ * chips and a box for free text or any query of the search language. Together they are one query
  * (`liveQuery`), shown under the box; Enter starts or applies it.
  */
 export function LiveFilters({
@@ -70,7 +70,7 @@ export function LiveFilters({
 }) {
   const { t } = useTranslation();
   const english = currentLang() === 'en';
-  const sources = catalogue?.sources ?? [];
+  const sources = menuSources(catalogue?.sources ?? []);
   const kinds = catalogue?.kinds ?? [];
   const query = liveQuery(filter);
 
@@ -98,6 +98,9 @@ export function LiveFilters({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
             <DropdownMenuLabel>{t('live.filters.sourcesTitle')}</DropdownMenuLabel>
+            <p className="max-w-72 px-2 pb-1.5 text-xs text-muted">
+              {t('live.filters.sourcesHint')}
+            </p>
             {sources.length === 0 ? (
               <p className="px-2 py-1.5 text-13 text-muted">{t('live.filters.noSources')}</p>
             ) : (

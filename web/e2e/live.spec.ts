@@ -91,6 +91,26 @@ test.describe('Canlı Akış', () => {
     expect(api.callsTo('DELETE', '/live/streams/akis-1')[0]?.background).toBe(true);
   });
 
+  test('the source menu leaves out unknown senders and the members of a network', async ({
+    page,
+  }) => {
+    // `GET /search/fields` lists the configured sources and every source ingest has seen.
+    await open(page);
+    await page.goto('/live');
+    await page.getByRole('button', { name: 'Kaynaklar: tümü' }).click();
+    const menu = page.getByRole('menu');
+    await expect(menu).toContainText('Bir ağ kaynağı üyelerini de kapsar');
+    await expect(menu.getByRole('menuitemcheckbox')).toHaveText([
+      /^ap\s*ağ$/,
+      'core-r1',
+      'fortigate',
+    ]);
+    await menu.getByRole('menuitemcheckbox', { name: /^ap/ }).click();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Bilinmeyen göndericiler' }).click();
+    await expect(page.getByTestId('live-query')).toHaveText('source:ap,unknown-*');
+  });
+
   test('a streamed body: hello, lines, dropped and end', async ({ page }) => {
     const { live } = await open(page);
     const [first, second] = [liveLine(8), liveLine(9)];

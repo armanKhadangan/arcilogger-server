@@ -115,7 +115,11 @@ const FIELDS = new Set([
   'text',
 ]);
 
-/** The parts of the field catalogue the filters read (`GET /search/fields`). */
+/**
+ * The parts of the field catalogue the filters read (`GET /search/fields`). Its sources are what
+ * the router's `_sources` answers: the configured ones and every `sources` row ingest has made
+ * (network members and unknown senders included), sorted by name.
+ */
 export const CATALOGUE = {
   fields: [],
   kinds: [
@@ -130,9 +134,12 @@ export const CATALOGUE = {
     { key: 'unknown', label_tr: 'Tanınmayan', label_en: 'Unrecognised' },
   ],
   sources: [
-    { name: 'fortigate', type: 'fortigate', network: false },
-    { name: 'core-r1', type: 'mikrotik', network: false },
     { name: 'ap', type: 'generic', network: true },
+    { name: 'ap-172.20.10.3', type: 'generic', network: false },
+    { name: 'ap-172.20.10.4', type: 'generic', network: false },
+    { name: 'core-r1', type: 'mikrotik', network: false },
+    { name: 'fortigate', type: 'fortigate', network: false },
+    { name: 'unknown-172.20.10.40', type: 'generic', network: false },
   ],
   limits: {
     max_chars: 1000,

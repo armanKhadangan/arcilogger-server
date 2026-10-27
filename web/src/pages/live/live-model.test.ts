@@ -13,6 +13,7 @@ import {
   loadRules,
   MAX_LINES,
   MAX_RULES,
+  menuSources,
   NO_DROPS,
   RULES_KEY,
   ruleField,
@@ -60,6 +61,38 @@ describe('the filter as a query', () => {
     ).toBe('source:core-r1,ap,unknown-* type:dhcp,arp "login failure"');
     expect(liveQuery({ ...EMPTY_FILTER, unknown: true })).toBe('source:unknown-*');
     expect(liveQuery({ ...EMPTY_FILTER, text: 'sender:172.20.10.30' })).toBe('sender:172.20.10.30');
+  });
+
+  it('offers the sources without unknown senders and the members of a network', () => {
+    // `GET /search/fields`: the configured sources and every `sources` row, sorted by name.
+    const catalogue = [
+      { name: 'ap', type: 'generic', network: true },
+      { name: 'ap-172.20.30.11', type: 'generic', network: false },
+      { name: 'ap-2001-db8--11', type: 'generic', network: false },
+      { name: 'ap-depo', type: 'generic', network: false },
+      { name: 'core-r1', type: 'mikrotik', network: false },
+      { name: 'eski-switch', type: 'generic', network: false },
+      { name: 'fortigate', type: 'fortigate', network: false },
+      { name: 'unknown-172.20.10.99', type: 'generic', network: false },
+    ];
+    expect(menuSources(catalogue).map((source) => source.name)).toEqual([
+      'ap',
+      'ap-depo',
+      'core-r1',
+      'eski-switch',
+      'fortigate',
+    ]);
+    // Without a network source the same names are ordinary sources.
+    expect(
+      menuSources(catalogue.filter((source) => !source.network)).map((source) => source.name),
+    ).toEqual([
+      'ap-172.20.30.11',
+      'ap-2001-db8--11',
+      'ap-depo',
+      'core-r1',
+      'eski-switch',
+      'fortigate',
+    ]);
   });
 });
 
