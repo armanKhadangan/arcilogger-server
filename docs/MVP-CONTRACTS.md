@@ -74,6 +74,14 @@ sessions, INET as `str`, parameters hidden in logs); sessions:
   else the VLAN's Turkish name (spec 2.2). Use it wherever a department is derived from a VLAN.
 - `lookups`: `authority`, `file_no`, `request_date` and `reason` are NOT NULL and must not be
   blank (spec 12.3 page 6) — the API refuses a lookup without them before running it.
+- **Search** (revision `0016_search`, section 17): `search_counts` (hourly summary of the loaded
+  lines per file, kind, typed table, lowercased action and private /24 of the client;
+  `arcilogger_db.searchcounts`), `saved_searches` (personal; names unique per owner ignoring
+  case), `ingest_offsets.counts_from_line` (lines before it were loaded before the upgrade and
+  are not in `search_counts` yet), the expression index `ix_fg_web_rhost_time`
+  (`reverse(lower(hostname)), time`) for `domain:`. `partitions.drop_before` also deletes the
+  `search_counts` rows before the cutoff. The kind of a line (`traffic`, `web`, `dhcp` …) is
+  `arcilogger_db.kinds.kind_of(type, subtype)` everywhere (ingest, search, live tail).
 - **Schema changes:** the baseline `0001_baseline` is frozen. If your package needs a column or
   table, add the model change **and** one new revision file
   `db/src/arcilogger_db/migrations/versions/v<NNNN>_<slug>.py` (`down_revision = "0001_baseline"`
@@ -118,6 +126,14 @@ outcome.error / outcome.detail -> pattern name / detail for parse_failures (None
   aggregate failures with `INSERT … ON CONFLICT (source, day, pattern) DO UPDATE SET count =
   parse_failures.count + EXCLUDED.count`; keep `sources` up to date and raise the alert
   `new_source` (`dedup_key = "new_source:<name>"`) for `unknown-<ip>` senders.
+- **Counts step (Wave 2, section 17.5):** the loader's steps are `offsets`, `copy`, `failures`,
+  `sources`, `counts`, `commit`. `counts` adds the lines that really loaded (a salvaged line
+  without its typed row counts with `tbl = ''`) to `search_counts` with
+  `searchcounts.upsert_counts`, in the batch's transaction, so rows, offsets and counts agree
+  after a crash at any step. Streams loaded before the upgrade carry
+  `ingest_offsets.counts_from_line`; the worker job `search.counts_backfill` recounts them
+  (`rebuild_stream`) and clears it, and `arcilogger-db search-counts status | rebuild | verify`
+  does the same by hand.
 
 ## 5. 5651 lookup (B3)
 
@@ -264,7 +280,9 @@ final rows. *Verify on site that FortiGate interim logs carry the cumulative `du
   `verify_audit_chain(session)` for the "Denetim Kaydı" page, `verify_audit_lines(lines)` for
   spool/vault files. Action names: `<area>.<verb>` (`auth.login`, `auth.login_failed`,
   `user.create`, `settings.change`, `lookup.run`, `evidence.create`, `evidence.download`,
-  `usage.person.view`, `seal.manual`, …).
+  `usage.person.view`, `seal.manual`, `search.run`, `search.event`, `search.refs`,
+  `search.export`, `search.saved_create`, `search.saved_update`, `search.saved_delete`,
+  `live.open`, `live.close`, `raw.tail`, …; section 17.9 lists the search details).
 - **One audit writer (W3-I):** the chain step has a single implementation,
   `arcilogger_db.audit.append_entry(session, actor_id=, actor=, action=, target=, details=,
   ip=)` — canonical entry, hash, `pg_advisory_xact_lock`, READ COMMITTED check, `jsonable`
@@ -296,7 +314,8 @@ final rows. *Verify on site that FortiGate interim logs carry the cumulative `du
 - **Router ownership:** `auth`, `users`, `audit` → B5; `lookup`, `lookups`, `raw` → W2-A
   (below); `evidence`, `seals`, `credits` → W2/W3 (implemented, docs/KANIT-PAKETI.md);
   `devices`, `persons`, `departments`, `vlans`, `imports` → devices and persons (section 11);
-  `license` → offline licensing (section 15); `sources` → a later package (still an empty router).
+  `license` → offline licensing (section 15); `search` → Wave 2 WP-B, `live` and `sources` →
+  Wave 2 WP-C (section 17).
 
 ### 6.1 5651 lookup, official report and raw lines (W2-A)
 
@@ -1258,3 +1277,261 @@ not written.
 Captured answers: `web/e2e/samples/admin.json` (`kamusm`, `sources` and the refusals in
 `errors`), `settings.json`, the seal now and credit query samples in `seals.json` /
 `credits.json`.
+
+## 17. Search, live tail and sources API (Wave 2, ADR-0015)
+
+Decision: [ADR-0015](adr/0015-search-live-sources.md). Operator guide: [ARAMA.md](ARAMA.md) /
+[SEARCH.md](SEARCH.md) (query language, fields, speed, statistics, export, live tail, measured
+performance). Base `/api/v1`; nothing here is licence-gated (5651 Temel,
+`api/tests/test_license_routes.py`, `test_search_permissions.py`). Captured answers:
+`web/e2e/samples/search.json` (`web/scripts/samples_search.py`), `live.json` and
+`sources.json` (`samples_live_sources.py`).
+
+### 17.1 Query language, kinds, field catalogue
+
+- **Grammar** (`arcilogger_api.search.grammar`, `parse_query(text) -> Query`): clauses ANDed,
+  `-`/`NOT ` negate, a bare `AND` is ignored, `field:a,b` is OR inside a field, `field:*`
+  present; `(`, `)` and a bare `OR` → `search_or_unsupported`; a word with `:` and no such field
+  → `search_unknown_field` (hint `mac:` for a MAC, quote a URL or IPv6). Limits `LIMITS`:
+  1,000 characters, 16 clauses, 20 values per clause, 5 free-text terms, 256 characters per
+  value (`search_too_complex`). Hand-written and linear; raises only `SearchQueryError(code,
+  start, end, **params)`; `Query.normalized` parses again to the same tree (property tests).
+  Time is never in `q`.
+- **Kinds** (`arcilogger_db.kinds`, shared by ingest, the planner, the matcher and the live hub):
+  `kind_of(type, subtype)`, `KINDS` (labels, `messages` predicate, typed tables, `mt_event.event`
+  values), `CLIENT_IP` (table → client column), `TYPED_TABLES`, `tables_of(kinds)`.
+- **Field catalogue** (`arcilogger_api.search.fields.FIELDS`, built from `Base.metadata`
+  columns): name, aliases, kind, scope (messages-only, typed, source/sender/type), columns per
+  table, `indexed` tables; `GET /search/fields` serves it, `tests/test_search_docs.py` compares
+  ARAMA.md/SEARCH.md with it. Values: `parse_value(field, raw)` (IP/CIDR/wildcard, int ranges and
+  comparisons, protocol, MAC and vendor prefix, domain with punycode, tokens, ASCII
+  case-insensitive text with `*` patterns, severity, parse error pattern, VLAN ids, departments,
+  free text ≥ 3 characters). `SiteNetwork.load(session, config)` resolves VLANs, departments and
+  network sources (`ap` also matches `ap-<ip>`).
+
+### 17.2 Planner and SQL
+
+- `plan_query(query, site) -> Plan` (`search.planner`): a **typed** plan when the query has a
+  typed field (one branch per table of the intersection of the fields' tables and the kinds
+  `type:` allows, else `search_fields_incompatible`), otherwise one `messages` branch with the
+  kind predicates. Messages-only conditions of a typed plan join `messages` by raw reference
+  (`time, source, raw_day, raw_line`). `Plan.selective` (some branch has a positive,
+  index-covered conjunct) decides only the notice `query_not_selective`;
+  `Plan.rollup_eligible(from, to)` the statistics mode. Notices of the plan: `text_case`,
+  `text_truncated`, `query_not_selective`, `department_by_vlan`.
+- **Safe by construction** (`search.sql`): identifiers only from the catalogue; every value is a
+  bound parameter (`CAST(… AS INET|CIDR|MACADDR)`, `LIKE`/`ILIKE … ESCAPE '\'` with `\ % _`
+  escaped in Python); no `text()` with input (the only constants: `READ_ONLY` and the deadline's
+  `set_config`). Negation is `NOT coalesce(<predicate>, false)`. Domains on `fg_web` use the
+  expression of `ix_fg_web_rhost_time` (`reverse(lower(hostname))`, an exact arm plus the
+  `[r + '.', r + '/')` range). `api/tests/test_search_sql_safety.py` checks compiled SQL for
+  user values, the identifier allow-list, the lint rule, a refused write inside a search
+  transaction and that every accepted query answers 200, a known 4xx or 504.
+- **Read-only snapshot** (`routers/search.reading`): the authentication's transaction is
+  committed, a gate slot taken, then `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ
+  ONLY` opens one snapshot for every window, fill-in query and count of the request; each
+  statement runs in a savepoint under `statement_deadline` (`routers/lookup.py`), so a timed-out
+  window keeps the snapshot; the transaction is rolled back and the audit entry written in a
+  fresh one, committed before the response.
+
+### 17.3 Window scan, registry, cursor, gates
+
+- `search.windows.run_page(session, plan, from, to, cursor, limit, budget_seconds)`: windows
+  newest first, 1 h, doubling while a window took less than a quarter of the budget left,
+  clipped to `from`; `LIMIT` = rows missing + 1; stop when the page is full, `from` is reached
+  or `search.request_budget_ms` is used. A first window that times out is halved down to 5 min
+  (each try gets half the budget left); 5 min timing out → 504 `search_timeout` (audited,
+  `outcome: "timeout"`, `search_id: null`); a later window that times out ends the page with a
+  frontier. After a `last` cursor the first window always runs, also when its time is `from`
+  itself (rows still due at that instant); a budget gone before any window returns the same
+  cursor. `scan {complete, scanned_from, scanned_to, windows, elapsed_ms}`.
+- **Registry** (`search.registry`, in memory, one worker): `search_id` =
+  `secrets.token_urlsafe(16)`; user, session token hash, plan, range, limit, `saved_id`; sliding
+  TTL 30 min, 20 per user, 1,000 in total (least recently used dropped). Another session's or
+  user's, an evicted or unknown id → 409 `search_expired`.
+- **Cursor** (`search.cursor`): base64url of `{"v":1,"k":"last","t":<UTC µs>,"b":<rank>,"i":<id>}`
+  or `{"v":1,"k":"frontier","t":…}`, at most 256 characters, parsed strictly (aware time inside
+  `[from, to]`, a rank of the plan, `0 ≤ id < 2^63`, nothing else) → 422
+  `search_cursor_invalid`. Per branch after `last (t, R, i)`: rank `< R` → `time < t`, `= R` →
+  `(time, id) < (t, i)`, `> R` → `time <= t`; after `frontier T`: `time < T`. Pages concatenate
+  to the full ordered list (`test_search_cursor.py`).
+- **Gates** (`search.gate`): `search.max_concurrent` slots for search, page, statistics, refs
+  and export, 2 per user, 2 s wait, then 429 `search_busy` (`Retry-After: 2`);
+  `search.runs_per_minute` per user for `POST /search` (429 `search_rate_limited`,
+  `Retry-After`); `search.max_days` (`search_range_too_long`).
+
+### 17.4 Endpoints
+
+Every endpoint needs `require_privacy_notice("search.read")` unless stated; bodies are strict
+(`extra="forbid"`); all are POST except the catalogue, the drawer and the saved list, so no query
+travels in a URL.
+
+| Endpoint | Request → response | Audit |
+|---|---|---|
+| `POST /search` | `SearchRequest {q ≤ 1000, from, to, limit?: 1..search.page_size_max (default min(100, max)), saved_id?}` (with `saved_id`: the saved query and range) → `SearchPage` | `search.run` |
+| `POST /search/page` | `{search_id, cursor, limit?}` → `SearchPage` | — |
+| `POST /search/stats` | `{search_id}` → `SearchStats` | — |
+| `POST /search/parse` | `{q}` → `ParseResult` (`search.read` only, no database) | — |
+| `GET /search/fields` | → `FieldCatalogue` (`search.read` only) | — |
+| `GET /search/event` | `?table=&time=&id=` → `SearchEvent` (unknown table or row: 404 `search_event_not_found`; a read that ran out of time: 504 `search_event_timeout`; `extra` display-safe) | `search.event` |
+| `POST /search/refs` | `{search_id, limit: 1..10000}` → `SearchRefs` (+ `evidence.create`) | `search.refs` |
+| `POST /search/export` | `{search_id, format: "csv" \| "xlsx"}` → file (+ `search.export`, re-authentication within 5 min) | `search.export` |
+| `GET /search/saved` | → `{items: SavedSearch[]}` (own only) | — |
+| `POST /search/saved` | `SavedSearchIn {name 1..80, q ≤ 1000, range: {preset} \| {from, to}}` → 201 `SavedSearch` | `search.saved_create` |
+| `PUT /search/saved/{id}` | `SavedSearchIn` → `SavedSearch` | `search.saved_update` |
+| `DELETE /search/saved/{id}` | → 204 | `search.saved_delete` |
+
+Answers (`search.schemas`): `SearchPage {search_id, expires_at, query {normalized, clauses
+[{field, op, values, negated, start, end}], text}, range {from, to}, plan {driver: "messages" |
+"typed", tables, kinds, selective, rollup_eligible}, items: SearchRow[], next_cursor, scan,
+notices}`; `SearchRow {key "<table>:<time>:<id>", table, time, time_received, source, sender,
+kind, type, subtype, summary {srcip, srcport, dstip, dstport, natip, natport, action, domain,
+url, app, category, user, mac, proto, policy, interface, vlan_id}, text (≤ 500, display-safe),
+raw {source, day, line, offset}, parse_error}`; `SearchStats {search_id, mode: "rollup" |
+"hybrid" | "direct", complete, covered_from, covered_to, total {value, exact}, histogram
+{bucket_seconds, buckets [{start, count}]}, facets {source, kind, action, vlan, department:
+{status: "ok" | "sampled" | "unavailable", values [{value, label_tr, label_en, count}], other}},
+sampled, sample_rows, notices, elapsed_ms}`; `ParseResult {normalized, clauses, kinds, selective,
+errors [{code, message_tr, message_en, start, end}]}`; `FieldCatalogue {fields [{name, aliases,
+kind, label_tr, label_en, help_tr, help_en, tables, indexed, examples}], kinds [{key, label_tr,
+label_en}], sources [{name, type, network}], limits {max_chars, max_clauses, max_values,
+max_terms, max_days, page_size_max}}`; `SearchEvent {table, kind, fields, extra, message {type,
+subtype, severity, facility, program, host, text (≤ 2000), parse_error} | null, raw}`;
+`SearchRefs {refs, truncated, complete, unsealed_days, sha256}`; `SavedSearch {id, name, q,
+range, created_at, updated_at, last_run_at}`; `Notice {code, message_tr, message_en, params}`
+with the codes `vault_only_before` (`from` before the oldest `messages.time`, cached 10 min),
+`counts_incomplete`, `text_case`, `text_truncated`, `query_not_selective`, `department_by_vlan`.
+
+### 17.5 Statistics and the summary table
+
+- `search_counts (hour, source, raw_day, kind, tbl, action, net, n)` (unique key `NULLS NOT
+  DISTINCT`): one row per hour, file, kind, typed table (`''` without one), lowercased action
+  and private IPv4 /24 of the client (`arcilogger_db.searchcounts`: `count_key`, `upsert_counts`,
+  `rebuild_stream(conn, source, day)`, `counts_complete(conn, from, to)`, `verify`). Filled by
+  ingest's `counts` step (section 4), by the worker job `search.counts_backfill` for streams with
+  `ingest_offsets.counts_from_line` set, and by `arcilogger-db search-counts rebuild`.
+- `search.stats.run_stats(session, plan, from, to, labels, budget_seconds, sample_rows)`:
+  **rollup** when `Plan.rollup_eligible` (only `source`, `type`, `action`, `vlan`, `department`
+  and negations, no free text, VLAN subnets private IPv4 ≤ /24, range > 12 h) and
+  `counts_complete`; **hybrid** when the range has partial edge hours (counted directly);
+  **direct** otherwise, windowed under `search.stats_budget_ms` (a cut count is `complete:
+  false` with `covered_from`, never 504). Buckets: ≤ 2 h 1 min, ≤ 12 h 5 min, ≤ 3 days 1 h,
+  ≤ 14 days 3 h, else 6 h, aligned with `date_bin` to `2000-01-01 00:00+03:00`. Facets (top 10
+  plus `other`) in one `GROUPING SETS` query; direct facets over the newest
+  `search.facet_sample_rows` matches (`sampled`); a `messages` plan counts only source and kind
+  (`unavailable` for the others). VLAN of a /24: the most specific VLAN holding it, `multiple`
+  ("Birden çok VLAN") when smaller VLANs lie inside it. Rollup and hybrid equal direct counting
+  (`test_search_stats.py`, `test_search_oracle.py`).
+
+### 17.6 Saved searches, export, evidence references
+
+- **Saved** (`search.saved`): personal; `search.saved_max_per_user` (409
+  `saved_search_limit`); names unique per owner ignoring case (409 `saved_search_name_taken`),
+  without control, format or surrogate characters (422 `validation_error`);
+  another user's id 404 `saved_search_not_found`. Presets `15m`, `1h`, `24h`, `today` (since
+  site midnight), `yesterday`, `7d`, `30d`, resolved when the search runs; a run sets
+  `last_run_at`.
+- **Export** (`search.export`): the plan's rows by the window loop in chunks until
+  `search.export_max_rows` or `search.export_budget_seconds`, the fill-in queries under the
+  budget left (then `truncated` = `rows` | `time`, a fill-in timeout too, never empty columns:
+  file name `arama-<from>-<to>-kismi.<ext>`, header `X-Arci-Export-Truncated`, the "Bilgi"
+  sheet). CSV: UTF-8 BOM, `;`, CRLF, `csvfiles.neutralise` on every cell; XLSX: write-only,
+  every cell text, sheets "Sonuçlar" and "Bilgi" (query, range, user, time, rows, status and
+  "Bu dosya mühürlü değildir; bütünlük için Kanıt Paketi'ni kullanın."). Built in a
+  `SpooledTemporaryFile` (16 MB), hashed, audited and committed before it is streamed with
+  `Content-Length`, `Repr-Digest: sha-256=:…:` and `Cache-Control: no-store`. One export per user
+  (409 `search_export_running`); `search.export_max_per_hour` counted from `audit_log` (429
+  `search_export_rate_limited`, `Retry-After`).
+- **Refs** (`search.refs`): the raw references of the whole search up to `limit` (≤ 10,000, the
+  evidence extract maximum), `truncated`, `complete` (the statistics budget), `unsealed_days`
+  (days without a vault manifest), `sha256` of the canonical JSON list (days as ISO dates). The
+  web hands them to the evidence wizard; `POST /evidence` is unchanged.
+
+### 17.7 Live tail (`routers/live.py`, `live/`)
+
+- Lines come from the **spool** (`rawtail.py`: `line_anchor`, `tail_lines`, `Follower`), never
+  from the database: one hub per API process (`live/hub.py`, on `app.state`) polls today's file
+  of the wanted folders every 0.5 s and lists `spool/` every 5 s (network members and new
+  `unknown-<ip>` folders join at once), reads at most 1 MiB per file per poll (more than 8 MiB
+  behind: skipped and counted `behind`), follows the day change at site midnight, parses with
+  `arcilogger_ingest.prepare.prepare_line` within `live.parse_lines_per_second` and filters with
+  `search/matcher.py` (the planner's semantics, property-tested). Buffer `live.buffer_lines` with
+  a sequence number and an `epoch`.
+- `POST /live/streams` (`require_privacy_notice("search.read")`, CSRF) `{q, backfill:
+  0..live.backfill_lines}` → 201 `{stream_id, epoch, expires_at, folders, limits}` (422 query
+  errors, 429 `live_stream_limit`, 503 `live_unavailable`), audited `live.open`;
+  `GET /live/streams/{id}` (the user's and session's own, else 404 `live_stream_not_found`) →
+  `text/event-stream` (`hello`, `line` with `id: <epoch>:<seq>`, `dropped` at most once a
+  second, `gap`, `end`, a keep-alive comment every 15 s; `Last-Event-ID` resumes);
+  `DELETE /live/streams/{id}` → 204, audited `live.close` (also on `end`, lingering out and
+  shutdown); `GET /live/status` (`search.read`, no person data).
+- Limits: `live.max_lines_per_second` per stream (token bucket; the rest `rate_limited`), a
+  queue of 500 (`slow_client`; full for 30 s ends the stream), `live.max_streams_total` and
+  `live.max_streams_per_user`, `live.max_minutes` (`end time_limit`); a paused stream lingers
+  120 s. Every 30 s the stream checks the session (`session_problem`: revoked, expired, idle,
+  inactive), `search.read` and the KVKK notice; the GET and its reconnects send
+  `X-Arci-Background: 1`. Caddy does not compress `/api/v1/live/*`.
+
+### 17.8 Sources and the Panel box (`routers/sources.py`, `sourcehealth.py`)
+
+- `GET /sources` (`sources.read`, counts only, cached 15 s) → `SourcesOverview {generated_at,
+  today, collector, items: SourceHealth[]}` with the state (`active`, `silent`, `never`,
+  `disabled`, `unknown`, `promoted`; the R15 definition), `messages_per_minute`, a 60-minute
+  `sparkline`, `lines_today`, `pending_bytes`, parse failures, `suggested` for unknown senders.
+- `GET /sources/{name}` (cached 30 s) → `SourceDetail` (+ `hourly` 48 h from `search_counts`
+  when complete, `daily` 14 days, `gaps` 30 days from the manifests and today, `parse_failures`
+  7 days; `error` only for `search.read` or `lookup.run`); unknown → 404 `source_not_found`.
+- `GET /sources/{name}/tail?limit=50` (≤ 200; `sources.read` and `search.read` or `lookup.run`
+  and the KVKK notice; 30 a minute) → today's (else yesterday's) spool lines with offsets and
+  SHA-256 and `range_sha256` of the exact byte range; `lines: []` with `reason: "no_file_today"`
+  without a file; audited `raw.tail`.
+- **Panel:** `GET /dashboard/summary` gains the box `parse_failures` (`sources.read` or
+  `dashboard.view`; patterns and counts only): `{day, lines, failures, permille, by_source,
+  top_patterns, last7} | null`.
+
+### 17.9 Permissions, settings, codes, audit
+
+- Permissions (no new key): search, pages, statistics, parse, fields, event, saved searches and
+  the live tail `search.read` + KVKK (admin, auditor); export `search.export` + KVKK +
+  re-authentication (admin); refs `search.read` + `evidence.create` + KVKK (admin); sources
+  `sources.read` (admin), the tail also `search.read` or `lookup.run` + KVKK
+  ([roles.md](roles.md)).
+- Settings (group `search`, "Arama ve canlı akış"): `search.max_days` 31, `page_size_max` 500,
+  `request_budget_ms` 4000, `stats_budget_ms` 8000, `facet_sample_rows` 100000,
+  `max_concurrent` 3, `runs_per_minute` 30, `export_max_rows` 100000, `export_max_per_hour` 10,
+  `export_budget_seconds` 120, `saved_max_per_user` 100; `live.max_streams_total` 4,
+  `max_streams_per_user` 2, `max_lines_per_second` 100, `parse_lines_per_second` 1000,
+  `buffer_lines` 5000, `max_minutes` 60, `backfill_lines` 50 (bounds in
+  `arcilogger_db.settings`; read per request).
+- Error codes and notices with their Turkish and English texts: `search.messages` (`MESSAGES`,
+  `STATUS`, `NOTICES`), `live/messages.py`, `routers/sources.py`; the list with HTTP statuses is
+  ARAMA.md/SEARCH.md section 14. Reused: `forbidden`, `privacy_notice_required`,
+  `reauth_required`, `password_change_required`, `session_*`, `csrf_failed`,
+  `validation_error`, `raw_*`.
+- Audit (details are inputs, counts and hashes, never row content): `search.run`
+  (`search_id`, `q` normalised, `from`, `to`, `kinds`, `driver`, `tables`, `rows`, `complete`,
+  `outcome`, `elapsed_ms`, `saved_id`), `search.event` (`table`, `id`, `time`, `raw`),
+  `search.refs` (`search_id`, `q`, `from`, `to`, `refs`, `truncated`, `complete`, `sha256`),
+  `search.export` (`search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`,
+  `sha256`), `search.saved_create` / `_update` / `_delete` (`saved_id`, `name`, `q`),
+  `live.open`, `live.close`, `raw.tail`. Not audited: `/search/page`, `/search/stats` (they serve
+  an audited `search_id` only), `/search/parse`, `/search/fields`, `/live/status`, the sources
+  list and detail.
+
+### 17.10 Performance guards (`poe test-perf`)
+
+`api/tests/test_search_perf.py`, tier `ARCILOGGER_SEARCH_PERF` = `1` (default: the newest day
+2,000,000 lines plus 29 days of 100,000, and 4,320 `mt_event` rows a day (heartbeats, Wi-Fi,
+1 % DHCP offers), written with `generate_series`, `search_counts` rebuilt,
+`VACUUM ANALYZE`, TimescaleDB chunks older than 7 days compressed), `heavy` (30 × 1,000,000, on
+site) or `0` (skipped). Budgets (best of three after a warm-up, through the API): Q1 browse first
+page 1 d / 30 d < 0.5 s; Q2 `srcip:<needle>` 1 d < 2 s, 30 d < 10 s; Q3 `srcip:<a /24>` 1 d
+< 2 s; Q4 `srcip:<needle> type:web action:blocked`, Q5 `domain:<rare> type:web`, Q6 `type:dhcp
+mac:<rare>`, Q7 `qname:<rare>` 30 d < 10 s; Q8 statistics from the summary table 30 d < 0.5 s and
+equal to direct counting; Q9 direct statistics 1 d < 2 s; Q10 export of 10,000 rows < 10 s;
+S1–S3 scans within the request budget + 0.5 s with an honest `complete`. For Q2 and Q4–Q7 the
+whole-range plan (`EXPLAIN (FORMAT JSON)`, scans resolved to their table through partitions and
+chunks) has no `Seq Scan` and no primary-key range scan of `messages`, `fg_traffic`, `fg_web`,
+`fg_dns`, `fg_app` (compressed chunks excepted) and uses the field's index (Q6: `mt_dhcp`'s MAC
+index and `mt_event`'s event index); Q3 refuses only a `Seq Scan`; Q10's rows all have their
+client address and text. The measured numbers: ARAMA.md / SEARCH.md section 13.

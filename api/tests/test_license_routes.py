@@ -68,8 +68,8 @@ ROUTES: dict[tuple[str, str], str | None] = {
     # Module bulk_import: 2 routes
     ("POST", f"{V}/imports/{{kind}}"): BI,
     ("GET", f"{V}/imports/{{kind}}/template.csv"): BI,
-    # 5651 Temel, never gated: 62 routes, the 3 of the licence and the 38 of the browser
-    # administration (ADR-0014)
+    # 5651 Temel, never gated: 62 routes, the 3 of the licence, the 38 of the browser
+    # administration (ADR-0014) and the 12 of Arama (ADR-0015)
     ("GET", f"{V}/health"): None,
     ("GET", f"{V}/alerts"): None,
     ("GET", f"{V}/alerts/summary"): None,
@@ -174,6 +174,19 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/settings"): None,
     ("PATCH", f"{V}/settings"): None,
     ("POST", f"{V}/settings/{{key}}/reset"): None,
+    # Arama (ADR-0015): 5651 Temel, never gated.
+    ("POST", f"{V}/search"): None,
+    ("POST", f"{V}/search/page"): None,
+    ("POST", f"{V}/search/stats"): None,
+    ("POST", f"{V}/search/parse"): None,
+    ("GET", f"{V}/search/fields"): None,
+    ("GET", f"{V}/search/event"): None,
+    ("POST", f"{V}/search/refs"): None,
+    ("POST", f"{V}/search/export"): None,
+    ("GET", f"{V}/search/saved"): None,
+    ("POST", f"{V}/search/saved"): None,
+    ("PUT", f"{V}/search/saved/{{saved_id}}"): None,
+    ("DELETE", f"{V}/search/saved/{{saved_id}}"): None,
 }
 PLACEHOLDERS = {
     "{key}": "x",
@@ -193,6 +206,7 @@ PLACEHOLDERS = {
     "{day}": "2026-10-12",
     "{user_id}": "1",
     "{request_id}": "0" * 32,
+    "{saved_id}": "1",
 }
 #: Called last: they end or change the session the other calls use.
 LAST = [("POST", f"{V}/auth/password"), ("POST", f"{V}/auth/logout")]
@@ -232,7 +246,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 103
+    assert len(ROUTES) - len(gated) == 115
 
 
 def test_the_module_markers_equal_the_table() -> None:

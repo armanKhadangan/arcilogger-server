@@ -99,6 +99,12 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = {
         "Kayıt veritabanında bulunamadı.",
         "The record was not found in the database.",
     ),
+    "search_event_timeout": (
+        "Kayıt {seconds} saniye içinde okunamadı; veritabanı şu anda yoğun. Biraz sonra yeniden "
+        "deneyin.",
+        "The record could not be read within {seconds} s; the database is busy. Try again a "
+        "little later.",
+    ),
     "search_export_running": (
         "Önceki dışa aktarmanız hâlâ hazırlanıyor.",
         "Your previous export is still being prepared.",
@@ -137,6 +143,7 @@ STATUS: Final[Mapping[str, int]] = {
     "search_busy": 429,
     "search_rate_limited": 429,
     "search_event_not_found": 404,
+    "search_event_timeout": 504,
     "search_export_running": 409,
     "search_export_rate_limited": 429,
     "saved_search_not_found": 404,

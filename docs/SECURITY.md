@@ -38,6 +38,10 @@
   beklemeler, kapatma) yalnızca yöneticilerin yazabildiği `admin\policy.json` dosyasındadır.
 - Kişisel veri gören roller **KVKK bilgilendirmesini** onaylamadan kişi düzeyinde veri döndüren
   uç noktalara erişemez (sunucu tarafında zorunlu, `require_privacy_notice`).
+- **Arama ve Canlı Akış** (bölüm 15, [ARAMA.md](ARAMA.md)): sorgular yalnızca POST gövdesinde
+  taşınır (adres satırında ve erişim kayıtlarında kişisel veri yoktur), her arama salt okunur bir
+  işlemde ve bağlı parametrelerle çalışır ve yanıttan önce denetim kaydına yazılır; dışa aktarma
+  yöneticiye ve yeniden doğrulamaya bağlıdır; canlı akış oturumu 30 saniyede bir yeniden denetler.
 - Giriş, hatalı giriş, kilitleme, TOTP hataları, çıkış, parola ve kullanıcı değişiklikleri
   **zincirlenmiş denetim kaydına** yazılır; parolalar, kodlar ve gizli anahtarlar asla yazılmaz.
 - İlk yönetici, sunucu konsolunda (yönetici PowerShell'i) üretilen **tek kullanımlık kurulum
@@ -66,7 +70,11 @@ separate virtual account (`NT SERVICE\ArciAdmin`) checks and applies signed requ
 firewall, Windows Time and the Zamane client are changed by a SYSTEM task that takes no input from
 a request; the tasks run programs from trusted places only. Offline licensing (section 13):
 only public keys and revoked licence ids in the code, no telemetry, services and tasks on isolated
-Python (`python -I`), and a plain list of what an offline licence check cannot prevent.
+Python (`python -I`), and a plain list of what an offline licence check cannot prevent. Search
+and live tail (section 15): queries only in POST bodies, read-only transactions with bound
+parameters, audited before the answer, export only for administrators after a
+re-authentication, and a live stream that re-checks its session every 30 seconds without
+resetting the idle timer.
 
 ## 1. Sign-in flow
 
@@ -560,3 +568,57 @@ CreateFiles with CREATOR OWNER Delete lets ArciAdmin create, write, rename and d
 files in `kamusm-roots`; that a virtual account can write the Application log; that event
 triggers wake LOCAL SERVICE and SYSTEM tasks; that the in-place firewall update loses no
 datagram.
+
+## 15. Search and live tail
+
+Decision: [ADR-0015](adr/0015-search-live-sources.md); operator guide: [ARAMA.md](ARAMA.md) /
+[SEARCH.md](SEARCH.md); contract: [MVP-CONTRACTS.md](MVP-CONTRACTS.md) section 17.
+
+**Özet (TR).** Arama ve Canlı Akış kişisel veri gösterir. Bir sorgu hiçbir zaman adres
+satırında taşınmaz: sorgu çalıştıran her istek POST gövdesindedir, canlı akışın adresi yalnızca
+rastgele bir numara taşır; Caddy ve Uvicorn erişim kayıtlarında kişisel veri bulunmaz. Her arama
+salt okunur bir veritabanı işleminde çalışır ve yanıt gönderilmeden önce denetim kaydına
+yazılır. Kullanıcının yazdığı hiçbir değer SQL metnine girmez. Dışa aktarma yalnızca yöneticiye
+ve parolanın son 5 dakika içinde yeniden girilmesiyle açıktır; dosya gönderilmeden önce SHA-256
+değeriyle denetlenir. Canlı akış her 30 saniyede oturumu, yetkiyi ve KVKK onayını yeniden denetler
+ve boşta kalma süresini sıfırlamaz.
+
+- **No personal data in URLs** (decision 10): `POST /search`, `/search/page`, `/search/stats`,
+  `/search/refs`, `/search/export`, `/search/parse` carry the query in the body; `GET
+  /search/event` carries only a table name, a time and a row id; a live stream URL holds only its
+  random id. Access logs of Caddy and Uvicorn therefore hold no query, address or name.
+- **Bound parameters only** (contract 2.5.1): identifiers come from the field catalogue, every
+  value is a bound parameter (casts to `INET`, `CIDR`, `MACADDR`; `LIKE`/`ILIKE` with `\ % _`
+  escaped in Python and `ESCAPE '\'`); no SQL text is built from input.
+  `api/tests/test_search_sql_safety.py` checks the compiled SQL for user values, refuses `text(`
+  and f-string SQL in `arcilogger_api/search/` and runs an injection property test.
+- **Read-only transactions:** every search request commits its authentication first, then runs
+  all of its statements in one `REPEATABLE READ, READ ONLY` transaction under
+  `statement_deadline`; a write inside it fails (tested). The transaction is rolled back and the
+  audit entry is written and committed **before** the answer: no row, count or file leaves the
+  API without its `search.run`, `search.event`, `search.refs` or `search.export` entry. Audit
+  details are inputs, counts and hashes, never row content.
+- **Bound to the session:** a `search_id` (random, 30 minutes, in memory) and a live stream
+  belong to the user **and** the session that made them; another session gets 409
+  `search_expired` / 404 `live_stream_not_found`. Cursors are parsed strictly and all their
+  parts are bound, so a changed cursor can only move within the same audited search (422
+  `search_cursor_invalid` otherwise). Saved searches are personal (another user's id: 404).
+- **Export:** `search.export` (administrators), the KVKK notice and a re-authentication within
+  5 minutes; formula neutralisation in every cell; the file is hashed and audited before it is
+  sent with `Repr-Digest` and `Cache-Control: no-store`; at most one export at a time and
+  `search.export_max_per_hour` an hour, counted from the audit log. The file is not sealed and
+  says so.
+- **Limits against overload:** `search.max_concurrent` slots (2 per user), `search.runs_per_minute`,
+  the request and statistics budgets, `search.max_days`; for the live tail per-stream rate
+  limits, a bounded queue, `live.max_streams_total` / `live.max_streams_per_user` and
+  `live.max_minutes`.
+- **Stream session behaviour** (contract 2.14.6): `POST /live/streams` is a user action; the
+  stream's GET, its keep-alives and reconnects send `X-Arci-Background: 1` and never reset the
+  idle timer. Every 30 s the stream checks the session (revoked, expired, idle, inactive user),
+  `search.read` and the current KVKK notice and ends with that code; an idle viewer is signed
+  out after `auth.idle_minutes` as on every page. Closing, ending and lingering out are audited
+  `live.close` (best effort on shutdown; `live.open` is already recorded). The hub only reads the
+  spool, opens every file shared and closes it, so it never blocks the sealer; raw lines are
+  never modified.
+- **No licence gate:** search, the live tail and the sources page are 5651 Core in every licence
+  state (`test_search_permissions.py`, `test_license_routes.py`).

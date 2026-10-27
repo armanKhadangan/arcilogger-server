@@ -95,6 +95,7 @@ licence state.
 | `/lookup` | 5651 lookup, official PDF report and time stamp | 5651 Core |
 | `/lookups` | Saved 5651 lookups | 5651 Core |
 | `/raw` | Raw log lines | 5651 Core |
+| `/search` | Arama (log search): searches, statistics, saved searches, export | 5651 Core |
 | `/evidence` | Evidence packages | 5651 Core |
 | `/seals` | Sealed days, manifest, time stamp, verification, "Şimdi mühürle" (seal now) | 5651 Core |
 | `/credits` | Kamu SM credit, "Kontör sorgula" (query now) | 5651 Core |

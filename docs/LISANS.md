@@ -96,6 +96,7 @@ vermez.
 | `/lookup` | 5651 sorgusu, resmi PDF raporu ve zaman damgası | 5651 Temel |
 | `/lookups` | Kaydedilmiş 5651 sorguları | 5651 Temel |
 | `/raw` | Ham log satırları | 5651 Temel |
+| `/search` | Arama: log araması, istatistikler, kayıtlı aramalar, dışa aktarma | 5651 Temel |
 | `/evidence` | Kanıt paketleri | 5651 Temel |
 | `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama, "Şimdi mühürle" | 5651 Temel |
 | `/credits` | Kamu SM kontörü, "Kontör sorgula" | 5651 Temel |
