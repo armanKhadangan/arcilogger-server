@@ -31,6 +31,24 @@ export type DestinationMatch =
   | 'none'
   | 'not_requested';
 export type DepartmentSource = 'person' | 'vlan' | 'none';
+/**
+ * Where a chain's MAC comes from (ADR-0016): `lease` — the lease timeline; `srcmac` — the srcmac
+ * field of the FortiGate session record on an interface listed in `lookup.srcmac_interfaces`
+ * (low confidence, partial evidence, never a lease).
+ */
+export type MacSource = 'lease' | 'srcmac';
+/** The kind of an internet exit of `nat.egresses` (`internal`: a NAT address, no internet exit). */
+export type EgressMode = 'direct' | 'isp_nat' | 'not_logged' | 'internal';
+export type PortPreservation = 'unknown' | 'preserved' | 'not_preserved';
+/** How a public-IP lookup resolved its address against the internet exits. */
+export type EgressResolution =
+  | 'public'
+  | 'transip'
+  | 'fallback'
+  | 'observed'
+  | 'public_unknown'
+  | 'unconfigured'
+  | 'no_egress';
 
 /** Line `line` (1-based) of `spool/<source>/<day>.log` = the same line of the sealed file. */
 export interface RawRef {
@@ -69,6 +87,12 @@ export interface LeaseInfo {
   end_reason: string;
   confidence: Confidence;
   evidence: EvidenceRef[];
+  /** `mt_dhcp` | `fg_dhcp` | `mt_arp`; `null` in lookups stored before ADR-0016. */
+  source_table: string | null;
+  /** The lease time the FortiGate logged (seconds; `fg_dhcp` leases only). */
+  lease_seconds: number | null;
+  /** The lease's own newest DHCP record at or before the chain's moment. */
+  last_dhcp_evidence: DateTimeString | null;
 }
 
 export interface DeviceInfo {
@@ -126,6 +150,7 @@ export interface AttributionChain {
   confidence: Confidence;
   explanations: Explanation[];
   alternatives: AttributionChain[];
+  mac_source: MacSource;
 }
 
 /** The FortiGate session behind a match (from `fg_traffic`). */
@@ -141,6 +166,10 @@ export interface TrafficInfo {
   start: DateTimeString;
   end: DateTimeString;
   evidence: EvidenceRef[];
+  srcintf: string | null;
+  dstintf: string | null;
+  /** Only for interfaces listed in `lookup.srcmac_interfaces`. */
+  srcmac: string | null;
 }
 
 export interface NatMatch {
@@ -152,6 +181,54 @@ export interface NatMatch {
   destination_match: DestinationMatch;
   traffic: TrafficInfo;
   chain: AttributionChain | null;
+  /** The internet exit of the match (from its session row nearest the requested moment). */
+  egress: string | null;
+  /** Sources of its rows that are not configured FortiGate senders (shown as a badge). */
+  untrusted_sources: string[];
+}
+
+/** One internet exit as the lookup used it (the normalised fields of `nat.egresses`). */
+export interface EgressEntry {
+  /** `""` for the implicit exit of a site without exits (`unconfigured`). */
+  name: string;
+  label: string;
+  mode: EgressMode;
+  public: string[];
+  public_dynamic: boolean;
+  transips: string[];
+  interfaces: string[];
+  port_preservation: PortPreservation;
+}
+
+/** What a public-IP lookup searched. */
+export interface EgressSearched {
+  transips: string[];
+  /** The private or shared NAT addresses no exit claims were searched. */
+  unclaimed: boolean;
+  /** Unclaimed NAT addresses the logs showed near the moment (at most 5). */
+  unclaimed_seen: string[];
+  /** `fallback` only: the private or shared addresses that made the log check fail. */
+  outside_seen: string[];
+  interfaces: string[];
+  interface_filter: boolean;
+}
+
+/** The last content change of an exit (`changed_by` as stored: `:migration`, `:seed`, …). */
+export interface EgressChange {
+  name: string;
+  changed_at: DateTimeString;
+  changed_by: string;
+  deleted: boolean;
+  after_event: boolean;
+}
+
+/** `LookupOutcome.egress`: how the requested public IP was resolved (ADR-0016). */
+export interface LookupEgress {
+  resolution: EgressResolution;
+  egresses: EgressEntry[];
+  searched: EgressSearched;
+  changes: EgressChange[];
+  changed_after_event: boolean;
 }
 
 /** Where the data of the requested day lives (the database keeps less than the vault). */
@@ -205,6 +282,10 @@ export interface LookupOutcome {
   generated_at: DateTimeString;
   /** More candidates existed than `lookup.max_candidates`. */
   truncated: boolean;
+  /** `null` without a public IP in the request. */
+  egress: LookupEgress | null;
+  /** FortiGate DHCP records of the moment that never entered the lease timeline (cited). */
+  unconverted_dhcp: EvidenceRef[];
   result_count: number;
 }
 

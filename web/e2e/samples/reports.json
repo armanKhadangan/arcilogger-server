@@ -145,13 +145,13 @@
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx\"",
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "x-arci-sha256": "e613dfd39b88c168df825b70b2c0abf4745b5ff849696ba8d244494f6e4b1e93"
+      "x-arci-sha256": "c133e9a6508e510db894c2042d6a51c76b221f6cb1ea5aa8e0244c3c294ef69d"
     },
-    "sha256": "e613dfd39b88c168df825b70b2c0abf4745b5ff849696ba8d244494f6e4b1e93",
+    "sha256": "c133e9a6508e510db894c2042d6a51c76b221f6cb1ea5aa8e0244c3c294ef69d",
     "size": 33571
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:15.256359+00:00",
+    "captured_at": "2026-10-13T04:01:30.426962+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -194,11 +194,11 @@
       {
         "format": "xlsx",
         "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.xlsx",
-        "sha256": "48f081ae4c66f485996a7d5d86a13c9941c8e7c933f3b3c0d13bb4ba11812f1b",
-        "size": 33490
+        "sha256": "9027a2a88924bd066e38acd09236d44c818e1b17d53c4f610b439c6a322c85bd",
+        "size": 33493
       }
     ],
-    "finished_at": "2026-10-13T04:00:17.616164Z",
+    "finished_at": "2026-10-13T04:00:18.088752Z",
     "id": 1,
     "kind": "monthly",
     "period": {
@@ -207,7 +207,7 @@
     },
     "requested_by": "tolga",
     "schedule_id": 4,
-    "started_at": "2026-10-13T04:00:17.390884Z",
+    "started_at": "2026-10-13T04:00:17.854123Z",
     "status": "sent",
     "triggered_by": "manual"
   },
@@ -216,7 +216,7 @@
       {
         "error": null,
         "recipient": "yonetim@ornek.example",
-        "sent_at": "2026-10-13T04:00:18.684943Z",
+        "sent_at": "2026-10-13T04:00:19.143923Z",
         "status": "sent"
       },
       {
@@ -243,11 +243,11 @@
       {
         "format": "xlsx",
         "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
-        "sha256": "e613dfd39b88c168df825b70b2c0abf4745b5ff849696ba8d244494f6e4b1e93",
+        "sha256": "c133e9a6508e510db894c2042d6a51c76b221f6cb1ea5aa8e0244c3c294ef69d",
         "size": 33571
       }
     ],
-    "finished_at": "2026-10-13T04:00:18.684943Z",
+    "finished_at": "2026-10-13T04:00:19.143923Z",
     "id": 3,
     "kind": "full_day",
     "period": {
@@ -256,7 +256,7 @@
     },
     "requested_by": null,
     "schedule_id": 2,
-    "started_at": "2026-10-13T04:00:17.616164Z",
+    "started_at": "2026-10-13T04:00:18.088752Z",
     "status": "partial",
     "triggered_by": "schedule"
   },
@@ -273,7 +273,7 @@
     },
     "requested_by": "tolga",
     "schedule_id": 4,
-    "started_at": "2026-10-13T04:00:17.390884Z",
+    "started_at": "2026-10-13T04:00:17.854123Z",
     "status": "queued",
     "triggered_by": "manual"
   },
@@ -284,7 +284,7 @@
           {
             "error": null,
             "recipient": "yonetim@ornek.example",
-            "sent_at": "2026-10-13T04:00:18.684943Z",
+            "sent_at": "2026-10-13T04:00:19.143923Z",
             "status": "sent"
           },
           {
@@ -311,11 +311,11 @@
           {
             "format": "xlsx",
             "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
-            "sha256": "e613dfd39b88c168df825b70b2c0abf4745b5ff849696ba8d244494f6e4b1e93",
+            "sha256": "c133e9a6508e510db894c2042d6a51c76b221f6cb1ea5aa8e0244c3c294ef69d",
             "size": 33571
           }
         ],
-        "finished_at": "2026-10-13T04:00:18.684943Z",
+        "finished_at": "2026-10-13T04:00:19.143923Z",
         "id": 3,
         "kind": "full_day",
         "period": {
@@ -324,7 +324,7 @@
         },
         "requested_by": null,
         "schedule_id": 2,
-        "started_at": "2026-10-13T04:00:17.616164Z",
+        "started_at": "2026-10-13T04:00:18.088752Z",
         "status": "partial",
         "triggered_by": "schedule"
       },
@@ -360,11 +360,11 @@
           {
             "format": "xlsx",
             "name": "ARCILOGGER-kullanim-ozel-20261005-20261011-r2.xlsx",
-            "sha256": "92455766620303bd4fd046b70eab7f0574f21f478f9a9cbfeee2a5f128d33d6a",
-            "size": 33595
+            "sha256": "910ffa9dcde821bc26935fe696aea7ecb1fd60a751cc6c89f90550991a26958c",
+            "size": 33597
           }
         ],
-        "finished_at": "2026-10-13T04:00:17.616164Z",
+        "finished_at": "2026-10-13T04:00:18.088752Z",
         "id": 2,
         "kind": "custom",
         "period": {
@@ -373,7 +373,7 @@
         },
         "requested_by": "tolga",
         "schedule_id": 2,
-        "started_at": "2026-10-13T04:00:17.455154Z",
+        "started_at": "2026-10-13T04:00:17.915142Z",
         "status": "sent",
         "triggered_by": "manual"
       },
@@ -396,11 +396,11 @@
           {
             "format": "xlsx",
             "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.xlsx",
-            "sha256": "48f081ae4c66f485996a7d5d86a13c9941c8e7c933f3b3c0d13bb4ba11812f1b",
-            "size": 33490
+            "sha256": "9027a2a88924bd066e38acd09236d44c818e1b17d53c4f610b439c6a322c85bd",
+            "size": 33493
           }
         ],
-        "finished_at": "2026-10-13T04:00:17.616164Z",
+        "finished_at": "2026-10-13T04:00:18.088752Z",
         "id": 1,
         "kind": "monthly",
         "period": {
@@ -409,7 +409,7 @@
         },
         "requested_by": "tolga",
         "schedule_id": 4,
-        "started_at": "2026-10-13T04:00:17.390884Z",
+        "started_at": "2026-10-13T04:00:17.854123Z",
         "status": "sent",
         "triggered_by": "manual"
       }
@@ -425,7 +425,7 @@
           {
             "error": null,
             "recipient": "yonetim@ornek.example",
-            "sent_at": "2026-10-13T04:00:18.684943Z",
+            "sent_at": "2026-10-13T04:00:19.143923Z",
             "status": "sent"
           },
           {
@@ -452,11 +452,11 @@
           {
             "format": "xlsx",
             "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
-            "sha256": "e613dfd39b88c168df825b70b2c0abf4745b5ff849696ba8d244494f6e4b1e93",
+            "sha256": "c133e9a6508e510db894c2042d6a51c76b221f6cb1ea5aa8e0244c3c294ef69d",
             "size": 33571
           }
         ],
-        "finished_at": "2026-10-13T04:00:18.684943Z",
+        "finished_at": "2026-10-13T04:00:19.143923Z",
         "id": 3,
         "kind": "full_day",
         "period": {
@@ -465,7 +465,7 @@
         },
         "requested_by": null,
         "schedule_id": 2,
-        "started_at": "2026-10-13T04:00:17.616164Z",
+        "started_at": "2026-10-13T04:00:18.088752Z",
         "status": "partial",
         "triggered_by": "schedule"
       }
@@ -475,7 +475,7 @@
     "total": 2
   },
   "schedule_created": {
-    "created_at": "2026-10-13T04:00:17.232458Z",
+    "created_at": "2026-10-13T04:00:17.676437Z",
     "enabled": true,
     "formats": {
       "email_html": true,
@@ -494,7 +494,7 @@
       "mudur@ornek.example"
     ],
     "time": "08:10",
-    "updated_at": "2026-10-13T04:00:17.232497Z",
+    "updated_at": "2026-10-13T04:00:17.676481Z",
     "updated_by": "tolga",
     "weekday": 5
   },
@@ -502,7 +502,7 @@
     "status": 204
   },
   "schedule_updated": {
-    "created_at": "2026-10-27T06:11:21.907281Z",
+    "created_at": "2026-10-27T22:20:39.015387Z",
     "enabled": true,
     "formats": {
       "email_html": true,
@@ -522,13 +522,13 @@
       "ik@ornek.example"
     ],
     "time": "07:00",
-    "updated_at": "2026-10-27T06:11:40.085335Z",
+    "updated_at": "2026-10-27T22:20:57.808231Z",
     "updated_by": "tolga",
     "weekday": null
   },
   "schedules": [
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": false,
       "formats": {
         "email_html": true,
@@ -545,12 +545,12 @@
       "pseudonymize": false,
       "recipients": [],
       "time": "18:30",
-      "updated_at": "2026-10-27T06:11:21.907281Z",
+      "updated_at": "2026-10-27T22:20:39.015387Z",
       "updated_by": ":seed",
       "weekday": null
     },
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": true,
       "formats": {
         "email_html": true,
@@ -564,7 +564,7 @@
           {
             "error": null,
             "recipient": "yonetim@ornek.example",
-            "sent_at": "2026-10-13T04:00:18.684943Z",
+            "sent_at": "2026-10-13T04:00:19.143923Z",
             "status": "sent"
           },
           {
@@ -591,11 +591,11 @@
           {
             "format": "xlsx",
             "name": "ARCILOGGER-kullanim-tam-gun-20261012-r3.xlsx",
-            "sha256": "e613dfd39b88c168df825b70b2c0abf4745b5ff849696ba8d244494f6e4b1e93",
+            "sha256": "c133e9a6508e510db894c2042d6a51c76b221f6cb1ea5aa8e0244c3c294ef69d",
             "size": 33571
           }
         ],
-        "finished_at": "2026-10-13T04:00:18.684943Z",
+        "finished_at": "2026-10-13T04:00:19.143923Z",
         "id": 3,
         "kind": "full_day",
         "period": {
@@ -604,7 +604,7 @@
         },
         "requested_by": null,
         "schedule_id": 2,
-        "started_at": "2026-10-13T04:00:17.616164Z",
+        "started_at": "2026-10-13T04:00:18.088752Z",
         "status": "partial",
         "triggered_by": "schedule"
       },
@@ -618,12 +618,12 @@
         "ik@ornek.example"
       ],
       "time": "07:00",
-      "updated_at": "2026-10-27T06:11:40.526788Z",
+      "updated_at": "2026-10-27T22:20:58.299090Z",
       "updated_by": "tolga",
       "weekday": null
     },
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": false,
       "formats": {
         "email_html": true,
@@ -640,12 +640,12 @@
       "pseudonymize": false,
       "recipients": [],
       "time": "07:15",
-      "updated_at": "2026-10-27T06:11:21.907281Z",
+      "updated_at": "2026-10-27T22:20:39.015387Z",
       "updated_by": ":seed",
       "weekday": 1
     },
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": false,
       "formats": {
         "email_html": true,
@@ -673,11 +673,11 @@
           {
             "format": "xlsx",
             "name": "ARCILOGGER-kullanim-aylik-20260901-20260930-r1.xlsx",
-            "sha256": "48f081ae4c66f485996a7d5d86a13c9941c8e7c933f3b3c0d13bb4ba11812f1b",
-            "size": 33490
+            "sha256": "9027a2a88924bd066e38acd09236d44c818e1b17d53c4f610b439c6a322c85bd",
+            "size": 33493
           }
         ],
-        "finished_at": "2026-10-13T04:00:17.616164Z",
+        "finished_at": "2026-10-13T04:00:18.088752Z",
         "id": 1,
         "kind": "monthly",
         "period": {
@@ -686,7 +686,7 @@
         },
         "requested_by": "tolga",
         "schedule_id": 4,
-        "started_at": "2026-10-13T04:00:17.390884Z",
+        "started_at": "2026-10-13T04:00:17.854123Z",
         "status": "sent",
         "triggered_by": "manual"
       },
@@ -697,12 +697,12 @@
       "pseudonymize": false,
       "recipients": [],
       "time": "07:30",
-      "updated_at": "2026-10-27T06:11:21.907281Z",
+      "updated_at": "2026-10-27T22:20:39.015387Z",
       "updated_by": ":seed",
       "weekday": null
     },
     {
-      "created_at": "2026-10-13T04:00:17.232458Z",
+      "created_at": "2026-10-13T04:00:17.676437Z",
       "enabled": true,
       "formats": {
         "email_html": true,
@@ -721,14 +721,14 @@
         "mudur@ornek.example"
       ],
       "time": "08:10",
-      "updated_at": "2026-10-13T04:00:17.232497Z",
+      "updated_at": "2026-10-13T04:00:17.676481Z",
       "updated_by": "tolga",
       "weekday": 5
     }
   ],
   "schedules_shipped": [
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": false,
       "formats": {
         "email_html": true,
@@ -745,12 +745,12 @@
       "pseudonymize": false,
       "recipients": [],
       "time": "18:30",
-      "updated_at": "2026-10-27T06:11:21.907281Z",
+      "updated_at": "2026-10-27T22:20:39.015387Z",
       "updated_by": ":seed",
       "weekday": null
     },
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": false,
       "formats": {
         "email_html": true,
@@ -767,12 +767,12 @@
       "pseudonymize": false,
       "recipients": [],
       "time": "07:00",
-      "updated_at": "2026-10-27T06:11:21.907281Z",
+      "updated_at": "2026-10-27T22:20:39.015387Z",
       "updated_by": ":seed",
       "weekday": null
     },
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": false,
       "formats": {
         "email_html": true,
@@ -789,12 +789,12 @@
       "pseudonymize": false,
       "recipients": [],
       "time": "07:15",
-      "updated_at": "2026-10-27T06:11:21.907281Z",
+      "updated_at": "2026-10-27T22:20:39.015387Z",
       "updated_by": ":seed",
       "weekday": 1
     },
     {
-      "created_at": "2026-10-27T06:11:21.907281Z",
+      "created_at": "2026-10-27T22:20:39.015387Z",
       "enabled": false,
       "formats": {
         "email_html": true,
@@ -811,7 +811,7 @@
       "pseudonymize": false,
       "recipients": [],
       "time": "07:30",
-      "updated_at": "2026-10-27T06:11:21.907281Z",
+      "updated_at": "2026-10-27T22:20:39.015387Z",
       "updated_by": ":seed",
       "weekday": null
     }

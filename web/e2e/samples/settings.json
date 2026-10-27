@@ -402,9 +402,47 @@
             "min": null,
             "reauth": false,
             "type": "string",
-            "updated_at": "2026-10-27T06:11:27.620794Z",
+            "updated_at": "2026-10-27T22:20:45.011966Z",
             "updated_by": "capture",
             "value": "100.64.12.9"
+          },
+          {
+            "default": {},
+            "help_en": "Each internet line of the organisation: the public IP addresses (or network) the ISP gave and whether that address may change, the FortiGate's source-NAT address on that line (transip), the NAT type (direct / ISP NAT / does not pass the FortiGate) and whether the ISP keeps source ports. The FortiGate's source-NAT addresses towards a DMZ, another VLAN, a VPN or a branch are entered with the type 'Not an internet exit'; no session is searched on them. A public address cannot be a private (RFC 1918) or shared (RFC 6598, e.g. 100.64.x.x) address: the FortiGate's address behind the ISP router is the NAT address of an ISP NAT exit. With several lines, enter each line's interfaces (dstintf). Empty: one double-NAT exit is assumed. Entered on site, never assumed; read the values from the 'NAT addresses seen in the logs' table.",
+            "help_tr": "Kurumun her internet hattı: servis sağlayıcının verdiği genel IP adresleri (ya da ağı) ve bu adresin değişip değişemeyeceği, FortiGate'in o hattaki kaynak NAT adresi (transip), NAT türü (doğrudan / servis sağlayıcı NAT'ı / FortiGate'ten geçmiyor) ve servis sağlayıcının kaynak portu koruyup korumadığı. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı kaynak NAT'ın adresleri 'İnternet çıkışı değil' türüyle girilir; bu adreslerde oturum aranmaz. Genel adres özel (RFC 1918) ya da paylaşılan (RFC 6598, ör. 100.64.x.x) bir adres olamaz: FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresi, servis sağlayıcı NAT'ı çıkışının NAT adresidir. Birden çok hat varsa her hattın arayüzlerini (dstintf) girin. Boş: tek bir çift NAT çıkışı varsayılır. Kurulum yerinde girilir, tahmin edilmez; değerleri 'Kayıtlarda görülen NAT adresleri' tablosundan okuyabilirsiniz.",
+            "is_default": true,
+            "key": "nat.egresses",
+            "label_en": "Internet exits (NAT)",
+            "label_tr": "İnternet çıkışları (NAT)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "object",
+            "updated_at": null,
+            "updated_by": null,
+            "value": {}
+          },
+          {
+            "default": [
+              "snat"
+            ],
+            "help_en": "The FortiGate trandisp values a candidate search takes for addresses no exit claims. The FortiOS documents do not list the values; only snat was seen in logs. Verify on site: other values are flagged in the 'NAT addresses seen in the logs' table.",
+            "help_tr": "Hiçbir çıkışa tanımlı olmayan adreslerde aday aramasına alınan FortiGate trandisp değerleri. FortiOS belgeleri değerlerin listesini vermez; kayıtlarda yalnızca snat görüldü. Sahada doğrulayın: başka değerler 'Kayıtlarda görülen NAT adresleri' tablosunda işaretlenir.",
+            "is_default": true,
+            "key": "nat.snat_trandisp",
+            "label_en": "Source NAT types (trandisp)",
+            "label_tr": "Kaynak NAT türleri (trandisp)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "string_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": [
+              "snat"
+            ]
           },
           {
             "default": 60,
@@ -436,7 +474,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T06:11:24.971427Z",
+            "updated_at": "2026-10-27T22:20:42.282106Z",
             "updated_by": "capture",
             "value": 100
           },
@@ -470,7 +508,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T06:11:27.558428Z",
+            "updated_at": "2026-10-27T22:20:44.952027Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -521,9 +559,43 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-27T06:11:25.877600Z",
+            "updated_at": "2026-10-27T22:20:43.240676Z",
             "updated_by": "capture",
             "value": false
+          },
+          {
+            "default": [],
+            "help_en": "The srcintf names of interfaces where device detection is on and the FortiGate is the VLAN's gateway. Never add an interface that faces a routed (L3) network: there srcmac is the router's or L3 switch's address. When only layer-2 switches sit in between, add the interface only after checking it on site with two known clients (DEVICE-SETUP.md section 2.5): according to Fortinet, with a switch in between the switch's MAC address may appear in the record. For a session without a lease, the MAC address, the device and the person assigned to it are shown from this field with low confidence, as partial evidence; no lease is ever created. Empty: srcmac is not used.",
+            "help_tr": "Aygıt tanımanın açık olduğu ve FortiGate'in VLAN'ın ağ geçidi olduğu arayüzlerin srcintf adları. Yönlendirilmiş (L3) bir ağa bakan arayüzü hiçbir zaman eklemeyin: orada srcmac yönlendiricinin ya da L3 anahtarın adresidir. Arada yalnızca katman 2 anahtarlar varsa arayüzü ancak iki bilinen istemciyle sahada doğruladıktan sonra ekleyin (Cihaz kurulumu bölüm 2.5): Fortinet'e göre arada bir anahtar varsa kayıtta anahtarın MAC adresi görülebilir. Kira kaydı olmayan bir oturumda MAC adresi, cihaz ve cihaza atanmış kişi bu alandan düşük güvenle ve kısmi kanıt olarak gösterilir; kira kaydı hiç oluşturulmaz. Boş: srcmac kullanılmaz.",
+            "is_default": true,
+            "key": "lookup.srcmac_interfaces",
+            "label_en": "FortiGate interfaces whose srcmac is used",
+            "label_tr": "srcmac kullanılan FortiGate arayüzleri",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "string_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": []
+          },
+          {
+            "default": 1,
+            "help_en": "A srcmac seen with more distinct IPv4 addresses within ±1 hour of the requested moment counts as a router's, switch's or network device's address and is not used. IPv6 addresses are not counted: a dual-stack client also uses IPv6 and temporary IPv6 addresses with the same MAC address.",
+            "help_tr": "Bir srcmac istenen anın ±1 saat içinde bundan çok farklı IPv4 adresiyle görülürse bir yönlendiricinin, anahtarın ya da ağ cihazının adresi sayılır ve kullanılmaz. IPv6 adresleri sayılmaz: çift yığınlı bir istemci aynı MAC adresiyle IPv6 ve geçici IPv6 adresleri de kullanır.",
+            "is_default": true,
+            "key": "lookup.srcmac_max_ips",
+            "label_en": "Most IP addresses per srcmac",
+            "label_tr": "Bir srcmac için en çok IP adresi",
+            "locked": false,
+            "max": 16,
+            "min": 1,
+            "reauth": false,
+            "type": "integer",
+            "updated_at": null,
+            "updated_by": null,
+            "value": 1
           },
           {
             "default": 86400,
@@ -544,8 +616,8 @@
           },
           {
             "default": {},
-            "help_en": "DHCP servers with another lease time: {\"<server name>\": seconds}, each at least 60.",
-            "help_tr": "Kira süresi farklı DHCP sunucuları: {\"<sunucu adı>\": saniye}, her biri en az 60.",
+            "help_en": "DHCP servers with another lease time: {\"<name>\": seconds}, each at least 60. The name is the DHCP server name (MikroTik, e.g. dhcp61) or the FortiGate DHCP interface name (e.g. vlan61).",
+            "help_tr": "Kira süresi farklı DHCP sunucuları: {\"<ad>\": saniye}, her biri en az 60. Ad, DHCP sunucusu adı (MikroTik, ör. dhcp61) ya da FortiGate DHCP arayüzü adı (ör. vlan61).",
             "is_default": false,
             "key": "lease.server_seconds",
             "label_en": "Lease time per server",
@@ -555,7 +627,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-27T06:11:22.706034Z",
+            "updated_at": "2026-10-27T22:20:39.908103Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -580,8 +652,8 @@
           },
           {
             "default": "^dhcp(\\d+)$",
-            "help_en": "The regular expression that takes the VLAN number from the DHCP server name; the first group is the VLAN number (dhcp60 → 60).",
-            "help_tr": "DHCP sunucu adından VLAN numarasını alan düzenli ifade; ilk grup VLAN numarasıdır (dhcp60 → 60).",
+            "help_en": "The regular expression that takes the VLAN number from the DHCP server name; the first group is the VLAN number (dhcp60 → 60). MikroTik DHCP server names only; FortiGate leases take the VLAN from the subnet.",
+            "help_tr": "DHCP sunucu adından VLAN numarasını alan düzenli ifade; ilk grup VLAN numarasıdır (dhcp60 → 60). Yalnızca MikroTik DHCP sunucusu adları; FortiGate kiralarının VLAN'ı alt ağdan bulunur.",
             "is_default": true,
             "key": "dhcp.server_vlan_regex",
             "label_en": "VLAN from the DHCP server name",
@@ -594,6 +666,122 @@
             "updated_at": null,
             "updated_by": null,
             "value": "^dhcp(\\d+)$"
+          },
+          {
+            "default": {
+              "0100026001": "assigned",
+              "0100026002": "deassigned"
+            },
+            "help_en": "The logid of each FortiGate DHCP server event that becomes lease evidence, and its meaning: assigned (address given or renewed), deassigned (address released). The defaults come from the FortiOS log reference (DHCP Ack 0100026001; DHCP Release 0100026002 derived from its numbering rule); verify them on site once the first records arrive. A change applies to past days when the leases are rebuilt. Empty: FortiGate DHCP records are not used.",
+            "help_tr": "FortiGate DHCP sunucusu olaylarından kira kanıtına çevrilenlerin logid değeri ve anlamı: assigned (adres verildi ya da yenilendi), deassigned (adres bırakıldı). Varsayılanlar FortiOS günlük başvuru belgesinden alınmıştır (DHCP Ack 0100026001; DHCP Release 0100026002 belgedeki numaralama kuralından türetildi); ilk kayıtlar gelince sahada doğrulayın. Değişiklik geçmiş günlere kiralar yeniden oluşturulunca uygulanır. Boş: FortiGate DHCP kayıtları kullanılmaz.",
+            "is_default": true,
+            "key": "dhcp.fortigate_logids",
+            "label_en": "FortiGate DHCP log IDs (logid)",
+            "label_tr": "FortiGate DHCP kayıt kimlikleri (logid)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "object",
+            "updated_at": null,
+            "updated_by": null,
+            "value": {
+              "0100026001": "assigned",
+              "0100026002": "deassigned"
+            }
+          },
+          {
+            "default": {
+              "0100026001": [
+                "Ack"
+              ]
+            },
+            "help_en": "Per logid, the dhcp_msg values that count as lease evidence (case-insensitive). Default: only Ack for the DHCP Ack record (the value of the community sample). A record with any other value (e.g. Nak) is not used and raises an alert. A logid without an entry is not restricted. Verify on site.",
+            "help_tr": "Her logid için kira kanıtı sayılan dhcp_msg değerleri (büyük/küçük harf ayrımı yok). Varsayılan: DHCP Ack kaydında yalnızca Ack (topluluk örneğindeki değer). Listede olmayan bir değerle gelen kayıt (ör. Nak) kullanılmaz ve uyarı verir. Listede olmayan logid sınırlanmaz. Sahada doğrulayın.",
+            "is_default": true,
+            "key": "dhcp.fortigate_dhcp_msgs",
+            "label_en": "FortiGate DHCP message types (dhcp_msg)",
+            "label_tr": "FortiGate DHCP ileti türleri (dhcp_msg)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "object",
+            "updated_at": null,
+            "updated_by": null,
+            "value": {
+              "0100026001": [
+                "Ack"
+              ]
+            }
+          },
+          {
+            "default": true,
+            "help_en": "On: the lease value of the FortiGate DHCP Ack record (seconds; verify on site) is that lease's time, and the lease closes that long after its last DHCP record, when the FortiGate itself ends it. Values below 300 seconds, above 100 days or 0 (unlimited) use the DHCP server times (lease.server_seconds, lease.default_seconds, with the lease.timeout_percent margin). Off: always those times.",
+            "help_tr": "Açık: FortiGate DHCP Ack kaydındaki lease değeri (saniye; sahada doğrulayın) o kiranın süresidir ve kira son DHCP kaydından bu süre sonra, FortiGate'in kendisinin bitirdiği anda kapanır. 300 saniyeden kısa, 100 günden uzun ya da 0 (süresiz) değerlerde DHCP sunucusu süreleri (lease.server_seconds, lease.default_seconds; lease.timeout_percent payıyla) kullanılır. Kapalı: her zaman o süreler.",
+            "is_default": true,
+            "key": "dhcp.fortigate_use_logged_lease",
+            "label_en": "Use the lease time in the FortiGate record",
+            "label_tr": "FortiGate kira süresini kayıttan al",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": true
+          },
+          {
+            "default": false,
+            "help_en": "Off (recommended): a FortiGate lease stays open through DHCP records only (Ack, renewal); traffic is added as evidence but does not extend it. FortiOS most likely logs renewals too (verify on site: DEVICE-SETUP.md section 2.4 step 5); traffic does not show the MAC, and another device using the same address could keep the lease tied to its former holder. On: traffic extends the lease as it does MikroTik leases; switch it on only when it is verified on site that renewals are not logged and the organisation accepts this wrong-person risk (alert R20-lease:fortigate-renewals-missing).",
+            "help_tr": "Kapalı (önerilen): FortiGate kirası yalnızca DHCP kayıtlarıyla (Ack, yenileme) açık kalır; trafik kanıt olarak eklenir ama süreyi uzatmaz. FortiOS büyük olasılıkla yenilemeleri de kaydeder (sahada doğrulayın: DEVICE-SETUP.md bölüm 2.4 adım 5); trafik MAC adresini göstermez ve aynı adresi kullanan başka bir cihaz kirayı eski sahibine bağlı tutabilir. Açık: MikroTik kiralarında olduğu gibi trafik kirayı uzatır; yalnızca yenilemelerin kaydedilmediği sahada doğrulanırsa ve kurum bu yanlış kişi riskini kabul ederse açın (uyarı R20-lease:fortigate-renewals-missing).",
+            "is_default": true,
+            "key": "dhcp.fortigate_traffic_extends",
+            "label_en": "Traffic extends a FortiGate lease",
+            "label_tr": "Trafik FortiGate kirasını uzatır",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": false
+          },
+          {
+            "default": [],
+            "help_en": "DHCP records of these FortiGate interfaces are not lease evidence. Add the interfaces of DHCP-over-IPsec servers (server-type ipsec): those leases end ipsec-lease-hold seconds after the tunnel goes down (default 60); the lease time in the record does not show that end.",
+            "help_tr": "Bu FortiGate arayüzlerinin DHCP kayıtları kira kanıtı sayılmaz. IPsec üzerinden DHCP veren sunucuların (server-type ipsec) arayüzlerini buraya ekleyin: bu kiralar tünel kapandıktan ipsec-lease-hold saniye sonra (varsayılan 60) biter; kayıttaki kira süresi bu bitişi göstermez.",
+            "is_default": true,
+            "key": "dhcp.fortigate_interfaces_excluded",
+            "label_en": "FortiGate DHCP interfaces that are not lease evidence",
+            "label_tr": "Kira kanıtı sayılmayan FortiGate DHCP arayüzleri",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "string_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": []
+          },
+          {
+            "default": false,
+            "help_en": "Switch on once the FortiGate DHCP record format has been verified on site with the steps of DEVICE-SETUP.md section 2.4; repeat the check after every FortiOS upgrade. While off, reports and the Lease evidence card say 'record format not verified on site'; while on, reports say who marked it verified and when.",
+            "help_tr": "FortiGate DHCP kayıtlarının biçimi DEVICE-SETUP.md bölüm 2.4'teki adımlarla sahada doğrulandıysa açın; her FortiOS yükseltmesinden sonra doğrulamayı yineleyin. Kapalıyken raporlar ve Kira kanıtı kutusu 'kayıt biçimi sahada doğrulanmadı' der; açıkken raporlar kimin ve ne zaman doğrulandı olarak işaretlediğini yazar.",
+            "is_default": true,
+            "key": "dhcp.fortigate_format_verified",
+            "label_en": "FortiGate DHCP record format verified on site",
+            "label_tr": "FortiGate DHCP kayıt biçimi sahada doğrulandı",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": false
           },
           {
             "default": 3600,
@@ -1494,7 +1682,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T06:11:33.096550Z",
+            "updated_at": "2026-10-27T22:20:50.442515Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -2059,9 +2247,47 @@
             "min": null,
             "reauth": false,
             "type": "string",
-            "updated_at": "2026-10-27T06:11:27.620794Z",
+            "updated_at": "2026-10-27T22:20:45.011966Z",
             "updated_by": "capture",
             "value": "100.64.12.9"
+          },
+          {
+            "default": {},
+            "help_en": "Each internet line of the organisation: the public IP addresses (or network) the ISP gave and whether that address may change, the FortiGate's source-NAT address on that line (transip), the NAT type (direct / ISP NAT / does not pass the FortiGate) and whether the ISP keeps source ports. The FortiGate's source-NAT addresses towards a DMZ, another VLAN, a VPN or a branch are entered with the type 'Not an internet exit'; no session is searched on them. A public address cannot be a private (RFC 1918) or shared (RFC 6598, e.g. 100.64.x.x) address: the FortiGate's address behind the ISP router is the NAT address of an ISP NAT exit. With several lines, enter each line's interfaces (dstintf). Empty: one double-NAT exit is assumed. Entered on site, never assumed; read the values from the 'NAT addresses seen in the logs' table.",
+            "help_tr": "Kurumun her internet hattı: servis sağlayıcının verdiği genel IP adresleri (ya da ağı) ve bu adresin değişip değişemeyeceği, FortiGate'in o hattaki kaynak NAT adresi (transip), NAT türü (doğrudan / servis sağlayıcı NAT'ı / FortiGate'ten geçmiyor) ve servis sağlayıcının kaynak portu koruyup korumadığı. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı kaynak NAT'ın adresleri 'İnternet çıkışı değil' türüyle girilir; bu adreslerde oturum aranmaz. Genel adres özel (RFC 1918) ya da paylaşılan (RFC 6598, ör. 100.64.x.x) bir adres olamaz: FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresi, servis sağlayıcı NAT'ı çıkışının NAT adresidir. Birden çok hat varsa her hattın arayüzlerini (dstintf) girin. Boş: tek bir çift NAT çıkışı varsayılır. Kurulum yerinde girilir, tahmin edilmez; değerleri 'Kayıtlarda görülen NAT adresleri' tablosundan okuyabilirsiniz.",
+            "is_default": true,
+            "key": "nat.egresses",
+            "label_en": "Internet exits (NAT)",
+            "label_tr": "İnternet çıkışları (NAT)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "object",
+            "updated_at": null,
+            "updated_by": null,
+            "value": {}
+          },
+          {
+            "default": [
+              "snat"
+            ],
+            "help_en": "The FortiGate trandisp values a candidate search takes for addresses no exit claims. The FortiOS documents do not list the values; only snat was seen in logs. Verify on site: other values are flagged in the 'NAT addresses seen in the logs' table.",
+            "help_tr": "Hiçbir çıkışa tanımlı olmayan adreslerde aday aramasına alınan FortiGate trandisp değerleri. FortiOS belgeleri değerlerin listesini vermez; kayıtlarda yalnızca snat görüldü. Sahada doğrulayın: başka değerler 'Kayıtlarda görülen NAT adresleri' tablosunda işaretlenir.",
+            "is_default": true,
+            "key": "nat.snat_trandisp",
+            "label_en": "Source NAT types (trandisp)",
+            "label_tr": "Kaynak NAT türleri (trandisp)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "string_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": [
+              "snat"
+            ]
           },
           {
             "default": 60,
@@ -2093,7 +2319,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T06:11:43.151342Z",
+            "updated_at": "2026-10-27T22:21:00.930913Z",
             "updated_by": "tolga",
             "value": 150
           },
@@ -2127,7 +2353,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T06:11:27.558428Z",
+            "updated_at": "2026-10-27T22:20:44.952027Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -2178,9 +2404,43 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-27T06:11:25.877600Z",
+            "updated_at": "2026-10-27T22:20:43.240676Z",
             "updated_by": "capture",
             "value": false
+          },
+          {
+            "default": [],
+            "help_en": "The srcintf names of interfaces where device detection is on and the FortiGate is the VLAN's gateway. Never add an interface that faces a routed (L3) network: there srcmac is the router's or L3 switch's address. When only layer-2 switches sit in between, add the interface only after checking it on site with two known clients (DEVICE-SETUP.md section 2.5): according to Fortinet, with a switch in between the switch's MAC address may appear in the record. For a session without a lease, the MAC address, the device and the person assigned to it are shown from this field with low confidence, as partial evidence; no lease is ever created. Empty: srcmac is not used.",
+            "help_tr": "Aygıt tanımanın açık olduğu ve FortiGate'in VLAN'ın ağ geçidi olduğu arayüzlerin srcintf adları. Yönlendirilmiş (L3) bir ağa bakan arayüzü hiçbir zaman eklemeyin: orada srcmac yönlendiricinin ya da L3 anahtarın adresidir. Arada yalnızca katman 2 anahtarlar varsa arayüzü ancak iki bilinen istemciyle sahada doğruladıktan sonra ekleyin (Cihaz kurulumu bölüm 2.5): Fortinet'e göre arada bir anahtar varsa kayıtta anahtarın MAC adresi görülebilir. Kira kaydı olmayan bir oturumda MAC adresi, cihaz ve cihaza atanmış kişi bu alandan düşük güvenle ve kısmi kanıt olarak gösterilir; kira kaydı hiç oluşturulmaz. Boş: srcmac kullanılmaz.",
+            "is_default": true,
+            "key": "lookup.srcmac_interfaces",
+            "label_en": "FortiGate interfaces whose srcmac is used",
+            "label_tr": "srcmac kullanılan FortiGate arayüzleri",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "string_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": []
+          },
+          {
+            "default": 1,
+            "help_en": "A srcmac seen with more distinct IPv4 addresses within ±1 hour of the requested moment counts as a router's, switch's or network device's address and is not used. IPv6 addresses are not counted: a dual-stack client also uses IPv6 and temporary IPv6 addresses with the same MAC address.",
+            "help_tr": "Bir srcmac istenen anın ±1 saat içinde bundan çok farklı IPv4 adresiyle görülürse bir yönlendiricinin, anahtarın ya da ağ cihazının adresi sayılır ve kullanılmaz. IPv6 adresleri sayılmaz: çift yığınlı bir istemci aynı MAC adresiyle IPv6 ve geçici IPv6 adresleri de kullanır.",
+            "is_default": true,
+            "key": "lookup.srcmac_max_ips",
+            "label_en": "Most IP addresses per srcmac",
+            "label_tr": "Bir srcmac için en çok IP adresi",
+            "locked": false,
+            "max": 16,
+            "min": 1,
+            "reauth": false,
+            "type": "integer",
+            "updated_at": null,
+            "updated_by": null,
+            "value": 1
           },
           {
             "default": 86400,
@@ -2201,8 +2461,8 @@
           },
           {
             "default": {},
-            "help_en": "DHCP servers with another lease time: {\"<server name>\": seconds}, each at least 60.",
-            "help_tr": "Kira süresi farklı DHCP sunucuları: {\"<sunucu adı>\": saniye}, her biri en az 60.",
+            "help_en": "DHCP servers with another lease time: {\"<name>\": seconds}, each at least 60. The name is the DHCP server name (MikroTik, e.g. dhcp61) or the FortiGate DHCP interface name (e.g. vlan61).",
+            "help_tr": "Kira süresi farklı DHCP sunucuları: {\"<ad>\": saniye}, her biri en az 60. Ad, DHCP sunucusu adı (MikroTik, ör. dhcp61) ya da FortiGate DHCP arayüzü adı (ör. vlan61).",
             "is_default": false,
             "key": "lease.server_seconds",
             "label_en": "Lease time per server",
@@ -2212,7 +2472,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-27T06:11:22.706034Z",
+            "updated_at": "2026-10-27T22:20:39.908103Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -2237,8 +2497,8 @@
           },
           {
             "default": "^dhcp(\\d+)$",
-            "help_en": "The regular expression that takes the VLAN number from the DHCP server name; the first group is the VLAN number (dhcp60 → 60).",
-            "help_tr": "DHCP sunucu adından VLAN numarasını alan düzenli ifade; ilk grup VLAN numarasıdır (dhcp60 → 60).",
+            "help_en": "The regular expression that takes the VLAN number from the DHCP server name; the first group is the VLAN number (dhcp60 → 60). MikroTik DHCP server names only; FortiGate leases take the VLAN from the subnet.",
+            "help_tr": "DHCP sunucu adından VLAN numarasını alan düzenli ifade; ilk grup VLAN numarasıdır (dhcp60 → 60). Yalnızca MikroTik DHCP sunucusu adları; FortiGate kiralarının VLAN'ı alt ağdan bulunur.",
             "is_default": true,
             "key": "dhcp.server_vlan_regex",
             "label_en": "VLAN from the DHCP server name",
@@ -2251,6 +2511,122 @@
             "updated_at": null,
             "updated_by": null,
             "value": "^dhcp(\\d+)$"
+          },
+          {
+            "default": {
+              "0100026001": "assigned",
+              "0100026002": "deassigned"
+            },
+            "help_en": "The logid of each FortiGate DHCP server event that becomes lease evidence, and its meaning: assigned (address given or renewed), deassigned (address released). The defaults come from the FortiOS log reference (DHCP Ack 0100026001; DHCP Release 0100026002 derived from its numbering rule); verify them on site once the first records arrive. A change applies to past days when the leases are rebuilt. Empty: FortiGate DHCP records are not used.",
+            "help_tr": "FortiGate DHCP sunucusu olaylarından kira kanıtına çevrilenlerin logid değeri ve anlamı: assigned (adres verildi ya da yenilendi), deassigned (adres bırakıldı). Varsayılanlar FortiOS günlük başvuru belgesinden alınmıştır (DHCP Ack 0100026001; DHCP Release 0100026002 belgedeki numaralama kuralından türetildi); ilk kayıtlar gelince sahada doğrulayın. Değişiklik geçmiş günlere kiralar yeniden oluşturulunca uygulanır. Boş: FortiGate DHCP kayıtları kullanılmaz.",
+            "is_default": true,
+            "key": "dhcp.fortigate_logids",
+            "label_en": "FortiGate DHCP log IDs (logid)",
+            "label_tr": "FortiGate DHCP kayıt kimlikleri (logid)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "object",
+            "updated_at": null,
+            "updated_by": null,
+            "value": {
+              "0100026001": "assigned",
+              "0100026002": "deassigned"
+            }
+          },
+          {
+            "default": {
+              "0100026001": [
+                "Ack"
+              ]
+            },
+            "help_en": "Per logid, the dhcp_msg values that count as lease evidence (case-insensitive). Default: only Ack for the DHCP Ack record (the value of the community sample). A record with any other value (e.g. Nak) is not used and raises an alert. A logid without an entry is not restricted. Verify on site.",
+            "help_tr": "Her logid için kira kanıtı sayılan dhcp_msg değerleri (büyük/küçük harf ayrımı yok). Varsayılan: DHCP Ack kaydında yalnızca Ack (topluluk örneğindeki değer). Listede olmayan bir değerle gelen kayıt (ör. Nak) kullanılmaz ve uyarı verir. Listede olmayan logid sınırlanmaz. Sahada doğrulayın.",
+            "is_default": true,
+            "key": "dhcp.fortigate_dhcp_msgs",
+            "label_en": "FortiGate DHCP message types (dhcp_msg)",
+            "label_tr": "FortiGate DHCP ileti türleri (dhcp_msg)",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "object",
+            "updated_at": null,
+            "updated_by": null,
+            "value": {
+              "0100026001": [
+                "Ack"
+              ]
+            }
+          },
+          {
+            "default": true,
+            "help_en": "On: the lease value of the FortiGate DHCP Ack record (seconds; verify on site) is that lease's time, and the lease closes that long after its last DHCP record, when the FortiGate itself ends it. Values below 300 seconds, above 100 days or 0 (unlimited) use the DHCP server times (lease.server_seconds, lease.default_seconds, with the lease.timeout_percent margin). Off: always those times.",
+            "help_tr": "Açık: FortiGate DHCP Ack kaydındaki lease değeri (saniye; sahada doğrulayın) o kiranın süresidir ve kira son DHCP kaydından bu süre sonra, FortiGate'in kendisinin bitirdiği anda kapanır. 300 saniyeden kısa, 100 günden uzun ya da 0 (süresiz) değerlerde DHCP sunucusu süreleri (lease.server_seconds, lease.default_seconds; lease.timeout_percent payıyla) kullanılır. Kapalı: her zaman o süreler.",
+            "is_default": true,
+            "key": "dhcp.fortigate_use_logged_lease",
+            "label_en": "Use the lease time in the FortiGate record",
+            "label_tr": "FortiGate kira süresini kayıttan al",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": true
+          },
+          {
+            "default": false,
+            "help_en": "Off (recommended): a FortiGate lease stays open through DHCP records only (Ack, renewal); traffic is added as evidence but does not extend it. FortiOS most likely logs renewals too (verify on site: DEVICE-SETUP.md section 2.4 step 5); traffic does not show the MAC, and another device using the same address could keep the lease tied to its former holder. On: traffic extends the lease as it does MikroTik leases; switch it on only when it is verified on site that renewals are not logged and the organisation accepts this wrong-person risk (alert R20-lease:fortigate-renewals-missing).",
+            "help_tr": "Kapalı (önerilen): FortiGate kirası yalnızca DHCP kayıtlarıyla (Ack, yenileme) açık kalır; trafik kanıt olarak eklenir ama süreyi uzatmaz. FortiOS büyük olasılıkla yenilemeleri de kaydeder (sahada doğrulayın: DEVICE-SETUP.md bölüm 2.4 adım 5); trafik MAC adresini göstermez ve aynı adresi kullanan başka bir cihaz kirayı eski sahibine bağlı tutabilir. Açık: MikroTik kiralarında olduğu gibi trafik kirayı uzatır; yalnızca yenilemelerin kaydedilmediği sahada doğrulanırsa ve kurum bu yanlış kişi riskini kabul ederse açın (uyarı R20-lease:fortigate-renewals-missing).",
+            "is_default": true,
+            "key": "dhcp.fortigate_traffic_extends",
+            "label_en": "Traffic extends a FortiGate lease",
+            "label_tr": "Trafik FortiGate kirasını uzatır",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": false
+          },
+          {
+            "default": [],
+            "help_en": "DHCP records of these FortiGate interfaces are not lease evidence. Add the interfaces of DHCP-over-IPsec servers (server-type ipsec): those leases end ipsec-lease-hold seconds after the tunnel goes down (default 60); the lease time in the record does not show that end.",
+            "help_tr": "Bu FortiGate arayüzlerinin DHCP kayıtları kira kanıtı sayılmaz. IPsec üzerinden DHCP veren sunucuların (server-type ipsec) arayüzlerini buraya ekleyin: bu kiralar tünel kapandıktan ipsec-lease-hold saniye sonra (varsayılan 60) biter; kayıttaki kira süresi bu bitişi göstermez.",
+            "is_default": true,
+            "key": "dhcp.fortigate_interfaces_excluded",
+            "label_en": "FortiGate DHCP interfaces that are not lease evidence",
+            "label_tr": "Kira kanıtı sayılmayan FortiGate DHCP arayüzleri",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "string_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": []
+          },
+          {
+            "default": false,
+            "help_en": "Switch on once the FortiGate DHCP record format has been verified on site with the steps of DEVICE-SETUP.md section 2.4; repeat the check after every FortiOS upgrade. While off, reports and the Lease evidence card say 'record format not verified on site'; while on, reports say who marked it verified and when.",
+            "help_tr": "FortiGate DHCP kayıtlarının biçimi DEVICE-SETUP.md bölüm 2.4'teki adımlarla sahada doğrulandıysa açın; her FortiOS yükseltmesinden sonra doğrulamayı yineleyin. Kapalıyken raporlar ve Kira kanıtı kutusu 'kayıt biçimi sahada doğrulanmadı' der; açıkken raporlar kimin ve ne zaman doğrulandı olarak işaretlediğini yazar.",
+            "is_default": true,
+            "key": "dhcp.fortigate_format_verified",
+            "label_en": "FortiGate DHCP record format verified on site",
+            "label_tr": "FortiGate DHCP kayıt biçimi sahada doğrulandı",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": false
           },
           {
             "default": 3600,
@@ -3151,7 +3527,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T06:11:33.096550Z",
+            "updated_at": "2026-10-27T22:20:50.442515Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -3401,7 +3777,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:15.256359+00:00",
+    "captured_at": "2026-10-13T04:01:30.426962+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
