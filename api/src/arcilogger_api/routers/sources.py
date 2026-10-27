@@ -48,10 +48,10 @@ from arcilogger_api.auth.ratelimit import RateLimiter
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep, TtlCache
 from arcilogger_api.errors import ApiError
 from arcilogger_api.live.events import message_part
-from arcilogger_api.search.schemas import RawRef
 from arcilogger_api.rawlines import display_text, os_error, valid_source_name
 from arcilogger_api.rawtail import line_anchor, read_tail
 from arcilogger_api.routers.raw import MESSAGES as RAW_MESSAGES
+from arcilogger_api.search.schemas import RawRef
 from arcilogger_api.security import CurrentUser, client_ip, require
 from arcilogger_core.timeutil import site_day, utc_now
 

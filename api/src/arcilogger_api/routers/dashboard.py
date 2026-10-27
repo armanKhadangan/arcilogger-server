@@ -50,9 +50,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
-from arcilogger_api.search.schemas import RawRef
 from arcilogger_api.routers.alerts import AlertOut, OpenBySeverity, latest_active, open_by_severity
 from arcilogger_api.sealinfo import VaultView, credit_history, on_demand_verifications
+from arcilogger_api.search.schemas import RawRef
 from arcilogger_api.security import CurrentUser, require
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
