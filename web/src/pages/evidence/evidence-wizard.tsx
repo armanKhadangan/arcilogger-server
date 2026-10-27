@@ -236,7 +236,14 @@ export function EvidenceWizard({
   });
   const isOpen = open || fromSearch !== null;
 
-  useEffect(() => {
+  // What the wizard is open for (`undefined` while closed). The wizard begins anew while
+  // rendering when this changes, so its first frame on screen already shows the handed-over
+  // days or the chosen lookup, never an empty or a previous draft: an effect would run only after
+  // that frame. Resetting the mutation is a side effect, so it stays in the effect below.
+  const openFor = isOpen ? (fromSearch ?? lookupId) : undefined;
+  const [begunFor, setBegunFor] = useState(openFor);
+  if (openFor !== begunFor) {
+    setBegunFor(openFor);
     if (isOpen) {
       setStep(0);
       setDraft(fromSearch ? wizardFromSearch(fromSearch) : emptyWizard(lookupId));
@@ -244,8 +251,10 @@ export function EvidenceWizard({
       setFailure(null);
       setCreated(null);
       setSaved(false);
-      reset();
     }
+  }
+  useEffect(() => {
+    if (isOpen) reset();
   }, [isOpen, lookupId, fromSearch, reset]);
 
   function close() {

@@ -54,6 +54,28 @@ function summaryValue(wizard: HTMLElement, name: string): string {
   return term?.nextElementSibling?.textContent ?? '';
 }
 
+/**
+ * What `read` finds in the first frame with the wizard on screen when the app opens at `path`: a
+ * MutationObserver runs after each commit, before React's next scheduled work (an effect's state
+ * update) can change it. A wizard that fills itself in an effect shows an empty frame first, and
+ * a test reading it right after `findByRole` fails on a slow runner.
+ */
+async function firstFrame<T>(path: string, read: (wizard: HTMLElement) => T): Promise<T[]> {
+  const seen: T[] = [];
+  const observer = new MutationObserver(() => {
+    const wizard = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (wizard !== null && seen.length === 0) seen.push(read(wizard));
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  try {
+    renderApp(path);
+    await screen.findByRole('dialog', { name: 'Yeni kanıt paketi' });
+  } finally {
+    observer.disconnect();
+  }
+  return seen;
+}
+
 async function openWizard() {
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
   await user.click(await screen.findByRole('button', { name: 'Yeni paket' }));
@@ -322,6 +344,35 @@ describe('EvidenceWizard', () => {
       expect(lines).toHaveFocus();
     });
     expect(lines).toHaveAccessibleDescription('Alıntı için en az bir satır girin.');
+  });
+
+  it('shows the chosen lookup from its very first frame', async () => {
+    fakeApi(() => errorResponse(500, 'unexpected'));
+    const seen = await firstFrame(
+      '/evidence?lookup=2',
+      (wizard) =>
+        within(wizard).queryByRole<HTMLInputElement>('radio', { name: /5651 sorgusundan/ })
+          ?.checked,
+    );
+    expect(seen).toEqual([true]);
+  });
+
+  it('shows the handed-over days from its very first frame', async () => {
+    fakeApi(() => errorResponse(500, 'unexpected'));
+    handoff.put('/evidence', {
+      extract: [{ day: '2026-10-09', source: 'fortigate', line: 27 }],
+      from_day: '2026-10-09',
+      to_day: '2026-10-09',
+      truncated: false,
+      complete: true,
+      unsealed_days: [],
+      query: 'srcip:172.20.42.57',
+    });
+    const seen = await firstFrame(
+      '/evidence',
+      (wizard) => within(wizard).queryByLabelText<HTMLInputElement>('İlk gün')?.value,
+    );
+    expect(seen).toEqual(['09.10.2026']);
   });
 
   it('opens by itself with the lines a search handed over, and warns before the API refuses', async () => {
