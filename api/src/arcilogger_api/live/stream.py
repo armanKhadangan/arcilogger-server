@@ -180,9 +180,10 @@ class EventStreamResponse(StreamingResponse):
         *,
         write_timeout: float,
         on_stalled: Callable[[], None],
+        status_code: int = 200,
         headers: Mapping[str, str] | None = None,
     ) -> None:
-        super().__init__(content, headers=headers)
+        super().__init__(content, status_code, headers)
         self.write_timeout = write_timeout
         self.on_stalled = on_stalled
 

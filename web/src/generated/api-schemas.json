@@ -12695,7 +12695,10 @@
         "reason": {
           "anyOf": [
             {
-              "const": "no_file_today",
+              "enum": [
+                "no_file_today",
+                "network_source"
+              ],
               "type": "string"
             },
             {

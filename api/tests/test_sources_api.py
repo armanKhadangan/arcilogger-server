@@ -377,6 +377,50 @@ def test_lines_lag_failures_and_sparkline(
     assert overview(client)["core-r1"]["parse_failure_permille"] is None  # no lines today
 
 
+def test_the_ingest_lag_counts_yesterdays_unfinished_file_after_midnight(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    site: None,
+    layout: Layout,
+    now: datetime,
+) -> None:
+    today = site_day(now)
+    yesterday, older = today - timedelta(days=1), today - timedelta(days=3)
+    with app_session_factory() as session:
+        session.add_all(
+            [
+                # ingest is 3,000 bytes behind on yesterday's file and never finished an older one
+                IngestOffset(source="fortigate", day=yesterday, byte_offset=1000, line_number=10),
+                IngestOffset(source="fortigate", day=older, byte_offset=100, line_number=1),
+                # finished: nothing left, whatever the file's size
+                IngestOffset(
+                    source="core-r1",
+                    day=yesterday,
+                    byte_offset=10,
+                    line_number=1,
+                    finished_at=now - timedelta(hours=1),
+                ),
+            ]
+        )
+        session.commit()
+    for name, day, size in (
+        ("fortigate", yesterday, 4000),
+        ("fortigate", older, 300),
+        ("core-r1", yesterday, 900),
+        ("unknown-198.51.100.23", yesterday, 700),  # no row: ingest has not started it
+    ):
+        path = layout.spool_file(name, day)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * size)
+    reader(client, login_as, app_session_factory)
+    items = overview(client)
+    assert items["fortigate"]["pending_bytes"] == 500 + 3000 + 200
+    assert items["fortigate"]["lines_today"] == 2000  # today's only
+    assert items["core-r1"]["pending_bytes"] == 0
+    assert items["unknown-198.51.100.23"]["pending_bytes"] == 700
+
+
 def test_detail_hours_days_gaps_and_failures(
     client: TestClient,
     login_as: Login,
@@ -630,6 +674,10 @@ def test_the_tail_falls_back_to_yesterday_and_says_when_there_is_no_file(
         "lines": [],
         "reason": "no_file_today",
     }
+    # A configured network has no folder of its own: its lines are under its members.
+    spool(layout, "ap-172.20.10.200", site_day(now), 3, "172.20.10.200")
+    network = client.get("/api/v1/sources/ap/tail").json()
+    assert network == {**empty, "source": "ap", "reason": "network_source"}
     with app_session_factory() as session:
         audited = session.scalars(
             select(AuditLog.details).where(AuditLog.action == "raw.tail")

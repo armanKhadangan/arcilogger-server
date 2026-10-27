@@ -1515,7 +1515,8 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
 - `GET /sources` (`sources.read`, counts only, cached 15 s) → `SourcesOverview {generated_at,
   today, collector, items: SourceHealth[]}` with the state (`active`, `silent`, `never`,
   `disabled`, `unknown`, `promoted`; the R15 definition), `messages_per_minute`, a 60-minute
-  `sparkline`, `lines_today`, `pending_bytes`, parse failures, `suggested` for unknown senders
+  `sparkline`, `lines_today`, `pending_bytes` (the unloaded bytes of today's, yesterday's and any
+  older unfinished spool file), parse failures, `suggested` for unknown senders
   (the kinds and the most common host of the sender's newest 1,000 messages of the last 24 h).
   Items by name; a configured network is followed by its members (both `configured: true`, the
   members with `network_of`; the network sums them and is `active` when a member is).

@@ -18,7 +18,8 @@ collector now writes it under; the old folder and its evidence stay where they a
 * the messages a minute of the last 60 whole minutes: one grouped query on
   ``ix_messages_source_time``, one descent per name (:func:`sparklines`; guard: under 1 s at
   300,000 rows an hour, ``api/tests/test_sources_api.py``);
-* today's lines and the ingest lag: ``ingest_offsets`` and one ``stat`` per spool file;
+* today's lines and the ingest lag: ``ingest_offsets`` and one ``stat`` per spool file ingest
+  may still read (today's, yesterday's and any older one it has not finished);
 * parse failures: sums of ``parse_failures``;
 * ``suggested`` (unknown senders only, at most 20): the device family of what they sent and a name
   from the most common ``messages.host``, both from their newest 1,000 messages of the last 24
@@ -46,7 +47,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from arcilogger_api.rawlines import regular_file
@@ -335,13 +336,42 @@ def _failures_on(db: Session, today: date) -> dict[str, int]:
     }
 
 
-def _pending_bytes(layout: Layout, name: str, today: date, loaded: int) -> int:
-    """Bytes of today's spool file ingest has not loaded yet (0 without a file)."""
-    try:
-        size = layout.spool_file(name, today).stat().st_size
-    except OSError:
-        return 0
-    return max(0, size - loaded)
+def _loaded(db: Session, today: date) -> dict[str, dict[date, int | None]]:
+    """``source → {day: bytes loaded}`` of the spool files ingest may still have to read:
+    yesterday's and today's, and every older one whose row is not finished. ``None``: finished
+    (every line loaded)."""
+    found: dict[str, dict[date, int | None]] = {}
+    for source, day, offset, finished in db.execute(
+        select(
+            IngestOffset.source,
+            IngestOffset.day,
+            IngestOffset.byte_offset,
+            IngestOffset.finished_at,
+        ).where(
+            or_(IngestOffset.day >= today - timedelta(days=1), IngestOffset.finished_at.is_(None))
+        )
+    ):
+        found.setdefault(source, {})[day] = None if finished is not None else int(offset)
+    return found
+
+
+def _pending_bytes(
+    layout: Layout, name: str, today: date, loaded: Mapping[date, int | None]
+) -> int:
+    """Bytes of the spool files ingest has not loaded yet (the ingest lag): today's, yesterday's
+    (after midnight ingest may still be behind on it; a file without a row is not started) and
+    any older file it has not finished. A file that is gone counts 0."""
+    total = 0
+    for day in sorted({today, today - timedelta(days=1), *loaded}):
+        done = loaded.get(day, 0)
+        if done is None:
+            continue
+        try:
+            size = layout.spool_file(name, day).stat().st_size
+        except OSError:
+            continue
+        total += max(0, size - done)
+    return total
 
 
 def permille(failures: int, lines: int) -> float | None:
@@ -356,6 +386,7 @@ def overview(db: Session, config: Config, layout: Layout, now: datetime) -> dict
     names = [item.name for item in items if not item.members]
     sparks = sparklines(db, names, now)
     offsets = _today_offsets(db, today)
+    loaded = _loaded(db, today)
     failures = _failures_on(db, today)
     states = {item.name: state_of(item, config, now) for item in items}
     suggested = suggestions(
@@ -371,9 +402,7 @@ def overview(db: Session, config: Config, layout: Layout, now: datetime) -> dict
         ]
         lines = sum(offsets.get(name, (0, 0))[1] for name in parts)
         failed = sum(failures.get(name, 0) for name in parts)
-        pending = sum(
-            _pending_bytes(layout, name, today, offsets.get(name, (0, 0))[0]) for name in parts
-        )
+        pending = sum(_pending_bytes(layout, name, today, loaded.get(name, {})) for name in parts)
         state, promoted = states[item.name]
         if members and item.enabled:  # a network: active when a member is
             member_states = {states[m.name][0] for m in members}

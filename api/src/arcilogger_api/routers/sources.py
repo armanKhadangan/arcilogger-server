@@ -19,7 +19,9 @@ Endpoint                        Permission                                      
 
 **Tail** (Son satırlar): the last ``limit`` (≤ 200) complete lines of today's spool file, else of
 yesterday's — the vault is never decompressed for it; with neither, ``lines: []`` and ``reason:
-"no_file_today"``. Line numbers and offsets are exact (the raw references ``GET /raw`` opens).
+"no_file_today"``. A configured network has no folder of its own (the collector writes its
+devices' lines under its members ``<name>-<ip>``): ``lines: []`` and ``reason: "network_source"``,
+nothing read and nothing audited. Line numbers and offsets are exact (the raw references ``GET /raw`` opens).
 ``range_sha256`` is the SHA-256 of the file's bytes ``[from_offset, to_offset)``: the lines shown
 with their line feeds, so an auditor can recompute it from the file (``raw.tail`` stores it with
 the range and the count, never the content). Read errors are ``raw_access_denied`` and
@@ -154,7 +156,8 @@ class SourceHealth(Answer):
     #: Messages a minute (device time) of the 60 whole minutes before now, oldest first.
     sparkline: list[int]
     lines_today: int
-    #: Bytes of today's spool file ingest has not loaded yet (the ingest lag).
+    #: Bytes of the spool files ingest has not loaded yet (the ingest lag): today's, yesterday's
+    #: and any older file it has not finished.
     pending_bytes: int
     parse_failures_today: int
     parse_failure_permille: float | None
@@ -237,8 +240,9 @@ class SourceTail(Answer):
     #: SHA-256 of the file's bytes ``[from_offset, to_offset)``.
     range_sha256: str | None
     lines: list[TailLine]
-    #: ``no_file_today``: neither today's nor yesterday's spool file exists.
-    reason: Literal["no_file_today"] | None = None
+    #: ``no_file_today``: neither today's nor yesterday's spool file exists. ``network_source``: a
+    #: configured network; its lines are in its members' folders (``<name>-<ip>``).
+    reason: Literal["no_file_today", "network_source"] | None = None
 
 
 # -- endpoints ------------------------------------------------------------------------------------
@@ -326,7 +330,6 @@ def source_tail(
     if not valid_source_name(name) or not sourcehealth.known(db, config, name):
         raise _error("source_not_found")
     now = utc_now()
-    day = sourcehealth.spool_day(layout, name, site_day(now))
     empty = SourceTail(
         source=name,
         day=None,
@@ -339,6 +342,9 @@ def source_tail(
         lines=[],
         reason="no_file_today",
     )
+    if any(source.name == name and source.is_network for source in config.sources):
+        return empty.model_copy(update={"reason": "network_source"})
+    day = sourcehealth.spool_day(layout, name, site_day(now))
     if day is None:
         return empty
     try:
