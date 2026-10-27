@@ -2,8 +2,8 @@
 
 > Durum: MVP (sürüm 0.1.0). Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
-> `v0016_search`). Bir test, modellerle migrasyonların birebir aynı olduğunu her çalıştırmada
-> doğrular.
+> `v0017_fortigate_dhcp`). Bir test, modellerle migrasyonların birebir aynı olduğunu her
+> çalıştırmada doğrular.
 
 ## Özet (TR)
 
@@ -37,6 +37,13 @@
   aramalardır. `ingest_offsets.counts_from_line` yükseltmeden önce yüklenmiş ve henüz
   sayılmamış dosyaları işaretler; `fg_web` üzerindeki `ix_fg_web_rhost_time` indeksi "bu alan adı
   ve alt alan adları" aramasını hızlandırır.
+- FortiGate DHCP (revizyon `0017_fortigate_dhcp`, ADR-0016): `fg_dhcp`, FortiGate'in DHCP
+  sunucusu satırlarını (ACK/RELEASE) tutan yeni zaman serisi tablosudur; bir satırın ne anlama
+  geldiğine `logid` ve ayarlara bakarak worker karar verir. `fg_traffic.srcmac` oturum kaydının
+  kaynak MAC adresidir (dizinsiz; kira kanıtı değildir). `leases.lease_seconds`, FortiGate'in
+  kaydettiği kira süresidir (300–8.640.000 sn); `leases.source_table` artık `mt_dhcp`, `mt_arp`
+  ya da `fg_dhcp` olabilir. Yükseltmeden önce yüklenmiş FortiGate DHCP satırları `fg_event`
+  satırı olarak kalır, dönüştürülmez.
 
 ## Summary (EN)
 
@@ -58,7 +65,12 @@ Search (revision `0016_search`, [ADR-0015](adr/0015-search-live-sources.md)) add
 summary table `search_counts` (written by ingest in the transaction of the rows), the personal
 `saved_searches`, `ingest_offsets.counts_from_line` (files loaded before the upgrade and not
 counted yet) and the expression index `ix_fg_web_rhost_time` for "this domain and its
-subdomains".
+subdomains". FortiGate DHCP (revision `0017_fortigate_dhcp`, ADR-0016) adds the time-series
+table `fg_dhcp` (the FortiGate DHCP server's ACK/RELEASE lines; the worker decides what a row
+means from its `logid` and the settings), `fg_traffic.srcmac` (the session record's source MAC;
+not indexed, never lease evidence) and `leases.lease_seconds` (the lease time the FortiGate
+logged, 300–8,640,000 s); `leases.source_table` is `mt_dhcp`, `mt_arp` or `fg_dhcp`. FortiGate
+DHCP lines loaded before the upgrade stay `fg_event` rows; they are not converted.
 
 ## Conventions
 
@@ -100,12 +112,13 @@ through the table itself (never into a partition), so the identity column is use
 | Table | Content | Indexes besides the primary key |
 |---|---|---|
 | `messages` | Every received message (lightweight): severity, facility, program/topics, host, type, subtype, short text, `parse_error` | (source, time), (type, time) |
-| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport` | (srcip, time), (transip, transport, time), (sessionid), (dstip, dstport, time) |
+| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
 | `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time), `ix_fg_web_rhost_time` (reverse(lower(hostname)), time) — the search field `domain:` (revision `0016_search`) |
 | `fg_dns` | DNS: qname, qtype, answers `INET[]`, catdesc, action | (srcip, time), (qname, time) |
 | `fg_app` | Application control: app, appid, appcat, hostname, url | (sessionid), (srcip, time) |
 | `fg_ips` / `fg_virus` | IPS and antivirus events | (srcip, time) |
 | `fg_event` | Admin logins, configuration changes (`cfgpath`, `cfgobj`, `cfgattr`), system/perf, VPN, user | (subtype, time) |
+| `fg_dhcp` | FortiGate DHCP server events (revision `0017_fortigate_dhcp`, ADR-0016): an `event` line with `ip`, `mac` and `dhcp_msg` that convert (else it stays `fg_event`, parse failure `fortigate.dhcp`): logid, subtype, level, logdesc, dhcp_msg, interface (the DHCP server's interface), ip, mac (both NOT NULL), hostname, lease (`BIGINT`, seconds as logged, NULL when absent; verify on site), msg, `device_time` (`true`: `time` is the FortiGate's event time; `false`: the receive time, never lease evidence). What a row means (ACK, RELEASE) is decided by the worker from its `logid` (`dhcp.fortigate_logids`), so a settings change re-reads old rows; lines loaded before the upgrade are not converted | (ip, time), (mac, time) |
 | `mt_dhcp` | `assigned`/`deassigned`: server, vlan, ip, mac, hostname | (ip, time), (mac, time) |
 | `mt_arp` | Hourly `ARP-LOG ip mac interface` | (ip, time), (mac, time) |
 | `mt_fw` | MikroTik firewall: prefix, chain, in/out interface, state, src-mac, proto, src:sport → dst:dport, len | (src, time), (dst, time) |
@@ -129,7 +142,7 @@ but which are not in a table go to `extra`.
 | `persons` | id | Name, department, title, e-mail, employee number (unique), active (persons are deactivated, never deleted), `usage_excluded` (left out of person-level usage views and reports; revision `0010_usage`) |
 | `devices` | `mac` | First/last seen, last IP/VLAN, `hostnames[]`, vendor, `randomized`, type (pc, phone, printer, ip_phone, ap, server, camera, other), `person_id` (the **current** owner, mirrored from `device_assignments`), `infrastructure`, notes, `tags[]`, label `name` |
 | `device_assignments` | id; partial unique `mac` where `valid_to` IS NULL | Assignment history (revision `0008_device_assignments`, ADR-0008): `mac` → `person_id` for `[valid_from, valid_to)` (`valid_to` NULL = current), `assigned_by`, `note` (given when the row is opened; an unassign takes none), `backfilled` (made by the migration from an older link; `valid_from` = the device's first sighting). No two intervals of one MAC overlap — exclusion constraint `ex_device_assignments_no_overlap` (`btree_gist`) or, where the extension cannot be created, a trigger with the same rule. Rows are never deleted; foreign keys RESTRICT. The 5651 person step reads the row valid at T. Not a time-series table (small) |
-| `leases` | id | IP ↔ MAC interval: vlan, server, hostname, `start`, `"end"` (NULL = open), `end_reason` (dhcp, timeout, superseded, arp, open), confidence (high/medium/low), `source_table`, `last_evidence`, `evidence` (JSON list of `arcilogger_worker.lookup.EvidenceRef.to_dict()` objects: `{"table", "row_id", "time", "raw": {"source", "day", "line", "offset"} \| null, "summary"}`). Checks: `end ≥ start`; `end_reason = 'open'` exactly when `end` is NULL. Indexes (ip, start), (mac, start) |
+| `leases` | id | IP ↔ MAC interval: vlan, server (a MikroTik DHCP server name, or the FortiGate interface of an `fg_dhcp` lease), hostname, `start`, `"end"` (NULL = open), `end_reason` (dhcp, timeout, superseded, arp, open), confidence (high/medium/low), `source_table` (`mt_dhcp`, `mt_arp` or `fg_dhcp`), `last_evidence`, `lease_seconds` (revision `0017_fortigate_dhcp`: the lease time a FortiGate ACK logged, when usable; NULL for every other lease), `evidence` (JSON list of `arcilogger_worker.lookup.EvidenceRef.to_dict()` objects: `{"table", "row_id", "time", "raw": {"source", "day", "line", "offset"} \| null, "summary"}`). Checks: `end ≥ start`; `end_reason = 'open'` exactly when `end` is NULL; `ck_leases_source_table` (the three tables); `ck_leases_lease_seconds` (NULL or 300–8,640,000, the FortiOS `lease-time` range). Indexes (ip, start), (mac, start), (source_table, "end") (open and recently ended leases per table, revision `0017_fortigate_dhcp`). The downgrade of that revision deletes the `fg_dhcp` leases first (the previous code cannot read them; they are rebuildable) |
 | `job_runs` | id | Worker job runs: job, started/finished, status (running/ok/failed/skipped), details |
 | `settings` | `key` | Canonical-JSON value (no floats: every change is audited), `updated_at`, `updated_by` (`:seed` while it is the shipped default, else the admin's user name; `:system`, `:migration` for internal keys — `:` never occurs in a user name) |
 | `users` | id; unique `username` | Lower-case ASCII user name, display name, role (admin/auditor/hr/viewer), Argon2id hash, `must_change_password`, encrypted TOTP secret, `totp_enabled`, `totp_last_counter` (replay guard), failed attempts, `locked_until`, last login, active |
@@ -210,7 +223,7 @@ tables:
 
 | `[database] timescale` | TimescaleDB installed | Result |
 |---|---|---|
-| `auto` (default) | yes | `CREATE EXTENSION timescaledb`; the 15 time-series tables become hypertables (`time`, 1-day chunks); compression (`segmentby source`, `orderby time DESC, id DESC`) with a 7-day policy where the edition supports it; `timescaledb.telemetry_level = off` for the database |
+| `auto` (default) | yes | `CREATE EXTENSION timescaledb`; the 15 time-series tables of the baseline become hypertables (`time`, 1-day chunks); compression (`segmentby source`, `orderby time DESC, id DESC`) with a 7-day policy where the edition supports it; `timescaledb.telemetry_level = off` for the database. Revision `0017_fortigate_dhcp` creates the 16th, `fg_dhcp`, in the storage the baseline chose (a hypertable with the same chunks and compression when `messages` is one, else natively partitioned) and appends it to the `db.timescale` status |
 | `auto` | no, or `CREATE EXTENSION` fails (e.g. not in `shared_preload_libraries`) | native partitions (below); the reason is recorded and `arcilogger-db check` warns when TimescaleDB is installed but unused |
 | `require` | no | the migration fails |
 | `off` | any | native partitions |

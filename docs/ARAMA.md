@@ -87,10 +87,10 @@ karşılaştırır). "Hızlı" sütunu, alanın tek başına bir indeksle okundu
 | `program` (`konu`) | metin | syslog programı ya da MikroTik konuları | — |
 | `severity` (`onem`) | önem | syslog önemi | — |
 | `error` (`hata`) | hata | satırın ayrıştırılamayan kalıbı | — |
-| `srcip` (`kaynakip`, `istemci`) | IP | istemcinin adresi ya da ağı — en hızlı alan | trafik, web, DNS, uygulama, IPS, virüs, DHCP, ARP, MikroTik güvenlik duvarı, oturum açma |
+| `srcip` (`kaynakip`, `istemci`) | IP | istemcinin adresi ya da ağı — en hızlı alan | trafik, web, DNS, uygulama, IPS, virüs, DHCP, ARP, MikroTik güvenlik duvarı, oturum açma, FortiGate DHCP |
 | `dstip` (`hedefip`) | IP | bağlanılan adres | trafik, MikroTik güvenlik duvarı |
 | `natip` (`transip`) | IP | FortiGate'in kaynak NAT sonrası adresi | trafik |
-| `ip` (`adres`) | IP | kaynak, hedef ya da NAT adreslerinden biri | trafik, MikroTik güvenlik duvarı, DHCP, ARP, oturum açma |
+| `ip` (`adres`) | IP | kaynak, hedef ya da NAT adreslerinden biri; FortiGate DHCP kayıtlarında kiralanan adres | trafik, MikroTik güvenlik duvarı, DHCP, ARP, oturum açma, FortiGate DHCP |
 | `srcport` (`kaynakport`) | port | istemcinin portu | — |
 | `dstport` (`hedefport`) | port | bağlanılan port | `dstip:` ile birlikte trafik |
 | `natport` (`transport`) | port | kaynak NAT sonrası port | `natip:` ile birlikte trafik |
@@ -108,15 +108,16 @@ karşılaştırır). "Hızlı" sütunu, alanın tek başına bir indeksle okundu
 | `policy` (`politika`) | politika | FortiGate politika numarası ya da adı | — |
 | `sessionid` (`oturum`) | sayı | FortiGate oturum numarası | trafik, web, uygulama |
 | `user` (`kullanici`) | metin | cihaza giriş yapan ya da değişiklik yapan kullanıcı | — |
-| `mac` | MAC | cihazın MAC adresi ya da üretici öneki | DHCP, ARP |
+| `mac` | MAC | cihazın MAC adresi ya da üretici öneki (MikroTik DHCP, ARP, güvenlik duvarı ve olayları, FortiGate DHCP); FortiGate oturum kaydındaki MAC'i aramaz, onun için `srcmac` | DHCP, ARP, FortiGate DHCP |
+| `srcmac` (`kaynakmac`) | MAC | FortiGate oturum kaydındaki kaynak MAC adresi (yalnızca aygıt tanıma açık arayüzlerde dolu); dizinsizdir, zaman dilimleriyle taranır | — |
 | `vlan` | VLAN | istemci adresinin VLAN'ı | `srcip` gibi |
 | `department` (`departman`) | departman | istemci adresinin VLAN'ına tanımlı departman | `srcip` gibi |
-| `interface` (`arayuz`) | metin | gelen ya da giden arayüz | — |
+| `interface` (`arayuz`) | metin | gelen ya da giden arayüz; FortiGate DHCP kayıtlarında DHCP sunucusunun arayüzü | — |
 | `qtype` | sabit | DNS sorgusunun tipi (A, AAAA, MX …) | — |
 | `attack` (`saldiri`) | metin | IPS imzasının adı | — |
 | `virus` | metin | bulunan virüsün adı | — |
-| `logid` | sabit | FortiGate `logid` alanı | — |
-| `level` | sabit | olayın seviyesi (FortiGate, MikroTik) | — |
+| `logid` | sabit | FortiGate `logid` alanı (FortiGate DHCP kayıtları dahil) | — |
+| `level` | sabit | olayın seviyesi (FortiGate, FortiGate DHCP, MikroTik) | — |
 | `text` (`metin`) | serbest metin | kaydın metni (bölüm 4); alan adı yazmadan da aranır | — |
 
 ## 4. Serbest metin
@@ -181,8 +182,8 @@ domain:, mac: veya qname: gibi bir alan ekleyin"). Ölçülen süreler bölüm 1
 | `ips` | Saldırı önleme | FortiGate UTM IPS |
 | `virus` | Virüs | FortiGate UTM antivirüs |
 | `utm` | Diğer UTM | diğer FortiGate UTM alt türleri |
-| `event` | FortiGate olayı | FortiGate olayları |
-| `dhcp` | DHCP | MikroTik DHCP (havuz olayları dahil) |
+| `event` | FortiGate olayı | FortiGate olayları; FortiGate DHCP kayıtları `type:event` altındadır; `type:event mac:<MAC>`, `ip:` ya da `logid:0100026001` onları bulur |
+| `dhcp` | DHCP (MikroTik) | MikroTik DHCP (havuz olayları dahil); FortiGate DHCP kayıtları `type:event` altındadır; `type:event mac:<MAC>`, `ip:` ya da `logid:0100026001` onları bulur |
 | `arp` | ARP | MikroTik ARP |
 | `fw` | MikroTik güvenlik duvarı | MikroTik firewall |
 | `account` | Oturum açma | MikroTik oturum açma |

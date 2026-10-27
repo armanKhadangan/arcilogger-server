@@ -86,10 +86,10 @@ the catalogue). "Fast" names the tables where the field alone is read from an in
 | `program` (`konu`) | text | the syslog program or the MikroTik topics | — |
 | `severity` (`onem`) | severity | the syslog severity | — |
 | `error` (`hata`) | error | the pattern a line could not be parsed with | — |
-| `srcip` (`kaynakip`, `istemci`) | IP | the client's address or network — the fastest field | traffic, web, DNS, application, IPS, virus, DHCP, ARP, MikroTik firewall, logins |
+| `srcip` (`kaynakip`, `istemci`) | IP | the client's address or network — the fastest field | traffic, web, DNS, application, IPS, virus, DHCP, ARP, MikroTik firewall, logins, FortiGate DHCP |
 | `dstip` (`hedefip`) | IP | the address connected to | traffic, MikroTik firewall |
 | `natip` (`transip`) | IP | the FortiGate's address after source NAT | traffic |
-| `ip` (`adres`) | IP | any of the source, destination or NAT addresses | traffic, MikroTik firewall, DHCP, ARP, logins |
+| `ip` (`adres`) | IP | any of the source, destination or NAT addresses; in FortiGate DHCP records the leased address | traffic, MikroTik firewall, DHCP, ARP, logins, FortiGate DHCP |
 | `srcport` (`kaynakport`) | port | the client's port | — |
 | `dstport` (`hedefport`) | port | the port connected to | traffic, together with `dstip:` |
 | `natport` (`transport`) | port | the port after source NAT | traffic, together with `natip:` |
@@ -107,15 +107,16 @@ the catalogue). "Fast" names the tables where the field alone is read from an in
 | `policy` (`politika`) | policy | the FortiGate policy number or name | — |
 | `sessionid` (`oturum`) | number | the FortiGate session id | traffic, web, application |
 | `user` (`kullanici`) | text | the user who signed in to a device or changed it | — |
-| `mac` | MAC | the device's MAC address or a vendor prefix | DHCP, ARP |
+| `mac` | MAC | the device's MAC address or a vendor prefix (MikroTik DHCP, ARP, firewall and events, FortiGate DHCP); not the MAC of a FortiGate session record, `srcmac` finds that | DHCP, ARP, FortiGate DHCP |
+| `srcmac` (`kaynakmac`) | MAC | the source MAC of the FortiGate session record (filled only on interfaces with device detection); not indexed, scanned in time slices | — |
 | `vlan` | VLAN | the VLAN of the client address | like `srcip` |
 | `department` (`departman`) | department | the department of the client address's VLAN | like `srcip` |
-| `interface` (`arayuz`) | text | the incoming or the outgoing interface | — |
+| `interface` (`arayuz`) | text | the incoming or the outgoing interface; in FortiGate DHCP records the DHCP server's interface | — |
 | `qtype` | token | the type of the DNS query (A, AAAA, MX …) | — |
 | `attack` (`saldiri`) | text | the name of the IPS signature | — |
 | `virus` | text | the name of the virus found | — |
-| `logid` | token | the FortiGate `logid` field | — |
-| `level` | token | the event's level (FortiGate, MikroTik) | — |
+| `logid` | token | the FortiGate `logid` field (FortiGate DHCP records included) | — |
+| `level` | token | the event's level (FortiGate, FortiGate DHCP, MikroTik) | — |
 | `text` (`metin`) | free text | the record's text (section 4); also searched without a field name | — |
 
 ## 4. Free text
@@ -180,8 +181,8 @@ The values of the `type:` field; the same names are used in the statistics and t
 | `ips` | Intrusion prevention | FortiGate UTM IPS |
 | `virus` | Antivirus | FortiGate UTM antivirus |
 | `utm` | Other UTM | other FortiGate UTM subtypes |
-| `event` | FortiGate event | FortiGate events |
-| `dhcp` | DHCP | MikroTik DHCP (pool events included) |
+| `event` | FortiGate event | FortiGate events; FortiGate DHCP records are under `type:event`; `type:event mac:<MAC>`, `ip:` or `logid:0100026001` finds them |
+| `dhcp` | DHCP (MikroTik) | MikroTik DHCP (pool events included); FortiGate DHCP records are under `type:event`; `type:event mac:<MAC>`, `ip:` or `logid:0100026001` finds them |
 | `arp` | ARP | MikroTik ARP |
 | `fw` | MikroTik firewall | MikroTik firewall |
 | `account` | Logins | MikroTik logins |
