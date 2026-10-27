@@ -52,18 +52,20 @@ test.describe('Kaynaklar', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Kaynaklar' })).toBeVisible();
     await expect(page.getByTestId('sources-summary')).toContainText('3/5 kaynak etkin');
     await expect(page.getByTestId('sources-summary')).toContainText('1 bilinmeyen gönderici');
-    expect(await names(page)).toEqual([
-      'core-r1',
-      'fortigate',
-      'ap',
-      'ap-172.20.10.3',
-      'ap-172.20.10.4',
-      'switch-3',
-      'lab-fw',
-      'edge-1',
-      'unknown-172.20.10.40',
-      'unknown-198.51.100.7',
-    ]);
+    await expect
+      .poll(() => names(page))
+      .toEqual([
+        'core-r1',
+        'fortigate',
+        'ap',
+        'ap-172.20.10.3',
+        'ap-172.20.10.4',
+        'switch-3',
+        'lab-fw',
+        'edge-1',
+        'unknown-172.20.10.40',
+        'unknown-198.51.100.7',
+      ]);
     const core = row(page, 'core-r1');
     await expect(core).toContainText('MikroTik');
     await expect(core).toContainText('172.20.10.1');
@@ -109,14 +111,14 @@ test.describe('Kaynaklar', () => {
       .getByRole('button', { name: /Sessiz/ })
       .click();
     await expect(page).toHaveURL(/\/sources\?filter=silent$/);
-    expect(await names(page)).toEqual(['ap-172.20.10.4', 'switch-3', 'edge-1']);
+    await expect.poll(() => names(page)).toEqual(['ap-172.20.10.4', 'switch-3', 'edge-1']);
     await page.getByRole('button', { name: /Bilinmeyen/ }).click();
-    expect(await names(page)).toEqual(['unknown-172.20.10.40', 'unknown-198.51.100.7']);
+    await expect.poll(() => names(page)).toEqual(['unknown-172.20.10.40', 'unknown-198.51.100.7']);
     await page.reload();
-    expect(await names(page)).toEqual(['unknown-172.20.10.40', 'unknown-198.51.100.7']);
+    await expect.poll(() => names(page)).toEqual(['unknown-172.20.10.40', 'unknown-198.51.100.7']);
     await page.getByRole('button', { name: /Tümü/ }).click();
     await expect(page).toHaveURL(/\/sources$/);
-    expect(await names(page)).toHaveLength(10);
+    await expect.poll(() => names(page)).toHaveLength(10);
   });
 
   test('the overview refreshes every 30 s in the background', async ({ page }) => {

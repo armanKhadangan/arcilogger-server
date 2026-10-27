@@ -419,9 +419,7 @@ export function SourcesHealthPage() {
                       }}
                     >
                       {t(`sources.filters.${key}`)}
-                      <span className="tabular opacity-80">
-                        {formatNumber(counts[key], 0, lang)}
-                      </span>
+                      <span className="tabular">{formatNumber(counts[key], 0, lang)}</span>
                     </Button>
                   ))}
                 </div>
