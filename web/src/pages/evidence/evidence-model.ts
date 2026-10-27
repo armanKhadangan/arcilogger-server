@@ -5,7 +5,8 @@
  */
 
 import type { EvidenceCreate, EvidenceOut, RawLine, Scope } from '@/lib/api-types';
-import { parseDay } from '@/lib/dates';
+import { dayText, parseDay } from '@/lib/dates';
+import type { HandoffPayloads } from '@/lib/handoff';
 import { codePointLength, type FieldErrors } from '@/lib/validation';
 
 /** Most days in one package (`routers.evidence.MAX_DAYS`). */
@@ -127,6 +128,30 @@ export function parseLines(text: string): { lines: RawLine[]; bad: number[] } {
     lines.push({ day, source, line: Number(number) });
   });
   return { lines, bad };
+}
+
+/** The extract as the line box shows it: `2026-10-09 fortigate 17`, one line each. */
+export function extractText(lines: readonly RawLine[]): string {
+  return lines.map((line) => `${line.day} ${line.source} ${line.line}`).join('\n');
+}
+
+/** What a search handed over ("Kanıt paketine aktar", Wave 2 contract 2.13). */
+export type SearchExtract = HandoffPayloads['/evidence'];
+
+/**
+ * The wizard filled with a search's raw lines: scope = their days (first to last), content = an
+ * extract of exactly these lines, still editable and checked by {@link parseLines} like typed
+ * ones.
+ */
+export function wizardFromSearch(extract: SearchExtract): WizardDraft {
+  return {
+    ...emptyWizard(),
+    scope: 'range',
+    from: dayText(extract.from_day),
+    to: dayText(extract.to_day),
+    content: 'extract',
+    lines: extractText(extract.extract),
+  };
 }
 
 /** Problems of the scope step (`today`: the site day, `YYYY-MM-DD`). */

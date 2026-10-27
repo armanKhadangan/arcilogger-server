@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-import { expectNoA11yViolations, usePreferences } from './fixtures';
+import { expectNoA11yViolations, usePreferences, useSampleClock } from './fixtures';
 import { mockApi } from './mock-api';
+import { mockSearch } from './mock-search';
+import { SAMPLE_TODAY } from './samples';
 
 const PAGES: [string, string][] = [
   ['Panel', 'Panel'],
@@ -118,7 +120,7 @@ test.describe('application shell', () => {
     expect(caption.y).toBeGreaterThanOrEqual(product.y + product.height - 1);
   });
 
-  test('the global search box is on every page; no time range outside Arama', async ({ page }) => {
+  test('the global search box is on every page; the time range only on Arama', async ({ page }) => {
     // Admin (has search.read): the box leads to Arama, the only page with a time range.
     for (const path of ['/', '/sources', '/live', '/audit', '/lookup', '/evidence', '/sealing']) {
       await page.goto(path);
@@ -128,6 +130,15 @@ test.describe('application shell', () => {
         page.locator('header').getByRole('button', { name: /^Tarih aralığı/ }),
       ).toHaveCount(0);
     }
+    await page.goto('/search');
+    await expect(page.getByRole('heading', { level: 1, name: 'Arama' })).toBeVisible();
+    await expect(
+      page.locator('header').getByRole('button', { name: 'Tarih aralığı: Son 24 saat' }),
+    ).toBeVisible();
+    await page.goto('/search?range=7d');
+    await expect(
+      page.locator('header').getByRole('button', { name: 'Tarih aralığı: Son 7 gün' }),
+    ).toBeVisible();
   });
 
   test('placeholder page has no accessibility violations (dark)', async ({ page }) => {
@@ -156,12 +167,18 @@ test.describe('global search box', () => {
   test('hands its term to Arama in memory: not in the address, history or storage', async ({
     page,
   }) => {
-    await mockApi(page, { signedInAs: 'tolga' });
+    await useSampleClock(page, SAMPLE_TODAY);
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await mockSearch(page, api);
     await page.goto('/audit');
     const box = page.locator('header').getByRole('searchbox', { name: 'Genel arama' });
     await box.fill('172.20.41.23');
     await box.press('Enter');
     await expect(page.getByRole('heading', { level: 1, name: 'Arama' })).toBeVisible();
+    // An IP arrives as `ip:` and runs at once, in a request body.
+    await expect(page.getByRole('combobox', { name: 'Sorgu' })).toHaveValue('ip:172.20.41.23');
+    await expect.poll(() => api.callsTo('POST', '/search').length).toBe(1);
+    expect(api.callsTo('POST', '/search')[0]?.body).toMatchObject({ q: 'ip:172.20.41.23' });
     const url = new URL(page.url());
     expect(url.pathname + url.search + url.hash).toBe('/search');
     const kept = await page.evaluate(() =>
@@ -172,6 +189,31 @@ test.describe('global search box', () => {
       ]),
     );
     expect(kept).not.toContain('172.20.41.23');
+  });
+
+  test('turns a MAC address into mac: and a host name into domain:, and keeps the range', async ({
+    page,
+  }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await mockSearch(page, api);
+    await page.goto('/search?range=1h');
+    const box = page.locator('header').getByRole('searchbox', { name: 'Genel arama' });
+    await box.fill('00-00-5E-00-53-21');
+    await box.press('Enter');
+    await expect(page.getByRole('combobox', { name: 'Sorgu' })).toHaveValue(
+      'mac:00:00:5e:00:53:21',
+    );
+    await box.fill('www.example.com');
+    await box.press('Enter');
+    await expect(page.getByRole('combobox', { name: 'Sorgu' })).toHaveValue(
+      'domain:www.example.com',
+    );
+    await box.fill('PLN-PC14');
+    await box.press('Enter');
+    await expect(page.getByRole('combobox', { name: 'Sorgu' })).toHaveValue('"PLN-PC14"');
+    expect(new URL(page.url()).search).toBe('?range=1h');
+    await expect.poll(() => api.callsTo('POST', '/search').length).toBe(3);
   });
 });
 

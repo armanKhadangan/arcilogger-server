@@ -1,5 +1,248 @@
 {
   "search": {
-    "description": "Kayıtlarda IP, MAC, alan adı, kullanıcı ve metinle arama; her sonuç ham satırına götürür."
+    "description": "Kayıtlarda IP, MAC, alan adı, kullanıcı ve metinle arama; her sonuç ham satırına götürür.",
+    "privacy": "Bu sayfa kişisel veri gösterir; sorgular ve açılan ham satırlar denetim kaydına yazılır.",
+    "privacyWait": {
+      "title": "KVKK bilgilendirmesinin onayı bekleniyor",
+      "body": "Arama sonuçları kişisel veri içerir. Açılan bilgilendirme metnini onayladığınızda arama çalışır."
+    },
+    "range": "Aralık: {{from}} – {{to}} (kaydın cihaz zamanı; alınma zamanı her satırın üzerinde)",
+    "retryAfter": "{{seconds}} saniye sonra yeniden deneyebilirsiniz.",
+    "query": {
+      "form": "Kayıt araması",
+      "label": "Sorgu",
+      "placeholder": "ör. srcip:172.20.41.5 type:web action:blocked",
+      "submit": "Ara",
+      "running": "Aranıyor…",
+      "help": "Sorgu söz dizimi yardımı (?)",
+      "hint": "Koşullar boşlukla birleşir (VE); bir alanın değerleri virgülle ayrılır (VEYA); başındaki - koşulu hariç tutar. Alanlar ve örnekler için “?”.",
+      "suggestions": "Öneriler"
+    },
+    "empty": {
+      "title": "Bir sorgu yazıp “Ara”ya basın",
+      "body": "Sayfa açılınca arama yapılmaz. Bir IP, MAC, alan adı ya da metin arayın; zaman aralığı üst çubuktadır."
+    },
+    "histogram": {
+      "title": "Zaman dağılımı",
+      "total_one": "{{formatted}} kayıt",
+      "total_other": "{{formatted}} kayıt",
+      "totalAtLeast_one": "≥ {{formatted}} kayıt",
+      "totalAtLeast_other": "≥ {{formatted}} kayıt",
+      "partly": "aralığın bir kısmı sayılamadı (taralı)",
+      "count_one": "{{formatted}} kayıt",
+      "count_other": "{{formatted}} kayıt",
+      "uncounted": "Bu dilim sayılamadı",
+      "uncountedShort": "sayılmadı",
+      "showTable": "Tablo olarak göster",
+      "showChart": "Grafik olarak göster",
+      "from": "Başlangıç",
+      "to": "Bitiş",
+      "records": "Kayıt",
+      "zoom": "Yakınlaştır",
+      "zoomTo": "{{from}} – {{to}} aralığına yakınlaş",
+      "dragHint": "Daha kısa bir aralıkta aramak için çubukların üzerinde sürükleyin (yeni bir arama yapılır)."
+    },
+    "facets": {
+      "title": "Dağılım",
+      "kind": "Tür",
+      "source": "Kaynak",
+      "action": "Eylem",
+      "vlan": "VLAN",
+      "department": "Departman (VLAN'a göre)",
+      "only": "Sorguya ekle: {{value}}",
+      "exclude": "Hariç tut",
+      "excludeValue": "Hariç tut: {{value}}",
+      "multipleNote": "Bu değerle süzülemez: bu ağda birden çok VLAN var.",
+      "other": "Diğer: {{formatted}}",
+      "sampled": "Örneklemden hesaplandı ({{formatted}} satır)",
+      "sampledSome": "Örneklemden hesaplandı",
+      "unavailable": "Bu arama için hesaplanamadı.",
+      "none": "Değer yok"
+    },
+    "results": {
+      "caption": "Arama sonuçları",
+      "count_one": "{{formatted}} kayıt gösteriliyor",
+      "count_other": "{{formatted}} kayıt gösteriliyor",
+      "time": "Zaman",
+      "received": "Alınma zamanı: {{time}}",
+      "source": "Kaynak",
+      "kind": "Tür",
+      "summary": "Özet",
+      "raw": "Ham satır",
+      "openRaw": "Ham satırı aç: {{source}}, satır {{line}}",
+      "more": "Daha fazla",
+      "capped": "İlk {{formatted}} kayıt gösteriliyor. Daha fazlası için sorguyu daraltın ya da dışa aktarın.",
+      "noneYet": "Henüz kayıt bulunamadı; tarama sürüyor."
+    },
+    "partial": {
+      "title": "Arama aralığın tamamını tarayamadı",
+      "continuing": "Taranıyor… {{reached}} ile şimdiye kadar bulunanlar gösteriliyor (aralık {{from}} başlangıçlı).",
+      "body": "Arama {{times}} kez kendiliğinden sürdü ve {{reached}} zamanına kadar geldi; daha eski kayıtlar ({{from}} başlangıcına kadar) için devam edin.",
+      "stopped": "Tarama {{reached}} zamanına kadar geldi, sonraki bölüm okunamadı (hata aşağıda); daha eski kayıtlar ({{from}} başlangıcına kadar) için devam edin.",
+      "continue": "Devam et"
+    },
+    "event": {
+      "title": "Kayıt ayrıntısı",
+      "subtitle": "{{source}} · {{time}} · {{table}}",
+      "fields": "Alanlar",
+      "emptyLeftOut": "Boş alanlar gösterilmez.",
+      "extra": "Diğer alanlar",
+      "message": "Mesaj kaydı",
+      "text": "Kaydın metni",
+      "rawRef": "Ham satır: {{source}} · {{day}} · satır {{line}} · bayt {{offset}}",
+      "openRaw": "Ham satır",
+      "audited": "Bu görüntüleme denetim kaydına yazıldı (kaydın konumuyla, içeriği olmadan)."
+    },
+    "saved": {
+      "menu": "Kayıtlı aramalar",
+      "none": "Kayıtlı aramanız yok.",
+      "save": "Bu aramayı kaydet…",
+      "saveTitle": "Aramayı kaydet",
+      "saveDescription": "Kayıtlı aramalar yalnızca sizindir; başka kullanıcılar görmez.",
+      "name": "Ad",
+      "query": "Sorgu",
+      "range": "Zaman aralığı",
+      "presetNote": "Her çalıştırmada o anki zamana göre yeniden hesaplanır.",
+      "fixedNote": "Sabit aralık: her çalıştırmada aynıdır.",
+      "manage": "Kayıtlı aramaları yönet…",
+      "manageTitle": "Kayıtlı aramalar",
+      "manageDescription": "Adlarını değiştirin ya da silin. Bir aramayı çalıştırmak için menüden seçin.",
+      "rename": "Yeniden adlandır",
+      "renameNamed": "Yeniden adlandır: {{name}}",
+      "renameTitle": "Kayıtlı aramayı yeniden adlandır",
+      "renameDescription": "“{{name}}” için yeni bir ad yazın.",
+      "delete": "Sil",
+      "deleteNamed": "Sil: {{name}}",
+      "deleteTitle": "Kayıtlı aramayı sil",
+      "deleteDescription": "“{{name}}” silinsin mi? Bu işlem geri alınamaz."
+    },
+    "export": {
+      "open": "Dışa aktar",
+      "title": "Arama sonuçlarını dışa aktar",
+      "description": "Aramanın tamamı, ekranda görünen satırlarla sınırlı olmadan, bir dosyaya yazılır.",
+      "format": "Dosya biçimi",
+      "formats": {
+        "xlsx": "Excel (.xlsx)",
+        "csv": "CSV (.csv)"
+      },
+      "formatHints": {
+        "xlsx": "“Sonuçlar” ve “Bilgi” sayfaları (sorgu, aralık, satır sayısı); hücreler metindir.",
+        "csv": "UTF-8, ; ayraçlı; Excel ile açılır."
+      },
+      "limit": "Dosya en fazla ayarlardaki satır sayısı (varsayılan 100.000) ya da süre kadar satır içerir; kesilen dosyanın adı “-kismi” ile biter.",
+      "privacy": "Dosya kişisel veri içerir: yalnızca gerektiği kadar saklayın ve paylaşmayın. Dışa aktarma denetim kaydına yazılır.",
+      "notSealed": "Bu dosya mühürlü değildir; bütünlük için Kanıt Paketi'ni kullanın.",
+      "reauth": "Dışa aktarma son {{minutes}} dakika içinde parolanızı yeniden girmenizi gerektirir.",
+      "start": "Dışa aktar",
+      "preparing": "Hazırlanıyor…",
+      "truncatedTitle": "Dosya kısaltıldı",
+      "truncated": {
+        "rows": "Satır sınırına ulaşıldı: dosya aramanın yalnızca ilk satırlarını içerir.",
+        "time": "Süre sınırına ulaşıldı: dosya aramanın yalnızca bir kısmını içerir."
+      }
+    },
+    "evidence": {
+      "action": "Kanıt paketine aktar",
+      "hint": "Aramanın ham satırları (en fazla 10.000) kanıt paketi sihirbazına aktarılır.",
+      "none": "Bu aramada aktarılacak satır yok.",
+      "failed": "Satırlar aktarılamadı"
+    },
+    "help": {
+      "title": "Sorgu söz dizimi",
+      "description": "Arama alanlar ve serbest metinle yapılır; zaman aralığı üst çubuktan seçilir ve sorgunun parçası değildir.",
+      "rulesTitle": "Kurallar",
+      "rules": {
+        "and": "Boşlukla ayrılan koşulların hepsi geçerlidir (VE): srcip:172.20.41.5 type:web",
+        "or": "Bir alanın değerleri virgülle yazılır (VEYA): action:deny,blocked. Farklı alanlar arasında VEYA ve parantez yoktur.",
+        "not": "Başına - (ya da NOT ) konan koşul hariç tutar: -action:accept, eylemi boş olan kayıtları da bulur.",
+        "quotes": "Boşluk içeren değerler ve metin ifadeleri tırnak içine yazılır: \"login failure\". Tırnak içindeki * joker değildir.",
+        "present": "alan:* alanın dolu olduğu kayıtları, -alan:* boş olanları bulur.",
+        "none": "Alanı olmayan bir sözcük serbest metindir (en az 3 karakter); “alan:” ile başlayıp alan olmayan bir sözcük reddedilir, metin olarak aramak için tırnak içine alın."
+      },
+      "examplesTitle": "Örnekler",
+      "examples": {
+        "0": "Bir istemcinin engellenen web erişimleri",
+        "1": "Bir alan adı ve alt alan adları, izin verilenler hariç",
+        "2": "Bir kaynaktaki bir ifade",
+        "3": "VLAN 41'den 80 ya da 443 numaralı porta giden trafik",
+        "4": "Bir MAC adresinin DHCP kayıtları",
+        "5": "FortiGate satırlarının ayrıştırma hataları"
+      },
+      "use": "Kullan",
+      "useExample": "Bu örneği sorguya yaz: {{query}}",
+      "speedTitle": "Hangi sorgular hızlıdır",
+      "speed": {
+        "indexed": "“Dizinli” işaretli alanlar (srcip:, domain:, mac:, qname:, sessionid: …) dizin kullanır ve uzun aralıklarda da hızlıdır.",
+        "srcip": "Bir istemci için ip: yerine srcip: yazın: ip: her tabloda dizin kullanamaz.",
+        "scan": "Serbest metin ve dizinsiz alanlar zaman dilimleri halinde, en yeniden geriye taranır; süre dolarsa sonuçlar kısmi olur ve “Devam et” ile sürer.",
+        "case": "Serbest metinde büyük/küçük harf farkı yalnızca İngilizce harflerde yok sayılır; İ/ı, Ş/ş, Ğ/ğ, Ü/ü, Ö/ö, Ç/ç yazıldığı gibi aranır.",
+        "truncated": "Serbest metin her kaydın ilk 2.000 karakterinde aranır; satırın tamamı ham kayıttadır.",
+        "time": "Zaman aralığı kaydın cihaz zamanına uygulanır; alınma zamanı her satırda ayrıca gösterilir."
+      },
+      "fieldsTitle": "Alanlar",
+      "columns": {
+        "field": "Alan",
+        "aliases": "Diğer adlar",
+        "meaning": "Ne arar",
+        "example": "Örnek",
+        "speed": "Hız"
+      },
+      "indexed": "Dizinli",
+      "scanned": "Taranır",
+      "kindsTitle": "Kayıt türleri (type:)"
+    }
+  },
+  "topbar": {
+    "searchPlaceholderLogs": "IP, MAC, alan adı veya metin ara…"
+  },
+  "timeRange": {
+    "label": "Tarih aralığı",
+    "button": "Tarih aralığı: {{range}}",
+    "presets": {
+      "15m": "Son 15 dk",
+      "1h": "Son 1 saat",
+      "24h": "Son 24 saat",
+      "today": "Bugün",
+      "yesterday": "Dün",
+      "7d": "Son 7 gün",
+      "30d": "Son 30 gün",
+      "custom": "Özel"
+    },
+    "span": "{{from}} – {{to}}",
+    "from": "Başlangıç",
+    "to": "Bitiş",
+    "hint": "Gün.ay.yıl saat:dakika, ör. 09.10.2026 14:30",
+    "placeholder": "GG.AA.YYYY SS:DD",
+    "note": "Aralık en fazla {{days}} gün olabilir; kaydın cihaz zamanına uygulanır.",
+    "apply": "Uygula",
+    "errors": {
+      "format": "Gün ve saati 09.10.2026 14:30 biçiminde yazın.",
+      "order": "Bitiş başlangıçtan sonra olmalıdır.",
+      "tooLong": "Aralık en fazla {{days}} gün olabilir."
+    }
+  },
+  "evidence": {
+    "wizard": {
+      "fromSearchTitle_one": "Arama sonucundan {{count}} satır aktarıldı",
+      "fromSearchTitle_other": "Arama sonucundan {{count}} satır aktarıldı",
+      "fromSearchQuery": "Sorgu: {{query}}",
+      "fromSearchBody": "Kapsam satırların günleri, içerik bu satırların alıntısıdır; satırları aşağıda değiştirebilirsiniz.",
+      "fromSearchTruncated": "Arama {{max}} satırdan fazlasını buldu; yalnızca ilk {{max}} satır aktarıldı.",
+      "fromSearchIncomplete": "Arama aralığın tamamını süresi içinde tarayamadı; bazı satırlar eksik olabilir.",
+      "fromSearchUnsealed": "Şu günler henüz mühürlenmedi: {{days}}. Bu günlerin satırlarıyla paket oluşturulamaz; gün mühürlendikten sonra yeniden deneyin.",
+      "fromSearchHint": "Arama sayfasında bir arama yapıp “Kanıt paketine aktar”a basın"
+    }
+  },
+  "auditActions": {
+    "search_run": "Arama yapıldı",
+    "search_event": "Arama kaydı açıldı",
+    "search_refs": "Arama satırları kanıt paketine aktarıldı",
+    "search_export": "Arama dışa aktarıldı",
+    "search_saved_create": "Kayıtlı arama oluşturuldu",
+    "search_saved_update": "Kayıtlı arama değiştirildi",
+    "search_saved_delete": "Kayıtlı arama silindi",
+    "live_open": "Canlı akış açıldı",
+    "live_close": "Canlı akış kapandı",
+    "raw_tail": "Kaynağın son satırları görüntülendi"
   }
 }

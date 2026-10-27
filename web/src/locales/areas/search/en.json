@@ -1,5 +1,248 @@
 {
   "search": {
-    "description": "Search the records by IP, MAC, domain, user and text; every result leads to its raw line."
+    "description": "Search the records by IP, MAC, domain, user and text; every result leads to its raw line.",
+    "privacy": "This page shows personal data; queries and opened raw lines are written to the audit log.",
+    "privacyWait": {
+      "title": "Waiting for the KVKK notice to be accepted",
+      "body": "Search results contain personal data. The search runs once you accept the notice that has opened."
+    },
+    "range": "Range: {{from}} – {{to}} (the record's device time; the receive time is on every row)",
+    "retryAfter": "You can try again in {{seconds}} s.",
+    "query": {
+      "form": "Record search",
+      "label": "Query",
+      "placeholder": "e.g. srcip:172.20.41.5 type:web action:blocked",
+      "submit": "Search",
+      "running": "Searching…",
+      "help": "Query syntax help (?)",
+      "hint": "Conditions joined by spaces must all hold (AND); a field's values are separated by commas (OR); a leading - excludes a condition. Fields and examples: “?”.",
+      "suggestions": "Suggestions"
+    },
+    "empty": {
+      "title": "Type a query and press “Search”",
+      "body": "Nothing is searched when the page opens. Search for an IP, MAC, domain or text; the time range is in the top bar."
+    },
+    "histogram": {
+      "title": "Records over time",
+      "total_one": "{{formatted}} record",
+      "total_other": "{{formatted}} records",
+      "totalAtLeast_one": "≥ {{formatted}} record",
+      "totalAtLeast_other": "≥ {{formatted}} records",
+      "partly": "part of the range could not be counted (shaded)",
+      "count_one": "{{formatted}} record",
+      "count_other": "{{formatted}} records",
+      "uncounted": "This slice could not be counted",
+      "uncountedShort": "not counted",
+      "showTable": "Show as a table",
+      "showChart": "Show as a chart",
+      "from": "From",
+      "to": "To",
+      "records": "Records",
+      "zoom": "Zoom in",
+      "zoomTo": "Zoom in to {{from}} – {{to}}",
+      "dragHint": "Drag across the bars to search a shorter range (a new search runs)."
+    },
+    "facets": {
+      "title": "Breakdown",
+      "kind": "Type",
+      "source": "Source",
+      "action": "Action",
+      "vlan": "VLAN",
+      "department": "Department (by VLAN)",
+      "only": "Add to the query: {{value}}",
+      "exclude": "Exclude",
+      "excludeValue": "Exclude: {{value}}",
+      "multipleNote": "Not a filter: this network holds several VLANs.",
+      "other": "Other: {{formatted}}",
+      "sampled": "Counted from a sample ({{formatted}} rows)",
+      "sampledSome": "Counted from a sample",
+      "unavailable": "Not available for this search.",
+      "none": "No values"
+    },
+    "results": {
+      "caption": "Search results",
+      "count_one": "{{formatted}} record shown",
+      "count_other": "{{formatted}} records shown",
+      "time": "Time",
+      "received": "Received: {{time}}",
+      "source": "Source",
+      "kind": "Type",
+      "summary": "Summary",
+      "raw": "Raw line",
+      "openRaw": "Raw line of {{source}}, line {{line}}",
+      "more": "Load more",
+      "capped": "The first {{formatted}} records are shown. Narrow the query or export it for more.",
+      "noneYet": "No records found yet; the scan goes on."
+    },
+    "partial": {
+      "title": "The search could not scan the whole range",
+      "continuing": "Scanning… records up to {{reached}} are shown (the range starts {{from}}).",
+      "body": "The search went on {{times}} times by itself and reached {{reached}}; continue for older records (back to {{from}}).",
+      "stopped": "The scan reached {{reached}}, then the next part could not be read (the error is below); continue for older records (back to {{from}}).",
+      "continue": "Continue"
+    },
+    "event": {
+      "title": "Record details",
+      "subtitle": "{{source}} · {{time}} · {{table}}",
+      "fields": "Fields",
+      "emptyLeftOut": "Empty fields are not shown.",
+      "extra": "Other fields",
+      "message": "Message record",
+      "text": "The record's text",
+      "rawRef": "Raw line: {{source}} · {{day}} · line {{line}} · byte {{offset}}",
+      "openRaw": "Raw line",
+      "audited": "This view was written to the audit log (with the record's position, without its content)."
+    },
+    "saved": {
+      "menu": "Saved searches",
+      "none": "You have no saved searches.",
+      "save": "Save this search…",
+      "saveTitle": "Save the search",
+      "saveDescription": "Saved searches are yours alone; other users do not see them.",
+      "name": "Name",
+      "query": "Query",
+      "range": "Time range",
+      "presetNote": "Worked out again from the current time at every run.",
+      "fixedNote": "Fixed range: the same at every run.",
+      "manage": "Manage saved searches…",
+      "manageTitle": "Saved searches",
+      "manageDescription": "Rename or delete them. To run one, choose it in the menu.",
+      "rename": "Rename",
+      "renameNamed": "Rename: {{name}}",
+      "renameTitle": "Rename the saved search",
+      "renameDescription": "Type a new name for “{{name}}”.",
+      "delete": "Delete",
+      "deleteNamed": "Delete: {{name}}",
+      "deleteTitle": "Delete the saved search",
+      "deleteDescription": "Delete “{{name}}”? This cannot be undone."
+    },
+    "export": {
+      "open": "Export",
+      "title": "Export the search results",
+      "description": "The whole search is written to a file, not only the rows on screen.",
+      "format": "File format",
+      "formats": {
+        "xlsx": "Excel (.xlsx)",
+        "csv": "CSV (.csv)"
+      },
+      "formatHints": {
+        "xlsx": "Sheets “Sonuçlar” and “Bilgi” (query, range, row count); every cell is text.",
+        "csv": "UTF-8, separated by ;; opens in Excel."
+      },
+      "limit": "The file holds at most the rows (default 100,000) or the time the settings allow; a file cut short has a name ending in “-kismi”.",
+      "privacy": "The file contains personal data: keep it only as long as needed and do not share it. The export is written to the audit log.",
+      "notSealed": "This file is not sealed; use an evidence package for integrity.",
+      "reauth": "Exporting needs your password confirmed within the last {{minutes}} minutes.",
+      "start": "Export",
+      "preparing": "Preparing…",
+      "truncatedTitle": "The file was cut short",
+      "truncated": {
+        "rows": "The row limit was reached: the file holds only the first rows of the search.",
+        "time": "The time limit was reached: the file holds only part of the search."
+      }
+    },
+    "evidence": {
+      "action": "Add to an evidence package",
+      "hint": "The search's raw lines (at most 10,000) are taken to the evidence package wizard.",
+      "none": "This search has no lines to take.",
+      "failed": "The lines could not be taken"
+    },
+    "help": {
+      "title": "Query syntax",
+      "description": "A search uses fields and free text; the time range is chosen in the top bar and is not part of the query.",
+      "rulesTitle": "Rules",
+      "rules": {
+        "and": "Conditions separated by spaces must all hold (AND): srcip:172.20.41.5 type:web",
+        "or": "A field's values are written with commas (OR): action:deny,blocked. There is no OR between different fields and no parentheses.",
+        "not": "A condition with a leading - (or NOT ) excludes: -action:accept also finds records without an action.",
+        "quotes": "Values with spaces and text phrases go in quotes: \"login failure\". A * inside quotes is not a wildcard.",
+        "present": "field:* finds records where the field is set, -field:* those where it is empty.",
+        "none": "A word without a field is free text (at least 3 characters); a word starting with “name:” where name is no field is refused: put it in quotes to search for it as text."
+      },
+      "examplesTitle": "Examples",
+      "examples": {
+        "0": "A client's blocked web access",
+        "1": "A domain and its subdomains, except what was let through",
+        "2": "A phrase on one source",
+        "3": "Traffic from VLAN 41 to port 80 or 443",
+        "4": "The DHCP records of a MAC address",
+        "5": "Parse errors of FortiGate lines"
+      },
+      "use": "Use",
+      "useExample": "Write this example into the query: {{query}}",
+      "speedTitle": "Which queries are fast",
+      "speed": {
+        "indexed": "Fields marked “Indexed” (srcip:, domain:, mac:, qname:, sessionid: …) use an index and stay fast over long ranges.",
+        "srcip": "For a client write srcip: rather than ip: — ip: cannot use an index in every table.",
+        "scan": "Free text and fields without an index are scanned in time slices, newest first; when the time is used up the results are partial and “Continue” goes on.",
+        "case": "Free text ignores case for English letters only; İ/ı, Ş/ş, Ğ/ğ, Ü/ü, Ö/ö, Ç/ç are matched as typed.",
+        "truncated": "Free text is matched in the first 2,000 characters of each record; the whole line is in the raw record.",
+        "time": "The time range applies to the record's device time; the receive time is shown on every row as well."
+      },
+      "fieldsTitle": "Fields",
+      "columns": {
+        "field": "Field",
+        "aliases": "Other names",
+        "meaning": "What it finds",
+        "example": "Example",
+        "speed": "Speed"
+      },
+      "indexed": "Indexed",
+      "scanned": "Scanned",
+      "kindsTitle": "Record types (type:)"
+    }
+  },
+  "topbar": {
+    "searchPlaceholderLogs": "Search IP, MAC, domain or text…"
+  },
+  "timeRange": {
+    "label": "Time range",
+    "button": "Time range: {{range}}",
+    "presets": {
+      "15m": "Last 15 min",
+      "1h": "Last hour",
+      "24h": "Last 24 hours",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "custom": "Custom"
+    },
+    "span": "{{from}} – {{to}}",
+    "from": "From",
+    "to": "To",
+    "hint": "Day.month.year hour:minute, e.g. 09.10.2026 14:30",
+    "placeholder": "DD.MM.YYYY HH:MM",
+    "note": "The range may span at most {{days}} days; it applies to the record's device time.",
+    "apply": "Apply",
+    "errors": {
+      "format": "Write the day and time as 09.10.2026 14:30.",
+      "order": "The end must be after the start.",
+      "tooLong": "The range may span at most {{days}} days."
+    }
+  },
+  "evidence": {
+    "wizard": {
+      "fromSearchTitle_one": "{{count}} line taken from a search",
+      "fromSearchTitle_other": "{{count}} lines taken from a search",
+      "fromSearchQuery": "Query: {{query}}",
+      "fromSearchBody": "The scope is the lines' days, the content an extract of these lines; you can change the lines below.",
+      "fromSearchTruncated": "The search found more than {{max}} lines; only the first {{max}} were taken.",
+      "fromSearchIncomplete": "The search could not scan the whole range in time; some lines may be missing.",
+      "fromSearchUnsealed": "These days are not sealed yet: {{days}}. A package cannot hold their lines; try again once the day is sealed.",
+      "fromSearchHint": "Run a search on the Search page and press “Add to an evidence package”"
+    }
+  },
+  "auditActions": {
+    "search_run": "Search run",
+    "search_event": "Search record opened",
+    "search_refs": "Search lines taken to an evidence package",
+    "search_export": "Search exported",
+    "search_saved_create": "Saved search created",
+    "search_saved_update": "Saved search changed",
+    "search_saved_delete": "Saved search deleted",
+    "live_open": "Live tail opened",
+    "live_close": "Live tail closed",
+    "raw_tail": "A source's latest lines viewed"
   }
 }
