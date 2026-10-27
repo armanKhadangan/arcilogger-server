@@ -20,8 +20,9 @@ Endpoint                        Permission                                      
 **Tail** (Son satırlar): the last ``limit`` (≤ 200) complete lines of today's spool file, else of
 yesterday's — the vault is never decompressed for it; with neither, ``lines: []`` and ``reason:
 "no_file_today"``. A configured network has no folder of its own (the collector writes its
-devices' lines under its members ``<name>-<ip>``): ``lines: []`` and ``reason: "network_source"``,
-nothing read and nothing audited. Line numbers and offsets are exact (the raw references ``GET /raw`` opens).
+devices' lines under its members ``<name>-<ip>``): ``lines: []`` and ``reason:
+"network_source"``, nothing read and nothing audited. Line numbers and offsets are exact (the raw
+references ``GET /raw`` opens).
 ``range_sha256`` is the SHA-256 of the file's bytes ``[from_offset, to_offset)``: the lines shown
 with their line feeds, so an auditor can recompute it from the file (``raw.tail`` stores it with
 the range and the count, never the content). Read errors are ``raw_access_denied`` and
