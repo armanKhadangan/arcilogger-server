@@ -1,0 +1,65 @@
+{
+  "network": {
+    "egress": {
+      "title": "İnternet çıkışları",
+      "empty": "Tanımlı çıkış yok: tek bir çift NAT çıkışı varsayılır.",
+      "add": "Çıkış ekle",
+      "remove": "Kaldır: {{name}}",
+      "exit": "Çıkış {{name}}",
+      "unnamed": "adsız çıkış",
+      "name": "Ad",
+      "nameHint": "Küçük harf, rakam ve tire, ör. hat-1",
+      "label": "Açıklama",
+      "mode": "NAT türü",
+      "modes": {
+        "direct": "Doğrudan (genel IP FortiGate'te)",
+        "isp_nat": "Servis sağlayıcı NAT'ı (çift NAT)",
+        "not_logged": "FortiGate'ten geçmiyor",
+        "internal": "İnternet çıkışı değil (DMZ, VLAN, VPN ya da şubeye NAT)"
+      },
+      "public": "Genel adresler",
+      "publicHint": "Her satıra bir IPv4 adresi ya da en az /24 bir ağ, ör. 203.0.113.208/29",
+      "transips": "NAT adresleri (transip)",
+      "transipsHint": "FortiGate'in bu hattaki kaynak NAT adresleri, her satıra bir tane",
+      "interfaces": "Arayüzler (dstintf)",
+      "interfacesHint": "Her satıra bir FortiGate arayüz adı, ör. wan1",
+      "portPreservation": "Port koruma",
+      "preservation": {
+        "unknown": "Bilinmiyor",
+        "preserved": "Korunuyor (sahada doğrulandı)",
+        "not_preserved": "Korunmuyor"
+      },
+      "dynamic": "Genel IP değişebilir (dinamik)",
+      "warnings": {
+        "noPublic": "Genel adres girilmedi: bu çıkış, hiçbir çıkışa tanımlı olmayan her genel IP için aranır.",
+        "dynamic": "Genel IP değişebilir: bu çıkış, tanımlı adreslerinin yanında hiçbir çıkışa tanımlı olmayan genel IP'ler için de aranır.",
+        "catchAll": "Tanımsız tüm NAT adreslerini kapsar.",
+        "interfaces": "Her hattın arayüzlerini (dstintf) girin; girilmezse sorgu bir çıkışın oturumunu hangi hattan çıktığına göre ayıramaz ve bir hattın doğrulanamadığı anlarda arama yalnızca tanımsız adreslere yönelir.",
+        "publicNat": "NAT adresi genel bir adres: FortiGate bu adresi kendisi tutuyorsa hat doğrudandır, türünü Doğrudan yapın.",
+        "converted": "Yükseltmede aktarıldı: aktarılan çıkışlar arayüzsüz ve değiştirilmeden kaldıkça sorgular onları eski NAT ayarlarındaki gibi tek hat sayar; sonradan eklenen bir çıkışın NAT adresleri bunun dışındadır. Her hattın genel adresini ve arayüzlerini girin (KURULUM.md bölüm 13)."
+      },
+      "serverRefused": "Sunucu çıkış tanımını kabul etmedi ({{code}}).",
+      "codes": {
+        "setting_type": "Değer türü yanlış: {{expected_tr}} bekleniyor.",
+        "setting_too_many": "En çok {{limit}} öğe girilebilir.",
+        "setting_interface_invalid": "Arayüz adı 1-35 karakter olmalı; kontrol karakteri ve baş/son boşluk içeremez.",
+        "setting_egress_name": "Çıkış adı küçük harf, rakam ve tire içermeli (en çok 32 karakter), ör. hat-1.",
+        "setting_egress_field": "Çıkışta bilinmeyen ya da eksik bir alan var; alanlar: label, mode (zorunlu), public, public_dynamic, transips, interfaces, port_preservation.",
+        "setting_egress_dynamic": "\"Genel IP değişebilir\" yalnızca servis sağlayıcı NAT'ı olan çıkışlarda seçilebilir.",
+        "setting_egress_mode": "NAT türü direct, isp_nat, not_logged ya da internal olmalı.",
+        "setting_egress_label": "Açıklama en çok 64 karakter olabilir ve kontrol karakteri içeremez.",
+        "setting_egress_address": "Geçersiz adres: IPv4 adresi ya da en az /24 bir IPv4 ağı bekleniyor (ağ adresi, ör. 203.0.113.208/29).",
+        "setting_ipv6_not_supported": "IPv6 adresleri bu sürümde desteklenmiyor.",
+        "setting_egress_overlap": "Bir genel adres ya da NAT adresi iki çıkışta birden olamaz; aynı transip yalnızca iki çıkışın arayüzleri ayrıysa kullanılabilir.",
+        "setting_egress_direct": "Doğrudan çıkış en az bir genel adres ister; transip girilmez (FortiGate genel adresi kendisi kullanır) ve port koruma 'unknown' kalır.",
+        "setting_egress_not_logged": "FortiGate'ten geçmeyen çıkışa yalnızca genel adres ve açıklama girilir.",
+        "setting_egress_internal": "İnternet çıkışı olmayan NAT tanımına yalnızca NAT adresleri (en az bir), arayüzler ve açıklama girilir.",
+        "setting_egress_port_preservation": "Port koruma unknown, preserved ya da not_preserved olmalı.",
+        "setting_egress_catch_all": "NAT adresi boş (tanımsız adresleri kapsayan) en çok bir çıkış olabilir.",
+        "setting_egress_public_private": "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin.",
+        "setting_egress_isp_nat_direct": "NAT adresi genel adresiyle aynı olan hat doğrudandır: türünü Doğrudan yapın.",
+        "egress_duplicate_name": "İki çıkış aynı adı taşıyamaz."
+      }
+    }
+  }
+}

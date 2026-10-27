@@ -1,0 +1,65 @@
+{
+  "network": {
+    "egress": {
+      "title": "Internet exits",
+      "empty": "No exits defined: one double-NAT exit is assumed.",
+      "add": "Add exit",
+      "remove": "Remove: {{name}}",
+      "exit": "Exit {{name}}",
+      "unnamed": "unnamed exit",
+      "name": "Name",
+      "nameHint": "Lower-case letters, digits and hyphens, e.g. hat-1",
+      "label": "Label",
+      "mode": "NAT type",
+      "modes": {
+        "direct": "Direct (public IP on the FortiGate)",
+        "isp_nat": "ISP NAT (double NAT)",
+        "not_logged": "Does not pass the FortiGate",
+        "internal": "Not an internet exit (NAT towards a DMZ, VLAN, VPN or branch)"
+      },
+      "public": "Public addresses",
+      "publicHint": "One IPv4 address or a network of at least /24 per line, e.g. 203.0.113.208/29",
+      "transips": "NAT addresses (transip)",
+      "transipsHint": "The FortiGate's source-NAT addresses on this line, one per line",
+      "interfaces": "Interfaces (dstintf)",
+      "interfacesHint": "One FortiGate interface name per line, e.g. wan1",
+      "portPreservation": "Port preservation",
+      "preservation": {
+        "unknown": "Unknown",
+        "preserved": "Kept (verified on site)",
+        "not_preserved": "Not kept"
+      },
+      "dynamic": "Public IP may change (dynamic)",
+      "warnings": {
+        "noPublic": "No public address: this exit is searched for every public IP that no exit claims.",
+        "dynamic": "Public IP may change: besides its listed addresses, this exit is also searched for public IPs that no exit claims.",
+        "catchAll": "Covers every unclaimed NAT address.",
+        "interfaces": "Enter each line's interfaces (dstintf); without them a lookup cannot tell by which line a session left, and at moments when a line cannot be confirmed the search falls back to unclaimed addresses only.",
+        "publicNat": "The NAT address is a public address: if the FortiGate holds it itself, the line is direct; set its type to Direct.",
+        "converted": "Converted at the upgrade: while the converted exits stay without interfaces and unchanged, lookups treat them as one line, as the old NAT settings did; the NAT addresses of an exit added later are outside that. Enter each line's public address and interfaces (INSTALL.md section 13)."
+      },
+      "serverRefused": "The server did not accept the exit definition ({{code}}).",
+      "codes": {
+        "setting_type": "Wrong type of value: {{expected_en}} expected.",
+        "setting_too_many": "At most {{limit}} items are allowed.",
+        "setting_interface_invalid": "An interface name has 1-35 characters, without control characters or leading/trailing spaces.",
+        "setting_egress_name": "An exit name has lower-case letters, digits and hyphens (at most 32 characters), e.g. hat-1.",
+        "setting_egress_field": "An exit has an unknown or missing field; the fields are label, mode (required), public, public_dynamic, transips, interfaces, port_preservation.",
+        "setting_egress_dynamic": "\"Public IP may change\" can only be chosen for an ISP NAT exit.",
+        "setting_egress_mode": "The NAT type must be direct, isp_nat, not_logged or internal.",
+        "setting_egress_label": "A label has at most 64 characters and no control characters.",
+        "setting_egress_address": "Invalid address: an IPv4 address or an IPv4 network of at least /24 is expected (the network address, e.g. 203.0.113.208/29).",
+        "setting_ipv6_not_supported": "IPv6 addresses are not supported in this version.",
+        "setting_egress_overlap": "A public or NAT address cannot be in two exits; the same transip is allowed only when the two exits have separate interfaces.",
+        "setting_egress_direct": "A direct exit needs at least one public address; it has no transip (the FortiGate uses the public address itself) and port preservation stays 'unknown'.",
+        "setting_egress_not_logged": "An exit that does not pass the FortiGate has only public addresses and a label.",
+        "setting_egress_internal": "An exit that is not an internet exit has only NAT addresses (at least one), interfaces and a label.",
+        "setting_egress_port_preservation": "Port preservation must be unknown, preserved or not_preserved.",
+        "setting_egress_catch_all": "At most one exit may have no NAT address (the one that covers unclaimed addresses).",
+        "setting_egress_public_private": "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit.",
+        "setting_egress_isp_nat_direct": "A line whose NAT address is its public address is direct: set its type to Direct.",
+        "egress_duplicate_name": "Two exits cannot have the same name."
+      }
+    }
+  }
+}

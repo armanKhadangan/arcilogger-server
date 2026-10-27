@@ -1,0 +1,788 @@
+{
+  "about": "HAND MOCK of tests/fixtures/egress-cases.json (WP-C1's file, not merged yet): the exit validation cases of contract 2.8.1 as the web reads them. Each case has a value and either the refusal code or the normalised value. The second step of WP-E switches egress-model.test.ts to the shared file.",
+  "cases": [
+    {
+      "name": "no exits",
+      "value": {},
+      "normalised": {}
+    },
+    {
+      "name": "the four modes of contract 2.8.1",
+      "value": {
+        "hat-1": {
+          "label": "Ana hat",
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": ["wan1"],
+          "port_preservation": "unknown"
+        },
+        "hat-2": {
+          "label": "Yedek hat",
+          "mode": "isp_nat",
+          "public": ["198.51.100.77"],
+          "public_dynamic": true,
+          "transips": ["100.64.13.9"],
+          "interfaces": ["wan2"],
+          "port_preservation": "unknown"
+        },
+        "misafir": {
+          "label": "Misafir hattı (FortiGate dışı)",
+          "mode": "not_logged",
+          "public": ["198.51.100.90"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        },
+        "dmz": {
+          "label": "DMZ'ye NAT",
+          "mode": "internal",
+          "public": [],
+          "public_dynamic": false,
+          "transips": ["172.20.99.1"],
+          "interfaces": ["dmz"],
+          "port_preservation": "unknown"
+        }
+      },
+      "normalised": {
+        "hat-1": {
+          "label": "Ana hat",
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": ["wan1"],
+          "port_preservation": "unknown"
+        },
+        "hat-2": {
+          "label": "Yedek hat",
+          "mode": "isp_nat",
+          "public": ["198.51.100.77"],
+          "public_dynamic": true,
+          "transips": ["100.64.13.9"],
+          "interfaces": ["wan2"],
+          "port_preservation": "unknown"
+        },
+        "misafir": {
+          "label": "Misafir hattı (FortiGate dışı)",
+          "mode": "not_logged",
+          "public": ["198.51.100.90"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        },
+        "dmz": {
+          "label": "DMZ'ye NAT",
+          "mode": "internal",
+          "public": [],
+          "public_dynamic": false,
+          "transips": ["172.20.99.1"],
+          "interfaces": ["dmz"],
+          "port_preservation": "unknown"
+        }
+      }
+    },
+    {
+      "name": "a /32 is written as the bare address, lists are de-duplicated, fields filled in",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200/32", "203.0.113.200", "203.0.113.208/29"]
+        }
+      },
+      "normalised": {
+        "hat-1": {
+          "label": "",
+          "mode": "direct",
+          "public": ["203.0.113.200", "203.0.113.208/29"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        }
+      }
+    },
+    {
+      "name": "a prefix written with a leading zero is read as ipaddress reads it",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.0/024"]
+        }
+      },
+      "normalised": {
+        "hat-1": {
+          "label": "",
+          "mode": "direct",
+          "public": ["203.0.113.0/24"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        }
+      }
+    },
+    {
+      "name": "RFC 5737 documentation addresses are public addresses",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["192.0.2.10", "198.51.100.0/24", "203.0.113.5"]
+        }
+      },
+      "normalised": {
+        "hat-1": {
+          "label": "",
+          "mode": "direct",
+          "public": ["192.0.2.10", "198.51.100.0/24", "203.0.113.5"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        }
+      }
+    },
+    {
+      "name": "one transip on two exits with separate interfaces",
+      "value": {
+        "hat-1": {
+          "mode": "isp_nat",
+          "public": ["203.0.113.200"],
+          "transips": ["100.64.12.9"],
+          "interfaces": ["wan1"]
+        },
+        "hat-2": {
+          "mode": "isp_nat",
+          "public": ["198.51.100.77"],
+          "transips": ["100.64.12.9"],
+          "interfaces": ["wan2"]
+        }
+      },
+      "normalised": {
+        "hat-1": {
+          "label": "",
+          "mode": "isp_nat",
+          "public": ["203.0.113.200"],
+          "public_dynamic": false,
+          "transips": ["100.64.12.9"],
+          "interfaces": ["wan1"],
+          "port_preservation": "unknown"
+        },
+        "hat-2": {
+          "label": "",
+          "mode": "isp_nat",
+          "public": ["198.51.100.77"],
+          "public_dynamic": false,
+          "transips": ["100.64.12.9"],
+          "interfaces": ["wan2"],
+          "port_preservation": "unknown"
+        }
+      }
+    },
+    {
+      "name": "an ISP NAT exit with a public NAT address is accepted (the editor only warns)",
+      "value": {
+        "hat-2": {
+          "mode": "isp_nat",
+          "transips": ["198.51.100.10"],
+          "port_preservation": "preserved"
+        }
+      },
+      "normalised": {
+        "hat-2": {
+          "label": "",
+          "mode": "isp_nat",
+          "public": [],
+          "public_dynamic": false,
+          "transips": ["198.51.100.10"],
+          "interfaces": [],
+          "port_preservation": "preserved"
+        }
+      }
+    },
+    {
+      "name": "an internal exit without interfaces; a catch-all beside it",
+      "value": {
+        "dmz": {
+          "mode": "internal",
+          "transips": ["172.20.99.1"]
+        },
+        "tanimsiz": {
+          "mode": "isp_nat"
+        }
+      },
+      "normalised": {
+        "dmz": {
+          "label": "",
+          "mode": "internal",
+          "public": [],
+          "public_dynamic": false,
+          "transips": ["172.20.99.1"],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        },
+        "tanimsiz": {
+          "label": "",
+          "mode": "isp_nat",
+          "public": [],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        }
+      }
+    },
+    {
+      "name": "a label of 64 characters with Turkish letters; an interface name with a space",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "label": "ŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞ",
+          "public": ["203.0.113.200"],
+          "interfaces": ["port 1"]
+        }
+      },
+      "normalised": {
+        "hat-1": {
+          "label": "ŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞŞ",
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": ["port 1"],
+          "port_preservation": "unknown"
+        }
+      }
+    },
+    {
+      "name": "a list instead of an object",
+      "value": [],
+      "code": "setting_type"
+    },
+    {
+      "name": "nine exits",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.1"]
+        },
+        "hat-2": {
+          "mode": "direct",
+          "public": ["203.0.113.2"]
+        },
+        "hat-3": {
+          "mode": "direct",
+          "public": ["203.0.113.3"]
+        },
+        "hat-4": {
+          "mode": "direct",
+          "public": ["203.0.113.4"]
+        },
+        "hat-5": {
+          "mode": "direct",
+          "public": ["203.0.113.5"]
+        },
+        "hat-6": {
+          "mode": "direct",
+          "public": ["203.0.113.6"]
+        },
+        "hat-7": {
+          "mode": "direct",
+          "public": ["203.0.113.7"]
+        },
+        "hat-8": {
+          "mode": "direct",
+          "public": ["203.0.113.8"]
+        },
+        "hat-9": {
+          "mode": "direct",
+          "public": ["203.0.113.9"]
+        }
+      },
+      "code": "setting_too_many"
+    },
+    {
+      "name": "an upper-case name",
+      "value": {
+        "Hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_name"
+    },
+    {
+      "name": "a name that starts with a hyphen",
+      "value": {
+        "-hat": {
+          "mode": "direct",
+          "public": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_name"
+    },
+    {
+      "name": "a name of 33 characters",
+      "value": {
+        "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh": {
+          "mode": "direct",
+          "public": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_name"
+    },
+    {
+      "name": "an exit that is not an object",
+      "value": {
+        "hat-1": "direct"
+      },
+      "code": "setting_egress_field"
+    },
+    {
+      "name": "an unknown field",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public_ip": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_field"
+    },
+    {
+      "name": "no mode",
+      "value": {
+        "hat-1": {
+          "public": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_field"
+    },
+    {
+      "name": "public_dynamic that is not a boolean",
+      "value": {
+        "hat-2": {
+          "mode": "isp_nat",
+          "public_dynamic": "yes"
+        }
+      },
+      "code": "setting_egress_field"
+    },
+    {
+      "name": "an unknown mode",
+      "value": {
+        "hat-1": {
+          "mode": "bridge",
+          "public": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_mode"
+    },
+    {
+      "name": "a label of 65 characters",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "label": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "public": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_label"
+    },
+    {
+      "name": "a label with a control character",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "label": "Ana\u0007hat",
+          "public": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_label"
+    },
+    {
+      "name": "not an address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["not an address"]
+        }
+      },
+      "code": "setting_egress_address"
+    },
+    {
+      "name": "a network wider than /24",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.112.0/23"]
+        }
+      },
+      "code": "setting_egress_address"
+    },
+    {
+      "name": "a network with host bits",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.1/24"]
+        }
+      },
+      "code": "setting_egress_address"
+    },
+    {
+      "name": "an octet with a leading zero",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.05"]
+        }
+      },
+      "code": "setting_egress_address"
+    },
+    {
+      "name": "a number instead of a text",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": [3405803976]
+        }
+      },
+      "code": "setting_egress_address"
+    },
+    {
+      "name": "an IPv6 address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["2001:db8::1"]
+        }
+      },
+      "code": "setting_ipv6_not_supported"
+    },
+    {
+      "name": "an IPv6 NAT address",
+      "value": {
+        "hat-2": {
+          "mode": "isp_nat",
+          "transips": ["2001:db8::/64"]
+        }
+      },
+      "code": "setting_ipv6_not_supported"
+    },
+    {
+      "name": "seventeen public addresses",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": [
+            "203.0.113.1",
+            "203.0.113.2",
+            "203.0.113.3",
+            "203.0.113.4",
+            "203.0.113.5",
+            "203.0.113.6",
+            "203.0.113.7",
+            "203.0.113.8",
+            "203.0.113.9",
+            "203.0.113.10",
+            "203.0.113.11",
+            "203.0.113.12",
+            "203.0.113.13",
+            "203.0.113.14",
+            "203.0.113.15",
+            "203.0.113.16",
+            "203.0.113.17"
+          ]
+        }
+      },
+      "code": "setting_too_many"
+    },
+    {
+      "name": "a shared (RFC 6598) public address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["100.64.12.9"]
+        }
+      },
+      "code": "setting_egress_public_private"
+    },
+    {
+      "name": "a private (RFC 1918) public address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["172.20.10.1"]
+        }
+      },
+      "code": "setting_egress_public_private"
+    },
+    {
+      "name": "a public network inside 192.168/16",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["192.168.1.0/24"]
+        }
+      },
+      "code": "setting_egress_public_private"
+    },
+    {
+      "name": "a loopback public address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["127.0.0.1"]
+        }
+      },
+      "code": "setting_egress_public_private"
+    },
+    {
+      "name": "a multicast public address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["224.0.0.1"]
+        }
+      },
+      "code": "setting_egress_public_private"
+    },
+    {
+      "name": "a public address of a not-logged line in private space",
+      "value": {
+        "misafir": {
+          "mode": "not_logged",
+          "public": ["10.1.2.3"]
+        }
+      },
+      "code": "setting_egress_public_private"
+    },
+    {
+      "name": "an interface with a leading space",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "interfaces": [" wan1"]
+        }
+      },
+      "code": "setting_interface_invalid"
+    },
+    {
+      "name": "an empty interface name",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "interfaces": [""]
+        }
+      },
+      "code": "setting_interface_invalid"
+    },
+    {
+      "name": "an interface name of 36 characters",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "interfaces": ["wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"]
+        }
+      },
+      "code": "setting_interface_invalid"
+    },
+    {
+      "name": "nine interfaces",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "interfaces": ["wan1", "wan2", "wan3", "wan4", "wan5", "wan6", "wan7", "wan8", "wan9"]
+        }
+      },
+      "code": "setting_too_many"
+    },
+    {
+      "name": "an unknown port preservation",
+      "value": {
+        "hat-2": {
+          "mode": "isp_nat",
+          "port_preservation": "maybe"
+        }
+      },
+      "code": "setting_egress_port_preservation"
+    },
+    {
+      "name": "a direct exit without a public address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "interfaces": ["wan1"]
+        }
+      },
+      "code": "setting_egress_direct"
+    },
+    {
+      "name": "a direct exit with a NAT address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "transips": ["100.64.12.9"]
+        }
+      },
+      "code": "setting_egress_direct"
+    },
+    {
+      "name": "a direct exit with port preservation",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "port_preservation": "preserved"
+        }
+      },
+      "code": "setting_egress_direct"
+    },
+    {
+      "name": "a dynamic direct exit",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"],
+          "public_dynamic": true
+        }
+      },
+      "code": "setting_egress_dynamic"
+    },
+    {
+      "name": "a not-logged exit without a public address",
+      "value": {
+        "misafir": {
+          "mode": "not_logged"
+        }
+      },
+      "code": "setting_egress_not_logged"
+    },
+    {
+      "name": "a not-logged exit with interfaces",
+      "value": {
+        "misafir": {
+          "mode": "not_logged",
+          "public": ["198.51.100.90"],
+          "interfaces": ["wan3"]
+        }
+      },
+      "code": "setting_egress_not_logged"
+    },
+    {
+      "name": "an internal exit without NAT addresses",
+      "value": {
+        "dmz": {
+          "mode": "internal",
+          "interfaces": ["dmz"]
+        }
+      },
+      "code": "setting_egress_internal"
+    },
+    {
+      "name": "an internal exit with a public address",
+      "value": {
+        "dmz": {
+          "mode": "internal",
+          "public": ["203.0.113.9"],
+          "transips": ["172.20.99.1"]
+        }
+      },
+      "code": "setting_egress_internal"
+    },
+    {
+      "name": "one public address on two exits",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["203.0.113.200"]
+        },
+        "hat-3": {
+          "mode": "direct",
+          "public": ["203.0.113.192/28"]
+        }
+      },
+      "code": "setting_egress_overlap"
+    },
+    {
+      "name": "a public address that is another exit's NAT address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": ["198.51.100.10"]
+        },
+        "hat-2": {
+          "mode": "isp_nat",
+          "transips": ["198.51.100.10"]
+        }
+      },
+      "code": "setting_egress_overlap"
+    },
+    {
+      "name": "one transip on two exits without interfaces",
+      "value": {
+        "hat-1": {
+          "mode": "isp_nat",
+          "public": ["203.0.113.200"],
+          "transips": ["100.64.12.9"]
+        },
+        "hat-2": {
+          "mode": "isp_nat",
+          "public": ["198.51.100.77"],
+          "transips": ["100.64.12.9"],
+          "interfaces": ["wan2"]
+        }
+      },
+      "code": "setting_egress_overlap"
+    },
+    {
+      "name": "one transip on two exits sharing an interface",
+      "value": {
+        "hat-1": {
+          "mode": "isp_nat",
+          "public": ["203.0.113.200"],
+          "transips": ["100.64.12.0/24"],
+          "interfaces": ["wan1", "wan2"]
+        },
+        "dmz": {
+          "mode": "internal",
+          "transips": ["100.64.12.9"],
+          "interfaces": ["wan2"]
+        }
+      },
+      "code": "setting_egress_overlap"
+    },
+    {
+      "name": "an ISP NAT exit whose NAT address is its public address",
+      "value": {
+        "wan": {
+          "mode": "isp_nat",
+          "public": ["203.0.113.200"],
+          "transips": ["203.0.113.200"]
+        }
+      },
+      "code": "setting_egress_isp_nat_direct"
+    },
+    {
+      "name": "two catch-all exits",
+      "value": {
+        "tanimsiz": {
+          "mode": "isp_nat"
+        },
+        "yedek": {
+          "mode": "isp_nat",
+          "public": ["198.51.100.77"]
+        }
+      },
+      "code": "setting_egress_catch_all"
+    }
+  ]
+}
