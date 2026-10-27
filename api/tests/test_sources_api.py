@@ -3,8 +3,8 @@
 sender, today's lines, ingest lag and failure ratio, the sparkline, a detail's hours (summary table
 or direct count, equal), days, gaps from a sealed vault and today's open one, parse failures with
 their detail only for raw-line readers, and the audited tail: permissions, KVKK, rate limit, the
-no-file case and a ``range_sha256`` an auditor recomputes from the file. The sparkline query is
-guarded at 300,000 rows an hour (``poe test-perf``).
+no-file case and a ``range_sha256`` an auditor recomputes from the file. The sparkline query and
+the suggestion for a busy unknown sender are guarded at 300,000 rows an hour (``poe test-perf``).
 """
 
 from __future__ import annotations
@@ -44,6 +44,9 @@ FIREWALL = "172.31.255.1"
 ROUTER = "172.20.10.1"
 #: The sparkline query on 300,000 messages in the hour must answer within this (perf guard).
 SPARKLINE_BUDGET_SECONDS = 1.0
+#: The suggestion for an unknown sender of 300,000 messages an hour (perf guard): it reads only
+#: the newest 1,000 of them.
+SUGGESTION_BUDGET_SECONDS = 0.05
 
 
 @pytest.fixture
@@ -737,3 +740,54 @@ def test_the_sparkline_query_stays_within_its_budget(db_engine: Engine) -> None:
     assert sum(sum(values) for values in lines.values()) >= 299_000
     assert re.search(r"Index (Only )?Scan using \S*source_time", plan), plan
     assert min(timings) < SPARKLINE_BUDGET_SECONDS
+
+
+UNKNOWN_LOAD = text(
+    "INSERT INTO messages (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "type, host, text) SELECT t, t, 'unknown-198.51.100.23', '198.51.100.23', :day, g, 0, "
+    "'traffic', 'FIREWALL-02', 'x' FROM generate_series(1, :rows) AS g, "
+    "LATERAL (SELECT CAST(:start AS timestamptz) + g * CAST(:step AS interval) AS t) AS x"
+)
+
+
+@pytest.mark.perf
+def test_the_suggestion_reads_only_the_newest_messages(db_engine: Engine, tmp_path: Path) -> None:
+    """A firewall whose address is not configured yet: 300,000 messages of one unknown sender in
+    the hour before now, after 600,000 in the 23 hours before. The suggestion reads only its
+    newest messages, so every overview costs one short backward index scan per sender."""
+    now = datetime(2026, 10, 14, 15, 30, 20, tzinfo=UTC)
+    end = now.replace(second=0)
+    with db_engine.begin() as connection:
+        ensure_partitions(connection, today=site_day(now))
+        for start, rows, step in (
+            (end - timedelta(hours=24), 600_000, "138 milliseconds"),
+            (end - timedelta(hours=1), 300_000, "11.9 milliseconds"),
+        ):
+            connection.execute(
+                UNKNOWN_LOAD, {"day": site_day(now), "rows": rows, "start": start, "step": step}
+            )
+    with db_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text("VACUUM ANALYZE messages"))
+    config = Config.model_validate(
+        {"site_name": EXAMPLE_SITE_NAME, "data_dir": str(tmp_path), "secrets_dir": str(tmp_path)}
+    )
+    timings = []
+    for _ in range(3):
+        with session_factory(db_engine)() as session:
+            began = time.perf_counter()
+            found = sourcehealth.suggestions(session, ["unknown-198.51.100.23"], config, now)
+            timings.append(time.perf_counter() - began)
+    print(f"\nsources suggestion, 900,000 rows of one sender: {min(timings) * 1000:.1f} ms")
+    statement = sourcehealth.newest_messages("unknown-198.51.100.23", now)
+    with db_engine.connect() as connection:
+        compiled = statement.compile(connection)
+        plan = "\n".join(
+            row[0] for row in connection.exec_driver_sql(f"EXPLAIN {compiled}", compiled.params)
+        )
+    print(plan)
+    assert found == {"unknown-198.51.100.23": {"name": "firewall-02", "type": "fortigate"}}
+    # a short backward scan, whichever index the planner takes (here every row is the sender's)
+    assert "Limit" in plan
+    assert "Seq Scan" not in plan
+    assert re.search(r"Index (Only )?Scan Backward using \S*(source_time|pkey)", plan), plan
+    assert min(timings) < SUGGESTION_BUDGET_SECONDS

@@ -20,8 +20,10 @@ collector now writes it under; the old folder and its evidence stay where they a
   300,000 rows an hour, ``api/tests/test_sources_api.py``);
 * today's lines and the ingest lag: ``ingest_offsets`` and one ``stat`` per spool file;
 * parse failures: sums of ``parse_failures``;
-* ``suggested`` (unknown senders only, at most 20): the device family of what they sent in the last
-  24 hours and a name from the most common ``messages.host``;
+* ``suggested`` (unknown senders only, at most 20): the device family of what they sent and a name
+  from the most common ``messages.host``, both from their newest 1,000 messages of the last 24
+  hours (one backward scan of ``ix_messages_source_time`` per sender, however busy it is; guard:
+  ``api/tests/test_sources_api.py``);
 * a detail's hours from ``search_counts`` while it is complete for the range, else counted
   directly; its days from ``ingest_offsets``, ``parse_failures`` and the seals; its gaps from the
   sealed manifests (parsed once, kept by path, size and time) plus today's open gap.
@@ -44,7 +46,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from arcilogger_api.rawlines import regular_file
@@ -67,9 +69,11 @@ DAILY_DAYS: Final = 14
 GAP_DAYS: Final = 30
 FAILURE_DAYS: Final = 7
 FAILURES_SHOWN: Final = 50
-#: Unknown senders a suggestion is made for, and the history it looks at.
+#: Unknown senders a suggestion is made for, the history it looks at and, of that, the newest
+#: messages it reads per sender (a firewall not configured yet may send millions a day).
 SUGGESTED_MAX: Final = 20
 SUGGEST_WINDOW: Final = timedelta(hours=24)
+SUGGEST_SAMPLE: Final = 1000
 UNKNOWN_PREFIX: Final = "unknown-"
 #: A source name (``[[sources]] name``).
 NAME: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -253,31 +257,43 @@ def sparklines(db: Session, names: Iterable[str], now: datetime) -> dict[str, li
     return lines
 
 
+def newest_messages(name: str, now: datetime) -> Select[str, str | None, str | None, int]:
+    """Type, subtype and host of the newest :data:`SUGGEST_SAMPLE` messages of ``name`` in the
+    last 24 hours, counted (a backward scan of ``ix_messages_source_time``)."""
+    newest = (
+        select(Message.type, Message.subtype, Message.host)
+        .where(
+            Message.source == name,
+            Message.time >= now - SUGGEST_WINDOW,
+            Message.time < now + timedelta(minutes=5),
+        )
+        .order_by(Message.time.desc())
+        .limit(SUGGEST_SAMPLE)
+        .subquery()
+    )
+    return select(newest.c.type, newest.c.subtype, newest.c.host, func.count()).group_by(
+        newest.c.type, newest.c.subtype, newest.c.host
+    )
+
+
 def suggestions(
     db: Session, names: Iterable[str], config: Config, now: datetime
 ) -> dict[str, dict[str, str]]:
-    """``{name, type}`` for unknown senders: the device family of the kinds they sent in the last
-    24 hours (else ``generic``) and a name from their most common host name (else
-    ``kaynak-<last part of the address>``), never one that is configured already."""
+    """``{name, type}`` for unknown senders: the device family of the kinds they sent (else
+    ``generic``) and a name from their most common host name (else ``kaynak-<last part of the
+    address>``), never one that is configured already — both from their newest messages
+    (:func:`newest_messages`)."""
     wanted = sorted(set(names))[:SUGGESTED_MAX]
     if not wanted:
         return {}
     taken = {source.name for source in config.sources}
     kinds: dict[str, set[str]] = {name: set() for name in wanted}
     hosts: dict[str, Counter[str]] = {name: Counter() for name in wanted}
-    rows = db.execute(
-        select(Message.source, Message.type, Message.subtype, Message.host, func.count())
-        .where(
-            Message.source.in_(wanted),
-            Message.time >= now - SUGGEST_WINDOW,
-            Message.time < now + timedelta(minutes=5),
-        )
-        .group_by(Message.source, Message.type, Message.subtype, Message.host)
-    )
-    for source, type_, subtype, host, count in rows:
-        kinds[source].add(kind_of(str(type_), subtype))
-        if host:
-            hosts[source][str(host)] += int(count)
+    for name in wanted:
+        for type_, subtype, host, count in db.execute(newest_messages(name, now)):
+            kinds[name].add(kind_of(str(type_), subtype))
+            if host:
+                hosts[name][str(host)] += int(count)
     found: dict[str, dict[str, str]] = {}
     for name in wanted:
         family = family_of(kinds[name]) or "generic"
