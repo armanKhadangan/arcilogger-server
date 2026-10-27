@@ -697,7 +697,10 @@ def test_a_server_stop_ends_the_stream_and_audits_it(
     assert [LiveEnd.model_validate(event.data).code for event in reader.of("end")] == [
         "server_stopping"
     ]
-    assert took < graceful + 1, took
+    # graceful + the 1 s of that last write, plus room for the lifespan shutdown, the close audit
+    # and the thread join on a slow runner (Windows took 2.1 s); a shielded last write without its
+    # 1 s bound would hold the server until the 20 s join instead
+    assert took < graceful + 1 + 2, took
     closes = audits(app_session_factory, "live.close")
     assert [entry.details["reason"] for entry in closes] == ["server_stopping"]
     assert closes[0].details["stream_id"] == opened["stream_id"]

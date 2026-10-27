@@ -103,8 +103,12 @@ def _unlock_sealed_files(tmp_path: Path) -> Iterator[None]:
 
 
 @pytest.fixture
-def now() -> datetime:
-    return datetime.now(UTC)
+def now(monkeypatch: pytest.MonkeyPatch) -> datetime:
+    """The moment the test data is written around; the router reads the same moment, so a
+    request that runs past a minute (or midnight) boundary still sees the data where it was put."""
+    moment = datetime.now(UTC)
+    monkeypatch.setattr("arcilogger_api.routers.sources.utc_now", lambda: moment)
+    return moment
 
 
 @pytest.fixture(autouse=True)
