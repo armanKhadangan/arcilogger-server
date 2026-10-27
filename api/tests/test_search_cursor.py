@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import base64
+import gc
 import json
 import os
 from collections.abc import Iterator
@@ -231,6 +232,25 @@ def _set_storage(app: FastAPI, storage: Storage) -> None:
     cache.get_or_compute(lambda: storage)
 
 
+def _paged(
+    factory: sessionmaker[Session],
+    q: str,
+    limit: int,
+    horizons: dict[str, datetime] | None = None,
+) -> list[tuple[datetime, int, int]]:
+    """``(time, rank, id)`` of every row of ``q``, page after page of ``limit`` rows."""
+    plan = plan_query(parse_query(q), SiteNetwork())
+    found: list[tuple[datetime, int, int]] = []
+    cursor: Cursor | None = None
+    with factory() as session:
+        while True:
+            page = run_page(session, plan, START, END, cursor, limit, 10.0, horizons=horizons)
+            found += [(row["time"], int(row["b"]), int(row["id"])) for row in page.rows]
+            if page.next_cursor is None:
+                return found
+            cursor = page.next_cursor
+
+
 @pytest.mark.parametrize(
     "horizon",
     [
@@ -241,16 +261,21 @@ def _set_storage(app: FastAPI, storage: Storage) -> None:
 )
 @pytest.mark.parametrize("q", [f"srcip:{CLIENT}", "type:traffic,web,dns,dhcp"])
 def test_a_split_at_a_compression_horizon_pages_the_same(
-    app: FastAPI,
-    client: TestClient,
-    searcher: LoggedIn,
-    lines: Lines,
-    db_engine: Engine,
-    q: str,
-    horizon: datetime,
+    app_session_factory: sessionmaker[Session], lines: Lines, q: str, horizon: datetime
 ) -> None:
-    whole = keys(client, q, 500)
-    _set_storage(app, Storage(False, dict.fromkeys(TIME_SERIES_TABLES, horizon)))
+    whole = _paged(app_session_factory, q, 500)
+    assert len(whole) == len(set(whole)) > 20
+    horizons = dict.fromkeys(TIME_SERIES_TABLES, horizon)
+    for limit in (500, 1, 2, 3, 5, 11):
+        assert _paged(app_session_factory, q, limit, horizons) == whole, limit
+
+
+def test_the_search_splits_at_the_horizons_of_its_storage(
+    app: FastAPI, client: TestClient, searcher: LoggedIn, lines: Lines, db_engine: Engine
+) -> None:
+    q = f"srcip:{CLIENT}"
+    whole = keys(client, q, 3)
+    _set_storage(app, Storage(False, dict.fromkeys(TIME_SERIES_TABLES, T - timedelta(minutes=30))))
     sent: list[str] = []
 
     def record(_c: Any, _cursor: Any, statement: str, *_args: Any) -> None:
@@ -258,8 +283,7 @@ def test_a_split_at_a_compression_horizon_pages_the_same(
 
     event.listen(db_engine, "before_cursor_execute", record)
     try:
-        for limit in (500, 1, 2, 3, 5, 11):
-            assert keys(client, q, limit) == whole, limit
+        assert keys(client, q, 3) == whole
     finally:
         event.remove(db_engine, "before_cursor_execute", record)
     assert any(" AS split" in statement for statement in sent)
@@ -442,6 +466,9 @@ def test_when_even_five_minutes_time_out_the_search_fails_and_is_audited(
 
     _setting(app_session_factory, "search.request_budget_ms", 500)
     state_of(app).hook = always_slow
+    # The five tries leave the last one about 30 ms of the 500; a full collection of a long test
+    # run's heap (260 ms measured in an xdist worker) must not fall inside them.
+    gc.collect()
     response = client.post(
         API, json={"q": f"srcip:{CLIENT}", "from": START.isoformat(), "to": END.isoformat()}
     )
