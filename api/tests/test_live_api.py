@@ -16,7 +16,6 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -44,11 +43,14 @@ from arcilogger_core.timeutil import site_day
 from arcilogger_db.models import AuditLog, User, UserSession
 from arcilogger_db.settings import set_setting
 
+# Most streams here are opened and never read, so they linger from the moment they open; a
+# short linger ran out on the Windows runner while a test was still counting or closing them.
+# Lingering out is tested in test_live_hub.py on a controlled clock.
 FAST = Timing(
     poll=0.05,
     listing=0.2,
     idle_stop=60.0,
-    linger=1.5,
+    linger=60.0,
     slow_client=1.0,
     keepalive=0.4,
     session_check=0.3,
@@ -746,9 +748,6 @@ def test_concurrent_opens_never_overshoot_the_limits(
 ) -> None:
     """Two tabs (or two automatic re-opens) at once: the limit is checked where the stream is
     registered, with no ``await`` between, so exactly the allowed number open."""
-    # The streams are never read, so they linger from the moment they open: FAST's 1.5 s could
-    # run out before the four requests of a round have finished on a slow runner (Windows).
-    hub.timing = replace(FAST, linger=60.0)
     spool.write("fortigate", traffic())
     client, who = clients()
     for _ in range(5):
