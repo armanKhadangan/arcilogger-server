@@ -11,8 +11,9 @@ import type { ScanState } from './search-model';
 
 /**
  * How far an incomplete scan got (its time budget ended before the range did, contract 2.6.1):
- * while it continues by itself ("taranıyor") and, after {@link SEARCH_AUTO_CONTINUES} rounds, the
- * banner with "Devam et". The rows above it are the newest; older ones may follow.
+ * while it continues by itself ("taranıyor") and, after {@link SEARCH_AUTO_CONTINUES} rounds or
+ * once a continuation failed (its error is shown below the banner), the banner with "Devam et".
+ * The rows above it are the newest; older ones may follow.
  */
 export function PartialBanner({
   first,
@@ -28,7 +29,7 @@ export function PartialBanner({
   onContinue: () => void;
 }) {
   const { t } = useTranslation();
-  if (state !== 'continuing' && state !== 'paused') return null;
+  if (state !== 'continuing' && state !== 'paused' && state !== 'stopped') return null;
   const values = {
     from: formatDateTime(first.range.from),
     reached: formatDateTime(last.scan.scanned_from),
@@ -43,7 +44,11 @@ export function PartialBanner({
   return (
     <Alert tone="warning" title={t('search.partial.title')}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p>{t('search.partial.body', { ...values, times: SEARCH_AUTO_CONTINUES })}</p>
+        <p>
+          {state === 'stopped'
+            ? t('search.partial.stopped', values)
+            : t('search.partial.body', { ...values, times: SEARCH_AUTO_CONTINUES })}
+        </p>
         <Button size="sm" variant="secondary" busy={busy} onClick={onContinue}>
           {t('search.partial.continue')}
         </Button>

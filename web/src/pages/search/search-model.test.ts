@@ -186,6 +186,18 @@ describe('the state of a scan', () => {
     expect(scanState(partial, 0, MAX_VIEW_ROWS)).toBe('capped');
     expect(scanState(page({ next_cursor: 'c1' }), 0, MAX_VIEW_ROWS)).toBe('capped');
   });
+
+  it('stops a scan whose continuation failed, so "Devam et" can try again', () => {
+    const partial = page({
+      next_cursor: 'frontier',
+      scan: { ...page().scan, complete: false },
+    });
+    expect(scanState(partial, 1, 3, true)).toBe('stopped');
+    expect(scanState(partial, AUTO_CONTINUES, 3, true)).toBe('stopped');
+    // "Daha fazla" that failed keeps its button; a full view stays full.
+    expect(scanState(page({ next_cursor: 'c1' }), 0, 100, true)).toBe('more');
+    expect(scanState(partial, 0, MAX_VIEW_ROWS, true)).toBe('capped');
+  });
 });
 
 describe('refusals', () => {

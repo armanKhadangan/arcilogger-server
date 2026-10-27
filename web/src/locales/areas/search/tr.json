@@ -52,6 +52,7 @@
       "only": "Sorguya ekle: {{value}}",
       "exclude": "Hariç tut",
       "excludeValue": "Hariç tut: {{value}}",
+      "multipleNote": "Bu değerle süzülemez: bu ağda birden çok VLAN var.",
       "other": "Diğer: {{formatted}}",
       "sampled": "Örneklemden hesaplandı ({{formatted}} satır)",
       "sampledSome": "Örneklemden hesaplandı",
@@ -77,6 +78,7 @@
       "title": "Arama aralığın tamamını tarayamadı",
       "continuing": "Taranıyor… {{reached}} ile şimdiye kadar bulunanlar gösteriliyor (aralık {{from}} başlangıçlı).",
       "body": "Arama {{times}} kez kendiliğinden sürdü ve {{reached}} zamanına kadar geldi; daha eski kayıtlar ({{from}} başlangıcına kadar) için devam edin.",
+      "stopped": "Tarama {{reached}} zamanına kadar geldi, sonraki bölüm okunamadı (hata aşağıda); daha eski kayıtlar ({{from}} başlangıcına kadar) için devam edin.",
       "continue": "Devam et"
     },
     "event": {
@@ -224,7 +226,7 @@
       "fromSearchTitle_one": "Arama sonucundan {{count}} satır aktarıldı",
       "fromSearchTitle_other": "Arama sonucundan {{count}} satır aktarıldı",
       "fromSearchQuery": "Sorgu: {{query}}",
-      "fromSearchBody": "Kapsam satırların günleri, içerik bu satırların özetidir; satırları aşağıda değiştirebilirsiniz.",
+      "fromSearchBody": "Kapsam satırların günleri, içerik bu satırların alıntısıdır; satırları aşağıda değiştirebilirsiniz.",
       "fromSearchTruncated": "Arama {{max}} satırdan fazlasını buldu; yalnızca ilk {{max}} satır aktarıldı.",
       "fromSearchIncomplete": "Arama aralığın tamamını süresi içinde tarayamadı; bazı satırlar eksik olabilir.",
       "fromSearchUnsealed": "Şu günler henüz mühürlenmedi: {{days}}. Bu günlerin satırlarıyla paket oluşturulamaz; gün mühürlendikten sonra yeniden deneyin.",

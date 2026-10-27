@@ -326,15 +326,22 @@ export function rowSummary(row: SearchRow): string {
 /**
  * What the newest page means for the list: `complete` (nothing more), `more` (a full page: "Daha
  * fazla"), `continuing` (the time budget ended before the range did; the scan goes on by itself
- * up to {@link SEARCH_AUTO_CONTINUES} times), `paused` (then "Devam et"), `capped` (the view
- * holds {@link SEARCH_VIEW_ROWS} rows).
+ * up to {@link SEARCH_AUTO_CONTINUES} times), `paused` (then "Devam et"), `stopped` (reading the
+ * next part failed — a time-out, a busy server, the network — so it does not go on by itself;
+ * "Devam et" tries again), `capped` (the view holds {@link SEARCH_VIEW_ROWS} rows).
  */
-export type ScanState = 'complete' | 'more' | 'continuing' | 'paused' | 'capped';
+export type ScanState = 'complete' | 'more' | 'continuing' | 'paused' | 'stopped' | 'capped';
 
-export function scanState(last: SearchPage, continues: number, rows: number): ScanState {
+export function scanState(
+  last: SearchPage,
+  continues: number,
+  rows: number,
+  failed = false,
+): ScanState {
   if (last.next_cursor === null) return 'complete';
   if (rows >= SEARCH_VIEW_ROWS) return 'capped';
   if (last.scan.complete) return 'more';
+  if (failed) return 'stopped';
   return continues < SEARCH_AUTO_CONTINUES ? 'continuing' : 'paused';
 }
 

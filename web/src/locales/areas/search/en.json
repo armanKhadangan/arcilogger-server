@@ -52,6 +52,7 @@
       "only": "Add to the query: {{value}}",
       "exclude": "Exclude",
       "excludeValue": "Exclude: {{value}}",
+      "multipleNote": "Not a filter: this network holds several VLANs.",
       "other": "Other: {{formatted}}",
       "sampled": "Counted from a sample ({{formatted}} rows)",
       "sampledSome": "Counted from a sample",
@@ -77,6 +78,7 @@
       "title": "The search could not scan the whole range",
       "continuing": "Scanning… records up to {{reached}} are shown (the range starts {{from}}).",
       "body": "The search went on {{times}} times by itself and reached {{reached}}; continue for older records (back to {{from}}).",
+      "stopped": "The scan reached {{reached}}, then the next part could not be read (the error is below); continue for older records (back to {{from}}).",
       "continue": "Continue"
     },
     "event": {

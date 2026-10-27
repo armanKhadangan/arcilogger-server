@@ -245,14 +245,15 @@ export function SearchPage() {
 
   const first = state.first;
   const last = state.last;
-  const scan = last ? scanState(last, state.continues, state.rows.length) : null;
   // A refusal of the run itself (rows cleared), unless the query bar or the KVKK notice shows it.
   const runError =
     state.error !== null &&
     first === null &&
     problemOf(state.error) === null &&
     !isApiError(state.error, 'privacy_notice_required');
+  // A failed page: the rows stay, and an incomplete scan waits for "Devam et".
   const pageError = state.error !== null && first !== null;
+  const scan = last ? scanState(last, state.continues, state.rows.length, pageError) : null;
   const notices = noticesOf(first?.notices, stats.data?.notices);
   const kinds = fields.data?.kinds ?? [];
 
@@ -399,7 +400,7 @@ export function SearchPage() {
               emptyMessage={
                 state.running
                   ? t('common.loading')
-                  : scan === 'continuing' || scan === 'paused'
+                  : scan === 'continuing' || scan === 'paused' || scan === 'stopped'
                     ? t('search.results.noneYet')
                     : t('common.noResults')
               }

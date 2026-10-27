@@ -12,6 +12,16 @@ import type { Facet, SearchFacets, SearchStats } from '@/lib/search-types';
 /** The facets in the panel's order. */
 const ORDER: (keyof SearchFacets)[] = ['kind', 'source', 'action', 'vlan', 'department'];
 
+/**
+ * The value of a /24 that holds several smaller VLANs ("Birden çok VLAN", "Birden çok
+ * departman"): a count, not a filter — `vlan:multiple` and `department:multiple` name nothing.
+ */
+const MULTIPLE_VALUE = 'multiple';
+
+function filterable(name: keyof SearchFacets, value: string): boolean {
+  return !((name === 'vlan' || name === 'department') && value === MULTIPLE_VALUE);
+}
+
 function FacetBlock({
   name,
   facet,
@@ -37,6 +47,20 @@ function FacetBlock({
         <ul className="flex flex-col">
           {facet.values.map((item) => {
             const label = visibleText(lang === 'en' ? item.label_en : item.label_tr);
+            const count = formatNumber(item.count, 0, lang);
+            if (!filterable(name, item.value))
+              return (
+                <li
+                  key={item.value}
+                  className="flex items-center gap-2 px-1.5 py-1 text-13"
+                  title={t('search.facets.multipleNote')}
+                >
+                  <span className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate text-foreground">{label}</span>
+                  <span className="sr-only">{t('search.facets.multipleNote')}</span>
+                  <span className="ml-auto pl-2 text-muted tabular">{count}</span>
+                </li>
+              );
             return (
               <li key={item.value} className="group flex items-center gap-1 text-13">
                 <button
@@ -49,9 +73,7 @@ function FacetBlock({
                 >
                   <Filter aria-hidden="true" className="size-3.5 shrink-0 text-muted" />
                   <span className="truncate text-foreground">{label}</span>
-                  <span className="ml-auto pl-2 text-muted tabular">
-                    {formatNumber(item.count, 0, lang)}
-                  </span>
+                  <span className="ml-auto pl-2 text-muted tabular">{count}</span>
                 </button>
                 <Button
                   variant="ghost"
@@ -88,8 +110,9 @@ function FacetBlock({
 
 /**
  * Kind, source, action, VLAN and department of the search's records (from its statistics). A
- * value adds `field:value` to the query, "Hariç tut" adds `-field:value`; the department is the
- * VLAN's default department, labelled so (owner decision D1).
+ * value adds `field:value` to the query, "Hariç tut" adds `-field:value` — except the VLAN and
+ * department value `multiple`, shown with its count only; the department is the VLAN's default
+ * department, labelled so (owner decision D1).
  */
 export function FacetPanel({
   stats,
