@@ -10,9 +10,9 @@ concatenated (references and order), the total, the histogram and the five facet
 statistics from the summary table (``rollup``, ``hybrid``) must equal direct counting. So the
 SQL of the planner and the live tail's matcher agree.
 
-The summary table is filled with ``searchcounts.rebuild_stream`` per file (the loader's own
-``counts`` step is WP-A2's; :func:`test_the_loader_counts_equal_direct_counting` compares its
-counts without the rebuild once the step exists).
+The summary table is filled again with ``searchcounts.rebuild_stream`` per file (the recount
+path of the worker job and the command); :func:`test_the_loader_counts_equal_direct_counting`
+checks the counts the loader's own ``counts`` step writes, without any rebuild.
 """
 
 from __future__ import annotations
@@ -53,7 +53,6 @@ from arcilogger_db import kinds
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import TIME_SERIES_TABLES, Base, IngestOffset
 from arcilogger_db.searchcounts import rebuild_stream
-from arcilogger_ingest import loader
 from arcilogger_ingest.service import IngestService
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -587,9 +586,6 @@ def test_the_summary_table_equals_direct_counting(oracle: Oracle) -> None:
             check_stats(rolled, expected_stats(oracle, text_, start, end))
 
 
-@pytest.mark.skipif(
-    "counts" not in loader.STEPS, reason="WP-A2: the ingest loader's counts step is not merged yet"
-)
 def test_the_loader_counts_equal_direct_counting(tmp_path: Path, db_engine: Engine) -> None:
     """Without any rebuild: the counts the loader wrote with the rows answer like the rows."""
     config = _config(tmp_path)
