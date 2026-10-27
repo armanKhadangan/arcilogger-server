@@ -176,7 +176,6 @@ test.describe('Kaynaklar', () => {
     await sheet.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
     const failures = sheet.getByRole('table', { name: 'Son 7 günün ayrıştırma hataları' });
     await expect(failures).toContainText('rawlog.invalid');
-    await expect(failures).toContainText('line is not in the spool format');
     // Not in the collector's format: no database row, so no search; its example line only.
     await expect(failures.getByRole('button', { name: 'Aramada göster' })).toHaveCount(0);
     await expect(sheet).toContainText('Arama onları bulamaz');
@@ -191,6 +190,7 @@ test.describe('Kaynaklar', () => {
     await page.goto('/sources?source=fortigate');
     const sheet = page.getByRole('dialog', { name: 'fortigate' });
     await sheet.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
+    await expect(sheet).toContainText('value was not key=value');
     await sheet.getByRole('button', { name: 'Aramada göster' }).click();
     await expect(page).toHaveURL(/\/search$/);
     // The query is in neither the address nor the history entry nor the browser's storage.
@@ -214,13 +214,37 @@ test.describe('Kaynaklar', () => {
       'Ham satırları görmek için Arama ya da 5651 Sorgu yetkisi gerekir.',
     );
     expect(api.callsTo('GET', '/sources/core-r1/tail')).toHaveLength(0);
-    await sheet.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
+    await page.goto('/sources?source=fortigate');
+    const fortigate = page.getByRole('dialog', { name: 'fortigate' });
+    await fortigate.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
     // The parser's detail can echo a value of the line: the API leaves it out.
-    await expect(sheet).toContainText(
+    await expect(fortigate).toContainText(
       'Hata ayrıntısı için Arama ya da 5651 Sorgu yetkisi gerekir.',
     );
-    await expect(sheet).not.toContainText('line is not in the spool format');
-    await expect(sheet.getByRole('button', { name: 'Örnek satır' })).toHaveCount(0);
+    await expect(fortigate).not.toContainText('value was not key=value');
+    await expect(fortigate.getByRole('button', { name: 'Örnek satır' })).toHaveCount(0);
+  });
+
+  test('the detail of a parse failure comes once the KVKK notice is accepted', async ({ page }) => {
+    const api = await open(page);
+    api.get('tolga').privacy_accepted = false;
+    await page.goto('/sources');
+    const notice = page.getByRole('dialog', { name: /KVKK bilgilendirmesi/ });
+    await expect(notice).toBeVisible();
+    // The raw-line rule: until the notice is accepted the API leaves a pattern's error out.
+    const before = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/sources/fortigate');
+      const detail = (await response.json()) as { parse_failures: { error: string | null }[] };
+      return detail.parse_failures.map((row) => row.error);
+    });
+    expect(before).toEqual([null]);
+    await notice.getByRole('checkbox').check();
+    await notice.getByRole('button', { name: 'Onaylıyorum' }).click();
+    await expect(notice).toBeHidden();
+    await page.goto('/sources?source=fortigate');
+    const sheet = page.getByRole('dialog', { name: 'fortigate' });
+    await sheet.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
+    await expect(sheet).toContainText('value was not key=value');
   });
 
   test('no file today: said so, with Arama for the source', async ({ page }) => {

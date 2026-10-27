@@ -3,8 +3,8 @@
  * (2.17) of the E2E tests: hand-made answers in the exact shapes of `src/lib/sources-types.ts` and
  * `api-types.ts`, the error codes and texts of the API (`source_not_found`), and the permission
  * rules of the router: the list and the detail need `sources.read` (a pattern's `error` only with
- * `search.read` or `lookup.run`), the last lines also `search.read` or `lookup.run` and the
- * accepted KVKK notice. Installed after `mockApi` (`page.route`: the newest route wins), it shares
+ * `search.read` or `lookup.run` and the accepted KVKK notice, the raw-line rule), the last lines
+ * also `search.read` or `lookup.run` and the accepted KVKK notice. Installed after `mockApi` (`page.route`: the newest route wins), it shares
  * the main mock's session, users and recorded calls.
  *
  * The site is the example network: a MikroTik `core-r1`, a FortiGate, a network `ap` with two
@@ -194,7 +194,8 @@ function failures(name: string): SourceParseFailure[] {
         count: 1,
         first_seen: at(300),
         last_seen: at(300),
-        error: 'line is not in the spool format',
+        // A line that is not in the spool format has no parser detail.
+        error: null,
         example: rawRef('core-r1|2026-10-09|4'),
       },
     ];
@@ -429,7 +430,7 @@ export class SourcesMock {
     }
     if (!item) return this.error(404, 'source_not_found');
     const detail = detailOf(item);
-    if (!this.rawAllowed(account))
+    if (!this.rawAllowed(account) || !account.privacy_accepted)
       detail.parse_failures = detail.parse_failures.map((row) => ({ ...row, error: null }));
     return [200, detail];
   }

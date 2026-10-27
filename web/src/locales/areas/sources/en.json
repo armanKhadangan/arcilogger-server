@@ -117,6 +117,7 @@
         "lastSeen": "Last seen",
         "actions": "Actions",
         "errorHidden": "The error detail needs the Search or the 5651 lookup permission.",
+        "errorPrivacy": "The error detail is shown once the KVKK privacy notice is accepted.",
         "example": "Example line",
         "search": "Show in Search",
         "invalidNote": "Lines not in the collector's format (rawlog.invalid) are not loaded into the database; Search cannot find them, only their example line opens."

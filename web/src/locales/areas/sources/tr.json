@@ -117,6 +117,7 @@
         "lastSeen": "Son görülme",
         "actions": "İşlemler",
         "errorHidden": "Hata ayrıntısı için Arama ya da 5651 Sorgu yetkisi gerekir.",
+        "errorPrivacy": "Hata ayrıntısı KVKK bilgilendirme metni onaylandıktan sonra gösterilir.",
         "example": "Örnek satır",
         "search": "Aramada göster",
         "invalidNote": "Toplayıcı biçiminde olmayan satırlar (rawlog.invalid) veritabanına yüklenmez; Arama onları bulamaz, yalnızca örnek satırları açılır."

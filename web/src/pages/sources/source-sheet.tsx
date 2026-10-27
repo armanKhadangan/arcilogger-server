@@ -339,9 +339,11 @@ function FailuresTab({
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
-  const { canAny, can } = useAuth();
+  const { canAny, can, me } = useAuth();
   const openSearch = useOpenSearch();
   const raw = canAny(RAW_PERMISSIONS);
+  // A pattern's error can echo a value of the line: the API sends it under the raw-line rule.
+  const privacyPending = me.privacy_notice.required && !me.privacy_notice.accepted;
   if (detail.parse_failures.length === 0)
     return <p className="text-13 text-muted">{t('sources.sheet.failures.empty')}</p>;
   return (
@@ -375,9 +377,11 @@ function FailuresTab({
                     <span className="block text-xs text-muted">
                       {failure.error
                         ? visibleText(failure.error)
-                        : raw
-                          ? null
-                          : t('sources.sheet.failures.errorHidden')}
+                        : !raw
+                          ? t('sources.sheet.failures.errorHidden')
+                          : privacyPending
+                            ? t('sources.sheet.failures.errorPrivacy')
+                            : null}
                     </span>
                   </th>
                   <td className={cn(CELL, 'text-right tabular')}>
