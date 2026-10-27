@@ -5,6 +5,99 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Search, live tail and sources (Wave 2)
+
+Three of the menu's placeholder pages are real: **Arama**, **Canlı Akış** and **Kaynaklar**, plus
+a parse-failure card on the Panel ([ADR-0015](docs/adr/0015-search-live-sources.md);
+docs/ARAMA.md / SEARCH.md; MVP-CONTRACTS §17). Decided by the developer on the owner's delegation;
+the owner may change it (the ADR lists the open points D1–D10, ASSUMPTIONS AR1–AR10 the
+implemented defaults, not yet confirmed).
+
+- **Arama:** one query language (`srcip:172.20.41.105 type:web action:blocked`; a comma is OR
+  inside a field, `-`/`NOT` negates, free text; no OR across fields and no parentheses, refused
+  with a hint), checked as you type with the faulty part underlined, Turkish field aliases and a
+  `?` help that says which fields are fast. The top-bar search box turns an address into `ip:`, a
+  MAC into `mac:` and a host name into `domain:`; the time range picker (up to `search.max_days`,
+  31) shows on Arama. Rows come newest first with the device and the receive time; a record
+  drawer shows every field and the raw reference, and its **Ham satır** opens the exact raw line
+  with its SHA-256. Statistics: total, histogram (drag to narrow the range) and the top values by
+  source, kind, action, VLAN and the VLAN's default department; a value adds or excludes a clause.
+  Saved searches (at most 100 a user), CSV/XLSX export (at most 100,000 rows or 120 s, formula
+  characters neutralised) and **Kanıt paketine aktar** into the evidence wizard (up to 10,000
+  lines; the unsealed days' lines can be left out). A partial answer says how far it got; older
+  days than the database holds are reached through an evidence package (the page says so).
+- **Canlı Akış:** watch lines arrive, filtered with the same query language, read from the raw
+  spool, so it works while ingest lags or is stopped and a new `unknown-<ip>` sender appears within
+  seconds (the **Bilinmeyen göndericiler** filter). A paused stream keeps its place for 120 s and
+  resumes with the lines it missed while the server's buffer still holds them; otherwise a `gap`
+  notice offers the interval in Arama. Lines not shown (rate, queue, parse budget) are counted with
+  their reason. Highlight rules are kept only in the tab's session storage and cleared at sign-out;
+  a line opens in Arama (±5 minutes).
+- **Kaynaklar:** every source's state (active, silent, never sent, switched off, not configured, or
+  configured since as a source), messages a minute loaded into the database with a 60-minute
+  sparkline, lines today, bytes not yet loaded, parse failures, and per source 48 hours, 14 days,
+  the gaps of 30 days and the newest 50 lines of today's (else yesterday's) spool file, each
+  opening as stored with its SHA-256, with the range's SHA-256. **Kaynak olarak tanımla** (for an
+  unknown sender) opens Ayarlar → Kaynaklar with the add dialog filled in; Kaynaklar itself never
+  changes the configuration.
+- **Panel:** a parse-failure card (today's failures per 1,000 lines, the last 7 days, today's three
+  commonest patterns with their source, an example line and **Aramada göster**); card titles wrap
+  instead of being cut off at 1280–1920 px.
+- **Who sees what** (docs/roles.md): Arama and Canlı Akış administrators and auditors
+  (`search.read` and the accepted privacy notice); export administrators (`search.export` and a
+  re-authentication within 5 minutes); Kanıt paketine aktar `evidence.create`; Kaynaklar
+  administrators (`sources.read`; its newest lines also `search.read` or `lookup.run` and the
+  notice); the Panel card also with `dashboard.view`. No new permission key.
+- **How:** typed tables (`fg_*`, `mt_*`) drive any query with a typed field, `messages` the rest;
+  all SQL from input is bound parameters (an injection property test). A search page scans time
+  windows newest first within `search.request_budget_ms` (4 s) and answers what it found with a
+  cursor (504 `search_timeout` only when not even 5 minutes fit); direct statistics within
+  `search.stats_budget_ms` (8 s). An exact hourly summary table `search_counts`, written by the
+  ingest loader in the same transaction as the rows (exactly-once kept) and recounted for older
+  files by the worker job `search.counts_backfill`, gives totals and facets of a broad 30-day query
+  in well under a second (`arcilogger-db search-counts status | rebuild | verify`). One new index on
+  the log tables, `ix_fg_web_rhost_time` on `fg_web (reverse(lower(hostname)), time)`, makes
+  `domain:` a prefix range; no trigram index (it would cost ingest most of its time). Limits:
+  3 searches at once (2 a user), 30 new searches a minute, 10 exports an hour. The live tail has one
+  spool reader per API process and a two-step stream (`POST /live/streams`, then a `GET` that holds
+  no database connection); limits 4 streams (2 a user), 100 lines a second, 60 minutes. Caddy does
+  not compress it and the API waits at most 5 s for open streams on shutdown. Ingest with the counts
+  step met the 5 % throughput gate on average on the development machine (−1.9 % in-process,
+  −3.8 % with 2 workers on a load-generator day), without margin; it is re-measured on site
+  (docs/INGEST.md).
+- **TimescaleDB:** a search window ends at a table's newest compressed chunk, so the uncompressed
+  days are planned on their own statistics and use the selective indexes (`domain:`,
+  `type:dhcp mac:`); the compressed days are read only while the page is not full. A page's fill-in
+  queries are bounded by its rows' time range, and the search's read-only transaction plans every
+  statement with its values (`plan_cache_mode`, transaction-local). Measured on a tenth and on half
+  of the tier-1 data; the full tier-1 run on TimescaleDB is the Linux CI job's (ADR-0015, ARAMA.md /
+  SEARCH.md section 13).
+- **KVKK and audit:** every search (`search.run`), opened record (`search.event`) and raw line
+  (`raw.view`), evidence hand-over (`search.refs`), export (`search.export`), saved-search change
+  (`search.saved_create` / `_update` / `_delete`), live stream (`live.open`, `live.close` with the
+  delivered ranges) and newest-lines read (`raw.tail`) is audited; search, hand-over and export
+  before the data leaves the API. Inputs, counts and hashes, never row content (docs/DENETCI-KILAVUZU.md
+  section 9). Follow-up pages and statistics serve only an audited `search_id` (30 minutes) and are
+  not audited again. No query in a URL or the browser history (the address holds only the range and
+  a saved search's id); hand-overs between pages stay in memory.
+- **5651 Temel:** search, live tail and sources are basic functions; no licence state blocks them
+  (LISANS/LICENSING).
+- **Database:** revision `0016_search` (`search_counts`, `saved_searches`,
+  `ingest_offsets.counts_from_line`, the `fg_web` index; up and down on native partitions and on
+  TimescaleDB with compressed chunks); on native partitions `drop_before` also deletes the
+  `search_counts` of the months it drops; the settings group `search` ("Arama ve canlı akış",
+  docs/AYARLAR.md / SETTINGS.md).
+- **API:** `/api/v1/search*`, `POST /live/streams`, `GET`/`DELETE /live/streams/{id}`,
+  `/live/status`, `/sources`, `/sources/{name}`, `/sources/{name}/tail`, the `parse_failures` box of
+  `/dashboard/summary`; `GET /raw` also opens an `unknown-<ip>` spool folder (MVP-CONTRACTS §17,
+  docs/roles.md).
+- **Upgrade:** ingest, API and worker stay stopped while `0016_search` builds the `fg_web` index
+  (about 15 s per 10 million rows on the development machine with the table in memory, about
+  2 minutes for 400 days at a million lines a day; longer from disk); the collector keeps writing
+  the spool, so ingest catches up afterwards, and the worker recounts older files in the background
+  (docs/INSTALL.md / KURULUM.md, which also advise `[database] pool_size` 10 when several people
+  search). DEVICE-SETUP section 4 checks a new device in Canlı Akış.
+
 ### Browser administration (Wave 1)
 
 Most of what an administrator configured on the server console is now a page in **Ayarlar**
