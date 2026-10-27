@@ -1,6 +1,7 @@
-"""Evidence from a search (contract 2.13, 3.4): the raw references of the whole search, their
-SHA-256 over the canonical list (as audited), the line limit, the time budget and the days that
-are not sealed yet; only with ``evidence.create``."""
+"""Evidence from a search (contract 2.13, 3.4): the raw references of the whole search (the same
+list in any chunk size, also at exactly ``from``), their SHA-256 over the canonical list (as
+audited), the line limit, the time budget and the days that are not sealed yet; only with
+``evidence.create``."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.routers.search import state_of
+from arcilogger_api.search import refs as references
 from arcilogger_api.search.refs import refs_sha256
 from arcilogger_api.search.testing import Lines, sign_in
 from arcilogger_core.canonical import canonical_json
@@ -101,6 +103,27 @@ def test_the_line_limit(
     )
     for limit in (0, 10_001):
         assert refs(client, search_id(client), limit=limit).status_code == 422
+
+
+def test_every_chunk_size_gives_the_same_list(
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sign_in(client, app_session_factory)
+    found = Lines(app_session_factory)
+    for table, count in (("fg_traffic", 3), ("fg_web", 2), ("fg_dns", 2)):
+        for _ in range(count):  # at exactly ``from``: a chunk may end there
+            found.add(START, table, srcip="172.20.41.105")
+    found.add(START + timedelta(minutes=5), "fg_web", srcip="172.20.41.105")
+    whole = refs(client, search_id(client)).json()
+    assert len(whole["refs"]) == 8
+    assert whole["complete"] is True
+    for chunk in (1, 2, 3):
+        monkeypatch.setattr(references, "CHUNK", chunk)
+        answer = refs(client, search_id(client)).json()
+        assert answer["refs"] == whole["refs"], chunk
+        assert (answer["complete"], answer["truncated"]) == (True, False)
 
 
 class FakeClock:

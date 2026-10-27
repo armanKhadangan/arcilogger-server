@@ -1,7 +1,9 @@
 """Export of a search (contract 2.12, R17, R18, 3.4): CSV and Excel, formula neutralisation, text
-cells, the "Bilgi" sheet, truncation by rows and by time (name, header, sheet, audit), the
-``Repr-Digest`` and audited SHA-256, re-authentication, one export at a time and the hourly
-limit counted from the audit log (it survives a new application)."""
+cells, the "Bilgi" sheet, truncation by rows and by time (name, header, sheet, audit; a fill-in
+query that times out cuts the file too, never half-empty rows), the same rows in any chunk size
+(also at exactly ``from``), the ``Repr-Digest`` and audited SHA-256, re-authentication, one
+export at a time and the hourly limit counted from the audit log (it survives a new
+application)."""
 
 from __future__ import annotations
 
@@ -16,11 +18,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.app import create_app
 from arcilogger_api.routers.search import state_of
+from arcilogger_api.search import export as exports
+from arcilogger_api.search import sql
 from arcilogger_api.search.export import NOT_SEALED
 from arcilogger_api.search.testing import Lines, sign_in
 from arcilogger_api.testing import LoggedIn
@@ -214,6 +218,72 @@ def test_a_file_cut_at_the_time_limit_says_so(
     assert response.headers["X-Arci-Export-Truncated"] == "time"
     assert '-kismi.csv"' in response.headers["content-disposition"]
     assert audits(app_session_factory)[0].details["truncated"] == "time"
+
+
+def _rows(response: Any) -> list[list[str]]:
+    data = response.content.decode("utf-8-sig")
+    return list(csv.reader(io.StringIO(data, newline=""), delimiter=";"))
+
+
+def test_every_chunk_size_gives_the_same_file(
+    client: TestClient,
+    exporter: LoggedIn,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    found = Lines(app_session_factory)
+    for table, count in (("fg_traffic", 3), ("fg_web", 2), ("fg_dns", 2)):
+        for _ in range(count):  # at exactly ``from``: a chunk may end there
+            found.add(START, table, srcip="172.20.41.105", text=f"{table} satırı")
+    found.add(START + timedelta(minutes=5), "fg_web", srcip="172.20.41.105")
+    whole = _rows(export(client, search_id(client)))
+    assert len(whole) == 1 + 8
+    for chunk in (1, 2, 3):
+        monkeypatch.setattr(exports, "CHUNK", chunk)
+        response = export(client, search_id(client))
+        assert "X-Arci-Export-Truncated" not in response.headers, chunk
+        assert _rows(response) == whole, chunk
+
+
+class StoppedClock:
+    """Seconds that move only when the test sets them."""
+
+    now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_a_fill_in_query_that_times_out_cuts_the_file(
+    app: FastAPI,
+    client: TestClient,
+    exporter: LoggedIn,
+    lines: Lines,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setting(app_session_factory, "search.export_budget_seconds", 10)
+    search = search_id(client)
+    clock = StoppedClock()
+
+    def late(session: Session, lower: datetime, upper: datetime) -> None:
+        clock.now = 9.7  # 0.3 s of the 10 s are left once the rows are found
+
+    def slow(*_: Any) -> Any:  # a fill-in as slow as one on compressed chunks can be
+        return select(func.pg_sleep(5).label("slept"))
+
+    state_of(app).clock = clock
+    state_of(app).hook = late
+    for name in ("typed_rows", "message_rows", "rows_by_reference"):
+        monkeypatch.setattr(sql, name, slow)
+    response = export(client, search)
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Arci-Export-Truncated"] == "time"
+    assert '-kismi.csv"' in response.headers["content-disposition"]
+    assert _rows(response) == [list(exports.HEADER)]  # no row without its columns
+    (entry,) = audits(app_session_factory)
+    assert entry.details["truncated"] == "time"
+    assert entry.details["rows"] == 0
 
 
 def test_export_needs_a_recent_re_authentication(

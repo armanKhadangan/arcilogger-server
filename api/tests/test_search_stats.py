@@ -1,10 +1,11 @@
 """Statistics of a search (contract 2.7, 3.2): buckets aligned to site midnight, the three modes,
-facets (sampled, unavailable, VLAN and department by the /24), the budget and the notice for
-counts still being prepared. The equality of every mode with the matcher on real ingest is
-``test_search_oracle.py``'s."""
+facets (sampled, unavailable, VLAN and department by the /24; a row's VLAN is the facet's, also
+with overlapping subnets), the budget and the notice for counts still being prepared. The
+equality of every mode with the matcher on real ingest is ``test_search_oracle.py``'s."""
 
 from __future__ import annotations
 
+import ipaddress
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -15,8 +16,10 @@ from sqlalchemy import insert, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.routers.search import state_of
-from arcilogger_api.search.stats import bucket_seconds, bucket_starts
+from arcilogger_api.search.fields import SiteNetwork
+from arcilogger_api.search.stats import SiteLabels, bucket_seconds, bucket_starts
 from arcilogger_api.search.testing import Lines, sign_in
+from arcilogger_api.search.windows import vlan_of
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.timeutil import SITE_TZ, day_window
 from arcilogger_db.models import IngestOffset, Vlan
@@ -286,3 +289,34 @@ def test_a_vlan_facet_of_a_net_with_smaller_vlans(
     ]
     with app_session_factory() as session:
         assert session.scalar(select(Vlan.name_tr).where(Vlan.vlan_id == 70)) == "Lab A"
+
+
+def test_a_row_names_the_most_specific_vlan_as_the_facet_does() -> None:
+    # The wider subnet first, as an unordered SELECT of the VLANs may give it.
+    site = SiteNetwork(
+        vlans={
+            90: ipaddress.ip_network("172.20.0.0/16"),
+            41: ipaddress.ip_network("172.20.41.0/24"),
+            42: ipaddress.ip_network("172.20.42.0/24"),
+        }
+    )
+    labels = SiteLabels(site)
+    assert vlan_of(site, "172.20.41.5") == 41 == labels.vlan_of_net("172.20.41.0/24")
+    assert vlan_of(site, "172.20.99.5") == 90 == labels.vlan_of_net("172.20.99.0/24")
+    assert vlan_of(site, "203.0.113.5") is None
+    assert vlan_of(site, None) is None
+
+
+def test_a_row_and_the_vlan_facet_agree_on_overlapping_subnets(
+    client: TestClient, searcher: LoggedIn, app_session_factory: sessionmaker[Session]
+) -> None:
+    with app_session_factory() as session:
+        session.add(Vlan(subnet="172.20.0.0/16", vlan_id=90, name_tr="Kampüs"))
+        session.commit()
+    Lines(app_session_factory).add(DAY_START + timedelta(minutes=1), "fg_web", srcip="172.20.41.5")
+    span = {"from": DAY_START.isoformat(), "to": (DAY_START + timedelta(hours=1)).isoformat()}
+    page = client.post(API, json={"q": "srcip:172.20.41.5", **span}).json()
+    (row,) = page["items"]
+    facet = client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()["facets"]
+    assert row["summary"]["vlan_id"] == 41
+    assert [value["value"] for value in facet["vlan"]["values"]] == ["41"]

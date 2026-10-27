@@ -1,8 +1,9 @@
 """Cursors and the window scan (contract 2.6.1, 2.6.3, 3.2).
 
 * Concatenated pages equal the full ordered list without duplicates or gaps, also with equal
-  timestamps across tables, for any page size, and after ``frontier`` cursors when the time
-  budget ran out (a clock the test controls).
+  timestamps across tables (also at exactly ``from``), for any page size, and after ``frontier``
+  cursors when the time budget ran out (a clock the test controls); a budget gone before any
+  window gives the cursor back.
 * A cursor is parsed strictly: anything changed is 422 ``search_cursor_invalid``.
 * A first window that times out is halved down to 5 minutes; when even that times out the
   search fails with 504 ``search_timeout``, audited with ``outcome: "timeout"``.
@@ -24,8 +25,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.errors import ApiError
 from arcilogger_api.routers.search import state_of
-from arcilogger_api.search.cursor import Bound, Cursor, bounds, decode, encode
+from arcilogger_api.search import parse_query
+from arcilogger_api.search.cursor import Bound, Cursor, bounds, decode, encode, utc_text
+from arcilogger_api.search.fields import SiteNetwork
+from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.testing import Lines, sign_in
+from arcilogger_api.search.windows import run_page
 from arcilogger_api.testing import LoggedIn
 from arcilogger_db.models import AuditLog
 from arcilogger_db.settings import set_setting
@@ -50,10 +55,8 @@ def _setting(factory: sessionmaker[Session], key: str, value: Any) -> None:
         session.commit()
 
 
-@pytest.fixture
-def lines(app_session_factory: sessionmaker[Session]) -> Lines:
-    """Rows of one client in several tables, many at exactly the same time."""
-    found = Lines(app_session_factory)
+def at_one_time(found: Lines, time: datetime) -> None:
+    """Ten rows of the client in five tables, all at ``time``."""
     for table, count in (
         ("fg_traffic", 3),
         ("fg_web", 2),
@@ -68,8 +71,15 @@ def lines(app_session_factory: sessionmaker[Session]) -> Lines:
             if table == "mt_event":
                 values["event"] = "dhcp_offering"
             found.add(
-                T, table, source="core-r1" if table.startswith("mt_") else "fortigate", **values
+                time, table, source="core-r1" if table.startswith("mt_") else "fortigate", **values
             )
+
+
+@pytest.fixture
+def lines(app_session_factory: sessionmaker[Session]) -> Lines:
+    """Rows of one client in several tables, many at exactly the same time."""
+    found = Lines(app_session_factory)
+    at_one_time(found, T)
     for minutes in (0, 1, 1, 59, 61, 120, 600, 601, 1300):
         found.add(T - timedelta(minutes=minutes, seconds=1), "fg_web", srcip=CLIENT)
         found.add(T - timedelta(minutes=minutes, seconds=1), "fg_traffic", srcip=CLIENT)
@@ -124,6 +134,34 @@ def test_pages_concatenate_to_the_whole_list(
     assert times == sorted(times, reverse=True)
     for limit in (1, 2, 3, 5, 11):
         assert keys(client, q, limit) == whole, limit
+
+
+@pytest.mark.parametrize("q", [f"srcip:{CLIENT}", "type:traffic,web,dns,dhcp"])
+def test_rows_at_exactly_from_are_paged_too(
+    client: TestClient, searcher: LoggedIn, app_session_factory: sessionmaker[Session], q: str
+) -> None:
+    # Device times of whole seconds and a range from site midnight: a page may end at ``from``.
+    found = Lines(app_session_factory)
+    at_one_time(found, START)
+    for minutes in (5, 5, 90):
+        found.add(START + timedelta(minutes=minutes), "fg_web", srcip=CLIENT)
+    whole = keys(client, q, 500)
+    assert len(whole) == len(set(whole)) == 13
+    assert sum(f":{utc_text(START)}:" in key for key in whole) == 10
+    for limit in (1, 2, 3):
+        assert keys(client, q, limit) == whole, limit
+
+
+def test_a_budget_gone_before_any_window_gives_the_cursor_back(
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    plan = plan_query(parse_query(f"srcip:{CLIENT}"), SiteNetwork())
+    cursor = Cursor.last(START, min(plan.ranks), 7)
+    with app_session_factory() as session:
+        page = run_page(session, plan, START, END, cursor, 5, 0.0)
+    assert page.rows == []
+    assert page.next_cursor == cursor  # a frontier at ``from`` would end the search here
+    assert page.scan.complete is False
 
 
 def test_equal_times_are_ordered_by_branch_then_id(
