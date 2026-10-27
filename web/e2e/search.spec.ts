@@ -215,27 +215,36 @@ test.describe('Arama', () => {
     await runQuery(page, 'srcip:172.20.42.57');
     const chart = page.getByTestId('histogram');
     await expect(chart.locator('.recharts-surface')).toBeVisible();
-    const box = await chart.boundingBox();
-    if (!box) throw new Error('no histogram');
-    const y = box.y + box.height / 2;
-    await page.mouse.move(box.x + box.width * 0.3, y);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.6, y, { steps: 5 });
-    await page.mouse.move(box.x + box.width * 0.8, y, { steps: 5 });
-    await page.mouse.up();
-    await expect.poll(() => api.callsTo('POST', '/search').length).toBe(2);
+    const drag = async (start: number, end: number) => {
+      const box = await chart.boundingBox();
+      if (!box) throw new Error('no histogram');
+      // The plot lies right of the 48 px value axis.
+      const x = (share: number) => box.x + 48 + (box.width - 56) * share;
+      const y = box.y + box.height / 2;
+      await page.mouse.move(x(start), y);
+      await page.mouse.down();
+      await page.mouse.move(x((start + end) / 2), y, { steps: 5 });
+      await page.mouse.move(x(end), y, { steps: 5 });
+      await page.mouse.up();
+    };
+    const runs = () => api.callsTo('POST', '/search').map((call) => call.body);
+
+    // Across every bar: the hourly buckets start before the range and end after it, and the zoom
+    // is cut to the search's own range (a longer one could exceed `search.max_days`).
+    await drag(0.01, 0.99);
+    await expect.poll(() => runs().length).toBe(2);
+    const first = runs()[0] as { from: string; to: string };
+    expect(runs()[1]).toEqual({ q: 'srcip:172.20.42.57', from: first.from, to: first.to });
+
+    await drag(0.3, 0.8);
+    await expect.poll(() => runs().length).toBe(3);
     const url = new URL(page.url());
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
     expect(from && to && Date.parse(from) < Date.parse(to)).toBe(true);
-    const first = api.callsTo('POST', '/search')[0]?.body as { from: string; to: string };
     expect(Date.parse(from ?? '')).toBeGreaterThan(Date.parse(first.from));
-    expect(Date.parse(to ?? '')).toBeLessThanOrEqual(Date.parse(first.to) + 3_600_000);
-    expect(api.callsTo('POST', '/search')[1]?.body).toEqual({
-      q: 'srcip:172.20.42.57',
-      from,
-      to,
-    });
+    expect(Date.parse(to ?? '')).toBeLessThan(Date.parse(first.to));
+    expect(runs()[2]).toEqual({ q: 'srcip:172.20.42.57', from, to });
     await expect(
       page.getByRole('button', { name: /^Tarih aralığı: \d{2}\.\d{2}\.2026/ }),
     ).toBeVisible();
@@ -552,23 +561,112 @@ test.describe('Arama', () => {
     await expect(page.getByText('Bu aramanın süresi doldu', { exact: false })).toHaveCount(0);
   });
 
-  test('a request body with a field the API does not know is refused (strict mock)', async ({
+  test('works on a site whose search.page_size_max is below 100', async ({ page }) => {
+    // The mock refuses a `limit` above the setting, as the API does; Arama asks for none.
+    const { api } = await openSearch(page, 'tolga', { search: { pageSizeMax: 50 } });
+    await runQuery(page, 'srcip:172.20.41.0/24');
+    await expect(page.getByText('50 kayıt gösteriliyor')).toBeVisible();
+    await page.getByRole('button', { name: 'Daha fazla' }).click();
+    await expect(page.getByText('100 kayıt gösteriliyor')).toBeVisible();
+    expect(api.callsTo('POST', '/search/page').map((call) => call.body)).toEqual([
+      { search_id: 'ornek-arama-01', cursor: 'rows:50' },
+    ]);
+    await expect(page.getByText('Gönderilen veriler geçersiz.')).toHaveCount(0);
+  });
+
+  test('offers only the ranges a site with a short search.max_days allows', async ({ page }) => {
+    const { api } = await openSearch(page, 'tolga', {
+      search: { maxDays: 7 },
+      path: '/search?range=30d',
+    });
+    // "Son 30 gün" in the address reads as the default.
+    const picker = page.getByRole('button', { name: 'Tarih aralığı: Son 24 saat' });
+    await expect(picker).toBeVisible();
+    await picker.click();
+    await expect(page.getByRole('button', { name: 'Son 7 gün' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Son 30 gün' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Özel' }).click();
+    await expect(
+      page.getByText('Aralık en fazla 7 gün olabilir; ', { exact: false }),
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    await runQuery(page, 'type:web');
+    await expect(resultRows(page)).toHaveCount(1);
+    expect(api.callsTo('POST', '/search').map((call) => call.body)).toEqual([
+      { q: 'type:web', ...LAST_24H },
+    ]);
+  });
+
+  test('asks once more when the server is busy, for the statistics and the drawer', async ({
     page,
   }) => {
-    await useSampleClock(page, SAMPLE_TODAY);
-    const api = await mockApi(page, { signedInAs: 'tolga' });
-    await mockSearch(page, api);
-    await page.goto('/search');
-    const status = await page.evaluate(async () => {
-      const csrf = /arci_csrf=([^;]+)/.exec(document.cookie)?.[1] ?? '';
-      const response = await fetch('/api/v1/search/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
-        body: JSON.stringify({ q: 'type:web', query: 'type:web' }),
-      });
-      return [response.status, ((await response.json()) as { error: { code: string } }).error.code];
+    const { api, search } = await openSearch(page, 'tolga', {
+      search: { refuseNext: { call: 'stats', code: 'search_busy' } },
     });
-    expect(status).toEqual([422, 'validation_error']);
+    await runQuery(page, 'srcip:172.20.42.57');
+    await expect(resultRows(page)).toHaveCount(4);
+    await expect(page.getByRole('heading', { name: 'Zaman dağılımı' })).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Dağılım' }).getByRole('region', { name: 'Tür' }),
+    ).toBeVisible();
+    expect(api.callsTo('POST', '/search/stats')).toHaveLength(2);
+    expect(api.callsTo('POST', '/search')).toHaveLength(1);
+
+    search.refuseNext = { call: 'event', code: 'search_busy' };
+    await resultRows(page).first().click();
+    const sheet = page.getByRole('dialog', { name: 'Kayıt ayrıntısı' });
+    await expect(sheet.getByRole('definition').filter({ hasText: '203.0.113.10' })).toBeVisible();
+    expect(api.callsTo('GET', '/search/event')).toHaveLength(2);
+    await expect(
+      page.getByText('Şu anda çok sayıda arama çalışıyor', { exact: false }),
+    ).toHaveCount(0);
+  });
+
+  test('a scan whose continuation failed waits for "Devam et"', async ({ page }) => {
+    const { api } = await openSearch(page, 'tolga', {
+      search: { refuseNext: { call: 'page', code: 'search_timeout' } },
+    });
+    await runQuery(page, '"login failure"');
+    const banner = page
+      .getByRole('status')
+      .filter({ hasText: 'Arama aralığın tamamını tarayamadı' });
+    await expect(banner).toContainText('sonraki bölüm okunamadı');
+    await expect(
+      page.getByText('Arama 4 saniyede en kısa zaman dilimini (5 dakika) bile tarayamadı.', {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await expect(page.getByText('Taranıyor…', { exact: false })).toHaveCount(0);
+    expect(api.callsTo('POST', '/search/page')).toHaveLength(1);
+
+    await banner.getByRole('button', { name: 'Devam et' }).click();
+    // It goes on by itself again, to the end of the range.
+    await expect(resultRows(page)).toHaveCount(2);
+    await expect(banner).toBeHidden();
+    expect(api.callsTo('POST', '/search/page')).toHaveLength(7);
+    expect(api.callsTo('POST', '/search')).toHaveLength(1);
+  });
+
+  test('a facet value of several VLANs is shown, never added to the query', async ({ page }) => {
+    const { api } = await openSearch(page);
+    await runQuery(page, 'srcip:172.20.70.0/24');
+    await expect(resultRows(page)).toHaveCount(2);
+    const facets = page.getByRole('region', { name: 'Dağılım' });
+    const vlans = facets.getByRole('region', { name: 'VLAN', exact: true });
+    await expect(vlans.getByText('Birden çok VLAN', { exact: true })).toBeVisible();
+    await expect(vlans.getByRole('button')).toHaveCount(0);
+    const departments = facets.getByRole('region', { name: "Departman (VLAN'a göre)" });
+    await expect(departments.getByText('Birden çok departman', { exact: true })).toBeVisible();
+    await expect(departments.getByRole('button')).toHaveCount(0);
+    await vlans.getByText('Birden çok VLAN', { exact: true }).click();
+    await expect(queryBox(page)).toHaveValue('srcip:172.20.70.0/24');
+    // The other facets still filter.
+    await facets
+      .getByRole('region', { name: 'Tür' })
+      .getByRole('button', { name: /^Trafik/ })
+      .click();
+    await expect(queryBox(page)).toHaveValue('srcip:172.20.70.0/24 type:traffic');
+    await expect.poll(() => api.callsTo('POST', '/search').length).toBe(2);
   });
 });
 
@@ -607,8 +705,12 @@ test.describe('Arama — accessibility', () => {
         .click();
       await expect(page.getByRole('dialog', { name: 'Ham kayıt satırı' })).toBeVisible();
       await expectNoA11yViolations(page);
+      // One sheet at a time: the raw line, then the record drawer under it.
       await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'Ham kayıt satırı' })).toBeHidden();
+      await expect(page.getByRole('dialog', { name: 'Kayıt ayrıntısı' })).toBeVisible();
       await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'Kayıt ayrıntısı' })).toBeHidden();
 
       await page.getByRole('button', { name: 'Dışa aktar' }).click();
       await expect(

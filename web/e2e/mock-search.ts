@@ -1122,7 +1122,13 @@ export class SearchMock {
       [60, 300, 900, 3600, 10_800, 86_400].find((seconds) => span / (seconds * 1000) <= 48) ??
       86_400;
     const buckets: { start: string; count: number }[] = [];
-    for (let start = from; start < to; start += bucket * 1000) {
+    // Whole buckets counted from the site midnight before `from`, as the API counts them: the
+    // first may start before the range and the last end after it.
+    const midnight = Date.parse(
+      `${new Date(from + 3 * 3_600_000).toISOString().slice(0, 10)}T00:00:00+03:00`,
+    );
+    const firstStart = midnight + Math.floor((from - midnight) / (bucket * 1000)) * bucket * 1000;
+    for (let start = firstStart; start < to; start += bucket * 1000) {
       const count = search.rows.filter((row) => {
         const time = Date.parse(row.time);
         return time >= start && time < start + bucket * 1000;
