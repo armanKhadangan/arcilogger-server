@@ -1,7 +1,9 @@
 import { QueryClientProvider, focusManager } from '@tanstack/react-query';
-import { act, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { FileWarning } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 
 import { BACKGROUND_HEADER } from '@/lib/api';
 import {
@@ -19,14 +21,21 @@ import {
   type RecordedRequest,
 } from '@/test/api-mock';
 import { formatBytes } from '@/lib/format';
+import { handoff } from '@/lib/handoff';
 import { setLanguage } from '@/lib/i18n';
 import { renderApp, testQueryClient } from '@/test/render';
-import { DASHBOARD, licenseSample, USAGE } from '@/test/samples';
+import { DASHBOARD, licenseSample, RAW, USAGE } from '@/test/samples';
 
-/** The summary the API sent to `role` (captured per role; `hr` is refused). */
+import { DashCard } from './dashboard-parts';
+import { PARSE_FAILURES, withParseFailures } from './test-data';
+
+/**
+ * The summary the API sent to `role` (captured per role; `hr` is refused), with a known
+ * parse-failure box beside the ingest box.
+ */
 function summaryFor(role: Role): DashboardSummary | null {
   if (role === 'admin' || role === 'auditor' || role === 'viewer')
-    return structuredClone(DASHBOARD[role]);
+    return withParseFailures(structuredClone(DASHBOARD[role]));
   return null;
 }
 
@@ -50,6 +59,13 @@ function serve(
       }
       case '/api/v1/usage/company':
         return jsonResponse(200, USAGE.company);
+      case '/api/v1/raw': {
+        const line =
+          RAW.lines[
+            `${request.params.get('source') ?? ''}|${request.params.get('day') ?? ''}|${request.params.get('line') ?? ''}`
+          ];
+        return line ? jsonResponse(200, line) : errorResponse(404, 'raw_not_found');
+      }
       default:
         return errorResponse(404, 'not_found');
     }
@@ -58,6 +74,7 @@ function serve(
 
 const CARDS = [
   'card-ingest',
+  'card-parse-failures',
   'card-seal',
   'card-credit',
   'card-clock',
@@ -194,6 +211,7 @@ describe('Panel — blocks by permission', () => {
     await screen.findByTestId('card-ingest');
     expect(await shownCards()).toEqual([
       'card-ingest',
+      'card-parse-failures',
       'card-usage',
       'card-sites',
       'card-categories',
@@ -203,6 +221,11 @@ describe('Panel — blocks by permission', () => {
         name: 'Kullanım sayfasını aç',
       }),
     ).toHaveAttribute('href', '/usage');
+    // Counts only: no raw line and no search for a role without either.
+    const failures = screen.getByTestId('card-parse-failures');
+    expect(failures).toHaveTextContent('fortigate.kv');
+    expect(within(failures).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(failures).queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('HR: usage only, the summary is never asked', async () => {
@@ -228,6 +251,108 @@ describe('Panel — blocks by permission', () => {
     expect(screen.getByText('Sunucu hatası.')).toBeInTheDocument();
     expect(await screen.findByTestId('card-usage')).toBeInTheDocument();
     expect(screen.queryByTestId('card-ingest')).not.toBeInTheDocument();
+  });
+});
+
+describe('Panel — parse failures (contract 2.17)', () => {
+  it("today's rate, counts and patterns; the example line and Arama by permission", async () => {
+    serve('admin');
+    const put = vi.spyOn(handoff, 'put');
+    const { router } = renderApp('/');
+    const card = await screen.findByTestId('card-parse-failures');
+    expect(within(card).getByRole('heading', { name: 'Ayrıştırma hataları' })).toBeInTheDocument();
+    expect(card).toHaveTextContent('Binde 25,0');
+    expect(card).toHaveTextContent('Bugün 31 hata / 1.240 satır');
+    expect(card).toHaveTextContent('Yüksek');
+    expect(within(card).getByRole('link', { name: 'Kaynaklar sayfasını aç' })).toHaveAttribute(
+      'href',
+      '/sources',
+    );
+    const patterns = within(card).getAllByRole('listitem');
+    expect(patterns.map((item) => item.dataset.pattern)).toEqual([
+      'fortigate.kv',
+      'rawlog.invalid',
+    ]);
+    // A line not in the collector's format has no database row: its example only.
+    expect(
+      within(card).queryByRole('button', { name: 'rawlog.invalid kalıbını Aramada göster' }),
+    ).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(
+      within(card).getByRole('button', { name: 'fortigate.kv kalıbının örnek satırını aç' }),
+    );
+    const sheet = await screen.findByRole('dialog', { name: 'Ham kayıt satırı' });
+    expect(
+      await within(sheet).findByText(RAW.lines['fortigate|2026-10-12|49']?.sha256 ?? '-'),
+    ).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(
+      within(card).getByRole('button', { name: 'fortigate.kv kalıbını Aramada göster' }),
+    );
+    expect(put).toHaveBeenCalledWith('/search', {
+      q: 'source:fortigate error:fortigate.kv',
+      range: { preset: 'today' },
+    });
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/search');
+    });
+    // In memory only: neither the address nor the history entry holds the query.
+    expect(router.state.location.search).toBe('');
+    expect(router.state.location.state).toBeNull();
+    put.mockRestore();
+  });
+
+  it('no failure today is said so; an API without the box shows no card', async () => {
+    serve('admin', (summary) => {
+      summary.parse_failures = { ...PARSE_FAILURES, failures: 0, permille: 0, top_patterns: [] };
+    });
+    renderApp('/');
+    const card = await screen.findByTestId('card-parse-failures');
+    expect(card).toHaveTextContent('Hata yok');
+    expect(card).toHaveTextContent('Binde 0,0');
+    expect(within(card).queryByRole('list')).not.toBeInTheDocument();
+  });
+
+  it('a summary without the box (an API before Wave 2) leaves it out', async () => {
+    serve('admin', (summary) => {
+      delete (summary as Partial<DashboardSummary>).parse_failures;
+    });
+    renderApp('/');
+    await screen.findByTestId('card-ingest');
+    expect(screen.queryByTestId('card-parse-failures')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashCard', () => {
+  it('wraps a long title instead of cutting it, and links from its footer', () => {
+    const title = 'Çok uzun bir başlık: dünkü mühür, kontör ve saat sapması';
+    const { container } = render(
+      <MemoryRouter>
+        <DashCard
+          title={title}
+          icon={FileWarning}
+          to="/sources"
+          page="Kaynaklar"
+          status={<span>Durum</span>}
+          testId="card-long"
+        >
+          <p>içerik</p>
+        </DashCard>
+      </MemoryRouter>,
+    );
+    const card = within(container).getByTestId('card-long');
+    const heading = within(card).getByRole('heading', { name: title });
+    for (const element of [heading, ...heading.querySelectorAll('*')])
+      expect(element.getAttribute('class') ?? '').not.toMatch(/\btruncate\b/);
+    expect(heading.className).toMatch(/break-words/);
+    const link = within(card).getByRole('link', { name: 'Kaynaklar sayfasını aç' });
+    expect(link).toHaveTextContent('Kaynaklar');
+    // The link is in the footer, after the content, not in the header beside the title.
+    expect(heading.parentElement?.contains(link)).toBe(false);
+    expect(
+      within(card).getByText('içerik').compareDocumentPosition(link) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 

@@ -128,5 +128,23 @@
       "prefillNotice": "Kaynaklar sayfasındaki bilinmeyen gönderici {{address}} için dolduruldu. Adı gözden geçirin; unknown-{{address}} klasörü ve eski kayıtları yerinde kalır.",
       "prefillBlocked": "{{address}} göndericisi şu anda kaynak olarak eklenemez: kaynakları değiştirme yetkiniz yok ya da yönetim hizmeti (ArciAdmin) çalışmıyor."
     }
+  },
+  "dashboard": {
+    "parseFailures": {
+      "title": "Ayrıştırma hataları",
+      "high": "Yüksek",
+      "none": "Hata yok",
+      "noLines": "Bugün satır yüklenmedi",
+      "permille": "Binde {{value}}",
+      "counts": "Bugün {{failures}} hata / {{lines}} satır",
+      "trend": "Ayrıştırma hataları, son 7 gün",
+      "topPatterns": "Bugünün en sık kalıpları",
+      "patternOf_one": "{{source}} · {{formatted}} satır",
+      "patternOf_other": "{{source}} · {{formatted}} satır",
+      "example": "Örnek satır",
+      "exampleFor": "{{pattern}} kalıbının örnek satırını aç",
+      "search": "Aramada göster",
+      "searchFor": "{{pattern}} kalıbını Aramada göster"
+    }
   }
 }

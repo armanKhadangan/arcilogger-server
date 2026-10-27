@@ -128,5 +128,23 @@
       "prefillNotice": "Filled in for the unknown sender {{address}} of the Sources page. Review the name; the folder unknown-{{address}} and its earlier records stay where they are.",
       "prefillBlocked": "The sender {{address}} cannot be added as a source now: you may not change the sources, or the administration service (ArciAdmin) is not running."
     }
+  },
+  "dashboard": {
+    "parseFailures": {
+      "title": "Parse failures",
+      "high": "High",
+      "none": "None",
+      "noLines": "No lines loaded today",
+      "permille": "{{value}} per 1,000",
+      "counts": "Today {{failures}} failures / {{lines}} lines",
+      "trend": "Parse failures, last 7 days",
+      "topPatterns": "Today's most frequent patterns",
+      "patternOf_one": "{{source}} · {{formatted}} line",
+      "patternOf_other": "{{source}} · {{formatted}} lines",
+      "example": "Example line",
+      "exampleFor": "Open an example line of {{pattern}}",
+      "search": "Show in Search",
+      "searchFor": "Show {{pattern}} in Search"
+    }
   }
 }
