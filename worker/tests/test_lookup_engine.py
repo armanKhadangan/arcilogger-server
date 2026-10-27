@@ -433,6 +433,24 @@ def test_candidates_by_domain_via_web_and_dns_logs(db_session: Session, site: Si
     assert (match.traffic.srcport, match.destination_match, match.score) == (51002, "domain", 90)
 
 
+def test_a_session_without_a_duration_is_named_by_its_own_web_log(
+    db_session: Session, evidence: Evidence, site: Site
+) -> None:
+    """A row without ``duration`` starts at its own time: a web log of the session from up to a
+    minute before names it, an older one does not (the address alone then counts less). Such
+    rows have a sub-query of their own (``sessions._named_by_logs``)."""
+    evidence.traffic(tr(DAY, 11, 23, 50), PC, 51007, "203.0.113.50", duration=None)
+    evidence.web(tr(DAY, 11, 22, 55), PC, 51007, "files.archive.example", "203.0.113.50")
+    evidence.traffic(tr(DAY, 11, 23, 52), PC, 51008, "203.0.113.51", duration=None)
+    evidence.web(tr(DAY, 11, 22, 47), PC, 51008, "files.archive.example", "203.0.113.51")
+    db_session.commit()
+    outcome = lookup(db_session, public_ip="192.0.2.44", dest_domain="archive.example")
+    assert {m.traffic.srcport: m.destination_match for m in outcome.matches} == {
+        51007: "domain",  # its log 55 s before its time
+        51008: "domain_address",  # its log 65 s before: outside the session's span ± 60 s
+    }
+
+
 def test_unknown_destination_lists_nobody(db_session: Session, site: Site) -> None:
     """Spec 2.3: candidates only *to the given destination*. No session goes there → mode
     ``none``; unrelated clients (and their persons) are never put into the answer."""

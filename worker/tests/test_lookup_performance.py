@@ -9,6 +9,19 @@ destination (every session that overlaps the window), with a destination IP + po
 popular and a rare domain, and an exact lookup. ``EXPLAIN`` shows that every query uses an index
 and the bounded time range.
 
+**Which chunks.** :func:`test_lookup_is_fast_on_continuous_data` measures uncompressed data: on
+plain PostgreSQL every partition, on TimescaleDB uncompressed chunks only (the compression
+policies are paused before loading, see :func:`_load`). On TimescaleDB every chunk older than
+7 days is compressed, and most 5651 requests ask about such days, so
+:func:`test_lookup_is_fast_on_compressed_chunks` (TimescaleDB with compression only, the Linux CI
+job) compresses the loaded chunks itself and checks the same answers and the same 5 s budget
+there. Its plans are not those of uncompressed chunks: a compressed chunk's btree indexes hold
+only its uncompressed rows, its batches are found by their time range (TimescaleDB's ``_ts_meta``
+columns) and decompressed, and a small chunk is read whole. One thing is checked: the domain
+search's correlated web/app sub-query bounds the batches by the session's own start. Without
+that bound it read every batch of the chunk for each session of the window; the default size
+stayed under 0.6 s, ``large`` took 6-7 s (docs/CORRELATION.md section 6).
+
 ``ARCILOGGER_PERF`` selects the size:
 
 * unset / ``1`` (default, about 30 s on a developer machine, most of it loading the rows):
@@ -36,7 +49,7 @@ from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.settings import get_settings
 from arcilogger_db.testing import pause_compression_jobs
 from arcilogger_worker.correlation.leases import rebuild_day
-from arcilogger_worker.lookup import LookupRequest, LookupSettings, run_lookup
+from arcilogger_worker.lookup import LookupOutcome, LookupRequest, LookupSettings, run_lookup
 from arcilogger_worker.lookup.sessions import Window, explain_rows
 from arcilogger_worker.testing import tr
 
@@ -48,6 +61,8 @@ pytestmark = pytest.mark.skipif(
 DAY = date(2026, 10, 12)
 WAN = "100.64.12.9"
 LIMIT_SECONDS = 5.0
+#: The tables :func:`_load` fills.
+LOADED = ("fg_traffic", "fg_web", "fg_dns", "mt_dhcp", "mt_arp")
 
 
 @dataclass(frozen=True)
@@ -69,18 +84,24 @@ class Size:
 SIZE = Size(3_000_000, 2.0, 14) if MODE == "large" else Size(1_000_000, 1.1, 2)
 
 
+def _compression(engine: Engine) -> bool:
+    """Whether the hypertables are compressed after 7 days (TimescaleDB with compression)."""
+    with engine.connect() as connection:
+        status = connection.scalar(text("SELECT value FROM settings WHERE key = 'db.timescale'"))
+    return bool((status or {}).get("compression"))
+
+
 def _load(engine: Engine) -> dict[str, float]:
     start, _ = (t.astimezone(UTC) for t in day_window(DAY))
     timings: dict[str, float] = {}
     with engine.begin() as connection:
-        timescale = connection.scalar(text("SELECT value FROM settings WHERE key = 'db.timescale'"))
         ensure_partitions(connection, today=DAY)
-    if (timescale or {}).get("compression"):
+    if _compression(engine):
         # The compression policies compress every chunk older than 7 days by the server's now(),
         # and DAY is a fixed past day: a policy the template left due runs when this database's
         # TimescaleDB scheduler starts (up to a minute after the copy was created) and would
-        # compress the rows loaded here under the lookups. The plans below are those of
-        # uncompressed chunks (their btree indexes), so the policies are paused before the load.
+        # compress the rows loaded here under the lookups, at a moment no test chose. The policies
+        # are paused before the load; the test of compressed chunks compresses them itself.
         pause_compression_jobs(engine)
     params = {
         "day": DAY,
@@ -185,31 +206,39 @@ def _load(engine: Engine) -> dict[str, float]:
     # autovacuum worker is still busy in the test database when it is dropped.
     with engine.connect() as connection:
         connection.execution_options(isolation_level="AUTOCOMMIT").execute(
-            text("VACUUM (ANALYZE) fg_traffic, fg_web, fg_dns, mt_dhcp, mt_arp")
+            text(f"VACUUM (ANALYZE) {', '.join(LOADED)}")
         )
     return timings
 
 
-def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Session) -> None:
-    timings = _load(db_engine)
-    count = db_session.scalar(text("SELECT count(*) FROM fg_traffic"))
-    assert count == SIZE.rows
-
+def _rebuild_leases(session: Session, timings: dict[str, float]) -> None:
     began = time.perf_counter()
-    report = rebuild_day(db_session, DAY, horizon=tr(DAY + timedelta(days=4), 0))
-    db_session.commit()
+    report = rebuild_day(session, DAY, horizon=tr(DAY + timedelta(days=4), 0))
+    session.commit()
     timings["rebuild_day"] = time.perf_counter() - began
     # 300 DHCP leases (00:00-00:25); the hourly ARP-LOG from 00:30 only extends them.
     assert report.inserted == 300
     assert report.events["traffic_points"] > 0
     assert report.lookahead_chunks >= 1  # the data continues past midnight
 
-    settings = LookupSettings.from_settings({**get_settings(db_session), "nat.wan_transip": WAN})
+
+@dataclass(frozen=True)
+class Lookups:
+    settings: LookupSettings
+    window: Window
+    exact_port: int
+    outcomes: dict[str, LookupOutcome]
+
+
+def _lookups(session: Session, timings: dict[str, float]) -> Lookups:
+    """Runs the measured lookups, each timed into ``timings``."""
+    settings = LookupSettings.from_settings({**get_settings(session), "nat.wan_transip": WAN})
     at = tr(DAY, SIZE.at_hour)
-    exact_port = db_session.scalar(
+    exact_port = session.scalar(
         text("SELECT transport FROM fg_traffic WHERE time >= :at ORDER BY time LIMIT 1"),
         {"at": at},
     )
+    assert exact_port is not None
     cases = {
         "candidates_no_destination": LookupRequest(
             at=at, public_ip="192.0.2.44", public_port=40001
@@ -224,10 +253,47 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
     outcomes = {}
     for name, request in cases.items():
         began = time.perf_counter()
-        outcomes[name] = run_lookup(db_session, request, settings)
+        outcomes[name] = run_lookup(session, request, settings)
         timings[name] = time.perf_counter() - began
+    return Lookups(settings, Window(at, 60, settings.max_session_seconds), exact_port, outcomes)
 
-    window = Window(at, 60, settings.max_session_seconds)
+
+def _print(title: str, timings: dict[str, float], lookups: Lookups) -> None:
+    print(f"\n--- performance (seconds), {SIZE}, {title} ---")
+    for name, seconds in timings.items():
+        print(f"{name:28s} {seconds:8.3f}")
+    for name, outcome in lookups.outcomes.items():
+        print(f"{name:28s} mode={outcome.mode} matches={len(outcome.matches)}")
+
+
+def _check_answers_and_budget(timings: dict[str, float], lookups: Lookups) -> None:
+    outcomes = lookups.outcomes
+    no_destination = outcomes["candidates_no_destination"]
+    assert no_destination.mode == "candidates"
+    assert no_destination.truncated  # ~1,400 sessions overlap ±60 s; the best 100 are listed
+    assert len(no_destination.matches) == lookups.settings.max_candidates
+    assert all(m.chain is not None for m in no_destination.matches)
+    assert outcomes["candidates_destination"].matches
+    assert {m.destination_match for m in outcomes["candidates_destination"].matches} == {"ip_port"}
+    popular = outcomes["domain_popular"]
+    assert popular.mode == "candidates"
+    assert {m.destination_match for m in popular.matches} == {"domain"}
+    assert outcomes["domain_rare"].mode in ("candidates", "none")
+    exact = outcomes["exact"]
+    assert exact.mode == "exact"
+    assert {m.kind for m in exact.matches} == {"exact"}
+    assert any(m.time_distance_ms == 0 for m in exact.matches)  # (ports repeat at 3 M/day)
+    for name in outcomes:
+        assert timings[name] < LIMIT_SECONDS, f"{name} took {timings[name]:.2f} s"
+
+
+def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Session) -> None:
+    timings = _load(db_engine)
+    count = db_session.scalar(text("SELECT count(*) FROM fg_traffic"))
+    assert count == SIZE.rows
+    _rebuild_leases(db_session, timings)
+    lookups = _lookups(db_session, timings)
+    window, exact_port = lookups.window, lookups.exact_port
     plans = {
         "candidates_no_destination": explain_rows(db_session, window, transip=WAN, analyze=True),
         "candidates_destination": explain_rows(
@@ -243,32 +309,12 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
         ),
         "exact": explain_rows(db_session, window, transip=WAN, transport=exact_port),
     }
-    print(f"\n--- performance (seconds), {SIZE} ---")
-    for name, seconds in timings.items():
-        print(f"{name:28s} {seconds:8.3f}")
-    for name, outcome in outcomes.items():
-        print(f"{name:28s} mode={outcome.mode} matches={len(outcome.matches)}")
+    _print("uncompressed", timings, lookups)
     for name, plan in plans.items():
         print(f"\n--- EXPLAIN {name} ---")
         print("\n".join(plan))
 
-    no_destination = outcomes["candidates_no_destination"]
-    assert no_destination.mode == "candidates"
-    assert no_destination.truncated  # ~1,400 sessions overlap ±60 s; the best 100 are listed
-    assert len(no_destination.matches) == settings.max_candidates
-    assert all(m.chain is not None for m in no_destination.matches)
-    assert outcomes["candidates_destination"].matches
-    assert {m.destination_match for m in outcomes["candidates_destination"].matches} == {"ip_port"}
-    popular = outcomes["domain_popular"]
-    assert popular.mode == "candidates"
-    assert {m.destination_match for m in popular.matches} == {"domain"}
-    assert outcomes["domain_rare"].mode in ("candidates", "none")
-    exact = outcomes["exact"]
-    assert exact.mode == "exact"
-    assert {m.kind for m in exact.matches} == {"exact"}
-    assert any(m.time_distance_ms == 0 for m in exact.matches)  # (ports repeat at 3 M/day)
-    for name in cases:
-        assert timings[name] < LIMIT_SECONDS, f"{name} took {timings[name]:.2f} s"
+    _check_answers_and_budget(timings, lookups)
     # Every plan reads through an index with the bounded time range (no sequential scan).
     for name, plan in plans.items():
         joined = "\n".join(plan)
@@ -278,3 +324,63 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
         assert '"time" <=' in joined, name
     assert "transip_transport_time" in "\n".join(plans["exact"])
     assert "dstip_dstport_time" in "\n".join(plans["candidates_destination"])
+
+
+def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Session) -> None:
+    """Spec 14 on the chunks most 5651 requests read on TimescaleDB: compressed ones.
+
+    The same data, leases and lookups as above; the leases are rebuilt first, as the worker did
+    when the day was new, then every chunk of the loaded tables is compressed, as the policy
+    does 7 days later. The answers and the 5 s budget are those of the uncompressed test; of
+    the plans only the domain search's is checked (see the module docstring). On the Linux CI
+    job (``ARCILOGGER_EXPECT_TIMESCALE=1``) a server without compression fails instead of
+    skipping.
+    """
+    if not _compression(db_engine):
+        if os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1":
+            pytest.fail("TimescaleDB with compression expected (ARCILOGGER_EXPECT_TIMESCALE=1)")
+        pytest.skip("TimescaleDB with compression only (the Linux CI job runs this)")
+    timings = _load(db_engine)
+    _rebuild_leases(db_session, timings)
+    began = time.perf_counter()
+    with db_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        for table in LOADED:
+            connection.execute(
+                text(
+                    "SELECT compress_chunk(c, if_not_compressed => true) "
+                    "FROM show_chunks(CAST(:table AS regclass)) AS c"
+                ),
+                {"table": table},
+            )
+        # Statistics of the compressed chunks, as autovacuum gathers them after the policy ran.
+        connection.execute(text(f"ANALYZE {', '.join(LOADED)}"))
+        chunks = connection.execute(
+            text(
+                "SELECT hypertable_name, count(*), count(*) FILTER (WHERE is_compressed) "
+                "FROM timescaledb_information.chunks WHERE hypertable_name = ANY(:tables) "
+                "GROUP BY hypertable_name"
+            ),
+            {"tables": list(LOADED)},
+        ).all()
+    timings["compress"] = time.perf_counter() - began
+    # Every loaded row is in a compressed chunk: the lookups below read no uncompressed one.
+    compressed = {table: (total, done) for table, total, done in chunks}
+    assert set(compressed) == set(LOADED)
+    assert all(total == done for total, done in compressed.values()), compressed
+    lookups = _lookups(db_session, timings)
+    plan = explain_rows(
+        db_session,
+        lookups.window,
+        transip=WAN,
+        domain="google.com",
+        dstips={"23.1.1.1", "23.2.2.1"},
+        analyze=True,
+    )
+    _print("compressed", timings, lookups)
+    print("\n--- EXPLAIN domain_popular ---")
+    print("\n".join(plan))
+
+    _check_answers_and_budget(timings, lookups)
+    # The bound on the session's start (``time - make_interval(… duration)``) reaches the batches'
+    # time range: with COALESCE in it TimescaleDB left it out, and each session read them all.
+    assert any("_ts_meta" in line and "make_interval" in line for line in plan)
