@@ -482,6 +482,10 @@ def test_a_slow_first_window_is_halved(
 
     _setting(app_session_factory, "search.request_budget_ms", 2000)
     state_of(app).hook = slow_while_wide
+    # Whether a window doubles depends on how fast it answered against the budget left; on a
+    # busy runner the real clock can make the 15-minute window look slow. Each reading of this
+    # clock moves 10 ms, so the tries still get about 1 s and 0.5 s of real time-out each.
+    state_of(app).clock = FakeClock(0.01)
     page = search(client, f"srcip:{CLIENT}", 3)
     assert spans[:4] == [
         timedelta(hours=1),
