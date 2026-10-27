@@ -223,6 +223,9 @@ class Stream:
     start: dict[str, tuple[date, int]] = field(default_factory=dict)
     #: The hub's sequence number when the stream opened (``None`` while it is opening).
     open_seq: int | None = None
+    #: The oldest sequence number the stream may be sent: its oldest backfill line, else the
+    #: first line after it opened (set on its first connection; a resume never goes further back).
+    first_seq: int = 0
     connection: Connection | None = None
     connected_once: bool = False
     #: When the connection went away (lingering), and the hub's sequence number then.
@@ -518,7 +521,9 @@ class Hub:
     ) -> list[Entry | bytes]:
         """Connect ``connection`` to ``stream``: the lines and frames to send before the live
         ones — the backfill on the first connection, else what it missed while paused
-        (``last``: the ``Last-Event-ID`` epoch and sequence number)."""
+        (``last``: the ``Last-Event-ID`` epoch and sequence number). A resume never replays a
+        line older than :attr:`Stream.first_seq`: the backfill bound holds, and only the stream's
+        own lines are counted."""
         previous = stream.connection
         if previous is not None and previous is not connection:
             previous.stop()  # another tab or a reconnect took over
@@ -529,13 +534,15 @@ class Hub:
             stream.pending_gap = False
         oldest = self.buffer[0].seq if self.buffer else self.seq + 1
         open_seq = stream.open_seq or 0
-        if last is None and not stream.connected_once:
+        if not stream.connected_once:
+            # No ``Last-Event-ID`` can name a line of this stream yet: nothing was sent.
             backfill = [
                 entry
                 for entry in reversed(self.buffer)
                 if entry.seq <= open_seq and stream.judge(entry) == "match"
             ][: stream.backfill]
             items.extend(reversed(backfill))
+            stream.first_seq = backfill[-1].seq if backfill else open_seq + 1
             after = open_seq
         elif last is None:
             after = stream.detach_seq
@@ -544,7 +551,7 @@ class Hub:
             after = self.seq
             stream.backlog.clear()
         else:
-            after = min(last[1], self.seq)
+            after = max(min(last[1], self.seq), stream.first_seq - 1)
         backlog = set(stream.backlog)
         lost_unknown = after < oldest - 1 and after < stream.detach_seq
         missed = stream.backlog_lost + sum(1 for seq in backlog if after < seq < oldest)

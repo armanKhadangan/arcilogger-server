@@ -371,6 +371,39 @@ def test_backfill_comes_from_the_end_of_the_file(hub: Hub, spool: Spool) -> None
     run(scenario())
 
 
+def test_a_resume_never_reaches_back_before_the_stream(hub: Hub, spool: Spool) -> None:
+    """``Last-Event-ID: <epoch>:0`` replays nothing older than the stream's first line (its
+    oldest backfill line, else the first one after it opened): the backfill bound holds and
+    nothing that was never the stream's is counted."""
+
+    async def scenario() -> None:
+        spool.write("fortigate", *(traffic(tag=f"once{n}") for n in range(300)))
+        none = stream(hub, backfill=0)
+        await hub.open(none, none.settings, SiteNetwork())
+        first = hub.attach(none, Connection(), (hub.epoch, 0))  # the very first connection
+        assert first == []
+        connection = none.connection
+        assert connection is not None
+        spool.write("fortigate", traffic(tag="sonra"))
+        await until(lambda: not connection.queue.empty())
+        [live] = drain(connection)
+        hub.detach(none, connection)  # Duraklat
+        again = hub.attach(none, Connection(), (hub.epoch, 0))
+        assert again == [live]  # its own line again, no gap, nothing from before
+        assert none.dropped == {}
+        two = stream(hub, backfill=2)
+        await hub.open(two, two.settings, SiteNetwork())
+        shown = hub.attach(two, Connection(), None)
+        assert [item.line for item in shown if isinstance(item, Entry)] == [300, 301]
+        assert two.connection is not None
+        hub.detach(two, two.connection)
+        assert hub.attach(two, Connection(), (hub.epoch, 0)) == shown
+        assert two.dropped == {}
+        await hub.stop()
+
+    run(scenario())
+
+
 def test_time_limit_and_lingering_out_are_audited(
     hub: Hub, spool: Spool, clock: Clock, app_session_factory: sessionmaker[Session]
 ) -> None:
