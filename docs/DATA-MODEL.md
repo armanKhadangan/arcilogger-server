@@ -252,8 +252,9 @@ PostgreSQL 16.
 - The licence tables (`license_installation`, `license_files`, `license_events`) are append-only
   and have no expiry.
 - The search summary table (`search_counts`) follows the log tables: `partitions.drop_before`
-  also deletes its rows with `hour` before the cutoff, so the counts and the rows stay in step
-  once database retention runs; until then nothing is deleted (no job calls `drop_before`).
+  also deletes its rows with `hour` before the first day of the cutoff's month (the month
+  `drop_before` keeps whole keeps its counts), so the counts and the rows stay in step once
+  database retention runs; until then nothing is deleted (no job calls `drop_before`).
   Saved searches (`saved_searches`) are deleted with their user.
 - `lookups`, `lookup_reports` (and the PDFs in `exports\reports\`), `audit_log`,
   `user_sessions`, the assignment history (`device_assignments`, `persons`) and the history of
