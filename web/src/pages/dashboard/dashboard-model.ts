@@ -30,7 +30,16 @@ export const USAGE_PERMISSIONS: readonly string[] = [
 ];
 
 export type DashboardBlock =
-  'ingest' | 'seal' | 'credit' | 'clock' | 'usage' | 'alerts' | 'sites' | 'categories' | 'calendar';
+  | 'ingest'
+  | 'parseFailures'
+  | 'seal'
+  | 'credit'
+  | 'clock'
+  | 'usage'
+  | 'alerts'
+  | 'sites'
+  | 'categories'
+  | 'calendar';
 
 /** The requests the page makes for a user with `granted` permissions. */
 export function dashboardRequests(granted: ReadonlySet<string>): {
@@ -61,6 +70,8 @@ export function visibleBlocks(
   const blocks = new Set<DashboardBlock>();
   if (asked.summary && summary) {
     if (summary.ingest) blocks.add('ingest');
+    // Absent in answers of an API before Wave 2: no box, not an error.
+    if (summary.parse_failures) blocks.add('parseFailures');
     if (summary.seal) {
       blocks.add('seal');
       blocks.add('calendar');
@@ -91,6 +102,20 @@ export function linkTarget(key: string, granted: ReadonlySet<string>): string | 
   const item = NAV_ITEMS.find((entry) => entry.key === key);
   if (!item || !hasAny(granted, item.permissions)) return null;
   return item.path;
+}
+
+/** Who may open a parse failure's example line (the rule of `GET /raw`). */
+export const RAW_LINE_PERMISSIONS: readonly string[] = ['search.read', 'lookup.run'];
+/** Above 1 % of a day's lines (the R20-parse threshold) the parse-failure card says "Yüksek". */
+export const HIGH_FAILURE_PERMILLE = 10;
+
+/** The parse-failure card's verdict: no failure today, some, or above the alert threshold. */
+export function failureLevel(box: {
+  failures: number;
+  permille: number | null;
+}): 'none' | 'some' | 'high' {
+  if (box.failures === 0) return 'none';
+  return box.permille !== null && box.permille >= HIGH_FAILURE_PERMILLE ? 'high' : 'some';
 }
 
 /** A day on the sealing page: its month's calendar with the day selected. */

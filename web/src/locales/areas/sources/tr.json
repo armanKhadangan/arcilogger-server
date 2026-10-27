@@ -1,5 +1,151 @@
 {
   "sources": {
-    "description": "Log gönderen cihazların durumu: son mesaj, hacim ve ayrıştırma hataları. Kaynaklar Ayarlar → Kaynaklar'da düzenlenir."
+    "description": "Log gönderen cihazların durumu: son mesaj, hacim ve ayrıştırma hataları. Kaynaklar Ayarlar → Kaynaklar'da düzenlenir.",
+    "updated": "Son güncelleme {{time}}",
+    "refresh": "Yenile",
+    "editInSettings": "Ayarlar → Kaynaklar'da düzenle",
+    "loadFailed": "Kaynakların durumu alınamadı.",
+    "summary": "{{active}}/{{total}} kaynak etkin",
+    "unknownSenders_one": "{{count}} bilinmeyen gönderici",
+    "unknownSenders_other": "{{count}} bilinmeyen gönderici",
+    "collectorStale": "Toplayıcı durum dosyasını 5 dakikadır güncellemedi; son mesaj zamanları veritabanından okunuyor. Toplayıcı hizmetinin (ArciCollector) çalıştığını denetleyin.",
+    "emptyTitle": "Henüz log gönderen bir cihaz yok",
+    "emptyBody": "Ayarlar → Kaynaklar'dan bir kaynak ekleyin ve cihazı ARCILOGGER sunucusuna syslog gönderecek şekilde ayarlayın; ilk mesajı gelince burada görünür.",
+    "caption": "Log kaynaklarının durumu",
+    "noMatch": "Bu süzgece uyan kaynak yok.",
+    "filters": {
+      "label": "Kaynakları süz",
+      "all": "Tümü",
+      "silent": "Sessiz",
+      "unknown": "Bilinmeyen"
+    },
+    "columns": {
+      "name": "Ad",
+      "type": "Tür",
+      "address": "Gönderici IP",
+      "lastMessage": "Son mesaj",
+      "rate": "Mesaj/dk",
+      "linesToday": "Bugünkü satır",
+      "failures": "Ayrıştırma hatası %",
+      "heartbeat": "Heartbeat eşiği",
+      "state": "Durum",
+      "actions": "İşlemler"
+    },
+    "badges": {
+      "unknown": "Bilinmeyen",
+      "promotedTo": "→ {{name}}",
+      "member": "{{network}} ağının üyesi"
+    },
+    "never": "Hiç mesaj yok",
+    "origin": {
+      "collector": "Toplayıcının kaydettiği son mesaj",
+      "database": "Veritabanındaki son mesaj"
+    },
+    "trend": "{{name}}: mesaj/dk, son 60 dakika",
+    "pending": "{{size}} henüz veritabanına yüklenmedi",
+    "percent": "%{{value}}",
+    "state": {
+      "active": "Etkin",
+      "silent": "Sessiz",
+      "silentUnexpected": "Sessiz (beklenmiyor)",
+      "never": "Hiç mesaj gelmedi",
+      "disabled": "Kapalı",
+      "unknown": "Tanımlı değil",
+      "promoted": "Kaynak olarak tanımlandı"
+    },
+    "promote": "Kaynak olarak tanımla",
+    "promoteFor": "{{name}} göndericisini kaynak olarak tanımla",
+    "licence": {
+      "strip": "Lisans: {{used}} / {{max}} log kaynağı (son 30 günde gönderenler dahil)",
+      "collected": "Sınırın üzerindeki kaynakların kayıtları da toplanır ve mühürlenir."
+    },
+    "sheet": {
+      "tabs": {
+        "label": "Kaynağın ayrıntıları",
+        "volume": "Hacim",
+        "tail": "Son satırlar",
+        "gaps": "Boşluklar",
+        "failures": "Ayrıştırma hataları"
+      },
+      "volume": {
+        "hourly": "Saatlik satır sayısı, son 48 saat",
+        "hour": "Saat",
+        "count": "Satır",
+        "daily": "Son 14 gün",
+        "dailyCaption": "Son 14 günün satır ve ayrıştırma hatası sayıları",
+        "day": "Gün",
+        "lines": "Satır",
+        "failures": "Ayrıştırma hatası",
+        "sealed": "Mühürlü",
+        "yes": "Evet",
+        "no": "Hayır"
+      },
+      "tail": {
+        "noPermission": "Ham satırları görmek için Arama ya da 5651 Sorgu yetkisi gerekir.",
+        "privacy": "Ham satırlar kişisel veri içerebilir: KVKK bilgilendirme metnini onayladıktan sonra açılır.",
+        "refresh": "Yeniden oku",
+        "noFile": "Bugün kayıt yok: bu kaynağın ne bugünkü ne dünkü biriktirme dosyası var.",
+        "searchSource": "Bu kaynağı Arama'da aç",
+        "range": "{{day}} · satır {{from}}–{{to}}",
+        "empty": "Dosyada henüz tamamlanmış bir satır yok.",
+        "caption": "Kaynağın son satırları",
+        "line": "Satır",
+        "received": "Alındı",
+        "text": "Mesaj",
+        "raw": "Ham satır",
+        "openRaw": "{{line}}. satırı ham haliyle aç",
+        "rangeSha": "Gösterilen bayt aralığının SHA-256 özeti",
+        "audited": "Bu okuma denetim kaydına yazıldı (dosya, satır ve bayt aralığı, aralığın özeti; içeriği olmadan)."
+      },
+      "gaps": {
+        "empty": "Son 30 günde kayıt boşluğu yok.",
+        "caption": "Son 30 günün kayıt boşlukları",
+        "from": "Başlangıç",
+        "to": "Bitiş",
+        "minutes": "Süre",
+        "reason": "Neden",
+        "origins": {
+          "manifest": "Mühürlü günün manifestinde",
+          "live": "Bugün, son mesajdan beri"
+        }
+      },
+      "failures": {
+        "empty": "Son 7 günde ayrıştırma hatası yok.",
+        "caption": "Son 7 günün ayrıştırma hataları",
+        "pattern": "Kalıp",
+        "count": "Sayı",
+        "lastSeen": "Son görülme",
+        "actions": "İşlemler",
+        "errorHidden": "Hata ayrıntısı için Arama ya da 5651 Sorgu yetkisi gerekir.",
+        "errorPrivacy": "Hata ayrıntısı KVKK bilgilendirme metni onaylandıktan sonra gösterilir.",
+        "example": "Örnek satır",
+        "search": "Aramada göster",
+        "invalidNote": "Toplayıcı biçiminde olmayan satırlar (rawlog.invalid) veritabanına yüklenmez; Arama onları bulamaz, yalnızca örnek satırları açılır."
+      }
+    }
+  },
+  "settings": {
+    "sources": {
+      "prefillNotice": "Kaynaklar sayfasındaki bilinmeyen gönderici {{address}} için dolduruldu. Adı gözden geçirin; unknown-{{address}} klasörü ve eski kayıtları yerinde kalır.",
+      "prefillBlocked": "{{address}} göndericisi şu anda kaynak olarak eklenemez: kaynakları değiştirme yetkiniz yok ya da yönetim hizmeti (ArciAdmin) çalışmıyor."
+    }
+  },
+  "dashboard": {
+    "parseFailures": {
+      "title": "Ayrıştırma hataları",
+      "high": "Yüksek",
+      "none": "Hata yok",
+      "noLines": "Bugün satır yüklenmedi",
+      "permille": "Binde {{value}}",
+      "counts": "Bugün {{failures}} hata / {{lines}} satır",
+      "trend": "Ayrıştırma hataları, son 7 gün",
+      "topPatterns": "Bugünün en sık kalıpları",
+      "patternOf_one": "{{source}} · {{formatted}} satır",
+      "patternOf_other": "{{source}} · {{formatted}} satır",
+      "example": "Örnek satır",
+      "exampleFor": "{{pattern}} kalıbının örnek satırını aç",
+      "search": "Aramada göster",
+      "searchFor": "{{pattern}} kalıbını Aramada göster"
+    }
   }
 }

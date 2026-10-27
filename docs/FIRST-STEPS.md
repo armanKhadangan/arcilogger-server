@@ -260,10 +260,10 @@ section 8):
 - **No department history:** the person in a 5651 result is the assignment at the moment of the
   event, the department is the person's current one (the report says so). A past assignment
   cannot be corrected in the interface (section 5).
-- **Kaynaklar, Canlı Akış, Arama, Uyum Durumu and Sistem** are still placeholders. Working pages:
-  Panel, 5651 Sorgu, Kullanım (section 16), Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve
-  Kişiler (section 12), Raporlar (Panel, Güvenlik and Raporlar: section 15), Denetim Kaydı,
-  Ayarlar (users and roles, licence: section 17).
+- Only **Uyum Durumu and Sistem** are still placeholders. Working pages: Panel, Kaynaklar and
+  Canlı Akış (section 9), Arama, 5651 Sorgu, Kullanım (section 16), Güvenlik, Mühürleme, Kanıt
+  Paketleri, Cihazlar ve Kişiler (section 12), Raporlar (Panel, Güvenlik and Raporlar: section
+  15), Denetim Kaydı, Ayarlar (users and roles, licence: section 17).
 - **Paid modules** (licence, [LICENSING.md](LICENSING.md)): Usage analytics (the Kullanım page,
   the dashboard's usage sections), Scheduled usage reports (the Raporlar page) and Bulk import
   (CSV). All are on during the trial; a module that is off shows its page locked. Everything else
@@ -310,8 +310,24 @@ section 8):
 
 Every day:
 
-- **Panel**: log intake, yesterday's seal, credit, clock offset and open alerts at a glance.
-  **Güvenlik** page: look into the new alerts, set the ones you work on to İnceleniyor.
+- **Panel**: log intake, today's parse failures, yesterday's seal, credit, clock offset and open
+  alerts at a glance. **Güvenlik** page: look into the new alerts, set the ones you work on to
+  İnceleniyor.
+- **Kaynaklar** page (administrators): is every expected source "Etkin" (active)? For a source
+  shown "Sessiz" (silent) or "Hiç mesaj gelmedi" (never sent), check the device and its network
+  path ("Sessiz (beklenmiyor)": the source may stay silent, R15 does not expect it). Today's line
+  count, the messages-per-minute curve of the last hour and the parse-failure rate are here too;
+  a row opens the source's last 48 hours, last 14 days, gaps and parse failures. The
+  **Bilinmeyen** (unknown) filter shows senders that are not in the configuration: if you know the
+  device, **Kaynak olarak tanımla** (add as a source) fills in the add dialog of Ayarlar →
+  Kaynaklar with its address (review the name and save; the old `unknown-<ip>` folder and its
+  records stay where they are). The Kaynaklar page only reads, and it shows the licence's log
+  source count; the lines of sources above the limit are collected and sealed too.
+- **Canlı Akış** (live tail; administrators and auditors): to see that a device's lines really
+  arrive, without waiting for ingest. Choose the source or the "Bilinmeyen göndericiler" (unknown
+  senders) chip and press **Başlat** (start); a new device's first test is in
+  [DEVICE-SETUP.md](DEVICE-SETUP.md) section 4. Every stream is written to the audit log with its
+  filter; an idle screen is signed out as on every page.
 - **Mühürleme** page: was yesterday verified? Is there a red "test stamp" banner?
 - On the server:
 
@@ -519,7 +535,11 @@ permission again on every request. Usage figures are **estimates** computed from
   severity and the newest five), the sites with the most time, categories (the six largest with
   their share of the active time, the rest "Diğer"; the day's active time in the middle) and the
   last 30 days of sealing. A block the role may not see is not shown at all (HR sees only the
-  usage blocks). The link in a block's title opens its page, a calendar day opens that day's
+  usage blocks). The **Ayrıştırma hataları** (parse failures) block shows today's failures per
+  1,000 lines, their counts and the most frequent patterns; a pattern's example line opens as
+  stored, "Aramada göster" (show in Search) opens that source's lines of the pattern in Arama
+  (lines not in the collector's format are not loaded into the database, so they have only their
+  example line). The link at the bottom of a block opens its page, a calendar day opens that day's
   sealing detail, an alert opens it on the Güvenlik page. The live blocks refresh every 30
   seconds and the usage every 5 minutes by themselves; nothing is refreshed while the tab is in
   the background, and these refreshes do not keep the session alive.

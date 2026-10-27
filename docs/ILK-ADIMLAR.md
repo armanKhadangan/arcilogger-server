@@ -258,10 +258,10 @@ veritabanından okunur; hizmetleri yeniden başlatmak gerekmez. Sahada belirleni
 - **Departman geçmişi tutulmaz:** 5651 sonucundaki kişi olay anındaki atamadır, departmanı ise
   kişinin bugünkü departmanıdır (rapor bunu belirtir). Geçmişteki bir atama arayüzden
   düzeltilemez (bölüm 5).
-- Menüde **Kaynaklar, Canlı Akış, Arama, Uyum Durumu ve Sistem** henüz yer tutucudur. Çalışan
-  sayfalar: Panel, 5651 Sorgu, Kullanım (bölüm 16), Güvenlik, Mühürleme, Kanıt Paketleri,
-  Cihazlar ve Kişiler (bölüm 12), Raporlar (Panel, Güvenlik ve Raporlar: bölüm 15), Denetim
-  Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans: bölüm 17).
+- Menüde yalnızca **Uyum Durumu ve Sistem** henüz yer tutucudur. Çalışan sayfalar: Panel,
+  Kaynaklar ve Canlı Akış (bölüm 9), Arama, 5651 Sorgu, Kullanım (bölüm 16), Güvenlik, Mühürleme,
+  Kanıt Paketleri, Cihazlar ve Kişiler (bölüm 12), Raporlar (Panel, Güvenlik ve Raporlar: bölüm
+  15), Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans: bölüm 17).
 - **Ücretli modüller** (lisans, [LISANS.md](LISANS.md)): Kullanım analizi (Kullanım sayfası,
   paneldeki kullanım bölümleri), Zamanlanmış kullanım raporları (Raporlar sayfası) ve Toplu içe
   aktarma (CSV). Deneme süresince hepsi açıktır; bir modül kapalıyken sayfası kilitli görünür.
@@ -308,8 +308,23 @@ veritabanından okunur; hizmetleri yeniden başlatmak gerekmez. Sahada belirleni
 
 Her gün:
 
-- **Panel**: log alımı, dünkü mühür, kontör, saat sapması ve açık uyarılar bir bakışta.
-  **Güvenlik** sayfası: Yeni uyarıları inceleyin, ilgilendiklerinizi İnceleniyor yapın.
+- **Panel**: log alımı, bugünkü ayrıştırma hataları, dünkü mühür, kontör, saat sapması ve açık
+  uyarılar bir bakışta. **Güvenlik** sayfası: Yeni uyarıları inceleyin, ilgilendiklerinizi
+  İnceleniyor yapın.
+- **Kaynaklar** sayfası (yönetici): her beklenen kaynak "Etkin" mi? "Sessiz" ya da "Hiç mesaj
+  gelmedi" görünen bir kaynağın cihazını ve ağ bağlantısını denetleyin ("Sessiz (beklenmiyor)":
+  kaynak sessiz kalabilir, R15 onu beklemez). Bugünkü satır sayısı, son bir saatin mesaj/dk eğrisi
+  ve ayrıştırma hatası oranı da buradadır; bir satır kaynağın son 48 saatini, son 14 gününü,
+  kayıt boşluklarını ve ayrıştırma hatalarını açar. **Bilinmeyen** süzgeci yapılandırmada olmayan
+  göndericileri gösterir: tanıdığınız bir cihazsa **Kaynak olarak tanımla**, Ayarlar →
+  Kaynaklar'da ekleme penceresini onun adresiyle doldurur (adı gözden geçirip kaydedin; eski
+  `unknown-<ip>` klasörü ve kayıtları yerinde kalır). Kaynaklar sayfası yalnızca okur ve lisanstaki
+  log kaynağı sayısını gösterir; sınırın üzerindeki kaynakların kayıtları da toplanır ve
+  mühürlenir.
+- **Canlı Akış** (yönetici ve denetçi): bir cihazın satırları gerçekten geliyor mu, ingest
+  beklemeden görmek için. Kaynağı ya da "Bilinmeyen göndericiler" çipini seçip **Başlat**'a basın;
+  yeni bir cihazın ilk denemesi [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 4'tedir. Her akış
+  süzgeciyle denetim kaydına yazılır; boşta kalan ekranın oturumu her sayfadaki gibi kapanır.
 - **Mühürleme** sayfası: dün "doğrulandı" mı? Kırmızı "test damgası" uyarısı var mı?
 - Sunucuda:
 
@@ -516,7 +531,11 @@ denetler. Kullanım rakamları bağlantı kayıtlarından hesaplanan **tahminler
   güvenlik uyarıları (önem derecesine göre sayılar ve en yeni beşi), en çok vakit geçirilen
   siteler, kategoriler (en büyük altısı aktif süredeki paylarıyla, gerisi "Diğer"; ortada günün
   aktif süresi) ve son 30 günün mühür takvimi. Rolün göremediği bölüm hiç gösterilmez (İK
-  yalnızca kullanım bölümlerini görür). Bölüm başlığındaki bağlantı ilgili sayfayı, takvimdeki
+  yalnızca kullanım bölümlerini görür). **Ayrıştırma hataları** bölümü bugün okunamayan satırların
+  binde oranını, sayılarını ve en sık kalıpları gösterir; bir kalıbın örnek satırı ham haliyle
+  açılır, "Aramada göster" o kaynağın o kalıptaki satırlarını Arama'da açar (toplayıcı biçiminde
+  olmayan satırlar veritabanına yüklenmediği için yalnızca örnek satırı vardır). Bölümün altındaki
+  bağlantı ilgili sayfayı, takvimdeki
   bir gün o günün mühür ayrıntısını, bir uyarı Güvenlik sayfasında o uyarıyı açar. Canlı
   bölümler 30 saniyede, kullanım 5 dakikada bir kendiliğinden yenilenir; sekme arka plandayken
   yenileme durur ve bu yenilemeler oturumu açık tutmaz.

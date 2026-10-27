@@ -1,5 +1,151 @@
 {
   "sources": {
-    "description": "The state of the devices that send logs: last message, volume and parse failures. Sources are edited in Settings → Sources."
+    "description": "The state of the devices that send logs: last message, volume and parse failures. Sources are edited in Settings → Sources.",
+    "updated": "Updated {{time}}",
+    "refresh": "Refresh",
+    "editInSettings": "Edit in Settings → Sources",
+    "loadFailed": "The state of the sources could not be loaded.",
+    "summary": "{{active}}/{{total}} sources active",
+    "unknownSenders_one": "{{count}} unknown sender",
+    "unknownSenders_other": "{{count}} unknown senders",
+    "collectorStale": "The collector has not updated its status file for 5 minutes; the last message times are read from the database. Check that the collector service (ArciCollector) is running.",
+    "emptyTitle": "No device has sent logs yet",
+    "emptyBody": "Add a source in Settings → Sources and set the device to send syslog to the ARCILOGGER server; it appears here with its first message.",
+    "caption": "State of the log sources",
+    "noMatch": "No source matches this filter.",
+    "filters": {
+      "label": "Filter the sources",
+      "all": "All",
+      "silent": "Silent",
+      "unknown": "Unknown"
+    },
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "address": "Sender IP",
+      "lastMessage": "Last message",
+      "rate": "Messages/min",
+      "linesToday": "Lines today",
+      "failures": "Parse failures %",
+      "heartbeat": "Heartbeat threshold",
+      "state": "State",
+      "actions": "Actions"
+    },
+    "badges": {
+      "unknown": "Unknown",
+      "promotedTo": "→ {{name}}",
+      "member": "Member of the network {{network}}"
+    },
+    "never": "No message yet",
+    "origin": {
+      "collector": "The last message the collector recorded",
+      "database": "The last message in the database"
+    },
+    "trend": "{{name}}: messages/min, last 60 minutes",
+    "pending": "{{size}} not loaded into the database yet",
+    "percent": "{{value}}%",
+    "state": {
+      "active": "Active",
+      "silent": "Silent",
+      "silentUnexpected": "Silent (not expected)",
+      "never": "Never sent",
+      "disabled": "Switched off",
+      "unknown": "Not configured",
+      "promoted": "Configured as a source"
+    },
+    "promote": "Add as a source",
+    "promoteFor": "Add the sender {{name}} as a source",
+    "licence": {
+      "strip": "Licence: {{used}} / {{max}} log sources (senders of the last 30 days included)",
+      "collected": "The lines of sources above the limit are collected and sealed too."
+    },
+    "sheet": {
+      "tabs": {
+        "label": "Details of the source",
+        "volume": "Volume",
+        "tail": "Latest lines",
+        "gaps": "Gaps",
+        "failures": "Parse failures"
+      },
+      "volume": {
+        "hourly": "Lines per hour, last 48 hours",
+        "hour": "Hour",
+        "count": "Lines",
+        "daily": "Last 14 days",
+        "dailyCaption": "Lines and parse failures of the last 14 days",
+        "day": "Day",
+        "lines": "Lines",
+        "failures": "Parse failures",
+        "sealed": "Sealed",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "tail": {
+        "noPermission": "Seeing raw lines needs the Search or the 5651 lookup permission.",
+        "privacy": "Raw lines can hold personal data: they open once the KVKK privacy notice is accepted.",
+        "refresh": "Read again",
+        "noFile": "No records today: this source has neither today's nor yesterday's spool file.",
+        "searchSource": "Open this source in Search",
+        "range": "{{day}} · lines {{from}}–{{to}}",
+        "empty": "The file holds no complete line yet.",
+        "caption": "The source's latest lines",
+        "line": "Line",
+        "received": "Received",
+        "text": "Message",
+        "raw": "Raw line",
+        "openRaw": "Open line {{line}} as stored",
+        "rangeSha": "SHA-256 of the byte range shown",
+        "audited": "This read was written to the audit log (file, line and byte range, the range's hash; not the content)."
+      },
+      "gaps": {
+        "empty": "No gap in the last 30 days.",
+        "caption": "Gaps of the last 30 days",
+        "from": "From",
+        "to": "To",
+        "minutes": "Length",
+        "reason": "Reason",
+        "origins": {
+          "manifest": "In the sealed day's manifest",
+          "live": "Today, since the last message"
+        }
+      },
+      "failures": {
+        "empty": "No parse failure in the last 7 days.",
+        "caption": "Parse failures of the last 7 days",
+        "pattern": "Pattern",
+        "count": "Count",
+        "lastSeen": "Last seen",
+        "actions": "Actions",
+        "errorHidden": "The error detail needs the Search or the 5651 lookup permission.",
+        "errorPrivacy": "The error detail is shown once the KVKK privacy notice is accepted.",
+        "example": "Example line",
+        "search": "Show in Search",
+        "invalidNote": "Lines not in the collector's format (rawlog.invalid) are not loaded into the database; Search cannot find them, only their example line opens."
+      }
+    }
+  },
+  "settings": {
+    "sources": {
+      "prefillNotice": "Filled in for the unknown sender {{address}} of the Sources page. Review the name; the folder unknown-{{address}} and its earlier records stay where they are.",
+      "prefillBlocked": "The sender {{address}} cannot be added as a source now: you may not change the sources, or the administration service (ArciAdmin) is not running."
+    }
+  },
+  "dashboard": {
+    "parseFailures": {
+      "title": "Parse failures",
+      "high": "High",
+      "none": "None",
+      "noLines": "No lines loaded today",
+      "permille": "{{value}} per 1,000",
+      "counts": "Today {{failures}} failures / {{lines}} lines",
+      "trend": "Parse failures, last 7 days",
+      "topPatterns": "Today's most frequent patterns",
+      "patternOf_one": "{{source}} · {{formatted}} line",
+      "patternOf_other": "{{source}} · {{formatted}} lines",
+      "example": "Example line",
+      "exampleFor": "Open an example line of {{pattern}}",
+      "search": "Show in Search",
+      "searchFor": "Show {{pattern}} in Search"
+    }
   }
 }

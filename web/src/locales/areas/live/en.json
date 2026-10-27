@@ -1,5 +1,118 @@
 {
   "live": {
-    "description": "Lines from the sources as they arrive, read from the raw log without waiting for the database."
+    "description": "Lines from the sources as they arrive, read from the raw log without waiting for the database.",
+    "privacy": "This page shows personal data; every stream started (with its filter) and every raw line opened are written to the audit log.",
+    "privacyWait": {
+      "title": "Waiting for the KVKK privacy notice",
+      "body": "The live tail shows personal data: read and accept the privacy notice before starting it."
+    },
+    "filters": {
+      "label": "Live tail filter",
+      "sourcesAll": "Sources: all",
+      "sourcesSome_one": "Sources: {{count}} selected",
+      "sourcesSome_other": "Sources: {{count}} selected",
+      "sourcesTitle": "Sources",
+      "sourcesHint": "A network source includes its members; for unknown senders use the “Unknown senders” button.",
+      "noSources": "No source.",
+      "network": "network",
+      "sourcesClear": "Clear the selection",
+      "unknown": "Unknown senders",
+      "kinds": "Record types",
+      "text": "Text or query",
+      "textPlaceholder": "e.g. \"login failure\" or srcip:172.20.41.0/24 action:deny",
+      "query": "Query:",
+      "everything": "No filter: every new line of every source comes in."
+    },
+    "actions": {
+      "start": "Start",
+      "apply": "Apply the filter",
+      "resume": "Resume",
+      "pause": "Pause",
+      "stop": "Stop",
+      "clear": "Clear",
+      "highlight": "Highlight rules",
+      "highlightCount": "Highlight rules ({{count}})"
+    },
+    "state": {
+      "idle": "Not started",
+      "connecting": "Connecting",
+      "connected": "Connected",
+      "reconnecting": "Reconnecting",
+      "paused": "Paused",
+      "stopped": "Stopped"
+    },
+    "status": {
+      "rate": "{{rate}} lines/s",
+      "lines_one": "{{formatted}} line shown",
+      "lines_other": "{{formatted}} lines shown",
+      "dropped_one": "{{formatted}} line not shown",
+      "dropped_other": "{{formatted}} lines not shown"
+    },
+    "banner": {
+      "failed": "The live tail could not start",
+      "retryAfter": "Try again in {{seconds}} s.",
+      "reopened": "Lines in between may not have been shown; open this interval in Search.",
+      "openInSearch": "Open this interval in Search"
+    },
+    "dropped": {
+      "rate_limited_one": "rate limit: {{formatted}}",
+      "rate_limited_other": "rate limit: {{formatted}}",
+      "slow_client_one": "connection too slow: {{formatted}}",
+      "slow_client_other": "connection too slow: {{formatted}}",
+      "parse_budget_one": "not parsed: {{formatted}}",
+      "parse_budget_other": "not parsed: {{formatted}}",
+      "behind_one": "file grew too fast: {{formatted}}",
+      "behind_other": "file grew too fast: {{formatted}}"
+    },
+    "list": {
+      "label": "Live lines",
+      "unseen_one": "{{formatted}} new line",
+      "unseen_other": "{{formatted}} new lines",
+      "waiting": "Waiting for a new line that matches the filter.",
+      "empty": "Press Start: new lines that match the filter appear here (newest at the bottom, at most 2,000 lines)."
+    },
+    "line": {
+      "invalid": "not in format",
+      "skipped": "not parsed"
+    },
+    "sheet": {
+      "title": "Live line",
+      "subtitle": "{{source}} · {{day}} · line {{line}}",
+      "preview": "preview",
+      "truncated": "Text shortened (8 KiB)",
+      "previewHint": "The fields were parsed as the line arrived; the record loaded into the database may differ in details. The whole line is in the raw line.",
+      "skippedHint": "The server could not parse this many lines; the line is shown without its fields.",
+      "invalidHint": "The line is not in the collector's format (e.g. a torn line); it is not loaded into the database.",
+      "received": "Received",
+      "sender": "Sender",
+      "text": "Message (invisible characters shown as escapes)",
+      "openRaw": "Raw line",
+      "search": "Open in Search (±5 min)"
+    },
+    "highlight": {
+      "title": "Highlight rules",
+      "description": "Type a text (marked where it occurs) or field:value (e.g. action:deny; the whole line is marked). At most 10 rules.",
+      "empty": "No rule yet.",
+      "list": "Rules",
+      "match": "Rule {{number}}",
+      "placeholder": "e.g. deny or srcip:172.20.41.5",
+      "kindField": "Field rule: the whole line is marked.",
+      "kindText": "Text rule: marked where it occurs.",
+      "color": "Colour",
+      "colors": {
+        "yellow": "Yellow",
+        "red": "Red",
+        "green": "Green",
+        "blue": "Blue",
+        "sky": "Light blue",
+        "teal": "Teal"
+      },
+      "remove": "Remove rule {{number}}",
+      "add": "Add a rule",
+      "limit": "At most {{max}} rules.",
+      "storage": "The rules are kept in this tab only: they stay when the page reloads and are gone when the tab closes.",
+      "save": "Save",
+      "unsaved": "The browser could not keep the rules; they apply until the page reloads."
+    }
   }
 }

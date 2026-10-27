@@ -1,6 +1,8 @@
 import { LayoutDashboard, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { RawLineSheet, type RawLineTarget } from '@/components/evidence/raw-line-sheet';
 import { PageHeader } from '@/components/layout/page-header';
 import { ModuleLockedCard } from '@/components/license/module-locked';
 import { Alert } from '@/components/ui/alert';
@@ -12,14 +14,16 @@ import { useDashboardSummary, useLicense, useTodayCompanyUsage } from '@/lib/api
 import { useAuth } from '@/lib/auth';
 import { formatTime } from '@/lib/format';
 import { moduleEnabled, type ModuleKey } from '@/lib/license';
+import { hasAny } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 
 import { AlertsCard, SealStripCard } from './dashboard-alerts';
-import { ClockCard, CreditCard, IngestCard, SealCard } from './dashboard-cards';
+import { ClockCard, CreditCard, IngestCard, ParseFailuresCard, SealCard } from './dashboard-cards';
 import {
   dashboardRequests,
   isRefusal,
   linkTarget,
+  RAW_LINE_PERMISSIONS,
   sealDayHref,
   visibleBlocks,
 } from './dashboard-model';
@@ -29,9 +33,9 @@ import { CategoriesCard, SitesCard, UsageCard } from './dashboard-usage';
 const USAGE_MODULE: ModuleKey = 'usage_analytics';
 
 /**
- * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): log intake, yesterday's seal,
- * Kamu SM credit and clock offset, today's company usage, open security alerts, the most visited
- * sites, categories and the last 30 days of sealing. Each block appears only for those who may
+ * Panel (spec 12.3 item 2; `dashboard.view` or `dashboard.usage`): log intake and today's parse
+ * failures, yesterday's seal, Kamu SM credit and clock offset, today's company usage, open security
+ * alerts, the most visited sites, categories and the last 30 days of sealing. Each block appears only for those who may
  * see it (the API leaves the others out); each links to its page when the user may open that.
  *
  * The live blocks refresh every 30 s, the usage figures every 5 minutes, both in the background
@@ -71,10 +75,22 @@ export function DashboardPage() {
     ((license.data === undefined && license.isPending) || (usageLicensed && usage.isPending));
   const updatedAt = Math.max(summary.dataUpdatedAt, usageLicensed ? usage.dataUpdatedAt : 0);
   const summaryFailed = asked.summary && summary.isError && !isRefusal(summary.error);
+  const [raw, setRaw] = useState<RawLineTarget | null>(null);
+  const sources = linkTarget('sources', permissions);
 
   const top = [
     blocks.has('ingest') && data?.ingest ? (
-      <IngestCard key="ingest" ingest={data.ingest} to={linkTarget('sources', permissions)} />
+      <IngestCard key="ingest" ingest={data.ingest} to={sources} />
+    ) : null,
+    blocks.has('parseFailures') && data?.parse_failures ? (
+      <ParseFailuresCard
+        key="parse-failures"
+        box={data.parse_failures}
+        to={sources}
+        canRaw={hasAny(permissions, RAW_LINE_PERMISSIONS)}
+        canSearch={permissions.has('search.read')}
+        onRaw={setRaw}
+      />
     ) : null,
     blocks.has('seal') && data?.seal ? (
       <SealCard
@@ -159,7 +175,15 @@ export function DashboardPage() {
           ))}
         </div>
       ) : top.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{top}</div>
+        // Five health cards: three a row up to 1535 px, then all five (each title wraps, never cut).
+        <div
+          className={cn(
+            'grid gap-4 sm:grid-cols-2',
+            top.length > 4 ? 'lg:grid-cols-3 2xl:grid-cols-5' : 'xl:grid-cols-4',
+          )}
+        >
+          {top}
+        </div>
       ) : null}
 
       {showUsage || showAlerts || usageCard ? (
@@ -203,6 +227,12 @@ export function DashboardPage() {
       ) : null}
 
       {nothing ? <EmptyState icon={LayoutDashboard} title={t('dashboard.nothing')} /> : null}
+      <RawLineSheet
+        target={raw}
+        onClose={() => {
+          setRaw(null);
+        }}
+      />
     </div>
   );
 }

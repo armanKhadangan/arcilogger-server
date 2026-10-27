@@ -1,5 +1,5 @@
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -44,6 +44,7 @@ import {
 } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { formatDateTime } from '@/lib/format';
+import { useHandoff, type HandoffPayloads } from '@/lib/handoff';
 import type {
   FirewallState,
   SourceBody,
@@ -95,7 +96,11 @@ interface Editing {
   /** The source being changed, `null` for a new one. */
   name: string | null;
   values: SourceForm;
+  /** Filled in from Kaynaklar's "Kaynak olarak tanımla": the unknown sender's address. */
+  prefilledFrom?: string;
 }
+
+type SourcePrefill = HandoffPayloads['/settings/sources']['prefill'];
 
 /** The configuration paths the API names for a field of the source `name` (422/409 `details`). */
 function sourcePaths(name: string): Record<SourceField, string[]> {
@@ -152,6 +157,11 @@ function SourceDialog({
             </DialogTitle>
             <DialogDescription>{t('settings.sources.dialogDescription')}</DialogDescription>
           </DialogHeader>
+          {editing.prefilledFrom ? (
+            <Alert tone="info" assertive={false} data-testid="source-prefilled">
+              {t('settings.sources.prefillNotice', { address: editing.prefilledFrom })}
+            </Alert>
+          ) : null}
           <TextField
             id={`${id}-name`}
             label={t('settings.sources.columns.name')}
@@ -276,6 +286,11 @@ function SourceDialog({
  * and off and removed one at a time. The collector and ingest take a change without a restart;
  * the system task opens or closes the syslog port for the source's address. Switching a source
  * off and removing it need a password confirmation; removing it also the name typed.
+ *
+ * "Kaynak olarak tanımla" on Kaynaklar (contract 2.16.4) hands over an unknown sender
+ * (`lib/handoff.ts`, in memory): once the configuration is read, the add dialog opens with its
+ * suggested name, type and address for the administrator to review. The old `unknown-<ip>`
+ * folder and its records stay where they are.
  */
 export function SourcesPage() {
   const { t } = useTranslation();
@@ -317,6 +332,9 @@ export function SourcesPage() {
   const [errors, setErrors] = useState<FieldErrors<SourceField>>({});
   const [typed, setTyped] = useState('');
   const [last, setLast] = useState<'change' | 'remove'>('change');
+  const [prefill, setPrefill] = useState<SourcePrefill | null>(null);
+  /** A hand-over that could not open the dialog (no right to change, the service is down). */
+  const [prefillBlocked, setPrefillBlocked] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const agent = status.data?.agent.state ?? null;
   const canEdit = can(PERMISSION);
@@ -332,6 +350,27 @@ export function SourcesPage() {
     removal.phase === 'submitting';
   const systemTask = status.data?.agent.system_task;
   const removing = removal.body;
+  const ready = config.data !== undefined && status.data !== undefined;
+
+  useHandoff('/settings/sources', (payload) => {
+    setPrefill(payload.prefill);
+  });
+  useEffect(() => {
+    if (prefill === null || !ready) return;
+    setPrefill(null);
+    if (!writable) {
+      setPrefillBlocked(prefill.address);
+      return;
+    }
+    setPrefillBlocked(null);
+    setErrors({});
+    setEditing({
+      mode: 'add',
+      name: null,
+      values: { ...NEW_SOURCE, name: prefill.name, type: prefill.type, address: prefill.address },
+      prefilledFrom: prefill.address,
+    });
+  }, [prefill, ready, writable]);
 
   function open(next: Editing) {
     change.reset();
@@ -399,6 +438,11 @@ export function SourcesPage() {
         <Alert tone="danger">{errorMessage(config.error)}</Alert>
       ) : (
         <>
+          {prefillBlocked ? (
+            <Alert tone="warning" assertive={false} data-testid="source-prefill-blocked">
+              {t('settings.sources.prefillBlocked', { address: prefillBlocked })}
+            </Alert>
+          ) : null}
           {systemTask && !systemTask.ok ? (
             <Alert tone="warning" assertive={false} data-testid="system-task-warning">
               {t('settings.sources.systemTask')}

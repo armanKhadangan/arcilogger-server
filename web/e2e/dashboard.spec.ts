@@ -1,12 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { useSampleClock } from './fixtures';
-import { mockApi } from './mock-api';
-import { DASHBOARD, SAMPLE_TODAY } from './samples';
+import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
+import { mockApi, type MockOptions } from './mock-api';
+import { mockSources } from './mock-sources';
+import { DASHBOARD, RAW, SAMPLE_TODAY } from './samples';
 
 /** The Panel's blocks (spec 12.3 item 2) by their test ids, in page order. */
 const ALL = [
   'card-ingest',
+  'card-parse-failures',
   'card-seal',
   'card-credit',
   'card-clock',
@@ -16,6 +18,13 @@ const ALL = [
   'card-categories',
   'card-calendar',
 ];
+
+/** The main mock with the parse-failure box of `mock-sources.ts` in the summary. */
+async function panel(page: Page, options: MockOptions) {
+  const api = await mockApi(page, options);
+  await mockSources(page, api);
+  return api;
+}
 
 async function shown(page: Page): Promise<string[]> {
   await expect(page.getByTestId('card-usage')).toContainText('Aktif kullanıcı');
@@ -32,7 +41,7 @@ test.describe('Panel', () => {
   test('administrator: every block with its figures, each linking to its page', async ({
     page,
   }) => {
-    const api = await mockApi(page, { signedInAs: 'tolga' });
+    const api = await panel(page, { signedInAs: 'tolga' });
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1, name: 'Panel' })).toBeVisible();
     await expect(page.getByTestId('card-ingest')).toContainText('2/3 kaynak aktif');
@@ -93,7 +102,7 @@ test.describe('Panel', () => {
   test('auditor: no alert block (no alerts.read), sealing and clock without system links', async ({
     page,
   }) => {
-    await mockApi(page, { signedInAs: 'ayse.yilmaz' });
+    await panel(page, { signedInAs: 'ayse.yilmaz' });
     await page.goto('/');
     await expect(page.getByTestId('card-seal')).toBeVisible();
     expect(await shown(page)).toEqual(ALL.filter((id) => id !== 'card-alerts'));
@@ -107,27 +116,33 @@ test.describe('Panel', () => {
   test('report viewer: log intake and company usage only, nothing else is an error', async ({
     page,
   }) => {
-    await mockApi(page, { signedInAs: 'zeynep' });
+    await panel(page, { signedInAs: 'zeynep' });
     await page.goto('/');
     await expect(page.getByTestId('card-ingest')).toBeVisible();
     expect(await shown(page)).toEqual([
       'card-ingest',
+      'card-parse-failures',
       'card-usage',
       'card-sites',
       'card-categories',
     ]);
     await expect(page.getByRole('alert')).toHaveCount(0);
+    // Counts only for a role without raw lines and search: no example, no Arama, no Kaynaklar.
+    const failures = page.getByTestId('card-parse-failures');
+    await expect(failures).toContainText('fortigate.kv');
+    await expect(failures.getByRole('button')).toHaveCount(0);
+    await expect(failures.getByRole('link')).toHaveCount(0);
   });
 
   test('HR: the usage blocks only; the summary is never asked', async ({ page }) => {
-    const api = await mockApi(page, { signedInAs: 'mehmet.kaya' });
+    const api = await panel(page, { signedInAs: 'mehmet.kaya' });
     await page.goto('/');
     expect(await shown(page)).toEqual(['card-usage', 'card-sites', 'card-categories']);
     expect(api.callsTo('GET', '/dashboard/summary')).toHaveLength(0);
   });
 
   test('an acknowledged alert leaves the open counts at the next refresh', async ({ page }) => {
-    const api = await mockApi(page, { signedInAs: 'tolga' });
+    const api = await panel(page, { signedInAs: 'tolga' });
     await page.goto('/');
     const alerts = page.getByTestId('card-alerts');
     await expect(alerts.getByRole('link', { name: 'Yüksek 2' })).toBeVisible();
@@ -141,7 +156,7 @@ test.describe('Panel', () => {
 
 test('the live blocks refresh every 30 s in the background', async ({ page }) => {
   await page.clock.install({ time: new Date(`${SAMPLE_TODAY}T15:00:00+03:00`) });
-  const api = await mockApi(page, { signedInAs: 'tolga' });
+  const api = await panel(page, { signedInAs: 'tolga' });
   await page.goto('/');
   await expect(page.getByTestId('card-ingest')).toBeVisible();
   const before = api.callsTo('GET', '/dashboard/summary').length;
@@ -153,3 +168,101 @@ test('the live blocks refresh every 30 s in the background', async ({ page }) =>
   // The usage figures wait for their 5 minutes.
   expect(api.callsTo('GET', '/usage/company')).toHaveLength(1);
 });
+
+test.describe('Panel — parse failures', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test("today's failures, the patterns, the example line and Arama", async ({ page }) => {
+    const api = await panel(page, { signedInAs: 'tolga' });
+    await page.goto('/');
+    const card = page.getByTestId('card-parse-failures');
+    await expect(card.getByRole('heading', { name: 'Ayrıştırma hataları' })).toBeVisible();
+    await expect(card).toContainText('Binde 2,5');
+    await expect(card).toContainText('Bugün 31 hata / 12.400 satır');
+    await expect(card.getByRole('img', { name: /Ayrıştırma hataları, son 7 gün/ })).toBeVisible();
+    const patterns = card.getByTestId('parse-patterns').getByRole('listitem');
+    await expect(patterns).toHaveCount(2);
+    await expect(patterns.first()).toContainText('fortigate.kv');
+    await expect(patterns.first()).toContainText('fortigate · 30 satır');
+    // A line not in the collector's format is not in the database: its example only.
+    await expect(
+      card.getByRole('button', { name: 'rawlog.invalid kalıbını Aramada göster' }),
+    ).toHaveCount(0);
+    await card.getByRole('button', { name: 'rawlog.invalid kalıbının örnek satırını aç' }).click();
+    const raw = page.getByRole('dialog', { name: 'Ham kayıt satırı' });
+    await expect(raw).toContainText(RAW.lines['core-r1|2026-10-09|4']?.sha256 ?? '-');
+    expect(api.callsTo('GET', '/raw').at(-1)?.query.get('line')).toBe('4');
+    await raw.getByRole('button', { name: 'Kapat' }).click();
+
+    await card.getByRole('button', { name: 'fortigate.kv kalıbını Aramada göster' }).click();
+    await expect(page).toHaveURL(/\/search$/);
+    expect(await page.evaluate(() => JSON.stringify(window.history.state))).not.toContain(
+      'fortigate.kv',
+    );
+    await page.goBack();
+    await page
+      .getByTestId('card-parse-failures')
+      .getByRole('link', { name: 'Kaynaklar sayfasını aç' })
+      .click();
+    await expect(page).toHaveURL(/\/sources$/);
+  });
+});
+
+/** Every card title on screen fits its box: it wraps instead of being cut ("Log..."). */
+async function titlesFit(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const titles = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="card-"] h3'));
+    return titles.flatMap((title) => {
+      const parts = [title, ...Array.from(title.querySelectorAll<HTMLElement>('*'))];
+      const cut = parts.some((element) => {
+        const style = getComputedStyle(element);
+        return (
+          style.textOverflow === 'ellipsis' ||
+          (element.scrollWidth > element.clientWidth && style.overflowX !== 'visible')
+        );
+      });
+      return cut || title.scrollWidth > title.clientWidth ? [title.textContent] : [];
+    });
+  });
+}
+
+for (const lang of ['tr', 'en'] as const) {
+  for (const width of [1280, 1440, 1920]) {
+    test(`no card title is cut at ${width} px (${lang})`, async ({ page }) => {
+      await usePreferences(page, { lang });
+      await useSampleClock(page, SAMPLE_TODAY);
+      await page.setViewportSize({ width, height: 1000 });
+      await panel(page, { signedInAs: 'tolga' });
+      await page.goto('/');
+      await expect(page.getByTestId('card-usage')).toBeVisible();
+      await expect(page.getByTestId('card-parse-failures')).toBeVisible();
+      const titles = await page.locator('[data-testid^="card-"] h3').count();
+      expect(titles).toBeGreaterThanOrEqual(10);
+      expect(await titlesFit(page)).toEqual([]);
+      // The page links sit in the card footers, not beside the titles.
+      const link = page.getByTestId('card-ingest').getByRole('link', {
+        name: lang === 'tr' ? 'Kaynaklar sayfasını aç' : 'Open the Sources page',
+      });
+      await expect(link).toBeVisible();
+      const [linkBox, titleBox] = await Promise.all([
+        link.boundingBox(),
+        page.getByTestId('card-ingest').locator('h3').boundingBox(),
+      ]);
+      expect((linkBox?.y ?? 0) > (titleBox?.y ?? 0) + (titleBox?.height ?? 0)).toBe(true);
+    });
+  }
+}
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`Panel with the parse-failure card: accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    await useSampleClock(page, SAMPLE_TODAY);
+    await panel(page, { signedInAs: 'tolga' });
+    await page.goto('/');
+    await expect(page.getByTestId('card-parse-failures')).toContainText('fortigate.kv');
+    await expect(page.getByTestId('card-usage')).toContainText('Aktif kullanıcı');
+    await expectNoA11yViolations(page);
+  });
+}
