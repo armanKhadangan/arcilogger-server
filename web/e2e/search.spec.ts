@@ -87,7 +87,7 @@ test.describe('Arama', () => {
     await runQuery(page, 'srcip:172.20.42.57');
     await expect(resultRows(page)).toHaveCount(4);
     expect(api.callsTo('POST', '/search').map((call) => call.body)).toEqual([
-      { q: 'srcip:172.20.42.57', ...LAST_24H, limit: 100 },
+      { q: 'srcip:172.20.42.57', ...LAST_24H },
     ]);
     await expect(page.getByRole('heading', { name: 'Zaman dağılımı' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Dağılım' })).toBeVisible();
@@ -235,7 +235,6 @@ test.describe('Arama', () => {
       q: 'srcip:172.20.42.57',
       from,
       to,
-      limit: 100,
     });
     await expect(
       page.getByRole('button', { name: /^Tarih aralığı: \d{2}\.\d{2}\.2026/ }),
@@ -256,7 +255,6 @@ test.describe('Arama', () => {
       q: 'type:web',
       from: `${SAMPLE_TODAY}T14:00:00+03:00`,
       to: `${SAMPLE_TODAY}T15:00:00+03:00`,
-      limit: 100,
     });
 
     await page.getByRole('button', { name: 'Tarih aralığı: Son 1 saat' }).click();
@@ -272,7 +270,6 @@ test.describe('Arama', () => {
       q: 'type:web',
       from: `${SAMPLE_TODAY}T08:00:00+03:00`,
       to: `${SAMPLE_TODAY}T10:00:00+03:00`,
-      limit: 100,
     });
   });
 
@@ -286,8 +283,8 @@ test.describe('Arama', () => {
     await expect(page.getByText(`${MANY_ROWS} kayıt gösteriliyor`)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Daha fazla' })).toHaveCount(0);
     expect(api.callsTo('POST', '/search/page').map((call) => call.body)).toEqual([
-      { search_id: 'ornek-arama-01', cursor: 'rows:100', limit: 100 },
-      { search_id: 'ornek-arama-01', cursor: 'rows:200', limit: 100 },
+      { search_id: 'ornek-arama-01', cursor: 'rows:100' },
+      { search_id: 'ornek-arama-01', cursor: 'rows:200' },
     ]);
   });
 
@@ -381,13 +378,13 @@ test.describe('Arama', () => {
     await menu.click();
     await page.getByRole('menuitem', { name: /^Engellenen web/ }).click();
     await expect(queryBox(page)).toHaveValue('type:web');
-    expect(api.callsTo('POST', '/search').at(-1)?.body).toEqual({ saved_id: 1, limit: 100 });
+    expect(api.callsTo('POST', '/search').at(-1)?.body).toEqual({ saved_id: 1 });
     expect(new URL(page.url()).search).toBe('?range=24h&saved=1');
 
     // A reload runs it again.
     await page.reload();
     await expect(queryBox(page)).toHaveValue('type:web');
-    expect(api.callsTo('POST', '/search').at(-1)?.body).toEqual({ saved_id: 1, limit: 100 });
+    expect(api.callsTo('POST', '/search').at(-1)?.body).toEqual({ saved_id: 1 });
 
     await menu.click();
     await page.getByRole('menuitem', { name: 'Kayıtlı aramaları yönet…' }).click();
@@ -537,9 +534,7 @@ test.describe('Arama', () => {
     await notice.getByRole('checkbox').check();
     await notice.getByRole('button', { name: 'Onaylıyorum' }).click();
     await expect(resultRows(page)).toHaveCount(1);
-    expect(api.callsTo('POST', '/search').map((call) => call.body)).toEqual([
-      { saved_id: 1, limit: 100 },
-    ]);
+    expect(api.callsTo('POST', '/search').map((call) => call.body)).toEqual([{ saved_id: 1 }]);
   });
 
   test('an expired search runs again once, silently', async ({ page }) => {

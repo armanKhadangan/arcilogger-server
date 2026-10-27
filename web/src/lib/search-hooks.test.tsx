@@ -2,7 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { page, row } from '@/pages/search/test-data';
+import { page, row, stats } from '@/pages/search/test-data';
 import {
   errorResponse,
   installFetch,
@@ -14,11 +14,13 @@ import { testQueryClient } from '@/test/render';
 
 import { ApiError, CSRF_HEADER } from './api';
 import {
+  busyDelay,
   downloadSearchExport,
   rowId,
   SEARCH_AUTO_CONTINUES,
   SEARCH_VIEW_ROWS,
   useSearchSession,
+  useSearchStats,
 } from './search-hooks';
 import type { SearchPage } from './search-types';
 
@@ -55,8 +57,13 @@ function bodies(calls: RecordedRequest[], path: string): unknown[] {
   return calls.filter((call) => call.path === `/api/v1${path}`).map((call) => call.body);
 }
 
+/** 429 `search_busy`; `Retry-After` 0 s by default (the tests do not wait the server's 2 s). */
+function busy(seconds = 0) {
+  return errorResponse(429, 'search_busy', { headers: { 'Retry-After': String(seconds) } });
+}
+
 describe('useSearchSession', () => {
-  it('runs a search in a POST body and reads further pages by its id', async () => {
+  it('runs a search in a POST body and reads further pages by its id, no page size asked', async () => {
     const calls = installFetch((request) =>
       request.path === '/api/v1/search'
         ? jsonResponse(200, page({ next_cursor: 'c1' }))
@@ -66,14 +73,13 @@ describe('useSearchSession', () => {
     await act(async () => {
       await result.current.run(INPUT);
     });
-    expect(bodies(calls, '/search')).toEqual([{ ...INPUT, limit: 100 }]);
+    // No `limit`: the server's default fits its `search.page_size_max` (which may be below 100).
+    expect(bodies(calls, '/search')).toEqual([INPUT]);
     expect(calls[0]?.url).toBe('/api/v1/search');
     await act(async () => {
       await result.current.next('more');
     });
-    expect(bodies(calls, '/search/page')).toEqual([
-      { search_id: 'ornek-arama-01', cursor: 'c1', limit: 100 },
-    ]);
+    expect(bodies(calls, '/search/page')).toEqual([{ search_id: 'ornek-arama-01', cursor: 'c1' }]);
     expect(result.current.state.rows.map((item) => item.key)).toEqual([
       'fg_traffic:2026-10-09T10:30:00Z:25',
       'fg_traffic:t:2',
@@ -87,7 +93,7 @@ describe('useSearchSession', () => {
     await act(async () => {
       await result.current.run({ saved_id: 3 });
     });
-    expect(bodies(calls, '/search')).toEqual([{ saved_id: 3, limit: 100 }]);
+    expect(bodies(calls, '/search')).toEqual([{ saved_id: 3 }]);
   });
 
   it('continues an incomplete scan by itself five times, then waits for "Devam et"', async () => {
@@ -135,10 +141,7 @@ describe('useSearchSession', () => {
     expect(runs).toBe(2);
     expect(result.current.state.first?.search_id).toBe('s2');
     expect(result.current.state.error).toBeNull();
-    expect(bodies(calls, '/search')).toEqual([
-      { ...INPUT, limit: 100 },
-      { ...INPUT, limit: 100 },
-    ]);
+    expect(bodies(calls, '/search')).toEqual([INPUT, INPUT]);
     await act(async () => {
       await result.current.next('more');
     });
@@ -222,6 +225,81 @@ describe('useSearchSession', () => {
     expect(result.current.state.first?.search_id).toBe('new');
   });
 
+  it('asks once more after search_busy: the run, a page and an action on the id', async () => {
+    let refused = 0;
+    const calls = installFetch((request) => {
+      if (request.path === '/api/v1/search' && refused++ === 0) return busy();
+      return jsonResponse(200, page({ next_cursor: 'c1' }));
+    });
+    const { result } = renderHook(() => useSearchSession(), { wrapper });
+    await act(async () => {
+      await result.current.run(INPUT);
+    });
+    expect(bodies(calls, '/search')).toEqual([INPUT, INPUT]);
+    expect(result.current.state.error).toBeNull();
+    expect(result.current.state.first?.search_id).toBe('ornek-arama-01');
+
+    let pages = 0;
+    installFetch(() => (pages++ === 0 ? busy() : jsonResponse(200, page())));
+    await act(async () => {
+      await result.current.next('more');
+    });
+    expect(pages).toBe(2);
+    expect(result.current.state.error).toBeNull();
+    expect(result.current.state.rows).toHaveLength(2);
+
+    const used: string[] = [];
+    const refusal = new ApiError({
+      status: 429,
+      code: 'search_busy',
+      messageTr: 'meşgul',
+      messageEn: 'busy',
+      retryAfter: 0,
+    });
+    let value: string | null = null;
+    await act(async () => {
+      value = await result.current.withSearch((id) => {
+        used.push(id);
+        return used.length === 1 ? Promise.reject(refusal) : Promise.resolve(id);
+      });
+    });
+    expect(value).toBe('ornek-arama-01');
+    expect(used).toEqual(['ornek-arama-01', 'ornek-arama-01']);
+  });
+
+  it('shows search_busy when the second try is refused too', async () => {
+    const calls = installFetch(() => busy());
+    const { result } = renderHook(() => useSearchSession(), { wrapper });
+    await act(async () => {
+      await result.current.run(INPUT);
+    });
+    expect(bodies(calls, '/search')).toHaveLength(2);
+    expect(result.current.state.error).toMatchObject({ code: 'search_busy' });
+  });
+
+  it('does not ask again for a search that a newer one replaced while it waited', async () => {
+    const calls = installFetch((request) =>
+      (request.body as { q: string }).q === 'old' ? busy(1) : jsonResponse(200, page()),
+    );
+    const { result } = renderHook(() => useSearchSession(), { wrapper });
+    let old: Promise<SearchPage | null> = Promise.resolve(null);
+    act(() => {
+      old = result.current.run({ ...INPUT, q: 'old' });
+    });
+    await waitFor(() => {
+      expect(bodies(calls, '/search')).toHaveLength(1);
+    });
+    await act(async () => {
+      await result.current.run({ ...INPUT, q: 'new' });
+      await old;
+    });
+    expect(bodies(calls, '/search').map((body) => (body as { q: string }).q)).toEqual([
+      'old',
+      'new',
+    ]);
+    expect(result.current.state.error).toBeNull();
+  });
+
   it('clears the rows when a run is refused', async () => {
     installFetch((request) =>
       (request.body as { q: string }).q === 'ok'
@@ -237,6 +315,35 @@ describe('useSearchSession', () => {
     });
     expect(result.current.state.rows).toEqual([]);
     expect(result.current.state.error).toMatchObject({ code: 'search_syntax' });
+  });
+});
+
+describe('search_busy', () => {
+  it('waits for the Retry-After of the answer, 2 s without one, 10 s at most', () => {
+    const refusal = (retryAfter: number | null) =>
+      new ApiError({ status: 429, code: 'search_busy', messageTr: '', messageEn: '', retryAfter });
+    expect(busyDelay(refusal(2))).toBe(2000);
+    expect(busyDelay(refusal(null))).toBe(2000);
+    expect(busyDelay(refusal(0))).toBe(0);
+    expect(busyDelay(refusal(3600))).toBe(10_000);
+  });
+
+  it('asks for the statistics once more after search_busy, not after other refusals', async () => {
+    let answers = [busy(), jsonResponse(200, stats())];
+    let calls = installFetch(() => answers.shift() ?? errorResponse(500, 'internal'));
+    const { result } = renderHook(() => useSearchStats('ornek-arama-01'), { wrapper });
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(bodies(calls, '/search/stats')).toHaveLength(2);
+
+    answers = [errorResponse(504, 'search_timeout'), jsonResponse(200, stats())];
+    calls = installFetch(() => answers.shift() ?? errorResponse(500, 'internal'));
+    const other = renderHook(() => useSearchStats('ornek-arama-02'), { wrapper });
+    await waitFor(() => {
+      expect(other.result.current.isError).toBe(true);
+    });
+    expect(bodies(calls, '/search/stats')).toHaveLength(1);
   });
 });
 

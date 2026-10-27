@@ -6,12 +6,18 @@
  * re-authentication within 5 minutes; references `evidence.create`). Installed after `mockApi`
  * (`page.route`: the newest route wins), it shares the main mock's session, users and recorded
  * calls. Like the API (every request model `extra="forbid"`), a body with an unknown or without a
- * required field answers 422 `validation_error`.
+ * required field answers 422 `validation_error`; so does a `limit` above the site's
+ * `search.page_size_max` (without one: `min(100, page_size_max)` for a run, the search's own for
+ * its pages), and a range longer than `search.max_days` answers `search_range_too_long`. Options
+ * set those two settings, refuse the next call of a kind with 429 `search_busy` (`Retry-After: 2`)
+ * or 504 `search_timeout`, and expire a search.
  *
  * The rows are a small fictional day of the example network (VLAN 42 Planlama, 172.20.42.x,
  * MAC `00:00:5e:00:53:xx`, RFC 5737 public addresses) whose raw references point at the captured
  * raw lines (`samples/raw.json`), so their raw drawer opens. A few queries select a scenario:
  *  - `srcip:172.20.41.0/24`: 250 rows in pages of 100 ("Daha fazla");
+ *  - `srcip:172.20.70.0/24`: two clients of a /24 that holds two smaller VLANs (70 Lab A and 71
+ *    Lab B, each a /25), so its VLAN and department facets are the value `multiple`;
  *  - `"login failure"`: a scan cut by its time budget, going on page by page until the frontier
  *    reaches the end (`PARTIAL_STEPS` pages);
  *  - `srcip:172.20.42.250`: nothing;
@@ -91,7 +97,20 @@ const TEXTS: Record<string, [string, string]> = {
     'Zaman aralığı geçersiz: başlangıç bitişten önce olmalı ve ikisinde de saat dilimi bulunmalı.',
     'Invalid time range: the start must be before the end, and both need a time zone.',
   ],
+  search_range_too_long: [
+    'Arama aralığı en fazla {days} gün olabilir.',
+    'The search range may span at most {days} days.',
+  ],
+  search_timeout: [
+    'Arama {seconds} saniyede en kısa zaman dilimini (5 dakika) bile tarayamadı. Seçici bir alan ekleyin (ör. srcip:, domain:) ya da biraz sonra yeniden deneyin.',
+    'The search could not scan even the shortest time slice (5 minutes) within {seconds} s. Add a selective field (e.g. srcip:, domain:) or try again a little later.',
+  ],
 };
+
+/** The facet value of a /24 that holds several smaller VLANs, and its labels (`search.stats`). */
+const MULTIPLE = 'multiple';
+const MULTIPLE_VLAN: [string, string] = ['Birden çok VLAN', 'Several VLANs'];
+const MULTIPLE_DEPARTMENT: [string, string] = ['Birden çok departman', 'Several departments'];
 
 const NOTICES: Record<string, [string, string]> = {
   vault_only_before: [
@@ -112,11 +131,16 @@ const NOTICES: Record<string, [string, string]> = {
   ],
 };
 
+/** `text` with its `{name}` placeholders filled in. */
+function fill(text: string, params: Record<string, string | number>): string {
+  return text.replace(/\{(\w+)\}/g, (_, name: string) =>
+    params[name] === undefined ? `{${name}}` : String(params[name]),
+  );
+}
+
 function notice(code: string, params: Record<string, string> = {}): Notice {
   const [tr, en] = NOTICES[code] ?? [code, code];
-  const fill = (text: string) =>
-    text.replace(/\{(\w+)\}/g, (_, name: string) => params[name] ?? `{${name}}`);
-  return { code, message_tr: fill(tr), message_en: fill(en), params };
+  return { code, message_tr: fill(tr, params), message_en: fill(en, params), params };
 }
 
 // -- the field catalogue (contract 2.4) ---------------------------------------------------------
@@ -380,6 +404,21 @@ function manyRows(): Base[] {
   });
 }
 
+/** The /24 of the "Lab" scenario: two VLANs of a /25 each (70 Lab A, 71 Lab B). */
+const LAB_NET = '172.20.70.';
+
+/** The rows of the "Lab" scenario: one client in each of the /24's two VLANs. */
+function labRows(): Base[] {
+  const base = BASE[0] as Base;
+  return [
+    ['172.20.70.20', 70],
+    ['172.20.70.140', 71],
+  ].map(([srcip, vlan]) => ({
+    ...base,
+    summary: { ...base.summary, srcip: String(srcip), vlan_id: Number(vlan) },
+  }));
+}
+
 /** A client clause's address (`srcip:` and its aliases). */
 function clauseValue(q: string, fieldName: string): string[] {
   const values: string[] = [];
@@ -607,6 +646,7 @@ function presetSpan(preset: string): { from: string; to: string } {
 
 type Answer =
   | [number, unknown]
+  | [number, unknown, { headers: Record<string, string> }]
   | [number, unknown, { body: Buffer; contentType: string; headers: Record<string, string> }];
 
 interface Search {
@@ -615,10 +655,24 @@ interface Search {
   q: string;
   from: string;
   to: string;
+  /** Rows per page: the run's `limit`, else `min(100, search.page_size_max)`. */
+  limit: number;
   rows: SearchRow[];
   scenario: 'rows' | 'partial';
   savedId: number | null;
 }
+
+/** The calls that take one of the server's search slots (contract 2.6.4). */
+export type SlotCall = 'run' | 'page' | 'stats' | 'event' | 'refs' | 'export';
+
+const SLOT_CALLS: Record<string, SlotCall> = {
+  'POST /search': 'run',
+  'POST /search/page': 'page',
+  'POST /search/stats': 'stats',
+  'GET /search/event': 'event',
+  'POST /search/refs': 'refs',
+  'POST /search/export': 'export',
+};
 
 /** Request models (`extra="forbid"`): required and optional fields. */
 const BODIES: Record<string, { required: string[]; optional: string[] }> = {
@@ -635,18 +689,30 @@ const BODIES: Record<string, { required: string[]; optional: string[] }> = {
 export interface SearchOptions {
   /** The next call of this kind answers 409 `search_expired` (the search is forgotten). */
   expireNext?: 'page' | 'stats' | 'refs' | 'export' | null;
+  /**
+   * The next call of this kind is refused before it runs: 429 `search_busy` (with
+   * `Retry-After: 2`; the web app asks once more) or 504 `search_timeout`.
+   */
+  refuseNext?: { call: SlotCall; code: 'search_busy' | 'search_timeout' } | null;
   /** The export file is cut short (`X-Arci-Export-Truncated`). */
   exportTruncated?: 'rows' | 'time' | null;
   /** Days the references are not sealed on. */
   unsealedDays?: string[];
+  /** The site's `search.page_size_max` (the setting's default: 500; at least 50). */
+  pageSizeMax?: number;
+  /** The site's `search.max_days` (the setting's default: 31; at least 1). */
+  maxDays?: number;
 }
 
 export class SearchMock {
   readonly searches = new Map<string, Search>();
   readonly saved = new Map<number, SavedSearch & { owner: number }>();
   expireNext: SearchOptions['expireNext'];
+  refuseNext: SearchOptions['refuseNext'];
   exportTruncated: SearchOptions['exportTruncated'];
   unsealedDays: string[];
+  pageSizeMax: number;
+  maxDays: number;
   private nextSearch = 1;
   private nextSaved = 1;
 
@@ -655,8 +721,19 @@ export class SearchMock {
     options: SearchOptions = {},
   ) {
     this.expireNext = options.expireNext ?? null;
+    this.refuseNext = options.refuseNext ?? null;
     this.exportTruncated = options.exportTruncated ?? null;
     this.unsealedDays = options.unsealedDays ?? [];
+    this.pageSizeMax = options.pageSizeMax ?? CATALOGUE.limits.page_size_max;
+    this.maxDays = options.maxDays ?? CATALOGUE.limits.max_days;
+  }
+
+  /** The field catalogue with this site's settings. */
+  catalogue(): FieldCatalogue {
+    return {
+      ...CATALOGUE,
+      limits: { ...CATALOGUE.limits, page_size_max: this.pageSizeMax, max_days: this.maxDays },
+    };
   }
 
   async install(page: Page): Promise<void> {
@@ -686,18 +763,23 @@ export class SearchMock {
     this.api.calls.push(call);
     const [status, payload, file] = this.answer(call);
     await route.fulfill(
-      file
+      file && 'body' in file
         ? { status, contentType: file.contentType, headers: file.headers, body: file.body }
         : {
             status,
             contentType: 'application/json',
-            headers: { 'Cache-Control': 'no-store' },
+            headers: { 'Cache-Control': 'no-store', ...file?.headers },
             body: status === 204 ? '' : JSON.stringify(payload),
           },
     );
   }
 
-  private error(status: number, code: string, details?: unknown): [number, unknown] {
+  private error(
+    status: number,
+    code: string,
+    details?: unknown,
+    params: Record<string, string | number> = {},
+  ): [number, unknown] {
     const texts = TEXTS[code];
     if (!texts) return this.api.error(status, code, details);
     return [
@@ -705,12 +787,24 @@ export class SearchMock {
       {
         error: {
           code,
-          message_tr: texts[0],
-          message_en: texts[1],
+          message_tr: fill(texts[0], params),
+          message_en: fill(texts[1], params),
           ...(details ? { details } : {}),
         },
       },
     ];
+  }
+
+  /** 422 `validation_error` of a `limit` above `search.page_size_max` (as the router words it). */
+  private limitProblem(limit: number | null | undefined): [number, unknown] | null {
+    if (limit === undefined || limit === null || limit <= this.pageSizeMax) return null;
+    return this.error(422, 'validation_error', [
+      {
+        loc: ['body', 'limit'],
+        type: 'less_than_equal',
+        msg: `Input should be less than or equal to ${this.pageSizeMax}`,
+      },
+    ]);
   }
 
   /** `search.read` (and `more`), the accepted KVKK notice unless `noticeFree`. */
@@ -770,10 +864,22 @@ export class SearchMock {
       const account = this.api.requirePermission(call, 'search.read');
       return Array.isArray(account) ? account : this.error(422, 'validation_error', problems);
     }
+    const slot = SLOT_CALLS[route];
+    const refusal = this.refuseNext;
+    if (slot !== undefined && refusal?.call === slot) {
+      const account = this.person(call);
+      if (Array.isArray(account)) return account;
+      this.refuseNext = null;
+      if (refusal.code === 'search_busy') {
+        const [status, payload] = this.error(429, 'search_busy');
+        return [status, payload, { headers: { 'Retry-After': '2' } }];
+      }
+      return this.error(504, 'search_timeout', undefined, { seconds: 4 });
+    }
     switch (route) {
       case 'GET /search/fields': {
         const account = this.person(call, [], true);
-        return Array.isArray(account) ? account : [200, CATALOGUE];
+        return Array.isArray(account) ? account : [200, this.catalogue()];
       }
       case 'POST /search/parse': {
         const account = this.person(call, [], true);
@@ -835,8 +941,12 @@ export class SearchMock {
       ({ from, to } = 'preset' in item.range ? presetSpan(item.range.preset) : item.range);
       item.last_run_at = new Date().toISOString();
     }
+    const tooMany = this.limitProblem(body.limit);
+    if (tooMany) return tooMany;
     if (!from || !to || !(Date.parse(from) < Date.parse(to)))
       return this.error(422, 'search_range_invalid');
+    if (Date.parse(to) - Date.parse(from) > this.maxDays * 86_400_000)
+      return this.error(422, 'search_range_too_long', undefined, { days: this.maxDays });
     const found = problems(q)[0];
     if (found)
       return [
@@ -856,6 +966,7 @@ export class SearchMock {
       q,
       from,
       to,
+      limit: body.limit ?? Math.min(100, this.pageSizeMax),
       rows: [],
       scenario: q.includes('"login failure"') ? 'partial' : 'rows',
       savedId,
@@ -864,15 +975,16 @@ export class SearchMock {
       ? []
       : clauseValue(q, 'srcip').includes('172.20.41.0/24')
         ? manyRows()
-        : search.scenario === 'partial'
-          ? [BASE[0] as Base, BASE[2] as Base]
-          : filtered(q);
+        : clauseValue(q, 'srcip').includes(`${LAB_NET}0/24`)
+          ? labRows()
+          : search.scenario === 'partial'
+            ? [BASE[0] as Base, BASE[2] as Base]
+            : filtered(q);
     search.rows = this.place(bases, from, to, this.nextSearch - 1);
     this.searches.set(search.id, search);
-    const limit = body.limit ?? 100;
     return [
       200,
-      this.pageOf(search, search.scenario === 'partial' ? 'frontier:1' : 'rows:0', limit),
+      this.pageOf(search, search.scenario === 'partial' ? 'frontier:1' : 'rows:0', search.limit),
     ];
   }
 
@@ -988,8 +1100,10 @@ export class SearchMock {
     const search = this.searchOf(call, 'page', account);
     if (Array.isArray(search)) return search;
     const { cursor, limit } = call.body as { cursor: string; limit?: number | null };
+    const tooMany = this.limitProblem(limit);
+    if (tooMany) return tooMany;
     if (!/^(rows|frontier):\d+$/.test(cursor)) return this.error(422, 'search_cursor_invalid');
-    return [200, this.pageOf(search, cursor, limit ?? 100)];
+    return [200, this.pageOf(search, cursor, limit ?? search.limit)];
   }
 
   private stats(call: RecordedCall): Answer {
@@ -1036,6 +1150,7 @@ export class SearchMock {
       other: values.slice(10).reduce((sum, [, total]) => sum + total, 0),
     });
     const partial = search.scenario === 'partial';
+    const lab = (row: SearchRow) => row.summary.srcip?.startsWith(LAB_NET) ?? false;
     return {
       search_id: search.id,
       mode: partial ? 'direct' : 'rollup',
@@ -1054,9 +1169,11 @@ export class SearchMock {
           },
         ),
         action: facet(count((row) => row.summary.action)),
+        // By the client's /24: the Lab /24 holds two VLANs, so it is `multiple` in both.
         vlan: facet(
-          count((row) => row.summary.vlan_id),
+          count((row) => (lab(row) ? MULTIPLE : row.summary.vlan_id)),
           (value) => {
+            if (value === MULTIPLE) return MULTIPLE_VLAN;
             const name = value === '42' ? 'Planlama' : value === '41' ? 'Finans' : 'Wi-Fi Personel';
             return [`VLAN ${value} (${name})`, `VLAN ${value} (${name})`];
           },
@@ -1064,12 +1181,15 @@ export class SearchMock {
         department: {
           ...facet(
             count((row) =>
-              row.summary.vlan_id === 42
-                ? 'Planlama'
-                : row.summary.vlan_id === 41
-                  ? 'Finans'
-                  : null,
+              lab(row)
+                ? MULTIPLE
+                : row.summary.vlan_id === 42
+                  ? 'Planlama'
+                  : row.summary.vlan_id === 41
+                    ? 'Finans'
+                    : null,
             ),
+            (value) => (value === MULTIPLE ? MULTIPLE_DEPARTMENT : [value, value]),
           ),
           status: partial ? 'unavailable' : 'ok',
         },

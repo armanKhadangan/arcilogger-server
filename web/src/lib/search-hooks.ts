@@ -9,8 +9,15 @@
  *    evidence references and the export take only that id. An expired id (409 `search_expired`)
  *    runs the same search again, once, without asking (`useSearchSession`).
  *  - Audited reads (`GET /search/event`: `search.event`) are fetched once per screen
- *    (`staleTime: Infinity`, no retry); statistics belong to their `search_id` and never change.
+ *    (`staleTime: Infinity`, no retry but the one below); statistics belong to their `search_id`
+ *    and never change.
  *  - The field catalogue changes only with the configuration: kept for five minutes.
+ *  - Every request that takes one of the server's search slots (run, page, statistics, record,
+ *    references, export) is sent once more after 429 `search_busy`, after its `Retry-After`
+ *    (contract 2.6.4): a page and its statistics, a drawer and a continuation may well overlap.
+ *  - Rows per page: none asked for. The server's default is `min(100, search.page_size_max)` for
+ *    a run and the search's own for its pages; a fixed 100 would be refused on a site whose
+ *    `search.page_size_max` is set below it.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -44,14 +51,16 @@ import type {
   SearchStats,
 } from './search-types';
 
-/** Rows asked for per page (contract R30: the API allows up to `search.page_size_max`). */
-export const SEARCH_PAGE_SIZE = 100;
 /** Most rows kept in the list; beyond them the query should be narrowed (or exported). */
 export const SEARCH_VIEW_ROWS = 2_000;
 /** Times an incomplete scan continues on its own before it waits for "Devam et". */
 export const SEARCH_AUTO_CONTINUES = 5;
 /** The field catalogue's freshness (it changes only with the configuration). */
 export const FIELDS_STALE_MS = 300_000;
+/** Seconds before a request refused with `search_busy` is sent again, without a `Retry-After`. */
+export const BUSY_RETRY_SECONDS = 2;
+/** The longest wait a `Retry-After` of `search_busy` may ask for (seconds). */
+const BUSY_RETRY_MAX_SECONDS = 10;
 
 export const searchKeys = {
   fields: ['search', 'fields'] as const,
@@ -60,6 +69,36 @@ export const searchKeys = {
   event: (row: Pick<SearchRow, 'table' | 'time' | 'key'>) =>
     ['search', 'event', row.table, row.time, row.key] as const,
   saved: ['search', 'saved'] as const,
+};
+
+/** The wait before a request refused with 429 `search_busy` goes again (ms). */
+export function busyDelay(error: unknown): number {
+  const seconds = error instanceof ApiError ? error.retryAfter : null;
+  return Math.min(seconds ?? BUSY_RETRY_SECONDS, BUSY_RETRY_MAX_SECONDS) * 1000;
+}
+
+/**
+ * `action`, sent once more after its `Retry-After` when the server answered `search_busy` —
+ * unless `wanted` says by then that its answer would be void (a newer search started).
+ */
+export async function retryBusyOnce<T>(
+  action: () => Promise<T>,
+  wanted: () => boolean = () => true,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (!isApiError(error, 'search_busy')) throw error;
+    await new Promise((resolve) => setTimeout(resolve, busyDelay(error)));
+    if (!wanted()) throw error;
+    return action();
+  }
+}
+
+/** The retry of a query that takes a search slot: once, and only after `search_busy`. */
+const busyRetry = {
+  retry: (failures: number, error: unknown) => failures < 1 && isApiError(error, 'search_busy'),
+  retryDelay: (_failures: number, error: unknown) => busyDelay(error),
 };
 
 /** The fields, kinds, sources and limits of the query language. */
@@ -91,7 +130,7 @@ export function useSearchStats(searchId: string | null) {
       api.post<SearchStats>('/search/stats', { search_id: searchId }, { signal }),
     enabled: searchId !== null,
     staleTime: Infinity,
-    retry: false,
+    ...busyRetry,
   });
 }
 
@@ -100,7 +139,10 @@ export function rowId(row: Pick<SearchRow, 'key'>): number {
   return Number(row.key.slice(row.key.lastIndexOf(':') + 1));
 }
 
-/** Every column of one record (audited `search.event`: read once per screen). */
+/**
+ * Every column of one record (audited `search.event`: read once per screen; sent again only
+ * after `search_busy`, which the server answers before it reads or audits anything).
+ */
 export function useSearchEvent(row: SearchRow | null) {
   return useQuery({
     queryKey: row ? searchKeys.event(row) : ['search', 'event', 'none'],
@@ -111,11 +153,14 @@ export function useSearchEvent(row: SearchRow | null) {
       }),
     enabled: row !== null,
     staleTime: Infinity,
-    retry: false,
+    ...busyRetry,
   });
 }
 
-/** `POST /search/refs` (audited `search.refs`): the raw lines of a whole search. */
+/**
+ * `POST /search/refs` (audited `search.refs`): the raw lines of a whole search. The page sends it
+ * through the session's `withSearch`, which also asks again after `search_busy`.
+ */
 export function useSearchRefs() {
   return useMutation({
     mutationFn: ({ searchId, limit }: { searchId: string; limit: number }) =>
@@ -273,8 +318,8 @@ const IDLE: SearchSession = {
 
 function requestOf(input: SearchInput): SearchRequest {
   return 'saved_id' in input
-    ? { saved_id: input.saved_id, limit: SEARCH_PAGE_SIZE }
-    : { q: input.q, from: input.from, to: input.to, limit: SEARCH_PAGE_SIZE };
+    ? { saved_id: input.saved_id }
+    : { q: input.q, from: input.from, to: input.to };
 }
 
 /** An incomplete scan that should go on by itself (time budget used up, below the caps). */
@@ -311,7 +356,10 @@ export function useSearchSession() {
     if (!again) rerun.current = false;
     setState((before) => ({ ...before, input, running: true, paging: null, error: null }));
     try {
-      const page = await api.post<SearchPage>('/search', requestOf(input));
+      const page = await retryBusyOnce(
+        () => api.post<SearchPage>('/search', requestOf(input)),
+        () => mine === generation.current,
+      );
       if (mine !== generation.current) return null;
       setState({
         ...IDLE,
@@ -340,7 +388,8 @@ export function useSearchSession() {
     async (kind: 'more' | 'continue' | 'auto') => {
       const before = current.current;
       const last = before.last;
-      if (!last?.next_cursor || before.paging !== null || before.running) return;
+      const cursor = last?.next_cursor;
+      if (!last || !cursor || before.paging !== null || before.running) return;
       const mine = generation.current;
       setState((now) => ({
         ...now,
@@ -349,11 +398,10 @@ export function useSearchSession() {
         error: null,
       }));
       try {
-        const page = await api.post<SearchPage>('/search/page', {
-          search_id: last.search_id,
-          cursor: last.next_cursor,
-          limit: SEARCH_PAGE_SIZE,
-        });
+        const page = await retryBusyOnce(
+          () => api.post<SearchPage>('/search/page', { search_id: last.search_id, cursor }),
+          () => mine === generation.current,
+        );
         if (mine !== generation.current) return;
         setState((now) => ({
           ...now,
@@ -372,19 +420,19 @@ export function useSearchSession() {
 
   /**
    * `action` with the search's id; when the id expired, the search runs again (once) and the
-   * action is repeated with the new id.
+   * action is repeated with the new id. Each try is sent once more after `search_busy`.
    */
   const withSearch = useCallback(
     async <T>(action: (searchId: string) => Promise<T>): Promise<T> => {
       const id = current.current.first?.search_id;
       if (!id) throw new Error('no search has run');
       try {
-        return await action(id);
+        return await retryBusyOnce(() => action(id));
       } catch (error) {
         if (!isApiError(error, 'search_expired')) throw error;
         const page = await renew();
         if (page === null) throw error;
-        return action(page.search_id);
+        return retryBusyOnce(() => action(page.search_id));
       }
     },
     [renew],

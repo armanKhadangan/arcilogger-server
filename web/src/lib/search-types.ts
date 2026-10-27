@@ -40,7 +40,10 @@ export interface SearchRequest {
   q?: string;
   from?: DateTimeString | null;
   to?: DateTimeString | null;
-  /** 1 … `search.page_size_max`; the web app asks for 100 rows a page. */
+  /**
+   * 1 … `search.page_size_max`; the web app leaves it out (the server's default is
+   * `min(100, search.page_size_max)`, and a search's pages keep the search's own).
+   */
   limit?: number | null;
   saved_id?: number | null;
 }
