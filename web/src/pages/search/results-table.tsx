@@ -13,12 +13,15 @@ import { rowSummary, type ScanState } from './search-model';
 
 /**
  * The search's records, newest first (virtualised: `DataTable` with `@tanstack/react-virtual`):
- * Zaman (the device's time, which the range applies to), Alınma zamanı (when the collector
- * received the line: a device clock that is wrong shows as the difference), Kaynak, Tür, Özet (by
- * kind, from the row's summary), Ham satır. A row opens the record's drawer; "Ham satır" opens the
+ * Zaman — the device's time, which the range applies to, and under it the receive time (when the
+ * collector received the line: a device clock that is wrong shows as the difference) —, Kaynak,
+ * Tür, Özet (by kind, from the row's summary), Ham satır. A row opens the record's drawer; "Ham satır" opens the
  * raw line itself. Up to {@link SEARCH_VIEW_ROWS} rows are kept in view ("Daha fazla" reads the
  * next page); the order is the server's (no sorting here).
  */
+/** Rows of two lines: the device's time over the receive time. */
+const ROW_HEIGHTS = { compact: 44, comfortable: 52 } as const;
+
 export function ResultsTable({
   rows,
   kinds,
@@ -50,28 +53,25 @@ export function ResultsTable({
       {
         id: 'time',
         accessorKey: 'time',
-        header: t('search.results.time'),
+        header: t('search.results.timeReceived'),
         size: 160,
         enableSorting: false,
-        meta: { label: t('search.results.time') },
-        cell: (info) => <span className="tabular">{formatDateTime(info.getValue<string>())}</span>,
-      },
-      {
-        id: 'received',
-        accessorKey: 'time_received',
-        header: t('search.results.receivedColumn'),
-        size: 160,
-        enableSorting: false,
-        meta: { label: t('search.results.receivedColumn') },
+        meta: { label: t('search.results.timeReceived'), wrapHeader: true },
         cell: (info) => (
-          <span className="text-muted tabular">{formatDateTime(info.getValue<string>())}</span>
+          <span className="flex flex-col gap-0.5 tabular">
+            <span>{formatDateTime(info.getValue<string>())}</span>
+            <span className="text-xs text-muted">
+              <span className="sr-only">{t('search.results.receivedColumn')}: </span>
+              {formatDateTime(info.row.original.time_received)}
+            </span>
+          </span>
         ),
       },
       {
         id: 'source',
         accessorKey: 'source',
         header: t('search.results.source'),
-        size: 140,
+        size: 125,
         enableSorting: false,
         meta: { label: t('search.results.source'), mono: true },
       },
@@ -79,7 +79,7 @@ export function ResultsTable({
         id: 'kind',
         accessorFn: (row) => kindLabels.get(row.kind) ?? row.kind,
         header: t('search.results.kind'),
-        size: 130,
+        size: 120,
         enableSorting: false,
         meta: { label: t('search.results.kind') },
       },
@@ -88,7 +88,7 @@ export function ResultsTable({
         accessorFn: (row) => rowSummary(row),
         header: t('search.results.summary'),
         size: 200,
-        minSize: 200,
+        minSize: 160,
         enableSorting: false,
         meta: { label: t('search.results.summary'), grow: true, mono: true },
         cell: (info) => <span title={info.getValue<string>()}>{info.getValue<string>()}</span>,
@@ -96,7 +96,7 @@ export function ResultsTable({
       {
         id: 'raw',
         header: t('search.results.raw'),
-        size: 130,
+        size: 115,
         enableSorting: false,
         enableHiding: false,
         meta: { label: t('search.results.raw') },
@@ -134,6 +134,7 @@ export function ResultsTable({
         columns={columns}
         caption={t('search.results.caption')}
         getRowId={(row) => row.key}
+        rowHeights={ROW_HEIGHTS}
         onRowClick={onOpen}
         height={520}
         emptyMessage={emptyMessage}

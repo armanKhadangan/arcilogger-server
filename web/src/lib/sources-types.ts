@@ -147,5 +147,5 @@ export interface SourceTail {
    * `no_file_today`: neither today's nor yesterday's spool file exists; `network_source`: a
    * configured network, whose lines are in its members' folders (`<name>-<ip>`).
    */
-  reason?: string | null;
+  reason?: 'no_file_today' | 'network_source' | null;
 }

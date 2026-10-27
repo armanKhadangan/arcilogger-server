@@ -286,7 +286,11 @@ export function TimeRangePicker({ maxDays = DEFAULT_MAX_DAYS }: { maxDays?: numb
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80">
         <div className="flex flex-col gap-3">
-          <div role="group" aria-label={t('timeRange.labelRange')} className="flex flex-col gap-0.5">
+          <div
+            role="group"
+            aria-label={t('timeRange.labelRange')}
+            className="flex flex-col gap-0.5"
+          >
             {presets.map((preset) => {
               const chosen = !custom && 'preset' in range && range.preset === preset;
               return (

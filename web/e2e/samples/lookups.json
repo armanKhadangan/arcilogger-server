@@ -1,8 +1,8 @@
 {
   "auditor_run": {
-    "created_at": "2026-10-13T04:00:03.044942Z",
-    "elapsed_ms": 45,
-    "finished_at": "2026-10-13T04:00:03.044683Z",
+    "created_at": "2026-10-13T04:00:02.131772Z",
+    "elapsed_ms": 28,
+    "finished_at": "2026-10-13T04:00:02.131563Z",
     "id": 8,
     "mode": "candidates",
     "outcome": {
@@ -30,7 +30,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.998397+00:00",
+      "generated_at": "2026-10-13T04:00:02.102181+00:00",
       "matches": [
         {
           "chain": {
@@ -385,9 +385,9 @@
     "username": "ayse.yilmaz"
   },
   "candidates": {
-    "created_at": "2026-10-13T04:00:02.162114Z",
-    "elapsed_ms": 44,
-    "finished_at": "2026-10-13T04:00:02.161876Z",
+    "created_at": "2026-10-13T04:00:01.623777Z",
+    "elapsed_ms": 33,
+    "finished_at": "2026-10-13T04:00:01.623575Z",
     "id": 2,
     "mode": "candidates",
     "outcome": {
@@ -415,7 +415,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.117087+00:00",
+      "generated_at": "2026-10-13T04:00:01.589134+00:00",
       "matches": [
         {
           "chain": {
@@ -770,9 +770,9 @@
     "username": "tolga"
   },
   "candidates_with_report": {
-    "created_at": "2026-10-13T04:00:02.162114Z",
+    "created_at": "2026-10-13T04:00:01.623777Z",
     "elapsed_ms": null,
-    "finished_at": "2026-10-13T04:00:02.161876Z",
+    "finished_at": "2026-10-13T04:00:01.623575Z",
     "id": 2,
     "mode": "candidates",
     "outcome": {
@@ -800,7 +800,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.117087+00:00",
+      "generated_at": "2026-10-13T04:00:01.589134+00:00",
       "matches": [
         {
           "chain": {
@@ -1144,19 +1144,19 @@
       "tolerance_seconds": 60
     },
     "report": {
-      "created_at": "2026-10-13T04:00:03.879317Z",
+      "created_at": "2026-10-13T04:00:02.797474Z",
       "download_count": 1,
       "pages": 7,
-      "sha256": "d2e51373cb4eaf3ebb4d456778e72f45925d4ee3865168c67261872b9075fc88",
-      "size": 89262,
+      "sha256": "0ebdaf37e8bb69d9cb7e3580a53eec44186c6cfc3fc8f4105e38fbfb0b1ee1d3",
+      "size": 89259,
       "timestamp": {
         "errors": [],
-        "gen_time": "2026-10-13T04:00:03+00:00",
+        "gen_time": "2026-10-13T04:00:02+00:00",
         "legal_grade": false,
         "policy": "2.999.5651.1",
         "provider": "mock",
         "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-        "serial": "1FC6E1E5439DCB69",
+        "serial": "525A4C208BEE292E",
         "server": "tzd.kamusm.gov.tr",
         "token_file": "reports/ARCILOGGER-5651-rapor-2.pdf.zd",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
@@ -1178,9 +1178,9 @@
     "username": "tolga"
   },
   "conflict": {
-    "created_at": "2026-10-13T04:00:02.274359Z",
-    "elapsed_ms": 41,
-    "finished_at": "2026-10-13T04:00:02.274124Z",
+    "created_at": "2026-10-13T04:00:01.712267Z",
+    "elapsed_ms": 30,
+    "finished_at": "2026-10-13T04:00:01.712042Z",
     "id": 3,
     "mode": "candidates",
     "outcome": {
@@ -1208,7 +1208,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.232116+00:00",
+      "generated_at": "2026-10-13T04:00:01.680726+00:00",
       "matches": [
         {
           "chain": {
@@ -1625,9 +1625,9 @@
     }
   },
   "exact": {
-    "created_at": "2026-10-13T04:00:02.017503Z",
-    "elapsed_ms": 40,
-    "finished_at": "2026-10-13T04:00:02.017232Z",
+    "created_at": "2026-10-13T04:00:01.526256Z",
+    "elapsed_ms": 32,
+    "finished_at": "2026-10-13T04:00:01.526039Z",
     "id": 1,
     "mode": "exact",
     "outcome": {
@@ -1655,7 +1655,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.976209+00:00",
+      "generated_at": "2026-10-13T04:00:01.493198+00:00",
       "matches": [
         {
           "chain": {
@@ -1808,9 +1808,9 @@
     "username": "tolga"
   },
   "exact_with_report": {
-    "created_at": "2026-10-13T04:00:02.017503Z",
+    "created_at": "2026-10-13T04:00:01.526256Z",
     "elapsed_ms": null,
-    "finished_at": "2026-10-13T04:00:02.017232Z",
+    "finished_at": "2026-10-13T04:00:01.526039Z",
     "id": 1,
     "mode": "exact",
     "outcome": {
@@ -1838,7 +1838,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.976209+00:00",
+      "generated_at": "2026-10-13T04:00:01.493198+00:00",
       "matches": [
         {
           "chain": {
@@ -1980,11 +1980,11 @@
       "tolerance_seconds": 60
     },
     "report": {
-      "created_at": "2026-10-13T04:00:03.421927Z",
+      "created_at": "2026-10-13T04:00:02.450434Z",
       "download_count": 1,
       "pages": 5,
-      "sha256": "0ebe2dd5fe6bb04a2bb31c644237e87ff9c5b6485b15814a32e096728d6f99d6",
-      "size": 80757,
+      "sha256": "b89bfe88b379754696322f73cc4f0f5278488c7b1e0322dc272d901519b31cc9",
+      "size": 80752,
       "timestamp": null,
       "timestamp_status": "not_requested",
       "username": "tolga",
@@ -2001,9 +2001,9 @@
     "username": "tolga"
   },
   "internal": {
-    "created_at": "2026-10-13T04:00:02.379441Z",
+    "created_at": "2026-10-13T04:00:01.793977Z",
     "elapsed_ms": 21,
-    "finished_at": "2026-10-13T04:00:02.379172Z",
+    "finished_at": "2026-10-13T04:00:01.793776Z",
     "id": 4,
     "mode": "internal",
     "outcome": {
@@ -2092,7 +2092,7 @@
       },
       "double_nat": true,
       "explanations": [],
-      "generated_at": "2026-10-13T04:00:02.357831+00:00",
+      "generated_at": "2026-10-13T04:00:01.772139+00:00",
       "matches": [],
       "mode": "internal",
       "request": {
@@ -2144,7 +2144,7 @@
     "items": [
       {
         "authority": "Ankara Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.044942Z",
+        "created_at": "2026-10-13T04:00:02.131772Z",
         "file_no": "2026/9917",
         "id": 8,
         "mode": "candidates",
@@ -2156,7 +2156,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.883211Z",
+        "created_at": "2026-10-13T04:00:02.034169Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 7,
         "mode": "candidates",
@@ -2168,7 +2168,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.719963Z",
+        "created_at": "2026-10-13T04:00:01.937059Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 6,
         "mode": "none",
@@ -2180,7 +2180,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.555910Z",
+        "created_at": "2026-10-13T04:00:01.863612Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 5,
         "mode": "none",
@@ -2192,7 +2192,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.379441Z",
+        "created_at": "2026-10-13T04:00:01.793977Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 4,
         "mode": "internal",
@@ -2204,7 +2204,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.274359Z",
+        "created_at": "2026-10-13T04:00:01.712267Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 3,
         "mode": "candidates",
@@ -2216,11 +2216,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.162114Z",
+        "created_at": "2026-10-13T04:00:01.623777Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 2,
         "mode": "candidates",
-        "report_sha256": "d2e51373cb4eaf3ebb4d456778e72f45925d4ee3865168c67261872b9075fc88",
+        "report_sha256": "0ebdaf37e8bb69d9cb7e3580a53eec44186c6cfc3fc8f4105e38fbfb0b1ee1d3",
         "request_date": "2026-10-10",
         "result_count": 3,
         "user_id": 1,
@@ -2228,11 +2228,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.017503Z",
+        "created_at": "2026-10-13T04:00:01.526256Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 1,
         "mode": "exact",
-        "report_sha256": "0ebe2dd5fe6bb04a2bb31c644237e87ff9c5b6485b15814a32e096728d6f99d6",
+        "report_sha256": "b89bfe88b379754696322f73cc4f0f5278488c7b1e0322dc272d901519b31cc9",
         "request_date": "2026-10-10",
         "result_count": 1,
         "user_id": 1,
@@ -2246,7 +2246,7 @@
     "items": [
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.883211Z",
+        "created_at": "2026-10-13T04:00:02.034169Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 7,
         "mode": "candidates",
@@ -2258,7 +2258,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.719963Z",
+        "created_at": "2026-10-13T04:00:01.937059Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 6,
         "mode": "none",
@@ -2270,7 +2270,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.555910Z",
+        "created_at": "2026-10-13T04:00:01.863612Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 5,
         "mode": "none",
@@ -2282,7 +2282,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.379441Z",
+        "created_at": "2026-10-13T04:00:01.793977Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 4,
         "mode": "internal",
@@ -2294,7 +2294,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.274359Z",
+        "created_at": "2026-10-13T04:00:01.712267Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 3,
         "mode": "candidates",
@@ -2306,11 +2306,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.162114Z",
+        "created_at": "2026-10-13T04:00:01.623777Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 2,
         "mode": "candidates",
-        "report_sha256": "d2e51373cb4eaf3ebb4d456778e72f45925d4ee3865168c67261872b9075fc88",
+        "report_sha256": "0ebdaf37e8bb69d9cb7e3580a53eec44186c6cfc3fc8f4105e38fbfb0b1ee1d3",
         "request_date": "2026-10-10",
         "result_count": 3,
         "user_id": 1,
@@ -2318,11 +2318,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.017503Z",
+        "created_at": "2026-10-13T04:00:01.526256Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 1,
         "mode": "exact",
-        "report_sha256": "0ebe2dd5fe6bb04a2bb31c644237e87ff9c5b6485b15814a32e096728d6f99d6",
+        "report_sha256": "b89bfe88b379754696322f73cc4f0f5278488c7b1e0322dc272d901519b31cc9",
         "request_date": "2026-10-10",
         "result_count": 1,
         "user_id": 1,
@@ -2336,7 +2336,7 @@
     "items": [
       {
         "authority": "Ankara Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.044942Z",
+        "created_at": "2026-10-13T04:00:02.131772Z",
         "file_no": "2026/9917",
         "id": 8,
         "mode": "candidates",
@@ -2350,7 +2350,7 @@
     "next_cursor": null
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:08.231715+00:00",
+    "captured_at": "2026-10-13T04:01:15.256359+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -2358,9 +2358,9 @@
     "tsa": "mock (never legally valid)"
   },
   "none": {
-    "created_at": "2026-10-13T04:00:02.555910Z",
-    "elapsed_ms": 20,
-    "finished_at": "2026-10-13T04:00:02.555619Z",
+    "created_at": "2026-10-13T04:00:01.863612Z",
+    "elapsed_ms": 15,
+    "finished_at": "2026-10-13T04:00:01.863396Z",
     "id": 5,
     "mode": "none",
     "outcome": {
@@ -2402,7 +2402,7 @@
           "text_tr": "Bu aralıkta aday oturum yok. Sonucu kesinleştirmek için: ISS modeminin NAT kaydı (genel port → FortiGate çıkış portu), talepteki hedef IP/port veya alan adı ve doğru saat/saat dilimi gerekir; toleransı genişletmek de yardımcı olabilir."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.530113+00:00",
+      "generated_at": "2026-10-13T04:00:01.847764+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -2454,20 +2454,20 @@
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-1.pdf\"",
       "content-type": "application/pdf",
-      "x-arci-sha256": "0ebe2dd5fe6bb04a2bb31c644237e87ff9c5b6485b15814a32e096728d6f99d6"
+      "x-arci-sha256": "b89bfe88b379754696322f73cc4f0f5278488c7b1e0322dc272d901519b31cc9"
     },
-    "sha256": "0ebe2dd5fe6bb04a2bb31c644237e87ff9c5b6485b15814a32e096728d6f99d6",
-    "size": 80757
+    "sha256": "b89bfe88b379754696322f73cc4f0f5278488c7b1e0322dc272d901519b31cc9",
+    "size": 80752
   },
   "report_pdf_stamped": {
     "headers": {
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf\"",
       "content-type": "application/pdf",
-      "x-arci-sha256": "d2e51373cb4eaf3ebb4d456778e72f45925d4ee3865168c67261872b9075fc88"
+      "x-arci-sha256": "0ebdaf37e8bb69d9cb7e3580a53eec44186c6cfc3fc8f4105e38fbfb0b1ee1d3"
     },
-    "sha256": "d2e51373cb4eaf3ebb4d456778e72f45925d4ee3865168c67261872b9075fc88",
-    "size": 89262
+    "sha256": "0ebdaf37e8bb69d9cb7e3580a53eec44186c6cfc3fc8f4105e38fbfb0b1ee1d3",
+    "size": 89259
   },
   "report_token": {
     "headers": {
@@ -2475,13 +2475,13 @@
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf.zd\"",
       "content-type": "application/timestamp-reply"
     },
-    "sha256": "d94d8740e02b462600b7b6b303f45f45b65d04366f5d97faedd96a5cac334746",
-    "size": 1204
+    "sha256": "4f8bec2bdf6715319ff70fdf27f13a70df2571ebec6dd4f10ea92d5cd56ecfef",
+    "size": 1201
   },
   "truncated": {
-    "created_at": "2026-10-13T04:00:02.883211Z",
-    "elapsed_ms": 56,
-    "finished_at": "2026-10-13T04:00:02.882937Z",
+    "created_at": "2026-10-13T04:00:02.034169Z",
+    "elapsed_ms": 35,
+    "finished_at": "2026-10-13T04:00:02.033952Z",
     "id": 7,
     "mode": "candidates",
     "outcome": {
@@ -2524,7 +2524,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.825576+00:00",
+      "generated_at": "2026-10-13T04:00:01.997882+00:00",
       "matches": [
         {
           "chain": {
@@ -3099,9 +3099,9 @@
     "username": "tolga"
   },
   "vault_only": {
-    "created_at": "2026-10-13T04:00:02.719963Z",
-    "elapsed_ms": 27,
-    "finished_at": "2026-10-13T04:00:02.719672Z",
+    "created_at": "2026-10-13T04:00:01.937059Z",
+    "elapsed_ms": 18,
+    "finished_at": "2026-10-13T04:00:01.936858Z",
     "id": 6,
     "mode": "none",
     "outcome": {
@@ -3151,7 +3151,7 @@
           "text_tr": "Bu aralıkta aday oturum yok. Sonucu kesinleştirmek için: ISS modeminin NAT kaydı (genel port → FortiGate çıkış portu), talepteki hedef IP/port veya alan adı ve doğru saat/saat dilimi gerekir; toleransı genişletmek de yardımcı olabilir."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.689227+00:00",
+      "generated_at": "2026-10-13T04:00:01.917783+00:00",
       "matches": [],
       "mode": "none",
       "request": {

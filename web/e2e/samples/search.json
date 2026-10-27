@@ -150,7 +150,7 @@
         }
       },
       "headers": {
-        "retry-after": "3598"
+        "retry-after": "3599"
       },
       "status": 429
     },
@@ -225,12 +225,12 @@
       "body": {
         "error": {
           "code": "search_rate_limited",
-          "message_en": "Too many searches in a short time; try again in 55 s.",
-          "message_tr": "Kısa sürede çok fazla arama yaptınız; 55 saniye sonra yeniden deneyin."
+          "message_en": "Too many searches in a short time; try again in 56 s.",
+          "message_tr": "Kısa sürede çok fazla arama yaptınız; 56 saniye sonra yeniden deneyin."
         }
       },
       "headers": {
-        "retry-after": "55"
+        "retry-after": "56"
       },
       "status": 429
     },
@@ -289,8 +289,8 @@
             "params": {},
             "start": 224
           },
-          "message_en": "The query is too long: at most 1,000 characters, 16 conditions, 20 values per condition and 5 free-text terms.",
-          "message_tr": "Sorgu çok uzun: en fazla 1.000 karakter, 16 koşul, koşul başına 20 değer ve 5 serbest metin terimi olabilir."
+          "message_en": "The query is too long: at most 1,000 characters, 16 conditions, 20 values per condition, 256 characters per value and 5 free-text terms.",
+          "message_tr": "Sorgu çok uzun: en fazla 1.000 karakter, 16 koşul, koşul başına 20 değer, değer başına 256 karakter ve 5 serbest metin terimi olabilir."
         }
       },
       "headers": {},
@@ -547,9 +547,9 @@
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.xlsx\"",
         "content-length": "7135",
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "repr-digest": "sha-256=:yfDX57MS6r8hlUvye6yNt6psM/4gDkRZtyKtVhkhmOE=:"
+        "repr-digest": "sha-256=:A2ssmRL3TcuohDGUw7yNXvPkb6YAgClSpKh1kPfRbbY=:"
       },
-      "sha256": "c9f0d7e7b312eabf21954bf27bac8db7aa6c33fe200e4459b722ad56192198e1",
+      "sha256": "036b2c9912f74dcba8843194c3bc8d5ef3e46fa600802952a4a87590f7d16db6",
       "size": 7135
     }
   },
@@ -1000,8 +1000,8 @@
           "action:deny,blocked",
           "-action:passthrough"
         ],
-        "help_en": "The device's action (deny, blocked, passthrough, assigned, login …). -action:accept finds records that have an action other than accept.",
-        "help_tr": "Cihazın eylemi (deny, blocked, passthrough, assigned, login …). -action:accept eylemi olan ve accept olmayan kayıtları bulur.",
+        "help_en": "The device's action (deny, blocked, passthrough, assigned, login …). -action:accept finds records whose action is not accept, including those without one.",
+        "help_tr": "Cihazın eylemi (deny, blocked, passthrough, assigned, login …). -action:accept eylemi accept olmayan kayıtları bulur (eylemi boş olanlar dahil).",
         "indexed": [],
         "kind": "token",
         "label_en": "Action",
@@ -1602,7 +1602,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:00:56.130066+00:00",
+    "captured_at": "2026-10-13T04:01:15.256359+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1781,7 +1781,7 @@
       "items": []
     },
     "created": {
-      "created_at": "2026-10-13T04:00:39.995287Z",
+      "created_at": "2026-10-13T04:00:30.077275Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC trafiği",
@@ -1790,10 +1790,10 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:39.995353Z"
+      "updated_at": "2026-10-13T04:00:30.077313Z"
     },
     "created_preset": {
-      "created_at": "2026-10-13T04:00:40.074881Z",
+      "created_at": "2026-10-13T04:00:30.135098Z",
       "id": 2,
       "last_run_at": null,
       "name": "Son 24 saat engellenen web",
@@ -1801,13 +1801,13 @@
       "range": {
         "preset": "24h"
       },
-      "updated_at": "2026-10-13T04:00:40.074920Z"
+      "updated_at": "2026-10-13T04:00:30.135131Z"
     },
     "deleted_status": 204,
     "list": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:39.995287Z",
+          "created_at": "2026-10-13T04:00:30.077275Z",
           "id": 1,
           "last_run_at": null,
           "name": "Planlama PC trafiği",
@@ -1816,10 +1816,10 @@
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-13T04:00:39.995353Z"
+          "updated_at": "2026-10-13T04:00:30.077313Z"
         },
         {
-          "created_at": "2026-10-13T04:00:40.074881Z",
+          "created_at": "2026-10-13T04:00:30.135098Z",
           "id": 2,
           "last_run_at": null,
           "name": "Son 24 saat engellenen web",
@@ -1827,28 +1827,28 @@
           "range": {
             "preset": "24h"
           },
-          "updated_at": "2026-10-13T04:00:40.074920Z"
+          "updated_at": "2026-10-13T04:00:30.135131Z"
         }
       ]
     },
     "list_after_delete": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:39.995287Z",
+          "created_at": "2026-10-13T04:00:30.077275Z",
           "id": 1,
-          "last_run_at": "2026-10-13T04:00:40.311893Z",
+          "last_run_at": "2026-10-13T04:00:30.336742Z",
           "name": "Planlama PC — oturumlar",
           "q": "srcip:172.20.42.57 type:traffic",
           "range": {
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-26T20:45:01.416034Z"
+          "updated_at": "2026-10-27T06:11:53.233211Z"
         }
       ]
     },
     "run": {
-      "expires_at": "2026-10-13T04:30:40.333501Z",
+      "expires_at": "2026-10-13T04:30:30.362735Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T10:30:00.000000+00:00:25",
@@ -2007,8 +2007,8 @@
       "notices": [
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -2057,7 +2057,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 15,
+        "elapsed_ms": 11,
         "scanned_from": "2026-10-08T21:00:00Z",
         "scanned_to": "2026-10-09T21:00:00Z",
         "windows": 5
@@ -2065,7 +2065,7 @@
       "search_id": "ornek-arama-11"
     },
     "updated": {
-      "created_at": "2026-10-13T04:00:39.995287Z",
+      "created_at": "2026-10-13T04:00:30.077275Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC — oturumlar",
@@ -2074,12 +2074,12 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:40.190348Z"
+      "updated_at": "2026-10-13T04:00:30.224513Z"
     }
   },
   "search": {
     "auditor": {
-      "expires_at": "2026-10-13T04:30:37.499250Z",
+      "expires_at": "2026-10-13T04:30:28.270859Z",
       "items": [
         {
           "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
@@ -2124,8 +2124,8 @@
       "notices": [
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -2174,7 +2174,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 14,
+        "elapsed_ms": 15,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2182,14 +2182,14 @@
       "search_id": "ornek-arama-06"
     },
     "empty": {
-      "expires_at": "2026-10-13T04:30:36.611715Z",
+      "expires_at": "2026-10-13T04:30:27.429201Z",
       "items": [],
       "next_cursor": null,
       "notices": [
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -2258,7 +2258,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 44,
+        "elapsed_ms": 34,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2266,7 +2266,7 @@
       "search_id": "ornek-arama-04"
     },
     "first_page": {
-      "expires_at": "2026-10-13T04:30:36.379074Z",
+      "expires_at": "2026-10-13T04:30:27.258468Z",
       "items": [
         {
           "key": "messages:2026-10-09T11:00:00.000000+00:00:103107",
@@ -2463,8 +2463,8 @@
       "notices": [
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -2511,7 +2511,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 12,
+        "elapsed_ms": 8,
         "scanned_from": "2026-10-09T08:25:26Z",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 4
@@ -2519,7 +2519,7 @@
       "search_id": "ornek-arama-03"
     },
     "next_page": {
-      "expires_at": "2026-10-13T04:30:36.429090Z",
+      "expires_at": "2026-10-13T04:30:27.287724Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:24:36.000000+00:00:103114",
@@ -2716,8 +2716,8 @@
       "notices": [
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -2764,7 +2764,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 5,
+        "elapsed_ms": 3,
         "scanned_from": "2026-10-09T08:23:46Z",
         "scanned_to": "2026-10-09T08:25:26Z",
         "windows": 1
@@ -2772,7 +2772,7 @@
       "search_id": "ornek-arama-03"
     },
     "partial": {
-      "expires_at": "2026-10-13T04:30:37.370166Z",
+      "expires_at": "2026-10-13T04:30:28.143944Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
@@ -2931,8 +2931,8 @@
       "notices": [
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -3001,7 +3001,7 @@
       },
       "scan": {
         "complete": false,
-        "elapsed_ms": 608,
+        "elapsed_ms": 604,
         "scanned_from": "2026-10-09T10:30:00+03:00",
         "scanned_to": "2026-10-09T11:30:00+03:00",
         "windows": 1
@@ -3009,7 +3009,7 @@
       "search_id": "ornek-arama-05"
     },
     "text": {
-      "expires_at": "2026-10-13T04:30:36.235308Z",
+      "expires_at": "2026-10-13T04:30:27.171034Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:14:56.003000+00:00:103108",
@@ -3066,8 +3066,8 @@
         },
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -3127,7 +3127,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 13,
+        "elapsed_ms": 10,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3135,7 +3135,7 @@
       "search_id": "ornek-arama-02"
     },
     "typed": {
-      "expires_at": "2026-10-13T04:30:36.104254Z",
+      "expires_at": "2026-10-13T04:30:27.087659Z",
       "items": [
         {
           "key": "mt_arp:2026-10-09T11:00:00.000000+00:00:2",
@@ -3446,8 +3446,8 @@
       "notices": [
         {
           "code": "vault_only_before",
-          "message_en": "Records before 2026-10-09 are not in the database; the raw lines are in the sealed vault (available through an evidence package).",
-          "message_tr": "2026-10-09 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+          "message_en": "Records before 09.10.2026 are not in the database; raw lines of those days, if any, are in the sealed vault (available through an evidence package).",
+          "message_tr": "09.10.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
           "params": {
             "date": "2026-10-09"
           }
@@ -3516,7 +3516,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 53,
+        "elapsed_ms": 40,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3529,7 +3529,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 18,
+      "elapsed_ms": 16,
       "facets": {
         "action": {
           "other": 0,
@@ -3700,7 +3700,7 @@
       "complete": true,
       "covered_from": "2026-10-09T11:00:00+03:00",
       "covered_to": "2026-10-09T12:00:00+03:00",
-      "elapsed_ms": 27,
+      "elapsed_ms": 17,
       "facets": {
         "action": {
           "other": 0,
@@ -4028,7 +4028,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:30:00+03:00",
       "covered_to": "2026-10-09T23:30:00+03:00",
-      "elapsed_ms": 39,
+      "elapsed_ms": 37,
       "facets": {
         "action": {
           "other": 0,
@@ -4386,7 +4386,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 8,
+      "elapsed_ms": 12,
       "facets": {
         "action": {
           "other": 0,

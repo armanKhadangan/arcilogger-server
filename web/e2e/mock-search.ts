@@ -76,10 +76,16 @@ const FILLED: Record<string, Record<string, string | number> | string[]> = {
   search_timeout: { seconds: 0.5 },
 };
 
+/** A parameter as the API writes it into a text: a day (`date`) as `09.10.2026`, like the UI. */
+function shownParam(name: string, value: unknown): string {
+  const day = name === 'date' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value)) : null;
+  return day ? `${day[3] ?? ''}.${day[2] ?? ''}.${day[1] ?? ''}` : String(value);
+}
+
 /** A captured text with the values of `params` turned back into `{name}` placeholders. */
 function template(text: string, params: Record<string, unknown>, code: string): string {
   return Object.entries(params).reduce((found, [name, value]) => {
-    const shown = String(value);
+    const shown = shownParam(name, value);
     if (!found.includes(shown)) throw new Error(`search.json ${code}: "${shown}" not in "${text}"`);
     return found.split(shown).join(`{${name}}`);
   }, text);
@@ -141,7 +147,7 @@ const NOTICES: Record<string, [string, string]> = {
 /** `text` with its `{name}` placeholders filled in. */
 function fill(text: string, params: Record<string, string | number>): string {
   return text.replace(/\{(\w+)\}/g, (_, name: string) =>
-    params[name] === undefined ? `{${name}}` : String(params[name]),
+    params[name] === undefined ? `{${name}}` : shownParam(name, params[name]),
   );
 }
 

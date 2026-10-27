@@ -347,7 +347,7 @@ test.describe('Kaynaklar', () => {
     await expect(page).toHaveURL(/\/search$/);
   });
 
-  test('a network: its lines are in its members\' folders, one click opens a member', async ({
+  test("a network: its lines are in its members' folders, one click opens a member", async ({
     page,
   }) => {
     await open(page);

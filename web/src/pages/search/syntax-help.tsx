@@ -27,7 +27,14 @@ export const EXAMPLES = [
 /** The rules of the language, in the help's order (`search.help.rules.<key>`). */
 const RULES = ['and', 'or', 'not', 'quotes', 'present', 'none'] as const;
 /** What makes a query fast or slow (`search.help.speed.<key>`). */
-const SPEED = ['indexedFields', 'srcipIndex', 'scanUnindexed', 'case', 'truncated', 'time'] as const;
+const SPEED = [
+  'indexedFields',
+  'srcipIndex',
+  'scanUnindexed',
+  'case',
+  'truncated',
+  'time',
+] as const;
 
 /**
  * "?" of the query bar: the language (AND by spaces, OR by commas inside one field, `-` to

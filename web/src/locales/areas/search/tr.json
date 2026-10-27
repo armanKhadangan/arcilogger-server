@@ -64,6 +64,7 @@
       "count_one": "{{formatted}} kayıt gösteriliyor",
       "count_other": "{{formatted}} kayıt gösteriliyor",
       "time": "Zaman",
+      "timeReceived": "Zaman / alınma zamanı",
       "receivedColumn": "Alınma zamanı",
       "source": "Kaynak",
       "kind": "Tür",

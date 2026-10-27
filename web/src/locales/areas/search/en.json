@@ -64,6 +64,7 @@
       "count_one": "{{formatted}} record shown",
       "count_other": "{{formatted}} records shown",
       "time": "Time",
+      "timeReceived": "Time / received",
       "receivedColumn": "Received",
       "source": "Source",
       "kind": "Type",

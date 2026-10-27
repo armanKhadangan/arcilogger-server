@@ -78,6 +78,14 @@ test.describe('Arama', () => {
     // Nothing is searched when the page opens.
     await expect(page.getByText('Bir sorgu yazıp “Ara”ya basın')).toBeVisible();
     expect(api.callsTo('POST', '/search')).toHaveLength(0);
+    // An example only fills the box: its address is searched (and audited) only on "Ara".
+    await page
+      .getByRole('button', {
+        name: 'Bu örneği sorguya yaz: srcip:172.20.41.105 type:web action:blocked',
+      })
+      .click();
+    await expect(queryBox(page)).toHaveValue('srcip:172.20.41.105 type:web action:blocked');
+    expect(api.callsTo('POST', '/search')).toHaveLength(0);
     await expect(
       page.getByText(
         'Bu sayfa kişisel veri gösterir; sorgular ve açılan ham satırlar denetim kaydına yazılır.',
@@ -809,3 +817,30 @@ test.describe('Arama on the captured answers (samples/search.json)', () => {
     await expect(page.getByText(refused.body.error.message_tr)).toBeVisible();
   });
 });
+
+/**
+ * Every row shows the device's time and the receive time side by side (contract D5: a wrong
+ * device clock shows as the difference), and the table does not scroll sideways at a normal
+ * desktop width.
+ */
+for (const width of [1280, 1440, 1920]) {
+  test(`the receive time is visible in every row at ${width} px`, async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+    await page.setViewportSize({ width, height: 1000 });
+    await openSearch(page);
+    await runQuery(page, 'srcip:172.20.42.57');
+    await expect(resultRows(page)).toHaveCount(4);
+    await expect(
+      results(page).getByRole('columnheader', { name: 'Zaman / alınma zamanı' }),
+    ).toBeVisible();
+    const times = (await resultRows(page).first().innerText()).match(
+      /\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/g,
+    );
+    expect(times).toHaveLength(2); // the device's time and the receive time
+    const overflow = await results(page).evaluate((element) => {
+      const box = element.parentElement;
+      return box ? box.scrollWidth - box.clientWidth : -1;
+    });
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+}

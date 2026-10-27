@@ -124,7 +124,8 @@ describe('global reactions inside the app', () => {
         ended = true;
         return new Response(null, { status: 204 });
       }
-      if (ended && request.path === '/api/v1/auth/me') return errorResponse(401, 'not_authenticated');
+      if (ended && request.path === '/api/v1/auth/me')
+        return errorResponse(401, 'not_authenticated');
       return undefined;
     });
     const user = userEvent.setup();
