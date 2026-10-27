@@ -48,6 +48,16 @@ import type {
   VlanOut,
 } from '../src/lib/api-types';
 import type { LiveStatus, LiveStreamOut } from '../src/lib/live-types';
+import type {
+  FieldCatalogue,
+  ParseResult,
+  SavedSearch,
+  SavedSearchList,
+  SearchEvent,
+  SearchPage,
+  SearchRefs,
+  SearchStats,
+} from '../src/lib/search-types';
 import type { SealDayDetail } from '../src/lib/seal-types';
 import type {
   AdminAccepted,
@@ -419,6 +429,38 @@ export const REPORTS = load('reports') as {
  * refusals, `DELETE`, the locked modules' 403 answers and the users limit's 409.
  */
 export const LICENSE = load('license') as LicenseSamples;
+
+/**
+ * Arama (captured, Wave 2 contract 2.10, `samples_search.py`, the sealed day 2026-10-09 of the
+ * main site): runs (`typed`, `text`, `first_page` and its `next_page`, `empty`, `partial`, the
+ * auditor's), statistics in every mode, `POST /search/parse`, the field catalogue, records of
+ * three tables, references, the exports' headers, saved searches and the refusals. The search
+ * ids are `ornek-arama-NN`.
+ */
+export const SEARCH = load('search') as {
+  meta: SampleMeta;
+  search: Record<
+    'typed' | 'text' | 'first_page' | 'next_page' | 'empty' | 'partial' | 'auditor',
+    SearchPage
+  >;
+  stats: Record<'rollup' | 'hybrid' | 'direct' | 'partial' | 'auditor', SearchStats>;
+  parse: Record<'typed' | 'text' | 'refused' | 'unknown_field', ParseResult>;
+  fields: FieldCatalogue;
+  event: Record<'traffic' | 'dhcp' | 'message', SearchEvent>;
+  refs: SearchRefs;
+  export: Record<'csv' | 'xlsx' | 'truncated', FileSample>;
+  saved: {
+    list: SavedSearchList;
+    auditor_list: SavedSearchList;
+    created: SavedSearch;
+    created_preset: SavedSearch;
+    updated: SavedSearch;
+    run: SearchPage;
+    deleted_status: number;
+    list_after_delete: SavedSearchList;
+  };
+  errors: Record<string, ErrorSample>;
+};
 
 /** One server-sent event of a captured stream, as the page reads it. */
 export interface LiveEventSample {
