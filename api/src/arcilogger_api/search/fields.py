@@ -712,9 +712,10 @@ FIELDS: Final[Mapping[str, Field]] = {
                 "Eylem",
                 "Action",
                 "Cihazın eylemi (deny, blocked, passthrough, assigned, login …). -action:accept "
-                "eylemi olan ve accept olmayan kayıtları bulur.",
+                "eylemi accept olmayan kayıtları bulur (eylemi boş olanlar dahil).",
                 "The device's action (deny, blocked, passthrough, assigned, login …). "
-                "-action:accept finds records that have an action other than accept.",
+                "-action:accept finds records whose action is not accept, including those "
+                "without one.",
             ),
             ("action:deny,blocked", "-action:passthrough"),
         ),

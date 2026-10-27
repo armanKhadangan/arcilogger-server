@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import string
 from collections.abc import Mapping
+from datetime import date
 from typing import Any, Final
 
 from arcilogger_api.errors import ApiError
@@ -41,10 +42,10 @@ MESSAGES: Final[Mapping[str, tuple[str, str]]] = {
         "Free text must be at least 3 characters long.",
     ),
     "search_too_complex": (
-        "Sorgu çok uzun: en fazla 1.000 karakter, 16 koşul, koşul başına 20 değer ve 5 serbest "
-        "metin terimi olabilir.",
+        "Sorgu çok uzun: en fazla 1.000 karakter, 16 koşul, koşul başına 20 değer, değer başına "
+        "256 karakter ve 5 serbest metin terimi olabilir.",
         "The query is too long: at most 1,000 characters, 16 conditions, 20 values per "
-        "condition and 5 free-text terms.",
+        "condition, 256 characters per value and 5 free-text terms.",
     ),
     "search_or_unsupported": (
         "VEYA yalnızca aynı alanın değerleri arasında virgülle yazılır (ör. "
@@ -154,10 +155,10 @@ STATUS: Final[Mapping[str, int]] = {
 #: Notices of a search answer (``Notice {code, message_tr, message_en, params}``).
 NOTICES: Final[Mapping[str, tuple[str, str]]] = {
     "vault_only_before": (
-        "{date} öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt "
-        "Paketi ile alınabilir).",
-        "Records before {date} are not in the database; the raw lines are in the sealed vault "
-        "(available through an evidence package).",
+        "{date} öncesine ait kayıtlar veritabanında yok; o günlerin ham kayıtları varsa mühürlü "
+        "arşivdedir (Kanıt Paketi ile alınabilir).",
+        "Records before {date} are not in the database; raw lines of those days, if any, are in "
+        "the sealed vault (available through an evidence package).",
     ),
     "counts_incomplete": (
         "Yükseltmeden önce yüklenen günlerin özet sayıları hâlâ hazırlanıyor; istatistikler "
@@ -318,6 +319,8 @@ def _values(params: Mapping[str, Any], language: int) -> dict[str, Any]:
             values[name] = FORMATS[value][language]
         elif name in ("value", "field", "department"):
             values[name] = _shown(value)
+        elif name == "date":  # ``params`` keep the ISO day; the texts write it as the UI does
+            values[name] = date.fromisoformat(value).strftime("%d.%m.%Y")
         else:
             values[name] = value
     return values

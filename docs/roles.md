@@ -310,7 +310,7 @@ closes them (5651 Core).
 | `POST /search/export` | `search.read` + `search.export` + KVKK + re-auth (5 min) | ✔ | — | — | — |
 | `POST /search/refs` | `search.read` + `evidence.create` + KVKK | ✔ | — | — | — |
 | `POST /live/streams`, `GET` / `DELETE /live/streams/{id}`, `GET /live/status` | `search.read` (+ KVKK to open a stream; a stream belongs to its user and session) | ✔ | ✔ | — | — |
-| `GET /sources`, `GET /sources/{name}` | `sources.read` (parse error texts only with `search.read` or `lookup.run`) | ✔ | — | — | — |
+| `GET /sources`, `GET /sources/{name}` | `sources.read` (parse error texts only with `search.read` or `lookup.run` + KVKK) | ✔ | — | — | — |
 | `GET /sources/{name}/tail` | `sources.read` + (`search.read` or `lookup.run`) + KVKK | ✔ | — | — | — |
 | Panel box `parse_failures` | `sources.read` or `dashboard.view` | ✔ | ✔ | — | ✔ |
 | Raw line drawer on these pages (`GET /raw`) | `search.read` or `lookup.run` + KVKK | ✔ | ✔ | — | — |

@@ -12,8 +12,8 @@ The semantics are those of the SQL the planner compiles:
   (:func:`~arcilogger_api.search.fields.branch_tables`; for ``mt_event`` the kind of its
   ``event``); its ``messages``-only conditions (free text, ``host``, ``severity``, ``error``,
   ``subtype``) are checked on the line's ``messages`` row. A line without a typed row (or with
-  one in another table) never matches it: ``-action:accept`` finds records that **have** an
-  action other than accept.
+  one in another table) never matches it: ``-action:accept`` finds the records of the tables
+  that carry an action whose action is not accept, an empty one included.
 * A query without a typed field matches ``messages`` rows: ``type:`` by
   :func:`arcilogger_db.kinds.kind_of`, ``source``, ``sender`` and the ``messages``-only fields.
 * One clause matches when any of its values matches any of the field's columns in that table;

@@ -437,9 +437,11 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 ## 9. Arama, Canlı Akış ve Kaynaklar denetim kayıtları
 
 Arama, Canlı Akış ve Kaynaklar sayfaları kişisel veri gösterir (istemci adresleri, MAC adresleri,
-alan adları, kullanıcı adları). Bu yüzden KVKK bilgilendirme metni onaylanmadan açılmazlar ve
-kayıt okuyan her işlem, yanıt gönderilmeden önce ARCILOGGER denetim kaydına (`audit_log`, web
-arayüzünde Denetim Kaydı sayfası) yazılır. Ayrıntılarda (`details`) girdiler, sayılar, satır
+alan adları, kullanıcı adları). Bu yüzden Arama ve Canlı Akış, Kaynaklar'da da bir kaynağın "Son
+satırlar" sekmesi ile ayrıştırma hatalarının ayrıntısı KVKK bilgilendirme metni onaylanmadan
+açılmaz (Kaynaklar listesi ve bir kaynağın sayıları metin beklemeden açılır). Aşağıdaki tablodaki
+işlemler, yanıt gönderilmeden önce ARCILOGGER denetim kaydına (`audit_log`, web arayüzünde
+Denetim Kaydı sayfası) yazılır; tablonun altındaki okumalar yazılmaz. Ayrıntılarda (`details`) girdiler, sayılar, satır
 aralıkları ve özetler bulunur; bulunan satırların içeriği yazılmaz. Aramanın sorgusu (`q`)
 normalleştirilmiş hâliyle yazılır: 5651 sorgusunda olduğu gibi bir IP, MAC adresi ya da metin
 içerebilir.
@@ -591,8 +593,10 @@ receive times were correct, that an IP belonged to a person, that the verify.py 
 is genuine, or the online revocation status; test (mock) stamps have no legal validity.
 
 **Search, live tail and sources in the audit log (section 9).** Arama, Canlı Akış and Kaynaklar
-show personal data, so they wait for the KVKK notice, and every call that reads records is written
-to ARCILOGGER's audit log (`audit_log`, the Denetim Kaydı page) before the answer is sent. The
+show personal data, so Arama, Canlı Akış and, in Kaynaklar, a source's "Son satırlar" tab and the
+detail of its parse errors wait for the KVKK notice (the Kaynaklar list and a source's counts open
+without it). The calls listed here are written to ARCILOGGER's audit log (`audit_log`, the
+Denetim Kaydı page) before the answer is sent; the reads named as not audited are not. The
 details hold inputs, counts, line ranges and hashes, never the content of the lines found; the
 search query (`q`) is stored normalised and can hold an IP, a MAC address or text, as a 5651 lookup
 does. `search.run` (every run, a timed-out one too with `outcome: "timeout"`): `search_id`, `q`,

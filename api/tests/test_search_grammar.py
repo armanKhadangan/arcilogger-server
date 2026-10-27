@@ -506,9 +506,9 @@ def test_rendered_errors_and_notices() -> None:
     assert "v" * 63 + "…" in shown[0]
     assert notice("vault_only_before", date="2026-01-01") == {
         "code": "vault_only_before",
-        "message_tr": "2026-01-01 öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü "
-        "arşivdedir (Kanıt Paketi ile alınabilir).",
-        "message_en": "Records before 2026-01-01 are not in the database; the raw lines are in "
-        "the sealed vault (available through an evidence package).",
+        "message_tr": "01.01.2026 öncesine ait kayıtlar veritabanında yok; o günlerin ham "
+        "kayıtları varsa mühürlü arşivdedir (Kanıt Paketi ile alınabilir).",
+        "message_en": "Records before 01.01.2026 are not in the database; raw lines of those "
+        "days, if any, are in the sealed vault (available through an evidence package).",
         "params": {"date": "2026-01-01"},
     }

@@ -67,9 +67,9 @@ Examples: `srcip:172.20.41.105 type:web action:blocked` · `domain:example.com -
 | VLAN (`vlan`) | VLAN ids (comma list) | the VLAN subnet of the client address (Devices and persons → VLANs) |
 | Department (`department`) | department name or id | the default department of the VLAN, **not** a person's assignment (notice `department_by_vlan`) |
 
-**Negation:** `-action:accept` finds "records that have an action other than accept"; a record
-whose field is empty also satisfies a negated condition. Only the kinds of records that carry the
-field are searched.
+**Negation:** `-action:accept` "finds records whose action is not accept, including those without
+one": a record whose field is empty also satisfies a negated condition. Only the kinds of records
+that carry the field are searched.
 
 ## 3. Fields
 
@@ -270,7 +270,7 @@ the package is made. The package itself is made as always ([KANIT-PAKETI.md](KAN
 
 ## 11. Who sees what, what is audited
 
-| | Administrator | Auditor | HR | Viewer |
+| | Administrator | Auditor | HR reports | Report viewer |
 |---|---|---|---|---|
 | Search, pages, statistics, record details, saved searches, live tail | ✔ | ✔ | — | — |
 | Export (re-authentication 5 min) | ✔ | — | — | — |
@@ -285,9 +285,11 @@ accepted (`privacy_notice_required`). Written to the audit log:
 | `search.event` | when a record's details are opened | table, id, time, raw reference |
 | `search.refs` | hand-over to an evidence package | search id, query, range, line count, cut or not, SHA-256 |
 | `search.export` | before the file is sent | search id, query, range, format, rows, reason it was cut, bytes, SHA-256 |
-| `search.saved_create` / `search.saved_update` / `search.saved_delete` | when a saved search changes | id, name, query |
+| `search.saved_create` / `search.saved_update` | when a saved search is added or changed | id, name, query |
+| `search.saved_delete` | when a saved search is deleted | id, name |
 | `live.open` / `live.close` | when a live tail opens / closes | stream id, query, folders; on close the duration, the lines shown and not shown, the line ranges |
 | `raw.view` | when a raw line is opened | raw reference |
+| `raw.tail` | when a source's "Son satırlar" (last lines) tab is opened in Kaynaklar | source, day, line and byte range, line count, SHA-256 of the range ([DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) section 9) |
 
 Not audited: the next pages and the statistics (they can only be asked for with the id of an
 audited search), the query check (`/search/parse`) and the field list. Entries hold no row

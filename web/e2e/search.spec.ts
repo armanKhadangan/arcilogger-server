@@ -93,7 +93,7 @@ test.describe('Arama', () => {
     await expect(page.getByRole('region', { name: 'Dağılım' })).toBeVisible();
     await expect(page.getByText('4 kayıt', { exact: true })).toBeVisible();
     await expect(
-      page.getByText('2026-10-09 öncesindeki kayıtlar veritabanında yok', { exact: false }),
+      page.getByText('09.10.2026 öncesine ait kayıtlar veritabanında yok', { exact: false }),
     ).toBeVisible();
     await expect(results(page).getByText('172.20.42.57:61001 → 203.0.113.10:443')).toBeVisible();
 
@@ -749,7 +749,7 @@ test.describe('Arama on the captured answers (samples/search.json)', () => {
       results(page).getByText('172.20.42.57 → static.portal.example · 203.0.113.40'),
     ).toBeVisible();
     await expect(
-      page.getByText('2026-10-09 öncesindeki kayıtlar veritabanında yok', { exact: false }),
+      page.getByText('09.10.2026 öncesine ait kayıtlar veritabanında yok', { exact: false }),
     ).toBeVisible();
 
     // The firewall's session at 13:30 site time: the captured record (`search.event`).

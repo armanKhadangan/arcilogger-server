@@ -15,7 +15,7 @@ hiçbir zaman değiştirilmez**; Arama yalnızca okur, her sorgu salt okunur bir
 işleminde çalışır.
 
 Bu sayfa kişisel veri gösterir; sorgular ve açılan ham satırlar denetim kaydına yazılır. Sayfayı
-yalnızca KVKK aydınlatma metnini onaylamış Sistem Yöneticisi ve Denetçi açabilir (bölüm 11).
+yalnızca KVKK aydınlatma metnini onaylamış Yönetici ve Denetçi açabilir (bölüm 11).
 
 ## 1. Sorgu dili
 
@@ -68,9 +68,9 @@ hızlı olduğunu açar.
 | VLAN (`vlan`) | VLAN numaraları (virgüllü) | istemci adresinin VLAN alt ağı (Cihazlar ve Kişiler → VLAN'lar) |
 | Departman (`department`) | departman adı ya da numarası | VLAN'a tanımlı varsayılan departman; kişi ataması **değildir** (bildirim `department_by_vlan`) |
 
-**Tersine çevirme:** `-action:accept` "eylemi olan ve accept olmayan" kayıtları bulur; alanı boş
-olan bir kayıt da tersine çevrilmiş koşulu sağlar. Yalnızca bu alanı taşıyan kayıt türleri
-aranır.
+**Tersine çevirme:** `-action:accept` "eylemi accept olmayan kayıtları bulur (eylemi boş olanlar
+dahil)": alanı boş olan bir kayıt da tersine çevrilmiş koşulu sağlar. Yalnızca bu alanı taşıyan
+kayıt türleri aranır.
 
 ## 3. Alanlar
 
@@ -233,7 +233,7 @@ yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir 
 
 ## 9. Dışa aktarma (CSV, Excel)
 
-- Yalnızca **Sistem Yöneticisi** (`search.export`), aydınlatma metni onaylıyken ve **son 5
+- Yalnızca **Yönetici** (`search.export`), aydınlatma metni onaylıyken ve **son 5
   dakika içinde parolasını yeniden doğrulamışsa** dışa aktarabilir.
 - Aramanın satırları en fazla `search.export_max_rows` (100.000) satır ya da
   `search.export_budget_seconds` (120 saniye) boyunca okunur; sınıra takılan dosya **kesilmiş**
@@ -261,7 +261,7 @@ yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir 
 
 ## 10. Aramadan Kanıt Paketi
 
-"Kanıt paketine aktar" (yalnızca `evidence.create` yetkisiyle, Sistem Yöneticisi) aramanın ham
+"Kanıt paketine aktar" (yalnızca `evidence.create` yetkisiyle, Yönetici) aramanın ham
 satır başvurularını alır (`POST /search/refs`, en fazla 10.000 satır, Kanıt Paketi'nin satır
 sınırı), denetim kaydına sayı ve listenin SHA-256 değeriyle yazar (`search.refs`) ve Kanıt
 Paketleri sayfasını bu satırlarla doldurur. Arama tamamlanmadıysa, satır sınırına takıldıysa ya
@@ -270,7 +270,7 @@ söyler. Paketin kendisi her zamanki gibi oluşturulur ([KANIT-PAKETI.md](KANIT-
 
 ## 11. Kim ne görür, ne denetlenir
 
-| | Sistem Yöneticisi | Denetçi | İK | İzleyici |
+| | Yönetici | Denetçi | İK Raporları | Rapor İzleyici |
 |---|---|---|---|---|
 | Arama, sayfalar, istatistikler, kayıt ayrıntısı, kayıtlı aramalar, Canlı Akış | ✔ | ✔ | — | — |
 | Dışa aktarma (yeniden doğrulama 5 dk) | ✔ | — | — | — |
@@ -285,9 +285,11 @@ Arama ve Canlı Akış kişisel veri gösterir: aydınlatma metni onaylanmadan a
 | `search.event` | bir kaydın ayrıntısı açılınca | tablo, numara, zaman, ham kayıt başvurusu |
 | `search.refs` | kanıt paketine aktarım | arama numarası, sorgu, aralık, satır sayısı, kesildi mi, SHA-256 |
 | `search.export` | dosya gönderilmeden önce | arama numarası, sorgu, aralık, biçim, satır, kesilme nedeni, bayt, SHA-256 |
-| `search.saved_create` / `search.saved_update` / `search.saved_delete` | kayıtlı arama değişince | numara, ad, sorgu |
+| `search.saved_create` / `search.saved_update` | kayıtlı arama eklenince ya da değişince | numara, ad, sorgu |
+| `search.saved_delete` | kayıtlı arama silinince | numara, ad |
 | `live.open` / `live.close` | canlı akış açılınca / kapanınca | akış numarası, sorgu, klasörler; kapanışta süre, gösterilen ve gösterilmeyen satırlar, satır aralıkları |
 | `raw.view` | bir ham satır açılınca | ham kayıt başvurusu |
+| `raw.tail` | Kaynaklar'da bir kaynağın "Son satırlar" sekmesi açılınca | kaynak, gün, satır ve bayt aralığı, satır sayısı, aralığın SHA-256 özeti ([DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) bölüm 9) |
 
 Denetlenmeyenler: sonraki sayfalar ve istatistikler (yalnızca denetlenmiş bir aramanın
 numarasıyla istenebilirler), sorgu denetimi (`/search/parse`) ve alan listesi. Kayıtlarda satır
