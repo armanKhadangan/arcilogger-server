@@ -4,7 +4,10 @@ filled, and the settings path they name is the one the web interface shows."""
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -53,11 +56,17 @@ RETIRED_KEYS = ("public_ip_not_configured", "wan_transip_not_seen")
 #: The one value that differs by language is two placeholders, one per text.
 PER_LANGUAGE = {"changes_tr": "changes_en"}
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
+LOCALES = Path(__file__).resolve().parents[2] / "web" / "src" / "locales"
 CLAIMS = re.compile(r"yasal|uyumlu|garanti|complian|guarantee", re.IGNORECASE)
 
 
 def _placeholders(text: str) -> set[str]:
     return set(PLACEHOLDER.findall(text))
+
+
+def _labels(language: str) -> dict[str, Any]:
+    """The web interface's labels in ``language`` (``web/src/locales``)."""
+    return json.loads((LOCALES / f"{language}.json").read_text(encoding="utf-8"))
 
 
 def test_every_new_key_is_in_the_catalogue() -> None:
@@ -92,27 +101,34 @@ def test_every_placeholder_is_filled(key: str) -> None:
 
 
 def test_the_settings_path_is_the_one_the_web_interface_shows() -> None:
-    """The texts name the page, the group and the setting by their labels (there is no NAT
-    page: the exits are a setting of the "5651 lookup and lease timeline" group)."""
+    """The texts name the page, the group, the setting and the section by the labels the web
+    interface shows in each language (there is no NAT page: the exits are a setting of the
+    "5651 lookup and lease timeline" group)."""
     (group,) = [g for g in GROUPS if g.id == "lookup"]
     exits = SETTINGS["nat.egresses"]
-    path_tr = f"Ayarlar → Uygulama ayarları → {group.label_tr} → {exits.label_tr}"
-    path_en = f"Settings → Application settings → {group.label_en} → {exits.label_en}"
+    tr, en = _labels("tr"), _labels("en")
+    settings_tr = f"{tr['nav']['settings']} → {tr['settings']['sections']['application']}"
+    settings_en = f"{en['nav']['settings']} → {en['settings']['sections']['application']}"
+    assert settings_tr == "Ayarlar → Uygulama ayarları"
+    assert settings_en == "Settings → Application settings"
+    path_tr = f"{settings_tr} → {group.label_tr} → {exits.label_tr}"
+    path_en = f"{settings_en} → {group.label_en} → {exits.label_en}"
     for key in ("egress_public_unknown", "public_ip_no_egress", "egress_unmapped_seen",
                 "egress_unconfigured", "egress_observed_not_configured",
                 "egress_not_logged_but_seen", "egress_internal"):  # fmt: skip
         text_tr, text_en = ENGINE_EXPLANATIONS[key]
         assert path_tr in text_tr, key
         assert path_en in text_en, key
-    rebuild_tr = f"Ayarlar → Uygulama ayarları → {group.label_tr} → Kiraları yeniden oluştur"
-    rebuild_en = f"Settings → Application settings → {group.label_en} → Rebuild leases"
+    rebuild_tr = f"{settings_tr} → {group.label_tr} → {tr['settings']['leaseRebuild']['title']}"
+    rebuild_en = f"{settings_en} → {group.label_en} → {en['settings']['leaseRebuild']['title']}"
+    networks_tr = f"{tr['nav']['devices']} → {tr['devices']['tabs']['departments']}"
+    networks_en = f"{en['nav']['devices']} → {en['devices']['tabs']['departments']}"
     for key in ("fortigate_dhcp_not_converted_since_lease", "fortigate_dhcp_no_network"):
         text_tr, text_en = ENGINE_EXPLANATIONS[key]
         assert rebuild_tr in text_tr, key
         assert rebuild_en in text_en, key
-        # The networks page by its own labels in each language (web/src/locales).
-        assert "Cihazlar ve Kişiler → Departmanlar ve VLAN'lar" in text_tr
-        assert "Devices and people → Departments and VLANs" in text_en
+        assert networks_tr in text_tr, key
+        assert networks_en in text_en, key
         assert "Cihazlar" not in text_en
 
 

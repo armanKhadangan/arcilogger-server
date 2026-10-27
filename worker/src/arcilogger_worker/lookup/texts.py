@@ -454,7 +454,7 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "client; the raw lines are kept and sealed every night (Search, type:event). If networks "
         "(Devices and people → Departments and VLANs) were entered or changed later, rebuild the "
         "leases from this lease's start day to today in Settings → Application settings → 5651 "
-        "lookup and lease timeline → Rebuild leases (at most 31 days per request).",
+        "lookup and lease timeline → Rebuild the leases (at most 31 days per request).",
     ),
     "fortigate_dhcp_no_network": (
         "{ip} adresi tanımlı hiçbir ağda değil (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar). "
@@ -471,8 +471,8 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "lease may not show the device that used the address at that moment, so the chain is shown "
         "with low confidence. Define the network, even without a VLAN number, then rebuild the "
         "leases from this lease's start day to today in Settings → Application settings → 5651 "
-        "lookup and lease timeline → Rebuild leases (at most 31 days per request): a network "
-        "applies to past leases only after a rebuild.",
+        "lookup and lease timeline → Rebuild the leases (at most 31 days per request): a "
+        "network applies to past leases only after a rebuild.",
     ),
     "egress_observed_not_configured": (
         "{address} hiçbir internet çıkışında tanımlı değil, ancak {at} çevresinde (±15 dakika) "
