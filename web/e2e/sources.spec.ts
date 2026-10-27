@@ -55,14 +55,14 @@ test.describe('Kaynaklar', () => {
     await expect
       .poll(() => names(page))
       .toEqual([
-        'core-r1',
-        'fortigate',
         'ap',
         'ap-172.20.10.3',
         'ap-172.20.10.4',
-        'switch-3',
-        'lab-fw',
+        'core-r1',
         'edge-1',
+        'fortigate',
+        'lab-fw',
+        'switch-3',
         'unknown-172.20.10.40',
         'unknown-198.51.100.7',
       ]);
@@ -111,7 +111,7 @@ test.describe('Kaynaklar', () => {
       .getByRole('button', { name: /Sessiz/ })
       .click();
     await expect(page).toHaveURL(/\/sources\?filter=silent$/);
-    await expect.poll(() => names(page)).toEqual(['ap-172.20.10.4', 'switch-3', 'edge-1']);
+    await expect.poll(() => names(page)).toEqual(['ap-172.20.10.4', 'edge-1', 'switch-3']);
     await page.getByRole('button', { name: /Bilinmeyen/ }).click();
     await expect.poll(() => names(page)).toEqual(['unknown-172.20.10.40', 'unknown-198.51.100.7']);
     await page.reload();

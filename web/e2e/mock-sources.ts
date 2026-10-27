@@ -81,9 +81,24 @@ function source(name: string, fields: Partial<SourceHealth>): SourceHealth {
   };
 }
 
+/** Plain code-point order, as Python's `sorted` compares names. */
+function compare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** The API's order (`sourcehealth.overview`): by name, a network's members right after it. */
+function apiOrder(items: SourceHealth[]): SourceHealth[] {
+  return [...items].sort(
+    (a, b) =>
+      compare(a.network_of ?? a.name, b.network_of ?? b.name) ||
+      Number(a.network_of !== null) - Number(b.network_of !== null) ||
+      compare(a.name, b.name),
+  );
+}
+
 /** The sources of the example site, in the API's order (a network followed by its members). */
 export function sampleSources(): SourceHealth[] {
-  return [
+  return apiOrder([
     source('core-r1', {
       address: '172.20.10.1',
       messages_per_minute: 12.5,
@@ -175,7 +190,7 @@ export function sampleSources(): SourceHealth[] {
       last_message_origin: 'database',
       promoted_to: 'edge-1',
     }),
-  ];
+  ]);
 }
 
 /** A captured raw line's reference, so that the raw-line drawer opens it. */
