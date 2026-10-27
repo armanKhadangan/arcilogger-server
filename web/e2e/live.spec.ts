@@ -316,9 +316,9 @@ test.describe('Canlı Akış', () => {
     await page.getByRole('button', { name: 'Vurgulama kuralları' }).click();
     const dialog = page.getByRole('dialog', { name: 'Vurgulama kuralları' });
     await dialog.getByRole('button', { name: 'Kural ekle' }).click();
-    await dialog.getByLabel('Kural 1').fill('deny');
+    await dialog.getByLabel('Kural 1', { exact: true }).fill('deny');
     await dialog.getByRole('button', { name: 'Kural ekle' }).click();
-    await dialog.getByLabel('Kural 2').fill('source:core-r1');
+    await dialog.getByLabel('Kural 2', { exact: true }).fill('source:core-r1');
     await expect(dialog).toContainText('Alan kuralı: satırın tamamı işaretlenir.');
     await dialog.getByRole('button', { name: 'Kaydet' }).click();
     await expect(page.getByRole('button', { name: 'Vurgulama kuralları (2)' })).toBeVisible();
