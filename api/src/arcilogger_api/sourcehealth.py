@@ -22,7 +22,7 @@ collector now writes it under; the old folder and its evidence stay where they a
 * parse failures: sums of ``parse_failures``;
 * ``suggested`` (unknown senders only, at most 20): the device family of what they sent and a name
   from the most common ``messages.host``, both from their newest 1,000 messages of the last 24
-  hours (one backward scan of ``ix_messages_source_time`` per sender, however busy it is; guard:
+  hours (one short backward index scan per sender, however busy it is; guard:
   ``api/tests/test_sources_api.py``);
 * a detail's hours from ``search_counts`` while it is complete for the range, else counted
   directly; its days from ``ingest_offsets``, ``parse_failures`` and the seals; its gaps from the
@@ -259,7 +259,8 @@ def sparklines(db: Session, names: Iterable[str], now: datetime) -> dict[str, li
 
 def newest_messages(name: str, now: datetime) -> Select[str, str | None, str | None, int]:
     """Type, subtype and host of the newest :data:`SUGGEST_SAMPLE` messages of ``name`` in the
-    last 24 hours, counted (a backward scan of ``ix_messages_source_time``)."""
+    last 24 hours, counted: a short backward index scan (``ix_messages_source_time``, or the time
+    key when nearly every recent row is the sender's)."""
     newest = (
         select(Message.type, Message.subtype, Message.host)
         .where(
