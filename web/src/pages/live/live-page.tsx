@@ -31,11 +31,11 @@ import { currentLang } from '@/lib/i18n';
 import { LiveConnection, RECONNECTING_END_CODE, type LiveConnectionState } from '@/lib/live-stream';
 import type { LiveDropped, LiveEnd, LiveLine } from '@/lib/live-types';
 import { DROP_REASONS } from '@/lib/live-types';
+import { useSearchFields } from '@/lib/search-hooks';
 
 import { HighlightDialog } from './highlight-dialog';
 import { LineSheet } from './line-sheet';
 import { LiveFilters } from './live-filters';
-import { useLiveCatalogue } from './live-hooks';
 import { LiveList, type LiveView } from './live-list';
 import {
   addDropped,
@@ -91,7 +91,7 @@ export function LivePage() {
   const navigate = useNavigate();
   const { me } = useAuth();
   const privacyPending = me.privacy_notice.required && !me.privacy_notice.accepted;
-  const catalogue = useLiveCatalogue();
+  const catalogue = useSearchFields();
   const [filter, setFilter] = useState<LiveFilter>(EMPTY_FILTER);
   const [running, setRunning] = useState<string | null>(null);
   const [state, setState] = useState<PageState>('idle');

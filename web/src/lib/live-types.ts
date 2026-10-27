@@ -12,40 +12,13 @@
  */
 
 import type { DateString, DateTimeString, Float } from './api-types';
+import type { SearchSummary } from './search-types';
 
 // -- shared with Arama ----------------------------------------------------------------------------
 // A live line, a Kaynaklar parse failure and the Panel's parse-failure box carry the same objects
-// as a search row. `search-types.ts` (Arama) declares them too; once both are on one branch these
-// two give way to `export type { RawRef, SearchSummary } from './search-types'`.
+// as a search row (`search-types.ts`).
 
-/** Line `line` of `spool/<source>/<day>.log` (or the sealed file), starting at byte `offset`. */
-export interface RawRef {
-  source: string;
-  day: DateString;
-  line: number;
-  offset: number;
-}
-
-/** The typed fields of a line, for its summary (only those the line has). */
-export interface SearchSummary {
-  srcip?: string | null;
-  srcport?: number | null;
-  dstip?: string | null;
-  dstport?: number | null;
-  natip?: string | null;
-  natport?: number | null;
-  action?: string | null;
-  domain?: string | null;
-  url?: string | null;
-  app?: string | null;
-  category?: string | null;
-  user?: string | null;
-  mac?: string | null;
-  proto?: string | null;
-  policy?: string | null;
-  interface?: string | null;
-  vlan_id?: number | null;
-}
+export type { RawRef, SearchSummary } from './search-types';
 
 // -- requests and answers -------------------------------------------------------------------------
 

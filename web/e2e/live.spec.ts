@@ -3,14 +3,15 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockApi, type MockOptions } from './mock-api';
 import { GAP_TEXTS, liveLine, mockLive, type LiveMock } from './mock-live';
-import { RAW, SAMPLE_TODAY } from './samples';
+import { CATALOGUE, mockSearch } from './mock-search';
+import { LIVE, RAW, SAMPLE_TODAY, type LiveEventSample } from './samples';
 
 /**
  * Canlı Akış (contract 2.14.4–2.14.6 and 2.22.3, `search.read` + KVKK): the filter as one query,
  * the two-step stream (POST, then a GET read with fetch and `X-Arci-Background: 1`), pause and
  * resume with `Last-Event-ID`, reconnects, the 2,000-line list, the dropped/gap/end banners, the
  * line drawer and the highlight rules (`sessionStorage` only). The API is `mock-live.ts`, whose
- * stream is a real event stream.
+ * stream is a real event stream, with Arama's mock for the field catalogue (`mock-search.ts`).
  */
 
 async function open(
@@ -18,8 +19,19 @@ async function open(
   options: MockOptions = {},
 ): Promise<{ api: MockApi; live: LiveMock }> {
   const api = await mockApi(page, { signedInAs: 'tolga', ...options });
+  await mockSearch(page, api);
   const live = await mockLive(page, api);
   return { api, live };
+}
+
+/** Captured events as the body of one stream GET. */
+function body(events: LiveEventSample[]): string {
+  return events
+    .map(
+      (item) =>
+        `${item.id ? `id: ${item.id}\n` : ''}event: ${item.event}\ndata: ${JSON.stringify(item.data)}\n\n`,
+    )
+    .join('');
 }
 
 function list(page: Page) {
@@ -94,8 +106,23 @@ test.describe('Canlı Akış', () => {
   test('the source menu leaves out unknown senders and the members of a network', async ({
     page,
   }) => {
-    // `GET /search/fields` lists the configured sources and every source ingest has seen.
+    // `GET /search/fields` lists the configured sources and every source ingest has seen
+    // (the router's `_sources`): here a network with two members and an unknown sender.
     await open(page);
+    await page.route('**/api/v1/search/fields', async (route) => {
+      await route.fulfill({
+        json: {
+          ...CATALOGUE,
+          sources: [
+            { name: 'ap', type: 'generic', network: true },
+            { name: 'ap-172.20.10.3', type: 'generic', network: false },
+            { name: 'ap-172.20.10.4', type: 'generic', network: false },
+            ...CATALOGUE.sources,
+            { name: 'unknown-172.20.10.40', type: 'generic', network: false },
+          ],
+        },
+      });
+    });
     await page.goto('/live');
     await page.getByRole('button', { name: 'Kaynaklar: tümü' }).click();
     const menu = page.getByRole('menu');
@@ -109,6 +136,65 @@ test.describe('Canlı Akış', () => {
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Bilinmeyen göndericiler' }).click();
     await expect(page.getByTestId('live-query')).toHaveText('source:ap,unknown-*');
+  });
+
+  test('the captured streams of the real API: lines, a line not in the format, dropped, gap', async ({
+    page,
+  }) => {
+    const { live } = await open(page);
+    // Each GET is one whole captured stream, ended by the captured `end` (no reconnect); "Sürdür"
+    // opens the next one.
+    const [ended] = LIVE.events.end.filter((item) => item.event === 'end');
+    const bodies = [LIVE.events.stream, LIVE.events.dropped, LIVE.events.gap];
+    await page.route('**/api/v1/live/streams/*', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.fallback();
+        return;
+      }
+      const events = bodies.shift() ?? [];
+      const headers = route.request().headers();
+      const id = new URL(route.request().url()).pathname.split('/').pop() ?? '';
+      live.gets.push({
+        id,
+        lastEventId: headers['last-event-id'] ?? null,
+        background: headers['x-arci-background'] === '1',
+      });
+      // The `end` closes the stream on the server too (its slot is free again).
+      const stream = live.streams.get(id);
+      if (stream) stream.closed = true;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+        body: body([...events, ...(ended ? [ended] : [])]),
+      });
+    });
+    const lines = LIVE.events.stream.filter((item) => item.event === 'line');
+    const sources = lines.map((item) => (item.data as { source: string }).source);
+    await page.goto('/live');
+    await page.getByRole('button', { name: 'Başlat', exact: true }).click();
+    await expect(list(page).getByRole('listitem')).toHaveCount(lines.length);
+    for (const name of new Set(sources)) await expect(list(page)).toContainText(name);
+    // The torn fragment of a line (rawlog.invalid): not parsed, no time.
+    await expect(list(page)).toContainText('biçim dışı');
+    const end = (ended?.data ?? {}) as { message_tr?: string };
+    await expect(page.getByTestId('live-end')).toContainText(end.message_tr ?? '-');
+
+    const dropped = LIVE.events.dropped.find((item) => item.event === 'dropped')?.data as {
+      message_tr: string;
+    };
+    await page.getByTestId('live-end').getByRole('button', { name: 'Sürdür' }).click();
+    await expect(page.getByTestId('live-dropped')).toContainText(dropped.message_tr);
+
+    const gap = LIVE.events.gap.find((item) => item.event === 'gap')?.data as {
+      message_tr: string;
+    };
+    await page.getByTestId('live-end').getByRole('button', { name: 'Sürdür' }).click();
+    await expect(page.getByText(gap.message_tr)).toBeVisible();
+    expect(live.gets).toHaveLength(3);
+    expect(live.gets.every((get) => get.background)).toBe(true);
   });
 
   test('a streamed body: hello, lines, dropped and end', async ({ page }) => {

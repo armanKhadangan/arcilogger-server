@@ -15,9 +15,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { currentLang } from '@/lib/i18n';
+import type { FieldCatalogue } from '@/lib/search-types';
 import { cn } from '@/lib/utils';
 
-import type { LiveCatalogue } from './live-hooks';
 import { liveQuery, menuSources, type LiveFilter } from './live-model';
 
 function toggled(list: readonly string[], value: string): string[] {
@@ -66,7 +66,7 @@ export function LiveFilters({
   filter: LiveFilter;
   onChange: (filter: LiveFilter) => void;
   onSubmit: () => void;
-  catalogue: LiveCatalogue | undefined;
+  catalogue: FieldCatalogue | undefined;
 }) {
   const { t } = useTranslation();
   const english = currentLang() === 'en';

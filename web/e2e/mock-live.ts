@@ -1,7 +1,7 @@
 /**
- * The mocked live tail API (`/live`, Wave 2 contract 2.14.4–2.14.6) of the E2E tests, with the
- * part of `GET /search/fields` Canlı Akış's filters read. Answers have the exact shapes of
- * `src/lib/live-types.ts`, the error codes and Turkish/English texts of contract 2.20 and the
+ * The mocked live tail API (`/live`, Wave 2 contract 2.14.4–2.14.6) of the E2E tests. The answers
+ * start from the ones captured from the real API (`samples/live.json`: the stream's answer and
+ * `hello`, its limits, the hub's lines, the `gap` and `end` texts and the refusals) and follow the
  * permission rules of the router: `POST /live/streams` needs `search.read` and the accepted KVKK
  * notice (a strict body, like the API's `extra="forbid"`), `GET` and `DELETE` the stream's owner.
  * Installed after `mockApi` (`page.route`: the newest route wins), it shares the main mock's
@@ -13,9 +13,9 @@
  * API does. A test pushes lines and events with `send`/`event`, drops the connection with
  * `drop`, forgets every stream with `restart` (the API restarted: the next GET is a 404) and
  * replays missed lines from the stream's history on a reconnect with `Last-Event-ID`, like the
- * hub's buffer. Lines are the example network's; the first ones are captured raw lines
- * (`samples/raw.json`), so their raw drawer opens. Integration replaces these answers with the
- * captured `samples/live.json`.
+ * hub's buffer. The first lines are captured raw lines (`samples/raw.json`), so their raw drawer
+ * opens; the others are the hub's captured firewall line, numbered on. The field catalogue the
+ * filters read is Arama's mock (`mock-search.ts`).
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -28,41 +28,53 @@ import type {
   LiveEnd,
   LiveGap,
   LiveHello,
-  LiveLimits,
   LiveLine,
   LiveStatus,
   LiveStreamOut,
 } from '../src/lib/live-types';
 
 import type { MockApi, MockUser, RecordedCall } from './mock-api';
-import { RAW, SAMPLE_TODAY } from './samples';
+import { CATALOGUE } from './mock-search';
+import { copy, LIVE, RAW, SAMPLE_TODAY } from './samples';
 
-/** Texts of the live tail API (contract 2.20, `arcilogger_api.live.messages`). */
+/** A captured refusal's texts, with `{field}` where the capture named one. */
+function capturedTexts(code: string): [string, string] {
+  const error = LIVE.errors[code]?.body.error;
+  if (!error) throw new Error(`no captured live tail error ${code}`);
+  const field = (error.details as { params?: { field?: string } } | undefined)?.params?.field;
+  const fill = (text: string) => (field ? text.replaceAll(`“${field}”`, '“{field}”') : text);
+  return [fill(error.message_tr), fill(error.message_en)];
+}
+
+/** The data of the first captured event `name` of the stream `set`. */
+function capturedEvent(set: keyof typeof LIVE.events, name: string): unknown {
+  const found = LIVE.events[set].find((item) => item.event === name);
+  if (!found) throw new Error(`no captured ${name} event in ${set}`);
+  return copy(found.data);
+}
+
+/** Texts of the live tail API (captured; `live_unavailable` from contract 2.20). */
 const TEXTS: Record<string, [string, string]> = {
-  live_stream_limit: [
-    'Aynı anda en fazla 2 canlı akış açabilirsiniz (sunucuda toplam 4); başka bir sekmedeki akışı kapatın.',
-    'You can have at most 2 live tails open at a time (server total 4); close the one in another tab.',
-  ],
-  live_stream_not_found: [
-    'Canlı akış bulunamadı (kapatılmış ya da sunucu yeniden başlamış olabilir).',
-    'Live tail not found (it was closed or the server restarted).',
-  ],
+  live_stream_limit: capturedTexts('live_stream_limit'),
+  live_stream_not_found: capturedTexts('live_stream_not_found'),
+  search_unknown_field: capturedTexts('search_unknown_field'),
+  // Not captured: the capture's spool folder is readable.
   live_unavailable: [
     'Ham kayıt klasörü okunamıyor; canlı akış başlatılamadı. Sistem yöneticisine bildirin.',
     'The raw spool folder cannot be read; the live tail cannot start. Tell the administrator.',
   ],
-  search_unknown_field: [
-    '“{field}” diye bir alan yok. Alan listesi için “?” düğmesine basın; metin olarak aramak için tırnak içine alın.',
-    'There is no field “{field}”. Press “?” for the list of fields; put it in quotes to search for it as text.',
-  ],
 };
 
-/** `end` texts (contract 2.20; the session codes reuse the sign-in texts). */
+const TIME_LIMIT = capturedEvent('end', 'end') as LiveEnd;
+const GAP = capturedEvent('gap', 'gap') as LiveGap;
+const HELLO = capturedEvent('stream', 'hello') as LiveHello;
+
+/**
+ * `end` texts: `time_limit` captured, the others from contract 2.20 (the session codes reuse the
+ * sign-in texts).
+ */
 export const END_TEXTS: Record<string, [string, string]> = {
-  time_limit: [
-    'Canlı akış 60 dakika sonra durduruldu (gözetimsiz ekran). Sürdürmek için “Sürdür”e basın.',
-    'The live tail stopped after 60 minutes (unattended screen). Press “Resume” to continue.',
-  ],
+  [TIME_LIMIT.code]: [TIME_LIMIT.message_tr, TIME_LIMIT.message_en],
   slow_client: [
     'Bağlantı satırlara yetişemedi; akış durduruldu. Filtreyi daraltıp yeniden başlatın.',
     'The connection could not keep up; the stream stopped. Narrow the filter and start again.',
@@ -78,78 +90,17 @@ export const END_TEXTS: Record<string, [string, string]> = {
   ],
 };
 
-export const GAP_TEXTS: [string, string] = [
-  "Aradaki satırlar gösterilemedi; bu aralığı Arama'da açabilirsiniz.",
-  'The lines in between could not be shown; you can open this interval in Search.',
-];
+export const GAP_TEXTS: [string, string] = [GAP.message_tr, GAP.message_en];
 
-const LIMITS: LiveLimits = {
-  max_lines_per_second: 100,
-  keepalive_seconds: 15,
-  buffer_lines: 5000,
-  max_minutes: 60,
-};
+/** The administrator's stream as the API opened it (its folders and limits). */
+const OPENED = LIVE.open.admin;
 
-/** Fields the mocked parser knows (a query naming another one is refused, as by the API). */
-const FIELDS = new Set([
-  'source',
-  'sender',
-  'type',
-  'subtype',
-  'host',
-  'program',
-  'severity',
-  'error',
-  'srcip',
-  'dstip',
-  'ip',
-  'srcport',
-  'dstport',
-  'proto',
-  'action',
-  'domain',
-  'user',
-  'mac',
-  'vlan',
-  'department',
-  'text',
-]);
-
-/**
- * The parts of the field catalogue the filters read (`GET /search/fields`). Its sources are what
- * the router's `_sources` answers: the configured ones and every `sources` row ingest has made
- * (network members and unknown senders included), sorted by name.
- */
-export const CATALOGUE = {
-  fields: [],
-  kinds: [
-    { key: 'traffic', label_tr: 'Trafik', label_en: 'Traffic' },
-    { key: 'web', label_tr: 'Web filtresi', label_en: 'Web filter' },
-    { key: 'dns', label_tr: 'DNS', label_en: 'DNS' },
-    { key: 'event', label_tr: 'FortiGate olayı', label_en: 'FortiGate event' },
-    { key: 'dhcp', label_tr: 'DHCP', label_en: 'DHCP' },
-    { key: 'arp', label_tr: 'ARP', label_en: 'ARP' },
-    { key: 'account', label_tr: 'Oturum açma', label_en: 'Logins' },
-    { key: 'syslog', label_tr: 'Genel syslog', label_en: 'Generic syslog' },
-    { key: 'unknown', label_tr: 'Tanınmayan', label_en: 'Unrecognised' },
-  ],
-  sources: [
-    { name: 'ap', type: 'generic', network: true },
-    { name: 'ap-172.20.10.3', type: 'generic', network: false },
-    { name: 'ap-172.20.10.4', type: 'generic', network: false },
-    { name: 'core-r1', type: 'mikrotik', network: false },
-    { name: 'fortigate', type: 'fortigate', network: false },
-    { name: 'unknown-172.20.10.40', type: 'generic', network: false },
-  ],
-  limits: {
-    max_chars: 1000,
-    max_clauses: 16,
-    max_values: 20,
-    max_terms: 5,
-    max_days: 31,
-    page_size_max: 500,
-  },
-};
+/** Fields and aliases of the catalogue (a query naming another one is refused, as by the API). */
+const FIELDS = new Set(
+  CATALOGUE.fields.flatMap((field) =>
+    [field.name, ...field.aliases].map((name) => name.toLowerCase()),
+  ),
+);
 
 /** 15:00 site time on the sample day, as an ISO time `seconds` later. */
 function received(seconds: number): string {
@@ -161,9 +112,15 @@ const CAPTURED = Object.values(RAW.lines)
   .filter((line) => line.source === 'core-r1' && line.day === '2026-10-09')
   .sort((a, b) => a.line - b.line);
 
+/** The hub's captured firewall line (accepted traffic), the model of the generated ones. */
+const TRAFFIC = LIVE.events.stream
+  .filter((item) => item.event === 'line')
+  .map((item) => item.data as LiveLine)
+  .find((line) => line.kind === 'traffic' && line.summary.action === 'accept');
+
 /**
  * Line number `n` (from 1) of the mocked spool: the captured core-r1 lines first (their raw
- * drawer opens), then FortiGate traffic of the example network, one denied in five.
+ * drawer opens), then the hub's captured firewall line with other clients, one denied in five.
  */
 export function liveLine(n: number, overrides: Partial<LiveLine> = {}): Omit<LiveLine, 'seq'> {
   const captured = CAPTURED[n - 1];
@@ -187,24 +144,20 @@ export function liveLine(n: number, overrides: Partial<LiveLine> = {}): Omit<Liv
       ...overrides,
     };
   }
+  if (!TRAFFIC) throw new Error('no captured firewall line');
   const client = `172.20.42.${(n % 200) + 20}`;
   const action = n % 5 === 0 ? 'deny' : 'accept';
+  const model = copy(TRAFFIC);
   return {
+    ...model,
     received: received(n),
-    source: 'fortigate',
-    sender: '172.31.255.1',
     day: SAMPLE_TODAY,
     line: n,
     offset: n * 400,
-    kind: 'traffic',
-    type: 'traffic',
-    subtype: 'forward',
-    summary: { srcip: client, dstip: '203.0.113.10', dstport: 443, action, proto: 'tcp' },
-    text: `<189>date=${SAMPLE_TODAY} type="traffic" subtype="forward" srcip=${client} dstip=203.0.113.10 dstport=443 proto=6 action="${action}" n=${n}`,
-    truncated: false,
-    parse_error: null,
-    parsed: true,
-    parse_skipped: false,
+    summary: { ...model.summary, srcip: client, action },
+    text: model.text
+      .replace(/srcip=\S+/, `srcip=${client}`)
+      .replace(/action="\w+"/, `action="${action}"`),
     ...overrides,
   };
 }
@@ -263,7 +216,6 @@ export class LiveMock {
       this.stop();
     });
     await page.route('**/api/v1/live/**', (route, request) => this.handle(route, request));
-    await page.route('**/api/v1/search/fields', (route, request) => this.handle(route, request));
   }
 
   /** Close the stream server (the page closes it on its own). */
@@ -430,10 +382,6 @@ export class LiveMock {
   }
 
   private answer(call: RecordedCall, id: string | null): [number, unknown] {
-    if (call.path === '/search/fields') {
-      const account = this.api.requirePermission(call, 'search.read');
-      return Array.isArray(account) ? account : [200, CATALOGUE];
-    }
     if (call.path === '/live/status') {
       const account = this.api.requirePermission(call, 'search.read');
       if (Array.isArray(account)) return account;
@@ -537,14 +485,10 @@ export class LiveMock {
     this.nextId += 1;
     this.streams.set(id, { id, owner: account.id, q, backfill, closed: false, history: [] });
     const answer: LiveStreamOut = {
+      ...copy(OPENED),
       stream_id: id,
       epoch: this.epoch,
-      expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-      folders: [
-        { folder: 'core-r1', day: SAMPLE_TODAY, start_line: 120 },
-        { folder: 'fortigate', day: SAMPLE_TODAY, start_line: 5_400 },
-      ],
-      limits: LIMITS,
+      expires_at: new Date(Date.now() + OPENED.limits.max_minutes * 60_000).toISOString(),
     };
     return [201, answer];
   }
@@ -564,16 +508,7 @@ export class LiveMock {
       'Cache-Control': 'no-store',
       'X-Accel-Buffering': 'no',
     });
-    const hello: LiveHello = {
-      stream_id: id,
-      epoch: this.epoch,
-      notice_version: '1',
-      folders: [
-        { folder: 'core-r1', day: SAMPLE_TODAY, start_line: 120 },
-        { folder: 'fortigate', day: SAMPLE_TODAY, start_line: 5_400 },
-      ],
-      limits: LIMITS,
-    };
+    const hello: LiveHello = { ...copy(HELLO), stream_id: id, epoch: this.epoch };
     response.write(frame('hello', hello));
     const last = request.headers['last-event-id'];
     const resume = typeof last === 'string' ? /^(.+):(\d+)$/.exec(last) : null;

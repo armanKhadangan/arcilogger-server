@@ -3,14 +3,15 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockApi } from './mock-api';
 import { mockSources } from './mock-sources';
-import { RAW, SAMPLE_TODAY } from './samples';
+import { RAW, SAMPLE_TODAY, SOURCES } from './samples';
 
 /**
  * Kaynaklar (contract 2.16 and 2.22.4, `sources.read`): every source with its state, networks
  * with their members under them, unknown senders, the drawer's volume, latest lines (audited,
  * only with a raw-line permission and only when the tab opens), gaps and parse failures,
  * "Kaynak olarak tanımla" (Ayarlar → Kaynaklar opens filled in) and the licence strip. The API is
- * `mock-sources.ts` on top of `mock-api.ts`.
+ * `mock-sources.ts` on top of `mock-api.ts`; one case runs the page on the captured answers of the
+ * real API (`samples/sources.json`) as they are.
  */
 
 async function open(page: Page, options: Parameters<typeof mockApi>[1] = {}): Promise<MockApi> {
@@ -98,6 +99,95 @@ test.describe('Kaynaklar', () => {
     await expect(
       page.getByRole('link', { name: "Ayarlar → Kaynaklar'da düzenle" }),
     ).toHaveAttribute('href', '/settings/sources');
+  });
+
+  test('the captured answers of the real API: overview, details, last lines', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await page.route('**/api/v1/sources**', async (route) => {
+      const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, '');
+      api.calls.push({
+        method: route.request().method(),
+        path,
+        query: new URL(route.request().url()).searchParams,
+        body: undefined,
+        raw: null,
+        contentType: null,
+        csrf: null,
+        background: route.request().headers()['x-arci-background'] === '1',
+      });
+      const found = /^\/sources\/([^/]+)(\/tail)?$/.exec(path);
+      const name = found?.[1] ? decodeURIComponent(found[1]) : '';
+      const tails: Record<string, unknown> = {
+        'core-r1': SOURCES.tail['core-r1'],
+        [SOURCES.tail.no_file_today.source]: SOURCES.tail.no_file_today,
+      };
+      const answer =
+        path === '/sources' ? SOURCES.overview : found?.[2] ? tails[name] : SOURCES.detail[name];
+      const refusal = SOURCES.errors.source_not_found;
+      await route.fulfill(
+        answer ? { json: answer } : { status: refusal?.status ?? 404, json: refusal?.body },
+      );
+    });
+    const items = SOURCES.overview.items;
+    await page.goto('/sources');
+    await expect.poll(() => names(page)).toEqual(items.map((item) => item.name));
+    const configured = items.filter(
+      (item) => item.configured && item.network_of === null && item.enabled,
+    );
+    const active = configured.filter((item) => item.state === 'active');
+    await expect(page.getByTestId('sources-summary')).toContainText(
+      `${active.length}/${configured.length} kaynak etkin`,
+    );
+    for (const item of items)
+      if (item.address) await expect(row(page, item.name)).toContainText(item.address);
+    const unknown = items.find((item) => item.unknown);
+    if (!unknown?.suggested) throw new Error('the capture has no unknown sender');
+    await expect(row(page, unknown.name)).toContainText('Bilinmeyen');
+
+    await row(page, 'core-r1').click();
+    const sheet = page.getByRole('dialog', { name: 'core-r1' });
+    const detail = SOURCES.detail['core-r1'];
+    await expect(
+      sheet
+        .getByRole('table', { name: 'Son 14 günün satır ve ayrıştırma hatası sayıları' })
+        .getByRole('row'),
+    ).toHaveCount((detail?.daily.length ?? 0) + 1);
+    await sheet.getByRole('tab', { name: 'Son satırlar' }).click();
+    const tail = SOURCES.tail['core-r1'];
+    await expect(
+      sheet.getByRole('table', { name: 'Kaynağın son satırları' }).getByRole('row'),
+    ).toHaveCount(tail.lines.length + 1);
+    const day = (tail.day ?? '').split('-').reverse().join('.');
+    await expect(sheet).toContainText(`${day} · satır ${tail.from_line}–${tail.to_line}`);
+    await sheet.getByRole('tab', { name: 'Boşluklar' }).click();
+    await expect(
+      sheet.getByRole('table', { name: 'Son 30 günün kayıt boşlukları' }).getByRole('row'),
+    ).toHaveCount((detail?.gaps.length ?? 0) + 1);
+    await sheet.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
+    for (const failure of detail?.parse_failures ?? [])
+      await expect(sheet).toContainText(failure.pattern);
+
+    await page.goto('/sources?source=fortigate');
+    const fortigate = page.getByRole('dialog', { name: 'fortigate' });
+    await fortigate.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
+    for (const failure of SOURCES.detail.fortigate?.parse_failures ?? [])
+      await expect(fortigate).toContainText(failure.error ?? failure.pattern);
+
+    // The capture has no detail of the silent switch: the refusal is shown in the drawer.
+    await page.goto(`/sources?source=${SOURCES.tail.no_file_today.source}`);
+    await expect(
+      page.getByRole('dialog', { name: SOURCES.tail.no_file_today.source }),
+    ).toContainText(SOURCES.errors.source_not_found?.body.error.message_tr ?? '-');
+
+    await page.goto(`/sources?source=${unknown.name}`);
+    await page
+      .getByRole('dialog', { name: unknown.name })
+      .getByRole('button', { name: 'Kaynak olarak tanımla' })
+      .click();
+    await expect(page).toHaveURL(/\/settings\/sources$/);
+    const dialog = page.getByRole('dialog', { name: 'Kaynak ekle' });
+    await expect(dialog.getByLabel('Ad', { exact: true })).toHaveValue(unknown.suggested.name);
+    await expect(dialog.getByLabel('Adres')).toHaveValue(unknown.address ?? '');
   });
 
   test('filters: silent and never-heard sources, unknown senders; in the address', async ({

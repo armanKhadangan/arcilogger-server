@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockOptions } from './mock-api';
 import { mockSources } from './mock-sources';
-import { DASHBOARD, RAW, SAMPLE_TODAY } from './samples';
+import { DASHBOARD, RAW, SAMPLE_TODAY, SOURCES } from './samples';
 
 /** The Panel's blocks (spec 12.3 item 2) by their test ids, in page order. */
 const ALL = [
@@ -172,6 +172,31 @@ test('the live blocks refresh every 30 s in the background', async ({ page }) =>
 test.describe('Panel — parse failures', () => {
   test.beforeEach(async ({ page }) => {
     await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('the captured box of the real API', async ({ page }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
+    // `GET /dashboard/summary` as the API answered it with today's parse failures.
+    await page.route('**/api/v1/dashboard/summary', (route) =>
+      route.fulfill({ json: SOURCES.dashboard }),
+    );
+    const box = SOURCES.dashboard.parse_failures;
+    if (!box) throw new Error('the capture has no parse-failure box');
+    const number = (value: number) => new Intl.NumberFormat('tr-TR').format(value);
+    await page.goto('/');
+    const card = page.getByTestId('card-parse-failures');
+    await expect(card).toContainText(`Binde ${number(box.permille ?? 0)}`);
+    await expect(card).toContainText(
+      `Bugün ${number(box.failures)} hata / ${number(box.lines)} satır`,
+    );
+    const patterns = card.getByTestId('parse-patterns').getByRole('listitem');
+    await expect(patterns).toHaveCount(box.top_patterns.length);
+    for (const [index, pattern] of box.top_patterns.entries()) {
+      await expect(patterns.nth(index)).toContainText(pattern.pattern);
+      await expect(patterns.nth(index)).toContainText(
+        `${pattern.source} · ${number(pattern.count)} satır`,
+      );
+    }
   });
 
   test("today's failures, the patterns, the example line and Arama", async ({ page }) => {

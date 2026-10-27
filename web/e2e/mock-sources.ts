@@ -1,8 +1,9 @@
 /**
  * The mocked sources API (`/sources`, Wave 2 contract 2.16) and the Panel's parse-failure box
- * (2.17) of the E2E tests: hand-made answers in the exact shapes of `src/lib/sources-types.ts` and
- * `api-types.ts`, the error codes and texts of the API (`source_not_found`), and the permission
- * rules of the router: the list and the detail need `sources.read` (a pattern's `error` only with
+ * (2.17) of the E2E tests: the refusals as the API answered them (`samples/sources.json`), the
+ * site's records in the shapes of `src/lib/sources-types.ts` and `api-types.ts` — the capture has
+ * four sources, the example site here every state; `sources.spec.ts` and `dashboard.spec.ts` also
+ * run the pages on the captured answers as they are —, and the permission rules of the router: the list and the detail need `sources.read` (a pattern's `error` only with
  * `search.read` or `lookup.run` and the accepted KVKK notice, the raw-line rule), the last lines
  * also `search.read` or `lookup.run` and the accepted KVKK notice. Installed after `mockApi` (`page.route`: the newest route wins), it shares
  * the main mock's session, users and recorded calls.
@@ -11,8 +12,8 @@
  * members, a silent switch that is not expected to send, a source switched off, a configured
  * source that never sent, an unknown sender in the site's network (`unknown-172.20.10.40`, the
  * "Kaynak olarak tanımla" case) and one promoted to `edge-1`. Example and tail lines are captured
- * raw lines (`samples/raw.json`), so their raw drawer opens. Integration replaces these answers
- * with the captured `samples/sources.json`.
+ * raw lines (`samples/raw.json`), so their raw drawer opens (the capture's own lines of today are
+ * not in `raw.json`).
  */
 
 import { createHash } from 'node:crypto';
@@ -29,14 +30,7 @@ import type {
 } from '../src/lib/sources-types';
 
 import type { MockApi, MockUser, RecordedCall } from './mock-api';
-import { RAW, SAMPLE_TODAY } from './samples';
-
-const TEXTS: Record<string, [string, string]> = {
-  source_not_found: [
-    'Bu adla bir log kaynağı tanımlı değil veya hiç görülmedi.',
-    'No log source with this name is configured or has been seen.',
-  ],
-};
+import { copy, RAW, SAMPLE_TODAY, SOURCES } from './samples';
 
 /** 15:00 site time on the sample day (the tests' browser clock, `useSampleClock`). */
 const NOW = `${SAMPLE_TODAY}T15:00:00+03:00`;
@@ -407,10 +401,10 @@ export class SourcesMock {
     });
   }
 
+  /** A refusal of this router as the API answered it (captured), else the main mock's. */
   private error(status: number, code: string): [number, unknown] {
-    const texts = TEXTS[code];
-    if (!texts) return this.api.error(status, code);
-    return [status, { error: { code, message_tr: texts[0], message_en: texts[1] } }];
+    const sample = SOURCES.errors[code];
+    return sample ? [sample.status, copy(sample.body)] : this.api.error(status, code);
   }
 
   private rawAllowed(account: MockUser): boolean {
@@ -436,8 +430,8 @@ export class SourcesMock {
     const name = found?.[1] ? decodeURIComponent(found[1]) : '';
     const item = this.items.find((entry) => entry.name === name);
     if (found?.[2]) {
-      if (!this.rawAllowed(account)) return this.api.error(403, 'forbidden');
-      if (!account.privacy_accepted) return this.api.error(403, 'privacy_notice_required');
+      if (!this.rawAllowed(account)) return this.error(403, 'forbidden');
+      if (!account.privacy_accepted) return this.error(403, 'privacy_notice_required');
       if (!item) return this.error(404, 'source_not_found');
       const tail = tailOf(item.name);
       const limit = Number(call.query.get('limit') ?? 50);
