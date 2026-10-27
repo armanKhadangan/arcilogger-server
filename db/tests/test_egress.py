@@ -10,6 +10,7 @@ import pytest
 from arcilogger_db.egress import (
     EGRESS_MODES,
     ERROR_CODES,
+    IMPLICIT_CATCH_ALL,
     NOT_PUBLIC,
     PORT_PRESERVATION,
     PRIVATE_OR_SHARED,
@@ -91,6 +92,9 @@ def test_catch_all_public_unknown_and_claims() -> None:
     assert not line.claims_public("2001:db8::1")  # IPv6 is never claimed
     dynamic = _exit("isp_nat", public=("198.51.100.77",), transips=("100.64.13.9",), dynamic=True)
     assert dynamic.public_unknown
+    assert IMPLICIT_CATCH_ALL.name == ""
+    assert IMPLICIT_CATCH_ALL.catch_all
+    assert IMPLICIT_CATCH_ALL.public_unknown
     internal = _exit("internal", transips=("172.20.99.1",))
     assert not internal.catch_all  # only an isp_nat exit is the catch-all
     assert not internal.public_unknown

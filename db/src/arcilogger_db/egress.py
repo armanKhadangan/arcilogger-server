@@ -154,6 +154,20 @@ class Egress:
         return _contains(self.transips, ip)
 
 
+#: The one exit assumed while ``nat.egresses`` is empty: a catch-all without a name (shown as
+#: ``""``), the pure double NAT of earlier versions.
+IMPLICIT_CATCH_ALL: Final = Egress(
+    name="",
+    label="",
+    mode="isp_nat",
+    public=(),
+    public_dynamic=False,
+    transips=(),
+    interfaces=(),
+    port_preservation="unknown",
+)
+
+
 def _contains(networks: tuple[IPv4Network, ...], ip: str) -> bool:
     address = ipaddress.ip_address(ip)
     return any(address in network for network in networks)

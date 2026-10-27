@@ -169,9 +169,17 @@ class Evidence:
         appcat: str | None = None,
         dstinetsvc: str | None = None,
         service: str | None = None,
+        srcintf: str | None = None,
+        dstintf: str | None = None,
+        srcmac: str | None = None,
     ) -> int:
         """A traffic log; byte counters, deltas, application and ISDB service are optional
-        (the usage golden datasets set them; the lookup tests do not need them)."""
+        (the usage golden datasets set them; the lookup tests do not need them).
+
+        ``srcintf``/``dstintf`` (the session's FortiGate interfaces, e.g. ``vlan42``/``wan1``)
+        and ``srcmac`` (device identification on the source interface, ADR-0016) are written
+        only when given, so every line written without them stays byte for byte as before;
+        ``srcmac`` goes into the raw line only."""
         local = to_site(time)
         logid = "0000000020" if interim else "0000000013"
         nat = (
@@ -195,13 +203,17 @@ class Evidence:
             for key, value in optional.items()
             if value is not None
         )
+        source_side = f' srcintf="{srcintf}"' if srcintf is not None else ""
+        destination_side = f' dstintf="{dstintf}"' if dstintf is not None else ""
+        device = f' srcmac="{srcmac}"' if srcmac is not None else ""
         message = (
             f'<189>date={local:%Y-%m-%d} time={local:%H:%M:%S} devname="FIREWALL-01" '
             f'devid="FGT0000000000000" eventtime={int(time.timestamp() * 1e9)} tz="+0300" '
             f'logid="{logid}" type="traffic" subtype="forward" level="notice" vd="root" '
-            f"srcip={srcip} srcport={srcport} dstip={dstip} dstport={dstport} "
+            f"srcip={srcip} srcport={srcport}{source_side} dstip={dstip} dstport={dstport}"
+            f"{destination_side} "
             f'sessionid={sessionid or srcport} proto={proto} action="{action}"{nat} '
-            f"duration={duration or 0}{extra}"
+            f"duration={duration or 0}{extra}{device}"
         )
         common = self._write("fortigate", FIREWALL, time, message)
         return self._add(
@@ -223,8 +235,10 @@ class Evidence:
                 proto=proto,
                 srcip=srcip,
                 srcport=srcport,
+                srcintf=srcintf,
                 dstip=dstip,
                 dstport=dstport,
+                dstintf=dstintf,
                 transip=transip,
                 transport=(transport or srcport) if transip else None,
                 trandisp=trandisp if transip else None,
