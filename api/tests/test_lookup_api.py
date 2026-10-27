@@ -695,7 +695,7 @@ def test_who_sees_which_lookup(
 
 
 def _slow_sql(session: Session, *args: Any, **kwargs: Any) -> Any:
-    session.execute(text("SELECT pg_sleep(5)"))
+    session.execute(text("SELECT pg_sleep(60)"))
     raise AssertionError("the statement timeout did not stop the query")
 
 
@@ -719,7 +719,11 @@ def test_a_slow_lookup_is_stopped_with_a_clear_error(
     who = signed_in(client, login_as, app_session_factory)
     started = time.monotonic()
     response = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC))
-    assert time.monotonic() - started < 3
+    # No hanging request: an uncancelled pg_sleep(60) would hold it for 60 s. The request also
+    # does work outside the lookup's budget (sign-in, rollback, the lookup.run_failed audit write
+    # and spool flush, the 504), which takes well over a second on a loaded CI runner, so the
+    # wall clock only gets this loose bound; the budget itself is checked on elapsed_ms below.
+    assert time.monotonic() - started < 20
     assert response.status_code == 504, response.text
     error = response.json()["error"]
     assert error["code"] == "lookup_timeout"
@@ -728,6 +732,9 @@ def test_a_slow_lookup_is_stopped_with_a_clear_error(
     (failed,) = audits(app_session_factory, "lookup.run_failed")
     assert failed.actor_id == who.user_id
     assert (failed.details["reason"], failed.details["limit_seconds"]) == ("timeout", 1)
+    # The 1 s budget stopped the lookup (the router times only run_lookup, ~1.0 s for _slow_sql,
+    # ~1.2 s for _slow_python), not a later timeout: a budget of 4 s would give ~4000 here.
+    assert failed.details["elapsed_ms"] < 3000
     assert failed.details["query"]["internal_ip"] == PC
     assert failed.details["request"]["file_no"] == FILE_NO
     assert audits(app_session_factory, "lookup.run") == []
