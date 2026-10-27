@@ -66,7 +66,8 @@ def _placeholders(text: str) -> set[str]:
 
 def _labels(language: str) -> dict[str, Any]:
     """The web interface's labels in ``language`` (``web/src/locales``)."""
-    return json.loads((LOCALES / f"{language}.json").read_text(encoding="utf-8"))
+    labels: dict[str, Any] = json.loads((LOCALES / f"{language}.json").read_text(encoding="utf-8"))
+    return labels
 
 
 def test_every_new_key_is_in_the_catalogue() -> None:
