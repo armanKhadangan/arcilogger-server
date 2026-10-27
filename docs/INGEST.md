@@ -332,6 +332,23 @@ each is SQLAlchemy building the multi-row `INSERT`), together 0.9 s, 2.2 % of an
 and 1.1–1.2 s, 5–6 % of a run with 2 workers: there it runs in the service process, at about
 50–60 % of one core, so it is partly hidden. Re-measure on site with the real mix (below).
 
+**After the cached upsert (2026-10-27).** `upsert_counts` now sends one fixed `unnest`
+statement instead of building a multi-row `INSERT` per batch (above). The same load-generator
+day, ABBA twice, 8 runs per tree and worker count (load average 2.9–4.2, another agent's work
+sharing the machine); min–max (median) lines/s:
+
+| Load-generator day | in-process | `--workers 2` |
+|---|---|---|
+| Wave 2 before the change / after it | 5,220–5,742 (5,562) / 4,930–5,757 (5,548), −0.3 % | 9,635–10,674 (9,887) / 9,219–10,384 (9,886), −0.0 % |
+| Wave 1 / Wave 2 after the change | 5,026–5,520 (5,340) / 4,781–5,466 (5,132), −3.9 % | 9,043–10,428 (9,654) / 9,177–10,396 (9,622), −0.3 % |
+
+The change saves CPU in the service process but no throughput measurable on this machine.
+**The 5 % gate is met on average, but not shown with margin:** with 2 workers (the default) one
+8-run campaign ranged −0.2 % to −6.7 % before the change and −0.3 % after it, in-process −1.4 %
+to −5.5 % and now −3.9 %; this shared 4-vCPU VM cannot tell such differences apart. It stays an
+on-site acceptance item with the real mix (`bench_throughput.py --repeat 3` and a day of the
+site's own spool, Wave 1 against Wave 2).
+
 Earlier rounds, while the test runs of the other Wave 2 packages shared the machine (load average
 2–9, 30–100 % busy): one run per tree and round, and one load-generator day of 217,875 lines
 (18 % web filter lines, 800 summary keys) besides; min–max (median) lines/s:
