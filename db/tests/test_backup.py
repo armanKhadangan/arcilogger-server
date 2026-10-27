@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from sqlalchemy import URL, Engine, make_url, select, text
@@ -229,6 +229,26 @@ def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             backup_module, "_tool_names", lambda name: (f"{name}.exe", f"{name}.cmd")
         )
     return tmp_path
+
+
+class _Usage(NamedTuple):
+    total: int
+    used: int
+    free: int
+
+
+@pytest.fixture(autouse=True)
+def roomy_disk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A large, mostly empty backup disk: ``run_backup`` (and ``arcilogger-db backup run``) reads
+    the real free space by default (``disk_usage=shutil.disk_usage``), and the test machine's
+    disk is shared with the other xdist workers, earlier basetemps and the database; below the
+    10 GiB of ``[backup] min_free_gb`` every backup here failed with "not enough free space".
+    The refusal itself: ``test_refused_without_free_space``, which passes its own disk."""
+    gib = 1024**3
+    roomy = _Usage(1000 * gib, 100 * gib, 900 * gib)
+    defaults = run_backup.__kwdefaults__  # the default is bound when run_backup is defined
+    assert defaults is not None
+    monkeypatch.setitem(defaults, "disk_usage", lambda path: roomy)
 
 
 # -- names, folders, tools ------------------------------------------------------------------------
