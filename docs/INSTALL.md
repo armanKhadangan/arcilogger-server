@@ -888,8 +888,10 @@ million log lines a day, about 18 % of them web filter lines, 400 days hold abou
 times as long. Ingest is stopped while the schema is migrated; the collector keeps writing the
 spool, so nothing is lost and ingest catches up afterwards ([INGEST.md](INGEST.md)). After the
 upgrade the worker job `search.counts_backfill` counts the days loaded before it into Arama's
-summary table, newest day first, for at most a minute every 10 minutes; until a day is counted,
-Arama counts that day's statistics directly (slower, same result). What is still to count:
+summary table every 10 minutes, newest day first: it starts no new file after a minute; one
+file's recount takes about 9 s per million lines (development machine), and the worker's other
+jobs wait for it. Until a day is counted, Arama counts that day's statistics directly (slower,
+same result). What is still to count:
 
 ```powershell
 & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" search-counts status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"

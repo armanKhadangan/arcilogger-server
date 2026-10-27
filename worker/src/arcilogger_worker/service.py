@@ -44,9 +44,10 @@ Jobs (``DEFAULT_JOBS``):
                             Excel) and e-mailed per recipient (:mod:`.reports.runner`)
 ``reports.purge``           daily after 03:20: files of report runs older than
                             ``reports.keep_days`` deleted from ``exports/usage-reports``
-``search.counts_backfill``  every 10 minutes, at most 60 s: the finished files loaded before
-                            the search summary table (``ingest_offsets.counts_from_line``)
-                            counted into ``search_counts``, newest first (:mod:`.search_jobs`)
+``search.counts_backfill``  every 10 minutes, no new file after 60 s: the finished files
+                            loaded before the search summary table
+                            (``ingest_offsets.counts_from_line``) counted into
+                            ``search_counts``, newest first (:mod:`.search_jobs`)
 ==========================  =============================================================
 
 A daily job runs once per site day (Europe/Istanbul) as soon as its time has passed — also

@@ -9,7 +9,8 @@ keys first, so the lines ingest counted meanwhile are not counted twice) and cle
 
 * Every 10 minutes; it starts no new file after :data:`BACKFILL_BUDGET` (60 s), so after an
   upgrade of a large database the files are counted over several runs, newest day first (recent
-  statistics are wanted first).
+  statistics are wanted first). The budget does not cut a file short: one file's recount takes
+  about 9 s per million lines (development machine), and the worker's other jobs wait for it.
 * Only **finished** files (``finished_at`` set: the day is sealed and every line is loaded):
   ingest never writes a finished file again, so a recount cannot race the loader. A file still
   being loaded waits (``waiting`` in the details); until every file of a time range is counted

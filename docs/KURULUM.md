@@ -1027,9 +1027,11 @@ milyon log satırında, bunların yaklaşık %18'i web filtresi satırıyken, 40
 `fg_web` satırı eder: yaklaşık 2 dakika, belleğe sığmıyorsa daha uzun; günde 5 milyon satırda beş
 katı. Şema yükseltilirken ingest durur; toplayıcı spool'a yazmayı sürdürür, hiçbir şey kaybolmaz
 ve ingest ardından yetişir ([INGEST.md](INGEST.md)). Yükseltmeden sonra worker işi
-`search.counts_backfill`, yükseltmeden önce yüklenmiş günleri Arama'nın özet tablosuna sayar: en
-yeni gün önce, 10 dakikada bir en çok bir dakika. Bir gün sayılana kadar Arama o günün
-istatistiklerini doğrudan sayar (daha yavaş, sonuç aynı). Sayılmayı bekleyenler:
+`search.counts_backfill`, yükseltmeden önce yüklenmiş günleri Arama'nın özet tablosuna 10
+dakikada bir, en yeni gün önce sayar: bir dakikadan sonra yeni dosyaya başlamaz; bir dosyanın
+yeniden sayımı milyon satır başına yaklaşık 9 sn sürer (geliştirme makinesi) ve worker'ın öteki
+işleri onu bekler. Bir gün sayılana kadar Arama o günün istatistiklerini doğrudan sayar (daha
+yavaş, sonuç aynı). Sayılmayı bekleyenler:
 
 ```powershell
 & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" search-counts status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
