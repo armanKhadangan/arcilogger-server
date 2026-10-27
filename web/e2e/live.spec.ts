@@ -107,7 +107,8 @@ test.describe('Canlı Akış', () => {
     page,
   }) => {
     // `GET /search/fields` lists the configured sources and every source ingest has seen
-    // (the router's `_sources`): here a network with two members and an unknown sender.
+    // (the router's `_sources`): the captured catalogue's (the core router, the firewall and a
+    // switch) and here a network with two members and an unknown sender.
     await open(page);
     await page.route('**/api/v1/search/fields', async (route) => {
       await route.fulfill({
@@ -131,6 +132,7 @@ test.describe('Canlı Akış', () => {
       /^ap\s*ağ$/,
       'core-r1',
       'fortigate',
+      'switch-3',
     ]);
     await menu.getByRole('menuitemcheckbox', { name: /^ap/ }).click();
     await page.keyboard.press('Escape');

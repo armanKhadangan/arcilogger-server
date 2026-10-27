@@ -1,20 +1,25 @@
 /**
- * The mocked search API (`/search`, Wave 2 contract 2.10) of the E2E tests: hand-made answers in
- * the exact shapes of `src/lib/search-types.ts`, the error codes and Turkish/English texts of
- * contract 2.20, and the permission rules of the router (`search.read` + the accepted KVKK notice;
- * `/search/parse` and `/search/fields` need `search.read` only; export `search.export` plus a
- * re-authentication within 5 minutes; references `evidence.create`). Installed after `mockApi`
- * (`page.route`: the newest route wins), it shares the main mock's session, users and recorded
- * calls. Like the API (every request model `extra="forbid"`), a body with an unknown or without a
- * required field answers 422 `validation_error`; so does a `limit` above the site's
- * `search.page_size_max` (without one: `min(100, page_size_max)` for a run, the search's own for
- * its pages), and a range longer than `search.max_days` answers `search_range_too_long`. Options
- * set those two settings, refuse the next call of a kind with 429 `search_busy` (`Retry-After: 2`)
- * or 504 `search_timeout`, and expire a search.
+ * The mocked search API (`/search`, Wave 2 contract 2.10) of the E2E tests, in the shapes of
+ * `src/lib/search-types.ts` and with the permission rules of the router (`search.read` + the
+ * accepted KVKK notice; `/search/parse` and `/search/fields` need `search.read` only; export
+ * `search.export` plus a re-authentication within 5 minutes; references `evidence.create`).
+ * Installed after `mockApi` (`page.route`: the newest route wins), it shares the main mock's
+ * session, users and recorded calls. Like the API (every request model `extra="forbid"`), a body
+ * with an unknown or without a required field answers 422 `validation_error`; so does a `limit`
+ * above the site's `search.page_size_max` (without one: `min(100, page_size_max)` for a run, the
+ * search's own for its pages), and a range longer than `search.max_days` answers
+ * `search_range_too_long`. Options set those two settings, refuse the next call of a kind with 429
+ * `search_busy` (`Retry-After: 2`) or 504 `search_timeout`, and expire a search.
  *
- * The rows are a small fictional day of the example network (VLAN 42 Planlama, 172.20.42.x,
- * MAC `00:00:5e:00:53:xx`, RFC 5737 public addresses) whose raw references point at the captured
- * raw lines (`samples/raw.json`), so their raw drawer opens. A few queries select a scenario:
+ * What the real API answered is taken from `samples/search.json` (`samples_search.py`): the field
+ * catalogue, the texts of every refusal and notice (contract 2.20, the placeholders filled in
+ * again), and with the option `captured` the captured runs themselves — their pages, the next
+ * page of the captured cursor, their statistics and records, exactly as captured.
+ *
+ * The other runs answer hand rows: a small fictional day of the example network (VLAN 42
+ * Planlama, 172.20.42.x, MAC `00:00:5e:00:53:xx`, RFC 5737 public addresses) whose raw references
+ * point at the captured raw lines (`samples/raw.json`), so their raw drawer opens. They are the
+ * states the capture does not hold. A few queries select a scenario:
  *  - `srcip:172.20.41.0/24`: 250 rows in pages of 100 ("Daha fazla");
  *  - `srcip:172.20.70.0/24`: two clients of a /24 that holds two smaller VLANs (70 Lab A and 71
  *    Lab B, each a /25), so its VLAN and department facets are the value `multiple`;
@@ -22,7 +27,6 @@
  *    reaches the end (`PARTIAL_STEPS` pages);
  *  - `srcip:172.20.42.250`: nothing;
  *  - otherwise the day's rows, filtered by the `type:`, `source:`, `action:` and `srcip:` clauses.
- * Integration replaces these answers with the captured `samples/search.json`.
  */
 
 import { createHash } from 'node:crypto';
@@ -30,7 +34,6 @@ import { createHash } from 'node:crypto';
 import type { Page, Request, Route } from '@playwright/test';
 
 import type {
-  CatalogueField,
   FieldCatalogue,
   Notice,
   ParseErrorItem,
@@ -48,6 +51,7 @@ import type {
 } from '../src/lib/search-types';
 
 import type { MockApi, MockUser, RecordedCall } from './mock-api';
+import { copy, SEARCH } from './samples';
 
 /** The byte order mark of the API's CSV files. */
 const BOM = String.fromCharCode(0xfeff);
@@ -58,77 +62,80 @@ export const PARTIAL_STEPS = 6;
 /** Rows of the `srcip:172.20.41.0/24` scenario. */
 export const MANY_ROWS = 250;
 
-/** Texts of the search API (contract 2.20, `arcilogger_api.search.messages`). */
-const TEXTS: Record<string, [string, string]> = {
-  search_expired: [
-    'Bu aramanın süresi doldu; arama yeniden çalıştırılıyor.',
-    'This search has expired; it is being run again.',
-  ],
-  search_cursor_invalid: [
-    'Sayfa konumu bu aramaya ait değil; aramayı yeniden başlatın.',
-    'The page position does not belong to this search; start the search again.',
-  ],
-  search_event_not_found: [
-    'Kayıt veritabanında bulunamadı.',
-    'The record was not found in the database.',
-  ],
-  search_busy: [
-    'Şu anda çok sayıda arama çalışıyor; birkaç saniye sonra yeniden deneyin.',
-    'Too many searches are running; try again in a few seconds.',
-  ],
-  search_export_running: [
-    'Önceki dışa aktarmanız hâlâ hazırlanıyor.',
-    'Your previous export is still being prepared.',
-  ],
-  saved_search_not_found: ['Kayıtlı arama bulunamadı.', 'Saved search not found.'],
-  saved_search_name_taken: [
-    'Bu adla kayıtlı bir aramanız zaten var.',
-    'You already have a saved search with this name.',
-  ],
-  search_term_too_short: [
-    'Serbest metin en az 3 karakter olmalı.',
-    'Free text must be at least 3 characters long.',
-  ],
-  search_or_unsupported: [
-    'VEYA yalnızca aynı alanın değerleri arasında virgülle yazılır (ör. action:deny,blocked); parantez kullanılamaz.',
-    'OR works only between values of one field, written with commas (e.g. action:deny,blocked); parentheses are not supported.',
-  ],
-  search_range_invalid: [
-    'Zaman aralığı geçersiz: başlangıç bitişten önce olmalı ve ikisinde de saat dilimi bulunmalı.',
-    'Invalid time range: the start must be before the end, and both need a time zone.',
-  ],
-  search_range_too_long: [
-    'Arama aralığı en fazla {days} gün olabilir.',
-    'The search range may span at most {days} days.',
-  ],
-  search_timeout: [
-    'Arama {seconds} saniyede en kısa zaman dilimini (5 dakika) bile tarayamadı. Seçici bir alan ekleyin (ör. srcip:, domain:) ya da biraz sonra yeniden deneyin.',
-    'The search could not scan even the shortest time slice (5 minutes) within {seconds} s. Add a selective field (e.g. srcip:, domain:) or try again a little later.',
-  ],
+/**
+ * The refusals' parameters the mock fills in, by code: their values are found in the captured
+ * texts and turned back into `{name}` placeholders. The two refusals without `details.params`
+ * take the values the capture ran with (`samples_search.py`: the default `search.max_days`, and
+ * `search.request_budget_ms` 500 for the timeout).
+ */
+const FILLED: Record<string, Record<string, string | number> | string[]> = {
+  search_syntax: ['position'],
+  search_unknown_field: ['field'],
+  search_value_invalid: ['value', 'field'],
+  search_range_too_long: { days: SEARCH.fields.limits.max_days },
+  search_timeout: { seconds: 0.5 },
 };
+
+/** A captured text with the values of `params` turned back into `{name}` placeholders. */
+function template(text: string, params: Record<string, unknown>, code: string): string {
+  return Object.entries(params).reduce((found, [name, value]) => {
+    const shown = String(value);
+    if (!found.includes(shown)) throw new Error(`search.json ${code}: "${shown}" not in "${text}"`);
+    return found.split(shown).join(`{${name}}`);
+  }, text);
+}
+
+/**
+ * Texts of the search API: the refusals captured from the real API (`samples/search.json`, the
+ * texts of contract 2.20), with the placeholders of {@link FILLED}.
+ */
+const TEXTS: Record<string, [string, string]> = Object.fromEntries(
+  Object.values(SEARCH.errors).map(({ body: { error } }) => {
+    const filled = FILLED[error.code] ?? [];
+    const captured = (error.details as { params?: Record<string, unknown> } | null | undefined)
+      ?.params;
+    const params = Array.isArray(filled)
+      ? Object.fromEntries(filled.map((name) => [name, captured?.[name]]))
+      : filled;
+    return [
+      error.code,
+      [
+        template(error.message_tr, params, error.code),
+        template(error.message_en, params, error.code),
+      ],
+    ];
+  }),
+);
 
 /** The facet value of a /24 that holds several smaller VLANs, and its labels (`search.stats`). */
 const MULTIPLE = 'multiple';
 const MULTIPLE_VLAN: [string, string] = ['Birden çok VLAN', 'Several VLANs'];
 const MULTIPLE_DEPARTMENT: [string, string] = ['Birden çok departman', 'Several departments'];
 
+/**
+ * The notices of the captured pages and statistics (`samples/search.json`) as templates, and the
+ * two the capture shows none of, in the words of `arcilogger_api.search.messages`.
+ */
 const NOTICES: Record<string, [string, string]> = {
-  vault_only_before: [
-    '{date} öncesindeki kayıtlar veritabanında yok; ham kayıtlar mühürlü arşivdedir (Kanıt Paketi ile alınabilir).',
-    'Records before {date} are not in the database; the raw lines are in the sealed vault (available through an evidence package).',
-  ],
   text_case: [
     'Serbest metinde büyük/küçük harf farkı yalnızca İngilizce harflerde yok sayılır; İ/ı, Ş/ş, Ğ/ğ, Ü/ü, Ö/ö, Ç/ç yazıldığı gibi aranır.',
     'Free text ignores case for English letters only; İ/ı, Ş/ş, Ğ/ğ, Ü/ü, Ö/ö, Ç/ç are matched as typed.',
-  ],
-  query_not_selective: [
-    'Bu sorgu indeks kullanamıyor ve zaman dilimleri halinde taranıyor. Daha hızlı sonuç için srcip:, domain:, mac: veya qname: gibi bir alan ekleyin.',
-    'This query cannot use an index and is scanned in time slices. Add a field such as srcip:, domain:, mac: or qname: for faster results.',
   ],
   department_by_vlan: [
     "Departman, istemci adresinin VLAN'ına tanımlı varsayılan departmandır; kişi ataması değildir.",
     "The department is the default department of the client address's VLAN, not the person's assignment.",
   ],
+  ...Object.fromEntries(
+    [...Object.values(SEARCH.search), ...Object.values(SEARCH.stats)]
+      .flatMap((answer) => answer.notices)
+      .map((item) => [
+        item.code,
+        [
+          template(item.message_tr, item.params, item.code),
+          template(item.message_en, item.params, item.code),
+        ],
+      ]),
+  ),
 };
 
 /** `text` with its `{name}` placeholders filled in. */
@@ -145,122 +152,8 @@ function notice(code: string, params: Record<string, string> = {}): Notice {
 
 // -- the field catalogue (contract 2.4) ---------------------------------------------------------
 
-/**
- * The fields (contract 2.4): name | other names | value form | Turkish and English label | help |
- * the tables where the field alone is index-backed | an example.
- */
-const FIELD_TABLE = `
-source | kaynak | source | Kaynak | Source | Log kaynağının adı; sonunda * olabilir. | The log source's name, with * at its end if needed. | messages | source:fortigate
-sender | gonderen | ip | Gönderen | Sender | Satırı gönderen cihazın adresi. | The address of the device that sent the line. | | sender:172.20.10.1
-type | tur,tip | kind | Tür | Type | Kaydın türü (aşağıdaki liste). | The record's type (the list below). | messages | type:web
-subtype | alttur | text | Alt tür | Subtype | Kaynağın alt türü. | The source's subtype. | | subtype:forward
-host | cihaz | text | Cihaz adı | Host | Satırdaki cihaz adı. | The host name in the line. | | host:firewall*
-program | konu | text | Program / konu | Program / topics | Syslog programı ya da MikroTik konuları. | The syslog program or the MikroTik topics. | | program:dhcp*
-severity | onem | severity | Önem | Severity | emerg…debug ya da 0–7. | emerg…debug or 0–7. | | severity:<=4
-error | hata | error | Ayrıştırma hatası | Parse error | Okunamayan satırların hata kalıbı. | The error pattern of lines that could not be read. | | error:fortigate.*
-srcip | kaynakip,istemci | ip | İstemci IP | Client IP | İstemcinin adresi ya da ağı. | The client's address or network. | fg_traffic,fg_web,fg_dns,fg_app,fg_ips,fg_virus,mt_dhcp,mt_arp,mt_fw,mt_account | srcip:172.20.41.0/24
-dstip | hedefip | ip | Hedef IP | Destination IP | Hedef adresi. | The destination address. | fg_traffic,mt_fw | dstip:203.0.113.10
-natip | transip | ip | NAT IP | NAT IP | Çıkıştaki genel adres. | The public address on the way out. | fg_traffic | natip:198.51.100.7
-ip | adres | ip | IP (her iki yön) | IP (either side) | İstemci, hedef ya da NAT adresi. | The client, destination or NAT address. | fg_traffic,mt_fw,mt_dhcp,mt_arp,mt_account | ip:172.20.41.5
-srcport | kaynakport | port | Kaynak port | Source port | Port, aralık ya da karşılaştırma. | A port, a range or a comparison. | | srcport:>1024
-dstport | hedefport | port | Hedef port | Destination port | Port, aralık ya da karşılaştırma. | A port, a range or a comparison. | | dstport:80,443
-natport | transport | port | NAT port | NAT port | NAT portu. | The NAT port. | | natport:61001
-port | | port | Port (her iki yön) | Port (either side) | Kaynak ya da hedef port. | The source or destination port. | | port:3389
-proto | protokol | proto | Protokol | Protocol | tcp, udp, icmp ya da numara. | tcp, udp, icmp or a number. | | proto:udp
-action | eylem | token | Eylem | Action | Cihazın eylemi. | The device's action. | | action:deny,blocked
-domain | alanadi,site | domain | Alan adı | Domain | Ad ve alt alan adları; *. yalnızca alt alan adları. | The name and its subdomains; *. subdomains only. | fg_web | domain:example.com
-qname | | name | DNS adı | DNS name | Tam DNS sorgu adı. | The exact DNS query name. | fg_dns | qname:www.example.com
-url | | url | URL | URL | URL içinde geçen metin. | Text inside the URL. | | url:/login
-app | uygulama | text | Uygulama | Application | Uygulama adı. | The application name. | | app:ssh
-appcat | | text | Uygulama kategorisi | Application category | Uygulama kategorisi. | The application category. | | appcat:p2p
-category | kategori | text | Kategori | Category | Web filtresinin kategorisi. | The web filter's category. | | category:haber*
-service | servis | text | Servis | Service | Servis adı. | The service name. | | service:HTTPS
-country | ulke | text | Ülke | Country | Hedefin ülkesi. | The destination's country. | | country:Germany
-policy | politika | policy | Politika | Policy | Politika numarası ya da adı. | The policy number or name. | | policy:12
-sessionid | oturum | int | Oturum no | Session id | Oturum numarası. | The session number. | fg_traffic,fg_web,fg_app | sessionid:61001
-user | kullanici | text | Kullanıcı | User | Oturum açan kullanıcı. | The signed-in user. | | user:admin
-mac | | mac | MAC | MAC | MAC adresi; 00:00:5e:* üretici öneki. | A MAC address; 00:00:5e:* a vendor prefix. | mt_dhcp,mt_arp | mac:00:00:5e:00:53:21
-vlan | | vlan | VLAN | VLAN | İstemci adresinin VLAN'ı. | The client address's VLAN. | fg_traffic,mt_dhcp | vlan:41
-department | departman | department | Departman (VLAN'a göre) | Department (by VLAN) | VLAN'ın varsayılan departmanı. | The VLAN's default department. | fg_traffic,mt_dhcp | department:Finans
-interface | arayuz | text | Arayüz | Interface | Cihazın arayüzü. | The device's interface. | | interface:vlan42
-qtype | | token | DNS sorgu tipi | DNS query type | A, AAAA, … | A, AAAA, … | | qtype:aaaa
-attack | saldiri | text | Saldırı | Attack | Saldırı imzası. | The attack signature. | | attack:*sql*
-virus | | text | Virüs | Virus | Virüs adı. | The virus name. | | virus:eicar*
-logid | | token | Log kimliği | Log id | FortiGate log kimliği. | The FortiGate log id. | | logid:0000000013
-level | | token | Düzey | Level | FortiGate düzeyi. | The FortiGate level. | | level:warning
-text | metin | freetext | Metin | Text | Kaydın metninde geçen sözcük ya da ifade. | A word or phrase in the record's text. | | "login failure"
-`;
-
-const list = (text: string) => (text ? text.split(',') : []);
-
-function fieldsOf(table: string): CatalogueField[] {
-  return table
-    .trim()
-    .split('\n')
-    .map((line) => {
-      const [
-        name = '',
-        aliases = '',
-        kind = '',
-        labelTr = '',
-        labelEn = '',
-        helpTr = '',
-        helpEn = '',
-        indexed = '',
-        example = '',
-      ] = line.split('|').map((cell) => cell.trim());
-      return {
-        name,
-        aliases: list(aliases),
-        kind,
-        label_tr: labelTr,
-        label_en: labelEn,
-        help_tr: helpTr,
-        help_en: helpEn,
-        tables: ['messages', ...list(indexed).filter((item) => item !== 'messages')],
-        indexed: list(indexed),
-        examples: [example],
-      };
-    });
-}
-
-export const CATALOGUE: FieldCatalogue = {
-  fields: fieldsOf(FIELD_TABLE),
-  kinds: [
-    ['traffic', 'Trafik', 'Traffic'],
-    ['web', 'Web filtresi', 'Web filter'],
-    ['dns', 'DNS', 'DNS'],
-    ['app', 'Uygulama ve SSL', 'Application and SSL'],
-    ['ips', 'Saldırı önleme', 'Intrusion prevention'],
-    ['virus', 'Virüs', 'Antivirus'],
-    ['utm', 'Diğer UTM', 'Other UTM'],
-    ['event', 'FortiGate olayı', 'FortiGate event'],
-    ['dhcp', 'DHCP', 'DHCP'],
-    ['arp', 'ARP', 'ARP'],
-    ['fw', 'MikroTik güvenlik duvarı', 'MikroTik firewall'],
-    ['account', 'Oturum açma', 'Logins'],
-    ['interface', 'Arayüz', 'Interface'],
-    ['config', 'Yapılandırma', 'Configuration'],
-    ['wifi', 'Kablosuz', 'Wireless'],
-    ['heartbeat', 'Heartbeat', 'Heartbeat'],
-    ['log', 'MikroTik günlüğü', 'MikroTik log'],
-    ['syslog', 'Genel syslog', 'Generic syslog'],
-    ['unknown', 'Tanınmayan', 'Unrecognised'],
-    ['other', 'Diğer', 'Other'],
-  ].map(([key = '', label_tr = '', label_en = '']) => ({ key, label_tr, label_en })),
-  sources: [
-    { name: 'core-r1', type: 'mikrotik', network: false },
-    { name: 'fortigate', type: 'fortigate', network: false },
-  ],
-  limits: {
-    max_chars: 1000,
-    max_clauses: 16,
-    max_values: 20,
-    max_terms: 5,
-    max_days: 31,
-    page_size_max: 500,
-  },
-};
+/** The field catalogue as the API sends it (`GET /search/fields`, captured). */
+export const CATALOGUE: FieldCatalogue = copy(SEARCH.fields);
 
 const NAMES = new Map<string, string>(
   CATALOGUE.fields.flatMap((item) => [item.name, ...item.aliases].map((name) => [name, item.name])),
@@ -492,45 +385,40 @@ function tokens(q: string): Token[] {
   return found;
 }
 
-const SYNTAX_REASONS: Record<string, [string, string]> = {
-  unclosed_quote: ['kapanmamış tırnak işareti', 'a quotation mark is not closed'],
-};
+/** A query problem: the item `POST /search/parse` lists, and the `params` a run's 422 carries. */
+interface Problem {
+  item: ParseErrorItem;
+  params: Record<string, string | number>;
+}
+
+/** A problem of `code` over `[start, end)`, in the API's words with `params` filled in. */
+function problem(
+  code: string,
+  start: number,
+  end: number,
+  params: Record<string, string | number> = {},
+): Problem {
+  const [tr, en] = TEXTS[code] ?? [code, code];
+  return {
+    item: { code, message_tr: fill(tr, params), message_en: fill(en, params), start, end },
+    params,
+  };
+}
 
 /** The query's problems (the first of each clause), as `POST /search/parse` lists them. */
-function problems(q: string): ParseErrorItem[] {
+function problems(q: string): Problem[] {
   const quote =
     q.split('').filter((char) => char === '"').length % 2 === 1 ? q.lastIndexOf('"') : -1;
-  if (quote >= 0) {
-    const [tr, en] = SYNTAX_REASONS.unclosed_quote as [string, string];
+  if (quote >= 0)
     return [
-      {
-        code: 'search_syntax',
-        message_tr: `Sorgu okunamadı: ${tr} (${quote + 1}. karakter).`,
-        message_en: `The query cannot be read: ${en} (character ${quote + 1}).`,
-        start: quote,
-        end: q.length,
-      },
+      problem('search_syntax', quote, q.length, { position: quote + 1, reason: 'unclosed_quote' }),
     ];
-  }
-  const items: ParseErrorItem[] = [];
+  const items: Problem[] = [];
   for (const token of tokens(q)) {
     if (/^[()]|[()]$/.test(token.text) || token.text === 'OR') {
-      const [tr, en] = TEXTS.search_or_unsupported as [string, string];
-      items.push({
-        code: 'search_or_unsupported',
-        message_tr: tr,
-        message_en: en,
-        start: token.start,
-        end: token.end,
-      });
+      items.push(problem('search_or_unsupported', token.start, token.end));
     } else if (token.field && !NAMES.has(token.field.toLowerCase())) {
-      items.push({
-        code: 'search_unknown_field',
-        message_tr: `“${token.field}” diye bir alan yok. Alan listesi için “?” düğmesine basın; metin olarak aramak için tırnak içine alın.`,
-        message_en: `There is no field “${token.field}”. Press “?” for the list of fields; put it in quotes to search for it as text.`,
-        start: token.start,
-        end: token.end,
-      });
+      items.push(problem('search_unknown_field', token.start, token.end, { field: token.field }));
     } else if (token.field && NAMES.get(token.field.toLowerCase()) === 'srcip') {
       const value = token.values.find(
         (item) =>
@@ -538,27 +426,20 @@ function problems(q: string): ParseErrorItem[] {
           item.split('.').some((part) => Number(part.split('/')[0]) > 255),
       );
       if (value !== undefined)
-        items.push({
-          code: 'search_value_invalid',
-          message_tr: `“${token.field}” alanı için “${value}” geçerli değil (beklenen: IP adresi ya da ağ, ör. 172.20.41.5, 172.20.41.0/24, 172.20.41.*).`,
-          message_en: `“${value}” is not valid for “${token.field}” (expected: an IP address or network, e.g. 172.20.41.5, 172.20.41.0/24, 172.20.41.*).`,
-          start: token.start + token.text.indexOf(':') + 1,
-          end: token.end,
-        });
+        items.push(
+          problem('search_value_invalid', token.start + token.text.indexOf(':') + 1, token.end, {
+            field: 'srcip',
+            format: 'ip',
+            value,
+          }),
+        );
     } else if (
       !token.field &&
       token.text !== 'NOT' &&
       token.text !== 'AND' &&
       unquote(token.negated ? token.text.slice(1) : token.text).length < 3
     ) {
-      const [tr, en] = TEXTS.search_term_too_short as [string, string];
-      items.push({
-        code: 'search_term_too_short',
-        message_tr: tr,
-        message_en: en,
-        start: token.start,
-        end: token.end,
-      });
+      items.push(problem('search_term_too_short', token.start, token.end));
     }
   }
   return items;
@@ -589,7 +470,7 @@ function clauses(q: string): SearchClause[] {
 }
 
 function parse(q: string): ParseResult {
-  const errors = problems(q);
+  const errors = problems(q).map((found) => found.item);
   if (errors.length > 0)
     return { normalized: '', clauses: [], kinds: [], selective: false, errors };
   const found = clauses(q);
@@ -660,6 +541,16 @@ interface Search {
   rows: SearchRow[];
   scenario: 'rows' | 'partial';
   savedId: number | null;
+  /** The captured page this search answered with (`captured` option). */
+  captured: SearchPage | null;
+}
+
+/** The captured runs (`samples/search.json`); `next_page` is the second page of `first_page`. */
+const CAPTURED_RUNS = Object.entries(SEARCH.search).filter(([name]) => name !== 'next_page');
+
+/** The same instant (the web app sends UTC, the capture shows site time). */
+function sameTime(a: string, b: string): boolean {
+  return Date.parse(a) === Date.parse(b);
 }
 
 /** The calls that take one of the server's search slots (contract 2.6.4). */
@@ -702,6 +593,13 @@ export interface SearchOptions {
   pageSizeMax?: number;
   /** The site's `search.max_days` (the setting's default: 31; at least 1). */
   maxDays?: number;
+  /**
+   * Answer what the capture holds exactly as captured: a run with the query and range of a
+   * captured page (the auditor's to the auditor only) gets that page, then its next page for the
+   * captured cursor, its statistics when the capture has them, and the captured records. Every
+   * other run gets the hand rows, numbered after the captured searches.
+   */
+  captured?: boolean;
 }
 
 export class SearchMock {
@@ -713,7 +611,8 @@ export class SearchMock {
   unsealedDays: string[];
   pageSizeMax: number;
   maxDays: number;
-  private nextSearch = 1;
+  readonly captured: boolean;
+  private nextSearch: number;
   private nextSaved = 1;
 
   constructor(
@@ -726,6 +625,9 @@ export class SearchMock {
     this.unsealedDays = options.unsealedDays ?? [];
     this.pageSizeMax = options.pageSizeMax ?? CATALOGUE.limits.page_size_max;
     this.maxDays = options.maxDays ?? CATALOGUE.limits.max_days;
+    this.captured = options.captured ?? false;
+    // Captured searches are `ornek-arama-01` … `-11`: hand searches follow them.
+    this.nextSearch = this.captured ? 51 : 1;
   }
 
   /** The field catalogue with this site's settings. */
@@ -953,13 +855,29 @@ export class SearchMock {
         422,
         {
           error: {
-            code: found.code,
-            message_tr: found.message_tr,
-            message_en: found.message_en,
-            details: { start: found.start, end: found.end, params: {} },
+            code: found.item.code,
+            message_tr: found.item.message_tr,
+            message_en: found.item.message_en,
+            details: { start: found.item.start, end: found.item.end, params: found.params },
           },
         },
       ];
+    const page = this.captured ? this.capturedRun(account, q, from, to) : null;
+    if (page) {
+      this.searches.set(page.search_id, {
+        id: page.search_id,
+        owner: account.id,
+        q,
+        from,
+        to,
+        limit: body.limit ?? Math.min(100, this.pageSizeMax),
+        rows: page.items,
+        scenario: page.scan.complete ? 'rows' : 'partial',
+        savedId,
+        captured: page,
+      });
+      return [200, copy(page)];
+    }
     const search: Search = {
       id: `ornek-arama-${String(this.nextSearch++).padStart(2, '0')}`,
       owner: account.id,
@@ -970,6 +888,7 @@ export class SearchMock {
       rows: [],
       scenario: q.includes('"login failure"') ? 'partial' : 'rows',
       savedId,
+      captured: null,
     };
     const bases = q.includes('172.20.42.250')
       ? []
@@ -986,6 +905,17 @@ export class SearchMock {
       200,
       this.pageOf(search, search.scenario === 'partial' ? 'frontier:1' : 'rows:0', search.limit),
     ];
+  }
+
+  /** The captured page of this query and range, for this user's role. */
+  private capturedRun(account: MockUser, q: string, from: string, to: string): SearchPage | null {
+    const normalized = parse(q).normalized;
+    for (const [name, page] of CAPTURED_RUNS) {
+      if ((name === 'auditor') !== (account.role === 'auditor')) continue;
+      if (page.query.normalized !== normalized) continue;
+      if (sameTime(page.range.from, from) && sameTime(page.range.to, to)) return page;
+    }
+    return null;
   }
 
   /** The rows, newest first, spread over the last hours of `[from, to)`. */
@@ -1102,6 +1032,13 @@ export class SearchMock {
     const { cursor, limit } = call.body as { cursor: string; limit?: number | null };
     const tooMany = this.limitProblem(limit);
     if (tooMany) return tooMany;
+    if (search.captured) {
+      // Only the first page's cursor has a captured answer: the next page of that search.
+      const next = SEARCH.search.next_page;
+      return search.captured.next_cursor === cursor && next.search_id === search.id
+        ? [200, copy(next)]
+        : this.error(422, 'search_cursor_invalid');
+    }
     if (!/^(rows|frontier):\d+$/.test(cursor)) return this.error(422, 'search_cursor_invalid');
     return [200, this.pageOf(search, cursor, limit ?? search.limit)];
   }
@@ -1111,6 +1048,8 @@ export class SearchMock {
     if (Array.isArray(account)) return account;
     const search = this.searchOf(call, 'stats', account);
     if (Array.isArray(search)) return search;
+    const captured = Object.values(SEARCH.stats).find((stats) => stats.search_id === search.id);
+    if (search.captured && captured) return [200, copy(captured)];
     return [200, this.statsOf(search)];
   }
 
@@ -1212,6 +1151,16 @@ export class SearchMock {
     if (Array.isArray(account)) return account;
     const table = call.query.get('table');
     const id = call.query.get('id');
+    const time = call.query.get('time') ?? '';
+    if (this.captured) {
+      const event = Object.values(SEARCH.event).find(
+        (item) =>
+          item.table === table &&
+          String(item.fields.id) === id &&
+          sameTime(String(item.fields.time), time),
+      );
+      if (event) return [200, copy(event)];
+    }
     for (const search of this.searches.values()) {
       const row = search.rows.find(
         (item) => item.table === table && item.key.endsWith(`:${id ?? ''}`),

@@ -9,7 +9,7 @@ import {
 } from './fixtures';
 import { mockApi, type MockApi, type MockOptions } from './mock-api';
 import { MANY_ROWS, mockSearch, type SearchMock, type SearchOptions } from './mock-search';
-import { RAW, SAMPLE_TODAY } from './samples';
+import { RAW, SAMPLE_TODAY, SEARCH } from './samples';
 
 /** "Son 24 saat" at the sample clock (15:00 site time on the sample day). */
 const DAY_BEFORE = (() => {
@@ -725,4 +725,87 @@ test.describe('Arama — accessibility', () => {
       await expectNoA11yViolations(page);
     });
   }
+});
+
+test.describe('Arama on the captured answers (samples/search.json)', () => {
+  // The capture searched its sealed day 2026-10-09; the address sets that range.
+  const DAY = SEARCH.search.typed.range;
+  const path = `/search?from=${encodeURIComponent(DAY.from)}&to=${encodeURIComponent(DAY.to)}`;
+  const captured: SearchOptions = { captured: true };
+
+  test('the administrator: the captured rows, a record and its raw line', async ({ page }) => {
+    const { api } = await openSearch(page, 'tolga', { search: captured, path });
+    await runQuery(page, 'srcip:172.20.42.57');
+    const typed = SEARCH.search.typed;
+    await expect(resultRows(page)).toHaveCount(typed.items.length);
+    const [body] = api
+      .callsTo('POST', '/search')
+      .map((call) => call.body as Record<string, string>);
+    expect(Object.keys(body ?? {}).sort()).toEqual(['from', 'q', 'to']);
+    expect(body?.q).toBe('srcip:172.20.42.57');
+    expect(Date.parse(body?.from ?? '')).toBe(Date.parse(DAY.from));
+    expect(Date.parse(body?.to ?? '')).toBe(Date.parse(DAY.to));
+    await expect(
+      results(page).getByText('172.20.42.57 → static.portal.example · 203.0.113.40'),
+    ).toBeVisible();
+    await expect(
+      page.getByText('2026-10-09 öncesindeki kayıtlar veritabanında yok', { exact: false }),
+    ).toBeVisible();
+
+    // The firewall's session at 13:30 site time: the captured record (`search.event`).
+    const event = SEARCH.event.traffic;
+    await resultRows(page).nth(1).click();
+    const sheet = page.getByRole('dialog', { name: 'Kayıt ayrıntısı' });
+    await expect(sheet.getByRole('definition').filter({ hasText: '100.64.12.9' })).toBeVisible();
+    const asked = api.callsTo('GET', '/search/event')[0];
+    expect(asked?.query.get('table')).toBe(event.table);
+    expect(asked?.query.get('id')).toBe(String(event.fields.id));
+    expect(Date.parse(asked?.query.get('time') ?? '')).toBe(Date.parse(String(event.fields.time)));
+    await sheet.getByRole('button', { name: 'Ham satır' }).click();
+    const line = RAW.lines[`${event.raw.source}|${event.raw.day}|${event.raw.line}`];
+    if (!line) throw new Error('raw sample missing');
+    await expect(
+      page.getByRole('dialog', { name: 'Ham kayıt satırı' }).getByText(line.sha256),
+    ).toBeVisible();
+  });
+
+  test('the auditor: the captured run and its statistics, nothing to export', async ({ page }) => {
+    const { api } = await openSearch(page, 'ayse.yilmaz', { search: captured, path });
+    await runQuery(page, 'srcip:172.20.42.57 type:web');
+    const auditor = SEARCH.search.auditor;
+    await expect(resultRows(page)).toHaveCount(auditor.items.length);
+    await expect(results(page).getByText('static.portal.example')).toBeVisible();
+    expect(api.callsTo('POST', '/search/stats').map((call) => call.body)).toEqual([
+      { search_id: auditor.search_id },
+    ]);
+    const facets = page.getByRole('region', { name: 'Dağılım' });
+    await expect(facets.getByText('VLAN 42 (Planlama)')).toBeVisible();
+    await expect(facets.getByText('Web filtresi')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Dışa aktar' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Kanıt paketine aktar' })).toHaveCount(0);
+  });
+
+  test('"Daha fazla" sends the captured cursor and shows the next captured page', async ({
+    page,
+  }) => {
+    const { api } = await openSearch(page, 'tolga', { search: captured, path });
+    await page.getByRole('button', { name: 'Ara', exact: true }).click();
+    const first = SEARCH.search.first_page;
+    await expect(resultRows(page)).toHaveCount(first.items.length);
+    await page.getByRole('button', { name: 'Daha fazla' }).click();
+    await expect(resultRows(page)).toHaveCount(
+      first.items.length + SEARCH.search.next_page.items.length,
+    );
+    expect(api.callsTo('POST', '/search/page').map((call) => call.body)).toEqual([
+      { search_id: first.search_id, cursor: first.next_cursor },
+    ]);
+  });
+
+  test('a refusal reads as the API words it', async ({ page }) => {
+    await openSearch(page, 'tolga', { search: captured, path });
+    await runQuery(page, 'srcip:172.20.42.999');
+    const refused = SEARCH.errors.search_value_invalid;
+    if (!refused) throw new Error('sample missing');
+    await expect(page.getByText(refused.body.error.message_tr)).toBeVisible();
+  });
 });
