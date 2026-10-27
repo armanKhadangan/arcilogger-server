@@ -226,7 +226,8 @@ counted in one of three ways:
 
 A query and a time range (a preset or fixed dates) are saved under a name. Saved searches are
 **personal**: every user sees only their own; another user's id answers "not found" (404). At
-most `search.saved_max_per_user` (100) per user; names are unique ignoring case. Running a saved
+most `search.saved_max_per_user` (100) per user; names are unique ignoring case and cannot contain control or invisible format characters (such
+as NUL or a direction override). Running a saved
 search is an ordinary search (`search.run`, with `saved_id`); a preset is resolved at the time it
 runs.
 
@@ -237,7 +238,9 @@ runs.
 - The search's rows are read up to `search.export_max_rows` (100,000) rows or
   `search.export_budget_seconds` (120 seconds); a file that hits a limit is marked **cut**: its
   name ends in `-kismi`, the answer carries the header `X-Arci-Export-Truncated: rows|time`, and
-  the Excel "Bilgi" (information) sheet gives the reason.
+  the Excel "Bilgi" (information) sheet gives the reason. The queries that fill in the rows'
+  fields use the same time; when it runs out the file is cut there (`time`), and no row is
+  written with empty columns.
 - **CSV:** UTF-8 (BOM), `;` separator, CRLF line ends. **Excel:** the sheets "Sonuçlar"
   (results) and "Bilgi", every cell text. Columns: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür,
   Alt tür, Kaynak IP, Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL,
@@ -369,6 +372,7 @@ comes in `details` with its character position.
 | `search_busy` | 429 | too many searches are running |
 | `search_rate_limited` | 429 | too many searches in a short time |
 | `search_event_not_found` | 404 | the record is not in the database |
+| `search_event_timeout` | 504 | the record could not be read in time (the database is busy; it may exist) |
 | `search_export_running` | 409 | the previous export is still running |
 | `search_export_rate_limited` | 429 | the hourly export limit |
 | `saved_search_not_found` | 404 | no such saved search |

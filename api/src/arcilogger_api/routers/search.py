@@ -23,7 +23,8 @@ POST (no personal data in access logs, decision 10).
 
 Errors are ``search.messages`` (Turkish first, with the span of a refused query in
 ``details``); the event drawer (``GET /search/event``) reads one row by its key and is audited
-(``search.event``).
+(``search.event``): a row that is not there is 404 ``search_event_not_found``, a read that ran out
+of time 504 ``search_event_timeout`` (never "not found").
 """
 
 from __future__ import annotations
@@ -240,10 +241,14 @@ def _entry(state: SearchState, search_id: str, user: CurrentUser) -> Entry:
     return state.registry.get(search_id, user.id, user.session_token_hash)
 
 
+def _shown(seconds: float) -> float:
+    """Seconds as a message shows them (``4``, ``0.5``)."""
+    return int(seconds) if seconds == int(seconds) else seconds
+
+
 def _timeout(settings: dict[str, Any]) -> ApiError:
     seconds = _seconds(settings, "search.request_budget_ms")
-    shown = int(seconds) if seconds == int(seconds) else seconds
-    return search_error("search_timeout", {"seconds": shown})
+    return search_error("search_timeout", {"seconds": _shown(seconds)})
 
 
 def _oldest_notice(db: Session, state: SearchState, start: datetime) -> list[dict[str, Any]]:
@@ -557,8 +562,10 @@ def event(
                     STATEMENT_SECONDS,
                 )
                 message = messages[0] if messages else None
-        except WindowTimeoutError:
-            raise search_error("search_event_not_found") from None
+        except WindowTimeoutError:  # the row may well exist: say that time ran out
+            raise search_error(
+                "search_event_timeout", {"seconds": _shown(STATEMENT_SECONDS)}
+            ) from None
     if row is None:
         raise search_error("search_event_not_found")
     raw = {
@@ -608,8 +615,19 @@ def event(
     )
 
 
+def _safe(value: Any) -> Any:
+    """A value of ``extra`` (JSON from a device's line) with every text display-safe."""
+    if isinstance(value, str):
+        return display(value, 2000)
+    if isinstance(value, dict):
+        return {display(str(key), 200): _safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_safe(item) for item in value]
+    return value
+
+
 def _plain_extra(extra: Any) -> dict[str, Any]:
-    return dict(extra) if isinstance(extra, dict) else {}
+    return _safe(extra) if isinstance(extra, dict) else {}
 
 
 # -- evidence references and export ---------------------------------------------------------------

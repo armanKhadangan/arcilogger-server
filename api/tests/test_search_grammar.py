@@ -387,7 +387,8 @@ def test_queries_from_the_catalogue_parse_and_normalise_stably(text: str) -> Non
 
 # -- texts ----------------------------------------------------------------------------------------
 
-#: Contract 2.20: the search codes and their HTTP status.
+#: Contract 2.20: the search codes and their HTTP status (``search_event_timeout``: WP-B's
+#: review fixes, the contract's Deviations).
 CONTRACT_CODES = {
     "search_syntax": 422,
     "search_unknown_field": 422,
@@ -406,6 +407,7 @@ CONTRACT_CODES = {
     "search_busy": 429,
     "search_rate_limited": 429,
     "search_event_not_found": 404,
+    "search_event_timeout": 504,
     "search_export_running": 409,
     "search_export_rate_limited": 429,
     "saved_search_not_found": 404,

@@ -227,7 +227,8 @@ sayılır:
 Sorgu ve zaman aralığı (hazır aralık ya da sabit tarih) bir adla kaydedilir. Kayıtlı aramalar
 **kişiseldir**: her kullanıcı yalnızca kendininkileri görür; başka bir kullanıcının numarası
 "bulunamadı" (404) yanıtı alır. Kullanıcı başına en fazla `search.saved_max_per_user` (100);
-adlar büyük/küçük harf ayırmadan tekildir. Kayıtlı bir aramayı çalıştırmak normal bir aramadır
+adlar büyük/küçük harf ayırmadan tekildir ve denetim ya da görünmez biçim karakteri (ör. NUL,
+yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir aramadır
 (`search.run`, `saved_id` ile); hazır aralık çalıştırma anına göre hesaplanır.
 
 ## 9. Dışa aktarma (CSV, Excel)
@@ -237,7 +238,9 @@ adlar büyük/küçük harf ayırmadan tekildir. Kayıtlı bir aramayı çalış
 - Aramanın satırları en fazla `search.export_max_rows` (100.000) satır ya da
   `search.export_budget_seconds` (120 saniye) boyunca okunur; sınıra takılan dosya **kesilmiş**
   olarak işaretlenir: dosya adı `-kismi` ile biter, yanıtta `X-Arci-Export-Truncated: rows|time`
-  başlığı ve Excel'in "Bilgi" sayfasında nedeni bulunur.
+  başlığı ve Excel'in "Bilgi" sayfasında nedeni bulunur. Satırların alanlarını tamamlayan
+  sorgular da bu süreden yer; süre biterse dosya orada kesilir (`time`), hiçbir satır boş
+  sütunlarla yazılmaz.
 - **CSV:** UTF-8 (BOM), `;` ayraç, CRLF satır sonu. **Excel:** "Sonuçlar" ve "Bilgi" sayfaları,
   her hücre metin. Sütunlar: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür, Alt tür, Kaynak IP,
   Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL, Kullanıcı,
@@ -369,6 +372,7 @@ Her hata `code`, `message_tr` ve `message_en` taşır; reddedilen sorgunun hatal
 | `search_busy` | 429 | çok sayıda arama çalışıyor |
 | `search_rate_limited` | 429 | kısa sürede çok fazla arama |
 | `search_event_not_found` | 404 | kayıt veritabanında yok |
+| `search_event_timeout` | 504 | kayıt süresi içinde okunamadı (veritabanı yoğun; kayıt var olabilir) |
 | `search_export_running` | 409 | önceki dışa aktarma sürüyor |
 | `search_export_rate_limited` | 429 | saatlik dışa aktarma sınırı |
 | `saved_search_not_found` | 404 | kayıtlı arama yok |

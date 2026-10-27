@@ -1,8 +1,10 @@
 """Saved searches (contract 2.11, owner decision D10): personal CRUD, names unique per owner
-ignoring case, another user's id is 404, the per-user limit, and running one by ``saved_id``."""
+ignoring case and without control characters, another user's id is 404, the per-user limit, and
+running one by ``saved_id``."""
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -154,6 +156,9 @@ def test_the_per_user_limit(
         ),
         (body(name=""), "validation_error"),
         (body(name="x" * 81), "validation_error"),
+        (body(name="a\u0000b"), "validation_error"),  # PostgreSQL text cannot hold NUL
+        (body(name="a\tb"), "validation_error"),
+        (body(name="a\u202eb"), "validation_error"),  # a bidi override disguises the name
         (body(q="x" * 1001), "validation_error"),
         (body(preset="2d"), "validation_error"),
         ({**body(), "range": {"preset": "24h", "from": NOW.isoformat()}}, "validation_error"),
@@ -166,6 +171,21 @@ def test_refusals(
     response = client.post(API, json=payload)
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == code
+
+
+@pytest.mark.parametrize("name", ["a\u0000b", "\ud800x"])
+def test_a_rename_with_a_control_character_is_refused(
+    client: TestClient, searcher: LoggedIn, name: str
+) -> None:
+    saved = client.post(API, json=body()).json()
+    # Sent as ASCII JSON: a lone surrogate is only an escape there.
+    content = json.dumps(body(name=name), ensure_ascii=True)
+    response = client.put(
+        f"{API}/{saved['id']}", content=content, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "validation_error"
+    assert client.get(API).json()["items"][0]["name"] == "Finans engellenen"
 
 
 def test_running_a_saved_search(

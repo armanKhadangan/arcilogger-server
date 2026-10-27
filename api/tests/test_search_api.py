@@ -11,9 +11,10 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_api.routers import search as search_router
 from arcilogger_api.routers.search import READ_ONLY, state_of
 from arcilogger_api.search import FIELDS
 from arcilogger_api.search.grammar import LIMITS
@@ -431,6 +432,51 @@ def test_the_event_drawer(
         .json()["message"]["text"]
         .startswith("İşlem")
     )
+
+
+def _event_params(item: dict[str, Any]) -> dict[str, Any]:
+    table, rest = item["key"].split(":", 1)
+    time, _, row_id = rest.rpartition(":")
+    return {"table": table, "time": time, "id": row_id}
+
+
+def test_the_event_drawer_shows_extra_display_safe(
+    client: TestClient, searcher: LoggedIn, app_session_factory: sessionmaker[Session]
+) -> None:
+    Lines(app_session_factory).add(
+        NOW - timedelta(hours=1),
+        "fg_web",
+        srcip="172.20.41.77",
+        extra={"devname": "FW\u202e01", "liste": ["a\x07b", 3], "iç": {"k\x1b": None}},
+    )
+    item = run(client, "srcip:172.20.41.77").json()["items"][0]
+    event_ = client.get(f"{API}/event", params=_event_params(item)).json()
+    assert event_["extra"] == {
+        "devname": "FW\\u202e01",
+        "liste": ["a\\u0007b", 3],
+        "iç": {"k\\u001b": None},
+    }
+
+
+def test_an_event_read_that_runs_out_of_time_is_not_not_found(
+    client: TestClient,
+    searcher: LoggedIn,
+    lines: Lines,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = run(client, "type:traffic dstport:443").json()["items"][0]
+    assert item["table"] == "fg_traffic"
+    monkeypatch.setattr(search_router, "STATEMENT_SECONDS", 0.3)
+    with app_session_factory() as busy:  # a loaded database: the read waits on a lock
+        busy.execute(text("LOCK TABLE fg_traffic IN ACCESS EXCLUSIVE MODE"))
+        response = client.get(f"{API}/event", params=_event_params(item))
+        busy.rollback()
+    assert response.status_code == 504, response.text
+    error = response.json()["error"]
+    assert error["code"] == "search_event_timeout"
+    assert "0.3" in error["message_en"]
+    assert audits(app_session_factory, "search.event") == []  # no row left the API
 
 
 @pytest.mark.parametrize(

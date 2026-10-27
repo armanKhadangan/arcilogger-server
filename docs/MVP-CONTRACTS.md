@@ -1335,7 +1335,9 @@ performance). Base `/api/v1`; nothing here is licence-gated (5651 Temel,
   or `search.request_budget_ms` is used. A first window that times out is halved down to 5 min
   (each try gets half the budget left); 5 min timing out → 504 `search_timeout` (audited,
   `outcome: "timeout"`, `search_id: null`); a later window that times out ends the page with a
-  frontier. `scan {complete, scanned_from, scanned_to, windows, elapsed_ms}`.
+  frontier. After a `last` cursor the first window always runs, also when its time is `from`
+  itself (rows still due at that instant); a budget gone before any window returns the same
+  cursor. `scan {complete, scanned_from, scanned_to, windows, elapsed_ms}`.
 - **Registry** (`search.registry`, in memory, one worker): `search_id` =
   `secrets.token_urlsafe(16)`; user, session token hash, plan, range, limit, `saved_id`; sliding
   TTL 30 min, 20 per user, 1,000 in total (least recently used dropped). Another session's or
@@ -1364,7 +1366,7 @@ travels in a URL.
 | `POST /search/stats` | `{search_id}` → `SearchStats` | — |
 | `POST /search/parse` | `{q}` → `ParseResult` (`search.read` only, no database) | — |
 | `GET /search/fields` | → `FieldCatalogue` (`search.read` only) | — |
-| `GET /search/event` | `?table=&time=&id=` → `SearchEvent` (unknown table or row: 404 `search_event_not_found`) | `search.event` |
+| `GET /search/event` | `?table=&time=&id=` → `SearchEvent` (unknown table or row: 404 `search_event_not_found`; a read that ran out of time: 504 `search_event_timeout`; `extra` display-safe) | `search.event` |
 | `POST /search/refs` | `{search_id, limit: 1..10000}` → `SearchRefs` (+ `evidence.create`) | `search.refs` |
 | `POST /search/export` | `{search_id, format: "csv" \| "xlsx"}` → file (+ `search.export`, re-authentication within 5 min) | `search.export` |
 | `GET /search/saved` | → `{items: SavedSearch[]}` (own only) | — |
@@ -1417,12 +1419,14 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
 ### 17.6 Saved searches, export, evidence references
 
 - **Saved** (`search.saved`): personal; `search.saved_max_per_user` (409
-  `saved_search_limit`); names unique per owner ignoring case (409 `saved_search_name_taken`);
+  `saved_search_limit`); names unique per owner ignoring case (409 `saved_search_name_taken`),
+  without control, format or surrogate characters (422 `validation_error`);
   another user's id 404 `saved_search_not_found`. Presets `15m`, `1h`, `24h`, `today` (since
   site midnight), `yesterday`, `7d`, `30d`, resolved when the search runs; a run sets
   `last_run_at`.
 - **Export** (`search.export`): the plan's rows by the window loop in chunks until
-  `search.export_max_rows` or `search.export_budget_seconds` (then `truncated` = `rows` | `time`:
+  `search.export_max_rows` or `search.export_budget_seconds`, the fill-in queries under the
+  budget left (then `truncated` = `rows` | `time`, a fill-in timeout too, never empty columns:
   file name `arama-<from>-<to>-kismi.<ext>`, header `X-Arci-Export-Truncated`, the "Bilgi"
   sheet). CSV: UTF-8 BOM, `;`, CRLF, `csvfiles.neutralise` on every cell; XLSX: write-only,
   every cell text, sheets "Sonuçlar" and "Bilgi" (query, range, user, time, rows, status and

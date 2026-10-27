@@ -7,10 +7,11 @@ times are aware ISO-8601, ``from``/``to`` are named so on the wire (``from_`` in
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 from arcilogger_db.models import SAVED_SEARCH_NAME_MAX, SAVED_SEARCH_QUERY_MAX
 
@@ -25,6 +26,15 @@ SearchId = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 QueryText = Annotated[str, StringConstraints(max_length=SAVED_SEARCH_QUERY_MAX)]
 #: ``models.SAVED_SEARCH_PRESETS`` (a test keeps the two equal).
 Preset = Literal["15m", "1h", "24h", "today", "yesterday", "7d", "30d"]
+#: Not in a saved search's name: control (NUL breaks PostgreSQL text), format (bidi overrides
+#: disguise a name) and lone surrogate characters (not UTF-8), as in ``auth.schemas``.
+_FORBIDDEN: Final = frozenset({"Cc", "Cf", "Cs"})
+
+
+def _single_line(value: str) -> str:
+    if any(unicodedata.category(char) in _FORBIDDEN for char in value):
+        raise ValueError("control characters are not allowed")
+    return value
 
 
 class StrictModel(BaseModel):
@@ -94,6 +104,7 @@ class SavedSearchIn(StrictModel):
     name: Annotated[
         str,
         StringConstraints(strip_whitespace=True, min_length=1, max_length=SAVED_SEARCH_NAME_MAX),
+        AfterValidator(_single_line),
     ]
     q: QueryText
     range: PresetRange | FixedRange
