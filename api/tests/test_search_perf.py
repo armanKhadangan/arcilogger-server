@@ -58,7 +58,7 @@ from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.stats import SiteLabels, run_stats
 from arcilogger_api.search.testing import sign_in
-from arcilogger_api.search.windows import compression_horizons
+from arcilogger_api.search.windows import read_storage
 from arcilogger_core.config import Config
 from arcilogger_core.timeutil import day_window
 from arcilogger_db.models import Message
@@ -544,7 +544,7 @@ def explain(site: Site, q: str, start: datetime, end: datetime) -> list[Scan]:
     """The scans of the plan of the whole-range window of ``q``."""
     with site.factory() as session:
         plan = plan_query(parse_query(q), SiteNetwork.load(session, site.config))
-        horizons = compression_horizons(session, 10.0)
+        horizons = read_storage(session, 10.0).horizons
     statement = sql.page_statement(plan, start, bounds(None, end, plan.ranks), 101, horizons)
     compiled = statement.compile(
         dialect=site.engine.dialect, compile_kwargs={"render_postcompile": True}

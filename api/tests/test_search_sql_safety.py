@@ -6,7 +6,8 @@
   word of the SQL text is an identifier of the models, a label of the search module or SQL.
 * **Lint:** no ``text(``, ``literal_column``, ``exec_driver_sql`` and no f-string SQL in
   ``arcilogger_api/search/``; the router's only SQL text is the ``SET TRANSACTION`` constant.
-* **Read-only:** a write inside a search transaction fails, through the API too.
+* **Read-only:** a write inside a search transaction fails, through the API too; the setting of
+  that transaction (``plan_cache_mode`` on TimescaleDB) ends with it, on any storage mode.
 * **Execution property:** every query the parser accepts answers 200, a known 4xx or 504 —
   never 500.
 """
@@ -26,7 +27,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from sqlalchemy import Select, insert, select
+from sqlalchemy import Select, func, insert, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
@@ -38,6 +39,7 @@ from arcilogger_api.search.fields import DepartmentEntry, SiteNetwork
 from arcilogger_api.search.messages import STATUS
 from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.testing import Lines, sign_in
+from arcilogger_api.search.windows import Storage
 from arcilogger_api.security import CurrentUser
 from arcilogger_api.testing import LoggedIn
 from arcilogger_db.models import Base, Message, SearchCount
@@ -455,6 +457,30 @@ def test_a_write_inside_the_search_transaction_fails(
             )
         assert getattr(refused.value.orig, "sqlstate", None) == "25006"  # read_only_sql_transaction
         assert session.scalar(select(SearchCount.id)) is None
+
+
+@pytest.mark.parametrize("timescale", [True, False])
+def test_the_custom_plans_last_as_long_as_the_search_transaction(
+    app_session_factory: sessionmaker[Session], timescale: bool
+) -> None:
+    """The statements after a search on its pooled connection are planned as before."""
+    state = search_router.SearchState()
+    state.storage.get_or_compute(lambda: Storage(timescale, {}))  # as on TimescaleDB, or not
+    show = select(func.current_setting("plan_cache_mode"))
+    with app_session_factory() as session:
+        settings_ = get_settings(session, prefix="search.")
+        before = session.scalar(show)
+        with search_router.reading(session, state, _user(), settings_):
+            inside = session.scalar(show)
+            pooled = session.connection().connection.dbapi_connection
+        assert pooled is not None
+        after = pooled.execute("SELECT current_setting('plan_cache_mode')").fetchone()
+        pooled.rollback()  # back to the pool as it was
+        again = session.scalar(show)
+    assert before == "auto"
+    assert inside == ("force_custom_plan" if timescale else "auto")
+    assert after == ("auto",)
+    assert again == "auto"
 
 
 def test_a_write_through_the_api_never_lands(

@@ -16,7 +16,8 @@ POST (no personal data in access logs, decision 10).
 * **Read-only and bounded** (contract 2.5.1): the request's authentication transaction is
   committed, the request waits for a slot of ``search.max_concurrent`` (:mod:`~.search.gate`),
   then ``SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`` opens one snapshot for every
-  window, fill-in and count of the request, each statement under ``statement_deadline``; the
+  window, fill-in and count of the request, each statement under ``statement_deadline`` (on
+  TimescaleDB planned with its values, ``plan_cache_mode`` set for this transaction only); the
   transaction is rolled back and the audit entry written in a fresh one, committed **before**
   the response. No row leaves the API without its audit entry.
 * **Saved searches** (``/search/saved``): personal (:mod:`~.search.saved`).
@@ -30,7 +31,7 @@ of time 504 ``search_event_timeout`` (never "not found").
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -101,11 +102,13 @@ from arcilogger_api.search.windows import (
     Clock,
     Page,
     SearchTimeoutError,
+    Storage,
     WindowHook,
     WindowTimeoutError,
-    compression_horizons,
     display,
     page_rows,
+    plan_with_values,
+    read_storage,
     run_page,
     run_statement,
 )
@@ -132,8 +135,8 @@ ReferrerDep = Annotated[
 READ_ONLY: Final = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
 #: How long the oldest ``messages.time`` (notice ``vault_only_before``) is kept.
 OLDEST_SECONDS: Final = 600.0
-#: How long the compression horizons (TimescaleDB, ``windows.compression_horizons``) are kept.
-HORIZONS_SECONDS: Final = 60.0
+#: How long the storage and its compression horizons (``windows.read_storage``) are kept.
+STORAGE_SECONDS: Final = 60.0
 #: Deadline of the single statements outside the window scan (event drawer, oldest row).
 STATEMENT_SECONDS: Final = 4.0
 MAX_ROW_ID: Final = 2**63 - 1
@@ -147,13 +150,6 @@ class Oldest:
     time: datetime | None
 
 
-@dataclass(frozen=True)
-class Horizons:
-    """Per table, the end of its newest compressed chunk (empty: native partitions)."""
-
-    tables: Mapping[str, datetime]
-
-
 @dataclass
 class SearchState:
     """The search API's in-process state (one Uvicorn worker, ADR-0001)."""
@@ -163,9 +159,7 @@ class SearchState:
     runs: RunLimiter = field(default_factory=RunLimiter)
     exports: ExportLocks = field(default_factory=ExportLocks)
     oldest: TtlCache[Oldest] = field(default_factory=lambda: TtlCache[Oldest](OLDEST_SECONDS))
-    horizons: TtlCache[Horizons] = field(
-        default_factory=lambda: TtlCache[Horizons](HORIZONS_SECONDS)
-    )
+    storage: TtlCache[Storage] = field(default_factory=lambda: TtlCache[Storage](STORAGE_SECONDS))
     #: The budget clock (seconds) and a hook run in every window (tests).
     clock: Clock = monotonic
     hook: WindowHook | None = None
@@ -206,16 +200,29 @@ def _seconds(settings: dict[str, Any], key: str) -> float:
     return int(settings[key]) / 1000
 
 
+def _storage(db: Session, state: SearchState) -> Storage:
+    """How the time-series tables are stored (``windows.read_storage``), kept a minute; when
+    TimescaleDB's catalogue does not answer in time nothing is split."""
+    try:
+        return state.storage.get_or_compute(lambda: read_storage(db, STATEMENT_SECONDS))
+    except WindowTimeoutError:
+        return Storage(True, {})  # only TimescaleDB's catalogue is read under a deadline
+
+
 @contextmanager
 def reading(
     db: Session, state: SearchState, user: CurrentUser, settings: dict[str, Any]
-) -> Iterator[None]:
-    """A slot of the gate and one read-only snapshot (see the module text); rolled back."""
+) -> Iterator[Storage]:
+    """A slot of the gate and one read-only snapshot (see the module text), on TimescaleDB with
+    every statement planned with its values (``windows.plan_with_values``); rolled back, which
+    also ends that setting."""
     db.commit()  # the authentication's transaction; a waiting request holds no connection
     with state.gate.slot(user.id, int(settings["search.max_concurrent"])):
         db.execute(text(READ_ONLY))
         try:
-            yield
+            storage = _storage(db, state)
+            plan_with_values(db, storage)
+            yield storage
         finally:
             db.rollback()
 
@@ -280,19 +287,6 @@ def _oldest_notice(db: Session, state: SearchState, start: datetime) -> list[dic
     return [notice("vault_only_before", date=site_day(oldest.time).isoformat())]
 
 
-def _horizons(db: Session, state: SearchState) -> Mapping[str, datetime]:
-    """Where each table's compressed chunks end (the page statements split there); a catalogue
-    that does not answer in time splits nothing."""
-
-    def compute() -> Horizons:
-        return Horizons(compression_horizons(db, STATEMENT_SECONDS))
-
-    try:
-        return state.horizons.get_or_compute(compute).tables
-    except WindowTimeoutError:
-        return {}
-
-
 def _page_answer(entry: Entry, items: list[dict[str, Any]], page: Page) -> SearchPage:
     return SearchPage.model_validate(
         {
@@ -352,7 +346,7 @@ def run_search(
         "saved_id": body.saved_id,
     }
     try:
-        with reading(db, state, user, settings):
+        with reading(db, state, user, settings) as storage:
             page = run_page(
                 db,
                 plan,
@@ -363,7 +357,7 @@ def run_search(
                 budget,
                 clock=state.clock,
                 hook=state.hook,
-                horizons=_horizons(db, state),
+                horizons=storage.horizons,
             )
             items = page_rows(db, plan, page.rows, site)
             found = _oldest_notice(db, state, start)
@@ -430,7 +424,7 @@ def next_page(
     site = SiteNetwork.load(db, config)
     budget = _seconds(settings, "search.request_budget_ms")
     try:
-        with reading(db, state, user, settings):
+        with reading(db, state, user, settings) as storage:
             page = run_page(
                 db,
                 entry.plan,
@@ -441,7 +435,7 @@ def next_page(
                 budget,
                 clock=state.clock,
                 hook=state.hook,
-                horizons=_horizons(db, state),
+                horizons=storage.horizons,
             )
             items = page_rows(db, entry.plan, page.rows, site)
     except SearchTimeoutError:
@@ -681,7 +675,7 @@ def search_refs(
     """The raw references of a search, for an evidence package (audited ``search.refs``)."""
     settings = _settings(db)
     entry = _entry(state, body.search_id, user)
-    with reading(db, state, user, settings):
+    with reading(db, state, user, settings) as storage:
         found = references.collect(
             db,
             entry.plan,
@@ -691,7 +685,7 @@ def search_refs(
             _seconds(settings, "search.stats_budget_ms"),
             clock=state.clock,
             hook=state.hook,
-            horizons=_horizons(db, state),
+            horizons=storage.horizons,
         )
     sha256 = references.refs_sha256(found.refs)
     record_audit(
@@ -750,7 +744,7 @@ def search_export(
             created_at=utc_now(),
         )
         state_ = exports.Reading()
-        with reading(db, state, user, settings):
+        with reading(db, state, user, settings) as storage:
             rows = exports.read_rows(
                 db,
                 entry.plan,
@@ -762,7 +756,7 @@ def search_export(
                 budget_seconds=float(settings["search.export_budget_seconds"]),
                 clock=state.clock,
                 hook=state.hook,
-                horizons=_horizons(db, state),
+                horizons=storage.horizons,
             )
             built = exports.build(rows, body.format, info, state_)
         try:

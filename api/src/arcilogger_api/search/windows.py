@@ -18,9 +18,10 @@ PostgreSQL ``statement_timeout``). It stops when the page is full, ``from`` is r
 * if the **first** window of a request times out it is halved, down to 5 minutes — each try of
   it gets half the time left, so a smaller one can still run; when even 5 minutes time out the
   request fails with :class:`SearchTimeoutError` (504 ``search_timeout``);
-* on TimescaleDB a window that holds a table's compression horizon (:func:`compression_horizons`)
-  reads that branch on both sides of it in one statement (``sql.page_statement``), so the
-  uncompressed chunks are planned with their own statistics.
+* on TimescaleDB (:func:`read_storage`) a window that holds a table's compression horizon reads
+  that branch on both sides of it in one statement (``sql.page_statement``), so the uncompressed
+  chunks are planned with their own statistics, and every statement of the search's transaction
+  is planned with its own values (:func:`plan_with_values`).
 
 :func:`page_rows` then fills the page in: the typed fields of a ``messages``-driven page and the
 ``messages`` fields of a typed page, one keyed query per table (``sql.typed_rows``,
@@ -116,15 +117,40 @@ def run_statement(
     return rows
 
 
-def compression_horizons(session: Session, seconds: float) -> dict[str, datetime]:
-    """Per time-series table, the end of its newest compressed chunk: TimescaleDB with
-    compression (the setting ``db.timescale`` the upgrade wrote), else empty;
-    :class:`WindowTimeoutError` when the catalogue does not answer within ``seconds``."""
-    storage = get_setting(session, "db.timescale") or {}
-    if not storage.get("compression"):
-        return {}
+@dataclass(frozen=True, slots=True)
+class Storage:
+    """How the time-series tables are stored, as far as the search plans for it."""
+
+    #: TimescaleDB hypertables (else native partitions).
+    timescale: bool
+    #: Per table, the end of its newest compressed chunk (``sql.page_statement``).
+    horizons: Mapping[str, datetime]
+
+
+def read_storage(session: Session, seconds: float) -> Storage:
+    """The storage of the setting ``db.timescale`` the upgrade wrote, with the compression
+    horizons of TimescaleDB (``sql.horizons_statement``); :class:`WindowTimeoutError` when the
+    catalogue does not answer within ``seconds``."""
+    status = get_setting(session, "db.timescale") or {}
+    if status.get("storage") != "hypertables":
+        return Storage(False, {})
+    if not status.get("compression"):
+        return Storage(True, {})
     rows = run_statement(session, sql.horizons_statement(), seconds)
-    return {str(row["tbl"]): row["horizon"] for row in rows}
+    return Storage(True, {str(row["tbl"]): row["horizon"] for row in rows})
+
+
+def plan_with_values(session: Session, storage: Storage) -> None:
+    """On TimescaleDB, plan every further statement of the transaction with its own values
+    (``sql.custom_plans_statement``: transaction-local, it ends with the search's read-only
+    transaction and never stays on the pooled connection).
+
+    psycopg prepares a statement sent five times, and PostgreSQL may then keep a generic plan,
+    made without the values: TimescaleDB then plans every chunk instead of those of the time
+    range, and a page's fill-in queries decompress them all (an export of 10,000 rows on half
+    of the tier-1 data: 4.5 s with custom plans, cut at 30 s with the generic ones)."""
+    if storage.timescale:
+        session.execute(sql.custom_plans_statement())
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,7 +194,7 @@ def run_page(
     horizons: Mapping[str, datetime] | None = None,
 ) -> Page:
     """The next ``limit`` rows of ``[start, end)`` after ``cursor`` (see the module text;
-    ``horizons``: :func:`compression_horizons`)."""
+    ``horizons``: :attr:`Storage.horizons`)."""
     began = clock()
     deadline = began + budget_seconds
     ranks = sorted(plan.ranks)

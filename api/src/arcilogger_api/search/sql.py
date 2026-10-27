@@ -439,6 +439,14 @@ def page_statement(
     )
 
 
+def custom_plans_statement() -> Select[Any]:
+    """``plan_cache_mode = force_custom_plan`` for the rest of the transaction (``set_config``
+    with ``is_local``, as ``SET LOCAL``): every statement is planned with its values."""
+    return select(
+        func.set_config(_text("plan_cache_mode"), _text("force_custom_plan"), literal(True))
+    )
+
+
 def horizons_statement() -> Select[Any]:
     """Per time-series table with a compressed chunk, the end of its newest one (``tbl``,
     ``horizon``; TimescaleDB only)."""
@@ -463,7 +471,8 @@ def _within(found: Any, times: Sequence[datetime]) -> ColumnElement[bool]:
     TimescaleDB reads every chunk, the compressed ones decompressed)."""
     if not times:
         return false()
-    return found.c.time.between(literal(min(times), TZ), literal(max(times), TZ))
+    time: ColumnElement[datetime] = found.c.time
+    return time.between(literal(min(times), TZ), literal(max(times), TZ))
 
 
 def typed_rows(table: str, keys: Sequence[tuple[datetime, int]]) -> Select[Any]:

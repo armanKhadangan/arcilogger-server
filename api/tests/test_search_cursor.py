@@ -28,13 +28,13 @@ from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.errors import ApiError
-from arcilogger_api.routers.search import Horizons, state_of
+from arcilogger_api.routers.search import state_of
 from arcilogger_api.search import parse_query
 from arcilogger_api.search.cursor import Bound, Cursor, bounds, decode, encode, utc_text
 from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.testing import Lines, sign_in
-from arcilogger_api.search.windows import compression_horizons, run_page
+from arcilogger_api.search.windows import Storage, read_storage, run_page
 from arcilogger_api.testing import LoggedIn
 from arcilogger_db.models import TIME_SERIES_TABLES, AuditLog
 from arcilogger_db.settings import get_setting, set_setting
@@ -224,11 +224,11 @@ def test_frontier_cursors_continue_where_the_budget_stopped(
 # -- a split at the compression horizon -----------------------------------------------------------
 
 
-def _set_horizon(app: FastAPI, horizon: datetime) -> None:
-    """The search's horizons as if every table's compressed chunks ended at ``horizon``."""
-    cache = state_of(app).horizons
+def _set_storage(app: FastAPI, storage: Storage) -> None:
+    """The storage the search plans for, whatever the database's is."""
+    cache = state_of(app).storage
     cache.invalidate()
-    cache.get_or_compute(lambda: Horizons(dict.fromkeys(TIME_SERIES_TABLES, horizon)))
+    cache.get_or_compute(lambda: storage)
 
 
 @pytest.mark.parametrize(
@@ -250,7 +250,7 @@ def test_a_split_at_a_compression_horizon_pages_the_same(
     horizon: datetime,
 ) -> None:
     whole = keys(client, q, 500)
-    _set_horizon(app, horizon)
+    _set_storage(app, Storage(False, dict.fromkeys(TIME_SERIES_TABLES, horizon)))
     sent: list[str] = []
 
     def record(_c: Any, _cursor: Any, statement: str, *_args: Any) -> None:
@@ -269,10 +269,12 @@ def test_compression_horizons_are_where_the_compressed_chunks_end(
     app_session_factory: sessionmaker[Session], db_engine: Engine
 ) -> None:
     with app_session_factory() as session:
-        assert compression_horizons(session, 5.0) == {}  # nothing compressed (yet)
-        storage = get_setting(session, "db.timescale") or {}
-    if not storage.get("compression"):
-        assert os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") != "1", storage
+        status = get_setting(session, "db.timescale") or {}
+        storage = read_storage(session, 5.0)
+    assert storage.horizons == {}  # nothing compressed (yet)
+    assert storage.timescale is (status.get("storage") == "hypertables")
+    if not status.get("compression"):
+        assert os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") != "1", status
         return  # native partitions: never anything to split
     pause_compression_jobs(db_engine)
     found = Lines(app_session_factory)
@@ -295,7 +297,7 @@ def test_compression_horizons_are_where_the_compressed_chunks_end(
         )
     plan = plan_query(parse_query(f"srcip:{CLIENT}"), SiteNetwork())
     with app_session_factory() as session:
-        horizons = compression_horizons(session, 5.0)
+        horizons = read_storage(session, 5.0).horizons
         assert horizons == {"fg_web": end}
         page = run_page(
             session, plan, T - timedelta(days=30), END, None, 10, 5.0, horizons=horizons
