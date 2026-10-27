@@ -30,7 +30,7 @@ of time 504 ``search_event_timeout`` (never "not found").
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -103,6 +103,7 @@ from arcilogger_api.search.windows import (
     SearchTimeoutError,
     WindowHook,
     WindowTimeoutError,
+    compression_horizons,
     display,
     page_rows,
     run_page,
@@ -131,6 +132,8 @@ ReferrerDep = Annotated[
 READ_ONLY: Final = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
 #: How long the oldest ``messages.time`` (notice ``vault_only_before``) is kept.
 OLDEST_SECONDS: Final = 600.0
+#: How long the compression horizons (TimescaleDB, ``windows.compression_horizons``) are kept.
+HORIZONS_SECONDS: Final = 60.0
 #: Deadline of the single statements outside the window scan (event drawer, oldest row).
 STATEMENT_SECONDS: Final = 4.0
 MAX_ROW_ID: Final = 2**63 - 1
@@ -144,6 +147,13 @@ class Oldest:
     time: datetime | None
 
 
+@dataclass(frozen=True)
+class Horizons:
+    """Per table, the end of its newest compressed chunk (empty: native partitions)."""
+
+    tables: Mapping[str, datetime]
+
+
 @dataclass
 class SearchState:
     """The search API's in-process state (one Uvicorn worker, ADR-0001)."""
@@ -153,6 +163,9 @@ class SearchState:
     runs: RunLimiter = field(default_factory=RunLimiter)
     exports: ExportLocks = field(default_factory=ExportLocks)
     oldest: TtlCache[Oldest] = field(default_factory=lambda: TtlCache[Oldest](OLDEST_SECONDS))
+    horizons: TtlCache[Horizons] = field(
+        default_factory=lambda: TtlCache[Horizons](HORIZONS_SECONDS)
+    )
     #: The budget clock (seconds) and a hook run in every window (tests).
     clock: Clock = monotonic
     hook: WindowHook | None = None
@@ -267,6 +280,19 @@ def _oldest_notice(db: Session, state: SearchState, start: datetime) -> list[dic
     return [notice("vault_only_before", date=site_day(oldest.time).isoformat())]
 
 
+def _horizons(db: Session, state: SearchState) -> Mapping[str, datetime]:
+    """Where each table's compressed chunks end (the page statements split there); a catalogue
+    that does not answer in time splits nothing."""
+
+    def compute() -> Horizons:
+        return Horizons(compression_horizons(db, STATEMENT_SECONDS))
+
+    try:
+        return state.horizons.get_or_compute(compute).tables
+    except WindowTimeoutError:
+        return {}
+
+
 def _page_answer(entry: Entry, items: list[dict[str, Any]], page: Page) -> SearchPage:
     return SearchPage.model_validate(
         {
@@ -328,7 +354,16 @@ def run_search(
     try:
         with reading(db, state, user, settings):
             page = run_page(
-                db, plan, start, end, None, limit, budget, clock=state.clock, hook=state.hook
+                db,
+                plan,
+                start,
+                end,
+                None,
+                limit,
+                budget,
+                clock=state.clock,
+                hook=state.hook,
+                horizons=_horizons(db, state),
             )
             items = page_rows(db, plan, page.rows, site)
             found = _oldest_notice(db, state, start)
@@ -406,6 +441,7 @@ def next_page(
                 budget,
                 clock=state.clock,
                 hook=state.hook,
+                horizons=_horizons(db, state),
             )
             items = page_rows(db, entry.plan, page.rows, site)
     except SearchTimeoutError:
@@ -655,6 +691,7 @@ def search_refs(
             _seconds(settings, "search.stats_budget_ms"),
             clock=state.clock,
             hook=state.hook,
+            horizons=_horizons(db, state),
         )
     sha256 = references.refs_sha256(found.refs)
     record_audit(
@@ -725,6 +762,7 @@ def search_export(
                 budget_seconds=float(settings["search.export_budget_seconds"]),
                 clock=state.clock,
                 hook=state.hook,
+                horizons=_horizons(db, state),
             )
             built = exports.build(rows, body.format, info, state_)
         try:

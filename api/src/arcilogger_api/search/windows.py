@@ -17,7 +17,10 @@ PostgreSQL ``statement_timeout``). It stops when the page is full, ``from`` is r
   out before any window gives the same cursor back;
 * if the **first** window of a request times out it is halved, down to 5 minutes — each try of
   it gets half the time left, so a smaller one can still run; when even 5 minutes time out the
-  request fails with :class:`SearchTimeoutError` (504 ``search_timeout``).
+  request fails with :class:`SearchTimeoutError` (504 ``search_timeout``);
+* on TimescaleDB a window that holds a table's compression horizon (:func:`compression_horizons`)
+  reads that branch on both sides of it in one statement (``sql.page_statement``), so the
+  uncompressed chunks are planned with their own statistics.
 
 :func:`page_rows` then fills the page in: the typed fields of a ``messages``-driven page and the
 ``messages`` fields of a typed page, one keyed query per table (``sql.typed_rows``,
@@ -46,6 +49,7 @@ from arcilogger_api.search.fields import FIELDS, PROTOCOL_NAMES, SiteNetwork
 from arcilogger_api.search.planner import Plan
 from arcilogger_db.kinds import KINDS, ascii_lower, kind_of, kind_of_row
 from arcilogger_db.models import TIME_SERIES_TABLES
+from arcilogger_db.settings import get_setting
 
 #: The first window of a page, and the smallest one a timed-out first window is halved to.
 FIRST_WINDOW: Final = timedelta(hours=1)
@@ -112,6 +116,17 @@ def run_statement(
     return rows
 
 
+def compression_horizons(session: Session, seconds: float) -> dict[str, datetime]:
+    """Per time-series table, the end of its newest compressed chunk: TimescaleDB with
+    compression (the setting ``db.timescale`` the upgrade wrote), else empty;
+    :class:`WindowTimeoutError` when the catalogue does not answer within ``seconds``."""
+    storage = get_setting(session, "db.timescale") or {}
+    if not storage.get("compression"):
+        return {}
+    rows = run_statement(session, sql.horizons_statement(), seconds)
+    return {str(row["tbl"]): row["horizon"] for row in rows}
+
+
 @dataclass(frozen=True, slots=True)
 class Scan:
     """How far a page's scan got (``SearchPage.scan``)."""
@@ -150,8 +165,10 @@ def run_page(
     *,
     clock: Clock = monotonic,
     hook: WindowHook | None = None,
+    horizons: Mapping[str, datetime] | None = None,
 ) -> Page:
-    """The next ``limit`` rows of ``[start, end)`` after ``cursor`` (see the module text)."""
+    """The next ``limit`` rows of ``[start, end)`` after ``cursor`` (see the module text;
+    ``horizons``: :func:`compression_horizons`)."""
     began = clock()
     deadline = began + budget_seconds
     ranks = sorted(plan.ranks)
@@ -171,7 +188,7 @@ def run_page(
         lower = max(start, upper - size)
         first = windows == 0
         seconds = left / 2 if first and size > MIN_WINDOW else left
-        statement = sql.page_statement(plan, lower, limits, limit - len(rows) + 1)
+        statement = sql.page_statement(plan, lower, limits, limit - len(rows) + 1, horizons)
         asked = clock()
         try:
             found = run_statement(session, statement, seconds, hook=hook, window=(lower, upper))

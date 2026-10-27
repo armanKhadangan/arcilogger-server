@@ -29,7 +29,7 @@ import csv
 import hashlib
 import io
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from time import monotonic
@@ -199,6 +199,7 @@ def read_rows(
     budget_seconds: float,
     clock: Clock = monotonic,
     hook: WindowHook | None = None,
+    horizons: Mapping[str, datetime] | None = None,
 ) -> Iterator[list[str]]:
     """The file's rows, page by page; ``reading`` records the count and the truncation."""
     deadline = clock() + budget_seconds
@@ -214,7 +215,18 @@ def read_rows(
             return
         want = min(CHUNK, max_rows + 1 - reading.count)
         try:
-            page = run_page(session, plan, start, end, cursor, want, left, clock=clock, hook=hook)
+            page = run_page(
+                session,
+                plan,
+                start,
+                end,
+                cursor,
+                want,
+                left,
+                clock=clock,
+                hook=hook,
+                horizons=horizons,
+            )
         except SearchTimeoutError:
             reading.truncated = "time"
             return

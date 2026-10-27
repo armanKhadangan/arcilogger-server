@@ -17,7 +17,10 @@ Statements:
 * :func:`page_statement` — one window of a page: each branch ``(SELECT <rank> AS b, time, id, …
   ORDER BY time DESC, id DESC LIMIT :n)``, several branches ``UNION ALL``\\ ed and ordered ``time
   DESC, b ASC, id DESC``; a typed branch with ``messages``-only conditions joins ``messages`` by
-  the raw reference (one probe of ``ix_messages_source_time`` per candidate row).
+  the raw reference (one probe of ``ix_messages_source_time`` per candidate row). On TimescaleDB
+  a branch whose window holds its table's **compression horizon** (:func:`horizons_statement`)
+  is two such selects, newer and older than the horizon, ordered and limited again (see
+  :func:`page_statement`).
 * :func:`typed_rows`, :func:`message_rows` — the fields of a page's rows, one keyed query per
   table, the page's keys bound as arrays (``unnest``).
 * :func:`count_statement`, :func:`rollup_statement` — the statistics (``stats.py``): buckets
@@ -32,6 +35,7 @@ from typing import Any, Final
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     ColumnElement,
     Date,
     FromClause,
@@ -50,6 +54,7 @@ from sqlalchemy import (
     null,
     or_,
     select,
+    table,
     tuple_,
     union_all,
 )
@@ -87,7 +92,7 @@ from arcilogger_db.kinds import (
     UTM_SUBTYPES,
     ascii_lower,
 )
-from arcilogger_db.models import Base, Message, SearchCount
+from arcilogger_db.models import TIME_SERIES_TABLES, Base, Message, SearchCount
 
 TZ: Final = TIMESTAMP(timezone=True)
 ESCAPE: Final = "\\"
@@ -108,6 +113,15 @@ MESSAGE_COLUMNS: Final = ("type", "subtype", "text", "parse_error")
 BUCKET_ORIGIN: Final = datetime.fromisoformat("2000-01-01T00:00:00+03:00")
 #: The /24 of the client address in the statistics.
 NET_PREFIX: Final = 24
+#: TimescaleDB's view of the chunks (read on TimescaleDB only, :func:`horizons_statement`).
+CHUNKS: Final = table(
+    "chunks",
+    column("hypertable_schema", Text),
+    column("hypertable_name", Text),
+    column("range_end", TZ),
+    column("is_compressed", Boolean),
+    schema="timescaledb_information",
+)
 
 Columns = Any  # a table's or an alias's ``.c``
 
@@ -355,7 +369,7 @@ def branch_where(
     return source, columns, where
 
 
-def _branch_page(
+def _branch_rows(
     plan: Plan, branch: Branch, lower: datetime, bound: Bound, limit: int
 ) -> Select[Any]:
     source, columns, where = branch_where(plan, branch, lower, bound)
@@ -372,12 +386,48 @@ def _branch_page(
     )
 
 
-def page_statement(
-    plan: Plan, lower: datetime, bounds: Mapping[int, Bound], limit: int
+def _branch_page(
+    plan: Plan,
+    branch: Branch,
+    lower: datetime,
+    bound: Bound,
+    limit: int,
+    horizon: datetime | None,
 ) -> Select[Any]:
-    """The newest ``limit`` rows of the plan in ``[lower, bound)`` (``bounds``: per rank)."""
+    if horizon is None or not lower < horizon < bound.time:
+        return _branch_rows(plan, branch, lower, bound, limit)
+    newer = _branch_rows(plan, branch, horizon, bound, limit)
+    older = _branch_rows(plan, branch, lower, Bound(horizon), limit)
+    split = union_all(newer, older).subquery("split")
+    return (
+        select(split)
+        .order_by(split.c.time.desc(), split.c.id.desc())
+        .limit(literal(limit, Integer))
+    )
+
+
+def page_statement(
+    plan: Plan,
+    lower: datetime,
+    bounds: Mapping[int, Bound],
+    limit: int,
+    horizons: Mapping[str, datetime] | None = None,
+) -> Select[Any]:
+    """The newest ``limit`` rows of the plan in ``[lower, bound)`` (``bounds``: per rank).
+
+    ``horizons`` (TimescaleDB, :func:`horizons_statement`): per table, the end of its newest
+    compressed chunk. A branch whose window holds it reads ``[horizon, bound)`` and ``[lower,
+    horizon)`` in two selects, each ``ORDER BY time DESC, id DESC LIMIT :n``, and keeps the
+    newest ``limit`` of both: the same rows in the same order. TimescaleDB estimates a compressed
+    chunk at up to 1,000 rows a compressed batch, leaving out the conditions on its other columns,
+    so in one select the page's ``LIMIT`` looks soon reached and the uncompressed chunks are read
+    backwards along the primary key instead of by the selective index; the newer select holds
+    only uncompressed chunks and is planned with their statistics, as a native partition is
+    (ADR-0015)."""
+    found = horizons or {}
     parts = [
-        _branch_page(plan, branch, lower, bounds[branch.rank], limit) for branch in plan.branches
+        _branch_page(plan, branch, lower, bounds[branch.rank], limit, found.get(branch.table))
+        for branch in plan.branches
     ]
     if len(parts) == 1:
         return parts[0]
@@ -386,6 +436,20 @@ def page_statement(
         select(union)
         .order_by(union.c.time.desc(), union.c.b.asc(), union.c.id.desc())
         .limit(literal(limit, Integer))
+    )
+
+
+def horizons_statement() -> Select[Any]:
+    """Per time-series table with a compressed chunk, the end of its newest one (``tbl``,
+    ``horizon``; TimescaleDB only)."""
+    return (
+        select(CHUNKS.c.hypertable_name.label("tbl"), func.max(CHUNKS.c.range_end).label("horizon"))
+        .where(
+            CHUNKS.c.is_compressed,
+            CHUNKS.c.hypertable_schema == func.current_schema(),
+            CHUNKS.c.hypertable_name.in_([_text(name) for name in TIME_SERIES_TABLES]),
+        )
+        .group_by(CHUNKS.c.hypertable_name)
     )
 
 

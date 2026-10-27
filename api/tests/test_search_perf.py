@@ -12,13 +12,17 @@ and Wi-Fi, one in a hundred a DHCP offer), and needles: one client with about 13
 the 30 days, one rare domain, one rare DNS name, one rare MAC address (DHCP leases and offers)
 and one rare free-text token.
 ``search_counts`` is filled with ``searchcounts.rebuild_stream``; ``VACUUM ANALYZE``; on
-TimescaleDB the chunks older than 7 days are compressed before timing.
+TimescaleDB the chunks older than 7 days are compressed before timing (the compression policies
+are paused before loading: run against today's date, they would compress whichever chunks
+existed when they started).
 
 **Timing:** through the API (``TestClient``), best of three after one warm-up; the cold run is
 printed too. The numbers are recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
 
-**Plans:** for Q2-Q7 the statement of a whole-range window is explained (``EXPLAIN (FORMAT
-JSON)``, each scan's table resolved from its partition or chunk): no ``Seq Scan`` and no
+**Plans:** for Q2-Q7 the statement of a whole-range window, as the search sends it (on
+TimescaleDB split at each table's compression horizon, ``sql.page_statement``), is explained
+(``EXPLAIN (FORMAT JSON)``, each scan's table resolved from its partition or chunk): no ``Seq
+Scan`` and no
 primary-key range scan of a high-volume table (``messages``, ``fg_traffic``, ``fg_web``,
 ``fg_dns``, ``fg_app``) — a compressed chunk's ``DecompressChunk`` is allowed — and the indexes
 the query is meant to use appear (Q6: ``mt_dhcp``'s MAC index and ``mt_event``'s event index).
@@ -54,6 +58,7 @@ from arcilogger_api.search.fields import SiteNetwork
 from arcilogger_api.search.planner import plan_query
 from arcilogger_api.search.stats import SiteLabels, run_stats
 from arcilogger_api.search.testing import sign_in
+from arcilogger_api.search.windows import compression_horizons
 from arcilogger_core.config import Config
 from arcilogger_core.timeutil import day_window
 from arcilogger_db.models import Message
@@ -366,6 +371,32 @@ def _timescale(engine: Engine) -> bool:
         )
 
 
+def _pause_compression_jobs(engine: Engine) -> None:
+    """The policies first run a few seconds after the database is created: pause them and wait
+    for a running one, so that only ``_compress_old_chunks`` compresses."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs "
+                "WHERE proc_name = 'policy_compression'"
+            )
+        )
+    deadline = time.monotonic() + 30
+    while True:
+        with engine.connect() as connection:
+            running = connection.scalar(
+                text(
+                    "SELECT count(*) FROM timescaledb_information.job_stats s "
+                    "JOIN timescaledb_information.jobs j USING (job_id) "
+                    "WHERE j.proc_name = 'policy_compression' AND s.job_status = 'Running'"
+                )
+            )
+        if not running:
+            return
+        assert time.monotonic() < deadline, "a compression job is still running"
+        time.sleep(0.1)
+
+
 def _compress_old_chunks(engine: Engine, before: datetime) -> int:
     compressed = 0
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
@@ -399,6 +430,9 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
     newest_rows, other_rows = LINES.get(TIER, LINES["1"])
     days = [NEWEST - timedelta(days=offset) for offset in range(DAYS)]
     began = time.perf_counter()
+    timescale = _timescale(db_engine)
+    if timescale:
+        _pause_compression_jobs(db_engine)
     with db_engine.begin() as connection:
         ensure_partitions(connection, today=NEWEST, months_back=2)
     for day in days:
@@ -418,7 +452,7 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
     with db_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         connection.execute(text("VACUUM ANALYZE"))
     compressed = 0
-    if _timescale(db_engine):
+    if timescale:
         compressed = _compress_old_chunks(db_engine, day_window(NEWEST - timedelta(days=7))[0])
         with db_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             connection.execute(text("ANALYZE"))
@@ -535,7 +569,8 @@ def explain(site: Site, q: str, start: datetime, end: datetime) -> list[Scan]:
     """The scans of the plan of the whole-range window of ``q``."""
     with site.factory() as session:
         plan = plan_query(parse_query(q), SiteNetwork.load(session, site.config))
-    statement = sql.page_statement(plan, start, bounds(None, end, plan.ranks), 101)
+        horizons = compression_horizons(session, 10.0)
+    statement = sql.page_statement(plan, start, bounds(None, end, plan.ranks), 101, horizons)
     compiled = statement.compile(
         dialect=site.engine.dialect, compile_kwargs={"render_postcompile": True}
     )

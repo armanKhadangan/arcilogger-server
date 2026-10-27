@@ -13,7 +13,7 @@ itself stays ``POST /evidence`` with its own permission, re-authentication and a
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from time import monotonic
@@ -48,6 +48,7 @@ def collect(
     *,
     clock: Clock = monotonic,
     hook: WindowHook | None = None,
+    horizons: Mapping[str, datetime] | None = None,
 ) -> Refs:
     """Up to ``limit`` raw references of the search, newest first."""
     deadline = clock() + budget_seconds
@@ -59,7 +60,18 @@ def collect(
             return Refs(refs, False, False)
         want = min(CHUNK, limit + 1 - len(refs))  # one more: is there anything beyond limit?
         try:
-            page = run_page(session, plan, start, end, cursor, want, left, clock=clock, hook=hook)
+            page = run_page(
+                session,
+                plan,
+                start,
+                end,
+                cursor,
+                want,
+                left,
+                clock=clock,
+                hook=hook,
+                horizons=horizons,
+            )
         except SearchTimeoutError:
             return Refs(refs, False, False)
         refs += [
