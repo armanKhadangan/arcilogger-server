@@ -514,9 +514,16 @@ def test_failure_details_and_the_tail_need_raw_access(
     site: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # the detail can echo a value of the line: shown under the raw-line rule, so only once the
+    # KVKK notice is accepted
+    who = login_as(client, "admin")
+    detail = client.get("/api/v1/sources/fortigate").json()
+    assert detail["parse_failures"][0]["error"] is None
+    accept_privacy(app_session_factory, who.user_id)
+    detail = client.get("/api/v1/sources/fortigate").json()
+    assert detail["parse_failures"][0]["error"] == "bad value srcip=ornek"
     without = security.ALL_PERMISSIONS - {"search.read", "lookup.run"}
     monkeypatch.setitem(security.ROLE_PERMISSIONS, "admin", without)
-    reader(client, login_as, app_session_factory)
     detail = client.get("/api/v1/sources/fortigate").json()
     assert detail["parse_failures"][0]["error"] is None
     response = client.get("/api/v1/sources/fortigate/tail")

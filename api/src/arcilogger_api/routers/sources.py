@@ -10,7 +10,8 @@ Endpoint                        Permission                                      
 ``GET /sources``                ``sources.read`` (counts only; cached 15 s)           —
 ``GET /sources/{name}``         ``sources.read`` (cached 30 s per source); a          —
                                 pattern's ``error`` only with ``search.read`` or
-                                ``lookup.run`` (it can echo a value of the line)
+                                ``lookup.run`` and the KVKK notice (it can echo a
+                                value of the line)
 ``GET /sources/{name}/tail``    ``sources.read`` **and** (``search.read`` or          ``raw.tail``
                                 ``lookup.run``) and the KVKK notice; 30 a minute
                                 per user
@@ -37,9 +38,11 @@ from typing import Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.orm import Session
 
 from arcilogger_api import sourcehealth
 from arcilogger_api.audit import record_audit
+from arcilogger_api.auth.accounts import privacy_accepted, privacy_required, privacy_version
 from arcilogger_api.auth.privacy import ensure_privacy_notice
 from arcilogger_api.auth.ratelimit import RateLimiter
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep, TtlCache
@@ -194,7 +197,8 @@ class SourceParseFailure(Answer):
     count: int
     first_seen: datetime
     last_seen: datetime
-    #: The parser's detail; ``null`` without ``search.read`` or ``lookup.run``.
+    #: The parser's detail; ``null`` without ``search.read`` or ``lookup.run``, or until the
+    #: current KVKK notice is accepted.
     error: str | None
     example: RawRef
 
@@ -278,12 +282,20 @@ def source_detail(
         .detail(name)
         .get_or_compute(lambda: sourcehealth.detail(db, config, layout, entry, members, utc_now()))
     )
-    if not any(user.has(permission) for permission in RAW_PERMISSIONS):
+    if not shows_line_values(db, user):
         data = {
             **data,
             "parse_failures": [{**row, "error": None} for row in data["parse_failures"]],
         }
     return SourceDetail.model_validate(data)
+
+
+def shows_line_values(db: Session, user: CurrentUser) -> bool:
+    """A parse failure's ``error`` can echo a value of the line: shown under the rule of the raw
+    lines (``search.read`` or ``lookup.run``, and the current KVKK notice accepted)."""
+    if not any(user.has(permission) for permission in RAW_PERMISSIONS):
+        return False
+    return not privacy_required(user.role) or privacy_accepted(db, user.id, privacy_version(db))
 
 
 def get_tail_reader(db: DbSession, user: ReaderDep) -> CurrentUser:
