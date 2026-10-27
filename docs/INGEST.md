@@ -18,7 +18,9 @@
   `search.counts_backfill` gün bitince sayar; o zamana kadar o günlerin istatistikleri doğrudan
   sayılır. Bu adımın kendi maliyeti tek süreçli yüklemenin işlemci süresinin yaklaşık %1,4'üdür;
   `bench_throughput.py --repeat 3` ile Wave 1'e göre yavaşlama ölçülemedi (medyanlar +%0,2 ve
-  2 worker ile +%1,6; aşağıda "Measured throughput").
+  2 worker ile +%1,6). Bu ölçümde web filtresi satırı yoktur; %18'i web filtresi olan yük
+  üreteci gününde iki karşılaştırmalı ölçümün medyanı Wave 1'den %1,9 (tek süreç) ve %3,8
+  (2 worker) yavaştır: %5 sınırının içinde, ama sıfır değil (aşağıda "Measured throughput").
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -288,8 +290,11 @@ lines/s:
 | Wave 1 (no `fg_web` index, no `counts` step) | 5,713–6,345 (6,156) | 9,668–12,368 (11,680) |
 | **Wave 2 (the index and the `counts` step)** | **5,657–6,407 (6,171)** | **11,513–12,346 (11,866)** |
 
-The medians differ by +0.2 % and +1.6 %: no slowdown is measurable, the gate holds (ingest
-process CPU, median: 30.98 / 30.99 s in-process, 8.68 / 8.82 s with 2 workers). The step's own
+The medians differ by +0.2 % and +1.6 %: no slowdown is measurable, the gate as the contract
+sets it holds (ingest process CPU, median: 30.98 / 30.99 s in-process, 8.68 / 8.82 s with 2
+workers). This benchmark loads **no web filter line** (its FortiGate format samples have none,
+the rest is DHCP): it measures the `counts` step with few keys a batch and not the `fg_web`
+index at all; both are measured on the load-generator day below. The step's own
 cost, measured inside such a run: 1.8 µs a line to make the keys (5 µs before the lines were
 grouped by what `count_key` reads) and 0.1 s CPU for the 40 upserts (2–7 keys each), together
 0.45 s of the 31 s an in-process run takes (1.4 %); with 2 workers the service process, at about
@@ -297,6 +302,33 @@ grouped by what `count_key` reads) and 0.1 s CPU for the 40 upserts (2–7 keys 
 step: the garbage collector then ran about 300 times more per 200,000 lines (0.3 s), and single
 runs alternating with Wave 1 on a busy machine were 3.5–4.6 % slower in-process; the loader now
 keeps the runs of lines `COPY` loaded.
+
+**The load-generator day (2026-10-27).** One site day of `tools/loadgen` (217,875 lines: 35 % DNS,
+27 % traffic, 18 % web filter, 17 % application control; 800 summary keys, about 57 a batch),
+loaded into a fresh database per run (`run(once=True)`, `batch_rows` 5,000), 2 runs per tree and
+worker count in each turn, the trees alternating in two campaigns: Wave 1, Wave 2, Wave 2, Wave 1,
+twice; then Wave 1, the `fg_web` index alone (the tree before the `counts` step), Wave 2, Wave 2,
+the index alone, Wave 1, twice. 8 runs per tree and campaign, load average 0.1–4.2 (another
+agent's work shared the machine); min–max (median) lines/s, the difference of the medians to
+Wave 1 of the same campaign:
+
+| Load-generator day | in-process | `--workers 2` |
+|---|---|---|
+| 1st campaign: Wave 1 | 5,095–5,711 (5,429) | 9,322–11,924 (10,921) |
+| 1st campaign: **Wave 2** | **4,919–5,415 (5,130), −5.5 %** | **8,516–11,062 (10,192), −6.7 %** |
+| 2nd campaign: Wave 1 | 5,303–5,760 (5,538) | 10,144–11,612 (10,770) |
+| 2nd campaign: the `fg_web` index alone | 5,312–5,783 (5,667), +2.3 % | 8,388–11,368 (10,542), −2.1 % |
+| 2nd campaign: **Wave 2** | **5,343–5,596 (5,462), −1.4 %** | **10,213–11,487 (10,746), −0.2 %** |
+| both campaigns, 16 runs each: Wave 1 / **Wave 2** | 5,471 / **5,366, −1.9 %** | 10,921 / **10,506, −3.8 %** |
+
+On the realistic mix Wave 2 is slower, but over both campaigns within the 5 % of the gate
+(−1.9 % in-process, −3.8 % with 2 workers); one campaign of 8 runs ranges from −0.2 % to
+−6.7 % and cannot tell 5 % apart on this machine. The index alone shows no cost beyond that noise
+(+2.3 %, −2.1 %). The step's own time in such a run, instrumented (2 runs per worker count):
+2.0–2.4 µs a line to make the keys and 0.42–0.71 s for the 44 upserts (2,529 keys; about 5 ms of
+each is SQLAlchemy building the multi-row `INSERT`), together 0.9 s, 2.2 % of an in-process run,
+and 1.1–1.2 s, 5–6 % of a run with 2 workers: there it runs in the service process, at about
+50–60 % of one core, so it is partly hidden. Re-measure on site with the real mix (below).
 
 Earlier rounds, while the test runs of the other Wave 2 packages shared the machine (load average
 2–9, 30–100 % busy): one run per tree and round, and one load-generator day of 217,875 lines
@@ -350,7 +382,9 @@ its timeout): it watches the parent's process sentinel, so no orphaned worker st
   `messages` row, see the table above).
 - Throughput with the real parsers and the production database (TimescaleDB or partitions):
   `bench_throughput.py --repeat 3 --workers 0 2 3` and a live feed at 10,000 lines/s (spec 14
-  acceptance; not met on the development VM).
+  acceptance; not met on the development VM); the cost of Wave 2 (the `counts` step and
+  `ix_fg_web_rhost_time`) on the site's own mix, with its web filter lines, which
+  `bench_throughput.py` does not have (the load-generator day above: −1.9 % / −3.8 %).
 - The search counts after the first days: `arcilogger-db search-counts verify --hours 24` must
   report no difference (rows and counts are written in one transaction), and its line on names
   not stored in lower case should read 0 for `fg_dns.qname` and `fg_web.hostname` (`domain:`
