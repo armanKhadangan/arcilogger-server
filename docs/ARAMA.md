@@ -312,8 +312,8 @@ göndermediğini görmenin en kısa yoludur ([DEVICE-SETUP.md](DEVICE-SETUP.md))
   kalan kullanıcı her sayfada olduğu gibi `auth.idle_minutes` sonunda çıkış yapar. Akışın
   arka plan istekleri boşta kalma süresini sıfırlamaz.
 - **Yeniden bağlanma:** ağ hatasında 1, 2, 5, 10, sonra 30 saniye arayla yeniden bağlanır.
-  Aradaki satırlar gösterilemediyse sayfa "Aradaki satırlar gösterilmemiş olabilir; bu aralığı
-  Arama'da açın." der ve aralığı Arama'da açan bağlantıyı verir.
+  Aradaki satırlar gösterilemediyse sayfa "Aradaki satırlar gösterilemedi; bu aralığı Arama'da
+  açabilirsiniz." der ve aralığı Arama'da açan bağlantıyı verir.
 - Akış açılışı ve kapanışı denetlenir (`live.open`, `live.close`); bir satırın ham hali her
   zamanki ham satır görünümüyle açılır (`raw.view`).
 
