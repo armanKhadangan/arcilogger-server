@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,7 @@ from arcilogger_core.immutability import unlock
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.seal import config_alert
-from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
+from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_core.tsa.base import TsaConfigurationError
 from arcilogger_core.tsa.mock import MockTsa
 
@@ -43,15 +43,15 @@ target = "{target}"
 
 
 @pytest.fixture
-def setup(tmp_path: Path) -> dict[str, Any]:
+def setup(tmp_path: Path, one_site_day: date) -> dict[str, Any]:
     data = tmp_path / "data"
     config = tmp_path / "arcilogger.toml"
     config.write_text(
         CONFIG.format(data=data.as_posix(), replica="false", target=(tmp_path / "nas").as_posix()),
         encoding="utf-8",
     )
-    today = site_day(utc_now())
-    days = [today - timedelta(days=n) for n in (3, 2, 1)]
+    # The three days before today, which stays today for the CLI the whole test long.
+    days = [one_site_day - timedelta(days=n) for n in (3, 2, 1)]
     layout = Layout(data)
     for day in days:
         path = layout.spool_file("fortigate", day)

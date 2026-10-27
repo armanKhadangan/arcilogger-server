@@ -44,7 +44,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
 from arcilogger_core.taskrequests import clean, take
-from arcilogger_core.timeutil import SITE_TZ, isoformat_site, site_day, utc_now
+from arcilogger_core.timeutil import SITE_TZ, isoformat_site, utc_now
 from arcilogger_core.tsa.mock import MockTsa
 
 CONFIG = """data_dir = "{data}"
@@ -186,7 +186,7 @@ def foreign_agent_key() -> SigningKey:
 
 
 @pytest.fixture
-def site(tmp_path: Path) -> Site:
+def site(tmp_path: Path, one_site_day: date) -> Site:
     programdata = tmp_path / "ProgramData" / "ARCILOGGER"
     data = tmp_path / "ARCILOGGER"
     programdata.mkdir(parents=True)
@@ -195,8 +195,8 @@ def site(tmp_path: Path) -> Site:
     )
     keys_dir = programdata / "admin" / "keys"
     init_keys(keys_dir)
-    today = site_day(utc_now())
-    days = [today - timedelta(days=n) for n in (3, 2, 1)]
+    # The three days before today, which stays today for the CLI the whole test long.
+    days = [one_site_day - timedelta(days=n) for n in (3, 2, 1)]
     layout = Layout(data)
     for day in days:
         path = layout.spool_file("fortigate", day)
