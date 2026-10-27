@@ -626,6 +626,13 @@ class Hub:
         data = {"code": code, "message_tr": message_tr, "message_en": message_en}
         connection.control(frame("end", data), ending=True)
 
+    def stalled(self, stream: Stream, connection: Connection) -> None:
+        """A write to ``connection`` waited :attr:`Timing.slow_client`: its client stopped
+        reading. The stream ends with ``slow_client`` (unless another connection took over)."""
+        if stream.connection is connection:
+            log.warning("live tail %s: the client stopped reading; the stream ends", stream.id)
+            self.end(stream, "slow_client")
+
     async def close(self, stream: Stream, reason: str) -> None:
         """Close ``stream`` without an event (``DELETE``) and audit it before returning."""
         if stream.closed is not None:

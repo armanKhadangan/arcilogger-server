@@ -12,6 +12,7 @@ its user and session; the GET holds no database connection while it streams.
 
 from __future__ import annotations
 
+import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -631,6 +632,43 @@ def test_the_stream_holds_no_database_connection(
         assert reader.headers["x-accel-buffering"] == "no"
     finally:
         reader.close()
+
+
+def test_a_client_that_stops_reading_is_ended_and_audited(
+    clients: Clients,
+    spool: Spool,
+    server: LiveServer,
+    hub: Hub,
+    app_session_factory: sessionmaker[Session],
+) -> None:
+    """A client that keeps the connection open but never reads (its TCP window stays at zero)
+    holds no write for ever: within the slow-client time the stream ends with ``slow_client``,
+    ``live.close`` is written, the slot is free and the server ends the response."""
+    client, who = clients()
+    opened = open_stream(client)
+    cookies = "; ".join(f"{name}={value}" for name, value in client.cookies.items())
+    request = (
+        f"GET /api/v1/live/streams/{opened['stream_id']} HTTP/1.1\r\n"
+        f"Host: 127.0.0.1:{server.port}\r\nCookie: {cookies}\r\n"
+        "X-Arci-Background: 1\r\nAccept: text/event-stream\r\n\r\n"
+    )
+    long_line = traffic() + ' msg="' + "ornek " * 1000 + '"'
+    with socket.socket() as stalled:
+        stalled.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        stalled.connect(("127.0.0.1", server.port))
+        stalled.sendall(request.encode())
+        deadline = time.monotonic() + 15
+        while not audits(app_session_factory, "live.close") and time.monotonic() < deadline:
+            spool.write("fortigate", *([long_line] * 20))
+            time.sleep(0.1)
+        (closed,) = audits(app_session_factory, "live.close")
+        assert closed.details["stream_id"] == opened["stream_id"]
+        assert closed.details["reason"] == "slow_client"
+        assert hub.count_streams(who.user_id) == (0, 0)
+        # The response ends: once the client reads, the buffered bytes arrive, then the end.
+        stalled.settimeout(10)
+        while stalled.recv(1 << 16):
+            pass
 
 
 def test_a_server_stop_ends_the_stream_and_audits_it(

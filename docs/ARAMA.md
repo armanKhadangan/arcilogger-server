@@ -304,8 +304,9 @@ göndermediğini görmenin en kısa yoludur ([DEVICE-SETUP.md](DEVICE-SETUP.md))
   satır "biçim dışı" rozetiyle gösterilir.
 - **Sınırlar:** akış başına saniyede en fazla `live.max_lines_per_second` (100) satır; sunucuda
   aynı anda `live.max_streams_total` (4), kullanıcı başına `live.max_streams_per_user` (2) akış
-  (`live_stream_limit`). Gösterilemeyen satırlar sayılır ve nedeniyle bildirilir. Sayfa en fazla
-  2.000 satır tutar (eskiler düşer).
+  (`live_stream_limit`). Gösterilemeyen satırlar sayılır ve nedeniyle bildirilir; 30 saniye
+  satırlara yetişemeyen (ör. okumayı bırakan) bir bağlantının akışı durdurulur (`slow_client`).
+  Sayfa en fazla 2.000 satır tutar (eskiler düşer).
 - **Duraklat / Sürdür:** duraklatılan akış 120 saniye bekler ve yerini korur; "Sürdür" kaldığı
   yerden devam eder. Akış `live.max_minutes` (60) dakika sonra durur (gözetimsiz ekran).
 - **Oturum:** akış 30 saniyede bir oturumu, yetkiyi ve aydınlatma metni onayını denetler; boşta

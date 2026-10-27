@@ -305,7 +305,9 @@ sends logs ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
 - **Limits:** at most `live.max_lines_per_second` (100) lines a second per stream;
   `live.max_streams_total` (4) streams on the server at a time, `live.max_streams_per_user` (2)
   per user (`live_stream_limit`). Lines that could not be shown are counted and reported with
-  their reason. The page keeps at most 2,000 lines (the oldest go first).
+  their reason; a connection that cannot keep up for 30 seconds (e.g. one that stopped reading)
+  has its stream stopped (`slow_client`). The page keeps at most 2,000 lines (the oldest go
+  first).
 - **Pause / resume:** a paused stream waits 120 seconds and keeps its slot; "Sürdür" (resume)
   continues where it stopped. A stream stops after `live.max_minutes` (60) minutes (unattended
   screen).

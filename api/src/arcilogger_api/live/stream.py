@@ -22,20 +22,25 @@ A pause closes the connection: the stream lingers (:attr:`Timing.linger`) and a 
 the client going away (also on ASGI 2.4 servers, where Starlette's streaming response does not),
 so a paused or closed tab frees the hub's work at once; when the server stops and cancels the
 response it still tries to write ``end {server_stopping}`` (1 s, best effort).
+
+A client that keeps the connection open but stops reading would hold a write for ever (neither
+Uvicorn nor Caddy has a write timeout): a write that waits longer than
+:attr:`Timing.slow_client` ends the stream with ``slow_client`` and the response, so the
+stream's queue is freed and ``live.close`` is written at once, not when the socket dies.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import datetime
 
 import anyio
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import StreamingResponse
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from arcilogger_api.auth.accounts import privacy_accepted, privacy_required, privacy_version
 from arcilogger_api.live.events import KEEPALIVE, Entry, frame
@@ -164,17 +169,41 @@ def stopping_frame() -> bytes:
 
 
 class EventStreamResponse(StreamingResponse):
-    """``text/event-stream`` that notices a client going away at once (see the module text)."""
+    """``text/event-stream`` that notices a client going away at once and gives up on one that
+    stops reading (see the module text)."""
 
     media_type = "text/event-stream"
+
+    def __init__(
+        self,
+        content: AsyncIterator[bytes],
+        *,
+        write_timeout: float,
+        on_stalled: Callable[[], None],
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(content, headers=headers)
+        self.write_timeout = write_timeout
+        self.on_stalled = on_stalled
+
+    async def stream_response(self, send: Send) -> None:
+        async def bounded(message: Message) -> None:
+            with anyio.fail_after(self.write_timeout):
+                await send(message)
+
+        await super().stream_response(bounded)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
             async with anyio.create_task_group() as group:
 
                 async def run() -> None:
-                    with contextlib.suppress(OSError):  # the client went away (ASGI 2.4)
+                    try:
                         await self.stream_response(send)
+                    except TimeoutError:  # the client stopped reading
+                        self.on_stalled()
+                    except OSError:  # the client went away (ASGI 2.4)
+                        pass
                     group.cancel_scope.cancel()
 
                 group.start_soon(run)

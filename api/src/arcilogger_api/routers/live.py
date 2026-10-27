@@ -201,7 +201,10 @@ async def stream_events(
     connection = Connection()
     replay = hub.attach(stream, connection, last_event(last_event_id))
     return EventStreamResponse(
-        events(hub, stream, connection, replay), headers={"X-Accel-Buffering": "no"}
+        events(hub, stream, connection, replay),
+        write_timeout=hub.timing.slow_client,
+        on_stalled=lambda: hub.stalled(stream, connection),
+        headers={"X-Accel-Buffering": "no"},
     )
 
 

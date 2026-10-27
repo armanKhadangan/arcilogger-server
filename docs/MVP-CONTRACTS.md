@@ -1498,7 +1498,8 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   match (free-text byte search) is kept unparsed, and a stream opened later whose terms occur in
   it counts it as `parse_budget`. A stream judges only the lines of the folders it reads.
 - Limits: `live.max_lines_per_second` per stream (token bucket; the rest `rate_limited`), a
-  queue of 500 (`slow_client`; full for 30 s ends the stream), `live.max_streams_total` and
+  queue of 500 (`slow_client`; full for 30 s ends the stream, and so does one write that waits
+  30 s because the client stopped reading), `live.max_streams_total` and
   `live.max_streams_per_user` (checked and the stream registered with no `await` in between, so
   concurrent opens never overshoot), `live.max_minutes` (`end time_limit`); a paused stream
   lingers 120 s. Every 30 s the stream checks the session (`security.session_problem`: every code
