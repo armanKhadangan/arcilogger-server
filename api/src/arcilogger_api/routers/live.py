@@ -42,6 +42,7 @@ from arcilogger_api.live.hub import (
     LiveSettings,
     LiveUnavailableError,
     Stream,
+    StreamLimitError,
     hub_of,
 )
 from arcilogger_api.live.messages import live_error
@@ -112,13 +113,6 @@ async def open_stream(
         matcher = compile_matcher(query, site)
     except SearchQueryError as exc:
         raise query_error(exc) from None
-    total, mine = hub.count_streams(user.id)
-    if total >= settings.max_streams_total or mine >= settings.max_streams_per_user:
-        raise live_error(
-            "live_stream_limit",
-            per_user=settings.max_streams_per_user,
-            total=settings.max_streams_total,
-        )
     version = await run_in_threadpool(privacy_version, db)
     opened_at = hub.now()
     stream = Stream(
@@ -138,6 +132,12 @@ async def open_stream(
     )
     try:
         folders = await hub.open(stream, settings, site)
+    except StreamLimitError:
+        raise live_error(
+            "live_stream_limit",
+            per_user=settings.max_streams_per_user,
+            total=settings.max_streams_total,
+        ) from None
     except LiveUnavailableError:
         raise live_error("live_unavailable") from None
     try:

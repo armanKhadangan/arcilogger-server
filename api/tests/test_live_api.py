@@ -667,6 +667,35 @@ def test_opening_refusals_are_plain_json(
     assert opens[0].details["backfill"] == 50  # the default: live.backfill_lines
 
 
+def test_concurrent_opens_never_overshoot_the_limits(
+    clients: Clients, spool: Spool, server: LiveServer, hub: Hub
+) -> None:
+    """Two tabs (or two automatic re-opens) at once: the limit is checked where the stream is
+    registered, with no ``await`` between, so exactly the allowed number open."""
+    spool.write("fortigate", traffic())
+    client, who = clients()
+    for _ in range(5):
+        start = threading.Barrier(4)
+        statuses: list[int] = []
+
+        def post(statuses: list[int] = statuses, start: threading.Barrier = start) -> None:
+            with httpx.Client(
+                base_url=server.url, timeout=10, cookies=client.cookies, headers=client.headers
+            ) as tab:
+                start.wait()
+                statuses.append(tab.post("/api/v1/live/streams", json={"q": ""}).status_code)
+
+        tabs = [threading.Thread(target=post) for _ in range(4)]
+        for tab in tabs:
+            tab.start()
+        for tab in tabs:
+            tab.join()
+        assert sorted(statuses) == [201, 201, 429, 429]
+        assert hub.count_streams(who.user_id) == (2, 2)
+        for stream in list(hub.streams.values()):
+            assert client.delete(f"/api/v1/live/streams/{stream.id}").status_code == 204
+
+
 def test_an_unreadable_spool_folder_is_503(clients: Clients, layout: Layout) -> None:
     layout.root.mkdir(parents=True, exist_ok=True)
     layout.spool.write_text("not a folder", encoding="utf-8")

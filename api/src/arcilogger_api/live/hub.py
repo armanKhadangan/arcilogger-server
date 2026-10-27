@@ -157,6 +157,10 @@ class LiveUnavailableError(OSError):
     """``spool/`` cannot be listed: no stream can start."""
 
 
+class StreamLimitError(Exception):
+    """``live.max_streams_total`` or ``live.max_streams_per_user`` streams are open already."""
+
+
 class Connection:
     """One ``GET /live/streams/{id}``: the lines queued for it and its control frames."""
 
@@ -481,8 +485,13 @@ class Hub:
     ) -> list[dict[str, Any]]:
         """Register ``stream``; returns its folders once the hub follows them.
 
-        Raises :class:`LiveUnavailableError` when ``spool/`` cannot be listed.
+        Raises :class:`StreamLimitError` when a limit is reached (checked and registered with no
+        ``await`` between, so concurrent opens cannot overshoot it) and
+        :class:`LiveUnavailableError` when ``spool/`` cannot be listed.
         """
+        total, mine = self.count_streams(stream.user_id)
+        if total >= settings.max_streams_total or mine >= settings.max_streams_per_user:
+            raise StreamLimitError
         self.settings, self.site = settings, site
         if self.buffer.maxlen != settings.buffer_lines:
             self.buffer = deque(self.buffer, maxlen=settings.buffer_lines)
