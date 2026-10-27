@@ -136,14 +136,14 @@ def _check_downgraded(engine: Engine, rows: int = 3) -> None:
     assert "counts_from_line" not in {c["name"] for c in inspector.get_columns("ingest_offsets")}
     assert "ix_fg_web_rhost_time" not in {i["name"] for i in inspector.get_indexes("fg_web")}
     assert _scalar(engine, "SELECT count(*) FROM fg_web") == rows  # the rows stay
-    assert upgrade(engine).after == (REVISION,)  # and up again
+    assert upgrade(engine, revision=REVISION).after == (REVISION,)  # and up again
 
 
 def test_up_and_down_on_native_partitions(empty_engine: Engine) -> None:
     upgrade(empty_engine, revision=BEFORE, timescale="off")
     assert not NEW_TABLES & set(inspect(empty_engine).get_table_names())
     old = _old_data(empty_engine, 20)
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     _check_upgraded(empty_engine, old.date())
     partitions = _scalar(
         empty_engine,
@@ -184,7 +184,7 @@ def test_up_and_down_on_timescaledb_with_compressed_chunks(empty_engine: Engine)
             )
         ).scalar_one()
     assert compressed >= 1
-    assert upgrade(empty_engine).after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION).after == (REVISION,)
     _check_upgraded(empty_engine, old.date(), plan=False)  # one chunk, compressed
     chunks = _scalar(
         empty_engine,

@@ -118,9 +118,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         op.f("ck_leases_source_table"), "leases", _in("source_table", SOURCE_TABLES)
     )
-    op.create_index(
-        "ix_leases_source_table_end", "leases", ["source_table", "end"], unique=False
-    )
+    op.create_index("ix_leases_source_table_end", "leases", ["source_table", "end"], unique=False)
 
 
 def downgrade() -> None:
