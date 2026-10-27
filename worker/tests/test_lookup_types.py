@@ -690,15 +690,38 @@ def test_the_new_settings_are_read() -> None:
     [
         ({"dhcp.fortigate_logids": ["0100026001"]}, "dhcp.fortigate_logids must be an object"),
         ({"dhcp.fortigate_dhcp_msgs": {"0100026001": "Ack"}}, "dhcp.fortigate_dhcp_msgs"),
-        ({"lookup.srcmac_interfaces": "vlan42"}, "lookup.srcmac_interfaces must be a list"),
-        ({"nat.snat_trandisp": "snat"}, "nat.snat_trandisp must be a list"),
+        (
+            {"dhcp.fortigate_interfaces_excluded": "ipsec-dhcp"},
+            "dhcp.fortigate_interfaces_excluded must be a list",
+        ),
     ],
 )
 def test_the_new_settings_refuse_values_of_another_shape(
     values: dict[str, Any], message: str
 ) -> None:
+    """The lease timeline's own values: a value of another shape names the setting."""
     with pytest.raises(ValueError, match=message):
         LookupSettings.from_settings(values)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"nat.snat_trandisp": "snat"},
+        {"lookup.srcmac_interfaces": "vlan42"},
+        {"lookup.srcmac_max_ips": "2"},
+        {"lookup.srcmac_max_ips": True},
+        {"nat.snat_trandisp": None, "lookup.srcmac_interfaces": {"vlan42": 1}},
+    ],
+)
+def test_the_lookup_only_settings_never_stop_the_lease_timeline(values: dict[str, Any]) -> None:
+    """A value written around the validator (hand-written SQL, CORRELATION §5) of a setting only
+    the lookup reads gives its shipped default: the lease job (``Context.load``) and the usage
+    rollups read these settings through ``from_settings`` too (contract 2.8.1)."""
+    settings = LookupSettings.from_settings({**DEFAULT_SETTINGS, **values})
+    assert settings == LookupSettings()
+    assert settings.snat_trandisp == ("snat",)
+    assert (settings.srcmac_interfaces, settings.srcmac_max_ips) == ((), 1)
 
 
 def test_the_exits_are_parsed_only_when_asked_for_and_kept() -> None:

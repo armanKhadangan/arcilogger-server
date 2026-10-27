@@ -932,7 +932,11 @@ class LookupSettings:
     def from_settings(cls, values: Mapping[str, Any]) -> LookupSettings:
         """From ``get_settings(session)`` (keys like ``nat.public_ips``).
 
-        Addresses are validated and normalised (``ValueError`` names the bad setting).
+        Addresses are validated and normalised (``ValueError`` names the bad setting). The lease
+        job and the usage rollups call this too, so the values only the lookup reads (the exits,
+        ``nat.snat_trandisp``, the srcmac settings) never raise here: the exits are parsed by
+        :meth:`egresses`, the others fall back to the shipped default for a value of another
+        shape (written around the validator, CORRELATION §5).
         """
         transip = str(values.get("nat.wan_transip") or "").strip()
         public = values.get("nat.public_ips") or ()
@@ -954,9 +958,9 @@ class LookupSettings:
                 normalize_mac(str(mac)) for mac in values.get("devices.infrastructure_macs") or ()
             ),
             nat_egresses=values.get("nat.egresses", {}),
-            snat_trandisp=_texts(values, "nat.snat_trandisp", ("snat",)),
-            srcmac_interfaces=_texts(values, "lookup.srcmac_interfaces", ()),
-            srcmac_max_ips=int(values.get("lookup.srcmac_max_ips", 1)),
+            snat_trandisp=_lookup_texts(values, "nat.snat_trandisp", ("snat",)),
+            srcmac_interfaces=_lookup_texts(values, "lookup.srcmac_interfaces", ()),
+            srcmac_max_ips=_lookup_count(values, "lookup.srcmac_max_ips", 1),
             fortigate_logids={
                 str(logid): str(meaning)
                 for logid, meaning in _object(values, "dhcp.fortigate_logids", FORTIGATE_LOGIDS)
@@ -993,3 +997,17 @@ def _object(
     if not isinstance(value, Mapping):
         raise ValueError(f"{key} must be an object")
     return list(value.items())
+
+
+def _lookup_texts(
+    values: Mapping[str, Any], key: str, default: tuple[str, ...]
+) -> tuple[str, ...]:
+    """The texts of a list setting only the lookup reads; ``default`` for any other value."""
+    items = values.get(key, default)
+    return tuple(str(item) for item in items) if isinstance(items, list | tuple) else default
+
+
+def _lookup_count(values: Mapping[str, Any], key: str, default: int) -> int:
+    """An integer setting only the lookup reads; ``default`` for any other value."""
+    value = values.get(key, default)
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
