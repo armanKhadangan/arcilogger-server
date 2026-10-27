@@ -1867,6 +1867,23 @@ def test_adr_index_lists_every_decision() -> None:
     assert [name for name in files if f"| [{name[:4]}]({name}) |" not in index] == []
 
 
+def test_adr_0016_cites_fortios_by_major_and_minor_release() -> None:
+    """ADR-0016 (Wave 3 contract 3.9): the Fortinet documents are cited as "FortiOS 7.6 …" and
+    the community articles by title and number, never with a third release number; the evidence
+    summary it quotes keeps "FortiGate DHCP," between the device and the logid; every decision
+    D1-D33 and the specification deviations are recorded."""
+    text = _doc("adr/0016-fortigate-dhcp-and-internet-exits.md")
+    flat = _flat(text)
+    for source in ("FortiOS 7.6 log reference", "FortiOS 7.6 CLI reference"):
+        assert source in flat, source
+    assert re.findall(r"FortiOS \d+\.\d+\.\d+", text) == []
+    assert MODEL_OR_RELEASE.findall(text) == []
+    assert "(FortiGate DHCP, logid 0100026001, lease 604800)" in flat
+    assert [n for n in range(1, 34) if f"**D{n} " not in text] == []
+    assert flat.count("This departs from SPEC 9.1") == 2  # srcmac (D10), traffic (D26)
+    assert [f"O{n}" for n in range(1, 23) if f"| O{n} |" not in text] == []
+
+
 def test_assumptions_record_every_licensing_decision() -> None:
     """Rows L1-L8 (the owner's brief) and C-1-C-16 (the contract's decisions) with the owner's
     answers: C-1, C-6 and C-11 confirmed (C-11 with the users limit of the code), the others

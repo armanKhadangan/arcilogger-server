@@ -403,6 +403,26 @@ so in an administrator PowerShell call it with its full path:
 `settings.change` with the old and new value to the audit log. A hand-written SQL change is not
 validated, not audited, and reverted by the next upgrade while the row still says `:seed`.
 
+**FortiGate DHCP evidence, srcmac and internet exits (ADR-0016).** Shipped as well, read by the
+lease timeline, the lookup and the lease and NAT alerts of ADR-0016:
+
+| Setting | Default | What it decides |
+|---|---|---|
+| `dhcp.fortigate_logids` | `{"0100026001": "assigned", "0100026002": "deassigned"}` | which FortiGate DHCP server events are lease evidence and what each means; `{}` switches FortiGate DHCP evidence off; a change applies to past days when the leases are rebuilt (sahada doğrula: the RELEASE logid is derived) |
+| `dhcp.fortigate_dhcp_msgs` | `{"0100026001": ["Ack"]}` | per logid, the `dhcp_msg` values its rows may carry (case-insensitive); a row with another value is refused and counted; a logid without an entry is not restricted |
+| `dhcp.fortigate_use_logged_lease` | `true` | the lease time of the ACK (300–8,640,000 s) ends the lease that long after its last DHCP record, without the `lease.timeout_percent` margin; other values, and `false`, use the configured times |
+| `dhcp.fortigate_traffic_extends` | `false` | whether traffic keeps a FortiGate lease open, as it does a MikroTik lease |
+| `dhcp.fortigate_interfaces_excluded` | `[]` | FortiGate DHCP interfaces whose rows are no lease evidence (DHCP over IPsec) |
+| `dhcp.fortigate_format_verified` | `false` | the site check of the FortiGate DHCP record format is done (DEVICE-SETUP.md section 2.4); lookups and reports name who marked it and when |
+| `lookup.srcmac_interfaces` | `[]` | the `srcintf` names whose FortiGate srcmac may name a chain's MAC, at `low` confidence and as partial evidence, never as a lease; `[]` = off |
+| `lookup.srcmac_max_ips` | `1` | the most IPv4 addresses one srcmac may show within ±1 hour of the moment (1–16) before it counts as a router's or switch's |
+| `nat.egresses` | `{}` | the internet exits (direct, ISP NAT, not through the FortiGate, or an internal NAT address that is no internet exit) with their public and NAT addresses and interfaces; `{}` = one implicit double-NAT exit |
+| `nat.snat_trandisp` | `["snat"]` | the FortiGate `trandisp` values a candidate search takes for NAT addresses no exit claims (sahada doğrula) |
+
+`nat.public_ips`, `nat.wan_transip` and `lookup.port_hint` stay until their conversion into
+`nat.egresses`. Labels, help texts and refusal codes: `arcilogger_db.settings_meta` and
+`SETTING_ERRORS`; the exit rules: `arcilogger_db.egress`.
+
 An unreadable `devices.oui_file` (a folder, no permission, missing) is logged once and treated
 as no file: the vendor stays empty and the lease jobs carry on. On the Windows server the usual
 cause is the file's location — see "Vendor" in section 1.
