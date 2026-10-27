@@ -4,7 +4,9 @@
   snapshot) until ``search.export_max_rows`` (100,000) or ``search.export_budget_seconds``
   (120 s); then the file stops and says so — in its name (``-kismi``), in the "Bilgi" sheet, in
   the header ``X-Arci-Export-Truncated`` (``rows`` or ``time``) and in the audit entry. Never
-  silent, never a count first.
+  silent, never a count first. The fill-in queries of a chunk (typed fields, ``messages`` text)
+  get the time the budget has left; one that times out cuts the file there (``time``), so no
+  row is written with empty columns.
 * **CSV:** the rules of :mod:`arcilogger_api.csvfiles` (UTF-8 with BOM, ``;``, CRLF, every cell
   neutralised against formula injection), written row by row.
 * **XLSX:** openpyxl write-only, every cell text (as ``usage_exports``: control characters an
@@ -47,6 +49,7 @@ from arcilogger_api.search.windows import (
     Clock,
     SearchTimeoutError,
     WindowHook,
+    WindowTimeoutError,
     page_rows,
     run_page,
 )
@@ -199,9 +202,13 @@ def read_rows(
 ) -> Iterator[list[str]]:
     """The file's rows, page by page; ``reading`` records the count and the truncation."""
     deadline = clock() + budget_seconds
+
+    def remaining() -> float:
+        return deadline - clock()
+
     cursor: Cursor | None = None
     while True:
-        left = deadline - clock()
+        left = remaining()
         if left <= 0:
             reading.truncated = "time"
             return
@@ -215,7 +222,12 @@ def read_rows(
         more = reading.count + len(rows) > max_rows
         if more:
             rows = rows[: max_rows - reading.count]
-        for row in page_rows(session, plan, rows, site, text_max=TEXT_MAX):
+        try:
+            filled = page_rows(session, plan, rows, site, text_max=TEXT_MAX, seconds=remaining)
+        except WindowTimeoutError:  # this chunk is left out whole, never half filled
+            reading.truncated = "time"
+            return
+        for row in filled:
             reading.count += 1
             yield cells(row)
         if more:

@@ -12,13 +12,17 @@ PostgreSQL ``statement_timeout``). It stops when the page is full, ``from`` is r
   shown) or ``None`` (the end);
 * a window whose statement timed out does not count; it runs in a savepoint, so the request's
   read-only snapshot (``REPEATABLE READ``) survives it;
+* after a ``last`` cursor the first window always runs, even when the cursor's time is ``from``
+  itself (the rows still due at that instant: later branches, lower ids), and a budget that ran
+  out before any window gives the same cursor back;
 * if the **first** window of a request times out it is halved, down to 5 minutes — each try of
   it gets half the time left, so a smaller one can still run; when even 5 minutes time out the
   request fails with :class:`SearchTimeoutError` (504 ``search_timeout``).
 
 :func:`page_rows` then fills the page in: the typed fields of a ``messages``-driven page and the
 ``messages`` fields of a typed page, one keyed query per table (``sql.typed_rows``,
-``sql.rows_by_reference``), under a deadline of their own (:data:`FILL_SECONDS`).
+``sql.rows_by_reference``), on a page under a deadline of their own (:data:`FILL_SECONDS`), in the
+export under the time its budget has left (a timeout there cuts the file).
 """
 
 from __future__ import annotations
@@ -48,7 +52,7 @@ FIRST_WINDOW: Final = timedelta(hours=1)
 MIN_WINDOW: Final = timedelta(minutes=5)
 #: A window that answered within this share of the time left doubles the next one.
 GROW_SHARE: Final = 0.25
-#: The fill-in queries of a page get this deadline of their own (keyed lookups).
+#: The fill-in queries of a page get this deadline of their own (keyed lookups; not the export).
 FILL_SECONDS: Final = 1.0
 #: ``SearchRow.text`` is at most this long (the export has the whole ``messages.text``).
 ROW_TEXT_MAX: Final = 500
@@ -56,6 +60,8 @@ ROW_TEXT_MAX: Final = 500
 _UNSAFE: Final = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp", "Co", "Cn"})
 
 Clock = Callable[[], float]
+#: The seconds a fill-in query may take, read just before it runs (the export's budget left).
+Seconds = Callable[[], float]
 #: Called inside each window's deadline before its statement (tests make windows slow).
 WindowHook = Callable[[Session, datetime, datetime], None]
 
@@ -155,7 +161,9 @@ def run_page(
     size = FIRST_WINDOW
     windows = 0
     budget_left = True
-    while len(rows) < limit and upper > start:
+    # Rows at the cursor's own time may still be due, also when that time is ``from``.
+    due = cursor is not None and cursor.kind == "last"
+    while len(rows) < limit and (upper > start or (due and windows == 0)):
         left = deadline - clock()
         if left <= 0:
             budget_left = False
@@ -190,7 +198,9 @@ def run_page(
         scan = Scan(True, last["time"], scanned_to, windows, elapsed)
         return Page(rows, page_cursor, scan)
     if not budget_left:
-        return Page(rows, Cursor.frontier(upper), Scan(False, upper, scanned_to, windows, elapsed))
+        # Without a window the cursor's own bounds still hold; a frontier would skip its rows.
+        resume = cursor if windows == 0 and cursor is not None else Cursor.frontier(upper)
+        return Page(rows, resume, Scan(False, upper, scanned_to, windows, elapsed))
     return Page(rows, None, Scan(True, start, scanned_to, windows, elapsed))
 
 
@@ -224,17 +234,20 @@ def _first(table: str, row: Mapping[Any, Any], field: str) -> Any:
 
 
 def vlan_of(site: SiteNetwork, address: Any) -> int | None:
-    """The VLAN whose subnet holds ``address`` (``None``: none, or no address)."""
+    """The VLAN whose subnet holds ``address``, the most specific one when subnets overlap (as
+    the statistics' ``SiteLabels``; ``None``: none, or no address)."""
     if address is None:
         return None
     try:
         ip = ipaddress.ip_interface(str(address)).ip
     except ValueError:
         return None
-    for vlan_id, subnet in site.vlans.items():
-        if ip.version == subnet.version and ip in subnet:
-            return vlan_id
-    return None
+    holding = [
+        (-subnet.prefixlen, vlan_id)
+        for vlan_id, subnet in site.vlans.items()
+        if ip.version == subnet.version and ip in subnet
+    ]
+    return min(holding)[1] if holding else None
 
 
 def summary(
@@ -286,7 +299,11 @@ def _raw_key(row: Fields) -> RawKey:
     return (row["time"], row["source"], row["raw_day"], int(row["raw_line"]))
 
 
-def _fetch(session: Session, statement: Select[Any]) -> Sequence[RowMapping]:
+def _fetch(
+    session: Session, statement: Select[Any], seconds: Seconds | None
+) -> Sequence[RowMapping]:
+    if seconds is not None:
+        return run_statement(session, statement, seconds())  # the export: a timeout cuts the file
     try:
         return run_statement(session, statement, FILL_SECONDS)
     except WindowTimeoutError:
@@ -294,7 +311,7 @@ def _fetch(session: Session, statement: Select[Any]) -> Sequence[RowMapping]:
 
 
 def _typed_of_messages(
-    session: Session, rows: Sequence[RowMapping]
+    session: Session, rows: Sequence[RowMapping], seconds: Seconds | None
 ) -> dict[RawKey, tuple[str, RowMapping]]:
     """The typed row of each line of a ``messages``-driven page."""
     wanted: dict[str, list[RawKey]] = {}
@@ -304,7 +321,7 @@ def _typed_of_messages(
             wanted.setdefault(table, []).append(_raw_key(row))
     found: dict[RawKey, tuple[str, RowMapping]] = {}
     for table in sorted(wanted, key=TIME_SERIES_TABLES.index):
-        for typed in _fetch(session, sql.rows_by_reference(table, wanted[table])):
+        for typed in _fetch(session, sql.rows_by_reference(table, wanted[table]), seconds):
             found[_raw_key(typed)] = (table, typed)
     return found
 
@@ -316,13 +333,18 @@ def page_rows(
     site: SiteNetwork,
     *,
     text_max: int = ROW_TEXT_MAX,
+    seconds: Seconds | None = None,
 ) -> list[dict[str, Any]]:
-    """The ``SearchRow`` of each row of a page (``rows`` as :func:`run_page` returned them;
-    ``text_max``: the export keeps the whole ``messages.text``)."""
+    """The ``SearchRow`` of each row of a page (``rows`` as :func:`run_page` returned them).
+
+    On a page each fill-in query gets :data:`FILL_SECONDS` and one that times out leaves its rows
+    without the other table's fields. The export passes ``text_max`` (the whole
+    ``messages.text``) and ``seconds`` (its budget left): there a timeout raises
+    :class:`WindowTimeoutError`, so a file is cut, never written with empty columns."""
     if not rows:
         return []
     if plan.driver == "messages":
-        typed = _typed_of_messages(session, rows)
+        typed = _typed_of_messages(session, rows, seconds)
         return [
             _row("messages", row, row, typed.get(_raw_key(row)), site, text_max) for row in rows
         ]
@@ -331,11 +353,11 @@ def page_rows(
         by_table.setdefault(TIME_SERIES_TABLES[row["b"]], []).append((row["time"], row["id"]))
     typed_rows: dict[tuple[str, datetime, int], RowMapping] = {}
     for table, keys in by_table.items():
-        for found in _fetch(session, sql.typed_rows(table, keys)):
+        for found in _fetch(session, sql.typed_rows(table, keys), seconds):
             typed_rows[(table, found["time"], found["id"])] = found
     messages = {
         _raw_key(found): found
-        for found in _fetch(session, sql.message_rows([_raw_key(row) for row in rows]))
+        for found in _fetch(session, sql.message_rows([_raw_key(row) for row in rows]), seconds)
     }
     result = []
     for row in rows:
