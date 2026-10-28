@@ -145,9 +145,9 @@
       "patternOf_one": "{{source}} · {{formatted}} line",
       "patternOf_other": "{{source}} · {{formatted}} lines",
       "example": "Example line",
-      "exampleFor": "Open an example line of {{pattern}}",
+      "exampleFor": "Example line: {{pattern}} pattern",
       "search": "Show in Search",
-      "searchFor": "Show {{pattern}} in Search"
+      "searchFor": "Show in Search: {{pattern}} pattern"
     }
   }
 }

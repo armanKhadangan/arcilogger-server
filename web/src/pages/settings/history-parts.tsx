@@ -105,6 +105,7 @@ export function VersionsCard({ onOpen }: { onOpen: (requestId: string) => void }
                           size="sm"
                           className="h-auto p-0"
                           aria-label={t('settings.history.versions.openRequest', {
+                            id: version.request_id.slice(0, 8),
                             number: version.n,
                           })}
                           onClick={() => {
