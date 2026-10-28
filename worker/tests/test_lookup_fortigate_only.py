@@ -425,7 +425,7 @@ def test_renewals_every_twelve_hours_keep_the_chain_high(
         chain = internal(db_session, PC, T0 + timedelta(hours=hours)).attribution
         assert chain is not None, hours
         assert chain.lease is not None
-        assert chain.lease.confidence == "high", hours
+        assert (chain.confidence, chain.lease.confidence) == ("high", "high"), hours
         assert "lease_renewal_not_seen" not in chain_keys(chain), hours
         assert chain.lease.last_dhcp_evidence == T0 + timedelta(hours=hours // 12 * 12), hours
 
@@ -501,7 +501,8 @@ def test_dropped_refs_are_read_from_the_rows(db_session: Session, evidence: Evid
     chain = internal(db_session, PC, moment).attribution
     assert chain is not None
     assert chain.lease is not None
-    assert (chain.lease.confidence, chain.lease.last_dhcp_evidence) == ("high", record)
+    assert (chain.confidence, chain.lease.confidence) == ("high", "high")
+    assert chain.lease.last_dhcp_evidence == record
     assert "lease_renewal_not_seen" not in chain_keys(chain)
     # The usage rollups (no lookup) read the stored refs only (round 6: the per-moment query
     # runs for lookups).
