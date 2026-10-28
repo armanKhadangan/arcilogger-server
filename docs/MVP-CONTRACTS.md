@@ -623,12 +623,14 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     "İnternet çıkışı değil" / "Not an internet exit"). Every match row gains "Çıkış / Exit:
     {name} ({label}) · dstintf {dstintf}" from `NatMatch.egress` and the cited row ("-" when
     unclaimed). The outcome stores one exit per match, so a match of a session whose cited
-    `fg_traffic` lines show more than one (`transip`, `dstintf`) while the outcome carries
-    `session_changed_exit` adds "oturumun kayıtlarında ayrıca: {exits}" / "the session's records
-    also show: {exits}" (the other exits named in the explanation) when the explanation counts
-    one such session and only this match's lines vary, else "oturumun kayıtları birden çok çıkış
-    gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the session's records show more than one
-    exit: …" read from its raw lines (WP-D, "Deviations — d"). For `no_egress`, `not_logged`
+    `fg_traffic` lines map to more than one exit (each (`transip`, `dstintf`) as the engine maps a
+    row, over the stored exits; another interface of the same exit is no change) while the
+    outcome carries `session_changed_exit` adds "oturumun kayıtlarında ayrıca: {exits}" / "the
+    session's records also show: {exits}" (the other exits named in the explanation) when the
+    explanation counts one such session and only this match's lines vary, else "oturumun
+    kayıtları birden çok çıkış gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the
+    session's records show more than one exit: …" read from its raw lines; a match whose lines
+    map to one exit prints that exit alone (WP-D, "Deviations — d"). For `no_egress`, `not_logged`
     and an `internal` exit, sections 4 and 5 print "Oturum aranmadı: …" / "No session was
     searched: …" (the address and the exit) instead of the generic `none` texts.
   - **Method paragraphs.** The Yöntem / Method section prints one paragraph per (resolution,
@@ -652,7 +654,9 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
       ones (a catch-all exit, or the O5 widening) it says "Arama {searched} adresleriyle{ ve
       arayüzleriyle (…)} yapıldı." / "The search covered {searched}{ on the interfaces (…)}.",
       and the `public_unknown` paragraph adds the same sentence then; the interface clause only
-      while the search kept its interface condition; a catch-all exit's `{transips}` reads
+      while the search kept its interface condition (for `public_unknown`, only when every exit
+      searched kept it: none declares no interfaces and none is named by
+      `egress_interface_not_seen`); a catch-all exit's `{transips}` reads
       "hiçbir çıkışa tanımlı olmayan özel ya da paylaşılan NAT adresleri" / "the private or
       shared NAT addresses no exit claims";
     - the direct `fallback` paragraph says "bu hatta" / "on this line" only when the exit

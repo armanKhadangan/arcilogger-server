@@ -92,7 +92,9 @@ yalnızca bir oturum çıkış değiştirdiyse ve bu eşleşmenin kanıt satırl
 gösteriyorsa öbür çıkış "oturumun kayıtlarında ayrıca: {çıkışlar}" / "the session's records also
 show: {exits}" diye adıyla yazılır; aksi hâlde satırların kendi değerleri yazılır: "oturumun
 kayıtları birden çok çıkış gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the session's
-records show more than one exit: …".
+records show more than one exit: …". Her kanıt satırının çıkışı, sorgu motorunun yaptığı gibi
+NAT adresi ve arayüzüyle saklanan çıkışlardan bulunur; aynı çıkışın iki arayüzü arasında geçen
+bir oturum çıkış değiştirmiş sayılmaz ve satırına bu ek yazılmaz.
 
 Yöntem bölümü her (yanıt, tür) için bir paragraf yazar, toplam on bir paragraf. Her paragraf
 neyin çıkış tanımına (ayara), neyin kayıtlara dayandığını ayırır. `{searched}` sonucun saklanan
@@ -142,7 +144,10 @@ arama bilgisindeki, gerçekten aranan adreslerdir:
   ya da değişebilen çıkışlarda ({exits}) yapıldı ve bu çıkışlarda servis sağlayıcının ikinci bir
   NAT yaptığı varsayıldı. Adres bu hatlardan birine ait değilse liste ilgisiz kullanıcıları
   gösterebilir. Arama tanımsız adresleri de kapsadıysa ardından "Arama {searched} adresleriyle{ ve
-  arayüzleriyle (…)} yapıldı." gelir.
+  arayüzleriyle (…)} yapıldı." gelir. Arayüz eki yalnızca aranan her çıkış arayüz koşulunu
+  koruduysa yazılır: arayüz tanımlanmamış bir çıkış (örneğin tanımsız adresleri kapsayan çıkış)
+  ya da arayüzleri kayıtlarda görülmediği için koşulu kaldırılan bir çıkış bütün arayüzlerde
+  arandığından ek yazılmaz.
 - `unconfigured`: internet çıkışı tanımlanmamış. Servis sağlayıcının ikinci bir NAT yaptığı
   varsayıldı ve FortiGate'in özel ya da paylaşılan bir NAT adresiyle çıkan bütün kaynak NAT
   oturumları arandı. Genel bir NAT adresiyle çıkan oturumlar FortiGate'in kendi adresinden
@@ -440,7 +445,9 @@ paragraph speaks of "the records of the configured FortiGate sources" and lists 
 at the time of the lookup. The ISP NAT paragraph says "The search was limited to this exit's NAT
 addresses" only when it was; when the search also covered the addresses no exit claims (a
 catch-all exit, or the widened search) it says "The search covered {searched}" instead, as the
-`public_unknown` paragraph then does. The direct `fallback` paragraph says "on this line" only for
+`public_unknown` paragraph then does; there "on the interfaces (…)" is printed only when every
+exit searched kept its interface condition (an exit without interfaces, or one whose interfaces
+were not seen in the logs, was searched on every interface). The direct `fallback` paragraph says "on this line" only for
 an exit with interfaces, and its addition names the other exit as converted without interfaces or
 as sharing an interface. The double-NAT paragraph is never
 printed for resolution `transip`. It reads "Double NAT" for a configured ISP NAT exit and "Double
@@ -453,7 +460,9 @@ advises defining a line as Direct when it already is, or for a `transip` fallbac
 FortiGate DHCP format note) come from the stored outcome, never from today's settings.
 
 Every match prints its exit and `dstintf` (for a session that changed exit, the other exit when
-the stored outcome can tell it, else the NAT address and `dstintf` of each of its cited lines); a
+the stored outcome can tell it, else the NAT address and `dstintf` of each of its cited lines;
+each line's exit is found from its NAT address and interface as the lookup engine does, so a
+session that moved between two interfaces of one exit did not change exit); a
 match whose records came from an unconfigured sender
 gets a "UYARI / Warning" row. `no_egress`, `not_logged` and an address that is not an internet exit
 print "No session was searched: …" instead of the generic no-match text. A srcmac step, the row

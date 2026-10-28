@@ -6126,10 +6126,16 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   / "The search covered {searched}{ on the interfaces ({interfaces})}." (`texts.METHOD_SEARCHED`,
   `METHOD_SEARCHED_INTERFACES`), and the `public_unknown` paragraph is followed by the same
   sentence then. The interface clause is printed only while the search kept its interface
-  condition (`searched.interface_filter`). `egress_search` stays as stored (the engine's key is
-  WP-C1's). Tests: `test_report_exits.py::test_the_isp_nat_paragraph_states_what_was_searched`,
-  `::test_e_n_an_unclaimed_search_is_stated`; the `public_unknown` form has no test of its own.
-  Fold into 2.12.
+  condition (`searched.interface_filter`). The engine sets `interface_filter` when any exit's part
+  kept one, so in the `public_unknown` sentence the clause is printed only when no exit searched
+  lost it, judged from the stored outcome: an exit that declares no interfaces (a catch-all
+  without interfaces searched every one), or one whose interfaces the engine dropped
+  (`egress_interface_not_seen` with its name as `egress`; not the `_kept` note), leaves the clause
+  out. `egress_search` stays as stored (the engine's key is WP-C1's). Tests:
+  `test_report_exits.py::test_the_isp_nat_paragraph_states_what_was_searched`,
+  `::test_e_n_an_unclaimed_search_is_stated`,
+  `::test_public_unknown_names_no_interface_when_an_exit_searched_them_all`,
+  `::test_public_unknown_names_the_interfaces_when_every_exit_kept_them`. Fold into 2.12.
 - **d-4. The advice of a `fallback` under its own heading, with a one-item lead-in** (2.12, "For
   `fallback` only (a) is printed"). The contract's advice sentence "Kesin eşleşme için şunlardan
   biri gerekir: (a) …; (b) …" does not read with one item. A `fallback` prints, under "Kesin
@@ -6191,14 +6197,25 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   tell it** (2.12 "the `session_changed_exit` match names both exits"). The outcome stores one
   exit per match (`NatMatch.egress`, the row nearest the moment), and a `transip` answer's
   `egresses` lists only the exit used, so the second exit cannot be read from the stored exit
-  list. When the explanation's `count` is 1, only one match's cited `fg_traffic` lines show more
-  than one (`transip`, `dstintf`), and that match's exit is one of the explanation's `egresses`,
-  the row adds "oturumun kayıtlarında ayrıca: {exits}" / "the session's records also show:
-  {exits}" (`texts.CHANGED_EXIT`); otherwise "oturumun kayıtları birden çok çıkış gösteriyor: NAT
-  {transip} · dstintf {dstintf}; …" / "the session's records show more than one exit: …"
-  (`texts.CHANGED_ROWS`), read from the match's own raw lines. Tests:
-  `test_report_exits.py::test_e_k3_a_session_that_changed_exit_names_both_exits`. Fold into 2.12;
-  storing every exit of a match in the outcome would let the row always name them (a WP-C1
+  list. Each (`transip`, `dstintf`) of a match's cited `fg_traffic` lines maps to an exit as the
+  engine's `_exit_of` decides it, over the stored `egress.egresses`: the one exit whose
+  `transips` hold the `transip`; when several do, the first whose `interfaces` hold the
+  `dstintf`; else the exit whose `public` holds it; else an unknown key ("?", `transip`). When the
+  explanation names an exit the stored list lacks, the one claiming exit counts only on a
+  `dstintf` it declares (or while it declares none): the missing exit may share the address by
+  interface (`db/egress.py` allows it). A match varies only when its lines map to more than one
+  key, so a session that moved between two interfaces of one exit is no change. When the
+  explanation's `count` is 1, only one match varies, and that match's exit is one of the
+  explanation's `egresses`, the row adds "oturumun kayıtlarında ayrıca: {exits}" / "the
+  session's records also show: {exits}" (`texts.CHANGED_EXIT`); another varying match gets
+  "oturumun kayıtları birden çok çıkış gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the
+  session's records show more than one exit: …" (`texts.CHANGED_ROWS`), read from its own raw
+  lines; a match that does not vary prints its exit alone. With a short stored list the mapping
+  errs toward no change (the explanation bullet still states it). Tests:
+  `test_report_exits.py::test_e_k3_a_session_that_changed_exit_names_both_exits`,
+  `::test_a_session_on_two_interfaces_of_one_exit_did_not_change_exit`,
+  `::test_a_shared_nat_address_on_two_interfaces_of_one_exit_did_not_change_exit`. Fold into
+  2.12; storing every exit of a match in the outcome would let the row always name them (a WP-C1
   question for a later wave).
 - **d-11. Table labels of the tables ADR-0016 added, in both languages; FortiGate lease additions
   only for `fg_dhcp` leases** (2.12 "`TABLES["fg_dhcp"]` = "FortiGate DHCP kaydı" / "FortiGate
