@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from functools import cached_property
 from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.orm import Session
 
 from arcilogger_api.admin_channel import Channel
@@ -95,7 +95,8 @@ SETTING_KEYS: Final = (
 )
 
 #: Dedup keys of a card's alerts (contract 2.3.2): ``(key, prefix)``; card 2's key is completed
-#: with yesterday's date. Prefixes only for R20-filter and R20-lease (contract D7).
+#: with yesterday's date. Prefixes only for R20-filter and R20-lease (contract D7). Card 4 goes
+#: by rule instead (:data:`RETENTION_RULE`).
 ALERT_KEYS: Final[Mapping[ComplianceCardId, tuple[str, bool]]] = {
     "sources": ("R15:", True),
     "seal_yesterday": ("R20-seal:", False),
@@ -108,6 +109,8 @@ ALERT_KEYS: Final[Mapping[ComplianceCardId, tuple[str, bool]]] = {
     "replica": ("R20-replica", True),
     "backup": ("R20-backup", True),
 }
+#: Card 4's alerts: this rule, except its ``info`` deletion notes (as the evidence jobs read it).
+RETENTION_RULE: Final = "R20-retention"
 
 
 # -- formatting -----------------------------------------------------------------------------------
@@ -244,9 +247,16 @@ class CardContext:
         key, prefix = ALERT_KEYS[card]
         if card == "seal_yesterday":
             key += self.yesterday.isoformat()
-        condition = (
-            Alert.dedup_key.startswith(key, autoescape=True) if prefix else (Alert.dedup_key == key)
-        )
+        if card == "retention":
+            # A retention alert is imported without a dedup key (every refused run is its own
+            # alert, ``import_key``); the ``info`` one only notes days deleted as configured.
+            condition: ColumnElement[bool] = and_(
+                Alert.rule == RETENTION_RULE, Alert.severity != "info"
+            )
+        elif prefix:
+            condition = Alert.dedup_key.startswith(key, autoescape=True)
+        else:
+            condition = Alert.dedup_key == key
         return list(
             self.db.scalars(
                 select(Alert)
@@ -387,14 +397,16 @@ class FullCheck:
 
 
 def full_check(layout: Layout) -> FullCheck | None:
-    """The newest full chain check; ``None`` when it never ran. An unreadable file raises (the
-    card says it could not be checked)."""
+    """The newest full chain check; ``None`` when it never ran. An unreadable file counts as a
+    failed check of unknown time: the card's error row, not "could not be checked"."""
     try:
         data = json.loads((layout.state / "verify" / "last-full.json").read_bytes())
     except FileNotFoundError:
         return None
+    except (OSError, ValueError):
+        return FullCheck(at=None, ok=False)
     if not isinstance(data, dict):
-        raise ValueError("last-full.json is not an object")
+        return FullCheck(at=None, ok=False)
     return FullCheck(at=moment(data.get("at")), ok=data.get("ok") is True)
 
 
@@ -763,15 +775,20 @@ def card_replica(ctx: CardContext) -> ComplianceCard:
 # -- card 10: backups -----------------------------------------------------------------------------
 
 
-def backup_state(layout: Layout) -> dict[str, Any] | None:
-    """``state/backup/last.json`` (``None``: no backup ran yet); an unreadable file raises."""
+#: An unreadable ``last.json``: a failed backup, as the worker's backup check reads it.
+UNREADABLE: Final[Mapping[str, Any]] = {"ok": False}
+
+
+def backup_state(layout: Layout) -> Mapping[str, Any] | None:
+    """``state/backup/last.json`` (``None``: no backup ran yet); an unreadable file or one that
+    is not an object is :data:`UNREADABLE` (``R20-backup`` "Yedek durum dosyası okunamıyor")."""
     try:
         data = json.loads(backup_state_path(layout).read_bytes())
     except FileNotFoundError:
         return None
-    if not isinstance(data, dict):
-        raise ValueError("last.json is not an object")
-    return data
+    except (OSError, ValueError):
+        return UNREADABLE
+    return data if isinstance(data, dict) else UNREADABLE
 
 
 def last_confirmation(db: Session) -> AuditLog | None:

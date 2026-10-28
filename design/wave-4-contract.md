@@ -1457,6 +1457,22 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   repository dumps on the same disk and copies the configuration by hand (`docs/YEDEKLEME.md:117-137`);
   card 10 reports what exists.
 
+## Deviations — W4-A
+
+- **Card 4 reads its alerts by rule, not by dedup-key prefix (2.3.2).** The retention task's
+  alerts are imported without a dedup key (`core/src/arcilogger_core/retention.py:214-225`,
+  `:479-487` give no `key` fact; `worker/src/arcilogger_worker/alerts/importer.py` `import_key`
+  has no `R20-retention` case and the rule is not in `ONE_ACTIVE`), so the prefix
+  `R20-retention` never matched a real alert and the card's error row could not fire. Card 4
+  therefore reads active alerts with `rule = 'R20-retention'` and `severity <> 'info'` (the
+  `info` alert only notes days deleted as configured, as `worker/src/arcilogger_worker/evidence_jobs.py:424`
+  reads it). Test: `test_retention_card_states` inserts the alerts as the importer stores them
+  (no dedup key). The other cards' patterns match the keys the importer and the worker write.
+  W4-G: fold into UYUM-DURUMU/COMPLIANCE-STATUS §2.4 if the section names the alert key.
+- **Card 5 "the newest known credit is 0" is read as `≤ 0`.** The credit log may hold a negative
+  reading (`api/src/arcilogger_api/routers/dashboard.py` `estimated_days` handles one); a
+  negative credit is used up too. Test: `test_tsa_card_states`.
+
 ---
 
 ## Owner questions

@@ -110,7 +110,7 @@ class Site:
 
     def alert(
         self,
-        key: str,
+        key: str | None,
         rule: str | None = None,
         *,
         severity: str = "high",
@@ -120,7 +120,8 @@ class Site:
         details: Mapping[str, Any] | None = None,
     ) -> int:
         row = Alert(
-            rule=rule or key.partition(":")[0],  # R15:<name> → R15, R20-lease:<cause> → R20-lease
+            # R15:<name> → R15, R20-lease:<cause> → R20-lease; an alert without a key names its rule
+            rule=rule or (key or "").partition(":")[0],
             severity=severity,
             state=state,
             title=title,
@@ -531,6 +532,24 @@ def chain(api_config: Config) -> Iterator[SealedVault]:
     sealed.unlock_all()
 
 
+def test_chain_card_reads_an_unreadable_full_check_as_failed(
+    site: Site, chain: SealedVault
+) -> None:
+    """A damaged last-full.json is a failed full check of unknown time (the error row), not a
+    card that could not be computed; failed days still come first."""
+    full = verify_state(site.layout, all_days=True)
+    full.parent.mkdir(parents=True, exist_ok=True)
+    for damaged in ('{"at": "2026-10-01T03:00:00+03:00", "ok": tr', '"ok"'):
+        full.write_text(damaged, encoding="utf-8")
+        card = site.card("chain")
+        assert card.tone == "error", damaged
+        assert reason(card) == (
+            "Tam zincir denetimi (—) başarısız.",
+            "The full chain check (—) failed.",
+        )
+        assert facts(card)["full_check"] == ("—, başarısız", "—, failed")
+
+
 def test_chain_card_states(site: Site, chain: SealedVault) -> None:
     layout = site.layout
     card = site.card("chain")
@@ -749,8 +768,11 @@ def test_retention_card_states(site: Site) -> None:
     # with retention on, the same vault is fine
     assert site.card("retention", config=on).tone == "ok"
 
-    # an open alert of the retention task comes first
-    site.alert("R20-retention:failed", "R20-retention")
+    # the retention task's alerts are imported without a dedup key (import_key): the info note
+    # of days deleted as configured changes nothing, a refused run comes first
+    site.alert(None, "R20-retention", severity="info", title="Saklama: 2 gün silindi")
+    assert site.card("retention", config=on).tone == "ok"
+    site.alert(None, "R20-retention", severity="critical", title="Saklama reddedildi")
     card = site.card("retention", config=on)
     assert card.tone == "error"
     assert reason(card) == (
@@ -898,6 +920,8 @@ def test_tsa_card_states(site: Site) -> None:
     card = site.card("tsa", config=production)
     assert card.tone == "error"
     assert reason(card) == ("Kamu SM kontörü bitti.", "The Kamu SM credit is used up.")
+    write_credit(site, (NOW - timedelta(hours=1), -3))  # a negative reading is used up too
+    assert site.card("tsa", config=production).reason_tr == "Kamu SM kontörü bitti."
     site.alert("R20-credit", "R20-credit")
     assert len(site.card("tsa", config=production).alerts) == 1
 
@@ -1418,6 +1442,28 @@ def confirm(site: Site, sha256: str) -> datetime:
         return row.time
 
 
+def test_backup_card_reads_an_unreadable_state_file_as_a_failed_backup(
+    site: Site, installed: Installed
+) -> None:
+    """The worker's backup check opens R20-backup for an unreadable last.json ("Yedek durum
+    dosyası okunamıyor"): the card says the same before the alert is imported, not "no data"."""
+    path = site.layout.state / "backup" / "last.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for damaged in ('{"ok": tr', "[1, 2]"):
+        path.write_text(damaged, encoding="utf-8")
+        card = site.card("backup")
+        assert card.tone == "error", damaged
+        assert reason(card) == (
+            "Son veritabanı yedeği başarısız ya da yedek uyarısı açık.",
+            "The last database backup failed or a backup alert is open.",
+        )
+        assert facts(card)["last_backup"] == ("—", "—")
+    off = site.config.model_copy(
+        update={"backup": site.config.backup.model_copy(update={"enabled": False})}
+    )
+    assert site.card("backup", config=off).reason_tr == "Gece veritabanı yedeği kapalı."
+
+
 def test_backup_card_states(site: Site, installed: Installed) -> None:
     off = site.config.model_copy(
         update={"backup": site.config.backup.model_copy(update={"enabled": False})}
@@ -1527,10 +1573,12 @@ def test_a_failing_card_is_neutral_and_the_others_answer(
     site: Site, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     site.add(watched())
-    # card 3: an unreadable full-check file; card 7: a database error inside its query
-    full = verify_state(site.layout, all_days=True)
-    full.parent.mkdir(parents=True, exist_ok=True)
-    full.write_text('{"at": "secret detail', encoding="utf-8")
+    # card 3: its full-check reader fails; card 7: a database error inside its query
+
+    def unreadable(layout: Layout) -> cards.FullCheck | None:
+        raise json.JSONDecodeError("secret detail", '{"at": "secret detail', 7)
+
+    monkeypatch.setattr(cards, "full_check", unreadable)
 
     def broken(session: Session, *, now: datetime) -> FilterEvidence:
         session.execute(text("SELECT * FROM no_such_table_with_172_20_42_101"))
