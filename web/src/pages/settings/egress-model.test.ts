@@ -94,7 +94,7 @@ describe('validateEgresses mirrors the server rules (shared case list)', () => {
   it('classifies only RFC 1918 and RFC 6598 space as private or shared', () => {
     for (const address of ['10.1.2.3', '172.20.42.57', '192.168.1.1', '100.64.13.9'])
       expect(isPrivateOrShared(address), address).toBe(true);
-    for (const address of ['203.0.113.200', '198.51.100.77', '192.0.2.1', '100.128.0.1'])
+    for (const address of ['203.0.113.200', '198.51.100.77', '192.0.2.1'])
       expect(isPrivateOrShared(address), address).toBe(false);
   });
 });

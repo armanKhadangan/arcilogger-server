@@ -417,7 +417,7 @@
       "value": {
         "hat-1": {
           "mode": "direct",
-          "public": ["203.0.112.0/23"]
+          "public": ["192.0.2.0/23"]
         }
       },
       "code": "setting_egress_address"
