@@ -3,23 +3,34 @@
 Every visible setting with its label, help, bounds and flags; ``PATCH /settings`` all or nothing
 with its audit entry (the user's id and address), conflicts, refusals in both languages without
 the submitted value, the re-authentication of ``REAUTH_KEYS`` and the console-only keys; the
-reset to the shipped default.
+reset to the shipped default; every refusal of the exit rules (``nat.egresses``) with its code.
+The observed endpoint (``GET /settings/fortigate/observed``) is tested in
+``test_settings_api_observed.py``.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.security import hash_token
 from arcilogger_api.testing import LoggedIn
+from arcilogger_db.egress import ERROR_CODES
 from arcilogger_db.models import AuditLog, UserSession
-from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting
+from arcilogger_db.settings import (
+    DEFAULT_SETTINGS,
+    SettingValueError,
+    get_setting,
+    validate_setting,
+)
 from arcilogger_db.settings_meta import GROUPS, SETTINGS
 
 Login = Callable[..., LoggedIn]
@@ -285,3 +296,50 @@ def test_the_fortigate_and_nat_settings_are_accepted_and_refused(
     assert sorted(str(entry.target) for entry in changes(app_session_factory)) == [
         f"setting:{key}" for key in sorted(defaults)
     ]
+
+
+#: The exit value cases the server rules and the web mirror both read (contract 2.5, 3.6).
+EGRESS_CASES: list[dict[str, Any]] = json.loads(
+    (Path(__file__).parents[2] / "tests" / "fixtures" / "egress-cases.json").read_text("utf-8")
+)["cases"]
+
+
+def test_every_exit_rule_is_refused_with_its_code(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session]
+) -> None:
+    """``PATCH nat.egresses`` answers each refusal of the exit rules (2.5) as 422
+    ``setting_invalid`` with one detail ``{key, code, message_tr, message_en}``: the code and
+    texts of the rule, no field path; nothing is written. An accepted value is stored
+    normalised."""
+    login_as(client, "admin")
+    seen = set()
+    for case in (case for case in EGRESS_CASES if "code" in case):
+        response = client.patch(
+            URL, json={"changes": [{"key": "nat.egresses", "old": {}, "value": case["value"]}]}
+        )
+        assert response.status_code == 422, (case["name"], response.text)
+        error = response.json()["error"]
+        assert error["code"] == "setting_invalid", case["name"]
+        with pytest.raises(SettingValueError) as expected:
+            validate_setting("nat.egresses", case["value"])
+        assert error["details"] == [
+            {
+                "key": "nat.egresses",
+                "code": case["code"],
+                "message_tr": expected.value.message_tr,
+                "message_en": expected.value.message_en,
+            }
+        ], case["name"]
+        seen.add(case["code"])
+    assert seen >= ERROR_CODES | {"setting_type", "setting_too_many"}
+    assert value(app_session_factory, "nat.egresses") == {}
+    assert not changes(app_session_factory)
+
+    accepted = next(case for case in EGRESS_CASES if "normalised" in case and case["value"])
+    response = client.patch(
+        URL, json={"changes": [{"key": "nat.egresses", "old": {}, "value": accepted["value"]}]}
+    )
+    assert response.status_code == 200, response.text
+    (changed,) = response.json()["changed"]
+    assert changed == {"key": "nat.egresses", "old": {}, "new": accepted["normalised"]}
+    assert value(app_session_factory, "nat.egresses") == accepted["normalised"]
