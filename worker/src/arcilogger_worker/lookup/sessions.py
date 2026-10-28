@@ -567,6 +567,35 @@ def srcmac_rows_of_mac(
     return [TrafficRow(**row._asdict()) for row in session.execute(query)]
 
 
+def srcmac_addresses_within(
+    session: Session,
+    *,
+    keys: Collection[tuple[str, str, str]],
+    low: datetime,
+    high: datetime,
+    untrusted: Collection[str],
+) -> set[tuple[str, str, str]]:
+    """Which of ``keys`` (``(srcintf, srcmac, srcip)``) have a trusted row within ``[low,
+    high]`` by row time (the router guard of 2.9 for a row it uses outside the hour around the
+    moment: is that row's address already among the ones counted there?). One query through
+    ``ix_fg_traffic_srcip_time``."""
+    if not keys:
+        return set()
+    query = (
+        select(FgTraffic.srcintf, FgTraffic.srcmac, FgTraffic.srcip)
+        .distinct()
+        .where(
+            FgTraffic.srcip == _inet_any({ip for _interface, _mac, ip in keys}),
+            FgTraffic.time >= low,
+            FgTraffic.time <= high,
+            FgTraffic.srcmac.in_(sorted({mac for _interface, mac, _ip in keys})),
+            *_srcmac_filters({interface for interface, _mac, _ip in keys}, untrusted),
+        )
+    )
+    found = {(str(interface), str(mac), str(ip)) for interface, mac, ip in session.execute(query)}
+    return found & set(keys)
+
+
 class Explain(Executable, ClauseElement):
     """``EXPLAIN [ANALYZE] <select>`` (SQLAlchemy's documented custom-construct recipe)."""
 

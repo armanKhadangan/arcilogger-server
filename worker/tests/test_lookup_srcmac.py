@@ -435,9 +435,10 @@ def test_a_shared_mac_logged_after_the_guard_window_is_still_counted(
     db_session: Session, evidence: Evidence, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The router's MAC on two addresses: .57's three-hour session spans the moment but is
-    logged once, at its end two hours after it; .58's session is at the moment. The guard counts
-    over the hour around the moment widened to every row it considers (one query), so the row
-    used is counted: ``srcmac_shared`` and no srcmac chain, also in the internal lookup of .57."""
+    logged once, at its end two hours after it; .58's session is at the moment. The one count
+    covers the hour around the moment, and the row outside it adds its own address (.57 is not
+    among the hour's), so the row used is counted: ``srcmac_shared`` and no srcmac chain, also
+    in the internal lookup of .57."""
     session_of(evidence, mac=ROUTER_MAC, at=AT + timedelta(hours=2), duration=3 * 3600)
     session_of(evidence, "172.20.42.58", ROUTER_MAC, port=51002)
     build(db_session, DAY, DAY)
@@ -454,28 +455,81 @@ def test_a_shared_mac_logged_after_the_guard_window_is_still_counted(
     assert sorted(m.traffic.srcip for m in found.matches) == [PC, "172.20.42.58"]
     assert all(m.chain is None for m in found.matches)
     assert note(found, "srcmac_shared") == {"mac": ROUTER_MAC, "at": iso(AT), "count": 2}
-    assert calls == [(AT - timedelta(hours=1), AT + timedelta(hours=2))]
+    assert calls == [(AT - timedelta(hours=1), AT + timedelta(hours=1))]
     outcome = internal(db_session)
     assert (outcome.mode, outcome.attribution) == ("none", None)
     assert note(outcome, "srcmac_shared") == {"mac": ROUTER_MAC, "at": iso(AT), "count": 2}
 
 
-def test_a_lease_of_another_address_beside_a_row_after_the_window_refuses(
-    db_session: Session, evidence: Evidence
+def test_another_long_session_does_not_widen_the_guard_of_a_mac(
+    db_session: Session, evidence: Evidence, selin: int
 ) -> None:
-    """The other-lease check reads the same widened window: the router's lease of .10 begins 90
-    minutes after the moment, inside the span of .57's session row logged two hours after it."""
-    evidence.fortigate_dhcp(AT + timedelta(minutes=90), ROUTER_IP, ROUTER_MAC)
+    """One candidate's long session reaches no other MAC's guard: .58's 21-hour session spans
+    the moment and is logged 20 hours after it, while the PC's MAC shows on .99 ten hours after
+    the moment. The PC's MAC is counted within the hour around the moment only (one address),
+    so .57's lease of another MAC stays the ``low`` conflict of D10."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, OTHER, hostname="MUH-NB03")
+    row = session_of(evidence)
+    session_of(evidence, "172.20.42.99", PC_MAC, at=AT + timedelta(hours=10), port=51003)
+    session_of(evidence, "172.20.42.58", "00:00:5e:00:53:58", at=AT + timedelta(hours=20),
+               port=51002, duration=21 * 3600)  # fmt: skip
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    found = candidates(db_session)
+    assert sorted(m.traffic.srcip for m in found.matches) == [PC, "172.20.42.58"]
+    assert "srcmac_shared" not in keys(found)
+    (match,) = (m for m in found.matches if m.traffic.srcip == PC)
+    chain = match.chain
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.mac, chain.mac_source, chain.confidence) == (OTHER, "lease", "low")
+    assert note(chain, "srcmac_mismatch") == {"srcmac": PC_MAC, "mac": OTHER}
+    (alternative,) = chain.alternatives
+    assert_srcmac_chain(alternative, row)
+
+
+def test_an_address_the_hour_shows_already_is_counted_once(
+    db_session: Session, evidence: Evidence, selin: int
+) -> None:
+    """.57's own session at the moment and its three-hour session logged two hours after it,
+    both with the PC's MAC: the row outside the hour adds no second address, so the MAC is
+    used (one address)."""
+    session_of(evidence, port=51002)
+    session_of(evidence, at=AT + timedelta(hours=2), duration=3 * 3600)
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    outcome = internal(db_session)
+    assert "srcmac_shared" not in keys(outcome)
+    chain = outcome.attribution
+    assert chain is not None
+    assert (chain.mac_source, chain.device and chain.device.mac) == ("srcmac", PC_MAC)
+
+
+@pytest.mark.parametrize(("begins", "refused"), [(timedelta(minutes=30), True),
+                                                 (timedelta(minutes=90), False)])  # fmt: skip
+def test_the_other_lease_check_of_a_row_after_the_window_reads_the_hour(
+    db_session: Session, evidence: Evidence, begins: timedelta, refused: bool
+) -> None:
+    """.57's session row is logged two hours after the moment; the other-lease check still
+    reads the hour around the moment (2.9): the router's lease of .10 beginning 30 minutes
+    after the moment refuses its srcmac, one beginning 90 minutes after it does not."""
+    evidence.fortigate_dhcp(AT + begins, ROUTER_IP, ROUTER_MAC)
     session_of(evidence, mac=ROUTER_MAC, at=AT + timedelta(hours=2), duration=3 * 3600)
     build(db_session, DAY, DAY)
     listed(db_session, ["vlan42"])
     outcome = internal(db_session)
-    assert (outcome.mode, outcome.attribution) == ("none", None)
-    assert note(outcome, "srcmac_other_lease") == {
-        "mac": ROUTER_MAC,
-        "at": iso(AT),
-        "other_ip": ROUTER_IP,
-    }
+    if refused:
+        assert (outcome.mode, outcome.attribution) == ("none", None)
+        assert note(outcome, "srcmac_other_lease") == {
+            "mac": ROUTER_MAC,
+            "at": iso(AT),
+            "other_ip": ROUTER_IP,
+        }
+    else:
+        assert "srcmac_other_lease" not in keys(outcome)
+        chain = outcome.attribution
+        assert chain is not None
+        assert (chain.mac_source, chain.device and chain.device.mac) == ("srcmac", ROUTER_MAC)
 
 
 # -- beside a lease (D10) -------------------------------------------------------------------------

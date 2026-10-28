@@ -155,6 +155,7 @@ from arcilogger_worker.lookup.sessions import (
     fetch_rows,
     find_domain,
     group_sessions,
+    srcmac_addresses_within,
     srcmac_rows_of_mac,
     srcmac_sightings,
     time_points,
@@ -216,9 +217,9 @@ _UNCLAIMED_RESOLUTIONS = frozenset({"public_unknown", "no_egress", "unconfigured
 #: The D8 probe (2.8.3) looks at the IPs of this many matches without a lease chain of one
 #: lookup at most.
 PROBE_IPS = 20
-#: The router guard of srcmac counts the addresses of a MAC this far around the moment, and
-#: as far as the rows it considers reach, and looks for its leases on other addresses there
-#: (2.9, D10).
+#: The router guard of srcmac counts the addresses of a MAC this far around the moment (and
+#: the address of a row it uses outside that) and looks for its leases on other addresses
+#: there (2.9, D10).
 SRCMAC_GUARD = timedelta(hours=1)
 #: Rows an internal lookup without a lease reads for the srcmac of an address or a MAC (2.9).
 SRCMAC_ROWS = 50
@@ -603,9 +604,10 @@ class _SrcmacGuard:
     interface within an hour of the moment (``srcmac_shared``; one
     :func:`.trust.srcmac_ip_counts` query per lookup, the one the alert and the observed
     endpoint count with), and holds no lease of another address there
-    (``srcmac_other_lease``). The hour around the moment is widened to every row the lookup
-    considers, so a row used is always inside what was counted (a long session logged at its
-    end). A refusal adds its explanation to ``notes``."""
+    (``srcmac_other_lease``). A considered row outside that hour (a session overlapping the
+    lookup window, logged at its end) adds its own address to its MAC's count unless the hour
+    shows it already, so a row used is always counted; no row widens the hour of another MAC.
+    A refusal adds its explanation to ``notes``."""
 
     def __init__(
         self,
@@ -632,12 +634,20 @@ class _SrcmacGuard:
         if not rows:
             return
         macs = {str(row.srcmac) for row in rows}
-        self.low = min(self.low, *(row.time for row in rows))
-        self.high = max(self.high, *(row.time for row in rows))
         interfaces = self.settings.srcmac_interfaces
         self._counts = srcmac_ip_counts(
             self.session, self.low, self.high, interfaces, self.untrusted, macs
         )
+        outside = {
+            (str(row.srcintf), str(row.srcmac), row.srcip)
+            for row in rows
+            if not self.low <= row.time <= self.high
+        }
+        within = srcmac_addresses_within(
+            self.session, keys=outside, low=self.low, high=self.high, untrusted=self.untrusted
+        )
+        for interface, mac, _ip in outside - within:
+            self._counts[interface, mac] = self._counts.get((interface, mac), 0) + 1
         self._leases = self.attributor.leases_of_macs(macs, self.low, self.high)
         self.attributor.prefetch_devices(macs)
 

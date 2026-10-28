@@ -5939,20 +5939,29 @@ from section 0.2 are recorded here too, with the date and who decided.
   `::test_the_tolerance_widened_by_the_offset_finds_the_session`,
   `::test_a_cited_source_whose_clock_was_off_lowers_every_chain` (120.4 s and 120.6 s). Fold
   into 2.7, 2.15's reading table and 2.17.
-- **The srcmac router guard's window reaches every row the lookup considers** (2.9, the
+- **The srcmac router guard counts a used row outside the hour by its own address** (2.9, the
   slice-4 review: a long session logged at its end, or a sighting up to the scan end, lies
   outside [T − 1 h, T + 1 h], so its srcmac was used uncounted). The one
   `trust.srcmac_ip_counts` call of a lookup and its `Attributor.leases_of_macs` call (the
-  other-lease check) cover `[min(T − 1 h, earliest considered row time), max(T + 1 h, latest
-  considered row time)]`, the considered rows being every srcmac row on a listed interface from
-  a trusted sender that the lookup may use (the matches' session rows, the internal sightings,
-  the MAC-only rows). A row used is therefore always inside what was counted; the count can only
-  grow, so the change refuses more and never names more. Refusing a row outside the hour was
-  not chosen: it does not protect the other address (the session at T of the same router MAC
-  would still count 1). The `srcmac_shared` and `srcmac_other_lease` texts still say "±1 saat"
-  / "±1 hour" of `{at}`; no new key. Tests:
+  other-lease check) cover `[T − 1 h, T + 1 h]` exactly, for every MAC. A considered row (a
+  srcmac row on a listed interface from a trusted sender: the matches' session rows, the
+  internal sightings, the MAC-only rows) whose time lies outside that hour adds its own address
+  to the count of its `(srcintf, srcmac)` unless the hour shows that address with that MAC
+  already; one more query per lookup decides it (`sessions.srcmac_addresses_within`, through
+  `ix_fg_traffic_srcip_time`, only when such a row exists). Every considered row belongs to a
+  session overlapping the lookup window (tolerance ≤ 3600 s), so the address it adds was in use
+  within ±1 h of `{at}`, and the `srcmac_shared` text stays true; no new key. No row widens the
+  hour of another MAC: an earlier form of this fix widened the one window to every considered
+  row, so one candidate's long session counted another MAC's ordinary address change hours
+  later and dropped its D10 conflict (the lease chain kept its confidence); that form was
+  withdrawn. The other-lease check is not widened for a row outside the hour: a lease covering
+  a moment of the hour around T is what 2.9 asks. Refusing a row outside the hour was not
+  chosen: such a row is the usual record of a long session, and refusing it would drop its D10
+  conflict and its srcmac chain. Tests:
   `worker/tests/test_lookup_srcmac.py::test_a_shared_mac_logged_after_the_guard_window_is_still_counted`,
-  `::test_a_lease_of_another_address_beside_a_row_after_the_window_refuses`. Fold into 2.9.
+  `::test_another_long_session_does_not_widen_the_guard_of_a_mac`,
+  `::test_an_address_the_hour_shows_already_is_counted_once`,
+  `::test_the_other_lease_check_of_a_row_after_the_window_reads_the_hour`. Fold into 2.9.
 
 ---
 
