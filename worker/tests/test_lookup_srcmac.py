@@ -109,11 +109,12 @@ def session_of(
     at: datetime = AT,
     port: int = 51001,
     srcintf: str = "vlan42",
+    duration: int = 10,
 ) -> int:
-    """A session of ``ip`` through the FortiGate's NAT address at ``at``, with ``mac`` as its
-    srcmac on ``srcintf``."""
+    """A session of ``ip`` through the FortiGate's NAT address logged at ``at`` (lasting
+    ``duration`` seconds), with ``mac`` as its srcmac on ``srcintf``."""
     return evidence.traffic(
-        at, ip, port, transip=WAN, srcintf=srcintf, dstintf="wan1", srcmac=mac, duration=10
+        at, ip, port, transip=WAN, srcintf=srcintf, dstintf="wan1", srcmac=mac, duration=duration
     )
 
 
@@ -370,6 +371,53 @@ def test_one_guard_query_serves_every_match(
     assert (low, high) == (AT - timedelta(hours=1), AT + timedelta(hours=1))
     assert tuple(interfaces) == ("vlan42",)
     assert sorted(macs) == [f"00:00:5e:00:53:{0x60 + n:02x}" for n in range(3)]
+
+
+def test_a_shared_mac_logged_after_the_guard_window_is_still_counted(
+    db_session: Session, evidence: Evidence, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The router's MAC on two addresses: .57's three-hour session spans the moment but is
+    logged once, at its end two hours after it; .58's session is at the moment. The guard counts
+    over the hour around the moment widened to every row it considers (one query), so the row
+    used is counted: ``srcmac_shared`` and no srcmac chain, also in the internal lookup of .57."""
+    session_of(evidence, mac=ROUTER_MAC, at=AT + timedelta(hours=2), duration=3 * 3600)
+    session_of(evidence, "172.20.42.58", ROUTER_MAC, port=51002)
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    calls: list[tuple[datetime, datetime]] = []
+    counted = trust.srcmac_ip_counts
+
+    def counting(*args: Any, **kwargs: Any) -> dict[tuple[str, str], int]:
+        calls.append((args[1], args[2]))
+        return counted(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "srcmac_ip_counts", counting)
+    found = candidates(db_session)
+    assert sorted(m.traffic.srcip for m in found.matches) == [PC, "172.20.42.58"]
+    assert all(m.chain is None for m in found.matches)
+    assert note(found, "srcmac_shared") == {"mac": ROUTER_MAC, "at": iso(AT), "count": 2}
+    assert calls == [(AT - timedelta(hours=1), AT + timedelta(hours=2))]
+    outcome = internal(db_session)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert note(outcome, "srcmac_shared") == {"mac": ROUTER_MAC, "at": iso(AT), "count": 2}
+
+
+def test_a_lease_of_another_address_beside_a_row_after_the_window_refuses(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The other-lease check reads the same widened window: the router's lease of .10 begins 90
+    minutes after the moment, inside the span of .57's session row logged two hours after it."""
+    evidence.fortigate_dhcp(AT + timedelta(minutes=90), ROUTER_IP, ROUTER_MAC)
+    session_of(evidence, mac=ROUTER_MAC, at=AT + timedelta(hours=2), duration=3 * 3600)
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    outcome = internal(db_session)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert note(outcome, "srcmac_other_lease") == {
+        "mac": ROUTER_MAC,
+        "at": iso(AT),
+        "other_ip": ROUTER_IP,
+    }
 
 
 # -- beside a lease (D10) -------------------------------------------------------------------------
