@@ -1526,6 +1526,32 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   results. `fg_web`, `fg_dns`, `search_counts` and the 200 active alerts are not loaded: the endpoint
   reads none of those tables.
 
+## Deviations — W4-A
+
+- **Card 4 reads its alerts by rule, not by dedup-key prefix (2.3.2).** The retention task's
+  alerts are imported without a dedup key (`core/src/arcilogger_core/retention.py:214-225`,
+  `:479-487` give no `key` fact; `worker/src/arcilogger_worker/alerts/importer.py` `import_key`
+  has no `R20-retention` case and the rule is not in `ONE_ACTIVE`), so the prefix
+  `R20-retention` never matched a real alert and the card's error row could not fire. Card 4
+  therefore reads active alerts with `rule = 'R20-retention'` and `severity <> 'info'` (the
+  `info` alert only notes days deleted as configured, as `worker/src/arcilogger_worker/evidence_jobs.py:424`
+  reads it). Test: `test_retention_card_states` inserts the alerts as the importer stores them
+  (no dedup key). The other cards' patterns match the keys the importer and the worker write.
+  W4-G: fold into UYUM-DURUMU/COMPLIANCE-STATUS §2.4 if the section names the alert key.
+- **Card 5 "the newest known credit is 0" is read as `≤ 0`.** The credit log may hold a negative
+  reading (`api/src/arcilogger_api/routers/dashboard.py` `estimated_days` handles one); a
+  negative credit is used up too. Test: `test_tsa_card_states`.
+- **Card 10: a damaged `state/backup/last.json` takes the error row (manager decision on #41).** A
+  file that does not parse or is not an object is a failed backup, as the worker's backup check
+  opens `R20-backup` for it ("Yedek durum dosyası okunamıyor"); a file that cannot be read at all
+  (access denied, a sharing violation) raises, so the card is `neutral` "could not be checked"
+  (2.3.2), as every other unreadable file of every card (card 3's `last-full.json` included: an
+  unreadable result is never a failed chain check). A status with a card from that error path is
+  not kept in the 30 s cache (2.2). Tests: `test_backup_card_reads_a_damaged_state_file_as_a_failed_backup`,
+  `test_chain_card_cannot_be_checked_with_an_unreadable_full_check`,
+  `test_an_answer_with_a_card_that_could_not_be_computed_is_not_cached`. W4-G: UYUM-DURUMU /
+  COMPLIANCE-STATUS §2.3 and §2.10.
+
 ---
 
 ## Owner questions
