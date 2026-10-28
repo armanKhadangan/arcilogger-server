@@ -1638,10 +1638,7 @@ class _Lookup:
         if tables:
             lease = bool(tables & LEASE_TABLES)
             for name in self._searched_sources(tables):
-                if name in sources:
-                    sources[name] |= lease
-                elif len(sources) < CLOCK_SOURCES:
-                    sources[name] = lease
+                sources[name] = sources.get(name, False) or lease
         return dict(list(sources.items())[:CLOCK_SOURCES])
 
     def _searched_sources(self, tables: set[str]) -> list[str]:
