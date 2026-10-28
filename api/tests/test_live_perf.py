@@ -47,10 +47,11 @@ SECONDS = 10
 CPU_PER_SECOND = 0.4
 #: The gauge's round on the core the budgets were set on, where the hub took 0.31 s a second
 #: (4.19 s of CPU). Estimated on a 4-CPU Linux machine where rounds took 5.8 to 6.4 ms and the hub
-#: 0.35 to 0.42 s a second (5.3 to 6.9 s of CPU): a core about a sixth slower.
+#: 0.37 s a second in most runs (0.35 to 0.47, the more the busier the machine): a core about a
+#: sixth slower.
 GAUGE_ROUND = 0.005
-#: The read thread's CPU a line on that core. Measured 34 to 44 µs (40 to 57 µs on the machine
-#: above, the more the busier it was); a hub whose reading costs twice as much took 86 µs and more.
+#: The read thread's CPU a line on that core. Measured 31 to 47 µs (37 to 58 µs on the machine
+#: above); a hub whose reading costs twice as much took 86 µs and more.
 READ_CPU_PER_LINE = 60e-6
 #: The gauge: ``python -c GAUGE <spool line> <seconds>`` times rounds of 5,000 lines cut, decoded,
 #: time-parsed, folded and searched, about a fifth of a core for ``seconds``, and prints the 10th
