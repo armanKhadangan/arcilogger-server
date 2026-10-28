@@ -72,7 +72,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from ipaddress import IPv4Network
 from typing import Any
@@ -195,7 +195,8 @@ def attribute(session: Session, ip: str, at: datetime) -> AttributionChain | Non
     settings = LookupSettings.from_settings(get_settings(session))
     request = LookupRequest(at=at, internal_ip=ip)
     attributor = StatusRows.load(session).attributor(session, settings, untrusted_sources(session))
-    return attributor.chain(str(request.internal_ip), request.at)
+    chain = attributor.chain(str(request.internal_ip), request.at)
+    return None if chain is None else attributor.checked([chain])[0]
 
 
 def run_lookup(
@@ -583,7 +584,20 @@ class _Lookup:
         else:
             plan = self._resolve_egress()
             mode, matches, plan = self._answer(plan)
+        attribution, matches = self._across_chains(attribution, matches)
         return self._outcome(mode, matches, attribution, window, plan)
+
+    def _across_chains(
+        self, attribution: AttributionChain | None, matches: list[NatMatch]
+    ) -> tuple[AttributionChain | None, list[NatMatch]]:
+        """Every chain of the outcome after the checks of 2.7 that read across them (D27, the
+        post-lease check): one pass, one query per check for the whole lookup."""
+        chains = [m.chain for m in matches if m.chain is not None]
+        if attribution is not None:
+            chains.append(attribution)
+        checked = iter(self.attributor.checked(chains))
+        matches = [m if m.chain is None else replace(m, chain=next(checked)) for m in matches]
+        return (None if attribution is None else next(checked)), matches
 
     def _outcome(
         self,

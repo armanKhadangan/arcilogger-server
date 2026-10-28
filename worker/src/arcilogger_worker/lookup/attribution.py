@@ -46,18 +46,30 @@ and chain) when ``at`` lies more than half the lease after that record
 (``lease_renewal_not_seen``) or when its IP lies in no configured network
 (``fortigate_dhcp_no_network``), and names cited rows of an ``unknown-<ip>`` sender that is
 trusted now (``source_configured_later``).
+
+**Checks across the chains of a lookup** (:meth:`Attributor.checked`, after the lease steps;
+contract 2.7), one query each for every chain of the lookup: a chain whose configured network
+shows usable DHCP rows of two origins within W of the moment is ``low`` with
+``dhcp_sources_overlap`` (D27); a DHCP chain still ``high`` or ``medium`` is ``low`` (lease and
+chain, its alternatives too) with ``fortigate_dhcp_not_converted_since_lease`` when, between its
+lease's last DHCP record and the moment, a mapped FortiGate DHCP line in ``fg_event`` names its
+IP or its MAC (D8), or a converted ACK moves its MAC to another address in a way D33 would have
+closed the lease on with today's networks (round 7). A MAC on another address counts unless
+both addresses lie in configured networks and those differ (D33's key). Nothing of those rows
+is cited or copied into the outcome: they may be another client's (KVKK).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections import defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Final
 
-from sqlalchemy import ColumnElement, case, or_, select
+from sqlalchemy import ColumnElement, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from arcilogger_db.assignments import Slot, covering, load_history
@@ -66,6 +78,7 @@ from arcilogger_db.models import (
     Department,
     Device,
     FgDhcp,
+    FgEvent,
     Lease,
     Person,
     Vlan,
@@ -79,7 +92,7 @@ from arcilogger_worker.lookup.refs import (
     last_dhcp_evidence,
 )
 from arcilogger_worker.lookup.texts import explain
-from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, kept
+from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, kept, usable_dhcp_origins
 from arcilogger_worker.lookup.types import (
     CONFIDENCE_ORDER,
     AttributionChain,
@@ -96,6 +109,17 @@ from arcilogger_worker.macaddr import is_randomized
 
 #: The logged lease of an ``fg_dhcp`` ref summary (``…, lease 86400)``; ``lease -)`` without).
 _REF_LEASE: Final = re.compile(r", lease (\d+)\)$")
+#: The D8 probe's window (2.8.3, FortiGate lease times): the post-lease check of a MikroTik
+#: lease, which traffic keeps open, reads no further back than this (2.7, round 7).
+UNCONVERTED_WINDOW: Final = timedelta(seconds=8_640_000)
+#: The chains the post-lease check looks at (a ``low`` chain is warned already).
+_CHECKED: Final = ("high", "medium")
+#: How 2.6.3 renders a log-supplied VDOM name: MAC- and IPv4-looking parts masked, cut.
+_MAC_LIKE: Final = re.compile(
+    r"[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}"
+)
+_IPV4_LIKE: Final = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+_VD_CUT: Final = 32
 
 
 @dataclass(frozen=True)
@@ -165,11 +189,14 @@ class StoredLease:
 class _Record:
     """A lease's own newest DHCP record at or before a moment (2.7): its time, its meaning
     (``assigned``/``deassigned``) and the usable lease it logged (``None``: none, or out of
-    range)."""
+    range); ``row``: read from the ``fg_dhcp`` row itself, which also gives its VDOM ``vd``
+    (not from the stored refs)."""
 
     time: datetime
     action: str | None
     lease: int | None
+    row: bool = False
+    vd: str | None = None
 
 
 @dataclass(frozen=True)
@@ -206,6 +233,8 @@ class Attributor:
         self._kept: ColumnElement[bool] | None = None
         #: Per ``(lease id, moment)`` the lease's own newest DHCP record (``None``: none).
         self._records: dict[tuple[int, datetime], _Record | None] = {}
+        #: The stored lease of every chain built, by lease id (the lookup's checks read them).
+        self._stored: dict[int, StoredLease] = {}
         self._leases: dict[str, list[StoredLease]] = {}
         #: Per IP the time range already loaded into ``_leases``.
         self._loaded: dict[str, tuple[datetime, datetime]] = {}
@@ -347,7 +376,7 @@ class Attributor:
         if self._kept is None:
             self._kept = kept(self.settings, self.untrusted)
         row = self.session.execute(
-            select(FgDhcp.time, FgDhcp.logid, FgDhcp.lease)
+            select(FgDhcp.time, FgDhcp.logid, FgDhcp.lease, FgDhcp.extra["vd"].astext)
             .where(
                 FgDhcp.ip == lease.ip,
                 FgDhcp.mac == lease.mac,
@@ -361,7 +390,7 @@ class Attributor:
         if row is None:
             return None
         action = self.settings.fortigate_logids.get(str(row.logid))
-        return _Record(row.time, action, self._usable_lease(row.lease))
+        return _Record(row.time, action, self._usable_lease(row.lease), row=True, vd=row[3])
 
     @property
     def _assigned_first(self) -> ColumnElement[int]:
@@ -533,6 +562,7 @@ class Attributor:
         return self._persons.get(person_id)
 
     def _single(self, ip: str, at: datetime, lease: StoredLease) -> AttributionChain:
+        self._stored[lease.id] = lease
         vlan, department = self._vlan(ip)
         device = self._device(lease.mac)
         randomized = device.randomized if device is not None else is_randomized(lease.mac)
@@ -642,3 +672,231 @@ class Attributor:
         if later:
             notes.append(explain("source_configured_later", sources=", ".join(later)))
         return confidence, notes
+
+    # -- checks across the chains of a lookup (2.7) -----------------------------------------------
+
+    def checked(self, chains: Sequence[AttributionChain]) -> list[AttributionChain]:
+        """``chains`` (every chain of one lookup, in order) after the checks of 2.7 that read
+        across them, in the contract's order: two DHCP origins (D27), then FortiGate DHCP lines
+        in ``fg_event`` after the lease (D8), then converted ACKs of a MAC move the lease build
+        missed (D33, round 7). Lookups only: the usage rollups ignore confidence."""
+        if not self.lookup or not chains:
+            return list(chains)
+        groups = [[chain, *chain.alternatives] for chain in chains]
+        self._two_origins(groups)
+        self._unconverted_lines(groups)
+        self._missed_moves(groups)
+        return [replace(group[0], alternatives=tuple(group[1:])) for group in groups]
+
+    def _stored_lease(self, chain: AttributionChain) -> StoredLease | None:
+        lease = chain.lease
+        return None if lease is None or lease.lease_id is None else self._stored.get(lease.lease_id)
+
+    def _alive(self, lease: StoredLease) -> int:
+        """How long after its last evidence ``lease`` stays alive (``_open_limit``'s window)."""
+        if lease.source_table == ARP_TABLE:
+            return self.settings.arp_interval_seconds
+        return self.settings.lease_timeout_seconds(lease.server, lease.lease_seconds)
+
+    def _two_origins(self, groups: list[list[AttributionChain]]) -> None:
+        """D27: one :func:`.trust.usable_dhcp_origins` query for the configured networks of all
+        chains over ``[T - W, T + W]``, W the largest alive window of their leases and at least
+        the longest configured DHCP window; a chain whose network shows two origins is ``low``
+        with ``dhcp_sources_overlap`` (the network and the origins, never a client's value)."""
+        every = [chain for group in groups for chain in group]
+        networks = {
+            chain.internal_ip: vlan
+            for chain in every
+            if (vlan := self._vlan(chain.internal_ip)[0]) is not None
+        }
+        if not networks:
+            return
+        servers = [None, *self.settings.lease_server_seconds]
+        windows = [self.settings.lease_timeout_seconds(server) for server in servers]
+        windows += [self._alive(lease) for c in every if (lease := self._stored_lease(c))]
+        width = timedelta(seconds=max(windows))
+        moments = [chain.at for chain in every]
+        origins = usable_dhcp_origins(
+            self.session,
+            self.settings,
+            self.untrusted,
+            sorted({str(vlan.subnet) for vlan in networks.values()}),
+            min(moments) - width,
+            max(moments) + width,
+        )
+        for group in groups:
+            for index, chain in enumerate(group):
+                vlan = networks.get(chain.internal_ip)
+                found = set() if vlan is None else origins[str(vlan.subnet)]
+                if vlan is None or len(found) < 2:
+                    continue
+                overlap = explain(
+                    "dhcp_sources_overlap",
+                    network=_network_name(vlan),
+                    at=chain.at.isoformat(),
+                    sources=", ".join(sorted(_origin_name(origin) for origin in found)),
+                )
+                group[index] = replace(
+                    chain, confidence="low", explanations=(*chain.explanations, overlap)
+                )
+
+    def _targets(
+        self, groups: list[list[AttributionChain]]
+    ) -> list[tuple[list[AttributionChain], AttributionChain, StoredLease, datetime]]:
+        """The chains the post-lease check looks at: a DHCP lease, still ``high`` or ``medium``;
+        each with its group and the lower end of its window: the lease's last DHCP record at
+        or before the moment (its start without one), for a MikroTik lease no earlier than the
+        D8 probe window before the moment."""
+        targets = []
+        for group in groups:
+            for chain in group:
+                lease = self._stored_lease(chain)
+                if lease is None or lease.source_table not in DHCP_TABLES:
+                    continue
+                if chain.confidence not in _CHECKED:
+                    continue
+                since = self._last_record(lease, chain.at)
+                if lease.source_table != FG_DHCP_TABLE:
+                    since = max(since, chain.at - UNCONVERTED_WINDOW)
+                targets.append((group, chain, lease, since))
+        return targets
+
+    def _last_record(self, lease: StoredLease, at: datetime) -> datetime:
+        record = self.record(lease, at)
+        return lease.start if record is None else record.time
+
+    def _unconverted_lines(self, groups: list[list[AttributionChain]]) -> None:
+        """D8 after the lease: one query on ``fg_event`` (``ix_fg_event_subtype_time``) for the
+        mapped FortiGate DHCP lines of trusted senders that name a target's IP or MAC, matched to
+        each target's own window ``(since, at]`` in memory."""
+        targets = self._targets(groups)
+        logids = sorted(self.settings.fortigate_logids)
+        if not targets or not logids:
+            return
+        ip = FgEvent.extra["ip"].astext
+        mac = func.lower(func.replace(FgEvent.extra["mac"].astext, "-", ":"))
+        query = select(ip, mac, FgEvent.time).where(
+            FgEvent.subtype == "system",
+            FgEvent.logid.in_(logids),
+            FgEvent.time > min(since for _, _, _, since in targets),
+            FgEvent.time <= max(chain.at for _, chain, _, _ in targets),
+            or_(
+                ip.in_(sorted({chain.internal_ip for _, chain, _, _ in targets})),
+                mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),
+            ),
+        )
+        if self.untrusted:
+            query = query.where(FgEvent.source.not_in(sorted(self.untrusted)))
+        rows = self.session.execute(query).all()
+        if not rows:
+            return
+        for group, chain, lease, since in targets:
+            if any(
+                since < time <= chain.at
+                and (
+                    address == chain.internal_ip
+                    or (moved == lease.mac and self._move_counts(chain.internal_ip, address))
+                )
+                for address, moved, time in rows
+            ):
+                self._lower(group)
+
+    def _missed_moves(self, groups: list[list[AttributionChain]]) -> None:
+        """Round 7: one query on ``fg_dhcp`` (``ix_fg_dhcp_mac_time``) for kept ACKs of a
+        target's MAC, matched in memory: another IP inside ``(since, at)``, for an ``fg_dhcp``
+        lease on its interface and (when its record is a row) its VDOM, under D33's key."""
+        targets = self._targets(groups)
+        assigned = sorted(
+            logid
+            for logid, meaning in self.settings.fortigate_logids.items()
+            if meaning == "assigned"
+        )
+        if not targets or not assigned:
+            return
+        if self._kept is None:
+            self._kept = kept(self.settings, self.untrusted)
+        query = select(
+            FgDhcp.ip, FgDhcp.mac, FgDhcp.interface, FgDhcp.extra["vd"].astext, FgDhcp.time
+        ).where(
+            FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),
+            FgDhcp.time > min(since for _, _, _, since in targets),
+            FgDhcp.time < max(chain.at for _, chain, _, _ in targets),
+            FgDhcp.logid.in_(assigned),
+            self._kept,
+        )
+        rows = self.session.execute(query).all()
+        if not rows:
+            return
+        for group, chain, lease, since in targets:
+            record = self.record(lease, chain.at)
+            for address, mac, interface, vd, time in rows:
+                if mac != lease.mac or address == chain.internal_ip:
+                    continue
+                if not since < time < chain.at:
+                    continue
+                if lease.source_table == FG_DHCP_TABLE:
+                    if interface != lease.server:
+                        continue
+                    if record is not None and record.row and vd != record.vd:
+                        continue
+                if self._move_counts(chain.internal_ip, address):
+                    self._lower(group)
+                    break
+
+    def _move_counts(self, ip: str, other: str | None) -> bool:
+        """Whether a row of the chain's MAC for address ``other`` bears on the chain of ``ip``:
+        not when both lie in configured networks and those differ (D33's key: a laptop or a NAS
+        on two configured networks); an unreadable address, or one outside every configured
+        network on either side, counts."""
+        try:
+            ipaddress.ip_address(other or "")
+        except ValueError:
+            return True
+        own, theirs = self._vlan(ip)[0], self._vlan(str(other))[0]
+        return own is None or theirs is None or str(own.subnet) == str(theirs.subnet)
+
+    def _lower(self, group: list[AttributionChain]) -> None:
+        """The chain and its alternatives ``low`` (lease and chain) with
+        ``fortigate_dhcp_not_converted_since_lease``, citing nothing (round 6: the lease row
+        must not show ``high`` beside a ``low`` chain)."""
+        for index, chain in enumerate(group):
+            if any(e.key == "fortigate_dhcp_not_converted_since_lease" for e in chain.explanations):
+                continue
+            lease = self._stored_lease(chain)
+            notes = chain.explanations
+            if lease is not None:
+                last = self._last_record(lease, chain.at)
+                notes = (
+                    *notes,
+                    explain(
+                        "fortigate_dhcp_not_converted_since_lease",
+                        last=last.isoformat(),
+                        ip=chain.internal_ip,
+                    ),
+                )
+            group[index] = replace(
+                chain,
+                confidence="low",
+                lease=None if chain.lease is None else replace(chain.lease, confidence="low"),
+                explanations=notes,
+            )
+
+
+def _network_name(vlan: Vlan) -> str:
+    """A configured network as 2.6.3 names it: ``VLAN 42``, else its name and subnet (site
+    configuration, never client data)."""
+    if vlan.vlan_id is not None:
+        return f"VLAN {vlan.vlan_id}"
+    return f"{vlan.name_tr} ({vlan.subnet})"
+
+
+def _origin_name(origin: tuple[str, str | None]) -> str:
+    """A DHCP origin ``(table, vd)`` as 2.6.3 renders it; the log-supplied VDOM name masked and
+    cut like every log value there."""
+    table, vd = origin
+    if table != FG_DHCP_TABLE:
+        return "MikroTik DHCP"
+    if vd is None:
+        return "FortiGate DHCP"
+    shown = _IPV4_LIKE.sub("…", _MAC_LIKE.sub("…", vd))[:_VD_CUT]
+    return f"FortiGate DHCP (VDOM {shown})"
