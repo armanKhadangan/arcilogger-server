@@ -676,7 +676,7 @@ evidence ArciApi can read). The limits are the task's cadence plus a margin; the
 
 | Task | Schedule | Evidence | Late after | Not used when |
 |---|---|---|---|---|
-| Seal | Every 5 minutes from 00:10 | modification time of the newest `state\seal\<YYYY-MM-DD>.json` | 26 h | — |
+| Seal | Every 5 minutes from 00:10 | modification time of the newest `state\seal\<YYYY-MM-DD>.json` whose `status` is not `deleted` (states Retention rewrote for the days it deleted do not count) | 26 h | — |
 | VerifyDaily | Daily at 01:00 | `at` of the newer of `state\verify\last-last-1.json` and `last-last-2.json` | 26 h | — |
 | VerifyWeekly | Sundays at 03:00 | newest `at` of `state\verify\last-last-<N>.json`, N ≥ 3 | 8 days | — |
 | VerifyMonthly | 1st of the month at 04:00 | `at` of `state\verify\last-full.json` | 32 days | — |
@@ -700,8 +700,9 @@ Get-ScheduledTask -TaskPath \ARCILOGGER\ | Get-ScheduledTaskInfo | Format-Table 
 ### 4.7 Worker jobs
 
 For each job of the worker: its schedule ("Every {n} seconds/minutes/hours" or "Daily after
-{HH:MM}"), its state ("never", "running", "failing" (at least one failure in a row), "skipped",
-"ok"), the last status, the last start and finish, the duration (from the newest finished run of the
+{HH:MM}"), its state ("never", "running" (a run in progress in `job_runs`), "failing" (at least one
+failure in a row, or a failed last run, also one the worker could not count because the database
+was unreachable), "skipped", "ok"), the last status, the last start and finish, the duration (from the newest finished run of the
 last 7 days), the number of failures in a row and the next run. Sources: `state\worker-status.json`
 and the `job_runs` table of the database. The error text is not shown: see
 `D:\ARCILOGGER\logs\worker.log`; 3 failures in a row open the `R20-job` alert.

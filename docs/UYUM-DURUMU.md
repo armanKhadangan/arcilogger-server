@@ -663,7 +663,7 @@ okuyabileceği bir kanıt yok). Sınırlar görevin çalışma sıklığı artı
 
 | Görev | Çalışma | Kanıt | Gecikti | Kullanılmıyor |
 |---|---|---|---|---|
-| Seal | Her gün 00:10'dan sonra 5 dakikada bir | en yeni `state\seal\<YYYY-AA-GG>.json` dosyasının değişme zamanı | 26 saat | — |
+| Seal | Her gün 00:10'dan sonra 5 dakikada bir | `status` değeri `deleted` olmayan en yeni `state\seal\<YYYY-AA-GG>.json` dosyasının değişme zamanı (Saklama'nın sildiği günlerin yeniden yazdığı durumlar sayılmaz) | 26 saat | — |
 | VerifyDaily | Her gün 01:00 | `state\verify\last-last-1.json` ve `last-last-2.json` dosyalarının yenisindeki `at` | 26 saat | — |
 | VerifyWeekly | Pazar 03:00 | `state\verify\last-last-<N>.json` (N ≥ 3) dosyalarının en yeni `at` değeri | 8 gün | — |
 | VerifyMonthly | Ayın 1'i 04:00 | `state\verify\last-full.json` içindeki `at` | 32 gün | — |
@@ -688,8 +688,9 @@ Get-ScheduledTask -TaskPath \ARCILOGGER\ | Get-ScheduledTaskInfo | Format-Table 
 ### 4.7 Worker işleri
 
 Worker'ın her işi için: çalışma sıklığı ("Her {n} saniyede/dakikada/saatte bir" ya da "Her gün
-{SS:DD}'den sonra"), durum ("hiç çalışmadı", "çalışıyor", "başarısız" (art arda en az bir hata),
-"atlandı", "tamam"), son durum, son başlangıç ve bitiş, süre (son 7 günün en yeni bitmiş
+{SS:DD}'den sonra"), durum ("hiç çalışmadı", "çalışıyor" (`job_runs` tablosunda bitmemiş bir çalışması var),
+"başarısız" (art arda en az bir hata ya da son çalışması başarısız; veritabanına ulaşılamadığında
+hata sayılmadan da), "atlandı", "tamam"), son durum, son başlangıç ve bitiş, süre (son 7 günün en yeni bitmiş
 çalışmasından), art arda hata sayısı ve bir sonraki çalışma. Kaynak `state\worker-status.json` ve
 veritabanındaki `job_runs` tablosudur. Hatanın metni gösterilmez: `D:\ARCILOGGER\logs\worker.log`
 dosyasına bakın; art arda 3 hata `R20-job` uyarısını açar.
