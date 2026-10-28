@@ -18,6 +18,11 @@ Seeding runs after every ``arcilogger-db upgrade`` and is idempotent:
   the same transaction, so a crash in between writes it at the next upgrade, never twice. The
   seed converts nothing itself: legacy rows edited by the previous version after a rollback are
   named by the alert ``R20-nat:legacy-changed`` and entered in the exits by hand.
+* **The re-upgrade after a rollback** (ADR-0016, round 6): when ``arcilogger-db leases
+  prepare-rollback`` lowered the FortiGate leases before a rollback, the seed restores the ones
+  the previous version left as they were and deletes the status row
+  (:func:`arcilogger_db.lease_rollback.restore_after_rollback`); the report carries both counts
+  and the lease rebuild range of the upgrade notes.
 * **Licence installation:** the installation id and the trial start (``license_installation``
   row 1, :func:`arcilogger_db.licensing.ensure_installation`, audited ``license.trial_start``),
   once. Guarded (licensing contract 4.1, 5.2): the licence code is imported inside a ``try`` and
@@ -30,6 +35,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from sqlalchemy import select
@@ -39,6 +45,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from arcilogger_core.timeutil import utc_now
 from arcilogger_db.audit import append_audit
 from arcilogger_db.egress import MIGRATION_KEY
+from arcilogger_db.lease_rollback import restore_after_rollback
 from arcilogger_db.models import Setting
 from arcilogger_db.settings import DEFAULT_SETTINGS, SEED_AUTHOR
 
@@ -53,6 +60,12 @@ class SeedReport:
     license_installation_created: bool = False
     #: The conversion of the legacy NAT keys was audited by this seeding.
     egresses_audited: bool = False
+    #: After a rollback's lease step (``leases.rollback_lowered``): the FortiGate leases restored
+    #: to ``high``, those still ``low``, and the days to rebuild; ``None`` without that step.
+    rollback_restored: int | None = None
+    rollback_still_low: int | None = None
+    rebuild_from: date | None = None
+    rebuild_to: date | None = None
 
     @property
     def changed(self) -> bool:
@@ -66,8 +79,20 @@ def seed(session: Session) -> SeedReport:
     _seed_settings(session, report)
     session.flush()
     _audit_egresses_migration(session, report)
+    _restore_leases(session, report)
     _seed_license_installation(session, report)
     return report
+
+
+def _restore_leases(session: Session, report: SeedReport) -> None:
+    """The re-upgrade's undoing of a rollback's lease step (module docstring)."""
+    restore = restore_after_rollback(session)
+    if restore is None:
+        return
+    report.rollback_restored = restore.restored
+    report.rollback_still_low = restore.still_low
+    report.rebuild_from = restore.rebuild_from
+    report.rebuild_to = restore.rebuild_to
 
 
 def _audit_egresses_migration(session: Session, report: SeedReport) -> None:
