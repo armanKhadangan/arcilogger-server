@@ -290,11 +290,15 @@ describe('useSearchSession', () => {
       act(() => {
         old = result.current.run({ ...INPUT, q: 'old' });
       });
-      // vi.waitFor: RTL's waitFor needs a real setTimeout.
-      await vi.waitFor(() => {
-        expect(bodies(calls, '/search')).toHaveLength(1);
-        expect(vi.getTimerCount()).toBe(1);
-      });
+      // vi.waitFor: RTL's waitFor needs a real setTimeout. Same 5 s budget as RTL's
+      // asyncUtilTimeout (src/test/setup.ts); each poll moves the fake clock by only 50 ms.
+      await vi.waitFor(
+        () => {
+          expect(bodies(calls, '/search')).toHaveLength(1);
+          expect(vi.getTimerCount()).toBe(1);
+        },
+        { timeout: 5_000 },
+      );
       await act(async () => {
         await result.current.run({ ...INPUT, q: 'new' });
         await vi.advanceTimersByTimeAsync(1_000);
