@@ -131,6 +131,13 @@ def test_the_settings_path_is_the_one_the_web_interface_shows() -> None:
         assert networks_tr in text_tr, key
         assert networks_en in text_en, key
         assert "Cihazlar" not in text_en
+    # A sender configured later (D24) or a logid mapped later is rebuilt from the Sources page
+    # and the FortiGate DHCP settings (the manager's final review of PR #30, Q3).
+    text_tr, text_en = ENGINE_EXPLANATIONS["fortigate_dhcp_not_converted_since_lease"]
+    assert f"FortiGate kaynakları ({tr['nav']['sources']})" in text_tr
+    assert f"FortiGate sources ({en['nav']['sources']})" in text_en
+    assert "FortiGate DHCP ayarları (ör. logid listesi)" in text_tr
+    assert "FortiGate DHCP settings (e.g. the logid list)" in text_en
 
 
 def test_the_changed_exits_are_one_value_per_language() -> None:
