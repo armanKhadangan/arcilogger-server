@@ -33,7 +33,10 @@
   IPv6 adresinin adayı olamaz.
 - Geç gelen kayıtlar (ingest kesintisi sonrası birikmiş günler) otomatik olarak yeniden işlenir.
 - Ölçüm: günde 3.000.000 trafik satırında (iki ardışık gün) ±60 sn aday araması **1,2–1,3 sn**,
-  alan adıyla **1,1–1,5 sn**, hedef IP + port ile **0,04 sn** (hedef < 5 sn).
+  alan adıyla **1,1–1,5 sn**, hedef IP + port ile **0,04 sn** (hedef < 5 sn). Bu, sıkıştırılmamış
+  veridir; TimescaleDB'nin sıkıştırdığı 7 günden eski bölümlerde (5651 taleplerinin çoğu bu
+  günleri sorar) aday araması **1,15 sn**, alan adıyla **1,5–1,6 sn**, hedef IP + port ile
+  **0,8 sn**.
 
 ## Summary (EN)
 
@@ -442,7 +445,8 @@ restart is needed.
 ## 6. Performance (spec 14: lookup < 5 s for ±60 s)
 
 `worker/tests/test_lookup_performance.py`, PostgreSQL 16 with native monthly partitions,
-developer machine, warm cache (`VACUUM ANALYZE` after loading). The synthetic traffic is
+developer machine, warm cache (`VACUUM ANALYZE` after loading); uncompressed data (compressed
+TimescaleDB chunks: below). The synthetic traffic is
 **continuous** — it does not stop at midnight — so the scan tail of
 `lookup.max_session_seconds` (24 h after the window) is full: 300 clients, sessions of 0–96 s
 and one 2-hour session in 500, web filter logs for every fourth session (a fifth of them
@@ -466,6 +470,33 @@ bounds in the index condition; the destination search a bitmap scan of
 `…_dstip_dstport_time_idx`; the window without destination and the domain search an index scan
 of the partition's primary key `(time, id)` limited to `[at − 60 s, at + 60 s + 86,400 s]`, the
 domain's correlated sub-queries an index scan of `fg_web`/`fg_app` `(sessionid)`.
+
+**Compressed chunks (TimescaleDB).** On TimescaleDB the test above covers uncompressed chunks
+only: it pauses the compression policies before loading. TimescaleDB compresses every chunk older
+than 7 days (`segmentby source`, `orderby time DESC, id DESC`), and most 5651 requests ask about
+such days. A compressed chunk's btree indexes hold only its uncompressed rows: the lookup finds
+the compressed batches by their time range and decompresses them, so the plans above do not apply
+there. `test_lookup_is_fast_on_compressed_chunks` (TimescaleDB with compression only; the Linux CI
+job runs it) compresses every loaded chunk after the lease rebuild and checks the same answers and
+the same 5 s budget; of the plan it checks only that the domain search's web/app sub-query bounds
+the batches by each session's own start. TimescaleDB 2.30.2 on PostgreSQL 16, developer machine,
+warm cache, `ANALYZE` after compressing:
+
+| Step | Default: 1 M rows/day, 1.1 days | `ARCILOGGER_PERF=large`: 3 M rows/day, 2 days |
+|---|---|---|
+| Compressing the loaded chunks | 4.7 s | 26 s |
+| Candidates, ±60 s, **no destination** | 0.41 s | 1.15 s |
+| Candidates, popular domain (`google.com`) | 0.51 s | 1.56 s |
+| Candidates, rare domain | 0.47 s | 1.45 s |
+| Candidates to a destination IP + port | 0.27 s | 0.77 s |
+| Exact (`transip`, `transport`) | 0.04 s | 0.06 s |
+
+At `large` the domain search took 6.0 s (popular) and 7.2 s (rare) on compressed chunks, over the
+budget, until the sub-query's bound on the session's start was written without `COALESCE` (a
+sub-query for rows with a duration and one for rows without): TimescaleDB turns a bound into a
+condition on the batches' time range only when it is plain arithmetic on the outer row, so each
+of the window's 6,300 sessions read every batch of the web filter chunk. A cold cache was not
+measured on compressed chunks either.
 
 **Scaling.** The search without a specific destination IP reads every `fg_traffic` row in that
 24-hour range (about `rows per day × max_session_seconds / 86,400` index entries plus their heap
