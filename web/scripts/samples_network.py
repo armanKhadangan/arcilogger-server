@@ -1,10 +1,11 @@
 """The observed panel of the internet exits editor (``web/e2e/samples/settings-observed.json``).
 
 Captured from the real ``GET /settings/fortigate/observed`` (contract 2.12):
-``capture_api_samples.py`` calls :func:`capture` on its main site after every other page's samples
-(it is the last of the sample modules), with the capture (the app, its database and data directory, the request helpers
-``json`` and ``error``) and three signed-in clients: an administrator, an auditor and an
-administrator who has not accepted the KVKK notice. It returns ``{sample file name: data}``.
+``capture_api_samples.py`` calls :func:`capture` on its main site after every other page's
+samples (it is the last of the sample modules), with the capture (the app, its database and data
+directory, the request helpers ``json`` and ``error``) and three signed-in clients: an
+administrator, an auditor and an administrator who has not accepted the KVKK notice. It returns
+``{sample file name: data}``.
 
 The module writes a dual-WAN day of the firewall before the capture's "now" (13.10.2026 07:00):
 session records as real spool lines and rows (:class:`arcilogger_worker.testing.Evidence`), so

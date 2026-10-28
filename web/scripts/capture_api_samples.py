@@ -2645,7 +2645,7 @@ def capture_settings(capture: Capture, admin: Any, auditor: Any) -> None:
     detail = errors["setting_invalid_egress"]["body"]["error"]["details"][0]
     if detail["code"] != "setting_egress_public_private":
         raise SystemExit(f"the private public address was refused with {detail}")
-    idle ={"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
+    idle = {"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
     capture.recent(admin, minutes_ago=10)
     errors["reauth_required"] = capture.error(admin.patch(url, json=idle), 403, "reauth_required")
     errors["forbidden"] = capture.error(auditor.get(url), 403, "forbidden")

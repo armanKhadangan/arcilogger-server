@@ -43,7 +43,6 @@ from arcilogger_api.lookup_testing import (
     PC,
     PC_INTERFACE,
     PC_MAC,
-    PHONE,
     build_site,
     enter_exits,
     unconverted_dhcp_line,
