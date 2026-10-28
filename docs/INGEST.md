@@ -398,17 +398,17 @@ lines/s, the difference of the medians to Wave 2:
 
 Both gates hold. Gate 1's lines reach only the routing rule's key check, as expected: its
 `event` lines (10 %) carry no `dhcp_msg`, and its traffic lines have no `srcmac` (ingest process
-CPU, median: 55.2 / 55.4 s in-process). Gate 2 is the case the change costs something in: every FortiGate DHCP line
-now converts a MAC and an address and is written to `fg_dhcp` instead of `fg_event`, and every
-traffic line converts `srcmac` (ingest process CPU, median: 60.4 / 62.8 s in-process, +3.9 %;
+CPU, median: 55.2 / 55.4 s in-process). Gate 2 is the case the change costs something in: every
+FortiGate DHCP line now converts a MAC and an address and is written to `fg_dhcp` instead of
+`fg_event`, and every traffic line converts `srcmac` (ingest process CPU, median: 60.4 / 62.8 s in-process, +3.9 %;
 with 2 workers the parsing runs in the workers and the medians show no cost). The per-campaign
 medians (one ABBA round each, 6 runs per tree): gate 1 −0.8 % / +1.8 % in-process and +6.3 % /
 −2.4 % with 2 workers; gate 2 −2.0 % / −3.3 % in-process and −1.2 % / −0.7 % with 2 workers. The
 machine got slower during gate 2's second campaign (both trees, about 3.5–5 % in-process and
 10 % with 2 workers), which the alternation evens out. An earlier, unrecorded measurement of the
 handed-over branch gave −5.5 % once under another job's load, and −2.2 % to −3.1 % (gate 1) and
-−0.5 % to −3.1 % (gate 2) in quiet runs, in line with these. Gate 3 (the load-generator days, `--dhcp-server fortigate
---srcmac`) is measured by the integrator after WP-F1 and recorded below.
+−0.5 % to −3.1 % (gate 2) in quiet runs, in line with these. Gate 3 (the load-generator days,
+`--dhcp-server fortigate --srcmac`) is measured by the integrator after WP-F1 and recorded below.
 
 Default `[ingest] workers = 2`: about 1.7× the in-process speed; a third worker adds 10–13 %
 on 4 vCPU but competes with PostgreSQL, the API and the collector on the same cores. **Spec 14
