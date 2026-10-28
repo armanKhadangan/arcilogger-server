@@ -131,6 +131,43 @@ Get-FileHash $usb\secret.key, $usb\arcilogger.toml -Algorithm SHA256
 Kamu SM credentials are entered again on a new server (`& $core secret set …`). Write the hashes
 on paper and keep them with the medium.
 
+**Confirming the copy (Uyum Durumu, card 10).** After making the copy, open the **Uyum Durumu**
+page of the web interface and press **Yapılandırma yedeğini aldım** (I have copied the
+configuration) on card 10 (**Configuration and database backups**). The confirmation dialog says:
+
+> You confirm that arcilogger.toml, secret.key and the Caddy CA folder (with its private key) were
+> copied to encrypted offline media kept apart from the backups (secrets.json optional; BACKUP.md
+> section 3). The confirmation is written to the audit log with the configuration's current
+> SHA-256.
+
+Only administrators see the button (`settings.manage`); the auditor sees the card but cannot
+confirm. ARCILOGGER cannot see the offline medium: the confirmation is the administrator's
+statement that the copy was made, not a check of the copy itself. It is written to the audit log
+as "Configuration backup confirmed" (`compliance.config_backup_confirm`) with the SHA-256 of
+`arcilogger.toml` at that moment (`config_sha256`); every confirmation is a new entry. When the
+file cannot be read, nothing is recorded (`config_backup_unreadable`: "The configuration file
+could not be read; the backup confirmation was not recorded.").
+
+Card 10 looks at the nightly database backup first (`[backup] enabled`, `state\backup\last.json`,
+open `R20-backup` alerts; section 2): with the backup off, failed or `last.json` damaged the
+card shows **Problem** (a file that cannot be read at all makes it **No data**: "This check could
+not be run now"); while the installation is younger than `alerts.backup_missing_hours` (48)
+and the first backup has not run, **No data**; when the last good backup is older than
+`alerts.backup_stale_hours` (36) or there is none, **Attention**. With the backup in place it
+turns to the confirmation:
+
+| State | Card 10 |
+|---|---|
+| Never confirmed | **Attention**: "The offline copy of the configuration files was never confirmed (BACKUP.md section 3)." |
+| `arcilogger.toml` changed after the last confirmation (on the Settings pages or by hand) | **Attention**: "The configuration changed after the last confirmation (…); make a new offline copy." |
+| The SHA-256 of the last confirmation is the file's current one | **OK**: the time and size of the last backup, the time of the confirmation |
+
+The comparison covers `arcilogger.toml` only. The application settings live in the database and
+do not change the file; a changed `secret.key`, `secrets.json` or Caddy CA does not turn the card
+to **Attention** by itself either. In those cases, too, make a new copy and confirm again. The
+card never shows who confirmed (the audit log does). Details:
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 2.10.
+
 ## 4. Copying the dumps off the server
 
 The dumps lie on the **same disk** as the database: they protect against a wrong action, a failed
