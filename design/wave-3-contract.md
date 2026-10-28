@@ -5914,7 +5914,9 @@ from section 0.2 are recorded here too, with the date and who decided.
   rebuild: between the stale lease's own timeout and the next sighting, the lookup keeps
   `no_lease` until the rebuild (at most one sighting interval); after the pair's re-ACK, the
   lease row's start and its cited opening ACK stay the stale ones (the MAC, the confidence and
-  `last_dhcp_evidence` are the rebuild's). Tests:
+  `last_dhcp_evidence` are the rebuild's). ARP chains are no target of the post-lease checks,
+  so a late-accepted ACK beside such a derived ARP chain stays unseen until the rebuild, and the
+  chain stays `medium` with `arp_only` (the manager's final review of PR #30, Q8). Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_release_mapped_after_the_build_ends_the_lease`,
   `::test_arp_sightings_after_a_release_mapped_later_name_the_client`. Fold into 2.7.
 - **D27 for a chain outside every configured network: the address stands for its network**
