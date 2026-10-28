@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from arcilogger_core import fsutil
 from arcilogger_core.layout import Layout
 from arcilogger_worker import system_jobs
 from arcilogger_worker.service import JobContext
@@ -56,8 +57,18 @@ def history(layout: Layout) -> dict[str, Any]:
     return data
 
 
-def test_sample_writes_one_entry_per_site_day(tmp_path: Path, disks: dict[str, int]) -> None:
+def test_sample_writes_one_entry_per_site_day(
+    tmp_path: Path, disks: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
     layout = Layout(tmp_path)
+    written: list[Path] = []
+    atomic = fsutil.atomic_write_text
+
+    def recorded(path: Path, text: str) -> None:
+        written.append(path)
+        atomic(path, text)
+
+    monkeypatch.setattr(system_jobs, "atomic_write_text", recorded)
     assert layout.system_history == tmp_path / "state" / "system-history.json"
     # 21:40 UTC is 00:40 of the next site day (Europe/Istanbul, UTC+3).
     first = datetime(2026, 10, 11, 21, 40, tzinfo=UTC)
@@ -84,7 +95,7 @@ def test_sample_writes_one_entry_per_site_day(tmp_path: Path, disks: dict[str, i
     job_system_sample(context(layout, first + timedelta(days=1)))
     assert [day["day"] for day in history(layout)["days"]] == ["2026-10-12", "2026-10-13"]
     assert read_history(layout.system_history) == history(layout)["days"]
-    assert not list(layout.state.glob("*.tmp"))  # written through a temporary file, replaced
+    assert written == [layout.system_history] * 3  # always replaced in one step
 
 
 def test_history_keeps_120_days(tmp_path: Path, disks: dict[str, int]) -> None:

@@ -167,6 +167,7 @@ def drive_infos(layout: Layout, data_dir: Path, *, warning: int, today: date) ->
                     total=usage.total,
                     warning_percent=warning,
                     today=today,
+                    used_now=used,
                 ),
             )
         )
@@ -287,18 +288,24 @@ def read_status(path: Path, now: datetime) -> tuple[StatusFileState, dict[str, A
 
 
 def _member_of(entry: str, source: SourceConfig) -> bool:
-    """Whether the spool name ``entry`` is a member ``<name>-<ip>`` of the network source."""
+    """Whether the spool name ``entry`` is a member ``<name>-<ip>`` of the network source.
+
+    The collector writes the member's address with ``:`` and a zone's ``%`` as ``-``
+    (:meth:`~arcilogger_core.config.Config.source_name_for`); an address is taken only when it
+    gives back exactly this name (a zone id may hold ``-`` itself)."""
     prefix = f"{source.name}-"
     if not entry.startswith(prefix):
         return False
-    rest = entry[len(prefix) :]
-    network = ipaddress.ip_network(source.address, strict=False)
-    for candidate in (rest, rest.replace("-", ":")):  # IPv6 ':' is written as '-'
-        try:
-            address = ipaddress.ip_address(candidate)
-        except ValueError:
-            continue
-        return address in network
+    parts = entry[len(prefix) :].split("-")
+    for end in range(len(parts), 0, -1):
+        head, zone = "-".join(parts[:end]), "-".join(parts[end:])
+        for text_ in dict.fromkeys((head, head.replace("-", ":"))):
+            try:
+                address = ipaddress.ip_address(f"{text_}%{zone}" if zone else text_)
+            except ValueError:
+                continue
+            if prefix + str(address).replace(":", "-").replace("%", "-") == entry:
+                return address in ipaddress.ip_network(source.address, strict=False)
     return False
 
 

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from arcilogger_api.system.forecast import MIN_SAMPLES, WINDOW, drive_samples, forecast
+from arcilogger_api.system.forecast import (
+    HORIZON_DAYS,
+    MIN_SAMPLES,
+    WINDOW,
+    drive_samples,
+    forecast,
+)
 
 GIB = 1024**3
 TOTAL = 1000 * GIB
@@ -88,12 +94,22 @@ def test_forecast_already_above_the_warning_mark() -> None:
     # The line already past the size: full "today", never a day in the past.
     full = growing(10, start_used=995 * GIB, per_day=2 * GIB)
     assert forecast(full, total=TOTAL, warning_percent=80, today=TODAY).full_on == TODAY
-    # Samples that stopped a week ago, the line crossing the mark since: today, not earlier.
-    # The newest sample (795 GiB, a week ago) is below the mark, the line today (830) above it.
+    # Samples that stopped a week ago: the newest (795 GiB) is below the mark, the line today
+    # (830) above it. No measurement is above, so the mark is reached "today", not earlier.
     stale = growing(10, start_used=750 * GIB, per_day=5 * GIB, last=TODAY - timedelta(days=7))
     result = forecast(stale, total=TOTAL, warning_percent=80, today=TODAY)
-    assert result.warning_on is None
+    assert result.warning_on == TODAY
     assert result.full_on == TODAY + timedelta(days=34)  # (1000 - 830) / 5
+    # The drive now decides when it is measured: above the mark since the morning sample …
+    below = growing(10, start_used=790 * GIB, per_day=GIB)  # 799 GiB at today's sample
+    assert forecast(below, total=TOTAL, warning_percent=80, today=TODAY).warning_on == (
+        TODAY + timedelta(days=1)
+    )
+    result = forecast(below, total=TOTAL, warning_percent=80, today=TODAY, used_now=812 * GIB)
+    assert result.warning_on is None
+    # … and below it again after a clean-up, although the newest sample was above.
+    result = forecast(above, total=TOTAL, warning_percent=80, today=TODAY, used_now=700 * GIB)
+    assert result.warning_on == TODAY  # the line says it is past the mark already
     stopped = growing(10, start_used=700 * GIB, per_day=GIB, last=TODAY - timedelta(days=7))
     result = forecast(stopped, total=TOTAL, warning_percent=80, today=TODAY)
     assert result.warning_on == TODAY + timedelta(days=800 - 709 - 7)
@@ -114,3 +130,24 @@ def test_drive_samples_read_one_drive_of_the_history() -> None:
     assert drive_samples(history, "D:") == [(date(2026, 10, 1), 5), (date(2026, 10, 2), 6)]
     assert drive_samples(history, "C:") == [(date(2026, 10, 1), 1)]
     assert drive_samples(history, "E:") == []
+
+
+def test_a_drive_that_hardly_grows_gets_no_date() -> None:
+    """A few bytes a day would put the marks thousands of years ahead (beyond the calendar):
+    beyond :data:`HORIZON_DAYS` there is no date, and the answer never fails."""
+    for per_day in (1, 1000, 50_000):
+        crawling = growing(30, start_used=500 * GIB, per_day=per_day)
+        result = forecast(crawling, total=TOTAL, warning_percent=80, today=TODAY)
+        assert result.state == "estimated"
+        assert result.growth_bytes_per_day == per_day
+        assert (result.warning_on, result.full_on) == (None, None)
+    noisy = [
+        (day, used + (i % 2) * 1000 + i)
+        for i, (day, used) in enumerate(growing(30, start_used=200 * GIB, per_day=0))
+    ]
+    assert forecast(noisy, total=TOTAL, warning_percent=80, today=TODAY).full_on is None
+    # Just inside the horizon still gets its date.
+    near = growing(30, start_used=0, per_day=TOTAL // (HORIZON_DAYS - 100))
+    result = forecast(near, total=TOTAL, warning_percent=80, today=TODAY)
+    assert result.full_on is not None
+    assert result.full_on <= TODAY + timedelta(days=HORIZON_DAYS)

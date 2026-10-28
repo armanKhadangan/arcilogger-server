@@ -31,7 +31,7 @@ from arcilogger_api.system.resources import CpuMeter, configured_name, measure_d
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core import RELEASE_DATE, hostinfo
 from arcilogger_core import __version__ as core_version
-from arcilogger_core.config import Config
+from arcilogger_core.config import Config, SourceConfig
 from arcilogger_core.hostinfo import CpuTimes
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site, site_day, utc_now
@@ -388,9 +388,13 @@ def test_system_returns_no_sender_address(
     write_status(layout)
     login_as(client, "admin")
     for path in (API, DISK):
-        answer = client.get(path).text
+        response = client.get(path)
+        assert response.status_code == 200, (path, response.text)
+        answer = response.text
         assert "172.20." not in answer, path  # no sender, member or configured address
-        assert "2001" not in answer, path
+        assert "2001:db8" not in answer, path
+        assert "2001-db8" not in answer, path
+        assert "lab6-" not in answer, path
         assert "unknown-" not in answer, path
         assert "old-switch" not in answer, path  # a name not configured any more
         assert "disk full" not in answer, path  # error texts are not returned
@@ -405,6 +409,20 @@ def test_configured_names_of_status_entries(api_config: Config) -> None:
     assert configured_name("ap-gateway", api_config) is None
     assert configured_name("ap", api_config) is None  # the network's own name has no entry
     assert configured_name("unknown-172.20.10.40", api_config) is None
+    # A link-local member keeps its zone id in the spool name ('%' written as '-').
+    lan = api_config.model_copy(
+        update={
+            "sources": [
+                *api_config.sources,
+                SourceConfig(name="lan", type="generic", address="fe80::/64"),
+            ]
+        }
+    )
+    for sender in ("fe80::1%eth0", "fe80::1%12", "fe80::abcd%br-lan", "fe80::2"):
+        spool_name = lan.source_name_for(sender)
+        assert spool_name is not None
+        assert configured_name(spool_name, lan) == "lan", spool_name
+    assert configured_name("lan-fe80--1-", lan) is None
 
 
 def test_database_sizes_are_cached(
