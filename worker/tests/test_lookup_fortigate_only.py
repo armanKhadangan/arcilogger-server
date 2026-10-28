@@ -140,18 +140,21 @@ def unconverted_line(
     source: str = "fortigate",
     logid: str = "0100026001",
     dhcp_msg: str | None = None,
+    without_dhcp_msg: bool = False,
 ) -> int:
     """A FortiGate DHCP ACK (a RELEASE with ``logid="0100026002"`` and ``lease=None``) that
     stayed an ``fg_event`` row with the full DHCP shape (D8: a line loaded before the upgrade,
     or by the previous version after a rollback): its spool line and the row that version
     stored, every DHCP field in ``extra``; returns the row id. ``dhcp_msg``: another message
-    than the logid's own ("Ack" / "Release")."""
+    than the logid's own ("Ack" / "Release"); ``without_dhcp_msg``: a line without the field,
+    which D3 keeps as an ``fg_event`` row today too."""
     sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
     local = to_site(time)
     logdesc, msg = FORTIGATE_DHCP_TEXTS[logid]
+    kind = dhcp_msg or ("Ack" if logid == "0100026001" else "Release")
     fields = {
         "interface": interface,
-        "dhcp_msg": dhcp_msg or ("Ack" if logid == "0100026001" else "Release"),
+        "dhcp_msg": None if without_dhcp_msg else kind,
         "mac": mac.upper(),
         "ip": ip,
         "lease": None if lease is None else str(lease),
@@ -1026,6 +1029,22 @@ def test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing(
     assert note(lowered, UNCONVERTED) == {"last": iso(tr(DAY, 11)), "ip": PC}
 
 
+def test_a_line_after_the_lease_without_dhcp_msg_counts(
+    db_session: Session, evidence: Evidence, example: list[int]
+) -> None:
+    """D25 refuses a listed logid's line only for a ``dhcp_msg`` it does not list: an ACK line
+    of the PC's address without the field (D3 kept it as an ``fg_event`` row, the shape a line
+    the timeline never saw has) after the 11:00 ACK lowers the chain, as the full line does."""
+    unconverted_line(evidence, tr(DAY, 11, 10), PC, OTHER, without_dhcp_msg=True)
+    db_session.commit()
+    chain = internal(db_session, PC, AT).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(tr(DAY, 11)), "ip": PC}
+    assert OTHER not in outcome_text(internal(db_session, PC, AT))
+
+
 @pytest.mark.parametrize(
     ("ip", "lowered"),
     [
@@ -1361,6 +1380,21 @@ def test_a_line_that_is_never_lease_evidence_is_never_named(
     older = internal(db_session, PC, AT)
     assert outcome_note(older, NOT_CONVERTED) == {"ips": PC}
     assert_cited(older, row, acked, evidence)
+
+
+def test_a_covering_line_without_dhcp_msg_is_named(db_session: Session, evidence: Evidence) -> None:
+    """D8 and D25: the covering pre-upgrade ACK without a ``dhcp_msg`` field is the line ingest
+    kept as an ``fg_event`` row (D3), and it is named and cited like the full line; only a
+    value the logid's list lacks (a NAK) refuses it."""
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(
+        evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK, without_dhcp_msg=True
+    )
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    assert_cited(outcome, row, acked, evidence)
 
 
 def test_a_line_of_an_unknown_sender_is_never_cited(

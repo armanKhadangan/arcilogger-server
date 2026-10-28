@@ -6040,6 +6040,33 @@ from section 0.2 are recorded here too, with the date and who decided.
   `::test_a_healthy_mixed_site_keeps_its_chains`,
   `worker/tests/test_lookup_performance.py::test_the_converted_row_query_of_a_hundred_chains_is_fast`.
   Fold into 2.7 (the round-7 bullet), 2.16 and 3.4.
+- **The lookup applies D25 and D28 to its `fg_event` lines, and a missing `dhcp_msg` passes**
+  (2.7 post-lease check, 2.8.3 D8 probe; the manager's review of PR #30, item 2). Neither
+  predicate in 2.7 or 2.8.3 filters the `fg_event` branch by D25 or D28; the lookup does
+  (`attribution.event_kept`, used by the post-lease query and the probe's `fg_event` query), so
+  a NAK under 0100026001 or an ACK of an interface in `dhcp.fortigate_interfaces_excluded` is
+  never counted or named, as `trust.kept` refuses such an `fg_dhcp` row. The filter refuses a
+  line of a logid that `dhcp.fortigate_dhcp_msgs` lists only when its `dhcp_msg` is **present**
+  and not listed: a line without the field passes, because under D3 a DHCP line without
+  `dhcp_msg` is exactly the one ingest keeps as an `fg_event` row (the shape of a line the
+  timeline never saw), while D25's "a NULL `dhcp_msg` included" (2.15's reading table) is a rule
+  for `fg_dhcp` rows, which always carry the field. An earlier form refused such a line too, so
+  the probe and the post-lease check never saw the lines they are for. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_line_after_the_lease_without_dhcp_msg_counts`,
+  `::test_a_covering_line_without_dhcp_msg_is_named` (both failed before),
+  `::test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing`,
+  `::test_a_line_that_is_never_lease_evidence_is_never_named`. Fold into 2.7 and 2.8.3.
+- **The D8 probe also runs for a match whose chain is a srcmac chain** (2.8.3 "When a chain
+  cannot be built for an IP (internal mode `no_lease`, or a match with `chain_missing`)"; the
+  manager's review of PR #30, item 2). A srcmac chain (D10, `srcmac_only`) is no lease chain:
+  the address had no lease at the moment, as with `chain_missing`, so the probe takes the IPs of
+  the first 20 matches **without a lease chain** (no chain, or a srcmac chain only; one rule for
+  both paths, `engine._unconverted`), and an internal lookup whose answer is a srcmac chain
+  keeps its `no_lease` and is probed too. The safe side: a covering pre-upgrade ACK beside a
+  srcmac chain is named (`fortigate_dhcp_not_converted`) and, for an exact match or internal
+  mode, cited, never as an attribution; the srcmac chain keeps its confidence (`low`). Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease`
+  (internal, exact and candidate). Fold into 2.8.3.
 
 ---
 

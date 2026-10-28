@@ -170,9 +170,11 @@ def event_kept(settings: LookupSettings) -> ColumnElement[bool]:
     """The rules of :func:`.trust.kept` that a FortiGate DHCP line kept as an ``fg_event`` row
     can be checked on, read from its ``extra`` fields: a line of an interface in
     ``dhcp.fortigate_interfaces_excluded`` (D28) or with a ``dhcp_msg`` that
-    ``dhcp.fortigate_dhcp_msgs`` does not list for its logid (D25; a missing one included) is
-    never lease evidence, so the lookup never counts it as a line the timeline missed. The
-    sender rule is each query's own (``untrusted``)."""
+    ``dhcp.fortigate_dhcp_msgs`` does not list for its logid (D25) is never lease evidence, so
+    the lookup never counts it as a line the timeline missed. A line **without** ``dhcp_msg``
+    passes: under D3 such a line of a DHCP logid is exactly the one ingest kept as an
+    ``fg_event`` row (the c2 deviation); only a present value that is not listed is refused.
+    The sender rule is each query's own (``untrusted``)."""
     interface = FgEvent.extra["interface"].astext
     message = FgEvent.extra["dhcp_msg"].astext
     clauses: list[ColumnElement[bool]] = []
@@ -181,7 +183,7 @@ def event_kept(settings: LookupSettings) -> ColumnElement[bool]:
         clauses.append(or_(interface.is_(None), interface.not_in(excluded)))
     for logid, messages in sorted(settings.fortigate_dhcp_msgs.items()):
         allowed = sorted({text.lower() for text in messages})
-        unexpected = message.is_(None) | func.lower(message).not_in(allowed)
+        unexpected = message.is_not(None) & func.lower(message).not_in(allowed)
         clauses.append(not_((FgEvent.logid == logid) & unexpected))
     return and_(true(), *clauses)
 
