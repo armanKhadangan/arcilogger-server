@@ -262,11 +262,22 @@ paragrafı sonuç cümlesi ve öneriyle sınırlıdır.
   satırlar hiçbir zaman değiştirilmez.
 
 **Ham satır karşılaştırması (bölüm 4 ve 6):** sorgunun sonucu veritabanı satırlarından
-(`fg_traffic`, `mt_dhcp`, `mt_arp`, `leases`) gelir; veritabanı türetilmiş veridir, kanıt ham
-kayıt satırıdır. Rapor oluşturulurken her kanıt satırı ingest hizmetinin kullandığı ayrıştırıcıyla
-yeniden okunur ve raporda gösterilen değerlerle karşılaştırılır: oturumun kaynak/hedef adres ve
-portları, protokol, FortiGate oturum no, NAT adresi/portu; IP-MAC kaydının IP ve MAC adresi
-(IP'yi başka bir cihaza veren kapanış satırında yalnızca IP); her satırda kayıt türü ve zamanı.
+(`fg_traffic`, `fg_dhcp`, `mt_dhcp`, `mt_arp`, `leases`) gelir; veritabanı türetilmiş veridir,
+kanıt ham kayıt satırıdır. Rapor oluşturulurken her kanıt satırı ingest hizmetinin kullandığı
+ayrıştırıcıyla yeniden okunur ve raporda gösterilen değerlerle karşılaştırılır:
+
+- oturumun kaynak/hedef adres ve portları, protokol, FortiGate oturum no, NAT adresi/portu;
+- srcmac'e dayanan bir zincirde, gösterilen oturum satırının kaynak IP adresi (`srcip`) ve
+  kaynak MAC adresi (`srcmac`);
+- IP-MAC kaydının (MikroTik DHCP, FortiGate DHCP, ARP-LOG) IP ve MAC adresi;
+- her satırda kayıt türü ve zamanı.
+
+Bir kirayı bitiren DHCP satırı (MikroTik ya da FortiGate) yalnızca kirayla paylaştığı alanı
+taşır. Kiranın IP adresini taşıyorsa yalnızca IP karşılaştırılır: adresi başka bir cihaz aldı
+ya da aynı adres ve MAC öbür DHCP kaynağının kaydıyla sürdü. Başka bir IP adresi taşıyorsa
+yalnızca MAC karşılaştırılır: aynı MAC adresi başka bir adres aldı. Böylece doğru bir zincir
+yanlış bir "uyuşmuyor" uyarısı almaz. Kira zaman çizelgesine girmemiş FortiGate DHCP satırları
+(bölüm 6'da notlu) karşılaştırılmaz.
 Bir fark varsa rapor bunu kırmızı uyarıyla yazar (bölüm 4 ve 5'in başında; farklar bölüm 6'da
 ilgili kanıtın altında, "raporda X, ham satırda Y"); o sonuç **"kesin eşleşme" olarak değil
 "kanıtla uyuşmayan sonuç"** olarak gösterilir ve zincire güven düzeyi verilmez. Karşılaştırma
