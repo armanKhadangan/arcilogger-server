@@ -23,7 +23,10 @@ a ``TestClient`` cannot read an endless response.
 What ``sources.json`` holds (contract 2.16, 2.17): ``overview``, ``detail`` of the firewall, the
 core router and the unknown sender, ``tail`` (the core router's last lines, a source without a
 file), ``dashboard`` (``GET /dashboard/summary`` with today's parse failures, for the Panel's
-"Ayrıştırma hataları" card) and ``errors``.
+"Ayrıştırma hataları" card), the "Kira kanıtı" card's states ``overview_lease_ok``,
+``overview_lease_none`` and ``overview_lease_refused`` (contract 2.12: whole overviews, captured
+last, after the module wrote FortiGate DHCP rows and sessions of the last hour and ran the
+worker's lease evidence check; see :func:`capture_lease_evidence`) and ``errors``.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx2 as httpx
@@ -43,10 +46,14 @@ from arcilogger_api.security import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.models import IngestOffset, ParseFailure, Source
-from arcilogger_db.settings import DEFAULT_SETTINGS
+from arcilogger_db.settings import DEFAULT_SETTINGS, get_settings
+from arcilogger_worker.alerts.system import CheckContext, apply, check_lease_evidence
+from arcilogger_worker.correlation.leases import rebuild_day
+from arcilogger_worker.testing import Evidence
 
 if TYPE_CHECKING:
     from capture_api_samples import Capture
+    from sqlalchemy.orm import Session
 
 #: Keys this module's files compare differently, added to the script's defaults:
 #: ``{file: (data-map keys, enum keys)}`` (``capture_api_samples.MAP_KEYS``, ``ENUM_KEYS``).
@@ -65,6 +72,20 @@ NEWCOMER_SENDER = "198.51.100.23"
 UNKNOWN = f"unknown-{NEWCOMER_SENDER}"
 #: The settings this module changes; put back to their defaults at the end.
 CHANGED = ("live.max_lines_per_second",)
+#: The clients of the lease evidence states: minutes before the capture's "now" of their
+#: FortiGate DHCP ACK (and of their sessions), address and MAC (VLAN 42 "Planlama").
+LEASE_CLIENTS = (
+    (40, "172.20.42.71", "00:00:5e:00:53:71"),
+    (25, "172.20.42.72", "00:00:5e:00:53:72"),
+)
+#: The FortiGate interface of VLAN 42 (``srcintf`` of its sessions, ``interface`` of its ACKs).
+PC_INTERFACE = "vlan42"
+#: A logid ``dhcp.fortigate_logids`` does not map: its row is refused (2.6.1 rule 4).
+UNMAPPED_LOGID = "0100026003"
+#: An interface listed in ``dhcp.fortigate_interfaces_excluded`` for the refused state.
+EXCLUDED_INTERFACE = "ipsec1"
+#: The settings the lease evidence states change; put back to their defaults at the end.
+LEASE_SETTINGS = ("lookup.srcmac_interfaces", "dhcp.fortigate_interfaces_excluded")
 #: Shorter hub intervals than production, so the capture does not wait for them (the
 #: keep-alive interval the samples show stays the production one).
 TIMING = Timing(poll=0.1, listing=0.3)
@@ -311,6 +332,7 @@ def capture_sources(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
     )
     out["tail"]["no_file_today"] = capture.json(admin.get(f"{API}/sources/switch-3/tail"), 200)
     out["dashboard"] = capture.json(admin.get(f"{API}/dashboard/summary"), 200)
+    out.update(capture_lease_evidence(capture, admin))
     errors["source_not_found"] = capture.error(
         admin.get(f"{API}/sources/yok-boyle"), 404, "source_not_found"
     )
@@ -319,6 +341,83 @@ def capture_sources(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
         newcomer.get(f"{API}/sources/core-r1/tail"), 403, "privacy_notice_required"
     )
     return out
+
+
+def capture_lease_evidence(capture: Capture, admin: Any) -> dict[str, Any]:
+    """The "Kira kanıtı" card's states (contract 2.12), each a whole ``GET /sources`` answer,
+    after the other samples of the page: ``overview`` above is ``ok`` with no row in the window
+    (the site's DHCP and ARP rows are of 09.10).
+
+    * ``overview_lease_ok``: FortiGate DHCP ACKs of the last hour, their leases rebuilt, the
+      srcmac interface listed; the lease evidence check finds nothing (no client traffic in
+      the last hour, so a quiet table is no finding);
+    * ``overview_lease_none``: client sessions of the last hour on the srcmac interface, and
+      the check run again opens ``R20-lease:none:mt_dhcp`` and ``none:mt_arp`` (the core
+      router's rows stopped after 09.10; FortiGate DHCP keeps arriving);
+    * ``overview_lease_refused``: one more ACK with a logid ``dhcp.fortigate_logids`` does not
+      map (refused) and one on an excluded interface (configuration, never refused): ``refused``
+      wins over the ``none`` alerts, which stay open."""
+    out: dict[str, Any] = {}
+    now = utc_now()
+    state_of(_Request(capture.app)).srcmac.ttl = 0.0  # every answer counts the srcmac rows
+    capture.setting("lookup.srcmac_interfaces", [PC_INTERFACE])
+    with capture.factory() as session:
+        evidence = Evidence(session, capture.layout)
+        for minutes, ip, mac in LEASE_CLIENTS:
+            evidence.fortigate_dhcp(now - timedelta(minutes=minutes), ip, mac)
+        session.commit()
+        rebuild_day(session, site_day(now), horizon=now)
+        session.commit()
+        _check_lease_evidence(capture, session, now)
+    out["overview_lease_ok"] = _lease(capture, admin, "ok")
+    now = utc_now()
+    with capture.factory() as session:
+        evidence = Evidence(session, capture.layout)
+        for minutes, ip, mac in LEASE_CLIENTS:
+            for n in range(3):
+                evidence.traffic(
+                    now - timedelta(minutes=minutes - n),
+                    ip,
+                    52000 + minutes + n,
+                    srcintf=PC_INTERFACE,
+                    dstintf="wan1",
+                    srcmac=mac,
+                )
+        session.commit()
+        _check_lease_evidence(capture, session, now)
+    out["overview_lease_none"] = _lease(capture, admin, "none")
+    capture.setting("dhcp.fortigate_interfaces_excluded", [EXCLUDED_INTERFACE])
+    now = utc_now()
+    with capture.factory() as session:
+        evidence = Evidence(session, capture.layout)
+        _minutes, ip, mac = LEASE_CLIENTS[0]
+        evidence.fortigate_dhcp(now - timedelta(minutes=5), ip, mac, logid=UNMAPPED_LOGID)
+        evidence.fortigate_dhcp(
+            now - timedelta(minutes=4), "172.20.250.14", "00:00:5e:00:53:7e",
+            interface=EXCLUDED_INTERFACE,
+        )  # fmt: skip
+        session.commit()
+    out["overview_lease_refused"] = _lease(capture, admin, "refused")
+    for key in LEASE_SETTINGS:
+        capture.setting(key, DEFAULT_SETTINGS[key])
+    return out
+
+
+def _check_lease_evidence(capture: Capture, session: Session, now: datetime) -> None:
+    """The worker's ``R20-lease`` check at ``now`` and its alerts, as the system checks run it."""
+    settings = get_settings(session, prefix="alerts.")
+    context = CheckContext(session, capture.layout, capture.config, now, settings)
+    apply(session, check_lease_evidence(context), now=now)
+    session.commit()
+
+
+def _lease(capture: Capture, admin: Any, state: str) -> Any:
+    """``GET /sources`` whose ``lease_evidence`` is in ``state``."""
+    answer = capture.json(admin.get(f"{API}/sources"), 200)
+    found = answer["lease_evidence"]
+    if found["state"] != state:
+        raise SystemExit(f"lease evidence: expected {state}, got {found}")
+    return answer
 
 
 class _Request:
