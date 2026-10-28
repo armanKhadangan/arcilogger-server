@@ -76,7 +76,9 @@ hemen siler: kart 10 onaydan hemen sonra güncellenir. Sayfada "Güncellendi {za
 
 **Bir kart hesaplanamazsa** **Bilgi yok** durumunda "Bu denetim şu anda yapılamadı: {hata kodu}"
 gösterir (hata kodu, hatanın sınıf adıdır; ayrıntısı ArciApi hizmetinin günlüğüne yazılır). Diğer
-kartlar bundan etkilenmez.
+kartlar bundan etkilenmez. Okunamayan bir durum dosyası da böyledir: bir denetimin sonucu
+okunamıyorsa kart "başarısız" demez, "yapılamadı" der (bozuk `last.json` dışında, bölüm 2.10).
+Hesaplanamayan bir kart içeren yanıt saklanmaz; sonraki istek kartları yeniden hesaplar.
 
 **Değerlendirme kuralı.** Her kartın bölüm 2'deki tablosu yukarıdan aşağıya okunur: **ilk tutan
 satır** durumu ve gerekçeyi belirler. Hiçbir satır tutmazsa kart **Tamam**'dır. Her kart ayrıca
@@ -202,15 +204,16 @@ sonuçları değerlendirir.
 | Sıra | Durum | Koşul | Gerekçe |
 |---|---|---|---|
 | 1 | Sorun | 30 günden biri "Başarısız" | "Son 30 günde {n} gün başarısız: {günler}." |
-| 2 | Sorun | `last-full.json` `"ok": false` diyor ya da okunamıyor, veya etkin bir `R20-verify` uyarısı var | "Tam zincir denetimi ({zaman}) başarısız." |
+| 2 | Sorun | `last-full.json` `"ok": false` diyor ya da etkin bir `R20-verify` uyarısı var | "Tam zincir denetimi ({zaman}) başarısız." |
 | 3 | Dikkat | Mühürlü bir gün son 35 günde doğrulanmadı | "Son 30 günde {n} mühürlü gün son 35 günde doğrulanmadı." |
 | 4 | Dikkat | Dünden eski bir gün hâlâ mühürlenmeyi bekliyor | "Son 30 günde {n} gün henüz mühürlenmedi: {günler}." |
 | 5 | Dikkat | Son tam zincir denetimi 35 günden eski; ya da hiç çalışmamış ve ilk mühürlü gün en az 35 gün önce | "Son tam zincir denetimi {zaman}; 35 günden eski." — hiç çalışmamışsa: "Tam zincir denetimi hiç çalışmadı." |
 | 6 | Bilgi yok | 30 gün içinde mühürlü gün yok | "Son 30 günde mühürlü gün yok." |
 | 7 | Tamam | — | "Son 30 günün mühürlü {n} günü doğrulandı; tam zincir denetimi {zaman} tarihinde başarılı." — ilk tam denetimden önce: "… tam zincir denetimi her ayın 1'inde çalışır, henüz çalışmadı." |
 
-Okunamayan bir `last-full.json` (bozuk ya da izin verilmeyen dosya) başarısız bir tam denetim
-sayılır (satır 2, zaman "—"); "denetlenemedi" diye geçiştirilmez. Geç damgalanmış, verisi olmayan,
+Okunamayan ya da çözümlenemeyen bir `last-full.json` (bozuk ya da okuma izni olmayan dosya) başarısız
+bir tam denetim sayılmaz: kart **Bilgi yok** durumunda "Bu denetim şu anda yapılamadı: {hata kodu}"
+gösterir (bölüm 1). Dosya yoksa tam denetim hiç çalışmamış sayılır (satır 5). Geç damgalanmış, verisi olmayan,
 silinmiş ve süren günler durumu değiştirmez; yalnızca sayılır (geç damgalanmış ama son 35 günde
 doğrulanmış bir gün "doğrulanmış" sayılır). Bilgiler: doğrulanmış, doğrulanmamış, başarısız ve "veri
 yok ya da silinmiş" gün sayıları, son tam zincir denetimi ("{zaman}, başarılı|başarısız"),
@@ -221,7 +224,10 @@ doğrulama görevleri ("günlük son 2 gün, haftalık son 90 gün, aylık tüm 
 - Başarısız gün ya da başarısız tam denetim (satır 1-2): aynı gün inceleyin. Mühürleme sayfasında
   günü açın, **Doğrula** ile yeniden doğrulayın; ham kayıtları ve kasayı **silmeyin, değiştirmeyin**.
   Bağımsız doğrulama: [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md). `R20-verify`, gün yeniden
-  doğrulanınca kendiliğinden çözülür. Dosya okunamıyorsa Windows haklarına bakın (bölüm 6).
+  doğrulanınca kendiliğinden çözülür.
+- Denetlenemedi ("Bu denetim şu anda yapılamadı"): `D:\ARCILOGGER\state\verify\last-full.json`
+  dosyasına ve Windows haklarına bakın (bölüm 6); VerifyMonthly bir sonraki çalışmasında dosyayı
+  yeniden yazar.
 - Doğrulanmamış gün (satır 3): VerifyWeekly ve VerifyMonthly görevleri çalışıyor mu (Sistem →
   Zamanlanmış görevler)? Mühürleme sayfasındaki **Doğrula** ile hemen doğrulayabilirsiniz.
 - Bekleyen gün (satır 4): kart 2'deki gibi Seal görevine ve `R20-seal` uyarılarına bakın.
@@ -498,15 +504,16 @@ değeri ile `arcilogger.toml` dosyasının şimdiki SHA-256 değeri; etkin `R20-
 | Sıra | Durum | Koşul | Gerekçe |
 |---|---|---|---|
 | 1 | Sorun | `[backup] enabled = false` | "Gece veritabanı yedeği kapalı." |
-| 2 | Sorun | Etkin bir `R20-backup` uyarısı var, ya da `last.json` `"ok": false` diyor ya da okunamıyor | "Son veritabanı yedeği başarısız ya da yedek uyarısı açık." |
+| 2 | Sorun | Etkin bir `R20-backup` uyarısı var, ya da `last.json` `"ok": false` diyor ya da bozuk (çözümlenemiyor) | "Son veritabanı yedeği başarısız ya da yedek uyarısı açık." |
 | 3 | Bilgi yok | `last.json` yok ve kurulum `alerts.backup_missing_hours`'tan genç | "İlk veritabanı yedeği henüz alınmadı (Backup görevi 01:40'ta çalışır)." |
 | 4 | Dikkat | Son başarılı yedek `alerts.backup_stale_hours`'tan eski (ya da hiç başarılı yedek yok) | "Son başarılı veritabanı yedeği {zaman}; {saat} saatten eski." |
 | 5 | Dikkat | Yapılandırma kopyası hiç onaylanmadı | "Yapılandırma dosyalarının çevrimdışı kopyası hiç onaylanmadı (YEDEKLEME.md bölüm 3)." |
 | 6 | Dikkat | Son onay, yapılandırmanın başka bir SHA-256 değeri içindi | "Yapılandırma son onaydan ({zaman}) sonra değişti; yeni bir çevrimdışı kopya alın." |
 | 7 | Tamam | — | "Son veritabanı yedeği {zaman} ({boyut}); yapılandırma kopyası {onay} tarihinde onaylandı." |
 
-Okunamayan bir `last.json` (bozuk ya da izin verilmeyen dosya) başarısız bir yedek sayılır (satır 2),
-worker'ın yedek denetimi gibi. Kart, onayı kimin verdiğini göstermez (denetim kaydı gösterir).
+Bozuk (çözümlenemeyen) bir `last.json` başarısız bir yedek sayılır (satır 2), worker'ın yedek
+denetimi gibi. Hiç okunamayan bir dosya (erişim reddi, paylaşım ihlali) ise kartı **Bilgi yok**
+yapar ("Bu denetim şu anda yapılamadı: {hata kodu}"): Windows haklarına bakın (bölüm 6). Kart, onayı kimin verdiğini göstermez (denetim kaydı gösterir).
 Bilgiler: son veritabanı yedeği, boyut, gece yedeği ("açık" ya da "kapalı"), yapılandırma kopyası
 onayı (zaman ya da "hiç").
 
@@ -770,5 +777,5 @@ yeniden) yerinde doğrulanması gereken konular:
 | Güvenlik duvarının filtre kaydı | Kart 7 yalnızca gelen kayıtları görür. Web ve DNS filtresi kullanan her politikanın bu olayları kaydettiğini ve ARCILOGGER'a gönderdiğini cihazda doğrulayın; kurum belirli günlerde hiç trafik üretmiyorsa beklenen günleri buna göre ayarlayın (bölüm 2.7). | Kart 7; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2 (komutları sahada doğrulayın) |
 | Kontör biçimi | Kontör, Zamane istemcisinin çıktısından `[tsa] credit_regex` ile okunur; çıktının biçimi Kamu SM'de doğrulanmadı (K4). Test sunucusunda **Kontör sorgula** ile okunan değeri Kamu SM'nin gösterdiğiyle karşılaştırın. | Kart 5; [kamusm.md](kamusm.md) bölüm 3 ve 4 |
 | WORM (replika hedefi) | ARCILOGGER kopyayı alır ve denetler, ama hedefin değiştirilemez (WORM) olup olmadığını göremez. Hedef cihazın WORM ayarını ve saklama süresini yerinde doğrulayın. | Kart 9; [KURULUM.md](KURULUM.md) bölüm 10, "Replika" |
-| Windows hakları | Sayfalar durum dosyalarını kurulumun `NT SERVICE\ArciApi` hesabına verdiği okuma hakkıyla okur; işlemci, bellek ve çalışma süresi aynı hesapla Windows API'sinden okunur. Requests görevinin kanıtı bilerek okunamaz ("izlenemiyor"). Okunamayan bir `last.json` ya da `last-full.json` kart 10'u ya da kart 3'ü **Sorun**'a çevirir. İlk geceden sonra Sistem sayfasında değerlerin göründüğünü ("bu platformda okunamıyor" yazmadığını) ve görevlerin kanıtının "yok" olmadığını denetleyin; haklar bozulduysa yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` çalıştırın. | Bölüm 4; [YEDEKLEME.md](YEDEKLEME.md) bölüm 7 |
+| Windows hakları | Sayfalar durum dosyalarını kurulumun `NT SERVICE\ArciApi` hesabına verdiği okuma hakkıyla okur; işlemci, bellek ve çalışma süresi aynı hesapla Windows API'sinden okunur. Requests görevinin kanıtı bilerek okunamaz ("izlenemiyor"). Okuma hakkı olmayan bir `last.json` ya da `last-full.json` kart 10'u ya da kart 3'ü **Bilgi yok** yapar ("Bu denetim şu anda yapılamadı"). İlk geceden sonra Sistem sayfasında değerlerin göründüğünü ("bu platformda okunamıyor" yazmadığını) ve görevlerin kanıtının "yok" olmadığını denetleyin; haklar bozulduysa yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` çalıştırın. | Bölüm 4; [YEDEKLEME.md](YEDEKLEME.md) bölüm 7 |
 | Hukuki değerlendirme | Kartların seçimi, eşikleri ve raporun metinleri teknik varsayımlardır. 5651 yükümlülüklerini nasıl karşıladığınızı ve raporu nasıl kullanacağınızı hukuk müşavirinizle teyit edin. | Bölüm 1 ve 3 |

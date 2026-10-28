@@ -151,8 +151,9 @@ değeriyle (`config_sha256`) yazılır; her onay yeni bir girdidir. Dosya okunam
 (`config_backup_unreadable`: "Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi.").
 
 Kart 10 önce gece veritabanı yedeğine bakar (`[backup] enabled`, `state\backup\last.json`,
-açık `R20-backup` uyarıları; bölüm 2): yedek kapalıysa, başarısızsa ya da `last.json` okunamıyorsa
-kart **Sorun**; kurulum `alerts.backup_missing_hours` (48) saatten genç ve ilk yedek henüz
+açık `R20-backup` uyarıları; bölüm 2): yedek kapalıysa, başarısızsa ya da `last.json` bozuksa
+kart **Sorun** (hiç okunamayan bir dosya kartı **Bilgi yok** yapar: "Bu denetim şu anda
+yapılamadı"); kurulum `alerts.backup_missing_hours` (48) saatten genç ve ilk yedek henüz
 alınmadıysa **Bilgi yok**; son başarılı yedek `alerts.backup_stale_hours` (36) saatten eskiyse ya
 da hiç yoksa **Dikkat** gösterir. Yedek yerindeyse kopyanın onayına geçer:
 

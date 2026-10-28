@@ -149,8 +149,9 @@ file cannot be read, nothing is recorded (`config_backup_unreadable`: "The confi
 could not be read; the backup confirmation was not recorded.").
 
 Card 10 looks at the nightly database backup first (`[backup] enabled`, `state\backup\last.json`,
-open `R20-backup` alerts; section 2): with the backup off, failed or `last.json` unreadable the
-card shows **Problem**; while the installation is younger than `alerts.backup_missing_hours` (48)
+open `R20-backup` alerts; section 2): with the backup off, failed or `last.json` damaged the
+card shows **Problem** (a file that cannot be read at all makes it **No data**: "This check could
+not be run now"); while the installation is younger than `alerts.backup_missing_hours` (48)
 and the first backup has not run, **No data**; when the last good backup is older than
 `alerts.backup_stale_hours` (36) or there is none, **Attention**. With the backup in place it
 turns to the confirmation:

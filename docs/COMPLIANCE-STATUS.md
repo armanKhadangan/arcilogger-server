@@ -78,7 +78,10 @@ result at once: card 10 changes right after the confirmation. The page shows "G�
 
 **A card that cannot be computed** shows **No data** with "This check could not be run now: {error
 code}" (the error code is the error's class name; the details go to the log of the ArciApi service).
-The other cards are not affected.
+The other cards are not affected. An unreadable status file counts the same way: when the result of
+a check cannot be read, the card says "could not be run", never "failed" (except a damaged
+`last.json`, section 2.10). An answer with a card that could not be computed is not kept; the next
+request computes the cards again.
 
 **How a card is evaluated.** Each card's table in section 2 is read from top to bottom: the **first
 row that holds** gives the state and the reason. If no row holds, the card is **OK**. Each card also
@@ -205,15 +208,16 @@ VerifyMonthly the whole chain every month; the card judges their results.
 | Row | State | Condition | Reason |
 |---|---|---|---|
 | 1 | Problem | One of the 30 days "Failed" | "{n} day(s) of the last 30 failed: {days}." |
-| 2 | Problem | `last-full.json` says `"ok": false` or cannot be read, or an `R20-verify` alert is active | "The full chain check ({at}) failed." |
+| 2 | Problem | `last-full.json` says `"ok": false`, or an `R20-verify` alert is active | "The full chain check ({at}) failed." |
 | 3 | Attention | A sealed day was not verified in the last 35 days | "{n} sealed day(s) of the last 30 were not verified in the last 35 days." |
 | 4 | Attention | A day older than yesterday is still waiting to be sealed | "{n} day(s) of the last 30 are not sealed yet: {days}." |
 | 5 | Attention | The last full chain check is more than 35 days old; or it never ran and the first sealed day is at least 35 days ago | "The last full chain check was on {at}, more than 35 days ago." — never ran: "The full chain check has never run." |
 | 6 | No data | No sealed day among the 30 | "No sealed day in the last 30 days." |
 | 7 | OK | — | "All {n} sealed days of the last 30 are verified; the full chain check of {at} passed." — before the first full check: "… the full chain check runs on the 1st of each month and has not run yet." |
 
-An unreadable `last-full.json` (damaged, or a file the API may not read) counts as a failed full
-check (row 2, time "—"); it is not passed over as "could not be checked". Days time-stamped late,
+A `last-full.json` that cannot be read or parsed (damaged, or a file the API may not read) is not a
+failed full check: the card shows **No data** with "This check could not be run now: {error code}"
+(section 1). Without the file the full check never ran (row 5). Days time-stamped late,
 days without data, deleted days and the running day do not change the state; they are only counted
 (a day time-stamped late but verified within 35 days counts as "verified"). Facts: the numbers of
 verified, not verified, failed and "no data or deleted" days, the last full chain check ("{time},
@@ -225,8 +229,10 @@ the whole chain").
 - Failed day or failed full check (rows 1-2): look into it the same day. Open the day on the
   Mühürleme page and verify it again with **Doğrula** (Verify); **do not delete or change** raw logs
   or the vault. Independent verification: [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md). `R20-verify`
-  resolves by itself once the day verifies again. If the file cannot be read, check the Windows
-  rights (section 6).
+  resolves by itself once the day verifies again.
+- Could not be checked ("This check could not be run now"): look at
+  `D:\ARCILOGGER\state\verify\last-full.json` and the Windows rights (section 6); VerifyMonthly
+  writes the file again on its next run.
 - Day not verified (row 3): are the VerifyWeekly and VerifyMonthly tasks running (Sistem →
   Scheduled tasks)? **Doğrula** on the Mühürleme page verifies at once.
 - Day waiting (row 4): as for card 2, see the Seal task and the `R20-seal` alerts.
@@ -509,15 +515,17 @@ starting with `R20-backup`, including `:missing`, `:prune`, `:clock`).
 | Row | State | Condition | Reason |
 |---|---|---|---|
 | 1 | Problem | `[backup] enabled = false` | "The nightly database backup is off." |
-| 2 | Problem | An `R20-backup` alert is active, or `last.json` says `"ok": false` or cannot be read | "The last database backup failed or a backup alert is open." |
+| 2 | Problem | An `R20-backup` alert is active, or `last.json` says `"ok": false` or is damaged (does not parse) | "The last database backup failed or a backup alert is open." |
 | 3 | No data | No `last.json` and the installation is younger than `alerts.backup_missing_hours` | "The first database backup has not run yet (the Backup task runs at 01:40)." |
 | 4 | Attention | The last successful backup is older than `alerts.backup_stale_hours` (or there is none) | "The last successful database backup was at {at}, more than {hours} hours ago." |
 | 5 | Attention | The configuration copy was never confirmed | "The offline copy of the configuration files was never confirmed (BACKUP.md section 3)." |
 | 6 | Attention | The last confirmation was for another SHA-256 of the configuration | "The configuration changed after the last confirmation ({at}); make a new offline copy." |
 | 7 | OK | — | "Last database backup {at} ({size}); configuration copy confirmed on {confirmed}." |
 
-An unreadable `last.json` (damaged, or a file the API may not read) counts as a failed backup
-(row 2), as the worker's backup check reads it. The card does not show who confirmed (the audit log
+A damaged `last.json` (one that does not parse) counts as a failed backup (row 2), as the worker's
+backup check reads it. A file that cannot be read at all (access denied, a sharing violation) makes
+the card **No data** ("This check could not be run now: {error code}"): check the Windows rights
+(section 6). The card does not show who confirmed (the audit log
 does). Facts: last database backup, size, nightly backup ("on" or "off"), configuration copy
 confirmed (time or "never").
 
@@ -782,5 +790,5 @@ again when devices or the server change):
 | Firewall filter logging | Card 7 sees only the records that arrive. Verify on the device that every policy using web and DNS filtering logs these events and sends them to ARCILOGGER; if the organisation produces no traffic at all on some days, set the expected days accordingly (section 2.7). | Card 7; [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2 (verify the commands on site) |
 | Credit format | The credit is read from the Zamane client's output with `[tsa] credit_regex`; the output format is not confirmed with Kamu SM (K4). Compare the value read with **Kontör sorgula** on the test server with the one Kamu SM shows. | Card 5; [kamusm.md](kamusm.md) sections 3 and 4 |
 | WORM (replica target) | ARCILOGGER makes and checks the copy, but cannot see whether the target is write-once (WORM). Verify the target device's WORM setting and retention on site. | Card 9; [INSTALL.md](INSTALL.md) section 10, "Replica" |
-| Windows rights | The pages read the status files with the read right the installer gives `NT SERVICE\ArciApi`; processor, memory and uptime are read from the Windows API with the same account. The Requests task's evidence cannot be read on purpose ("not observable"). An unreadable `last.json` or `last-full.json` turns card 10 or card 3 to **Problem**. After the first night, check on the Sistem page that the values show (not "bu platformda okunamıyor") and that no task's evidence is "missing"; if the rights are broken, run `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an elevated PowerShell. | Section 4; [BACKUP.md](BACKUP.md) section 7 |
+| Windows rights | The pages read the status files with the read right the installer gives `NT SERVICE\ArciApi`; processor, memory and uptime are read from the Windows API with the same account. The Requests task's evidence cannot be read on purpose ("not observable"). A `last.json` or `last-full.json` without the read right makes card 10 or card 3 **No data** ("This check could not be run now"). After the first night, check on the Sistem page that the values show (not "bu platformda okunamıyor") and that no task's evidence is "missing"; if the rights are broken, run `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an elevated PowerShell. | Section 4; [BACKUP.md](BACKUP.md) section 7 |
 | Legal assessment | The choice of the cards, their thresholds and the report's texts are technical assumptions. Confirm with your legal counsel how you meet the 5651 obligations and how you use the report. | Sections 1 and 3 |
