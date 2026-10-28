@@ -22,7 +22,8 @@ and the worker read them whenever they use them, so a change needs no reload.
 * ``GET /settings/fortigate/observed?hours=24`` (``hours`` 1 to 72; contract 2.12) — what the
   FortiGate's session records show, for the exit editor's observed panel: the NAT addresses
   (``transip``, ``dstintf``, ``trandisp``) of the trusted ``fg_traffic`` rows of the last
-  ``hours``, the 100 busiest groups, each with the exit that claims it by the **current**
+  ``hours`` with an IPv4 NAT address (exits refuse IPv6, as ``R20-nat:unmapped-transip`` reads
+  the rows), the 100 busiest groups, each with the exit that claims it by the **current**
   ``nat.egresses`` (the one whose interfaces hold the row's ``dstintf``, else the first by name;
   ``exits_invalid`` and no claims while the stored value cannot be parsed, never a 500), and the
   srcmac rows of the last hour per ``srcintf`` (rows, MACs, the most IPv4 sources of one MAC, as
@@ -370,8 +371,9 @@ def observed_state(request: Request) -> ObservedState:
 
 
 def observed_nat_query(hours: int, now: datetime, untrusted: Collection[str]) -> Executable:
-    """The NAT groups of the trusted ``fg_traffic`` rows of ``[now - hours, now]`` with a NAT
-    address, busiest first; one more than :data:`OBSERVED_ROWS`, to tell a truncated list."""
+    """The NAT groups of the trusted ``fg_traffic`` rows of ``[now - hours, now]`` with an IPv4
+    NAT address (exits refuse IPv6, as ``R20-nat:unmapped-transip`` reads the rows), busiest
+    first; one more than :data:`OBSERVED_ROWS`, to tell a truncated list."""
     sessions = func.count().label("sessions")
     query = (
         select(
@@ -386,6 +388,7 @@ def observed_nat_query(hours: int, now: datetime, untrusted: Collection[str]) ->
             FgTraffic.time >= now - timedelta(hours=hours),
             FgTraffic.time <= now,
             FgTraffic.transip.is_not(None),
+            func.family(FgTraffic.transip) == 4,
         )
         .group_by(FgTraffic.transip, FgTraffic.dstintf, FgTraffic.trandisp)
         .order_by(sessions.desc(), FgTraffic.transip, FgTraffic.dstintf, FgTraffic.trandisp)

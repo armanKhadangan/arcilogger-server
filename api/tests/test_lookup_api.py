@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, timedelta
@@ -576,6 +577,14 @@ SETTINGS_INVALID_EN = (
     "(Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT)); "
     "an administrator must fix it."
 )
+SETTINGS_UNREADABLE_TR = (
+    "5651 sorgu ayarları geçersiz: kayıtlı bir sorgu ya da kira ayarı okunamadı (Ayarlar → "
+    "Uygulama ayarları); sistem yöneticisi düzeltmelidir."
+)
+SETTINGS_UNREADABLE_EN = (
+    "The 5651 lookup settings are invalid: a stored lookup or lease setting cannot be read "
+    "(Settings → Application settings); an administrator must fix it."
+)
 
 
 @pytest.mark.parametrize(
@@ -621,21 +630,46 @@ def test_invalid_nat_settings_are_reported(
     assert audits(app_session_factory, "lookup.run_failed") == []
 
 
+@pytest.mark.parametrize(
+    ("key", "stored"),
+    [
+        ("dhcp.fortigate_logids", ["0100026001"]),  # not an object
+        ("lookup.timeout_seconds", "beş"),  # not a number
+    ],
+    ids=["fortigate-logids", "timeout"],
+)
 def test_another_unreadable_lookup_setting_answers_the_same_503(
-    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    site: Site,
+    caplog: pytest.LogCaptureFixture,
+    key: str,
+    stored: Any,
 ) -> None:
-    """``LookupSettings.from_settings`` is strict for the ``dhcp.fortigate_*`` values: one
-    written around the validator stops every lookup with the same 503 (never 500), although
-    its fixed text names nat.egresses (contract 2.12; listed as a Question of WP-D: should the
-    503 name the key that failed?)."""
-    setting(app_session_factory, "dhcp.fortigate_logids", ["0100026001"])  # not an object
+    """``LookupSettings.from_settings`` is strict for the ``dhcp.fortigate_*`` values, and
+    ``lookup.timeout_seconds`` must be a number: one written around the validator stops every
+    lookup with the same code, never 500, but with the second text, which names no key (the
+    key is in the WARNING of the system log; review Q1)."""
+    setting(app_session_factory, key, stored)
     signed_in(client, login_as, app_session_factory)
+    caplog.set_level(logging.WARNING, logger="arcilogger.api.lookup")
     for query in ({"internal_ip": PC}, {"public_ip": WAN, "public_port": 51001}):
+        caplog.clear()
         response = client.post("/api/v1/lookup/5651", json=body(**query))
-        assert (response.status_code, response.json()["error"]["code"]) == (
-            503,
+        assert response.status_code == 503, response.text
+        error = response.json()["error"]
+        assert (error["code"], error["message_tr"], error["message_en"]) == (
             "lookup_settings_invalid",
+            SETTINGS_UNREADABLE_TR,
+            SETTINGS_UNREADABLE_EN,
         )
+        assert key not in response.text
+        assert "nat.egresses" not in response.text
+        (record,) = [r for r in caplog.records if r.name == "arcilogger.api.lookup"]
+        assert record.levelno == logging.WARNING
+    assert lookup_router.SETTINGS_UNREADABLE == (SETTINGS_UNREADABLE_TR, SETTINGS_UNREADABLE_EN)
+    assert audits(app_session_factory, "lookup.run_failed") == []
 
 
 # -- the Wave 3 fields of the outcome (contract 2.10, 2.12) ---------------------------------------

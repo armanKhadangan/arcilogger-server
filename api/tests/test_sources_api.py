@@ -1130,16 +1130,26 @@ def test_unreadable_dhcp_settings_keep_the_card(
     evidence_rows: None,
 ) -> None:
     """A ``dhcp.fortigate_*`` value written around the validator: never a 500 and never a card
-    without lease evidence; the refusal rules cannot run, so nothing counts as refused or
-    excluded, ``rows`` are the trusted senders' rows and the state comes from the alerts
-    (decision X8)."""
+    without lease evidence; the lease job cannot use any ``fg_dhcp`` row then (``Context.load``
+    raises), so no row counts as usable, refused or excluded, ``format_verified`` is only a
+    stored JSON ``true`` and the state comes from the alerts (decision X8, review 3, Q10)."""
     set_value(app_session_factory, "dhcp.fortigate_logids", ["0100026001"])
+    set_value(app_session_factory, "dhcp.fortigate_format_verified", "true")
     reader(client, login_as, app_session_factory)
     card = lease_card(client)
     fortigate = card["fg_dhcp"]
-    # the five rows of trusted senders in the window (not the unknown sender's, not the old one)
-    assert (fortigate["rows"], fortigate["refused_rows"], fortigate["excluded_rows"]) == (5, 0, 0)
+    # the IPv6 row and the receive-time row of the fixture are not counted as usable either
+    assert fortigate == {
+        "rows": 0,
+        "last_hour": None,
+        "leases_current": 1,
+        "refused_rows": 0,
+        "excluded_rows": 0,
+        "format_verified": False,
+    }
     assert (card["mt_dhcp"]["rows"], card["state"]) == (2, "ok")
+    set_value(app_session_factory, "dhcp.fortigate_format_verified", True)
+    assert lease_card(client)["fg_dhcp"]["format_verified"] is True
     add_alert(app_session_factory, "R20-lease:none:mt_arp")
     assert lease_card(client)["state"] == "none"
 

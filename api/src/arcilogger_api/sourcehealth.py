@@ -525,9 +525,11 @@ def lease_evidence(
       active ``none`` alerts, in card order, whatever the state.
 
     The settings are validated when they are written; a ``dhcp.fortigate_*`` value written
-    around the validator (``LookupSettings.from_settings`` refuses it) is logged and gives
-    ``fg_dhcp.rows`` = the rows of trusted senders, ``refused_rows`` and ``excluded_rows`` 0 (the
-    refusal rules need the settings), so the state comes from the alerts alone.
+    around the validator (``LookupSettings.from_settings`` refuses it) is logged and counts no
+    ``fg_dhcp`` row as usable: ``rows`` 0, ``last_hour`` None, ``refused_rows`` and
+    ``excluded_rows`` 0 (the lease job cannot use any row then, ``Context.load`` raises, and the
+    refusal rules need the settings), ``format_verified`` only for a stored JSON ``true``, so the
+    state comes from the alerts alone.
     """
     values = get_settings(db)
     settings: LookupSettings | None
@@ -553,11 +555,8 @@ def lease_evidence(
     ):
         rows, last = counts(model, usable)
         tables[table] = _table_counts(rows, last, current[table])
-    refused = excluded = 0
-    if settings is None:
-        trusted = FgDhcp.source.not_in(sorted(untrusted)) if untrusted else true()
-        rows, last = counts(FgDhcp, trusted)
-    else:
+    rows, last, refused, excluded = 0, None, 0, 0
+    if settings is not None:  # unreadable settings: no fg_dhcp row is usable
         rows, last, refused, excluded = _fortigate_counts(db, settings, untrusted, low, hour, now)
     interfaces = _srcmac_interfaces(values, settings)
     count = srcmac_count or (
@@ -582,7 +581,7 @@ def lease_evidence(
             "format_verified": (
                 settings.fortigate_format_verified
                 if settings is not None
-                else bool(values.get("dhcp.fortigate_format_verified", False))
+                else values.get("dhcp.fortigate_format_verified") is True
             ),
         },
         ARP_TABLE: tables[ARP_TABLE],
