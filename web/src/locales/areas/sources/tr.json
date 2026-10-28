@@ -145,9 +145,9 @@
       "patternOf_one": "{{source}} · {{formatted}} satır",
       "patternOf_other": "{{source}} · {{formatted}} satır",
       "example": "Örnek satır",
-      "exampleFor": "{{pattern}} kalıbının örnek satırını aç",
+      "exampleFor": "Örnek satır: {{pattern}} kalıbı",
       "search": "Aramada göster",
-      "searchFor": "{{pattern}} kalıbını Aramada göster"
+      "searchFor": "Aramada göster: {{pattern}} kalıbı"
     }
   }
 }
