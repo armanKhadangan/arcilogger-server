@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from arcilogger_api.admin_channel import ChannelDep
 from arcilogger_api.audit import record_audit
-from arcilogger_api.compliance.cards import CONFIG_BACKUP_CONFIRM, compute_status
+from arcilogger_api.compliance.cards import CONFIG_BACKUP_CONFIRM, compute_status, fully_computed
 from arcilogger_api.compliance.models import ComplianceStatus, ConfigBackupOut
 from arcilogger_api.compliance.pdf import render_report
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep, TtlCache
@@ -74,9 +74,10 @@ def compliance_status(
     channel: ChannelDep,
     user: ReaderDep,
 ) -> ComplianceStatus:
-    """The ten cards (kept :data:`CACHE_SECONDS` seconds; not audited)."""
+    """The ten cards (kept :data:`CACHE_SECONDS` seconds unless a card could not be computed;
+    not audited)."""
     return status_cache(request).get_or_compute(
-        lambda: compute_status(db, layout, config, channel, utc_now())
+        lambda: compute_status(db, layout, config, channel, utc_now()), keep=fully_computed
     )
 
 

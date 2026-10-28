@@ -532,22 +532,32 @@ def chain(api_config: Config) -> Iterator[SealedVault]:
     sealed.unlock_all()
 
 
-def test_chain_card_reads_an_unreadable_full_check_as_failed(
+def test_chain_card_cannot_be_checked_with_an_unreadable_full_check(
     site: Site, chain: SealedVault
 ) -> None:
-    """A damaged last-full.json is a failed full check of unknown time (the error row), not a
-    card that could not be computed; failed days still come first."""
+    """A last-full.json that cannot be read or parsed is "could not be checked", never "failed"
+    (manager decision on #41): the worker raises no R20-verify for it, and the dated report would
+    state a failed chain check that never happened. A file that says ``ok: false`` is failed."""
     full = verify_state(site.layout, all_days=True)
     full.parent.mkdir(parents=True, exist_ok=True)
-    for damaged in ('{"at": "2026-10-01T03:00:00+03:00", "ok": tr', '"ok"'):
+    for damaged, error in (
+        ('{"at": "2026-10-01T03:00:00+03:00", "ok": tr', "JSONDecodeError"),
+        ('"ok"', "ValueError"),
+    ):
         full.write_text(damaged, encoding="utf-8")
         card = site.card("chain")
-        assert card.tone == "error", damaged
+        assert card.tone == "neutral", damaged
         assert reason(card) == (
-            "Tam zincir denetimi (—) başarısız.",
-            "The full chain check (—) failed.",
+            f"Bu denetim şu anda yapılamadı: {error}",
+            f"This check could not be run now: {error}",
         )
-        assert facts(card)["full_check"] == ("—, başarısız", "—, failed")
+    full.unlink()
+    full.mkdir()  # cannot be read as a file (access denied, a sharing violation …)
+    assert site.card("chain").reason_tr.startswith("Bu denetim şu anda yapılamadı: ")
+    full.rmdir()
+    full.write_text('{"at": "2026-10-01T03:00:00+03:00", "ok": false}', encoding="utf-8")
+    assert site.card("chain").reason_tr.startswith("Tam zincir denetimi (")
+    assert site.card("chain").tone == "error"
 
 
 def test_chain_card_states(site: Site, chain: SealedVault) -> None:
@@ -1442,11 +1452,12 @@ def confirm(site: Site, sha256: str) -> datetime:
         return row.time
 
 
-def test_backup_card_reads_an_unreadable_state_file_as_a_failed_backup(
+def test_backup_card_reads_a_damaged_state_file_as_a_failed_backup(
     site: Site, installed: Installed
 ) -> None:
-    """The worker's backup check opens R20-backup for an unreadable last.json ("Yedek durum
-    dosyası okunamıyor"): the card says the same before the alert is imported, not "no data"."""
+    """A last.json that does not parse is a failed backup, as the worker's backup check opens
+    R20-backup for it ("Yedek durum dosyası okunamıyor"); one that cannot be read at all (access
+    denied, a sharing violation) is "could not be checked" (manager decision on #41)."""
     path = site.layout.state / "backup" / "last.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     for damaged in ('{"ok": tr', "[1, 2]"):
@@ -1462,6 +1473,11 @@ def test_backup_card_reads_an_unreadable_state_file_as_a_failed_backup(
         update={"backup": site.config.backup.model_copy(update={"enabled": False})}
     )
     assert site.card("backup", config=off).reason_tr == "Gece veritabanı yedeği kapalı."
+    path.unlink()
+    path.mkdir()  # cannot be read as a file
+    card = site.card("backup")
+    assert card.tone == "neutral"
+    assert card.reason_tr.startswith("Bu denetim şu anda yapılamadı: ")
 
 
 def test_backup_card_states(site: Site, installed: Installed) -> None:

@@ -397,16 +397,15 @@ class FullCheck:
 
 
 def full_check(layout: Layout) -> FullCheck | None:
-    """The newest full chain check; ``None`` when it never ran. An unreadable file counts as a
-    failed check of unknown time: the card's error row, not "could not be checked"."""
+    """The newest full chain check; ``None`` when it never ran. A file that cannot be read or is
+    not an object raises: the card could not be checked (never "failed": the worker raises no
+    R20-verify for an unreadable result either)."""
     try:
         data = json.loads((layout.state / "verify" / "last-full.json").read_bytes())
     except FileNotFoundError:
         return None
-    except (OSError, ValueError):
-        return FullCheck(at=None, ok=False)
     if not isinstance(data, dict):
-        return FullCheck(at=None, ok=False)
+        raise ValueError("last-full.json is not an object")
     return FullCheck(at=moment(data.get("at")), ok=data.get("ok") is True)
 
 
@@ -775,18 +774,20 @@ def card_replica(ctx: CardContext) -> ComplianceCard:
 # -- card 10: backups -----------------------------------------------------------------------------
 
 
-#: An unreadable ``last.json``: a failed backup, as the worker's backup check reads it.
+#: A damaged ``last.json``: a failed backup, as the worker's backup check reads it.
 UNREADABLE: Final[Mapping[str, Any]] = {"ok": False}
 
 
 def backup_state(layout: Layout) -> Mapping[str, Any] | None:
-    """``state/backup/last.json`` (``None``: no backup ran yet); an unreadable file or one that
-    is not an object is :data:`UNREADABLE` (``R20-backup`` "Yedek durum dosyası okunamıyor")."""
+    """``state/backup/last.json`` (``None``: no backup ran yet). A file that does not parse or is
+    not an object is :data:`UNREADABLE` (``R20-backup`` "Yedek durum dosyası okunamıyor"); one
+    that cannot be read at all (access denied, a sharing violation) raises: the card could not
+    be checked."""
     try:
         data = json.loads(backup_state_path(layout).read_bytes())
     except FileNotFoundError:
         return None
-    except (OSError, ValueError):
+    except ValueError:
         return UNREADABLE
     return data if isinstance(data, dict) else UNREADABLE
 
@@ -872,6 +873,15 @@ CARD_FUNCTIONS: Final[Mapping[ComplianceCardId, Callable[[CardContext], Complian
 }
 #: The order of contract 2.3.3 (``number`` 1-10).
 CARD_ORDER: Final[tuple[ComplianceCardId, ...]] = tuple(CARD_FUNCTIONS)
+
+
+#: The start of a card's reason when its computation raised (:func:`compute_card`).
+FAILED_PREFIX: Final = texts.CHECK_FAILED[0].partition("{")[0]
+
+
+def fully_computed(status: ComplianceStatus) -> bool:
+    """No card came from the error path: the answer may be cached (a failure is tried again)."""
+    return not any(card.reason_tr.startswith(FAILED_PREFIX) for card in status.cards)
 
 
 def compute_card(ctx: CardContext, card: ComplianceCardId) -> ComplianceCard:

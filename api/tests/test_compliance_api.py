@@ -317,6 +317,27 @@ def test_compliance_answer_is_cached_for_30_seconds(
         assert len(computed) == 4
 
 
+def test_an_answer_with_a_card_that_could_not_be_computed_is_not_cached(
+    app: FastAPI, login_as: Login, layout: Layout, computed: list[datetime]
+) -> None:
+    """A card from the error path (an unreadable file, a database error) would otherwise stand for
+    30 seconds after the cause is gone: such an answer is computed again by the next request."""
+    blocked = layout.state / "verify" / "last-full.json"
+    blocked.mkdir(parents=True)  # a path that cannot be read as a file (not "missing")
+    with TestClient(app) as admin:
+        login_as(admin, "admin")
+        first = admin.get(API).json()
+        assert card(first, "chain")["tone"] == "neutral"
+        assert card(first, "chain")["reason_tr"].startswith("Bu denetim şu anda yapılamadı: ")
+        admin.get(API)
+        assert len(computed) == 2
+        blocked.rmdir()
+        recovered = admin.get(API).json()
+        assert not card(recovered, "chain")["reason_tr"].startswith("Bu denetim")
+        assert admin.get(API).json() == recovered
+        assert len(computed) == 3
+
+
 # -- the report -----------------------------------------------------------------------------------
 
 
