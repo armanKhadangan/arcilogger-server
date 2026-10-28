@@ -1509,6 +1509,9 @@ class _Lookup:
                 FgEvent.time <= high,
                 FgEvent.logid.in_(sorted(logids)),
                 event_kept(self.settings),
+                # Every row of the window is read (no index holds the key); the key is read once
+                # per row here, before the per-key bounds (3.8).
+                event_key.in_(sorted(targets)),
                 or_(
                     *(
                         and_(
