@@ -415,8 +415,8 @@ all, each separating what the exit definition states from what the logs show; th
 paragraph lists the exits defined at the time of the lookup. The double-NAT paragraph is never
 printed for resolution `transip`. It reads "Double NAT" for a configured ISP NAT exit and "Double
 NAT assumed" for `unconfigured` and `public_unknown`, with the CGNAT sentence; for a `fallback`
-the method paragraph stands in for it. Those two sentences appear only when the request names a
-public IP. The report never states as a fact that a line sits behind an ISP router, and never
+the method paragraph stands in for it. The variant sentence and the CGNAT sentence appear only
+when the request names a public IP. The report never states as a fact that a line sits behind an ISP router, and never
 advises defining a line as Direct when it already is, or for a `transip` fallback. Method notes
 (clock offset, changing public address, internal NAT, exits changed after the event, the
 FortiGate DHCP format note) come from the stored outcome, never from today's settings.
@@ -472,3 +472,15 @@ Download the reports of lookups made in the new version before a `-Rollback`. Th
   contain person-level data — listed as an open decision in the draft retention/deletion policy
   for legal review ([legal/saklama-imha-politikasi-taslak.md](legal/saklama-imha-politikasi-taslak.md)).
 - The report wording (Turkish and English) needs legal review before the first official use.
+- The FortiGate DHCP record format comes from the FortiOS documentation and is verified on site
+  ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4, again after every FortiOS upgrade). Until
+  `dhcp.fortigate_format_verified` is switched on, reports say "sahada doğrulanmadı"; a PDF keeps
+  the state at the time of its lookup.
+- The Wave 3 wording (the exit and method paragraphs, srcmac as partial evidence, the
+  device-identification fields that raw lines carry, also in other people's candidate sessions)
+  needs the same legal review, together with the matching rows of the privacy-notice draft
+  ([legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md)).
+- Unconverted FortiGate DHCP lines are looked for over 7 days before the moment (longer only when
+  the longest lease window is longer), not the 100 days the plan named, to keep the lookup within
+  its time budget: an older such line is not named. An index on the event lines' address would
+  restore the longer window (an open question of the Wave 3 contract).
