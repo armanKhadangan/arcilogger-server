@@ -893,7 +893,7 @@ class _Lookup:
         request = self.request
         if plan.nobody:
             self.explanations.extend(plan.notes)
-            self._unmapped_note()
+            self._unmapped_note(plan)
             return "none", [], plan
         if plan.seen_beside is not None and not self._carried(str(plan.address)):
             egress, outside = plan.seen_beside
@@ -901,10 +901,10 @@ class _Lookup:
         if plan.address is not None and request.public_port is not None:
             matches = self._exact(plan.address)
             self.explanations.extend(plan.notes)
-            self._unmapped_note()
+            self._unmapped_note(plan)
             return ("exact" if matches else "none"), matches, plan
         matches = self._candidates(plan)
-        self._unmapped_note()
+        self._unmapped_note(plan)
         return ("candidates" if matches else "none"), matches, plan
 
     def _carried(self, address: str) -> bool:
@@ -926,13 +926,17 @@ class _Lookup:
             clauses.append(_not_in(FgTraffic.source, self.untrusted))
         return bool(self.session.scalar(select(exists().where(*clauses))))
 
-    def _unmapped_note(self) -> None:
+    def _unmapped_note(self, plan: _Plan) -> None:
         """``egress_unmapped_seen``: NAT addresses no exit claims near the moment (public ones
-        included), while exits are configured: an incomplete configuration always shows."""
+        included), while exits are configured: an incomplete configuration always shows. The
+        requested address is left out only when it was answered as observed (its own warning
+        names it); an ``isp_nat`` exit's public address the FortiGate itself used (a line
+        switched to bridge mode) is named."""
         if not self.exits:
             return
         private, public = self.probe.unclaimed()
-        seen = [a for a in [*private, *public] if a != self.request.public_ip][:PROBE_NAMES]
+        observed = self.request.public_ip if plan.resolution == "observed" else None
+        seen = [a for a in [*private, *public] if a != observed][:PROBE_NAMES]
         if seen:
             self.explanations.append(
                 explain(

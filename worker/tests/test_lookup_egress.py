@@ -1053,6 +1053,24 @@ def test_e_m_an_unclaimed_nat_address_near_the_moment_is_named(
     assert "egress_unmapped_seen" not in keys(none)
 
 
+def test_e_m_an_isp_nat_lines_public_address_the_fortigate_used_is_named(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Line 2's ISP router was switched to bridge mode and the exit was not edited: the
+    FortiGate holds P2 itself and logs the requester's session with it while T2 is quiet. The
+    search over T2 finds nobody, and the warning names P2 (never a bare "nobody")."""
+    evidence.traffic(AT, PC, 51001, DEST, 443, transip=T1, dstintf="wan1")
+    evidence.traffic(AT, PHONE, 41000, DEST, 443, transip=P2, dstintf="wan2")
+    hat_1 = isp_nat([T1], public=[P1], interfaces=["wan1"])
+    hat_2 = isp_nat([T2], public=[P2], interfaces=["wan2"])
+    settings = exits(db_session, {"hat-1": hat_1, "hat-2": hat_2})
+    outcome = lookup(db_session, settings, public_ip=P2, public_port=41000)
+    assert (outcome.mode, resolution(outcome)) == ("none", ("public", ["hat-2"]))
+    assert note(outcome, "egress_unmapped_seen")["addresses"] == P2
+    assert outcome.egress is not None
+    assert outcome.egress.searched.unclaimed_seen == (P2,)
+
+
 def test_e_n_an_isp_nat_line_not_seen_is_widened(db_session: Session, evidence: Evidence) -> None:
     other = "100.64.12.77"
     evidence.traffic(AT, PC, 51001, DEST, 443, transip=other)
