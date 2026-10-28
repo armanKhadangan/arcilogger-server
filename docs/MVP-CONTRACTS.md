@@ -552,7 +552,10 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
   lookup gets the **remaining** time as `statement_timeout` (`set_config(…, true)` on the
   cursor before each statement, `routers.lookup.statement_deadline`); past it → 504
   **`lookup_timeout`**, the attempt is audited as `lookup.run_failed` (`reason: timeout`) and no
-  `lookups` row is stored. 503 **`lookup_settings_invalid`** when the stored `nat.egresses`
+  `lookups` row is stored. The lookup's transaction plans every statement with its values
+  (`plan_cache_mode = force_custom_plan`, transaction-local, `search.sql.custom_plans_statement`
+  as in the search), so no generic plan skips the partition pruning (d-35). 503
+  **`lookup_settings_invalid`** when the stored `nat.egresses`
   cannot be parsed, for a public-IP request only (`settings.egresses()` is called inside the
   router's `try` only when `public_ip` is set; other lookups read an unparsable value as having
   no `direct` exit (`double_nat`), never as a 503): "5651 sorgu
@@ -729,8 +732,9 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     chain's `srcmac_only`); a
     `srcmac_mismatch` alternative is printed under "Olası diğer zincir (srcmac, kısmi kanıt)" /
     "Possible other chain (srcmac, partial evidence)" (the `ip_conflict` header stays for the
-    others). A chain without a lease prints "Zincir kurulamadı: o anda bu iç IP adresi için kira
-    kaydı yok." / "No chain: no lease covered this internal IP address at that moment."
+    others) with its srcmac row, never a lease row (its `lease` is null). A chain without a lease
+    prints "Zincir kurulamadı: o anda bu iç IP adresi için kira kaydı yok." / "No chain: no lease
+    covered this internal IP address at that moment."
   - **End reason.** Every `superseded` lease, whatever closed it (another MAC took the IP, the
     lease's MAC took another address, D33, or the other DHCP table's ACK of the same pair, D5),
     prints the end reason "sonraki bir DHCP atamasıyla kapandı" / "closed by a later DHCP
@@ -741,7 +745,8 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     DHCP kanıtı: {last}" and, below it, "source: FortiGate DHCP record · lease time (FortiGate
     record): {lease} s · last DHCP evidence: {last}" (`lease_seconds`, `last_dhcp_evidence`;
     "ayarlardaki süre" / "configured time" when `lease_seconds` is null; `TABLES["fg_dhcp"]`,
-    `TABLES_EN["fg_dhcp"]`). In section 6 the tables added by ADR-0016 are labelled in both
+    `TABLES_EN["fg_dhcp"]`; an `mt_dhcp` lease carries `last_dhcp_evidence` too and prints
+    neither). In section 6 the tables added by ADR-0016 are labelled in both
     languages, "FortiGate DHCP kaydı / FortiGate DHCP record" and "FortiGate olay kaydı /
     FortiGate event record" (`TABLES_EN` holds only these two); the older table labels stay
     Turkish only, as reports printed them. A chain at `low` through
@@ -752,7 +757,10 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
   - **Unconverted citation.** Each row of `outcome.unconverted_dhcp` is printed in section 6
     like every cited row (raw line, seal facts), marked "kira zaman çizelgesine girmedi; zincir
     kurulmadı, güven düzeyi verilmez" / "not in the lease timeline; no chain built; no confidence
-    given", never as an attribution (`inputs.py` cites `outcome.unconverted_dhcp`); a candidate
+    given", never as an attribution (`inputs.py` cites `outcome.unconverted_dhcp`); its summary
+    row prints the fixed label "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir
+    kurulmadı, güven düzeyi verilmez) / FortiGate DHCP record (not in the lease timeline; no
+    chain built; no confidence given)", never the Turkish-only stored summary (d-36); a candidate
     report carries only the `fortigate_dhcp_not_converted` text with the IPs.
   - **Untrusted senders and raw lines.** A match with `untrusted_sources` gets a "UYARI /
     Warning" row naming them. A cited session line of an interface with FortiGate device

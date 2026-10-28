@@ -6455,6 +6455,25 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
 - **d-34. Where the 3.5 report tests live** (3.5 "`test_report_pdf.py`"; review 1, nit 10). The
   3.5 PDF cases live in `test_report_exits.py` and `test_report_fortigate.py`, with the
   `lookup_testing` defaults in `test_lookup_testing_sites.py`. Fold into 3.5.
+- **d-35. The lookup plans every statement with its values** (4.3 WP-D, `routers/lookup.py`
+  "schemas, audit details and the 503 text only"; manager's review 2, item 1, Q7 of #30; a
+  manager extension). psycopg prepares a statement sent five times, and PostgreSQL may then keep
+  a generic plan, made without the values, which prunes no partition of the time range. The
+  router runs `search.sql.custom_plans_statement()` (`plan_cache_mode = force_custom_plan`,
+  transaction-local) inside the request transaction, under `statement_deadline` and before
+  `run_lookup`, as the search does (`windows.plan_with_values`); the transaction's commit or
+  rollback ends it, so it never stays on the pooled connection. Tests:
+  `test_lookup_api.py::test_the_custom_plans_last_as_long_as_the_lookup_transaction`. Fold into
+  2.12 and 4.3.
+- **d-36. The summary of an unconverted citation in both languages** (2.12 "unconverted FortiGate
+  DHCP rows"; manager's review 2, item 2, note 3, Q10 of #30). Section 6 printed the stored
+  `EvidenceRef.summary` of an `outcome.unconverted_dhcp` row, which is Turkish only. Its "Özet /
+  Summary" row now prints the fixed label `texts.UNCONVERTED_SUMMARY`: "FortiGate DHCP kaydı
+  (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez) / FortiGate DHCP
+  record (not in the lease timeline; no chain built; no confidence given)"; the "Not / Note"
+  warning row with the mark stays. Tests:
+  `test_report_fortigate.py::test_unconverted_dhcp_is_cited_in_internal_mode_only`. Fold into
+  2.12.
 
 ---
 

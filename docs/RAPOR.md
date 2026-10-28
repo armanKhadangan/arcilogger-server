@@ -279,10 +279,12 @@ paragrafı sonuç cümlesi ve öneriyle sınırlıdır.
   almadan sonra önceki sürümün yüklediği kayıtlar. Bir iç IP sorgusunda ya da kesin eşleşmede,
   o anı kapsayan böyle bir kayıt (IP başına en çok bir tane, andan önceki) 6. bölümde her kanıt
   gibi ham satırı ve mühür bilgisiyle gösterilir. Not şudur: "kira zaman çizelgesine girmedi;
-  zincir kurulmadı, güven düzeyi verilmez". Kayıt bir eşleştirme değildir. Aday raporu yalnızca
-  `fortigate_dhcp_not_converted` metnini IP adresleriyle yazar; böyle bir satır göstermez. Bu
-  kayıtlar en az 7 gün geriye aranır, en uzun kira penceresi daha uzunsa o kadar. Daha eski
-  bir kayıt adlandırılmaz.
+  zincir kurulmadı, güven düzeyi verilmez". Özet satırı iki dilde sabit bir etikettir: "FortiGate
+  DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez) /
+  FortiGate DHCP record (not in the lease timeline; no chain built; no confidence given)". Kayıt
+  bir eşleştirme değildir. Aday raporu yalnızca `fortigate_dhcp_not_converted` metnini IP
+  adresleriyle yazar; böyle bir satır göstermez. Bu kayıtlar en az 7 gün geriye aranır, en uzun
+  kira penceresi daha uzunsa o kadar. Daha eski bir kayıt adlandırılmaz.
 - **Tanımsız gönderici.** Kayıtları yapılandırmada tanımlı olmayan bir göndericiden gelen bir
   eşleşme, kanıtla uyuşmayan bir eşleşmedeki gibi bir "UYARI / Warning" satırı alır: "Bu
   eşleşmenin kayıtları yapılandırmada tanımlı olmayan bir göndericiden geldi: {kaynaklar}; kurumun
@@ -492,9 +494,11 @@ DHCP source recorded the same pair, reads "sonraki bir DHCP atamasıyla kapandı
 DHCP assignment"; a `low` chain prints its reason beside it (`lease_renewal_not_seen`,
 `fortigate_dhcp_not_converted_since_lease`, `fortigate_dhcp_no_network`). An unconverted FortiGate
 DHCP line is cited in section 6 only for an internal lookup or an exact match, marked "not in the
-lease timeline; no chain built; no confidence given"; a candidate report carries the text alone. Raw
-session lines of an interface with FortiGate device identification show `srcmac`, the device name,
-OS and passively learned user names as logged, other people's candidate sessions included.
+lease timeline; no chain built; no confidence given", with the fixed summary "FortiGate DHCP kaydı
+(…) / FortiGate DHCP record (not in the lease timeline; no chain built; no confidence given)"; a
+candidate report carries the text alone. Raw session lines of an interface with FortiGate device
+identification show `srcmac`, the device name, OS and passively learned user names as logged, other
+people's candidate sessions included.
 
 A lookup made before the upgrade to this version is printed, on its first download, without exit
 rows, per-resolution paragraphs or FortiGate lease additions; a double-NAT answer to a public-IP
