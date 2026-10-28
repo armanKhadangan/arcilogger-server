@@ -1128,6 +1128,41 @@ def test_a_covering_line_that_stayed_an_event_row_is_named_and_cited(
     assert_cited(exact, row, acked, evidence)
 
 
+def test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """One rule for every address without a lease chain (2.8.3, 2.9): with the PC's interface
+    listed, the session's srcmac gives a srcmac chain in the internal lookup and for the exact
+    and the candidate match alike, and the probe still names the covering line that stayed an
+    event row, cited in internal mode and for the exact match, never for a candidate. The chain
+    stays the srcmac chain at ``low``."""
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    evidence.traffic(AT, PC, 51001, transip=WAN, srcintf="vlan42", dstintf="wan1",
+                     srcmac=PC_MAC)  # fmt: skip
+    build(db_session, DAY, DAY)
+    set_setting(db_session, "lookup.srcmac_interfaces", ["vlan42"], updated_by="tolga")
+    db_session.commit()
+    wan_exit(db_session)
+    outcomes = {
+        "internal": internal(db_session, PC, AT),
+        "exact": exact_request(db_session),
+        "candidates": lookup(db_session, public_ip=WAN),
+    }
+    for name, outcome in outcomes.items():
+        chain = outcome.attribution if name == "internal" else outcome.matches[0].chain
+        assert chain is not None
+        assert (chain.lease, chain.mac_source, chain.confidence) == (None, "srcmac", "low")
+        assert MISSING not in keys(outcome)
+        assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+        if name == "candidates":
+            assert outcome.unconverted_dhcp == ()
+        else:
+            assert_cited(outcome, row, acked, evidence)
+    assert outcomes["exact"].mode == "exact"
+    assert outcomes["candidates"].mode == "candidates"
+
+
 def test_an_ack_older_than_its_lease_is_not_named(db_session: Session, evidence: Evidence) -> None:
     """The window reaches 100 days back, but a 1-day lease logged 100 days before the moment
     would not have covered it (the coverage rule)."""

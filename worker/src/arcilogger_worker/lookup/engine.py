@@ -63,13 +63,14 @@ the device-person assignment **valid at that moment** (assignment history, ADR-0
 person's current department (``person_department_current``); only a device without any
 assignment history falls back to its owner at lookup time, and the outcome then says so
 (``person_link_at_lookup_time``). A match without a chain ends at the session and the internal IP
-(``chain_missing``). When no chain could be built (an internal lookup without a lease, a match
-without a chain), the newest FortiGate DHCP row of a trusted sender before the moment is looked
-up for the address (at most 20; the MAC of a MAC-only request): a covering ACK that stayed an
-``fg_event`` row (loaded before the upgrade, unreadable fields, loaded by the previous version
-after a rollback) is named (``fortigate_dhcp_not_converted``) and, in internal mode and for an
-exact match, cited in ``unconverted_dhcp``, never as an attribution (ADR-0016 D8). A match with
-rows of an unconfigured sender is marked (``NatMatch.untrusted_sources``,
+(``chain_missing``). When no lease chain could be built (an internal lookup without a lease, a
+match without a chain or with a srcmac chain only), the newest FortiGate DHCP row of a trusted
+sender before the moment is looked up for the address (at most 20; the MAC of a MAC-only
+request): a covering ACK that stayed an ``fg_event`` row (loaded before the upgrade, unreadable
+fields, loaded by the previous version after a rollback) is named
+(``fortigate_dhcp_not_converted``) and, in internal mode and for an exact match, cited in
+``unconverted_dhcp``, never as an attribution (ADR-0016 D8). A match with rows of an
+unconfigured sender is marked (``NatMatch.untrusted_sources``,
 ``session_from_unknown_source``; D24). **srcmac** (D10, contract 2.9; off while
 ``lookup.srcmac_interfaces`` is empty): the srcmac of a session record on a listed interface and
 from a trusted sender, whose MAC passes the router guard (no infrastructure MAC, at most
@@ -212,7 +213,8 @@ _DESTINATION_ORDER = {
 #: Resolutions whose address no exit claims now (D32: every exit changed after the moment is
 #: named; ``observed`` rests on the FortiGate's own record and is left out).
 _UNCLAIMED_RESOLUTIONS = frozenset({"public_unknown", "no_egress", "unconfigured"})
-#: The D8 probe (2.8.3) looks at the IPs of this many chainless matches of one lookup at most.
+#: The D8 probe (2.8.3) looks at the IPs of this many matches without a lease chain of one
+#: lookup at most.
 PROBE_IPS = 20
 #: The router guard of srcmac counts the addresses of a MAC this far around the moment, and
 #: as far as the rows it considers reach, and looks for its leases on other addresses there
@@ -1405,9 +1407,10 @@ class _Lookup:
     # -- FortiGate DHCP rows that did not become lease evidence (D8 probe) -------------------------
 
     def _unconverted(self, matches: Sequence[NatMatch]) -> tuple[EvidenceRef, ...]:
-        """The D8 probe (2.8.3) for what no chain could be built for: the internal lookup's
-        address (its MAC for a MAC-only request), else the IPs of the first :data:`PROBE_IPS`
-        chainless matches, each at its chain's moment. Per IP the newest DHCP-shaped row before
+        """The D8 probe (2.8.3) for what no lease chain could be built for: the internal
+        lookup's address (its MAC for a MAC-only request), else the IPs of the first
+        :data:`PROBE_IPS` matches without one (no chain, or a srcmac chain: one rule for both
+        paths), each at its chain's moment. Per IP the newest DHCP-shaped row before
         the moment from a trusted sender decides, in ``fg_event`` or ``fg_dhcp``: only an
         ``fg_event`` row of a logid mapped to ``assigned`` that would have covered the moment
         counts (``fortigate_dhcp_not_converted``). In internal mode and for an exact match the
@@ -1424,7 +1427,7 @@ class _Lookup:
             cited.add(value)
         for match in matches:
             ip = match.traffic.srcip
-            if match.chain is not None or ip in targets:
+            if (match.chain is not None and match.chain.lease is not None) or ip in targets:
                 continue
             if len(targets) == PROBE_IPS:
                 break
