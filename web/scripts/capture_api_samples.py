@@ -172,7 +172,7 @@ from arcilogger_db.models import (
     UserSession,
 )
 from arcilogger_db.seed import seed
-from arcilogger_db.settings import set_setting
+from arcilogger_db.settings import get_setting, set_setting
 from arcilogger_db.testing import TestServer, admin_dsn_from_env
 from arcilogger_worker.admin_jobs import process_requests as process_admin_requests
 from arcilogger_worker.alerts.importer import import_alerts
@@ -784,7 +784,8 @@ def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
 
 
 def raw_refs(outcome: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    """Every raw reference in a stored outcome (matches, chains, alternatives)."""
+    """Every raw reference in a stored outcome (matches, chains, alternatives, unconverted
+    FortiGate DHCP lines)."""
 
     def chain(item: dict[str, Any] | None) -> Iterator[dict[str, Any]]:
         if not item:
@@ -798,6 +799,8 @@ def raw_refs(outcome: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield from match["traffic"].get("evidence") or []
         yield from chain(match.get("chain"))
     yield from chain(outcome.get("attribution"))
+    # FortiGate DHCP lines that stayed event rows: cited like every other row (2.8.3).
+    yield from outcome.get("unconverted_dhcp") or []
 
 
 def capture_raw(capture: Capture, admin: Any, odd: tuple[str, date, int]) -> None:
@@ -2600,7 +2603,19 @@ def capture_settings(capture: Capture, admin: Any, auditor: Any) -> None:
     )
     locked = {"changes": [{"key": "devices.oui_file", "old": "", "value": "C:/oui.csv"}]}
     errors["setting_locked"] = capture.error(admin.patch(url, json=locked), 422, "setting_locked")
-    idle = {"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
+    # An internet exit the validator refuses (contract 2.5): a private address as the public
+    # address of a direct line; its own key, as the pages check ``setting_invalid``'s details.
+    with capture.factory() as session:
+        exits = get_setting(session, "nat.egresses")
+    private = {"hat-1": {"mode": "direct", "public": ["100.64.12.9"]}}
+    egress = {"changes": [{"key": "nat.egresses", "old": exits, "value": private}]}
+    errors["setting_invalid_egress"] = capture.error(
+        admin.patch(url, json=egress), 422, "setting_invalid"
+    )
+    detail = errors["setting_invalid_egress"]["body"]["error"]["details"][0]
+    if detail["code"] != "setting_egress_public_private":
+        raise SystemExit(f"the private public address was refused with {detail}")
+    idle ={"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
     capture.recent(admin, minutes_ago=10)
     errors["reauth_required"] = capture.error(admin.patch(url, json=idle), 403, "reauth_required")
     errors["forbidden"] = capture.error(auditor.get(url), 403, "forbidden")
@@ -3154,6 +3169,12 @@ FILE_KEYS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "license": (MAP_KEYS - {"details"}, ENUM_KEYS | {"problem", "source", "from", "to"}),
     # A request's ``changes`` are keyed by the paths it changes, a root's by its fingerprint.
     "admin": (MAP_KEYS | {"changes"}, ENUM_KEYS),
+    # The lookup page maps an outcome's exit resolution, a chain's MAC source, a lease's table
+    # and end and an exit's port preservation to labels (contract 2.13).
+    "lookups": (
+        MAP_KEYS,
+        ENUM_KEYS | {"resolution", "mac_source", "source_table", "end_reason", "port_preservation"},
+    ),
     # The sample modules' files: their own keys added to the defaults (``SHAPE_KEYS``).
     **{
         name: (MAP_KEYS | maps, ENUM_KEYS | enums)
