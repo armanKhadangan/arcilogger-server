@@ -267,8 +267,29 @@ function matches(code: string, openapi: string): boolean {
   );
 }
 
+/**
+ * Endpoints the web calls before the server side adds them (Wave 3 contract 2.12, WP-D): the
+ * pages are built on hand mocks first. Each must still be missing from the API — once the
+ * endpoint is in the OpenAPI document, its entry here fails and is removed, so the list never
+ * hides a call to an endpoint that does not exist.
+ */
+const PENDING_ENDPOINTS = new Set(['GET /settings/fortigate/observed']);
+
 describe('endpoints the app calls exist in the API', () => {
-  const calls = apiCalls();
+  const calls = apiCalls().filter(
+    (call) => !PENDING_ENDPOINTS.has(`${call.method.toUpperCase()} ${call.path}`),
+  );
+
+  it.each([...PENDING_ENDPOINTS])('%s is still pending (remove it once it exists)', (route) => {
+    const [method = '', path = ''] = route.split(' ');
+    const found = Object.entries(PATHS).find(
+      ([openapi, methods]) => matches(path, openapi) && methods.includes(method.toLowerCase()),
+    );
+    expect(found).toBeUndefined();
+    expect(apiCalls().some((call) => `${call.method.toUpperCase()} ${call.path}` === route)).toBe(
+      true,
+    );
+  });
 
   it('finds the calls (the scanner works)', () => {
     expect(calls.length).toBeGreaterThan(15);
