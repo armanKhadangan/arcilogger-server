@@ -68,7 +68,9 @@ without a chain), the newest FortiGate DHCP row of a trusted sender before the m
 up for the address (at most 20; the MAC of a MAC-only request): a covering ACK that stayed an
 ``fg_event`` row (loaded before the upgrade, unreadable fields, loaded by the previous version
 after a rollback) is named (``fortigate_dhcp_not_converted``) and, in internal mode and for an
-exact match, cited in ``unconverted_dhcp``, never as an attribution (ADR-0016 D8). Both functions
+exact match, cited in ``unconverted_dhcp``, never as an attribution (ADR-0016 D8). A match with
+rows of an unconfigured sender is marked (``NatMatch.untrusted_sources``,
+``session_from_unknown_source``; D24). Both functions
 only read (JIT compilation is switched off for the caller's transaction, ``SET LOCAL``); the API
 stores the lookup and writes the audit entry.
 """
@@ -129,7 +131,7 @@ from arcilogger_worker.lookup.sessions import (
     within,
 )
 from arcilogger_worker.lookup.texts import exit_changes, explain
-from arcilogger_worker.lookup.trust import kept, untrusted_sources
+from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, kept, untrusted_sources
 from arcilogger_worker.lookup.types import (
     AttributionChain,
     DataWindow,
@@ -1670,12 +1672,15 @@ class _Lookup:
         matches = []
         changed: list[str] = []
         changed_count = 0
+        later: set[str] = set()
         for group, match, score in shown:
             egress = self._exit_of(group.nearest(at))
             exits = list(dict.fromkeys(self._exit_of(row) for row in group.rows))
             if len(exits) > 1:
                 changed_count += 1
                 changed += [name or "-" for name in exits if (name or "-") not in changed]
+            sources = {row.source for row in group.rows}
+            later |= {name for name in sources - self.untrusted if name.startswith(UNKNOWN_PREFIX)}
             matches.append(
                 NatMatch(
                     kind=kind,
@@ -1685,10 +1690,28 @@ class _Lookup:
                     traffic=group.traffic(at),
                     chain=self.attributor.chain(group.first.srcip, group.moment(at)),
                     egress=egress,
+                    untrusted_sources=tuple(sorted(sources & self.untrusted)),
                 )
             )
         if changed_count:
             self.explanations.append(
                 explain("session_changed_exit", count=changed_count, egresses=_joined(changed))
             )
+        self._sender_notes(matches, later)
         return matches
+
+    def _sender_notes(self, matches: Sequence[NatMatch], later: set[str]) -> None:
+        """D24: the session search keeps every sender, so a match with rows of an unconfigured
+        one is marked on the match and named here (``session_from_unknown_source``); rows of an
+        ``unknown-<ip>`` sender that a source configured later vouches for are named as such
+        (``source_configured_later``, information)."""
+        marked = [match for match in matches if match.untrusted_sources]
+        if marked:
+            names = sorted({name for match in marked for name in match.untrusted_sources})
+            self.explanations.append(
+                explain("session_from_unknown_source", count=len(marked), sources=_joined(names))
+            )
+        if later:
+            self.explanations.append(
+                explain("source_configured_later", sources=", ".join(sorted(later)))
+            )

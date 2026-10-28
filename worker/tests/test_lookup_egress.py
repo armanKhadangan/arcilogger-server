@@ -2,8 +2,9 @@
 engine parts of the E-cases — which exit answers a public IP, the log check of an exit's address
 and its fallback, the observed and dynamic addresses, the interface rule, the not-seen widening,
 the port hint, the per-exit change warning, the internal NAT addresses, untrusted senders in the
-probe — and E-j, the legacy equivalence against the answers recorded on the Wave 2 engine
-(``goldens/legacy_nat.json``). The PDF assertions of the E-cases are the report tests'.
+probe and on a match — and E-j, the legacy equivalence against the answers recorded on the
+Wave 2 engine (``goldens/legacy_nat.json``). The PDF assertions of the E-cases are the report
+tests'.
 
 Values: T1 ``100.64.12.9`` and T2 ``100.64.13.9`` (the FortiGate's addresses behind the two ISP
 routers), P1 ``203.0.113.200`` and P2 ``198.51.100.77`` (the lines' public addresses), the
@@ -1324,6 +1325,51 @@ def test_e_p1_a_forged_line_never_decides_the_probe(
     outcome = lookup(db_session, settings, at=later, public_ip=P1, public_port=51001)
     assert resolution(outcome) == ("fallback", ["hat-1"])
     assert "public_ip_not_transip" in keys(outcome)
+
+
+# -- E-p2: an untrusted sender on a match ---------------------------------------------------------
+
+
+def _twenty(session: Session, evidence: Evidence) -> int:
+    """Twenty sessions through T1 near the moment, the forged line among them (its row id)."""
+    for n in range(19):
+        evidence.traffic(AT + timedelta(seconds=n), f"172.20.42.{100 + n}", 52000 + n, transip=T1)
+    row = evidence.traffic(AT, PC, 51001, DEST, 443, transip=T1)
+    forged(session, row)
+    return row
+
+
+def test_e_p2_a_forged_session_is_marked_on_its_match(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The session search keeps every sender (D24), so the forged line matching the request is
+    listed, marked on its own match, and named by the outcome; among 20 candidates only that
+    match is marked."""
+    settings = exits(db_session, {"hat-1": isp_nat([T1], public=[P1])})
+    _twenty(db_session, evidence)
+    outcome = lookup(db_session, settings, public_ip=P1, public_port=51001)
+    assert (outcome.mode, len(outcome.matches)) == ("candidates", 20)
+    marked = [m for m in outcome.matches if m.untrusted_sources]
+    assert [(m.traffic.srcip, m.traffic.srcport) for m in marked] == [(PC, 51001)]
+    assert marked[0].untrusted_sources == (FORGED,)
+    assert note(outcome, "session_from_unknown_source") == {"count": 1, "sources": FORGED}
+    assert "source_configured_later" not in keys(outcome)
+
+
+def test_e_p2_a_sender_configured_later_is_named_instead(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Once a FortiGate source covers the sender's address (D24's exception), its rows are
+    trusted: no match is marked, and the outcome says that the sender was configured later."""
+    settings = exits(db_session, {"hat-1": isp_nat([T1], public=[P1])})
+    _twenty(db_session, evidence)
+    db_session.add(Source(name="fortigate-2", type="fortigate", address="192.0.2.248/29"))
+    db_session.commit()
+    outcome = lookup(db_session, settings, public_ip=P1, public_port=51001)
+    assert len(outcome.matches) == 20
+    assert not any(m.untrusted_sources for m in outcome.matches)
+    assert "session_from_unknown_source" not in keys(outcome)
+    assert note(outcome, "source_configured_later") == {"sources": FORGED}
 
 
 # -- the keys -----------------------------------------------------------------------------------
