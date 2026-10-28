@@ -32,23 +32,54 @@ the conflict alerts. The department is the linked person's, else the VLAN's
 
 The department of a person is always the person's **current** department (no department history
 is kept); the engine says so for history links (``person_department_current``).
+
+**Lease facts at the moment** (ADR-0016, D6, D29, D33, D24; Wave 3 contract 2.7). A chain's
+``LeaseInfo`` carries the lease time and ``last_dhcp_evidence``, the lease's own newest DHCP
+record at or before ``at`` (never the line that ended a ``superseded`` lease, never a renewal
+logged after ``at``). For a lookup (``lookup=True``) an ``fg_dhcp`` lease reads that record from
+the rows, one ``LIMIT 1`` query per chain on ``ix_fg_dhcp_ip_time`` over the rows
+:func:`.trust.kept` accepts; the stored refs (the opening ACK and the last continuations only)
+are its fallback and the only source for other tables and for the usage rollups, which ignore
+confidence. A lease whose newest such row is a mapped RELEASE does not cover ``at`` (a logid
+mapped after the build). An ``fg_dhcp`` chain carries the format note (D29), is ``low`` (lease
+and chain) when ``at`` lies more than half the lease after that record
+(``lease_renewal_not_seen``) or when its IP lies in no configured network
+(``fortigate_dhcp_no_network``), and names cited rows of an ``unknown-<ip>`` sender that is
+trusted now (``source_configured_later``).
 """
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from typing import Final
 
-from sqlalchemy import or_, select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session
 
 from arcilogger_db.assignments import Slot, covering, load_history
-from arcilogger_db.models import Department, Device, Lease, Person, Vlan
+from arcilogger_db.models import (
+    LEASE_SECONDS_RANGE,
+    Department,
+    Device,
+    FgDhcp,
+    Lease,
+    Person,
+    Vlan,
+)
 from arcilogger_db.network import VlanDepartment, find_vlan, vlan_department
-from arcilogger_worker.lookup.refs import ARP_TABLE
+from arcilogger_worker.lookup.refs import (
+    ARP_TABLE,
+    DHCP_TABLES,
+    FG_DHCP_TABLE,
+    dhcp_action,
+    last_dhcp_evidence,
+)
 from arcilogger_worker.lookup.texts import explain
+from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, kept
 from arcilogger_worker.lookup.types import (
     CONFIDENCE_ORDER,
     AttributionChain,
@@ -62,6 +93,9 @@ from arcilogger_worker.lookup.types import (
     weakest,
 )
 from arcilogger_worker.macaddr import is_randomized
+
+#: The logged lease of an ``fg_dhcp`` ref summary (``…, lease 86400)``; ``lease -)`` without).
+_REF_LEASE: Final = re.compile(r", lease (\d+)\)$")
 
 
 @dataclass(frozen=True)
@@ -81,6 +115,8 @@ class StoredLease:
     source_table: str
     last_evidence: datetime | None
     evidence: tuple[EvidenceRef, ...]
+    #: The usable lease time the FortiGate logged (``fg_dhcp`` only; D6).
+    lease_seconds: int | None = None
 
     @classmethod
     def from_row(cls, row: Lease) -> StoredLease:
@@ -98,9 +134,16 @@ class StoredLease:
             source_table=row.source_table,
             last_evidence=row.last_evidence,
             evidence=tuple(EvidenceRef.from_dict(item) for item in row.evidence or ()),
+            lease_seconds=row.lease_seconds,
         )
 
-    def info(self) -> LeaseInfo:
+    def info(
+        self,
+        *,
+        confidence: Confidence | None = None,
+        lease_seconds: int | None = None,
+        last_dhcp_evidence: datetime | None = None,
+    ) -> LeaseInfo:
         return LeaseInfo(
             lease_id=self.id,
             ip=self.ip,
@@ -110,9 +153,23 @@ class StoredLease:
             start=self.start,
             end=self.end,
             end_reason=self.end_reason,
-            confidence=self.confidence,
+            confidence=confidence or self.confidence,
             evidence=self.evidence,
+            source_table=self.source_table,
+            lease_seconds=lease_seconds if lease_seconds is not None else self.lease_seconds,
+            last_dhcp_evidence=last_dhcp_evidence,
         )
+
+
+@dataclass(frozen=True)
+class _Record:
+    """A lease's own newest DHCP record at or before a moment (2.7): its time, its meaning
+    (``assigned``/``deassigned``) and the usable lease it logged (``None``: none, or out of
+    range)."""
+
+    time: datetime
+    action: str | None
+    lease: int | None
 
 
 @dataclass(frozen=True)
@@ -124,9 +181,31 @@ class _PersonRow:
 
 
 class Attributor:
-    def __init__(self, session: Session, settings: LookupSettings) -> None:
+    """Chains of one lookup or one usage run.
+
+    ``untrusted``: :func:`.trust.untrusted_sources` (loaded once by the caller). ``lookup``: read
+    each ``fg_dhcp`` chain's record at the moment from the rows (one query per chain); the usage
+    rollups leave it off and use the stored refs. ``format_verified``: the time and author of
+    the ``dhcp.fortigate_format_verified`` settings row, which :func:`.engine.run_lookup` reads.
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        settings: LookupSettings,
+        untrusted: Collection[str] = frozenset(),
+        *,
+        lookup: bool = False,
+        format_verified: tuple[datetime | None, str | None] = (None, None),
+    ) -> None:
         self.session = session
         self.settings = settings
+        self.untrusted = frozenset(untrusted)
+        self.lookup = lookup
+        self.format_verified = format_verified
+        self._kept: ColumnElement[bool] | None = None
+        #: Per ``(lease id, moment)`` the lease's own newest DHCP record (``None``: none).
+        self._records: dict[tuple[int, datetime], _Record | None] = {}
         self._leases: dict[str, list[StoredLease]] = {}
         #: Per IP the time range already loaded into ``_leases``.
         self._loaded: dict[str, tuple[datetime, datetime]] = {}
@@ -213,7 +292,8 @@ class Attributor:
         last = lease.last_evidence or lease.start
         if lease.source_table == ARP_TABLE:
             return last + timedelta(seconds=self.settings.arp_interval_seconds)
-        return last + timedelta(seconds=self.settings.lease_timeout_seconds(lease.server))
+        timeout = self.settings.lease_timeout_seconds(lease.server, lease.lease_seconds)
+        return last + timedelta(seconds=timeout)
 
     def covered_until(self, lease: StoredLease) -> datetime:
         """End of the time ``lease`` covers: its end, or for an open lease the moment it times
@@ -240,10 +320,72 @@ class Attributor:
         if lease.start > at:
             return False
         if lease.end is not None:
-            return at < lease.end
-        if lease.source_table == ARP_TABLE:
+            inside = at < lease.end
+        elif lease.source_table == ARP_TABLE:
             return at < self._open_limit(lease)
-        return at <= self._open_limit(lease)
+        else:
+            inside = at <= self._open_limit(lease)
+        # A lease built without its client's RELEASE (a logid mapped after the build) ended at
+        # that RELEASE under today's settings (2.7, round 6): it no longer covers ``at``.
+        return inside and not self._released(lease, at)
+
+    # -- the lease's own record at the moment (2.7) -----------------------------------------------
+
+    def record(self, lease: StoredLease, at: datetime) -> _Record | None:
+        """The lease's own newest DHCP record at or before ``at``: for a lookup's ``fg_dhcp``
+        lease the newest kept row of its pair in ``[start, at]``, else (and when no row is
+        found) the newest of its stored refs (:func:`.refs.last_dhcp_evidence`)."""
+        key = (lease.id, at)
+        if key not in self._records:
+            found = None
+            if self.lookup and lease.source_table == FG_DHCP_TABLE:
+                found = self._row_record(lease, at)
+            self._records[key] = found or self._ref_record(lease, at)
+        return self._records[key]
+
+    def _row_record(self, lease: StoredLease, at: datetime) -> _Record | None:
+        if self._kept is None:
+            self._kept = kept(self.settings, self.untrusted)
+        row = self.session.execute(
+            select(FgDhcp.time, FgDhcp.logid, FgDhcp.lease)
+            .where(
+                FgDhcp.ip == lease.ip,
+                FgDhcp.mac == lease.mac,
+                FgDhcp.time >= lease.start,
+                FgDhcp.time <= at,
+                self._kept,
+            )
+            .order_by(FgDhcp.time.desc(), FgDhcp.id.desc())
+            .limit(1)
+        ).first()
+        if row is None:
+            return None
+        action = self.settings.fortigate_logids.get(str(row.logid))
+        return _Record(row.time, action, self._usable_lease(row.lease))
+
+    def _ref_record(self, lease: StoredLease, at: datetime) -> _Record | None:
+        last = last_dhcp_evidence(lease.evidence, lease.end, lease.end_reason, at)
+        if last is None:
+            return None
+        ref = next(
+            ref for ref in reversed(lease.evidence) if ref.table in DHCP_TABLES and ref.time == last
+        )
+        logged = _REF_LEASE.search(ref.summary) if ref.table == FG_DHCP_TABLE else None
+        return _Record(
+            last, dhcp_action(ref), self._usable_lease(int(logged.group(1)) if logged else None)
+        )
+
+    def _usable_lease(self, lease: int | None) -> int | None:
+        low, high = LEASE_SECONDS_RANGE
+        if not self.settings.use_logged_lease or lease is None or not low <= lease <= high:
+            return None
+        return lease
+
+    def _released(self, lease: StoredLease, at: datetime) -> bool:
+        if not (self.lookup and lease.source_table == FG_DHCP_TABLE):
+            return False
+        record = self.record(lease, at)
+        return record is not None and record.action == "deassigned"
 
     def leases_at(self, ip: str, at: datetime) -> list[StoredLease]:
         """Leases of ``ip`` covering ``at``, one per MAC, most likely first."""
@@ -407,6 +549,8 @@ class Attributor:
         if infrastructure:
             explanations.append(explain("infrastructure_device"))
         explanations += person_notes
+        lease_confidence, lease_notes = self._lease_notes(ip, at, lease, vlan)
+        explanations += lease_notes
         if person is not None and person.department:
             dept, source = person.department, "person"
         elif department is not None:
@@ -415,19 +559,76 @@ class Attributor:
                 explanations.append(explain("no_person"))
         else:
             dept, source = None, "none"
-        levels: list[Confidence] = [lease.confidence, device_info.confidence]
+        levels: list[Confidence] = [lease_confidence, device_info.confidence]
         if person is not None:
             levels.append(person.confidence)
+        record = self.record(lease, at)
         return AttributionChain(
             internal_ip=ip,
             at=at,
             vlan=vlan.vlan_id if vlan is not None else lease.vlan,
             vlan_name=None if vlan is None else vlan.name_tr,
-            lease=lease.info(),
+            lease=lease.info(
+                confidence=lease_confidence,
+                lease_seconds=None if record is None else record.lease,
+                last_dhcp_evidence=None if record is None else record.time,
+            ),
             device=device_info,
             person=person,
             department=dept,
             department_source=source,  # type: ignore[arg-type]
             confidence=weakest(levels),
             explanations=tuple(explanations),
+        )
+
+    def _lease_notes(
+        self, ip: str, at: datetime, lease: StoredLease, vlan: Vlan | None
+    ) -> tuple[Confidence, list[Explanation]]:
+        """The lease step's confidence and the notes of 2.7 on it: the FortiGate notes of an
+        ``fg_dhcp`` lease (D29, D6, D33) and a sender configured later (D24)."""
+        confidence = lease.confidence
+        notes: list[Explanation] = []
+        if lease.source_table == FG_DHCP_TABLE:
+            if self.settings.fortigate_format_verified:
+                verified_at, verified_by = self.format_verified
+                notes.append(
+                    explain(
+                        "fortigate_format_verified",
+                        at=None if verified_at is None else verified_at.isoformat(),
+                        by=verified_by,
+                    )
+                )
+            else:
+                notes.append(explain("fortigate_format_unverified"))
+            record = self.record(lease, at)
+            if record is not None:
+                length = record.lease or lease.lease_seconds or self._server_seconds(lease)
+                if at > record.time + timedelta(seconds=length / 2):
+                    confidence = "low"
+                    notes.append(
+                        explain(
+                            "lease_renewal_not_seen", last=record.time.isoformat(), lease=length
+                        )
+                    )
+            if vlan is None:
+                confidence = "low"
+                notes.append(explain("fortigate_dhcp_no_network", ip=ip))
+        later = sorted(
+            {
+                ref.raw.source
+                for ref in lease.evidence
+                if ref.table in DHCP_TABLES
+                and ref.raw is not None
+                and ref.raw.source.startswith(UNKNOWN_PREFIX)
+                and ref.raw.source not in self.untrusted
+            }
+        )
+        if later:
+            notes.append(explain("source_configured_later", sources=", ".join(later)))
+        return confidence, notes
+
+    def _server_seconds(self, lease: StoredLease) -> int:
+        """The configured lease time of the lease's server (no timeout margin)."""
+        return self.settings.lease_server_seconds.get(
+            lease.server or "", self.settings.lease_default_seconds
         )

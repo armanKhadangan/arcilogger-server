@@ -194,7 +194,8 @@ def attribute(session: Session, ip: str, at: datetime) -> AttributionChain | Non
     """
     settings = LookupSettings.from_settings(get_settings(session))
     request = LookupRequest(at=at, internal_ip=ip)
-    return Attributor(session, settings).chain(str(request.internal_ip), request.at)
+    attributor = StatusRows.load(session).attributor(session, settings, untrusted_sources(session))
+    return attributor.chain(str(request.internal_ip), request.at)
 
 
 def run_lookup(
@@ -256,6 +257,19 @@ class StatusRows:
             egresses_by=None if egresses is None else egresses.updated_by,
             format_verified_at=None if verified is None else verified.updated_at,
             format_verified_by=None if verified is None else verified.updated_by,
+        )
+
+    def attributor(
+        self, session: Session, settings: LookupSettings, untrusted: frozenset[str]
+    ) -> Attributor:
+        """The attributor of a lookup: lease facts read for the moment (2.7), the format note
+        with this row's time and author (D29)."""
+        return Attributor(
+            session,
+            settings,
+            untrusted,
+            lookup=True,
+            format_verified=(self.format_verified_at, self.format_verified_by),
         )
 
     def last_change(self, name: str) -> tuple[datetime, str, bool] | None:
@@ -534,7 +548,8 @@ class _Lookup:
             else settings.tolerance_seconds
         )
         self.window = Window(request.at, self.tolerance, settings.max_session_seconds)
-        self.attributor = Attributor(session, settings)
+        #: Made in :meth:`run` from the status rows (the format note needs one of them).
+        self.attributor: Attributor
         self.explanations: list[Explanation] = []
         self.truncated = False
         self.status = StatusRows()
@@ -550,6 +565,7 @@ class _Lookup:
         # takes longer (~0.8 s) than the query itself. Off for this transaction only.
         self.session.execute(text("SET LOCAL jit = off"))
         self.status = StatusRows.load(self.session)
+        self.attributor = self.status.attributor(self.session, self.settings, self.untrusted)
         window, notes = data_window(self.session, self.request.at, layout=self.layout, now=self.now)
         self.explanations.extend(notes)
         self._watermark_note()
