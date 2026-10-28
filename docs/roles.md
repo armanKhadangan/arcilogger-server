@@ -315,8 +315,8 @@ agent's journal (`admin.applied`, `admin.failed`, …); a refused change is audi
 `admin.refused` with its codes only; a setting change is `settings.change` with the user's id
 and address (docs/MVP-CONTRACTS.md section 16). `api/tests/test_admin_config.py`,
 `test_admin_kamusm.py`, `test_admin_sources.py`, `test_admin_sections.py`,
-`test_admin_actions.py`, `test_admin_history.py` and `test_settings_api.py` (the observed
-endpoint too) check the roles;
+`test_admin_actions.py`, `test_admin_history.py`, `test_settings_api.py` and
+`test_settings_api_observed.py` (the observed endpoint) check the roles;
 `tests/test_admin_end_to_end.py` runs the whole channel on Linux.
 
 ## Arama, Canlı Akış ve Kaynaklar / Search, live tail and sources
