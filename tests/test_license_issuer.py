@@ -176,9 +176,14 @@ def test_keygen_writes_an_encrypted_key_and_the_public_line(owner: Owner) -> Non
     from arcilogger_core.license.codec import b64url_encode
 
     assert b64url_encode(raw) == public
+    assert owner.pem.read_bytes().startswith(b"-----BEGIN ENCRYPTED PRIVATE KEY-----\n")
     with pytest.raises(TypeError):
         load_pem_private_key(owner.pem.read_bytes(), password=None)  # encrypted
-    with pytest.raises(ValueError, match=r"(?i)password|decrypt"):
+    # The same bytes opened above with the right passphrase; a wrong one never opens them. Its
+    # error text depends on keygen's random salt and IV: CBC decryption with the wrong key fails
+    # its padding check, but about once in 256 the garbage ends in valid padding and the PKCS#8
+    # parser refuses it instead ("Could not deserialize key data").
+    with pytest.raises(ValueError, match=r"(?i)password|decrypt|deserialize"):
         load_pem_private_key(owner.pem.read_bytes(), password=b"wrong passphrase!")
     if os.name == "posix":
         assert owner.pem.stat().st_mode & 0o777 == 0o600
