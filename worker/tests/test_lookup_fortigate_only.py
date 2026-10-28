@@ -261,6 +261,30 @@ def test_no_renewal_and_traffic_only(db_session: Session, evidence: Evidence) ->
     assert "lease_renewal_not_seen" not in chain_keys(early)
 
 
+def test_a_refused_row_of_the_pair_is_not_its_record(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Rows of the pair after the ACK that are no lease evidence (2.7: the per-moment query reads
+    the rows ``trust.kept`` accepts): an ACK from an unconfigured sender, a line stamped with its
+    receive time and an unmapped logid. None of them is the lease's record, so the moment still
+    lies past half the lease after the 08:00 ACK."""
+    sender = "unknown-192.0.2.7"
+    db_session.add(Source(name=sender, type="fortigate", address="192.0.2.7", unknown=True))
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(T0 + timedelta(hours=12), PC, PC_MAC, source=sender)
+    evidence.fortigate_dhcp(T0 + timedelta(hours=13), PC, PC_MAC, device_time=False)
+    evidence.fortigate_dhcp(T0 + timedelta(hours=14), PC, PC_MAC, logid="0100026003")
+    evidence.traffic(T0 + timedelta(hours=15), PC, 50001)
+    build(db_session, DAY, DAY + timedelta(days=1))
+    assert db_session.scalars(select(Lease)).one().last_evidence == T0
+    chain = internal(db_session, PC, T0 + timedelta(hours=15)).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert chain.lease.last_dhcp_evidence == T0
+    assert note(chain, "lease_renewal_not_seen") == {"last": iso(T0), "lease": 86400}
+
+
 def test_renewals_every_twelve_hours_keep_the_chain_high(
     db_session: Session, evidence: Evidence
 ) -> None:
