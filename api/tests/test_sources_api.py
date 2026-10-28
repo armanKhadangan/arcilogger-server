@@ -104,9 +104,17 @@ def _unlock_sealed_files(tmp_path: Path) -> Iterator[None]:
 
 @pytest.fixture
 def now(monkeypatch: pytest.MonkeyPatch) -> datetime:
-    """The moment the test data is written around; the router reads the same moment, so a
-    request that runs past a minute (or midnight) boundary still sees the data where it was put."""
-    moment = datetime.now(UTC)
+    """The moment the test data is written around: the latest site noon, not the real now. The
+    router reads the same moment, so a request that runs past a minute boundary still sees the
+    data where it was put.
+
+    At the real now the firewall's minute three minutes before it was in yesterday's file from
+    00:00 to 00:03 site time, and the tests count today's file only (``0 == 12``). Noon is 12
+    hours from either midnight. It is never more than a day old: a fixed day would age past
+    the 7-day compression policy of the TimescaleDB job."""
+    real = datetime.now(UTC)
+    noon = day_window(site_day(real))[0] + timedelta(hours=12)
+    moment = (noon if noon <= real else noon - timedelta(days=1)).astimezone(UTC)
     monkeypatch.setattr("arcilogger_api.routers.sources.utc_now", lambda: moment)
     return moment
 

@@ -43,7 +43,10 @@ function devicesTable(page: Page) {
   return page.getByRole('table', { name: 'Ağda görülen cihazlar' });
 }
 
-/** MAC addresses in the device table, top to bottom. */
+/**
+ * MAC addresses in the device table, top to bottom. One read: until the first answer is on screen
+ * the body holds a single "Yükleniyor…" row (no MAC buttons), so callers poll it.
+ */
 async function macs(page: Page): Promise<string[]> {
   const table = devicesTable(page);
   await expect(table.getByRole('row').nth(1)).toBeVisible();
@@ -71,7 +74,8 @@ test.describe('Cihazlar ve Kişiler', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: 'Cihazlar ve Kişiler' }),
     ).toBeVisible();
-    expect(await macs(page)).toHaveLength(DEVICES.list.items.length);
+    // The heading renders while GET /devices is still pending: wait for the answer.
+    await expect.poll(() => macs(page)).toHaveLength(DEVICES.list.items.length);
     await expect(page.getByText('1–6 / 6 cihaz')).toBeVisible();
     // Randomised MAC addresses are marked (spec 9.2).
     const phone = devicesTable(page).getByRole('row').filter({ hasText: '02:00:5e:00:53:64' });

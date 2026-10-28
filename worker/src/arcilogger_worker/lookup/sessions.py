@@ -52,7 +52,20 @@ from datetime import datetime, timedelta
 from ipaddress import IPv4Network
 from typing import Any, Final
 
-from sqlalchemy import Select, Text, and_, any_, cast, exists, func, literal, not_, or_, select
+from sqlalchemy import (
+    Select,
+    SQLColumnExpression,
+    Text,
+    and_,
+    any_,
+    cast,
+    exists,
+    func,
+    literal,
+    not_,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
@@ -318,24 +331,53 @@ def unclaimed_nat(
 
 def _named_by_logs(domain: str, window: Window) -> ColumnElement[bool]:
     """A web filter or application control log of this session names ``domain`` (correlated:
-    same ``sessionid`` and source IP, written within the session's span)."""
-    started = _session_start()
+    same ``sessionid`` and source IP, written within the session's span).
+
+    The span starts at ``time - duration``, or at ``time`` for a row without a duration (as in
+    :func:`_session_start`), and each case has its own sub-query instead of one with
+    ``COALESCE``: TimescaleDB turns the bounds into an index range over a compressed chunk's
+    batches only when they are plain arithmetic on the outer row, so with ``COALESCE`` every
+    batch of the chunk was read again for every session of the window (a domain lookup at
+    3 M rows a day took 6-7 s on compressed chunks instead of 1.4 s, docs/CORRELATION.md
+    section 6).
+    """
+    with_duration = FgTraffic.time - func.make_interval(0, 0, 0, 0, 0, 0, FgTraffic.duration)
     clauses = []
     for model in (FgWeb, FgApp):
         clauses.append(
-            exists().where(
-                model.sessionid == FgTraffic.sessionid,
-                model.srcip == FgTraffic.srcip,
-                model.time >= started - LOG_SLACK,
-                model.time <= FgTraffic.time + LOG_SLACK,
-                # Constant bounds as well, for partition pruning: sessions longer than
-                # ``max_session`` are outside the lookup anyway.
-                model.time >= window.low - timedelta(seconds=window.max_session) - LOG_SLACK,
-                model.time <= window.scan_end + LOG_SLACK,
-                _host_matches(model.hostname, domain),
+            and_(
+                FgTraffic.duration.is_not(None),
+                _logs_name(model, domain, window, started=with_duration),
+            )
+        )
+        clauses.append(
+            and_(
+                FgTraffic.duration.is_(None),
+                _logs_name(model, domain, window, started=FgTraffic.time),
             )
         )
     return or_(*clauses)
+
+
+def _logs_name(
+    model: type[FgWeb] | type[FgApp],
+    domain: str,
+    window: Window,
+    *,
+    started: SQLColumnExpression[datetime],
+) -> ColumnElement[bool]:
+    """A log of ``model`` for the outer session that started at ``started`` names ``domain``."""
+    return exists().where(
+        model.sessionid == FgTraffic.sessionid,
+        model.srcip == FgTraffic.srcip,
+        model.time >= started - LOG_SLACK,
+        model.time <= FgTraffic.time + LOG_SLACK,
+        # Constant bounds as well, for partition pruning: sessions longer than
+        # ``max_session`` are outside the lookup anyway.
+        model.time >= window.low - timedelta(seconds=window.max_session) - LOG_SLACK,
+        model.time <= window.scan_end + LOG_SLACK,
+        _host_matches(model.hostname, domain),
+    )
 
 
 def build_query(

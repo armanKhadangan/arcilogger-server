@@ -35,6 +35,7 @@ import pytest
 from sqlalchemy import Engine
 
 from arcilogger_api.app import create_app
+from arcilogger_api.live.hub import hub_of
 from arcilogger_api.live.testing import LiveServer, read_events, sign_in, spool_line
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
@@ -223,10 +224,15 @@ def test_a_spool_line_reaches_the_live_tail_through_caddy(
         }
     )
     layout = Layout(config.data_dir)
-    spool = layout.spool_file("fortigate", site_day(utc_now()))
+    # The hub follows the spool file of its own site day: with its own clock, a site midnight
+    # (21:00 UTC) between choosing this file and opening the stream, or before the append,
+    # leaves the line in a file it no longer reads. It reads the test's moment instead.
+    moment = utc_now()
+    spool = layout.spool_file("fortigate", site_day(moment))
     spool.parent.mkdir(parents=True)
     spool.write_bytes(spool_line('logid="0000000013" type="traffic" srcip=172.20.41.105'))
     app = create_app(config, db_engine, audit_flush_seconds=None)
+    hub_of(app).now = lambda: moment
     with LiveServer(app) as api:
         port = free_port()
         process, context = start_caddy(tmp_path, port, f"127.0.0.1:{api.port}")

@@ -39,7 +39,7 @@ from arcilogger_api.security import hash_token, session_problem
 from arcilogger_api.testing import EXAMPLE_SITE_NAME, LoggedIn
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import site_day
+from arcilogger_core.timeutil import day_window, site_day
 from arcilogger_db.models import AuditLog, User, UserSession
 from arcilogger_db.settings import set_setting
 
@@ -102,14 +102,35 @@ def api_config(tmp_path: Path) -> Config:
     )
 
 
+#: A test's spool and hub share one wall clock (:class:`Clock`). On the real clock a site
+#: midnight passing mid-test put the later lines into a new file numbered from 1, and the days,
+#: line numbers and ranges a test asserts split across two files. A test here runs for seconds,
+#: more on the Windows runner; the clock starts at the next site midnight when that is nearer
+#: than this. The move stays well below the session idle limit (``auth.idle_minutes``, 15 by
+#: default) the hub's session checks apply to the real-time sessions the tests sign in with.
+NEAR_MIDNIGHT = timedelta(minutes=2)
+
+
+class Clock:
+    """Real time, from the next site midnight on when that is nearer than :data:`NEAR_MIDNIGHT`."""
+
+    def __init__(self) -> None:
+        real = datetime.now(UTC)
+        midnight = day_window(site_day(real))[1]
+        self.offset = midnight - real if midnight - real < NEAR_MIDNIGHT else timedelta(0)
+
+    def now(self) -> datetime:
+        return datetime.now(UTC) + self.offset
+
+
 class Spool:
     """Writes collector lines into today's (or another day's) spool files."""
 
-    def __init__(self, layout: Layout) -> None:
-        self.layout = layout
+    def __init__(self, layout: Layout, clock: Clock) -> None:
+        self.layout, self.clock = layout, clock
 
     def path(self, folder: str, day: date | None = None) -> Path:
-        return self.layout.spool_file(folder, day or site_day(datetime.now(UTC)))
+        return self.layout.spool_file(folder, day or site_day(self.clock.now()))
 
     def write(
         self, folder: str, *messages: str, sender: str = FIREWALL, day: date | None = None
@@ -118,18 +139,23 @@ class Spool:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("ab") as handle:
             for message in messages:
-                handle.write(spool_line(message, sender))
+                handle.write(spool_line(message, sender, self.clock.now()))
         return path
 
 
 @pytest.fixture
-def spool(layout: Layout) -> Spool:
-    return Spool(layout)
+def clock() -> Clock:
+    return Clock()
 
 
 @pytest.fixture
-def hub(app: FastAPI) -> Hub:
-    created = Hub(app.state.arci, timing=FAST)
+def spool(layout: Layout, clock: Clock) -> Spool:
+    return Spool(layout, clock)
+
+
+@pytest.fixture
+def hub(app: FastAPI, clock: Clock) -> Hub:
+    created = Hub(app.state.arci, timing=FAST, now=clock.now)
     app.state.arci_live = created
     return created
 
@@ -418,7 +444,7 @@ def test_rate_limited_lines_are_reported_as_dropped(
         reader.close()
 
 
-def test_pause_and_resume_replay_what_was_missed(clients: Clients, spool: Spool) -> None:
+def test_pause_and_resume_replay_what_was_missed(clients: Clients, spool: Spool, hub: Hub) -> None:
     client, _ = clients()
     spool.write("fortigate", traffic())
     opened = open_stream(client, "action:deny", backfill=0)
@@ -427,9 +453,14 @@ def test_pause_and_resume_replay_what_was_missed(clients: Clients, spool: Spool)
     spool.write("fortigate", traffic(action="deny"))
     reader.wait(lambda r: len(r.lines()) == 1)
     last_id = reader.of("line")[-1].id
+    stream = hub.streams[opened["stream_id"]]
     reader.close()  # Duraklat: the connection goes, the stream lingers
+    # The server has seen the pause and the hub has read the three lines: they are replayed
+    # from the buffer, not sent live to a resume that came before them.
+    eventually(lambda: stream.connection is None)
+    seq = hub.seq
     spool.write("fortigate", traffic(action="deny"), traffic(), traffic(action="deny"))
-    time.sleep(0.4)
+    eventually(lambda: hub.seq >= seq + 3)
     resumed = Reader(client, opened["stream_id"], last_event_id=last_id)
     try:
         resumed.wait(lambda r: len(r.lines()) == 2)
@@ -449,7 +480,7 @@ def test_pause_and_resume_replay_what_was_missed(clients: Clients, spool: Spool)
 
 
 def test_a_resume_after_the_buffer_moved_on_announces_a_gap(
-    clients: Clients, spool: Spool, app_session_factory: sessionmaker[Session]
+    clients: Clients, spool: Spool, app_session_factory: sessionmaker[Session], hub: Hub
 ) -> None:
     with app_session_factory() as session:
         set_setting(session, "live.buffer_lines", 500, updated_by="test")
@@ -462,10 +493,17 @@ def test_a_resume_after_the_buffer_moved_on_announces_a_gap(
     spool.write("fortigate", traffic(action="deny"))
     reader.wait(lambda r: len(r.lines()) == 1)
     last_id = reader.of("line")[-1].id
+    stream = hub.streams[opened["stream_id"]]
     reader.close()
+    # Wait for the hub's state, not a sleep: the server has seen the pause (the deny lines go
+    # to the stream's backlog, not to the closed connection), and the hub has read and buffered
+    # all 603 lines before the resume. One read cycle of 603 parsed lines took 0.3 s on Linux
+    # with coverage; a resume before it ends rightly gets the three lines live, without a gap.
+    eventually(lambda: stream.connection is None)
+    seq = hub.seq
     spool.write("fortigate", *(traffic(action="deny") for _ in range(3)))
     spool.write("fortigate", *(traffic() for _ in range(600)))  # pushes them out of the buffer
-    time.sleep(0.6)
+    eventually(lambda: hub.seq >= seq + 603)
     resumed = Reader(client, opened["stream_id"], last_event_id=last_id)
     try:
         resumed.wait(lambda r: bool(r.of("gap")))
