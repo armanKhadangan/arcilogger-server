@@ -264,7 +264,14 @@ def test_too_many_users_for_the_wifi_pool_is_a_clear_error() -> None:
     assert done.returncode == 2
     assert "Traceback" not in done.stderr
     assert "HATA / ERROR: VLAN 60 DHCP havuzu" in done.stderr
-    assert "lower --users" in done.stderr
+    assert "lower --users (the staff Wi-Fi fills up at about 160)" in done.stderr
+    # FortiGate DHCP holds an address until its lease ends: fewer users fit
+    done = _run_script(
+        "--users", "300", "--day", FRIDAY.isoformat(), "--dhcp-server", "fortigate", "stats"
+    )
+    assert done.returncode == 2
+    assert "lower --users (the staff Wi-Fi fills up at about 140)" in done.stderr
+    assert "yaklaşık 140 kullanıcıyla dolar" in done.stderr
 
 
 def test_spool_refuses_a_data_folder_in_use(tmp_path: Path) -> None:

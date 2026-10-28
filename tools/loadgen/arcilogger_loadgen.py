@@ -58,7 +58,8 @@ counts lines per source and kind. Python API: :class:`Settings`, :class:`Simulat
 days, a ``state`` folder, spool files it did not write) unless ``--i-know-this-is-not-production``
 is given, and leaves the marker file ``LOADGEN-DEMO.txt`` in every data folder it writes to.
 Every simulated DHCP pool has 160 addresses (``.64`` to ``.223``): about 160 users fill the
-staff Wi-Fi (everyone's phone is on it); more stop with a clear error.
+staff Wi-Fi (everyone's phone is on it), about 140 when the FortiGate serves it (an address stays
+held until its lease ends); more stop with a clear error.
 
 Run from the repository root: ``uv run python tools/loadgen/arcilogger_loadgen.py --help``.
 """
@@ -106,6 +107,10 @@ HEARTBEAT_MINUTES: Final = 5
 EPHEMERAL: Final = (49152, 65535)
 #: The simulated DHCP pools are ``.64`` to ``.223`` in every VLAN.
 POOL_FIRST, POOL_SIZE = 64, 160
+#: About how many users fill the staff Wi-Fi pool, by who serves it (14 simulated days: 162 users
+#: with MikroTik DHCP; 144-149, by seed, with FortiGate DHCP, whose addresses stay held until the
+#: lease ends).
+WIFI_USERS: Final = {"mikrotik": 160, "fortigate": 140}
 #: A NAT port stays taken this long after its session ended.
 NAT_GRACE: Final = timedelta(seconds=120)
 #: Left in every data folder ``spool`` writes to: these lines are synthetic, never evidence.
@@ -765,12 +770,14 @@ class Simulation:
             if candidate not in held:
                 return candidate
         vlan = device.vlan
+        full = WIFI_USERS["fortigate" if self._fortigate_gateway(STAFF_WIFI) else "mikrotik"]
         raise LoadgenError(
             f"VLAN {vlan} DHCP havuzu (172.20.{vlan}.{POOL_FIRST}-{POOL_FIRST + POOL_SIZE - 1}, "
             f"{POOL_SIZE} adres) {self.settings.users} kullanıcının cihazlarına yetmiyor; "
-            "--users değerini düşürün (personel Wi-Fi'ı yaklaşık 160 kullanıcıyla dolar). / The "
-            f"DHCP pool of VLAN {vlan} ({POOL_SIZE} addresses) is exhausted with "
-            f"{self.settings.users} users: lower --users (the staff Wi-Fi fills up at about 160)."
+            f"--users değerini düşürün (personel Wi-Fi'ı yaklaşık {full} kullanıcıyla dolar). / "
+            f"The DHCP pool of VLAN {vlan} ({POOL_SIZE} addresses) is exhausted with "
+            f"{self.settings.users} users: lower --users (the staff Wi-Fi fills up at about "
+            f"{full})."
         )
 
     def _dhcp_line(self, device: Device, action: str, ip: str, mac: str, at: datetime) -> None:
