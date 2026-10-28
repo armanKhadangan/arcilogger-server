@@ -538,9 +538,15 @@ def test_srcmac_step_and_conflict(
     data, text = _report(client, public_ip="198.51.100.20", public_port=51061)
     conflicted = [m for m in data["outcome"]["matches"] if m["traffic"]["srcport"] == 51061]
     assert conflicted
+    for match in conflicted:  # a srcmac_mismatch conflict whose alternative has no lease (D10)
+        assert "srcmac_mismatch" in {item["key"] for item in match["chain"]["explanations"]}
+        (other,) = match["chain"]["alternatives"]
+        assert (other["mac_source"], other["lease"]) == ("srcmac", None)
     assert f"MAC {PC_MAC}" in text
     assert f"MAC {other_mac}" in text
     alternative = text.split(texts.ALTERNATIVE_SRCMAC, 1)[1]
+    # the srcmac alternative without a lease: its MAC row, never a lease row
+    assert "IP-MAC kaydı / Lease" not in alternative.split("Zincir güveni / Confidence", 1)[0]
     assert "Olası diğer zincir (srcmac, kısmi kanıt) / Possible other chain (srcmac, partial " in (
         text
     )
