@@ -7,9 +7,10 @@ bytes against the day): fewer than :data:`MIN_SAMPLES` samples → ``insufficien
 zero or less → ``not_growing``; otherwise ``estimated`` with the rounded slope in bytes per day,
 the first day the line reaches the warning mark and the first day it reaches the drive's size.
 
-* ``warning_on`` is ``null`` when the drive is already at or above the mark: its use now (the
-  live reading the API passes) or, without one, its newest sample. A measurement decides, not
-  the line.
+* ``warning_on`` is ``null`` when the drive is already at or above the mark (its use now, the
+  live reading the API passes, or without one its newest sample: a measurement decides, not the
+  line) or when the mark lies beyond the horizon (below). Whether a drive is above the mark is
+  read from ``used_bytes``/``used_percent`` against ``warning_percent``, not from the null.
 * The days are never before ``today``: a line that should already have crossed a mark no
   measurement has reached says "today".
 * A day further away than :data:`HORIZON_DAYS` is ``null``: a drive that grows by a few bytes a
@@ -56,11 +57,15 @@ def _first_day(
     intercept: float, slope: float, target: float, start: date, today: date
 ) -> date | None:
     """The first day (on or after ``today``) the line ``intercept + slope * x`` reaches
-    ``target``; ``x`` counts days from ``start``. ``None`` beyond :data:`HORIZON_DAYS`."""
-    days = math.ceil((target - intercept) / slope)
-    if days - (today - start).days > HORIZON_DAYS:
+    ``target``; ``x`` counts days from ``start``. ``None`` beyond :data:`HORIZON_DAYS`.
+
+    The offset is taken from ``today`` before a date is built: a line that reached the target
+    long before the first sample (a slope of a few bytes a day) would otherwise lie before the
+    calendar's first day."""
+    ahead = math.ceil((target - intercept) / slope) - (today - start).days
+    if ahead > HORIZON_DAYS:
         return None
-    return max(start + timedelta(days=days), today)
+    return today + timedelta(days=max(ahead, 0))
 
 
 def forecast(

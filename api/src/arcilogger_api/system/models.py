@@ -32,9 +32,11 @@ class DiskForecast(BaseModel):
     #: Daily samples the forecast used (at most the newest 30).
     samples: int
     growth_bytes_per_day: int | None
-    #: First day the trend line reaches ``warning_percent`` (``null``: already there).
+    #: First day the trend line reaches ``warning_percent``. ``null``: at or above the mark, or
+    #: beyond the horizon (100 years); whether the drive is already above the mark is read from
+    #: ``used_bytes``/``used_percent`` against ``warning_percent``.
     warning_on: date | None
-    #: First day the trend line reaches the drive's size.
+    #: First day the trend line reaches the drive's size (``null``: beyond the horizon).
     full_on: date | None
 
 

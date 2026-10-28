@@ -151,3 +151,16 @@ def test_a_drive_that_hardly_grows_gets_no_date() -> None:
     result = forecast(near, total=TOTAL, warning_percent=80, today=TODAY)
     assert result.full_on is not None
     assert result.full_on <= TODAY + timedelta(days=HORIZON_DAYS)
+
+
+def test_a_line_past_the_mark_long_ago_after_a_clean_up() -> None:
+    """A drive at about 85 % that hardly grows, cleaned up today: the line reached the mark
+    long before the first sample (a huge negative offset), the live reading is below it. The
+    answer is today, never a day before the calendar's first one."""
+    samples = [(TODAY - timedelta(days=30 - i), 85 * 10**9 + 2000 * i) for i in range(30)]
+    result = forecast(
+        samples, total=100 * 10**9, warning_percent=80, today=TODAY, used_now=75 * 10**9
+    )
+    assert result.state == "estimated"
+    assert result.warning_on == TODAY
+    assert result.full_on is None  # 15 GB to go at 2 kB a day: beyond the horizon
