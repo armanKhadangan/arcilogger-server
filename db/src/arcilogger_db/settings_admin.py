@@ -12,7 +12,14 @@ interface's ``PATCH /settings`` and ``POST /settings/{key}/reset`` (ADR-0014, co
   hash-chained audit log (spec 8.5) through the one shared writer
   (:func:`arcilogger_db.audit.append_entry`), with the user's id and address when the web
   interface made the change; the API copies it into the audit spool with its next flush (at start
-  and every minute), so it is sealed like every other entry.
+  and every minute), so it is sealed like every other entry;
+* a change of ``nat.egresses`` also keeps the status row ``nat.egresses_changes`` (ADR-0016 D32)
+  in the same transaction: for every exit whose content changed (its
+  :func:`arcilogger_db.egress.fingerprint`: mode, public and NAT addresses, a changing public
+  address), that was added or deleted, the time of the audit entry and the author. A label-,
+  interface- or port-preservation-only edit changes nothing there, and no earlier content is
+  kept: the audit log holds every old value. A lookup of a moment before the change names the
+  exit (``egress_changed_after_event``).
 
 A change made with hand-written SQL is neither validated nor audited, and a row left with
 ``updated_by = ':seed'`` is reverted by the next upgrade.
@@ -29,8 +36,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from arcilogger_db.audit import append_entry
+from arcilogger_db.egress import CHANGES_KEY, EgressValueError, fingerprint, validate_egresses
 from arcilogger_db.models import Setting
-from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting, set_setting, validate_setting
+from arcilogger_db.settings import (
+    DEFAULT_SETTINGS,
+    SYSTEM_AUTHOR,
+    get_setting,
+    set_setting,
+    validate_setting,
+)
 
 AUDIT_ACTION: Final = "settings.change"
 #: Who made the change (a person's name or user name; ``:`` is reserved for internal authors).
@@ -88,7 +102,44 @@ def change_setting(
         details={**(details or {}), "old": old, "new": new},
         ip=ip,
     )
+    if key == "nat.egresses":
+        _record_exit_changes(session, old, new, actor=name, at=entry.time.isoformat())
     return SettingChange(key=key, old=old, new=new, audit_id=entry.id)
+
+
+def _record_exit_changes(session: Session, old: Any, new: Any, *, actor: str, at: str) -> None:
+    """Update ``nat.egresses_changes`` for the exits whose content ``old`` -> ``new`` changed,
+    added or deleted (module docstring)."""
+    before = old if isinstance(old, dict) else {}
+    changes = get_setting(session, CHANGES_KEY)
+    record = dict(changes) if isinstance(changes, dict) else {}
+    changed: dict[str, tuple[str, bool]] = {}
+    for name, exit_ in new.items():
+        content = fingerprint(exit_)
+        if _content(name, before.get(name)) != content:
+            changed[name] = (content, False)
+    for name in sorted(before.keys() - new.keys()):
+        known = record.get(name)
+        old_content = _content(name, before[name]) or (known or {}).get("fingerprint", "")
+        changed[name] = (old_content, True)
+    for name, (content, deleted) in changed.items():
+        record[name] = {
+            "fingerprint": content,
+            "changed_at": at,
+            "changed_by": actor,
+            "deleted": deleted,
+        }
+    if changed:
+        set_setting(session, CHANGES_KEY, record, updated_by=SYSTEM_AUTHOR)
+
+
+def _content(name: str, exit_: Any) -> str | None:
+    """The fingerprint of a stored exit; ``None`` for one the rules refuse (stored around the
+    validator), which then counts as changed."""
+    try:
+        return fingerprint(validate_egresses({name: exit_})[name])
+    except EgressValueError:
+        return None
 
 
 def reset_setting(

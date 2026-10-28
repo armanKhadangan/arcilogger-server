@@ -188,6 +188,15 @@ def _contains(networks: tuple[IPv4Network, ...], ip: str) -> bool:
     return any(address in network for network in networks)
 
 
+#: The status rows of the exits (never in ``DEFAULT_SETTINGS``, never editable, like
+#: ``db.timescale``): what revision ``0018_nat_egresses`` converted (``new`` is what an exit is
+#: compared with to tell whether it is still *as converted*, D15; the seed audits it once), and
+#: the last content change of each exit (D32), kept by ``settings_admin.change_setting``.
+MIGRATION_KEY: Final = "nat.egresses_migration"
+CHANGES_KEY: Final = "nat.egresses_changes"
+#: The Wave 2 keys ``nat.egresses`` replaces: revision ``0018_nat_egresses`` converts them and
+#: keeps an administrator's rows, unread, for one version (D18).
+LEGACY_KEYS: Final = ("nat.public_ips", "nat.wan_transip", "lookup.port_hint")
 #: An exit name (rule 2): lower-case letters, digits and hyphens, at most 32 characters.
 NAME: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 #: The fields whose values decide which addresses an exit claims or is searched for: the
