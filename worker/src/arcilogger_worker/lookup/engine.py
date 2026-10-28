@@ -1459,7 +1459,9 @@ class _Lookup:
         counted = [
             newest[key]
             for key, moment in targets.items()
-            if key in newest and self._would_cover(newest[key], moment)
+            if key in newest
+            and self._would_cover(newest[key], moment)
+            and (not by_mac or self._newest_of_its_address(newest[key], moment))
         ]
         if not counted:
             return ()
@@ -1576,6 +1578,21 @@ class _Lookup:
         return {
             line.key: line for line in lines if line.key not in seen or seen[line.key] < line.time
         }
+
+    def _newest_of_its_address(self, line: _DhcpLine, moment: datetime) -> bool:
+        """The address rule for a MAC's line (the c2 deviation): it counts only while it is
+        also the newest DHCP-shaped row of the address it names, by the IP probe at the same
+        moment; a newer row of that address, converted or not, says the address went on (to
+        another client, or to the MAC again in a row the timeline saw). A line whose ``ip`` is
+        no plain IPv4 address has no address to read (it never reaches PostgreSQL's ``inet``)
+        and counts as found."""
+        address = line.ip or ""
+        try:
+            ipaddress.IPv4Address(address)
+        except ValueError:
+            return True
+        same = self._newest_dhcp({address: moment}, by_mac=False).get(address)
+        return same is not None and same.id == line.id
 
     def _would_cover(self, line: _DhcpLine, moment: datetime) -> bool:
         """An ACK (a logid mapped to ``assigned``) whose lease would have covered ``moment``: its

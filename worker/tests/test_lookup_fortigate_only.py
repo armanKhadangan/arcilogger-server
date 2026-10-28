@@ -1601,6 +1601,56 @@ def test_a_newer_converted_row_of_the_mac_silences_the_mac_only_probe(
     assert outcome.unconverted_dhcp == ()
 
 
+@pytest.mark.parametrize("converted", [True, False], ids=["converted", "unconverted"])
+def test_a_mac_only_probe_reads_the_address_of_its_line(
+    db_session: Session, evidence: Evidence, converted: bool
+) -> None:
+    """The MAC-only probe keeps the address rule for the line it finds: the PC's pre-upgrade
+    ACK of .57 two days before the moment, then an ACK of .57 to :77 twelve hours before it
+    (a converted ``fg_dhcp`` row, or a line that stayed an ``fg_event`` row too). The IP
+    lookup gives :77's answer; the MAC-only lookup of the PC names and cites nothing, because
+    the newest row of .57 is :77's, and nothing of :77 shows."""
+    unconverted_line(evidence, AT - timedelta(days=2), PC, PC_MAC, hostname=HOST, lease=WEEK)
+    if converted:
+        evidence.fortigate_dhcp(AT - timedelta(hours=12), PC, OTHER, hostname="MUH-NB03")
+    else:
+        newer = unconverted_line(
+            evidence, AT - timedelta(hours=12), PC, OTHER, hostname="MUH-NB03", lease=WEEK
+        )
+    build(db_session, DAY - timedelta(days=2), DAY)
+    by_ip = internal(db_session, PC, AT)
+    if converted:
+        chain = by_ip.attribution
+        assert chain is not None
+        assert chain.lease is not None
+        assert chain.lease.mac == OTHER
+    else:
+        assert outcome_note(by_ip, NOT_CONVERTED) == {"ips": PC}
+        assert [ref.row_id for ref in by_ip.unconverted_dhcp] == [newer]
+    outcome = lookup(db_session, mac=PC_MAC)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert "no_lease_for_mac" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+    text = outcome_text(outcome)
+    assert OTHER not in text
+    assert "muh-nb03" not in text
+
+
+def test_a_mac_only_probe_line_without_a_plain_address_still_counts(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The address rule reads only a plain IPv4 address: the MAC's covering line whose ``ip``
+    carries an IPv6 zone id has no address to read and is named and cited as found, and the
+    zone id never reaches PostgreSQL's ``inet`` (it would end the lookup's transaction)."""
+    acked = AT - timedelta(days=2)
+    row = unconverted_line(evidence, acked, "fe80::1%eth0", PC_MAC, lease=WEEK)
+    build(db_session, DAY, DAY)
+    outcome = lookup(db_session, mac=PC_MAC)
+    assert NOT_CONVERTED in keys(outcome)
+    assert [ref.row_id for ref in outcome.unconverted_dhcp] == [row]
+
+
 # -- two DHCP origins (D27) -----------------------------------------------------------------------
 
 SHARED = "172.20.42.142"

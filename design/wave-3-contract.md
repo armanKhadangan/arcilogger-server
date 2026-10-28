@@ -5929,9 +5929,15 @@ from section 0.2 are recorded here too, with the date and who decided.
   with the same window, sender filter and coverage rule. A counting row gives the same
   `fortigate_dhcp_not_converted`, `{ips}` = the address that row names (the requested MAC's own
   record; the MAC itself when the row's `ip` cannot be read), and is cited in `unconverted_dhcp`
-  (internal mode). No new key, no text change, no extra query for any other lookup. Tests:
-  `worker/tests/test_lookup_fortigate_only.py::test_a_mac_only_lookup_finds_the_line_by_its_mac`.
-  Fold into 2.8.3.
+  (internal mode). A MAC-keyed line that counts must also pass the address rule for the
+  address it names: the IP probe at the same moment for that `ip` must find that same row as
+  the address's newest DHCP-shaped row (a newer converted or `fg_event` row of the address,
+  e.g. an ACK to another client, silences it; a line whose `ip` is no plain IPv4 address has no
+  address to read and counts). No new key, no text change, no extra query for any other lookup.
+  Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_mac_only_lookup_finds_the_line_by_its_mac`,
+  `::test_a_mac_only_probe_reads_the_address_of_its_line` (both variants failed before),
+  `::test_a_mac_only_probe_line_without_a_plain_address_still_counts`. Fold into 2.8.3.
 - **The per-lookup clock check: the rows nearest T on each side, and the fixed limit for lease
   searches** (2.7 "Source clock at the requested moment", round-5 note "2.7 clock sample" and
   round-6 note "`source_clock_offset` of an internal lookup", their suggested handling). A
