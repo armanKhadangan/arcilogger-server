@@ -349,8 +349,8 @@ def capture_lease_evidence(capture: Capture, admin: Any) -> dict[str, Any]:
     (the site's DHCP and ARP rows are of 09.10).
 
     * ``overview_lease_ok``: FortiGate DHCP ACKs of the last hour, their leases rebuilt, the
-      srcmac interface listed; the lease evidence check finds nothing (no client traffic in
-      the last hour, so a quiet table is no finding);
+      srcmac interface listed; the lease evidence check opens no ``none`` cause (no client
+      traffic in the last hour, so a quiet table is no finding);
     * ``overview_lease_none``: client sessions of the last hour on the srcmac interface, and
       the check run again opens ``R20-lease:none:mt_dhcp`` and ``none:mt_arp`` (the core
       router's rows stopped after 09.10; FortiGate DHCP keeps arriving);
@@ -415,7 +415,7 @@ def _lease(capture: Capture, admin: Any, state: str) -> Any:
     """``GET /sources`` whose ``lease_evidence`` is in ``state``."""
     answer = capture.json(admin.get(f"{API}/sources"), 200)
     found = answer["lease_evidence"]
-    if found["state"] != state:
+    if found["state"] != state or bool(found["none_tables"]) != (state != "ok"):
         raise SystemExit(f"lease evidence: expected {state}, got {found}")
     return answer
 
