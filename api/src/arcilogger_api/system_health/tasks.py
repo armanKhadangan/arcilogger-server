@@ -6,7 +6,8 @@ by the newest evidence it leaves where ArciApi may read:
 =============  ========================================================  ==========  ==========
 Task           Evidence (below the data folder)                          Late after  Not used
 =============  ========================================================  ==========  ==========
-Seal           newest modification of ``state/seal/<day>.json``          26 h        —
+Seal           newest modification of ``state/seal/<day>.json`` (the     26 h        —
+               last 3 days)
 VerifyDaily    ``at`` of ``state/verify/last-last-1.json`` or ``-2``     26 h        —
 VerifyWeekly   newest ``at`` of ``state/verify/last-last-<N>.json``,     8 days      —
                N ≥ 3
@@ -28,15 +29,17 @@ ApplySystem    ``at`` of ``admin/system/status.json``                    15 min 
 (the task's XML) plus a grace, not a setting. The names of the verification results are the ones
 ``arcilogger-core verify`` really writes (contract Implementation note 7): it puts ``last-``
 before its kind, and the kind of ``--last N`` is ``last-<days verified>`` (:func:`verify_state`).
+Seal is judged by the states of the last days only: Retention rewrites the state of each day it
+deletes (``status = "deleted"``, ``retention._delete_day``), which says nothing about Seal.
+A file that cannot be read is no evidence; it never fails the request.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -50,6 +53,9 @@ from arcilogger_worker.alerts.system import backup_state_path
 #: ``verify --last 2`` (VerifyDaily) checks 1 day on a chain of one sealed day, else 2; more
 #: days are the weekly ``--last 90`` (on a young chain: every sealed day there is).
 DAILY_VERIFY_DAYS: Final = (1, 2)
+#: Days of ``state/seal`` read, ending today (Seal writes yesterday's state after 00:10; a day
+#: this young is never one Retention deletes).
+SEAL_DAYS: Final = 3
 #: Days of ``state/replica`` read, ending today (a day is copied after it was sealed).
 REPLICA_DAYS: Final = 3
 
@@ -124,29 +130,24 @@ def _verified_days(layout: Layout, path: Path) -> int | None:
     """The ``days`` of a ``--last`` result's name (None: another kind, or a name the CLI never
     writes such as ``last-2.json``)."""
     count = path.stem.rpartition("-")[2]
-    if not count.isdigit():
+    if not (count.isascii() and count.isdigit()):
         return None
     return int(count) if verify_state(layout, int(count)).name == path.name else None
 
 
-def _seal(evidence: Evidence) -> datetime | None:
-    folder = evidence.layout.state / "seal"
-    newest: float | None = None
+def _modified(path: Path) -> datetime | None:
     try:
-        entries = list(os.scandir(folder))
+        return datetime.fromtimestamp(path.stat().st_mtime, UTC)
     except OSError:
         return None
-    for entry in entries:
-        name = entry.name
-        if not name.endswith(".json"):
-            continue
-        try:
-            date.fromisoformat(name.removesuffix(".json"))
-            modified = entry.stat().st_mtime
-        except (ValueError, OSError):
-            continue
-        newest = modified if newest is None else max(newest, modified)
-    return None if newest is None else datetime.fromtimestamp(newest, UTC)
+
+
+def _seal(evidence: Evidence) -> datetime | None:
+    today = site_day(evidence.now)
+    return _newest(
+        _modified(evidence.layout.seal_state(today - timedelta(days=back)))
+        for back in range(SEAL_DAYS)
+    )
 
 
 def _verify_daily(evidence: Evidence) -> datetime | None:
@@ -182,7 +183,10 @@ def _replica(evidence: Evidence) -> datetime | None:
 
 
 def _credit(evidence: Evidence) -> datetime | None:
-    entries, _ = credit_history(evidence.layout)
+    try:
+        entries, _ = credit_history(evidence.layout)
+    except OSError:  # not a file, or not readable (credit_history passes only a missing one)
+        return None
     return _newest(entry["time"] for entry in entries)
 
 

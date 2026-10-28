@@ -259,8 +259,9 @@ def test_task_states_from_evidence_files(
     verify = layout.state / "verify"
     write_json(verify / verify_name(1), {"at": isoformat_site(now - timedelta(hours=30))})
     write_json(verify / verify_name(2), {"at": isoformat_site(now - timedelta(hours=27))})
-    # A name the CLI never writes (``last-2.json``) is not a verification result.
+    # Names the CLI never writes (``--last 2`` and ``--last 90`` by hand) are no results.
     write_json(verify / "last-2.json", {"at": isoformat_site(now)})
+    write_json(verify / "last-90.json", {"at": isoformat_site(now)})
     write_json(verify / verify_name(90), {"at": isoformat_site(now - timedelta(days=2))})
     write_json(verify / "last-full.json", {"at": isoformat_site(now - timedelta(days=33))})
     write_json(verify / "last-day.json", {"at": isoformat_site(now)})  # "Doğrula" of one day
@@ -286,6 +287,34 @@ def test_task_states_from_evidence_files(
     assert tasks["Seal"]["state"] == "late"
     assert tasks["VerifyDaily"]["state"] == "ok"
     assert tasks["VerifyWeekly"]["state"] == "late"  # a young chain: --last 90 verified 3 days
+
+    # Retention rewrites the state of each day it deletes (``retention._delete_day``): it is
+    # not Seal's evidence, nor is an old day's state touched by anything else.
+    old = site_day(now) - timedelta(days=800)
+    write_json(
+        layout.seal_state(old),
+        {"day": old.isoformat(), "status": "deleted", "deleted_by": "retention-1.json"},
+    )
+    assert by(get(client)["tasks"], "task")["Seal"]["state"] == "late"
+    layout.seal_state(yesterday).unlink()
+    assert by(get(client)["tasks"], "task")["Seal"]["state"] == "missing"
+
+
+def test_unreadable_evidence_is_no_evidence(
+    client: TestClient, login_as: Login, layout: Layout, api_config: Config
+) -> None:
+    """A file that cannot be read never fails the page (Channel's rule): a credit log that is
+    a folder, a verification result whose number is not ASCII."""
+    layout.credit_log.mkdir(parents=True)
+    verify = layout.state / "verify"
+    write_json(verify / "last-last-\u00b2.json", {"at": isoformat_site(utc_now())})
+    login_as(client, "admin")
+    tasks = by(get(client)["tasks"], "task")
+    assert (tasks["Credit"]["state"], tasks["VerifyWeekly"]["state"]) == ("not_used", "missing")
+    zamane = api_config.model_copy(
+        update={"tsa": api_config.tsa.model_copy(update={"provider": "zamane"})}
+    )
+    assert states(evidence(zamane, utc_now()))["Credit"] == "missing"
 
 
 def evidence(config: Config, now: datetime, **values: Any) -> Evidence:
