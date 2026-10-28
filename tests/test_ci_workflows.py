@@ -109,11 +109,22 @@ def test_every_action_is_pinned_by_its_commit_sha() -> None:
             assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", action), (workflow.name, action)
 
 
+def test_pull_requests_run_the_installer_on_the_same_paths() -> None:
+    """Work branches are tested through their pull request: it runs on the paths a push does."""
+    text = (WORKFLOWS / "installer.yml").read_text(encoding="utf-8")
+    block = re.search(r"(?m)^  pull_request:\n    paths:\n((?:      - .*\n)+)", text)
+    assert block, "installer.yml: no pull_request paths filter"
+    paths = [line.split("- ", 1)[1].strip().strip("'\"") for line in block.group(1).splitlines()]
+    assert paths == _push_paths(WORKFLOWS / "installer.yml")
+
+
 def test_release_job_runs_only_for_tags_and_manual_runs() -> None:
     """A v* tag runs the release job; ordinary branch pushes keep their path filter."""
     workflow = (WORKFLOWS / "installer.yml").read_text(encoding="utf-8")
     trigger = workflow[workflow.index("\non:\n") : workflow.index("\npermissions:")]
-    assert re.search(r"(?m)^    branches:\n      - '\*\*'$", trigger), "branch pushes still run"
+    assert re.search(r"(?m)^    branches:\n      - main\n      - 'wave-\*'$", trigger), (
+        "pushes to main and the integration branches still run"
+    )
     assert re.search(r"(?m)^    tags:\n      - 'v\*'$", trigger)
     assert re.search(r"(?m)^  workflow_dispatch:$", trigger)
     release = _jobs(WORKFLOWS / "installer.yml")["release"]
