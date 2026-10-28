@@ -6137,6 +6137,24 @@ from section 0.2 are recorded here too, with the date and who decided.
   the text stays. Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease`
   (internal, exact and candidate). Fold into 2.8.3.
+- **Interpretations** (readings of the contract where it says nothing explicit; accepted in the
+  manager's final review of PR #30, Q9; no new key, no text change):
+  - **A match is probed at its chain's moment, capped at T** (2.8.3): the D8 probe of a match
+    reads the rows before its chain's moment (the session moment nearest T, at most the
+    tolerance from T), never a row after T, and judges coverage at that moment. Test:
+    `worker/tests/test_lookup_fortigate_only.py::test_a_session_after_the_moment_is_probed_no_later_than_the_moment`.
+  - **A converted row at the same second wins over an `fg_event` line** (2.8.3): when the
+    newest DHCP-shaped row of an address is a converted `fg_dhcp` row and an `fg_event` line at
+    the same second, the converted row is the newest, so nothing is named or cited.
+  - **srcmac refusals are outcome explanations, de-duplicated by key** (2.9): `srcmac_shared`,
+    `srcmac_infrastructure` and `srcmac_other_lease` are explanations of the outcome, not of a
+    chain, and like every outcome explanation each key appears once, so a candidate list names
+    the first refused MAC of each kind only.
+  - **A destination-only empty search measures `fg_traffic`'s sources** (2.7 "A search that
+    found nothing"): a request with a destination and no public IP that found no session ran
+    the same session search as a public-IP request, so the sources of `fg_traffic` are measured
+    for the clock.
+  Fold into 2.7, 2.8.3 and 2.9.
 
 ---
 
