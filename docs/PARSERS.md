@@ -140,8 +140,10 @@ case). Of the documented FortiOS 26xxx messages only 26001 (DHCP ACK) and 26002 
 carry the three together: 26003 statistics, 26007 blocked MAC (a `mac`, no `ip`), 26008–26010
 DDNS (an `ip`, no `mac`) and 26011/26012 DHCPv6 (no `mac`) stay ordinary `fg_event` rows without
 a failure. When the three keys are there but a value does not convert (`ip="n/a"`, `mac=""`), the
-row stays `fg_event` with every field in `extra` and the line is the failure `fortigate.dhcp`,
-whose detail gives only the validity of each value (`ip=valid, mac=empty`), never the value. An
+row stays `fg_event` (its `logid`, `level`, `logdesc` and `msg` columns filled as for any event;
+`ip`, `mac`, `dhcp_msg` and the other DHCP keys kept in `extra` as sent) and the line is the
+failure `fortigate.dhcp`, whose detail gives only the validity of each value (a valid `ip` with
+`mac=""` gives `ip=valid, mac=empty`; `ip="n/a"` gives `ip=invalid`), never the value. An
 IPv6 `ip` with a MAC is an `fg_dhcp` row too (`INET` takes it; the lease timeline ignores it).
 
 The rule uses the shape of the line and constants only, never a setting: ingest runs the shipped

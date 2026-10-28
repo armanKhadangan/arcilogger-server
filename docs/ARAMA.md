@@ -314,8 +314,9 @@ göndermediğini görmenin en kısa yoludur ([DEVICE-SETUP.md](DEVICE-SETUP.md))
   gösterilir (ingest'in son kaydı ayrıntıda farklı olabilir); toplayıcı biçiminde olmayan bir
   satır "biçim dışı" rozetiyle gösterilir. Bir FortiGate DHCP kaydı, Arama'daki gibi `event`
   (FortiGate olayı) türünde gösterilir: Canlı Akış DHCP kaydını başka bir FortiGate olayından
-  ayırmaz; `type:event logid:0100026001` yalnızca DHCP Ack kayıtlarını gösterir
-  (docs/DEVICE-SETUP.md bölüm 2.4 ham satırı karşılaştırmak için bunu kullanır).
+  ayırmaz; `type:event logid:0100026001` FortiGate'in DHCP Ack kayıt kimliğiyle (logid) gelen
+  satırları gösterir (bu kimlikle başka `dhcp_msg` değerleri de gelebilir; sahada doğrulayın;
+  docs/DEVICE-SETUP.md bölüm 2.4 ham satırı karşılaştırmak için bunu kullanır).
 - **Sınırlar:** akış başına saniyede en fazla `live.max_lines_per_second` (100) satır; sunucuda
   aynı anda `live.max_streams_total` (4), kullanıcı başına `live.max_streams_per_user` (2) akış
   (`live_stream_limit`). Gösterilemeyen satırlar sayılır ve nedeniyle bildirilir; 30 saniye
@@ -344,8 +345,9 @@ iyisidir.
 Bu ölçümden sonra veriye günde 4.320 MikroTik olayı (`mt_event`; Q6 artık olay indeksini de
 denetler) eklendi; aşağıdaki sayılar bu ekten önceki veriyle alınmıştır. TimescaleDB'nin
 sayıları tablonun ardındadır; Windows CI işininkiler henüz kaydedilmedi. Veride FortiGate DHCP
-kaydı yoktur (revizyon `0017_fortigate_dhcp`); bu kayıtlar `mac:` ve `ip:` sorgularına küçük
-`fg_dhcp` tablosunun `(mac, time)` ve `(ip, time)` indeksleri üzerinde bir dal ekler.
+kaydı yoktur (revizyon `0017_fortigate_dhcp`); bu kayıtlar, `event` türünü dışlamayan `srcip:`,
+`vlan:`, `department:`, `ip:` ve `mac:` sorgularına küçük `fg_dhcp` tablosunun `(ip, time)` ve
+`(mac, time)` indeksleri üzerinde bir dal ekler (`type:dhcp` sorgularına, Q6, eklemez).
 
 | # | Sorgu | Aralık | Bütçe | İlk çalıştırma | En iyi | Not |
 |---|---|---|---|---|---|---|
