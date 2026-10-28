@@ -13,7 +13,9 @@ lookups would name a former holder with high confidence.
   (the previous version may rebuild any day), is set to ``low`` with **one** ``updated_at``,
   and the status row :data:`ROLLBACK_KEY` records that time and the count. Raw and sealed data
   are not touched; the previous version keeps a stored confidence through all its jobs, so its
-  chains on these leases are ``low``.
+  chains on these leases are ``low``. A step run again before the re-upgrade (a rollback retried
+  after it failed, while this version ran in between) lowers the leases still ``high`` with the
+  time already recorded and adds to the count, so the re-upgrade restores both sets.
 * :func:`restore_after_rollback` (the seed, which ``arcilogger-db upgrade`` runs after alembic):
   the ``fg_dhcp`` leases still ``low`` with exactly that ``updated_at`` are this version's rows
   of the rollback moment (the previous version did not rewrite them): they are ``high`` again,
@@ -54,7 +56,8 @@ STATEMENT_TIMEOUT: Final = "10min"
 
 @dataclass(frozen=True)
 class RollbackReport:
-    """What :func:`prepare_rollback` lowered."""
+    """What :func:`prepare_rollback` lowered: the step's time and the leases it lowered, those of
+    an earlier run of the same step included."""
 
     at: datetime
     count: int
@@ -73,9 +76,11 @@ class RestoreReport:
 
 def prepare_rollback(session: Session, now: datetime | None = None) -> RollbackReport:
     """Lower every FortiGate DHCP lease to ``low`` before a rollback (the caller commits)."""
-    at = require_aware(now or utc_now())
     session.execute(text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
     session.execute(text(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'"))
+    earlier = session.get(Setting, ROLLBACK_KEY, with_for_update=True)
+    recorded = _recorded(earlier)
+    at = recorded[0] if recorded is not None else require_aware(now or utc_now())
     result = session.execute(
         update(Lease)
         .where(Lease.source_table == FORTIGATE_DHCP, Lease.confidence != "low")
@@ -83,6 +88,8 @@ def prepare_rollback(session: Session, now: datetime | None = None) -> RollbackR
         .execution_options(synchronize_session=False)
     )
     count = int(result.rowcount or 0)  # type: ignore[attr-defined]
+    if recorded is not None:
+        count += recorded[1]
     value = {"at": at.isoformat(timespec="microseconds"), "count": count}
     session.execute(
         insert(Setting)
@@ -92,7 +99,23 @@ def prepare_rollback(session: Session, now: datetime | None = None) -> RollbackR
             set_={"value": value, "updated_by": SYSTEM_AUTHOR, "updated_at": func.now()},
         )
     )
+    if earlier is not None:
+        session.expire(earlier)
     return RollbackReport(at=at, count=count)
+
+
+def _recorded(row: Setting | None) -> tuple[datetime, int] | None:
+    """The time and count of a recorded step; ``None`` without one or when its time cannot be
+    read (an aware ISO time, compared exactly)."""
+    value = row.value if row is not None and isinstance(row.value, dict) else {}
+    try:
+        at = datetime.fromisoformat(str(value.get("at")))
+    except ValueError:
+        return None
+    if at.tzinfo is None:
+        return None
+    count = value.get("count")
+    return at, count if isinstance(count, int) and not isinstance(count, bool) else 0
 
 
 def restore_after_rollback(session: Session, now: datetime | None = None) -> RestoreReport | None:
@@ -101,13 +124,10 @@ def restore_after_rollback(session: Session, now: datetime | None = None) -> Res
     row = session.get(Setting, ROLLBACK_KEY)
     if row is None:
         return None
-    value = row.value if isinstance(row.value, dict) else {}
-    try:
-        at = datetime.fromisoformat(str(value.get("at")))
-    except ValueError:
-        at = None
+    recorded = _recorded(row)
+    at = recorded[0] if recorded is not None else None
     restored = 0
-    if at is not None and at.tzinfo is not None:
+    if at is not None:
         result = session.execute(
             update(Lease)
             .where(
@@ -131,9 +151,7 @@ def restore_after_rollback(session: Session, now: datetime | None = None) -> Res
         select(func.max(Lease.lease_seconds)).where(Lease.source_table == FORTIGATE_DHCP)
     )
     today = site_day(now or utc_now())
-    since = (at if at is not None and at.tzinfo is not None else now or utc_now()) - timedelta(
-        seconds=longest or DEFAULT_LEASE_SECONDS
-    )
+    since = (at or now or utc_now()) - timedelta(seconds=longest or DEFAULT_LEASE_SECONDS)
     session.delete(row)
     session.flush()
     return RestoreReport(

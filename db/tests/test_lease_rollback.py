@@ -283,6 +283,29 @@ def test_a_lease_low_from_an_earlier_rollback_is_not_restored(session: Session) 
     assert state[ids["open"]][0] == state[ids["low"]][0] == "low"
 
 
+def test_a_step_run_again_before_the_re_upgrade_keeps_its_time(session: Session) -> None:
+    """A rollback retried after it failed (this version ran in between and opened a lease):
+    the second run lowers the new lease with the recorded time, so the re-upgrade restores
+    both."""
+    ids = _site(session)
+    prepare_rollback(session, AT)
+    session.commit()
+    later = _lease(session, "172.20.42.60", start=AT + timedelta(hours=1), mac=OTHER)
+    session.commit()
+    again = prepare_rollback(session, AT + timedelta(hours=3))
+    session.commit()
+    assert (again.at, again.count) == (AT, 3)
+    row = session.get(Setting, ROLLBACK_KEY)
+    assert row is not None
+    assert row.value == {"at": AT.isoformat(timespec="microseconds"), "count": 3}
+    restore = restore_after_rollback(session, AT + timedelta(days=1))
+    session.commit()
+    assert restore is not None
+    assert (restore.restored, restore.still_low) == (3, 1)
+    state = _state(session)
+    assert state[ids["open"]][0] == state[ids["ended"]][0] == state[later][0] == "high"
+
+
 def test_the_rebuild_range_falls_back_to_the_fortios_default_lease(session: Session) -> None:
     _lease(session, "172.20.42.57")  # no logged lease time
     _lease(session, "172.20.41.20", table="mt_dhcp", lease_seconds=None)
