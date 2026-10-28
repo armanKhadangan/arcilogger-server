@@ -220,9 +220,15 @@ def test_a_mikrotik_report_has_no_fortigate_lease_additions(
 ) -> None:
     build_site(app_session_factory, layout)
     signed_in(client, login_as, app_session_factory)
-    _data, text = _report(client, internal_ip=PC)
+    data, text = _report(client, internal_ip=PC)
+    lease = data["outcome"]["attribution"]["lease"]
+    # an mt_dhcp chain carries its last DHCP evidence too; only an fg_dhcp row prints it
+    assert lease["source_table"] == "mt_dhcp"
+    assert lease["last_dhcp_evidence"] is not None
     assert "MikroTik DHCP kaydı (mt_dhcp #" in text
     assert "kira süresi (FortiGate kaydı)" not in text
+    assert "son DHCP kanıtı" not in text
+    assert "last DHCP evidence" not in text
     assert "kaynak: " not in _lease_row(text)
     assert "sahada doğrula" not in text
     assert "Kira notu / Lease note" not in text
