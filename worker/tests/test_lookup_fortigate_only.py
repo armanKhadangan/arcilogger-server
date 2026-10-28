@@ -1192,6 +1192,36 @@ def test_each_candidate_is_probed_at_its_own_moment(
     assert OTHER not in outcome_text(outcome)
 
 
+def test_a_session_after_the_moment_is_probed_no_later_than_the_moment(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """2.8.3 "No row after T is looked for": the PC's exact session starts 30 s after the
+    requested moment, and another client's ACK for .57 was logged 15 s after the moment. That
+    line is never read (never named, never cited); the PC's own covering line before the
+    moment is the one cited."""
+    evidence.traffic(AT + timedelta(seconds=40), PC, 51001, transip=WAN, duration=10)
+    unconverted_line(evidence, AT + timedelta(seconds=15), PC, OTHER, hostname="MUH-NB03",
+                     lease=WEEK)  # fmt: skip
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    alone = lookup(db_session, public_ip=WAN, public_port=51001, protocol="tcp")
+    assert alone.mode == "exact"
+    (match,) = alone.matches
+    assert match.chain is None
+    assert match.traffic.start == AT + timedelta(seconds=30)
+    assert NOT_CONVERTED not in keys(alone)
+    assert alone.unconverted_dhcp == ()
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    db_session.commit()
+    exact = lookup(db_session, public_ip=WAN, public_port=51001, protocol="tcp")
+    assert outcome_note(exact, NOT_CONVERTED) == {"ips": PC}
+    assert_cited(exact, row, acked, evidence)
+    for text in (outcome_text(alone), outcome_text(exact)):
+        assert OTHER not in text
+        assert "muh-nb03" not in text
+
+
 def test_the_probe_reads_twenty_addresses_at_most(db_session: Session, evidence: Evidence) -> None:
     """One probe per lookup for at most 20 IPs: those of the first 20 chainless matches."""
     clients = [f"172.20.42.{100 + n}" for n in range(21)]

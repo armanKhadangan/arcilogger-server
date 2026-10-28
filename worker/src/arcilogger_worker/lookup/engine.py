@@ -1162,7 +1162,8 @@ class _Lookup:
         ``fg_event`` row of a logid mapped to ``assigned`` that would have covered the moment
         counts (``fortigate_dhcp_not_converted``). In internal mode and for an exact match the
         row is cited (never as an attribution); for a candidate nothing is (KVKK). No row after
-        the moment is read: another client's later ACK says nothing about it."""
+        the requested moment is read, also for a session that began after it: another client's
+        later ACK says nothing about it."""
         targets: dict[str, datetime] = {}
         cited: set[str] = set()
         by_mac = False
@@ -1204,16 +1205,18 @@ class _Lookup:
         self, targets: Mapping[str, datetime], *, by_mac: bool
     ) -> dict[str, _DhcpLine]:
         """Per target key the ``fg_event`` DHCP line of the probe when it is the newest
-        DHCP-shaped row of trusted senders in ``[moment - window, moment]``: one ``DISTINCT ON``
-        query per table (``ix_fg_event_subtype_time``, ``ix_fg_dhcp_ip_time``; round 5's cost
-        note), each key bounded by its own moment. A converted row (``trust.kept``) as new or
-        newer means the timeline saw that event: nothing is said."""
+        DHCP-shaped row of trusted senders in ``[moment - window, min(moment, T)]``: one
+        ``DISTINCT ON`` query per table (``ix_fg_event_subtype_time``, ``ix_fg_dhcp_ip_time``;
+        round 5's cost note), each key bounded by its own moment, and never past the requested
+        moment T (2.8.3: a session that began after T is probed up to T). A converted row
+        (``trust.kept``) as new or newer means the timeline saw that event: nothing is said."""
         # The lease timeline imports this package (its refs), so its rules are imported here.
         from arcilogger_worker.correlation.timeline import TimelineRules
 
         longest = timedelta(seconds=TimelineRules.from_settings(self.settings).longest_window)
         width = max(longest, UNCONVERTED_WINDOW)
-        low, high = min(targets.values()) - width, max(targets.values())
+        until = {key: min(at, self.request.at) for key, at in targets.items()}
+        low, high = min(targets.values()) - width, max(until.values())
         logids = self.settings.fortigate_logids
         released = sorted(logid for logid, meaning in logids.items() if meaning == "deassigned")
         event_key = (
@@ -1242,7 +1245,11 @@ class _Lookup:
                 FgEvent.logid.in_(sorted(logids)),
                 or_(
                     *(
-                        and_(event_key == key, FgEvent.time >= at - width, FgEvent.time <= at)
+                        and_(
+                            event_key == key,
+                            FgEvent.time >= at - width,
+                            FgEvent.time <= until[key],
+                        )
                         for key, at in targets.items()
                     )
                 ),
@@ -1272,7 +1279,7 @@ class _Lookup:
                         and_(
                             dhcp_key == line.key,
                             FgDhcp.time >= targets[line.key] - width,
-                            FgDhcp.time <= targets[line.key],
+                            FgDhcp.time <= until[line.key],
                         )
                         for line in lines
                     )
