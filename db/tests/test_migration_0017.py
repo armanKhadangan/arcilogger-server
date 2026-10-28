@@ -1,10 +1,12 @@
 """Revision ``0017_fortigate_dhcp`` (Wave 3 contract 2.2.1, 3.2): up and down on native
 partitions and on TimescaleDB with a compressed ``fg_traffic`` chunk (``ADD COLUMN srcmac``,
-V13), the storage of ``fg_dhcp`` and its place in the ``db.timescale`` status, the two lease
-checks, the lease index, and the downgrade's deletion of the FortiGate leases."""
+V13), the storage of ``fg_dhcp`` and its place in the ``db.timescale`` status (a refused
+compression of ``fg_dhcp`` included), the two lease checks, the lease index, and the downgrade's
+deletion of the FortiGate leases."""
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -14,13 +16,13 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import Engine, inspect, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import Engine, event, inspect, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.pool import NullPool
 
 from arcilogger_core.timeutil import site_day
 from arcilogger_db.engine import engine_from_url
-from arcilogger_db.migrate import alembic_config, upgrade
+from arcilogger_db.migrate import alembic_config, current_revisions, upgrade
 from arcilogger_db.models import TIME_SERIES_TABLES, Base
 from arcilogger_db.partitions import (
     include_name,
@@ -79,6 +81,22 @@ def _scalar(engine: Engine, sql: str, **params: Any) -> Any:
 def _timescale(engine: Engine) -> bool:
     available = _scalar(engine, "SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'")
     return available is not None
+
+
+def _timescale_baseline(engine: Engine) -> None:
+    """Migrate to ``0016_search`` on TimescaleDB with compression, or skip; on the Linux CI job
+    (``ARCILOGGER_EXPECT_TIMESCALE=1``) fail instead of skipping."""
+    expected = os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
+    if not _timescale(engine):
+        if expected:
+            pytest.fail("TimescaleDB expected but not installed")
+        pytest.skip("TimescaleDB is not installed (the Linux CI job runs this)")
+    upgrade(engine, revision=BEFORE, timescale="require")
+    status = _scalar(engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
+    if not status.get("compression"):
+        if expected:
+            pytest.fail(f"TimescaleDB expected with compression: {status}")
+        pytest.skip(f"no compression in this TimescaleDB edition: {status}")
 
 
 def _settings(engine: Engine) -> dict[str, tuple[Any, str]]:
@@ -307,17 +325,7 @@ def test_up_and_down_on_native_partitions(empty_engine: Engine) -> None:
 def test_up_and_down_on_timescaledb_with_a_compressed_chunk(empty_engine: Engine) -> None:
     """V13: ``ALTER TABLE fg_traffic ADD COLUMN srcmac`` with a compressed chunk in place. On
     the Linux CI job (``ARCILOGGER_EXPECT_TIMESCALE=1``) it fails instead of skipping."""
-    expected = os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1"
-    if not _timescale(empty_engine):
-        if expected:
-            pytest.fail("TimescaleDB expected but not installed")
-        pytest.skip("TimescaleDB is not installed (the Linux CI job runs this)")
-    upgrade(empty_engine, revision=BEFORE, timescale="require")
-    status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
-    if not status.get("compression"):
-        if expected:
-            pytest.fail(f"TimescaleDB expected with compression: {status}")
-        pytest.skip(f"no compression in this TimescaleDB edition: {status}")
+    _timescale_baseline(empty_engine)
     pause_compression_jobs(empty_engine)
     old = _old_data(empty_engine, 30)
     with empty_engine.begin() as connection:
@@ -406,3 +414,73 @@ def test_up_and_down_on_timescaledb_with_a_compressed_chunk(empty_engine: Engine
         "SELECT count(*) FROM timescaledb_information.jobs WHERE hypertable_name = 'fg_dhcp'",
     )
     assert jobs == 1  # the re-upgrade's policy only: the downgrade removed the first one
+
+
+def _refuse_the_policy(
+    _connection: Any, _cursor: Any, statement: str, parameters: Any, *_: Any
+) -> tuple[str, Any]:
+    """``add_compression_policy`` for ``fg_dhcp`` (the second statement of the savepoint) calls
+    a function that does not exist, so the database refuses it as an edition would."""
+    if isinstance(parameters, dict) and parameters.get("table") == TABLE:
+        statement = statement.replace("add_compression_policy", "arci_no_compression_policy")
+    return statement, parameters
+
+
+def _compression_of_fg_dhcp(engine: Engine) -> tuple[bool, int]:
+    """Whether ``fg_dhcp`` is set to compress, and its number of compression policies."""
+    enabled = _scalar(
+        engine,
+        "SELECT compression_enabled FROM timescaledb_information.hypertables "
+        "WHERE hypertable_name = 'fg_dhcp'",
+    )
+    policies = _scalar(
+        engine,
+        "SELECT count(*) FROM timescaledb_information.jobs "
+        "WHERE proc_name = 'policy_compression' AND hypertable_name = 'fg_dhcp'",
+    )
+    return enabled, policies
+
+
+def test_a_refused_compression_of_fg_dhcp_on_timescaledb(empty_engine: Engine) -> None:
+    """The baseline compressed, ``fg_dhcp``'s compression is refused: ``require`` raises and
+    leaves the database at 0016; ``auto`` keeps ``fg_dhcp`` a hypertable without compression
+    and records ``compression_reason`` = ``"fg_dhcp: <reason>"``; the downgrade, and an upgrade
+    that compresses, drop that reason."""
+    _timescale_baseline(empty_engine)
+    before = _settings(empty_engine)
+    old, _ = before["db.timescale"]
+    assert "compression_reason" not in old
+    event.listen(empty_engine, "before_cursor_execute", _refuse_the_policy, retval=True)
+    try:
+        with pytest.raises(DBAPIError, match="arci_no_compression_policy"):
+            upgrade(empty_engine, timescale="require")
+        with empty_engine.connect() as connection:
+            assert current_revisions(connection) == (BEFORE,)
+        assert TABLE not in inspect(empty_engine).get_table_names()
+        assert _settings(empty_engine) == before
+        assert upgrade(empty_engine).after == (REVISION,)  # auto
+    finally:
+        event.remove(empty_engine, "before_cursor_execute", _refuse_the_policy)
+    status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
+    reason = status.pop("compression_reason")
+    assert reason.startswith("fg_dhcp: function arci_no_compression_policy(")
+    assert status.pop("hypertables") == list(TIME_SERIES_TABLES)
+    assert status == {k: v for k, v in old.items() if k != "hypertables"}  # compression: true
+    # the savepoint undid the ALTER TABLE before the refused policy, as the baseline's does
+    assert _compression_of_fg_dhcp(empty_engine) == (False, 0)
+
+    _migrate(empty_engine, BEFORE)
+    assert _settings(empty_engine)["db.timescale"] == before["db.timescale"]  # reason dropped
+
+    # a reason an earlier downgrade left behind: the upgrade that compresses drops it
+    stale = {**old, "compression_reason": "fg_dhcp: an earlier refusal"}
+    with empty_engine.begin() as connection:
+        connection.execute(
+            text("UPDATE settings SET value = CAST(:value AS jsonb) WHERE key = 'db.timescale'"),
+            {"value": json.dumps(stale)},
+        )
+    assert upgrade(empty_engine).after == (REVISION,)
+    status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
+    assert "compression_reason" not in status
+    assert status["hypertables"] == list(TIME_SERIES_TABLES)
+    assert _compression_of_fg_dhcp(empty_engine) == (True, 1)

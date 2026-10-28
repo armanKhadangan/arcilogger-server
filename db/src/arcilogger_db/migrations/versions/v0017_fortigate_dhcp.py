@@ -13,9 +13,11 @@ ADR-0016 (FortiGate DHCP as lease evidence; Wave 3 contract 2.2.1):
   The storage is the one the baseline chose: when ``messages`` is a hypertable, ``fg_dhcp``
   becomes one too (the baseline's 1-day chunks; compression ``segmentby source``, ``orderby
   time DESC, id DESC`` with the 7-day policy where the baseline could compress, inside a
-  savepoint like the baseline's); otherwise it is ``PARTITION BY RANGE (time)`` with
-  ``fg_dhcp_default``, and its monthly partitions come from ``arcilogger_db.partitions``
-  (``TIME_SERIES_MODELS``, run by ``arcilogger-db upgrade`` right after the migration).
+  savepoint like the baseline's; a refusal is recorded as ``compression_reason`` =
+  ``"fg_dhcp: <reason>"``, or raised in ``require`` mode); otherwise it is ``PARTITION BY RANGE
+  (time)`` with ``fg_dhcp_default``, and its monthly partitions come from
+  ``arcilogger_db.partitions`` (``TIME_SERIES_MODELS``, run by ``arcilogger-db upgrade`` right
+  after the migration).
   ``fg_dhcp`` is appended to the ``db.timescale`` status (``hypertables`` or ``partitioned``),
   the only settings row this revision writes.
 * ``fg_traffic.srcmac`` (``MACADDR``, nullable, no default, no index): the session record's
@@ -32,8 +34,9 @@ FortiGate DHCP lines loaded before this revision stay ``fg_event`` rows; they ar
 (D8), and every existing row keeps its values (``srcmac`` and ``lease_seconds`` are NULL).
 
 The downgrade deletes the ``fg_dhcp`` leases first (derived rows the previous code cannot read),
-then drops everything above and removes ``fg_dhcp`` from the ``db.timescale`` status. The rows of
-``fg_dhcp`` are lost; their raw lines stay in the spool and the vault.
+then drops everything above and removes ``fg_dhcp`` from the ``db.timescale`` status (its lists
+and its compression refusal). The rows of ``fg_dhcp`` are lost; their raw lines stay in the spool
+and the vault.
 """
 
 from __future__ import annotations
@@ -139,6 +142,7 @@ def downgrade() -> None:
     for key in ("hypertables", "partitioned"):
         if TABLE in status.get(key, ()):
             status[key] = [table for table in status[key] if table != TABLE]
+    _forget_refusal(status)
     _record(bind, status)
 
 
@@ -209,6 +213,14 @@ def _hypertable(bind: sa.Connection, status: dict[str, Any]) -> None:
         if context.config.attributes.get("timescale", "auto") == "require":
             raise
         status["compression_reason"] = f"{TABLE}: {_short(exc)}"
+        return
+    _forget_refusal(status)  # an earlier refusal no longer holds
+
+
+def _forget_refusal(status: dict[str, Any]) -> None:
+    """Drop this revision's ``compression_reason`` (the baseline's own reason stays)."""
+    if str(status.get("compression_reason", "")).startswith(f"{TABLE}:"):
+        del status["compression_reason"]
 
 
 def _status(bind: sa.Connection) -> dict[str, Any]:
