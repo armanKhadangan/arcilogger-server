@@ -73,6 +73,8 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
   with `--check`. Never edit generated files by hand.
 - Web: `cd web && npm run check`, and the affected Playwright specs
   (`cd web && CI=1 npx playwright test <specs> --workers=2`).
+- CI runs on pull requests (and on `wave-*` and `main`), not on pushes to your work branch: open
+  the pull request as a draft early if you want CI before you are done.
 - Never skip, xfail, quarantine or weaken a test to get green. CI must be green on the pull request
   before review.
 
