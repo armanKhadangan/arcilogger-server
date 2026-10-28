@@ -287,6 +287,17 @@ def _interfaces(searched: EgressSearched, clause: tuple[str, str]) -> tuple[str,
     return _pair(clause, interfaces=", ".join(searched.interfaces))
 
 
+def _interfaces_dropped(outcome: LookupOutcome, entry: EgressEntry) -> bool:
+    """The exit's part of the search had no interface condition: it declares no interfaces, or
+    the engine dropped them (``egress_interface_not_seen`` names it; not the ``_kept`` note)."""
+    if not entry.interfaces:
+        return True
+    return any(
+        item.key == "egress_interface_not_seen" and item.params.get("egress") == entry.name
+        for item in outcome.explanations
+    )
+
+
 def _exit_key(
     exits: Sequence[EgressEntry], signature: tuple[str | None, str | None], *, unstored: bool
 ) -> str | tuple[str, str | None]:
@@ -429,7 +440,13 @@ def method_paragraphs(outcome: LookupOutcome) -> tuple[list[tuple[str, str]], se
             text, address=address, exits=_exit_names(egress.egresses)
         )
         if egress.searched.unclaimed:
-            clause_tr, clause_en = _interfaces(egress.searched, texts.METHOD_SEARCHED_INTERFACES)
+            # ``interface_filter`` holds when any exit's part kept one: the clause only when
+            # none of the exits searched lost it (a catch-all without interfaces searched all)
+            clause_tr, clause_en = (
+                ("", "")
+                if any(_interfaces_dropped(outcome, e) for e in egress.egresses)
+                else _interfaces(egress.searched, texts.METHOD_SEARCHED_INTERFACES)
+            )
             found_tr, found_en = _searched(egress.searched)
             paragraph_tr += " " + texts.METHOD_SEARCHED[0].format(
                 searched=found_tr, interfaces=clause_tr
