@@ -70,7 +70,13 @@ up for the address (at most 20; the MAC of a MAC-only request): a covering ACK t
 after a rollback) is named (``fortigate_dhcp_not_converted``) and, in internal mode and for an
 exact match, cited in ``unconverted_dhcp``, never as an attribution (ADR-0016 D8). A match with
 rows of an unconfigured sender is marked (``NatMatch.untrusted_sources``,
-``session_from_unknown_source``; D24). Both functions
+``session_from_unknown_source``; D24). **srcmac** (D10, contract 2.9; off while
+``lookup.srcmac_interfaces`` is empty): the srcmac of a session record on a listed interface and
+from a trusted sender, whose MAC passes the router guard (no infrastructure MAC, at most
+``lookup.srcmac_max_ips`` IPv4 addresses within an hour of the moment, no lease of another
+address there), gives a match without a lease, and an internal lookup without one, a ``low``
+chain by that MAC (``srcmac_only``); beside a lease it agrees or makes the ``low`` conflict of
+D10. It is never lease evidence and is never written anywhere. Both functions
 only read (JIT compilation is switched off for the caller's transaction, ``SET LOCAL``); the API
 stores the lookup and writes the audit entry.
 """
@@ -118,9 +124,12 @@ from arcilogger_worker.correlation.watermark import get_watermark
 from arcilogger_worker.lookup.attribution import (
     UNCONVERTED_WINDOW,
     Attributor,
+    Srcmac,
+    StoredLease,
     event_kept,
     usable_lease,
 )
+from arcilogger_worker.lookup.refs import traffic_ref
 from arcilogger_worker.lookup.sessions import (
     CANDIDATE_MAX_SCORE,
     PORT_HINT_POINTS,
@@ -132,11 +141,18 @@ from arcilogger_worker.lookup.sessions import (
     fetch_rows,
     find_domain,
     group_sessions,
+    srcmac_rows_of_mac,
+    srcmac_sightings,
     time_points,
     within,
 )
 from arcilogger_worker.lookup.texts import exit_changes, explain
-from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, kept, untrusted_sources
+from arcilogger_worker.lookup.trust import (
+    UNKNOWN_PREFIX,
+    kept,
+    srcmac_ip_counts,
+    untrusted_sources,
+)
 from arcilogger_worker.lookup.types import (
     AttributionChain,
     DataWindow,
@@ -185,6 +201,13 @@ _DESTINATION_ORDER = {
 _UNCLAIMED_RESOLUTIONS = frozenset({"public_unknown", "no_egress", "unconfigured"})
 #: The D8 probe (2.8.3) looks at the IPs of this many chainless matches of one lookup at most.
 PROBE_IPS = 20
+#: The router guard of srcmac counts the addresses of a MAC this far around the moment and
+#: looks for its leases on other addresses there (2.9, D10).
+SRCMAC_GUARD = timedelta(hours=1)
+#: Rows an internal lookup without a lease reads for the srcmac of an address or a MAC (2.9).
+SRCMAC_ROWS = 50
+#: srcmac values ``srcmac_ambiguous`` names.
+SRCMAC_NAMED = 3
 #: How the D8 probe cites a FortiGate DHCP record that never entered the lease timeline.
 UNCONVERTED_SUMMARY = (
     "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
@@ -522,6 +545,86 @@ def own_networks(egress: Egress, exits: Sequence[Egress]) -> tuple[IPv4Network, 
     return tuple(dict.fromkeys(found))
 
 
+# -- srcmac (2.9, D10) ----------------------------------------------------------------------------
+
+
+def _nearest_first(at: datetime) -> Any:
+    return lambda row: (abs((row.time - at).total_seconds()), row.time, row.id)
+
+
+class _SrcmacGuard:
+    """When a session record's srcmac may name a MAC in a lookup (2.9, D10), the rows being of a
+    listed interface and a trusted sender already: the MAC is no infrastructure MAC
+    (``srcmac_infrastructure``), shows at most ``lookup.srcmac_max_ips`` IPv4 addresses on that
+    interface within an hour of the moment (``srcmac_shared``; one
+    :func:`.trust.srcmac_ip_counts` query per lookup, the one the alert and the observed
+    endpoint count with), and holds no lease of another address there
+    (``srcmac_other_lease``). A refusal adds its explanation to ``notes``."""
+
+    def __init__(
+        self,
+        session: Session,
+        settings: LookupSettings,
+        attributor: Attributor,
+        at: datetime,
+        untrusted: frozenset[str],
+        notes: list[Explanation],
+    ) -> None:
+        self.session = session
+        self.settings = settings
+        self.attributor = attributor
+        self.at = at
+        self.low, self.high = at - SRCMAC_GUARD, at + SRCMAC_GUARD
+        self.untrusted = untrusted
+        self.notes = notes
+        self._counts: dict[tuple[str, str], int] = {}
+        self._leases: dict[str, list[StoredLease]] = {}
+        self._decided: dict[tuple[str, str, str], bool] = {}
+
+    def load(self, macs: set[str]) -> None:
+        """Read what the guard needs for every MAC the lookup considers, once."""
+        if not macs:
+            return
+        interfaces = self.settings.srcmac_interfaces
+        self._counts = srcmac_ip_counts(
+            self.session, self.low, self.high, interfaces, self.untrusted, macs
+        )
+        self._leases = self.attributor.leases_of_macs(macs, self.low, self.high)
+        self.attributor.prefetch_devices(macs)
+
+    def usable(self, row: TrafficRow) -> Srcmac | None:
+        """The srcmac of ``row`` (a listed interface, a trusted sender) when it may be used."""
+        mac, interface = str(row.srcmac), str(row.srcintf)
+        key = (mac, interface, row.srcip)
+        if key not in self._decided:
+            self._decided[key] = self._allowed(mac, interface, row.srcip)
+        return (mac, traffic_ref(row), interface) if self._decided[key] else None
+
+    def _allowed(self, mac: str, interface: str, ip: str) -> bool:
+        at = self.at.isoformat()
+        if self.attributor.is_infrastructure(mac):
+            self.notes.append(explain("srcmac_infrastructure", mac=mac))
+            return False
+        count = self._counts.get((interface, mac), 0)
+        if count > self.settings.srcmac_max_ips:
+            self.notes.append(explain("srcmac_shared", mac=mac, at=at, count=count))
+            return False
+        other = next(
+            (
+                lease
+                for lease in self._leases.get(mac, ())
+                if lease.ip != ip
+                and lease.start <= self.high
+                and self.attributor.covered_until(lease) >= self.low
+            ),
+            None,
+        )
+        if other is not None:
+            self.notes.append(explain("srcmac_other_lease", mac=mac, at=at, other_ip=other.ip))
+            return False
+        return True
+
+
 # -- the resolution and its search ----------------------------------------------------------------
 
 
@@ -609,6 +712,7 @@ class _Lookup:
         self.status = StatusRows()
         self._exits: tuple[Egress, ...] | None = None
         self._probe: _Probe | None = None
+        self._srcmac: _SrcmacGuard | None = None
         self._untrusted: frozenset[str] | None = None
         #: What an internal lookup could not build a chain for: ``("ip", address, at)``, or
         #: ``("mac", mac, at)`` for a MAC-only request (the D8 probe, 2.8.3).
@@ -731,6 +835,19 @@ class _Lookup:
                 self.untrusted,
             )
         return self._probe
+
+    @property
+    def srcmac(self) -> _SrcmacGuard:
+        if self._srcmac is None:
+            self._srcmac = _SrcmacGuard(
+                self.session,
+                self.settings,
+                self.attributor,
+                self.request.at,
+                self.untrusted,
+                self.explanations,
+            )
+        return self._srcmac
 
     def _no_direct_exit(self) -> bool:
         """``double_nat`` of a request without a public IP: no line on which the FortiGate holds
@@ -1127,7 +1244,7 @@ class _Lookup:
             if not leases:
                 self.explanations.append(explain("no_lease_for_mac", mac=mac, at=at.isoformat()))
                 self._unbuilt = ("mac", mac, at)
-                return None
+                return self._srcmac_of_mac(mac)
             ips = sorted({lease.ip for lease in leases})
             if len(ips) > 1:
                 self.explanations.append(explain("mac_multiple_ips", mac=mac, ips=", ".join(ips)))
@@ -1148,14 +1265,92 @@ class _Lookup:
                 )
             )
             self._unbuilt = ("ip", ip, at)
-            return None
+            chain = self._srcmac_of_ip(ip)
+            if chain is None:
+                return None
         if mac is not None and request.internal_ip is not None:
-            macs = {chain.lease.mac if chain.lease else None} | {
-                a.lease.mac for a in chain.alternatives if a.lease is not None
-            }
+            macs = {c.device.mac for c in (chain, *chain.alternatives) if c.device is not None}
             if mac not in macs:
                 self.explanations.append(explain("mac_not_at_ip", mac=mac, ip=ip))
         return chain
+
+    def _srcmac_of_ip(self, ip: str) -> AttributionChain | None:
+        """An internal lookup of ``ip`` without a lease (2.9): the srcmac of the address's
+        sessions overlapping the window on listed interfaces. One usable MAC gives the srcmac
+        chain (the outcome keeps ``no_lease``); several give ``srcmac_ambiguous`` and no
+        chain."""
+        interfaces = self.settings.srcmac_interfaces
+        if not interfaces:
+            return None
+        rows = srcmac_sightings(
+            self.session,
+            srcips={ip},
+            window=self.window,
+            interfaces=interfaces,
+            untrusted=self.untrusted,
+            limit=SRCMAC_ROWS,
+        )
+        self.srcmac.load({str(row.srcmac) for row in rows})
+        usable = self._usable_rows(rows, key=lambda row: str(row.srcmac))
+        if len(usable) > 1:
+            self.explanations.append(
+                explain(
+                    "srcmac_ambiguous",
+                    ip=ip,
+                    seconds=self.tolerance,
+                    count=len(usable),
+                    macs=", ".join(list(usable)[:SRCMAC_NAMED]),
+                )
+            )
+            return None
+        if not usable:
+            return None
+        ((srcmac, _row),) = usable.values()
+        return self.attributor.srcmac_chain(ip, self.request.at, *srcmac)
+
+    def _srcmac_of_mac(self, mac: str) -> AttributionChain | None:
+        """A MAC-only internal lookup without a lease (2.9): the rows whose srcmac is ``mac``
+        within the tolerance of the moment on listed interfaces. One address gives the srcmac
+        chain (the outcome keeps ``no_lease_for_mac``); several give ``mac_multiple_ips`` and
+        no chain."""
+        interfaces = self.settings.srcmac_interfaces
+        if not interfaces:
+            return None
+        rows = srcmac_rows_of_mac(
+            self.session,
+            mac=mac,
+            low=self.window.low,
+            high=self.window.high,
+            interfaces=interfaces,
+            untrusted=self.untrusted,
+            limit=SRCMAC_ROWS,
+        )
+        self.srcmac.load({mac})
+        usable = self._usable_rows(rows, key=lambda row: row.srcip)
+        if len(usable) > 1:
+            ips = ", ".join(sorted(usable, key=_ip_order))
+            self.explanations.append(explain("mac_multiple_ips", mac=mac, ips=ips))
+            return None
+        if not usable:
+            return None
+        ((ip, (srcmac, _row)),) = usable.items()
+        return self.attributor.srcmac_chain(ip, self.request.at, *srcmac)
+
+    def _usable_rows(
+        self, rows: Sequence[TrafficRow], *, key: Any
+    ) -> dict[str, tuple[Srcmac, TrafficRow]]:
+        """Per ``key`` (the MAC or the address), in the order first seen, the usable srcmac of
+        its row nearest to the moment."""
+        nearest = _nearest_first(self.request.at)
+        found: dict[str, tuple[Srcmac, TrafficRow]] = {}
+        for row in rows:
+            usable = self.srcmac.usable(row)
+            if usable is None:
+                continue
+            known = found.get(key(row))
+            if known is None or nearest(row) < nearest(known[1]):
+                found[key(row)] = (usable, row)
+        return found
 
     # -- FortiGate DHCP rows that did not become lease evidence (D8 probe) -------------------------
 
@@ -1684,11 +1879,13 @@ class _Lookup:
             self.explanations.append(explain("truncated", total=total, shown=min(total, limit)))
         shown = scored[:limit]
         self.attributor.prefetch((g.first.srcip, g.moment(at)) for g, _, _ in shown)
+        srcmacs = self._session_srcmacs([group for group, _, _ in shown])
+        interfaces = self.settings.srcmac_interfaces
         matches = []
         changed: list[str] = []
         changed_count = 0
         later: set[str] = set()
-        for group, match, score in shown:
+        for (group, match, score), srcmac in zip(shown, srcmacs, strict=True):
             egress = self._exit_of(group.nearest(at))
             exits = list(dict.fromkeys(self._exit_of(row) for row in group.rows))
             if len(exits) > 1:
@@ -1702,8 +1899,8 @@ class _Lookup:
                     score=score,
                     time_distance_ms=group.distance_ms(at),
                     destination_match=match,
-                    traffic=group.traffic(at),
-                    chain=self.attributor.chain(group.first.srcip, group.moment(at)),
+                    traffic=group.traffic(at, interfaces, self.untrusted),
+                    chain=self.attributor.chain(group.first.srcip, group.moment(at), srcmac=srcmac),
                     egress=egress,
                     untrusted_sources=tuple(sorted(sources & self.untrusted)),
                 )
@@ -1714,6 +1911,22 @@ class _Lookup:
             )
         self._sender_notes(matches, later)
         return matches
+
+    def _session_srcmacs(self, groups: Sequence[SessionGroup]) -> list[Srcmac | None]:
+        """Per session, the srcmac of its row nearest to the moment that carries a usable one
+        (2.9): a listed interface, a trusted sender and the guard; ``None`` while
+        ``lookup.srcmac_interfaces`` is empty (off)."""
+        interfaces = self.settings.srcmac_interfaces
+        if not interfaces:
+            return [None] * len(groups)
+        at = self.request.at
+        rows = [group.srcmac_rows(at, interfaces, self.untrusted) for group in groups]
+        self.srcmac.load({str(row.srcmac) for found in rows for row in found})
+        used: list[Srcmac | None] = []
+        for found in rows:
+            usable = (self.srcmac.usable(row) for row in found)
+            used.append(next((srcmac for srcmac in usable if srcmac is not None), None))
+        return used
 
     def _sender_notes(self, matches: Sequence[NatMatch], later: set[str]) -> None:
         """D24: the session search keeps every sender, so a match with rows of an unconfigured
