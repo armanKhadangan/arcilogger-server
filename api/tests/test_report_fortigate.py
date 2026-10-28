@@ -442,6 +442,12 @@ def test_unconverted_dhcp_is_cited_in_internal_mode_only(
         "kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez / not in the "
         "lease timeline; no chain built; no confidence given" in section_6
     )
+    # its summary row: the fixed label in both languages, not the Turkish-only stored summary
+    assert (
+        "Özet / Summary FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, "
+        "güven düzeyi verilmez) / FortiGate DHCP record (not in the lease timeline; no chain "
+        "built; no confidence given)" in section_6
+    )
     for hidden in (other_mac, other_mac.upper(), "PLN-NB7A"):
         assert hidden not in text
 

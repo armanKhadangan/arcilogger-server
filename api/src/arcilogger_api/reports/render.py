@@ -1196,12 +1196,16 @@ class _Builder:
         table = texts.TABLES.get(item["table"], item["table"])
         if item["table"] in texts.TABLES_EN:
             table += f" / {texts.TABLES_EN[item['table']]}"
+        unconverted = item["key"] in self.unconverted  # never to be read as an attribution (D8)
+        summary = _dash(item.get("summary"))
+        if unconverted:  # its fixed label in both languages, not the stored Turkish summary
+            summary = " / ".join(texts.UNCONVERTED_SUMMARY)
         rows: list[tuple[str, Any]] = [
             ("Kayıt / Record", _x(f"{table} ({item['table']} #{_dash(item.get('row_id'))})")),
             ("Zaman / Time", _x(_time(item.get("time")))),
-            ("Özet / Summary", _x(_dash(item.get("summary")))),
+            ("Özet / Summary", _x(summary)),
         ]
-        if item["key"] in self.unconverted:  # never to be read as an attribution (D8)
+        if unconverted:
             mark_tr, mark_en = texts.UNCONVERTED_MARK
             rows.append(("Not / Note", self.p(_x(f"{mark_tr} / {mark_en}"), "warn")))
         if raw is not None:

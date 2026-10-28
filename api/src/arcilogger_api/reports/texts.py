@@ -463,6 +463,11 @@ UNCONVERTED_MARK: Final = (
     "kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez",
     "not in the lease timeline; no chain built; no confidence given",
 )
+#: Its summary row in both languages, instead of the Turkish-only stored ``EvidenceRef.summary``.
+UNCONVERTED_SUMMARY: Final = (
+    f"FortiGate DHCP kaydı ({UNCONVERTED_MARK[0]})",
+    f"FortiGate DHCP record ({UNCONVERTED_MARK[1]})",
+)
 SCORE_TR: Final = (
     "Aday puanı (0-95; kesin eşleşmeler 100): zaman 0-40 (an oturum aralığının içindeyse 40, "
     "toleransın sonuna doğru doğrusal olarak 0), hedef 0-50 (istenen IP ve port 50, alan adı "
