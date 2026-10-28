@@ -518,14 +518,15 @@ class Attributor:
         self, macs: Collection[str], low: datetime, high: datetime
     ) -> dict[str, list[StoredLease]]:
         """Per MAC of ``macs``, its leases that overlap ``[low, high]``, oldest first (one
-        query; the srcmac guard of a lookup reads every MAC it considers at once)."""
+        query; the srcmac guard of a lookup reads every MAC it considers at once). A lease
+        ending at ``low`` is one, as the guard's rule on :meth:`covered_until` counts it."""
         found: dict[str, list[StoredLease]] = defaultdict(list)
         if not macs:
             return found
         query = select(Lease).where(
             Lease.mac.in_(sorted(macs)),
             Lease.start <= high,
-            or_(Lease.end.is_(None), Lease.end > low),
+            or_(Lease.end.is_(None), Lease.end >= low),
         )
         for row in self.session.scalars(query.order_by(Lease.start, Lease.id)):
             found[row.mac].append(StoredLease.from_row(row))

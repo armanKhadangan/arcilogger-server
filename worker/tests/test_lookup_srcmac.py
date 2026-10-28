@@ -328,6 +328,38 @@ def test_a_mac_with_a_lease_of_another_address_is_not_used(
     }
 
 
+@pytest.mark.parametrize(
+    ("released", "refused"),
+    [
+        pytest.param(timedelta(hours=1), True, id="at-the-window-start"),
+        pytest.param(timedelta(hours=1, seconds=1), False, id="a-second-before"),
+    ],
+)
+def test_a_lease_of_another_address_ending_at_the_window_start(
+    db_session: Session, evidence: Evidence, selin: int, released: timedelta, refused: bool
+) -> None:
+    """The boundary of the other-lease check: the router's lease of .10, released exactly at
+    T - 1 h, still touches the window and refuses its srcmac; released a second earlier, it does
+    not (the read of the leases and the rule on them agree)."""
+    evidence.fortigate_dhcp(AT - timedelta(hours=3), ROUTER_IP, ROUTER_MAC)
+    evidence.fortigate_dhcp(AT - released, ROUTER_IP, ROUTER_MAC, logid="0100026002",
+                            dhcp_msg="Release")  # fmt: skip
+    session_of(evidence, mac=ROUTER_MAC)
+    build(db_session, DAY, DAY)
+    ends = db_session.scalars(select(Lease.end).where(Lease.mac == ROUTER_MAC)).all()
+    assert ends == [AT - released]
+    listed(db_session, ["vlan42"])
+    outcome = internal(db_session)
+    if refused:
+        assert outcome.attribution is None
+        assert note(outcome, "srcmac_other_lease")["other_ip"] == ROUTER_IP
+    else:
+        assert "srcmac_other_lease" not in keys(outcome)
+        chain = outcome.attribution
+        assert chain is not None
+        assert (chain.mac_source, chain.device and chain.device.mac) == ("srcmac", ROUTER_MAC)
+
+
 @pytest.mark.parametrize("marked", ["setting", "device"])
 def test_an_infrastructure_mac_is_not_used(
     db_session: Session, evidence: Evidence, selin: int, marked: str
