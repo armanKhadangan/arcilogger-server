@@ -71,7 +71,7 @@ from sqlalchemy import (
     or_,
     select,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET
+from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET, distinct_on
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import ClauseElement, ColumnElement, Executable
@@ -507,6 +507,32 @@ def _srcmac_filters(
     return clauses
 
 
+def _nearest_srcmac_rows(
+    session: Session, filters: Sequence[ColumnElement[bool]], at: datetime, limit: int
+) -> list[TrafficRow]:
+    """The rows of ``filters`` reduced to the nearest one to ``at`` (by row time) of each
+    ``(srcintf, srcmac, srcip)``, at most ``limit`` of them, nearest first, returned oldest
+    first. The router guard decides per ``(srcintf, srcmac, srcip)`` and a lookup uses the
+    nearest usable row of a key (``engine._usable_rows``), so no other row changes an answer;
+    a limit on the window's oldest rows instead would cut a second MAC or address logged later
+    (``srcmac_ambiguous`` / ``mac_multiple_ips`` would become one srcmac chain)."""
+    distance = func.greatest(FgTraffic.time - at, at - FgTraffic.time).label("distance")
+    nearest = (
+        select(*_COLUMNS, distance)
+        .where(*filters)
+        .ext(distinct_on(FgTraffic.srcintf, FgTraffic.srcmac, FgTraffic.srcip))
+        .order_by(FgTraffic.srcintf, FgTraffic.srcmac, FgTraffic.srcip, distance, FgTraffic.id)
+        .subquery()
+    )
+    query = (
+        select(*(nearest.c[column.key] for column in _COLUMNS))
+        .order_by(nearest.c.distance, nearest.c.time, nearest.c.id)
+        .limit(limit)
+    )
+    rows = [TrafficRow(**row._asdict()) for row in session.execute(query)]
+    return sorted(rows, key=lambda row: (row.time, row.id))
+
+
 def srcmac_sightings(
     session: Session,
     *,
@@ -517,31 +543,28 @@ def srcmac_sightings(
     limit: int = 50,
 ) -> list[TrafficRow]:
     """The rows of ``srcips`` with a srcmac on a listed interface whose session overlaps the
-    window, trusted senders only, oldest first (an internal lookup without a lease, 2.9;
-    ``ix_fg_traffic_srcip_time``). Only the typed ``srcmac`` column is read: a row loaded before
-    the upgrade keeps its srcmac in ``extra`` only, and the router guard
-    (:func:`.trust.srcmac_ip_counts`) cannot count it either."""
+    window, trusted senders only: the nearest row to the moment of each srcmac (and interface),
+    oldest first (an internal lookup without a lease, 2.9; ``ix_fg_traffic_srcip_time``). Only
+    the typed ``srcmac`` column is read: a row loaded before the upgrade keeps its srcmac in
+    ``extra`` only, and the router guard (:func:`.trust.srcmac_ip_counts`) cannot count it
+    either."""
     if not srcips or not interfaces:
         return []
-    query = (
-        select(*_COLUMNS)
-        .where(
-            FgTraffic.srcip == _inet_any(srcips),
-            FgTraffic.time >= window.low,
-            FgTraffic.time <= window.scan_end,
-            _session_start() <= window.high,
-            *_srcmac_filters(interfaces, untrusted),
-        )
-        .order_by(FgTraffic.time, FgTraffic.id)
-        .limit(limit)
-    )
-    return [TrafficRow(**row._asdict()) for row in session.execute(query)]
+    filters = [
+        FgTraffic.srcip == _inet_any(srcips),
+        FgTraffic.time >= window.low,
+        FgTraffic.time <= window.scan_end,
+        _session_start() <= window.high,
+        *_srcmac_filters(interfaces, untrusted),
+    ]
+    return _nearest_srcmac_rows(session, filters, window.at, limit)
 
 
 def srcmac_rows_of_mac(
     session: Session,
     *,
     mac: str,
+    at: datetime,
     low: datetime,
     high: datetime,
     interfaces: Collection[str],
@@ -549,22 +572,18 @@ def srcmac_rows_of_mac(
     limit: int = 50,
 ) -> list[TrafficRow]:
     """The rows whose srcmac is ``mac`` on a listed interface within ``[low, high]`` by row
-    time, trusted senders only, oldest first (a MAC-only internal lookup without a lease,
-    2.9): a primary-key time range, as the srcmac column has no index (D10)."""
+    time, trusted senders only: the nearest row to ``at`` of each address (and interface),
+    oldest first (a MAC-only internal lookup without a lease, 2.9): a primary-key time range,
+    as the srcmac column has no index (D10)."""
     if not interfaces:
         return []
-    query = (
-        select(*_COLUMNS)
-        .where(
-            FgTraffic.time >= low,
-            FgTraffic.time <= high,
-            FgTraffic.srcmac == mac,
-            *_srcmac_filters(interfaces, untrusted),
-        )
-        .order_by(FgTraffic.time, FgTraffic.id)
-        .limit(limit)
-    )
-    return [TrafficRow(**row._asdict()) for row in session.execute(query)]
+    filters = [
+        FgTraffic.time >= low,
+        FgTraffic.time <= high,
+        FgTraffic.srcmac == mac,
+        *_srcmac_filters(interfaces, untrusted),
+    ]
+    return _nearest_srcmac_rows(session, filters, at, limit)
 
 
 def srcmac_addresses_within(
