@@ -76,12 +76,13 @@ from collections import defaultdict
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Final
+from typing import Any, Final
 
 from sqlalchemy import (
     Boolean,
     ColumnElement,
     and_,
+    any_,
     case,
     cast,
     false,
@@ -186,6 +187,14 @@ def event_kept(settings: LookupSettings) -> ColumnElement[bool]:
         unexpected = message.is_not(None) & func.lower(message).not_in(allowed)
         clauses.append(not_((FgEvent.logid == logid) & unexpected))
     return and_(true(), *clauses)
+
+
+def _selected(addresses: Sequence[str]) -> ColumnElement[Any]:
+    """``ARRAY(SELECT unnest(:addresses))``: a list of addresses the planner does not estimate
+    per partition or chunk, as it does a constant ``IN``/``= ANY`` list, and which an index scan
+    uses like a constant one (see :meth:`Attributor._missed_moves`)."""
+    listed = select(func.unnest(cast(list(addresses), ARRAY(INET)))).scalar_subquery()
+    return func.array(listed, type_=ARRAY(INET))
 
 
 @dataclass(frozen=True)
@@ -998,6 +1007,13 @@ class Attributor:
           the build supersedes every open lease of an address at such an ACK, so it is one the
           build refused and today's settings accept (a sender or HA member configured later,
           D24; a logid mapped later), and a healthy timeline never returns one.
+
+        The addresses are ``ARRAY(SELECT unnest(...))``, not a constant list: a constant list
+        is estimated per partition when planning (on TimescaleDB per one-day chunk, 100 of them
+        in the window: about 0.3 ms each for 100 addresses), and the planner then reads this
+        branch, which a healthy site answers with no row, on its index. The MAC branch keeps
+        its constant list, which tests each row by a hash: it reads every row of the MACs, and
+        in the same form it was slower on monthly partitions (3.8, measured with daily ones).
         """
         targets = self._targets(groups, MISSED_MOVE_WINDOW)
         assigned = sorted(
@@ -1064,7 +1080,10 @@ class Attributor:
                     or_(windows.c.any_mac, FgDhcp.mac != windows.c.mac),
                 ),
             )
-            .where(FgDhcp.ip.in_(sorted({chain.internal_ip for _, chain, _, _ in targets})), inside)
+            .where(
+                FgDhcp.ip == any_(_selected(sorted({c.internal_ip for _, c, _, _ in targets}))),
+                inside,
+            )
         )
         rows = self.session.execute(union_all(moves, held)).all()
         if not rows:
@@ -1116,7 +1135,7 @@ class Attributor:
         refuse (an IPv6 zone id), which would end the lookup's transaction."""
         wanted = set()
         for address in addresses:
-            if address is None or address in self._subnets:
+            if address is None or address in self._subnets or address in wanted:
                 continue
             try:
                 ipaddress.IPv4Address(address)

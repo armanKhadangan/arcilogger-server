@@ -1130,7 +1130,9 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     ``ix_fg_dhcp_mac_time`` over the 100-day cap (no fallback), at the load generator's
     FortiGate DHCP rate over 400 days (the chains' MACs on the staff Wi-Fi: read, every chain's
     rows returned, and no move under D33's key), with its branch for the chains' addresses on
-    ``ix_fg_dhcp_ip_time`` (deviation c2) in the same statement, under 0.2 s."""
+    ``ix_fg_dhcp_ip_time`` (deviation c2) in the same statement, under 0.2 s. The addresses are
+    no planning constant (``ARRAY(SELECT unnest(…))``): on TimescaleDB the 100 days are 100
+    one-day chunks, each planned with the statement's lists."""
     moves: list[_Timed] = []
 
     def measure() -> None:
@@ -1151,6 +1153,8 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     assert len(timed.calls) == 1
     sql, parameters = executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
     executed.stop()
+    assert sql.count("JOIN fg_dhcp") == 2
+    assert "fg_dhcp.ip = ANY (array((SELECT unnest(" in sql
     moments = _moments(parameters)
     assert min(moments) == MT_AT - attribution.MISSED_MOVE_WINDOW
     with event_site.connect() as connection:
