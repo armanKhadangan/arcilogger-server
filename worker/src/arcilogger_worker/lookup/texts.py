@@ -21,13 +21,16 @@ from arcilogger_worker.lookup.types import EXPLANATIONS, EgressChange, EgressEnt
 
 ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
     "no_lease": (
-        "{ip} adresi için {at} anında geçerli bir DHCP/ARP kaydı (kira) yok. En yakın kayıtlar: "
-        "önce {before}, sonra {after}. DHCP ve saatlik ARP-LOG kayıtlarının ana "
-        "yönlendiriciden (MikroTik, DHCP sunucusu) geldiğini kontrol edin; statik IP'li "
-        "cihazlar yalnızca ARP-LOG ile görünür.",
-        "No DHCP/ARP lease covers {ip} at {at}. Nearest leases: before {before}, after "
-        "{after}. Check that the main router (MikroTik, the DHCP server) sends DHCP and hourly "
-        "ARP-LOG messages; static-IP devices only appear through ARP-LOG.",
+        "{ip} adresi için {at} anında geçerli bir kira kaydı yok. En yakın kayıtlar: önce "
+        "{before}, sonra {after}. Kira kanıtı DHCP sunucusunun kayıtlarından (MikroTik DHCP ya "
+        "da FortiGate DHCP olayları) ve MikroTik ARP-LOG kayıtlarından gelir: DHCP sunucusunun "
+        'kayıt gönderdiğini Kaynaklar sayfasındaki "Kira kanıtı" kutusunda kontrol edin. Statik '
+        "IP'li cihazlar yalnızca ARP-LOG ile (ya da srcmac ile kısmi kanıt olarak) görünür.",
+        "No lease covers {ip} at {at}. Nearest leases: before {before}, after {after}. Lease "
+        "evidence comes from the DHCP server's records (MikroTik DHCP or FortiGate DHCP events) "
+        'and from MikroTik ARP-LOG lines: check on the Sources page ("Lease evidence") that the '
+        "DHCP server sends them. Static-IP devices only appear through ARP-LOG (or, as partial "
+        "evidence, through srcmac).",
     ),
     "no_match_exact": (
         "FortiGate bu zaman aralığında {address}:{port} için oturum kaydetmemiş. Saati ve saat "
@@ -216,8 +219,8 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "{mac} did not hold {ip} at that moment; the chain shows who held {ip} then.",
     ),
     "no_lease_for_mac": (
-        "{mac} için {at} anında geçerli bir DHCP/ARP kaydı yok.",
-        "No DHCP/ARP lease of {mac} covers {at}.",
+        "{mac} için {at} anında geçerli bir kira kaydı (DHCP ya da ARP-LOG) yok.",
+        "No lease (DHCP or ARP-LOG) of {mac} covers {at}.",
     ),
     "lease_timeline_behind": (
         "IP-MAC zaman çizelgesi {watermark} anına kadar hesaplandı; daha yeni anlar için "

@@ -133,9 +133,21 @@ def test_explanation_texts_are_filled_and_bilingual() -> None:
     assert "172.20.43.9" in note.text_tr
     assert "12.10.2026 09:00:00" in note.text_tr
     assert "before —" in note.text_en
-    # A device role, never a host name of one network.
-    assert "ana yönlendiriciden (MikroTik, DHCP sunucusu)" in note.text_tr
-    assert "the main router (MikroTik, the DHCP server)" in note.text_en
+    # Device roles and the Sources page, never a host name of one network.
+    assert "DHCP sunucusunun kayıtlarından (MikroTik DHCP ya da FortiGate DHCP olayları)" in (
+        note.text_tr
+    )
+    assert "the DHCP server's records (MikroTik DHCP or FortiGate DHCP events)" in note.text_en
+    assert 'Kaynaklar sayfasındaki "Kira kanıtı" kutusunda' in note.text_tr
+    assert 'on the Sources page ("Lease evidence")' in note.text_en
+    mac = explain("no_lease_for_mac", mac="00:00:5e:00:53:57", at=(tr(DAY, 9)).isoformat())
+    assert mac.text_tr == (
+        "00:00:5e:00:53:57 için 12.10.2026 09:00:00 anında geçerli bir kira kaydı (DHCP ya da "
+        "ARP-LOG) yok."
+    )
+    assert mac.text_en == (
+        "No lease (DHCP or ARP-LOG) of 00:00:5e:00:53:57 covers 12.10.2026 09:00:00."
+    )
     day = explain("not_in_database", day=(DAY - timedelta(days=1)).isoformat())
     assert day.text_tr.startswith("11.10.2026 gününe ait kayıt veritabanında yok")
     assert day.params == {"day": "2026-10-11"}
