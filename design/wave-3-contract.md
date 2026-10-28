@@ -6253,7 +6253,7 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   Tests: `test_report_fortigate.py::test_fortigate_only_report`,
   `::test_the_verified_fortigate_format_names_who_and_when`,
   `::test_the_format_note_comes_from_the_stored_outcome_not_the_setting`,
-  `TESTNAME(both format keys in one outcome print the unverified sentence only)`. Fold into
+  `::test_the_unverified_format_note_wins_over_a_verified_one`. Fold into
   2.12.
 - **d-14. `reports/inputs.py` cites `outcome.unconverted_dhcp`, outside WP-D's file list** (2.12
   "unconverted FortiGate DHCP rows … are printed in section 6 like every cited row").
@@ -6312,7 +6312,7 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   several claiming exits the one whose interfaces hold the row's `dstintf` wins, else the first by
   name (`parse_egresses` order). Tests:
   `test_settings_api_observed.py::test_the_observed_endpoint_counts_only` (the first by name),
-  `TESTNAME(an internal exit claims its transip, which is not in unmapped_transips)`. Fold into
+  `::test_an_internal_exit_claims_its_nat_address`. Fold into
   2.12.
 - **d-21. `build_site`: the phone on `vlan60`, `Site.wan2`, the helper names** (2.12
   "`lookup_testing.build_site`"; decision X7). `dhcp="fortigate"` writes the PC's ACK at 10:42:18
@@ -6394,8 +6394,7 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   every match row read "Çıkış / Exit - · dstintf …", where "-" means that no exit claims the NAT
   address. When `outcome.egress` is None the row reads "çıkış belirlenmedi (talepte genel IP
   yok) / exit not determined (no public IP in the request) · dstintf {dstintf}"; "-" appears
-  only when a public IP was requested. Tests: `TESTNAME(destination-only outcome with one match
-  prints the not-determined exit)`. Fold into 2.12.
+  only when a public IP was requested. Tests: `test_report_exits.py::test_a_destination_search_determines_no_exit`. Fold into 2.12.
 - **d-28. A second text for the 503 `lookup_settings_invalid`** (2.12 "Lookup schemas", the 503
   text; review 1, Q1). The router's `try` maps a `TypeError`/`ValueError` of
   `LookupSettings.from_settings`, of `lookup.timeout_seconds` and of `settings.egresses()` to the
@@ -6406,8 +6405,9 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   ayarları geçersiz: kayıtlı bir sorgu ya da kira ayarı okunamadı (Ayarlar → Uygulama
   ayarları); sistem yöneticisi düzeltmelidir." / "The 5651 lookup settings are invalid: a stored
   lookup or lease setting cannot be read (Settings → Application settings); an administrator
-  must fix it." Tests: `TESTNAME(a stored non-object dhcp.fortigate_logids gets the second 503
-  text)`. Fold into 2.12.
+  must fix it." Tests: `test_lookup_api.py::test_another_unreadable_lookup_setting_answers_the_same_503`
+  (`[fortigate-logids]`, `[timeout]`), `::test_invalid_nat_settings_are_reported` (the contract
+  text kept). Fold into 2.12.
 - **d-29. "T" of the unclaimed search printed as the moment** (2.12 `{searched}` "(T çevresinde
   görülenler: …)" / "(seen near T: …)"; review 1, Q2). A reader of the PDF does not know "T".
   The parenthesis reads "({at} çevresinde görülenler: {seen})" / "(seen around {at}: {seen})",
@@ -6424,16 +6424,16 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   lease's IP claims `{ip: lease.ip}`; one that names another IP (D33 and its MikroTik variant)
   claims `{ip: refs.dhcp_ip(ref), mac: lease.mac}`; a ref without a summary claims `ip` as
   before. A summary edited to a third IP now gives "uyuşmuyor". Tests:
-  `test_report_consistency.py::test_a_lease_closed_by_its_macs_ack_for_another_address_claims_the_mac`,
-  `::test_a_mikrotik_lease_closed_by_a_fortigate_ack_of_its_mac_claims_the_mac`,
-  `::test_a_d33_lease_cited_in_a_report_has_no_mismatch`, `TESTNAME(a closing summary edited to a
-  third IP mismatches)`. Fold into 2.12.
+  `test_report_consistency.py::test_a_lease_closed_by_its_macs_ack_for_another_address_claims_both`,
+  `::test_a_mikrotik_lease_closed_by_a_fortigate_ack_of_its_mac_claims_both`,
+  `::test_a_d33_lease_cited_in_a_report_has_no_mismatch`,
+  `::test_a_d33_closing_summary_edited_to_a_third_address_is_flagged`,
+  `::test_an_altered_closing_row_still_mismatches`. Fold into 2.12.
 - **d-31. The observed NAT part counts IPv4 NAT addresses only** (2.12 observed JSON, "NAT part
   … `transip IS NOT NULL`"; review 1, Q9). The rows, `unmapped_transips` and `unknown_trandisp`
   read only rows with `family(transip) = 4`, matching `R20-nat:unmapped-transip`: exits refuse
   IPv6 (`setting_ipv6_not_supported`), so an IPv6 address could only ever be listed as unmapped.
-  The srcmac part stays IPv4 by `srcip` (d-18). Tests: `TESTNAME(an IPv6 transip is left out of
-  the observed NAT part)`. Fold into 2.12.
+  The srcmac part stays IPv4 by `srcip` (d-18). Tests: `test_settings_api_observed.py::test_ipv6_nat_addresses_are_not_listed`. Fold into 2.12.
 - **d-32. The exact `transip` answer is not called "genel"** (2.12 method rows; review 1, nit 1).
   The "Açıklama" row of an exact answer said "Talepteki genel IP adresi FortiGate'in kendi
   genel/WAN adresidir; …", false for resolution `transip`, whose address may be a shared (RFC
@@ -6444,8 +6444,7 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
 - **d-33. "-" in the changed-exit addition is named** (d-10, `texts.CHANGED_EXIT`; review 1, nit
   2). When the other exit of a session that changed exit is an unclaimed NAT address, the
   addition printed "oturumun kayıtlarında ayrıca: -". The "-" now reads "hiçbir çıkışa tanımlı
-  olmayan bir NAT adresi" / "a NAT address no exit claims". Tests: `TESTNAME(a session that also
-  left through an unclaimed NAT address names it in words)`. Fold into 2.12.
+  olmayan bir NAT adresi" / "a NAT address no exit claims". Tests: `test_report_exits.py::test_a_session_that_left_by_an_unclaimed_row_names_it_in_words`. Fold into 2.12.
 - **d-34. Where the 3.5 report tests live** (3.5 "`test_report_pdf.py`"; review 1, nit 10). The
   3.5 PDF cases live in `test_report_exits.py` and `test_report_fortigate.py`, with the
   `lookup_testing` defaults in `test_lookup_testing_sites.py`. Fold into 3.5.
