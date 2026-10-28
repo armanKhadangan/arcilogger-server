@@ -151,6 +151,36 @@ it was attributed to in the period; `lookup.run` (admin, auditor) shows in a 565
 chain's person step) the assignment valid at that moment: the person's name, department and title
 and the assignment's start and end.
 
+**FortiGate DHCP, srcmac ve aygıt tanıma (ADR-0016).** Yeni bir izin yoktur. FortiGate DHCP
+kayıtlarındaki ana bilgisayar adları ve MAC adresleri (kira kanıtı, cihaz listesi) mevcut
+izinlerle okunur: 5651 sonuçlarında `lookup.run`, Arama'da `search.read`, Cihazlar ve Kişiler
+sayfasında `devices.read`. `lookup.run` (Yönetici, Denetçi) ile bir 5651 sonucu, kira kaydı
+olmayan bir oturumda cihazı ve kişiyi `lookup.srcmac_interfaces` ayarındaki arayüzlerde
+FortiGate oturum kaydının srcmac alanından da gösterebilir ("kısmi kanıt", düşük güven). Ham
+satırlar olduğu gibi basılır (D21): FortiGate'in aygıt tanıma özelliği açık bir arayüzde her
+oturum satırı istemcinin MAC adresini, cihaz adını, işletim sistemini, donanım üreticisini ve
+sürümünü, cihaz türünü ve pasif olarak öğrenilen kullanıcı adlarını taşır; 5651 raporu ve kanıt
+paketi bu satırları, başka kişilerin aday oturumları da dahil ve `lookup.srcmac_interfaces` boş
+olsa da, değiştirmeden basar. `search.read` (Yönetici, Denetçi) aynı alanları Arama'daki ham
+satırlarda ve `srcmac:` alanıyla görür. 5651 sorgusu, raporu, ham satır görünümü ve Arama KVKK
+bilgilendirmesinin onayını ister ve yanıt vermeden önce denetim kaydına yazılır (`lookup.run`,
+`lookup.view`, `lookup.report`, `raw.view`, `search.run`).
+
+**FortiGate DHCP, srcmac and device identification (ADR-0016).** There is no new permission.
+FortiGate DHCP host names and MAC addresses (lease evidence, the device list) are read under the
+existing permissions: `lookup.run` in 5651 results, `search.read` in Search, `devices.read` on
+the devices page. With `lookup.run` (admin, auditor) a 5651 result may also name the device and
+the person of a session without a lease through the srcmac field of the FortiGate session record
+on the interfaces of `lookup.srcmac_interfaces` ("kısmi kanıt", partial evidence, low
+confidence). Raw lines are printed as they are (D21): on an interface with FortiGate device
+identification on, every session line carries the client's MAC address, device name, operating
+system, hardware vendor and version, device type and passively learned user names; the 5651
+report and the evidence package print these lines unchanged, other people's candidate sessions
+included and also while `lookup.srcmac_interfaces` is empty. `search.read` (admin, auditor) sees
+the same fields in the raw lines of Search and through the field `srcmac:`. The 5651 lookup, its
+report, the raw-line view and Search need the accepted KVKK notice and are audited before they
+answer (`lookup.run`, `lookup.view`, `lookup.report`, `raw.view`, `search.run`).
+
 | Endpoint | Access |
 |---|---|
 | `GET /devices`, `/devices/{mac}`, `/devices/export.csv`, `GET /persons…` | `devices.read` + KVKK notice (they name current owners) |
@@ -250,14 +280,20 @@ Sunucu yapılandırması (`/admin/...`, ADR-0014) ve uygulama ayarları (`/setti
 "Ayarlar" yalnızca yöneticiye açıktır). Kimlik bilgisi, saklama süresi, saat sunucusu ve güvenlik
 ayarlarının değişikliği ayrıca son 5 dakika içinde parolanın yeniden girilmesini ister. Hiçbir
 lisans durumu bu uç noktaları kapatmaz. "Şimdi mühürle" ve "Kontör sorgula" `seal.manage` ister;
-bu izni olan kişi kendi başlattığı isteği izleyebilir.
+bu izni olan kişi kendi başlattığı isteği izleyebilir. Çıkış düzenleyicisinin altındaki
+"Kayıtlarda görülen NAT adresleri" tablosu (`GET /settings/fortigate/observed`) yalnızca
+Yöneticiye açıktır (`settings.manage`); yalnızca sayıları ve güvenlik duvarının kendi NAT
+adreslerini, arayüz adlarını gösterir, kişisel veri içermez ve denetim kaydına yazılmaz.
 
 The machine configuration (`/admin/...`, ADR-0014) and the database settings (`/settings`) are
 administrator-only today (`settings.manage`, `sources.manage`, `seal.manage`; "Ayarlar" is
 administrator-only in the spec 13 table). Changes of credentials, retention, the time servers
 and security settings also need a re-authentication within the last 5 minutes. No licence state
 closes these endpoints. "Şimdi mühürle" and "Kontör sorgula" need `seal.manage`; a user with it
-may follow the request they started.
+may follow the request they started. The "NAT addresses seen in the logs" table under the exit
+editor (`GET /settings/fortigate/observed`) is administrator-only (`settings.manage`); it shows
+counts, the firewall's own NAT addresses and interface names only, holds no personal data and is
+not audited.
 
 | Endpoint | Access | admin | auditor | hr | viewer |
 |---|---|---|---|---|---|
@@ -272,13 +308,15 @@ may follow the request they started.
 | `GET /admin/diagnostics` | `settings.manage` + re-auth | ✔ | — | — | — |
 | `POST /seals/{day}/seal`, `POST /credits/query` | `seal.manage` | ✔ | — | — | — |
 | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset` | `settings.manage` (+ re-auth for `REAUTH_KEYS`) | ✔ | — | — | — |
+| `GET /settings/fortigate/observed` | `settings.manage` (counts and the firewall's own NAT addresses only; not audited; 504 `fortigate_observed_timeout`) | ✔ | — | — | — |
 
 Every request is audited `admin.request` when it is queued and its outcome is imported from the
 agent's journal (`admin.applied`, `admin.failed`, …); a refused change is audited
 `admin.refused` with its codes only; a setting change is `settings.change` with the user's id
 and address (docs/MVP-CONTRACTS.md section 16). `api/tests/test_admin_config.py`,
 `test_admin_kamusm.py`, `test_admin_sources.py`, `test_admin_sections.py`,
-`test_admin_actions.py`, `test_admin_history.py` and `test_settings_api.py` check the roles;
+`test_admin_actions.py`, `test_admin_history.py` and `test_settings_api.py` (the observed
+endpoint too) check the roles;
 `tests/test_admin_end_to_end.py` runs the whole channel on Linux.
 
 ## Arama, Canlı Akış ve Kaynaklar / Search, live tail and sources
@@ -289,8 +327,12 @@ açar, kendi kayıtlı aramalarını tutar ve canlı akışı izler. Dışa akta
 içindir (`search.export`) ve son 5 dakika içinde parolanın yeniden girilmesini ister; "Kanıt
 paketine aktar" `evidence.create` ister (Yönetici). Kaynaklar sayfası `sources.read` ister
 (Yönetici); sayfadaki "Son satırlar" ham satır gösterdiği için ayrıca `search.read` ya da
-`lookup.run` ve KVKK onayı ister (ham satır görünümünün kuralı). İK ve Rapor İzleyici bu
-sayfaları açamaz. Hiçbir lisans durumu bunları kapatmaz (5651 Temel).
+`lookup.run` ve KVKK onayı ister (ham satır görünümünün kuralı). Kaynaklar sayfasındaki "Kira
+kanıtı" kutusu (`GET /sources` yanıtının `lease_evidence` alanı) da `sources.read` ister
+(Yönetici); yalnızca sayıları, zamanları, arayüz adlarını ve kayıt biçiminin durumunu taşır
+(istemci MAC adresi, IP adresi ya da ana bilgisayar adı yok) ve denetim kaydına yazılmaz; `none`
+durumu yalnızca yöneticinin gördüğü uyarılardan (`alerts.read`) okunur. İK ve Rapor
+İzleyici bu sayfaları açamaz. Hiçbir lisans durumu bunları kapatmaz (5651 Temel).
 
 Search and the live tail show personal data: **administrators** and **auditors**
 (`search.read`) search, see pages and statistics, open a record's details, keep their own saved
@@ -299,8 +341,12 @@ searches and watch the live tail once they accepted the KVKK notice. Export is
 5 minutes; "Kanıt paketine aktar" (make an evidence package from the lines) needs `evidence.create`
 (administrators). The sources page needs `sources.read` (administrators); its "Son satırlar"
 (latest lines) also needs `search.read` or `lookup.run` and the KVKK notice, because it shows raw
-lines (the rule of the raw line view). HR and viewers cannot open these pages. No licence state
-closes them (5651 Core).
+lines (the rule of the raw line view). The "Kira kanıtı" / "Lease evidence" card of the sources
+page (`lease_evidence` of `GET /sources`) needs `sources.read` too (administrators); it holds
+counts, times, interface names and the format state only (no client MAC, IP address or host
+name) and is not audited; its `none` state is read from the alerts, which only administrators
+see (`alerts.read`). HR and viewers cannot open these pages. No licence state closes them
+(5651 Core).
 
 | Endpoint | Access | admin | auditor | hr | viewer |
 |---|---|---|---|---|---|
@@ -310,7 +356,7 @@ closes them (5651 Core).
 | `POST /search/export` | `search.read` + `search.export` + KVKK + re-auth (5 min) | ✔ | — | — | — |
 | `POST /search/refs` | `search.read` + `evidence.create` + KVKK | ✔ | — | — | — |
 | `POST /live/streams`, `GET` / `DELETE /live/streams/{id}`, `GET /live/status` | `search.read` (+ KVKK to open a stream; a stream belongs to its user and session) | ✔ | ✔ | — | — |
-| `GET /sources`, `GET /sources/{name}` | `sources.read` (parse error texts only with `search.read` or `lookup.run` + KVKK) | ✔ | — | — | — |
+| `GET /sources`, `GET /sources/{name}` | `sources.read` (parse error texts only with `search.read` or `lookup.run` + KVKK; the `lease_evidence` card: counts only, no client MAC or IP, not audited) | ✔ | — | — | — |
 | `GET /sources/{name}/tail` | `sources.read` + (`search.read` or `lookup.run`) + KVKK | ✔ | — | — | — |
 | Panel box `parse_failures` | `sources.read` or `dashboard.view` | ✔ | ✔ | — | ✔ |
 | Raw line drawer on these pages (`GET /raw`) | `search.read` or `lookup.run` + KVKK | ✔ | ✔ | — | — |
@@ -318,7 +364,7 @@ closes them (5651 Core).
 Audited: `search.run`, `search.event`, `search.refs`, `search.export`, `search.saved_*`,
 `live.open`, `live.close`, `raw.tail`, `raw.view`; not audited: the next pages and the
 statistics of an audited search, the query check and the field list ([SEARCH.md](SEARCH.md)
-section 11). `api/tests/test_search_permissions.py` runs every search endpoint with every role,
+section 11), and the sources list with its `lease_evidence` card. `api/tests/test_search_permissions.py` runs every search endpoint with every role,
 without the notice, without a session, with a pending password change and in every licence
 state.
 
