@@ -42,6 +42,11 @@
   taşınır (adres satırında ve erişim kayıtlarında kişisel veri yoktur), her arama salt okunur bir
   işlemde ve bağlı parametrelerle çalışır ve yanıttan önce denetim kaydına yazılır; dışa aktarma
   yöneticiye ve yeniden doğrulamaya bağlıdır; canlı akış oturumu 30 saniyede bir yeniden denetler.
+- **Uyum Durumu ve Sistem** (bölüm 16, [UYUM-DURUMU.md](UYUM-DURUMU.md)): iki sayfa da yalnızca
+  okur ve log öznelerine ilişkin veri göstermez. Uyum Durumu ve Uyum Durumu Raporu (PDF)
+  yöneticiye ve denetçiye, yapılandırma yedeği onayı ve Sistem yalnızca yöneticiye açıktır. Rapor
+  yalnızca onu indiren ARCILOGGER hesabının adını taşır; raporun indirilmesi ve yedek onayı denetim
+  kaydına yazılır.
 - Giriş, hatalı giriş, kilitleme, TOTP hataları, çıkış, parola ve kullanıcı değişiklikleri
   **zincirlenmiş denetim kaydına** yazılır; parolalar, kodlar ve gizli anahtarlar asla yazılmaz.
 - İlk yönetici, sunucu konsolunda (yönetici PowerShell'i) üretilen **tek kullanımlık kurulum
@@ -74,7 +79,10 @@ Python (`python -I`), and a plain list of what an offline licence check cannot p
 and live tail (section 15): queries only in POST bodies, read-only transactions with bound
 parameters, audited before the answer, export only for administrators after a
 re-authentication, and a live stream that re-checks its session every 30 seconds without
-resetting the idle timer.
+resetting the idle timer. Uyum Durumu and Sistem (section 16): both pages only read and show no
+data about log subjects; Uyum Durumu and its PDF report for the administrator and the auditor,
+the configuration backup confirmation and Sistem for the administrator only; the PDF names only
+the exporting account, and the export and the confirmation are audited.
 
 ## 1. Sign-in flow
 
@@ -622,3 +630,72 @@ ve boşta kalma süresini sıfırlamaz.
   never modified.
 - **No licence gate:** search, the live tail and the sources page are 5651 Core in every licence
   state (`test_search_permissions.py`, `test_license_routes.py`).
+
+## 16. Uyum Durumu and Sistem
+
+Owner decision of 2026-10-28 (D15 of the Wave 4 design); operator guide: [UYUM-DURUMU.md](UYUM-DURUMU.md) / [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md).
+
+**Özet (TR).** Uyum Durumu ve Sistem sayfaları yalnızca okur: `state\` ve `admin\` altındaki
+dosyaları, kasayı, veritabanını ve açık uyarıları. Hiçbir cihaza ya da Kamu SM'ye bağlanmaz, hiçbir
+şey indirmez. İki sayfa da, Uyum Durumu Raporu (PDF) da log öznelerine ilişkin veri göstermez:
+istemci IP ya da MAC adresi, bir cihaza atanmış kişinin adı, cihaz adı, gönderici adresi ve
+replika hedefinin yolu yoktur. Bu yüzden KVKK bilgilendirmesi istenmez ve sayfaları görüntülemek
+denetim kaydına yazılmaz. Uyum Durumu ve raporu yöneticiye ve denetçiye, yapılandırma yedeği onayı
+ve Sistem yalnızca yöneticiye açıktır. Rapor yalnızca onu indiren ARCILOGGER hesabını (görünen ad
+ve kullanıcı adı) taşır. Raporun indirilmesi (`compliance.report_export`) ve yapılandırma yedeği
+onayı (`compliance.config_backup_confirm`) denetim kaydına yazılır. Hiçbir lisans durumu bu
+sayfaları kapatmaz (5651 Temel).
+
+| What | Endpoint | Permission | Holders | Audited |
+|---|---|---|---|---|
+| Uyum Durumu: the ten cards | `GET /api/v1/compliance` | `compliance.read` | admin, auditor | no |
+| Uyum Durumu Raporu (PDF) | `GET /api/v1/compliance/report.pdf` | `compliance.read` | admin, auditor | `compliance.report_export` |
+| Configuration backup confirmation | `POST /api/v1/compliance/config-backup` | `settings.manage` | admin | `compliance.config_backup_confirm` |
+| Sistem; the Panel's disk card | `GET /api/v1/system`, `GET /api/v1/system/disk`, `GET /api/v1/system/health` | `system.read` | admin | no |
+| First-run wizard (`/settings/setup` in the web app) | the existing Ayarlar endpoints | `settings.manage` | admin | as each Ayarlar change |
+
+hr and viewer hold none of these permissions. No licence state blocks either page (5651 Core).
+
+- **Read only.** The pages read files under `state\` and `admin\`, the vault, the database and
+  the active alerts. They never ask a device or Kamu SM and never download or install anything; a
+  value such as the Kamu SM credit is the newest *recorded* one, shown with its time. The alerts
+  of a card are read with a plain `SELECT`, never with the row lock of the alert engine.
+- **No data about log subjects** (contract 0.1 item 4). No client IP or MAC address, no name of
+  a person attributed to a device, no device host name, no sender address and no replica target
+  path, on the pages or in the PDF. What they do show: configured source names, counts, times,
+  drive letters, table names, web filter profile names and the configured time-server addresses.
+  Card 8 lists the titles of open lease-evidence alerts, which name causes, counts and configured
+  networks only, never the dedup keys. Sistem lists the collector's and ingest's configured
+  sources under their configured name: their status files key the spool by a name that embeds
+  the sender address for unknown senders and for the members of a network source, so every
+  other entry is only counted, and the text of a job's or a source's last error is never
+  returned. Hence **no KVKK notice gate** (section 7a) and **viewing is not audited**, as on the
+  Panel.
+- **The auditor** (D15) opens Uyum Durumu and downloads the PDF with `compliance.read` alone.
+  The answer is the same for every user: it is kept 30 seconds for the whole API process and
+  holds the cards' alert references (id, rule, severity, time) although `alerts.read` stays with
+  the administrator; the web app hides the links the user may not open (Güvenlik, Kaynaklar,
+  Ayarlar, Sistem) and shows the card. The confirmation button and the link to the first-run
+  wizard are hidden without `settings.manage`, and the API refuses the confirmation without it
+  (403 `forbidden`).
+- **The PDF** is computed fresh on every request, not stored and not time-stamped. It names one
+  person only: the signed-in ARCILOGGER account that exported it (display name and username).
+  Before the file is sent, the audit entry `compliance.report_export` is written with the file's
+  SHA-256, which the answer also carries in `X-Arci-Sha256`, so a printed or forwarded copy can
+  be matched with its entry.
+- **The backup confirmation** is the administrator's statement that the configuration files were
+  copied offline ([BACKUP.md](BACKUP.md) section 3); ARCILOGGER cannot check the copy itself. It
+  is a POST with the CSRF token like every change and needs no re-authentication: it changes
+  nothing but the audit log. The entry holds the SHA-256 of `arcilogger.toml`, never the file or
+  a secret. The card shows only the time of the newest confirmation, never who confirmed. An
+  unreadable file is refused with 409 `config_backup_unreadable` and nothing is recorded.
+- **The first-run wizard** stores nothing of its own: it derives each step from the
+  configuration and the request history and opens the existing Ayarlar pages, where every change
+  keeps its own checks (re-authentication, signed requests, holds; section 14).
+
+Audit entries of the two pages (`target` `null`; details integers and strings only, section 11):
+
+| Action | Details |
+|---|---|
+| `compliance.report_export` | `sha256` (of the PDF), `ok`, `warning`, `error`, `neutral` (the number of cards per state) |
+| `compliance.config_backup_confirm` | `config_sha256` (of `arcilogger.toml` when it was confirmed) |

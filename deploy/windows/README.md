@@ -43,6 +43,17 @@ installer\Build-ArciBundle.ps1                        installer\Install-Arcilogg
 | `C:\ProgramData\ARCILOGGER\` | `arcilogger.toml`, `data-root.txt`, `secret.key` + `secrets.json`, `kamusm-roots\`, `smtp-ca\`, `zamane\` (`web\` staging, `approved\`), `caddy\` (internal CA), `install\` (protected: `state.json` with the remembered server address and name, `firewall-state.json`, `power-state.json` on desktop Windows), `admin\` (protected: `policy.json`, `keys\`, `inbox\`, `versions\`, `status\`, `journal\`, `system\`) | administrators; ArciAdmin writes `arcilogger.toml`, `secrets.json`, new files in `kamusm-roots\` / `smtp-ca\` and its `admin\` folders; read by services and tasks |
 | `D:\ARCILOGGER\` (`C:\ARCILOGGER\` without a data disk) | `spool\` (with the protected `_audit\`), `vault\`, `exports\`, `state\` (with the protected `seal\`, `replica\`, `verify\`, `clock\`), `logs\`, `backups\db\` and `backups\scheduled\` (database dumps), `db\` (PostgreSQL) | services and tasks, each only where it needs to (ADR-0007 section 4) |
 
+`state\system-history.json` holds one disk sample a day: the worker job `system.sample` (daily
+after 00:30, `worker/src/arcilogger_worker/system_jobs.py`) writes `{"schema": 1, "days": [{"day",
+"drives": [{"path", "total", "used"}]}]}` for the data drive and, when it is another device, the
+system drive (drive letter, total and used bytes; nothing else), replaces an entry of the same day,
+keeps the newest 120 days and writes the file atomically. ArciWorker writes it under the existing
+rights of `state\` (no new rights entry); ArciApi reads it for the disk forecast of the Sistem page
+and the Panel's disk card (linear over the newest 30 samples, shown from 7:
+`api/src/arcilogger_api/system/forecast.py`). A damaged file is started again from the next sample
+and the forecast waits for seven new ones; deleting it loses only the forecast. The installer
+neither creates nor removes it (`-Uninstall` keeps the data folder).
+
 ## Services and accounts
 
 | Service | Program | Account | Start |

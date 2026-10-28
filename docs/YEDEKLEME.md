@@ -135,6 +135,38 @@ Get-FileHash $usb\secret.key, $usb\arcilogger.toml -Algorithm SHA256
 Kamu SM kimlik bilgileri yeniden girilir (`& $core secret set …`). Özetleri kâğıda yazıp ortamla
 birlikte saklayın.
 
+**Kopyayı onaylamak (Uyum Durumu, kart 10).** Kopyayı aldıktan sonra web arayüzünde **Uyum
+Durumu** sayfasını açın ve 10. kartta (**Yapılandırma ve veritabanı yedekleri**) **Yapılandırma
+yedeğini aldım** düğmesine basın. Onay penceresi şunu yazar:
+
+> arcilogger.toml, secret.key ve Caddy CA klasörünün (özel anahtarıyla) şifreli, çevrim dışı ve
+> yedeklerden ayrı saklanan bir ortama kopyalandığını onaylıyorsunuz (secrets.json isteğe bağlı;
+> YEDEKLEME.md bölüm 3). Onay, yapılandırmanın şimdiki SHA-256 değeriyle denetim kaydına yazılır.
+
+Düğmeyi yalnızca yöneticiler görür (`settings.manage`); denetçi kartı görür ama onaylayamaz.
+ARCILOGGER çevrim dışı ortamı göremez: onay, yöneticinin kopyayı aldığına dair beyanıdır, kopyanın
+kendisini denetlemez. Onay, denetim kaydına "Yapılandırma yedeği onaylandı"
+(`compliance.config_backup_confirm`) girdisi olarak, `arcilogger.toml` dosyasının o anki SHA-256
+değeriyle (`config_sha256`) yazılır; her onay yeni bir girdidir. Dosya okunamazsa onay kaydedilmez
+(`config_backup_unreadable`: "Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi.").
+
+Kart 10 önce gece veritabanı yedeğine bakar (`[backup] enabled`, `state\backup\last.json`,
+açık `R20-backup` uyarıları; bölüm 2): yedek kapalıysa, başarısızsa ya da `last.json` okunamıyorsa
+kart **Sorun**; kurulum `alerts.backup_missing_hours` (48) saatten genç ve ilk yedek henüz
+alınmadıysa **Bilgi yok**; son başarılı yedek `alerts.backup_stale_hours` (36) saatten eskiyse ya
+da hiç yoksa **Dikkat** gösterir. Yedek yerindeyse kopyanın onayına geçer:
+
+| Durum | Kart 10 |
+|---|---|
+| Hiç onay yok | **Dikkat**: "Yapılandırma dosyalarının çevrimdışı kopyası hiç onaylanmadı (YEDEKLEME.md bölüm 3)." |
+| `arcilogger.toml` son onaydan sonra değişti (Ayarlar sayfalarından ya da elle) | **Dikkat**: "Yapılandırma son onaydan (…) sonra değişti; yeni bir çevrimdışı kopya alın." |
+| Son onaydaki SHA-256 dosyanın şimdiki değeriyle aynı | **Tamam**: son yedeğin zamanı ve boyutu, onayın zamanı |
+
+Karşılaştırma yalnızca `arcilogger.toml` dosyasını kapsar. Uygulama ayarları veritabanında durur,
+dosyayı değiştirmez; `secret.key`, `secrets.json` ya da Caddy CA değiştiğinde de kart kendiliğinden
+**Dikkat** olmaz. Bu durumlarda da yeni bir kopya alıp yeniden onaylayın. Kart kimin onayladığını
+göstermez (denetim kaydı gösterir). Ayrıntı: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.10.
+
 ## 4. Yedekleri sunucu dışına kopyalama
 
 Yedekler veritabanıyla **aynı diskte** durur: yanlış bir işleme, başarısız bir yükseltmeye ya da
