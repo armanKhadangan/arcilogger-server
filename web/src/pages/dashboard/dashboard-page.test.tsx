@@ -275,11 +275,11 @@ describe('Panel — parse failures (contract 2.17)', () => {
     ]);
     // A line not in the collector's format has no database row: its example only.
     expect(
-      within(card).queryByRole('button', { name: 'rawlog.invalid kalıbını Aramada göster' }),
+      within(card).queryByRole('button', { name: 'Aramada göster: rawlog.invalid kalıbı' }),
     ).not.toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(
-      within(card).getByRole('button', { name: 'fortigate.kv kalıbının örnek satırını aç' }),
+      within(card).getByRole('button', { name: 'Örnek satır: fortigate.kv kalıbı' }),
     );
     const sheet = await screen.findByRole('dialog', { name: 'Ham kayıt satırı' });
     expect(
@@ -287,7 +287,7 @@ describe('Panel — parse failures (contract 2.17)', () => {
     ).toBeInTheDocument();
     await user.keyboard('{Escape}');
     await user.click(
-      within(card).getByRole('button', { name: 'fortigate.kv kalıbını Aramada göster' }),
+      within(card).getByRole('button', { name: 'Aramada göster: fortigate.kv kalıbı' }),
     );
     expect(put).toHaveBeenCalledWith('/search', {
       q: 'source:fortigate error:fortigate.kv',

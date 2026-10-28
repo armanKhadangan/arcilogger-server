@@ -40,20 +40,20 @@ export function UserMenu() {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            ref={trigger}
-            variant="ghost"
-            className="gap-2 px-2"
-            aria-label={t('topbar.userMenuFor', { name: me.user.display_name })}
-          >
+          {/* The name comes from the hidden text, not an aria-label: a label must contain the
+              text on screen (WCAG 2.5.3), and that starts with the initials. */}
+          <Button ref={trigger} variant="ghost" className="gap-2 px-2">
             <span
               aria-hidden="true"
               className="flex size-7 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-ink"
             >
               {initials(me.user.display_name)}
             </span>
-            <span className="hidden max-w-40 truncate text-sm lg:inline">
+            <span aria-hidden="true" className="hidden max-w-40 truncate text-sm lg:inline">
               {me.user.display_name}
+            </span>
+            <span className="sr-only">
+              {t('topbar.userMenuFor', { name: me.user.display_name })}
             </span>
             <ChevronDown aria-hidden="true" className="text-muted" />
           </Button>

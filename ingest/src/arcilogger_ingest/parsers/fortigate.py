@@ -245,7 +245,8 @@ FG_DHCP: Final[Spec] = (
     ("msg", "msg", "text"),
 )
 #: The keys that make an ``event`` line a DHCP server record (D3; the 26001/26002 field list).
-DHCP_KEYS: Final = ("ip", "mac", "dhcp_msg")
+#: ``dhcp_msg`` first: every other event line costs one dictionary test (``all`` stops there).
+DHCP_KEYS: Final = ("dhcp_msg", "ip", "mac")
 SPECS: Final[dict[str, Spec]] = {
     "fg_traffic": FG_TRAFFIC,
     "fg_web": FG_WEB,

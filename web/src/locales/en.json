@@ -530,7 +530,7 @@
         "restores": "Restore",
         "withSecrets": "Settings; secrets are restored too",
         "withoutSecrets": "Settings only; the secrets are no longer kept",
-        "openRequest": "Open the request of version {{number}}",
+        "openRequest": "{{id}}: open the request of version {{number}}",
         "console": "Server console",
         "restore": "A version is restored on the server console only and brings back the settings from before its change. For example, to undo the latest change:",
         "command": "Server console command"
@@ -2869,7 +2869,7 @@
         "files": "Files",
         "trigger": "Started by"
       },
-      "open": "Details of run #{{id}}",
+      "open": "{{started}}: details of run #{{id}}",
       "detailTitle": "Run #{{id}}",
       "deletedSchedule": "Deleted schedule",
       "delivered": "{{sent}}/{{total}} sent",
