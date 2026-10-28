@@ -118,9 +118,12 @@ from arcilogger_worker.macaddr import is_randomized
 
 #: The logged lease of an ``fg_dhcp`` ref summary (``…, lease 86400)``; ``lease -)`` without).
 _REF_LEASE: Final = re.compile(r", lease (\d+)\)$")
-#: The D8 probe's window (2.8.3, FortiGate lease times): the post-lease check of a MikroTik
-#: lease, which traffic keeps open, reads no further back than this (2.7, round 7).
-UNCONVERTED_WINDOW: Final = timedelta(seconds=8_640_000)
+#: The D8 probe's window (2.8.3, FortiGate lease times; at least the timeline's longest
+#: window): the post-lease check of a MikroTik lease, which traffic keeps open, reads no further
+#: back than this (2.7, round 7). The fallback of 2.8.3, 604,800 s (the FortiOS default lease),
+#: not 8,640,000 s: ``fg_event`` has no index on the line's address, so these queries read every
+#: ``system`` line of the window, and 100 days of them miss the 3.8 guards (deviation c2).
+UNCONVERTED_WINDOW: Final = timedelta(seconds=604_800)
 #: The chains the post-lease check looks at (a ``low`` chain is warned already).
 _CHECKED: Final = ("high", "medium")
 #: The subnet of a logged address that is no address (the post-lease checks count its row).

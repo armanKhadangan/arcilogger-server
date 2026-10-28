@@ -683,16 +683,16 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
 
 @pytest.mark.parametrize(
     ("days", "lowered", "refs"),
-    [(110, False, True), (50, True, True), (50, True, False)],
+    [(8, False, True), (6, True, True), (6, True, False)],
     ids=["beyond-the-window", "inside", "inside-without-a-record"],
 )
 def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     db_session: Session, evidence: Evidence, days: int, lowered: bool, refs: bool
 ) -> None:
     """Round 7: a MikroTik lease that traffic keeps open has its last DHCP record far back; the
-    post-lease check reads no further back than the D8 probe window (8,640,000 s, 100 days)
-    before the moment, and from the lease start when the lease has no DHCP record (printed as
-    ``{last}``)."""
+    post-lease check reads no further back than the D8 probe window (the 3.8 fallback,
+    604,800 s: 7 days; deviation c2) before the moment, and from the lease start when the lease
+    has no DHCP record (printed as ``{last}``)."""
     moment = AT
     ack = moment - timedelta(days=120)
     evidence.dhcp(ack, "assigned", PC, PC_MAC, server="dhcp42")
@@ -1164,9 +1164,9 @@ def test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease(
 
 
 def test_an_ack_older_than_its_lease_is_not_named(db_session: Session, evidence: Evidence) -> None:
-    """The window reaches 100 days back, but a 1-day lease logged 100 days before the moment
-    would not have covered it (the coverage rule)."""
-    unconverted_line(evidence, AT - timedelta(days=100), PC, PC_MAC, hostname=HOST)
+    """The window reaches 7 days back, but a 1-day lease logged 6 days before the moment would
+    not have covered it (the coverage rule)."""
+    unconverted_line(evidence, AT - timedelta(days=6), PC, PC_MAC, hostname=HOST)
     build(db_session, DAY, DAY)
     outcome = internal(db_session, PC, AT)
     assert "no_lease" in keys(outcome)
