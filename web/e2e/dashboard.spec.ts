@@ -222,7 +222,17 @@ test.describe('Panel — parse failures', () => {
     await raw.getByRole('button', { name: 'Kapat' }).click();
 
     await card.getByRole('button', { name: 'fortigate.kv kalıbını Aramada göster' }).click();
-    await expect(page).toHaveURL(/\/search$/);
+    // The address holds today's range, never the query; once Arama has answered (this mock has no
+    // search), it has searched that range alone (not its default range besides).
+    await expect(page).toHaveURL(/\/search\?range=today$/);
+    await expect(page.getByRole('alert').filter({ hasText: 'Kayıt bulunamadı.' })).toBeVisible();
+    expect(api.callsTo('POST', '/search').map((call) => call.body)).toEqual([
+      {
+        q: 'source:fortigate error:fortigate.kv',
+        from: `${SAMPLE_TODAY}T00:00:00+03:00`,
+        to: `${SAMPLE_TODAY}T15:00:00+03:00`,
+      },
+    ]);
     expect(await page.evaluate(() => JSON.stringify(window.history.state))).not.toContain(
       'fortigate.kv',
     );
