@@ -39,6 +39,11 @@
         "converted": "Converted at the upgrade: while the converted exits stay without interfaces and unchanged, lookups treat them as one line, as the old NAT settings did; the NAT addresses of an exit added later are outside that. Enter each line's public address and interfaces (INSTALL.md section 13)."
       },
       "serverRefused": "The server did not accept the exit definition ({{code}}).",
+      "kept": {
+        "note": "This exit cannot be shown in the editor as it is stored; its stored value is below and is kept unchanged. To correct it, remove the exit and add it again with valid values.",
+        "value": "Stored value"
+      },
+      "storedUnreadable": "The stored exit definition cannot be read: {{reason}} Once you add an exit and save, it replaces the stored value.",
       "codes": {
         "setting_type": "Wrong type of value: {{expected_en}} expected.",
         "setting_too_many": "At most {{limit}} items are allowed.",

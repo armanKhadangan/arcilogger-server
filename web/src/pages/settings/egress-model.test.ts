@@ -11,6 +11,7 @@ import {
   isPrivateOrShared,
   prefillOptions,
   rowsFromValue,
+  storedRefusal,
   validateEgresses,
   valueFromRows,
   type EgressRow,
@@ -152,16 +153,95 @@ describe('the editor rows', () => {
     expect(typed.public).toBe('203.0.113.9');
   });
 
-  it('split addresses at spaces and commas, interfaces only at commas and line breaks', () => {
+  it('split addresses at spaces and commas, interfaces only at line breaks', () => {
     const value = valueFromRows([
       row({
         name: 'hat-1',
         public: '203.0.113.200, 203.0.113.208/29\n 203.0.113.200/32 ',
-        interfaces: 'port 1, wan1\n',
+        interfaces: 'port 1\na,b\n wan1 \n',
       }),
     ]).value;
     expect(value?.['hat-1']?.public).toEqual(['203.0.113.200', '203.0.113.208/29']);
-    expect(value?.['hat-1']?.interfaces).toEqual(['port 1', 'wan1']);
+    // A FortiGate interface name may hold a space or a comma (the interface rule).
+    expect(value?.['hat-1']?.interfaces).toEqual(['port 1', 'a,b', 'wan1']);
+  });
+
+  it('give labels and interface names back exactly as stored', () => {
+    const stored = {
+      'hat-1': {
+        label: ' Ana hat ',
+        mode: 'direct',
+        public: ['203.0.113.200'],
+        public_dynamic: false,
+        transips: [],
+        interfaces: ['a,b', 'port 1;2'],
+        port_preservation: 'unknown',
+      },
+    };
+    const rows = rowsFromValue(stored);
+    expect(rows[0]?.stored).toBeUndefined();
+    expect(rows[0]?.label).toBe(' Ana hat ');
+    expect(valueFromRows(rows)).toEqual({ value: stored });
+  });
+
+  it('keep a stored exit the rows cannot give back as stored, and send it as stored', () => {
+    const hat1 = {
+      label: 'Ana hat',
+      mode: 'direct',
+      public: ['203.0.113.200'],
+      public_dynamic: false,
+      transips: [],
+      interfaces: ['wan1'],
+      port_preservation: 'unknown',
+    };
+    // An unknown mode (written around the rules, or by a later version before a rollback).
+    const misafir = { mode: 'notlogged', public: ['198.51.100.90'] };
+    const rows = rowsFromValue({ misafir, 'hat-1': hat1 });
+    expect(rows[0]?.stored).toEqual(misafir);
+    expect(rows[1]?.stored).toBeUndefined();
+    expect(storedRefusal(rows[0] as EgressRow)).toMatchObject({
+      code: 'setting_egress_mode',
+      field: 'mode',
+    });
+    // Never read into a direct line: the whole value is refused on that row.
+    expect(valueFromRows(rows).refusal).toMatchObject({
+      code: 'setting_egress_mode',
+      row: 'misafir',
+    });
+    // Not a line to warn about, join or claim an address with.
+    expect(egressWarnings(rows).rows.misafir).toEqual([]);
+    expect(draftClaim({ transip: '198.51.100.90', dstintf: null }, rows)).toBeNull();
+    // Removed, the rest is sent.
+    expect(valueFromRows(rows.slice(1))).toEqual({ value: { 'hat-1': hat1 } });
+  });
+
+  it.each([
+    ['an unknown field', { mode: 'direct', public: ['203.0.113.200'], vlan: 5 }],
+    ['public_dynamic not a boolean', { mode: 'isp_nat', public_dynamic: 'yes' }],
+    ['an unknown port preservation', { mode: 'isp_nat', port_preservation: 'kept' }],
+    ['a label with a line break', { label: 'Ana\nhat', mode: 'direct', public: ['203.0.113.200'] }],
+    ['public not a list', { mode: 'direct', public: '203.0.113.200' }],
+    ['an interface with a trailing space', { mode: 'isp_nat', interfaces: ['wan1 '] }],
+    [
+      'a field its mode does not take',
+      { mode: 'direct', public: ['203.0.113.200'], transips: ['100.64.12.9'] },
+    ],
+    ['no object', 'direct'],
+  ])('keep %s as stored, refused with the rule of the server', (_, item) => {
+    const rows = rowsFromValue({ x: item });
+    expect(rows[0]?.stored).toEqual(item);
+    const code = validateEgresses({ x: item }).refusal?.code;
+    expect(code).toBeDefined();
+    expect(valueFromRows(rows).refusal).toMatchObject({ code, row: 'x' });
+  });
+
+  it('keep a stored name the rules refuse', () => {
+    const rows = rowsFromValue({ 'Hat 1': { mode: 'direct', public: ['203.0.113.200'] } });
+    expect(rows[0]?.stored).toBeDefined();
+    expect(valueFromRows(rows).refusal).toMatchObject({
+      code: 'setting_egress_name',
+      row: 'Hat 1',
+    });
   });
 
   it('refuse an empty or doubled name on its row', () => {

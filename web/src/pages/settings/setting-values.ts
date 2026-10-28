@@ -65,7 +65,8 @@ export function draftText(draft: Draft): string {
   return typeof draft === 'string' ? draft : '';
 }
 
-function listItems(text: string): string[] {
+/** The entries of a list kept as text: one per line, or separated by commas or semicolons. */
+export function stringListItems(text: string): string[] {
   return text
     .split(/[\n,;]/)
     .map((item) => item.trim())
@@ -177,13 +178,13 @@ export function fromDraft(
     case 'string':
       return { value: draftText(draft).trim() };
     case 'string_list': {
-      const items = listItems(draftText(draft));
+      const items = stringListItems(draftText(draft));
       if (EMAIL_LISTS.has(key) && items.some((item) => !EMAIL_PATTERN.test(item)))
         return { error: 'validation.email' };
       return { value: items };
     }
     case 'integer_list': {
-      const items = listItems(draftText(draft));
+      const items = stringListItems(draftText(draft));
       const numbers = items.map(parseInteger);
       if (numbers.some((item) => item === null || item < 0))
         return { error: 'settings.application.errors.integerList' };

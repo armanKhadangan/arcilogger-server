@@ -59,7 +59,7 @@ function capturedHelp(key: string): Pick<SettingOut, 'help_tr' | 'help_en'> {
   return { help_tr: found.help_tr, help_en: found.help_en };
 }
 
-function groups(egresses: Egresses): SettingGroup[] {
+function groups(egresses: Egresses, more: SettingOut[] = []): SettingGroup[] {
   return [
     {
       id: 'lookup',
@@ -86,6 +86,7 @@ function groups(egresses: Egresses): SettingGroup[] {
           help_tr: 'Kapalı (önerilen): FortiGate kirası yalnızca DHCP kayıtlarıyla açık kalır.',
         }),
         setting('lease.server_seconds', 'object', { dhcp61: 3600 }),
+        ...more,
       ],
     },
   ];
@@ -112,11 +113,11 @@ const TWO_LINES: Egresses = {
   },
 };
 
-function serve(egresses: Egresses, patch?: (body: unknown) => Response) {
+function serve(egresses: Egresses, patch?: (body: unknown) => Response, more: SettingOut[] = []) {
   return installFetch((request) => {
     if (request.path === '/api/v1/auth/me') return jsonResponse(200, makeMe('admin'));
     if (request.path === '/api/v1/settings' && request.method === 'GET')
-      return jsonResponse(200, { groups: groups(egresses) } satisfies SettingsOut);
+      return jsonResponse(200, { groups: groups(egresses, more) } satisfies SettingsOut);
     if (request.path === '/api/v1/settings' && request.method === 'PATCH' && patch)
       return patch(request.body);
     return errorResponse(404, 'not_found');
@@ -336,6 +337,129 @@ describe('the exit editor', () => {
     await waitFor(() => {
       expect(screen.getByTestId('egress-editor')).toHaveFocus();
     });
+  });
+});
+
+describe('a stored value the rows cannot give back as stored', () => {
+  /** An unknown mode (written around the rules, or by a later version before a rollback). */
+  const UNREADABLE = { misafir: { mode: 'notlogged', public: ['198.51.100.90'] } };
+  /** Valid on the server: a label with spaces around it, an interface name with a comma. */
+  const AS_STORED: Egresses = {
+    'hat-1': {
+      ...(TWO_LINES['hat-1'] as Egresses[string]),
+      label: ' Ana hat',
+      interfaces: ['a,b'],
+    },
+  };
+
+  it.each([
+    ['an exit it cannot read', UNREADABLE],
+    ['a label and an interface name as stored', AS_STORED],
+  ])('is no change: saving another key of the group sends only that key (%s)', async (_, value) => {
+    let sent: unknown = null;
+    const calls = serve(value as Egresses, (body) => {
+      sent = body;
+      return jsonResponse(200, { changed: [], unchanged: [] });
+    });
+    await editor();
+    const save = screen.getByRole('button', { name: 'Kaydet' });
+    expect(save).toBeDisabled();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('switch', { name: 'Etiket dhcp.fortigate_traffic_extends' }));
+    await user.click(save);
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
+    });
+    expect(sent).toEqual({
+      changes: [{ key: 'dhcp.fortigate_traffic_extends', old: false, value: true }],
+    });
+  });
+
+  it('a stored value another editor reads back differently is no change of the group', async () => {
+    // A FortiGate interface name may hold a comma; the list editor splits at commas.
+    let sent: unknown = null;
+    const calls = serve(
+      TWO_LINES,
+      (body) => {
+        sent = body;
+        return jsonResponse(200, { changed: [], unchanged: [] });
+      },
+      [setting('lookup.srcmac_interfaces', 'string_list', ['a,b'])],
+    );
+    await editor();
+    const save = screen.getByRole('button', { name: 'Kaydet' });
+    expect(save).toBeDisabled();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('switch', { name: 'Etiket dhcp.fortigate_traffic_extends' }));
+    await user.click(save);
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
+    });
+    expect(sent).toEqual({
+      changes: [{ key: 'dhcp.fortigate_traffic_extends', old: false, value: true }],
+    });
+  });
+
+  it('shows an exit it cannot read as stored, with the rule it breaks, never as a direct line', async () => {
+    serve(UNREADABLE as unknown as Egresses);
+    await editor();
+    const kept = exit('misafir');
+    expect(
+      within(kept).getByText(/^Bu çıkış kaydedildiği biçimiyle düzenleyicide gösterilemiyor/),
+    ).toBeVisible();
+    expect(
+      within(kept).getByText('NAT türü direct, isp_nat, not_logged ya da internal olmalı.'),
+    ).toBeVisible();
+    expect(within(kept).getByRole('figure', { name: 'Kayıtlı değer' })).toHaveTextContent(
+      '"mode": "notlogged"',
+    );
+    expect(within(kept).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(kept).queryByText("Doğrudan (genel IP FortiGate'te)")).not.toBeInTheDocument();
+  });
+
+  it('keeps it in every save of the exits until it is removed', async () => {
+    let sent: unknown = null;
+    const calls = serve(UNREADABLE as unknown as Egresses, (body) => {
+      sent = body;
+      return jsonResponse(200, { changed: [], unchanged: [] });
+    });
+    const box = await editor();
+    const user = userEvent.setup();
+    await user.click(within(box).getByRole('button', { name: 'Çıkış ekle' }));
+    const row = within(box).getByRole('group', { name: 'Çıkış adsız çıkış' });
+    await user.type(within(row).getByLabelText('Ad'), 'hat-1');
+    await user.type(within(row).getByLabelText('Genel adresler'), '203.0.113.200');
+    await user.click(screen.getByRole('button', { name: 'Kaydet' }));
+    expect(
+      within(screen.getByTestId('setting-nat.egresses')).getAllByText(
+        'NAT türü direct, isp_nat, not_logged ya da internal olmalı.',
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
+    await user.click(within(box).getByRole('button', { name: 'Kaldır: misafir' }));
+    await user.click(screen.getByRole('button', { name: 'Kaydet' }));
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
+    });
+    expect(sent).toMatchObject({
+      changes: [
+        {
+          key: 'nat.egresses',
+          old: UNREADABLE,
+          value: { 'hat-1': { mode: 'direct', public: ['203.0.113.200'] } },
+        },
+      ],
+    });
+  });
+
+  it('names a stored value that is no object above the rows', async () => {
+    serve('hat-1' as unknown as Egresses);
+    const box = await editor();
+    expect(within(box).getByTestId('egress-stored-unreadable')).toHaveTextContent(
+      'Kayıtlı çıkış tanımı okunamıyor: Değer türü yanlış: nesne bekleniyor.',
+    );
+    expect(within(box).queryByText(/^Tanımlı çıkış yok/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Kaydet' })).toBeDisabled();
   });
 });
 

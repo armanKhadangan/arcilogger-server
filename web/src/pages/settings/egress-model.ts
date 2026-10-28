@@ -6,7 +6,9 @@
  * anything is sent; the server stays authoritative and its 422 is shown at the editor level (its
  * details carry no field path). Both suites read one case list (value, expected code or
  * normalised value). The editor keeps a draft of text rows (`EgressRow`), turns it into the value
- * with `valueFromRows` and warns about set-ups that work but answer worse (`egressWarnings`).
+ * with `valueFromRows` and warns about set-ups that work but answer worse (`egressWarnings`). A
+ * stored exit is never read into something else: one the rows cannot give back as stored stays
+ * as stored (`EgressRow.stored`) until the administrator removes it.
  * The observed panel's "Çıkış olarak ekle" prefills a row by the fixed rule of `prefillOptions`.
  */
 
@@ -364,6 +366,12 @@ export interface EgressRow {
   transips: string;
   interfaces: string;
   port_preservation: PortPreservation;
+  /**
+   * A stored exit the rows cannot give back as stored (a value written around the rules, e.g. an
+   * unknown mode or field): kept and sent exactly as stored, so the rules refuse it on its own
+   * row instead of a reading of it being saved; the row is shown read-only, to be removed.
+   */
+  stored?: unknown;
 }
 
 /**
@@ -390,9 +398,9 @@ export function showsField(mode: EgressMode, field: EgressField): boolean {
 }
 
 /** The entries of a list field: addresses split at line breaks, commas and spaces; interface
- * names (which may hold a space, `port 1`) at line breaks and commas only. */
+ * names (which may hold a space or a comma, `port 1`) one per line. */
 export function listItems(text: string, field: 'public' | 'transips' | 'interfaces'): string[] {
-  const separator = field === 'interfaces' ? /[\n,;]/ : /[\s,;]+/;
+  const separator = field === 'interfaces' ? /\n/ : /[\s,;]+/;
   return text
     .split(separator)
     .map((item) => item.trim())
@@ -403,36 +411,63 @@ function textOf(value: unknown): string {
   return Array.isArray(value) ? value.map(String).join('\n') : '';
 }
 
-/** The rows of a stored value (tolerant: a value stored around the rules still opens). */
+/** A row of one stored exit as far as its fields can be read (`rowsFromValue` checks it). */
+function readRow(name: string, item: unknown): EgressRow {
+  const exit = isObject(item) ? item : {};
+  const mode = (EGRESS_MODES as readonly unknown[]).includes(exit.mode)
+    ? (exit.mode as EgressMode)
+    : 'direct';
+  const preservation = (PORT_PRESERVATION as readonly unknown[]).includes(exit.port_preservation)
+    ? (exit.port_preservation as PortPreservation)
+    : 'unknown';
+  return {
+    key: name,
+    name,
+    label: typeof exit.label === 'string' ? exit.label : '',
+    mode,
+    public: textOf(exit.public),
+    public_dynamic: exit.public_dynamic === true,
+    transips: textOf(exit.transips),
+    interfaces: textOf(exit.interfaces),
+    port_preservation: preservation,
+  };
+}
+
+/**
+ * The rows of a stored value. An exit the rules of one exit accept and whose row gives it back
+ * unchanged (normalised) opens for editing; any other is kept as stored (`stored`), so opening
+ * and saving never rewrites what the administrator did not touch.
+ */
 export function rowsFromValue(value: unknown): EgressRow[] {
   if (!isObject(value)) return [];
   return Object.entries(value).map(([name, item]) => {
-    const exit = isObject(item) ? item : {};
-    const mode = (EGRESS_MODES as readonly unknown[]).includes(exit.mode)
-      ? (exit.mode as EgressMode)
-      : 'direct';
-    const preservation = (PORT_PRESERVATION as readonly unknown[]).includes(exit.port_preservation)
-      ? (exit.port_preservation as PortPreservation)
-      : 'unknown';
-    return {
-      key: name,
-      name,
-      label: typeof exit.label === 'string' ? exit.label : '',
-      mode,
-      public: textOf(exit.public),
-      public_dynamic: exit.public_dynamic === true,
-      transips: textOf(exit.transips),
-      interfaces: textOf(exit.interfaces),
-      port_preservation: preservation,
-    };
+    const row = readRow(name, item);
+    const stored = validateEgresses({ [name]: item }).value;
+    const read = validateEgresses({ [name]: exitOfRow(row) }).value;
+    const same = stored !== undefined && JSON.stringify(stored) === JSON.stringify(read);
+    return same ? row : { ...row, stored: item };
   });
+}
+
+/** `false` for a stored value that is no object of exits (the editor opens without rows). */
+export function readableValue(value: unknown): boolean {
+  return isObject(value);
+}
+
+/** The rule a row kept as stored breaks, as the server would refuse it (none: it only cannot be
+ * shown as rows). */
+export function storedRefusal(row: EgressRow): EgressRefusal | undefined {
+  return row.stored === undefined
+    ? undefined
+    : validateEgresses({ [row.name]: row.stored }).refusal;
 }
 
 /** What a row sends: only the fields its mode takes (the others at their defaults). */
 export function exitOfRow(row: EgressRow): Exit {
   const shown = (field: EgressField) => showsField(row.mode, field);
   return {
-    label: row.label.trim(),
+    // As typed: the server keeps a label as given (rule 4).
+    label: row.label,
     mode: row.mode,
     public: shown('public') ? listItems(row.public, 'public') : [],
     public_dynamic: shown('public_dynamic') ? row.public_dynamic : false,
@@ -453,21 +488,29 @@ export type RowsResult =
 /** Two rows with one name: not expressible as a JSON object (a browser-side code). */
 export const DUPLICATE_NAME = 'egress_duplicate_name';
 
-/** The value of the rows (normalised as the server stores it), or the first refusal. */
+/** The name a row is sent under: as typed, trimmed; a row kept as stored under its stored one. */
+function rowName(row: EgressRow): string {
+  return row.stored === undefined ? row.name.trim() : row.name;
+}
+
+/**
+ * The value of the rows (normalised as the server stores it), or the first refusal. A row kept
+ * as stored is sent as stored, so its refusal is the server's.
+ */
 export function valueFromRows(rows: readonly EgressRow[]): RowsResult {
   const seen = new Set<string>();
-  const raw: Record<string, Exit> = {};
+  const raw: Record<string, unknown> = {};
   for (const row of rows) {
-    const name = row.name.trim();
+    const name = rowName(row);
     if (seen.has(name))
       return { refusal: { code: DUPLICATE_NAME, facts: {}, row: row.key, field: 'name' } };
     seen.add(name);
-    raw[name] = exitOfRow(row);
+    raw[name] = row.stored === undefined ? exitOfRow(row) : row.stored;
   }
   const result = validateEgresses(raw);
   if (result.refusal === undefined) return result;
   const exit = result.refusal.exit;
-  const row = exit === undefined ? undefined : rows.find((item) => item.name.trim() === exit);
+  const row = exit === undefined ? undefined : rows.find((item) => rowName(item) === exit);
   return { refusal: { ...result.refusal, ...(row ? { row: row.key } : {}) } };
 }
 
@@ -523,6 +566,7 @@ export type EditorWarning = 'interfaces';
  * ISP NAT without public addresses or interfaces.
  */
 function convertedShape(row: EgressRow): 'direct' | 'nat' | null {
+  if (row.stored !== undefined) return null;
   const exit = exitOfRow(row);
   const name = row.name.trim();
   if (exit.interfaces.length > 0 || exit.public_dynamic) return null;
@@ -542,7 +586,7 @@ export function egressWarnings(rows: readonly EgressRow[]): {
   rows.forEach((row, index) => {
     const exit = exitOfRow(row);
     const found: RowWarning[] = [];
-    if (exit.mode === 'isp_nat') {
+    if (row.stored === undefined && exit.mode === 'isp_nat') {
       if (exit.public.length === 0) found.push('noPublic');
       if (exit.public_dynamic) found.push('dynamic');
       if (exit.transips.length === 0) found.push('catchAll');
@@ -554,7 +598,9 @@ export function egressWarnings(rows: readonly EgressRow[]): {
       found.push('converted');
     byRow[row.key] = found;
   });
+  // A row kept as stored has no reading to warn about (its refusal says what is wrong).
   const lines = rows
+    .filter((row) => row.stored === undefined)
     .map(exitOfRow)
     .filter((exit) => exit.mode === 'direct' || exit.mode === 'isp_nat');
   const editor: EditorWarning[] =
@@ -635,6 +681,7 @@ export function prefillOptions(
   const joins: PrefillOption[] = dstintf
     ? rows
         .filter((row) => {
+          if (row.stored !== undefined) return false;
           const exit = exitOfRow(row);
           const fits = shared
             ? exit.mode === 'isp_nat' || exit.mode === 'internal'
@@ -684,7 +731,8 @@ export function applyPrefill(
 
 /**
  * The row of the draft that claims an observed address (its public or NAT addresses hold it;
- * of several, the one on the row's `dstintf`), `null` when none does.
+ * of several, the one on the row's `dstintf`), `null` when none does; a row kept as stored
+ * claims nothing.
  */
 export function draftClaim(
   observed: Pick<ObservedNatRow, 'transip' | 'dstintf'>,
@@ -693,6 +741,7 @@ export function draftClaim(
   const address = network(observed.transip);
   if (address === null) return null;
   const claims = rows.filter((row) => {
+    if (row.stored !== undefined) return false;
     const exit = exitOfRow(row);
     return RANGES([...exit.public, ...exit.transips]).some((range) => overlaps(range, address));
   });

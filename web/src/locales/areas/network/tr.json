@@ -39,6 +39,11 @@
         "converted": "Yükseltmede aktarıldı: aktarılan çıkışlar arayüzsüz ve değiştirilmeden kaldıkça sorgular onları eski NAT ayarlarındaki gibi tek hat sayar; sonradan eklenen bir çıkışın NAT adresleri bunun dışındadır. Her hattın genel adresini ve arayüzlerini girin (KURULUM.md bölüm 13)."
       },
       "serverRefused": "Sunucu çıkış tanımını kabul etmedi ({{code}}).",
+      "kept": {
+        "note": "Bu çıkış kaydedildiği biçimiyle düzenleyicide gösterilemiyor; kayıtlı değeri aşağıda ve değiştirilmeden korunur. Düzeltmek için çıkışı kaldırıp doğru değerlerle yeniden ekleyin.",
+        "value": "Kayıtlı değer"
+      },
+      "storedUnreadable": "Kayıtlı çıkış tanımı okunamıyor: {{reason}} Bir çıkış ekleyip kaydettiğinizde kayıtlı değerin yerine geçer.",
       "codes": {
         "setting_type": "Değer türü yanlış: {{expected_tr}} bekleniyor.",
         "setting_too_many": "En çok {{limit}} öğe girilebilir.",

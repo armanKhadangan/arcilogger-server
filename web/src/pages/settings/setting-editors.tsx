@@ -27,7 +27,7 @@ import { roleLabel, ROLE_IDS } from '@/lib/permissions';
 import type { SettingOut } from '@/lib/settings-types';
 
 import { EgressEditor } from './egress-editor';
-import { EGRESSES_KEY, listItems, type EgressRow } from './egress-model';
+import { EGRESSES_KEY, type EgressRow } from './egress-model';
 import { FortiGateObservedPanel, type SrcmacDrafts } from './fortigate-observed-panel';
 import { parseInteger } from './settings-validation';
 import {
@@ -37,6 +37,7 @@ import {
   SERVER_SECONDS_KEY,
   SEVERITIES,
   SEVERITY_KEY,
+  stringListItems,
   TOTP_MANDATORY_ROLES,
   TOTP_ROLES_KEY,
   validHoliday,
@@ -70,7 +71,8 @@ function srcmacDrafts(group: GroupDrafts | undefined): SrcmacDrafts | null {
   const interfaces = group?.draft(SRCMAC_INTERFACES_KEY);
   if (!group || typeof interfaces !== 'string') return null;
   const limit = group.draft(SRCMAC_MAX_IPS_KEY);
-  const listed = listItems(interfaces, 'interfaces');
+  // Read as the setting's own list editor reads it (`fromDraft`).
+  const listed = stringListItems(interfaces);
   return {
     interfaces: listed,
     maxIps: (typeof limit === 'string' ? parseInteger(limit) : null) ?? 1,
@@ -461,7 +463,14 @@ export function SettingField({
   else if (setting.key === TOTP_ROLES_KEY && Array.isArray(draft))
     editor = <RolesEditor {...common} draft={draft as string[]} onChange={onChange} />;
   else if (setting.key === EGRESSES_KEY && Array.isArray(draft))
-    editor = <EgressEditor {...common} draft={draft as EgressRow[]} onChange={onChange} />;
+    editor = (
+      <EgressEditor
+        {...common}
+        draft={draft as EgressRow[]}
+        stored={setting.value}
+        onChange={onChange}
+      />
+    );
   else if (setting.key === SEVERITY_KEY)
     editor = (
       <Select value={draftText(draft)} onValueChange={onChange} disabled={disabled}>

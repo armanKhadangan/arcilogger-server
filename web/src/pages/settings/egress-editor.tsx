@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Alert } from '@/components/ui/alert';
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { visibleText } from '@/lib/display';
 import type { EgressMode, PortPreservation } from '@/lib/lookup-types';
 
 import {
@@ -22,8 +23,11 @@ import {
   egressWarnings,
   emptyRow,
   PORT_PRESERVATION,
+  readableValue,
   refusalText,
   showsField,
+  storedRefusal,
+  validateEgresses,
   valueFromRows,
   type EgressField,
   type EgressRefusal,
@@ -281,14 +285,73 @@ function ExitRow({
 }
 
 /**
+ * A stored exit the rows cannot give back as stored (`EgressRow.stored`): read-only, with the rule
+ * it breaks and its stored value; it is sent as stored until it is removed.
+ */
+function StoredExitRow({
+  row,
+  number,
+  disabled,
+  onRemove,
+}: {
+  row: EgressRow;
+  number: number;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation();
+  const captionId = useId();
+  const title = visibleText(row.name) || t('network.egress.unnamed');
+  const refusal = storedRefusal(row);
+  const json = JSON.stringify(row.stored, null, 2);
+  return (
+    <fieldset
+      className="flex flex-col gap-3 rounded-lg border border-border p-3"
+      data-testid={`egress-${row.key}`}
+      data-stored=""
+    >
+      <legend className="px-1 text-13 font-medium text-foreground">
+        {t('network.egress.exit', { name: title, number })}
+      </legend>
+      <Alert tone="warning" assertive={false}>
+        {t('network.egress.kept.note')}
+      </Alert>
+      {refusal ? <p className="text-xs text-danger-ink">{refusalText(refusal, t)}</p> : null}
+      <figure className="flex flex-col gap-1" aria-labelledby={captionId}>
+        <figcaption id={captionId} className="text-13 font-medium text-foreground">
+          {t('network.egress.kept.value')}
+        </figcaption>
+        <pre className="rounded-md bg-subtle p-2 font-mono text-xs wrap-anywhere whitespace-pre-wrap text-foreground">
+          {json.split('\n').map(visibleText).join('\n')}
+        </pre>
+      </figure>
+      <div>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          aria-label={t('network.egress.remove', { name: title })}
+          onClick={onRemove}
+        >
+          <X aria-hidden="true" />
+          {t('network.egress.removeShort')}
+        </Button>
+      </div>
+    </fieldset>
+  );
+}
+
+/**
  * The editor of `nat.egresses` (contract 2.13): one row per internet exit with the fields its
  * mode takes, the server's rules checked on the field (`egress-model.ts`) and the warnings of
- * set-ups that work but answer worse. A refusal of the server (no field path) is shown by the
- * setting's field, at the editor level.
+ * set-ups that work but answer worse. A stored exit the rows cannot give back as stored is kept
+ * read-only (`StoredExitRow`). A refusal of the server (no field path) is shown by the setting's
+ * field, at the editor level.
  */
 export function EgressEditor({
   id,
   draft,
+  stored,
   onChange,
   disabled,
   invalid,
@@ -297,6 +360,8 @@ export function EgressEditor({
 }: {
   id: string;
   draft: EgressRow[];
+  /** The stored value (an unreadable one is named above the rows). */
+  stored: unknown;
   onChange: (draft: EgressRow[]) => void;
   disabled: boolean;
   invalid: boolean;
@@ -307,6 +372,7 @@ export function EgressEditor({
   const warnings = egressWarnings(draft);
   const refusal = valueFromRows(draft).refusal;
   const outer = refusal && refusal.row === undefined ? refusalText(refusal, t) : null;
+  const unreadable = readableValue(stored) ? undefined : validateEgresses(stored).refusal;
   return (
     <div
       className="flex flex-col gap-3"
@@ -323,26 +389,42 @@ export function EgressEditor({
           {t(`network.egress.warnings.${warning}`)}
         </Alert>
       ))}
-      {draft.length === 0 ? (
+      {unreadable ? (
+        <Alert tone="warning" assertive={false} data-testid="egress-stored-unreadable">
+          {t('network.egress.storedUnreadable', { reason: refusalText(unreadable, t) })}
+        </Alert>
+      ) : draft.length === 0 ? (
         <p className="text-13 text-muted">{t('network.egress.empty')}</p>
       ) : null}
-      {draft.map((row, index) => (
-        <ExitRow
-          key={row.key}
-          row={row}
-          baseId={id}
-          number={index + 1}
-          warnings={warnings.rows[row.key] ?? []}
-          refusal={refusal?.row === row.key ? refusal : undefined}
-          disabled={disabled}
-          onChange={(next) => {
-            onChange(draft.map((item) => (item.key === row.key ? next : item)));
-          }}
-          onRemove={() => {
-            onChange(draft.filter((item) => item.key !== row.key));
-          }}
-        />
-      ))}
+      {draft.map((row, index) =>
+        row.stored !== undefined ? (
+          <StoredExitRow
+            key={row.key}
+            row={row}
+            number={index + 1}
+            disabled={disabled}
+            onRemove={() => {
+              onChange(draft.filter((item) => item.key !== row.key));
+            }}
+          />
+        ) : (
+          <ExitRow
+            key={row.key}
+            row={row}
+            baseId={id}
+            number={index + 1}
+            warnings={warnings.rows[row.key] ?? []}
+            refusal={refusal?.row === row.key ? refusal : undefined}
+            disabled={disabled}
+            onChange={(next) => {
+              onChange(draft.map((item) => (item.key === row.key ? next : item)));
+            }}
+            onRemove={() => {
+              onChange(draft.filter((item) => item.key !== row.key));
+            }}
+          />
+        ),
+      )}
       {outer ? <p className="text-xs text-danger-ink">{outer}</p> : null}
       <div>
         <Button

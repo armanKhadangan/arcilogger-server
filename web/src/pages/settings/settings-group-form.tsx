@@ -74,16 +74,19 @@ export function SettingsGroupForm({
   const shown = useRef(JSON.stringify(drafts(settings)));
   const serverText = JSON.stringify(drafts(settings));
 
-  /** Keys whose draft is not the stored value (a draft that does not parse counts as changed). */
+  /**
+   * Keys the administrator edited to another value: the draft is not the one the stored value
+   * opens with, and it stands for another value (a draft that does not parse counts as changed).
+   * A stored value its editor reads back differently is never a change of its own.
+   */
   const changed = useMemo(
     () =>
       settings.filter((setting) => {
         const draft = values[setting.key];
-        if (draft === undefined) return false;
+        if (draft === undefined || JSON.stringify(draft) === JSON.stringify(toDraft(setting)))
+          return false;
         const parsed = fromDraft(setting, draft);
-        return parsed.error !== undefined
-          ? JSON.stringify(draft) !== JSON.stringify(toDraft(setting))
-          : !sameValue(parsed.value, setting.value);
+        return parsed.error !== undefined || !sameValue(parsed.value, setting.value);
       }),
     [settings, values],
   );
