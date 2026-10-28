@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -69,13 +69,18 @@ export function PersonDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const busy = create.isPending || update.isPending;
 
-  useEffect(() => {
+  // The form begins while rendering when the dialog opens (or for another person), so its first
+  // frame already shows that person's values: an effect would run only after that frame.
+  const openFor = open ? person : undefined;
+  const [begunFor, setBegunFor] = useState<PersonOut | null | undefined>(undefined);
+  if (openFor !== begunFor) {
+    setBegunFor(openFor);
     if (open) {
       setValues(personFormValues(person));
       setErrors({});
       setFailure(null);
     }
-  }, [open, person]);
+  }
 
   function set<K extends keyof PersonFormValues>(field: K, value: PersonFormValues[K]) {
     setValues((current) => ({ ...current, [field]: value }));
