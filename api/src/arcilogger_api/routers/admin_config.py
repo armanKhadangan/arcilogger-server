@@ -81,8 +81,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 SettingsDep = Annotated[CurrentUser, Depends(require("settings.manage"))]
 SourcesDep = Annotated[CurrentUser, Depends(require("sources.manage"))]
-#: ``Türkçe [English]`` of ``config.setup_problems``.
-_BILINGUAL = re.compile(r"^(?P<tr>.*) \[(?P<en>[^\[\]]*)\]$", re.DOTALL)
+#: ``Türkçe [English]`` of ``config.setup_problems``; the English part may name a TOML table
+#: (``[[sources]]``), never another bracket.
+_BILINGUAL = re.compile(r"^(?P<tr>.*) \[(?P<en>(?:[^\[\]]|\[\[[a-z_]+\]\])*)\]$", re.DOTALL)
 
 
 # -- GET /admin/config ----------------------------------------------------------------------------
