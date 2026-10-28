@@ -11,8 +11,9 @@ missing renewal (D6), the DECLINE shapes of D33 (those the lease build decides a
 build made before a network was entered missed), relayed networks, the migrations from MikroTik
 DHCP (D5, D33's MikroTik variant, a move loaded before the upgrade), a rollback window (D8), two
 DHCP origins (D27), the probe for FortiGate DHCP lines that never became lease evidence when no
-chain could be built (D8, 2.8.3), a RELEASE mapped after the build, unconfigured senders (D24)
-and a FortiGate clock that was off at the moment (D28).
+chain could be built (D8, 2.8.3), a RELEASE mapped after the build, unconfigured senders (D24),
+ACKs the build refused and today's settings accept (deviation c2) and a FortiGate clock that was
+off at the moment (D28).
 """
 
 from __future__ import annotations
@@ -1731,6 +1732,199 @@ def test_a_sender_configured_later_is_named_on_the_chain(
     assert chain.lease.evidence[0].raw.source == sender
     assert note(chain, "source_configured_later") == {"sources": sender}
     assert chain.lease.confidence == "high"  # information only
+
+
+# -- ACKs the build refused and today's settings accept (deviation c2) -----------------------------
+
+#: An HA member that sent from its own address before anyone configured it (D24).
+HA_MEMBER = "unknown-172.20.10.2"
+#: A logid nobody had mapped when the leases were built (synthetic, as in the trust tests).
+LATER_LOGID = "0100026099"
+
+
+def configure_ha_member(session: Session) -> None:
+    """The second FortiGate source, whose address covers :data:`HA_MEMBER` (D24)."""
+    session.add(Source(name="fortigate-2", type="fortigate", address="172.20.10.0/30"))
+    session.commit()
+
+
+def assert_unshown(outcome: LookupOutcome) -> None:
+    """Nothing of OTHER's row is cited or shown (KVKK, 2.16)."""
+    text = outcome_text(outcome)
+    assert OTHER not in text
+    assert "idr-nb07" not in text
+    assert outcome.unconverted_dhcp == ()
+
+
+def test_another_clients_ack_from_a_sender_configured_after_the_build(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Manager review of PR #30, (a): OTHER's 10:00 ACK for .57 came from the HA member nobody
+    had configured, so the build refused it and left the PC's 08:00 lease open. Once a source
+    covers the member, the lookup at 11:00 names Selin Kaya at ``low`` with the post-lease
+    warning (OTHER's row is neither cited nor shown), until the rebuild names OTHER."""
+    db_session.add(Source(name=HA_MEMBER, type="fortigate", address="172.20.10.2", unknown=True))
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(tr(DAY, 10), PC, OTHER, hostname="IDR-NB07", source=HA_MEMBER)
+    build(db_session, DAY, DAY)
+    selin(db_session)
+    moment = tr(DAY, 11)
+    refused = internal(db_session, PC, moment).attribution
+    assert refused is not None
+    assert refused.lease is not None
+    # ``medium``: the person step, as on a MikroTik site.
+    assert (refused.lease.mac, refused.confidence, refused.lease.confidence) == (
+        PC_MAC,
+        "medium",
+        "high",
+    )
+    configure_ha_member(db_session)
+    outcome = internal(db_session, PC, moment)
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.person is not None
+    assert (chain.lease.mac, chain.person.name) == (PC_MAC, "Selin Kaya")
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(T0), "ip": PC}
+    assert OVERLAP not in chain_keys(chain)
+    assert [ref.time for ref in chain.lease.evidence if ref.table == "fg_dhcp"] == [T0]
+    assert_unshown(outcome)
+    # Before OTHER's ACK nothing is lowered.
+    early = internal(db_session, PC, tr(DAY, 9, 59)).attribution
+    assert early is not None
+    assert (early.confidence, chain_keys(early).count(UNCONVERTED)) == ("medium", 0)
+    build(db_session, DAY, DAY)  # the rebuild
+    rebuilt = internal(db_session, PC, moment).attribution
+    assert rebuilt is not None
+    assert rebuilt.lease is not None
+    assert (rebuilt.lease.mac, rebuilt.lease.confidence) == (OTHER, "high")
+    assert UNCONVERTED not in chain_keys(rebuilt)
+
+
+def test_another_clients_ack_under_a_logid_mapped_after_the_build(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Manager review of PR #30, (b): OTHER's ACK for .57 six hours after the PC's (both with
+    the 7-day default lease) was logged under a logid mapped only after the build. Thirty hours
+    after the PC's ACK (inside half its lease) the chain is ``low`` with the post-lease warning
+    until the rebuild names OTHER."""
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    evidence.fortigate_dhcp(
+        T0 + timedelta(hours=6), PC, OTHER, hostname="IDR-NB07", lease=WEEK, logid=LATER_LOGID
+    )
+    build(db_session, DAY, DAY + timedelta(days=1))
+    selin(db_session)
+    moment = T0 + timedelta(hours=30)
+    unmapped = internal(db_session, PC, moment).attribution
+    assert unmapped is not None
+    assert (unmapped.confidence, chain_keys(unmapped).count(UNCONVERTED)) == ("medium", 0)
+    mapped = {"0100026001": "assigned", "0100026002": "deassigned", LATER_LOGID: "assigned"}
+    set_setting(db_session, "dhcp.fortigate_logids", mapped, updated_by="tolga")
+    db_session.commit()
+    outcome = internal(db_session, PC, moment)
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.lease.mac == PC_MAC
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(T0), "ip": PC}
+    assert "lease_renewal_not_seen" not in chain_keys(chain)
+    assert_unshown(outcome)
+    build(db_session, DAY, DAY + timedelta(days=1))
+    rebuilt = internal(db_session, PC, moment).attribution
+    assert rebuilt is not None
+    assert rebuilt.lease is not None
+    assert (rebuilt.lease.mac, rebuilt.lease.confidence) == (OTHER, "high")
+    assert UNCONVERTED not in chain_keys(rebuilt)
+
+
+def test_a_migration_ack_from_a_sender_configured_after_the_build(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Manager review of PR #30, (c): the FortiGate's 09:20 ACK of the PC's own pair (D5) came
+    from the HA member nobody had configured, so the build kept the MikroTik lease, and the
+    printer's traffic keeps it open. Once the member is configured, the lookup on day 3 is
+    ``low`` with the post-lease warning, until the rebuild answers ``no_lease``."""
+    db_session.add(Source(name=HA_MEMBER, type="fortigate", address="172.20.10.2", unknown=True))
+    _mikrotik_lease(evidence)
+    evidence.fortigate_dhcp(MOVED, PC, PC_MAC, hostname=HOST, source=HA_MEMBER)
+    _printer(evidence, 3)
+    build(db_session, MOVE_DAY, MOVE_DAY + timedelta(days=3))
+    selin(db_session)
+    moment = MOVED + timedelta(days=2, minutes=10)
+    refused = internal(db_session, PC, moment).attribution
+    assert refused is not None
+    assert refused.lease is not None
+    assert (refused.lease.source_table, refused.lease.confidence) == ("mt_dhcp", "high")
+    assert UNCONVERTED not in chain_keys(refused)
+    configure_ha_member(db_session)
+    outcome = internal(db_session, PC, moment)
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.source_table, chain.lease.mac) == ("mt_dhcp", PC_MAC)
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(tr(MOVE_DAY, 8)), "ip": PC}
+    assert OVERLAP not in chain_keys(chain)
+    assert_unshown(outcome)
+    build(db_session, MOVE_DAY, MOVE_DAY + timedelta(days=3))
+    rebuilt = internal(db_session, PC, moment)
+    assert rebuilt.attribution is None
+    assert "no_lease" in keys(rebuilt)
+
+
+def test_a_healthy_fortigate_site_keeps_its_chain(
+    db_session: Session, evidence: Evidence, example: list[int]
+) -> None:
+    """The example site with OTHER's ACKs of .57 that a healthy build either applied (before the
+    PC's lease, after the moment) or still refuses (an unconfigured sender, an unmapped logid,
+    the receive time, a NAK under the ACK's logid): the lease stays ``high``, and the chain at
+    the person step's ``medium``."""
+    stranger(db_session)
+    evidence.fortigate_dhcp(tr(DAY, 7), PC, OTHER)
+    # Inside the chain's window: after its 11:00 re-ACK, before the moment.
+    evidence.fortigate_dhcp(AT - timedelta(minutes=20), PC, OTHER, source=STRANGER)
+    evidence.fortigate_dhcp(AT - timedelta(minutes=15), PC, OTHER, logid="0100026003")
+    evidence.fortigate_dhcp(AT - timedelta(minutes=10), PC, OTHER, device_time=False)
+    evidence.fortigate_dhcp(AT - timedelta(minutes=5), PC, OTHER, dhcp_msg="Nak")
+    evidence.fortigate_dhcp(AT + timedelta(minutes=1), PC, OTHER)
+    evidence.fortigate_dhcp(tr(DAY, 9), "172.20.42.58", OTHER)
+    build(db_session, DAY - timedelta(days=1), DAY + timedelta(days=1))
+    chain = internal(db_session, PC, AT).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.mac, chain.lease.start) == (PC_MAC, tr(DAY, 8))
+    assert (chain.confidence, chain.lease.confidence) == ("medium", "high")  # the person step
+    assert UNCONVERTED not in chain_keys(chain)
+
+
+def test_a_healthy_mixed_site_keeps_its_chains(db_session: Session, evidence: Evidence) -> None:
+    """MikroTik DHCP serves VLAN 42, the FortiGate VLAN 43 (renewals every 12 hours); the
+    FortiGate gave .57 to OTHER two days before the PC's MikroTik ACK (the build ended that
+    lease long before). Both chains keep their confidence."""
+    staff, staff_mac = "172.20.43.57", "00:00:5e:00:53:58"
+    start = tr(MOVE_DAY + timedelta(days=2), 8)
+    evidence.fortigate_dhcp(tr(MOVE_DAY, 8), PC, OTHER)
+    evidence.dhcp(start, "assigned", PC, PC_MAC, server="dhcp42", hostname=HOST)
+    for step in range(8):
+        moment = tr(MOVE_DAY, 8) + timedelta(hours=12 * step)
+        evidence.fortigate_dhcp(moment, staff, staff_mac, interface="vlan43")
+    evidence.traffic(start + timedelta(hours=3), PC, 50001)
+    build(db_session, MOVE_DAY, MOVE_DAY + timedelta(days=3))
+    moment = start + timedelta(hours=4)
+    mikrotik = internal(db_session, PC, moment).attribution
+    assert mikrotik is not None
+    assert mikrotik.lease is not None
+    assert (mikrotik.lease.source_table, mikrotik.lease.mac) == ("mt_dhcp", PC_MAC)
+    assert (mikrotik.confidence, mikrotik.lease.confidence) == ("high", "high")
+    assert UNCONVERTED not in chain_keys(mikrotik)
+    fortigate = internal(db_session, staff, moment).attribution
+    assert fortigate is not None
+    assert fortigate.lease is not None
+    assert (fortigate.lease.source_table, fortigate.lease.mac) == ("fg_dhcp", staff_mac)
+    assert (fortigate.confidence, fortigate.lease.confidence) == ("high", "high")
+    assert UNCONVERTED not in chain_keys(fortigate)
 
 
 # -- the source clock at the requested moment (D28, 2.7) ------------------------------------------
