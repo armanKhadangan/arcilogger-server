@@ -45,7 +45,7 @@
     }
   },
   "meta": {
-    "captured_at": "2026-10-13T04:02:35.078484+00:00",
+    "captured_at": "2026-10-13T04:01:58.225641+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -53,7 +53,7 @@
     "tsa": "mock (never legally valid)"
   },
   "observed": {
-    "generated_at": "2026-10-13T07:01:47.786081+03:00",
+    "generated_at": "2026-10-13T07:01:26.085312+03:00",
     "nat": {
       "exits_invalid": false,
       "hours": 24,
@@ -61,8 +61,8 @@
         {
           "dstintf": "wan1",
           "egress": "wan",
-          "first_seen": "2026-10-12T08:31:47.480850+03:00",
-          "last_seen": "2026-10-13T06:49:47.480850+03:00",
+          "first_seen": "2026-10-12T08:31:25.847561+03:00",
+          "last_seen": "2026-10-13T06:49:25.847561+03:00",
           "sessions": 48,
           "trandisp": "snat",
           "trandisp_known": true,
@@ -71,8 +71,8 @@
         {
           "dstintf": "wan2",
           "egress": null,
-          "first_seen": "2026-10-12T10:01:47.480850+03:00",
-          "last_seen": "2026-10-13T06:37:47.480850+03:00",
+          "first_seen": "2026-10-12T10:01:25.847561+03:00",
+          "last_seen": "2026-10-13T06:37:25.847561+03:00",
           "sessions": 14,
           "trandisp": "snat",
           "trandisp_known": true,
@@ -81,8 +81,8 @@
         {
           "dstintf": "dmz",
           "egress": null,
-          "first_seen": "2026-10-12T13:01:47.480850+03:00",
-          "last_seen": "2026-10-13T04:01:47.480850+03:00",
+          "first_seen": "2026-10-12T13:01:25.847561+03:00",
+          "last_seen": "2026-10-13T04:01:25.847561+03:00",
           "sessions": 6,
           "trandisp": "snat",
           "trandisp_known": true,
@@ -91,8 +91,8 @@
         {
           "dstintf": "wan1",
           "egress": null,
-          "first_seen": "2026-10-12T22:01:47.480850+03:00",
-          "last_seen": "2026-10-12T23:31:47.480850+03:00",
+          "first_seen": "2026-10-12T22:01:25.847561+03:00",
+          "last_seen": "2026-10-12T23:31:25.847561+03:00",
           "sessions": 3,
           "trandisp": "snat-pool",
           "trandisp_known": false,
@@ -131,7 +131,7 @@
     }
   },
   "observed_exits_invalid": {
-    "generated_at": "2026-10-13T07:01:47.939040+03:00",
+    "generated_at": "2026-10-13T07:01:26.175636+03:00",
     "nat": {
       "exits_invalid": true,
       "hours": 24,
@@ -139,8 +139,8 @@
         {
           "dstintf": "wan1",
           "egress": null,
-          "first_seen": "2026-10-12T08:31:47.480850+03:00",
-          "last_seen": "2026-10-13T06:49:47.480850+03:00",
+          "first_seen": "2026-10-12T08:31:25.847561+03:00",
+          "last_seen": "2026-10-13T06:49:25.847561+03:00",
           "sessions": 48,
           "trandisp": "snat",
           "trandisp_known": true,
@@ -149,8 +149,8 @@
         {
           "dstintf": "wan2",
           "egress": null,
-          "first_seen": "2026-10-12T10:01:47.480850+03:00",
-          "last_seen": "2026-10-13T06:37:47.480850+03:00",
+          "first_seen": "2026-10-12T10:01:25.847561+03:00",
+          "last_seen": "2026-10-13T06:37:25.847561+03:00",
           "sessions": 14,
           "trandisp": "snat",
           "trandisp_known": true,
@@ -159,8 +159,8 @@
         {
           "dstintf": "dmz",
           "egress": null,
-          "first_seen": "2026-10-12T13:01:47.480850+03:00",
-          "last_seen": "2026-10-13T04:01:47.480850+03:00",
+          "first_seen": "2026-10-12T13:01:25.847561+03:00",
+          "last_seen": "2026-10-13T04:01:25.847561+03:00",
           "sessions": 6,
           "trandisp": "snat",
           "trandisp_known": true,
@@ -169,8 +169,8 @@
         {
           "dstintf": "wan1",
           "egress": null,
-          "first_seen": "2026-10-12T22:01:47.480850+03:00",
-          "last_seen": "2026-10-12T23:31:47.480850+03:00",
+          "first_seen": "2026-10-12T22:01:25.847561+03:00",
+          "last_seen": "2026-10-12T23:31:25.847561+03:00",
           "sessions": 3,
           "trandisp": "snat-pool",
           "trandisp_known": false,
