@@ -682,17 +682,39 @@ def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Ev
 
 
 @pytest.mark.parametrize(
-    ("days", "lowered", "refs"),
-    [(8, False, True), (6, True, True), (6, True, False)],
-    ids=["beyond-the-window", "inside", "inside-without-a-record"],
+    ("converted", "days", "lowered", "refs"),
+    [
+        (False, 8, False, True),
+        (False, 6, True, True),
+        (False, 6, True, False),
+        (True, 101, False, True),
+        (True, 99, True, True),
+        (True, 99, True, False),
+        (True, 8, True, True),
+    ],
+    ids=[
+        "line-beyond-the-window",
+        "line-inside",
+        "line-inside-without-a-record",
+        "converted-beyond-the-window",
+        "converted-inside",
+        "converted-inside-without-a-record",
+        "converted-beyond-the-line-window",
+    ],
 )
 def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
-    db_session: Session, evidence: Evidence, days: int, lowered: bool, refs: bool
+    db_session: Session,
+    evidence: Evidence,
+    converted: bool,
+    days: int,
+    lowered: bool,
+    refs: bool,
 ) -> None:
     """Round 7: a MikroTik lease that traffic keeps open has its last DHCP record far back; the
-    post-lease check reads no further back than the D8 probe window (the 3.8 fallback,
-    604,800 s: 7 days; deviation c2) before the moment, and from the lease start when the lease
-    has no DHCP record (printed as ``{last}``)."""
+    post-lease check reads no further back than the D8 probe window before the moment: for an
+    ``fg_event`` line the 3.8 fallback, 604,800 s (7 days; deviation c2), for a converted row
+    the 8,640,000 s (100 days) of 2.7; from the lease start when the lease has no DHCP record
+    (printed as ``{last}``)."""
     moment = AT
     ack = moment - timedelta(days=120)
     evidence.dhcp(ack, "assigned", PC, PC_MAC, server="dhcp42")
@@ -703,8 +725,10 @@ def test_a_mikrotik_lease_kept_open_reads_back_one_probe_window(
     lease.last_evidence = moment - timedelta(hours=1)  # the traffic of yesterday and today
     if not refs:
         lease.evidence = []
-    evidence.fortigate_dhcp(moment - timedelta(days=days), "172.20.42.120", PC_MAC)
-    unconverted_line(evidence, moment - timedelta(days=days), "172.20.42.121", PC_MAC)
+    if converted:
+        evidence.fortigate_dhcp(moment - timedelta(days=days), "172.20.42.120", PC_MAC)
+    else:
+        unconverted_line(evidence, moment - timedelta(days=days), "172.20.42.121", PC_MAC)
     db_session.commit()
     chain = internal(db_session, PC, moment).attribution
     assert chain is not None

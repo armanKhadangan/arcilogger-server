@@ -77,7 +77,7 @@ from datetime import datetime, timedelta
 from typing import Final
 
 from sqlalchemy import ColumnElement, and_, case, cast, func, not_, or_, select, true
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, INET, MACADDR, TIMESTAMP
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
 
@@ -119,11 +119,15 @@ from arcilogger_worker.macaddr import is_randomized
 #: The logged lease of an ``fg_dhcp`` ref summary (``…, lease 86400)``; ``lease -)`` without).
 _REF_LEASE: Final = re.compile(r", lease (\d+)\)$")
 #: The D8 probe's window (2.8.3, FortiGate lease times; at least the timeline's longest
-#: window): the post-lease check of a MikroTik lease, which traffic keeps open, reads no further
-#: back than this (2.7, round 7). The fallback of 2.8.3, 604,800 s (the FortiOS default lease),
-#: not 8,640,000 s: ``fg_event`` has no index on the line's address, so these queries read every
-#: ``system`` line of the window, and 100 days of them miss the 3.8 guards (deviation c2).
+#: window): the ``fg_event`` post-lease check of a MikroTik lease, which traffic keeps open,
+#: reads no further back than this (2.7, round 7). The fallback of 2.8.3, 604,800 s (the FortiOS
+#: default lease), not 8,640,000 s: ``fg_event`` has no index on the line's address, so these
+#: queries read every ``system`` line of the window, and 100 days of them miss the 3.8 guards
+#: (deviation c2).
 UNCONVERTED_WINDOW: Final = timedelta(seconds=604_800)
+#: The cap of the converted-row check of a MikroTik lease (2.7, round 7): the 100 days of 2.7,
+#: not the fallback above; it reads ``fg_dhcp`` on ``ix_fg_dhcp_mac_time``.
+MISSED_MOVE_WINDOW: Final = timedelta(seconds=8_640_000)
 #: The chains the post-lease check looks at (a ``low`` chain is warned already).
 _CHECKED: Final = ("high", "medium")
 #: The subnet of a logged address that is no address (the post-lease checks count its row).
@@ -898,12 +902,12 @@ class Attributor:
         return str(vlan.subnet), f"{vlan.name_tr} ({vlan.subnet})"
 
     def _targets(
-        self, groups: list[list[AttributionChain]]
+        self, groups: list[list[AttributionChain]], cap: timedelta
     ) -> list[tuple[list[AttributionChain], AttributionChain, StoredLease, datetime]]:
         """The chains the post-lease check looks at: a DHCP lease, still ``high`` or ``medium``;
         each with its group and the lower end of its window: the lease's last DHCP record at
-        or before the moment (its start without one), for a MikroTik lease no earlier than the
-        D8 probe window before the moment."""
+        or before the moment (its start without one), for a MikroTik lease no earlier than
+        ``cap`` before the moment."""
         targets = []
         for group in groups:
             for chain in group:
@@ -914,7 +918,7 @@ class Attributor:
                     continue
                 since = self._last_record(lease, chain.at)
                 if lease.source_table != FG_DHCP_TABLE:
-                    since = max(since, chain.at - UNCONVERTED_WINDOW)
+                    since = max(since, chain.at - cap)
                 targets.append((group, chain, lease, since))
         return targets
 
@@ -927,7 +931,7 @@ class Attributor:
         mapped FortiGate DHCP lines of trusted senders that name a target's IP or MAC and that
         D25 and D28 do not refuse (:func:`event_kept`), matched to each target's own window
         ``(since, at]`` in memory."""
-        targets = self._targets(groups)
+        targets = self._targets(groups, UNCONVERTED_WINDOW)
         logids = sorted(self.settings.fortigate_logids)
         if not targets or not logids:
             return
@@ -964,9 +968,11 @@ class Attributor:
 
     def _missed_moves(self, groups: list[list[AttributionChain]]) -> None:
         """Round 7: one query on ``fg_dhcp`` (``ix_fg_dhcp_mac_time``) for kept ACKs of a
-        target's MAC, matched in memory: another IP inside ``(since, at)``, for an ``fg_dhcp``
-        lease on its interface and (when its record is a row) its VDOM, under D33's key."""
-        targets = self._targets(groups)
+        target's MAC for another IP inside the target's own ``(since, at)``, each address,
+        interface and VDOM once per target (the window is matched in the query: 100 days of a
+        MAC's ACKs are hundreds of rows, 3.8); in memory, for an ``fg_dhcp`` lease its interface
+        and (when its record is a row) its VDOM, and D33's key."""
+        targets = self._targets(groups, MISSED_MOVE_WINDOW)
         assigned = sorted(
             logid
             for logid, meaning in self.settings.fortigate_logids.items()
@@ -976,29 +982,52 @@ class Attributor:
             return
         if self._kept is None:
             self._kept = kept(self.settings, self.untrusted)
-        query = select(
-            FgDhcp.ip, FgDhcp.mac, FgDhcp.interface, FgDhcp.extra["vd"].astext, FgDhcp.time
-        ).where(
-            FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),
-            FgDhcp.time > min(since for _, _, _, since in targets),
-            FgDhcp.time < max(chain.at for _, chain, _, _ in targets),
-            FgDhcp.logid.in_(assigned),
-            self._kept,
+        windows = (
+            func.unnest(
+                cast([lease.mac for _, _, lease, _ in targets], ARRAY(MACADDR)),
+                cast([chain.internal_ip for _, chain, _, _ in targets], ARRAY(INET)),
+                cast([since for _, _, _, since in targets], ARRAY(TIMESTAMP(timezone=True))),
+                cast([chain.at for _, chain, _, _ in targets], ARRAY(TIMESTAMP(timezone=True))),
+            )
+            .table_valued("mac", "ip", "since", "at", with_ordinality="n")
+            .render_derived("windows")
+        )
+        query = (
+            select(
+                windows.c.n,
+                FgDhcp.ip,
+                FgDhcp.interface,
+                FgDhcp.extra["vd"].astext,
+            )
+            .distinct()
+            .join_from(
+                windows,
+                FgDhcp,
+                and_(
+                    FgDhcp.mac == windows.c.mac,
+                    FgDhcp.time > windows.c.since,
+                    FgDhcp.time < windows.c.at,
+                    FgDhcp.ip != windows.c.ip,
+                ),
+            )
+            .where(
+                FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),
+                FgDhcp.time > min(since for _, _, _, since in targets),
+                FgDhcp.time < max(chain.at for _, chain, _, _ in targets),
+                FgDhcp.logid.in_(assigned),
+                self._kept,
+            )
         )
         rows = self.session.execute(query).all()
         if not rows:
             return
-        by_mac: dict[str, list[tuple[str, str | None, str | None, datetime]]] = defaultdict(list)
-        for address, mac, interface, vd, time in rows:
-            by_mac[mac].append((address, interface, vd, time))
-        self._load_subnets(address for address, _mac, _interface, _vd, _time in rows)
-        for group, chain, lease, since in targets:
+        found: dict[int, list[tuple[str, str | None, str | None]]] = defaultdict(list)
+        for n, address, interface, vd in rows:
+            found[n - 1].append((address, interface, vd))
+        self._load_subnets(address for _n, address, _interface, _vd in rows)
+        for index, (group, chain, lease, _since) in enumerate(targets):
             record = self.record(lease, chain.at)
-            for address, interface, vd, time in by_mac.get(lease.mac, ()):
-                if address == chain.internal_ip:
-                    continue
-                if not since < time < chain.at:
-                    continue
+            for address, interface, vd in found.get(index, ()):
                 if lease.source_table == FG_DHCP_TABLE:
                     if interface != lease.server:
                         continue

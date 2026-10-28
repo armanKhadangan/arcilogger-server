@@ -442,7 +442,8 @@ def test_lookup_is_fast_on_compressed_chunks(db_engine: Engine, db_session: Sess
 # can only use ``ix_fg_event_subtype_time``, so their cost grows with the ``system`` lines in
 # their window (contract 3.8, round-7 note "3.8 guard for the round-6 post-lease query"): on the
 # 100-day window the probe and the post-lease query missed their 0.5 s here, so the lookup reads
-# the 2.8.3 fallback, the last 604,800 s (``attribution.UNCONVERTED_WINDOW``; deviation c2).
+# the 2.8.3 fallback, the last 604,800 s (``attribution.UNCONVERTED_WINDOW``; deviation c2). The
+# converted-row query reads ``fg_dhcp`` on its MAC index and keeps the 100 days of 2.7.
 
 #: Moments of the guards: the traffic site's and the event site's lookups.
 GUARD_AT = tr(DAY, 14)
@@ -983,9 +984,9 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     event_site: Engine, timer: _Timer
 ) -> None:
     """3.8: the round-7 converted-row query of 2.7 for the MACs of 100 chains on
-    ``ix_fg_dhcp_mac_time`` over the cap, at the load generator's FortiGate DHCP rate over
-    400 days (the chains' MACs on the staff Wi-Fi: read, and no move under D33's key), under
-    0.2 s."""
+    ``ix_fg_dhcp_mac_time`` over the 100-day cap (no fallback), at the load generator's
+    FortiGate DHCP rate over 400 days (the chains' MACs on the staff Wi-Fi: read, and no move
+    under D33's key), under 0.2 s."""
     moves: list[_Timed] = []
 
     def measure() -> None:
@@ -994,6 +995,12 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     outcome = _guard_lookup(event_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
     timer.report("round-7 converted-row query")
     assert len(outcome.matches) == 100
+    for match in outcome.matches:
+        chain = match.chain
+        assert chain is not None
+        assert chain.lease is not None
+        assert chain.lease.last_dhcp_evidence is not None
+        assert chain.at - chain.lease.last_dhcp_evidence > attribution.MISSED_MOVE_WINDOW
     assert all(m.chain is not None and m.chain.confidence != "low" for m in outcome.matches)
     (timed,) = moves
     assert len(timed.calls) == 1
