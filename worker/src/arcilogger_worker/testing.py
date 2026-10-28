@@ -270,6 +270,7 @@ class Evidence:
         source: str = "fortigate",
         device_time: bool = True,
         vd: str | None = "root",
+        devid: str = "FGT0000000000000",
     ) -> int:
         """A FortiGate DHCP server event (ADR-0016: an ACK ``0100026001`` by default, a RELEASE
         with ``logid="0100026002"``) in the format of the synthetic fixture lines, and the
@@ -281,7 +282,8 @@ class Evidence:
         receive time ``time`` (``fortigate.time``). ``None`` leaves a field out of the line
         (without ``dhcp_msg`` the parser files it under ``fg_event``: ``ValueError``); ``""``
         writes an empty one, whose column is then ``NULL`` (``dhcp_msg=""``: a row without a
-        ``dhcp_msg``)."""
+        ``dhcp_msg``). ``devid``: the unit's serial number (the two members of an HA pair log
+        two)."""
         if dhcp_msg is None:
             raise ValueError("a FortiGate DHCP line without dhcp_msg is no fg_dhcp row")
         sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
@@ -305,12 +307,12 @@ class Evidence:
         domain = f' vd="{vd}"' if vd is not None else ""
         message = (
             f'<190>date={local:%Y-%m-%d} time={local:%H:%M:%S} devname="FIREWALL-01" '
-            f'devid="FGT0000000000000" eventtime={int(stamp.timestamp() * 1e9)} tz="+0300" '
+            f'devid="{devid}" eventtime={int(stamp.timestamp() * 1e9)} tz="+0300" '
             f'logid="{logid}" type="event" subtype="system" level="information"{domain} '
             f'logdesc="{logdesc}"{tail}'
         )
         common = self._write(source, sender, time, message, None if device_time else time)
-        extra: dict[str, Any] = {"devid": "FGT0000000000000"}
+        extra: dict[str, Any] = {"devid": devid}
         if vd is not None:
             extra["vd"] = vd
         if not device_time:  # the parser keeps a device time it did not use

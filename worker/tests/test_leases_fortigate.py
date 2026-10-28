@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_db.models import Device, FgTraffic, Lease, Source
@@ -350,6 +350,17 @@ def test_a_seed_whose_mac_moves_before_midnight_is_closed(
         (PC, MAC, tr(DAY, 20), tr(DAY, 23, 50), "superseded"),
         ("172.20.42.58", MAC, tr(DAY, 23, 50), None, "open"),
     ]
+    # A live build of the same rows (the incremental job every few minutes) agrees.
+    ranged = leases(db_session)
+    db_session.execute(delete(Lease))
+    set_watermark(db_session, tr(DAY, 19))
+    db_session.commit()
+    now = tr(DAY, 19, 3)
+    while now <= tr(NEXT, 12):
+        run_incremental(db_session, now=now)
+        db_session.commit()
+        now += timedelta(minutes=7)
+    assert leases(db_session) == ranged
 
 
 def test_a_rebuilt_fortigate_seed_is_high_again(db_session: Session, evidence: Evidence) -> None:

@@ -476,6 +476,10 @@ def test_two_dhcp_sources_on_one_network(
     evidence.fortigate_dhcp(NOW - HOUR, "172.20.60.11", "00:00:5e:00:53:14", interface="vlan60")
     evidence.fortigate_dhcp(NOW - HOUR, "172.20.60.12", "00:00:5e:00:53:15", interface="vlan60",
                             source="fortigate-ha2")  # fmt: skip
+    # Two devid values (the pair's members after a failover), one sender, one VDOM: one origin.
+    evidence.fortigate_dhcp(NOW - HOUR, "172.20.61.11", "00:00:5e:00:53:16", interface="vlan61")
+    evidence.fortigate_dhcp(NOW - HOUR, "172.20.61.12", "00:00:5e:00:53:17", interface="vlan61",
+                            devid="FGT0000000000001")  # fmt: skip
     alerts = check()
     mixed = alerts["R20-lease:dhcp-sources-overlap:41"]
     assert mixed.severity == "high"
@@ -487,6 +491,7 @@ def test_two_dhcp_sources_on_one_network(
         f"FortiGate DHCP (VDOM {long_vd[:32]})",
     ]
     assert "R20-lease:dhcp-sources-overlap:60" not in alerts
+    assert "R20-lease:dhcp-sources-overlap:61" not in alerts
 
 
 def test_one_mac_on_many_addresses_of_one_network(check: Any, evidence: Evidence) -> None:
