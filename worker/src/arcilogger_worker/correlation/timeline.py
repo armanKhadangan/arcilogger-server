@@ -2,7 +2,9 @@
 
 Input is evidence that some MAC address held, or some host used, an internal IP address:
 
-* :class:`DhcpEvent` — MikroTik ``assigned`` / ``deassigned`` (``mt_dhcp``);
+* :class:`DhcpEvent` — an ``assigned`` / ``deassigned`` of a DHCP server: MikroTik
+  (``mt_dhcp``) or, ADR-0016, a FortiGate DHCP ACK/RELEASE whose logid the settings map to that
+  meaning (``fg_dhcp``, :mod:`.dhcp_sources`); its ``table`` says which;
 * :class:`ArpSighting` — the hourly ``ARP-LOG <ip> <mac> <interface>`` lines (``mt_arp``);
 * :class:`TrafficSeen` — FortiGate traffic **from** the IP (``fg_traffic.srcip``). It proves that
   the address was in use, not which MAC used it.
@@ -14,15 +16,30 @@ it in and writes the result; every rule lives here so it can be tested without a
 Rules (docs/CORRELATION.md has the full table):
 
 1. ``assigned`` opens an interval (ip, mac, hostname, vlan, server) with confidence ``high``. An
-   ``assigned`` of an IP whose interval for the same MAC is already open is a continuation (the
-   evidence is kept, the hostname updated). Every *other* open interval of that IP is closed:
-   ``superseded``.
+   ``assigned`` of an IP whose interval for the same MAC **from the same DHCP table** is already
+   open is a continuation (the evidence is kept, the hostname and a logged lease time updated).
+   Every *other* open interval of that IP is closed: ``superseded`` — an interval of the same
+   pair from the other DHCP table too (ADR-0016 D5: after a move from MikroTik to FortiGate DHCP
+   the FortiGate's ACK starts a lease of its own). A supersede across DHCP origins
+   (``(table, vd)``) is counted (``superseded_across_sources``). **ADR-0016 D33:** a FortiGate
+   ``assigned`` of MAC m also closes m's open FortiGate interval on another IP of the same
+   origin, interface (``server``) and configured network, and m's open MikroTik interval on
+   another IP of the same network (a migration), each after that IP's own deadline is applied
+   (``fg_mac_moved``, ``superseded_across_sources``): a client holds one address per server
+   interface and network, and a DHCPDECLINE is not logged. Nothing is closed this way for an
+   address in no configured network, nor by a MikroTik ``assigned``.
 2. ``deassigned`` with the same ip + mac closes the open interval: ``dhcp``. A ``deassigned``
    without an open interval is counted (``orphan_deassign``) and ignored.
-3. RouterOS logs no renewals, so an open DHCP interval stays open while evidence keeps coming:
-   an ``ARP-LOG`` of the same ip + mac or traffic from the IP extends it. Without evidence it
-   times out ``lease time x lease.timeout_percent / 100`` after the last evidence, per DHCP
-   server (``LookupSettings.lease_timeout_seconds``): ``timeout``, ending at that moment.
+3. RouterOS logs no renewals, so an open MikroTik interval stays open while evidence keeps
+   coming: an ``ARP-LOG`` of the same ip + mac or traffic from the IP extends it. Without
+   evidence it times out ``lease time x lease.timeout_percent / 100`` after the last evidence,
+   per DHCP server (``LookupSettings.lease_timeout_seconds``): ``timeout``, ending at that
+   moment. A FortiGate interval with a usable logged lease time (``lease_seconds``) times out
+   exactly that long after its last DHCP evidence, the FortiGate's own end (ADR-0016 D6), and
+   FortiOS logs renewals: traffic and ARP sightings are kept as its evidence but move its
+   deadline only with ``dhcp.fortigate_traffic_extends`` (D26). A FortiGate continuation at least
+   40 % of the lease after the interval's previous DHCP evidence is a renewal
+   (``fg_renewal_ack``).
 4. Traffic never creates an interval and never extends an ARP interval (it cannot name the MAC).
 5. An ``ARP-LOG`` of an ip + mac without an open interval creates an ARP interval with
    confidence ``medium``: static devices (IPs never in DHCP), and DHCP clients whose assignment
@@ -51,7 +68,14 @@ from datetime import datetime, timedelta
 from typing import Final, Literal
 
 from arcilogger_core.timeutil import require_aware
-from arcilogger_worker.lookup.refs import ARP_TABLE, DHCP_TABLE, TRAFFIC_TABLE
+from arcilogger_worker.lookup.refs import (
+    ARP_TABLE,
+    DHCP_TABLE,
+    DHCP_TABLES,
+    FG_DHCP_TABLE,
+    TABLE_RANK,
+    TRAFFIC_TABLE,
+)
 from arcilogger_worker.lookup.types import Confidence, EvidenceRef, LookupSettings
 
 #: ``assigned`` continuations kept per interval (the opening and closing rows are always kept).
@@ -60,6 +84,12 @@ CONTINUATIONS_KEPT: Final = 6
 DEFAULT_RELEASE_GRACE: Final = 300
 
 EndReason = Literal["dhcp", "timeout", "superseded", "arp", "open"]
+#: The DHCP authority that wrote a row: ``(table, vd)`` (``vd`` of a FortiGate row's ``extra``,
+#: ``None`` for MikroTik; ADR-0016 D27).
+Origin = tuple[str, str | None]
+#: A FortiGate continuation this share of its lease (or more) after the previous DHCP evidence
+#: is a renewal (``fg_renewal_ack``; a client renews at half the lease, RFC 2131 T1).
+RENEWAL_SHARE: Final = (2, 5)
 
 
 # -- evidence -------------------------------------------------------------------------------------
@@ -75,6 +105,12 @@ class DhcpEvent:
     vlan: int | None = None
     hostname: str | None = None
     ref: EvidenceRef | None = None
+    #: The DHCP table (``mt_dhcp`` or ``fg_dhcp``), its usable logged lease time (``fg_dhcp``
+    #: only), its origin and the subnet of the configured network holding ``ip`` (ADR-0016).
+    table: str = DHCP_TABLE
+    lease_seconds: int | None = None
+    origin: Origin | None = None
+    network: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,10 +148,16 @@ def _rank(event: Evidence) -> int:
     return 2 if event.action == "deassigned" else 3
 
 
-def evidence_key(event: Evidence) -> tuple[datetime, int, int, str, str]:
+def evidence_key(event: Evidence) -> tuple[datetime, int, int, int, str, str]:
+    """Feed order: time, :func:`_rank`, the DHCP table's rank (rows of two tables may share an
+    id, ADR-0016), row id, IP, MAC."""
     row_id = event.ref.row_id if event.ref is not None and event.ref.row_id is not None else 0
+    if event.ref is not None:
+        table = event.ref.table
+    else:
+        table = event.table if isinstance(event, DhcpEvent) else ""
     mac = "" if isinstance(event, TrafficSeen) else event.mac
-    return (event.time, _rank(event), row_id, event.ip, mac)
+    return (event.time, _rank(event), TABLE_RANK.get(table, 0), row_id, event.ip, mac)
 
 
 # -- rules and result -----------------------------------------------------------------------------
@@ -133,6 +175,9 @@ class TimelineRules:
     #: An ARP sighting of a pair this soon after its ``deassigned`` is a stale ARP table entry
     #: (setting ``arp.ignore_after_release_seconds``; 0 switches the rule off).
     release_grace: int = DEFAULT_RELEASE_GRACE
+    #: Traffic (and ARP) extends a FortiGate interval as it does a MikroTik one (setting
+    #: ``dhcp.fortigate_traffic_extends``, ADR-0016 D26; off: only DHCP records move its end).
+    fortigate_traffic_extends: bool = False
 
     def __post_init__(self) -> None:
         if self.arp_grace < self.arp_interval:
@@ -158,6 +203,7 @@ class TimelineRules:
                 settings.arp_interval_seconds, settings.arp_interval_seconds * percent // 100
             ),
             release_grace=release_grace,
+            fortigate_traffic_extends=settings.fortigate_traffic_extends,
         )
 
     def timeout(self, server: str | None) -> int:
@@ -169,11 +215,27 @@ class TimelineRules:
 
     @property
     def longest_window(self) -> int:
-        """Longest time evidence can keep an interval alive (seed and bucket bounds)."""
+        """Longest time evidence can keep an interval alive (seed and bucket bounds) without a
+        logged lease time (:meth:`longest_window_with` takes those into account)."""
         return max([self.default_timeout, self.arp_grace, *self.server_timeouts.values()])
 
-    def alive_window(self, source_table: str, server: str | None) -> int:
-        return self.arp_grace if source_table == ARP_TABLE else self.timeout(server)
+    def longest_window_with(self, lease_seconds: Iterable[int | None]) -> int:
+        """:attr:`longest_window`, or the largest logged lease time of ``lease_seconds`` (the
+        seeds' FortiGate leases) when that is longer."""
+        return max([self.longest_window, *(lease for lease in lease_seconds if lease)])
+
+    def alive_window(
+        self, source_table: str, server: str | None, lease_seconds: int | None = None
+    ) -> int:
+        """How long after its last evidence an interval stays alive: an ARP interval the grace;
+        a DHCP interval with a logged lease time (only ``fg_dhcp`` rows carry one) exactly that
+        lease, the FortiGate's own end (ADR-0016 D6); any other the server's configured time x
+        ``lease.timeout_percent`` (``LookupSettings.lease_timeout_seconds``, the same formula)."""
+        if source_table == ARP_TABLE:
+            return self.arp_grace
+        if lease_seconds is not None:
+            return lease_seconds
+        return self.timeout(server)
 
 
 @dataclass(frozen=True)
@@ -197,6 +259,12 @@ class LeaseInterval:
     #: Time of the latest traffic that extended it (its row is looked up afterwards when the
     #: traffic evidence was aggregated without row references).
     last_traffic: datetime | None = None
+    #: ADR-0016: the logged lease time of a FortiGate interval (``leases.lease_seconds``); its
+    #: origin ``(table, vd)`` and the subnet of the configured network holding ``ip`` (D27, D33;
+    #: not stored: the lease job sets both for a seed).
+    lease_seconds: int | None = None
+    origin: Origin | None = None
+    network: str | None = None
 
     @property
     def is_open(self) -> bool:
@@ -230,16 +298,23 @@ class _Open:
     latest: dict[str, EvidenceRef]
     last_traffic: datetime | None
     row_id: int | None
+    lease_seconds: int | None = None
+    origin: Origin | None = None
+    network: str | None = None
+    #: Time of the newest DHCP evidence (the opening, a continuation, its release): what a
+    #: renewal is measured from.
+    last_dhcp: datetime | None = None
 
     @classmethod
     def from_interval(cls, seed: LeaseInterval) -> _Open:
         refs = sort_evidence(seed.evidence)
         opening = next((r for r in refs if r.time == seed.start), refs[0] if refs else None)
-        continuations = [r for r in refs if r is not opening and r.table == DHCP_TABLE]
+        continuations = [r for r in refs if r is not opening and r.table in DHCP_TABLES]
         latest: dict[str, EvidenceRef] = {}
         for ref in refs:
             if ref is not opening and ref.table in (ARP_TABLE, TRAFFIC_TABLE):
                 latest[ref.table] = ref  # time order: the last one wins
+        dhcp_times = [r.time for r in refs if r.table in DHCP_TABLES]
         return cls(
             ip=seed.ip,
             mac=seed.mac,
@@ -255,10 +330,18 @@ class _Open:
             latest=latest,
             last_traffic=seed.last_traffic,
             row_id=seed.row_id,
+            lease_seconds=seed.lease_seconds,
+            origin=seed.origin,
+            network=seed.network,
+            last_dhcp=max(dhcp_times, default=seed.start),
         )
 
-    def touch(self, time: datetime, ref: EvidenceRef | None, table: str) -> None:
-        if time >= self.last:
+    def touch(
+        self, time: datetime, ref: EvidenceRef | None, table: str, *, extends: bool = True
+    ) -> None:
+        """Add evidence at ``time``; ``extends=False`` keeps it without moving the deadline
+        (traffic and ARP of a FortiGate interval, ADR-0016 D26)."""
+        if extends and time >= self.last:
             self.last = time
         if ref is not None:
             current = self.latest.get(table)
@@ -266,6 +349,8 @@ class _Open:
                 self.latest[table] = ref
         if table == TRAFFIC_TABLE and (self.last_traffic is None or time >= self.last_traffic):
             self.last_traffic = time
+        if table in DHCP_TABLES and (self.last_dhcp is None or time >= self.last_dhcp):
+            self.last_dhcp = time
 
     def evidence(self, closing: EvidenceRef | None = None) -> tuple[EvidenceRef, ...]:
         refs = [*self.continuations, *self.latest.values()]
@@ -293,6 +378,9 @@ class _Open:
             evidence=self.evidence(closing),
             row_id=self.row_id,
             last_traffic=self.last_traffic,
+            lease_seconds=self.lease_seconds,
+            origin=self.origin,
+            network=self.network,
         )
 
 
@@ -318,11 +406,17 @@ class LeaseTimeline:
         self._clock: datetime | None = None
         #: Latest ``deassigned`` per (ip, mac) (rule 6).
         self._released: dict[tuple[str, str], datetime] = {}
+        #: The IPs of each MAC's open DHCP intervals of both tables (rule 1, D33); may hold IPs
+        #: whose interval has closed since, which :meth:`_moved` skips and drops.
+        self._dhcp_by_mac: dict[str, set[str]] = {}
         self.stats: Counter[str] = Counter()
         for seed in seeds:
             if not seed.is_open:
                 raise ValueError("seeds must be open intervals")
-            self._open.setdefault(seed.ip, []).append(_Open.from_interval(seed))
+            item = _Open.from_interval(seed)
+            self._open.setdefault(seed.ip, []).append(item)
+            if item.source_table in DHCP_TABLES:
+                self._dhcp_by_mac.setdefault(item.mac, set()).add(item.ip)
         for event in releases:
             if event.action == "deassigned":
                 self._note_release(event)
@@ -375,8 +469,14 @@ class LeaseTimeline:
 
     def _deadline(self, item: _Open) -> datetime:
         return item.last + timedelta(
-            seconds=self.rules.alive_window(item.source_table, item.server)
+            seconds=self.rules.alive_window(item.source_table, item.server, item.lease_seconds)
         )
+
+    def _extends(self, item: _Open) -> bool:
+        """Does activity (traffic, an ARP sighting) move this DHCP interval's deadline? Always
+        for MikroTik (RouterOS logs no renewals), for FortiGate only with
+        ``fortigate_traffic_extends`` (ADR-0016 D26)."""
+        return item.source_table != FG_DHCP_TABLE or self.rules.fortigate_traffic_extends
 
     def _expire_ip(self, ip: str, now: datetime) -> None:
         """An interval is alive at ``now`` while ``now <= last + window``."""
@@ -443,14 +543,15 @@ class LeaseTimeline:
     def _traffic(self, event: TrafficSeen) -> None:
         self.stats["traffic"] += 1
         for item in self._open.get(event.ip, ()):
-            if item.source_table == DHCP_TABLE:
-                item.touch(event.time, event.ref, TRAFFIC_TABLE)
+            if item.source_table in DHCP_TABLES:
+                item.touch(event.time, event.ref, TRAFFIC_TABLE, extends=self._extends(item))
 
     def _arp(self, event: ArpSighting) -> None:
         self.stats["arp"] += 1
         item = self._find(event.ip, event.mac)
         if item is not None:
-            item.touch(event.time, event.ref, ARP_TABLE)
+            extends = item.source_table == ARP_TABLE or self._extends(item)
+            item.touch(event.time, event.ref, ARP_TABLE, extends=extends)
             return
         if self._stale_after_release(event):
             self.stats["ignored_arp_after_release"] += 1
@@ -482,26 +583,31 @@ class LeaseTimeline:
         if item is None:
             self.stats["orphan_deassign"] += 1
             return
-        if item.source_table == DHCP_TABLE:
+        if item.source_table in DHCP_TABLES:
             # The release is the lease's last evidence; an ARP interval keeps its last
             # sighting (its claim is measured from it).
-            item.touch(event.time, None, DHCP_TABLE)
+            item.touch(event.time, None, item.source_table)
         self._close(item, event.time, "dhcp", event.ref)
         self._set(event.ip, [o for o in self._open.get(event.ip, ()) if o is not item])
 
     def _assigned(self, event: DhcpEvent) -> None:
         self.stats["assigned"] += 1
         hostname = (event.hostname or "").strip() or None
+        if event.table == FG_DHCP_TABLE:
+            self._moved(event)
         current = self._find(event.ip, event.mac)
-        if current is not None and current.source_table == DHCP_TABLE:
-            current.touch(event.time, None, DHCP_TABLE)
+        if current is not None and current.source_table == event.table:
+            if event.table == FG_DHCP_TABLE and self._renewal(current, event):
+                self.stats["fg_renewal_ack"] += 1
+            current.touch(event.time, None, event.table)
             if event.ref is not None:
                 current.continuations = [*current.continuations, event.ref][-CONTINUATIONS_KEPT:]
             current.hostname = hostname or current.hostname
+            current.lease_seconds = event.lease_seconds or current.lease_seconds
             self.stats["continued"] += 1
             return
         for other in self._open.get(event.ip, ()):
-            self._close(other, event.time, "superseded", event.ref)
+            self._supersede(other, event)
         self._open[event.ip] = [
             _Open(
                 ip=event.ip,
@@ -511,16 +617,87 @@ class LeaseTimeline:
                 hostname=hostname,
                 start=event.time,
                 last=event.time,
-                source_table=DHCP_TABLE,
+                source_table=event.table,
                 confidence="high",
                 opening=event.ref,
                 continuations=[],
                 latest={},
                 last_traffic=None,
                 row_id=None,
+                lease_seconds=event.lease_seconds,
+                origin=event.origin,
+                network=event.network,
+                last_dhcp=event.time,
             )
         ]
+        self._dhcp_by_mac.setdefault(event.mac, set()).add(event.ip)
         self.stats["opened_dhcp"] += 1
+
+    def _supersede(self, item: _Open, event: DhcpEvent) -> None:
+        """Close ``item`` at ``event`` as ``superseded``; a DHCP interval of another origin
+        counts as a supersede across sources (ADR-0016 D27)."""
+        if item.source_table in DHCP_TABLES and _origin(item) != _origin(event):
+            self.stats["superseded_across_sources"] += 1
+        self._close(item, event.time, "superseded", event.ref)
+
+    def _renewal(self, item: _Open, event: DhcpEvent) -> bool:
+        """A continuation ACK at least :data:`RENEWAL_SHARE` of the lease after the interval's
+        previous DHCP evidence (a renewal at half the lease; ADR-0016 V3)."""
+        lease = item.lease_seconds or event.lease_seconds
+        if lease is None or item.last_dhcp is None:
+            return False
+        part, whole = RENEWAL_SHARE
+        return (event.time - item.last_dhcp).total_seconds() * whole >= lease * part
+
+    def _moved(self, event: DhcpEvent) -> None:
+        """ADR-0016 D33: a FortiGate ``assigned`` of MAC m for IP y ends m's open FortiGate
+        interval on another IP of the same origin, interface and configured network
+        (``fg_mac_moved``), and m's open MikroTik interval on another IP of the same network
+        (``superseded_across_sources``); each IP's own deadline is applied first, so an
+        interval already past its end times out there, as a run that expires every minute
+        would have closed it. Nothing is closed for an address in no configured network."""
+        if event.network is None:
+            return
+        ips = self._dhcp_by_mac.get(event.mac)
+        if not ips:
+            return
+        for ip in sorted(ips - {event.ip}):
+            self._expire_ip(ip, event.time)
+            items = self._open.get(ip, [])
+            ended = []
+            for item in items:
+                if item.mac != event.mac or item.network != event.network:
+                    continue
+                if item.source_table == FG_DHCP_TABLE:
+                    if _origin(item) != _origin(event) or item.server != event.server:
+                        continue
+                    self.stats["fg_mac_moved"] += 1
+                elif item.source_table == DHCP_TABLE:
+                    self.stats["superseded_across_sources"] += 1
+                else:
+                    continue
+                self._close(item, event.time, "superseded", event.ref)
+                ended.append(item)
+            if ended:
+                self._set(ip, [o for o in items if all(o is not e for e in ended)])
+        still = {
+            ip
+            for ip in ips
+            if any(
+                o.mac == event.mac and o.source_table in DHCP_TABLES for o in self._open.get(ip, ())
+            )
+        }
+        if still:
+            self._dhcp_by_mac[event.mac] = still
+        else:
+            self._dhcp_by_mac.pop(event.mac, None)
+
+
+def _origin(item: _Open | DhcpEvent) -> Origin:
+    """The origin of a DHCP interval or event; without one known, its table's without a VDOM."""
+    if item.origin is not None:
+        return item.origin
+    return (item.source_table if isinstance(item, _Open) else item.table, None)
 
 
 def build_timeline(
