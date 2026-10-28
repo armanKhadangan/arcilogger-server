@@ -514,8 +514,9 @@ def _chains(outcome: LookupOutcome) -> Iterator[AttributionChain]:
 
 def format_notes(outcome: LookupOutcome) -> list[tuple[str, str]]:
     """The method note on the FortiGate DHCP record format, from the stored chains only (never
-    the setting at render time): the stored "verified" text (who marked it, and when), else the
-    fixed "not verified" sentence; nothing without FortiGate leases."""
+    the setting at render time): the fixed "not verified" sentence when any chain says so (the
+    safe side, should both keys ever reach one outcome), else the stored "verified" text (who
+    marked it, and when); nothing without FortiGate leases."""
     verified: list[tuple[str, str]] = []
     unverified = False
     for chain in _chains(outcome):
@@ -525,9 +526,7 @@ def format_notes(outcome: LookupOutcome) -> list[tuple[str, str]]:
                     verified.append((item.text_tr, item.text_en))
             elif item.key == "fortigate_format_unverified":
                 unverified = True
-    if verified:
-        return verified
-    return [texts.FORMAT_UNVERIFIED] if unverified else []
+    return [texts.FORMAT_UNVERIFIED] if unverified else verified
 
 
 def _raw_field(line: str, key: str) -> str | None:

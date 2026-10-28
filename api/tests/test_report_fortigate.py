@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -32,15 +33,19 @@ from arcilogger_api.lookup_testing import (
     unconverted_dhcp_line,
 )
 from arcilogger_api.pdftext import normalized, pdf_text
-from arcilogger_api.reports import texts
+from arcilogger_api.reports import render, texts
+from arcilogger_api.reports.render import format_notes
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.layout import Layout
 from arcilogger_db.models import FgDhcp, FgTraffic, Message, Source, Vlan
 from arcilogger_db.searchcounts import rebuild_stream
 from arcilogger_worker.correlation.leases import rebuild_day
+from arcilogger_worker.lookup import Explanation, LookupOutcome, LookupRequest
+from arcilogger_worker.lookup.texts import explain
+from arcilogger_worker.lookup.types import AttributionChain
 from arcilogger_worker.testing import FIREWALL, ROUTER, Evidence, tr
 
-from .test_report_pdf import download, lookup, report_row, setting, signed_in
+from .test_report_pdf import _minimal_inputs, download, lookup, report_row, setting, signed_in
 
 Login = Callable[..., LoggedIn]
 #: The lease job's horizon for every day these tests build.
@@ -161,6 +166,50 @@ def test_the_format_note_comes_from_the_stored_outcome_not_the_setting(
     text = normalized(pdf_text(download(client, data["id"])))
     assert UNVERIFIED in text
     assert "doğrulandı olarak işaretlendi" not in text
+
+
+def test_the_unverified_format_note_wins_over_a_verified_one() -> None:
+    """Should both format keys ever reach one outcome (a chain and its alternative here), the
+    note is the unverified sentence alone, the safe side (deviation d-13)."""
+    verified = explain("fortigate_format_verified", at="01.10.2026 09:00:00", by="admin")
+    alternative = AttributionChain(
+        internal_ip=PC,
+        at=AT,
+        vlan=42,
+        vlan_name=None,
+        lease=None,
+        device=None,
+        person=None,
+        department=None,
+        department_source="none",
+        confidence="low",
+        explanations=(explain("fortigate_format_unverified"),),
+    )
+    chain = replace(
+        alternative,
+        explanations=(verified, Explanation("ip_conflict", "IP çakışması", "IP conflict")),
+        alternatives=(alternative,),
+    )
+    outcome = LookupOutcome(
+        request=LookupRequest(at=AT, internal_ip=PC),
+        mode="internal",
+        matches=(),
+        double_nat=False,
+        attribution=chain,
+        explanations=(),
+        data_window=None,
+        tolerance_seconds=60,
+        generated_at=AT,
+    )
+    assert format_notes(outcome) == [texts.FORMAT_UNVERIFIED]
+    inputs = _minimal_inputs()
+    inputs["outcome"] = outcome.to_dict()
+    text = normalized(pdf_text(render(inputs).pdf))
+    assert text.count(UNVERIFIED) == 1
+    assert "doğrulandı olarak işaretlendi" not in text
+    # alone, the verified text is printed as stored
+    alone = replace(outcome, attribution=replace(alternative, explanations=(verified,)))
+    assert format_notes(alone) == [(verified.text_tr, verified.text_en)]
 
 
 def test_a_mikrotik_report_has_no_fortigate_lease_additions(
