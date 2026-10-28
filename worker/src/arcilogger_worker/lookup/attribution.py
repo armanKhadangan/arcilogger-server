@@ -69,7 +69,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Final
 
-from sqlalchemy import ColumnElement, case, func, or_, select
+from sqlalchemy import ColumnElement, and_, case, func, not_, or_, select, true
 from sqlalchemy.orm import Session
 
 from arcilogger_db.assignments import Slot, covering, load_history
@@ -130,6 +130,26 @@ def usable_lease(settings: LookupSettings, lease: int | None) -> int | None:
     if not settings.use_logged_lease or lease is None or not low <= lease <= high:
         return None
     return lease
+
+
+def event_kept(settings: LookupSettings) -> ColumnElement[bool]:
+    """The rules of :func:`.trust.kept` that a FortiGate DHCP line kept as an ``fg_event`` row
+    can be checked on, read from its ``extra`` fields: a line of an interface in
+    ``dhcp.fortigate_interfaces_excluded`` (D28) or with a ``dhcp_msg`` that
+    ``dhcp.fortigate_dhcp_msgs`` does not list for its logid (D25; a missing one included) is
+    never lease evidence, so the lookup never counts it as a line the timeline missed. The
+    sender rule is each query's own (``untrusted``)."""
+    interface = FgEvent.extra["interface"].astext
+    message = FgEvent.extra["dhcp_msg"].astext
+    clauses: list[ColumnElement[bool]] = []
+    if settings.fortigate_interfaces_excluded:
+        excluded = sorted(settings.fortigate_interfaces_excluded)
+        clauses.append(or_(interface.is_(None), interface.not_in(excluded)))
+    for logid, messages in sorted(settings.fortigate_dhcp_msgs.items()):
+        allowed = sorted({text.lower() for text in messages})
+        unexpected = message.is_(None) | func.lower(message).not_in(allowed)
+        clauses.append(not_((FgEvent.logid == logid) & unexpected))
+    return and_(true(), *clauses)
 
 
 @dataclass(frozen=True)
@@ -782,8 +802,9 @@ class Attributor:
 
     def _unconverted_lines(self, groups: list[list[AttributionChain]]) -> None:
         """D8 after the lease: one query on ``fg_event`` (``ix_fg_event_subtype_time``) for the
-        mapped FortiGate DHCP lines of trusted senders that name a target's IP or MAC, matched to
-        each target's own window ``(since, at]`` in memory."""
+        mapped FortiGate DHCP lines of trusted senders that name a target's IP or MAC and that
+        D25 and D28 do not refuse (:func:`event_kept`), matched to each target's own window
+        ``(since, at]`` in memory."""
         targets = self._targets(groups)
         logids = sorted(self.settings.fortigate_logids)
         if not targets or not logids:
@@ -795,6 +816,7 @@ class Attributor:
             FgEvent.logid.in_(logids),
             FgEvent.time > min(since for _, _, _, since in targets),
             FgEvent.time <= max(chain.at for _, chain, _, _ in targets),
+            event_kept(self.settings),
             or_(
                 ip.in_(sorted({chain.internal_ip for _, chain, _, _ in targets})),
                 mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),

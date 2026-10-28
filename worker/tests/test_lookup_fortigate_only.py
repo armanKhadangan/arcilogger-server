@@ -131,17 +131,19 @@ def unconverted_line(
     interface: str = "vlan42",
     source: str = "fortigate",
     logid: str = "0100026001",
+    dhcp_msg: str | None = None,
 ) -> int:
     """A FortiGate DHCP ACK (a RELEASE with ``logid="0100026002"`` and ``lease=None``) that
     stayed an ``fg_event`` row with the full DHCP shape (D8: a line loaded before the upgrade,
     or by the previous version after a rollback): its spool line and the row that version
-    stored, every DHCP field in ``extra``; returns the row id."""
+    stored, every DHCP field in ``extra``; returns the row id. ``dhcp_msg``: another message
+    than the logid's own ("Ack" / "Release")."""
     sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
     local = to_site(time)
     logdesc, msg = FORTIGATE_DHCP_TEXTS[logid]
     fields = {
         "interface": interface,
-        "dhcp_msg": "Ack" if logid == "0100026001" else "Release",
+        "dhcp_msg": dhcp_msg or ("Ack" if logid == "0100026001" else "Release"),
         "mac": mac.upper(),
         "ip": ip,
         "lease": None if lease is None else str(lease),
@@ -892,6 +894,41 @@ def test_a_migration_loaded_before_the_upgrade(
     assert OTHER not in text
 
 
+#: An ``fg_event`` line that D25 or D28 says is never lease evidence: a NAK under the ACK's
+#: logid (``dhcp.fortigate_dhcp_msgs``) and an ACK of an excluded interface (an IPsec server).
+REFUSED_LINES = {"nak": ("Nak", "vlan42"), "excluded": ("Ack", "ipsec1")}
+
+
+def exclude_ipsec(session: Session) -> None:
+    set_setting(session, "dhcp.fortigate_interfaces_excluded", ["ipsec1"], updated_by="tolga")
+    session.commit()
+
+
+@pytest.mark.parametrize("variant", sorted(REFUSED_LINES))
+def test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing(
+    db_session: Session, evidence: Evidence, example: list[int], variant: str
+) -> None:
+    """The post-lease check (2.7) applies D25 and D28 to its ``fg_event`` lines too: a NAK for
+    the PC's address under 0100026001, or an ACK of an excluded interface, after the 11:00 ACK
+    leaves the chain as it was; the same line as an ACK on vlan42 lowers it."""
+    message, interface = REFUSED_LINES[variant]
+    exclude_ipsec(db_session)
+    unconverted_line(evidence, tr(DAY, 11, 10), PC, OTHER, interface=interface, dhcp_msg=message)
+    db_session.commit()
+    chain = internal(db_session, PC, AT).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.confidence, chain.lease.confidence) == ("medium", "high")
+    assert UNCONVERTED not in chain_keys(chain)
+    unconverted_line(evidence, tr(DAY, 11, 10), PC, OTHER)
+    db_session.commit()
+    lowered = internal(db_session, PC, AT).attribution
+    assert lowered is not None
+    assert lowered.lease is not None
+    assert (lowered.confidence, lowered.lease.confidence) == ("low", "low")
+    assert note(lowered, UNCONVERTED) == {"last": iso(tr(DAY, 11)), "ip": PC}
+
+
 # -- a rollback window (D8, 2.2.1) ----------------------------------------------------------------
 
 
@@ -1129,6 +1166,31 @@ def test_a_refused_converted_row_does_not_silence_the_probe(
     outcome = internal(db_session, PC, AT)
     assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
     assert_cited(outcome, row, acked, evidence)
+
+
+@pytest.mark.parametrize("variant", sorted(REFUSED_LINES))
+def test_a_line_that_is_never_lease_evidence_is_never_named(
+    db_session: Session, evidence: Evidence, variant: str
+) -> None:
+    """D25 and D28 hold for the probe's ``fg_event`` lines as ``trust.kept`` holds them for
+    ``fg_dhcp`` rows: a covering NAK under 0100026001, or a covering ACK of an excluded
+    interface, is never named or cited; such a line newer than a covering ACK does not hide
+    that ACK either."""
+    message, interface = REFUSED_LINES[variant]
+    exclude_ipsec(db_session)
+    unconverted_line(evidence, AT - timedelta(days=1), PC, PC_MAC, hostname=HOST, lease=WEEK,
+                     interface=interface, dhcp_msg=message)  # fmt: skip
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    db_session.commit()
+    older = internal(db_session, PC, AT)
+    assert outcome_note(older, NOT_CONVERTED) == {"ips": PC}
+    assert_cited(older, row, acked, evidence)
 
 
 def test_a_line_of_an_unknown_sender_is_never_cited(

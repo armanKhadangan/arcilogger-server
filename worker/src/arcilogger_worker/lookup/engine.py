@@ -115,7 +115,12 @@ from arcilogger_db.egress import (
 from arcilogger_db.models import FgDhcp, FgEvent, FgTraffic, Setting
 from arcilogger_db.settings import get_setting, get_settings
 from arcilogger_worker.correlation.watermark import get_watermark
-from arcilogger_worker.lookup.attribution import UNCONVERTED_WINDOW, Attributor, usable_lease
+from arcilogger_worker.lookup.attribution import (
+    UNCONVERTED_WINDOW,
+    Attributor,
+    event_kept,
+    usable_lease,
+)
 from arcilogger_worker.lookup.sessions import (
     CANDIDATE_MAX_SCORE,
     PORT_HINT_POINTS,
@@ -1208,8 +1213,10 @@ class _Lookup:
         DHCP-shaped row of trusted senders in ``[moment - window, min(moment, T)]``: one
         ``DISTINCT ON`` query per table (``ix_fg_event_subtype_time``, ``ix_fg_dhcp_ip_time``;
         round 5's cost note), each key bounded by its own moment, and never past the requested
-        moment T (2.8.3: a session that began after T is probed up to T). A converted row
-        (``trust.kept``) as new or newer means the timeline saw that event: nothing is said."""
+        moment T (2.8.3: a session that began after T is probed up to T). A line D25 or D28
+        refuses (:func:`.attribution.event_kept`) is no such row, as a refused ``fg_dhcp`` row
+        is none; a converted row (``trust.kept``) as new or newer means the timeline saw that
+        event: nothing is said."""
         # The lease timeline imports this package (its refs), so its rules are imported here.
         from arcilogger_worker.correlation.timeline import TimelineRules
 
@@ -1243,6 +1250,7 @@ class _Lookup:
                 FgEvent.time >= low,
                 FgEvent.time <= high,
                 FgEvent.logid.in_(sorted(logids)),
+                event_kept(self.settings),
                 or_(
                     *(
                         and_(
