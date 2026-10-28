@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -353,6 +354,68 @@ def test_the_isp_nat_paragraph_states_what_was_searched() -> None:
         "(T çevresinde görülenler: 100.64.12.77) adresleriyle yapıldı." in text
     )
     assert "198.51.100.250" not in text  # a public address is never in the unclaimed predicate
+
+
+#: A ``public_unknown`` search of hat-2 (wan1) and a catch-all, as the engine stores it: the
+#: interface condition is set when any exit's part kept one.
+PUBLIC_UNKNOWN_SEARCHED = EgressSearched(
+    transips=(T2,),
+    unclaimed=True,
+    unclaimed_seen=("100.64.12.77",),
+    interfaces=("wan1", "wan3"),
+    interface_filter=True,
+)
+
+
+def test_public_unknown_names_no_interface_when_an_exit_searched_them_all() -> None:
+    """A catch-all without interfaces searched every interface beside hat-2 on wan1: the
+    sentence names no interface (deviation d-3); nor when the engine dropped an exit's
+    interfaces (``egress_interface_not_seen``)."""
+    on_wan1 = _exit("hat-2", "isp_nat", "Yedek hat", transips=[T2], interfaces=["wan1"])
+    everywhere = _exit("tanimsiz", "isp_nat")
+    searched = replace(PUBLIC_UNKNOWN_SEARCHED, interfaces=("wan1",))
+    text = _section_4(_text("public_unknown", (on_wan1, everywhere), searched=searched))
+    assert (
+        "Arama 100.64.13.9 ve hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak "
+        "NAT adresleri (T çevresinde görülenler: 100.64.12.77) adresleriyle yapıldı." in text
+    )
+    assert "ve arayüzleriyle" not in text
+    assert "on the interfaces" not in text
+    lined = _exit("tanimsiz", "isp_nat", interfaces=["wan3"])
+    not_seen = explain(
+        "egress_interface_not_seen", egress="tanimsiz", interfaces="wan3", at=AT.isoformat()
+    )
+    text = _section_4(
+        _text(
+            "public_unknown",
+            (on_wan1, lined),
+            searched=searched,
+            explanations=(not_seen,),
+        )
+    )
+    assert "ve arayüzleriyle" not in text
+    assert "on the interfaces" not in text
+
+
+def test_public_unknown_names_the_interfaces_when_every_exit_kept_them() -> None:
+    on_wan1 = _exit("hat-2", "isp_nat", "Yedek hat", transips=[T2], interfaces=["wan1"])
+    lined = _exit("tanimsiz", "isp_nat", interfaces=["wan3"])
+    kept = explain(
+        "egress_interface_not_seen_kept", egress="hat-2", interfaces="wan1", at=AT.isoformat()
+    )
+    text = _section_4(
+        _text(
+            "public_unknown",
+            (on_wan1, lined),
+            searched=PUBLIC_UNKNOWN_SEARCHED,
+            explanations=(kept,),
+        )
+    )
+    assert (
+        "(T çevresinde görülenler: 100.64.12.77) adresleriyle ve arayüzleriyle (wan1, wan3) "
+        "yapıldı." in text
+    )
+    assert "(seen near T: 100.64.12.77) on the interfaces (wan1, wan3)." in text
 
 
 def test_a_fallback_says_bu_hatta_only_for_an_exit_with_interfaces() -> None:
@@ -751,6 +814,126 @@ def test_e_k3_a_session_that_changed_exit_names_both_exits(
         "100.64.12.9 · dstintf wan2" in text
     )
     assert "oturumun kayıtlarında ayrıca" not in text
+
+
+def _changed_beside_a_session_on_one_exit(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    layout: Layout,
+    value: dict[str, Any],
+    interfaces: tuple[str, str],
+) -> tuple[str, str]:
+    """The PC's session changes exit (wan1, then wan2) while the phone's moves between
+    ``interfaces`` of one exit; the report on the shared NAT address T1, and the blocks of the
+    two candidates (the PC's, the phone's)."""
+    traffic(
+        factory,
+        layout,
+        {
+            "at": AT - timedelta(seconds=30),
+            "srcip": PC,
+            "srcport": 51031,
+            "transip": T1,
+            "dstintf": "wan1",
+            "interim": True,
+        },
+        {
+            "at": AT + timedelta(seconds=60),
+            "srcip": PC,
+            "srcport": 51031,
+            "transip": T1,
+            "dstintf": "wan2",
+        },
+        {
+            "at": AT - timedelta(seconds=20),
+            "srcip": PHONE,
+            "srcport": 51032,
+            "transip": T1,
+            "dstintf": interfaces[0],
+            "interim": True,
+        },
+        {
+            "at": AT + timedelta(seconds=50),
+            "srcip": PHONE,
+            "srcport": 51032,
+            "transip": T1,
+            "dstintf": interfaces[1],
+        },
+    )
+    exits(factory, value)
+    data, text = report(client, public_ip=T1)
+    (changed,) = [e for e in data["outcome"]["explanations"] if e["key"] == "session_changed_exit"]
+    assert changed["params"]["count"] == 1  # the engine: only the PC's session changed exit
+    results = text.split("5. Sonuçlar", 1)[1].split("6. Kanıt listesi", 1)[0]
+    blocks = re.split(r"Aday \d+: puan", results)[1:]
+    (pc,) = [block for block in blocks if f"{PC}:51031" in block]
+    (phone,) = [block for block in blocks if f"{PHONE}:51032" in block]
+    assert "birden çok çıkış" not in text
+    return pc, phone
+
+
+def test_a_session_on_two_interfaces_of_one_exit_did_not_change_exit(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    site: Site,
+) -> None:
+    """Beside E-k3's session, a second one moves from wan1 to wan1b, both hat-1's: only the
+    session that changed exit names the other exit (deviation d-10)."""
+    signed_in(client, login_as, app_session_factory)
+    pc, phone = _changed_beside_a_session_on_one_exit(
+        client,
+        app_session_factory,
+        layout,
+        {
+            "hat-1": {
+                "mode": "isp_nat",
+                "transips": [T1],
+                "public": [P1],
+                "interfaces": ["wan1", "wan1b"],
+            },
+            "hat-2": {"mode": "isp_nat", "transips": [T1], "public": [P2], "interfaces": ["wan2"]},
+        },
+        ("wan1", "wan1b"),
+    )
+    assert (
+        "Çıkış / Exit hat-1 · dstintf wan1 · oturumun kayıtlarında ayrıca: hat-2 / the "
+        "session's records also show: hat-2 Oturum aralığı" in pc
+    )
+    assert "Çıkış / Exit hat-1 · dstintf wan1 Oturum aralığı" in phone
+    assert "oturumun kayıtları" not in phone
+
+
+def test_a_shared_nat_address_on_two_interfaces_of_one_exit_did_not_change_exit(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    site: Site,
+) -> None:
+    """T1 is shared by hat-1 (wan1) and hat-2 (wan2, wan2b); the answer stores hat-1 alone. The
+    phone's lines on wan2 and wan2b are hat-2's both: no change on its row, while the PC's
+    session, hat-1 then hat-2, still names hat-2 (deviation d-10)."""
+    signed_in(client, login_as, app_session_factory)
+    pc, phone = _changed_beside_a_session_on_one_exit(
+        client,
+        app_session_factory,
+        layout,
+        {
+            "hat-1": {"mode": "isp_nat", "transips": [T1], "public": [P1], "interfaces": ["wan1"]},
+            "hat-2": {
+                "mode": "isp_nat",
+                "transips": [T1],
+                "public": [P2],
+                "interfaces": ["wan2", "wan2b"],
+            },
+        },
+        ("wan2", "wan2b"),
+    )
+    assert "oturumun kayıtlarında ayrıca: hat-2 / the session's records also show: hat-2" in pc
+    assert "Çıkış / Exit hat-2 · dstintf wan2 Oturum aralığı" in phone
+    assert "oturumun kayıtları" not in phone
 
 
 def test_e_k4_exits_changed_after_the_event_in_the_method(
