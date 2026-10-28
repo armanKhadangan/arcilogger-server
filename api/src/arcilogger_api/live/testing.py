@@ -30,18 +30,18 @@ from arcilogger_core.rawlog import format_line
 from arcilogger_db.models import User
 
 
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port: int = sock.getsockname()[1]
-        return port
-
-
 class LiveServer:
-    """``app`` served by Uvicorn on ``127.0.0.1:<free port>`` while the context is open."""
+    """``app`` served by Uvicorn on ``127.0.0.1:<free port>`` while the context is open.
+
+    The listening socket is bound here and handed to Uvicorn, so the port is held from the
+    start: choosing a free port and binding it later would leave a window in which another
+    test (another xdist worker) takes it and Uvicorn fails with "address already in use".
+    """
 
     def __init__(self, app: FastAPI, *, graceful_seconds: int = 1) -> None:
-        self.port = free_port()
+        self.socket = socket.socket()
+        self.socket.bind(("127.0.0.1", 0))
+        self.port: int = self.socket.getsockname()[1]
         self.url = f"http://127.0.0.1:{self.port}"
         config = uvicorn.Config(
             app,
@@ -52,7 +52,9 @@ class LiveServer:
             timeout_graceful_shutdown=graceful_seconds,
         )
         self.server = uvicorn.Server(config)
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread = threading.Thread(
+            target=self.server.run, kwargs={"sockets": [self.socket]}, daemon=True
+        )
 
     def __enter__(self) -> LiveServer:
         self.thread.start()
@@ -71,6 +73,7 @@ class LiveServer:
     ) -> None:
         self.server.should_exit = True
         self.thread.join(timeout=20)
+        self.socket.close()
 
 
 def sign_in(
