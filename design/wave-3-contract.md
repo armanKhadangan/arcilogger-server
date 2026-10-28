@@ -5898,12 +5898,19 @@ from section 0.2 are recorded here too, with the date and who decided.
 - **A RELEASE mapped after the build ends the lease in the lookup** (2.7, round-6 note "a release
   mapped after the build", its second option). When the newest kept `fg_dhcp` row of a lease's
   pair in `[lease.start, at]` (the per-moment query) has a logid mapped to `deassigned`, the
-  lookup treats the lease as not covering `at` (`Attributor.covers`): no chain from it, so an
-  internal lookup answers `no_lease` and a match `chain_missing`, as after the rebuild. No new
-  explanation key and no lowered chain with a text. The stored lease is unchanged; the usage
-  rollups (no per-moment query) still read the stored lease until the rebuild. Tests:
-  `worker/tests/test_lookup_fortigate_only.py::test_a_release_mapped_after_the_build_ends_the_lease`.
-  Fold into 2.7.
+  lookup treats the lease as not covering `at` (`Attributor.covering`). What covers `at` then is
+  what the rebuild opens after that RELEASE: the ARP interval of the pair (timeline rules 5 and
+  6), read from the `mt_arp` rows of the pair later than `arp.ignore_after_release_seconds`
+  after the RELEASE (sightings at most the ARP grace apart, the last one less than
+  `arp.interval_seconds` before `at`; one query on `ix_mt_arp_ip_time`), which gives the
+  `mt_arp` chain (`medium`, `arp_only`) with `lease_id` null, `end` null and the opening and
+  latest sightings up to `at` as its refs (the rebuilt lease has a row id, its end and its
+  last sighting, also one after `at`). Without such sightings there is no chain: an internal lookup answers
+  `no_lease` and a match `chain_missing`, as after the rebuild. No new explanation key and no
+  lowered chain with a text. The stored lease is unchanged; the usage rollups (no per-moment
+  query) still read the stored lease until the rebuild. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_release_mapped_after_the_build_ends_the_lease`,
+  `::test_arp_sightings_after_a_release_mapped_later_name_the_client`. Fold into 2.7.
 - **D27 for a chain outside every configured network: the address stands for its network**
   (2.7, round-6 note "a network not entered on a mixed site", its suggested handling). The one
   `usable_dhcp_origins` query of a lookup also covers, for each chain whose IP lies in no

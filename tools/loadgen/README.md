@@ -83,8 +83,9 @@ uv run python tools/loadgen/arcilogger_loadgen.py --egress hat-1:100.64.12.9:wan
   değildir); işaretli klasöre sonraki günler bayraksız yazılabilir. Mevcut bir dosyaya
   `--append` olmadan yazmaz.
 - Simülasyondaki her DHCP havuzunda 160 adres var (`.64`–`.223`): bütün telefonlar personel
-  Wi-Fi'ında (60) olduğundan o yaklaşık 160 kullanıcıyla dolar; daha fazlası açık bir hata ile
-  durur (çıkış kodu 2).
+  Wi-Fi'ında (60) olduğundan o yaklaşık 160 kullanıcıyla dolar; DHCP'yi FortiGate verdiğinde
+  (`--dhcp-server fortigate` ya da `both`) bir adres kirası bitene kadar tutulduğundan yaklaşık
+  140 kullanıcıyla. Daha fazlası açık bir hata ile durur (çıkış kodu 2).
 - Çıktı her zaman UTF-8'dir (İngilizce yerel ayarlı bir Windows konsolunda da).
 - Toplayıcı kaynakları gönderen IP'sine göre tanır: her kaynağa `--bind` ile kendi yerel
   adresini verin (127.0.0.0/8 Linux ve Windows'ta loopback'tir) ve aynı adresleri
@@ -153,9 +154,9 @@ placeholders (verify on site).
 folder, spool files it did not write) unless `--i-know-this-is-not-production` is given on a test
 installation, and leaves the marker `LOADGEN-DEMO.txt` (synthetic lines, not evidence) in every
 data folder it writes to. Each simulated DHCP pool has 160 addresses (`.64`–`.223`): every phone
-is on the staff Wi-Fi, which fills up at about 160 users; more stop with a clear error (exit code
-2). Output is always
-UTF-8.
+is on the staff Wi-Fi, which fills up at about 160 users, or at about 140 when the FortiGate serves
+DHCP (`--dhcp-server fortigate` or `both`: an address stays held until its lease ends); more stop
+with a clear error (exit code 2). Output is always UTF-8.
 
 Commands: `spool` (raw spool files exactly as the collector writes them, through
 `arcilogger_core.rawlog.format_line`; refuses to append unless `--append`, and refuses a data

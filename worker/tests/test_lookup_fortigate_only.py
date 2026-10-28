@@ -425,7 +425,7 @@ def test_renewals_every_twelve_hours_keep_the_chain_high(
         chain = internal(db_session, PC, T0 + timedelta(hours=hours)).attribution
         assert chain is not None, hours
         assert chain.lease is not None
-        assert chain.lease.confidence == "high", hours
+        assert (chain.confidence, chain.lease.confidence) == ("high", "high"), hours
         assert "lease_renewal_not_seen" not in chain_keys(chain), hours
         assert chain.lease.last_dhcp_evidence == T0 + timedelta(hours=hours // 12 * 12), hours
 
@@ -501,7 +501,8 @@ def test_dropped_refs_are_read_from_the_rows(db_session: Session, evidence: Evid
     chain = internal(db_session, PC, moment).attribution
     assert chain is not None
     assert chain.lease is not None
-    assert (chain.lease.confidence, chain.lease.last_dhcp_evidence) == ("high", record)
+    assert (chain.confidence, chain.lease.confidence) == ("high", "high")
+    assert chain.lease.last_dhcp_evidence == record
     assert "lease_renewal_not_seen" not in chain_keys(chain)
     # The usage rollups (no lookup) read the stored refs only (round 6: the per-moment query
     # runs for lookups).
@@ -1699,6 +1700,88 @@ def test_a_release_mapped_after_the_build_ends_the_lease(
         "high",
         held.lease.last_dhcp_evidence,
     )
+
+
+@pytest.mark.parametrize(("grace", "opening"), [(None, tr(DAY, 12, 30)), (0, tr(DAY, 12, 2))])
+def test_arp_sightings_after_a_release_mapped_later_name_the_client(
+    db_session: Session, evidence: Evidence, grace: int | None, opening: datetime
+) -> None:
+    """The same late-mapped RELEASE with MikroTik ARP sightings of the pair after it: in the
+    stale build they only touched the open FortiGate lease; the rebuild ends that lease at the
+    RELEASE and opens an ARP interval at the first sighting after ``arp.ignore_after_release_
+    seconds`` (by default 12:02 is a stale ARP entry and 12:30 opens it; 0 switches the rule
+    off). The lookup answers as after the rebuild: the ARP chain (``medium``, ``arp_only``),
+    never an unwarned "nobody"."""
+    if grace is not None:
+        set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
+    assert settings_for(db_session).arp_release_grace_seconds == (300 if grace is None else 0)
+    set_setting(db_session, "dhcp.fortigate_logids", {"0100026001": "assigned"}, updated_by="tolga")
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(
+        tr(DAY, 12), PC, PC_MAC, logid="0100026002", dhcp_msg="Release", lease=None
+    )
+    for hour, minute in ((12, 2), (12, 30), (13, 30), (14, 30)):
+        evidence.arp(tr(DAY, hour, minute), PC, PC_MAC, interface="vlan42")
+    build(db_session, DAY, DAY)
+    assert [lease.source_table for lease in db_session.scalars(select(Lease))] == ["fg_dhcp"]
+    mapped = {"0100026001": "assigned", "0100026002": "deassigned"}
+    set_setting(db_session, "dhcp.fortigate_logids", mapped, updated_by="tolga")
+    db_session.commit()
+
+    def answers() -> list[tuple[Any, ...]]:
+        found: list[tuple[Any, ...]] = []
+        for moment in (tr(DAY, 12, 10), tr(DAY, 14, 45), tr(DAY, 15, 31)):
+            outcome = internal(db_session, PC, moment)
+            chain = outcome.attribution
+            if chain is None:
+                found.append((moment, None, keys(outcome)))
+                continue
+            assert chain.lease is not None
+            found.append(
+                (
+                    moment,
+                    chain.confidence,
+                    chain.lease.mac,
+                    chain.lease.source_table,
+                    chain.lease.start,
+                    chain.lease.confidence,
+                    chain.lease.last_dhcp_evidence,
+                    sorted(chain_keys(chain)),
+                    keys(outcome),
+                )
+            )
+        return found
+
+    def cited() -> tuple[EvidenceRef, ...]:
+        """The refs of the chain after the last sighting (the opening one and that one)."""
+        chain = internal(db_session, PC, tr(DAY, 14, 45)).attribution
+        assert chain is not None
+        assert chain.lease is not None
+        return chain.lease.evidence
+
+    stale, refs = answers(), cited()
+    assert [ref.time for ref in refs] == [opening, tr(DAY, 14, 30)]
+    assert stale[1][1:8] == (
+        "medium",
+        PC_MAC,
+        "mt_arp",
+        opening,
+        "medium",
+        None,
+        ["arp_only", "no_person"],
+    )
+    early = None if grace is None else "medium"
+    assert [answer[1] for answer in stale] == [early, "medium", None]
+    by_mac = lookup(db_session, mac=PC_MAC, at=tr(DAY, 14, 45)).attribution
+    assert by_mac is not None
+    assert by_mac.lease is not None
+    assert (by_mac.internal_ip, by_mac.lease.source_table) == (PC, "mt_arp")
+    # The rebuild gives the same answers.
+    build(db_session, DAY, DAY)
+    assert sorted(
+        (lease.source_table, lease.start) for lease in db_session.scalars(select(Lease))
+    ) == [("fg_dhcp", T0), ("mt_arp", opening)]
+    assert (answers(), cited()) == (stale, refs)
 
 
 def test_a_release_and_a_renewal_in_one_second_keep_the_new_lease(

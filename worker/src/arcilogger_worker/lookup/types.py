@@ -874,6 +874,11 @@ class LookupSettings:
     #: "x 1.1"). An integer, because every setting must be auditable as canonical JSON.
     lease_timeout_percent: int = 110
     arp_interval_seconds: int = 3600
+    #: ``arp.ignore_after_release_seconds``: an ARP sighting of a pair this soon after its
+    #: release is a stale ARP table entry (the lease timeline's rule 6, whose default
+    #: ``DEFAULT_RELEASE_GRACE`` this equals; the lookup reads it for a RELEASE mapped after the
+    #: build, round 6).
+    arp_release_grace_seconds: int = 300
     infrastructure_macs: tuple[str, ...] = ()
     #: ``nat.egresses`` as stored: parsed only where it is used (:meth:`egresses`), so a value
     #: that cannot be parsed never stops the lease timeline or the usage rollups.
@@ -944,6 +949,9 @@ class LookupSettings:
             },
             lease_timeout_percent=int(values.get("lease.timeout_percent", 110)),
             arp_interval_seconds=int(values.get("arp.interval_seconds", 3600)),
+            arp_release_grace_seconds=_lookup_count(
+                values, "arp.ignore_after_release_seconds", 300
+            ),
             infrastructure_macs=tuple(
                 normalize_mac(str(mac)) for mac in values.get("devices.infrastructure_macs") or ()
             ),

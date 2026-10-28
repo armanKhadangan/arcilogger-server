@@ -41,11 +41,12 @@ the rows, one ``LIMIT 1`` query per chain on ``ix_fg_dhcp_ip_time`` over the row
 :func:`.trust.kept` accepts; the stored refs (the opening ACK and the last continuations only)
 are its fallback and the only source for other tables and for the usage rollups, which ignore
 confidence. A lease whose newest such row is a mapped RELEASE does not cover ``at`` (a logid
-mapped after the build). An ``fg_dhcp`` chain carries the format note (D29), is ``low`` (lease
-and chain) when ``at`` lies more than half the lease after that record
-(``lease_renewal_not_seen``) or when its IP lies in no configured network
-(``fortigate_dhcp_no_network``), and names cited rows of an ``unknown-<ip>`` sender that is
-trusted now (``source_configured_later``).
+mapped after the build); the ARP interval of its pair that the rebuild opens after that RELEASE
+does, read from the ``mt_arp`` rows (an ``mt_arp`` chain without a ``leases`` row). An
+``fg_dhcp`` chain carries the format note (D29), is ``low`` (lease and chain) when ``at`` lies
+more than half the lease after that record (``lease_renewal_not_seen``) or when its IP lies in
+no configured network (``fortigate_dhcp_no_network``), and names cited rows of an
+``unknown-<ip>`` sender that is trusted now (``source_configured_later``).
 
 **srcmac** (ADR-0016 D10, contract 2.9): with a usable srcmac of the session (the lookup's
 guards passed), an IP without a lease gets the srcmac chain (:meth:`Attributor.srcmac_chain`: no
@@ -106,6 +107,7 @@ from arcilogger_db.models import (
     FgDhcp,
     FgEvent,
     Lease,
+    MtArp,
     Person,
     Vlan,
 )
@@ -114,6 +116,7 @@ from arcilogger_worker.lookup.refs import (
     ARP_TABLE,
     DHCP_TABLES,
     FG_DHCP_TABLE,
+    arp_ref,
     dhcp_action,
     last_dhcp_evidence,
 )
@@ -216,6 +219,9 @@ class StoredLease:
     evidence: tuple[EvidenceRef, ...]
     #: The usable lease time the FortiGate logged (``fg_dhcp`` only; D6).
     lease_seconds: int | None = None
+    #: ``False``: an ARP interval the lookup read from the rows after a RELEASE mapped after
+    #: the build (:meth:`Attributor.covering`): no ``leases`` row, so no ``lease_id``.
+    stored: bool = True
 
     @classmethod
     def from_row(cls, row: Lease) -> StoredLease:
@@ -244,7 +250,7 @@ class StoredLease:
         last_dhcp_evidence: datetime | None = None,
     ) -> LeaseInfo:
         return LeaseInfo(
-            lease_id=self.id,
+            lease_id=self.id if self.stored else None,
             ip=self.ip,
             mac=self.mac,
             vlan=self.vlan,
@@ -429,17 +435,25 @@ class Attributor:
         return list(self._history.get(mac, ()))
 
     def covers(self, lease: StoredLease, at: datetime) -> bool:
+        return self.covering(lease, at) is not None
+
+    def covering(self, lease: StoredLease, at: datetime) -> StoredLease | None:
+        """``lease`` when it covers ``at``, else ``None``. A lease built without its client's
+        RELEASE (a logid mapped after the build) ended at that RELEASE under today's settings
+        (2.7, round 6): what covers ``at`` then is the ARP interval of the pair the rebuild
+        opens after it (:meth:`_arp_after_release`), if any."""
         if lease.start > at:
-            return False
+            return None
         if lease.end is not None:
             inside = at < lease.end
         elif lease.source_table == ARP_TABLE:
-            return at < self._open_limit(lease)
+            return lease if at < self._open_limit(lease) else None
         else:
             inside = at <= self._open_limit(lease)
-        # A lease built without its client's RELEASE (a logid mapped after the build) ended at
-        # that RELEASE under today's settings (2.7, round 6): it no longer covers ``at``.
-        return inside and not self._released(lease, at)
+        if not inside:
+            return None
+        released = self._released(lease, at)
+        return lease if released is None else self._arp_after_release(lease, released, at)
 
     # -- the lease's own record at the moment (2.7) -----------------------------------------------
 
@@ -503,18 +517,80 @@ class Attributor:
             usable_lease(self.settings, int(logged.group(1)) if logged else None),
         )
 
-    def _released(self, lease: StoredLease, at: datetime) -> bool:
+    def _released(self, lease: StoredLease, at: datetime) -> datetime | None:
+        """The time of the RELEASE that is the lease's own record at ``at`` (lookups of an
+        ``fg_dhcp`` lease only), else ``None``."""
         if not (self.lookup and lease.source_table == FG_DHCP_TABLE):
-            return False
+            return None
         record = self.record(lease, at)
-        return record is not None and record.action == "deassigned"
+        return record.time if record is not None and record.action == "deassigned" else None
+
+    def _arp_after_release(
+        self, lease: StoredLease, released: datetime, at: datetime
+    ) -> StoredLease | None:
+        """The ARP interval of ``lease``'s pair covering ``at`` that the lease timeline opens
+        after the RELEASE at ``released`` (its rules 5 and 6): sightings of the pair later than
+        ``arp.ignore_after_release_seconds`` after it, at most the ARP grace apart, the last one
+        less than the ARP interval before ``at``. One query on ``ix_mt_arp_ip_time``; the
+        interval has no ``leases`` row (``stored=False``) and keeps the refs the timeline keeps
+        (the opening sighting and the latest)."""
+        grace = timedelta(seconds=self.settings.arp_release_grace_seconds)
+        rows = self.session.execute(
+            select(
+                MtArp.id,
+                MtArp.time,
+                MtArp.ip,
+                MtArp.mac,
+                MtArp.interface,
+                MtArp.source,
+                MtArp.raw_day,
+                MtArp.raw_line,
+                MtArp.raw_offset,
+            )
+            .where(
+                MtArp.ip == lease.ip,
+                MtArp.mac == lease.mac,
+                MtArp.time > released + grace,
+                MtArp.time <= at,
+            )
+            .order_by(MtArp.time.desc(), MtArp.id.desc())
+        ).all()
+        interval = self.settings.arp_interval_seconds
+        if not rows or at >= rows[0].time + timedelta(seconds=interval):
+            return None
+        percent = self.settings.lease_timeout_percent
+        merge = timedelta(seconds=max(interval, interval * percent // 100))
+        opening = 0
+        while opening + 1 < len(rows) and rows[opening].time - rows[opening + 1].time <= merge:
+            opening += 1
+        refs = tuple(arp_ref(row) for row in dict.fromkeys((rows[opening], rows[0])))
+        return StoredLease(
+            id=-lease.id,
+            ip=lease.ip,
+            mac=lease.mac,
+            vlan=lease.vlan,
+            server=None,
+            hostname=None,
+            start=rows[opening].time,
+            end=None,
+            end_reason="open",
+            confidence="medium",
+            source_table=ARP_TABLE,
+            last_evidence=rows[0].time,
+            evidence=refs,
+            stored=False,
+        )
 
     def leases_at(self, ip: str, at: datetime) -> list[StoredLease]:
         """Leases of ``ip`` covering ``at``, one per MAC, most likely first."""
         loaded = self._loaded.get(ip)
         if loaded is None or not loaded[0] <= at <= loaded[1]:
             self._load([ip], at, at)
-        covering = [lease for lease in self._leases.get(ip, ()) if self.covers(lease, at)]
+        covering = [
+            found
+            for lease in self._leases.get(ip, ())
+            if (found := self.covering(lease, at)) is not None
+        ]
         best: dict[str, StoredLease] = {}
         for lease in sorted(covering, key=self._rank):
             best.setdefault(lease.mac, lease)
