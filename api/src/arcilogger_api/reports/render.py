@@ -287,6 +287,37 @@ def _interfaces(searched: EgressSearched, clause: tuple[str, str]) -> tuple[str,
     return _pair(clause, interfaces=", ".join(searched.interfaces))
 
 
+def _exit_key(
+    exits: Sequence[EgressEntry], signature: tuple[str | None, str | None], *, unstored: bool
+) -> str | tuple[str, str | None]:
+    """The exit a session line left by, decided as the engine's ``_exit_of`` does but over the
+    stored exits: the one exit claiming its ``transip`` as a NAT address, several by its
+    ``dstintf``, else the exit whose public address it is; ``("?", transip)`` when none can be
+    told. ``unstored``: the ``session_changed_exit`` note names an exit the stored list lacks
+    (a ``transip`` answer stores only its own), which may share the address by interface, so the
+    one claiming exit counts only on a ``dstintf`` it declares (or while it declares none)."""
+    transip, dstintf = signature
+    unknown = ("?", transip)
+    try:
+        address = ipaddress.ip_address(transip or "")
+    except ValueError:
+        return unknown
+
+    def holds(networks: Iterable[str]) -> bool:
+        return any(address in ipaddress.ip_network(n, strict=False) for n in networks)
+
+    nat = [entry for entry in exits if holds(entry.transips)]
+    if len(nat) == 1:
+        (claimed,) = nat
+        if not (unstored and claimed.interfaces and dstintf not in claimed.interfaces):
+            return claimed.name
+    elif nat:
+        found = next((entry.name for entry in nat if dstintf in entry.interfaces), None)
+        if found is not None:
+            return found
+    return next((entry.name for entry in exits if holds(entry.public)), unknown)
+
+
 def _port_hinted(outcome: LookupOutcome, name: str) -> bool:
     """The stored ``port_hint`` explanation names exit ``name`` (the hint ranked candidates)."""
     for item in outcome.explanations:
@@ -845,7 +876,8 @@ class _Builder:
 
     def match_exit(self, match: NatMatch) -> str:
         """``hat-2 (Hat 2) · dstintf wan2`` ("-" for an unclaimed row), and for the session
-        whose rows left by more than one exit (``session_changed_exit``) the other exit."""
+        whose rows left by more than one exit (``session_changed_exit``, each row's exit as
+        :func:`_exit_key` tells it) the other exit."""
         exits = self.outcome.egress.egresses if self.outcome.egress is not None else ()
         labels = {entry.name: _exit_name(entry) for entry in exits}
         name = "-" if match.egress is None else labels.get(match.egress, match.egress)
@@ -857,13 +889,22 @@ class _Builder:
         if changed is None or len(signatures) < 2:
             return text
         # The outcome keeps one exit per match (its row nearest the moment); the engine's note
-        # names the exits of the sessions that changed exit. With one such session, and only
-        # this match's cited rows showing more than one exit, those are this match's exits;
-        # otherwise the rows' own NAT address and dstintf are shown (deviation d).
+        # names the exits of the sessions that changed exit. A match varies when its cited rows
+        # map to more than one exit (another dstintf of the same exit is no change); with one
+        # such session, and only this match varying, those are this match's exits; otherwise
+        # the rows' own NAT address and dstintf are shown (deviation d).
         named = [n.strip() for n in str(changed.params.get("egresses") or "").split(",")]
+        unstored = any(n and n not in labels for n in named)
+
+        def varies(other: NatMatch) -> bool:
+            keys = {_exit_key(exits, s, unstored=unstored) for s in self.signatures(other)}
+            return len(keys) > 1
+
+        if not varies(match):
+            return text
         own = match.egress or "-"
         others = [n for n in named if n and n != own]
-        varying = sum(1 for other in self.outcome.matches if len(self.signatures(other)) > 1)
+        varying = sum(1 for other in self.outcome.matches if varies(other))
         if changed.params.get("count") == 1 and varying == 1 and own in named and others:
             shown = ", ".join(labels.get(other, other) for other in others)
             return text + " · " + " / ".join(_pair(texts.CHANGED_EXIT, exits=shown))
