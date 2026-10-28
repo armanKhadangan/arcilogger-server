@@ -1457,6 +1457,30 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   repository dumps on the same disk and copies the configuration by hand (`docs/YEDEKLEME.md:117-137`);
   card 10 reports what exists.
 
+## Deviations — W4-B (2026-10-28)
+
+- **A forecast date more than 100 years away is `null`** (2.5.2 "Forecast"). A drive that grows by
+  a few bytes a day has a positive least-squares slope, so it is `estimated`, but its marks lie
+  thousands of years ahead, past the calendar (the first version answered 500 for such a drive).
+  `forecast.HORIZON_DAYS` = 36,500: a mark further away gets `warning_on`/`full_on` = `null` while
+  `state` stays `estimated` (with `growth_bytes_per_day` the rounded slope, 0 for less than half a
+  byte a day). **W4-C:** the `estimated` text needs a variant for `full_on: null`, e.g. "Disk
+  kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor." / "Disk use grows very slowly; no
+  date can be given." Tests: `api/tests/test_system_forecast.py::
+  test_a_drive_that_hardly_grows_gets_no_date`. Fold into 2.5.2 and W4-C's texts.
+- **"Already above the warning mark" is decided by a measurement** (reading of 2.5.2): the drive's
+  use at the moment of the request (`DriveInfo.used_bytes`), else the newest sample. A trend line
+  that has passed the mark while no measurement has gives `warning_on` = today. `warning_on` is
+  therefore `null` when the drive is at or above the mark, or when the mark lies beyond the
+  horizon (deviation above); whether a drive is already above the mark is read from
+  `used_bytes`/`used_percent` against `warning_percent`, never from the `null`. Tests:
+  `test_forecast_already_above_the_warning_mark`. Fold into 2.5.2.
+- **The collector and ingest blocks list the configured sources that have an entry in the status
+  file** (reading of 2.5.2): a configured source that has not sent yet has no row (the Kaynaklar
+  page lists every configured source). `used_percent` is the R20-disk check's whole percent
+  (`used * 100 // total`); on Linux a drive's `path` is the label R20-disk uses (the data
+  directory's path, `/` for the system drive). Nothing to fold.
+
 ## Deviations — W4-A
 
 - **Card 4 reads its alerts by rule, not by dedup-key prefix (2.3.2).** The retention task's
