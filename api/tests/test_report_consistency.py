@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.lookup_testing import PC, PC_MAC, PHONE_MAC, build_site, iso
@@ -48,6 +48,8 @@ DHCP = b"<30>2026-10-12T10:42:18.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172
 D33_FIRST, D33_SECOND = tr(DAY, 8, 41, 10), tr(DAY, 8, 41, 14)
 MAC_31, MAC_32 = "00:00:5e:00:53:31", "00:00:5e:00:53:32"
 PC_58 = "172.20.42.58"
+#: An address neither ACK gives (a stored summary edited to name it).
+PC_59 = "172.20.42.59"
 #: The lease row's end of a ``superseded`` lease, whatever ended it; never the old text, which
 #: says another MAC took the address (not so for D33 or D5).
 SUPERSEDED = "bitiş: sonraki bir DHCP atamasıyla kapandı / closed by a later DHCP assignment"
@@ -206,14 +208,14 @@ def test_spellings_and_the_closing_line_of_a_superseded_lease() -> None:
     assert check_line(_ref("mt_dhcp"), line, 0, claims)["ok"] is True
 
 
-def test_a_lease_closed_by_its_macs_ack_for_another_address_claims_the_mac() -> None:
-    """D33: ACK(.57, :31), then ACK(.58, :31) ends the .57 lease; the closing line names .58,
-    so it claims only the MAC the lease shares with it."""
+def test_a_lease_closed_by_its_macs_ack_for_another_address_claims_both() -> None:
+    """D33: ACK(.57, :31), then ACK(.58, :31) ends the .57 lease; the closing line claims the
+    MAC the lease shares with it and the address its stored summary names (.58)."""
     first, first_line = _ack(D33_FIRST, "172.20.42.57", MAC_31, 3)
     closing, closing_line = _ack(D33_SECOND, PC_58, MAC_31, 4)
     chain = _chain(_lease("172.20.42.57", MAC_31, (first, closing), end=D33_SECOND))
     assert [c.values for c in _claims(chain, first)] == [{"ip": "172.20.42.57", "mac": MAC_31}]
-    assert [c.values for c in _claims(chain, closing)] == [{"mac": MAC_31}]
+    assert [c.values for c in _claims(chain, closing)] == [{"ip": PC_58, "mac": MAC_31}]
     assert check_line(first, first_line, 0, _claims(chain, first))["ok"] is True
     assert check_line(closing, closing_line, 0, _claims(chain, closing))["ok"] is True
 
@@ -226,7 +228,7 @@ def test_a_lease_superseded_by_another_macs_ack_claims_the_ip() -> None:
     assert check_line(closing, closing_line, 0, _claims(chain, closing))["ok"] is True
 
 
-def test_a_mikrotik_lease_closed_by_a_fortigate_ack_of_its_mac_claims_the_mac() -> None:
+def test_a_mikrotik_lease_closed_by_a_fortigate_ack_of_its_mac_claims_both() -> None:
     """The MikroTik variant of D33: an ``mt_dhcp`` lease of .57 ended by the FortiGate's ACK of
     the same MAC for .58."""
     row = SimpleNamespace(
@@ -247,7 +249,9 @@ def test_a_mikrotik_lease_closed_by_a_fortigate_ack_of_its_mac_claims_the_mac() 
     end = AT + timedelta(minutes=5)
     closing, closing_line = _ack(end, PC_58, "00:00:5e:00:53:57", 4)
     chain = _chain(_lease("172.20.42.57", "00:00:5e:00:53:57", (first, closing), end=end))
-    assert [c.values for c in _claims(chain, closing)] == [{"mac": "00:00:5e:00:53:57"}]
+    assert [c.values for c in _claims(chain, closing)] == [
+        {"ip": PC_58, "mac": "00:00:5e:00:53:57"}
+    ]
     assert check_line(first, first_line, 0, _claims(chain, first))["ok"] is True
     assert check_line(closing, closing_line, 0, _claims(chain, closing))["ok"] is True
 
@@ -266,6 +270,18 @@ def test_an_altered_closing_row_still_mismatches() -> None:
     chain = _chain(_lease(PC, MAC_31, (first, edited), end=D33_SECOND))
     result = check_line(edited, closing_line, 0, _claims(chain, edited))
     assert result["mismatches"] == [{"field": "ip", "report": PC, "raw": PC_58}]
+    # edited to name a third address: the summary's address is claimed too, and fails
+    third = EvidenceRef(
+        closing.table,
+        closing.row_id,
+        closing.time,
+        closing.raw,
+        closing.summary.replace(PC_58, PC_59),
+    )
+    chain = _chain(_lease(PC, MAC_31, (first, third), end=D33_SECOND))
+    assert [c.values for c in _claims(chain, third)] == [{"ip": PC_59, "mac": MAC_31}]
+    result = check_line(third, closing_line, 0, _claims(chain, third))
+    assert result["mismatches"] == [{"field": "ip", "report": PC_59, "raw": PC_58}]
     # the raw closing line names another MAC than the lease
     _other, other_line = _ack(D33_SECOND, PC_58, MAC_32, 4)
     chain = _chain(_lease(PC, MAC_31, (first, closing), end=D33_SECOND))
@@ -280,7 +296,7 @@ def test_the_closing_line_of_a_spaced_interface_reads_its_ip() -> None:
     closing, closing_line = _ack(D33_SECOND, PC_58, MAC_31, 4, interface="port 1")
     assert closing.summary.startswith("port_1 assigned 172.20.42.58 for ")
     chain = _chain(_lease(PC, MAC_31, (first, closing), end=D33_SECOND))
-    assert [c.values for c in _claims(chain, closing)] == [{"mac": MAC_31}]
+    assert [c.values for c in _claims(chain, closing)] == [{"ip": PC_58, "mac": MAC_31}]
     assert check_line(closing, closing_line, 0, _claims(chain, closing))["ok"] is True
 
 
@@ -439,6 +455,33 @@ def test_a_d33_lease_cited_in_a_report_has_no_mismatch(
     assert "uyuşmuyor" not in text
     assert SUPERSEDED in text
     assert OTHER_MAC_TOOK_IT not in text
+
+
+def test_a_d33_closing_summary_edited_to_a_third_address_is_flagged(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+) -> None:
+    """The stored closing summary of the D33 lease edited in the database to name .59: the line
+    claims the address the summary names, the raw ACK gives .58, and the report says so."""
+    _d33_site(app_session_factory, layout)
+    with app_session_factory() as session:
+        lease = session.scalars(select(Lease).where(Lease.end_reason == "superseded")).one()
+        lease.evidence = [
+            {**item, "summary": item["summary"].replace(PC_58, PC_59)} for item in lease.evidence
+        ]
+        session.commit()
+    signed_in(client, login_as, app_session_factory)
+    data = _internal(client, internal_ip=PC, at=iso(tr(DAY, 8, 41, 12)))
+    text = normalized(pdf_text(download(client, data["id"])))
+    inputs = report_row(app_session_factory, data["id"]).inputs
+    (closing,) = [
+        i for i in inputs["evidence"] if i["table"] == "fg_dhcp" and PC_59 in i["summary"]
+    ]
+    assert closing["check"]["mismatches"] == [{"field": "ip", "report": PC_59, "raw": PC_58}]
+    assert inputs["consistency"]["ok"] is False
+    assert "uyuşmuyor" in text
 
 
 def test_a_mikrotik_lease_closed_by_a_fortigate_ack_has_no_mismatch(

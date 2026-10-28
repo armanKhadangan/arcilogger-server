@@ -11,9 +11,9 @@ what the report presents:
   and destination address and port, protocol, session number, NAT address and port;
 * an IP-MAC record of a chain (its ``mt_dhcp`` / ``fg_dhcp`` / ``mt_arp`` / ``fg_traffic``
   lines): the IP address, and the MAC address on a DHCP or ARP line, except the line that ended
-  a ``superseded`` lease, which claims only the field it shares with the lease (the IP when it
-  gives the address to another device or is the other DHCP table's record of the same client,
-  the MAC when it gives the lease's MAC another address, D33);
+  a ``superseded`` lease: it claims the IP when it gives the lease's address to another device
+  or is the other DHCP table's record of the same client, and, when it gives the lease's MAC
+  another address (D33), that MAC and the address its stored summary names;
 * the session record of a srcmac chain (2.9): its source IP and srcmac;
 * every cited line: the record type (the line must parse into a row of the cited table) and the
   record time. FortiGate DHCP lines outside the lease timeline (``fg_event``, D8) are shown,
@@ -99,11 +99,13 @@ def _shown(value: Any) -> Any:
     return str(value)
 
 
-def _names_other_ip(ref: EvidenceRef, lease: LeaseInfo) -> bool:
-    """The DHCP line ``ref`` gives another address than the lease's (read from the fixed
-    ``<action> <ip> for`` part of its summary; a ref without a summary names none)."""
+def _other_ip(ref: EvidenceRef, lease: LeaseInfo) -> str | None:
+    """The address the DHCP line ``ref`` gives when it is another than the lease's (read from
+    the fixed ``<action> <ip> for`` part of its summary; a ref without a summary names none)."""
     named = dhcp_ip(ref)
-    return named is not None and _normal("ip", named) != _normal("ip", lease.ip)
+    if named is None or _normal("ip", named) == _normal("ip", lease.ip):
+        return None
+    return named
 
 
 def _lease_claims(lease: LeaseInfo) -> dict[tuple[str, int | None, str], list[Claim]]:
@@ -117,8 +119,8 @@ def _lease_claims(lease: LeaseInfo) -> dict[tuple[str, int | None, str], list[Cl
             )
             if not closing:
                 values = {"ip": lease.ip, "mac": lease.mac}
-            elif _names_other_ip(ref, lease):  # the lease's MAC took another address (D33)
-                values = {"mac": lease.mac}
+            elif (other := _other_ip(ref, lease)) is not None:  # the MAC took another IP (D33)
+                values = {"ip": other, "mac": lease.mac}
             else:  # another device took the address, or the other table's record of the pair
                 values = {"ip": lease.ip}
         elif ref.table == TRAFFIC_TABLE:
