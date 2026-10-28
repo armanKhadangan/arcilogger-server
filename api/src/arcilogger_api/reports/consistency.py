@@ -9,11 +9,15 @@ what the report presents:
 
 * a FortiGate session of a result (``fg_traffic`` lines of :class:`NatMatch.traffic`): source
   and destination address and port, protocol, session number, NAT address and port;
-* an IP-MAC record of a chain (its ``mt_dhcp`` / ``mt_arp`` / ``fg_traffic`` lines): the IP
-  address, and the MAC address (``mt_arp``, and every ``mt_dhcp`` line except the one that ended
-  a lease because the IP went to another device);
+* an IP-MAC record of a chain (its ``mt_dhcp`` / ``fg_dhcp`` / ``mt_arp`` / ``fg_traffic``
+  lines): the IP address, and the MAC address on a DHCP or ARP line, except the line that ended
+  a ``superseded`` lease, which claims only the field it shares with the lease (the IP when it
+  gives the address to another device or is the other DHCP table's record of the same client,
+  the MAC when it gives the lease's MAC another address, D33);
+* the session record of a srcmac chain (2.9): its source IP and srcmac;
 * every cited line: the record type (the line must parse into a row of the cited table) and the
-  record time.
+  record time. FortiGate DHCP lines outside the lease timeline (``fg_event``, D8) are shown,
+  not compared (``not_checked``).
 
 The check finds a database that changed after ingest (a manual repair, a defective rebuild, a
 row edited by hand or by an intruder, a parser version that reads the line differently now). It
@@ -36,6 +40,7 @@ from arcilogger_core.rawlog import RawLineError
 from arcilogger_core.rawlog import parse_line as parse_raw
 from arcilogger_ingest.parsers import PARSERS, LinePosition, SourceType
 from arcilogger_worker.lookup import AttributionChain, EvidenceRef, LeaseInfo, LookupOutcome
+from arcilogger_worker.lookup.refs import DHCP_TABLES, TRAFFIC_TABLE, dhcp_ip
 
 #: Parser of each table a lookup cites (the table decides, not today's source configuration:
 #: only the FortiGate parser writes ``fg_*`` rows and only the MikroTik parser ``mt_*`` rows).
@@ -44,6 +49,7 @@ PARSER_OF_TABLE: Final[Mapping[str, SourceType]] = {
     "fg_web": "fortigate",
     "fg_app": "fortigate",
     "fg_dns": "fortigate",
+    "fg_dhcp": "fortigate",
     "mt_dhcp": "mikrotik",
     "mt_arp": "mikrotik",
 }
@@ -59,6 +65,7 @@ SESSION_FIELDS: Final = (
     "transport",
 )
 _IP_FIELDS: Final = frozenset({"srcip", "dstip", "transip", "ip"})
+_MAC_FIELDS: Final = frozenset({"mac", "srcmac"})
 
 
 @dataclass(frozen=True)
@@ -78,7 +85,7 @@ def _normal(column: str, value: Any) -> Any:
             return ipaddress.ip_address(str(value))
         except ValueError:
             return str(value)
-    if column == "mac":
+    if column in _MAC_FIELDS:
         return str(value).lower()
     return value
 
@@ -92,19 +99,29 @@ def _shown(value: Any) -> Any:
     return str(value)
 
 
+def _names_other_ip(ref: EvidenceRef, lease: LeaseInfo) -> bool:
+    """The DHCP line ``ref`` gives another address than the lease's (read from the fixed
+    ``<action> <ip> for`` part of its summary; a ref without a summary names none)."""
+    named = dhcp_ip(ref)
+    return named is not None and _normal("ip", named) != _normal("ip", lease.ip)
+
+
 def _lease_claims(lease: LeaseInfo) -> dict[tuple[str, int | None, str], list[Claim]]:
     claims: dict[tuple[str, int | None, str], list[Claim]] = {}
     for ref in lease.evidence:
         if ref.table == "mt_arp":
             values: dict[str, Any] = {"ip": lease.ip, "mac": lease.mac}
-        elif ref.table == "mt_dhcp":
-            values = {"ip": lease.ip}
+        elif ref.table in DHCP_TABLES:
             closing = (
                 lease.end_reason == "superseded" and lease.end is not None and ref.time >= lease.end
             )
-            if not closing:  # the line that gave the IP to another device names that MAC
-                values["mac"] = lease.mac
-        elif ref.table == "fg_traffic":
+            if not closing:
+                values = {"ip": lease.ip, "mac": lease.mac}
+            elif _names_other_ip(ref, lease):  # the lease's MAC took another address (D33)
+                values = {"mac": lease.mac}
+            else:  # another device took the address, or the other table's record of the pair
+                values = {"ip": lease.ip}
+        elif ref.table == TRAFFIC_TABLE:
             values = {"srcip": lease.ip}
         else:
             continue
@@ -112,10 +129,23 @@ def _lease_claims(lease: LeaseInfo) -> dict[tuple[str, int | None, str], list[Cl
     return claims
 
 
+def _srcmac_claims(chain: AttributionChain) -> dict[tuple[str, int | None, str], list[Claim]]:
+    """A srcmac chain (2.9) rests on its session record: that record's source IP and srcmac."""
+    claims: dict[tuple[str, int | None, str], list[Claim]] = {}
+    if chain.mac_source != "srcmac" or chain.device is None:
+        return claims
+    values = {"srcip": chain.internal_ip, "srcmac": chain.device.mac}
+    for ref in chain.device.evidence:
+        if ref.table == TRAFFIC_TABLE:
+            claims.setdefault(ref_key(ref), []).append(Claim(values))
+    return claims
+
+
 def _chain_claims(chain: AttributionChain) -> dict[tuple[str, int | None, str], list[Claim]]:
     claims: dict[tuple[str, int | None, str], list[Claim]] = {}
     if chain.lease is not None:
         _merge(claims, _lease_claims(chain.lease))
+    _merge(claims, _srcmac_claims(chain))
     for other in chain.alternatives:
         _merge(claims, _chain_claims(other))
     return claims
