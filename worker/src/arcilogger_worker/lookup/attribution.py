@@ -121,7 +121,7 @@ from arcilogger_worker.lookup.refs import (
     last_dhcp_evidence,
 )
 from arcilogger_worker.lookup.texts import explain
-from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, kept, usable_dhcp_origins
+from arcilogger_worker.lookup.trust import UNKNOWN_PREFIX, ZERO_MAC, kept, usable_dhcp_origins
 from arcilogger_worker.lookup.types import (
     CONFIDENCE_ORDER,
     AttributionChain,
@@ -158,6 +158,10 @@ _MAC_LIKE: Final = re.compile(
 )
 _IPV4_LIKE: Final = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
 _VD_CUT: Final = 32
+#: A MAC of an ``fg_event`` line in the normalised form (lower-case, colons) that D28 reads.
+_READABLE_MAC: Final = "^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
+#: The second hex digit of a MAC whose first octet has the multicast bit set (as ``trust``).
+_MULTICAST_HEX: Final = ("1", "3", "5", "7", "9", "b", "d", "f")
 
 
 def usable_lease(settings: LookupSettings, lease: int | None) -> int | None:
@@ -173,15 +177,23 @@ def usable_lease(settings: LookupSettings, lease: int | None) -> int | None:
 def event_kept(settings: LookupSettings) -> ColumnElement[bool]:
     """The rules of :func:`.trust.kept` that a FortiGate DHCP line kept as an ``fg_event`` row
     can be checked on, read from its ``extra`` fields: a line of an interface in
-    ``dhcp.fortigate_interfaces_excluded`` (D28) or with a ``dhcp_msg`` that
-    ``dhcp.fortigate_dhcp_msgs`` does not list for its logid (D25) is never lease evidence, so
-    the lookup never counts it as a line the timeline missed. A line **without** ``dhcp_msg``
-    passes: under D3 such a line of a DHCP logid is exactly the one ingest kept as an
-    ``fg_event`` row (the c2 deviation); only a present value that is not listed is refused.
-    The sender rule is each query's own (``untrusted``)."""
+    ``dhcp.fortigate_interfaces_excluded`` (D28), with a ``dhcp_msg`` that
+    ``dhcp.fortigate_dhcp_msgs`` does not list for its logid (D25) or with a zero, broadcast or
+    multicast MAC (D28) is never lease evidence, so the lookup never counts it as a line the
+    timeline missed. A line **without** ``dhcp_msg`` passes: under D3 such a line of a DHCP
+    logid is exactly the one ingest kept as an ``fg_event`` row (the c2 deviation); only a
+    present value that is not listed is refused. A missing or unreadable MAC passes in the
+    same way. D28's receive-time rule cannot be checked here (an ``fg_event`` row has no
+    ``device_time``). The sender rule is each query's own (``untrusted``)."""
     interface = FgEvent.extra["interface"].astext
     message = FgEvent.extra["dhcp_msg"].astext
-    clauses: list[ColumnElement[bool]] = []
+    mac = func.lower(func.replace(FgEvent.extra["mac"].astext, "-", ":"))
+    # A copy of trust.refusal's rule 7 for the normalised text form (trust.py is the lease
+    # program's): only a readable MAC that is zero or has the multicast bit set is refused.
+    bad_mac = mac.regexp_match(_READABLE_MAC) & (
+        (mac == ZERO_MAC) | func.substr(mac, 2, 1).in_(_MULTICAST_HEX)
+    )
+    clauses: list[ColumnElement[bool]] = [or_(mac.is_(None), not_(bad_mac))]
     if settings.fortigate_interfaces_excluded:
         excluded = sorted(settings.fortigate_interfaces_excluded)
         clauses.append(or_(interface.is_(None), interface.not_in(excluded)))

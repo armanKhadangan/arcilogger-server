@@ -136,7 +136,7 @@ def unconverted_line(
     evidence: Evidence,
     time: datetime,
     ip: str,
-    mac: str,
+    mac: str | None,
     *,
     hostname: str | None = None,
     lease: int | None = 86400,
@@ -151,7 +151,7 @@ def unconverted_line(
     or by the previous version after a rollback): its spool line and the row that version
     stored, every DHCP field in ``extra``; returns the row id. ``dhcp_msg``: another message
     than the logid's own ("Ack" / "Release"); ``without_dhcp_msg``: a line without the field,
-    which D3 keeps as an ``fg_event`` row today too."""
+    which D3 keeps as an ``fg_event`` row today too; ``mac=None``: a line without the field."""
     sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
     local = to_site(time)
     logdesc, msg = FORTIGATE_DHCP_TEXTS[logid]
@@ -159,7 +159,7 @@ def unconverted_line(
     fields = {
         "interface": interface,
         "dhcp_msg": None if without_dhcp_msg else kind,
-        "mac": mac.upper(),
+        "mac": None if mac is None else mac.upper(),
         "ip": ip,
         "lease": None if lease is None else str(lease),
         "hostname": hostname,
@@ -1000,8 +1000,13 @@ def test_a_migration_loaded_before_the_upgrade(
 
 
 #: An ``fg_event`` line that D25 or D28 says is never lease evidence: a NAK under the ACK's
-#: logid (``dhcp.fortigate_dhcp_msgs``) and an ACK of an excluded interface (an IPsec server).
-REFUSED_LINES = {"nak": ("Nak", "vlan42"), "excluded": ("Ack", "ipsec1")}
+#: logid (``dhcp.fortigate_dhcp_msgs``), an ACK of an excluded interface (an IPsec server) and
+#: an ACK for a multicast MAC; ``None``: the test's own client.
+REFUSED_LINES = {
+    "nak": ("Nak", "vlan42", None),
+    "excluded": ("Ack", "ipsec1", None),
+    "bad-mac": ("Ack", "vlan42", "01:00:5e:00:00:fb"),
+}
 
 
 def exclude_ipsec(session: Session) -> None:
@@ -1013,12 +1018,14 @@ def exclude_ipsec(session: Session) -> None:
 def test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing(
     db_session: Session, evidence: Evidence, example: list[int], variant: str
 ) -> None:
-    """The post-lease check (2.7) applies D25 and D28 to its ``fg_event`` lines too: a NAK for
-    the PC's address under 0100026001, or an ACK of an excluded interface, after the 11:00 ACK
-    leaves the chain as it was; the same line as an ACK on vlan42 lowers it."""
-    message, interface = REFUSED_LINES[variant]
+    """The post-lease check (2.7) applies D25 and D28's interface and MAC rules to its
+    ``fg_event`` lines too: a NAK for the PC's address under 0100026001, an ACK of an excluded
+    interface or an ACK for a multicast MAC after the 11:00 ACK leaves the chain as it was; the
+    same line as an ACK of another client on vlan42 lowers it."""
+    message, interface, mac = REFUSED_LINES[variant]
     exclude_ipsec(db_session)
-    unconverted_line(evidence, tr(DAY, 11, 10), PC, OTHER, interface=interface, dhcp_msg=message)
+    unconverted_line(evidence, tr(DAY, 11, 10), PC, mac or OTHER, interface=interface,
+                     dhcp_msg=message)  # fmt: skip
     db_session.commit()
     chain = internal(db_session, PC, AT).attribution
     assert chain is not None
@@ -1395,14 +1402,14 @@ def test_a_refused_converted_row_does_not_silence_the_probe(
 def test_a_line_that_is_never_lease_evidence_is_never_named(
     db_session: Session, evidence: Evidence, variant: str
 ) -> None:
-    """D25 and D28 hold for the probe's ``fg_event`` lines as ``trust.kept`` holds them for
-    ``fg_dhcp`` rows: a covering NAK under 0100026001, or a covering ACK of an excluded
-    interface, is never named or cited; such a line newer than a covering ACK does not hide
-    that ACK either."""
-    message, interface = REFUSED_LINES[variant]
+    """D25 and D28's interface and MAC rules hold for the probe's ``fg_event`` lines as
+    ``trust.kept`` holds them for ``fg_dhcp`` rows: a covering NAK under 0100026001, a covering
+    ACK of an excluded interface or a covering ACK for a multicast MAC is never named or cited;
+    such a line newer than a covering ACK does not hide that ACK either."""
+    message, interface, mac = REFUSED_LINES[variant]
     exclude_ipsec(db_session)
-    unconverted_line(evidence, AT - timedelta(days=1), PC, PC_MAC, hostname=HOST, lease=WEEK,
-                     interface=interface, dhcp_msg=message)  # fmt: skip
+    unconverted_line(evidence, AT - timedelta(days=1), PC, mac or PC_MAC, hostname=HOST,
+                     lease=WEEK, interface=interface, dhcp_msg=message)  # fmt: skip
     build(db_session, DAY, DAY)
     outcome = internal(db_session, PC, AT)
     assert "no_lease" in keys(outcome)
@@ -1429,6 +1436,28 @@ def test_a_covering_line_without_dhcp_msg_is_named(db_session: Session, evidence
     assert "no_lease" in keys(outcome)
     assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
     assert_cited(outcome, row, acked, evidence)
+
+
+@pytest.mark.parametrize("mac", [None, "0000.5e00.5357"], ids=["missing", "unreadable"])
+def test_a_covering_line_without_a_readable_mac_is_named(
+    db_session: Session, evidence: Evidence, mac: str | None
+) -> None:
+    """D28's MAC rule refuses only a readable MAC that is zero, broadcast or multicast: the
+    covering pre-upgrade ACK of the PC's address without a ``mac`` field, or with one in
+    another notation, is named and cited by the IP probe, as a line without ``dhcp_msg`` is."""
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, mac, hostname=HOST, lease=WEEK)
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    (ref,) = outcome.unconverted_dhcp
+    assert (ref.table, ref.row_id, ref.time, ref.summary) == (
+        "fg_event",
+        row,
+        acked,
+        UNCONVERTED_LABEL,
+    )
 
 
 def test_a_line_of_an_unknown_sender_is_never_cited(
