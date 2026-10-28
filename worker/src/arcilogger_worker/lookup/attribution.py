@@ -122,6 +122,16 @@ _IPV4_LIKE: Final = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
 _VD_CUT: Final = 32
 
 
+def usable_lease(settings: LookupSettings, lease: int | None) -> int | None:
+    """The logged lease time a FortiGate lease runs on (D6): within the FortiOS range and with
+    ``dhcp.fortigate_use_logged_lease``; ``None``: the configured times apply (the lease
+    timeline's rule)."""
+    low, high = LEASE_SECONDS_RANGE
+    if not settings.use_logged_lease or lease is None or not low <= lease <= high:
+        return None
+    return lease
+
+
 @dataclass(frozen=True)
 class StoredLease:
     """A ``leases`` row as the engine uses it."""
@@ -390,7 +400,9 @@ class Attributor:
         if row is None:
             return None
         action = self.settings.fortigate_logids.get(str(row.logid))
-        return _Record(row.time, action, self._usable_lease(row.lease), row=True, vd=row[3])
+        return _Record(
+            row.time, action, usable_lease(self.settings, row.lease), row=True, vd=row[3]
+        )
 
     @property
     def _assigned_first(self) -> ColumnElement[int]:
@@ -413,14 +425,10 @@ class Attributor:
         )
         logged = _REF_LEASE.search(ref.summary) if ref.table == FG_DHCP_TABLE else None
         return _Record(
-            last, dhcp_action(ref), self._usable_lease(int(logged.group(1)) if logged else None)
+            last,
+            dhcp_action(ref),
+            usable_lease(self.settings, int(logged.group(1)) if logged else None),
         )
-
-    def _usable_lease(self, lease: int | None) -> int | None:
-        low, high = LEASE_SECONDS_RANGE
-        if not self.settings.use_logged_lease or lease is None or not low <= lease <= high:
-            return None
-        return lease
 
     def _released(self, lease: StoredLease, at: datetime) -> bool:
         if not (self.lookup and lease.source_table == FG_DHCP_TABLE):
