@@ -45,12 +45,12 @@ import os
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from ipaddress import IPv4Network
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, event, text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import day_window
@@ -733,6 +733,53 @@ def timer(monkeypatch: pytest.MonkeyPatch) -> _Timer:
     return _Timer(monkeypatch)
 
 
+class _Executed:
+    """The statements an engine sends while recorded, with their bound parameters: a guard
+    checks what its query read, not only that it was fast (a query that reads nothing is fast
+    too)."""
+
+    def __init__(self) -> None:
+        self.statements: list[tuple[str, dict[str, Any]]] = []
+        self._site: Engine | None = None
+
+    def record(self, site: Engine) -> None:
+        self._site = site
+        event.listen(site, "before_cursor_execute", self._executed)
+
+    def stop(self) -> None:
+        if self._site is not None:
+            event.remove(self._site, "before_cursor_execute", self._executed)
+            self._site = None
+
+    def _executed(self, *args: Any) -> None:
+        _connection, _cursor, statement, parameters, _context, _many = args
+        self.statements.append((statement, dict(parameters)))
+
+    def one(self, *parts: str) -> tuple[str, dict[str, Any]]:
+        """The one recorded statement that contains every one of ``parts``."""
+        (found,) = [
+            (sql, params) for sql, params in self.statements if all(p in sql for p in parts)
+        ]
+        return found
+
+
+def _moments(parameters: dict[str, Any]) -> list[datetime]:
+    """Every moment bound to a statement, those in arrays too."""
+    values = [
+        v for value in parameters.values() for v in (value if isinstance(value, list) else [value])
+    ]
+    return [value for value in values if isinstance(value, datetime)]
+
+
+@pytest.fixture
+def executed() -> Iterator[_Executed]:
+    recorded = _Executed()
+    try:
+        yield recorded
+    finally:
+        recorded.stop()
+
+
 def _guard_lookup(site: Engine, request: LookupRequest, measure: Any) -> LookupOutcome:
     """``request`` run once to warm the caches, then again with ``measure()`` installing the
     timers (a lookup only reads; each run is rolled back)."""
@@ -896,15 +943,19 @@ def test_the_dhcp_origins_of_twenty_chains_are_one_fast_query(
 
 
 @pytest.mark.perf
-def test_the_d8_probe_of_twenty_addresses_is_fast(event_site: Engine, timer: _Timer) -> None:
+def test_the_d8_probe_of_twenty_addresses_is_fast(
+    event_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
     """3.8: the ``fortigate_dhcp_not_converted`` probe of 2.8.3 (the newest DHCP-shaped row per
     IP in ``fg_event`` and ``fg_dhcp``) for 20 addresses with no DHCP row at all (the worst
     case: the scan reads every ``system`` line of the window), under 0.5 s; on the fallback
-    window of 2.8.3 (deviation c2)."""
+    window of 2.8.3 (deviation c2), which the query was bound to and which holds the site's
+    ``system`` lines of 7 days."""
     probe: list[_Timed] = []
 
     def measure() -> None:
         probe.append(timer.time(lookup_engine._Lookup, "_newest_dhcp"))
+        executed.record(event_site)
 
     outcome = _guard_lookup(event_site, LookupRequest(at=PROBE_AT, public_ip=PUBLIC), measure)
     timer.report(f"D8 probe, {EVENT_ROWS} system lines a day")
@@ -915,6 +966,19 @@ def test_the_d8_probe_of_twenty_addresses_is_fast(event_site: Engine, timer: _Ti
     (timed,) = probe
     (call,) = timed.calls
     assert len(call[1]) == 20
+    _sql, parameters = executed.one("FROM fg_event", "DISTINCT ON")
+    moments = _moments(parameters)
+    low, high = min(moments), max(moments)
+    assert (low, high) == (PROBE_AT - attribution.UNCONVERTED_WINDOW, PROBE_AT)
+    with event_site.connect() as connection:
+        lines = connection.execute(
+            text(
+                "SELECT count(*) FROM fg_event WHERE subtype = 'system' "
+                "AND time >= :low AND time <= :high"
+            ),
+            {"low": low, "high": high},
+        ).scalar_one()
+    assert lines >= 7 * EVENT_ROWS
     assert timed.seconds < 0.5, f"the D8 probe took {timed.seconds:.3f} s"
 
 
@@ -981,16 +1045,17 @@ def test_the_post_lease_query_of_a_hundred_chains_is_fast(
 
 @pytest.mark.perf
 def test_the_converted_row_query_of_a_hundred_chains_is_fast(
-    event_site: Engine, timer: _Timer
+    event_site: Engine, timer: _Timer, executed: _Executed
 ) -> None:
     """3.8: the round-7 converted-row query of 2.7 for the MACs of 100 chains on
     ``ix_fg_dhcp_mac_time`` over the 100-day cap (no fallback), at the load generator's
-    FortiGate DHCP rate over 400 days (the chains' MACs on the staff Wi-Fi: read, and no move
-    under D33's key), under 0.2 s."""
+    FortiGate DHCP rate over 400 days (the chains' MACs on the staff Wi-Fi: read, every chain's
+    rows returned, and no move under D33's key), under 0.2 s."""
     moves: list[_Timed] = []
 
     def measure() -> None:
         moves.append(timer.time(Attributor, "_missed_moves"))
+        executed.record(event_site)
 
     outcome = _guard_lookup(event_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
     timer.report("round-7 converted-row query")
@@ -1004,4 +1069,14 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     assert all(m.chain is not None and m.chain.confidence != "low" for m in outcome.matches)
     (timed,) = moves
     assert len(timed.calls) == 1
+    sql, parameters = executed.one("WITH ORDINALITY", "JOIN fg_dhcp")
+    executed.stop()
+    moments = _moments(parameters)
+    assert min(moments) == MT_AT - attribution.MISSED_MOVE_WINDOW
+    with event_site.connect() as connection:
+        rows = connection.exec_driver_sql(sql, parameters).all()
+    assert {n for n, _ip, _interface, _vd in rows} == set(range(1, 101))
+    assert {(str(ip).startswith("172.20.60."), interface) for _n, ip, interface, _vd in rows} == {
+        (True, "vlan60")
+    }
     assert timed.seconds < 0.2, f"the converted-row query took {timed.seconds:.3f} s"
