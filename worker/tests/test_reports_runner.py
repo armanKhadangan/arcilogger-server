@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import socket
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
@@ -447,21 +446,15 @@ def test_a_refused_recipient_fails_alone(
     assert alert.state == "resolved"
 
 
-def _closed_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port: int = probe.getsockname()[1]
-    return port
-
-
 def test_when_the_server_is_down_the_other_recipients_wait(
     sessions: sessionmaker[Session],
     layout: Layout,
     smtp_server: FakeSmtp,
     db_session: Session,
     engine: Engine_,
+    closed_port: int,
 ) -> None:
-    config = smtp_config(layout, smtp_server, port=_closed_port())
+    config = smtp_config(layout, smtp_server, port=closed_port)
     schedule(db_session)
     report = tick(sessions, layout, config, engine)
     assert report.emails == 0
