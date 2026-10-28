@@ -287,8 +287,7 @@ FILTER_NONE: Final[Text] = (
 FILTER_DUE: Final[Text] = (
     "Beklenen günlerde son {hours} saattir web ya da DNS filtresi kaydı gelmedi (son kayıt: "
     "{last}).",
-    "No web or DNS filter record in the last {hours} hours of expected days (last record: "
-    "{last}).",
+    "No web or DNS filter record in the last {hours} hours of expected days (last record: {last}).",
 )
 FILTER_QUIET: Final[Text] = (
     "Son {hours} saatte içerik filtresi kaydı yok; bu süre beklenmeyen bir gün içeriyor (son "

@@ -57,7 +57,9 @@ def dns(session: Session, time: datetime, source: str = "fortigate") -> None:
     session.commit()
 
 
-def counted(session: Session, time: datetime, table: str, n: int, source: str = "fortigate") -> None:
+def counted(
+    session: Session, time: datetime, table: str, n: int, source: str = "fortigate"
+) -> None:
     """``n`` lines of ``table`` in the hour of ``time`` (as the ingest loader counts them)."""
     subtype = {"fg_web": "webfilter", "fg_dns": "dns"}.get(table, "forward")
     session.add(
