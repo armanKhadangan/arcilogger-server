@@ -500,6 +500,9 @@ def test_time_limit_and_lingering_out_are_audited(
         assert b'"code":"time_limit"' in connection.controls[-1]
         assert "5 dakika" in connection.controls[-1].decode()
         hub.detach(limited, connection)  # the writer sent the end and returned
+        # Its live.close is written by a worker thread (``Hub._finish``), and so is the lingered
+        # one below: held up 30 ms on a busy runner, it was committed second (read by id below).
+        await until(lambda: not hub._background)
         paused = stream(hub)
         held = await connect(hub, paused)
         hub.detach(paused, held)

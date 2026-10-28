@@ -27,6 +27,11 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
   it under "## Deviations" at the end of the contract in the same pull request.
 - **Open questions** of the contract: implement the contract's stated default and list the question
   in the pull request under "Questions". Do not decide owner questions yourself.
+- **Never sit idle.**
+  - When your pull request is ready for review (not a draft), go on with your next issue: the open issue assigned to you with the label `ready` and no pull request yet, `wave-3` before `wave-4`, then the lowest number.
+  - First, though, handle any review comment on your open pull requests, and fix any red CI on them.
+  - An early-start "Hazır / Ready" comment names the branch to start from, often the branch of the package you wait for. Its pull request merges after that package; the comment says when.
+  - Read the latest comments on your issue and pull request before each push: answers to your questions arrive there.
 
 ## Product rules (never break them)
 
@@ -77,6 +82,7 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
   (`cd web && CI=1 npx playwright test <specs> --workers=2`).
 - CI runs on pull requests (and on `wave-*` and `main`), not on pushes to your work branch: open
   the pull request as a draft early if you want CI before you are done.
+- **Push to an open pull request only at checkpoints**: after the local gates pass, and when you want a CI result. A full CI run takes over an hour, and each new push cancels the run in progress. Commit as often as you like; pushing every few minutes means CI never finishes.
 - Never skip, xfail, quarantine or weaken a test to get green. CI must be green on the pull request
   before review.
 
