@@ -20,10 +20,13 @@ alabilir; denetçi yalnızca kendi sorgularının raporunu görür.
 2. Talep bilgileri — makam, dosya/evrak no, talep tarihi, gerekçe (sorgudan önce zorunlu).
 3. Sorgu ölçütleri — zaman (Europe/Istanbul ve UTC; girilen metin ve saat diliminin nasıl
    yorumlandığı), genel IP/port, protokol, hedef, tolerans, iç IP, MAC.
-4. Yöntem — NAT kaydı + IP–MAC zaman çizelgesi; **çift NAT** açıklaması ve kesin sonuç için
-   gerekenler (ISS modeminin NAT kaydı veya köprü modu) — "sonuç bir aday listesidir" cümlesi
-   yalnızca aday varken yazılır, sonuç yoksa "aday oturum da bulunamadı" yazılır; aday puanının
-   anlamı; sorgu motorunun açıklamaları; veri penceresi.
+4. Yöntem — (1) FortiGate oturum kayıtlarının kaynak NAT bilgisi ve (2) "DHCP sunucusunun
+   kayıtlarından (MikroTik DHCP, FortiGate DHCP olayları) ve saatlik ARP-LOG kayıtlarından kurulan
+   IP–MAC zaman çizelgesi"; genel IP sorgusunda **çıkış satırı** ve yanıt türüne göre bir **yöntem
+   paragrafı**; gerektiğinde **çift NAT** paragrafı ve kesin sonuç için gerekenler — "sonuç bir
+   aday listesidir" cümlesi yalnızca aday varken yazılır, sonuç yoksa "aday oturum da bulunamadı"
+   yazılır; aday puanının anlamı; FortiGate DHCP kayıt biçimi notu; sorgu motorunun açıklamaları;
+   veri penceresi (ayrıntılar aşağıda, "İnternet çıkışları ve yöntem").
 5. Sonuçlar — kesin eşleşmeler veya adaylar; her biri için oturum, NAT, zaman farkı, hedef
    eşleşmesi ve tam atıf zinciri (iç IP → IP–MAC kaydı → cihaz → kişi/departman, güven
    düzeyleri; IP çakışmasında diğer olası zincirler, hepsi "düşük" güvenle). Kişi bağlantısının
@@ -36,7 +39,10 @@ alabilir; denetçi yalnızca kendi sorgularının raporunu görür.
    paylaşılan CDN adresi olabilir"). Yalnızca alan adı verilen bir kesin (NAT) sorguda alan
    adı FortiGate DNS/web/uygulama kayıtlarında görülmediyse oturum yine listelenir, ancak hedef
    "hedef doğrulanmadı" olarak yazılır; kayıt eksikliği başka bir hedefe gidildiği şeklinde
-   yorumlanmaz.
+   yorumlanmaz. Her eşleşme çıkışını ve `dstintf` değerini yazar; yapılandırılmamış bir
+   göndericinin kayıtlarına dayanan eşleşme "UYARI / Warning" satırı alır; srcmac'e dayanan bir
+   adım "kısmi kanıt" olarak, FortiGate DHCP kirası kira süresi ve son DHCP kanıtıyla yazılır
+   (aşağıda, "FortiGate DHCP, srcmac ve tanımsız göndericiler").
 6. Kanıt listesi — her kanıt (K1, K2 …) için veritabanı satırı, kaynak dosya, satır numarası,
    bayt konumu, ham satırın kendisi ve SHA-256 özeti; ham dosyaların rapor anındaki özetleri
    (mühürlü günlerde manifestle karşılaştırma); her mühürlü gün için manifest ve zaman damgası
@@ -52,9 +58,208 @@ alabilir; denetçi yalnızca kendi sorgularının raporunu görür.
    iki gün önce kapandıysa "mühürleme gecikmiş" uyarısıyla). Ham dosyası kasada olduğu hâlde
    manifesti veya zaman damgası bulunmayan günler kırmızı **"MÜHÜR BULUNAMADI"** olarak yazılır —
    asla "henüz mühürlenmedi" olarak değil. 72 KiB'den uzun ham satırlar raporda kısaltılır ve
-   bu açıkça belirtilir; satırın SHA-256 özeti ve uzunluğu her zaman satırın tamamınındır.
+   bu açıkça belirtilir; satırın SHA-256 özeti ve uzunluğu her zaman satırın tamamınındır. Kira
+   zaman çizelgesine girmemiş bir FortiGate DHCP kaydı da gerektiğinde burada, eşleştirme
+   olmadığını söyleyen notuyla gösterilir; ham satırlar aygıt tanıma alanlarıyla olduğu gibi
+   yazılır (aşağıda).
 7. Raporun doğrulanması — özetin nasıl kontrol edileceği ve (açıksa) zaman damgası.
 8. Yasal not. Her sayfada "Sayfa n / N", sorgu no, sürüm ve ifade kuralı vardır.
+
+**İnternet çıkışları ve yöntem (bölüm 4 ve 5):** genel IP ile yapılan bir sorgunun 4. bölümü,
+istenen adresin hangi internet çıkışına (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman
+çizelgesi → İnternet çıkışları (NAT)) göre arandığını bir satırda yazar: "Çıkış / Exit: {yanıt
+etiketi} — {ad} ({açıklama}), {tür}". `unconfigured` ve `no_egress` yanıtlarında çıkış adı
+yazılmaz. Etiketler ve tür adları, web'deki sorgu başlığının ve aşağıdaki okuma tablosunun da
+kullandığı tek bir Türkçe/İngilizce tablodan gelir:
+
+- `public` "Genel IP" / "Public IP"; `transip` "NAT adresi" / "NAT address";
+- `fallback`, doğrudan bir çıkışta "Doğrudan hat doğrulanamadı" / "Direct line not confirmed";
+  servis sağlayıcı NAT'ı çıkışının NAT adresinde (`transip`) "NAT adresi doğrulanamadı" / "NAT
+  address not confirmed";
+- `observed` "Kayıtlarda görülen adres" / "Address seen in the logs"; `public_unknown` "Genel
+  adresi bilinmeyen hatlar" / "Lines with unknown public address"; `unconfigured` "Çıkış tanımlı
+  değil" / "No exits defined"; `no_egress` "Çıkış yok" / "No exit";
+- türler: "Doğrudan" / "Direct", "Servis sağlayıcı NAT'ı" / "ISP NAT", "FortiGate'ten geçmiyor" /
+  "Does not pass the FortiGate", "İnternet çıkışı değil" / "Not an internet exit".
+
+Her eşleşme de kendi satırını alır: "Çıkış / Exit: {ad} ({açıklama}) · dstintf {dstintf}"
+(kanıt satırının NAT adresini tanımlayan çıkış; hiçbir çıkış tanımlamıyorsa "-"). Kayıtları farklı
+çıkışlarda görünen bir oturum (`session_changed_exit`) iki çıkışı da yazar. Böylece
+`public_unknown`, `unconfigured` ya da `fallback` yanıtında her adayın hangi hattan çıktığı
+görülür.
+
+Yöntem bölümü her (yanıt, tür) için bir paragraf yazar, toplam on bir paragraf. Her paragraf
+neyin çıkış tanımına (ayara), neyin kayıtlara dayandığını ayırır. `{searched}` sonucun saklanan
+arama bilgisindeki, gerçekten aranan adreslerdir:
+
+- `public`, doğrudan: genel IP FortiGate'in kendisindedir ve oturum kayıtlarında kaynak NAT
+  adresi (transip) olarak görünür. Talepteki port FortiGate'in NAT portuyla (transport)
+  karşılaştırılır; port yoksa o adresle çıkan oturumlar aday olarak sıralanır.
+- `public` ya da `transip`, servis sağlayıcı NAT'ı: tanıma göre servis sağlayıcının yönlendiricisi
+  FortiGate'in bu hattaki NAT adresini ({transips}) ikinci kez çevirir ve bu dönüşümün kaydı
+  ARCILOGGER'da yoktur. Arama bu çıkışın NAT adresleriyle (arayüzleri tanımlıysa arayüzleriyle
+  de) sınırlanır. Port koruma ya kullanılmamıştır ya da yalnızca sıralamada kullanılmıştır
+  (sahada doğrulandı olarak işaretliyse). NAT adresi girilmemiş, tanımsız adresleri kapsayan bir
+  çıkışta {transips} yerine "hiçbir çıkışa tanımlı olmayan özel ya da paylaşılan NAT adresleri"
+  yazılır. `transip` yanıtında istenen adres FortiGate'in bu çıkıştaki kendi NAT adresidir ve
+  eşleşme FortiGate kaydında transip ve transport ile yapılır. Genel adresi "değişebilir"
+  işaretli bir çıkışın `public` yanıtında paragraf `egress_public_dynamic` metnini de taşır:
+  adresin o anda bu hatta ait olduğunu yalnızca servis sağlayıcı doğrulayabilir.
+- `fallback`, doğrudan çıkış ("Doğrudan hat doğrulanamadı"): istenen adres o anın çevresinde
+  FortiGate kayıtlarında NAT adresi olarak görünmüyor ya da yalnızca bir kısmında görünüyor;
+  kayıtlar o sırada özel ya da paylaşılan başka kaynak NAT adreslerini de ({seen}, en çok 5)
+  gösteriyor. Bu nedenle kesin eşleşme yapılamadı ve {searched} adresleriyle çıkan oturumlar aday
+  olarak sıralandı. Servis sağlayıcının yönlendiricisinin o sırada ikinci bir NAT yapmış
+  **olabileceği** yazılır, bir olgu olarak değil. Çıkışın arayüzleri tanımlıysa {seen} "bu
+  hatta", tanımlı değilse "FortiGate kayıtlarında" görülmüş olarak yazılır: arayüz olmadan
+  adresin hangi hatta görüldüğü bilinemez.
+- `fallback`, servis sağlayıcı NAT'ı çıkışının NAT adresi ("NAT adresi doğrulanamadı"): aynı
+  açıklama; köprü modu cümlesi ve "Doğrudan olarak tanımlayın" önerisi yoktur.
+- `fallback` eki: arama başka bir çıkışın adreslerine de girdiyse "Aranan adreslerin bir kısmı
+  {other} çıkışına aittir" ile başlayan bir ek yazılır. Ek, o çıkışın neden aynı hat sayıldığını
+  söyler: yükseltmede eski ayarlardan arayüzsüz aktarıldığı için ya da bu hatla bir arayüzü
+  paylaştığı için. Liste o hattın kullanıcılarını da içerebilir.
+- `observed` ("Kayıtlarda görülen adres"): adres hiçbir çıkışta tanımlı değil, ama o anın
+  çevresinde (±15 dakika) FortiGate kayıtlarında kaynak NAT adresi olarak görünüyor
+  (`egress_observed_not_configured`). Adres FortiGate'ten geçmeyen bir çıkışa tanımlıysa metin
+  `egress_not_logged_but_seen` olur. Eşleşme FortiGate kaydında yapılır; adresin o tarihte kuruma
+  ait olduğunu servis sağlayıcı doğrular.
+- `public_unknown`: adres hiçbir çıkışın genel adresi değil. Arama, genel adresi tanımlanmamış
+  ya da değişebilen çıkışlarda ({exits}) yapıldı ve bu çıkışlarda servis sağlayıcının ikinci bir
+  NAT yaptığı varsayıldı. Adres bu hatlardan birine ait değilse liste ilgisiz kullanıcıları
+  gösterebilir.
+- `unconfigured`: internet çıkışı tanımlanmamış. Servis sağlayıcının ikinci bir NAT yaptığı
+  varsayıldı ve FortiGate'in özel ya da paylaşılan bir NAT adresiyle çıkan bütün kaynak NAT
+  oturumları arandı. Genel bir NAT adresiyle çıkan oturumlar FortiGate'in kendi adresinden
+  çıktıkları için aranmadı.
+- `not_logged`: adres FortiGate'ten geçmeyen bir çıkışa ait ve ARCILOGGER'da bu hattın oturum
+  kaydı yok. Rapor sonuç içermez; kayıt ancak hattı yöneten cihazdan alınabilir.
+- `transip`, internet çıkışı değil: adres, çıkış tanımına göre FortiGate'in iç ağlara (DMZ, başka
+  bir VLAN, VPN ya da şube) yaptığı kaynak NAT'ın adresidir. Oturum aranmadı; rapor sonuç
+  içermez.
+- `no_egress`: adres kurumun tanımlı internet çıkışlarından hiçbirine ait değil ve o sırada
+  yapılandırılmış kaynakların FortiGate kayıtlarında da görünmüyor; oturum aranmadı. Adres
+  kurumun bir hattına aitse çıkış tanımlanıp sorgu yeniden çalıştırılmalıdır. Ardından "Sorgu
+  anında tanımlı çıkışlar: {configured}." gelir: her çıkış "ad (açıklama): tür, genel adresler"
+  biçimindedir. Bunlar güvenlik duvarının kendi adresleridir, kişisel veri değildir. Liste
+  sorgunun saklanan sonucundan gelir, bugünkü ayardan değil.
+
+Tanımsız adresler de arandıysa `{searched}` "… ve hiçbir çıkışa tanımlı olmayan bütün özel ya da
+paylaşılan kaynak NAT adresleri (T çevresinde görülenler: …)" diye biter. T istenen andır. Böylece
+listede görülmeyen bir tanımsız adresten gelen bir aday da yazılı aramanın içinde kalır.
+
+`no_egress`, `not_logged` ve internet çıkışı olmayan bir NAT adresi hiç oturum aramaz. Bu yüzden 4.
+ve 5. bölüm, kayıtlara dayalı bir "kimse yok" gibi okunacak "Ölçütlere uyan kayıt bulunamadı"
+yerine şunları yazar:
+
+- "Oturum aranmadı: istenen adres {address} tanımlı internet çıkışlarından hiçbirine ait değil
+  (bölüm 4)."
+- "Oturum aranmadı: istenen adres {address} FortiGate'ten geçmeyen {exit} çıkışına ait (bölüm
+  4)."
+- "Oturum aranmadı: istenen adres {address} internet çıkışı olmayan {exit} tanımına ait (bölüm
+  4)."
+
+Yöntem bölümü ayrıca şu notları, varsa, metinleriyle yazar:
+
+- `source_clock_offset`: kanıt gösterilen bir kaynağın saati o anda kaymıştı (sonuç boşsa aranan
+  bir kaynağın). Zincirler düşük güvenle gösterilir. Sınır, kira araması ve iç IP sorgusu için
+  120 saniyedir; yalnızca oturum araması için ölçülen bir kaynakta, sorgu toleransı daha büyükse
+  toleranstır.
+- `egress_internal`: internet çıkışı olmayan NAT adresi.
+- `egress_changed_after_event`: olaydan sonra tanımı değişen her çıkış, değişiklik zamanı, kim
+  tarafından (ARCILOGGER'ın kendi değişikliklerinde "yükseltme (eski NAT ayarlarından aktarıldı)"
+  ya da "varsayılan değer") ve çıkışın bugün ne tuttuğu, silindiyse "silindi". Not denetim
+  kaydına bakmadan okunabilir; önceki tanımlar kurumun denetim kaydındadır (`settings.change`).
+
+Bu notların hepsi ve FortiGate kira notları saklanan sorgu sonucundan gelir, rapor anındaki
+ayardan değil: rapor ilk indirmede üretilir ve ayar o arada değişmiş olabilir. Metni bir yöntem
+paragrafının içinde yazılan açıklamalar (`egress_observed_not_configured`,
+`egress_not_logged_but_seen`, `egress_public_dynamic`) açıklama listesinde bir daha yazılmaz;
+diğer her açıklama listede kalır.
+
+**Çift NAT paragrafı (bölüm 4):** aday ya da sonuçsuz bir yanıtta sorgu motoru çift NAT
+belirlediyse yazılır; `transip` yanıtında **hiç yazılmaz**. Orada istenen adres FortiGate'in kendi
+NAT adresidir, eşleşme transip ve transport ile yapılır ve "genel port kesin eşlenemez" cümlesi
+yöntem paragrafıyla çelişirdi. Üç biçimi vardır:
+
+- tanımlı servis sağlayıcı NAT'ı (`public` yanıtı): "Çift NAT: {exit} çıkışı servis sağlayıcı
+  NAT'ı olarak tanımlı; servis sağlayıcının yönlendiricisi FortiGate'in adresini ikinci kez
+  çevirir. …";
+- varsayılan (`unconfigured`, `public_unknown`): "Çift NAT varsayımı: bu adres için servis
+  sağlayıcının ikinci bir NAT yaptığı varsayıldı; …";
+- `fallback`: paragrafın yerini yöntem paragrafı tutar. Saklanan çift NAT açıklamaları da bu
+  paragrafın yanında ayrıca listelenmez.
+
+`fallback` dışındaki biçimler CGNAT cümlesini ekler: "Genel adres başka müşterilerle
+paylaşılıyorsa (CGNAT) aday listesi doğru oturumu içermeyebilir; kesin yanıt için servis
+sağlayıcının NAT kaydı gerekir." Sonra sonuç cümlesi ve öneri gelir. Kesin eşleşme için ya (a)
+servis sağlayıcının ilgili zamana ait NAT kaydı (genel port → FortiGate çıkış portu) gerekir ya da
+(b) servis sağlayıcı yönlendiricisinin köprü (bridge) moduna alınması ve hattın İnternet
+çıkışlarında 'Doğrudan' olarak tanımlanması. `fallback` yalnızca (a)'yı yazar; doğrulanamayan çıkış
+doğrudansa "ya da hattın o tarihte köprü modunda olduğunun servis sağlayıcıdan doğrulanması"
+ekiyle. "Doğrudan olarak tanımlayın" önerisi zaten doğrudan olan bir çıkış ve bir `transip`
+fallback için hiç yazılmaz. Rapor, hattın servis sağlayıcı yönlendiricisinin arkasında olduğunu
+hiçbir zaman bir olgu olarak yazmaz. Biçim cümlesi ve CGNAT cümlesi yalnızca talep bir genel IP
+adresi içerdiğinde yazılır. İç IP, MAC ya da yalnızca hedefle yapılan bir sorguda çift NAT
+paragrafı sonuç cümlesi ve öneriyle sınırlıdır.
+
+**FortiGate DHCP, srcmac ve tanımsız göndericiler (bölüm 4–6):**
+
+- **Kira satırı.** FortiGate DHCP kirasının satırı kaynağını "FortiGate DHCP kaydı / FortiGate
+  DHCP record" olarak adlandırır ve şunu ekler: "kira süresi (FortiGate kaydı): {lease} sn · son
+  DHCP kanıtı: {last}". İkisi de kiranın istenen anda ya da ondan önceki **kendi son DHCP
+  kaydından** gelir. Kirayı bitiren satır ya da sonraki bir yenileme kullanılmaz. Kayıt süre
+  yazmadıysa "ayarlardaki süre" yazılır. Bu ekler yalnızca kaynağı FortiGate DHCP olan kiralarda
+  bulunur; MikroTik kiralarının satırı değişmez.
+- **Düşük güven notları.** Bir zincir aşağıdaki nedenlerden biriyle düşük güvendeyse o nedenin
+  metni kira satırının yanında yazılır:
+  - `lease_renewal_not_seen`: istenen an, kiranın son kaydından kira süresinin yarısından fazla
+    sonra ve arada yenileme kaydı yok;
+  - `fortigate_dhcp_not_converted_since_lease`: kiranın son kaydından sonra o adres ya da kiranın
+    MAC adresi için, kira zaman çizelgesinin bu kiraya uygulamadığı bir FortiGate DHCP kaydı var.
+    O kayıt başka bir istemciye ait olabileceği için gösterilmez;
+  - `fortigate_dhcp_no_network`: adres tanımlı hiçbir ağda değil.
+
+  Kendi notu olmadan düşük güvende görünen bir FortiGate zinciri, ardından kiraların yeniden
+  oluşturulmadığı bir geri almadan kalmış olabilir ([KURULUM.md](KURULUM.md) bölüm 13). Kiralar
+  yeniden oluşturulup sorgu yeniden çalıştırılmalıdır.
+- **Kayıt biçimi notu.** Yöntem bölümünde bir kez yazılır. Biçim doğrulanmadıysa: "FortiGate DHCP
+  kayıt biçimi bu kurulumda sahada doğrulanmadı; kira kayıtları FortiOS belgelerindeki biçime göre
+  okundu." Doğrulandıysa sorgu anında saklanan metin yazılır: kimin, hangi tarihte "sahada
+  doğrulandı olarak işaretlendi" dediği. İkisi birlikte yazılmaz ve zincirlerin yanında
+  tekrarlanmaz. Not sorgu anındaki durumu gösterir: doğrulanmadan yapılan bir sorgunun raporu,
+  ayar sonradan açılıp rapor ilk kez o zaman indirilse de "sahada doğrulanmadı" der.
+- **srcmac.** Kira kaydı olmayan bir iç IP için MAC adresi, listelenen bir arayüzde FortiGate
+  oturum kaydının srcmac alanından gelebilir. Satır şöyledir: "MAC adresi (kısmi kanıt):
+  FortiGate oturum kaydının srcmac alanı, {interface} arayüzü; FortiGate'in aygıt tanıma
+  bilgisine göre kaynak IP adresi o anda bu MAC adresiyle ilişkilendirilmişti; kira kaydı yok".
+  Satır MAC adresinin oturumu gönderdiğini söylemez; güven düşüktür. srcmac kira kaydındaki MAC
+  adresinden farklıysa kira zinciri ve srcmac'e göre olası zincir iki MAC adresiyle birlikte
+  yazılır. Olası zincir "Olası diğer zincir (srcmac, kısmi kanıt)" başlığı altındadır; ikisi de
+  düşük güvenlidir. Zinciri hiç kurulamayan bir eşleşme "Zincir kurulamadı: o anda bu iç IP adresi
+  için kira kaydı yok." yazar.
+- **Kira zaman çizelgesine girmemiş FortiGate DHCP kaydı.** Bazı FortiGate DHCP kayıtları kira
+  kanıtına çevrilmemiştir: yükseltmeden önce yüklenmiş, alanları okunamamış ya da bir geri
+  almadan sonra önceki sürümün yüklediği kayıtlar. Bir iç IP sorgusunda ya da kesin eşleşmede,
+  o anı kapsayan böyle bir kayıt (IP başına en çok bir tane, andan önceki) 6. bölümde her kanıt
+  gibi ham satırı ve mühür bilgisiyle gösterilir. Not şudur: "kira zaman çizelgesine girmedi;
+  zincir kurulmadı, güven düzeyi verilmez". Kayıt bir eşleştirme değildir. Aday raporu yalnızca
+  `fortigate_dhcp_not_converted` metnini IP adresleriyle yazar; böyle bir satır göstermez. Bu
+  kayıtlar en az 7 gün geriye aranır, en uzun kira penceresi daha uzunsa o kadar. Daha eski
+  bir kayıt adlandırılmaz.
+- **Tanımsız gönderici.** Kayıtları yapılandırmada tanımlı olmayan bir göndericiden gelen bir
+  eşleşme, kanıtla uyuşmayan bir eşleşmedeki gibi bir "UYARI / Warning" satırı alır: "Bu
+  eşleşmenin kayıtları yapılandırmada tanımlı olmayan bir göndericiden geldi: {kaynaklar}; kurumun
+  FortiGate'inden geldiği doğrulanmadan kanıt olarak kullanılmamalıdır." Aynı rapordaki diğer
+  eşleşmeler bu uyarıyı almaz. Bir göndericinin adresi kayıtlar alındıktan sonra FortiGate kaynağı
+  olarak tanımlandıysa, bu kayıtlara dayanan zincir ya da eşleşme `source_configured_later`
+  metnini taşır ("gönderici sonradan yapılandırıldı").
+- **Aygıt tanıma alanları ham satırlarda.** FortiGate'te aygıt tanıması açık bir arayüzün oturum
+  satırları istemcinin MAC adresini (`srcmac`), cihaz adını (`srcname`), işletim sistemini
+  (`osname`), donanım bilgisini, cihaz türünü ve pasif öğrenilen kullanıcı adını (`unauthuser`)
+  taşır. Böyle bir satır kanıt olarak gösterildiğinde bu alanlar olduğu gibi yazılır, başka
+  kişilerin aday oturumlarında da. `lookup.srcmac_interfaces` ayarı bunu değiştirmez. Ham
+  satırlar hiçbir zaman değiştirilmez.
 
 **Ham satır karşılaştırması (bölüm 4 ve 6):** sorgunun sonucu veritabanı satırlarından
 (`fg_traffic`, `mt_dhcp`, `mt_arp`, `leases`) gelir; veritabanı türetilmiş veridir, kanıt ham
