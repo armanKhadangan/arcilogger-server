@@ -146,6 +146,11 @@ def test_agent_and_apply_system_states(
     assert moment(body["time"]["applied_at"]) == status.time.changed_at
     assert by(body["tasks"], "task")["ApplySystem"]["state"] == "ok"
 
+    # An applied empty peer list is shown as it is, not as "ApplySystem never reported".
+    unset = status.model_copy(update={"time": status.time.model_copy(update={"peers": ""})})
+    installed.layout.system_status.write_bytes(dump_document(unset))
+    assert get(client)["time"]["applied_peers"] == ""
+
     failed = status.model_copy(
         update={"ok": False, "code": "system_sync_failed", "at": utc_now() - timedelta(minutes=20)}
     )
@@ -686,8 +691,10 @@ def test_time_samples_of_the_last_24_hours(
     client: TestClient, login_as: Login, layout: Layout, api_config: Config
 ) -> None:
     now = utc_now().replace(microsecond=0)
+    # The first moment of yesterday is in a file that is read and always older than 24 hours.
+    stale = at_site(site_day(now) - timedelta(days=1), 0, 0)
     samples: list[tuple[datetime, dict[str, Any]]] = [
-        (now - timedelta(hours=25), {"ok": True, "server": "172.20.10.1", "offset_us": 1}),
+        (stale, {"ok": True, "server": "172.20.10.1", "offset_us": 1}),
         (
             now - timedelta(hours=23),
             {

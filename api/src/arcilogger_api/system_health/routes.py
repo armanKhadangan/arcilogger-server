@@ -63,7 +63,8 @@ def _site(value: datetime | None) -> datetime | None:
 
 def service_health(layout: Layout, now: datetime) -> list[ServiceHealth]:
     """The three services with a status file, then ArciApi. A file without a readable
-    ``updated_at`` is judged by its modification time (as ``Channel.service``)."""
+    ``updated_at`` is judged by its modification time (``Channel.service`` judges every file
+    that way)."""
     found = []
     for name in STATUS_FILE_SERVICES:
         path = SERVICES[name](layout)
@@ -130,7 +131,7 @@ def time_health(
         ntp_server=config.clock.ntp_server or None,
         fallback_server=config.clock.fallback_server or None,
         alert_offset_ms=config.clock.alert_offset_ms,
-        applied_peers=(system.time.peers or None) if system is not None else None,
+        applied_peers=system.time.peers if system is not None else None,
         applied_at=_site(system.time.changed_at) if system is not None else None,
         samples=shown,
     )
