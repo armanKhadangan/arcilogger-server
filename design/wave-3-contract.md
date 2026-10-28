@@ -5496,6 +5496,11 @@ as soon as it merges; E on hand mocks).
 9. WP-F2: docs and end to end. F1 merges in between, at any point after A.
 10. Integration (the installer's rollback step included, round 6), then `wave-3` → `main`.
 
+**Manager decision, 2026-10-28 (shorter critical path):**
+- **Start early and merge in order.** WP-D, WP-E2 and WP-F2 start now on the branch of the package they wait for. Their pull requests into `wave-3` merge in the order above.
+- **F2 no longer waits for E2.** It merges right after WP-D, in either order with WP-E2: the two touch disjoint files. A doc that quotes a §2.13 web text follows the text as merged; if E2 deviates later, a one-line follow-up is acceptable.
+- **The integration step** (#11 part 2) waits for WP-E2 and WP-F2 both.
+
 ---
 
 ## Deviations
