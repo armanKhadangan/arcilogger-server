@@ -143,7 +143,7 @@ from arcilogger_worker.lookup.attribution import (
     event_kept,
     usable_lease,
 )
-from arcilogger_worker.lookup.refs import traffic_ref
+from arcilogger_worker.lookup.refs import ARP_TABLE, DHCP_TABLES, traffic_ref
 from arcilogger_worker.lookup.sessions import (
     CANDIDATE_MAX_SCORE,
     PORT_HINT_POINTS,
@@ -239,7 +239,7 @@ CLOCK_SOURCES = 5
 #: The tables of the lease timeline: a source measured for one of them has the fixed limit, as
 #: every source of an internal lookup has (the lease search uses the moment, not the tolerance;
 #: round 6).
-LEASE_TABLES = frozenset({"mt_dhcp", "fg_dhcp", "mt_arp"})
+LEASE_TABLES = frozenset((*DHCP_TABLES, ARP_TABLE))
 #: How the D8 probe cites a FortiGate DHCP record that never entered the lease timeline.
 UNCONVERTED_SUMMARY = (
     "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
