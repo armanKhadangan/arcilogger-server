@@ -1844,8 +1844,9 @@ def test_arp_sightings_after_a_release_mapped_later_name_the_client(
     stale build they only touched the open FortiGate lease; the rebuild ends that lease at the
     RELEASE and opens an ARP interval at the first sighting after ``arp.ignore_after_release_
     seconds`` (by default 12:02 is a stale ARP entry and 12:30 opens it; 0 switches the rule
-    off). The lookup answers as after the rebuild: the ARP chain (``medium``, ``arp_only``),
-    never an unwarned "nobody"."""
+    off). At the moments the sightings cover, the lookup answers as after the rebuild: the ARP
+    chain (``medium``, ``arp_only``); between the stale lease's own timeout and the next
+    sighting it keeps ``no_lease`` until the rebuild (deviation c2, the late-mapped RELEASE)."""
     if grace is not None:
         set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
     assert settings_for(db_session).arp_release_grace_seconds == (300 if grace is None else 0)

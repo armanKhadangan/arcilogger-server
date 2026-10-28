@@ -5908,7 +5908,11 @@ from section 0.2 are recorded here too, with the date and who decided.
   last sighting, also one after `at`). Without such sightings there is no chain: an internal lookup answers
   `no_lease` and a match `chain_missing`, as after the rebuild. No new explanation key and no
   lowered chain with a text. The stored lease is unchanged; the usage rollups (no per-moment
-  query) still read the stored lease until the rebuild. Tests:
+  query) still read the stored lease until the rebuild. Two shapes still differ from the
+  rebuild: between the stale lease's own timeout and the next sighting, the lookup keeps
+  `no_lease` until the rebuild (at most one sighting interval); after the pair's re-ACK, the
+  lease row's start and its cited opening ACK stay the stale ones (the MAC, the confidence and
+  `last_dhcp_evidence` are the rebuild's). Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_release_mapped_after_the_build_ends_the_lease`,
   `::test_arp_sightings_after_a_release_mapped_later_name_the_client`. Fold into 2.7.
 - **D27 for a chain outside every configured network: the address stands for its network**
