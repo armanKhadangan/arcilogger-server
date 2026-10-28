@@ -5962,34 +5962,55 @@ from section 0.2 are recorded here too, with the date and who decided.
   `::test_another_long_session_does_not_widen_the_guard_of_a_mac`,
   `::test_an_address_the_hour_shows_already_is_counted_once`,
   `::test_the_other_lease_check_of_a_row_after_the_window_reads_the_hour`. Fold into 2.9.
-- **The D8 probe window and the MikroTik cap of the post-lease check fall back to 604,800 s**
-  (2.8.3 "Cost", 2.7, 3.8; round-5 note "2.8.3 D8 probe cost", round-7 note "3.8 guard for the
-  round-6 post-lease query"). `fg_event` has no index on a line's address (A0 adds none), so
-  the probe and the round-6 post-lease query read every `system` line of their window. Measured
-  by the 3.8 guards (`test_lookup_performance.py`, 50,000 `system` lines a day: a twentieth of
-  1 M FortiGate lines, the share the alert guard writes) on the 100-day window: the probe for 20
-  addresses without a DHCP row 2.1 s in its round-5 form and 0.64 s with the key read once per
-  row (an `IN` before the per-key bounds, the round-5 note's form), the post-lease query for 100
-  chains 0.93 s; both miss 0.5 s. So the probe's window is `max(longest_window, 604,800 s)` and
-  the `mt_dhcp` cap of the post-lease query (and of the round-7 converted-row query, which
-  shares its window) 604,800 s (`attribution.UNCONVERTED_WINDOW`), as 2.8.3 and 3.8 provide:
-  0.08 s and 0.09 s. What it costs: a pre-upgrade ACK more than 7 days before the moment is not
-  named (`fortigate_dhcp_not_converted`), and a MikroTik lease kept open by traffic is checked
-  against the FortiGate DHCP lines of the last 7 days only, so a FortiGate lease-time above the
-  FortiOS default can leave such a chain at its confidence without the warning; with lease-times
-  up to 7 days a FortiGate client logs a line at least every half lease (if FortiOS logs
-  renewals, F7, sahada doğrula), so the window holds one. An `fg_dhcp` chain's own window
-  `(last_dhcp_evidence, at]` is not capped (at most half its lease while the chain is not
-  `low`). The cost grows with the `system` lines of the window (about 0.13-0.19 s per million
-  here): the 100-day window would pass below about 25,000 lines a day, and the fallback misses
-  0.5 s above about 400,000; expression indexes on `(extra->>'ip', time)` and on the normalised
-  `extra->>'mac'` for `subtype = 'system'` (a WP-A revision) would restore the 100 days.
+- **The D8 probe window and the MikroTik cap of the `fg_event` post-lease check fall back to
+  604,800 s** (2.8.3 "Cost", 2.7, 3.8; round-5 note "2.8.3 D8 probe cost", round-7 notes "3.8
+  guard for the round-6 post-lease query" and "2.7 post-lease check, the MikroTik window cap and
+  an empty `last_dhcp_evidence`"). `fg_event` has no index on a line's address (A0 adds none),
+  so the probe and the round-6 post-lease query read every `system` line of their window.
+  Measured by the 3.8 guards (`test_lookup_performance.py`, 50,000 `system` lines a day: a
+  twentieth of 1 M FortiGate lines, the share the alert guard writes) on the 100-day window: the
+  probe for 20 addresses without a DHCP row 2.1 s in its round-5 form and 0.64 s with the key
+  read once per row (an `IN` before the per-key bounds, the round-5 note's form), the post-lease
+  query for 100 chains 0.93 s; both miss 0.5 s. So the probe's window is `max(longest_window,
+  604,800 s)` and the `mt_dhcp` cap of the `fg_event` post-lease query 604,800 s
+  (`attribution.UNCONVERTED_WINDOW`), as 2.8.3 and 3.8 provide: 0.08 s and 0.09 s. The round-7
+  converted-row query is not capped so: 3.8 gives it no fallback, and it keeps `at` −
+  8,640,000 s for an `mt_dhcp` chain (`attribution.MISSED_MOVE_WINDOW`). On those 100 days it
+  missed its 0.2 s too (0.89 s in its first form, 0.30-0.33 s with the rows grouped per MAC,
+  because it fetched about 45,000 rows for 100 MACs at the load generator's FortiGate DHCP rate
+  and matched them in memory), so it now matches each chain's own window in the query: one
+  join of the chains' `(mac, ip, since, at)` (an `unnest` of bound arrays) with `fg_dhcp`, still
+  `mac = ANY(:macs)` over the union of the windows on `ix_fg_dhcp_mac_time`, returning each
+  other address, interface and VDOM once per chain; interface, VDOM and D33's key are checked
+  in memory as 2.7 writes (0.08 s; the same answers). What the fallback costs: a pre-upgrade
+  ACK more than 7 days before the moment is not named (`fortigate_dhcp_not_converted`); a
+  MikroTik lease kept open by traffic is checked against the unconverted FortiGate DHCP lines
+  of the last 7 days only. Two wrong-person paths follow, each named at the chain's stored
+  confidence (`high` or `medium`) **without a warning**: (1) a client moved to another address
+  by an unconverted `fg_event` ACK (before the upgrade, or in a rollback window) **that then
+  left the site** logs nothing more, and its old MikroTik lease, kept open by another device's
+  traffic, names it in every lookup more than 7 days after that line (under the contract, more
+  than 100 days after; the round-7 note's residual, so a recorded residual of 2.17); a client
+  moved by a **converted** ACK keeps the contract's 100 days through the round-7 query; (2) a
+  FortiGate lease-time above the FortiOS default can leave such a chain without a line in the
+  7 days even while the client stays on the site; with lease-times up to 7 days a client that
+  stays logs a line at least every half lease (if FortiOS logs renewals, F7, sahada doğrula),
+  so the window holds one, but a client that left logs none (path 1). An `fg_dhcp` chain's own
+  window `(last_dhcp_evidence, at]` is not capped (at most half its lease while the chain is
+  not `low`). The cost grows with the `system` lines of the window (about 0.13-0.19 s per
+  million here): the 100-day window would pass below about 25,000 lines a day, and the fallback
+  misses 0.5 s above about 400,000; expression indexes on `(extra->>'ip', time)` and on the
+  normalised `extra->>'mac'` for `subtype = 'system'` (a WP-A revision) would restore the 100
+  days and remove both paths' 7-day limit (a question to the manager in the pull request).
   Tests: `worker/tests/test_lookup_performance.py::test_the_d8_probe_of_twenty_addresses_is_fast`,
   `::test_the_post_lease_query_of_a_hundred_chains_is_fast`,
-  `::test_the_converted_row_query_of_a_hundred_chains_is_fast`,
-  `worker/tests/test_lookup_fortigate_only.py::test_a_mikrotik_lease_kept_open_reads_back_one_probe_window`,
-  `::test_an_ack_older_than_its_lease_is_not_named`. Fold into 2.7, 2.8.3, 3.8 and CORRELATION
-  §7 (WP-F2: the window is 7 days).
+  `::test_the_converted_row_query_of_a_hundred_chains_is_fast` (100 days),
+  `worker/tests/test_lookup_fortigate_only.py::test_a_mikrotik_lease_kept_open_reads_back_one_probe_window`
+  (an `fg_event` line 8 days back not counted, 6 days back counted; a converted row 8 and 99
+  days back counted, 101 days back not), `::test_an_ack_older_than_its_lease_is_not_named`
+  (the 3.4 golden's 100 days, and 6 days inside the window by the coverage rule). Fold into
+  2.7, 2.8.3, 2.17 (the residual of path 1), 3.8 and CORRELATION §7 (WP-F2: the window of the
+  probe and of the `fg_event` post-lease check is 7 days; the converted-row check reads 100).
 
 ---
 
