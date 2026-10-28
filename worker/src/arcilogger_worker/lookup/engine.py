@@ -76,7 +76,10 @@ from a trusted sender, whose MAC passes the router guard (no infrastructure MAC,
 ``lookup.srcmac_max_ips`` IPv4 addresses within an hour of the moment, no lease of another
 address there), gives a match without a lease, and an internal lookup without one, a ``low``
 chain by that MAC (``srcmac_only``); beside a lease it agrees or makes the ``low`` conflict of
-D10. It is never lease evidence and is never written anywhere. Both functions
+D10. It is never lease evidence and is never written anywhere. The clocks of the sources whose
+rows the outcome cites (and, when a search found nothing, of the sources whose rows it read) are
+measured at the moment from the stored device and receive times; an offset beyond the limit
+gives ``source_clock_offset`` and every chain ``low`` (D28). Both functions
 only read (JIT compilation is switched off for the caller's transaction, ``SET LOCAL``); the API
 stores the lookup and writes the audit entry.
 """
@@ -85,6 +88,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -104,13 +108,14 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    union_all,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, distinct_on
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
 
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import utc_now
+from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.egress import (
     CHANGES_KEY,
     IMPLICIT_CATCH_ALL,
@@ -118,7 +123,15 @@ from arcilogger_db.egress import (
     NOT_PUBLIC,
     Egress,
 )
-from arcilogger_db.models import FgDhcp, FgEvent, FgTraffic, Setting
+from arcilogger_db.models import (
+    FgDhcp,
+    FgEvent,
+    FgTraffic,
+    Message,
+    SearchCount,
+    Setting,
+    Source,
+)
 from arcilogger_db.settings import get_setting, get_settings
 from arcilogger_worker.correlation.watermark import get_watermark
 from arcilogger_worker.lookup.attribution import (
@@ -208,6 +221,22 @@ SRCMAC_GUARD = timedelta(hours=1)
 SRCMAC_ROWS = 50
 #: srcmac values ``srcmac_ambiguous`` names.
 SRCMAC_NAMED = 3
+#: The source clock at the requested moment (2.7, D28): a source's ``messages`` rows within this
+#: span of the moment by device time, at most :data:`CLOCK_SIDE_ROWS` on each side of it (the
+#: rows the search and the lease timeline used, on both sides of a clock step; round 5), of which
+#: :data:`CLOCK_MIN_ROWS` make a measurement; a median offset beyond :data:`CLOCK_LIMIT_SECONDS`
+#: (a session search: or beyond the tolerance) lowers the chains. The minimum and the limit are
+#: those of ``R20-lease:source-clock`` (a test pins them equal). At most :data:`CLOCK_SOURCES`
+#: sources are measured, the cited ones first.
+CLOCK_SPAN = timedelta(hours=1)
+CLOCK_SIDE_ROWS = 2500
+CLOCK_MIN_ROWS = 10
+CLOCK_LIMIT_SECONDS = 120
+CLOCK_SOURCES = 5
+#: The tables of the lease timeline: a source measured for one of them has the fixed limit, as
+#: every source of an internal lookup has (the lease search uses the moment, not the tolerance;
+#: round 6).
+LEASE_TABLES = frozenset({"mt_dhcp", "fg_dhcp", "mt_arp"})
 #: How the D8 probe cites a FortiGate DHCP record that never entered the lease timeline.
 UNCONVERTED_SUMMARY = (
     "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
@@ -237,6 +266,18 @@ def _text_order(value: str) -> tuple[int, int, str]:
 
 def _joined(items: Sequence[str]) -> str:
     return ", ".join(items) if items else "-"
+
+
+def _lowered(chain: AttributionChain) -> AttributionChain:
+    """``chain`` and its alternatives at ``low``, the lease step too (a source's clock was off
+    at the moment, D28)."""
+    lease = None if chain.lease is None else replace(chain.lease, confidence="low")
+    return replace(
+        chain,
+        confidence="low",
+        lease=lease,
+        alternatives=tuple(_lowered(other) for other in chain.alternatives),
+    )
 
 
 def attribute(session: Session, ip: str, at: datetime) -> AttributionChain | None:
@@ -717,6 +758,8 @@ class _Lookup:
         #: What an internal lookup could not build a chain for: ``("ip", address, at)``, or
         #: ``("mac", mac, at)`` for a MAC-only request (the D8 probe, 2.8.3).
         self._unbuilt: tuple[str, str, datetime] | None = None
+        #: The clock measurement per source (2.7): (median offset in seconds, rows) or ``None``.
+        self._clocks: dict[str, tuple[float, int] | None] = {}
 
     # -- entry ------------------------------------------------------------------------------------
 
@@ -749,6 +792,7 @@ class _Lookup:
         if missing:
             self.explanations.append(explain("chain_missing", count=missing))
         unconverted = self._unconverted(matches)
+        attribution, matches = self._source_clocks(attribution, matches, plan)
         return self._outcome(mode, matches, attribution, window, plan, unconverted)
 
     def _across_chains(
@@ -1519,6 +1563,137 @@ class _Lookup:
             return str(ipaddress.ip_address(line.ip or ""))
         except ValueError:
             return line.key
+
+    # -- the source clock at the requested moment (D28) ------------------------------------------
+
+    def _source_clocks(
+        self, attribution: AttributionChain | None, matches: list[NatMatch], plan: _Plan | None
+    ) -> tuple[AttributionChain | None, list[NatMatch]]:
+        """2.7 "Source clock at the requested moment": the sources of :meth:`_clock_sources`
+        whose median offset at the moment is beyond their limit are named
+        (``source_clock_offset``) and every chain of the outcome, alternatives included, is
+        ``low``, its lease step too; a match keeps its kind. The search and the lease timeline
+        used the device's times, so a session or lease found may not be the one the moment
+        means, and an empty search may have missed it."""
+        sources = self._clock_sources(attribution, matches, plan)
+        tolerance = max(CLOCK_LIMIT_SECONDS, self.tolerance)
+        offsets: dict[str, int] = {}
+        limits: list[int] = []
+        for name, lease in sources.items():
+            limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
+            measured = self._clock(name)
+            if measured is not None and abs(measured[0]) > limit:
+                offsets[name] = int(measured[0])
+                limits.append(limit)
+        if not offsets:
+            return attribution, matches
+        self.explanations.append(
+            explain(
+                "source_clock_offset",
+                at=self.request.at.isoformat(),
+                offsets=", ".join(f"{name}: {offset:+d}" for name, offset in offsets.items()),
+                limit=min(limits),
+            )
+        )
+        matches = [m if m.chain is None else replace(m, chain=_lowered(m.chain)) for m in matches]
+        return (None if attribution is None else _lowered(attribution)), matches
+
+    def _clock_sources(
+        self, attribution: AttributionChain | None, matches: Sequence[NatMatch], plan: _Plan | None
+    ) -> dict[str, bool]:
+        """The sources to measure, at most :data:`CLOCK_SOURCES`, each with whether it was
+        measured for a lease table (the fixed limit): the sources of the cited rows (the
+        matches' session rows, the chains' lease and device evidence), most cited first; then,
+        for a search whose outcome cites no row of the tables it read (round 5), the sources
+        ``R20-lease:source-clock`` would check for those tables, by their rows in the files of
+        the receive days around the moment (``search_counts``; a device clock cannot move the
+        receive day). A search that ran and found no match read ``fg_traffic``; an internal
+        lookup without a lease and a match without a lease chain read the lease tables. An
+        answer that searched nothing (``no_egress``, ``not_logged``, ``internal``) adds
+        none."""
+        cited: Counter[str] = Counter()
+        lease_cited: set[str] = set()
+        chains = [m.chain for m in matches if m.chain is not None]
+        if attribution is not None:
+            chains.append(attribution)
+        refs = [ref for m in matches for ref in m.traffic.evidence]
+        for chain in (c for top in chains for c in (top, *top.alternatives)):
+            refs += chain.lease.evidence if chain.lease is not None else ()
+            refs += chain.device.evidence if chain.device is not None else ()
+        for ref in refs:
+            if ref.raw is not None:
+                cited[ref.raw.source] += 1
+                if ref.table in LEASE_TABLES:
+                    lease_cited.add(ref.raw.source)
+        tables: set[str] = set()
+        searched = not self.request.is_internal and (plan is None or not plan.nobody)
+        if searched and not matches:
+            tables.add("fg_traffic")
+        if self._unbuilt is not None or any(
+            m.chain is None or m.chain.lease is None for m in matches
+        ):
+            tables |= LEASE_TABLES
+        ranked = sorted(cited, key=lambda name: (-cited[name], name))
+        sources = {name: name in lease_cited for name in ranked}
+        if tables:
+            lease = bool(tables & LEASE_TABLES)
+            for name in self._searched_sources(tables):
+                if name in sources:
+                    sources[name] |= lease
+                elif len(sources) < CLOCK_SOURCES:
+                    sources[name] = lease
+        return dict(list(sources.items())[:CLOCK_SOURCES])
+
+    def _searched_sources(self, tables: set[str]) -> list[str]:
+        """The enabled, configured sources whose spool files of the receive days of the clock
+        span hold rows of ``tables``, most rows first (``ix_search_counts_raw_day_source``)."""
+        at = self.request.at
+        days = sorted({site_day(at - CLOCK_SPAN), site_day(at + CLOCK_SPAN)})
+        configured = select(Source.name).where(Source.enabled.is_(True), Source.unknown.is_(False))
+        rows = func.sum(SearchCount.n)
+        query = (
+            select(SearchCount.source)
+            .where(
+                SearchCount.raw_day.in_(days),
+                SearchCount.tbl.in_(sorted(tables)),
+                SearchCount.source.in_(configured),
+            )
+            .group_by(SearchCount.source)
+            .order_by(rows.desc(), SearchCount.source)
+        )
+        return list(self.session.scalars(query))
+
+    def _clock(self, source: str) -> tuple[float, int] | None:
+        """The median of ``time - time_received`` (seconds) over ``source``'s ``messages`` rows
+        nearest the moment on each side within :data:`CLOCK_SPAN` whose device time is not the
+        receive time (ingest's stand-in for a clock beyond ``max_clock_skew`` says nothing),
+        and their number; ``None`` with fewer than :data:`CLOCK_MIN_ROWS`. One query on
+        ``ix_messages_source_time``, cached per lookup."""
+        if source not in self._clocks:
+            at = self.request.at
+
+            def side(*clauses: ColumnElement[bool], order: Any) -> Any:
+                return (
+                    select(Message.time, Message.time_received)
+                    .where(
+                        Message.source == source, Message.time != Message.time_received, *clauses
+                    )
+                    .order_by(order)
+                    .limit(CLOCK_SIDE_ROWS)
+                )
+
+            before = side(
+                Message.time >= at - CLOCK_SPAN, Message.time < at, order=Message.time.desc()
+            )
+            after = side(Message.time >= at, Message.time <= at + CLOCK_SPAN, order=Message.time)
+            rows = union_all(before, after).subquery("clock")
+            seconds = func.extract("epoch", rows.c.time - rows.c.time_received)
+            count, median = self.session.execute(
+                select(func.count(), func.percentile_cont(0.5).within_group(seconds))
+            ).one()
+            found = count >= CLOCK_MIN_ROWS and median is not None
+            self._clocks[source] = (float(median), int(count)) if found else None
+        return self._clocks[source]
 
     # -- exact ------------------------------------------------------------------------------------
 
