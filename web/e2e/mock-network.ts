@@ -5,7 +5,8 @@
  * - `GET /settings/fortigate/observed` (`settings.manage`): the observed NAT addresses of a
  *   dual-WAN day (`src/test/wave3-mocks.ts`, a HAND MOCK until the endpoint's sample is
  *   captured), each row's `egress` computed from the `nat.egresses` the main mock stores, as the
- *   server claims addresses (`exits_invalid` when that value is no object of exits);
+ *   server claims addresses (`exits_invalid` when the exit rules refuse that value, as the
+ *   server's `parse_egresses` does);
  * - `PATCH /settings` refused once with a captured-shape 422 (`refuseNext`, the server's exit
  *   rules that the browser's mirror cannot see); every other change goes to the main mock, which
  *   checks the body against the API's model and stores it.
@@ -14,7 +15,7 @@
 import type { Page, Request, Route } from '@playwright/test';
 
 import type { SettingProblem } from '../src/lib/settings-types';
-import type { FortigateObserved } from '../src/pages/settings/egress-model';
+import { validateEgresses, type FortigateObserved } from '../src/pages/settings/egress-model';
 import { observedSample } from '../src/test/wave3-mocks';
 
 import { bodyProblems, type MockApi, type RecordedCall } from './mock-api';
@@ -100,9 +101,8 @@ export class NetworkMock {
     for (const group of this.api.admin.settings) {
       const found = group.settings.find((item) => item.key === 'nat.egresses');
       if (!found) continue;
-      const value = found.value;
-      if (typeof value !== 'object' || Array.isArray(value)) return null;
-      return value as Record<string, StoredExit>;
+      const value = validateEgresses(found.value).value;
+      return value ?? null;
     }
     return {};
   }

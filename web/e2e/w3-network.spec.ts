@@ -14,8 +14,21 @@ import { SAMPLE_TODAY } from './samples';
  * refusal are HAND MOCKS (`mock-network.ts`) until the server side captures them.
  */
 
-async function open(page: Page): Promise<{ api: MockApi; network: NetworkMock }> {
+/** A stored exit the editor cannot read (an unknown mode, written around the rules). */
+const UNREADABLE = { misafir: { mode: 'notlogged', public: ['198.51.100.90'] } };
+
+async function open(
+  page: Page,
+  egresses?: Record<string, unknown>,
+): Promise<{ api: MockApi; network: NetworkMock }> {
   const api = await mockApi(page, { signedInAs: 'tolga' });
+  if (egresses) {
+    const stored = api.admin.settings
+      .flatMap((item) => item.settings)
+      .find((item) => item.key === 'nat.egresses');
+    if (!stored) throw new Error('no nat.egresses setting');
+    Object.assign(stored, { value: egresses, is_default: false, updated_by: 'tolga' });
+  }
   const network = await mockNetwork(page, api);
   await page.goto('/settings/application?group=lookup');
   await expect(page.getByTestId('egress-editor')).toBeVisible();
@@ -222,6 +235,29 @@ test.describe('İnternet çıkışları (NAT)', () => {
     );
   });
 
+  test('a stored exit the editor cannot read is kept as stored; another key is saved alone', async ({
+    page,
+  }) => {
+    const { api } = await open(page, UNREADABLE);
+    const kept = exit(page, 'misafir');
+    await expect(kept).toContainText(
+      'Bu çıkış kaydedildiği biçimiyle düzenleyicide gösterilemiyor',
+    );
+    await expect(kept).toContainText('NAT türü direct, isp_nat, not_logged ya da internal olmalı.');
+    await expect(kept.getByRole('combobox')).toHaveCount(0);
+    await expect(page.getByTestId('fortigate-observed')).toContainText(
+      'Kayıtlı çıkış tanımı okunamıyor; çıkış sütunu boş.',
+    );
+    const lookup = page.getByTestId('settings-group-lookup');
+    await expect(lookup.getByRole('button', { name: 'Kaydet' })).toBeDisabled();
+    await lookup.getByTestId('setting-dhcp.fortigate_traffic_extends').getByRole('switch').click();
+    await lookup.getByRole('button', { name: 'Kaydet' }).click();
+    await expect.poll(() => patches(api).length).toBe(1);
+    expect(patches(api)[0]?.body).toEqual({
+      changes: [{ key: 'dhcp.fortigate_traffic_extends', old: false, value: true }],
+    });
+  });
+
   test('Ayarlar → Kaynaklar: the supported set-ups and the FortiGate hint', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings/sources');
@@ -256,6 +292,17 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       'Çıkış adı küçük harf, rakam ve tire içermeli',
     );
     await expect(page.getByTestId('fortigate-observed')).toContainText('Ayarlarda yok');
+    await expectNoA11yViolations(page);
+  });
+
+  test(`a stored exit the editor cannot read, accessibility — ${theme}`, async ({ page }) => {
+    await usePreferences(page, { theme });
+    await useSampleClock(page, SAMPLE_TODAY);
+    await open(page, UNREADABLE);
+    await expect(exit(page, 'misafir')).toContainText('Kayıtlı değer');
+    await expect(page.getByTestId('fortigate-observed')).toContainText(
+      'Kayıtlı çıkış tanımı okunamıyor',
+    );
     await expectNoA11yViolations(page);
   });
 }
