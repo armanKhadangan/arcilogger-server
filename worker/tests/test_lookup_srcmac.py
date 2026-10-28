@@ -84,6 +84,19 @@ def candidates(session: Session) -> LookupOutcome:
     return lookup(session, public_ip=PUBLIC)
 
 
+def wan_exit(session: Session) -> None:
+    """Exit ``wan`` with the FortiGate's NAT address, entered before the evidence."""
+    value = validate_egresses({"wan": {"mode": "isp_nat", "transips": [WAN]}})
+    set_setting(session, "nat.egresses", value, updated_by="tolga")
+    session.execute(update(Setting).where(Setting.key == "nat.egresses").values(updated_at=ENTERED))
+    session.commit()
+
+
+def exact(session: Session) -> LookupOutcome:
+    """The exact request: the exit's address with the session's port."""
+    return lookup(session, public_ip=WAN, public_port=51001, protocol="tcp")
+
+
 def keys(items: LookupOutcome | AttributionChain) -> list[str]:
     return [e.key for e in items.explanations]
 
@@ -212,6 +225,23 @@ def test_a_listed_interface_gives_the_srcmac_chain(
     assert "chain_missing" not in keys(found)
 
 
+def test_an_exact_match_gets_the_same_srcmac_chain(
+    db_session: Session, evidence: Evidence, selin: int
+) -> None:
+    """The exact form (an ``isp_nat`` exit with the FortiGate's NAT address, the request with
+    its address, port 51001 and tcp): the same srcmac chain as the candidate's."""
+    row = session_of(evidence)
+    wan_exit(db_session)
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    outcome = exact(db_session)
+    assert outcome.mode == "exact"
+    (match,) = outcome.matches
+    assert (match.kind, match.traffic.srcmac) == ("exact", PC_MAC)
+    assert_srcmac_chain(match.chain, row)
+    assert "chain_missing" not in keys(outcome)
+
+
 def test_an_unlisted_interface_is_never_used_and_never_stored(
     db_session: Session, evidence: Evidence, selin: int
 ) -> None:
@@ -220,17 +250,13 @@ def test_an_unlisted_interface_is_never_used_and_never_stored(
     every row carries one: the PC's session in VLAN 42 and another client's in VLAN 43."""
     session_of(evidence)
     session_of(evidence, "172.20.43.20", OTHER, port=51002, srcintf="vlan43")
-    value = validate_egresses({"wan": {"mode": "isp_nat", "transips": [WAN]}})
-    set_setting(db_session, "nat.egresses", value, updated_by="tolga")
-    db_session.execute(
-        update(Setting).where(Setting.key == "nat.egresses").values(updated_at=ENTERED)
-    )
+    wan_exit(db_session)
     build(db_session, DAY, DAY)
     outcomes = [
         internal(db_session),
         internal(db_session, "172.20.43.20"),
         lookup(db_session, public_ip=WAN),
-        lookup(db_session, public_ip=WAN, public_port=51001, protocol="tcp"),
+        exact(db_session),
         lookup(db_session, mac=PC_MAC),
     ]
     for outcome in outcomes:
@@ -497,6 +523,30 @@ def test_a_lease_with_another_srcmac_is_a_low_conflict(
     assert_srcmac_chain(alternative, row)
     assert note(alternative, "srcmac_mismatch") == {"srcmac": PC_MAC, "mac": OTHER}
     assert AttributionChain.from_dict(json.loads(json.dumps(chain.to_dict()))) == chain
+
+
+def test_an_exact_match_beside_another_lease_is_the_low_conflict(
+    db_session: Session, evidence: Evidence, selin: int
+) -> None:
+    """D10 in the exact form: the lease of another MAC and the session's srcmac give the lease
+    chain first and the srcmac chain as its alternative, both ``low`` with
+    ``srcmac_mismatch``."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, OTHER, hostname="MUH-NB03")
+    row = session_of(evidence)
+    wan_exit(db_session)
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    outcome = exact(db_session)
+    assert outcome.mode == "exact"
+    (match,) = outcome.matches
+    chain = match.chain
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.mac, chain.mac_source, chain.confidence) == (OTHER, "lease", "low")
+    assert note(chain, "srcmac_mismatch") == {"srcmac": PC_MAC, "mac": OTHER}
+    (alternative,) = chain.alternatives
+    assert_srcmac_chain(alternative, row)
+    assert note(alternative, "srcmac_mismatch") == {"srcmac": PC_MAC, "mac": OTHER}
 
 
 # -- internal lookups without a lease -------------------------------------------------------------
