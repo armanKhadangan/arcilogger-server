@@ -2,9 +2,10 @@
 2.12, 3.5): the FortiGate-only report (table names, lease time and last DHCP evidence, the
 record-format note taken from the stored outcome), the notes of a ``low`` lease beside its lease
 row (no renewal, a renewal after the moment, superseded early, a rollback window, a migration
-loaded before the upgrade, a DECLINE outside every network), the unconverted FortiGate DHCP row
-cited in internal mode only, a chain without a lease, the srcmac step and the srcmac conflict,
-and raw lines that keep the device identification fields."""
+loaded before the upgrade, a DECLINE outside every network), a source clock off at the moment
+in the method section, the unconverted FortiGate DHCP row cited in internal mode only, a chain
+without a lease, the srcmac step and the srcmac conflict, and raw lines that keep the device
+identification fields."""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.lookup_testing import (
@@ -34,7 +35,8 @@ from arcilogger_api.pdftext import normalized, pdf_text
 from arcilogger_api.reports import texts
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.layout import Layout
-from arcilogger_db.models import Source, Vlan
+from arcilogger_db.models import FgDhcp, FgTraffic, Message, Source, Vlan
+from arcilogger_db.searchcounts import rebuild_stream
 from arcilogger_worker.correlation.leases import rebuild_day
 from arcilogger_worker.testing import FIREWALL, ROUTER, Evidence, tr
 
@@ -515,3 +517,80 @@ def test_raw_lines_keep_the_device_identification_fields(
     stored = report_row(app_session_factory, data["id"]).inputs["outcome"]
     assert all(m["traffic"]["srcmac"] is None for m in stored["matches"])
     assert shown.lower() not in json.dumps(stored).lower()
+
+
+# -- the source clock (D28) -----------------------------------------------------------------------
+
+
+def _as_loaded_behind(session: Session, behind: timedelta) -> None:
+    """The FortiGate's typed rows as ingest loads them from a clock ``behind`` its receive
+    time, each with its ``messages`` row, and its files' ``search_counts`` (the worker's
+    "source clock" golden of 3.4)."""
+    for model in (FgTraffic, FgDhcp):
+        session.execute(
+            update(model)
+            .where(model.source == "fortigate")
+            .values(time_received=model.time + behind)
+        )
+    rows: list[tuple[FgTraffic | FgDhcp, str]] = [
+        (row, "traffic")
+        for row in session.scalars(select(FgTraffic).where(FgTraffic.source == "fortigate"))
+    ]
+    rows += [
+        (row, "event")
+        for row in session.scalars(select(FgDhcp).where(FgDhcp.source == "fortigate"))
+    ]
+    days = set()
+    for row, kind in rows:
+        session.add(
+            Message(
+                time=row.time,
+                time_received=row.time_received,
+                source="fortigate",
+                sender=row.sender,
+                raw_day=row.raw_day,
+                raw_line=row.raw_line,
+                raw_offset=row.raw_offset,
+                type=kind,
+                subtype=row.subtype,
+                text="",
+            )
+        )
+        days.add(row.raw_day)
+    session.flush()
+    days |= set(session.scalars(select(Message.raw_day).where(Message.source == "fortigate")))
+    for day in days:
+        rebuild_stream(session.connection(), "fortigate", day)
+    session.commit()
+
+
+def test_a_source_clock_offset_is_printed_in_the_method(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+) -> None:
+    """The FortiGate's rows around the moment are stamped 8 minutes before they arrive: the
+    method section prints ``source_clock_offset`` with the offset, and the chain is low."""
+    behind = timedelta(minutes=8)
+    with app_session_factory() as session:
+        session.merge(Source(name="fortigate", type="fortigate", address=FIREWALL))
+        evidence = Evidence(session, layout)
+        evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=PC_HOSTNAME)
+        evidence.traffic(AT, PC, 51001, transip=WAN)
+        for k in range(20):
+            time = AT - timedelta(minutes=50) + timedelta(minutes=5 * k)
+            evidence.heartbeat(time, source="fortigate", received=time + behind)
+        session.commit()
+        _as_loaded_behind(session, behind)
+        rebuild_day(session, DAY, horizon=HORIZON)
+        session.commit()
+    setting(app_session_factory, "nat.egresses", {"wan": {"mode": "isp_nat", "transips": [WAN]}})
+    signed_in(client, login_as, app_session_factory)
+    data, text = _report(client, public_ip=WAN, public_port=51001, protocol=6)
+    assert data["mode"] == "exact"
+    method = text.split("4. Yöntem", 1)[1].split("5. Sonuçlar", 1)[0]
+    assert "kayıt zamanları ARCILOGGER'ın alma zamanından" in method
+    assert "fortigate: -480 (sınır 120 saniye)" in method
+    assert "fortigate: -480 (limit 120 seconds)" in method
+    assert "güven: düşük" in _lease_row(text)
