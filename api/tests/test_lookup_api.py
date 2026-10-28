@@ -39,9 +39,15 @@ from arcilogger_core.canonical import canonical_json
 from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.iputil import canonical_ip
 from arcilogger_core.layout import Layout
+from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.models import AuditLog, Department, Lease, Lookup
 from arcilogger_db.settings import set_setting
 from arcilogger_worker.lookup import EXPLANATIONS
+
+#: The FortiGate's WAN address behind the ISP router as revision 0018 converts Wave 2's
+#: nat.public_ips = [WAN] or nat.wan_transip = WAN: the NAT address of the isp_nat exit wan
+#: (contract 2.8.2 cases (c), (h)); an exact lookup on it keeps double_nat true.
+WAN_EXIT = legacy_egresses([], WAN, False)[0]
 
 Login = Callable[..., LoggedIn]
 AUTHORITY = "İstanbul Cumhuriyet Başsavcılığı"
@@ -115,7 +121,7 @@ def keys(outcome: dict[str, Any]) -> list[str]:
 def test_exact_lookup_with_a_configured_public_ip(
     client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
 ) -> None:
-    setting(app_session_factory, "nat.public_ips", [WAN])  # ISP router in bridge mode
+    setting(app_session_factory, "nat.egresses", WAN_EXIT)
     admin = signed_in(client, login_as, app_session_factory)
     started = time.monotonic()
     response = client.post(
@@ -125,7 +131,10 @@ def test_exact_lookup_with_a_configured_public_ip(
     assert time.monotonic() - started < 5  # spec 14: < 5 s for ±60 s
     data = response.json()
     outcome = data["outcome"]
-    assert (data["mode"], data["result_count"], outcome["double_nat"]) == ("exact", 1, False)
+    assert (data["mode"], data["result_count"], outcome["double_nat"]) == ("exact", 1, True)
+    assert outcome["egress"]["resolution"] == "transip"
+    assert [e["name"] for e in outcome["egress"]["egresses"]] == ["wan"]
+    assert outcome["matches"][0]["egress"] == "wan"
     assert 0 <= data["elapsed_ms"] < 5000
     (match,) = outcome["matches"]
     assert (match["kind"], match["score"], match["time_distance_ms"]) == ("exact", 100, 0)
@@ -187,7 +196,7 @@ def test_a_person_left_out_of_usage_reports_is_still_named(
     client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
 ) -> None:
     """``usage_excluded`` belongs to the usage reports (area U): the 5651 lookup never reads it."""
-    setting(app_session_factory, "nat.public_ips", [WAN])
+    setting(app_session_factory, "nat.egresses", WAN_EXIT)
     signed_in(client, login_as, app_session_factory)
     excluded = client.patch(f"/api/v1/persons/{site.person_id}", json={"usage_excluded": True})
     assert excluded.status_code == 200, excluded.text
@@ -511,7 +520,7 @@ def test_ipv6_lookups_are_refused_and_audited(
 ) -> None:
     """No IPv6 identity evidence (NDP, DHCPv6): a clear refusal instead of a result — never the
     IPv4 sessions through the FortiGate's WAN address as candidates; the attempt is audited."""
-    setting(app_session_factory, "nat.wan_transip", WAN)
+    setting(app_session_factory, "nat.egresses", WAN_EXIT)
     who = signed_in(client, login_as, app_session_factory, "auditor")
     response = client.post("/api/v1/lookup/5651", json=body(**query))
     assert response.status_code == 422, response.text
@@ -545,13 +554,20 @@ def test_ipv6_lookups_are_refused_and_audited(
 
 
 def test_invalid_nat_settings_are_reported(
-    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session]
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
 ) -> None:
-    setting(app_session_factory, "nat.public_ips", ["not an address"])
+    """A stored nat.egresses the exit rules refuse (written around the validator) stops the
+    public-IP lookups with 503 lookup_settings_invalid; lookups that need no exit (an internal
+    IP or MAC) still answer (contract 2.8.1, implementation note round 5)."""
+    setting(app_session_factory, "nat.egresses", {"hat-1": {"mode": "direct", "public": ["x"]}})
     signed_in(client, login_as, app_session_factory)
-    response = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC))
+    response = client.post("/api/v1/lookup/5651", json=body(public_ip=WAN, public_port=51001))
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "lookup_settings_invalid"
+    assert client.post("/api/v1/lookup/5651", json=body(internal_ip=PC)).status_code == 201
+    setting(app_session_factory, "nat.egresses", ["hat-1"])  # not even an object
+    response = client.post("/api/v1/lookup/5651", json=body(public_ip=WAN))
+    assert response.status_code == 503
 
 
 # -- permissions ----------------------------------------------------------------------------------

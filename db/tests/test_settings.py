@@ -34,11 +34,11 @@ def test_get_setting_falls_back_to_default_and_returns_copies(db_session: Sessio
 
 
 def test_set_setting_upserts_and_records_the_author(db_session: Session) -> None:
-    set_setting(db_session, "nat.public_ips", ["203.0.113.7"], updated_by="tolga")
+    set_setting(db_session, "nat.snat_trandisp", ["snat", "dnat"], updated_by="tolga")
     set_setting(db_session, "custom.flag", True, updated_by="tolga")
-    row = db_session.scalars(select(Setting).where(Setting.key == "nat.public_ips")).one()
+    row = db_session.scalars(select(Setting).where(Setting.key == "nat.snat_trandisp")).one()
     db_session.refresh(row)
-    assert row.value == ["203.0.113.7"]
+    assert row.value == ["snat", "dnat"]
     assert row.updated_by == "tolga"
     assert get_setting(db_session, "custom.flag") is True
 
@@ -49,8 +49,8 @@ def test_get_settings_by_prefix_and_keys(db_session: Session) -> None:
     assert set(auth) == {k for k in DEFAULT_SETTINGS if k.startswith("auth.")}
     assert auth["auth.idle_minutes"] == 5
     assert auth["auth.absolute_hours"] == 12
-    picked = get_settings(db_session, keys=["nat.public_ips", "auth.idle_minutes"])
-    assert picked == {"nat.public_ips": [], "auth.idle_minutes": 5}
+    picked = get_settings(db_session, keys=["nat.egresses", "auth.idle_minutes"])
+    assert picked == {"nat.egresses": {}, "auth.idle_minutes": 5}
 
 
 def test_every_default_is_canonical_json_so_changes_can_be_audited() -> None:
@@ -87,12 +87,20 @@ def test_prefix_is_literal_not_a_like_pattern(db_session: Session) -> None:
     ("key", "value", "stored"),
     [
         (
-            "nat.public_ips",
-            ["2001:DB8::1", "203.0.113.7", "203.0.113.7"],
-            ["2001:db8::1", "203.0.113.7"],
+            "nat.egresses",
+            {"wan": {"mode": "isp_nat", "transips": ["100.64.12.9/32", "100.64.12.9"]}},
+            {
+                "wan": {
+                    "label": "",
+                    "mode": "isp_nat",
+                    "public": [],
+                    "public_dynamic": False,
+                    "transips": ["100.64.12.9"],
+                    "interfaces": [],
+                    "port_preservation": "unknown",
+                }
+            },
         ),
-        ("nat.wan_transip", " 100.64.12.9 ", "100.64.12.9"),
-        ("nat.wan_transip", "", ""),
         ("devices.infrastructure_macs", ["0000.5E00.5332"], ["00:00:5e:00:53:32"]),
         (
             "auth.totp_required_roles",
@@ -118,7 +126,11 @@ def test_valid_setting_values_are_normalised(key: str, value: object, stored: ob
         ("lease.server_seconds", {"dhcp61": 5}, "en az 60 saniye"),
         ("lease.server_seconds", {"dhcp61": True}, "en az 60 saniye"),
         ("privacy.notice_version", " ", "boş olamaz"),
-        ("nat.public_ips", [7], "IP adresi bekleniyor"),
+        ("nat.egresses", {"hat-1": {"mode": "direct", "public": [7]}}, "IPv4 adresi"),
+        # The Wave 2 NAT keys are no settings any more (revision 0018_nat_egresses).
+        ("nat.public_ips", ["203.0.113.7"], "bilinmeyen ayar"),
+        ("nat.wan_transip", "100.64.12.9", "bilinmeyen ayar"),
+        ("lookup.port_hint", True, "bilinmeyen ayar"),
         ("dhcp.server_vlan_regex", "(", "geçersiz düzenli ifade"),
         ("lookup.max_candidates", 0, "en az 1"),
         ("evidence.keep_days", None, "tam sayı bekleniyor"),

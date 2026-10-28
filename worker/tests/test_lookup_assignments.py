@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.canonical import canonical_json
 from arcilogger_db.assignments import Planner, apply, load_history, lock_devices
+from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.models import Department, Device, DeviceAssignment, Person
 from arcilogger_db.settings import get_settings
 from arcilogger_worker.correlation.leases import rebuild_day
@@ -119,7 +120,8 @@ def test_a_later_reassignment_does_not_change_the_person_at_t(
 def test_exact_matches_use_the_history_too(db_session: Session, people: People) -> None:
     assign(db_session, PC_MAC, people.mehmet, tr(DAY, 7))
     assign(db_session, PC_MAC, people.selin, tr(DAY, 19))
-    settings = LookupSettings.from_settings({**get_settings(db_session), "nat.wan_transip": WAN})
+    exits, _dropped = legacy_egresses([], WAN, False)  # Wave 2's nat.wan_transip
+    settings = LookupSettings.from_settings({**get_settings(db_session), "nat.egresses": exits})
     outcome = run_lookup(
         db_session,
         LookupRequest(at=AT, public_ip=WAN, public_port=51001, protocol=6),

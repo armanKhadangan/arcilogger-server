@@ -68,24 +68,6 @@ REFUSALS: list[tuple[str, Any, str, str]] = [
         "auth.idle_minutes: en az 1, en çok 120 olmalı",
     ),
     (
-        "nat.public_ips",
-        [7],
-        "setting_ip_invalid",
-        "nat.public_ips: IP adresi bekleniyor, verilen 7",
-    ),
-    (
-        "nat.public_ips",
-        ["999.1.1.1"],
-        "setting_ip_invalid",
-        "nat.public_ips: geçersiz IP adresi '999.1.1.1'",
-    ),
-    (
-        "nat.wan_transip",
-        "not-an-ip",
-        "setting_ip_invalid",
-        "nat.wan_transip: geçersiz IP adresi 'not-an-ip'",
-    ),
-    (
         "devices.infrastructure_macs",
         ["00:00:5e:00:53"],
         "setting_mac_invalid",
@@ -249,6 +231,13 @@ REFUSALS: list[tuple[str, Any, str, str]] = [
         "setting_type",
         "nat.egresses: nesne bekleniyor (varsayılan {}), verilen: liste",
     ),
+    (
+        "nat.egresses",
+        {"hat-1": {"mode": "direct", "public": ["100.64.12.9"]}},
+        "setting_egress_public_private",
+        "nat.egresses: 'hat-1' çıkışı: genel adres özel, paylaşılan ya da ayrılmış bir adres "
+        "olamaz",
+    ),
 ]
 
 
@@ -294,7 +283,7 @@ def test_the_bounds_are_named_in_both_languages() -> None:
     assert caught.value.message_tr == "En az 60 olmalı."
     assert caught.value.message_en == "Must be at least 60."
     with pytest.raises(SettingValueError) as caught:
-        validate_setting("lookup.port_hint", "yes")
+        validate_setting("lookup.report_timestamp", "yes")
     assert caught.value.message_en == "Wrong type of value: true/false expected."
 
 

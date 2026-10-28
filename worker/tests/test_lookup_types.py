@@ -12,7 +12,7 @@ import pytest
 
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.layout import Layout
-from arcilogger_db.egress import IMPLICIT_CATCH_ALL, Egress
+from arcilogger_db.egress import IMPLICIT_CATCH_ALL, Egress, legacy_egresses
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.testing import EXAMPLE_SETTINGS
 from arcilogger_worker.lookup import (
@@ -254,9 +254,7 @@ def test_raw_ref_points_to_spool_and_vault(tmp_path: Path) -> None:
 
 def test_settings_from_shipped_defaults_mean_double_nat() -> None:
     settings = LookupSettings.from_settings(DEFAULT_SETTINGS)
-    assert settings.double_nat is True
-    assert settings.exact_addresses() == frozenset()
-    assert settings.wan_transip is None
+    assert settings.egresses() == ()  # no exits: one implicit double-NAT exit
     assert settings.tolerance_seconds == 60
     assert settings.lease_server_seconds == {}  # no site's DHCP servers are shipped
     assert settings.lease_timeout_percent == 110
@@ -271,43 +269,59 @@ def test_settings_from_shipped_defaults_mean_double_nat() -> None:
     assert example.lease_timeout_seconds("dhcp60") == 95040
 
 
-def test_settings_with_public_and_wan_addresses() -> None:
+def test_settings_with_internet_exits() -> None:
+    """The legacy keys as revision 0018 converts them: the exits are parsed (sorted by name,
+    addresses as networks); the MAC addresses are normalised as before."""
+    exits, _dropped = legacy_egresses(["192.0.2.44"], "100.64.12.9", False)
     settings = LookupSettings.from_settings(
         {
             **DEFAULT_SETTINGS,
-            "nat.public_ips": ["192.0.2.44"],
-            "nat.wan_transip": "100.64.12.9",
+            "nat.egresses": exits,
             "devices.infrastructure_macs": ["00-00-5E-00-53-32"],
         }
     )
-    assert settings.double_nat is False
-    assert settings.exact_addresses() == {"192.0.2.44", "100.64.12.9"}
+    genel, wan = settings.egresses()
+    assert (genel.name, genel.mode, genel.claims_public("192.0.2.44")) == (
+        "genel-1",
+        "direct",
+        True,
+    )
+    assert (wan.name, wan.mode, wan.claims_transip("100.64.12.9")) == ("wan", "isp_nat", True)
     assert settings.infrastructure_macs == ("00:00:5e:00:53:32",)
 
 
-def test_settings_addresses_are_normalised_like_postgresql_returns_them() -> None:
-    settings = LookupSettings.from_settings(
-        {
-            "nat.public_ips": [" 2001:DB8::0001 ", "192.0.2.44"],
-            "nat.wan_transip": " 100.64.12.9 ",
-        }
-    )
-    assert settings.public_ips == ("2001:db8::1", "192.0.2.44")
-    assert settings.wan_transip == "100.64.12.9"
-    assert "2001:db8::1" in settings.exact_addresses()
+def test_the_legacy_nat_keys_are_no_settings_any_more() -> None:
+    """Revision 0018 keeps an administrator's legacy rows unread for one version (D18): values
+    of ``nat.public_ips``, ``nat.wan_transip`` or ``lookup.port_hint`` change nothing here."""
+    legacy = {
+        "nat.public_ips": ["not an address"],
+        "nat.wan_transip": "100.64.12",
+        "lookup.port_hint": True,
+    }
+    settings = LookupSettings.from_settings({**DEFAULT_SETTINGS, **legacy})
+    assert settings == LookupSettings.from_settings(DEFAULT_SETTINGS)
+    assert settings.egresses() == ()
+    for name in ("public_ips", "wan_transip", "double_nat", "exact_addresses"):
+        assert not hasattr(settings, name), name
 
 
 @pytest.mark.parametrize(
-    ("values", "message"),
+    "stored",
     [
-        ({"nat.public_ips": ["085.001.002.003"]}, "nat.public_ips"),
-        ({"nat.public_ips": "192.0.2.44"}, "list"),
-        ({"nat.wan_transip": "100.64.12"}, "nat.wan_transip"),
+        ["hat-1"],
+        {"hat-1": {"mode": "direct", "public": ["not an address"]}},
+        {"hat-1": {"mode": "direct", "public": ["10.0.0.1"]}},  # a private public address
+        {"Hat 1": {"mode": "isp_nat"}},
     ],
 )
-def test_settings_reject_invalid_addresses(values: dict[str, Any], message: str) -> None:
-    with pytest.raises(ValueError, match=message):
-        LookupSettings.from_settings(values)
+def test_a_stored_bad_exits_value_raises_only_when_parsed(stored: Any) -> None:
+    """Contract 2.8.1 / 4.3 C1: ``from_settings`` with a stored ``nat.egresses`` the rules
+    refuse succeeds (the lease job and the usage subjects need no change), and only
+    ``egresses()`` raises ``ValueError`` (the lookup router turns it into 503)."""
+    settings = LookupSettings.from_settings({**DEFAULT_SETTINGS, "nat.egresses": stored})
+    assert settings.nat_egresses == stored
+    with pytest.raises(ValueError):  # noqa: PT011 - an EgressValueError or the type refusal
+        settings.egresses()
 
 
 def _conflict_chain() -> AttributionChain:

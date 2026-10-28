@@ -26,12 +26,14 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, date, timedelta
+from ipaddress import IPv4Network
 
 import pytest
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import day_window
+from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.settings import get_settings
 from arcilogger_worker.correlation.leases import rebuild_day
@@ -195,7 +197,8 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
     assert report.events["traffic_points"] > 0
     assert report.lookahead_chunks >= 1  # the data continues past midnight
 
-    settings = LookupSettings.from_settings({**get_settings(db_session), "nat.wan_transip": WAN})
+    exits, _dropped = legacy_egresses([], WAN, False)  # Wave 2's nat.wan_transip
+    settings = LookupSettings.from_settings({**get_settings(db_session), "nat.egresses": exits})
     at = tr(DAY, SIZE.at_hour)
     exact_port = db_session.scalar(
         text("SELECT transport FROM fg_traffic WHERE time >= :at ORDER BY time LIMIT 1"),
@@ -219,15 +222,19 @@ def test_lookup_is_fast_on_continuous_data(db_engine: Engine, db_session: Sessio
         timings[name] = time.perf_counter() - began
 
     window = Window(at, 60, settings.max_session_seconds)
+    wan = (IPv4Network(f"{WAN}/32"),)  # the converted exit's NAT address (candidate searches)
     plans = {
-        "candidates_no_destination": explain_rows(db_session, window, transip=WAN, analyze=True),
+        "candidates_no_destination": explain_rows(db_session, window, transip_in=wan, analyze=True),
         "candidates_destination": explain_rows(
-            db_session, window, transip=WAN, dstips={"23.10.10.1"}, analyze=True
+            db_session, window, transip_in=wan, dstips={"23.10.10.1"}, analyze=True
+        ),
+        "candidates_unclaimed": explain_rows(
+            db_session, window, unclaimed=(), dstips={"23.10.10.1"}, analyze=True
         ),
         "domain_popular": explain_rows(
             db_session,
             window,
-            transip=WAN,
+            transip_in=wan,
             domain="google.com",
             dstips={"23.1.1.1", "23.2.2.1"},
             analyze=True,

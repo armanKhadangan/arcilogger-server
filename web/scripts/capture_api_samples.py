@@ -155,6 +155,7 @@ from arcilogger_core.tsa.mock import MockFailure, MockTsaProvider
 from arcilogger_db import licensing
 from arcilogger_db.assignments import Planner, apply, load_history, lock_devices
 from arcilogger_db.audit import append_audit
+from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.models import (
     Alert,
@@ -211,6 +212,9 @@ SITE_DAY = date(2026, 10, 9)
 #: source NAT keeps (WAN port 51001).
 AT = "2026-10-09T11:23:41"
 WAN = "100.64.12.9"
+#: The FortiGate's WAN address behind the ISP router as the internet exit ``wan`` (revision
+#: 0018_nat_egresses converts Wave 2's nat.wan_transip to it), so the WAN request is exact.
+WAN_EXIT = legacy_egresses([], WAN, False)[0]
 #: A public address of the ISP router (documentation range, RFC 5737).
 PUBLIC_IP = "198.51.100.23"
 #: The example attribution chain: WAN 100.64.12.9:51001 → the PC on VLAN 42 "Planlama" (lease of
@@ -629,7 +633,7 @@ def lookup_body(**query: Any) -> dict[str, Any]:
 
 def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -> dict[str, int]:
     out = capture.samples["lookups"]
-    capture.setting("nat.wan_transip", WAN)
+    capture.setting("nat.egresses", WAN_EXIT)
     runs = {
         "exact": lookup_body(public_ip=WAN, public_port=51001, protocol="tcp"),
         "candidates": lookup_body(
@@ -743,14 +747,15 @@ def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
             "lookup_timeout",
         )
     capture.setting(lookup_router.TIMEOUT_SETTING, lookup_router.DEFAULT_TIMEOUT_SECONDS)
-    # An address the lookup cannot use was saved in the settings (Ayarlar → NAT).
-    capture.setting("nat.wan_transip", "100.64.12")
+    # Internet exits the lookup cannot use were saved around the validator (an address that is
+    # no address); a public-IP lookup is refused, as the router parses the exits first.
+    capture.setting("nat.egresses", {"wan": {"mode": "isp_nat", "transips": ["100.64.12"]}})
     errors["lookup_settings_invalid"] = capture.error(
         admin.post(f"{API}/lookup/5651", json=lookup_body(public_ip=WAN, public_port=51001)),
         503,
         "lookup_settings_invalid",
     )
-    capture.setting("nat.wan_transip", WAN)
+    capture.setting("nat.egresses", WAN_EXIT)
     # A cited file cannot be read right now (folder rights, disk error): no report is made.
     failures = {
         "report_access_denied": PermissionError(13, "Permission denied"),

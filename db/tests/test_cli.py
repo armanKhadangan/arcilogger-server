@@ -274,7 +274,7 @@ def test_settings_set_is_validated_audited_and_kept_by_upgrades(
     assert main(["settings", "list", "--config", config]) == 0
     listing = capsys.readouterr().out
     assert f'{key} = ["00:00:5e:00:53:32"]  (tolga)' in listing
-    assert "nat.public_ips = []  (:seed)" in listing
+    assert 'nat.snat_trandisp = ["snat"]  (:seed)' in listing
     assert "audit.spool_watermark" not in listing  # internal keys are not settings
 
 
@@ -283,16 +283,18 @@ def test_settings_set_accepts_a_bare_string_and_stdin(
 ) -> None:
     config = str(setup)
     assert main(["upgrade", "--config", config]) == 0
-    # Windows PowerShell 5.1 drops the JSON quotes of a native argument: 100.64.12.9 is a string.
-    assert main(["settings", "set", "nat.wan_transip", "100.64.12.9", "--by", "tolga",
+    # Windows PowerShell 5.1 drops the JSON quotes of a native argument: v2 is a string.
+    assert main(["settings", "set", "privacy.notice_version", "v2", "--by", "tolga",
                  "--config", config]) == 0  # fmt: skip
-    assert _settings_state(setup, "nat.wan_transip")[0] == "100.64.12.9"
-    monkeypatch.setattr("sys.stdin", io.StringIO('["203.0.113.200"]\n'))
-    assert main(["settings", "set", "nat.public_ips", "-", "--by", "tolga", "--config",
+    assert _settings_state(setup, "privacy.notice_version")[0] == "v2"
+    exits = '{"hat-1": {"mode": "direct", "public": ["203.0.113.200"]}}'
+    monkeypatch.setattr("sys.stdin", io.StringIO(exits + "\n"))
+    assert main(["settings", "set", "nat.egresses", "-", "--by", "tolga", "--config",
                  config]) == 0  # fmt: skip
-    value, _author, audit = _settings_state(setup, "nat.public_ips")
-    assert value == ["203.0.113.200"]
-    assert [e.details["new"] for e in audit] == ["100.64.12.9", ["203.0.113.200"]]
+    value, _author, audit = _settings_state(setup, "nat.egresses")
+    assert value["hat-1"]["public"] == ["203.0.113.200"]
+    assert value["hat-1"]["port_preservation"] == "unknown"  # normalised, every field filled
+    assert [e.details["new"] for e in audit] == ["v2", value]
 
 
 def test_settings_set_takes_the_fortigate_and_nat_keys_normalised(
@@ -334,9 +336,15 @@ def test_settings_set_takes_the_fortigate_and_nat_keys_normalised(
         ("lease.timeout_percent", "1.5", "tolga", "tam sayı bekleniyor"),  # float
         ("devices.infrastructure_macs", '"x"', "tolga", "liste bekleniyor"),
         ("devices.infrastructure_macs", '["not-a-mac"]', "tolga", "geçersiz MAC"),
-        ("nat.public_ips", "[1.2.3.4]", "tolga", "geçerli JSON değil"),
-        ("nat.public_ips", '["999.1.1.1"]', "tolga", "geçersiz IP"),
-        ("lookup.port_hint", "1", "tolga", "true/false bekleniyor"),
+        ("nat.snat_trandisp", "[snat]", "tolga", "geçerli JSON değil"),
+        (
+            "nat.egresses",
+            '{"hat-1": {"mode": "direct", "public": ["999.1.1.1"]}}',
+            "tolga",
+            "IPv4 adresi",
+        ),
+        ("nat.public_ips", '["203.0.113.200"]', "tolga", "bilinmeyen ayar"),  # converted (0018)
+        ("lookup.report_timestamp", "1", "tolga", "true/false bekleniyor"),
         ("lookup.tolerance_seconds", "true", "tolga", "tam sayı bekleniyor"),
         ("lookup.tolerance_seconds", "7200", "tolga", "en çok 3600"),
         ("auth.totp_required_roles", '["root"]', "tolga", "bilinmeyen rol"),
