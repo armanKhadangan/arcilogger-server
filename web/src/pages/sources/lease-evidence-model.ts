@@ -7,8 +7,9 @@
  * `leaseEvidenceOf` (a server without the field shows no card).
  */
 
-import type { DateTimeString } from '@/lib/api-types';
-import type { SourcesOverview } from '@/lib/sources-types';
+// Relative imports: the E2E mocks import this module, outside the `@/` alias.
+import type { DateTimeString } from '../../lib/api-types';
+import type { SourcesOverview } from '../../lib/sources-types';
 
 /** Usable rows of one evidence table in the last 24 hours. */
 export interface LeaseTableCounts {

@@ -12,9 +12,10 @@
 
 import type { TFunction } from 'i18next';
 
-import type { DateTimeString } from '@/lib/api-types';
-import type { EgressMode, PortPreservation } from '@/lib/lookup-types';
-import { codePointLength } from '@/lib/validation';
+// Relative imports: the E2E mocks import this module, outside the `@/` alias.
+import type { DateTimeString } from '../../lib/api-types';
+import type { EgressMode, PortPreservation } from '../../lib/lookup-types';
+import { codePointLength } from '../../lib/validation';
 
 export const EGRESSES_KEY = 'nat.egresses';
 
