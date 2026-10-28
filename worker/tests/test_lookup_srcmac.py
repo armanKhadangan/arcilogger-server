@@ -336,6 +336,33 @@ def test_a_row_of_an_unconfigured_sender_is_never_used_nor_counted(
     assert_srcmac_chain(outcome.attribution, row)
 
 
+#: An HA member that sent from its own address before anyone configured it (D24).
+HA_MEMBER = "unknown-172.20.10.2"
+
+
+def test_a_row_of_a_sender_configured_later_is_named_on_the_chain(
+    db_session: Session, evidence: Evidence, selin: int
+) -> None:
+    """D24: the session row of an ``unknown-<ip>`` sender that a FortiGate source configured
+    later covers is used, and the srcmac chain resting on it says so
+    (``source_configured_later``), in the internal and in the MAC-only lookup alike, as the
+    candidate lookup over the same row does; the chain stays ``low`` with ``srcmac_only``."""
+    row = session_of(evidence)
+    db_session.add(Source(name=HA_MEMBER, type="fortigate", address="172.20.10.2", unknown=True))
+    db_session.add(Source(name="fortigate-2", type="fortigate", address="172.20.10.0/30"))
+    db_session.execute(update(FgTraffic).where(FgTraffic.id == row).values(source=HA_MEMBER))
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    for outcome in (internal(db_session), lookup(db_session, mac=PC_MAC)):
+        chain = assert_srcmac_chain(outcome.attribution, row)
+        assert note(chain, "source_configured_later") == {"sources": HA_MEMBER}
+    found = candidates(db_session)
+    (match,) = found.matches
+    assert match.untrusted_sources == ()
+    assert_srcmac_chain(match.chain, row)
+    assert note(found, "source_configured_later") == {"sources": HA_MEMBER}
+
+
 def test_a_mac_with_a_lease_of_another_address_is_not_used(
     db_session: Session, evidence: Evidence, selin: int
 ) -> None:

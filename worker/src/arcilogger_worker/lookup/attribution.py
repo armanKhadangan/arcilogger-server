@@ -710,7 +710,9 @@ class Attributor:
         """The chain of ``ip`` at ``at`` by the srcmac of a session record on a listed
         interface (2.9, D10): no lease; the device of ``mac`` as ``devices`` knows it (nothing
         is written there), resting on the session record ``ref``; the person valid at ``at``,
-        the VLAN of the subnet; ``low`` throughout, ``mac_source="srcmac"``, ``srcmac_only``."""
+        the VLAN of the subnet; ``low`` throughout, ``mac_source="srcmac"``, ``srcmac_only``.
+        A record of an ``unknown-<ip>`` sender trusted now is named as in :meth:`_lease_notes`
+        (``source_configured_later``, D24)."""
         vlan, department = self._vlan(ip)
         device = self._device(mac)
         randomized = device.randomized if device is not None else is_randomized(mac)
@@ -727,6 +729,9 @@ class Attributor:
         )
         person, person_notes = self._person(device, at)
         explanations = [explain("srcmac_only", interface=interface)]
+        sender = "" if ref.raw is None else ref.raw.source
+        if sender.startswith(UNKNOWN_PREFIX) and sender not in self.untrusted:
+            explanations.append(explain("source_configured_later", sources=sender))
         if vlan is not None and vlan.guest:
             explanations.append(explain("guest_vlan"))
         if randomized:
