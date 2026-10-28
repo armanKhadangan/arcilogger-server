@@ -54,7 +54,7 @@ from arcilogger_api.sealinfo import (
 )
 from arcilogger_core.chain import sealed_days
 from arcilogger_core.config import MIN_RETENTION_DAYS, Config
-from arcilogger_core.fmt import format_bytes, format_date, format_datetime, format_number
+from arcilogger_core.fmt import Lang, format_bytes, format_date, format_datetime, format_number
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day, to_site
 from arcilogger_db.models import Alert, AuditLog, JobRun, SearchCount, Source
@@ -134,9 +134,16 @@ def when(moment: datetime | None) -> str:
 
 
 def number(value: float, decimals: int = 0) -> Text:
-    """``1.234`` / ``1,234`` (``decimals`` at most, a whole number without them)."""
-    places = 0 if float(value).is_integer() else decimals
-    return format_number(value, places, "tr"), format_number(value, places, "en")
+    """``1.234`` / ``1,234``; ``3,2`` / ``3.2`` with at most ``decimals`` places, trailing
+    zeros dropped (as :func:`arcilogger_core.fmt.format_bytes`)."""
+
+    def text(lang: Lang) -> str:
+        shown = format_number(value, decimals, lang)
+        if decimals and shown.endswith("0" * decimals):
+            return shown[: -decimals - 1]
+        return shown
+
+    return text("tr"), text("en")
 
 
 def names(items: Sequence[str], limit: int = NAMES_LISTED, separator: str = ", ") -> str:
@@ -149,7 +156,7 @@ def names(items: Sequence[str], limit: int = NAMES_LISTED, separator: str = ", "
 
 
 def size(num_bytes: int | None) -> Text:
-    """ "1,2 GB" / "1.2 GB"."""
+    """``1,2 GB`` / ``1.2 GB`` (binary multiples, as Windows shows them)."""
     if num_bytes is None or num_bytes < 0:
         return same(texts.NONE)
     return format_bytes(num_bytes, "tr"), format_bytes(num_bytes, "en")
