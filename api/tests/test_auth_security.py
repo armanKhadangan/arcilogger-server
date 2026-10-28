@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -24,7 +23,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
@@ -421,9 +420,14 @@ def _factory(app: FastAPI) -> sessionmaker[Session]:
 def test_a_request_never_holds_two_pooled_connections(
     small_pool_app: Callable[..., tuple[FastAPI, Engine]],
 ) -> None:
-    """With one connection in the pool every authenticated request still works, and at once:
-    recording activity must not wait for a second connection (pool starvation, see below)."""
-    app, _engine = small_pool_app(pool_size=1, max_overflow=0, pool_timeout=3)
+    """Every authenticated request, recording activity included, uses one pooled connection
+    at a time: a second one taken while the first is out starves the pool (see below).
+
+    Counted at each checkout, not timed: three requests on a fresh app spend most of their
+    time on first-request work, and on a slow runner they passed a bound below
+    ``pool_timeout`` with no wait at all. The overflow connection hands a second checkout out
+    at once, so it is counted here instead of waiting ``pool_timeout`` (or being swallowed)."""
+    app, engine = small_pool_app(pool_size=1, max_overflow=1, pool_timeout=3)
     factory = _factory(app)
     client = TestClient(app, base_url="http://testserver")  # no lifespan: no background flush
     signed_in = api_testing.login(client, factory, api_testing.make_user(factory, "admin"))
@@ -434,11 +438,15 @@ def test_a_request_never_holds_two_pooled_connections(
             .values(last_seen_at=UserSession.last_seen_at - timedelta(minutes=10))
         )
         session.commit()
-    started = time.monotonic()
+    pool = engine.pool
+    assert isinstance(pool, QueuePool)
+    held: list[int] = []  # connections out of the pool at each checkout during the requests
+    event.listen(engine, "checkout", lambda *_: held.append(pool.checkedout()))
     assert client.get("/api/v1/auth/me").status_code == 200
     assert client.get("/api/v1/users").status_code == 200
     assert client.get("/api/v1/users", headers={BACKGROUND_HEADER: "1"}).status_code == 200
-    assert time.monotonic() - started < 2.5  # no request waited for the pool timeout
+    assert held  # the requests did check connections out
+    assert max(held) == 1, held  # never a second connection while one is out
     with factory() as session:
         seen = session.get_one(UserSession, hash_token(signed_in.session_token)).last_seen_at
     assert datetime.now(UTC) - seen < timedelta(minutes=1)
