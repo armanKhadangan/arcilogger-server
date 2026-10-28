@@ -5927,15 +5927,18 @@ from section 0.2 are recorded here too, with the date and who decided.
   within [T − 1 h, T + 1 h], at most 2,500 before and 2,500 from T (one `UNION ALL` query on
   `ix_messages_source_time`, median by `percentile_cont`), not the first 5,000 of the range. The
   limit is 120 s, not max(120 s, tolerance), for every source of an internal lookup and for a
-  source measured for a lease table (cited lease evidence, or searched for `mt_dhcp`, `fg_dhcp`,
-  `mt_arp`): the lease search uses the moment, not the tolerance; a source measured only for the
-  session search keeps max(120 s, tolerance). `{limit}` prints the smallest limit of the named
-  sources. The 2.11 text is unchanged (its remedy "widen the tolerance by the offset" is not
-  reworded for internal lookups). Tests: `worker/tests/test_lookup_fortigate_only.py::test_the_clock_is_measured_on_the_rows_nearest_the_moment`,
+  source with a cited `mt_dhcp`, `fg_dhcp` or `mt_arp` row, or searched for one of those tables:
+  the lease search uses the moment, not the tolerance; a source measured only for the session
+  search keeps max(120 s, tolerance). The offset compared with the limit is the whole number of
+  seconds printed (the median rounded), so a named offset always exceeds `{limit}`. `{limit}`
+  prints the smallest limit of the named sources. The 2.11 text is unchanged (its remedy "widen
+  the tolerance by the offset" is not reworded for internal lookups). Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_the_clock_is_measured_on_the_rows_nearest_the_moment`,
   `::test_the_clock_of_a_session_search_alone_may_reach_the_tolerance`,
   `::test_an_internal_lookup_without_a_lease_names_the_clock`,
-  `::test_the_tolerance_widened_by_the_offset_finds_the_session`. Fold into 2.7, 2.15's reading
-  table and 2.17.
+  `::test_the_tolerance_widened_by_the_offset_finds_the_session`,
+  `::test_a_cited_source_whose_clock_was_off_lowers_every_chain` (120.4 s and 120.6 s). Fold
+  into 2.7, 2.15's reading table and 2.17.
 - **The srcmac router guard's window reaches every row the lookup considers** (2.9, the
   slice-4 review: a long session logged at its end, or a sighting up to the scan end, lies
   outside [T − 1 h, T + 1 h], so its srcmac was used uncounted). The one

@@ -1591,8 +1591,10 @@ class _Lookup:
         for name, lease in sources.items():
             limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
             measured = self._clock(name)
-            if measured is not None and abs(measured[0]) > limit:
-                offsets[name] = int(measured[0])
+            # The whole seconds printed are the ones compared: a named offset exceeds its limit.
+            offset = None if measured is None else round(measured[0])
+            if offset is not None and abs(offset) > limit:
+                offsets[name] = offset
                 limits.append(limit)
         if not offsets:
             return attribution, matches

@@ -1732,21 +1732,25 @@ def exact_request(session: Session, **request: Any) -> LookupOutcome:
 
 
 @pytest.mark.parametrize(
-    ("offset", "lines", "warned"),
+    ("offset", "lines", "printed"),
     [
-        pytest.param(BEHIND, 20, True, id="8-minutes-behind"),
-        pytest.param(-timedelta(seconds=30), 20, False, id="30-seconds"),
-        pytest.param(BEHIND, 8, False, id="9-rows"),
-        pytest.param(BEHIND, 9, True, id="10-rows"),
+        pytest.param(BEHIND, 20, -480, id="8-minutes-behind"),
+        pytest.param(-timedelta(seconds=30), 20, None, id="30-seconds"),
+        pytest.param(BEHIND, 8, None, id="9-rows"),
+        pytest.param(BEHIND, 9, -480, id="10-rows"),
+        pytest.param(-timedelta(seconds=120.4), 20, None, id="120.4-seconds"),
+        pytest.param(-timedelta(seconds=120.6), 20, -121, id="120.6-seconds"),
     ],
 )
 def test_a_cited_source_whose_clock_was_off_lowers_every_chain(
-    db_session: Session, evidence: Evidence, offset: timedelta, lines: int, warned: bool
+    db_session: Session, evidence: Evidence, offset: timedelta, lines: int, printed: int | None
 ) -> None:
     """3.4 "source clock": the FortiGate's rows around T are 8 minutes behind their receive
     time; an exact request at T names the FortiGate with about -480 s, every chain is ``low``
     (its lease step too) and the match stays ``exact``. 30 s, or fewer than 10 rows of the source
-    around T (the session row and the lines without a typed row), add nothing."""
+    around T (the session row and the lines without a typed row), add nothing. The offset
+    compared with the limit is the whole number printed, so a printed offset always exceeds
+    the limit (120.4 s prints 120: nothing)."""
     evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
     evidence.traffic(AT, PC, 51001, transip=WAN)
     clock_lines(evidence, offset, lines)
@@ -1760,21 +1764,60 @@ def test_a_cited_source_whose_clock_was_off_lowers_every_chain(
     chain = match.chain
     assert chain is not None
     assert chain.lease is not None
-    if not warned:
+    if printed is None:
         assert CLOCK not in keys(outcome)
         assert (chain.confidence, chain.lease.confidence) == ("high", "high")
         return
     assert (chain.confidence, chain.lease.confidence) == ("low", "low")
-    assert offsets(outcome) == {"fortigate": -480}
+    assert offsets(outcome) == {"fortigate": printed}
     params = outcome_note(outcome, CLOCK)
     assert (params["at"], params["limit"]) == (iso(AT), 120)
     text = next(e for e in outcome.explanations if e.key == CLOCK)
-    assert "fortigate: -480 (sınır 120 saniye)" in text.text_tr
-    assert "fortigate: -480 (limit 120 seconds)" in text.text_en
+    assert f"fortigate: {printed} (sınır 120 saniye)" in text.text_tr
+    assert f"fortigate: {printed} (limit 120 seconds)" in text.text_en
     # The internal lookup rests on the same lease rows of the same clock.
     chain = internal(db_session, PC, AT).attribution
     assert chain is not None
     assert chain.confidence == "low"
+
+
+def test_the_clock_lowers_every_alternative_and_every_match(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Under the 8-minute clock every chain of the outcome is ``low`` with its lease step: the
+    PC's chain whose session srcmac contradicts its lease (D10) and that srcmac chain, its
+    alternative, in the exact request; both matches' chains of one candidate request."""
+    stranger = "00:00:5e:00:53:66"
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(tr(DAY, 8, 5), "172.20.42.58", OTHER)
+    evidence.traffic(AT, PC, 51001, transip=WAN, srcintf="vlan42", dstintf="wan1",
+                     srcmac=stranger)  # fmt: skip
+    evidence.traffic(AT, "172.20.42.58", 51002, transip=WAN)
+    clock_lines(evidence, BEHIND)
+    as_loaded(db_session, BEHIND)
+    build(db_session, DAY, DAY)
+    set_setting(db_session, "lookup.srcmac_interfaces", ["vlan42"], updated_by="tolga")
+    wan_exit(db_session)
+    exact = exact_request(db_session)
+    assert offsets(exact) == {"fortigate": -480}
+    (match,) = exact.matches
+    chain = match.chain
+    assert chain is not None
+    assert chain.lease is not None
+    assert note(chain, "srcmac_mismatch") == {"srcmac": stranger, "mac": PC_MAC}
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    (alternative,) = chain.alternatives
+    assert alternative.device is not None
+    assert (alternative.device.mac, alternative.confidence) == (stranger, "low")
+    found = lookup(db_session, public_ip=WAN)
+    assert found.mode == "candidates"
+    assert offsets(found) == {"fortigate": -480}
+    assert sorted(m.traffic.srcip for m in found.matches) == [PC, "172.20.42.58"]
+    for match in found.matches:
+        assert match.chain is not None
+        every = [match.chain, *match.chain.alternatives]
+        assert {c.confidence for c in every} == {"low"}
+        assert {c.lease.confidence for c in every if c.lease is not None} == {"low"}
 
 
 def test_rows_stamped_with_the_receive_time_say_nothing_about_the_clock(
@@ -1872,15 +1915,59 @@ def test_the_tolerance_widened_by_the_offset_finds_the_session(
     assert outcome_note(outcome, CLOCK)["limit"] == 120
 
 
-def test_a_no_egress_answer_measures_nothing(db_session: Session, clock_behind: None) -> None:
-    value = validate_egresses(
-        {"wan": {"mode": "isp_nat", "public": ["198.51.100.20"], "transips": [WAN]}}
-    )
-    set_setting(db_session, "nat.egresses", value, updated_by="tolga")
-    db_session.commit()
-    outcome = lookup(db_session, public_ip="203.0.113.99", public_port=51001, protocol="tcp")
-    assert (outcome.mode, outcome.egress and outcome.egress.resolution) == ("none", "no_egress")
+#: Answers that search nothing (2.8.3 ``nobody``): the exits, the requested address and the
+#: resolution.
+UNSEARCHED = {
+    "no-egress": (
+        {"wan": {"mode": "isp_nat", "public": ["198.51.100.20"], "transips": [WAN]}},
+        "203.0.113.99",
+        "no_egress",
+    ),
+    "not-logged": (
+        {"misafir": {"mode": "not_logged", "public": ["198.51.100.90"]}},
+        "198.51.100.90",
+        "public",
+    ),
+    "internal": (
+        {"dmz": {"mode": "internal", "transips": ["172.20.99.1"]}},
+        "172.20.99.1",
+        "transip",
+    ),
+}
+
+
+def egresses(session: Session, value: dict[str, Any]) -> None:
+    set_setting(session, "nat.egresses", validate_egresses(value), updated_by="tolga")
+    session.commit()
+
+
+@pytest.mark.parametrize("variant", sorted(UNSEARCHED))
+def test_a_no_egress_answer_measures_nothing(
+    db_session: Session, clock_behind: None, variant: str
+) -> None:
+    """An answer that searched nothing (``no_egress``, a ``not_logged`` exit nobody saw, an
+    ``internal`` exit) cites no row and read no table: no clock is measured."""
+    value, address, resolution = UNSEARCHED[variant]
+    egresses(db_session, value)
+    outcome = lookup(db_session, public_ip=address, public_port=51001, protocol="tcp")
+    assert (outcome.mode, outcome.egress and outcome.egress.resolution) == ("none", resolution)
     assert CLOCK not in keys(outcome)
+
+
+def test_a_not_logged_exit_the_logs_saw_measures_the_search(
+    db_session: Session, evidence: Evidence, clock_behind: None
+) -> None:
+    """A ``not_logged`` exit whose address the FortiGate used near the moment (``observed``,
+    D31 (a)): the PC's session through it, logged 8 minutes early, is searched for and not
+    found, and the empty search names the FortiGate's clock."""
+    guest = "198.51.100.90"
+    evidence.traffic(AT + BEHIND, PC, 51001, transip=guest)
+    egresses(db_session, {"misafir": {"mode": "not_logged", "public": [guest]}})
+    outcome = lookup(db_session, public_ip=guest, public_port=51001, protocol="tcp")
+    assert (outcome.mode, outcome.egress and outcome.egress.resolution) == ("none", "observed")
+    assert "egress_not_logged_but_seen" in keys(outcome)
+    assert offsets(outcome) == {"fortigate": -480}
+    assert outcome_note(outcome, CLOCK)["limit"] == 120
 
 
 def test_at_most_five_sources_are_measured_the_cited_ones_first(
