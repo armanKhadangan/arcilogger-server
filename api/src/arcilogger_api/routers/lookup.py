@@ -13,7 +13,9 @@
   The lookup must finish within ``lookup.timeout_seconds`` (spec 14: < 5 s for ±60 s): each
   statement gets the remaining time as PostgreSQL ``statement_timeout``; past the limit the
   answer is 504 ``lookup_timeout`` (audited as ``lookup.run_failed``) instead of a hanging
-  request. The lookup is stored (``lookups``) and audited (``lookup.run``).
+  request. Its transaction plans every statement with its values (``plan_cache_mode =
+  force_custom_plan``, transaction-local, as the search does). The lookup is stored
+  (``lookups``) and audited (``lookup.run``).
   A stored setting the lookup cannot read (written around the validator) answers 503
   ``lookup_settings_invalid``: for ``nat.egresses`` (public-IP lookups only) with the text that
   names it, for any other lookup or lease setting (``LookupSettings.from_settings``,
@@ -71,6 +73,7 @@ from arcilogger_api.auth.privacy import require_privacy_notice
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
 from arcilogger_api.errors import ApiError
 from arcilogger_api.reports import Person, ReportError, load_or_create, read_token
+from arcilogger_api.search.sql import custom_plans_statement
 from arcilogger_api.security import CurrentUser, client_ip
 from arcilogger_core.iputil import canonical_ip
 from arcilogger_core.timeutil import SITE_TZ_NAME, site_day, utc_now
@@ -683,6 +686,10 @@ def run_5651(
     started = monotonic()
     try:
         with statement_deadline(db, limit):
+            # Every statement planned with its values, for this transaction only: psycopg prepares
+            # a statement sent five times, and PostgreSQL may then keep a generic plan, made
+            # without the values, which prunes no partition of the time range.
+            db.execute(custom_plans_statement())
             outcome = run_lookup(db, lookup_request, settings, layout=layout)
     except (LookupTimeoutError, DBAPIError) as exc:
         if isinstance(exc, DBAPIError) and not _is_timeout(exc):

@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -49,7 +49,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.models import AuditLog, Department, Lease, Lookup
 from arcilogger_db.settings import set_setting
-from arcilogger_worker.lookup import EXPLANATIONS
+from arcilogger_worker.lookup import EXPLANATIONS, run_lookup
 from arcilogger_worker.testing import tr
 
 #: The FortiGate's WAN address behind the ISP router as revision 0018 converts Wave 2's
@@ -1017,6 +1017,35 @@ def test_other_database_errors_are_not_reported_as_timeouts(
     response = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC))
     assert (response.status_code, response.json()["error"]["code"]) == (500, "internal_error")
     assert audits(app_session_factory, "lookup.run_failed") == []
+
+
+def test_the_custom_plans_last_as_long_as_the_lookup_transaction(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    site: Site,
+) -> None:
+    """The lookup's statements are planned with their values; the statements after it on its
+    pooled connection are planned as before."""
+    show = select(func.current_setting("plan_cache_mode"))
+    seen: list[tuple[Any, Any]] = []
+
+    def watched(session: Session, *args: Any, **kwargs: Any) -> Any:
+        seen.append((session.scalar(show), session.connection().connection.dbapi_connection))
+        return run_lookup(session, *args, **kwargs)
+
+    monkeypatch.setattr(lookup_router, "run_lookup", watched)
+    signed_in(client, login_as, app_session_factory)
+    response = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC))
+    assert response.status_code == 201, response.text
+    assert response.json()["outcome"]["attribution"]["person"]["name"] == PERSON_NAME
+    ((inside, pooled),) = seen
+    assert pooled is not None
+    after = pooled.execute("SELECT current_setting('plan_cache_mode')").fetchone()
+    pooled.rollback()  # back to the pool as it was
+    assert inside == "force_custom_plan"
+    assert after == ("auto",)
 
 
 def test_statement_deadline_limits_each_statement_to_the_remaining_time(
