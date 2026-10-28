@@ -123,6 +123,13 @@ def _audit(engine: Engine) -> list[AuditLog]:
         )
 
 
+def _warnings(caplog: Any) -> list[logging.LogRecord]:
+    """The warnings the test captured: alembic's INFO lines name the revision too, and reach the
+    capture whenever the root logger lets INFO through (``--log-level``, a command line run
+    earlier in the same process)."""
+    return [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
 def _legacy_values(row: Mapping[str, Any]) -> dict[str, Any]:
     """The administrator's rows of a fixture row: every key that differs from the default, and
     ``nat.wan_transip`` when all are defaults (an administrator saved a default)."""
@@ -240,7 +247,7 @@ def test_the_case_matrix(db_engine: Engine, row: dict[str, Any], caplog: Any) ->
         else:
             assert key not in rows, key
     if not row["valid"]:
-        (warning,) = [r for r in caplog.records if "0018_nat_egresses" in r.getMessage()]
+        (warning,) = [r for r in _warnings(caplog) if "0018_nat_egresses" in r.getMessage()]
         assert "setting_" in warning.getMessage()  # the rule, never a value
         for address in [*row["public_ips"], row["wan_transip"]]:
             if address:
@@ -425,7 +432,7 @@ def test_the_downgrade_rebuilds_the_legacy_rows_after_a_change(
     assert rows["nat.wan_transip"][:2] == ("100.64.13.9", ":migration")
     assert rows["lookup.port_hint"][:2] == (True, ":migration")
     assert not set(rows) & {"nat.egresses", MIGRATION_KEY, CHANGES_KEY}
-    (warning,) = [r.getMessage() for r in caplog.records if "0018_nat_egresses" in r.getMessage()]
+    (warning,) = [m for r in _warnings(caplog) if "0018_nat_egresses" in (m := r.getMessage())]
     for lost in ("hat-1 (public networks)", "hat-2 (public)", "hat-3", "misafir", "dmz"):
         assert lost in warning
 

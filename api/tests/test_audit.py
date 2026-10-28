@@ -342,15 +342,19 @@ def test_torn_tail_is_cut_before_the_next_append(
     layout: Layout,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # One site day for every clock read (entries and flushes): on the real clock a site
+    # midnight (21:00 UTC) between two flushes splits the spool into two files.
+    monkeypatch.setattr(audit, "utc_now", _at(date(2026, 10, 12), 12))
     for number in range(2):
         with app_session_factory() as session:
             record_audit(session, actor=TOLGA, action=f"a{number}")
             session.commit()
+    append = audit._append
     monkeypatch.setattr(audit, "_append", _torn_append)
     with app_session_factory() as session:
         record_audit(session, actor=TOLGA, action="torn")
         session.commit()  # the entry is committed; only its spool line is torn
-    monkeypatch.undo()
+    monkeypatch.setattr(audit, "_append", append)  # not undo(): that would drop the clock
     (path,) = (layout.spool / "_audit").glob("*.jsonl")
     assert not path.read_bytes().endswith(b"\n")
     assert flush_audit_spool(db_engine, layout) == 1

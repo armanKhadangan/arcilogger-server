@@ -122,10 +122,16 @@ def test_current_month_has_today_open_and_future_days(
     client: TestClient, login_as: Login, layout: Layout
 ) -> None:
     login_as(client, "admin")
-    today = site_day(utc_now())
+    # The router reads its own clock (VaultView.now), so a site midnight (21:00 UTC) can fall
+    # between the test's read and the server's. Take the server's day from the response and
+    # bracket it with reads before and after the request: a wrong server day still fails.
+    before = utc_now()
     response = client.get(f"{API}/calendar")
+    after = utc_now()
     assert response.status_code == 200
     body = response.json()
+    today = date.fromisoformat(body["today"])
+    assert site_day(before) <= today <= site_day(after)
     assert body["month"] == today.strftime("%Y-%m")
     days = {date.fromisoformat(cell["day"]): cell for cell in body["days"]}
     assert days[today]["state"] == "open"
