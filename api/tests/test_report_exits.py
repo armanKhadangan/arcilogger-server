@@ -817,6 +817,56 @@ def test_e_k3_a_session_that_changed_exit_names_both_exits(
     assert "oturumun kayıtlarında ayrıca" not in text
 
 
+def test_a_session_that_left_by_an_unclaimed_row_names_it_in_words(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    site: Site,
+) -> None:
+    """E-k3 with the final row on wan3, an interface of neither exit sharing T1: the engine
+    names that row's exit "-", which the match's row says in words, never "ayrıca: -"
+    (deviation d)."""
+    traffic(
+        app_session_factory,
+        layout,
+        {
+            "at": AT - timedelta(seconds=30),
+            "srcip": PC,
+            "srcport": 51031,
+            "transip": T1,
+            "dstintf": "wan1",
+            "interim": True,
+        },
+        {
+            "at": AT + timedelta(seconds=60),
+            "srcip": PC,
+            "srcport": 51031,
+            "transip": T1,
+            "dstintf": "wan3",
+        },
+    )
+    exits(
+        app_session_factory,
+        {
+            "hat-1": {"mode": "isp_nat", "transips": [T1], "public": [P1], "interfaces": ["wan1"]},
+            "hat-2": {"mode": "isp_nat", "transips": [T1], "public": [P2], "interfaces": ["wan2"]},
+        },
+    )
+    signed_in(client, login_as, app_session_factory)
+    data, text = report(client, public_ip=T1, public_port=51031)
+    (match,) = data["outcome"]["matches"]
+    (changed,) = [e for e in data["outcome"]["explanations"] if e["key"] == "session_changed_exit"]
+    assert (match["egress"], changed["params"]["egresses"]) == ("hat-1", "hat-1, -")
+    assert (
+        "Çıkış / Exit hat-1 · dstintf wan1 · oturumun kayıtlarında ayrıca: hiçbir çıkışa tanımlı "
+        "olmayan bir NAT adresi / the session's records also show: a NAT address no exit claims "
+        "Oturum aralığı" in text
+    )
+    assert "ayrıca: -" not in text
+    assert "also show: -" not in text
+
+
 def _changed_beside_a_session_on_one_exit(
     client: TestClient,
     factory: sessionmaker[Session],

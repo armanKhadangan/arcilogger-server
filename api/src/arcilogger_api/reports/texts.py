@@ -405,6 +405,11 @@ CHANGED_EXIT: Final = (
     "oturumun kayıtlarında ayrıca: {exits}",
     "the session's records also show: {exits}",
 )
+#: ``{exits}`` of :data:`CHANGED_EXIT` for the engine's "-": a row no exit claims (deviation d).
+UNCLAIMED_EXIT: Final = (
+    "hiçbir çıkışa tanımlı olmayan bir NAT adresi",
+    "a NAT address no exit claims",
+)
 CHANGED_ROWS: Final = (
     "oturumun kayıtları birden çok çıkış gösteriyor: {rows}",
     "the session's records show more than one exit: {rows}",

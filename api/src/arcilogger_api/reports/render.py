@@ -929,8 +929,16 @@ class _Builder:
         others = [n for n in named if n and n != own]
         varying = sum(1 for other in self.outcome.matches if varies(other))
         if changed.params.get("count") == 1 and varying == 1 and own in named and others:
-            shown = ", ".join(labels.get(other, other) for other in others)
-            return text + " · " + " / ".join(_pair(texts.CHANGED_EXIT, exits=shown))
+            # the engine's "-" (a row no exit claims) in words, in each language
+            shown = [
+                ", ".join(
+                    unclaimed if other == "-" else labels.get(other, other) for other in others
+                )
+                for unclaimed in texts.UNCLAIMED_EXIT
+            ]
+            changed_tr = texts.CHANGED_EXIT[0].format(exits=shown[0])
+            changed_en = texts.CHANGED_EXIT[1].format(exits=shown[1])
+            return f"{text} · {changed_tr} / {changed_en}"
         rows = "; ".join(f"NAT {_dash(t)} · dstintf {d or '-'}" for t, d in signatures)
         return text + " · " + " / ".join(_pair(texts.CHANGED_ROWS, rows=rows))
 
