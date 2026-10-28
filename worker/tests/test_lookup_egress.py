@@ -1052,6 +1052,26 @@ def test_e_k4_an_address_no_exit_claims_names_every_exit_changed_after(
     text = warning(lookup(db_session, settings, public_ip=a))
     assert text is not None
     assert "hat-2 (" in text[0]
+    # (4) An exit outside the searched ones, written around change_setting (no entry in the
+    # change record): the nat.egresses row's time and author stand in for its change.
+    catch_all = {**BASE, "tanimsiz": {"mode": "isp_nat"}}
+    exits(db_session, catch_all)
+    hat_3 = isp_nat(["100.64.14.9"], public=["198.51.100.80"])
+    by_hand = validate_egresses({**catch_all, "hat-3": hat_3})
+    set_setting(db_session, "nat.egresses", by_hand, updated_by="yonetici")
+    db_session.commit()
+    settings = LookupSettings.from_settings(get_settings(db_session))
+    outcome = lookup(db_session, settings, public_ip=other)
+    assert resolution(outcome) == ("public_unknown", ["tanimsiz"])
+    text = warning(outcome)
+    assert text is not None
+    assert "hat-3 (" in text[0]
+    assert "hat-1 (" not in text[0]
+    assert outcome.egress is not None
+    assert [(c.name, c.changed_by, c.after_event) for c in outcome.egress.changes] == [
+        ("tanimsiz", ":migration", False),
+        ("hat-3", "yonetici", True),
+    ]
 
 
 # -- E-l, E-m, E-n, E-n2: unknown trandisp, unmapped addresses, the not-seen widening -------------

@@ -1001,7 +1001,9 @@ class _Lookup:
 
     def _changes(self, plan: _Plan) -> list[EgressChange]:
         """The last content change of each exit used and, for an address no exit claims now,
-        of every exit (deleted ones included) changed after the moment (D32)."""
+        of every exit (deleted ones included) changed after the moment (D32). A current exit
+        without an entry in the change record (a value written around ``change_setting``) falls
+        back to the ``nat.egresses`` row's time and author, so the warning errs on showing."""
         at = self.request.at
         found: dict[str, EgressChange] = {}
         for egress in plan.exits:
@@ -1012,7 +1014,7 @@ class _Lookup:
                     egress.name, changed_at, by, deleted, after_event=changed_at > at
                 )
         if plan.resolution in _UNCLAIMED_RESOLUTIONS:
-            for name in sorted(self.status.changes):
+            for name in sorted({*self.status.changes, *(egress.name for egress in self.exits)}):
                 last = self.status.last_change(name)
                 if name not in found and last is not None and last[0] > at:
                     found[name] = EgressChange(name, last[0], last[1], last[2], after_event=True)
