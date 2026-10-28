@@ -10,11 +10,14 @@ never the line that ended it and never a renewal after the moment), the format n
 missing renewal (D6), the DECLINE shapes of D33 (those the lease build decides and those a
 build made before a network was entered missed), relayed networks, the migrations from MikroTik
 DHCP (D5, D33's MikroTik variant, a move loaded before the upgrade), a rollback window (D8), two
-DHCP origins (D27), a RELEASE mapped after the build, and unconfigured senders (D24).
+DHCP origins (D27), the probe for FortiGate DHCP lines that never became lease evidence when no
+chain could be built (D8, 2.8.3), a RELEASE mapped after the build, and unconfigured senders
+(D24).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -48,7 +51,7 @@ from arcilogger_worker.lookup import (
 )
 from arcilogger_worker.lookup.attribution import Attributor
 from arcilogger_worker.lookup.types import EvidenceRef
-from arcilogger_worker.testing import FIREWALL, Evidence, tr
+from arcilogger_worker.testing import FIREWALL, FORTIGATE_DHCP_TEXTS, Evidence, tr
 
 DAY = date(2026, 10, 12)
 AT = tr(DAY, 11, 23, 41)
@@ -124,21 +127,24 @@ def unconverted_line(
     mac: str,
     *,
     hostname: str | None = None,
-    lease: int = 86400,
+    lease: int | None = 86400,
     interface: str = "vlan42",
     source: str = "fortigate",
-) -> None:
-    """A FortiGate DHCP ACK that stayed an ``fg_event`` row with the full DHCP shape (D8: a line
-    loaded before the upgrade, or by the previous version after a rollback): its spool line and
-    the row that version stored, every DHCP field in ``extra``."""
+    logid: str = "0100026001",
+) -> int:
+    """A FortiGate DHCP ACK (a RELEASE with ``logid="0100026002"`` and ``lease=None``) that
+    stayed an ``fg_event`` row with the full DHCP shape (D8: a line loaded before the upgrade,
+    or by the previous version after a rollback): its spool line and the row that version
+    stored, every DHCP field in ``extra``; returns the row id."""
     sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
     local = to_site(time)
+    logdesc, msg = FORTIGATE_DHCP_TEXTS[logid]
     fields = {
         "interface": interface,
-        "dhcp_msg": "Ack",
+        "dhcp_msg": "Ack" if logid == "0100026001" else "Release",
         "mac": mac.upper(),
         "ip": ip,
-        "lease": str(lease),
+        "lease": None if lease is None else str(lease),
         "hostname": hostname,
     }
     tail = "".join(
@@ -149,23 +155,23 @@ def unconverted_line(
     message = (
         f'<190>date={local:%Y-%m-%d} time={local:%H:%M:%S} devname="FIREWALL-01" '
         f'devid="FGT0000000000000" eventtime={int(time.timestamp() * 1e9)} tz="+0300" '
-        f'logid="0100026001" type="event" subtype="system" level="information" vd="root" '
-        f'logdesc="DHCP Ack log"{tail} msg="DHCP server sends a DHCPACK"'
+        f'logid="{logid}" type="event" subtype="system" level="information" vd="root" '
+        f'logdesc="{logdesc}"{tail} msg="{msg}"'
     )
     common = evidence._write(source, sender, time, message)
     extra = {key: value for key, value in fields.items() if value is not None}
-    evidence.session.add(
-        FgEvent(
-            **common,
-            logid="0100026001",
-            subtype="system",
-            level="information",
-            logdesc="DHCP Ack log",
-            msg="DHCP server sends a DHCPACK",
-            extra={"devid": "FGT0000000000000", "vd": "root", **extra},
-        )
+    row = FgEvent(
+        **common,
+        logid=logid,
+        subtype="system",
+        level="information",
+        logdesc=logdesc,
+        msg=msg,
+        extra={"devid": "FGT0000000000000", "vd": "root", **extra},
     )
+    evidence.session.add(row)
     evidence.session.flush()
+    return int(row.id)
 
 
 def stranger(session: Session) -> None:
@@ -924,6 +930,300 @@ def test_a_line_loaded_in_a_rollback_window(
     text = outcome_text(outcome)
     assert laptop not in text
     assert "pln-nb44" not in text
+
+
+# -- FortiGate DHCP rows that did not become lease evidence (D8 probe, 2.8.3) ---------------------
+
+#: The probe's text, its citation label (2.8.3) and the static-client warning (2.11).
+NOT_CONVERTED, MISSING = "fortigate_dhcp_not_converted", "chain_missing"
+UNCONVERTED_LABEL = (
+    "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
+)
+#: A pre-upgrade ACK of the PC four days before the moment, with the FortiOS default lease.
+WEEK = 604800
+
+
+def outcome_note(outcome: LookupOutcome, key: str) -> dict[str, Any]:
+    return dict(next(e for e in outcome.explanations if e.key == key).params)
+
+
+def wan_exit(session: Session) -> None:
+    """Exit ``wan`` with the FortiGate's NAT address, entered before the evidence."""
+    value = validate_egresses({"wan": {"mode": "isp_nat", "transips": [WAN]}})
+    set_setting(session, "nat.egresses", value, updated_by="tolga")
+    session.execute(update(Setting).where(Setting.key == "nat.egresses").values(updated_at=ENTERED))
+    session.commit()
+
+
+def assert_cited(outcome: LookupOutcome, row: int, at: datetime, evidence: Evidence) -> None:
+    """The one ``unconverted_dhcp`` citation: that ``fg_event`` row with its raw line, labelled
+    as 2.8.3 says, and never an attribution."""
+    (ref,) = outcome.unconverted_dhcp
+    assert (ref.table, ref.row_id, ref.time, ref.summary) == (
+        "fg_event",
+        row,
+        at,
+        UNCONVERTED_LABEL,
+    )
+    assert ref.raw is not None
+    assert ref.raw.source == "fortigate"
+    line = evidence.raw_line(ref.raw.source, ref.raw.day, ref.raw.line, ref.raw.offset or 0)
+    assert b'logid="0100026001"' in line
+    assert PC_MAC.upper().encode() in line
+
+
+def test_a_static_client_gives_a_match_without_a_chain(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A printer set statically to .200: its session is listed, its chain ends at the internal
+    IP (``chain_missing``), and the probe finds no DHCP row to speak of."""
+    evidence.traffic(AT, "172.20.42.200", 51001, transip=WAN)
+    build(db_session, DAY, DAY)
+    outcome = lookup(db_session, public_ip="198.51.100.20")
+    assert outcome.mode == "candidates"
+    (match,) = outcome.matches
+    assert (match.traffic.srcip, match.chain) == ("172.20.42.200", None)
+    assert outcome_note(outcome, MISSING) == {"count": 1}
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+
+
+def test_a_covering_line_that_stayed_an_event_row_is_named_and_cited(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A pre-upgrade ACK four days before the moment with ``lease=604800`` (the probe window
+    covers FortiGate lease times): the internal lookup names the IP with the three possible
+    reasons and cites the row in ``unconverted_dhcp``; an exact match does the same."""
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    evidence.traffic(AT, PC, 51001, "203.0.113.10", 443, transip=WAN, duration=10)
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert keys(outcome)[-2:] == ["no_lease", NOT_CONVERTED]
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    text = next(e for e in outcome.explanations if e.key == NOT_CONVERTED)
+    for reason in ("bu sürüme yükseltmeden önce", "fortigate.dhcp", "bir geri almadan sonra"):
+        assert reason in text.text_tr
+    for reason in ("before the upgrade", "fortigate.dhcp", "after a rollback"):
+        assert reason in text.text_en
+    assert_cited(outcome, row, acked, evidence)
+
+    wan_exit(db_session)
+    exact = lookup(db_session, public_ip=WAN, public_port=51001, protocol="tcp")
+    assert exact.mode == "exact"
+    (match,) = exact.matches
+    assert match.chain is None
+    assert outcome_note(exact, MISSING) == {"count": 1}
+    assert outcome_note(exact, NOT_CONVERTED) == {"ips": PC}
+    assert_cited(exact, row, acked, evidence)
+
+
+def test_an_ack_older_than_its_lease_is_not_named(db_session: Session, evidence: Evidence) -> None:
+    """The window reaches 100 days back, but a 1-day lease logged 100 days before the moment
+    would not have covered it (the coverage rule)."""
+    unconverted_line(evidence, AT - timedelta(days=100), PC, PC_MAC, hostname=HOST)
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+
+
+@pytest.mark.parametrize(
+    ("lease", "before", "named"),
+    [
+        (0, timedelta(hours=20), True),
+        (0, timedelta(hours=27), False),
+        (9_000_000, timedelta(hours=27), False),
+    ],
+    ids=["zero-inside", "zero-past", "beyond-range"],
+)
+def test_an_unusable_logged_lease_covers_by_the_configured_time(
+    db_session: Session, evidence: Evidence, lease: int, before: timedelta, named: bool
+) -> None:
+    """A logged lease outside 300-8,640,000 s does not decide the coverage: the configured time
+    of the interface x ``lease.timeout_percent`` does (86400 s x 110 % = 26.4 h), as for a
+    lease (D6)."""
+    unconverted_line(evidence, AT - before, PC, PC_MAC, lease=lease)
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert (NOT_CONVERTED in keys(outcome)) is named
+    assert len(outcome.unconverted_dhcp) == (1 if named else 0)
+
+
+def test_a_later_line_of_another_client_is_never_read(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Another client's ACK for the address an hour after the moment says nothing about it: it is
+    never cited, and its MAC and host name appear nowhere in the outcome, with or without the
+    PC's own covering line before the moment."""
+    unconverted_line(evidence, AT + timedelta(hours=1), PC, OTHER, hostname="MUH-NB03", lease=WEEK)
+    build(db_session, DAY, DAY)
+    alone = internal(db_session, PC, AT)
+    assert "no_lease" in keys(alone)
+    assert NOT_CONVERTED not in keys(alone)
+    assert alone.unconverted_dhcp == ()
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    db_session.commit()
+    outcome = internal(db_session, PC, AT)
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    assert_cited(outcome, row, acked, evidence)
+    for text in (outcome_text(alone), outcome_text(outcome)):
+        assert OTHER not in text
+        assert "muh-nb03" not in text
+
+
+def test_an_ack_and_its_release_before_the_moment_say_nothing(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The newest row before the moment is the pre-upgrade RELEASE: the client left, nothing is
+    said and nothing is cited."""
+    unconverted_line(evidence, AT - timedelta(days=4), PC, PC_MAC, hostname=HOST, lease=WEEK)
+    unconverted_line(evidence, AT - timedelta(days=1), PC, PC_MAC, lease=None, logid="0100026002")
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+
+
+def test_a_converted_release_after_the_old_ack_says_nothing(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The pre-upgrade ACK of :31 (lease 604800) at U - 1 d, then a converted ACK of :77 for the
+    same address at U + 2 h and its RELEASE at U + 3 h: at U + 5 h the newest row before the
+    moment is the converted RELEASE, so no chain, no text, no citation. Before :77's ACK the old
+    line is the newest row and is named."""
+    u = tr(DAY, 8)
+    row = unconverted_line(evidence, u - timedelta(days=1), PC, DECLINER, lease=WEEK)
+    evidence.fortigate_dhcp(u + timedelta(hours=2), PC, OTHER)
+    evidence.fortigate_dhcp(
+        u + timedelta(hours=3), PC, OTHER, logid="0100026002", dhcp_msg="Release", lease=None
+    )
+    build(db_session, DAY - timedelta(days=1), DAY)
+    outcome = internal(db_session, PC, u + timedelta(hours=5))
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert "no_lease" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+    earlier = internal(db_session, PC, u + timedelta(hours=1))
+    assert outcome_note(earlier, NOT_CONVERTED) == {"ips": PC}
+    assert [ref.row_id for ref in earlier.unconverted_dhcp] == [row]
+
+
+def test_a_refused_converted_row_does_not_silence_the_probe(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Round 6: ``fg_dhcp`` rows that are no lease evidence (``trust.kept`` refuses them: the
+    receive time, an unmapped logid, an unconfigured sender) newer than the covering line are
+    no converted rows the timeline saw."""
+    stranger(db_session)
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    evidence.fortigate_dhcp(AT - timedelta(hours=3), PC, OTHER, device_time=False)
+    evidence.fortigate_dhcp(AT - timedelta(hours=2), PC, OTHER, logid="0100026003")
+    evidence.fortigate_dhcp(AT - timedelta(hours=1), PC, OTHER, source=STRANGER)
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    assert_cited(outcome, row, acked, evidence)
+
+
+def test_a_line_of_an_unknown_sender_is_never_cited(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """D24: the same pre-upgrade ACK written by an ``unknown-<ip>`` sender is no evidence of
+    anything; a forged line never reaches the outcome."""
+    stranger(db_session)
+    unconverted_line(evidence, AT - timedelta(days=4), PC, PC_MAC, hostname=HOST, lease=WEEK,
+                     source=STRANGER)  # fmt: skip
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+
+
+#: Five clients without a chain whose addresses have covering pre-upgrade ACKs.
+FIVE = [f"172.20.42.{61 + n}" for n in range(5)]
+
+
+def test_candidates_are_named_but_their_lines_never_cited(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A candidate lookup with 5 chainless candidates: the text names their IPs, nothing is
+    cited (a double-NAT report would print other people's DHCP lines), and no MAC or host name
+    of those lines shows."""
+    for n, ip in enumerate(FIVE):
+        mac = f"00:00:5e:00:53:{0x61 + n:02x}"
+        unconverted_line(evidence, AT - timedelta(days=4), ip, mac, hostname=f"PLN-NB{n:02}",
+                         lease=WEEK)  # fmt: skip
+        evidence.traffic(AT + timedelta(seconds=n), ip, 51001 + n, transip=WAN)
+    build(db_session, DAY, DAY)
+    outcome = lookup(db_session, public_ip="198.51.100.20")
+    assert outcome.mode == "candidates"
+    assert sorted(m.traffic.srcip for m in outcome.matches) == FIVE
+    assert all(m.chain is None for m in outcome.matches)
+    assert outcome_note(outcome, MISSING) == {"count": 5}
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": ", ".join(FIVE)}
+    assert outcome.unconverted_dhcp == ()
+    text = outcome_text(outcome)
+    assert "00:00:5e:00:53:6" not in text
+    assert "pln-nb" not in text
+
+
+def test_each_candidate_is_probed_at_its_own_moment(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A candidate's chain and its probe use the moment of its own session: another client's
+    ACK for .71 logged 10 s after .71's session ended (and before the requested moment) is no
+    row before that moment, while .72's covering line is named."""
+    early, late = "172.20.42.71", "172.20.42.72"
+    evidence.traffic(AT - timedelta(seconds=30), early, 51001, transip=WAN, duration=10)
+    unconverted_line(evidence, AT - timedelta(seconds=20), early, OTHER, lease=WEEK)
+    evidence.traffic(AT, late, 51002, transip=WAN)
+    unconverted_line(evidence, AT - timedelta(days=4), late, PC_MAC, lease=WEEK)
+    build(db_session, DAY, DAY)
+    outcome = lookup(db_session, public_ip="198.51.100.20")
+    assert sorted(m.traffic.srcip for m in outcome.matches) == [early, late]
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": late}
+    assert OTHER not in outcome_text(outcome)
+
+
+def test_the_probe_reads_twenty_addresses_at_most(db_session: Session, evidence: Evidence) -> None:
+    """One probe per lookup for at most 20 IPs: those of the first 20 chainless matches."""
+    clients = [f"172.20.42.{100 + n}" for n in range(21)]
+    for n, ip in enumerate(clients):
+        unconverted_line(evidence, AT - timedelta(hours=12), ip, f"00:00:5e:00:53:{n:02x}")
+        evidence.traffic(AT, ip, 51001 + n, transip=WAN)
+    build(db_session, DAY, DAY)
+    outcome = lookup(db_session, public_ip="198.51.100.20")
+    assert len(outcome.matches) == 21
+    assert outcome_note(outcome, MISSING) == {"count": 21}
+    first = sorted((m.traffic.srcip for m in outcome.matches[:20]), key=ipaddress.ip_address)
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": ", ".join(first)}
+
+
+def test_a_mac_only_lookup_finds_the_line_by_its_mac(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Round 6: a MAC-only lookup whose ACK exists only as an ``fg_event`` line (the MAC in the
+    FortiGate's dashed form) names the address of that line and cites it, instead of a bare
+    ``no_lease_for_mac``."""
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, "00-00-5e-00-53-57", hostname=HOST, lease=WEEK)
+    build(db_session, DAY, DAY)
+    outcome = lookup(db_session, mac=PC_MAC)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert keys(outcome)[-2:] == ["no_lease_for_mac", NOT_CONVERTED]
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    (ref,) = outcome.unconverted_dhcp
+    assert (ref.row_id, ref.time, ref.summary) == (row, acked, UNCONVERTED_LABEL)
+    other = lookup(db_session, mac="00:00:5e:00:53:58")
+    assert NOT_CONVERTED not in keys(other)
+    assert other.unconverted_dhcp == ()
 
 
 # -- two DHCP origins (D27) -----------------------------------------------------------------------
