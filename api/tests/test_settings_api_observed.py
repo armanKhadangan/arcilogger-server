@@ -343,9 +343,7 @@ def test_ipv6_nat_addresses_are_not_listed(
     response = client.get(URL)
     assert response.status_code == 200, response.text
     nat = response.json()["nat"]
-    assert [(r["transip"], r["dstintf"], r["sessions"]) for r in nat["rows"]] == [
-        (WAN, "wan1", 1)
-    ]
+    assert [(r["transip"], r["dstintf"], r["sessions"]) for r in nat["rows"]] == [(WAN, "wan1", 1)]
     assert (nat["unmapped_transips"], nat["unknown_trandisp"]) == ([WAN], [])
     assert "2001:db8" not in response.text
 
