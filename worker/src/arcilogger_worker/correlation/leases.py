@@ -3,7 +3,8 @@
 Storage rule: a ``leases`` row belongs to the **site day of its start** (Europe/Istanbul).
 
 * :func:`rebuild_day` — idempotent full rebuild of one site day in one transaction: recompute
-  the day's intervals from ``mt_dhcp`` / ``mt_arp`` / ``fg_traffic`` and write the difference
+  the day's intervals from the DHCP tables ``mt_dhcp`` / ``fg_dhcp`` (:mod:`.dhcp_sources`),
+  ``mt_arp`` and ``fg_traffic`` and write the difference
   (unchanged rows keep their ``id``; rows that no longer follow from the evidence are deleted).
   Intervals that started earlier and were **alive at midnight** are the **seeds** (see
   :func:`_seeds`): their state at midnight is reconstructed from their stored evidence before
@@ -28,7 +29,17 @@ rows (tested).
 Traffic volume: ``fg_traffic`` holds about a million rows a day, but the timeline only needs, per
 source IP, the first and last row of every :data:`TRAFFIC_BUCKET_SECONDS` bucket. This is exact
 as long as the bucket is shorter than the shortest lease timeout (checked): an interval that is
-alive at a bucket's first row is still alive at its last.
+alive at a bucket's first row is still alive at its last. Traffic of a sender that is not a
+configured FortiGate (``trust.untrusted_sources``, ADR-0016 D24) never keeps a lease alive.
+
+**FortiGate DHCP (ADR-0016).** An ``fg_dhcp`` interval is not extended by traffic unless
+``dhcp.fortigate_traffic_extends`` (D26), so its seed's state at midnight takes its last
+evidence from its DHCP records only, and its lease time from the latest ACK of its pair before
+midnight (or before the event that ends it). A FortiGate ACK of a MAC for another address ends
+that MAC's lease (D33), so the seeds' raw DHCP rows and the look-ahead are also read by the MACs
+of the DHCP intervals. The job report counts the FortiGate rows read and refused
+(:mod:`.dhcp_sources`), and the timeline's ``fg_renewal_ack``, ``fg_mac_moved`` and
+``superseded_across_sources``.
 """
 
 from __future__ import annotations
@@ -45,15 +56,17 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import day_window, site_day, utc_now
-from arcilogger_db.models import Device, FgTraffic, Lease, MtArp, MtDhcp
+from arcilogger_db.models import Device, FgDhcp, FgTraffic, Lease, MtArp
 from arcilogger_db.network import find_vlan
 from arcilogger_db.settings import get_setting, get_settings
+from arcilogger_worker.correlation import dhcp_sources
 from arcilogger_worker.correlation.conflicts import (
     find_conflicts,
     raise_conflict_alerts,
     resolve_unsupported,
 )
 from arcilogger_worker.correlation.devices import DeviceSighting, upsert_devices
+from arcilogger_worker.correlation.dhcp_sources import DhcpRow, load_rows
 from arcilogger_worker.correlation.late import (
     find_late_days,
     get_seen,
@@ -70,6 +83,7 @@ from arcilogger_worker.correlation.timeline import (
     Evidence,
     LeaseInterval,
     LeaseTimeline,
+    Origin,
     TimelineRules,
     TrafficSeen,
     bounded,
@@ -85,12 +99,15 @@ from arcilogger_worker.correlation.watermark import (
 )
 from arcilogger_worker.lookup.refs import (
     ARP_TABLE,
-    DHCP_TABLE,
+    DHCP_TABLES,
+    FG_DHCP_TABLE,
+    TABLE_RANK,
     TRAFFIC_TABLE,
     arp_ref,
-    dhcp_ref,
+    dhcp_action,
     traffic_ref,
 )
+from arcilogger_worker.lookup.trust import untrusted_sources
 from arcilogger_worker.lookup.types import EvidenceRef, LookupSettings
 
 #: pg_advisory_xact_lock key ("ARCILEAS" as a signed 64-bit integer).
@@ -186,11 +203,19 @@ class Context:
     server_vlan: re.Pattern[str] | None
     infrastructure: frozenset[str]
     oui: OuiTable | None
-    _vlans: dict[str, int | None] = field(default_factory=dict)
+    #: Sources whose ``fg_*`` rows are no evidence (ADR-0016 D24), loaded once per run.
+    untrusted: frozenset[str] = frozenset()
+    #: Rows read and refused (:mod:`.dhcp_sources`), for the job report.
+    stats: Counter[str] = field(default_factory=Counter)
+    #: Per IP: the VLAN number and the subnet of the configured network holding it.
+    _networks: dict[str, tuple[int | None, str | None]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, session: Session) -> Context:
-        """Settings of the run; ``ValueError`` for settings the timeline cannot work with."""
+        """Settings of the run; ``ValueError`` for settings the timeline cannot work with.
+
+        ``nat.egresses`` is kept as stored and never parsed here (``LookupSettings``), so an
+        exit value that cannot be read never stops the lease timeline."""
         settings = LookupSettings.from_settings(get_settings(session))
         release_grace = int(get_setting(session, RELEASE_GRACE_KEY, DEFAULT_RELEASE_GRACE))
         rules = TimelineRules.from_settings(settings, release_grace=release_grace)
@@ -209,10 +234,12 @@ class Context:
             server_vlan=server_vlan,
             infrastructure=frozenset([*settings.infrastructure_macs, *flagged]),
             oui=load_oui(get_setting(session, "devices.oui_file", "")),
+            untrusted=untrusted_sources(session),
         )
 
     def vlan_for(self, ip: str, server: str | None = None, vlan: int | None = None) -> int | None:
-        """The row's VLAN, else the DHCP server name's (``dhcp60``), else the subnet's."""
+        """The row's VLAN, else the DHCP server name's (``dhcp60``), else the subnet's (a
+        FortiGate row passes no server: ``dhcp.server_vlan_regex`` names MikroTik servers)."""
         if vlan is not None:
             return vlan
         if server and self.server_vlan is not None:
@@ -221,29 +248,24 @@ class Context:
                 number = int(match.group(1))
                 if 1 <= number <= 4094:
                     return number
-        if ip not in self._vlans:
+        return self._network(ip)[0]
+
+    def network_for(self, ip: str) -> str | None:
+        """The subnet of the configured network holding ``ip`` (the most specific ``vlans`` row,
+        ``find_vlan``), else ``None``: the key of ADR-0016 D33, whether or not the network has a
+        VLAN number."""
+        return self._network(ip)[1]
+
+    def _network(self, ip: str) -> tuple[int | None, str | None]:
+        if ip not in self._networks:
             row = find_vlan(self.session, ip)
-            self._vlans[ip] = None if row is None else row.vlan_id
-        return self._vlans[ip]
+            self._networks[ip] = (None, None) if row is None else (row.vlan_id, str(row.subnet))
+        return self._networks[ip]
 
 
 # -- evidence from the database -------------------------------------------------------------------
 
 
-_DHCP_COLUMNS = (
-    MtDhcp.id,
-    MtDhcp.time,
-    MtDhcp.server,
-    MtDhcp.vlan,
-    MtDhcp.action,
-    MtDhcp.ip,
-    MtDhcp.mac,
-    MtDhcp.hostname,
-    MtDhcp.source,
-    MtDhcp.raw_day,
-    MtDhcp.raw_line,
-    MtDhcp.raw_offset,
-)
 _ARP_COLUMNS = (
     MtArp.id,
     MtArp.time,
@@ -275,30 +297,16 @@ TRAFFIC_REF_COLUMNS: Final = (
 
 
 def load_dhcp(
-    ctx: Context, lo: datetime, hi: datetime, ips: Collection[str] | None = None
+    ctx: Context,
+    lo: datetime,
+    hi: datetime,
+    ips: Collection[str] | None = None,
+    macs: Collection[str] | None = None,
+    *,
+    count: bool = False,
 ) -> list[DhcpEvent]:
-    query = select(*_DHCP_COLUMNS).where(MtDhcp.time >= lo, MtDhcp.time < hi)
-    if ips is not None:
-        if not ips:
-            return []
-        query = query.where(MtDhcp.ip.in_(sorted(ips)))
-    events = []
-    for row in ctx.session.execute(query.order_by(MtDhcp.time, MtDhcp.id)):
-        if row.action not in ("assigned", "deassigned"):
-            continue
-        events.append(
-            DhcpEvent(
-                time=row.time,
-                action=row.action,
-                ip=row.ip,
-                mac=row.mac,
-                server=row.server,
-                vlan=ctx.vlan_for(row.ip, row.server, row.vlan),
-                hostname=row.hostname,
-                ref=dhcp_ref(row),
-            )
-        )
-    return events
+    """The DHCP events of both tables (:func:`.dhcp_sources.load_rows`)."""
+    return dhcp_sources.events(load_rows(ctx, lo, hi, ips, macs, count=count))
 
 
 def load_arp(
@@ -329,6 +337,8 @@ def load_traffic(
         .where(FgTraffic.time >= lo, FgTraffic.time < hi, FgTraffic.srcip.in_(sorted(ips)))
         .group_by(FgTraffic.srcip, bucket)
     )
+    if ctx.untrusted:
+        query = query.where(FgTraffic.source.not_in(sorted(ctx.untrusted)))
     events: list[TrafficSeen] = []
     for ip, first, last in ctx.session.execute(query):
         if ip is None:  # pragma: no cover - the IN filter excludes NULL
@@ -340,9 +350,9 @@ def load_traffic(
 
 
 def first_evidence_time(session: Session) -> datetime | None:
-    """Earliest DHCP or ARP row (start of a catch-up)."""
+    """Earliest DHCP or ARP evidence (start of a catch-up; :func:`.dhcp_sources.first_time`)."""
     times = [
-        session.scalar(select(func.min(MtDhcp.time))),
+        dhcp_sources.first_time(session),
         session.scalar(select(func.min(MtArp.time))),
     ]
     found = [t for t in times if t is not None]
@@ -370,6 +380,7 @@ def interval_from_row(row: Lease) -> LeaseInterval:
         evidence=refs,
         row_id=row.id,
         last_traffic=max(traffic) if traffic else None,
+        lease_seconds=row.lease_seconds,
     )
 
 
@@ -386,6 +397,7 @@ def _values(interval: LeaseInterval) -> dict[str, Any]:
         "confidence": interval.confidence,
         "source_table": interval.source_table,
         "last_evidence": interval.last_evidence,
+        "lease_seconds": interval.lease_seconds,
         "evidence": [ref.to_dict() for ref in interval.evidence],
     }
 
@@ -546,21 +558,31 @@ class _Seeds:
 
 
 #: Order of evidence at equal times (:func:`.timeline.evidence_key`): traffic, ARP, release,
-#: assignment.
+#: assignment; then the DHCP table (``TABLE_RANK``) and the row id.
 _RANK: Final = {TRAFFIC_TABLE: 0, ARP_TABLE: 1, "deassigned": 2, "assigned": 3}
+Key = tuple[datetime, int, int, int]
+#: The lease a FortiGate DHCP ref's summary cites (``…, lease 86400)``, :func:`.refs.fg_dhcp_ref`).
+_REF_LEASE: Final = re.compile(r", lease (\d+)\)$")
 
 
-def _ref_key(ref: EvidenceRef) -> tuple[datetime, int, int]:
-    if ref.table == DHCP_TABLE:
-        rank = _RANK["deassigned"] if " deassigned " in f" {ref.summary} " else _RANK["assigned"]
+def _ref_key(ref: EvidenceRef) -> Key:
+    if ref.table in DHCP_TABLES:
+        rank = _RANK["deassigned"] if dhcp_action(ref) == "deassigned" else _RANK["assigned"]
     else:
         rank = _RANK.get(ref.table, 0)
-    return (ref.time, rank, ref.row_id or 0)
+    return (ref.time, rank, TABLE_RANK.get(ref.table, 0), ref.row_id or 0)
 
 
-def _row_key(row: Any, table: str) -> tuple[datetime, int, int]:
-    rank = _RANK[row.action] if table == DHCP_TABLE else _RANK[table]
-    return (row.time, rank, int(row.id))
+def _arp_key(row: Any) -> Key:
+    return (row.time, _RANK[ARP_TABLE], 0, int(row.id))
+
+
+def _ref_lease(ctx: Context, ref: EvidenceRef) -> int | None:
+    """The usable lease time a FortiGate ``assigned`` ref cites (``None`` for any other ref)."""
+    if ref.table != FG_DHCP_TABLE or dhcp_action(ref) != "assigned":
+        return None
+    match = _REF_LEASE.search(ref.summary)
+    return dhcp_sources.usable_lease(ctx.settings, int(match.group(1)) if match else None)
 
 
 def _seed_candidates(ctx: Context, day_start: datetime) -> list[LeaseInterval]:
@@ -594,7 +616,44 @@ def _seed_candidates(ctx: Context, day_start: datetime) -> list[LeaseInterval]:
         )
         if spans_midnight or undecided_arp:
             candidates.append(seed)
-    return candidates
+    return _annotated(ctx, candidates)
+
+
+def _annotated(ctx: Context, seeds: Sequence[LeaseInterval]) -> list[LeaseInterval]:
+    """``seeds`` with what the stored rows do not hold (ADR-0016 D27, D33): the network of
+    their IP and their DHCP origin. A FortiGate seed's VDOM is read from the ``fg_dhcp`` row of
+    its newest own ref (by primary key; never the line that superseded it)."""
+    newest: dict[int | None, EvidenceRef] = {}
+    for seed in seeds:
+        if seed.source_table != FG_DHCP_TABLE:
+            continue
+        own = [
+            ref
+            for ref in seed.evidence
+            if ref.table == FG_DHCP_TABLE
+            and ref.row_id is not None
+            and not (seed.end_reason == "superseded" and seed.end and ref.time >= seed.end)
+        ]
+        if own:
+            newest[seed.row_id] = max(own, key=lambda ref: (ref.time, ref.row_id or 0))
+    keys = sorted({(ref.time, ref.row_id) for ref in newest.values()})
+    vds: dict[tuple[datetime, int | None], str | None] = {}
+    for first in range(0, len(keys), 500):
+        query = select(FgDhcp.time, FgDhcp.id, FgDhcp.extra["vd"].astext).where(
+            tuple_(FgDhcp.time, FgDhcp.id).in_(keys[first : first + 500])
+        )
+        for time, row_id, vd in ctx.session.execute(query):
+            vds[(time, row_id)] = vd
+    result = []
+    for seed in seeds:
+        origin: Origin | None = None
+        if seed.source_table == FG_DHCP_TABLE:
+            ref = newest.get(seed.row_id)
+            origin = (FG_DHCP_TABLE, None if ref is None else vds.get((ref.time, ref.row_id)))
+        elif seed.source_table in DHCP_TABLES:
+            origin = (seed.source_table, None)
+        result.append(replace(seed, origin=origin, network=ctx.network_for(seed.ip)))
+    return result
 
 
 @dataclass(frozen=True)
@@ -602,6 +661,7 @@ class _Held:
     """A stored DHCP interval (to tell a continuation ``assigned`` from a new assignment)."""
 
     mac: str
+    table: str
     start: datetime
     end: datetime | None
 
@@ -609,31 +669,83 @@ class _Held:
         return self.start < moment and (self.end is None or self.end > moment)
 
 
-def _closes(seed: LeaseInterval, row: Any, held: Sequence[_Held]) -> bool:
-    """Whether DHCP ``row`` (same IP) ends ``seed`` (timeline rules 1 and 2).
+def _closes(seed: LeaseInterval, row: DhcpRow, held: Sequence[_Held]) -> bool:
+    """Whether DHCP ``row`` ends ``seed`` (timeline rules 1 and 2).
 
     A ``deassigned`` ends the interval of its own pair. An ``assigned`` ends every other
-    interval of the IP — unless it continues a DHCP lease its MAC already held (``held``: the
-    stored DHCP intervals of the IP), which changes nothing for the others (an IP conflict
-    stays a conflict).
+    interval of the IP — unless it continues a DHCP lease its MAC already held from the same
+    table (``held``: the stored DHCP intervals of the IP), which changes nothing for the others
+    (an IP conflict stays a conflict). An ``assigned`` of the seed's own pair ends an ARP seed
+    and a seed of the other DHCP table (ADR-0016 D5). A row of another IP ends the seed only as
+    a FortiGate ACK of its MAC (:func:`_moves`, D33).
     """
+    if row.ip != seed.ip:
+        return _moves(seed, row)
     if row.action == "deassigned":
         return bool(row.mac == seed.mac)
     if row.mac == seed.mac:
-        return seed.source_table == ARP_TABLE  # an ARP interval becomes a DHCP lease
-    return not any(h.mac == row.mac and h.open_at(row.time) for h in held)
+        return seed.source_table != row.table  # an ARP interval, or the other DHCP table's
+    return not any(h.mac == row.mac and h.table == row.table and h.open_at(row.time) for h in held)
+
+
+def _moves(seed: LeaseInterval, row: DhcpRow) -> bool:
+    """ADR-0016 D33 for a seed: a FortiGate ``assigned`` of its MAC for another IP of its
+    configured network ends a FortiGate seed of the same origin and interface, and a MikroTik
+    seed (the migration case); never for an address in no configured network."""
+    if row.table != FG_DHCP_TABLE or row.action != "assigned" or row.mac != seed.mac:
+        return False
+    if row.network is None or row.network != seed.network:
+        return False
+    if seed.source_table == FG_DHCP_TABLE:
+        origin = seed.origin or (FG_DHCP_TABLE, None)
+        return origin == row.origin and seed.server == row.server
+    return seed.source_table in DHCP_TABLES
+
+
+def _bound_window(ctx: Context, seed: LeaseInterval) -> int:
+    """How far before midnight a seed's raw evidence is read: its alive window. A FortiGate
+    seed's lease at midnight is only known from those rows, so its window is the longest it can
+    have: the configured time, its stored lease and every lease its stored refs cite."""
+    window = ctx.rules.alive_window(seed.source_table, seed.server)
+    if seed.source_table == FG_DHCP_TABLE:
+        leases = [seed.lease_seconds, *(_ref_lease(ctx, ref) for ref in seed.evidence)]
+        window = max([window, *(lease for lease in leases if lease)])
+    return window
+
+
+def _midnight_lease(
+    ctx: Context, seed: LeaseInterval, refs: Sequence[EvidenceRef], own: Sequence[DhcpRow]
+) -> int | None:
+    """A FortiGate seed's lease time at midnight (or at the event that ends it): the usable
+    lease of the latest ``assigned`` of its pair that logs one, as the timeline's continuations
+    keep it (a renewal without a usable lease keeps the one before), from its stored refs and
+    the raw rows before that point; the stored value only without either. A later day's rebuild
+    may have stored a newer ACK's lease, so the stored value is never the first choice."""
+    if seed.source_table != FG_DHCP_TABLE:
+        return seed.lease_seconds
+    assigned = [(_ref_key(ref), ref) for ref in refs if _ref_key(ref)[1] == _RANK["assigned"]]
+    seen = [(key, _ref_lease(ctx, ref)) for key, ref in assigned if ref.table == FG_DHCP_TABLE]
+    seen += [(row.key, row.lease_seconds) for row in own]
+    if not seen:
+        return seed.lease_seconds
+    usable = [(key, lease) for key, lease in seen if lease is not None]
+    return max(usable)[1] if usable else None
 
 
 def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
     """The state at ``day_start`` of the intervals alive then (see the module docstring).
 
     For a seed that was continuously open from its start to midnight, every ARP sighting and
-    ``assigned`` of its pair and (DHCP) every traffic row of its IP before midnight belongs to it,
-    and nothing closed it — so its state at midnight is its stored evidence before midnight plus
-    the raw evidence of the last ``alive_window`` before midnight. The raw DHCP events of that
-    window are also checked for a release or a new assignment that ended it (an ARP interval
-    decided after midnight, or stored rows that late evidence made stale): such a seed is closed
-    exactly as the timeline would close it, never re-opened.
+    ``assigned`` of its pair (of its own DHCP table) and (DHCP) every traffic row of its IP
+    before midnight belongs to it, and nothing closed it — so its state at midnight is its
+    stored evidence before midnight plus the raw evidence of the last ``alive_window`` before
+    midnight. The raw DHCP events of that window are also checked for a release or a new
+    assignment that ended it (an ARP interval decided after midnight, or stored rows that late
+    evidence made stale), and for a FortiGate ACK of its MAC for another address (D33): such a
+    seed is closed exactly as the timeline would close it, never re-opened. A FortiGate seed's
+    last evidence counts its DHCP records only unless ``dhcp.fortigate_traffic_extends`` (D26);
+    its lease time is the one at midnight, and it is ``high`` again (re-derived from its rows,
+    which undoes the rollback step's ``low``, ``db.lease_rollback``).
     """
     rules = ctx.rules
     candidates = _seed_candidates(ctx, day_start)
@@ -641,68 +753,69 @@ def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
         return _Seeds()
 
     def lower(seed: LeaseInterval) -> datetime:
-        window = rules.alive_window(seed.source_table, seed.server)
+        window = _bound_window(ctx, seed)
         return max(seed.start, day_start - timedelta(seconds=window))
 
     bounds = {seed.row_id: lower(seed) for seed in candidates}
     ips = sorted({seed.ip for seed in candidates})
+    macs = sorted({seed.mac for seed in candidates if seed.source_table in DHCP_TABLES})
     low = min(bounds.values())
     arp = ctx.session.execute(
         select(*_ARP_COLUMNS)
         .where(MtArp.time >= low, MtArp.time < day_start, MtArp.ip.in_(ips))
         .order_by(MtArp.time, MtArp.id)
     ).all()
-    dhcp = ctx.session.execute(
-        select(*_DHCP_COLUMNS)
-        .where(
-            MtDhcp.time >= low,
-            MtDhcp.time < day_start,
-            MtDhcp.ip.in_(ips),
-            MtDhcp.action.in_(("assigned", "deassigned")),
-        )
-        .order_by(MtDhcp.time, MtDhcp.id)
-    ).all()
-    dhcp_by_ip: dict[str, list[Any]] = defaultdict(list)
-    for dhcp_row in dhcp:
+    dhcp_by_ip: dict[str, list[DhcpRow]] = defaultdict(list)
+    dhcp_by_mac: dict[str, list[DhcpRow]] = defaultdict(list)
+    for dhcp_row in load_rows(ctx, low, day_start, ips, macs):
         dhcp_by_ip[dhcp_row.ip].append(dhcp_row)
+        if dhcp_row.table == FG_DHCP_TABLE:
+            dhcp_by_mac[dhcp_row.mac].append(dhcp_row)
     held: dict[str, list[_Held]] = defaultdict(list)
-    for lease_ip, lease_mac, lease_start, lease_end in ctx.session.execute(
-        select(Lease.ip, Lease.mac, Lease.start, Lease.end).where(
+    for lease_ip, lease_mac, lease_table, lease_start, lease_end in ctx.session.execute(
+        select(Lease.ip, Lease.mac, Lease.source_table, Lease.start, Lease.end).where(
             Lease.ip.in_(ips),
-            Lease.source_table == DHCP_TABLE,
+            Lease.source_table.in_(DHCP_TABLES),
             Lease.start < day_start,
             Lease.end.is_(None) | (Lease.end > low),
         )
     ):
-        held[lease_ip].append(_Held(lease_mac, lease_start, lease_end))
+        held[lease_ip].append(_Held(lease_mac, lease_table, lease_start, lease_end))
     arp_by_pair: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for arp_row in arp:
         arp_by_pair[(arp_row.ip, arp_row.mac)].append(arp_row)
 
+    def rows_for(seed: LeaseInterval) -> list[DhcpRow]:
+        """The DHCP rows that can end ``seed``: its IP's, and its MAC's for other IPs."""
+        rows = dhcp_by_ip.get(seed.ip, [])
+        if seed.source_table not in DHCP_TABLES:
+            return rows
+        moved = [row for row in dhcp_by_mac.get(seed.mac, ()) if row.ip != seed.ip]
+        return sorted([*rows, *moved], key=lambda row: row.key) if moved else rows
+
     # The first event before midnight that ends each seed (normally none).
-    closing: dict[int | None, Any] = {}
+    closing: dict[int | None, DhcpRow] = {}
     for seed in candidates:
         opening = min(
             (_ref_key(r) for r in seed.evidence if r.time == seed.start),
-            default=(seed.start, _RANK.get(seed.source_table, 0), 0),
+            default=(seed.start, _RANK.get(seed.source_table, 0), 0, 0),
         )
-        for row in dhcp_by_ip.get(seed.ip, ()):
-            key = _row_key(row, DHCP_TABLE)
+        for row in rows_for(seed):
             if (
                 row.time >= bounds[seed.row_id]
-                and key > opening
+                and row.key > opening
                 and _closes(seed, row, held.get(seed.ip, ()))
             ):
                 closing[seed.row_id] = row
                 break
 
-    def limit(seed: LeaseInterval) -> tuple[datetime, int, int]:
+    def limit(seed: LeaseInterval) -> Key:
         row = closing.get(seed.row_id)
-        return (day_start, -1, 0) if row is None else _row_key(row, DHCP_TABLE)
+        return (day_start, -1, 0, 0) if row is None else row.key
 
     traffic = _latest_traffic(
         ctx,
-        [s for s in candidates if s.source_table == DHCP_TABLE],
+        [s for s in candidates if s.source_table in DHCP_TABLES],
         bounds,
         {s.row_id: closing[s.row_id].time for s in candidates if s.row_id in closing},
         day_start,
@@ -716,20 +829,34 @@ def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
         found = [
             arp_ref(r)
             for r in arp_by_pair.get((seed.ip, seed.mac), ())
-            if r.time >= lo and _row_key(r, ARP_TABLE) < end_key
+            if r.time >= lo and _arp_key(r) < end_key
         ]
-        if seed.source_table == DHCP_TABLE:
+        own: list[DhcpRow] = []
+        if seed.source_table in DHCP_TABLES:
             for r in dhcp_by_ip.get(seed.ip, ()):
-                key = _row_key(r, DHCP_TABLE)
-                if r.action == "assigned" and r.mac == seed.mac and r.time >= lo and key < end_key:
-                    found.append(dhcp_ref(r))
+                if (
+                    r.action == "assigned"
+                    and r.mac == seed.mac
+                    and r.table == seed.source_table
+                    and r.time >= lo
+                    and r.key < end_key
+                ):
+                    own.append(r)
                     hostname = (r.hostname or "").strip() or hostname
+        found.extend(r.ref for r in own)
         last_traffic = max((r.time for r in refs if r.table == TRAFFIC_TABLE), default=None)
         latest = traffic.get(seed.row_id)
         if latest is not None:
             found.append(traffic_ref(latest))
             last_traffic = latest.time if last_traffic is None else max(last_traffic, latest.time)
-        last = max([seed.start, *(r.time for r in refs), *(r.time for r in found)])
+        fortigate = seed.source_table == FG_DHCP_TABLE
+        if fortigate and not rules.fortigate_traffic_extends:
+            # D26: traffic and ARP stay evidence of a FortiGate lease but never move its end.
+            dhcp_times = [r.time for r in refs if r.table in DHCP_TABLES]
+            last = max([seed.start, *dhcp_times, *(r.time for r in own)])
+        else:
+            last = max([seed.start, *(r.time for r in refs), *(r.time for r in found)])
+        lease = _midnight_lease(ctx, seed, refs, own)
         state = replace(
             seed,
             end=None,
@@ -738,8 +865,11 @@ def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
             last_evidence=last,
             evidence=sort_evidence([*refs, *found]),
             last_traffic=last_traffic,
+            lease_seconds=lease,
+            origin=own[-1].origin if own else seed.origin,
+            confidence="high" if fortigate else seed.confidence,
         )
-        window = timedelta(seconds=rules.alive_window(seed.source_table, seed.server))
+        window = timedelta(seconds=rules.alive_window(seed.source_table, seed.server, lease))
         ended_by = closing.get(seed.row_id)
         if ended_by is not None and ended_by.time <= last + window:
             result.closed.append(_closed_by(ctx, state, ended_by))
@@ -756,7 +886,7 @@ def _seeds(ctx: Context, day_start: datetime) -> _Seeds:
     return result
 
 
-def _closed_by(ctx: Context, state: LeaseInterval, row: Any) -> LeaseInterval:
+def _closed_by(ctx: Context, state: LeaseInterval, row: DhcpRow) -> LeaseInterval:
     """``state`` closed by DHCP ``row`` as :meth:`.timeline.LeaseTimeline._close` would."""
     if state.source_table == ARP_TABLE:
         claim = state.last_evidence + timedelta(seconds=ctx.rules.arp_interval)
@@ -764,14 +894,14 @@ def _closed_by(ctx: Context, state: LeaseInterval, row: Any) -> LeaseInterval:
             return replace(state, end=claim, end_reason="arp", evidence=bounded(state))
     reason: EndReason = "dhcp" if row.action == "deassigned" else "superseded"
     last = state.last_evidence
-    if reason == "dhcp" and state.source_table == DHCP_TABLE:
+    if reason == "dhcp" and state.source_table in DHCP_TABLES:
         last = max(last, row.time)  # the release is a DHCP lease's last evidence
     return replace(
         state,
         end=max(row.time, state.start),
         end_reason=reason,
         last_evidence=last,
-        evidence=bounded(state, dhcp_ref(row)),
+        evidence=bounded(state, row.ref),
     )
 
 
@@ -796,8 +926,9 @@ def _latest_traffic(
     ends: Mapping[int | None, datetime],
     day_start: datetime,
 ) -> dict[int | None, Any]:
-    """Per DHCP seed the latest traffic row from its IP in ``[bound, end]`` (end: the closing
-    event, which sorts after traffic at the same instant; else midnight, exclusive)."""
+    """Per DHCP seed the latest traffic row of a trusted sender from its IP in ``[bound, end]``
+    (end: the closing event, which sorts after traffic at the same instant; else midnight,
+    exclusive)."""
     if not seeds:
         return {}
     statement = text(
@@ -808,6 +939,7 @@ def _latest_traffic(
         "f.dstport, f.proto, host(f.transip) AS transip, f.transport, f.trandisp, "
         "f.is_interim, f.source, f.raw_day, f.raw_line, f.raw_offset FROM fg_traffic f "
         "WHERE f.srcip = s.ip AND f.time >= s.lo AND f.time < s.hi "
+        "AND f.source <> ALL(CAST(:untrusted AS text[])) "
         "ORDER BY f.time DESC, f.id DESC LIMIT 1) AS t"
     )
     tick = timedelta(microseconds=1)
@@ -819,6 +951,7 @@ def _latest_traffic(
             "ips": [s.ip for s in seeds],
             "los": [bounds[s.row_id] for s in seeds],
             "his": [ends[s.row_id] + tick if s.row_id in ends else day_start for s in seeds],
+            "untrusted": sorted(ctx.untrusted),
         },
     ):
         found[row.row_id] = row
@@ -860,9 +993,9 @@ def rebuild_day(
         return report
     seeds = _seeds(ctx, start)
     timeline = LeaseTimeline(ctx.rules, seeds.open, releases=_releases(ctx, start))
-    dhcp = load_dhcp(ctx, start, limit)
+    dhcp = load_dhcp(ctx, start, limit, count=True)
     arp = load_arp(ctx, start, limit)
-    traffic_ips = {s.ip for s in seeds.open if s.source_table == DHCP_TABLE}
+    traffic_ips = {s.ip for s in seeds.open if s.source_table in DHCP_TABLES}
     traffic_ips |= {e.ip for e in dhcp if e.action == "assigned"}
     traffic = load_traffic(ctx, start, limit, traffic_ips)
     events: list[Evidence] = [*dhcp, *arp, *traffic]
@@ -875,9 +1008,12 @@ def rebuild_day(
         if not pending:
             break
         chunk_end = min(cursor + LOOKAHEAD_CHUNK, horizon)
-        dhcp_ips = {i.ip for i in timeline.open_intervals() if i.source_table == DHCP_TABLE}
+        open_dhcp = [i for i in timeline.open_intervals() if i.source_table in DHCP_TABLES]
+        dhcp_ips = {i.ip for i in open_dhcp}
+        # A FortiGate ACK of a pending interval's MAC for another address ends it (D33).
+        macs = {i.mac for i in open_dhcp if i.start < end}
         later: list[Evidence] = [
-            *load_dhcp(ctx, cursor, chunk_end, pending),
+            *load_dhcp(ctx, cursor, chunk_end, pending, macs),
             *load_arp(ctx, cursor, chunk_end, pending),
             *load_traffic(ctx, cursor, chunk_end, pending & dhcp_ips),
         ]
@@ -889,6 +1025,7 @@ def rebuild_day(
     result = timeline.finish(cursor)
     report.stats.update(timeline.stats)
     report.stats.update(seeds.stats)
+    report.stats.update(ctx.stats)
     report.stats["seeds"] += len(seeds.open)
     report.stats["seeds_closed_before_midnight"] += len(seeds.closed)
     seed_ids = {s.row_id for s in seeds.open}
@@ -951,14 +1088,19 @@ def run_incremental(
         return report
     report.window_end = horizon
     ctx = Context.load(session)
-    seeds = [
-        interval_from_row(row) for row in session.scalars(select(Lease).where(Lease.end.is_(None)))
-    ]
+    # Stored rows as they are (their confidence included), with their network and origin.
+    seeds = _annotated(
+        ctx,
+        [
+            interval_from_row(row)
+            for row in session.scalars(select(Lease).where(Lease.end.is_(None)))
+        ],
+    )
     by_id: dict[int | None, LeaseInterval] = {s.row_id: s for s in seeds}
     timeline = LeaseTimeline(ctx.rules, seeds, releases=_releases(ctx, watermark))
-    dhcp = load_dhcp(ctx, watermark, horizon)
+    dhcp = load_dhcp(ctx, watermark, horizon, count=True)
     arp = load_arp(ctx, watermark, horizon)
-    traffic_ips = {s.ip for s in seeds if s.source_table == DHCP_TABLE}
+    traffic_ips = {s.ip for s in seeds if s.source_table in DHCP_TABLES}
     traffic_ips |= {e.ip for e in dhcp if e.action == "assigned"}
     traffic = load_traffic(ctx, watermark, horizon, traffic_ips)
     events: list[Evidence] = [*dhcp, *arp, *traffic]
@@ -966,6 +1108,7 @@ def run_incremental(
     timeline.feed(events)
     result = timeline.finish(horizon)
     report.stats.update(timeline.stats)
+    report.stats.update(ctx.stats)
     report.inserted, report.updated = _write(ctx, result, by_id)
     report.devices = _devices(ctx, [*dhcp, *arp])
     session.flush()

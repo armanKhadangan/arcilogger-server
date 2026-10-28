@@ -672,7 +672,7 @@ class LeaseTimeline:
                     if _origin(item) != _origin(event) or item.server != event.server:
                         continue
                     self.stats["fg_mac_moved"] += 1
-                elif item.source_table == DHCP_TABLE:
+                elif item.source_table in DHCP_TABLES:  # MikroTik: the migration case
                     self.stats["superseded_across_sources"] += 1
                 else:
                     continue
