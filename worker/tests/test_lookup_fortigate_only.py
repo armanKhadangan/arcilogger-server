@@ -1187,10 +1187,17 @@ def test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease(
     assert outcomes["candidates"].mode == "candidates"
 
 
-def test_an_ack_older_than_its_lease_is_not_named(db_session: Session, evidence: Evidence) -> None:
-    """The window reaches 7 days back, but a 1-day lease logged 6 days before the moment would
-    not have covered it (the coverage rule)."""
-    unconverted_line(evidence, AT - timedelta(days=6), PC, PC_MAC, hostname=HOST)
+@pytest.mark.parametrize(
+    "days", [100, 6], ids=["the-golden-100-days-before", "inside-the-window-by-coverage"]
+)
+def test_an_ack_older_than_its_lease_is_not_named(
+    db_session: Session, evidence: Evidence, days: int
+) -> None:
+    """3.4: a pre-upgrade ACK with lease=86400 100 days before the moment is not named; the
+    window reaches 7 days back (the 3.8 fallback, deviation c2), and a 1-day lease logged 6
+    days before the moment, inside it, would not have covered the moment either (the coverage
+    rule)."""
+    unconverted_line(evidence, AT - timedelta(days=days), PC, PC_MAC, hostname=HOST)
     build(db_session, DAY, DAY)
     outcome = internal(db_session, PC, AT)
     assert "no_lease" in keys(outcome)
