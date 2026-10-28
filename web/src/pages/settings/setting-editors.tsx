@@ -51,8 +51,11 @@ import {
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 /** FortiGate lease evidence (ADR-0016): its help is a warning while the switch is on. */
 const TRAFFIC_EXTENDS_KEY = 'dhcp.fortigate_traffic_extends';
-/** Maps that a lease rebuild applies to past days (the rebuild is the group's last section). */
-const REBUILD_KEYS = new Set(['dhcp.fortigate_logids', 'dhcp.fortigate_dhcp_msgs']);
+/**
+ * Maps that a lease rebuild applies to past days (the rebuild is the group's last section) and
+ * whose server help does not say so: `dhcp.fortigate_logids` states it in its own help.
+ */
+const REBUILD_HINT_KEYS = new Set(['dhcp.fortigate_dhcp_msgs']);
 const SRCMAC_INTERFACES_KEY = 'lookup.srcmac_interfaces';
 const SRCMAC_MAX_IPS_KEY = 'lookup.srcmac_max_ips';
 
@@ -580,7 +583,7 @@ export function SettingField({
           {setting.type === 'string_list' || setting.type === 'integer_list'
             ? ` ${t('settings.application.onePerLine')}`
             : ''}
-          {REBUILD_KEYS.has(setting.key) ? ` ${t('network.settings.rebuildHint')}` : ''}
+          {REBUILD_HINT_KEYS.has(setting.key) ? ` ${t('network.settings.rebuildHint')}` : ''}
         </p>
       )}
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-strong">

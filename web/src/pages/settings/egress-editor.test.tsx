@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -44,6 +47,18 @@ function setting(
   };
 }
 
+/** The server's help of a setting as the captured `GET /settings` gives it. */
+function capturedHelp(key: string): Pick<SettingOut, 'help_tr' | 'help_en'> {
+  const sample = JSON.parse(
+    readFileSync(join(process.cwd(), 'e2e', 'samples', 'settings.json'), 'utf8'),
+  ) as { list: SettingsOut };
+  const found = sample.list.groups
+    .flatMap((group) => group.settings)
+    .find((item) => item.key === key);
+  if (!found) throw new Error(`${key} is not in the captured settings`);
+  return { help_tr: found.help_tr, help_en: found.help_en };
+}
+
 function groups(egresses: Egresses): SettingGroup[] {
   return [
     {
@@ -55,10 +70,18 @@ function groups(egresses: Egresses): SettingGroup[] {
           label_tr: 'İnternet çıkışları (NAT)',
           label_en: 'Internet exits (NAT)',
         }),
-        setting('dhcp.fortigate_logids', 'object', {
-          '0100026001': 'assigned',
-          '0100026002': 'deassigned',
-        }),
+        setting(
+          'dhcp.fortigate_logids',
+          'object',
+          { '0100026001': 'assigned', '0100026002': 'deassigned' },
+          capturedHelp('dhcp.fortigate_logids'),
+        ),
+        setting(
+          'dhcp.fortigate_dhcp_msgs',
+          'object',
+          { '0100026001': ['Ack'] },
+          capturedHelp('dhcp.fortigate_dhcp_msgs'),
+        ),
         setting('dhcp.fortigate_traffic_extends', 'boolean', false, {
           help_tr: 'Kapalı (önerilen): FortiGate kirası yalnızca DHCP kayıtlarıyla açık kalır.',
         }),
@@ -328,10 +351,16 @@ describe('the other FortiGate DHCP settings', () => {
     );
   });
 
-  it('the logid map says that a rebuild applies it to past days; the server field names the interface', async () => {
+  it('both FortiGate DHCP maps say once that a rebuild applies them to past days; the server field names the interface', async () => {
     serve(TWO_LINES);
     await editor();
-    expect(screen.getByTestId('setting-dhcp.fortigate_logids')).toHaveTextContent(
+    // The logid map's own help (the server's) says it; the message map gets the hint.
+    const rebuild = /yeniden oluşturulunca uygulanır/g;
+    for (const key of ['dhcp.fortigate_logids', 'dhcp.fortigate_dhcp_msgs'])
+      expect(screen.getByTestId(`setting-${key}`).textContent?.match(rebuild), key).toHaveLength(
+        1,
+      );
+    expect(screen.getByTestId('setting-dhcp.fortigate_dhcp_msgs')).toHaveTextContent(
       'Değişiklik geçmiş günlere ancak kiralar yeniden oluşturulunca uygulanır',
     );
     expect(

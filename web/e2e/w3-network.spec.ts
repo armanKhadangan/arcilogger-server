@@ -205,7 +205,14 @@ test.describe('İnternet çıkışları (NAT)', () => {
   test('the FortiGate DHCP settings: the traffic warning, the rebuild hint', async ({ page }) => {
     await open(page);
     const lookup = page.getByTestId('settings-group-lookup');
+    // The logid map's own help says it (the captured settings); the message map gets the hint.
     await expect(lookup.getByTestId('setting-dhcp.fortigate_logids')).toContainText(
+      'Değişiklik geçmiş günlere kiralar yeniden oluşturulunca uygulanır.',
+    );
+    await expect(lookup.getByTestId('setting-dhcp.fortigate_logids')).not.toContainText(
+      'Değişiklik geçmiş günlere ancak kiralar',
+    );
+    await expect(lookup.getByTestId('setting-dhcp.fortigate_dhcp_msgs')).toContainText(
       'Değişiklik geçmiş günlere ancak kiralar yeniden oluşturulunca uygulanır',
     );
     await expect(lookup.getByTestId('traffic-extends-warning')).toHaveCount(0);
