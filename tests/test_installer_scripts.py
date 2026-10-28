@@ -3977,6 +3977,11 @@ def test_dry_run_rollback_lowers_the_fortigate_leases_before_the_swap(
     assert ids.count("leases.prepare-rollback") == 1
     detail = {item["id"]: item for item in plan["items"]}["leases.prepare-rollback"]["detail"]
     assert detail == {"command": "arcilogger-db leases prepare-rollback", "lowered": None}
+    # -SkipDatabase: no database work, also not this step (recorded as skipped).
+    result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", "-SkipDatabase")
+    assert_dry_run_exit(result, plan)
+    items = {item["id"]: item for item in plan["items"]}
+    assert items["leases.prepare-rollback"]["status"] == "skipped"
 
 
 def test_dry_run_rollback_sets_firewall_and_time_from_the_restored_configuration(
@@ -4028,7 +4033,12 @@ def test_dry_run_rollback_restores_only_the_database_without_previous(
         "services.start-mode",
         "services.start",
     )
-    assert not {"program.swap", "services.remove", "tasks.disable"} & set(ids)
+    assert not {
+        "program.swap",
+        "services.remove",
+        "tasks.disable",
+        "leases.prepare-rollback",
+    } & set(ids)
     items = {item["id"]: item for item in plan["items"]}
     stopped = items["services.stop"]["text"]
     for name in ("ArciIngest", "ArciApi", "ArciWorker"):
@@ -5327,7 +5337,7 @@ function Rename-Item {
     if ($Scenario -eq 'move' -and $LiteralPath -eq $InstallDir -and $toPrevious) {
         throw 'simulated: the folder is in use'
     }
-    if ($Scenario -eq 'rollback-swap' -and $LiteralPath -eq $PreviousDir) {
+    if ($Scenario.StartsWith('rollback-swap') -and $LiteralPath -eq $PreviousDir) {
         throw 'simulated: the folder is in use'
     }
     Microsoft.PowerShell.Management\Rename-Item -LiteralPath $LiteralPath -NewName $NewName
@@ -5521,7 +5531,8 @@ if ($licenseScenario) {
 
 if ($rollback) {
     # "arcilogger-db leases prepare-rollback" (contract 2.2.1): the count it prints, or (rollback-
-    # leases-down) the database cannot be reached.
+    # leases-down) the database cannot be reached; "arcilogger-db upgrade" after a failed swap:
+    # the seed's restore, or (rollback-swap-restore-fails) a database error.
     function Invoke-ArciProcess {
         param([string]$FilePath, [string[]]$ArgumentList, [string]$StdinText,
             [hashtable]$Environment, [string[]]$Redact, [switch]$AllowFailure,
@@ -5531,6 +5542,14 @@ if ($rollback) {
         if ($Scenario -eq 'rollback-leases-down') {
             $unreachable = "Veritabanına ulaşılamadı.`n[The database cannot be reached.]`n"
             return [pscustomobject]@{ ExitCode = 3; StdOut = ''; StdErr = $unreachable }
+        }
+        if ($ArgumentList[0] -eq 'upgrade') {
+            if ($Scenario -eq 'rollback-swap-restore-fails') {
+                return [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = "lock timeout`n" }
+            }
+            $out = 'Geri almadan sonra FortiGate kiraları [FortiGate leases after a rollback]: ' +
+            "1.234 yüksek güvene döndü [restored to high], 0 hâlâ düşük güvende [still low]`n"
+            return [pscustomobject]@{ ExitCode = 0; StdOut = $out; StdErr = '' }
         }
         $out = 'FortiGate kiraları düşük güvene indirildi [FortiGate leases lowered to low ' +
         "confidence]: 1.234`n"
@@ -5835,19 +5854,44 @@ def test_rollback_that_cannot_swap_keeps_the_current_version(engine: str, tmp_pa
     assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
     assert _running(report) == NEW_SERVICES
     assert report["tasks"] == {"Replica": "Disabled", "Seal": "Ready", "VerifyDaily": "Ready"}
-    # The leases were lowered before the swap failed; this version runs on, and its repair (the
-    # seed of arcilogger-db upgrade) restores them (contract 2.2.1, review note round 7).
+    # The leases were lowered before the swap failed and this version runs on: its own
+    # arcilogger-db upgrade (the seed) restores them before its services start again, so its jobs
+    # cannot rewrite them first (contract 2.2.1, review note round 7).
+    calls = report["calls"]
+    restore = calls.index("process arcilogger-db.exe upgrade --config")
+    assert restore > calls.index("process arcilogger-db.exe leases prepare-rollback")
+    assert restore < min(i for i, c in enumerate(calls) if c.startswith("start "))
+    assert _unwrapped(LEASES_RESTORED) in _unwrapped(report["stdout"])
+    manual = report["state"]["last_failure"]["manual_steps"] or []
+    assert not [s for s in manual if "FortiGate" in s]
+
+
+def test_rollback_that_cannot_swap_names_the_lease_restore_when_it_fails(
+    engine: str, tmp_path: Path
+) -> None:
+    report = simulate(engine, tmp_path, "rollback-swap-restore-fails")
+    assert report["exit"] == 3
+    assert _folders(report) == {"ARCILOGGER": "1.0.0", "ARCILOGGER.previous": "0.9.0"}
     (step,) = [s for s in report["state"]["last_failure"]["manual_steps"] if "FortiGate" in s]
     assert LEASES_STAY_LOW in step
-    assert _unwrapped(LEASES_STAY_LOW) in _unwrapped(report["stdout"])
+    assert "lock timeout" in step
+    assert re.search(r'arcilogger-db\.exe" upgrade --config ".*arcilogger\.toml"$', step), step
 
 
 #: What the rollback step prints when ``arcilogger-db leases prepare-rollback`` succeeded.
 LEASES_LOWERED = (
     "FortiGate kiraları düşük güvene indirildi [FortiGate leases lowered to low confidence]: 1.234"
 )
-#: The manual step after a rollback that lowered the leases and then failed before the swap.
-LEASES_STAY_LOW = "[FortiGate leases stay at low confidence: run the installer again"
+#: What the seed's restore prints when a rollback failed before the swap (simulated).
+LEASES_RESTORED = (
+    "Geri almadan sonra FortiGate kiraları [FortiGate leases after a rollback]: 1.234 yüksek "
+    "güvene döndü [restored to high], 0 hâlâ düşük güvende [still low]"
+)
+#: The manual step when that restore failed too.
+LEASES_STAY_LOW = (
+    "[FortiGate leases stay at low confidence: run this in an administrator PowerShell, then "
+    "rebuild the leases of the days it prints]"
+)
 #: The warning when the step failed: what it means for the previous version's lookups.
 LEASES_NOT_LOWERED = (
     "[FortiGate chains in the previous version may name a former holder of an address; make "
@@ -7590,6 +7634,11 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
             assert items["leases.prepare-rollback"]["detail"]["lowered"] == 0, last()
             lowered = _unwrapped("[FortiGate leases lowered to low confidence]: 0")
             assert lowered in _unwrapped(result.stdout), last()
+        else:
+            # -SkipDatabase (the wrapper's runs without a database): skipped, no warning.
+            items = {item["id"]: item for item in plans[-1].get("items", [])}
+            assert items["leases.prepare-rollback"]["status"] == "skipped", last()
+            assert not [w for w in warnings if w.startswith("FortiGate")], last()
         state = _e2e_state(powershell, tmp_path)
         services = {service["name"]: service for service in state["services"]}
         assert "ArciAdmin" not in services, (services, last())
