@@ -3977,11 +3977,15 @@ def test_dry_run_rollback_lowers_the_fortigate_leases_before_the_swap(
     assert ids.count("leases.prepare-rollback") == 1
     detail = {item["id"]: item for item in plan["items"]}["leases.prepare-rollback"]["detail"]
     assert detail == {"command": "arcilogger-db leases prepare-rollback", "lowered": None}
-    # -SkipDatabase: no database work, also not this step (recorded as skipped).
+    # -SkipDatabase: no database work, also not this step (recorded as skipped), and the leases
+    # stay as they are: the warning of a failed step says what that means for the lookups.
     result, plan = dry_run(engine, tmp_path, bundle, "-Rollback", "-SkipDatabase")
     assert_dry_run_exit(result, plan)
     items = {item["id"]: item for item in plan["items"]}
     assert items["leases.prepare-rollback"]["status"] == "skipped"
+    (warning,) = [w for w in plan["warnings"] if w.startswith("FortiGate")]
+    assert "[FortiGate leases not lowered] (-SkipDatabase)" in warning
+    assert LEASES_NOT_LOWERED in warning
 
 
 def test_dry_run_rollback_sets_firewall_and_time_from_the_restored_configuration(
@@ -7635,10 +7639,13 @@ def test_real_install_upgrade_rollback_and_uninstall(tmp_path: Path) -> None:
             lowered = _unwrapped("[FortiGate leases lowered to low confidence]: 0")
             assert lowered in _unwrapped(result.stdout), last()
         else:
-            # -SkipDatabase (the wrapper's runs without a database): skipped, no warning.
+            # -SkipDatabase (the wrapper's runs without a database): skipped, with the warning
+            # that the FortiGate leases were not lowered.
             items = {item["id"]: item for item in plans[-1].get("items", [])}
             assert items["leases.prepare-rollback"]["status"] == "skipped", last()
-            assert not [w for w in warnings if w.startswith("FortiGate")], last()
+            (warning,) = [w for w in warnings if w.startswith("FortiGate")]
+            assert "(-SkipDatabase)" in warning, last()
+            assert LEASES_NOT_LOWERED in warning, last()
         state = _e2e_state(powershell, tmp_path)
         services = {service["name"]: service for service in state["services"]}
         assert "ArciAdmin" not in services, (services, last())

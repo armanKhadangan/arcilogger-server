@@ -114,9 +114,10 @@
                 says so: the later browser changes are undone, the audit log keeps them. Without
                 -RestoreDatabase, before the swap, this version sets every FortiGate DHCP lease to
                 low confidence (arcilogger-db leases prepare-rollback: a version from before
-                FortiGate DHCP cannot read those lines) and prints the count; a failure only
-                warns. The next arcilogger-db upgrade restores the leases the previous version
-                left as they were and prints the days to rebuild for the rest.
+                FortiGate DHCP cannot read those lines) and prints the count; a failure or
+                -SkipDatabase only warns. The next arcilogger-db upgrade restores the leases
+                the previous version left as they were and prints the days to rebuild for the
+                rest.
     -Uninstall: removes services, scheduled tasks, the Event Log source ARCILOGGER-Admin, firewall
                 rules and the ARCILOGGER program folders (only folders that this installer
                 created) and restores the power settings Set-ArciPower.ps1 recorded. It NEVER
@@ -3124,12 +3125,16 @@ function Invoke-LeaseRollbackStep {
     prepare-rollback" sets every FortiGate lease to low confidence (derived rows only) and prints
     the count. It runs on every rollback without -RestoreDatabase (also between two versions that
     read them: false lows only, which the next upgrade restores). A failure does not stop the
-    rollback: it is a warning that says what it means for the lookups.
+    rollback, nor does -SkipDatabase: either is a warning that says what it means for the lookups.
     #>
     $detail = [pscustomobject]@{ command = 'arcilogger-db leases prepare-rollback'; lowered = $null }
     $text = 'FortiGate kiraları düşük güvene indiriliyor [lowering FortiGate leases to low confidence] (arcilogger-db leases prepare-rollback)'
+    $notLowered = 'FortiGate kiraları düşük güvene indirilemedi [FortiGate leases not lowered] ({0}). Geri alınan sürümdeki FortiGate zincirleri bir adresin önceki sahibini gösterebilir; geri alma sonrasındaki anlar için FortiGate-DHCP sorgularını yeniden yükseltmeden sonra yapın [FortiGate chains in the previous version may name a former holder of an address; make FortiGate-DHCP lookups of moments after the rollback after the re-upgrade].'
     if ($SkipDatabase) {
         Add-PlanItem -Id 'leases.prepare-rollback' -Status 'skipped' -Text ($text + ' (-SkipDatabase)') -Detail $detail
+        $message = $notLowered -f '-SkipDatabase'
+        Write-ArciWarn $message
+        $script:Warnings.Add($message)
         return
     }
     Invoke-Step 'leases.prepare-rollback' $text {
@@ -3146,7 +3151,7 @@ function Invoke-LeaseRollbackStep {
             return
         }
         if ($result) { $problem = Get-DbLicenseProblem $result }
-        $message = 'FortiGate kiraları düşük güvene indirilemedi [FortiGate leases not lowered] ({0}). Geri alınan sürümdeki FortiGate zincirleri bir adresin önceki sahibini gösterebilir; geri alma sonrasındaki anlar için FortiGate-DHCP sorgularını yeniden yükseltmeden sonra yapın [FortiGate chains in the previous version may name a former holder of an address; make FortiGate-DHCP lookups of moments after the rollback after the re-upgrade].' -f $problem
+        $message = $notLowered -f $problem
         Write-ArciWarn $message
         $script:Warnings.Add($message)
     } $detail
