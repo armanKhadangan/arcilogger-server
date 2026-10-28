@@ -16,10 +16,11 @@ same on both storage modes:
   ``conversion_failed``; the log names the rule, never a value. ``nat.egresses`` is written with
   ``updated_by = ':migration'`` and the latest ``updated_at`` of the administrator's legacy rows.
 * Two status rows (author ``:migration``, not in ``DEFAULT_SETTINGS``): ``nat.egresses_migration``
-  (the legacy values, the result, the dropped values with their reason, ``conversion_failed``,
-  ``audited: false``; the seed writes the one ``settings.change`` audit entry from it, because
-  no revision writes audit entries) and ``nat.egresses_changes`` (one entry per converted exit:
-  its content fingerprint and the time and author of the legacy rows' last change).
+  (the legacy values, a number canonical JSON refuses as its text, the result, the dropped
+  values with their reason, ``conversion_failed``, ``audited: false``; the seed writes the one
+  ``settings.change`` audit entry from it, because no revision writes audit entries) and
+  ``nat.egresses_changes`` (one entry per converted exit: its content fingerprint and the time
+  and author of the legacy rows' last change).
 * Legacy rows owned by the seed are deleted; an administrator's rows are kept as they are,
   unread by this version, so ``Install-Arcilogger.ps1 -Rollback`` without ``-RestoreDatabase``
   runs the previous version with its own NAT values; the first revision after Wave 3 deletes
@@ -68,6 +69,8 @@ LEGACY_DEFAULTS: dict[str, Any] = {
 }
 SEED = ":seed"
 MIGRATION = ":migration"
+#: The largest integer a canonical JSON document holds (``arcilogger_core.canonical``).
+MAX_SAFE_INTEGER = 2**53 - 1
 
 # -- frozen copy of arcilogger_db.egress (2026-10-28) ---------------------------------------------
 
@@ -367,6 +370,22 @@ def _iso(at: datetime) -> str:
     return at.astimezone(UTC).isoformat()
 
 
+def _storable(value: Any) -> Any:
+    """``value`` with every number canonical JSON refuses (a float, an integer beyond
+    ±(2^53 − 1)) as its text: the legacy rows were stored without validation (2.8.2 (g)), and
+    the seed copies the status row's ``from`` into the audit entry, whose details are canonical
+    (a refused entry would stop every later upgrade at the seed)."""
+    if isinstance(value, float) or (
+        isinstance(value, int) and not isinstance(value, bool) and abs(value) > MAX_SAFE_INTEGER
+    ):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _storable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_storable(item) for item in value]
+    return value
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     rows = _rows(bind, [*LEGACY_KEYS, KEY])
@@ -405,7 +424,7 @@ def _convert(
     _upsert(bind, KEY, exits, MIGRATION, latest_at)
     status = {
         "migration": revision,
-        "from": values,
+        "from": _storable(values),
         "new": exits,
         "dropped": dropped,
         "conversion_failed": failed,

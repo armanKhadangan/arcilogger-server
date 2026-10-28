@@ -21,6 +21,7 @@ from alembic import command
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
+from arcilogger_core.canonical import MAX_SAFE_INTEGER
 from arcilogger_db import egress
 from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.egress import (
@@ -209,13 +210,14 @@ def test_the_case_matrix(db_engine: Engine, row: dict[str, Any], caplog: Any) ->
     parse_egresses(value)
     status, status_author, _ = rows[MIGRATION_KEY]
     assert status_author == ":migration"
+    raw = {
+        "nat.public_ips": row["public_ips"],
+        "nat.wan_transip": row["wan_transip"],
+        "lookup.port_hint": row["port_hint"],
+    }
     assert status == {
         "migration": REVISION,
-        "from": {
-            "nat.public_ips": row["public_ips"],
-            "nat.wan_transip": row["wan_transip"],
-            "lookup.port_hint": row["port_hint"],
-        },
+        "from": row.get("from", raw),  # a number canonical JSON refuses: its text
         "new": expected,
         "dropped": row["dropped"],
         "conversion_failed": not row["valid"],
@@ -345,6 +347,26 @@ def test_the_audit_entry_names_what_was_dropped(db_engine: Engine) -> None:
         {"value": "not an address", "reason": "invalid"},
         {"value": "2001:db8::44", "reason": "ipv6"},
     ]
+
+
+def test_numbers_canonical_json_refuses_never_stop_the_upgrade(db_engine: Engine) -> None:
+    """Legacy values stored without validation (2.8.2 (g)) include numbers an audit entry
+    cannot hold (a float, an integer beyond 2^53): the status row keeps them as text, so the
+    seed's entry is written and the next upgrade does not fail at the seed."""
+    (row,) = [r for r in LEGACY if r["name"] == "g: numbers stored without validation"]
+    _at_0017(db_engine)
+    legacy = {"nat.public_ips": row["public_ips"], "lookup.port_hint": row["port_hint"]}
+    _administrator(db_engine, legacy)
+    assert upgrade(db_engine).seed.egresses_audited
+    (entry,) = _audit(db_engine)
+    assert entry.details["from"] == row["from"]
+    assert entry.details["dropped"] == [{"value": "1.5", "reason": "invalid"}]
+    assert _rows(db_engine)[MIGRATION_KEY][0]["audited"] is True
+    assert not upgrade(db_engine).seed.egresses_audited
+    assert len(_audit(db_engine)) == 1
+    assert FROZEN.MAX_SAFE_INTEGER == MAX_SAFE_INTEGER
+    with Session(db_engine) as session:
+        assert verify_audit_chain(session).ok
 
 
 # -- the downgrade --------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 {
-  "about": "The exit rules of nat.egresses (Wave 3 contract 2.8.1) and the conversion of the legacy NAT keys (2.8.2). Each case has a value and either the refusal code (the first rule it breaks) or the normalised value; each legacy row has the legacy values, the exits and dropped values legacy_egresses gives, and whether the exits pass the rules. Read by db/tests/test_egress.py and the web mirror's test (egress-model.test.ts).",
+  "about": "The exit rules of nat.egresses (Wave 3 contract 2.8.1) and the conversion of the legacy NAT keys (2.8.2). Each case has a value and either the refusal code (the first rule it breaks) or the normalised value; each legacy row has the legacy values, the exits and dropped values legacy_egresses gives, and whether the exits pass the rules (and, where it differs, the form revision 0018 keeps in its status row, from: a number canonical JSON refuses as its text). Read by db/tests/test_egress.py and the web mirror's test (egress-model.test.ts).",
   "cases": [
     {
       "name": "no exits",
@@ -2392,6 +2392,52 @@
       },
       "dropped": [],
       "valid": true
+    },
+    {
+      "name": "g: numbers stored without validation",
+      "public_ips": [
+        "203.0.113.200",
+        1.5
+      ],
+      "wan_transip": "",
+      "port_hint": 1152921504606846976,
+      "exits": {
+        "genel-1": {
+          "label": "Genel IP (yükseltmede aktarıldı)",
+          "mode": "direct",
+          "public": [
+            "203.0.113.200"
+          ],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        },
+        "tanimsiz": {
+          "label": "Genel adresi tanımlanmamış hatlar",
+          "mode": "isp_nat",
+          "public": [],
+          "public_dynamic": false,
+          "transips": [],
+          "interfaces": [],
+          "port_preservation": "unknown"
+        }
+      },
+      "dropped": [
+        {
+          "value": "1.5",
+          "reason": "invalid"
+        }
+      ],
+      "valid": true,
+      "from": {
+        "nat.public_ips": [
+          "203.0.113.200",
+          "1.5"
+        ],
+        "nat.wan_transip": "",
+        "lookup.port_hint": "1152921504606846976"
+      }
     },
     {
       "name": "h: the private WAN address entered as a public address",
