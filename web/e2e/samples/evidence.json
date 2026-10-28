@@ -1,12 +1,12 @@
 {
   "created": {
     "package": {
-      "created_at": "2026-10-13T04:00:06.036685Z",
+      "created_at": "2026-10-13T04:00:12.702920Z",
       "created_by": "tolga",
       "download_count": 0,
       "downloadable": false,
       "error": null,
-      "expires_at": "2026-11-12T04:00:06.018536Z",
+      "expires_at": "2026-11-12T04:00:12.651984Z",
       "file": null,
       "finished_at": null,
       "id": 1,
@@ -21,7 +21,7 @@
           "2026-10-04",
           "2026-10-05"
         ],
-        "estimated_bytes": 4201856,
+        "estimated_bytes": 4201859,
         "extract_lines": 0,
         "include_audit_log": false,
         "lookup_id": null,
@@ -42,12 +42,12 @@
   },
   "created_password": {
     "package": {
-      "created_at": "2026-10-13T04:00:06.286581Z",
+      "created_at": "2026-10-13T04:00:13.367878Z",
       "created_by": "tolga",
       "download_count": 0,
       "downloadable": false,
       "error": null,
-      "expires_at": "2026-11-12T04:00:06.264253Z",
+      "expires_at": "2026-11-12T04:00:13.308457Z",
       "file": null,
       "finished_at": null,
       "id": 2,
@@ -61,7 +61,7 @@
         "days": [
           "2026-10-09"
         ],
-        "estimated_bytes": 4211964,
+        "estimated_bytes": 4211965,
         "extract_lines": 3,
         "include_audit_log": false,
         "lookup_id": 1,
@@ -85,12 +85,12 @@
   },
   "created_queued": {
     "package": {
-      "created_at": "2026-10-13T04:00:09.918044Z",
+      "created_at": "2026-10-13T04:00:16.967014Z",
       "created_by": "tolga",
       "download_count": 0,
       "downloadable": false,
       "error": null,
-      "expires_at": "2026-11-12T04:00:09.901565Z",
+      "expires_at": "2026-11-12T04:00:16.926493Z",
       "file": null,
       "finished_at": null,
       "id": 5,
@@ -125,32 +125,32 @@
   },
   "details": {
     "1": {
-      "created_at": "2026-10-13T04:00:06.036685Z",
+      "created_at": "2026-10-13T04:00:12.702920Z",
       "created_by": "tolga",
       "download_count": 2,
       "downloadable": true,
       "downloads": [
         {
           "ip": null,
-          "time": "2026-10-13T04:00:10.251595Z",
+          "time": "2026-10-13T04:00:17.744278Z",
           "username": "ayse.yilmaz"
         },
         {
           "ip": null,
-          "time": "2026-10-13T04:00:10.170197Z",
+          "time": "2026-10-13T04:00:17.544147Z",
           "username": "tolga"
         }
       ],
       "error": null,
-      "expires_at": "2026-11-12T04:00:06.208227Z",
+      "expires_at": "2026-11-12T04:00:13.150668Z",
       "extract": [],
-      "file": "ARCILOGGER-kanit-KP-20261013-070006-35406f6b.zip",
-      "finished_at": "2026-10-13T04:00:06.208227Z",
+      "file": "ARCILOGGER-kanit-KP-20261013-070012-35406f6b.zip",
+      "finished_at": "2026-10-13T04:00:13.150668Z",
       "id": 1,
-      "index_sha256": "ae8321dd8ebe2581e34b4b4366aa6046414a8492aaf41e179af64eea425f8f13",
+      "index_sha256": "632384fabdac4baeedd91a05aba794f92cae0d83bc2acb79ee3d72078221d26c",
       "legal_grade": false,
       "lookup_id": null,
-      "package_name": "KP-20261013-070006-35406f6b",
+      "package_name": "KP-20261013-070012-35406f6b",
       "password_protected": false,
       "scope": {
         "content": "full_days",
@@ -158,15 +158,15 @@
           "2026-10-04",
           "2026-10-05"
         ],
-        "estimated_bytes": 4201856,
+        "estimated_bytes": 4201859,
         "extract_lines": 0,
         "include_audit_log": false,
         "lookup_id": null,
         "reference": null,
         "sources": null
       },
-      "sha256": "b561d5c84a9b2d2dbf0efb8251528aaaa4bddeae955a5e0d008e0fc4b2969166",
-      "size": 61935,
+      "sha256": "2eb94646b3616be8cdf7c0d24bdfe78c789b7482b53b5c92c38ca7266eddf4c0",
+      "size": 61942,
       "status": "ready",
       "status_label_en": "Ready",
       "status_label_tr": "Hazır",
@@ -174,13 +174,13 @@
       "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
     },
     "2": {
-      "created_at": "2026-10-13T04:00:06.286581Z",
+      "created_at": "2026-10-13T04:00:13.367878Z",
       "created_by": "tolga",
       "download_count": 0,
       "downloadable": true,
       "downloads": [],
       "error": null,
-      "expires_at": "2026-11-12T04:00:07.186464Z",
+      "expires_at": "2026-11-12T04:00:13.806458Z",
       "extract": [
         {
           "day": "2026-10-09",
@@ -198,20 +198,20 @@
           "source": "fortigate"
         }
       ],
-      "file": "ARCILOGGER-kanit-KP-20261013-070007-d1a63c1d.zip",
-      "finished_at": "2026-10-13T04:00:07.186464Z",
+      "file": "ARCILOGGER-kanit-KP-20261013-070013-d1a63c1d.zip",
+      "finished_at": "2026-10-13T04:00:13.806458Z",
       "id": 2,
-      "index_sha256": "d49763abfb1aefd7cfef15399200392e3e2132c81cd2e3eb698ca9d20e0485cd",
+      "index_sha256": "53c7c1aed33d4e445006f768242fbff9b08566ad069b066766c1bc5caccbc4b1",
       "legal_grade": false,
       "lookup_id": 1,
-      "package_name": "KP-20261013-070007-d1a63c1d",
+      "package_name": "KP-20261013-070013-d1a63c1d",
       "password_protected": true,
       "scope": {
         "content": "extract",
         "days": [
           "2026-10-09"
         ],
-        "estimated_bytes": 4211964,
+        "estimated_bytes": 4211965,
         "extract_lines": 3,
         "include_audit_log": false,
         "lookup_id": 1,
@@ -221,8 +221,8 @@
           "fortigate"
         ]
       },
-      "sha256": "76c64ac7734795a5d4c58e368c71a9e7e08b305c1923f428772c1b0eb1da28ff",
-      "size": 142572,
+      "sha256": "50ff67ac1c225dbda6e209ff1e9bb823468bb6c448808d4f48a918575a51c459",
+      "size": 145578,
       "status": "ready",
       "status_label_en": "Ready",
       "status_label_tr": "Hazır",
@@ -230,28 +230,28 @@
       "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
     },
     "3": {
-      "created_at": "2026-10-13T04:00:07.249795Z",
+      "created_at": "2026-10-13T04:00:13.945855Z",
       "created_by": "tolga",
       "download_count": 0,
       "downloadable": false,
       "downloads": [],
       "error": null,
-      "expires_at": "2026-10-13T03:00:09.817893Z",
+      "expires_at": "2026-10-13T03:00:16.755133Z",
       "extract": [],
-      "file": "ARCILOGGER-kanit-KP-20261013-070008-7584fbe9.zip",
-      "finished_at": "2026-10-13T04:00:08.128223Z",
+      "file": "ARCILOGGER-kanit-KP-20261013-070014-7584fbe9.zip",
+      "finished_at": "2026-10-13T04:00:14.239166Z",
       "id": 3,
-      "index_sha256": "ca0565e2e21c184923b3751de901f48fc61293c559e8422a89f4b5fd52b9c4bb",
+      "index_sha256": "9a105344c110f32ddca6087f35c8f24e2d65fd698c31d6359348891736fc948e",
       "legal_grade": false,
       "lookup_id": null,
-      "package_name": "KP-20261013-070008-7584fbe9",
+      "package_name": "KP-20261013-070014-7584fbe9",
       "password_protected": false,
       "scope": {
         "content": "full_days",
         "days": [
           "2026-10-07"
         ],
-        "estimated_bytes": 4197872,
+        "estimated_bytes": 4197873,
         "extract_lines": 0,
         "include_audit_log": false,
         "lookup_id": null,
@@ -260,8 +260,8 @@
           "fortigate"
         ]
       },
-      "sha256": "5a880df25a7bb31b06769d80310ef9c29dc58cb101d7f0aee5086366774c9ff5",
-      "size": 57969,
+      "sha256": "17c48e446c664b04187426217108c261e603411cb0adf04f98703e42ff5aef86",
+      "size": 57967,
       "status": "expired",
       "status_label_en": "Expired",
       "status_label_tr": "Süresi doldu",
@@ -269,16 +269,16 @@
       "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
     },
     "4": {
-      "created_at": "2026-10-13T04:00:08.197986Z",
+      "created_at": "2026-10-13T04:00:14.382781Z",
       "created_by": "tolga",
       "download_count": 0,
       "downloadable": false,
       "downloads": [],
       "error": "2026/10/08/fortigate.log.gz: dosya boyutu manifesttekinden farklı (değişmiş olabilir) / 2026/10/08/fortigate.log.gz: size differs from the manifest (changed?)",
-      "expires_at": "2026-11-12T04:00:08.179128Z",
+      "expires_at": "2026-11-12T04:00:14.346525Z",
       "extract": [],
       "file": null,
-      "finished_at": "2026-10-13T04:00:09.041823Z",
+      "finished_at": "2026-10-13T04:00:15.133124Z",
       "id": 4,
       "index_sha256": null,
       "legal_grade": null,
@@ -306,13 +306,13 @@
       "verifier_sha256": null
     },
     "5": {
-      "created_at": "2026-10-13T04:00:09.918044Z",
+      "created_at": "2026-10-13T04:00:16.967014Z",
       "created_by": "tolga",
       "download_count": 0,
       "downloadable": false,
       "downloads": [],
       "error": null,
-      "expires_at": "2026-11-12T04:00:09.901565Z",
+      "expires_at": "2026-11-12T04:00:16.926493Z",
       "extract": [],
       "file": null,
       "finished_at": null,
@@ -347,12 +347,12 @@
     "headers": {
       "accept-ranges": "none",
       "cache-control": "no-store",
-      "content-disposition": "attachment; filename=\"ARCILOGGER-kanit-KP-20261013-070006-35406f6b.zip\"",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-kanit-KP-20261013-070012-35406f6b.zip\"",
       "content-type": "application/zip",
-      "repr-digest": "sha-256=:tWHVyEqbLS2/DvuCUVKKqqS93q6VWl4NAI4PxLKWkWY=:"
+      "repr-digest": "sha-256=:LrlGRrNha+jN98DSS9/njHibdIK1O1ySw4ynJm7d9MA=:"
     },
-    "sha256": "b561d5c84a9b2d2dbf0efb8251528aaaa4bddeae955a5e0d008e0fc4b2969166",
-    "size": 61935
+    "sha256": "2eb94646b3616be8cdf7c0d24bdfe78c789b7482b53b5c92c38ca7266eddf4c0",
+    "size": 61942
   },
   "errors": {
     "create_forbidden_auditor": {
@@ -399,7 +399,7 @@
         "error": {
           "code": "disk_space_low",
           "details": {
-            "estimated_bytes": 4197988,
+            "estimated_bytes": 4197990,
             "free_bytes": 32212254720,
             "pending_bytes": 4198169,
             "reserve_bytes": 107374182400
@@ -491,12 +491,12 @@
   "list": {
     "items": [
       {
-        "created_at": "2026-10-13T04:00:09.918044Z",
+        "created_at": "2026-10-13T04:00:16.967014Z",
         "created_by": "tolga",
         "download_count": 0,
         "downloadable": false,
         "error": null,
-        "expires_at": "2026-11-12T04:00:09.901565Z",
+        "expires_at": "2026-11-12T04:00:16.926493Z",
         "file": null,
         "finished_at": null,
         "id": 5,
@@ -526,14 +526,14 @@
         "verifier_sha256": null
       },
       {
-        "created_at": "2026-10-13T04:00:08.197986Z",
+        "created_at": "2026-10-13T04:00:14.382781Z",
         "created_by": "tolga",
         "download_count": 0,
         "downloadable": false,
         "error": "2026/10/08/fortigate.log.gz: dosya boyutu manifesttekinden farklı (değişmiş olabilir) / 2026/10/08/fortigate.log.gz: size differs from the manifest (changed?)",
-        "expires_at": "2026-11-12T04:00:08.179128Z",
+        "expires_at": "2026-11-12T04:00:14.346525Z",
         "file": null,
-        "finished_at": "2026-10-13T04:00:09.041823Z",
+        "finished_at": "2026-10-13T04:00:15.133124Z",
         "id": 4,
         "index_sha256": null,
         "legal_grade": null,
@@ -561,26 +561,26 @@
         "verifier_sha256": null
       },
       {
-        "created_at": "2026-10-13T04:00:07.249795Z",
+        "created_at": "2026-10-13T04:00:13.945855Z",
         "created_by": "tolga",
         "download_count": 0,
         "downloadable": false,
         "error": null,
-        "expires_at": "2026-10-13T03:00:09.817893Z",
-        "file": "ARCILOGGER-kanit-KP-20261013-070008-7584fbe9.zip",
-        "finished_at": "2026-10-13T04:00:08.128223Z",
+        "expires_at": "2026-10-13T03:00:16.755133Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070014-7584fbe9.zip",
+        "finished_at": "2026-10-13T04:00:14.239166Z",
         "id": 3,
-        "index_sha256": "ca0565e2e21c184923b3751de901f48fc61293c559e8422a89f4b5fd52b9c4bb",
+        "index_sha256": "9a105344c110f32ddca6087f35c8f24e2d65fd698c31d6359348891736fc948e",
         "legal_grade": false,
         "lookup_id": null,
-        "package_name": "KP-20261013-070008-7584fbe9",
+        "package_name": "KP-20261013-070014-7584fbe9",
         "password_protected": false,
         "scope": {
           "content": "full_days",
           "days": [
             "2026-10-07"
           ],
-          "estimated_bytes": 4197872,
+          "estimated_bytes": 4197873,
           "extract_lines": 0,
           "include_audit_log": false,
           "lookup_id": null,
@@ -589,8 +589,8 @@
             "fortigate"
           ]
         },
-        "sha256": "5a880df25a7bb31b06769d80310ef9c29dc58cb101d7f0aee5086366774c9ff5",
-        "size": 57969,
+        "sha256": "17c48e446c664b04187426217108c261e603411cb0adf04f98703e42ff5aef86",
+        "size": 57967,
         "status": "expired",
         "status_label_en": "Expired",
         "status_label_tr": "Süresi doldu",
@@ -598,26 +598,26 @@
         "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
       },
       {
-        "created_at": "2026-10-13T04:00:06.286581Z",
+        "created_at": "2026-10-13T04:00:13.367878Z",
         "created_by": "tolga",
         "download_count": 0,
         "downloadable": true,
         "error": null,
-        "expires_at": "2026-11-12T04:00:07.186464Z",
-        "file": "ARCILOGGER-kanit-KP-20261013-070007-d1a63c1d.zip",
-        "finished_at": "2026-10-13T04:00:07.186464Z",
+        "expires_at": "2026-11-12T04:00:13.806458Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070013-d1a63c1d.zip",
+        "finished_at": "2026-10-13T04:00:13.806458Z",
         "id": 2,
-        "index_sha256": "d49763abfb1aefd7cfef15399200392e3e2132c81cd2e3eb698ca9d20e0485cd",
+        "index_sha256": "53c7c1aed33d4e445006f768242fbff9b08566ad069b066766c1bc5caccbc4b1",
         "legal_grade": false,
         "lookup_id": 1,
-        "package_name": "KP-20261013-070007-d1a63c1d",
+        "package_name": "KP-20261013-070013-d1a63c1d",
         "password_protected": true,
         "scope": {
           "content": "extract",
           "days": [
             "2026-10-09"
           ],
-          "estimated_bytes": 4211964,
+          "estimated_bytes": 4211965,
           "extract_lines": 3,
           "include_audit_log": false,
           "lookup_id": 1,
@@ -627,8 +627,8 @@
             "fortigate"
           ]
         },
-        "sha256": "76c64ac7734795a5d4c58e368c71a9e7e08b305c1923f428772c1b0eb1da28ff",
-        "size": 142572,
+        "sha256": "50ff67ac1c225dbda6e209ff1e9bb823468bb6c448808d4f48a918575a51c459",
+        "size": 145578,
         "status": "ready",
         "status_label_en": "Ready",
         "status_label_tr": "Hazır",
@@ -636,19 +636,19 @@
         "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
       },
       {
-        "created_at": "2026-10-13T04:00:06.036685Z",
+        "created_at": "2026-10-13T04:00:12.702920Z",
         "created_by": "tolga",
         "download_count": 2,
         "downloadable": true,
         "error": null,
-        "expires_at": "2026-11-12T04:00:06.208227Z",
-        "file": "ARCILOGGER-kanit-KP-20261013-070006-35406f6b.zip",
-        "finished_at": "2026-10-13T04:00:06.208227Z",
+        "expires_at": "2026-11-12T04:00:13.150668Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070012-35406f6b.zip",
+        "finished_at": "2026-10-13T04:00:13.150668Z",
         "id": 1,
-        "index_sha256": "ae8321dd8ebe2581e34b4b4366aa6046414a8492aaf41e179af64eea425f8f13",
+        "index_sha256": "632384fabdac4baeedd91a05aba794f92cae0d83bc2acb79ee3d72078221d26c",
         "legal_grade": false,
         "lookup_id": null,
-        "package_name": "KP-20261013-070006-35406f6b",
+        "package_name": "KP-20261013-070012-35406f6b",
         "password_protected": false,
         "scope": {
           "content": "full_days",
@@ -656,15 +656,15 @@
             "2026-10-04",
             "2026-10-05"
           ],
-          "estimated_bytes": 4201856,
+          "estimated_bytes": 4201859,
           "extract_lines": 0,
           "include_audit_log": false,
           "lookup_id": null,
           "reference": null,
           "sources": null
         },
-        "sha256": "b561d5c84a9b2d2dbf0efb8251528aaaa4bddeae955a5e0d008e0fc4b2969166",
-        "size": 61935,
+        "sha256": "2eb94646b3616be8cdf7c0d24bdfe78c789b7482b53b5c92c38ca7266eddf4c0",
+        "size": 61942,
         "status": "ready",
         "status_label_en": "Ready",
         "status_label_tr": "Hazır",
@@ -677,12 +677,12 @@
   "list_auditor": {
     "items": [
       {
-        "created_at": "2026-10-13T04:00:09.918044Z",
+        "created_at": "2026-10-13T04:00:16.967014Z",
         "created_by": "tolga",
         "download_count": 0,
         "downloadable": false,
         "error": null,
-        "expires_at": "2026-11-12T04:00:09.901565Z",
+        "expires_at": "2026-11-12T04:00:16.926493Z",
         "file": null,
         "finished_at": null,
         "id": 5,
@@ -712,14 +712,14 @@
         "verifier_sha256": null
       },
       {
-        "created_at": "2026-10-13T04:00:08.197986Z",
+        "created_at": "2026-10-13T04:00:14.382781Z",
         "created_by": "tolga",
         "download_count": 0,
         "downloadable": false,
         "error": "2026/10/08/fortigate.log.gz: dosya boyutu manifesttekinden farklı (değişmiş olabilir) / 2026/10/08/fortigate.log.gz: size differs from the manifest (changed?)",
-        "expires_at": "2026-11-12T04:00:08.179128Z",
+        "expires_at": "2026-11-12T04:00:14.346525Z",
         "file": null,
-        "finished_at": "2026-10-13T04:00:09.041823Z",
+        "finished_at": "2026-10-13T04:00:15.133124Z",
         "id": 4,
         "index_sha256": null,
         "legal_grade": null,
@@ -747,26 +747,26 @@
         "verifier_sha256": null
       },
       {
-        "created_at": "2026-10-13T04:00:07.249795Z",
+        "created_at": "2026-10-13T04:00:13.945855Z",
         "created_by": "tolga",
         "download_count": 0,
         "downloadable": false,
         "error": null,
-        "expires_at": "2026-10-13T03:00:09.817893Z",
-        "file": "ARCILOGGER-kanit-KP-20261013-070008-7584fbe9.zip",
-        "finished_at": "2026-10-13T04:00:08.128223Z",
+        "expires_at": "2026-10-13T03:00:16.755133Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070014-7584fbe9.zip",
+        "finished_at": "2026-10-13T04:00:14.239166Z",
         "id": 3,
-        "index_sha256": "ca0565e2e21c184923b3751de901f48fc61293c559e8422a89f4b5fd52b9c4bb",
+        "index_sha256": "9a105344c110f32ddca6087f35c8f24e2d65fd698c31d6359348891736fc948e",
         "legal_grade": false,
         "lookup_id": null,
-        "package_name": "KP-20261013-070008-7584fbe9",
+        "package_name": "KP-20261013-070014-7584fbe9",
         "password_protected": false,
         "scope": {
           "content": "full_days",
           "days": [
             "2026-10-07"
           ],
-          "estimated_bytes": 4197872,
+          "estimated_bytes": 4197873,
           "extract_lines": 0,
           "include_audit_log": false,
           "lookup_id": null,
@@ -775,8 +775,8 @@
             "fortigate"
           ]
         },
-        "sha256": "5a880df25a7bb31b06769d80310ef9c29dc58cb101d7f0aee5086366774c9ff5",
-        "size": 57969,
+        "sha256": "17c48e446c664b04187426217108c261e603411cb0adf04f98703e42ff5aef86",
+        "size": 57967,
         "status": "expired",
         "status_label_en": "Expired",
         "status_label_tr": "Süresi doldu",
@@ -784,19 +784,19 @@
         "verifier_sha256": "262eec38f1426bf327d3384f3d652e2e2bba57a989046c16adf205e776104a7d"
       },
       {
-        "created_at": "2026-10-13T04:00:06.036685Z",
+        "created_at": "2026-10-13T04:00:12.702920Z",
         "created_by": "tolga",
         "download_count": 2,
         "downloadable": true,
         "error": null,
-        "expires_at": "2026-11-12T04:00:06.208227Z",
-        "file": "ARCILOGGER-kanit-KP-20261013-070006-35406f6b.zip",
-        "finished_at": "2026-10-13T04:00:06.208227Z",
+        "expires_at": "2026-11-12T04:00:13.150668Z",
+        "file": "ARCILOGGER-kanit-KP-20261013-070012-35406f6b.zip",
+        "finished_at": "2026-10-13T04:00:13.150668Z",
         "id": 1,
-        "index_sha256": "ae8321dd8ebe2581e34b4b4366aa6046414a8492aaf41e179af64eea425f8f13",
+        "index_sha256": "632384fabdac4baeedd91a05aba794f92cae0d83bc2acb79ee3d72078221d26c",
         "legal_grade": false,
         "lookup_id": null,
-        "package_name": "KP-20261013-070006-35406f6b",
+        "package_name": "KP-20261013-070012-35406f6b",
         "password_protected": false,
         "scope": {
           "content": "full_days",
@@ -804,15 +804,15 @@
             "2026-10-04",
             "2026-10-05"
           ],
-          "estimated_bytes": 4201856,
+          "estimated_bytes": 4201859,
           "extract_lines": 0,
           "include_audit_log": false,
           "lookup_id": null,
           "reference": null,
           "sources": null
         },
-        "sha256": "b561d5c84a9b2d2dbf0efb8251528aaaa4bddeae955a5e0d008e0fc4b2969166",
-        "size": 61935,
+        "sha256": "2eb94646b3616be8cdf7c0d24bdfe78c789b7482b53b5c92c38ca7266eddf4c0",
+        "size": 61942,
         "status": "ready",
         "status_label_en": "Ready",
         "status_label_tr": "Hazır",
@@ -823,7 +823,7 @@
     "next_cursor": null
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.511645+00:00",
+    "captured_at": "2026-10-13T04:02:35.078484+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -831,28 +831,28 @@
     "tsa": "mock (never legally valid)"
   },
   "ready_expired": {
-    "created_at": "2026-10-13T04:00:07.249795Z",
+    "created_at": "2026-10-13T04:00:13.945855Z",
     "created_by": "tolga",
     "download_count": 0,
     "downloadable": false,
     "downloads": [],
     "error": null,
-    "expires_at": "2026-10-13T03:00:09.817893Z",
+    "expires_at": "2026-10-13T03:00:16.755133Z",
     "extract": [],
-    "file": "ARCILOGGER-kanit-KP-20261013-070008-7584fbe9.zip",
-    "finished_at": "2026-10-13T04:00:08.128223Z",
+    "file": "ARCILOGGER-kanit-KP-20261013-070014-7584fbe9.zip",
+    "finished_at": "2026-10-13T04:00:14.239166Z",
     "id": 3,
-    "index_sha256": "ca0565e2e21c184923b3751de901f48fc61293c559e8422a89f4b5fd52b9c4bb",
+    "index_sha256": "9a105344c110f32ddca6087f35c8f24e2d65fd698c31d6359348891736fc948e",
     "legal_grade": false,
     "lookup_id": null,
-    "package_name": "KP-20261013-070008-7584fbe9",
+    "package_name": "KP-20261013-070014-7584fbe9",
     "password_protected": false,
     "scope": {
       "content": "full_days",
       "days": [
         "2026-10-07"
       ],
-      "estimated_bytes": 4197872,
+      "estimated_bytes": 4197873,
       "extract_lines": 0,
       "include_audit_log": false,
       "lookup_id": null,
@@ -861,8 +861,8 @@
         "fortigate"
       ]
     },
-    "sha256": "5a880df25a7bb31b06769d80310ef9c29dc58cb101d7f0aee5086366774c9ff5",
-    "size": 57969,
+    "sha256": "17c48e446c664b04187426217108c261e603411cb0adf04f98703e42ff5aef86",
+    "size": 57967,
     "status": "ready",
     "status_label_en": "Ready",
     "status_label_tr": "Hazır",
@@ -899,20 +899,20 @@
     "day": "2026-10-08",
     "deep": true,
     "details": {
-      "duration_ms": 294,
+      "duration_ms": 576,
       "gen_time": "2026-10-08T22:30:05+00:00",
       "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-      "serial": "1FE6DC7402E5AEBA"
+      "serial": "C8261381AED4B4D"
     },
-    "duration_ms": 294,
+    "duration_ms": 576,
     "errors": [],
     "errors_tr": [],
-    "finished_at": "2026-10-13T04:00:09.778891Z",
+    "finished_at": "2026-10-13T04:00:16.674361Z",
     "message_en": "08.10.2026 verified.",
     "message_tr": "08.10.2026 günü doğrulandı.",
     "ok": true,
     "outcome": "ok",
-    "started_at": "2026-10-13T04:00:09.484542Z",
+    "started_at": "2026-10-13T04:00:16.097716Z",
     "warnings": [
       "2026/10/08/fortigate.log.gz: not read-only"
     ],
@@ -924,24 +924,24 @@
     "day": "2026-10-08",
     "deep": true,
     "details": {
-      "duration_ms": 307,
+      "duration_ms": 606,
       "gen_time": "2026-10-08T22:30:05+00:00",
       "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-      "serial": "1FE6DC7402E5AEBA"
+      "serial": "C8261381AED4B4D"
     },
-    "duration_ms": 307,
+    "duration_ms": 606,
     "errors": [
       "2026/10/08/fortigate.log.gz: SHA-256 mismatch (file changed)"
     ],
     "errors_tr": [
       "2026/10/08/fortigate.log.gz: SHA-256 özeti tutmuyor (dosya değişmiş)"
     ],
-    "finished_at": "2026-10-13T04:00:09.427906Z",
+    "finished_at": "2026-10-13T04:00:15.953956Z",
     "message_en": "08.10.2026 does not verify: 2026/10/08/fortigate.log.gz: SHA-256 mismatch (file changed)",
     "message_tr": "08.10.2026 günü doğrulanamadı: 2026/10/08/fortigate.log.gz: SHA-256 özeti tutmuyor (dosya değişmiş)",
     "ok": false,
     "outcome": "failed",
-    "started_at": "2026-10-13T04:00:09.119916Z",
+    "started_at": "2026-10-13T04:00:15.347694Z",
     "warnings": [
       "2026/10/08/fortigate.log.gz: not read-only"
     ],

@@ -1,0 +1,212 @@
+{
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    },
+    "fortigate_observed_timeout": {
+      "body": {
+        "error": {
+          "code": "fortigate_observed_timeout",
+          "message_en": "The FortiGate records could not be summarised within 5 s; try again a little later.",
+          "message_tr": "FortiGate kayıtları 5 saniyede özetlenemedi; biraz sonra yeniden deneyin."
+        }
+      },
+      "headers": {},
+      "status": 504
+    },
+    "validation_error": {
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "details": [
+            {
+              "loc": [
+                "query",
+                "hours"
+              ],
+              "msg": "Input should be less than or equal to 72",
+              "type": "less_than_equal"
+            }
+          ],
+          "message_en": "The submitted data is invalid.",
+          "message_tr": "Gönderilen veriler geçersiz."
+        }
+      },
+      "headers": {},
+      "status": 422
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:02:35.078484+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "observed": {
+    "generated_at": "2026-10-13T07:01:47.786081+03:00",
+    "nat": {
+      "exits_invalid": false,
+      "hours": 24,
+      "rows": [
+        {
+          "dstintf": "wan1",
+          "egress": "wan",
+          "first_seen": "2026-10-12T08:31:47.480850+03:00",
+          "last_seen": "2026-10-13T06:49:47.480850+03:00",
+          "sessions": 48,
+          "trandisp": "snat",
+          "trandisp_known": true,
+          "transip": "100.64.12.9"
+        },
+        {
+          "dstintf": "wan2",
+          "egress": null,
+          "first_seen": "2026-10-12T10:01:47.480850+03:00",
+          "last_seen": "2026-10-13T06:37:47.480850+03:00",
+          "sessions": 14,
+          "trandisp": "snat",
+          "trandisp_known": true,
+          "transip": "100.64.13.9"
+        },
+        {
+          "dstintf": "dmz",
+          "egress": null,
+          "first_seen": "2026-10-12T13:01:47.480850+03:00",
+          "last_seen": "2026-10-13T04:01:47.480850+03:00",
+          "sessions": 6,
+          "trandisp": "snat",
+          "trandisp_known": true,
+          "transip": "172.20.99.1"
+        },
+        {
+          "dstintf": "wan1",
+          "egress": null,
+          "first_seen": "2026-10-12T22:01:47.480850+03:00",
+          "last_seen": "2026-10-12T23:31:47.480850+03:00",
+          "sessions": 3,
+          "trandisp": "snat-pool",
+          "trandisp_known": false,
+          "transip": "198.51.100.20"
+        }
+      ],
+      "truncated": false,
+      "unknown_trandisp": [
+        "snat-pool"
+      ],
+      "unmapped_transips": [
+        "100.64.13.9",
+        "172.20.99.1",
+        "198.51.100.20"
+      ]
+    },
+    "srcmac": {
+      "hours": 1,
+      "interfaces": [
+        {
+          "configured": true,
+          "macs": 4,
+          "max_ips_per_mac": 1,
+          "rows": 12,
+          "srcintf": "vlan42"
+        },
+        {
+          "configured": false,
+          "macs": 1,
+          "max_ips_per_mac": 3,
+          "rows": 6,
+          "srcintf": "vlan60"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  "observed_exits_invalid": {
+    "generated_at": "2026-10-13T07:01:47.939040+03:00",
+    "nat": {
+      "exits_invalid": true,
+      "hours": 24,
+      "rows": [
+        {
+          "dstintf": "wan1",
+          "egress": null,
+          "first_seen": "2026-10-12T08:31:47.480850+03:00",
+          "last_seen": "2026-10-13T06:49:47.480850+03:00",
+          "sessions": 48,
+          "trandisp": "snat",
+          "trandisp_known": true,
+          "transip": "100.64.12.9"
+        },
+        {
+          "dstintf": "wan2",
+          "egress": null,
+          "first_seen": "2026-10-12T10:01:47.480850+03:00",
+          "last_seen": "2026-10-13T06:37:47.480850+03:00",
+          "sessions": 14,
+          "trandisp": "snat",
+          "trandisp_known": true,
+          "transip": "100.64.13.9"
+        },
+        {
+          "dstintf": "dmz",
+          "egress": null,
+          "first_seen": "2026-10-12T13:01:47.480850+03:00",
+          "last_seen": "2026-10-13T04:01:47.480850+03:00",
+          "sessions": 6,
+          "trandisp": "snat",
+          "trandisp_known": true,
+          "transip": "172.20.99.1"
+        },
+        {
+          "dstintf": "wan1",
+          "egress": null,
+          "first_seen": "2026-10-12T22:01:47.480850+03:00",
+          "last_seen": "2026-10-12T23:31:47.480850+03:00",
+          "sessions": 3,
+          "trandisp": "snat-pool",
+          "trandisp_known": false,
+          "transip": "198.51.100.20"
+        }
+      ],
+      "truncated": false,
+      "unknown_trandisp": [
+        "snat-pool"
+      ],
+      "unmapped_transips": [
+        "100.64.12.9",
+        "100.64.13.9",
+        "172.20.99.1",
+        "198.51.100.20"
+      ]
+    },
+    "srcmac": {
+      "hours": 1,
+      "interfaces": [
+        {
+          "configured": true,
+          "macs": 4,
+          "max_ips_per_mac": 1,
+          "rows": 12,
+          "srcintf": "vlan42"
+        },
+        {
+          "configured": false,
+          "macs": 1,
+          "max_ips_per_mac": 3,
+          "rows": 6,
+          "srcintf": "vlan60"
+        }
+      ],
+      "truncated": false
+    }
+  }
+}

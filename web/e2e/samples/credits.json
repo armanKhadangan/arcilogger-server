@@ -368,7 +368,7 @@
     "unreadable_lines": 0
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.511645+00:00",
+    "captured_at": "2026-10-13T04:02:35.078484+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -414,18 +414,18 @@
     "effective_at": null,
     "effects": [],
     "guarded": false,
-    "request_id": "fb0c3d2e538eabf2f8b55457dd97efed",
-    "short_id": "fb0c3d2e",
+    "request_id": "a463e3d31f5c8ce07a4a0a598dc23254",
+    "short_id": "a463e3d3",
     "state": "queued",
-    "status_url": "/api/v1/admin/requests/fb0c3d2e538eabf2f8b55457dd97efed",
+    "status_url": "/api/v1/admin/requests/a463e3d31f5c8ce07a4a0a598dc23254",
     "warnings": []
   },
   "query_done": {
     "changes": {},
-    "created_at": "2026-10-13T04:00:12.700269Z",
+    "created_at": "2026-10-13T04:00:23.485584Z",
     "effective_at": null,
     "error": null,
-    "id": "fb0c3d2e538eabf2f8b55457dd97efed",
+    "id": "a463e3d31f5c8ce07a4a0a598dc23254",
     "kind": "action.credit",
     "label_en": "Done",
     "label_tr": "Tamamlandı",
@@ -439,11 +439,11 @@
     },
     "rolled_back": false,
     "section": null,
-    "short_id": "fb0c3d2e",
+    "short_id": "a463e3d3",
     "state": "succeeded",
     "steps": [
       {
-        "at": "2026-10-13T07:00:12.771376+03:00",
+        "at": "2026-10-13T07:00:23.634658+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -451,7 +451,7 @@
         "step": "received"
       },
       {
-        "at": "2026-10-13T07:00:12.772508+03:00",
+        "at": "2026-10-13T07:00:23.637045+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -459,7 +459,7 @@
         "step": "dispatch"
       },
       {
-        "at": "2026-10-13T07:00:12.779293+03:00",
+        "at": "2026-10-13T07:00:23.650877+03:00",
         "code": null,
         "message_en": null,
         "message_tr": null,
@@ -468,7 +468,7 @@
       }
     ],
     "terminal": true,
-    "updated_at": "2026-10-13T07:00:12.807082+03:00",
+    "updated_at": "2026-10-13T07:00:23.716880+03:00",
     "version": null,
     "warnings": []
   },
