@@ -6325,6 +6325,31 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   column. `docs/DENETCI-KILAVUZU.md` (WP-F2) must carry the same two cells. Tests: the behaviour
   is pinned by the c2 tests named there; no docs test reads the cells yet (3.9's reading-table
   test is WP-F2's). Fold into 2.15.
+- **d-24. The Wave 3 samples come from a second capture site** (2.12 "Samples"). The 21 Wave 3
+  lookups (ids 101-121: FortiGate DHCP, srcmac, the eight exit labels, `clock_offset`,
+  `unconverted_dhcp`, `untrusted_match`) are captured by `web/scripts/samples_lookups.py` on a
+  site with its own database from the template and its own data directory, run after the usage
+  capture, as `capture_usage` does: written into the main site they would move its `vault_only`
+  window, its seal and sources values, its raw-line keys and its lookup ids. Each lookup is
+  checked for its mode, exit resolution and explanation keys, and the capture stops when one no
+  longer shows them. `settings-observed.json` comes from `web/scripts/samples_network.py` (a
+  dual-WAN day; the 504 with the production 5-s deadline, so the capture waits about 5 s), with
+  the 5-minute cache off. `FILE_KEYS["lookups"]` compares the values of `resolution`,
+  `mac_source`, `source_table`, `end_reason` and `port_preservation`, so a renamed value is a
+  `--check` difference. Tests: `capture_api_samples.py --check`; `web/src/lib/api-samples.test.ts`.
+  Fold into 2.12.
+- **d-25. The lease evidence samples: three states in one order, no `absent`** (2.12 "the
+  `sources.json` `lease_evidence` states"). `overview_lease_ok` is captured first, with FortiGate
+  DHCP rows only and no client traffic in the last hour; then the worker's own
+  `check_lease_evidence` opens the `none` alerts of `mt_dhcp` and `mt_arp` (`overview_lease_none`);
+  then one refused and one excluded `fg_dhcp` row give `overview_lease_refused` while those alerts
+  stay open: refused rows stay in the 24-hour window, so this is the one order that gives all
+  three without deleting rows. The refused row uses logid `0100026003`, the unmapped logid of the
+  worker tests; it claims nothing about FortiGate. `absent` is not captured (2.12 names ok, none
+  and refused). `web/e2e/mock-sources.ts` (outside WP-D's list) serves
+  `SOURCES.overview.lease_evidence`, because the field is required (d-15); `api-samples.test.ts`
+  gains the type rules of the new keys. Tests: `capture_api_samples.py --check`;
+  `api-samples.test.ts`; `api-types.test.ts`. Fold into 2.12 and 4.1.
 
 ---
 
