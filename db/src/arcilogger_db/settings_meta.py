@@ -228,6 +228,33 @@ _ALERTS = _group(
         "Kurulumdan bu kadar sonra hiç yedek yoksa R20-backup uyarısı (orta önem).",
         "R20-backup (medium) when there is no backup at all this long after the installation.",
     ),
+    (
+        "alerts.filter_days",
+        "İçerik filtresi kaydı beklenen günler",
+        "Days on which content filter records are expected",
+        "ISO hafta günleri (1 = Pazartesi, 7 = Pazar). Bu günlerde aşağıdaki süre boyunca web ya "
+        "da DNS filtresi kaydı gelmezse Uyum Durumu'nun 7. kartı kırmızı olur ve R20-filter "
+        "uyarısı açılır. Varsayılan: haftanın her günü.",
+        "ISO weekdays (1 = Monday, 7 = Sunday). If no web or DNS filter record arrives for the "
+        "time below on these days, card 7 of the Uyum Durumu page turns red and the R20-filter "
+        "alert opens. Default: every day of the week.",
+    ),
+    (
+        "alerts.filter_skip_holidays",
+        "Resmî tatillerde içerik filtresi kaydı bekleme",
+        "Expect no content filter records on public holidays",
+        "Açıkken (varsayılan) Kullanım analizi'nin tatil listesindeki (usage.holidays) günler "
+        "beklenmez. Kapalıyken resmî tatiller de beklenen gün sayılır.",
+        "On (the default): the days in the holiday list of usage analytics (usage.holidays) are "
+        "not expected. Off: public holidays count as expected days.",
+    ),
+    (
+        "alerts.filter_quiet_hours",
+        "İçerik filtresi kaydı olmadan geçebilecek süre (saat)",
+        "Hours allowed without content filter records",
+        "Beklenen günlerde kayıtsız geçebilecek en uzun süre.",
+        "The longest time without a record on expected days.",
+    ),
 )
 
 _LOOKUP = _group(
