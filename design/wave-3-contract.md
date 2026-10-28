@@ -5888,6 +5888,18 @@ from section 0.2 are recorded here too, with the date and who decided.
   `source_configured_later` wording (WP-C2/WP-D), the web's per-rule labels (WP-E), the installer
   step `leases.prepare-rollback` (integrator), CORRELATION/KURULUM texts (WP-F2).
 
+## Deviations — c2 (WP-C2, 2026-10-28)
+
+- **A RELEASE mapped after the build ends the lease in the lookup** (2.7, round-6 note "a release
+  mapped after the build", its second option). When the newest kept `fg_dhcp` row of a lease's
+  pair in `[lease.start, at]` (the per-moment query) has a logid mapped to `deassigned`, the
+  lookup treats the lease as not covering `at` (`Attributor.covers`): no chain from it, so an
+  internal lookup answers `no_lease` and a match `chain_missing`, as after the rebuild. No new
+  explanation key and no lowered chain with a text. The stored lease is unchanged; the usage
+  rollups (no per-moment query) still read the stored lease until the rebuild. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_release_mapped_after_the_build_ends_the_lease`.
+  Fold into 2.7.
+
 ---
 
 ## Implementation notes — round 5
