@@ -42,7 +42,7 @@ A pattern is set when a line was not (fully) understood. Rows that could be buil
 returned, so B2 loads them **and** counts the failure.
 
 One pattern per line, the most severe first (FortiGate: glued, unterminated, unparsed, type,
-value, time; MikroTik: glued, the family's own failure, time).
+dhcp, value, time; MikroTik: glued, the family's own failure, time).
 
 | Pattern | Meaning | Typed row? |
 |---|---|---|
@@ -51,6 +51,7 @@ value, time; MikroTik: glued, the family's own failure, time).
 | `fortigate.unterminated` | A quoted value has no closing quote (datagram cut short?) | yes |
 | `fortigate.unparsed` | Tokens that are not `key=value` (kept in `messages.extra.unparsed`) | yes |
 | `fortigate.type` | No `type=` field (all fields in `messages.extra.fields`) | no |
+| `fortigate.dhcp` | An `event` line with `ip`, `mac` and `dhcp_msg` (the shape of a FortiGate DHCP server record, ADR-0016) whose `ip` is no address or whose `mac` is no MAC: the row stays `fg_event`, never silently an ordinary event; the detail gives only the validity, never the value (`DHCP event without a usable ip/mac: ip=valid, mac=invalid`) | yes (`fg_event`) |
 | `fortigate.value` | A mapped value does not fit its column (kept in `extra`); also an `eventtime` that is not a timestamp, and `date`/`time` that are not a date and time although `tz` is valid (`invalid value: eventtime`, `invalid value: date/time`) | yes |
 | `fortigate.time` | Implausible device time (see "Device time"); detail `implausible device time: …` | yes |
 | `mikrotik.glued` | A second syslog header (`<PRI>` + ISO, BSD or RFC 5424 timestamp) inside the message: cut there, the rest is in `messages.extra.glued` | first message's |
@@ -119,6 +120,7 @@ and `date`/`time`/`tz` agree to within one second — they fail loudly if a samp
 | `utm` / `ips` | `fg_ips` | `utm` / `ips` |
 | `utm` / `virus` | `fg_virus` | `utm` / `virus` |
 | `event` / any (`system`, `user`, `vpn`, …) | `fg_event` | `event` / subtype |
+| `event` / any, with `ip`, `mac` and `dhcp_msg` that convert (FortiGate DHCP server, ADR-0016) | `fg_dhcp` (else `fg_event` and `fortigate.dhcp`) | `event` / subtype |
 | anything else (e.g. `utm`/`dlp`) | — (`messages.extra.fields` holds all fields) | type / subtype |
 
 **SSL logs go to `fg_app`** (not `fg_web`): spec 10.2 ranks `fg_web.hostname` first (the web
@@ -146,11 +148,12 @@ Keys not listed go to the row's `extra` under their own name. In every typed tab
 implied by the table and `devname` is `messages.host`.
 
 **`fg_traffic`** — `logid`, `subtype`, `action`, `policyid`*, `policyname`, `sessionid`*,
-`proto`*, `srcip`†, `srcport`*, `srcintf`, `dstip`†, `dstport`*, `dstintf`, `transip`†,
+`proto`*, `srcip`†, `srcport`*, `srcintf`, `srcmac`‡, `dstip`†, `dstport`*, `dstintf`, `transip`†,
 `transport`*, `trandisp`, `service`, `dstinetsvc`, `app`, `appid`*, `appcat`, `apprisk`,
 `dstcountry`, `duration`*, `sentbyte`*, `rcvdbyte`*, `sentpkt`*, `rcvdpkt`*, `sentdelta`*,
 `rcvddelta`*, `durationdelta`*, `utmaction`, `crscore`*; derived: `is_interim`. (Spec 7.3 list,
-complete.) Typical `extra`: `devid`, `vd`, `level`, `srcintfrole`, `dstintfrole`, `srccountry`,
+complete; `srcmac` since revision `0017_fortigate_dhcp`, never lease evidence, with
+`mastersrcmac` and `srcmacvendor` in `extra`.) Typical `extra`: `devid`, `vd`, `level`, `srcintfrole`, `dstintfrole`, `srccountry`,
 `dstregion`, `dstcity`, `dstreputation`, `policytype`, `poluuid`, `applist`, `appact`,
 `countapp`, `craction`, `crlevel`, `msg`, `sentpktdelta`, `rcvdpktdelta`.
 
@@ -179,8 +182,15 @@ complete.) Typical `extra`: `devid`, `vd`, `level`, `srcintfrole`, `dstintfrole`
 `extra`. Detections (spec 11): R03/R04 use `logdesc`, `status`, `user_name`, `srcip`, `ui`;
 R16 `cfgpath`/`cfgobj`/`cfgattr`; R17 `extra.cpu`/`extra.mem` of `action="perf-stats"`.
 
+**`fg_dhcp`** (ADR-0016; synthetic, verify on site) — `logid`, `subtype`, `level`, `logdesc`,
+`dhcp_msg`, `interface`, `ip`† (NOT NULL), `mac`‡ (NOT NULL), `hostname`, `lease`* (as logged),
+`msg`; derived: `device_time` (`true` when `time` is the FortiGate's event time, `false` when the
+receive time was used). `devid`, `vd`, 8.0's `vendor` … in `extra`. The parser routes by the
+shape of the line only; what a row means is the worker's (`dhcp.fortigate_logids`).
+
 \* integer column (range-checked: `proto` SMALLINT; ports, `cat`, `crscore` INTEGER; the rest
-BIGINT) · † `INET`.
+BIGINT) · † `INET` · ‡ `MACADDR`, normalised to lower case with colons (an empty value is
+`NULL`, a value that is no MAC stays in `extra` with `fortigate.value`).
 
 **`messages`** — `type`, `subtype` (FortiGate's), `severity`/`facility` (PRI; severity from
 `level` without PRI), `host` = `devname`, `program` = `NULL`, `text` = the line after the PRI.
