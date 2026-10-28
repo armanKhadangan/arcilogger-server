@@ -1128,6 +1128,32 @@ def test_a_line_loaded_in_a_rollback_window(
     assert "pln-nb44" not in text
 
 
+def test_a_line_inside_a_long_fortigate_lease_counts_beyond_the_fallback(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The ``fg_dhcp`` post-lease window has no 7-day fallback (deviation c2, the manager's
+    review of PR #30): the PC's converted ACK at t0 with a 30-day lease, then an ACK of .57 to
+    :77 that stayed an ``fg_event`` row at t0 + 1 d. A lookup at t0 + 8.5 d, more than 7 days
+    after that line and less than half the lease after t0, is ``low`` with its lease step;
+    nothing is cited and :77 appears nowhere. A capped window would name the PC at ``high``
+    without a warning."""
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, lease=2592000)
+    unconverted_line(evidence, T0 + timedelta(days=1), PC, OTHER, hostname="PLN-NB77")
+    build(db_session, DAY, DAY + timedelta(days=1))
+    outcome = internal(db_session, PC, T0 + timedelta(days=8, hours=12))
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.lease.mac == PC_MAC
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(T0), "ip": PC}
+    assert [ref.table for ref in chain.lease.evidence] == ["fg_dhcp"]
+    assert outcome.unconverted_dhcp == ()
+    text = outcome_text(outcome)
+    assert OTHER not in text
+    assert "pln-nb77" not in text
+
+
 # -- FortiGate DHCP rows that did not become lease evidence (D8 probe, 2.8.3) ---------------------
 
 #: The probe's text, its citation label (2.8.3) and the static-client warning (2.11).

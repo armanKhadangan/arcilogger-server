@@ -6046,7 +6046,9 @@ from section 0.2 are recorded here too, with the date and who decided.
   `worker/tests/test_lookup_fortigate_only.py::test_a_mikrotik_lease_kept_open_reads_back_one_probe_window`
   (an `fg_event` line 8 days back not counted, 6 days back counted; a converted row 8 and 99
   days back counted, 101 days back not), `::test_an_ack_older_than_its_lease_is_not_named`
-  (the 3.4 golden's 100 days, and 6 days inside the window by the coverage rule). Fold into
+  (the 3.4 golden's 100 days, and 6 days inside the window by the coverage rule),
+  `::test_a_line_inside_a_long_fortigate_lease_counts_beyond_the_fallback` (an `fg_dhcp` chain
+  of a 30-day lease: a line 7.5 days back lowers it, the uncapped window). Fold into
   2.7, 2.8.3, 2.17 (the residual of path 1), 3.8 and CORRELATION §7 (WP-F2: the window of the
   probe and of the `fg_event` post-lease check is 7 days; the converted-row check reads 100).
 - **The converted-row check also reads the chain's address** (2.7 "A MAC move the lease build
