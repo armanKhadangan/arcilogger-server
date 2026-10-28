@@ -14,6 +14,10 @@
   statement gets the remaining time as PostgreSQL ``statement_timeout``; past the limit the
   answer is 504 ``lookup_timeout`` (audited as ``lookup.run_failed``) instead of a hanging
   request. The lookup is stored (``lookups``) and audited (``lookup.run``).
+  A stored setting the lookup cannot read (written around the validator) answers 503
+  ``lookup_settings_invalid``: for ``nat.egresses`` (public-IP lookups only) with the text that
+  names it, for any other lookup or lease setting (``LookupSettings.from_settings``,
+  ``lookup.timeout_seconds``) with a second text that names no key, logged at WARNING.
 * ``GET /lookup/{id}`` — one lookup with its outcome (audited ``lookup.view``).
 * ``GET /lookup/{id}/report.pdf`` — the official report: rendered and stored on the first call
   (``lookup.report``), the same bytes on every call (``lookup.report_download``);
@@ -40,6 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -83,6 +88,7 @@ from arcilogger_worker.lookup import (
 from arcilogger_worker.lookup.types import MAX_TOLERANCE_SECONDS
 
 router = APIRouter(prefix="/lookup", tags=["lookup"])
+log = logging.getLogger("arcilogger.api.lookup")
 
 RunnerDep = Annotated[CurrentUser, Depends(require_privacy_notice("lookup.run"))]
 
@@ -164,6 +170,14 @@ MESSAGES: Final = {
         "(details are in the system log).",
     ),
 }
+#: The second text of ``lookup_settings_invalid``: a stored lookup or lease setting other than
+#: ``nat.egresses`` cannot be read (the key is named only in the system log).
+SETTINGS_UNREADABLE: Final = (
+    "5651 sorgu ayarları geçersiz: kayıtlı bir sorgu ya da kira ayarı okunamadı (Ayarlar → "
+    "Uygulama ayarları); sistem yöneticisi düzeltmelidir.",
+    "The 5651 lookup settings are invalid: a stored lookup or lease setting cannot be read "
+    "(Settings → Application settings); an administrator must fix it.",
+)
 #: HTTP status of each report error (``report_missing``/``report_damaged``: the stored file is
 #: gone or changed; the others: the report could not be made now and nothing was stored).
 REPORT_STATUS: Final = {
@@ -658,6 +672,10 @@ def run_5651(
     try:
         settings = LookupSettings.from_settings(values)
         limit = min(max(int(values.get(TIMEOUT_SETTING, DEFAULT_TIMEOUT_SECONDS)), 1), 300)
+    except (TypeError, ValueError) as exc:
+        log.warning("lookup settings cannot be read: %s", exc)
+        raise ApiError(503, "lookup_settings_invalid", *SETTINGS_UNREADABLE) from exc
+    try:
         if lookup_request.public_ip is not None:  # the internet exits: public-IP lookups only
             settings.egresses()
     except (TypeError, ValueError) as exc:
