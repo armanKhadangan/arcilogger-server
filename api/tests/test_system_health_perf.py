@@ -5,11 +5,14 @@ day (3,060,000 rows, the jobs of ``default_jobs`` in turn, one run in a hundred 
 table is not purged, owner question Q21), written with ``INSERT … SELECT generate_series`` (the
 technique of ``test_dashboard_api.py``), then ``VACUUM ANALYZE``; today's and yesterday's
 ``state/clock`` files with 24 samples each; collector and ingest status files with 20 sources;
-the worker's status file with every job; 30 sealed days in ``state/seal`` and the verification
-results of the three verification tasks.
+the worker's status file with every job; 30 days sealed in the vault with the mock TSA
+(``vaulttesting``, as the worker's tests seal) and the verification results of the three
+verification tasks. The rows of ``fg_web``, ``fg_dns``, ``search_counts`` and the alerts of
+contract 3 are not loaded: this endpoint reads none of those tables (contract, "Deviations —
+W4-D").
 
 **Timing:** through the API (``TestClient``), best of three after one warm-up (the cold run is
-printed too); the budget is one second. The probe of each job is explained as well: an index
+printed too); the budget is one second. Both probes of a job are explained as well: an index
 scan of ``ix_job_runs_job_started_at``, never a ``Seq Scan``.
 """
 
@@ -17,7 +20,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -36,6 +39,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site, site_day, utc_now
 from arcilogger_worker.alerts.system import backup_state_path
 from arcilogger_worker.service import JobState, default_jobs
+from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 pytestmark = pytest.mark.perf
 
@@ -45,6 +49,7 @@ BUDGET_SECONDS: Final = 1.0
 DAYS: Final = 180
 RUNS_PER_DAY: Final = 17_000
 SOURCES: Final = 20
+SEALED_DAYS: Final = 30
 
 LOAD = text(
     "INSERT INTO job_runs (job, started_at, finished_at, status, details) "
@@ -54,6 +59,17 @@ LOAD = text(
     "FROM generate_series(1, :rows) AS g, "
     "LATERAL (SELECT CAST(:start AS timestamptz) + g * CAST(:step AS interval) AS t) AS x"
 )
+
+
+@pytest.fixture
+def sealed(api_config: Config) -> Iterator[SealedVault]:
+    """The 30 days before today sealed in the API's data folder."""
+    today = site_day(utc_now())
+    days = [today - timedelta(days=back) for back in range(SEALED_DAYS, 0, -1)]
+    vault = make_vault(api_config.data_dir, tsa_now=at_site(days[0] - timedelta(days=30)))
+    vault.seal_days(days)
+    yield vault
+    vault.unlock_all()
 
 
 @pytest.fixture
@@ -138,13 +154,14 @@ def write_state(layout: Layout, jobs: list[str]) -> None:
             ),
             encoding="utf-8",
         )
-    for back in range(1, 31):
-        day = today - timedelta(days=back)
-        write_json(layout.seal_state(day), {"day": day.isoformat(), "status": "sealed"})
     verify = layout.state / "verify"
     for name in (verify_name(2), verify_name(30), "last-full.json"):
         write_json(verify / name, {"at": stamp, "days": 30, "ok": True, "checks": []})
     write_json(backup_state_path(layout), {"ok": True, "finished": stamp})
+
+
+def by_task(body: dict[str, Any]) -> dict[str, str]:
+    return {task["task"]: task["state"] for task in body["tasks"]}
 
 
 def test_health_within_one_second(
@@ -153,6 +170,7 @@ def test_health_within_one_second(
     db_engine: Engine,
     layout: Layout,
     api_config: Config,
+    sealed: SealedVault,
 ) -> None:
     jobs = [job.name for job in default_jobs(api_config.worker.interval_seconds)]
     began = time.perf_counter()
@@ -160,20 +178,25 @@ def test_health_within_one_second(
     write_state(layout, jobs)
     print(f"\nloaded {DAYS * RUNS_PER_DAY:,} job runs in {time.perf_counter() - began:.0f} s")
 
+    probes = (
+        "SELECT status, started_at, finished_at FROM job_runs "
+        "WHERE job = :job AND status <> 'running' AND started_at >= :since "
+        "ORDER BY started_at DESC LIMIT 1",
+        "SELECT started_at FROM job_runs "
+        "WHERE job = :job AND status = 'running' AND started_at > :since "
+        "ORDER BY started_at DESC LIMIT 1",
+    )
     with db_engine.connect() as connection:
-        plan = "\n".join(
-            row[0]
-            for row in connection.execute(
-                text(
-                    "EXPLAIN SELECT status, started_at, finished_at FROM job_runs "
-                    "WHERE job = :job AND status <> 'running' AND started_at >= :since "
-                    "ORDER BY started_at DESC LIMIT 1"
-                ),
-                {"job": "partitions.ensure", "since": utc_now() - timedelta(days=7)},
+        for probe in probes:
+            plan = "\n".join(
+                row[0]
+                for row in connection.execute(
+                    text(f"EXPLAIN {probe}"),
+                    {"job": "partitions.ensure", "since": utc_now() - timedelta(days=7)},
+                )
             )
-        )
-    assert "ix_job_runs_job_started_at" in plan, plan
-    assert "Seq Scan" not in plan, plan
+            assert "ix_job_runs_job_started_at" in plan, plan
+            assert "Seq Scan" not in plan, plan
 
     login_as(client, "admin")
     began = time.perf_counter()
@@ -183,6 +206,7 @@ def test_health_within_one_second(
     body = response.json()
     assert len(body["jobs"]) == len(jobs)
     assert all(job["duration_ms"] == 50 for job in body["jobs"])
+    assert by_task(body)["Seal"] == "ok"
     assert len(body["time"]["samples"]) >= 23
     best = float("inf")
     for _ in range(3):
