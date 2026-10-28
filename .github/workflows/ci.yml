@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Work branches are tested through their pull request, not once more for every push.
   push:
-    branches: [main, 'claude/**', 'wave-*']
+    branches: [main, 'wave-*']
   pull_request:
   workflow_dispatch:
 
