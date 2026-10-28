@@ -243,11 +243,16 @@ def test_admin_end_to_end(tmp_path: Path, db_engine: Engine) -> None:
             accepted = client.put(f"{CONFIG}/general", json=body)
             assert accepted.status_code == 202, accepted.text
             agent.process()
+            # Timed on the path every request takes to its configuration, not through requests:
+            # the span would also hold up to two whole requests (each commits its session and
+            # crosses threads), and on a loaded Windows runner they used up the second the
+            # bound leaves beyond the API's 2 seconds.
             took = wait_for(
-                lambda: client.get(f"{V}/auth/me").json()["site_name"] == "Örnek Lojistik A.Ş.",
+                lambda: app.state.arci.require_config().site_name == "Örnek Lojistik A.Ş.",
                 timeout=4.0,
             )
             assert took <= 3.0
+            assert client.get(f"{V}/auth/me").json()["site_name"] == "Örnek Lojistik A.Ş."
             assert app.state.arci.engine is db_engine  # the engine was not rebuilt
             worker_round()
             assert reported_sha(installed.data.worker_status) == file_sha(installed.config_path)

@@ -19,6 +19,7 @@ import pytest
 
 from arcilogger_collector.service import Collector, run
 from arcilogger_core.config import load_config
+from arcilogger_core.fsutil import atomic_write_text
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import parse_line
 
@@ -259,6 +260,37 @@ def test_a_switched_off_source_is_still_recorded_under_its_name(
 
     with_collector(config_path, body)
     assert not (layout.spool / "unknown-127.0.0.2").exists()
+
+
+def test_a_refused_status_write_is_tried_again_at_the_next_round(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Windows the replace of ``collector-status.json`` is refused while another process
+    reads the file (the agent waiting for the new SHA-256, the API). The report of a new file
+    must not then wait for the next status interval (30 s here): the browser administration
+    widens the firewall only once it is in."""
+    layout = Layout(load_config(config_path).data_dir)
+    refuse: list[Path] = []
+    refused: list[Path] = []
+
+    def refusing(path: Path, text: str) -> None:
+        if path in refuse:
+            refuse.remove(path)
+            refused.append(path)
+            raise PermissionError(13, "Access is denied", str(path))
+        atomic_write_text(path, text)
+
+    monkeypatch.setattr("arcilogger_collector.service.atomic_write_text", refusing)
+
+    async def body(collector: Collector) -> None:
+        await wait_for(lambda: layout.collector_status.exists())
+        refuse.append(layout.collector_status)
+        rewrite(config_path, config_path.read_text(encoding="utf-8") + SWITCH)
+        await wait_for(lambda: collector.config.source_for("127.0.0.2") is not None)
+        await wait_for(lambda: status(layout)["config"]["sha256"] == sha(config_path))
+
+    with_collector(config_path, body)
+    assert refused == [layout.collector_status], "the first write after the change failed"
 
 
 def test_without_a_file_there_is_no_reload_and_no_config_block(tmp_path: Path) -> None:
