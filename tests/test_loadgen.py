@@ -471,12 +471,14 @@ def test_a_fortigate_only_site_has_fortigate_dhcp_and_no_mikrotik_line(
             assert row.get("hostname") == lease.hostname
             assert row.get("lease") == (None if release else _lease_seconds(lease.server))
             assert (row["time"], row["device_time"]) == (message.at, True)
+            assert f' mac="{lease.mac.upper()}" ' in message.wire.decode()  # upper case, as F6
             checked[kind] += 1
         elif kind == "traffic":
             session = sessions[int(row["sessionid"])]
             assert (row["srcip"], int(row["srcport"])) == (session.srcip, session.srcport)
             assert row["srcintf"] == f"vlan{session.vlan}"
-            assert row["srcmac"] == session.mac  # the client's own MAC, lower case
+            assert row["srcmac"] == session.mac  # the client's own MAC
+            assert f' srcmac="{session.mac}" ' in message.wire.decode()  # lower case on the wire
             assert (row["transip"], int(row["transport"])) == (session.transip, session.transport)
             assert row["dstintf"] == "wan1"
             assert session.egress is None
@@ -540,6 +542,23 @@ def test_fortigate_renewals_come_at_half_the_lease(
         last = max(at for at in acks[pair] if at <= session.start)
         assert session.start < last + lease, session
         assert not [at for at in releases.get(pair, []) if last < at < session.start], session
+
+
+def test_a_fortigate_address_is_never_handed_out_while_its_lease_runs() -> None:
+    """Devices are simulated one after the other: an address whose lease ends later in the day
+    must not go to a device that comes earlier (two MACs ACKed one address at once)."""
+    days = (date(2026, 10, 5), FRIDAY)
+    site = simulate_plan(days, users=60, intensity=1.0, dhcp_server="fortigate")
+    far = datetime(9999, 1, 1, tzinfo=UTC)
+    by_ip: dict[str, list[Any]] = {}
+    for lease in (lease for o in site for lease in o.leases if lease.evidence == "fg_dhcp"):
+        by_ip.setdefault(lease.ip, []).append(lease)
+    assert len(by_ip) > 100
+    for leases in by_ip.values():
+        for first, second in itertools.combinations(leases, 2):
+            assert first.mac == second.mac or not (
+                first.start < (second.end or far) and second.start < (first.end or far)
+            ), (first, second)
 
 
 def test_both_keeps_mikrotik_for_the_departments_and_fortigate_for_the_wifi() -> None:

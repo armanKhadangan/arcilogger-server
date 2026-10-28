@@ -37,7 +37,7 @@ bayt aynı kalır):
   FortiGate olan bir site. FortiGate her VLAN'ın ağ geçidi ve DHCP sunucusudur: DHCP döngüsü
   FortiGate DHCP Ack (26001) satırlarıyla yazılır (`logid="0100026001"`,
   `logdesc="DHCP Ack log"`, `interface="vlan<VLAN>"`, `dhcp_msg="Ack"`, `lease=<saniye>`,
-  `hostname`, `msg="DHCP server sends a DHCPACK"`); kira verilirken ve kiranın yarısı dolunca
+  cihazın adı varsa `hostname`, `msg="DHCP server sends a DHCPACK"`); kira verilirken ve kiranın yarısı dolunca
   yenilemede (cihaz bağlıysa o anda, değilse geri döndüğünde; simülasyon varsayımı, sahada
   doğrula). 26002 (RELEASE) yalnızca bir misafir ayrılırken yazılır; diğer kiralar kayıt
   bırakmadan biter (simülasyon tercihi, ölçülmüş bir davranış değildir). `core-r1`/`switch-1`
@@ -54,7 +54,11 @@ bayt aynı kalır):
   (bugünkü gibi); `--transip` ile birlikte kullanılamaz.
 - **Doğruluk verisi:** kiralar `"evidence": "mt_dhcp" | "fg_dhcp" | "none"` alır (FortiGate'in
   arkasındaki statik cihazlar, ilk günün kayıtlarında bir kez, `none` ile listelenir: onları
-  adreslerine bağlayan hiçbir satır yoktur); oturumlar `"egress"` alır (çıkış yoksa `null`).
+  adreslerine bağlayan DHCP ya da ARP-LOG satırı yoktur; `--srcmac` ile trafik satırları MAC
+  adreslerini taşır, bu yalnızca kısmi kanıttır); oturumlar `"egress"` alır (çıkış yoksa
+  `null`).
+- Wave 3'ten beri kapsananlar: FortiGate DHCP (`--dhcp-server`), srcmac ve birden çok internet
+  çıkışı.
 
 ```text
 uv run python tools/loadgen/arcilogger_loadgen.py --help
@@ -121,8 +125,8 @@ same, byte for byte):
 - **`--dhcp-server mikrotik|fortigate|both`** (default `mikrotik`). `fortigate`: a
   FortiGate-only site, where the FortiGate is every VLAN's gateway and DHCP server. DHCP churn
   is written as FortiGate DHCP Ack (26001) lines (`logid="0100026001"`, `logdesc="DHCP Ack
-  log"`, `interface="vlan<VLAN>"`, `dhcp_msg="Ack"`, `lease=<seconds>`, `hostname`,
-  `msg="DHCP server sends a DHCPACK"`) on assignment and on renewal at half the lease (at that
+  log"`, `interface="vlan<VLAN>"`, `dhcp_msg="Ack"`, `lease=<seconds>`, `hostname` when the
+  device has one, `msg="DHCP server sends a DHCPACK"`) on assignment and on renewal at half the lease (at that
   moment while the device is connected, else when it is back; a simulation assumption, verify
   on site). 26002 (RELEASE) is written only when a guest leaves; every other lease expires
   unlogged (a simulation choice, not a measured behaviour). No `core-r1`/`switch-1` line and no
@@ -137,8 +141,9 @@ same, byte for byte):
   lists the interfaces. Without the option there is one `--transip` and `dstintf="wan1"` as
   before; it excludes `--transip`.
 - **Truth:** leases gain `"evidence": "mt_dhcp" | "fg_dhcp" | "none"` (static devices behind the
-  FortiGate are listed once, in the first day's records, with `none`: no line ties them to their
-  address); sessions gain `"egress"` (`null` without exits).
+  FortiGate are listed once, in the first day's records, with `none`: no DHCP or ARP-LOG line ties
+  them to their address; with `--srcmac` their traffic lines carry their MAC, partial evidence
+  only); sessions gain `"egress"` (`null` without exits).
 
 The FortiGate DHCP lines follow the shape of the synthetic fixture lines (the FortiOS 7.6 field
 list and one community sample): the RELEASE logid is derived and its `dhcp_msg`/`msg` are

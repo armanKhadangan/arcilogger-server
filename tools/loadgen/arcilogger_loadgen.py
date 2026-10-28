@@ -470,8 +470,9 @@ class SessionTruth:
     egress: str | None = None
 
 
-#: The table that holds a lease's DHCP evidence; ``none``: no log line places the device at its
-#: address (a static device behind the FortiGate: no DHCP, no ARP-LOG).
+#: The table that holds a lease's DHCP evidence; ``none``: no DHCP or ARP-LOG line places the
+#: device at its address (a static device behind the FortiGate; with ``--srcmac`` its traffic
+#: lines carry its MAC, partial evidence only).
 Evidence = Literal["mt_dhcp", "fg_dhcp", "none"]
 
 
@@ -624,6 +625,9 @@ class Simulation:
         #: Per device: (from, until, ip) of the leases seen on the current day.
         self._windows: dict[str, list[tuple[datetime, datetime, str]]] = {}
         self._statics_recorded = False
+        #: Per IP: when its last lease ended. ``day`` handles one device at a time, so a lease that
+        #: ended later than another device's ``begin`` is already gone from ``_leases`` then.
+        self._ended: dict[str, datetime] = {}
 
     # -- public -------------------------------------------------------------------------------
 
@@ -746,8 +750,12 @@ class Simulation:
     def _lease_seconds(self, server: str | None) -> int:
         return LEASE_SECONDS_BY_SERVER.get(server or "", LEASE_SECONDS)
 
-    def _free_ip(self, device: Device) -> str:
+    def _free_ip(self, device: Device, at: datetime) -> str:
         held = {lease.ip for lease in self._leases.values()}
+        if self._fortigate_gateway(device.vlan):
+            # A DHCP server never hands out an address before its lease has ended. (The MikroTik
+            # VLANs keep the earlier allocation, so the default output keeps its bytes.)
+            held |= {ip for ip, ended in self._ended.items() if ended > at}
         sticky = self._sticky.get(device.key)
         if sticky is not None and sticky not in held:
             return sticky
@@ -811,6 +819,7 @@ class Simulation:
 
     def _end(self, lease: _Lease, at: datetime) -> None:
         del self._leases[lease.mac]
+        self._ended[lease.ip] = max(at, self._ended.get(lease.ip, at))
         if lease.truth is not None:
             output, index = lease.truth
             output.leases[index] = replace(output.leases[index], end=at)
@@ -834,7 +843,7 @@ class Simulation:
                     self._expire(other, other.expires)
             lease = self._leases.get(mac)
             if lease is None:
-                ip = self._free_ip(device)
+                ip = self._free_ip(device, begin)
                 lease = _Lease(mac, ip, device, begin, begin)
                 self._leases[mac] = lease
                 self._sticky[device.key] = ip
