@@ -70,7 +70,7 @@
       "kind": "Tür",
       "summary": "Özet",
       "raw": "Ham satır",
-      "openRaw": "Ham satırı aç: {{source}}, satır {{line}}",
+      "openRaw": "Ham satır: {{source}}, satır {{line}}",
       "more": "Daha fazla",
       "capped": "İlk {{formatted}} kayıt gösteriliyor. Daha fazlası için sorguyu daraltın ya da dışa aktarın.",
       "noneYet": "Henüz kayıt bulunamadı; tarama sürüyor."
@@ -188,6 +188,7 @@
       },
       "use": "Kullan",
       "useExample": "Bu örneği sorguya yaz: {{query}}",
+      "useThisExample": "Kullan — bu örneği sorguya yaz: {{query}}",
       "speedTitle": "Hangi sorgular hızlıdır",
       "speed": {
         "indexedFields": "“İndeksli” işaretli alanlar (srcip:, domain:, mac:, qname:, sessionid: …) indeks kullanır ve uzun aralıklarda da hızlıdır.",

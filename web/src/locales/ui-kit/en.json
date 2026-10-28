@@ -9,7 +9,6 @@
   "uiKit": {
     "title": "UI kit",
     "intro": "Every building block of the ARCILOGGER interface, in the light and dark theme. Pages are composed from these components.",
-    "themeToggle": "Switch theme",
     "sections": {
       "colors": "Colours",
       "typography": "Typography",

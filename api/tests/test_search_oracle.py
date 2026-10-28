@@ -121,7 +121,12 @@ def _fixture_lines() -> dict[str, tuple[str, list[bytes]]]:
                 b"<11>Oct 20 10:16:00 ap-kat2 kernel: Interface eth0 link down \xc4\xb0\xc5\x9f",
             ],
         ),
-        UNKNOWN: ("198.51.100.77", fortigate[:3]),
+        # An unknown sender is parsed by content: its DHCP line is an fg_dhcp row as well (the
+        # worker refuses it as lease evidence, ADR-0016 D24; search keeps every source).
+        UNKNOWN: (
+            "198.51.100.77",
+            [*fortigate[:3], *[m for m in fortigate if b"0100026001" in m][:1]],
+        ),
     }
 
 
@@ -550,7 +555,29 @@ EXAMPLES = (
     "host:FIREWALL-01 -type:traffic",
     "qtype:a",
     "interface:*",
+    # ADR-0016: FortiGate DHCP rows are events; srcmac is the session record's MAC
+    "type:event mac:00:00:5e:00:53:57",
+    "mac:00:00:5e:00:53:*",
+    "logid:0100026001,0100026002",
+    "type:event ip:172.20.42.0/24 -level:notice",
+    "interface:vlan42",
+    "srcmac:00:00:5e:00:53:57",
+    "kaynakmac:* -interface:vlan42",
+    "source:unknown* type:event",
 )
+
+
+def test_the_fortigate_dhcp_lines_flow_in(oracle: Oracle) -> None:
+    """ADR-0016: the appended synthetic lines give fg_dhcp rows (an unknown sender's included)
+    and srcmac values, so the drawn and the hand-picked queries reach them."""
+    dhcp = [record for record in oracle.records if record.table == "fg_dhcp"]
+    assert Counter(record.message["source"] for record in dhcp) == {"fortigate": 9, UNKNOWN: 1}
+    assert {record.message["type"] for record in dhcp} == {"event"}
+    assert "00:00:5e:00:53:57" in oracle.values["srcmac"]
+    assert {"00:00:5e:00:53:57", "00:00:00:00:00:00"} <= set(oracle.values["mac"])
+    for text_ in ("type:event mac:00:00:5e:00:53:57", "srcmac:00:00:5e:00:53:57"):
+        assert expected_rows(oracle, text_, DAY_START, DAY_END), text_
+        check(oracle, text_, DAY_START, DAY_END)
 
 
 @pytest.mark.parametrize("hours", [24, 9])

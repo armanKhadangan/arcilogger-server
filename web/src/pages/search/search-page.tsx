@@ -43,6 +43,7 @@ import { ResultsTable } from './results-table';
 import { SavedMenu } from './saved-menu';
 import {
   addClause,
+  EXAMPLES,
   FACET_FIELDS,
   fieldNames,
   problemOf,
@@ -50,7 +51,7 @@ import {
   type QueryProblem,
 } from './search-model';
 import { EventSheet } from './event-sheet';
-import { EXAMPLES, SyntaxHelp } from './syntax-help';
+import { SyntaxHelp } from './syntax-help';
 
 /** Time after the last key before the query is read by the server (contract 2.22.2). */
 export const PARSE_DELAY_MS = 250;
