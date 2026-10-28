@@ -44,6 +44,12 @@
   kaydettiği kira süresidir (300–8.640.000 sn); `leases.source_table` artık `mt_dhcp`, `mt_arp`
   ya da `fg_dhcp` olabilir. Yükseltmeden önce yüklenmiş FortiGate DHCP satırları `fg_event`
   satırı olarak kalır, dönüştürülmez.
+- İnternet çıkışları (revizyon `0018_nat_egresses`, ADR-0016): eski `nat.public_ips`,
+  `nat.wan_transip` ve `lookup.port_hint` ayarları tek `nat.egresses` ayarına (varsayılan `{}`:
+  tek bir çift NAT çıkışı varsayılır) dönüştürülür. Düzenlenemeyen üç durum satırı vardır:
+  `nat.egresses_migration` (dönüşümün kaydı), `nat.egresses_changes` (her çıkışın son içerik
+  değişikliği: zaman ve yazan) ve `leases.rollback_lowered` (`-Rollback` sırasında düşük güvene
+  indirilen FortiGate kiraları; yeniden yükseltmede okunup silinir).
 
 ## Summary (EN)
 
@@ -70,7 +76,11 @@ table `fg_dhcp` (the FortiGate DHCP server's ACK/RELEASE lines; the worker decid
 means from its `logid` and the settings), `fg_traffic.srcmac` (the session record's source MAC;
 not indexed, never lease evidence) and `leases.lease_seconds` (the lease time the FortiGate
 logged, 300–8,640,000 s); `leases.source_table` is `mt_dhcp`, `mt_arp` or `fg_dhcp`. FortiGate
-DHCP lines loaded before the upgrade stay `fg_event` rows; they are not converted.
+DHCP lines loaded before the upgrade stay `fg_event` rows; they are not converted. Internet exits
+(revision `0018_nat_egresses`, ADR-0016) replace the settings `nat.public_ips`, `nat.wan_transip`
+and `lookup.port_hint` with the one setting `nat.egresses` (default `{}`: one implicit double-NAT
+exit) and add three status rows that are never edited: `nat.egresses_migration`,
+`nat.egresses_changes` and `leases.rollback_lowered` ("Status rows" below).
 
 ## Conventions
 
@@ -142,9 +152,9 @@ but which are not in a table go to `extra`.
 | `persons` | id | Name, department, title, e-mail, employee number (unique), active (persons are deactivated, never deleted), `usage_excluded` (left out of person-level usage views and reports; revision `0010_usage`) |
 | `devices` | `mac` | First/last seen, last IP/VLAN, `hostnames[]`, vendor, `randomized`, type (pc, phone, printer, ip_phone, ap, server, camera, other), `person_id` (the **current** owner, mirrored from `device_assignments`), `infrastructure`, notes, `tags[]`, label `name` |
 | `device_assignments` | id; partial unique `mac` where `valid_to` IS NULL | Assignment history (revision `0008_device_assignments`, ADR-0008): `mac` → `person_id` for `[valid_from, valid_to)` (`valid_to` NULL = current), `assigned_by`, `note` (given when the row is opened; an unassign takes none), `backfilled` (made by the migration from an older link; `valid_from` = the device's first sighting). No two intervals of one MAC overlap — exclusion constraint `ex_device_assignments_no_overlap` (`btree_gist`) or, where the extension cannot be created, a trigger with the same rule. Rows are never deleted; foreign keys RESTRICT. The 5651 person step reads the row valid at T. Not a time-series table (small) |
-| `leases` | id | IP ↔ MAC interval: vlan, server (a MikroTik DHCP server name, or the FortiGate interface of an `fg_dhcp` lease), hostname, `start`, `"end"` (NULL = open), `end_reason` (dhcp, timeout, superseded, arp, open), confidence (high/medium/low), `source_table` (`mt_dhcp`, `mt_arp` or `fg_dhcp`), `last_evidence`, `lease_seconds` (revision `0017_fortigate_dhcp`: the lease time a FortiGate ACK logged, when usable; NULL for every other lease), `evidence` (JSON list of `arcilogger_worker.lookup.EvidenceRef.to_dict()` objects: `{"table", "row_id", "time", "raw": {"source", "day", "line", "offset"} \| null, "summary"}`). Checks: `end ≥ start`; `end_reason = 'open'` exactly when `end` is NULL; `ck_leases_source_table` (the three tables); `ck_leases_lease_seconds` (NULL or 300–8,640,000, the FortiOS `lease-time` range). Indexes (ip, start), (mac, start), (source_table, "end") (open and recently ended leases per table, revision `0017_fortigate_dhcp`). The downgrade of that revision deletes the `fg_dhcp` leases first (the previous code cannot read them; they are rebuildable) |
+| `leases` | id | IP ↔ MAC interval: vlan, server (a MikroTik DHCP server name, or the FortiGate interface of an `fg_dhcp` lease), hostname, `start`, `"end"` (NULL = open), `end_reason` (dhcp, timeout, superseded, arp, open), confidence (high/medium/low), `source_table` (`mt_dhcp`, `mt_arp` or `fg_dhcp`), `last_evidence`, `lease_seconds` (revision `0017_fortigate_dhcp`: the lease time a FortiGate ACK logged, when usable; NULL for every other lease), `evidence` (JSON list of `arcilogger_worker.lookup.EvidenceRef.to_dict()` objects: `{"table", "row_id", "time", "raw": {"source", "day", "line", "offset"} \| null, "summary"}`). Checks: `end ≥ start`; `end_reason = 'open'` exactly when `end` is NULL; `ck_leases_source_table` (the three tables); `ck_leases_lease_seconds` (NULL or 300–8,640,000, the FortiOS `lease-time` range). Indexes (ip, start), (mac, start), `ix_leases_source_table_end` (source_table, "end") (open and recently ended leases per table, revision `0017_fortigate_dhcp`). The downgrade of that revision deletes the `fg_dhcp` leases first (the previous code cannot read them; they are rebuildable) |
 | `job_runs` | id | Worker job runs: job, started/finished, status (running/ok/failed/skipped), details |
-| `settings` | `key` | Canonical-JSON value (no floats: every change is audited), `updated_at`, `updated_by` (`:seed` while it is the shipped default, else the admin's user name; `:system`, `:migration` for internal keys — `:` never occurs in a user name) |
+| `settings` | `key` | Canonical-JSON value (no floats: every change is audited), `updated_at`, `updated_by` (`:seed` while it is the shipped default, else the admin's user name; `:system`, `:migration` for internal keys — `:` never occurs in a user name). Besides the keys of `DEFAULT_SETTINGS` it holds the **status rows** below, which are not settings: never listed by `GET /settings`, never editable (`settings set` refuses them) |
 | `users` | id; unique `username` | Lower-case ASCII user name, display name, role (admin/auditor/hr/viewer), Argon2id hash, `must_change_password`, encrypted TOTP secret, `totp_enabled`, `totp_last_counter` (replay guard), failed attempts, `locked_until`, last login, active |
 | `user_recovery_codes` | id | Hashed one-time recovery codes |
 | `user_sessions` | `token_hash` | SHA-256 of the session cookie token; created, last seen, `expires_absolute`, ip, user agent, `mfa_passed`, `csrf_token_hash`, `revoked_at`, `reauthenticated_at` |
@@ -174,6 +184,21 @@ but which are not in a table go to `extra`.
 | `search_counts` | id; unique `uq_search_counts_key` (hour, source, raw_day, kind, tbl, action, net) `NULLS NOT DISTINCT`; index (source, hour), (raw_day, source) | Exact hourly line counts of the search statistics (revision `0016_search`, ADR-0015, `arcilogger_db.searchcounts`): `hour` (`date_trunc('hour', time)`, device time, UTC), the spool file (`source`, `raw_day`), `kind` (`arcilogger_db.kinds.kind_of` of the `messages` row), `tbl` (the line's typed table, `''` without one), `action` (the typed row's, lower-cased), `net` (the /24 of the typed row's client address when it is private IPv4: 10/8, 172.16/12, 192.168/16, 100.64/10), `n` (> 0). One row per key, about 450 keys an hour for 150 users. The ingest loader adds a batch's counts in the transaction that loads its rows; `searchcounts.rebuild_stream` recounts one file from its rows (`arcilogger-db search-counts rebuild`); derived, like every table |
 | `saved_searches` | id; unique `uq_saved_searches_owner_name` (owner_id, lower(name)) | Personal saved searches (revision `0016_search`): `owner_id` (users, CASCADE), `name` (1–80 characters, unique per owner ignoring case), `query` (≤ 1,000 characters, parsed again on every run), the range as a preset `range_preset` (`15m`, `1h`, `24h`, `today`, `yesterday`, `7d`, `30d`) **or** a fixed `[range_from, range_to)`, never both (`ck_saved_searches_range`), created/updated, `last_run_at` |
 | `report_runs` | id; index (schedule_id, id), index (status) | Every report run (scheduled or "run now"): period, kind (+ `custom`), the schedule's settings then (formats, recipients, person level), status (queued/running/sent/partial/failed), `files` (name, format, size, SHA-256 of each file in `exports/usage-reports/<id>/`), `deliveries` (per recipient: status, attempts, error, sent), `expired_at` (files deleted after `reports.keep_days`). Kept when the schedule is deleted |
+
+**Status rows** (`settings` rows outside `DEFAULT_SETTINGS`; each written only by the code
+named, read by the code named):
+
+| Key | Written by | Value | Read by |
+|---|---|---|---|
+| `db.timescale` | the baseline (`:migration`); revision `0017_fortigate_dhcp` appends `fg_dhcp` to its table list (and records `compression_reason = "fg_dhcp: <reason>"` when compressing `fg_dhcp` is refused in `auto` mode; the downgrade removes both) | storage outcome (`enabled`, `mode`, `storage`, `hypertables` or `partitioned`, `compression`, `reason`, …), see "TimescaleDB" | `arcilogger-db check` and `arcilogger-db upgrade` (printed), the search (`arcilogger_api.search.windows.read_storage`: `storage`, `compression`), the tests |
+| `nat.egresses_migration` | revision `0018_nat_egresses` (`:migration`), only when an administrator had set a legacy NAT key; the seed sets `audited` once it wrote the audit entry | `{"migration": "0018_nat_egresses", "from": {the three legacy values}, "new": <the converted exits>, "dropped": [{"value", "reason": "ipv6" \| "invalid" \| "reserved"}], "conversion_failed": bool, "audited": bool}` | the seed (one `settings.change` entry, target `setting:nat.egresses`), the lookup (whether an exit is still *as converted*, ADR-0016 D15), the alert `R20-nat:conversion-failed` |
+| `nat.egresses_changes` | revision `0018_nat_egresses` (per converted exit, with the legacy rows' author and time) and `settings_admin.change_setting` (`:system`, in the transaction of the `settings.change` entry) | per exit name `{"fingerprint": <SHA-256 of the canonical JSON of mode, public, transips and public_dynamic>, "changed_at", "changed_by", "deleted": bool}`; a label-, interface- or port-preservation-only edit changes nothing; no earlier contents (the audit log holds them) | the lookup (`egress_changed_after_event`, D32) |
+| `leases.rollback_lowered` | `arcilogger-db leases prepare-rollback` (`:system`), the lease step of `Install-Arcilogger.ps1 -Rollback` | `{"at": <one timestamp>, "count": <FortiGate leases lowered to low>}` | the seed of the re-upgrade, which restores `high` on the `fg_dhcp` leases whose `updated_at` equals `at` and deletes the row |
+
+The administrator-owned rows of the legacy keys `nat.public_ips`, `nat.wan_transip` and
+`lookup.port_hint` are kept unread for one version after revision `0018_nat_egresses` (a
+rollback without a database restore then runs the previous version with its own NAT values); the
+new code never reads, lists or writes them, and the first revision after Wave 3 deletes them.
 
 Not created yet (later milestones):
 `nat_index` (the `fg_traffic` index `(transip, transport, time)` serves spec 9.3 for now; the
@@ -282,8 +307,8 @@ PostgreSQL 16.
 `arcilogger-db upgrade` seeds after every migration run (idempotent, `arcilogger_db.seed`):
 
 - **default settings only** (`arcilogger_db.settings.DEFAULT_SETTINGS`), e.g.
-  `nat.public_ips = []` (double NAT), `nat.wan_transip = ""` (unknown until configured),
-  `lookup.tolerance_seconds = 60`, `lookup.max_session_seconds = 86400`,
+  `nat.egresses = {}` (no internet exit entered: one implicit double-NAT exit until the site
+  enters its lines), `lookup.tolerance_seconds = 60`, `lookup.max_session_seconds = 86400`,
   `lease.server_seconds = {}` (every DHCP server `lease.default_seconds`, 1 day, until the site
   enters other lease times), `lease.timeout_percent = 110` (spec 9.1 "× 1.1" as an integer),
   `auth.idle_minutes = 15`, `db.retention_days = 400`. All values are canonical JSON (no floats),

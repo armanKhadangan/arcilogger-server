@@ -816,6 +816,51 @@ def test_synthetic_eventtime_units_and_fallbacks() -> None:
     assert prefixed.error is None
 
 
+def test_forward_traffic_with_srcmac() -> None:
+    """ADR-0016: ``srcmac`` is a column (lower case with colons); ``mastersrcmac`` and
+    ``srcmacvendor`` stay in ``extra`` (FortiGate DHCP lines: test_fortigate_dhcp.py)."""
+    (line,) = [line for line in SYNTHETIC if b"sessionid=3100119 " in line]
+    outcome = parse(line)
+    assert outcome.error is None
+    assert (outcome.message["type"], outcome.message["subtype"]) == ("traffic", "forward")
+    assert outcome.message["time"] == utc(2026, 9, 23, 6, 46, 25)
+    assert typed(outcome) == (
+        "fg_traffic",
+        columns(
+            "fg_traffic",
+            logid="0000000013",
+            subtype="forward",
+            action="close",
+            policyid=12,
+            policyname="internet-out",
+            proto=6,
+            sessionid=3100119,
+            srcip="172.20.42.57",
+            srcport=50005,
+            dstip="203.0.113.44",
+            dstport=443,
+            srcintf="vlan42",
+            srcmac="00:00:5e:00:53:57",
+            dstintf="wan1",
+            transip="100.64.12.9",
+            transport=50005,
+            trandisp="snat",
+            service="HTTPS",
+            duration=30,
+            sentbyte=1200,
+            rcvdbyte=34000,
+            sentpkt=12,
+            rcvdpkt=30,
+            extra={
+                **COMMON_EXTRA,
+                "level": "notice",
+                "mastersrcmac": "00:00:5e:00:53:57",
+                "srcmacvendor": "sentetik",
+            },
+        ),
+    )
+
+
 def test_unmapped_subtype_keeps_every_field_in_messages_extra() -> None:
     outcome = synthetic("9900000018")
     assert outcome.rows == ()
@@ -834,6 +879,7 @@ def test_unmapped_subtype_keeps_every_field_in_messages_extra() -> None:
         ("traffic", "forward", "fg_traffic"),
         ("traffic", "sniffer", "fg_traffic"),
         ("event", "vpn", "fg_event"),
+        ("event", "system", "fg_event"),  # a DHCP server line is routed by its shape later
         ("utm", "webfilter", "fg_web"),
         ("utm", "dns", "fg_dns"),
         ("utm", "app-ctrl", "fg_app"),

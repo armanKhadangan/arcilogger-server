@@ -85,6 +85,11 @@ def login(
             user_agent="pytest",
         )
         session.commit()
+    # The session's cookies replace any the client holds, as a browser's login does: a CSRF cookie
+    # the server set earlier (for the test host) would otherwise go out beside this one, and which
+    # of the two the server reads depends on the HTTP client's cookie order.
+    for name in (SESSION_COOKIE, CSRF_COOKIE):
+        client.cookies.delete(name)
     client.cookies.set(SESSION_COOKIE, issued.token)
     client.cookies.set(CSRF_COOKIE, issued.csrf_token)
     client.headers[CSRF_HEADER] = issued.csrf_token

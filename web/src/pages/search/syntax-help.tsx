@@ -14,15 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { currentLang } from '@/lib/i18n';
 import type { FieldCatalogue } from '@/lib/search-types';
 
-/** Example queries (contract 2.2.2), each explained in `search.help.examples.<index>`. */
-export const EXAMPLES = [
-  'srcip:172.20.41.105 type:web action:blocked',
-  'domain:example.com -action:passthrough',
-  '"login failure" source:core-r1',
-  'vlan:41 dstport:80,443',
-  'type:dhcp mac:00:00:5e:00:53:21',
-  'error:fortigate.*',
-] as const;
+import { EXAMPLES } from './search-model';
 
 /** The rules of the language, in the help's order (`search.help.rules.<key>`). */
 const RULES = ['and', 'or', 'not', 'quotes', 'present', 'none'] as const;
@@ -89,7 +81,7 @@ export function SyntaxHelp({
                     variant="link"
                     size="sm"
                     className="h-auto"
-                    aria-label={t('search.help.useExample', { query: example })}
+                    aria-label={t('search.help.useThisExample', { query: example })}
                     onClick={() => {
                       onUse(example);
                     }}
