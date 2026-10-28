@@ -404,6 +404,26 @@ def test_an_infrastructure_mac_is_not_used(
     assert note(outcome, "srcmac_infrastructure") == {"mac": ROUTER_MAC}
 
 
+@pytest.mark.parametrize("marked", ["setting", "device"])
+def test_a_lease_of_an_infrastructure_mac_still_names_the_device(
+    db_session: Session, evidence: Evidence, marked: str
+) -> None:
+    """Only the srcmac of an infrastructure MAC is never used: the router's own lease gives its
+    chain, which says that the device is infrastructure (``infrastructure_device``)."""
+    if marked == "setting":
+        set_setting(db_session, "devices.infrastructure_macs", [ROUTER_MAC], updated_by="tolga")
+    else:
+        db_session.add(Device(mac=ROUTER_MAC, name="CORE-SW1", infrastructure=True))
+    evidence.fortigate_dhcp(AT - timedelta(hours=1), ROUTER_IP, ROUTER_MAC)
+    build(db_session, DAY, DAY)
+    chain = internal(db_session, ROUTER_IP).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.device is not None
+    assert (chain.device.mac, chain.device.infrastructure) == (ROUTER_MAC, True)
+    assert "infrastructure_device" in keys(chain)
+
+
 def test_one_guard_query_serves_every_match(
     db_session: Session, evidence: Evidence, selin: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -645,6 +665,45 @@ def test_a_mac_only_lookup_finds_the_address_by_its_srcmac(
     two = lookup(db_session, mac=PC_MAC)
     assert (two.mode, two.attribution) == ("none", None)
     assert note(two, "mac_multiple_ips") == {"mac": PC_MAC, "ips": f"{PC}, 172.20.42.58"}
+
+
+def test_a_srcmac_logged_after_fifty_rows_of_another_is_still_seen(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The rows read for an address are the nearest row of each srcmac, at most 50: fifty
+    sessions of .57 with one srcmac inside the tolerance and a long session with a second
+    srcmac logged at its end, two hours later, give ``srcmac_ambiguous``, not the first MAC's
+    chain (the 50 oldest rows of the window hold only the first MAC)."""
+    first, second = "00:00:5e:00:53:91", "00:00:5e:00:53:92"
+    for n in range(50):
+        session_of(evidence, mac=first, at=AT - timedelta(seconds=55 - n), port=51001 + n)
+    session_of(evidence, mac=second, at=AT + timedelta(hours=2), port=52001, duration=3 * 3600)
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"])
+    outcome = internal(db_session)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert note(outcome, "srcmac_ambiguous") == {
+        "ip": PC,
+        "seconds": 60,
+        "count": 2,
+        "macs": f"{first}, {second}",
+    }
+
+
+def test_an_address_after_fifty_rows_of_the_mac_is_still_seen(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A MAC-only lookup reads the nearest row of each address, at most 50: fifty rows of the
+    MAC from .57 before the moment and one from .58 after it give ``mac_multiple_ips``, not a
+    srcmac chain of .57."""
+    for n in range(50):
+        session_of(evidence, at=AT - timedelta(seconds=55 - n), port=51001 + n)
+    session_of(evidence, "172.20.42.58", at=AT + timedelta(seconds=30), port=52001)
+    build(db_session, DAY, DAY)
+    listed(db_session, ["vlan42"], max_ips=2)
+    outcome = lookup(db_session, mac=PC_MAC)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert note(outcome, "mac_multiple_ips") == {"mac": PC_MAC, "ips": f"{PC}, 172.20.42.58"}
 
 
 # -- srcmac never reaches the leases or the devices -----------------------------------------------

@@ -5973,7 +5973,16 @@ from section 0.2 are recorded here too, with the date and who decided.
   an empty `last_dhcp_evidence`"). `fg_event` has no index on a line's address (A0 adds none),
   so the probe and the round-6 post-lease query read every `system` line of their window.
   Measured by the 3.8 guards (`test_lookup_performance.py`, 50,000 `system` lines a day: a
-  twentieth of 1 M FortiGate lines, the share the alert guard writes) on the 100-day window: the
+  twentieth of 1 M FortiGate lines, the share the alert guard writes) on the 100-day window. The
+  event site writes 50,000 `fg_event` `system` lines a day over the 101 days the queries can
+  read (one every 5 minutes for the 300 days before; `ARCILOGGER_PERF_EVENTS` sets the rate),
+  **not** 3.8's "400 days of `fg_event` at 1 M lines a day": every one of these queries reads
+  `ix_fg_event_subtype_time` with `subtype = 'system'`, and of a FortiGate's 1 M lines a day the
+  traffic lines (the bulk) are `fg_traffic` rows since Wave 2 and never `fg_event` rows, so the
+  `system` lines are the share that costs (the load generator writes 0.3 %, the alert guard a
+  twentieth); 400 M rows would not fit a CI job's disk or time either. The cost grows linearly
+  with that rate (below), so a site with more `system` lines a day reads proportionally longer.
+  On that window the
   probe for 20 addresses without a DHCP row 2.1 s in its round-5 form and 0.64 s with the key
   read once per row (an `IN` before the per-key bounds, the round-5 note's form), the post-lease
   query for 100 chains 0.93 s; both miss 0.5 s. So the probe's window is `max(longest_window,
@@ -6002,7 +6011,16 @@ from section 0.2 are recorded here too, with the date and who decided.
   stays logs a line at least every half lease (if FortiOS logs renewals, F7, sahada doğrula),
   so the window holds one, but a client that left logs none (path 1). An `fg_dhcp` chain's own
   window `(last_dhcp_evidence, at]` is not capped (at most half its lease while the chain is
-  not `low`). The cost grows with the `system` lines of the window (about 0.13-0.19 s per
+  not `low`). Its cost (the manager's review of PR #30, item 4): FortiOS allows lease-times up to
+  8,640,000 s, so that window reaches up to 50 days; in the guard
+  `test_lookup_performance.py::test_the_post_lease_query_of_long_fortigate_leases_is_fast` (20
+  chains with a 30-day lease half a lease after their last ACK, about 750,000 `system` lines in
+  the window) the query takes 0.17-0.19 s, and with a 100-day lease (50 days, about 2.5 M lines;
+  measured once, not a guard) 0.44 s, both under 0.5 s, so the window is not capped: a cap
+  would leave a line between the lease's last record and the cap unread (a wrong person
+  without a warning, path 1's shape for an `fg_dhcp` chain). Above about 55,000 `system` lines
+  a day a lease-time near the FortiOS maximum misses 0.5 s; the expression indexes below would
+  remove that cost too. The cost grows with the `system` lines of the window (about 0.13-0.19 s per
   million here): the 100-day window would pass below about 25,000 lines a day, and the fallback
   misses 0.5 s above about 400,000; expression indexes on `(extra->>'ip', time)` and on the
   normalised `extra->>'mac'` for `subtype = 'system'` (a WP-A revision) would restore the 100
@@ -6016,6 +6034,62 @@ from section 0.2 are recorded here too, with the date and who decided.
   (the 3.4 golden's 100 days, and 6 days inside the window by the coverage rule). Fold into
   2.7, 2.8.3, 2.17 (the residual of path 1), 3.8 and CORRELATION §7 (WP-F2: the window of the
   probe and of the `fg_event` post-lease check is 7 days; the converted-row check reads 100).
+- **The converted-row check also reads the chain's address** (2.7 "A MAC move the lease build
+  could not apply"; the manager's review of PR #30, item 1). Round 7 does not match converted
+  rows by the chain's IP because the build applies them; it does not apply a row it refused
+  that today's settings accept: an ACK of a sender or HA member configured later (D24), of a
+  logid mapped later, or, for an `mt_dhcp` chain, a FortiGate ACK of the same pair (D5) from
+  such a sender. The former holder then stays `high` (or `medium`) after the address was given
+  to another client, until a rebuild names that client or `no_lease`. The one statement of the
+  round-7 check gets a second branch (`UNION ALL`, on `ix_fg_dhcp_ip_time`): `fg_dhcp` rows
+  that `trust.kept(settings, untrusted)` accepts, with a logid mapped to `assigned`, with `ip`
+  = the chain's IP and `time` in the chain's own `(last_dhcp_evidence, at)` (the MAC branch's
+  window: `lease.start` without a record, at most 8,640,000 s for an `mt_dhcp` chain), of
+  another MAC for an `fg_dhcp` chain and of any MAC for an `mt_dhcp` chain. A match lowers the
+  chain and its alternatives to `low` with `fortigate_dhcp_not_converted_since_lease`, as the
+  MAC branch does. No interface, VDOM or network key applies: the build supersedes every open
+  lease of an address at such an ACK, whatever its origin (timeline rule 1, D5), so a healthy
+  timeline never returns one, and a lease still open past it is the stale build. The branch
+  returns the chain's ordinal only: no value of the row, nothing cited (KVKK, 2.16). Cost in the
+  3.8 guard of 100 `mt_dhcp` chains over 100 days: 0.12 s with the branch (0.08 s without;
+  both branches on their `(…, time)` index; the address branch reads no row there), under its
+  0.2 s. The 2.11 text is unchanged: its examples do not name a sender or logid configured
+  later, and its remedy names the rebuild only for networks entered later (a question in the
+  pull request). Tests: `worker/tests/test_lookup_fortigate_only.py::test_another_clients_ack_from_a_sender_configured_after_the_build`,
+  `::test_another_clients_ack_under_a_logid_mapped_after_the_build`,
+  `::test_a_migration_ack_from_a_sender_configured_after_the_build` (the three shapes of the
+  review; each failed before), `::test_a_healthy_fortigate_site_keeps_its_chain` (applied and
+  still refused ACKs of another client inside the window lower nothing),
+  `::test_a_healthy_mixed_site_keeps_its_chains`,
+  `worker/tests/test_lookup_performance.py::test_the_converted_row_query_of_a_hundred_chains_is_fast`.
+  Fold into 2.7 (the round-7 bullet), 2.16 and 3.4.
+- **The lookup applies D25 and D28 to its `fg_event` lines, and a missing `dhcp_msg` passes**
+  (2.7 post-lease check, 2.8.3 D8 probe; the manager's review of PR #30, item 2). Neither
+  predicate in 2.7 or 2.8.3 filters the `fg_event` branch by D25 or D28; the lookup does
+  (`attribution.event_kept`, used by the post-lease query and the probe's `fg_event` query), so
+  a NAK under 0100026001 or an ACK of an interface in `dhcp.fortigate_interfaces_excluded` is
+  never counted or named, as `trust.kept` refuses such an `fg_dhcp` row. The filter refuses a
+  line of a logid that `dhcp.fortigate_dhcp_msgs` lists only when its `dhcp_msg` is **present**
+  and not listed: a line without the field passes, because under D3 a DHCP line without
+  `dhcp_msg` is exactly the one ingest keeps as an `fg_event` row (the shape of a line the
+  timeline never saw), while D25's "a NULL `dhcp_msg` included" (2.15's reading table) is a rule
+  for `fg_dhcp` rows, which always carry the field. An earlier form refused such a line too, so
+  the probe and the post-lease check never saw the lines they are for. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_line_after_the_lease_without_dhcp_msg_counts`,
+  `::test_a_covering_line_without_dhcp_msg_is_named` (both failed before),
+  `::test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing`,
+  `::test_a_line_that_is_never_lease_evidence_is_never_named`. Fold into 2.7 and 2.8.3.
+- **The D8 probe also runs for a match whose chain is a srcmac chain** (2.8.3 "When a chain
+  cannot be built for an IP (internal mode `no_lease`, or a match with `chain_missing`)"; the
+  manager's review of PR #30, item 2). A srcmac chain (D10, `srcmac_only`) is no lease chain:
+  the address had no lease at the moment, as with `chain_missing`, so the probe takes the IPs of
+  the first 20 matches **without a lease chain** (no chain, or a srcmac chain only; one rule for
+  both paths, `engine._unconverted`), and an internal lookup whose answer is a srcmac chain
+  keeps its `no_lease` and is probed too. The safe side: a covering pre-upgrade ACK beside a
+  srcmac chain is named (`fortigate_dhcp_not_converted`) and, for an exact match or internal
+  mode, cited, never as an attribution; the srcmac chain keeps its confidence (`low`). Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease`
+  (internal, exact and candidate). Fold into 2.8.3.
 
 ---
 

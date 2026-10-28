@@ -11,15 +11,19 @@ missing renewal (D6), the DECLINE shapes of D33 (those the lease build decides a
 build made before a network was entered missed), relayed networks, the migrations from MikroTik
 DHCP (D5, D33's MikroTik variant, a move loaded before the upgrade), a rollback window (D8), two
 DHCP origins (D27), the probe for FortiGate DHCP lines that never became lease evidence when no
-chain could be built (D8, 2.8.3), a RELEASE mapped after the build, unconfigured senders (D24)
-and a FortiGate clock that was off at the moment (D28).
+chain could be built (D8, 2.8.3), a RELEASE mapped after the build, unconfigured senders (D24),
+ACKs the build refused and today's settings accept (deviation c2) and a FortiGate clock that was
+off at the moment (D28). Last, the list of every explanation the engine can emit with a test
+that emits it (4.3 WP-C, "done when").
 """
 
 from __future__ import annotations
 
+import ast
 import ipaddress
 import json
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -57,7 +61,8 @@ from arcilogger_worker.lookup import (
     trust,
 )
 from arcilogger_worker.lookup.attribution import Attributor
-from arcilogger_worker.lookup.types import EvidenceRef
+from arcilogger_worker.lookup.texts import ENGINE_EXPLANATIONS
+from arcilogger_worker.lookup.types import EXPLANATIONS, EvidenceRef
 from arcilogger_worker.testing import FIREWALL, FORTIGATE_DHCP_TEXTS, Evidence, tr
 
 DAY = date(2026, 10, 12)
@@ -139,18 +144,21 @@ def unconverted_line(
     source: str = "fortigate",
     logid: str = "0100026001",
     dhcp_msg: str | None = None,
+    without_dhcp_msg: bool = False,
 ) -> int:
     """A FortiGate DHCP ACK (a RELEASE with ``logid="0100026002"`` and ``lease=None``) that
     stayed an ``fg_event`` row with the full DHCP shape (D8: a line loaded before the upgrade,
     or by the previous version after a rollback): its spool line and the row that version
     stored, every DHCP field in ``extra``; returns the row id. ``dhcp_msg``: another message
-    than the logid's own ("Ack" / "Release")."""
+    than the logid's own ("Ack" / "Release"); ``without_dhcp_msg``: a line without the field,
+    which D3 keeps as an ``fg_event`` row today too."""
     sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
     local = to_site(time)
     logdesc, msg = FORTIGATE_DHCP_TEXTS[logid]
+    kind = dhcp_msg or ("Ack" if logid == "0100026001" else "Release")
     fields = {
         "interface": interface,
-        "dhcp_msg": dhcp_msg or ("Ack" if logid == "0100026001" else "Release"),
+        "dhcp_msg": None if without_dhcp_msg else kind,
         "mac": mac.upper(),
         "ip": ip,
         "lease": None if lease is None else str(lease),
@@ -1025,6 +1033,22 @@ def test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing(
     assert note(lowered, UNCONVERTED) == {"last": iso(tr(DAY, 11)), "ip": PC}
 
 
+def test_a_line_after_the_lease_without_dhcp_msg_counts(
+    db_session: Session, evidence: Evidence, example: list[int]
+) -> None:
+    """D25 refuses a listed logid's line only for a ``dhcp_msg`` it does not list: an ACK line
+    of the PC's address without the field (D3 kept it as an ``fg_event`` row, the shape a line
+    the timeline never saw has) after the 11:00 ACK lowers the chain, as the full line does."""
+    unconverted_line(evidence, tr(DAY, 11, 10), PC, OTHER, without_dhcp_msg=True)
+    db_session.commit()
+    chain = internal(db_session, PC, AT).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(tr(DAY, 11)), "ip": PC}
+    assert OTHER not in outcome_text(internal(db_session, PC, AT))
+
+
 @pytest.mark.parametrize(
     ("ip", "lowered"),
     [
@@ -1360,6 +1384,21 @@ def test_a_line_that_is_never_lease_evidence_is_never_named(
     older = internal(db_session, PC, AT)
     assert outcome_note(older, NOT_CONVERTED) == {"ips": PC}
     assert_cited(older, row, acked, evidence)
+
+
+def test_a_covering_line_without_dhcp_msg_is_named(db_session: Session, evidence: Evidence) -> None:
+    """D8 and D25: the covering pre-upgrade ACK without a ``dhcp_msg`` field is the line ingest
+    kept as an ``fg_event`` row (D3), and it is named and cited like the full line; only a
+    value the logid's list lacks (a NAK) refuses it."""
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(
+        evidence, acked, PC, PC_MAC, hostname=HOST, lease=WEEK, without_dhcp_msg=True
+    )
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    assert_cited(outcome, row, acked, evidence)
 
 
 def test_a_line_of_an_unknown_sender_is_never_cited(
@@ -1731,6 +1770,199 @@ def test_a_sender_configured_later_is_named_on_the_chain(
     assert chain.lease.evidence[0].raw.source == sender
     assert note(chain, "source_configured_later") == {"sources": sender}
     assert chain.lease.confidence == "high"  # information only
+
+
+# -- ACKs the build refused and today's settings accept (deviation c2) -----------------------------
+
+#: An HA member that sent from its own address before anyone configured it (D24).
+HA_MEMBER = "unknown-172.20.10.2"
+#: A logid nobody had mapped when the leases were built (synthetic, as in the trust tests).
+LATER_LOGID = "0100026099"
+
+
+def configure_ha_member(session: Session) -> None:
+    """The second FortiGate source, whose address covers :data:`HA_MEMBER` (D24)."""
+    session.add(Source(name="fortigate-2", type="fortigate", address="172.20.10.0/30"))
+    session.commit()
+
+
+def assert_unshown(outcome: LookupOutcome) -> None:
+    """Nothing of OTHER's row is cited or shown (KVKK, 2.16)."""
+    text = outcome_text(outcome)
+    assert OTHER not in text
+    assert "idr-nb07" not in text
+    assert outcome.unconverted_dhcp == ()
+
+
+def test_another_clients_ack_from_a_sender_configured_after_the_build(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Manager review of PR #30, (a): OTHER's 10:00 ACK for .57 came from the HA member nobody
+    had configured, so the build refused it and left the PC's 08:00 lease open. Once a source
+    covers the member, the lookup at 11:00 names Selin Kaya at ``low`` with the post-lease
+    warning (OTHER's row is neither cited nor shown), until the rebuild names OTHER."""
+    db_session.add(Source(name=HA_MEMBER, type="fortigate", address="172.20.10.2", unknown=True))
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(tr(DAY, 10), PC, OTHER, hostname="IDR-NB07", source=HA_MEMBER)
+    build(db_session, DAY, DAY)
+    selin(db_session)
+    moment = tr(DAY, 11)
+    refused = internal(db_session, PC, moment).attribution
+    assert refused is not None
+    assert refused.lease is not None
+    # ``medium``: the person step, as on a MikroTik site.
+    assert (refused.lease.mac, refused.confidence, refused.lease.confidence) == (
+        PC_MAC,
+        "medium",
+        "high",
+    )
+    configure_ha_member(db_session)
+    outcome = internal(db_session, PC, moment)
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.person is not None
+    assert (chain.lease.mac, chain.person.name) == (PC_MAC, "Selin Kaya")
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(T0), "ip": PC}
+    assert OVERLAP not in chain_keys(chain)
+    assert [ref.time for ref in chain.lease.evidence if ref.table == "fg_dhcp"] == [T0]
+    assert_unshown(outcome)
+    # Before OTHER's ACK nothing is lowered.
+    early = internal(db_session, PC, tr(DAY, 9, 59)).attribution
+    assert early is not None
+    assert (early.confidence, chain_keys(early).count(UNCONVERTED)) == ("medium", 0)
+    build(db_session, DAY, DAY)  # the rebuild
+    rebuilt = internal(db_session, PC, moment).attribution
+    assert rebuilt is not None
+    assert rebuilt.lease is not None
+    assert (rebuilt.lease.mac, rebuilt.lease.confidence) == (OTHER, "high")
+    assert UNCONVERTED not in chain_keys(rebuilt)
+
+
+def test_another_clients_ack_under_a_logid_mapped_after_the_build(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Manager review of PR #30, (b): OTHER's ACK for .57 six hours after the PC's (both with
+    the 7-day default lease) was logged under a logid mapped only after the build. Thirty hours
+    after the PC's ACK (inside half its lease) the chain is ``low`` with the post-lease warning
+    until the rebuild names OTHER."""
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST, lease=WEEK)
+    evidence.fortigate_dhcp(
+        T0 + timedelta(hours=6), PC, OTHER, hostname="IDR-NB07", lease=WEEK, logid=LATER_LOGID
+    )
+    build(db_session, DAY, DAY + timedelta(days=1))
+    selin(db_session)
+    moment = T0 + timedelta(hours=30)
+    unmapped = internal(db_session, PC, moment).attribution
+    assert unmapped is not None
+    assert (unmapped.confidence, chain_keys(unmapped).count(UNCONVERTED)) == ("medium", 0)
+    mapped = {"0100026001": "assigned", "0100026002": "deassigned", LATER_LOGID: "assigned"}
+    set_setting(db_session, "dhcp.fortigate_logids", mapped, updated_by="tolga")
+    db_session.commit()
+    outcome = internal(db_session, PC, moment)
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.lease.mac == PC_MAC
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(T0), "ip": PC}
+    assert "lease_renewal_not_seen" not in chain_keys(chain)
+    assert_unshown(outcome)
+    build(db_session, DAY, DAY + timedelta(days=1))
+    rebuilt = internal(db_session, PC, moment).attribution
+    assert rebuilt is not None
+    assert rebuilt.lease is not None
+    assert (rebuilt.lease.mac, rebuilt.lease.confidence) == (OTHER, "high")
+    assert UNCONVERTED not in chain_keys(rebuilt)
+
+
+def test_a_migration_ack_from_a_sender_configured_after_the_build(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Manager review of PR #30, (c): the FortiGate's 09:20 ACK of the PC's own pair (D5) came
+    from the HA member nobody had configured, so the build kept the MikroTik lease, and the
+    printer's traffic keeps it open. Once the member is configured, the lookup on day 3 is
+    ``low`` with the post-lease warning, until the rebuild answers ``no_lease``."""
+    db_session.add(Source(name=HA_MEMBER, type="fortigate", address="172.20.10.2", unknown=True))
+    _mikrotik_lease(evidence)
+    evidence.fortigate_dhcp(MOVED, PC, PC_MAC, hostname=HOST, source=HA_MEMBER)
+    _printer(evidence, 3)
+    build(db_session, MOVE_DAY, MOVE_DAY + timedelta(days=3))
+    selin(db_session)
+    moment = MOVED + timedelta(days=2, minutes=10)
+    refused = internal(db_session, PC, moment).attribution
+    assert refused is not None
+    assert refused.lease is not None
+    assert (refused.lease.source_table, refused.lease.confidence) == ("mt_dhcp", "high")
+    assert UNCONVERTED not in chain_keys(refused)
+    configure_ha_member(db_session)
+    outcome = internal(db_session, PC, moment)
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.source_table, chain.lease.mac) == ("mt_dhcp", PC_MAC)
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(tr(MOVE_DAY, 8)), "ip": PC}
+    assert OVERLAP not in chain_keys(chain)
+    assert_unshown(outcome)
+    build(db_session, MOVE_DAY, MOVE_DAY + timedelta(days=3))
+    rebuilt = internal(db_session, PC, moment)
+    assert rebuilt.attribution is None
+    assert "no_lease" in keys(rebuilt)
+
+
+def test_a_healthy_fortigate_site_keeps_its_chain(
+    db_session: Session, evidence: Evidence, example: list[int]
+) -> None:
+    """The example site with OTHER's ACKs of .57 that a healthy build either applied (before the
+    PC's lease, after the moment) or still refuses (an unconfigured sender, an unmapped logid,
+    the receive time, a NAK under the ACK's logid): the lease stays ``high``, and the chain at
+    the person step's ``medium``."""
+    stranger(db_session)
+    evidence.fortigate_dhcp(tr(DAY, 7), PC, OTHER)
+    # Inside the chain's window: after its 11:00 re-ACK, before the moment.
+    evidence.fortigate_dhcp(AT - timedelta(minutes=20), PC, OTHER, source=STRANGER)
+    evidence.fortigate_dhcp(AT - timedelta(minutes=15), PC, OTHER, logid="0100026003")
+    evidence.fortigate_dhcp(AT - timedelta(minutes=10), PC, OTHER, device_time=False)
+    evidence.fortigate_dhcp(AT - timedelta(minutes=5), PC, OTHER, dhcp_msg="Nak")
+    evidence.fortigate_dhcp(AT + timedelta(minutes=1), PC, OTHER)
+    evidence.fortigate_dhcp(tr(DAY, 9), "172.20.42.58", OTHER)
+    build(db_session, DAY - timedelta(days=1), DAY + timedelta(days=1))
+    chain = internal(db_session, PC, AT).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.mac, chain.lease.start) == (PC_MAC, tr(DAY, 8))
+    assert (chain.confidence, chain.lease.confidence) == ("medium", "high")  # the person step
+    assert UNCONVERTED not in chain_keys(chain)
+
+
+def test_a_healthy_mixed_site_keeps_its_chains(db_session: Session, evidence: Evidence) -> None:
+    """MikroTik DHCP serves VLAN 42, the FortiGate VLAN 43 (renewals every 12 hours); the
+    FortiGate gave .57 to OTHER two days before the PC's MikroTik ACK (the build ended that
+    lease long before). Both chains keep their confidence."""
+    staff, staff_mac = "172.20.43.57", "00:00:5e:00:53:58"
+    start = tr(MOVE_DAY + timedelta(days=2), 8)
+    evidence.fortigate_dhcp(tr(MOVE_DAY, 8), PC, OTHER)
+    evidence.dhcp(start, "assigned", PC, PC_MAC, server="dhcp42", hostname=HOST)
+    for step in range(8):
+        moment = tr(MOVE_DAY, 8) + timedelta(hours=12 * step)
+        evidence.fortigate_dhcp(moment, staff, staff_mac, interface="vlan43")
+    evidence.traffic(start + timedelta(hours=3), PC, 50001)
+    build(db_session, MOVE_DAY, MOVE_DAY + timedelta(days=3))
+    moment = start + timedelta(hours=4)
+    mikrotik = internal(db_session, PC, moment).attribution
+    assert mikrotik is not None
+    assert mikrotik.lease is not None
+    assert (mikrotik.lease.source_table, mikrotik.lease.mac) == ("mt_dhcp", PC_MAC)
+    assert (mikrotik.confidence, mikrotik.lease.confidence) == ("high", "high")
+    assert UNCONVERTED not in chain_keys(mikrotik)
+    fortigate = internal(db_session, staff, moment).attribution
+    assert fortigate is not None
+    assert fortigate.lease is not None
+    assert (fortigate.lease.source_table, fortigate.lease.mac) == ("fg_dhcp", staff_mac)
+    assert (fortigate.confidence, fortigate.lease.confidence) == ("high", "high")
+    assert UNCONVERTED not in chain_keys(fortigate)
 
 
 # -- the source clock at the requested moment (D28, 2.7) ------------------------------------------
@@ -2127,3 +2359,274 @@ def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
         system.CLOCK_LIMIT_SECONDS,
         system.CLOCK_MIN_ROWS,
     )
+
+
+# -- every engine explanation has a test that emits it (4.3 WP-C, "done when") --------------------
+
+#: Per key the lookup engine can emit, a test that emits it and asserts it: the test names the
+#: key (its text, or a module constant holding it), itself or in a module helper it calls. The
+#: keys are those of the catalogue that an engine module names.
+EMITTED_BY: dict[str, tuple[str, str]] = {
+    "arp_only": ("test_lookup_engine.py", "test_ip_conflict_lists_every_device"),
+    "candidates_without_destination": (
+        "test_lookup_engine.py",
+        "test_double_nat_candidates_without_destination",
+    ),
+    "chain_missing": (
+        "test_lookup_fortigate_only.py",
+        "test_the_probe_reads_twenty_addresses_at_most",
+    ),
+    "destination_not_found": ("test_lookup_engine.py", "test_unknown_destination_lists_nobody"),
+    "destination_search": ("test_lookup_engine.py", "test_destination_only_request"),
+    "dhcp_sources_overlap": (
+        "test_lookup_fortigate_only.py",
+        "test_one_origins_query_serves_every_chain",
+    ),
+    "double_nat": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
+    "double_nat_no_candidates": ("test_lookup_engine.py", "test_shipped_defaults_are_double_nat"),
+    "egress_changed_after_event": (
+        "test_lookup_egress.py",
+        "test_e_k4_a_content_change_of_the_exit_used_is_named",
+    ),
+    "egress_interface_not_seen": (
+        "test_lookup_egress.py",
+        "test_e_n2_the_widening_keeps_the_interfaces",
+    ),
+    "egress_interface_not_seen_kept": (
+        "test_lookup_egress.py",
+        "test_e_k_the_interface_condition_drops_only_on_evidence",
+    ),
+    "egress_internal": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "egress_not_logged": ("test_lookup_egress.py", "test_e_d_e_d2_a_not_logged_line"),
+    "egress_not_logged_but_seen": (
+        "test_lookup_fortigate_only.py",
+        "test_a_not_logged_exit_the_logs_saw_measures_the_search",
+    ),
+    "egress_observed_not_configured": (
+        "test_lookup_egress.py",
+        "test_e_e2_e_e3_an_address_the_fortigate_used_itself",
+    ),
+    "egress_public_dynamic": (
+        "test_lookup_egress.py",
+        "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
+    ),
+    "egress_public_unknown": (
+        "test_lookup_egress.py",
+        "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
+    ),
+    "egress_search": ("test_lookup_egress.py", "test_e_n_an_isp_nat_line_not_seen_is_widened"),
+    "egress_transip_not_seen": (
+        "test_lookup_egress.py",
+        "test_e_n2_the_widening_keeps_the_interfaces",
+    ),
+    "egress_unconfigured": ("test_lookup_engine.py", "test_unknown_destination_lists_nobody"),
+    "egress_unmapped_seen": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "exact_domain_unverified": (
+        "test_lookup_engine.py",
+        "test_exact_domain_only_request_without_dns_logs_keeps_the_session_unverified",
+    ),
+    "exact_nat": ("test_lookup_egress.py", "test_e_d_e_d2_a_not_logged_line"),
+    "exact_only_other_destinations": (
+        "test_lookup_engine.py",
+        "test_exact_lookup_lists_only_sessions_to_the_requested_destination",
+    ),
+    "exact_other_destinations": (
+        "test_lookup_engine.py",
+        "test_exact_lookup_lists_only_sessions_to_the_requested_destination",
+    ),
+    "exact_unverified_destinations": (
+        "test_lookup_engine.py",
+        "test_exact_domain_only_request_lists_only_the_sessions_tied_to_the_name",
+    ),
+    "fortigate_dhcp_no_network": (
+        "test_lookup_fortigate_only.py",
+        "test_a_decline_in_no_configured_network_is_low",
+    ),
+    "fortigate_dhcp_not_converted": (
+        "test_lookup_fortigate_only.py",
+        "test_the_probe_reads_twenty_addresses_at_most",
+    ),
+    "fortigate_dhcp_not_converted_since_lease": (
+        "test_lookup_fortigate_only.py",
+        "test_a_line_loaded_in_a_rollback_window",
+    ),
+    "fortigate_format_unverified": (
+        "test_lookup_fortigate_only.py",
+        "test_the_example_chain_from_fortigate_dhcp_alone",
+    ),
+    "fortigate_format_verified": (
+        "test_lookup_fortigate_only.py",
+        "test_the_format_note_names_who_verified_it_and_when",
+    ),
+    "future_time": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "guest_vlan": ("test_lookup_engine.py", "test_guest_network_explanation"),
+    "infrastructure_device": (
+        "test_lookup_srcmac.py",
+        "test_a_lease_of_an_infrastructure_mac_still_names_the_device",
+    ),
+    "ip_conflict": (
+        "test_lookup_fortigate_only.py",
+        "test_the_clock_lowers_every_alternative_and_every_match",
+    ),
+    "lease_renewal_not_seen": ("test_lookup_fortigate_only.py", "test_no_renewal_and_traffic_only"),
+    "lease_timeline_behind": ("test_lookup_engine.py", "test_lease_timeline_behind_is_reported"),
+    "mac_multiple_ips": (
+        "test_lookup_srcmac.py",
+        "test_a_mac_only_lookup_finds_the_address_by_its_srcmac",
+    ),
+    "mac_not_at_ip": ("test_lookup_engine.py", "test_internal_ip_mac_and_none_modes"),
+    "multiple_exact": (
+        "test_lookup_engine.py",
+        "test_exact_lookup_lists_only_sessions_to_the_requested_destination",
+    ),
+    "nat_unknown_trandisp": ("test_lookup_egress.py", "test_e_l_an_unlisted_trandisp"),
+    "no_data_for_day": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "no_lease": ("test_lookup_fortigate_only.py", "test_no_renewal_and_traffic_only"),
+    "no_lease_for_mac": (
+        "test_lookup_fortigate_only.py",
+        "test_a_mac_only_lookup_finds_the_line_by_its_mac",
+    ),
+    "no_match": ("test_lookup_egress.py", "test_e_c5_a_line_that_carried_the_address_stays_exact"),
+    "no_match_candidates": ("test_lookup_engine.py", "test_shipped_defaults_are_double_nat"),
+    "no_match_exact": (
+        "test_lookup_fortigate_only.py",
+        "test_an_empty_exact_search_names_the_clock_of_the_searched_source",
+    ),
+    "no_person": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
+    "not_in_database": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "older_than_db_retention": (
+        "test_lookup_engine.py",
+        "test_data_window_for_days_outside_the_database",
+    ),
+    "only_in_vault": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "person_department_current": (
+        "test_lookup_assignments.py",
+        "test_a_later_reassignment_does_not_change_the_person_at_t",
+    ),
+    "person_link_at_lookup_time": ("test_lookup_engine.py", "test_ip_conflict_lists_every_device"),
+    "person_link_backfilled": (
+        "test_lookup_assignments.py",
+        "test_a_backfilled_assignment_says_its_start_is_not_known",
+    ),
+    "person_unassigned_at_time": (
+        "test_lookup_assignments.py",
+        "test_a_device_unassigned_at_t_names_nobody",
+    ),
+    "port_hint": (
+        "test_lookup_egress.py",
+        "test_e_g_the_port_hint_ranks_only_a_preserved_exits_candidates",
+    ),
+    "port_missing": (
+        "test_lookup_egress.py",
+        "test_e_e2_e_e3_an_address_the_fortigate_used_itself",
+    ),
+    "public_ip_no_egress": (
+        "test_lookup_egress.py",
+        "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
+    ),
+    "public_ip_not_transip": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "randomized_mac": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
+    "session_changed_exit": ("test_lookup_egress.py", "test_e_k3_a_session_that_changes_exit"),
+    "session_from_unknown_source": (
+        "test_lookup_egress.py",
+        "test_e_p2_a_forged_session_is_marked_on_its_match",
+    ),
+    "source_clock_offset": (
+        "test_lookup_fortigate_only.py",
+        "test_a_not_logged_exit_the_logs_saw_measures_the_search",
+    ),
+    "source_configured_later": (
+        "test_lookup_fortigate_only.py",
+        "test_a_sender_configured_later_is_named_on_the_chain",
+    ),
+    "srcmac_agrees": ("test_lookup_srcmac.py", "test_a_lease_with_the_same_srcmac_agrees"),
+    "srcmac_ambiguous": (
+        "test_lookup_srcmac.py",
+        "test_four_srcmacs_of_one_address_name_the_count_and_three",
+    ),
+    "srcmac_infrastructure": ("test_lookup_srcmac.py", "test_an_infrastructure_mac_is_not_used"),
+    "srcmac_mismatch": (
+        "test_lookup_fortigate_only.py",
+        "test_a_srcmac_that_contradicts_the_lease",
+    ),
+    "srcmac_only": ("test_lookup_fortigate_only.py", "test_a_srcmac_that_contradicts_the_lease"),
+    "srcmac_other_lease": (
+        "test_lookup_srcmac.py",
+        "test_a_mac_with_a_lease_of_another_address_is_not_used",
+    ),
+    "srcmac_shared": ("test_lookup_srcmac.py", "test_one_mac_on_two_ipv4_addresses_is_shared"),
+    "truncated": ("test_lookup_engine.py", "test_truncation_keeps_the_best_and_says_so"),
+}
+#: Retired keys: only the catalogue names them (stored lookups still render).
+NEVER_EMITTED = frozenset({"public_ip_not_configured", "wan_transip_not_seen"})
+
+
+def engine_keys(catalogue: set[str]) -> set[str]:
+    """The catalogue's keys that a module of the lookup package other than the catalogue's own
+    (``texts.py``, ``types.py``) names."""
+    package = Path(attribution.__file__).parent
+    named: set[str] = set()
+    for path in sorted(package.glob("*.py")):
+        if path.name in ("texts.py", "types.py"):
+            continue
+        for node in ast.walk(ast.parse(path.read_text("utf-8"))):
+            if isinstance(node, ast.Constant) and node.value in catalogue:
+                named.add(node.value)
+    return named
+
+
+def read_module(name: str) -> tuple[dict[str, Any], dict[str, ast.FunctionDef]]:
+    """A test module's string constants and functions, by name."""
+    tree = ast.parse((Path(__file__).parent / name).read_text("utf-8"))
+    constants: dict[str, Any] = {}
+    functions: dict[str, ast.FunctionDef] = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            functions[node.name] = node
+        targets = node.targets if isinstance(node, ast.Assign) else []
+        value = node.value if isinstance(node, ast.Assign) else None
+        if isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        for target in targets:
+            pairs = (
+                zip(target.elts, value.elts, strict=False)
+                if isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple)
+                else [(target, value)]
+            )
+            for name_node, constant in pairs:
+                if isinstance(name_node, ast.Name) and isinstance(constant, ast.Constant):
+                    constants[name_node.id] = constant.value
+    return constants, functions
+
+
+def names_key(module: str, test: str, key: str) -> bool:
+    constants, functions = read_module(module)
+    if test not in functions:
+        return False
+    function = functions[test]
+    helpers = [
+        functions[node.func.id]
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in functions
+    ]
+    return any(
+        (isinstance(node, ast.Constant) and node.value == key)
+        or (isinstance(node, ast.Name) and constants.get(node.id) == key)
+        for body in (function, *helpers)
+        for node in ast.walk(body)
+    )
+
+
+def test_every_engine_explanation_has_a_test_that_emits_it() -> None:
+    """4.3 WP-C, done when: "every engine explanation has a test that emits it". Every key of
+    the catalogue that the engine names is listed with its test, every listed test exists and
+    names its key, and only the retired keys are named by no engine module."""
+    catalogue = set(EXPLANATIONS) | set(ENGINE_EXPLANATIONS)
+    emitted = engine_keys(catalogue)
+    assert catalogue - emitted == NEVER_EMITTED
+    assert sorted(emitted - set(EMITTED_BY)) == []
+    assert sorted(set(EMITTED_BY) - emitted) == []
+    unnamed = {key: where for key, where in EMITTED_BY.items() if not names_key(*where, key)}
+    assert unnamed == {}

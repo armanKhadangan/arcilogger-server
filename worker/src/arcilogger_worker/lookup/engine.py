@@ -1389,6 +1389,7 @@ class _Lookup:
         rows = srcmac_rows_of_mac(
             self.session,
             mac=mac,
+            at=self.request.at,
             low=self.window.low,
             high=self.window.high,
             interfaces=interfaces,
