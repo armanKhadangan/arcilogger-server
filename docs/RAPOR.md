@@ -394,14 +394,51 @@ found**, in red), how to verify the report, and the legal note; every page is nu
 stored when a cited file exists but cannot be read now (503 `report_access_denied` /
 `report_evidence_unreadable`) or the layout fails (500 `report_render_failed`); the next request
 tries again. Every cited raw line is parsed again with the ingest parser and compared with what the
-report shows from the database (session addresses, ports, protocol, session number, NAT; IP and MAC
-of an IP-MAC record; record type and time): a difference is printed in red, and that result is shown
+report shows from the database (session addresses, ports, protocol, session number, NAT; `srcip`
+and `srcmac` of a srcmac chain's session line; IP and MAC of an IP-MAC record, MikroTik or
+FortiGate DHCP or ARP-LOG, where the line that ended a lease claims only the field it shares with
+the lease; record type and time): a difference is printed in red, and that result is shown
 as "contradicted by its evidence", never as an exact match or with a confidence. The check finds a
 database changed after ingest, not a defect of the parser itself. With `lookup.report_timestamp` the
 PDF's hash is time-stamped (1 kontör), the `.zd` is stored next to it and the PDF names the provider
 and warns when it is not the Kamu SM production server (it never states that a stamp is legally
 valid). Verify with `certutil -hashfile … SHA256` / `sha256sum`, and the token with Zamane `-CC` or
 `openssl ts -verify`.
+
+**Internet exits, FortiGate DHCP and srcmac (Wave 3).** Section 4 of a public-IP report has an
+exit row, "Çıkış / Exit: {resolution label} — {name} ({label}), {mode}", with the labels of one
+TR/EN table that the web and the reading table share ("Public IP", "NAT address", "Direct line not
+confirmed", "NAT address not confirmed", "Address seen in the logs", "Lines with unknown public
+address", "No exits defined", "No exit"; modes "Direct", "ISP NAT", "Does not pass the FortiGate",
+"Not an internet exit"). The method section prints one paragraph per (resolution, mode), eleven in
+all, each separating what the exit definition states from what the logs show; the `no_egress`
+paragraph lists the exits defined at the time of the lookup. The double-NAT paragraph is never
+printed for resolution `transip`. It reads "Double NAT" for a configured ISP NAT exit and "Double
+NAT assumed" for `unconfigured` and `public_unknown`, with the CGNAT sentence; for a `fallback`
+the method paragraph stands in for it. Those two sentences appear only when the request names a
+public IP. The report never states as a fact that a line sits behind an ISP router, and never
+advises defining a line as Direct when it already is, or for a `transip` fallback. Method notes
+(clock offset, changing public address, internal NAT, exits changed after the event, the
+FortiGate DHCP format note) come from the stored outcome, never from today's settings.
+
+Every match prints its exit and `dstintf`; a match whose records came from an unconfigured sender
+gets a "UYARI / Warning" row. `no_egress`, `not_logged` and an address that is not an internet exit
+print "No session was searched: …" instead of the generic no-match text. A srcmac step reads "MAC
+address (partial evidence)" and never says that the MAC sent the session; a srcmac conflict prints
+both MACs, the alternative under "Possible other chain (srcmac, partial evidence)". A FortiGate
+DHCP lease row adds its lease time and last DHCP evidence, both from the lease's own last record at
+or before the moment; a `low` chain prints its reason beside it (`lease_renewal_not_seen`,
+`fortigate_dhcp_not_converted_since_lease`, `fortigate_dhcp_no_network`). An unconverted FortiGate
+DHCP line is cited in section 6 only for an internal lookup or an exact match, marked "not in the
+lease timeline; no chain built; no confidence given"; a candidate report carries the text alone.
+Raw session lines of an interface with FortiGate device identification show `srcmac`, the device
+name, OS and passively learned user names as logged, other people's candidate sessions included.
+
+A lookup made before the upgrade to this version is printed, on its first download, without exit
+rows, per-resolution paragraphs or FortiGate lease additions; a double-NAT answer to a public-IP
+request reads "Double NAT assumed" with the CGNAT sentence. Reports already stored keep their bytes.
+Download the reports of lookups made in the new version before a `-Rollback`. The reading table
+(exact in the records / configured / assumed) is bilingual and sits in the Turkish part above.
 
 ## Verify on site / open items
 
