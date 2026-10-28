@@ -210,7 +210,8 @@ def test_prepare_rollback_lowers_every_fortigate_lease_and_prints_the_count(
     row = session.get(Setting, ROLLBACK_KEY)
     assert row is not None
     assert row.updated_by == SYSTEM_AUTHOR
-    assert row.value == {"at": at.isoformat(timespec="microseconds"), "count": 2}
+    assert row.value["count"] == 2
+    # the server may answer in another time zone: the recorded instant is the same, to the µs
     assert datetime.fromisoformat(row.value["at"]) == at
 
 
