@@ -905,7 +905,7 @@ def test_a_line_loaded_in_a_rollback_window(
     lowers nothing."""
     if source == STRANGER:
         stranger(db_session)
-    laptop = "00:00:5e:00:53:4a"
+    laptop = "00:00:5e:00:53:44"
     evidence.fortigate_dhcp(T0, PC, DECLINER, lease=604800)
     unconverted_line(
         evidence, T0 + timedelta(hours=26), PC, laptop, hostname="PLN-NB44", source=source
