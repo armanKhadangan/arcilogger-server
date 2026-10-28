@@ -160,6 +160,17 @@ export function SearchPage() {
     [privacyPending, run],
   );
 
+  // The picker or a zoom changed the range: the same query, a new search. Declared before the
+  // hand-over: a hand-over taken when the page opens runs in the same commit, and this effect must
+  // not see its range as already run while the address still holds the old one (it would search
+  // again on that range and write it back).
+  const key = rangeKey(range);
+  useEffect(() => {
+    if (ranWith.current === null || ranWith.current === key) return;
+    dropSaved();
+    search(committed.current, range);
+  }, [key, range, search, dropSaved]);
+
   // A term handed over by the top bar (or Canlı Akış, the Panel): run it, with its range if any.
   useHandoff('/search', (payload) => {
     setText(payload.q);
@@ -184,14 +195,6 @@ export function SearchPage() {
     // Only once, when the page opens and the catalogue has answered.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields.isPending]);
-
-  // The picker or a zoom changed the range: the same query, a new search.
-  const key = rangeKey(range);
-  useEffect(() => {
-    if (ranWith.current === null || ranWith.current === key) return;
-    dropSaved();
-    search(committed.current, range);
-  }, [key, range, search, dropSaved]);
 
   // The KVKK notice was accepted: the search that waited for it runs now.
   useEffect(() => {
