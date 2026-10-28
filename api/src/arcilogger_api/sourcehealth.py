@@ -27,7 +27,16 @@ collector now writes it under; the old folder and its evidence stay where they a
   ``api/tests/test_sources_api.py``);
 * a detail's hours from ``search_counts`` while it is complete for the range, else counted
   directly; its days from ``ingest_offsets``, ``parse_failures`` and the seals; its gaps from the
-  sealed manifests (parsed once, kept by path, size and time) plus today's open gap.
+  sealed manifests (parsed once, kept by path, size and time) plus today's open gap;
+* ``lease_evidence`` (the "Kira kanıtı" card, contract 2.12; :func:`lease_evidence`): one grouped
+  count per DHCP or ARP table over the last 24 hours on its primary key (``fg_dhcp`` grouped by
+  :func:`arcilogger_worker.lookup.trust.refusal`, so ``rows`` are the rows the lease job keeps
+  and the refused and excluded rows are counted apart, by the same rules as the
+  ``R20-lease:fortigate-refused`` alert), the open and recently ended leases per table on
+  ``ix_leases_source_table_end``, the active ``R20-lease:none:<table>``/``absent`` alerts, and
+  the srcmac rows of the last hour on the configured interfaces (only with interfaces
+  configured; the router keeps it 60 s; a 2-s statement deadline, ``null`` past it;
+  :func:`srcmac_rows_last_hour`; guards: ``api/tests/test_observed_perf.py``).
 
 Counts and states only — nothing here is person-level data, nothing is audited. The raw lines of
 a source (``GET /sources/{name}/tail``) are, and are audited as ``raw.tail``
@@ -38,16 +47,18 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import re
 import threading
 from collections import Counter, OrderedDict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import ColumnElement, Executable, Select, func, or_, select, true
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from arcilogger_api.rawlines import regular_file
@@ -56,9 +67,28 @@ from arcilogger_core.config import Config, SourceConfig
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, to_site
 from arcilogger_db.kinds import family_of, kind_of
-from arcilogger_db.models import IngestOffset, Message, ParseFailure, SearchCount, Source
+from arcilogger_db.models import (
+    Alert,
+    FgDhcp,
+    FgTraffic,
+    IngestOffset,
+    Lease,
+    Message,
+    MtArp,
+    MtDhcp,
+    ParseFailure,
+    SearchCount,
+    Source,
+)
 from arcilogger_db.searchcounts import counts_complete
+from arcilogger_db.settings import get_settings
+from arcilogger_worker.alerts.store import ACTIVE_STATES
+from arcilogger_worker.alerts.system import LEASE_RULE, LEASE_WINDOW
 from arcilogger_worker.correlation.watermark import COLLECTOR_STATUS_FRESH
+from arcilogger_worker.lookup import LookupSettings, trust
+from arcilogger_worker.lookup.refs import ARP_TABLE, DHCP_TABLE, FG_DHCP_TABLE
+
+log = logging.getLogger("arcilogger.api.sourcehealth")
 
 State = Literal["active", "silent", "never", "disabled", "unknown", "promoted"]
 
@@ -80,6 +110,16 @@ UNKNOWN_PREFIX: Final = "unknown-"
 NAME: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 #: Parsed manifests kept (sealed manifests never change).
 MANIFESTS_KEPT: Final = 64
+#: ``lease_evidence``: the tables in the order of the card, the window of ``rows`` (the lease
+#: alerts' 24 hours) and of ``last_hour``, and the statement deadline of the srcmac count.
+LEASE_TABLES: Final = (DHCP_TABLE, FG_DHCP_TABLE, ARP_TABLE)
+LEASE_HOURS: Final = int(LEASE_WINDOW / timedelta(hours=1))
+LAST_HOUR: Final = timedelta(hours=1)
+SRCMAC_DEADLINE_MS: Final = 2000
+#: PostgreSQL ``query_canceled`` (statement timeout).
+QUERY_CANCELED: Final = "57014"
+NONE_PREFIX: Final = f"{LEASE_RULE}:none:"
+ABSENT_KEY: Final = f"{LEASE_RULE}:absent"
 
 
 def _minutes(delta: timedelta) -> int:
@@ -378,8 +418,15 @@ def permille(failures: int, lines: int) -> float | None:
     return round(1000 * failures / lines, 1) if lines else None
 
 
-def overview(db: Session, config: Config, layout: Layout, now: datetime) -> dict[str, Any]:
-    """``SourcesOverview`` (see the module documentation)."""
+def overview(
+    db: Session,
+    config: Config,
+    layout: Layout,
+    now: datetime,
+    srcmac_count: SrcmacCount | None = None,
+) -> dict[str, Any]:
+    """``SourcesOverview`` (see the module documentation); ``srcmac_count`` as for
+    :func:`lease_evidence`."""
     today = site_day(now)
     updated, fresh, received = collector_status(layout, now)
     items = _items(db, config, received)
@@ -442,7 +489,213 @@ def overview(db: Session, config: Config, layout: Layout, now: datetime) -> dict
         "today": today,
         "collector": {"updated_at": None if updated is None else to_site(updated), "fresh": fresh},
         "items": out,
+        "lease_evidence": lease_evidence(db, now, srcmac_count),
     }
+
+
+# -- the lease evidence card ----------------------------------------------------------------------
+
+#: How the srcmac rows of the last hour are counted for ``lease_evidence``: ``(interfaces,
+#: untrusted senders, now)`` → the count, ``None`` past the deadline (the router passes one that
+#: keeps the count 60 s).
+SrcmacCount = Callable[[tuple[str, ...], frozenset[str], datetime], int | None]
+
+
+def lease_evidence(
+    db: Session, now: datetime, srcmac_count: SrcmacCount | None = None
+) -> dict[str, Any]:
+    """``LeaseEvidence`` (contract 2.12): whether the records the lease timeline rests on arrive
+    and are used.
+
+    * ``<table>.rows``: the **usable** rows of the last 24 hours (``mt_dhcp``
+      ``assigned``/``deassigned``, every ``mt_arp`` row, the ``fg_dhcp`` rows
+      :func:`~arcilogger_worker.lookup.trust.kept` accepts); ``last_hour``: the newest of them
+      within the last hour, None when none arrived in it; ``leases_current``: the leases of the
+      table open or ended in the last 24 hours.
+    * ``fg_dhcp.refused_rows``: the rows of the window refused by rules 1 and 4 to 7 of
+      :func:`~arcilogger_worker.lookup.trust.refusal` (0 while ``dhcp.fortigate_logids`` is
+      empty: FortiGate DHCP evidence is off, as the alert reads it); ``excluded_rows``: those of
+      rules 2 and 3 (excluded interfaces, IPv6), configuration and never refused;
+      ``format_verified``: ``dhcp.fortigate_format_verified``.
+    * ``srcmac``: ``lookup.srcmac_interfaces`` and the srcmac rows of the last hour on them
+      (``srcmac_count``, default :func:`srcmac_rows_last_hour`; None without interfaces).
+    * ``state``: ``refused`` while ``refused_rows > 0``, else ``none`` while an
+      ``R20-lease:none:<table>`` or ``R20-lease:absent`` alert is active (read, never
+      recomputed: up to the alert check's lag), else ``ok``; ``none_tables``: the tables of the
+      active ``none`` alerts, in card order, whatever the state.
+
+    The settings are validated when they are written; a ``dhcp.fortigate_*`` value written
+    around the validator (``LookupSettings.from_settings`` refuses it) is logged and gives
+    ``fg_dhcp.rows`` = the rows of trusted senders, ``refused_rows`` and ``excluded_rows`` 0 (the
+    refusal rules need the settings), so the state comes from the alerts alone.
+    """
+    values = get_settings(db)
+    settings: LookupSettings | None
+    try:
+        settings = LookupSettings.from_settings(values)
+    except (TypeError, ValueError) as exc:
+        log.warning("lease evidence without the refusal rules: %s", exc)
+        settings = None
+    untrusted = trust.untrusted_sources(db)
+    low, hour = now - LEASE_WINDOW, now - LAST_HOUR
+    current = leases_current(db, low)
+
+    def counts(model: Any, usable: ColumnElement[bool]) -> tuple[int, datetime | None]:
+        newest = func.max(model.time).filter(model.time >= hour)
+        query = select(func.count(), newest).where(model.time >= low, model.time <= now, usable)
+        rows, last = db.execute(query).one()
+        return int(rows), last
+
+    tables: dict[str, dict[str, Any]] = {}
+    for table, model, usable in (
+        (DHCP_TABLE, MtDhcp, MtDhcp.action.in_(("assigned", "deassigned"))),
+        (ARP_TABLE, MtArp, true()),
+    ):
+        rows, last = counts(model, usable)
+        tables[table] = _table_counts(rows, last, current[table])
+    refused = excluded = 0
+    if settings is None:
+        trusted = FgDhcp.source.not_in(sorted(untrusted)) if untrusted else true()
+        rows, last = counts(FgDhcp, trusted)
+    else:
+        rows, last, refused, excluded = _fortigate_counts(db, settings, untrusted, low, hour, now)
+    interfaces = _srcmac_interfaces(values, settings)
+    count = srcmac_count or (
+        lambda listed, senders, moment: srcmac_rows_last_hour(db, listed, senders, moment)
+    )
+    keys = db.scalars(
+        select(Alert.dedup_key).where(
+            Alert.state.in_(ACTIVE_STATES),
+            or_(Alert.dedup_key == ABSENT_KEY, Alert.dedup_key.startswith(NONE_PREFIX)),
+        )
+    ).all()
+    named = {str(key).removeprefix(NONE_PREFIX) for key in keys if key != ABSENT_KEY}
+    none_tables = [table for table in LEASE_TABLES if table in named]
+    state = "refused" if refused else "none" if keys else "ok"
+    return {
+        "hours": LEASE_HOURS,
+        DHCP_TABLE: tables[DHCP_TABLE],
+        FG_DHCP_TABLE: {
+            **_table_counts(rows, last, current[FG_DHCP_TABLE]),
+            "refused_rows": refused,
+            "excluded_rows": excluded,
+            "format_verified": (
+                settings.fortigate_format_verified
+                if settings is not None
+                else bool(values.get("dhcp.fortigate_format_verified", False))
+            ),
+        },
+        ARP_TABLE: tables[ARP_TABLE],
+        "srcmac": {
+            "interfaces": list(interfaces),
+            "rows_last_hour": count(interfaces, untrusted, now) if interfaces else None,
+        },
+        "state": state,
+        "none_tables": none_tables,
+    }
+
+
+def _table_counts(rows: int, last: datetime | None, leases: int) -> dict[str, Any]:
+    return {
+        "rows": rows,
+        "last_hour": None if last is None else to_site(last),
+        "leases_current": leases,
+    }
+
+
+def _fortigate_counts(
+    db: Session,
+    settings: LookupSettings,
+    untrusted: Collection[str],
+    low: datetime,
+    hour: datetime,
+    now: datetime,
+) -> tuple[int, datetime | None, int, int]:
+    """``(rows, last_hour, refused_rows, excluded_rows)`` of ``fg_dhcp`` in ``[low, now]``:
+    one pass grouped by the refusal code."""
+    window = select(
+        trust.refusal(settings, untrusted).label("code"), FgDhcp.time.label("time")
+    ).where(FgDhcp.time >= low, FgDhcp.time <= now)
+    rows = window.subquery("rows")
+    query = select(
+        rows.c.code, func.count(), func.max(rows.c.time).filter(rows.c.time >= hour)
+    ).group_by(rows.c.code)
+    kept, last, refused, excluded = 0, None, 0, 0
+    for code, n, newest in db.execute(query):
+        if code is None:
+            kept, last = int(n), newest
+        elif code in trust.CONFIGURATION:
+            excluded += int(n)
+        else:
+            refused += int(n)
+    if not settings.fortigate_logids:  # FortiGate DHCP evidence off: nothing is refused
+        refused = 0
+    return kept, last, refused, excluded
+
+
+def leases_current(db: Session, low: datetime) -> dict[str, int]:
+    """Per lease table, the leases open or ended at or after ``low``; one short range of
+    ``ix_leases_source_table_end`` per table."""
+    found = dict.fromkeys(LEASE_TABLES, 0)
+    for table in LEASE_TABLES:
+        found[table] = int(
+            db.scalar(
+                select(func.count()).where(
+                    Lease.source_table == table, or_(Lease.end.is_(None), Lease.end >= low)
+                )
+            )
+            or 0
+        )
+    return found
+
+
+def _srcmac_interfaces(
+    values: Mapping[str, Any], settings: LookupSettings | None
+) -> tuple[str, ...]:
+    if settings is not None:
+        return settings.srcmac_interfaces
+    listed = values.get("lookup.srcmac_interfaces")
+    return tuple(str(item) for item in listed) if isinstance(listed, list) else ()
+
+
+def srcmac_query(
+    interfaces: Collection[str], untrusted: Collection[str], now: datetime
+) -> Executable:
+    """The trusted ``fg_traffic`` rows with srcmac on ``interfaces`` in the last hour."""
+    query = select(func.count()).where(
+        FgTraffic.time >= now - LAST_HOUR,
+        FgTraffic.time <= now,
+        FgTraffic.srcmac.is_not(None),
+        FgTraffic.srcintf.in_(sorted(interfaces)),
+    )
+    if untrusted:
+        query = query.where(FgTraffic.source.not_in(sorted(untrusted)))
+    return query
+
+
+def srcmac_rows_last_hour(
+    db: Session, interfaces: Collection[str], untrusted: Collection[str], now: datetime
+) -> int | None:
+    """``lease_evidence.srcmac.rows_last_hour``: None without interfaces (nothing is read) and
+    past :data:`SRCMAC_DEADLINE_MS`. The count runs in a savepoint with its own
+    ``statement_timeout``, so a cancelled count leaves the request's transaction usable."""
+    if not interfaces:
+        return None
+    previous = db.scalar(select(func.current_setting("statement_timeout")))
+    try:
+        with db.begin_nested():
+            db.execute(select(func.set_config("statement_timeout", str(SRCMAC_DEADLINE_MS), True)))
+            count = db.scalar(srcmac_query(interfaces, untrusted, now))
+    except DBAPIError as exc:
+        if QUERY_CANCELED not in (
+            getattr(exc.orig, "sqlstate", None),
+            getattr(exc.orig, "pgcode", None),
+        ):
+            raise
+        log.warning("srcmac count stopped after %d ms", SRCMAC_DEADLINE_MS)
+        return None
+    db.execute(select(func.set_config("statement_timeout", previous, True)))
+    return int(count or 0)
 
 
 # -- the detail of one source ---------------------------------------------------------------------
