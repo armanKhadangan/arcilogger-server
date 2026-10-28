@@ -274,7 +274,10 @@ export interface LookupOutcome {
   mode: LookupMode;
   /** Best first (exact before candidates, then score, then time distance). */
   matches: NatMatch[];
-  /** No public IP configured (`nat.public_ips`): public-port lookups are not exact. */
+  /**
+   * Double NAT: the ISP router translates once more on the exit the public IP resolved to (an
+   * `isp_nat` exit, a fallback or no exits configured; `egress`).
+   */
   double_nat: boolean;
   /** For `internal` lookups: the chain of the requested internal IP / MAC. */
   attribution: AttributionChain | null;

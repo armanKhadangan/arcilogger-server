@@ -373,44 +373,10 @@
         "label_tr": "5651 sorgu ve kira zaman çizelgesi",
         "settings": [
           {
-            "default": [],
-            "help_en": "The firewall's public (WAN) addresses. Empty: the ISP router does a second NAT; lookups by public IP and port can only give ranked candidates.",
-            "help_tr": "Güvenlik duvarının genel (WAN) adresleri. Boş: servis sağlayıcının yönlendiricisi ikinci bir NAT yapıyor; genel IP ve porta göre sorgular yalnızca aday listesi verebilir.",
-            "is_default": true,
-            "key": "nat.public_ips",
-            "label_en": "Public IP addresses (NAT)",
-            "label_tr": "Genel IP adresleri (NAT)",
-            "locked": false,
-            "max": null,
-            "min": null,
-            "reauth": false,
-            "type": "string_list",
-            "updated_at": null,
-            "updated_by": null,
-            "value": []
-          },
-          {
-            "default": "",
-            "help_en": "The FortiGate's own WAN address as seen in transip (e.g. a private address behind the ISP router). Entered on site, never assumed.",
-            "help_tr": "FortiGate'in transip alanında görünen kendi WAN adresi (ör. servis sağlayıcının yönlendiricisinin arkasındaki özel adres). Kurulum yerinde girilir, tahmin edilmez.",
-            "is_default": false,
-            "key": "nat.wan_transip",
-            "label_en": "Firewall WAN address (transip)",
-            "label_tr": "Güvenlik duvarının WAN adresi (transip)",
-            "locked": false,
-            "max": null,
-            "min": null,
-            "reauth": false,
-            "type": "string",
-            "updated_at": "2026-10-27T23:44:49.781050Z",
-            "updated_by": "capture",
-            "value": "100.64.12.9"
-          },
-          {
             "default": {},
             "help_en": "Each internet line of the organisation: the public IP addresses (or network) the ISP gave and whether that address may change, the FortiGate's source-NAT address on that line (transip), the NAT type (direct / ISP NAT / does not pass the FortiGate) and whether the ISP keeps source ports. The FortiGate's source-NAT addresses towards a DMZ, another VLAN, a VPN or a branch are entered with the type 'Not an internet exit'; no session is searched on them. A public address cannot be a private (RFC 1918) or shared (RFC 6598, e.g. 100.64.x.x) address: the FortiGate's address behind the ISP router is the NAT address of an ISP NAT exit. With several lines, enter each line's interfaces (dstintf). Empty: one double-NAT exit is assumed. Entered on site, never assumed; read the values from the 'NAT addresses seen in the logs' table.",
             "help_tr": "Kurumun her internet hattı: servis sağlayıcının verdiği genel IP adresleri (ya da ağı) ve bu adresin değişip değişemeyeceği, FortiGate'in o hattaki kaynak NAT adresi (transip), NAT türü (doğrudan / servis sağlayıcı NAT'ı / FortiGate'ten geçmiyor) ve servis sağlayıcının kaynak portu koruyup korumadığı. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı kaynak NAT'ın adresleri 'İnternet çıkışı değil' türüyle girilir; bu adreslerde oturum aranmaz. Genel adres özel (RFC 1918) ya da paylaşılan (RFC 6598, ör. 100.64.x.x) bir adres olamaz: FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresi, servis sağlayıcı NAT'ı çıkışının NAT adresidir. Birden çok hat varsa her hattın arayüzlerini (dstintf) girin. Boş: tek bir çift NAT çıkışı varsayılır. Kurulum yerinde girilir, tahmin edilmez; değerleri 'Kayıtlarda görülen NAT adresleri' tablosundan okuyabilirsiniz.",
-            "is_default": true,
+            "is_default": false,
             "key": "nat.egresses",
             "label_en": "Internet exits (NAT)",
             "label_tr": "İnternet çıkışları (NAT)",
@@ -419,9 +385,21 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": null,
-            "updated_by": null,
-            "value": {}
+            "updated_at": "2026-10-01T06:00:00Z",
+            "updated_by": "capture",
+            "value": {
+              "wan": {
+                "interfaces": [],
+                "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+                "mode": "isp_nat",
+                "port_preservation": "unknown",
+                "public": [],
+                "public_dynamic": false,
+                "transips": [
+                  "100.64.12.9"
+                ]
+              }
+            }
           },
           {
             "default": [
@@ -474,7 +452,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T23:44:47.361409Z",
+            "updated_at": "2026-10-28T02:18:54.884287Z",
             "updated_by": "capture",
             "value": 100
           },
@@ -508,26 +486,9 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T23:44:49.712973Z",
+            "updated_at": "2026-10-28T02:18:57.305592Z",
             "updated_by": "capture",
             "value": 5
-          },
-          {
-            "default": false,
-            "help_en": "Candidates whose FortiGate port equals the requested public port rank first. Verify on site that the ISP router keeps source ports before switching it on.",
-            "help_tr": "Adaylar sıralanırken FortiGate portu istenen genel porta eşit olanlar öne alınır. Servis sağlayıcının yönlendiricisinin kaynak portları koruduğunu yerinde doğrulamadan açmayın.",
-            "is_default": true,
-            "key": "lookup.port_hint",
-            "label_en": "Port hint",
-            "label_tr": "Port ipucu",
-            "locked": false,
-            "max": null,
-            "min": null,
-            "reauth": false,
-            "type": "boolean",
-            "updated_at": null,
-            "updated_by": null,
-            "value": false
           },
           {
             "default": 3600,
@@ -559,7 +520,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-27T23:44:48.044618Z",
+            "updated_at": "2026-10-28T02:18:55.625299Z",
             "updated_by": "capture",
             "value": false
           },
@@ -627,7 +588,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-27T23:44:44.968058Z",
+            "updated_at": "2026-10-28T02:18:52.262688Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -1682,7 +1643,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T23:44:54.500791Z",
+            "updated_at": "2026-10-28T02:19:02.700881Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -2218,44 +2179,10 @@
         "label_tr": "5651 sorgu ve kira zaman çizelgesi",
         "settings": [
           {
-            "default": [],
-            "help_en": "The firewall's public (WAN) addresses. Empty: the ISP router does a second NAT; lookups by public IP and port can only give ranked candidates.",
-            "help_tr": "Güvenlik duvarının genel (WAN) adresleri. Boş: servis sağlayıcının yönlendiricisi ikinci bir NAT yapıyor; genel IP ve porta göre sorgular yalnızca aday listesi verebilir.",
-            "is_default": true,
-            "key": "nat.public_ips",
-            "label_en": "Public IP addresses (NAT)",
-            "label_tr": "Genel IP adresleri (NAT)",
-            "locked": false,
-            "max": null,
-            "min": null,
-            "reauth": false,
-            "type": "string_list",
-            "updated_at": null,
-            "updated_by": null,
-            "value": []
-          },
-          {
-            "default": "",
-            "help_en": "The FortiGate's own WAN address as seen in transip (e.g. a private address behind the ISP router). Entered on site, never assumed.",
-            "help_tr": "FortiGate'in transip alanında görünen kendi WAN adresi (ör. servis sağlayıcının yönlendiricisinin arkasındaki özel adres). Kurulum yerinde girilir, tahmin edilmez.",
-            "is_default": false,
-            "key": "nat.wan_transip",
-            "label_en": "Firewall WAN address (transip)",
-            "label_tr": "Güvenlik duvarının WAN adresi (transip)",
-            "locked": false,
-            "max": null,
-            "min": null,
-            "reauth": false,
-            "type": "string",
-            "updated_at": "2026-10-27T23:44:49.781050Z",
-            "updated_by": "capture",
-            "value": "100.64.12.9"
-          },
-          {
             "default": {},
             "help_en": "Each internet line of the organisation: the public IP addresses (or network) the ISP gave and whether that address may change, the FortiGate's source-NAT address on that line (transip), the NAT type (direct / ISP NAT / does not pass the FortiGate) and whether the ISP keeps source ports. The FortiGate's source-NAT addresses towards a DMZ, another VLAN, a VPN or a branch are entered with the type 'Not an internet exit'; no session is searched on them. A public address cannot be a private (RFC 1918) or shared (RFC 6598, e.g. 100.64.x.x) address: the FortiGate's address behind the ISP router is the NAT address of an ISP NAT exit. With several lines, enter each line's interfaces (dstintf). Empty: one double-NAT exit is assumed. Entered on site, never assumed; read the values from the 'NAT addresses seen in the logs' table.",
             "help_tr": "Kurumun her internet hattı: servis sağlayıcının verdiği genel IP adresleri (ya da ağı) ve bu adresin değişip değişemeyeceği, FortiGate'in o hattaki kaynak NAT adresi (transip), NAT türü (doğrudan / servis sağlayıcı NAT'ı / FortiGate'ten geçmiyor) ve servis sağlayıcının kaynak portu koruyup korumadığı. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı kaynak NAT'ın adresleri 'İnternet çıkışı değil' türüyle girilir; bu adreslerde oturum aranmaz. Genel adres özel (RFC 1918) ya da paylaşılan (RFC 6598, ör. 100.64.x.x) bir adres olamaz: FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresi, servis sağlayıcı NAT'ı çıkışının NAT adresidir. Birden çok hat varsa her hattın arayüzlerini (dstintf) girin. Boş: tek bir çift NAT çıkışı varsayılır. Kurulum yerinde girilir, tahmin edilmez; değerleri 'Kayıtlarda görülen NAT adresleri' tablosundan okuyabilirsiniz.",
-            "is_default": true,
+            "is_default": false,
             "key": "nat.egresses",
             "label_en": "Internet exits (NAT)",
             "label_tr": "İnternet çıkışları (NAT)",
@@ -2264,9 +2191,21 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": null,
-            "updated_by": null,
-            "value": {}
+            "updated_at": "2026-10-01T06:00:00Z",
+            "updated_by": "capture",
+            "value": {
+              "wan": {
+                "interfaces": [],
+                "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+                "mode": "isp_nat",
+                "port_preservation": "unknown",
+                "public": [],
+                "public_dynamic": false,
+                "transips": [
+                  "100.64.12.9"
+                ]
+              }
+            }
           },
           {
             "default": [
@@ -2319,7 +2258,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T23:45:04.491523Z",
+            "updated_at": "2026-10-28T02:19:12.505259Z",
             "updated_by": "tolga",
             "value": 150
           },
@@ -2353,26 +2292,9 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T23:44:49.712973Z",
+            "updated_at": "2026-10-28T02:18:57.305592Z",
             "updated_by": "capture",
             "value": 5
-          },
-          {
-            "default": false,
-            "help_en": "Candidates whose FortiGate port equals the requested public port rank first. Verify on site that the ISP router keeps source ports before switching it on.",
-            "help_tr": "Adaylar sıralanırken FortiGate portu istenen genel porta eşit olanlar öne alınır. Servis sağlayıcının yönlendiricisinin kaynak portları koruduğunu yerinde doğrulamadan açmayın.",
-            "is_default": true,
-            "key": "lookup.port_hint",
-            "label_en": "Port hint",
-            "label_tr": "Port ipucu",
-            "locked": false,
-            "max": null,
-            "min": null,
-            "reauth": false,
-            "type": "boolean",
-            "updated_at": null,
-            "updated_by": null,
-            "value": false
           },
           {
             "default": 3600,
@@ -2404,7 +2326,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-27T23:44:48.044618Z",
+            "updated_at": "2026-10-28T02:18:55.625299Z",
             "updated_by": "capture",
             "value": false
           },
@@ -2472,7 +2394,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-27T23:44:44.968058Z",
+            "updated_at": "2026-10-28T02:18:52.262688Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -3527,7 +3449,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-27T23:44:54.500791Z",
+            "updated_at": "2026-10-28T02:19:02.700881Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -3777,7 +3699,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.069404+00:00",
+    "captured_at": "2026-10-13T04:01:17.511645+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

@@ -293,7 +293,9 @@ def within(column: Any, networks: Sequence[IPv4Network]) -> ColumnElement[bool]:
         clause = column == any_(cast(literal(addresses, ARRAY(INET)), ARRAY(INET)))
     else:
         texts = [str(n) for n in networks]
-        clause = column.op("<<=")(any_(cast(literal(texts, ARRAY(CIDR)), ARRAY(CIDR))))
+        clause = column.op("<<=", is_comparison=True)(
+            any_(cast(literal(texts, ARRAY(CIDR)), ARRAY(CIDR)))
+        )
     return clause
 
 

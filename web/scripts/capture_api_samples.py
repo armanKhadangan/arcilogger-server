@@ -166,6 +166,7 @@ from arcilogger_db.models import (
     Person,
     ReportRun,
     ReportSchedule,
+    Setting,
     Source,
     User,
     UserSession,
@@ -215,6 +216,9 @@ WAN = "100.64.12.9"
 #: The FortiGate's WAN address behind the ISP router as the internet exit ``wan`` (revision
 #: 0018_nat_egresses converts Wave 2's nat.wan_transip to it), so the WAN request is exact.
 WAN_EXIT = legacy_egresses([], WAN, False)[0]
+#: When the site entered its internet exits: before the requested day, so no lookup warns that
+#: they changed after the event (egress_changed_after_event), and the samples stay the same.
+EXITS_ENTERED = datetime(2026, 10, 1, 9, 0, tzinfo=SITE_TZ)
 #: A public address of the ISP router (documentation range, RFC 5737).
 PUBLIC_IP = "198.51.100.23"
 #: The example attribution chain: WAN 100.64.12.9:51001 → the PC on VLAN 42 "Planlama" (lease of
@@ -631,9 +635,19 @@ def lookup_body(**query: Any) -> dict[str, Any]:
     return {"request": dict(REQUEST), "query": {"at": AT, "tolerance_seconds": 60, **query}}
 
 
+def enter_exits(capture: Capture, value: Any) -> None:
+    """``nat.egresses`` as the site entered it (:data:`EXITS_ENTERED`)."""
+    capture.setting("nat.egresses", value)
+    with capture.factory() as session:
+        session.execute(
+            update(Setting).where(Setting.key == "nat.egresses").values(updated_at=EXITS_ENTERED)
+        )
+        session.commit()
+
+
 def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -> dict[str, int]:
     out = capture.samples["lookups"]
-    capture.setting("nat.egresses", WAN_EXIT)
+    enter_exits(capture, WAN_EXIT)
     runs = {
         "exact": lookup_body(public_ip=WAN, public_port=51001, protocol="tcp"),
         "candidates": lookup_body(
@@ -755,7 +769,7 @@ def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
         503,
         "lookup_settings_invalid",
     )
-    capture.setting("nat.egresses", WAN_EXIT)
+    enter_exits(capture, WAN_EXIT)
     # A cited file cannot be read right now (folder rights, disk error): no report is made.
     failures = {
         "report_access_denied": PermissionError(13, "Permission denied"),

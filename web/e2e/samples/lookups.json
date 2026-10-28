@@ -1,8 +1,8 @@
 {
   "auditor_run": {
-    "created_at": "2026-10-13T04:00:02.043355Z",
-    "elapsed_ms": 27,
-    "finished_at": "2026-10-13T04:00:02.043154Z",
+    "created_at": "2026-10-13T04:00:02.281564Z",
+    "elapsed_ms": 34,
+    "finished_at": "2026-10-13T04:00:02.281354Z",
     "id": 8,
     "mode": "candidates",
     "outcome": {
@@ -16,7 +16,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "public_unknown",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "double_nat",
@@ -25,13 +61,22 @@
           "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
         },
         {
+          "key": "egress_public_unknown",
+          "params": {
+            "address": "198.51.100.23",
+            "egresses": "wan"
+          },
+          "text_en": "198.51.100.23 is not the public address of any exit; it was searched in the exits whose public address is not defined or may change: wan. If the address does not belong to such a line, the list may show the users of the wrong line; add the public address of the line it belongs to in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+          "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
+        },
+        {
           "key": "person_department_current",
           "params": {},
           "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.015575+00:00",
+      "generated_at": "2026-10-13T04:00:02.246457+00:00",
       "matches": [
         {
           "chain": {
@@ -111,7 +156,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 90,
           "time_distance_ms": 0,
@@ -221,7 +266,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 90,
           "time_distance_ms": 0,
@@ -331,7 +376,7 @@
             "vlan_name": "Finans"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 70,
           "time_distance_ms": 30000,
@@ -414,9 +459,9 @@
     "username": "ayse.yilmaz"
   },
   "candidates": {
-    "created_at": "2026-10-13T04:00:01.405260Z",
-    "elapsed_ms": 35,
-    "finished_at": "2026-10-13T04:00:01.405015Z",
+    "created_at": "2026-10-13T04:00:01.584145Z",
+    "elapsed_ms": 43,
+    "finished_at": "2026-10-13T04:00:01.583925Z",
     "id": 2,
     "mode": "candidates",
     "outcome": {
@@ -430,7 +475,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "public_unknown",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "double_nat",
@@ -439,13 +520,22 @@
           "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
         },
         {
+          "key": "egress_public_unknown",
+          "params": {
+            "address": "198.51.100.23",
+            "egresses": "wan"
+          },
+          "text_en": "198.51.100.23 is not the public address of any exit; it was searched in the exits whose public address is not defined or may change: wan. If the address does not belong to such a line, the list may show the users of the wrong line; add the public address of the line it belongs to in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+          "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
+        },
+        {
           "key": "person_department_current",
           "params": {},
           "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.368399+00:00",
+      "generated_at": "2026-10-13T04:00:01.540284+00:00",
       "matches": [
         {
           "chain": {
@@ -525,7 +615,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 90,
           "time_distance_ms": 0,
@@ -635,7 +725,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 90,
           "time_distance_ms": 0,
@@ -745,7 +835,7 @@
             "vlan_name": "Finans"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 70,
           "time_distance_ms": 30000,
@@ -828,9 +918,9 @@
     "username": "tolga"
   },
   "candidates_with_report": {
-    "created_at": "2026-10-13T04:00:01.405260Z",
+    "created_at": "2026-10-13T04:00:01.584145Z",
     "elapsed_ms": null,
-    "finished_at": "2026-10-13T04:00:01.405015Z",
+    "finished_at": "2026-10-13T04:00:01.583925Z",
     "id": 2,
     "mode": "candidates",
     "outcome": {
@@ -844,7 +934,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "public_unknown",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "double_nat",
@@ -853,13 +979,22 @@
           "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
         },
         {
+          "key": "egress_public_unknown",
+          "params": {
+            "address": "198.51.100.23",
+            "egresses": "wan"
+          },
+          "text_en": "198.51.100.23 is not the public address of any exit; it was searched in the exits whose public address is not defined or may change: wan. If the address does not belong to such a line, the list may show the users of the wrong line; add the public address of the line it belongs to in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+          "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
+        },
+        {
           "key": "person_department_current",
           "params": {},
           "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.368399+00:00",
+      "generated_at": "2026-10-13T04:00:01.540284+00:00",
       "matches": [
         {
           "chain": {
@@ -939,7 +1074,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 90,
           "time_distance_ms": 0,
@@ -1049,7 +1184,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 90,
           "time_distance_ms": 0,
@@ -1159,7 +1294,7 @@
             "vlan_name": "Finans"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 70,
           "time_distance_ms": 30000,
@@ -1231,11 +1366,11 @@
       "tolerance_seconds": 60
     },
     "report": {
-      "created_at": "2026-10-13T04:00:02.516954Z",
+      "created_at": "2026-10-13T04:00:02.805936Z",
       "download_count": 1,
-      "pages": 7,
-      "sha256": "b8fb57b91e1752b5ce1ca464354916afb6d6833743c5c27a8923713f5b86305e",
-      "size": 89262,
+      "pages": 8,
+      "sha256": "a4103aa7c10f030502de9e48fcaf229b4e2ddd4a64060f99fe1115be31a4b85c",
+      "size": 90826,
       "timestamp": {
         "errors": [],
         "gen_time": "2026-10-13T04:00:02+00:00",
@@ -1243,7 +1378,7 @@
         "policy": "2.999.5651.1",
         "provider": "mock",
         "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-        "serial": "20C3DEAC6927DC3B",
+        "serial": "76458C8436D682DA",
         "server": "tzd.kamusm.gov.tr",
         "token_file": "reports/ARCILOGGER-5651-rapor-2.pdf.zd",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
@@ -1265,9 +1400,9 @@
     "username": "tolga"
   },
   "conflict": {
-    "created_at": "2026-10-13T04:00:01.490891Z",
-    "elapsed_ms": 28,
-    "finished_at": "2026-10-13T04:00:01.490628Z",
+    "created_at": "2026-10-13T04:00:01.801979Z",
+    "elapsed_ms": 31,
+    "finished_at": "2026-10-13T04:00:01.801775Z",
     "id": 3,
     "mode": "candidates",
     "outcome": {
@@ -1281,7 +1416,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "public_unknown",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "double_nat",
@@ -1290,13 +1461,22 @@
           "text_tr": "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre adaylar listelenmiştir."
         },
         {
+          "key": "egress_public_unknown",
+          "params": {
+            "address": "198.51.100.23",
+            "egresses": "wan"
+          },
+          "text_en": "198.51.100.23 is not the public address of any exit; it was searched in the exits whose public address is not defined or may change: wan. If the address does not belong to such a line, the list may show the users of the wrong line; add the public address of the line it belongs to in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+          "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
+        },
+        {
           "key": "person_department_current",
           "params": {},
           "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.461809+00:00",
+      "generated_at": "2026-10-13T04:00:01.769629+00:00",
       "matches": [
         {
           "chain": {
@@ -1467,7 +1647,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "ip_port",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 86,
           "time_distance_ms": 5000,
@@ -1727,9 +1907,9 @@
     }
   },
   "exact": {
-    "created_at": "2026-10-13T04:00:01.307432Z",
-    "elapsed_ms": 31,
-    "finished_at": "2026-10-13T04:00:01.307212Z",
+    "created_at": "2026-10-13T04:00:01.470075Z",
+    "elapsed_ms": 54,
+    "finished_at": "2026-10-13T04:00:01.469513Z",
     "id": 1,
     "mode": "exact",
     "outcome": {
@@ -1743,7 +1923,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "transip",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "exact_nat",
@@ -1752,13 +1968,23 @@
           "text_tr": "Genel IP adresi FortiGate'in kendi adresi olduğu için oturum kesin olarak eşleşti."
         },
         {
+          "key": "egress_search",
+          "params": {
+            "egress": "wan",
+            "interfaces": "-",
+            "transips": "100.64.12.9"
+          },
+          "text_en": "The search was limited to exit wan: this exit is defined as ISP NAT (by the settings, the ISP router does a second NAT on this line). The FortiGate's NAT addresses on this line: 100.64.12.9; interfaces: -.",
+          "text_tr": "Arama wan çıkışıyla sınırlandı: bu çıkış servis sağlayıcı NAT'ı olarak tanımlı (ayarlara göre servis sağlayıcının yönlendiricisi bu hatta ikinci bir NAT yapıyor). FortiGate'in bu hattaki NAT adresleri: 100.64.12.9; arayüzler: -."
+        },
+        {
           "key": "person_department_current",
           "params": {},
           "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.275206+00:00",
+      "generated_at": "2026-10-13T04:00:01.413882+00:00",
       "matches": [
         {
           "chain": {
@@ -1838,7 +2064,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "not_requested",
-          "egress": null,
+          "egress": "wan",
           "kind": "exact",
           "score": 100,
           "time_distance_ms": 0,
@@ -1921,9 +2147,9 @@
     "username": "tolga"
   },
   "exact_with_report": {
-    "created_at": "2026-10-13T04:00:01.307432Z",
+    "created_at": "2026-10-13T04:00:01.470075Z",
     "elapsed_ms": null,
-    "finished_at": "2026-10-13T04:00:01.307212Z",
+    "finished_at": "2026-10-13T04:00:01.469513Z",
     "id": 1,
     "mode": "exact",
     "outcome": {
@@ -1937,7 +2163,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "transip",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "exact_nat",
@@ -1946,13 +2208,23 @@
           "text_tr": "Genel IP adresi FortiGate'in kendi adresi olduğu için oturum kesin olarak eşleşti."
         },
         {
+          "key": "egress_search",
+          "params": {
+            "egress": "wan",
+            "interfaces": "-",
+            "transips": "100.64.12.9"
+          },
+          "text_en": "The search was limited to exit wan: this exit is defined as ISP NAT (by the settings, the ISP router does a second NAT on this line). The FortiGate's NAT addresses on this line: 100.64.12.9; interfaces: -.",
+          "text_tr": "Arama wan çıkışıyla sınırlandı: bu çıkış servis sağlayıcı NAT'ı olarak tanımlı (ayarlara göre servis sağlayıcının yönlendiricisi bu hatta ikinci bir NAT yapıyor). FortiGate'in bu hattaki NAT adresleri: 100.64.12.9; arayüzler: -."
+        },
+        {
           "key": "person_department_current",
           "params": {},
           "text_en": "The person is the device-person assignment valid at the time of the event (assignment history). The department is the person's current one; department changes are not kept as history.",
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.275206+00:00",
+      "generated_at": "2026-10-13T04:00:01.413882+00:00",
       "matches": [
         {
           "chain": {
@@ -2032,7 +2304,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "not_requested",
-          "egress": null,
+          "egress": "wan",
           "kind": "exact",
           "score": 100,
           "time_distance_ms": 0,
@@ -2104,11 +2376,11 @@
       "tolerance_seconds": 60
     },
     "report": {
-      "created_at": "2026-10-13T04:00:02.217103Z",
+      "created_at": "2026-10-13T04:00:02.490640Z",
       "download_count": 1,
       "pages": 5,
-      "sha256": "2d6235b083fcdc7cbc8f3e688852bc06baf17a32bac7e71080f5c7e94a25b086",
-      "size": 80756,
+      "sha256": "5895c35039c78fe3b62ef4cbeb5392f5796d74b1d1e5017b945e944d7ccd2e92",
+      "size": 81075,
       "timestamp": null,
       "timestamp_status": "not_requested",
       "username": "tolga",
@@ -2125,9 +2397,9 @@
     "username": "tolga"
   },
   "internal": {
-    "created_at": "2026-10-13T04:00:01.563450Z",
-    "elapsed_ms": 17,
-    "finished_at": "2026-10-13T04:00:01.563263Z",
+    "created_at": "2026-10-13T04:00:01.876680Z",
+    "elapsed_ms": 20,
+    "finished_at": "2026-10-13T04:00:01.876435Z",
     "id": 4,
     "mode": "internal",
     "outcome": {
@@ -2221,7 +2493,7 @@
       "double_nat": true,
       "egress": null,
       "explanations": [],
-      "generated_at": "2026-10-13T04:00:01.545902+00:00",
+      "generated_at": "2026-10-13T04:00:01.855733+00:00",
       "matches": [],
       "mode": "internal",
       "request": {
@@ -2274,7 +2546,7 @@
     "items": [
       {
         "authority": "Ankara Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.043355Z",
+        "created_at": "2026-10-13T04:00:02.281564Z",
         "file_no": "2026/9917",
         "id": 8,
         "mode": "candidates",
@@ -2286,7 +2558,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.951340Z",
+        "created_at": "2026-10-13T04:00:02.179106Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 7,
         "mode": "candidates",
@@ -2298,7 +2570,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.702762Z",
+        "created_at": "2026-10-13T04:00:02.063135Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 6,
         "mode": "none",
@@ -2310,7 +2582,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.627214Z",
+        "created_at": "2026-10-13T04:00:01.959464Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 5,
         "mode": "none",
@@ -2322,7 +2594,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.563450Z",
+        "created_at": "2026-10-13T04:00:01.876680Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 4,
         "mode": "internal",
@@ -2334,7 +2606,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.490891Z",
+        "created_at": "2026-10-13T04:00:01.801979Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 3,
         "mode": "candidates",
@@ -2346,11 +2618,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.405260Z",
+        "created_at": "2026-10-13T04:00:01.584145Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 2,
         "mode": "candidates",
-        "report_sha256": "b8fb57b91e1752b5ce1ca464354916afb6d6833743c5c27a8923713f5b86305e",
+        "report_sha256": "a4103aa7c10f030502de9e48fcaf229b4e2ddd4a64060f99fe1115be31a4b85c",
         "request_date": "2026-10-10",
         "result_count": 3,
         "user_id": 1,
@@ -2358,11 +2630,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.307432Z",
+        "created_at": "2026-10-13T04:00:01.470075Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 1,
         "mode": "exact",
-        "report_sha256": "2d6235b083fcdc7cbc8f3e688852bc06baf17a32bac7e71080f5c7e94a25b086",
+        "report_sha256": "5895c35039c78fe3b62ef4cbeb5392f5796d74b1d1e5017b945e944d7ccd2e92",
         "request_date": "2026-10-10",
         "result_count": 1,
         "user_id": 1,
@@ -2376,7 +2648,7 @@
     "items": [
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.951340Z",
+        "created_at": "2026-10-13T04:00:02.179106Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 7,
         "mode": "candidates",
@@ -2388,7 +2660,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.702762Z",
+        "created_at": "2026-10-13T04:00:02.063135Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 6,
         "mode": "none",
@@ -2400,7 +2672,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.627214Z",
+        "created_at": "2026-10-13T04:00:01.959464Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 5,
         "mode": "none",
@@ -2412,7 +2684,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.563450Z",
+        "created_at": "2026-10-13T04:00:01.876680Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 4,
         "mode": "internal",
@@ -2424,7 +2696,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.490891Z",
+        "created_at": "2026-10-13T04:00:01.801979Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 3,
         "mode": "candidates",
@@ -2436,11 +2708,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.405260Z",
+        "created_at": "2026-10-13T04:00:01.584145Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 2,
         "mode": "candidates",
-        "report_sha256": "b8fb57b91e1752b5ce1ca464354916afb6d6833743c5c27a8923713f5b86305e",
+        "report_sha256": "a4103aa7c10f030502de9e48fcaf229b4e2ddd4a64060f99fe1115be31a4b85c",
         "request_date": "2026-10-10",
         "result_count": 3,
         "user_id": 1,
@@ -2448,11 +2720,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:01.307432Z",
+        "created_at": "2026-10-13T04:00:01.470075Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 1,
         "mode": "exact",
-        "report_sha256": "2d6235b083fcdc7cbc8f3e688852bc06baf17a32bac7e71080f5c7e94a25b086",
+        "report_sha256": "5895c35039c78fe3b62ef4cbeb5392f5796d74b1d1e5017b945e944d7ccd2e92",
         "request_date": "2026-10-10",
         "result_count": 1,
         "user_id": 1,
@@ -2466,7 +2738,7 @@
     "items": [
       {
         "authority": "Ankara Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.043355Z",
+        "created_at": "2026-10-13T04:00:02.281564Z",
         "file_no": "2026/9917",
         "id": 8,
         "mode": "candidates",
@@ -2480,7 +2752,7 @@
     "next_cursor": null
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.069404+00:00",
+    "captured_at": "2026-10-13T04:01:17.511645+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -2488,9 +2760,9 @@
     "tsa": "mock (never legally valid)"
   },
   "none": {
-    "created_at": "2026-10-13T04:00:01.627214Z",
-    "elapsed_ms": 15,
-    "finished_at": "2026-10-13T04:00:01.627031Z",
+    "created_at": "2026-10-13T04:00:01.959464Z",
+    "elapsed_ms": 28,
+    "finished_at": "2026-10-13T04:00:01.959172Z",
     "id": 5,
     "mode": "none",
     "outcome": {
@@ -2504,7 +2776,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "public_unknown",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "double_nat_no_candidates",
@@ -2531,9 +2839,18 @@
           "params": {},
           "text_en": "No candidate session in this window. An exact answer needs the ISP router's NAT record (public port → FortiGate port), the requested destination IP/port or domain and the correct time/time zone; a wider tolerance may also help.",
           "text_tr": "Bu aralıkta aday oturum yok. Sonucu kesinleştirmek için: ISS modeminin NAT kaydı (genel port → FortiGate çıkış portu), talepteki hedef IP/port veya alan adı ve doğru saat/saat dilimi gerekir; toleransı genişletmek de yardımcı olabilir."
+        },
+        {
+          "key": "egress_public_unknown",
+          "params": {
+            "address": "198.51.100.23",
+            "egresses": "wan"
+          },
+          "text_en": "198.51.100.23 is not the public address of any exit; it was searched in the exits whose public address is not defined or may change: wan. If the address does not belong to such a line, the list may show the users of the wrong line; add the public address of the line it belongs to in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+          "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.611116+00:00",
+      "generated_at": "2026-10-13T04:00:01.930103+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -2586,20 +2903,20 @@
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-1.pdf\"",
       "content-type": "application/pdf",
-      "x-arci-sha256": "2d6235b083fcdc7cbc8f3e688852bc06baf17a32bac7e71080f5c7e94a25b086"
+      "x-arci-sha256": "5895c35039c78fe3b62ef4cbeb5392f5796d74b1d1e5017b945e944d7ccd2e92"
     },
-    "sha256": "2d6235b083fcdc7cbc8f3e688852bc06baf17a32bac7e71080f5c7e94a25b086",
-    "size": 80756
+    "sha256": "5895c35039c78fe3b62ef4cbeb5392f5796d74b1d1e5017b945e944d7ccd2e92",
+    "size": 81075
   },
   "report_pdf_stamped": {
     "headers": {
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf\"",
       "content-type": "application/pdf",
-      "x-arci-sha256": "b8fb57b91e1752b5ce1ca464354916afb6d6833743c5c27a8923713f5b86305e"
+      "x-arci-sha256": "a4103aa7c10f030502de9e48fcaf229b4e2ddd4a64060f99fe1115be31a4b85c"
     },
-    "sha256": "b8fb57b91e1752b5ce1ca464354916afb6d6833743c5c27a8923713f5b86305e",
-    "size": 89262
+    "sha256": "a4103aa7c10f030502de9e48fcaf229b4e2ddd4a64060f99fe1115be31a4b85c",
+    "size": 90826
   },
   "report_token": {
     "headers": {
@@ -2607,13 +2924,13 @@
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf.zd\"",
       "content-type": "application/timestamp-reply"
     },
-    "sha256": "028da5954008e1e51a6439d7767f1ca67c24598a8fc13516a19adb15353ba12a",
-    "size": 1203
+    "sha256": "8edbabfac6f23ed3353c647e820b8938b1bc9a4f5f5e28ddef840ad86a4189a2",
+    "size": 1202
   },
   "truncated": {
-    "created_at": "2026-10-13T04:00:01.951340Z",
-    "elapsed_ms": 176,
-    "finished_at": "2026-10-13T04:00:01.951159Z",
+    "created_at": "2026-10-13T04:00:02.179106Z",
+    "elapsed_ms": 39,
+    "finished_at": "2026-10-13T04:00:02.178891Z",
     "id": 7,
     "mode": "candidates",
     "outcome": {
@@ -2627,7 +2944,43 @@
         "requested_day": "2026-10-09"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "public_unknown",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "double_nat",
@@ -2640,6 +2993,15 @@
           "params": {},
           "text_en": "The request names no destination IP/port or domain: all sessions in the window are ranked by time only. A destination narrows the candidates considerably.",
           "text_tr": "Talepte hedef IP/port veya alan adı yok: aralıktaki tüm oturumlar yalnızca zamana göre sıralandı. Hedef bilgisi aday sayısını büyük ölçüde azaltır."
+        },
+        {
+          "key": "egress_public_unknown",
+          "params": {
+            "address": "198.51.100.23",
+            "egresses": "wan"
+          },
+          "text_en": "198.51.100.23 is not the public address of any exit; it was searched in the exits whose public address is not defined or may change: wan. If the address does not belong to such a line, the list may show the users of the wrong line; add the public address of the line it belongs to in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+          "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
         },
         {
           "key": "truncated",
@@ -2657,7 +3019,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.774143+00:00",
+      "generated_at": "2026-10-13T04:00:02.138478+00:00",
       "matches": [
         {
           "chain": {
@@ -2740,7 +3102,7 @@
             "vlan_name": "Wi-Fi Personel"
           },
           "destination_match": "not_requested",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 65,
           "time_distance_ms": 0,
@@ -2865,7 +3227,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "not_requested",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 65,
           "time_distance_ms": 0,
@@ -2975,7 +3337,7 @@
             "vlan_name": "Planlama"
           },
           "destination_match": "not_requested",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 65,
           "time_distance_ms": 0,
@@ -3085,7 +3447,7 @@
             "vlan_name": "İdari İşler"
           },
           "destination_match": "not_requested",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 64,
           "time_distance_ms": 2000,
@@ -3195,7 +3557,7 @@
             "vlan_name": "Finans"
           },
           "destination_match": "not_requested",
-          "egress": null,
+          "egress": "wan",
           "kind": "candidate",
           "score": 62,
           "time_distance_ms": 9000,
@@ -3278,9 +3640,9 @@
     "username": "tolga"
   },
   "vault_only": {
-    "created_at": "2026-10-13T04:00:01.702762Z",
-    "elapsed_ms": 22,
-    "finished_at": "2026-10-13T04:00:01.702513Z",
+    "created_at": "2026-10-13T04:00:02.063135Z",
+    "elapsed_ms": 37,
+    "finished_at": "2026-10-13T04:00:02.062839Z",
     "id": 6,
     "mode": "none",
     "outcome": {
@@ -3294,7 +3656,43 @@
         "requested_day": "2026-10-05"
       },
       "double_nat": true,
-      "egress": null,
+      "egress": {
+        "changed_after_event": false,
+        "changes": [
+          {
+            "after_event": false,
+            "changed_at": "2026-10-01T06:00:00+00:00",
+            "changed_by": "capture",
+            "deleted": false,
+            "name": "wan"
+          }
+        ],
+        "egresses": [
+          {
+            "interfaces": [],
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "name": "wan",
+            "port_preservation": "unknown",
+            "public": [],
+            "public_dynamic": false,
+            "transips": [
+              "100.64.12.9"
+            ]
+          }
+        ],
+        "resolution": "public_unknown",
+        "searched": {
+          "interface_filter": false,
+          "interfaces": [],
+          "outside_seen": [],
+          "transips": [
+            "100.64.12.9"
+          ],
+          "unclaimed": false,
+          "unclaimed_seen": []
+        }
+      },
       "explanations": [
         {
           "key": "only_in_vault",
@@ -3329,9 +3727,18 @@
           "params": {},
           "text_en": "No candidate session in this window. An exact answer needs the ISP router's NAT record (public port → FortiGate port), the requested destination IP/port or domain and the correct time/time zone; a wider tolerance may also help.",
           "text_tr": "Bu aralıkta aday oturum yok. Sonucu kesinleştirmek için: ISS modeminin NAT kaydı (genel port → FortiGate çıkış portu), talepteki hedef IP/port veya alan adı ve doğru saat/saat dilimi gerekir; toleransı genişletmek de yardımcı olabilir."
+        },
+        {
+          "key": "egress_public_unknown",
+          "params": {
+            "address": "198.51.100.23",
+            "egresses": "wan"
+          },
+          "text_en": "198.51.100.23 is not the public address of any exit; it was searched in the exits whose public address is not defined or may change: wan. If the address does not belong to such a line, the list may show the users of the wrong line; add the public address of the line it belongs to in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+          "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
         }
       ],
-      "generated_at": "2026-10-13T04:00:01.679550+00:00",
+      "generated_at": "2026-10-13T04:00:02.024611+00:00",
       "matches": [],
       "mode": "none",
       "request": {

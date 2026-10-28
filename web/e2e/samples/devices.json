@@ -251,7 +251,7 @@
   "devices_csv": {
     "headers": {
       "cache-control": "no-store",
-      "content-disposition": "attachment; filename=\"arcilogger-cihazlar-20261013-040013.csv\"",
+      "content-disposition": "attachment; filename=\"arcilogger-cihazlar-20261013-040014.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
     "sha256": "7bac193db5574d4b97a6aca95bb1a2fdf49c1886748b8ed6a7e47bf13087c449",
@@ -490,7 +490,7 @@
         "person_name": "Selin Kaya",
         "previous_person_id": null,
         "previous_person_name": null,
-        "valid_from": "2026-10-13T04:00:13.824575+00:00"
+        "valid_from": "2026-10-13T04:00:14.829317+00:00"
       }
     ],
     "rows": 2,
@@ -547,7 +547,7 @@
         "person_name": "Selin Kaya",
         "previous_person_id": null,
         "previous_person_name": null,
-        "valid_from": "2026-10-13T04:00:13.787310+00:00"
+        "valid_from": "2026-10-13T04:00:14.794246+00:00"
       }
     ],
     "rows": 2,
@@ -987,7 +987,7 @@
     "total": 4
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.069404+00:00",
+    "captured_at": "2026-10-13T04:01:17.511645+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -996,7 +996,7 @@
   },
   "person_created": {
     "active": true,
-    "created_at": "2026-10-13T04:00:12.560983Z",
+    "created_at": "2026-10-13T04:00:13.453624Z",
     "department": {
       "id": 1,
       "name": "Finans"
@@ -1008,7 +1008,7 @@
     "name": "Can Öztürk",
     "notes": null,
     "title": "Mali Analist",
-    "updated_at": "2026-10-13T04:00:12.561015Z",
+    "updated_at": "2026-10-13T04:00:13.453698Z",
     "usage_excluded": false
   },
   "person_detail": {
@@ -1041,7 +1041,7 @@
         "valid_to": null
       }
     ],
-    "created_at": "2026-10-13T04:00:00.288820Z",
+    "created_at": "2026-10-13T04:00:00.301383Z",
     "department": {
       "id": 2,
       "name": "Planlama"
@@ -1111,12 +1111,12 @@
     "name": "Selin Kaya",
     "notes": null,
     "title": "Planlama Uzmanı",
-    "updated_at": "2026-10-27T23:44:57.986651Z",
+    "updated_at": "2026-10-28T02:19:06.182035Z",
     "usage_excluded": false
   },
   "person_updated": {
     "active": true,
-    "created_at": "2026-10-13T04:00:12.560983Z",
+    "created_at": "2026-10-13T04:00:13.453624Z",
     "department": {
       "id": 1,
       "name": "Finans"
@@ -1128,14 +1128,14 @@
     "name": "Can Öztürk",
     "notes": null,
     "title": "Finans Müdürü",
-    "updated_at": "2026-10-27T23:44:58.124343Z",
+    "updated_at": "2026-10-28T02:19:06.331094Z",
     "usage_excluded": false
   },
   "persons": {
     "items": [
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:12.560983Z",
+        "created_at": "2026-10-13T04:00:13.453624Z",
         "department": {
           "id": 1,
           "name": "Finans"
@@ -1147,12 +1147,12 @@
         "name": "Can Öztürk",
         "notes": null,
         "title": "Finans Müdürü",
-        "updated_at": "2026-10-27T23:44:58.124343Z",
+        "updated_at": "2026-10-28T02:19:06.331094Z",
         "usage_excluded": false
       },
       {
         "active": false,
-        "created_at": "2026-10-13T04:00:12.669090Z",
+        "created_at": "2026-10-13T04:00:13.571937Z",
         "department": null,
         "device_count": 0,
         "email": null,
@@ -1161,12 +1161,12 @@
         "name": "Deniz Işık",
         "notes": null,
         "title": null,
-        "updated_at": "2026-10-13T04:00:12.669121Z",
+        "updated_at": "2026-10-13T04:00:13.571968Z",
         "usage_excluded": true
       },
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:00.288820Z",
+        "created_at": "2026-10-13T04:00:00.301383Z",
         "department": {
           "id": 2,
           "name": "Planlama"
@@ -1178,7 +1178,7 @@
         "name": "Selin Kaya",
         "notes": null,
         "title": "Planlama Uzmanı",
-        "updated_at": "2026-10-27T23:44:57.986651Z",
+        "updated_at": "2026-10-28T02:19:06.182035Z",
         "usage_excluded": false
       }
     ],
@@ -1189,18 +1189,18 @@
   "persons_csv": {
     "headers": {
       "cache-control": "no-store",
-      "content-disposition": "attachment; filename=\"arcilogger-kisiler-20261013-040013.csv\"",
+      "content-disposition": "attachment; filename=\"arcilogger-kisiler-20261013-040014.csv\"",
       "content-type": "text/csv; charset=utf-8"
     },
-    "sha256": "a770db6d96e4f030876a75d995a283ba9eef84e950079c3b013825fe5d5aa624",
+    "sha256": "be7405c8a12293cf88e18dbabe1de1f5a11e49384bd17cf9b94e64b9ee3f2c98",
     "size": 449,
-    "text": "﻿id;name;department;title;email;employee_no;active;notes;usage_excluded;device_count;created_at;updated_at\r\n2;Can Öztürk;Finans;Finans Müdürü;can.ozturk@example.com;1002;evet;;hayır;0;2026-10-13T07:00:12+03:00;2026-10-28T02:44:58+03:00\r\n3;Deniz Işık;;;;0950;hayır;;evet;0;2026-10-13T07:00:12+03:00;2026-10-13T07:00:12+03:00\r\n1;Selin Kaya;Planlama;Planlama Uzmanı;;1001;evet;;hayır;2;2026-10-13T07:00:00+03:00;2026-10-28T02:44:57+03:00\r\n"
+    "text": "﻿id;name;department;title;email;employee_no;active;notes;usage_excluded;device_count;created_at;updated_at\r\n2;Can Öztürk;Finans;Finans Müdürü;can.ozturk@example.com;1002;evet;;hayır;0;2026-10-13T07:00:13+03:00;2026-10-28T05:19:06+03:00\r\n3;Deniz Işık;;;;0950;hayır;;evet;0;2026-10-13T07:00:13+03:00;2026-10-13T07:00:13+03:00\r\n1;Selin Kaya;Planlama;Planlama Uzmanı;;1001;evet;;hayır;2;2026-10-13T07:00:00+03:00;2026-10-28T05:19:06+03:00\r\n"
   },
   "persons_search": {
     "items": [
       {
         "active": true,
-        "created_at": "2026-10-13T04:00:12.560983Z",
+        "created_at": "2026-10-13T04:00:13.453624Z",
         "department": {
           "id": 1,
           "name": "Finans"
@@ -1212,7 +1212,7 @@
         "name": "Can Öztürk",
         "notes": null,
         "title": "Finans Müdürü",
-        "updated_at": "2026-10-27T23:44:58.124343Z",
+        "updated_at": "2026-10-28T02:19:06.331094Z",
         "usage_excluded": false
       }
     ],

@@ -3110,7 +3110,10 @@ const SETTING_ERRORS: Record<string, [string, string]> = {
   ],
   setting_below_minimum: ['En az {low} olmalı.', 'Must be at least {low}.'],
   setting_out_of_range: ['{low} ile {high} arasında olmalı.', 'Must be between {low} and {high}.'],
-  setting_ip_invalid: ['Geçersiz IP adresi.', 'Invalid IP address.'],
+  setting_egress_public_private: [
+    "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin.",
+    "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit.",
+  ],
   setting_email_invalid: ['Geçersiz e-posta adresi.', 'Invalid e-mail address.'],
   setting_totp_required: [
     '{roles} rolleri için iki adımlı doğrulama (TOTP) zorunludur (şartname 13): listeye rol eklenebilir, bu roller çıkarılamaz.',
@@ -3137,6 +3140,9 @@ const SETTING_ERRORS: Record<string, [string, string]> = {
 }
 
 const HOLIDAY = /^(?:\d{4}-)?\d{2}-\d{2}$/;
+/** RFC 1918, RFC 6598 and the reserved ranges (`arcilogger_db.egress.NOT_PUBLIC`). */
+const NOT_PUBLIC =
+  /^(?:10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|(?:22[4-9]|2[3-5]\d)\.)/;
 const TYPE_NAMES: Record<string, [string, string]> = {
   boolean: ['true/false', 'true/false'],
   number: ['tam sayı', 'an integer'],
@@ -3170,8 +3176,14 @@ function settingProblem(
         ? { code: 'setting_below_minimum', facts: { low } }
         : { code: 'setting_out_of_range', facts: { low, high: setting.max } };
   }
-  if (setting.key === 'nat.public_ips' && (value as string[]).some((item) => !IPV4.test(item)))
-    return { code: 'setting_ip_invalid', facts: {} };
+  if (setting.key === 'nat.egresses') {
+    // Of the exit rules (`arcilogger_db.egress`), the one the specs send: a public address in
+    // private, shared or reserved space.
+    const exits = Object.values(value as Record<string, { public?: unknown }>);
+    const addresses = exits.flatMap((exit) => (Array.isArray(exit.public) ? exit.public : []));
+    if (addresses.some((address) => typeof address === 'string' && NOT_PUBLIC.test(address)))
+      return { code: 'setting_egress_public_private', facts: {} };
+  }
   if (
     setting.key === 'alerts.email_recipients' &&
     (value as string[]).some((item) => !EMAIL.test(item))

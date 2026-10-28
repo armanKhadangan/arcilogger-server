@@ -546,12 +546,12 @@
       "headers": {
         "cache-control": "no-store",
         "content-disposition": "attachment; filename=\"arama-20261009T0000-20261010T0000.xlsx\"",
-        "content-length": "7149",
+        "content-length": "7148",
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "repr-digest": "sha-256=:RBU2slyBXrFsNRKT4wSO3H1vMqw4FXtnkieOkTiUY58=:"
+        "repr-digest": "sha-256=:D9BJO3yAKS6GoRtoeJC6Sy1KFDbi6+j306c72Ev7QNE=:"
       },
-      "sha256": "441536b25c815eb16c351293e3048edc7d6f32ac38157b6792278e913894639f",
-      "size": 7149
+      "sha256": "0fd0493b7c80292e86a11b687890ba4b2d4a1436e2ebe8f7d3a73bd84bfb40d1",
+      "size": 7148
     }
   },
   "fields": {
@@ -1637,7 +1637,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.069404+00:00",
+    "captured_at": "2026-10-13T04:01:17.511645+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -1816,7 +1816,7 @@
       "items": []
     },
     "created": {
-      "created_at": "2026-10-13T04:00:30.090089Z",
+      "created_at": "2026-10-13T04:00:30.466965Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC trafiği",
@@ -1825,10 +1825,10 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:30.090125Z"
+      "updated_at": "2026-10-13T04:00:30.467002Z"
     },
     "created_preset": {
-      "created_at": "2026-10-13T04:00:30.151493Z",
+      "created_at": "2026-10-13T04:00:30.536037Z",
       "id": 2,
       "last_run_at": null,
       "name": "Son 24 saat engellenen web",
@@ -1836,13 +1836,13 @@
       "range": {
         "preset": "24h"
       },
-      "updated_at": "2026-10-13T04:00:30.151529Z"
+      "updated_at": "2026-10-13T04:00:30.536076Z"
     },
     "deleted_status": 204,
     "list": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:30.090089Z",
+          "created_at": "2026-10-13T04:00:30.466965Z",
           "id": 1,
           "last_run_at": null,
           "name": "Planlama PC trafiği",
@@ -1851,10 +1851,10 @@
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-13T04:00:30.090125Z"
+          "updated_at": "2026-10-13T04:00:30.467002Z"
         },
         {
-          "created_at": "2026-10-13T04:00:30.151493Z",
+          "created_at": "2026-10-13T04:00:30.536037Z",
           "id": 2,
           "last_run_at": null,
           "name": "Son 24 saat engellenen web",
@@ -1862,28 +1862,28 @@
           "range": {
             "preset": "24h"
           },
-          "updated_at": "2026-10-13T04:00:30.151529Z"
+          "updated_at": "2026-10-13T04:00:30.536076Z"
         }
       ]
     },
     "list_after_delete": {
       "items": [
         {
-          "created_at": "2026-10-13T04:00:30.090089Z",
+          "created_at": "2026-10-13T04:00:30.466965Z",
           "id": 1,
-          "last_run_at": "2026-10-13T04:00:30.416010Z",
+          "last_run_at": "2026-10-13T04:00:30.753151Z",
           "name": "Planlama PC — oturumlar",
           "q": "srcip:172.20.42.57 type:traffic",
           "range": {
             "from": "2026-10-08T21:00:00Z",
             "to": "2026-10-09T21:00:00Z"
           },
-          "updated_at": "2026-10-27T23:45:15.786909Z"
+          "updated_at": "2026-10-28T02:19:23.418694Z"
         }
       ]
     },
     "run": {
-      "expires_at": "2026-10-13T04:30:30.455255Z",
+      "expires_at": "2026-10-13T04:30:30.774051Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T10:30:00.000000+00:00:25",
@@ -2092,7 +2092,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 13,
+        "elapsed_ms": 12,
         "scanned_from": "2026-10-08T21:00:00Z",
         "scanned_to": "2026-10-09T21:00:00Z",
         "windows": 5
@@ -2100,7 +2100,7 @@
       "search_id": "ornek-arama-11"
     },
     "updated": {
-      "created_at": "2026-10-13T04:00:30.090089Z",
+      "created_at": "2026-10-13T04:00:30.466965Z",
       "id": 1,
       "last_run_at": null,
       "name": "Planlama PC — oturumlar",
@@ -2109,12 +2109,12 @@
         "from": "2026-10-08T21:00:00Z",
         "to": "2026-10-09T21:00:00Z"
       },
-      "updated_at": "2026-10-13T04:00:30.277873Z"
+      "updated_at": "2026-10-13T04:00:30.642631Z"
     }
   },
   "search": {
     "auditor": {
-      "expires_at": "2026-10-13T04:30:27.802004Z",
+      "expires_at": "2026-10-13T04:30:28.083389Z",
       "items": [
         {
           "key": "fg_web:2026-10-09T08:24:32.000000+00:00:1",
@@ -2209,7 +2209,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 18,
+        "elapsed_ms": 11,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2217,7 +2217,7 @@
       "search_id": "ornek-arama-06"
     },
     "empty": {
-      "expires_at": "2026-10-13T04:30:26.951110Z",
+      "expires_at": "2026-10-13T04:30:27.255012Z",
       "items": [],
       "next_cursor": null,
       "notices": [
@@ -2294,7 +2294,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 55,
+        "elapsed_ms": 56,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -2302,7 +2302,7 @@
       "search_id": "ornek-arama-04"
     },
     "first_page": {
-      "expires_at": "2026-10-13T04:30:26.743527Z",
+      "expires_at": "2026-10-13T04:30:27.036480Z",
       "items": [
         {
           "key": "messages:2026-10-09T11:00:00.000000+00:00:103107",
@@ -2547,7 +2547,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 11,
+        "elapsed_ms": 9,
         "scanned_from": "2026-10-09T08:25:26Z",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 4
@@ -2555,7 +2555,7 @@
       "search_id": "ornek-arama-03"
     },
     "next_page": {
-      "expires_at": "2026-10-13T04:30:26.783709Z",
+      "expires_at": "2026-10-13T04:30:27.078513Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:24:36.000000+00:00:103114",
@@ -2800,7 +2800,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 4,
+        "elapsed_ms": 5,
         "scanned_from": "2026-10-09T08:23:46Z",
         "scanned_to": "2026-10-09T08:25:26Z",
         "windows": 1
@@ -2808,7 +2808,7 @@
       "search_id": "ornek-arama-03"
     },
     "partial": {
-      "expires_at": "2026-10-13T04:30:27.678147Z",
+      "expires_at": "2026-10-13T04:30:27.971030Z",
       "items": [
         {
           "key": "fg_traffic:2026-10-09T08:24:36.000000+00:00:5",
@@ -3046,7 +3046,7 @@
       "search_id": "ornek-arama-05"
     },
     "text": {
-      "expires_at": "2026-10-13T04:30:26.635862Z",
+      "expires_at": "2026-10-13T04:30:26.930953Z",
       "items": [
         {
           "key": "messages:2026-10-09T08:14:56.003000+00:00:103108",
@@ -3164,7 +3164,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 14,
+        "elapsed_ms": 22,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3172,7 +3172,7 @@
       "search_id": "ornek-arama-02"
     },
     "typed": {
-      "expires_at": "2026-10-13T04:30:26.522759Z",
+      "expires_at": "2026-10-13T04:30:26.816011Z",
       "items": [
         {
           "key": "mt_arp:2026-10-09T11:00:00.000000+00:00:2",
@@ -3554,7 +3554,7 @@
       },
       "scan": {
         "complete": true,
-        "elapsed_ms": 55,
+        "elapsed_ms": 46,
         "scanned_from": "2026-10-09T00:00:00+03:00",
         "scanned_to": "2026-10-10T00:00:00+03:00",
         "windows": 5
@@ -3567,7 +3567,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 16,
+      "elapsed_ms": 20,
       "facets": {
         "action": {
           "other": 0,
@@ -3738,7 +3738,7 @@
       "complete": true,
       "covered_from": "2026-10-09T11:00:00+03:00",
       "covered_to": "2026-10-09T12:00:00+03:00",
-      "elapsed_ms": 30,
+      "elapsed_ms": 32,
       "facets": {
         "action": {
           "other": 0,
@@ -4066,7 +4066,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:30:00+03:00",
       "covered_to": "2026-10-09T23:30:00+03:00",
-      "elapsed_ms": 27,
+      "elapsed_ms": 30,
       "facets": {
         "action": {
           "other": 0,
@@ -4424,7 +4424,7 @@
       "complete": true,
       "covered_from": "2026-10-09T00:00:00+03:00",
       "covered_to": "2026-10-10T00:00:00+03:00",
-      "elapsed_ms": 6,
+      "elapsed_ms": 10,
       "facets": {
         "action": {
           "other": 0,

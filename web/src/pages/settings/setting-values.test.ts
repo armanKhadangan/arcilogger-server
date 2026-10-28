@@ -51,17 +51,21 @@ describe('database settings as drafts and back (contract 2.13)', () => {
   });
 
   it('switches, texts and lists (one value per line, commas too)', () => {
-    const flag = setting({ key: 'lookup.port_hint', type: 'boolean', value: false });
+    const flag = setting({ key: 'lookup.report_timestamp', type: 'boolean', value: false });
     expect(toDraft(flag)).toBe(false);
     expect(fromDraft(flag, true)).toEqual({ value: true });
     const text = setting({ key: 'alerts.web_base_url', type: 'string', value: '' });
     expect(fromDraft(text, '  https://127.0.0.1:8443 ')).toEqual({
       value: 'https://127.0.0.1:8443',
     });
-    const ips = setting({ key: 'nat.public_ips', type: 'string_list', value: ['198.51.100.7'] });
-    expect(toDraft(ips)).toBe('198.51.100.7');
-    expect(fromDraft(ips, '198.51.100.7\n203.0.113.9, 192.0.2.1\n\n')).toEqual({
-      value: ['198.51.100.7', '203.0.113.9', '192.0.2.1'],
+    const domains = setting({
+      key: 'usage.background_domains',
+      type: 'string_list',
+      value: ['update.example.com'],
+    });
+    expect(toDraft(domains)).toBe('update.example.com');
+    expect(fromDraft(domains, 'update.example.com\nexample.org, cdn.example.net\n\n')).toEqual({
+      value: ['update.example.com', 'example.org', 'cdn.example.net'],
     });
     const mails = setting({ key: 'alerts.email_recipients', type: 'string_list', value: [] });
     expect(fromDraft(mails, 'bt@ornek.example')).toEqual({ value: ['bt@ornek.example'] });
