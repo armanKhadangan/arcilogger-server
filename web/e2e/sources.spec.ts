@@ -1,5 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import type { LeaseEvidence } from '../src/pages/sources/lease-evidence-model';
+import {
+  leaseEvidenceAbsent,
+  leaseEvidenceNone,
+  leaseEvidenceOk,
+  leaseEvidenceRefused,
+} from '../src/test/wave3-mocks';
+
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockApi } from './mock-api';
 import { mockSources } from './mock-sources';
@@ -14,9 +22,13 @@ import { RAW, SAMPLE_TODAY, SOURCES } from './samples';
  * real API (`samples/sources.json`) as they are.
  */
 
-async function open(page: Page, options: Parameters<typeof mockApi>[1] = {}): Promise<MockApi> {
+async function open(
+  page: Page,
+  options: Parameters<typeof mockApi>[1] = {},
+  leaseEvidence?: LeaseEvidence | null,
+): Promise<MockApi> {
   const api = await mockApi(page, { signedInAs: 'tolga', ...options });
-  await mockSources(page, api);
+  await mockSources(page, api, leaseEvidence === undefined ? {} : { leaseEvidence });
   return api;
 }
 
@@ -402,6 +414,105 @@ test.describe('Kaynaklar', () => {
     ).toHaveCount(0);
   });
 });
+
+/**
+ * "Kira kanıtı" (Wave 3 contract 2.13, D30): the card of `GET /sources` `lease_evidence` in its
+ * three states, `refused` winning over `none`. HAND MOCKS of the counts (`src/test/wave3-mocks.ts`)
+ * until the server side captures them.
+ */
+test.describe('Kira kanıtı', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('ok: the usable records and current leases per table', async ({ page }) => {
+    await open(page, {}, leaseEvidenceOk());
+    await page.goto('/sources');
+    const card = page.getByTestId('lease-evidence');
+    await expect(card.getByRole('heading', { name: 'Kira kanıtı' })).toBeVisible();
+    await expect(card).toContainText('Kayıtlar geliyor');
+    await expect(card.locator('[data-table="fg_dhcp"]')).toContainText(
+      'Son 24 saatte 412 kullanılabilir kayıt',
+    );
+    await expect(card.locator('[data-table="mt_dhcp"]')).toContainText('310 güncel kira');
+    await expect(card.locator('[data-none]')).toHaveCount(0);
+  });
+
+  test('none: one line per table, the hedged MikroTik DHCP line', async ({ page }) => {
+    await open(page, {}, leaseEvidenceNone());
+    await page.goto('/sources');
+    const card = page.getByTestId('lease-evidence');
+    await expect(card).toContainText('Kayıt gelmiyor');
+    await expect(card.locator('[data-none="fg_dhcp"]')).toContainText(
+      'Kullanılabilir FortiGate DHCP kaydı gelmiyor (daha önce geliyordu)',
+    );
+    await expect(card.locator('[data-none="mt_dhcp"]')).toContainText(
+      'Son 24 saatte yeni MikroTik DHCP kaydı gelmedi;',
+    );
+  });
+
+  test('none without tables: the absent line', async ({ page }) => {
+    await open(page, {}, leaseEvidenceAbsent());
+    await page.goto('/sources');
+    await expect(page.getByTestId('lease-evidence').locator('[data-none="absent"]')).toContainText(
+      'Kullanılabilir DHCP ya da ARP-LOG kaydı gelmiyor: 5651 sorguları iç IP adresinde durur',
+    );
+  });
+
+  test('refused wins over none; the alert and the settings are one click away', async ({
+    page,
+  }) => {
+    await open(page, {}, leaseEvidenceRefused());
+    await page.goto('/sources');
+    const card = page.getByTestId('lease-evidence');
+    await expect(card.getByTestId('lease-evidence-refused')).toContainText(
+      'FortiGate DHCP kayıtları geliyor ama son 24 saatte 214 tanesi kullanılmadı; nedenler uyarıda.',
+    );
+    await expect(card.locator('[data-none]')).toHaveCount(0);
+    await expect(card.getByTestId('lease-evidence-excluded')).toHaveText(
+      'Hariç tutulan arayüzler: 12 kayıt (kira kanıtı sayılmaz)',
+    );
+    await expect(card.getByTestId('lease-evidence-unverified')).toContainText(
+      'FortiGate DHCP kayıt biçimi sahada doğrulanmadı (DEVICE-SETUP.md bölüm 2.4).',
+    );
+    await card.getByRole('link', { name: 'Uyarıyı aç (Güvenlik)' }).click();
+    await expect(page).toHaveURL(/\/security\?rule=R20-lease$/);
+  });
+
+  test('a server without the counts shows no card; the supported set-ups open', async ({
+    page,
+  }) => {
+    await open(page, {}, null);
+    await page.goto('/sources');
+    await expect(table(page)).toBeVisible();
+    await expect(page.getByTestId('lease-evidence')).toHaveCount(0);
+    const note = page.getByTestId('supported-topologies');
+    await note.getByRole('button', { name: 'Desteklenen ağ yapıları' }).click();
+    await expect(note.getByRole('listitem')).toHaveCount(7);
+    await expect(note).toContainText('Ayrıntılar: Kurulum kılavuzu bölüm 0.1');
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  for (const [state, evidence] of [
+    ['refused', leaseEvidenceRefused()],
+    ['none', leaseEvidenceNone()],
+  ] as const) {
+    test(`Kira kanıtı accessibility — ${state}, ${theme}`, async ({ page }) => {
+      await usePreferences(page, { theme });
+      await useSampleClock(page, SAMPLE_TODAY);
+      await open(page, {}, evidence);
+      await page.goto('/sources');
+      await expect(page.getByTestId('lease-evidence')).toBeVisible();
+      await page
+        .getByTestId('supported-topologies')
+        .getByRole('button', { name: 'Desteklenen ağ yapıları' })
+        .click();
+      await expect(page.getByTestId('supported-topologies').getByRole('listitem')).toHaveCount(7);
+      await expectNoA11yViolations(page);
+    });
+  }
+}
 
 for (const theme of ['light', 'dark'] as Theme[]) {
   test(`Kaynaklar accessibility — ${theme}`, async ({ page }) => {

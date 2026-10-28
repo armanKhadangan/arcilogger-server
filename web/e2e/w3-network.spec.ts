@@ -56,7 +56,7 @@ test.describe('İnternet çıkışları (NAT)', () => {
       .getByRole('button', { name: 'Çıkış olarak ekle: 203.0.113.200' })
       .click();
     const hat1 = exit(page, 'hat-1');
-    await expect(hat1.getByLabel('Ad')).toBeFocused();
+    await expect(hat1.getByLabel('Ad', { exact: true })).toBeFocused();
     await expect(hat1.getByRole('combobox', { name: 'NAT türü' })).toHaveText(
       "Doğrudan (genel IP FortiGate'te)",
     );
@@ -149,8 +149,9 @@ test.describe('İnternet çıkışları (NAT)', () => {
   }) => {
     const { api, network } = await open(page);
     await page.getByRole('button', { name: 'Çıkış ekle' }).click();
-    const row = page.getByRole('group', { name: 'Çıkış adsız çıkış' });
-    await row.getByLabel('Ad').fill('hat-1');
+    // A row keeps its test id while its name (and so its group's name) is typed.
+    const row = page.getByTestId('egress-new-1');
+    await row.getByLabel('Ad', { exact: true }).fill('hat-1');
     await row.getByLabel('Genel adresler').fill('100.64.12.9');
     const refusal =
       "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin.";
@@ -162,8 +163,8 @@ test.describe('İnternet çıkışları (NAT)', () => {
     await exit(page, 'hat-1').getByLabel('Genel adresler').fill('203.0.113.200');
     await expect(exit(page, 'hat-1').getByText(refusal)).toHaveCount(0);
     await page.getByRole('button', { name: 'Çıkış ekle' }).click();
-    const second = page.getByRole('group', { name: 'Çıkış adsız çıkış' });
-    await second.getByLabel('Ad').fill('hat-2');
+    const second = page.getByTestId('egress-new-2');
+    await second.getByLabel('Ad', { exact: true }).fill('hat-2');
     await second.getByRole('combobox', { name: 'NAT türü' }).click();
     await page.getByRole('option', { name: "Servis sağlayıcı NAT'ı (çift NAT)" }).click();
     await second.getByLabel('NAT adresleri (transip)').fill('198.51.100.10');
@@ -240,7 +241,10 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       .getByRole('button', { name: 'Çıkış olarak ekle: 100.64.13.9' })
       .click();
     await page.getByRole('button', { name: 'Çıkış ekle' }).click();
-    await page.getByRole('group', { name: 'Çıkış adsız çıkış' }).getByLabel('Ad').fill('Hat 3');
+    await page
+      .getByRole('group', { name: 'Çıkış adsız çıkış' })
+      .getByLabel('Ad', { exact: true })
+      .fill('Hat 3');
     await expect(page.getByTestId('egress-editor')).toContainText(
       'Çıkış adı küçük harf, rakam ve tire içermeli',
     );

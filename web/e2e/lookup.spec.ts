@@ -1,8 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { useSampleClock } from './fixtures';
-import { mockApi } from './mock-api';
-import { LOOKUPS, RAW, SAMPLE_TODAY } from './samples';
+import type { LookupOut } from '../src/lib/api-types';
+import { wave3Lookups } from '../src/test/wave3-mocks';
+
+import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
+import { mockApi, type MockApi } from './mock-api';
+import { copy, LOOKUPS, RAW, SAMPLE_TODAY } from './samples';
 
 /** Explanation texts exactly as the API sent them (captured samples). */
 function explanation(lookup: keyof typeof LOOKUPS, key: string): string {
@@ -410,3 +413,132 @@ test.describe('5651 Sorgu', () => {
     await expect(page.getByRole('heading', { name: 'Sorgu #8' })).toBeVisible();
   });
 });
+
+/**
+ * The result view of ADR-0016 (Wave 3 contract 2.13): FortiGate DHCP leases, srcmac steps and
+ * the internet exits. HAND MOCKS built from the captured lookups (`src/test/wave3-mocks.ts`)
+ * until the server side captures them; each is stored in the mocked API and opened by its id.
+ */
+const W3 = wave3Lookups(LOOKUPS);
+
+async function openStored(page: Page, lookup: LookupOut): Promise<MockApi> {
+  const api = await mockApi(page, { signedInAs: 'tolga' });
+  api.records.lookups.set(lookup.id, copy(lookup));
+  await page.goto(`/lookup/${String(lookup.id)}`);
+  await expect(page.getByRole('heading', { name: `Sorgu #${String(lookup.id)}` })).toBeVisible();
+  return api;
+}
+
+/** The lease step (or the srcmac step in its place) of the first chain on the page. */
+function leaseStep(page: Page) {
+  return page
+    .getByRole('listitem')
+    .filter({ has: page.getByText(/^MAC \((DHCP\/ARP|srcmac)\)$/) })
+    .first();
+}
+
+test.describe('5651 Sorgu — FortiGate DHCP, srcmac and internet exits', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('FortiGate-only: the lease time and last DHCP evidence; a low chain says why', async ({
+    page,
+  }) => {
+    await openStored(page, W3.fortigate);
+    await expect(page.getByTestId('lookup-exit')).toHaveText(
+      'Genel IP — hat-1 (Ana hat), Doğrudan',
+    );
+    const step = leaseStep(page);
+    await expect(step.getByTestId('lease-fortigate')).toHaveText(
+      'kira süresi (FortiGate kaydı): 86400 sn · son DHCP kanıtı: 09.10.2026 09:00:12',
+    );
+    await expect(step.getByTestId('lease-source')).toHaveText('Kaynak: DHCP kaydı (FortiGate)');
+    await expect(page.getByTestId('match-exit')).toHaveText(
+      'Çıkış: hat-1 (Ana hat) · dstintf wan1',
+    );
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.renewal);
+    const low = leaseStep(page);
+    await expect(low.getByText('Düşük güven', { exact: true })).toBeVisible();
+    await expect(low.locator('[data-explanation="lease_renewal_not_seen"]')).toContainText(
+      'Bu kiranın istenen andan önceki son DHCP kaydı 09.10.2026 09:00:12 anında',
+    );
+  });
+
+  test('srcmac: partial evidence in place of the lease; a conflict shows both chains', async ({
+    page,
+  }) => {
+    await openStored(page, W3.srcmacOnly);
+    const step = leaseStep(page);
+    await expect(step.getByText('Kısmi kanıt: srcmac')).toBeVisible();
+    await expect(step).toContainText('FortiGate oturum kaydının srcmac alanı (vlan42 arayüzü)');
+    await expect(page.getByText('Bu anda geçerli kira kaydı yok')).toHaveCount(0);
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.srcmacConflict);
+    const conflict = page.getByTestId('ip-conflict');
+    await expect(conflict.getByText('srcmac farklı: 2 olası cihaz')).toBeVisible();
+    await expect(
+      conflict.getByRole('region', { name: 'Olasılık 2 (srcmac, kısmi kanıt)' }),
+    ).toContainText('00:00:5e:00:53:31');
+  });
+
+  test('hat-2: the exit line, every match on hat-2, the unconfigured sender', async ({ page }) => {
+    await openStored(page, W3.hat2);
+    await expect(page.getByTestId('lookup-exit')).toHaveText(
+      "Genel IP — hat-2 (Yedek hat), Servis sağlayıcı NAT'ı",
+    );
+    const matches = page.getByTestId('match');
+    await expect(matches).toHaveCount(3);
+    await expect(matches.getByTestId('match-exit')).toHaveText(
+      Array(3).fill('Çıkış: hat-2 (Yedek hat) · dstintf wan2') as string[],
+    );
+    await expect(matches.nth(2).getByTestId('untrusted-sender')).toHaveText(
+      'Tanımsız gönderici: unknown-198.51.100.7',
+    );
+    await expect(matches.nth(0).getByTestId('untrusted-sender')).toHaveCount(0);
+  });
+
+  test('nobody listed: no exit, the DMZ NAT address; a match without a chain', async ({ page }) => {
+    await openStored(page, W3.noEgress);
+    await expect(page.getByTestId('lookup-exit')).toHaveText('Çıkış yok');
+    await expect(
+      page.getByText(/^192\.0\.2\.44 hiçbir internet çıkışına tanımlı değil/),
+    ).toBeVisible();
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.internalNat);
+    await expect(page.getByTestId('lookup-exit')).toHaveText(
+      "NAT adresi — dmz (DMZ'ye NAT), İnternet çıkışı değil",
+    );
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.chainMissing);
+    await expect(
+      page.getByText('Zincir kurulamadı: o anda bu iç IP için kira kaydı yok'),
+    ).toBeVisible();
+    await expect(page.getByTestId('unconverted-dhcp')).toContainText(
+      'kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez',
+    );
+  });
+
+  test('a lookup stored before ADR-0016 shows no exit rows', async ({ page }) => {
+    await openStored(page, W3.stored);
+    await expect(page.getByTestId('chain-summary')).toContainText('00:00:5e:00:53:57');
+    await expect(page.getByTestId('lookup-exit')).toHaveCount(0);
+    await expect(page.getByTestId('match-exit')).toHaveCount(0);
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  for (const name of ['hat2', 'srcmacConflict', 'renewal', 'chainMissing'] as const) {
+    test(`5651 Sorgu ADR-0016 result accessibility — ${name}, ${theme}`, async ({ page }) => {
+      await usePreferences(page, { theme });
+      await useSampleClock(page, SAMPLE_TODAY);
+      await openStored(page, W3[name]);
+      await expectNoA11yViolations(page);
+    });
+  }
+}
