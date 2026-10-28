@@ -275,6 +275,32 @@ def test_candidate_and_exact_mode_give_the_same_chain(
     assert match.chain == chain
 
 
+def test_a_srcmac_that_contradicts_the_lease(db_session: Session, evidence: Evidence) -> None:
+    """3.4 "srcmac contradicts the lease" (D10): ACK(A), then a session of the address on a
+    listed interface whose srcmac is B: A's chain at ``low`` with ``srcmac_mismatch``, and B's
+    srcmac chain as the alternative, also ``low``."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    row = evidence.traffic(AT, PC, 51001, transip=WAN, srcintf="vlan42", dstintf="wan1",
+                           srcmac=OTHER)  # fmt: skip
+    build(db_session, DAY, DAY)
+    set_setting(db_session, "lookup.srcmac_interfaces", ["vlan42"], updated_by="tolga")
+    db_session.commit()
+    (match,) = lookup(db_session, public_ip="198.51.100.20").matches
+    assert match.traffic.srcmac == OTHER
+    chain = match.chain
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.mac, chain.lease.source_table) == (PC_MAC, "fg_dhcp")
+    assert (chain.mac_source, chain.confidence) == ("lease", "low")
+    assert note(chain, "srcmac_mismatch") == {"srcmac": OTHER, "mac": PC_MAC}
+    (alternative,) = chain.alternatives
+    assert alternative.device is not None
+    assert (alternative.lease, alternative.device.mac) == (None, OTHER)
+    assert (alternative.mac_source, alternative.confidence) == ("srcmac", "low")
+    assert [ref.row_id for ref in alternative.device.evidence] == [row]
+    assert {"srcmac_mismatch", "srcmac_only"} <= set(chain_keys(alternative))
+
+
 def test_the_format_note_names_who_verified_it_and_when(
     db_session: Session, example: list[int]
 ) -> None:
