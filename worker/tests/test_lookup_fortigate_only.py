@@ -458,6 +458,37 @@ def test_a_release_mapped_after_the_build_ends_the_lease(
     )
 
 
+def test_a_release_and_a_renewal_in_one_second_keep_the_new_lease(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A RELEASE and an ACK of the pair in the same second: the build ends the old lease at that
+    second and opens a new one (release before assignment). The RELEASE row is written last (a
+    higher id), yet the new lease's own record at a later moment is the ACK, as in the build's
+    order: the chain stays ``high``, never a false "nobody"."""
+    renewed = tr(DAY, 12)
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(renewed, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(renewed, PC, PC_MAC, logid="0100026002", dhcp_msg="Release", lease=None)
+    build(db_session, DAY, DAY)
+    stored = db_session.scalars(select(Lease).order_by(Lease.start)).all()
+    assert [(lease.start, lease.end, lease.end_reason) for lease in stored] == [
+        (T0, renewed, "dhcp"),
+        (renewed, renewed + timedelta(days=1), "timeout"),
+    ]
+
+    for moment in (renewed, tr(DAY, 12, 0, 1), tr(DAY, 13)):
+        chain = internal(db_session, PC, moment).attribution
+        assert chain is not None, moment
+        assert chain.lease is not None
+        assert (chain.lease.mac, chain.lease.start, chain.lease.confidence) == (
+            PC_MAC,
+            renewed,
+            "high",
+        )
+        assert chain.lease.last_dhcp_evidence == renewed
+        assert chain.confidence == "high"
+
+
 # -- unconfigured senders (D24) -------------------------------------------------------------------
 
 

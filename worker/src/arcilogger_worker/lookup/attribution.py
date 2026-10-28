@@ -57,7 +57,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Final
 
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, case, or_, select
 from sqlalchemy.orm import Session
 
 from arcilogger_db.assignments import Slot, covering, load_history
@@ -355,13 +355,25 @@ class Attributor:
                 FgDhcp.time <= at,
                 self._kept,
             )
-            .order_by(FgDhcp.time.desc(), FgDhcp.id.desc())
+            .order_by(FgDhcp.time.desc(), self._assigned_first, FgDhcp.id.desc())
             .limit(1)
         ).first()
         if row is None:
             return None
         action = self.settings.fortigate_logids.get(str(row.logid))
         return _Record(row.time, action, self._usable_lease(row.lease))
+
+    @property
+    def _assigned_first(self) -> ColumnElement[int]:
+        """At equal times an assignment is newer than a release, as in the timeline's feed
+        order (``deassigned`` before ``assigned``): a RELEASE that closed the previous interval
+        in the second this lease began is not this lease's record."""
+        released = sorted(
+            logid
+            for logid, meaning in self.settings.fortigate_logids.items()
+            if meaning == "deassigned"
+        )
+        return case((FgDhcp.logid.in_(released), 1), else_=0)
 
     def _ref_record(self, lease: StoredLease, at: datetime) -> _Record | None:
         last = last_dhcp_evidence(lease.evidence, lease.end, lease.end_reason, at)
