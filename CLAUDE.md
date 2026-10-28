@@ -11,13 +11,15 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
   your brief: read it completely before anything else. It names the branch to start from, the
   design contract sections to read, the files you own, the files you must not touch, the
   done-when list and the commands to run.
-- **Design contracts** live in `design/` (Wave 3: `design/wave-3-contract.md`). They are binding:
+- **Design contracts** live in `design/` (Wave 3: `design/wave-3-contract.md`; Wave 4:
+  `design/wave-4-contract.md`). They are binding:
   names, setting keys, defaults, error codes, JSON shapes, texts and tests are fixed there. Read
   §0, §4.1, your package in §4.3, every §2 and §3 section your package touches, and the
   "Implementation notes" sections.
-- **Branches:** start from the wave's integration branch (Wave 3: `wave-3`), never from `main`:
-  `git fetch origin wave-3 && git checkout -B <your branch> origin/wave-3`. Open your pull request
-  **into that integration branch**. Never push to `wave-3` or `main`; the manager reviews and merges.
+- **Branches:** start from the wave's integration branch (Wave 3: `wave-3`; Wave 4: `wave-4`; your
+  issue names it), never from `main`: `git fetch origin wave-N && git checkout -B <your branch>
+  origin/wave-N`. Open your pull request **into that integration branch**. Never push to `wave-*`
+  or `main`; the manager reviews and merges.
 - **One owner per file.** Edit only the files your issue gives you (and the exceptions it lists).
   If you need a change in a file another package owns, write it in your pull request under
   "Files outside my ownership" and on the issue; do not edit it.
@@ -73,6 +75,8 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
   with `--check`. Never edit generated files by hand.
 - Web: `cd web && npm run check`, and the affected Playwright specs
   (`cd web && CI=1 npx playwright test <specs> --workers=2`).
+- CI runs on pull requests (and on `wave-*` and `main`), not on pushes to your work branch: open
+  the pull request as a draft early if you want CI before you are done.
 - Never skip, xfail, quarantine or weaken a test to get green. CI must be green on the pull request
   before review.
 

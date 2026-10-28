@@ -7,7 +7,9 @@ from a few **whitelisted facts** of ``details``, each checked for its shape befo
 its IP address, ``ap-172.20.10.23``, ``unknown-172.20.19.9`` —, a day, a number, a drive letter,
 a job name, a licence state and the names of licence modules, the IP address of a new sender, of
 a message refused for its transport (``wrong-transport``) or of an IP conflict, the section and
-the field names of a configuration change and the outcome code of the browser administration).
+the field names of a configuration change and the outcome code of the browser administration;
+for the lease evidence and internet exit alerts of ADR-0016 the cause's fixed line, a count, a
+VLAN number, an evidence table and a clock offset).
 Anything else an alert carries — raw log lines, error texts, person or device owner names, MAC
 addresses, paths, configuration values, user names, the licensee — is never put into an e-mail,
 whatever it contains.
@@ -207,6 +209,25 @@ RULES: Final[Mapping[str, RuleText]] = {
         "geçmişi.",
         "If no known administrator made this change, look into it at once: Settings → Change "
         "history.",
+    ),
+    # Lease evidence (ADR-0016): the check _lease_evidence of alerts.system; the cause is in
+    # details.cause (LEASE_CAUSES), its own title and what-to-do in the details.
+    "R20-lease": RuleText(
+        "Kira kanıtı sorunu",
+        "Lease evidence problem",
+        "Uyarıdaki nedeni okuyun ve Kaynaklar → Kira kanıtı kutusunu açın (DEVICE-SETUP.md bölüm "
+        "2.4).",
+        "Read the cause in the alert and open Sources → Lease evidence (DEVICE-SETUP.md section "
+        "2.4).",
+    ),
+    # Internet exits (ADR-0016): the check _nat_exits of alerts.system (NAT_CAUSES).
+    "R20-nat": RuleText(
+        "İnternet çıkışı tanımı sorunu",
+        "Internet exit definition problem",
+        "Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları "
+        "(NAT) bölümünü denetleyin.",
+        "Check Settings → Application settings → 5651 lookup and lease timeline → Internet exits "
+        "(NAT).",
     ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
@@ -534,6 +555,47 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "2. Send a test e-mail: arcilogger-worker alerts test-email --to <address>.\n"
         "3. With strict outbound mode, check the firewall rule (Set-ArciFirewall.ps1).\n"
         "4. The next e-mail that reaches the recipients it names closes the alert by itself.",
+    ),
+    "R20-lease": (
+        "1. Ayrıntılardaki nedeni okuyun; o nedene özgü ne yapılacağı orada yazılıdır.\n"
+        "2. Kaynaklar → Kira kanıtı kutusunu açın: hangi kira kanıtının geldiği, kullanıldığı ya "
+        "da kullanılmadığı orada görünür.\n"
+        "3. Nedene göre DEVICE-SETUP.md bölüm 2 (cihaz saati, NTP) ve bölüm 2.4-2.6'yı izleyin. "
+        "Kiralar Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları "
+        "yeniden oluştur bölümünde, ayrıntıların adını verdiği günden başlayarak yeniden "
+        "oluşturulur (bir istekte en çok 31 gün).\n"
+        "4. Ham loglar etkilenmez ve mühürlenir. Uyarı, sorun bittikten 24 saat sonra "
+        "kendiliğinden kapanır: kesilen kanıt kullanılabilir bir kayıt gelince, kullanılmayan "
+        "kayıtlar son 24 saatte kullanılmayan kayıt kalmayınca, saat uyarısı sonraki doğru "
+        "ölçümde, doğrulanmamış biçim uyarısı ayar açılınca.",
+        "1. Read the cause in the details; what to do for that cause is written there.\n"
+        "2. Open Sources → Lease evidence: it shows which lease evidence arrives, is used or is "
+        "not used.\n"
+        "3. Follow DEVICE-SETUP.md section 2 (device clock, NTP) and sections 2.4-2.6 for the "
+        "cause. Leases are rebuilt in Settings → Application settings → 5651 lookup and lease "
+        "timeline → Rebuild the leases, from the day the details name (at most 31 days per "
+        "request).\n"
+        "4. Raw logs are not affected and are sealed. The alert closes by itself 24 hours after "
+        "the problem ends: stopped evidence once a usable record arrives, unused records once no "
+        "record of the last 24 hours is refused, the clock alert at the next good measurement, "
+        "the unverified format once the setting is on.",
+    ),
+    "R20-nat": (
+        "1. Ayrıntılardaki nedeni okuyun; o nedene özgü ne yapılacağı orada yazılıdır.\n"
+        "2. Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet "
+        "çıkışları (NAT) bölümünü ve altındaki 'Kayıtlarda görülen NAT adresleri' tablosunu "
+        "açın.\n"
+        "3. Hatları DEVICE-SETUP.md bölüm 2.6'ya göre tanımlayın; eski değerler denetim "
+        "kaydındadır (settings.change).\n"
+        "4. Ham loglar etkilenmez ve mühürlenir. Uyarı, çıkışlar kaydedilince ya da sorun "
+        "bittikten 24 saat sonra kendiliğinden kapanır.",
+        "1. Read the cause in the details; what to do for that cause is written there.\n"
+        "2. Open Settings → Application settings → 5651 lookup and lease timeline → Internet "
+        "exits (NAT) and the table 'NAT addresses seen in the logs' below it.\n"
+        "3. Define the lines as DEVICE-SETUP.md section 2.6 describes; old values are in the "
+        "audit log (settings.change).\n"
+        "4. Raw logs are not affected and are sealed. The alert closes by itself once the exits "
+        "are saved or 24 hours after the problem ends.",
     ),
     "new-log-source": (
         "1. Göndericinin adresini ayrıntılarda görün ve hangi cihaz olduğunu belirleyin.\n"
@@ -994,6 +1056,510 @@ def _conflict(d: Mapping[str, Any]) -> Facts | None:
     return (f"Çakışan IP adresi: {address}.", f"Conflicting IP address: {address}.")
 
 
+# -- lease evidence and internet exits (ADR-0016: R20-lease, R20-nat) ----------------------------
+
+#: The fixed one-line action of each ``R20-lease`` cause (``details.cause``): the e-mail line and
+#: the Security page summary, as :data:`CONFIG_CAUSES` is for ``R20-seal-config``. No
+#: placeholders: an e-mail carries only these, the counts and VLAN numbers.
+LEASE_CAUSES: Final[Mapping[str, tuple[str, str]]] = {
+    "none": (
+        "Kira kanıtı kesildi: bu kaynağın olay kayıtlarını syslog'a gönderdiğini denetleyin.",
+        "Lease evidence stopped: check that this source sends its event records to syslog.",
+    ),
+    "absent": (
+        "Kira kanıtı yok: 5651 sorguları iç IP adresinde biter (Kurulum kılavuzu bölüm 0.1).",
+        "No lease evidence: 5651 lookups end at the internal IP (installation guide section 0.1).",
+    ),
+    "fortigate-refused": (
+        "FortiGate DHCP kayıtları kullanılmıyor: uyarıdaki nedene göre ayarı düzeltip kiraları "
+        "yeniden oluşturun.",
+        "FortiGate DHCP records are not used: fix what the alert names and rebuild the leases.",
+    ),
+    "fortigate-unconverted": (
+        "FortiGate DHCP kayıtları kira kanıtına çevrilemedi: kayıt biçimini sahada doğrulayın.",
+        "FortiGate DHCP records could not become lease evidence: verify the record format on site.",
+    ),
+    "fortigate-renewals-missing": (
+        "FortiGate DHCP yenilemeleri görünmüyor: önce kullanılmayan kayıtlara, sonra yenileme "
+        "denetimine bakın.",
+        "FortiGate DHCP renewals do not appear: check refused records first, then do the renewal "
+        "check.",
+    ),
+    "fortigate-renewals-not-logged": (
+        "FortiGate DHCP yenilemeleri bu kurulumda kaydedilmiyor: zincirler kira bitiminde biter "
+        "(Kurulum kılavuzu bölüm 16).",
+        "FortiGate DHCP renewals are not logged at this installation: chains end when the lease "
+        "ends (installation guide section 16).",
+    ),
+    "fortigate-decline": (
+        "DHCP havuzunda statik adresli bir cihaz olabilir: cihazı havuzun dışına taşıyın ya da "
+        "adresini ayırın.",
+        "A static device may sit in the DHCP pool: move it out of the pool or reserve its address.",
+    ),
+    "dhcp-sources-overlap": (
+        "Aynı ağda iki DHCP kaynağı: fazla DHCP sunucusunu kapatın ya da ağları ayırın.",
+        "Two DHCP sources on one network: switch off the extra DHCP server or separate the "
+        "networks.",
+    ),
+    "fortigate-lease-unlimited": (
+        "FortiGate süresiz kira veriyor: DHCP sunucusunda sınırlı bir lease-time ayarlayın.",
+        "The FortiGate gives unlimited leases: set a finite lease-time on its DHCP server.",
+    ),
+    "source-clock": (
+        "Bir log kaynağının saati kayık: cihazda NTP eşitlemesini açın.",
+        "A log source's clock is off: switch on NTP synchronisation on the device.",
+    ),
+    "fortigate-dhcp-mac": (
+        "Bir MAC adresi tek bir ağda çok sayıda FortiGate adresi aldı: arayüz yapısını denetleyin.",
+        "One MAC address got many FortiGate addresses on one network: check the interface setup.",
+    ),
+    "srcmac-shared": (
+        "srcmac arayüzünde paylaşılan MAC adresi: arayüzü srcmac listesinden çıkarın.",
+        "Shared MAC address on a srcmac interface: remove the interface from the srcmac list.",
+    ),
+    "fortigate-lease": (
+        "FortiGate kira süresi beklenmeyen bir değerde: lease alanının birimini sahada doğrulayın.",
+        "Unexpected FortiGate lease time: verify the unit of the lease field on site.",
+    ),
+    "fortigate-dhcp-subnet": (
+        "FortiGate DHCP kaydı tanımlı bir VLAN'a ait değil: ağı (VLAN numarası olmasa da) ekleyip "
+        "kiraları yeniden oluşturun ya da arayüzü hariç tutun.",
+        "FortiGate DHCP record outside the configured VLANs: add the network (even without a VLAN "
+        "number) and rebuild the leases, or exclude the interface.",
+    ),
+    "fortigate-unverified": (
+        "FortiGate DHCP kayıt biçimi sahada doğrulanmadı: DEVICE-SETUP.md bölüm 2.4'teki "
+        "doğrulamayı yapın.",
+        "FortiGate DHCP record format not verified on site: do the check of DEVICE-SETUP.md "
+        "section 2.4.",
+    ),
+}
+#: The fixed one-line action of each ``R20-nat`` cause.
+NAT_CAUSES: Final[Mapping[str, tuple[str, str]]] = {
+    "conversion-failed": (
+        "Eski NAT ayarları aktarılamadı: internet çıkışlarını tanımlayın.",
+        "The old NAT settings could not be converted: define the internet exits.",
+    ),
+    "invalid": (
+        "İnternet çıkışları ayarı okunamıyor: genel IP ile 5651 sorguları çalışmaz; ayarı "
+        "düzeltin.",
+        "The internet exits setting cannot be read: 5651 lookups by public IP fail; fix the "
+        "setting.",
+    ),
+    "legacy-changed": (
+        "Geri almada değiştirilen eski NAT ayarları çıkışlara aktarılmadı: değişikliği çıkışlara "
+        "elle işleyin.",
+        "Old NAT settings changed during a rollback were not carried over: enter the change in "
+        "the exits by hand.",
+    ),
+    "unmapped-transip": (
+        "Hiçbir çıkışa tanımlı olmayan NAT adresi kullanılıyor: hattı çıkış olarak tanımlayın.",
+        "A NAT address no exit defines is in use: define the line as an exit.",
+    ),
+}
+#: The evidence tables of ``R20-lease:none:<table>`` (``details.table``), by name.
+EVIDENCE_TABLES: Final[Mapping[str, str]] = {
+    "fg_dhcp": "FortiGate DHCP",
+    "mt_dhcp": "MikroTik DHCP",
+    "mt_arp": "MikroTik ARP-LOG",
+}
+#: The causes whose one-line action is followed by the evidence table, and by the clock offset.
+_TABLE_CAUSES: Final = frozenset({"none"})
+_SECONDS_CAUSES: Final = frozenset({"source-clock"})
+
+#: Per cause: the Turkish and English title and what to do (shown on the Security page, never in
+#: an e-mail), formatted by the check with its own counts and site configuration (the same
+#: parameters for both languages).
+LEASE_TEXTS: Final[Mapping[str, tuple[str, str, str, str]]] = {
+    "fortigate-unconverted": (
+        "FortiGate DHCP olay kaydı kira kanıtına çevrilemedi",
+        "A FortiGate DHCP event could not be turned into lease evidence",
+        "Son 24 saatte {rows} kayıt DHCP logid'iyle geldi ama beklenen alanlar (ip, mac, "
+        "dhcp_msg) yok ya da okunamadı ({failures} ayrıştırma hatası). Bu kayıtlardaki adresler "
+        "için 5651 sorguları iç IP adresinde durabilir. Kayıt biçimi bu FortiOS sürümünde farklı "
+        "olabilir: ham satırı Canlı Akış ya da Arama'da açın ve sahada doğrulama adımını izleyin "
+        "(DEVICE-SETUP.md bölüm 2.4).",
+        "In the last 24 hours {rows} records came with a DHCP logid but without the expected "
+        "fields (ip, mac, dhcp_msg), or with values that could not be read ({failures} parse "
+        "failures). 5651 lookups for these addresses may stop at the internal IP. The record "
+        "format may differ in this FortiOS version: open the raw line in Live tail or Search and "
+        "follow the on-site check (DEVICE-SETUP.md section 2.4).",
+    ),
+    "none": (
+        "Kira kanıtı kesildi: {evidence} kayıtları gelmiyor",
+        "Lease evidence stopped: no {evidence} records",
+        "Son {hours} saatte kullanılabilir hiçbir {evidence} kaydı gelmedi (daha önce geliyordu), "
+        "ancak FortiGate iç ağdan trafik kaydediyor. Bu kayıtlara dayanan 5651 zincirleri bu "
+        "sürede kurulamayabilir: FortiGate DHCP'de yeni ve yenilenen kiralar, ARP-LOG'da statik "
+        "IP'li cihazlar, MikroTik DHCP'de yeni istemciler. Başka bir kaynağın kayıtları gelmeye "
+        "devam etse de bu kaynak kesilmiş olabilir. Kaynağın olay kayıtlarını syslog'a "
+        "gönderdiğini denetleyin (FortiGate DHCP: DEVICE-SETUP.md bölüm 2.4, event/system "
+        "kayıtları ve syslog filtresi; MikroTik: bölüm 3, DHCP konusu ve ARP-LOG betiği); "
+        "kayıtlar geliyor ama kullanılmıyorsa ayrıca R20-lease:fortigate-refused uyarısına bakın. "
+        "MikroTik DHCP için uyarı orta önemdedir ve yalnızca ARP-LOG kaydı da gelmiyorsa açılır: "
+        "RouterOS yenilemeleri kaydetmez, yeni istemcinin gelmediği sessiz bir dönem de böyle "
+        "görünür.",
+        "In the last {hours} hours no usable {evidence} record arrived (they did before), while "
+        "the FortiGate logs traffic from the internal network. 5651 chains that rest on these "
+        "records may not be built meanwhile: new and renewed leases for FortiGate DHCP, "
+        "static-IP devices for ARP-LOG, new clients for MikroTik DHCP. This source may have "
+        "stopped although another source's records keep arriving. Check that the source sends "
+        "its event records to syslog (FortiGate DHCP: DEVICE-SETUP.md section 2.4, the "
+        "event/system records and the syslog filter; MikroTik: section 3, the DHCP topic and the "
+        "ARP-LOG script); if records arrive but are not used, see the alert "
+        "R20-lease:fortigate-refused as well. For MikroTik DHCP the alert is of medium severity "
+        "and opens only while no ARP-LOG record arrives either: RouterOS logs no renewals, and a "
+        "quiet period without new clients looks the same.",
+    ),
+    "absent": (
+        "Kira kanıtı yok: 5651 sorguları iç IP adresinde biter",
+        "No lease evidence: 5651 lookups end at the internal IP",
+        "Son 30 günde kullanılabilir hiçbir DHCP ya da ARP-LOG kaydı gelmedi, ancak FortiGate iç "
+        "ağdan trafik kaydediyor. Bu, Kurulum kılavuzu bölüm 0.1'de anlatılan bir yapı olabilir "
+        "(MikroTik ARP-LOG olmadan başka bir DHCP sunucusu, yalnızca statik adresli bir FortiGate "
+        "ağı): 5651 sorguları FortiGate oturumunda ve iç IP adresinde biter. Kira kanıtı "
+        "isteniyorsa FortiGate ya da MikroTik DHCP kayıtlarını (DEVICE-SETUP.md bölüm 2.4 ve 3) "
+        "ya da ana MikroTik yönlendiricide ARP-LOG betiğini açın.",
+        "In the last 30 days no usable DHCP or ARP-LOG record arrived, while the FortiGate logs "
+        "traffic from the internal network. This may be a set-up described in the installation "
+        "guide section 0.1 (another DHCP server without MikroTik ARP-LOG, a FortiGate network "
+        "with static addresses only): 5651 lookups end at the FortiGate session and the internal "
+        "IP address. For lease evidence, switch on the FortiGate or MikroTik DHCP records "
+        "(DEVICE-SETUP.md sections 2.4 and 3) or the ARP-LOG script on the main MikroTik router.",
+    ),
+    "fortigate-refused": (
+        "FortiGate DHCP kayıtlarının bir kısmı kullanılmıyor",
+        "Some FortiGate DHCP records are not used",
+        "Son 24 saatte gelen {rows} FortiGate DHCP kaydının {refused} tanesi kira kanıtı "
+        "sayılmadı ({kept} tanesi sayıldı; hariç tutulan arayüzlerin {excluded} kaydı bu "
+        "sayılara girmez). Nedenler (kayıt sayısı ve görülen değerler): {reasons}. Bu "
+        "kayıtlardaki adresler için açık kiralar süreleri dolunca kapanır ve 5651 sorguları iç IP "
+        "adresinde durabilir. Nedene göre: tanınmayan logid için dhcp.fortigate_logids, "
+        "beklenmeyen dhcp_msg değeri için dhcp.fortigate_dhcp_msgs (anlamını sahada doğrulayın), "
+        "cihaz saati için FortiGate'in saati (NTP, DEVICE-SETUP.md bölüm 2), kullanılamayan MAC "
+        "adresi için arayüz yapısı, tanımsız gönderici için log kaynağı tanımı (DEVICE-SETUP.md "
+        "bölüm 4; gönderici kurumun FortiGate'iyse onu ekleyin, değilse kaynağını araştırın); "
+        "sonra {first_day} gününden bugüne kiraları Ayarlar → Uygulama ayarları → 5651 sorgu ve "
+        "kira zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir "
+        "istekte en çok 31 gün). Uyarı, son 24 saatte kullanılmayan kayıt kalmayınca kapanır; "
+        "cihaz saati ve kullanılamayan MAC adresi nedeniyle kullanılmayan kayıtlar 24 saat "
+        "dolana kadar sayılır.",
+        "Of the {rows} FortiGate DHCP records of the last 24 hours {refused} were not used as "
+        "lease evidence ({kept} were; the {excluded} records of excluded interfaces are not in "
+        "these numbers). Reasons (records and values seen): {reasons}. For the addresses of these "
+        "records open leases close when their time runs out and 5651 lookups may stop at the "
+        "internal IP. By reason: dhcp.fortigate_logids for an unknown logid, "
+        "dhcp.fortigate_dhcp_msgs for an unexpected dhcp_msg value (verify its meaning on site), "
+        "the FortiGate's clock for the device time (NTP, DEVICE-SETUP.md section 2), the "
+        "interface setup for an unusable MAC address, the log source definition for an "
+        "unconfigured sender (DEVICE-SETUP.md section 4; if it is the organisation's FortiGate "
+        "add it, otherwise find out where the records come from); then rebuild the leases from "
+        "{first_day} to today in Settings → Application settings → 5651 lookup and lease "
+        "timeline → Rebuild the leases (at most 31 days per request). The alert closes once no "
+        "record of the last 24 hours is refused; records refused for the device time or an "
+        "unusable MAC address stay counted until 24 hours have passed.",
+    ),
+    "fortigate-renewals-missing": (
+        "FortiGate DHCP yenilemeleri kayıtlarda görünmüyor",
+        "FortiGate DHCP renewals do not appear in the logs",
+        "Son 24 saatte {count} FortiGate kirası, IP adresi kira süresinin ikinci yarısında ve "
+        "bitiminden hemen sonra da kullanıldığı hâlde yenileme kaydı olmadan kapandı; son 7 günde "
+        "hiçbir yenileme (kira süresinin yarısında gelen DHCP Ack) kaydı görülmedi. Bu "
+        "istemcilerin 5651 zincirleri kira bitiminde kesiliyor. Önce R20-lease:fortigate-refused "
+        "uyarısına bakın: yenileme kayıtları, kullanılmayan kayıtlar arasında olabilir (ör. farklı "
+        "bir dhcp_msg değeri ya da cihaz saati). Öyle değilse FortiGate yenilemeleri kaydetmiyor "
+        "olabilir: DEVICE-SETUP.md bölüm 2.4 adım 5'teki yenileme denetimini yapın; denetimin "
+        "sonucu ne yapılacağını anlatır.",
+        "In the last 24 hours {count} FortiGate leases closed without a renewal record although "
+        "their IP address was in use in the second half of the lease and right after its end; no "
+        "renewal (a DHCP Ack at half the lease) was seen in the last 7 days. These clients' 5651 "
+        "chains end when the lease ends. First see the alert R20-lease:fortigate-refused: the "
+        "renewal records may be among the records that are not used (e.g. another dhcp_msg value "
+        "or the device time). If not, the FortiGate may not log renewals: do the renewal check of "
+        "DEVICE-SETUP.md section 2.4 step 5; its outcome says what to do.",
+    ),
+    "fortigate-renewals-not-logged": (
+        "FortiGate DHCP yenilemeleri bu kurulumda kaydedilmiyor",
+        "FortiGate DHCP renewals are not logged at this installation",
+        "Son 24 saatte {count} FortiGate kirası, IP adresi kira süresinin ikinci yarısında ve "
+        "bitiminden hemen sonra da kullanıldığı hâlde yenileme kaydı olmadan kapandı; son 30 günde "
+        "hiçbir yenileme (kira süresinin yarısında gelen DHCP Ack) kaydı görülmedi ve kayıt "
+        "biçimi sahada doğrulandı olarak işaretli. Bu, DEVICE-SETUP.md bölüm 2.4 adım 5'teki "
+        "yenileme denetiminin olumsuz sonucu olabilir: sürekli açık istemcilerin 5651 zincirleri "
+        "kira süresinin yarısından sonra düşük güvenle gösterilir ve kira bitiminde kesilir. "
+        "Denetimin sonucunu ve kurumun seçimini Kurulum kılavuzu bölüm 16'da denetleyin; "
+        "yenilemeler kaydediliyorsa önce R20-lease:fortigate-refused uyarısına bakın.",
+        "In the last 24 hours {count} FortiGate leases closed without a renewal record although "
+        "their IP address was in use in the second half of the lease and right after its end; no "
+        "renewal (a DHCP Ack at half the lease) was seen in the last 30 days, and the record "
+        "format is marked as verified on site. This may be the negative outcome of the renewal "
+        "check of DEVICE-SETUP.md section 2.4 step 5: always-on clients' 5651 chains are shown "
+        "with low confidence after half the lease and end when the lease ends. Check the recorded "
+        "outcome and the organisation's choice in the installation guide section 16; if renewals "
+        "are logged, see the alert R20-lease:fortigate-refused first.",
+    ),
+    "fortigate-decline": (
+        "{network} DHCP havuzunda statik adresli bir cihaz olabilir",
+        "A static device may sit in the DHCP pool of {network}",
+        "Son 24 saatte {network} alt ağında {count} kez bir istemci FortiGate'ten aldığı adresi "
+        "birkaç dakika içinde (en çok 5 dakika) bırakıp başka bir adres aldı; aynı adreste bu "
+        "birden çok kez oldu. Bu, adresin ağda başka bir cihazca (havuz içinde statik adres) "
+        "kullanıldığını gösterebilir (DHCPDECLINE; FortiOS'un bunu kaydettiği "
+        "belgelenmemiştir). O cihaz açık değilken adresi alan bir istemci olursa iki cihaz aynı "
+        "adresi kullanır ve sorgu yanlış kişiyi gösterebilir. Statik cihazı havuzun dışına "
+        "taşıyın ya da adresini FortiGate'te ayırın (Güvenlik sayfasında uyarının ayrıntıları "
+        "ilgili adresleri, en çok beşini, gösterir).",
+        "In the last 24 hours, in the subnet of {network}, a client {count} times left an "
+        "address the FortiGate had given it within minutes (at most 5) and took another; this "
+        "happened more than once on one address. Another device may use that address (a static "
+        "address inside the pool; DHCPDECLINE, which FortiOS is not documented to log). If a "
+        "client gets the address while that device is off, two devices use one address and a "
+        "lookup may show the wrong person. Move the static device out of the pool or reserve its "
+        "address on the FortiGate (on the Security page the alert's details show the addresses "
+        "concerned, at most five).",
+    ),
+    "dhcp-sources-overlap": (
+        "Aynı ağda iki DHCP kaynağı: {network}",
+        "Two DHCP sources on one network: {network}",
+        "Son 24 saatte {network} alt ağında {sources} kaynaklarından DHCP kaydı geldi. Aynı ağa "
+        "iki DHCP sunucusu desteklenmez: bir sunucunun verdiği adres ötekinin kirasını kapatır ve "
+        "sorgu son kaydı yazan sunucuya göre yanıt verir. Bu anlardaki zincirler düşük güvenle "
+        "gösterilir. Fazla DHCP sunucusunu kapatın ya da ağları ayırın; geçiş sırasında bu uyarı "
+        "beklenir.",
+        "In the last 24 hours DHCP records for the subnet of {network} came from {sources}. Two "
+        "DHCP servers on one network are not supported: an address one server gives closes the "
+        "other's lease, and the lookup answers by whichever server logged last. Chains at those "
+        "moments are shown with low confidence. Switch off the extra DHCP server or separate the "
+        "networks; during a migration this alert is expected.",
+    ),
+    "fortigate-dhcp-mac": (
+        "Bir MAC adresi tek bir ağda çok sayıda FortiGate adresi aldı",
+        "One MAC address got many FortiGate addresses on one network",
+        "Son 24 saatte {shared} MAC adresine aynı arayüz ve ağda 3'ten fazla farklı IP adresi "
+        "verildi. Bu, istemcinin MAC adresini göstermeyen bir yapı (ör. IPsec üzerinden DHCP, MAC "
+        "adresini değiştiren bir tekrarlayıcı) ya da paylaşılan veya sanal bir MAC adresi "
+        "olabilir; böyle bir MAC adresinin zinciri yalnızca son adres verilen istemciye gider ve "
+        "yanlış cihazı gösterebilir. IPsec üzerinden DHCP veren arayüzü "
+        "dhcp.fortigate_interfaces_excluded ayarına ekleyin; bir ağ cihazının MAC adresiyse onu "
+        "altyapı cihazı olarak işaretleyin; değilse arayüz ve VLAN yapısını denetleyin.",
+        "In the last 24 hours {shared} MAC addresses were given more than 3 distinct IP addresses "
+        "on one interface and network. This may be a setup that does not show the client's MAC "
+        "address (e.g. DHCP over IPsec, a repeater that rewrites MAC addresses) or a shared or "
+        "virtual MAC address; the chain of such a MAC address only follows the client that got "
+        "the latest address and may show the wrong device. Add an interface that serves DHCP "
+        "over IPsec to dhcp.fortigate_interfaces_excluded; mark the MAC address as an "
+        "infrastructure device if it is a network device's; otherwise check the interface and "
+        "VLAN setup.",
+    ),
+    "fortigate-lease": (
+        "FortiGate DHCP kira süresi beklenmeyen bir değerde",
+        "Unexpected FortiGate DHCP lease time",
+        "{rows} kayıtta lease değeri 300 saniye ile 100 gün arasında değil; bu kiralarda "
+        "ayarlardaki süreler kullanıldı. lease alanının birimini sahada doğrulayın.",
+        "In {rows} records the lease value is not between 300 seconds and 100 days; those leases "
+        "used the configured times. Verify the unit of the lease field on site.",
+    ),
+    "fortigate-lease-unlimited": (
+        "FortiGate DHCP süresiz kira veriyor: zincirler kesiliyor",
+        "The FortiGate DHCP server gives unlimited leases: chains are cut",
+        "{rows} kayıtta süresiz kira (lease=0) var: bu istemciler adreslerini yenilemez ve kira "
+        "kaydı ayarlardaki süre dolunca kapanır; sonrasında 5651 zinciri kurulamaz. FortiGate "
+        "DHCP sunucusunda sınırlı bir lease-time ayarlayın.",
+        "{rows} records carry an unlimited lease (lease=0): these clients never renew and their "
+        "lease closes when the configured time runs out; after that no 5651 chain can be built. "
+        "Set a finite lease-time on the FortiGate DHCP server.",
+    ),
+    "fortigate-dhcp-subnet": (
+        "FortiGate DHCP kaydı tanımlı bir VLAN'a ait değil",
+        "FortiGate DHCP record outside the configured VLANs",
+        "Son 24 saatte {rows} FortiGate DHCP kaydının IP adresi hiçbir VLAN alt ağında değil "
+        "(arayüzler: {interfaces}). Bu adreslere dayanan 5651 zincirleri düşük güvenle "
+        "gösterilir: bir istemcinin adresi reddedip başka bir adres alması yalnızca tanımlı "
+        "ağlarda anlaşılır. Bir VPN havuzu, girilmemiş bir ağ ya da yeni bir DHCP kapsamı "
+        "olabilir: ağı, FortiGate'teki DHCP kapsamının tamamıyla ve VLAN numarası olmasa da, "
+        "ekleyin (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar → VLAN ekle); sonra {first_day} "
+        "gününden bugüne kiraları Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman "
+        "çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 "
+        "gün): eklenen ya da değiştirilen bir ağ geçmiş FortiGate kiralarına ancak yeniden "
+        "oluşturmadan sonra uygulanır. IPsec arayüzüyse onu dhcp.fortigate_interfaces_excluded "
+        "ayarına ekleyin.",
+        "In the last 24 hours the IP address of {rows} FortiGate DHCP records lies in no VLAN "
+        "subnet (interfaces: {interfaces}). 5651 chains on these addresses are shown with low "
+        "confidence: a client that declines an address and takes another is only detected in "
+        "configured networks. It may be a VPN pool, a network not entered or a new DHCP scope: "
+        "add the network, with the FortiGate's whole DHCP scope and even without a VLAN number "
+        "(Devices and people → Departments and VLANs → Add a VLAN); then rebuild the leases from "
+        "{first_day} to today in Settings → Application settings → 5651 lookup and lease "
+        "timeline → Rebuild the leases (at most 31 days per request): a network added or changed "
+        "applies to past FortiGate leases only after a rebuild. For an IPsec interface, add it to "
+        "dhcp.fortigate_interfaces_excluded.",
+    ),
+    "fortigate-unverified": (
+        "FortiGate DHCP kayıt biçimi sahada doğrulanmadı",
+        "FortiGate DHCP record format not verified on site",
+        "FortiGate DHCP kayıtları kira kanıtı olarak kullanılıyor, ancak kayıt biçimi yalnızca "
+        "FortiOS belgelerine ve tek bir topluluk örneğine dayanıyor. DEVICE-SETUP.md bölüm "
+        "2.4'teki doğrulamayı yapıp dhcp.fortigate_format_verified ayarını açın; o zamana kadar "
+        "raporlar bunu belirtir.",
+        "FortiGate DHCP records are used as lease evidence, but their format rests only on the "
+        "FortiOS documentation and one community sample. Do the check of DEVICE-SETUP.md section "
+        "2.4 and switch on dhcp.fortigate_format_verified; until then reports say so.",
+    ),
+    "source-clock": (
+        "Bir log kaynağının saati kayık",
+        "A log source's clock is off",
+        "{sources} kaynaklarının son kayıtlarının zamanları, ARCILOGGER'ın alma zamanından ortanca "
+        "olarak {seconds} saniye farklı (sınır 120 saniye). Bu kaynağın kayıtlarıyla yapılan "
+        "kesin ve aday 5651 sorguları bu kadar kayar: doğru oturum bulunmayabilir ve aynı portu "
+        "sonra kullanan başka bir oturum bulunabilir; FortiGate DHCP kiraları da aynı kadar "
+        "kayar. Cihazda NTP eşitlemesini açın (FortiGate: config system ntp → set ntpsync "
+        "enable, DEVICE-SETUP.md bölüm 2; başka bir cihazda kendi NTP istemcisi). Bu kaynağın "
+        "kayıtlarına dayanan sorgular kaymayı kendileri ölçer ve zincirleri düşük güvenle, "
+        "nedeniyle birlikte gösterir.",
+        "The times of the latest records of {sources} differ from ARCILOGGER's receive time by a "
+        "median of {seconds} seconds (limit 120 seconds). Exact and candidate 5651 lookups on "
+        "these records are shifted by that much: the right session may be missed and another "
+        "session that used the same port later may be found; FortiGate DHCP leases are shifted by "
+        "the same amount. Switch on NTP synchronisation on the device (FortiGate: config system "
+        "ntp → set ntpsync enable, DEVICE-SETUP.md section 2; another device: its own NTP "
+        "client). Lookups that rest on this source's records measure the offset themselves and "
+        "show their chains with low confidence, stating why.",
+    ),
+    "srcmac-shared": (
+        "srcmac arayüzünde paylaşılan MAC adresi: {interface}",
+        "Shared MAC address on a srcmac interface: {interface}",
+        "Son bir saatte {interface} arayüzünde {macs} MAC adresi birden çok IPv4 adresiyle "
+        "görüldü (bir MAC adresinde en çok {count} farklı IPv4 adresi; sınır {limit}); bu "
+        "arayüz yönlendirilmiş bir ağa bakıyor olabilir. Arayüzü lookup.srcmac_interfaces "
+        "ayarından çıkarın ya da ağ yapısını kontrol edin. Bu MAC adresleri sorgularda "
+        "kullanılmıyor.",
+        "In the last hour {macs} MAC addresses were seen with more than one IPv4 address on "
+        "interface {interface} (at most {count} distinct IPv4 addresses for one MAC address; "
+        "limit {limit}); the interface may face a routed network. Remove it from "
+        "lookup.srcmac_interfaces or check the network. These MAC addresses are not used in "
+        "lookups.",
+    ),
+}
+#: The title of ``fortigate-refused`` when nearly every record is refused (high).
+REFUSED_HIGH_TITLE: Final = (
+    "FortiGate DHCP kayıtları geliyor ama kullanılmıyor",
+    "FortiGate DHCP records arrive but are not used",
+)
+#: The refusal reasons of ``fortigate-refused`` (``details.reasons``), by name.
+REFUSAL_REASONS: Final[Mapping[str, tuple[str, str]]] = {
+    "untrusted": ("tanımsız gönderici", "unconfigured sender"),
+    "unmapped": ("tanınmayan logid", "unknown logid"),
+    "unexpected_msg": ("beklenmeyen dhcp_msg", "unexpected dhcp_msg"),
+    "receive_time": ("cihaz saati kullanılamadı", "no usable device time"),
+    "bad_mac": ("kullanılamayan MAC adresi", "unusable MAC address"),
+}
+NAT_TEXTS: Final[Mapping[str, tuple[str, str, str, str]]] = {
+    "conversion-failed": (
+        "Eski NAT ayarları internet çıkışlarına aktarılamadı",
+        "The old NAT settings could not be converted to internet exits",
+        "Yükseltmede eski NAT ayarları (nat.public_ips, nat.wan_transip, lookup.port_hint) "
+        "geçerli bir internet çıkışı tanımına çevrilemedi; çıkışlar boş bırakıldı ve sorgular "
+        "şimdi tek bir çift NAT çıkışı varsayıyor. Eski değerler denetim kaydındadır "
+        "(settings.change). Hatlarınızı Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman "
+        "çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlayın.",
+        "During the upgrade the old NAT settings (nat.public_ips, nat.wan_transip, "
+        "lookup.port_hint) could not be turned into a valid internet exit definition; the exits "
+        "were left empty and lookups now assume one double-NAT exit. The old values are in the "
+        "audit log (settings.change). Define your lines in Settings → Application settings → "
+        "5651 lookup and lease timeline → Internet exits (NAT).",
+    ),
+    "invalid": (
+        "İnternet çıkışları ayarı okunamıyor",
+        "The internet exits setting cannot be read",
+        "Kayıtlı nat.egresses değeri bu sürümün kurallarıyla okunamıyor ({code}); genel IP "
+        "adresiyle yapılan 5651 sorguları 503 hatasıyla durur ve NAT uyarıları denetlenemez. "
+        "Ayarı Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet "
+        "çıkışları (NAT) bölümünde düzeltin; eski değer denetim kaydındadır (settings.change).",
+        "The stored nat.egresses value cannot be read by this version's rules ({code}); 5651 "
+        "lookups by public IP stop with error 503 and the NAT alerts cannot be checked. Fix the "
+        "setting in Settings → Application settings → 5651 lookup and lease timeline → Internet "
+        "exits (NAT); the old value is in the audit log (settings.change).",
+    ),
+    "legacy-changed": (
+        "Geri almada değiştirilen eski NAT ayarları çıkışlara aktarılmadı",
+        "Old NAT settings changed during a rollback were not carried over",
+        "Önceki sürüme geri dönüldüğü sırada eski NAT ayarları ({keys}) internet çıkışlarının "
+        "son kaydından sonra değiştirildi. Yükseltme eski ayarları yeniden çevirmez; sorgular "
+        "şimdi çıkışların bugünkü tanımını kullanıyor. Eski ayarlardaki değişikliği (denetim "
+        "kaydında settings.change) Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman "
+        "çizelgesi → İnternet çıkışları (NAT) bölümüne elle işleyin; uyarı çıkışlar kaydedilince "
+        "kapanır.",
+        "While the previous version was running after a rollback, the old NAT settings ({keys}) "
+        "were changed after the internet exits were last saved. The upgrade does not convert old "
+        "settings again; lookups now use the exits as they are defined today. Enter the change "
+        "of the old settings (in the audit log as settings.change) by hand in Settings → "
+        "Application settings → 5651 lookup and lease timeline → Internet exits (NAT); the "
+        "alert closes once the exits are saved.",
+    ),
+    "unmapped-transip": (
+        "Hiçbir internet çıkışına tanımlı olmayan NAT adresi kullanılıyor",
+        "A NAT address that no internet exit defines is in use",
+        "Son bir saatte FortiGate {count} oturumu hiçbir çıkışın tanımlamadığı kaynak NAT "
+        "adresleriyle çıkardı: {addresses}. Özel ya da paylaşılan bir adres, servis sağlayıcı "
+        "yönlendiricisinin arkasındaki tanımsız bir hat olabilir: o hattın genel IP'si "
+        "sorulduğunda kimse listelenmez; ya da FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e veya "
+        "şubeye yaptığı NAT'ın adresi olabilir: onu 'İnternet çıkışı değil' türüyle tanımlayın. "
+        "Genel bir adres FortiGate'in kendi adresidir ve sorgularda uyarıyla 'kayıtlarda görülen "
+        "adres' olarak yanıtlanır. Adresi Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman "
+        "çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlayın ('Kayıtlarda görülen NAT "
+        "adresleri' → 'Çıkış olarak ekle').",
+        "In the last hour the FortiGate sent {count} sessions out with source-NAT addresses that "
+        "no exit defines: {addresses}. A private or shared address may be an undefined line "
+        "behind an ISP router, so that a lookup for that line's public IP lists nobody; or the "
+        "address of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch: define "
+        "it with the type 'Not an internet exit'. A public address is the FortiGate's own "
+        "address and is answered in lookups as an 'address seen in the logs', with a warning. "
+        "Define the address in Settings → Application settings → 5651 lookup and lease timeline "
+        "→ Internet exits (NAT) ('NAT addresses seen in the logs' → 'Add as exit').",
+    ),
+}
+
+
+def _cause_line(causes: Mapping[str, tuple[str, str]], d: Mapping[str, Any]) -> Facts | None:
+    """``R20-lease`` / ``R20-nat`` (ADR-0016): the cause's fixed one-line action with the
+    whitelisted facts only — the count (``count``), the VLAN number of a network (``vlan``), the
+    evidence table (``table``) and a clock offset (``seconds``). Never a source name, an
+    interface, a VDOM, a logid, a ``dhcp_msg`` value, a day or an address: those stay on the
+    Security page."""
+    cause = d.get("cause")
+    line = causes.get(cause) if isinstance(cause, str) else None
+    if line is None:
+        return None
+    tr, en = line
+    if cause in _TABLE_CAUSES:
+        table = d.get("table")
+        name = EVIDENCE_TABLES.get(table) if isinstance(table, str) else None
+        return (f"{tr} ({name})", f"{en} ({name})") if name else (tr, en)
+    if cause in _SECONDS_CAUSES:
+        seconds = _int(d, "seconds")
+        return (f"{tr} ({seconds} sn)", f"{en} ({seconds} s)") if seconds is not None else (tr, en)
+    parts_tr, parts_en = [], []
+    vlan = _int(d, "vlan")
+    if vlan is not None and 1 <= vlan <= 4094:
+        parts_tr.append(f"VLAN {vlan}")
+        parts_en.append(f"VLAN {vlan}")
+    count = _int(d, "count")
+    if count is not None:
+        parts_tr.append(f"{format_number(count, 0, 'tr')} kayıt")
+        parts_en.append(f"{format_number(count, 0, 'en')} records")
+    if not parts_tr:
+        return (tr, en)
+    return (f"{tr} ({', '.join(parts_tr)})", f"{en} ({', '.join(parts_en)})")
+
+
+def _lease(d: Mapping[str, Any]) -> Facts | None:
+    return _cause_line(LEASE_CAUSES, d)
+
+
+def _nat(d: Mapping[str, Any]) -> Facts | None:
+    return _cause_line(NAT_CAUSES, d)
+
+
 DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R15": _r15,
     "R20-seal": _seal,
@@ -1012,6 +1578,8 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-license-maintenance": _license_maintenance,
     "R20-admin": _admin,
     "R20-config-change": _config_change,
+    "R20-lease": _lease,
+    "R20-nat": _nat,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,
