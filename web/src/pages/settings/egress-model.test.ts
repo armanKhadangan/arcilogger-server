@@ -235,13 +235,13 @@ describe('the editor rows', () => {
     expect(valueFromRows(rows).refusal).toMatchObject({ code, row: 'x' });
   });
 
-  it('keep a stored name the rules refuse', () => {
-    const rows = rowsFromValue({ 'Hat 1': { mode: 'direct', public: ['203.0.113.200'] } });
+  it.each(['Hat 1', '__proto__'])('keep a stored name the rules refuse: %s', (name) => {
+    const stored = JSON.parse(
+      JSON.stringify({ [name]: { mode: 'direct', public: ['203.0.113.200'] } }),
+    ) as unknown;
+    const rows = rowsFromValue(stored);
     expect(rows[0]?.stored).toBeDefined();
-    expect(valueFromRows(rows).refusal).toMatchObject({
-      code: 'setting_egress_name',
-      row: 'Hat 1',
-    });
+    expect(valueFromRows(rows).refusal).toMatchObject({ code: 'setting_egress_name', row: name });
   });
 
   it('refuse an empty or doubled name on its row', () => {

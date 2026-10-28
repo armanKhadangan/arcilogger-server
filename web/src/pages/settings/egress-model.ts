@@ -499,15 +499,16 @@ function rowName(row: EgressRow): string {
  */
 export function valueFromRows(rows: readonly EgressRow[]): RowsResult {
   const seen = new Set<string>();
-  const raw: Record<string, unknown> = {};
+  const entries: [string, unknown][] = [];
   for (const row of rows) {
     const name = rowName(row);
     if (seen.has(name))
       return { refusal: { code: DUPLICATE_NAME, facts: {}, row: row.key, field: 'name' } };
     seen.add(name);
-    raw[name] = row.stored === undefined ? exitOfRow(row) : row.stored;
+    entries.push([name, row.stored === undefined ? exitOfRow(row) : row.stored]);
   }
-  const result = validateEgresses(raw);
+  // `fromEntries` keeps any name an own key (an assignment of `__proto__` would drop the exit).
+  const result = validateEgresses(Object.fromEntries(entries));
   if (result.refusal === undefined) return result;
   const exit = result.refusal.exit;
   const row = exit === undefined ? undefined : rows.find((item) => rowName(item) === exit);
