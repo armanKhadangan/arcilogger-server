@@ -5784,6 +5784,81 @@ from section 0.2 are recorded here too, with the date and who decided.
 - **Handover:** after this merge `db/src/arcilogger_db/cli.py` and `db/src/arcilogger_db/seed.py`
   go to WP-B (4.3).
 
+## Deviations — b (WP-B, 2026-10-28)
+
+- **ARP never moves the deadline of an `fg_dhcp` interval or seed (round-5 note "D6 / D26 / 2.6.2
+  `_arp`", first option).** Without `dhcp.fortigate_traffic_extends`, `_arp` keeps the ARP ref and
+  the sighting as evidence but does not move `last` of an `fg_dhcp` interval, as `_traffic` does
+  (D26); the `_seeds` `last` of an `fg_dhcp` seed is therefore the maximum of `seed.start` and its
+  **DHCP** refs and rows only (2.6.2 wrote "DHCP and ARP refs and rows"). So the deadline is "the
+  FortiGate's own end" of D6 on a site whose ARP-LOG also lists a FortiGate-served VLAN, and live,
+  range and single-day rebuilds agree. Tests:
+  `test_timeline.py::test_traffic_never_extends_a_fortigate_lease_by_default` (its ARP part),
+  `test_leases_consistency.py`. Fold into CORRELATION §1 (WP-F2) and the D6 text of ADR-0016.
+- **Counters are counted once, in the run's primary window.** `load_rows(…, count=True)` adds to
+  `ctx.stats` only for the window the run builds; the seeds and the look-ahead, which read rows of
+  other windows again, call it with `count=False`. Every counter of 2.6.2 lands in the job report's
+  `details.stats` (the existing counter map), `kept_fg_dhcp`, `refused_fg_dhcp` and
+  `excluded_fg_dhcp` included. Tests: `test_leases_fortigate.py`, `test_dhcp_sources.py`.
+- **Raw window of an `fg_dhcp` seed (round-5 performance note, option "bound per seed").** The lower
+  bound is `max(seed.start, midnight − W)` with W the longest window the seed can have (the
+  configured alive window, its stored `lease_seconds` and every lease its stored refs cite), instead
+  of `seed.start`. A row older than that cannot touch the seed at midnight. Tests: the consistency
+  feeds (lease varying between ACKs, a lease ending after midnight).
+- **Lease of an `fg_dhcp` seed at midnight (round-5 and round-6 notes).** The usable lease of the
+  latest kept `assigned` of its pair that logs one, from its stored refs (the lease in the ref
+  summary) and the raw rows before the closing row, else before midnight; the stored value only when
+  the seed has no such ref or row at all. When refs or rows exist but none logs a usable lease, the
+  configured time applies (`None`), as the live interval had it, instead of round 5's "else the
+  stored value": a later day's rebuild may have stored a newer ACK's lease. Tests:
+  `test_leases_consistency.py`.
+- **Origin of a seed (round-5 note "`run_incremental` seed origin").** Read for `rebuild_day` and
+  `run_incremental` alike from the `vd` of the `fg_dhcp` row of the seed's newest own ref (by
+  primary key, never the line that superseded it); `mt_dhcp` seeds have `(mt_dhcp, None)`. Tests:
+  the DECLINE shape across a live cut in `test_leases_consistency.py`.
+- **D33 network granularity (round-7 note).** `Context.network_for` keeps the most specific
+  configured network holding the address (the existing `find_vlan` rule); no 3.3 case pins the least
+  specific choice. The docs side is WP-F2's.
+- **`lookup/trust.py` imports the table names from `lookup/refs.py`** (`DHCP_TABLE`,
+  `FG_DHCP_TABLE`) for `usable_dhcp_origins`, so the grep rule's registry files share one spelling.
+- **Check names.** The two checks are `check_lease_evidence` and `check_nat_exits` (registered in
+  `CHECKS` as `lease_evidence` and `nat_exits`, each in its own transaction like every check), after
+  the module's `check_*` convention; 2.6.3 calls them `_lease_evidence` / `_nat_exits`.
+- **Describer facts.** `_lease`/`_nat` read only `cause`, `count`, `vlan`, `table` and `seconds`;
+  each finding puts its main number into `details.count` (`rows`, `kept` and `shared` stay in the
+  details for the Security page but are not printed). Tests: `test_alerts_lease.py`
+  (`test_no_e_mail_or_report_line_carries_an_address_a_name_or_a_log_value`, the e-mail test).
+- **`source-clock` (round-5 note).** `time <> time_received` is in the WHERE clause before the
+  `LIMIT 200`, and the bound is the worker's `MAX_CLOCK_SKEW` (1 day), pinned equal to
+  `arcilogger_ingest.parsers.syslog.DEFAULT_MAX_CLOCK_SKEW` by a test in `test_alerts_lease.py`.
+- **`R20-nat:unmapped-transip`.** "Claims" means the public or a NAT address of any exit (`internal`
+  exits included); only IPv4 `transip` values are counted. **`legacy-changed`** is also true when no
+  `nat.egresses` row exists (a site with the shipped NAT defaults).
+- **`fortigate-unverified`** looks at any `fg_dhcp` row of the last 7 days (2.6.3: "rows exist"),
+  not only usable rows.
+- **`trust.srcmac_ip_counts`** reads the `fg_traffic.srcmac` column only (a coalesce with `extra` is
+  WP-C2's); `interfaces=None` counts every interface (round-5 note (d)).
+- **Rollback step (2.2.1).** `prepare_rollback` sets `lock_timeout = 30s` and `statement_timeout =
+  10min` (`SET LOCAL`, review note "2.2.1 rollback step … timeouts"); the command exits 0 with the
+  count, 1 on a database error (a timeout included), 3 when the database cannot be reached. A step
+  run again before the re-upgrade (a rollback retried after a failure, this version running in
+  between) keeps the recorded `at`, lowers the leases still `high` with it and adds to the count, so
+  the restore covers both runs (an upsert with a new `at` would leave every lease of the first run
+  `low`). The restore gives the restored rows a fresh `updated_at`; a status row whose `at` cannot
+  be read restores nothing and is deleted (the rows stay `low` until a rebuild). The rebuild range
+  is `[site day of (at − max(lease_seconds of the fg_dhcp leases, else 604,800 s)), site day of
+  now]`. `arcilogger-db upgrade` prints two Turkish lines with the English in brackets, as
+  `search-counts` does; the first line of the upgrade output is unchanged. Tests:
+  `db/tests/test_lease_rollback.py`; the rebuilt seed's `high` in `test_leases_fortigate.py`.
+- **Docs.** UYARILAR/ALERTS §2 have one row per cause, keyed `` `R20-lease:<cause>` `` (with
+  `:<tablo>`/`:<table>`, `:<ağ>`/`:<net>` or `:<arayüz>`/`:<interface>` where the dedup key has
+  one), whose "what to do" cell starts with the cause's one-line action; the §2 opening names both
+  rules. The assertion appended to `tests/test_docs_consistency.py` needed its import line widened
+  (`LEASE_CAUSES`, `NAT_CAUSES`, `RULES`), not only an append.
+- **Left to other packages, as the contract assigns them:** the "Kira kanıtı" card and its
+  `source_configured_later` wording (WP-C2/WP-D), the web's per-rule labels (WP-E), the installer
+  step `leases.prepare-rollback` (integrator), CORRELATION/KURULUM texts (WP-F2).
+
 ---
 
 ## Implementation notes — round 5
