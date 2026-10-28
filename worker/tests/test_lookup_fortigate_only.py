@@ -1177,6 +1177,35 @@ def test_a_static_client_gives_a_match_without_a_chain(
     assert outcome.unconverted_dhcp == ()
 
 
+@pytest.mark.parametrize("grace", [60, 0])
+def test_the_probe_runs_with_a_short_arp_interval(
+    db_session: Session, evidence: Evidence, grace: int
+) -> None:
+    """The probe reads its window from the lease timeline's rules with the configured ARP grace
+    (``arp.ignore_after_release_seconds``, at most ``arp.interval_seconds``), as the lease job
+    builds them: with a 120 s ARP interval an internal lookup without a lease, a candidate
+    lookup whose static client has no chain and a MAC-only lookup without a lease give their
+    answer, never an error."""
+    set_setting(db_session, "arp.interval_seconds", 120, updated_by="tolga")
+    set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
+    evidence.traffic(AT, "172.20.42.200", 51001, transip=WAN)
+    build(db_session, DAY, DAY)
+    alone = internal(db_session, "172.20.42.200", AT)
+    assert (alone.mode, alone.attribution) == ("none", None)
+    assert "no_lease" in keys(alone)
+    candidates = lookup(db_session, public_ip="198.51.100.20")
+    assert candidates.mode == "candidates"
+    (match,) = candidates.matches
+    assert (match.traffic.srcip, match.chain) == ("172.20.42.200", None)
+    assert outcome_note(candidates, MISSING) == {"count": 1}
+    by_mac = lookup(db_session, mac=PC_MAC)
+    assert (by_mac.mode, by_mac.attribution) == ("none", None)
+    assert "no_lease_for_mac" in keys(by_mac)
+    for outcome in (alone, candidates, by_mac):
+        assert NOT_CONVERTED not in keys(outcome)
+        assert outcome.unconverted_dhcp == ()
+
+
 def test_a_covering_line_that_stayed_an_event_row_is_named_and_cited(
     db_session: Session, evidence: Evidence
 ) -> None:

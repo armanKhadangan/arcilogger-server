@@ -1487,7 +1487,12 @@ class _Lookup:
         # The lease timeline imports this package (its refs), so its rules are imported here.
         from arcilogger_worker.correlation.timeline import TimelineRules
 
-        longest = timedelta(seconds=TimelineRules.from_settings(self.settings).longest_window)
+        # The configured ARP grace, at most the ARP interval (the rules refuse a longer one), as
+        # the lease job builds them; the window does not depend on it.
+        settings = self.settings
+        grace = min(settings.arp_release_grace_seconds, settings.arp_interval_seconds)
+        rules = TimelineRules.from_settings(settings, release_grace=grace)
+        longest = timedelta(seconds=rules.longest_window)
         width = max(longest, UNCONVERTED_WINDOW)
         until = {key: min(at, self.request.at) for key, at in targets.items()}
         low, high = min(targets.values()) - width, max(until.values())
