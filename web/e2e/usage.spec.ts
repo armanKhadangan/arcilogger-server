@@ -91,7 +91,8 @@ test.describe('Kullanım', () => {
           ),
       )
       .toBe(true);
-    expect(lastQuery(api, '/usage/sites')?.get('department')).toBe('Finans');
+    // The department's four requests leave together: the sites one may still be on its way.
+    await expect.poll(() => lastQuery(api, '/usage/sites')?.get('department')).toBe('Finans');
     await expect(page.getByRole('table', { name: 'Finans departmanının cihazları' })).toContainText(
       '172.20.41.77',
     );
