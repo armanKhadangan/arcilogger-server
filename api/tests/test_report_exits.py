@@ -1065,6 +1065,13 @@ def test_no_double_nat_paragraph_for_transip(
         assert "Çift NAT" not in text, query
         assert "kesin olarak eşlenemez" not in text, query
         assert "İstenen adres bu çıkışta FortiGate'in kendi NAT adresidir" in text
+        # the shared (RFC 6598) address is the exit's NAT address, never called public
+        assert "genel/WAN" not in text, query
+        assert (
+            "Açıklama Talepteki adres FortiGate'in bu çıkıştaki kendi NAT (WAN) adresidir; "
+            "transip:transport talepteki adres ve portla birebir eşleşen oturumlar listelenir."
+            in text
+        ) is (mode == "exact"), query
 
 
 def test_e_e3_observed_without_exits_report(

@@ -591,6 +591,12 @@ MODE_DETAIL_TR: Final[Mapping[str, str]] = {
     ),
     "none": "Ölçütlere uyan kayıt bulunamadı; nedenleri aşağıdaki açıklamalardadır.",
 }
+#: The exact answer on an exit's NAT address (resolution ``transip``), which may be a shared
+#: (RFC 6598) or private address, never called "genel" (deviation d).
+MODE_DETAIL_TRANSIP_TR: Final = (
+    "Talepteki adres FortiGate'in bu çıkıştaki kendi NAT (WAN) adresidir; transip:transport "
+    "talepteki adres ve portla birebir eşleşen oturumlar listelenir."
+)
 DESTINATION: Final[Mapping[str, str]] = {
     "ip_port": "hedef IP ve port eşleşti",
     "ip": "hedef IP eşleşti",

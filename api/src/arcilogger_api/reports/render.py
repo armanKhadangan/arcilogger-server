@@ -770,6 +770,9 @@ class _Builder:
             rows.append(("Çıkış / Exit", _x(exit_row(outcome.egress))))
         skipped = not_searched(outcome)
         detail = texts.MODE_DETAIL_TR[outcome.mode] if skipped is None else " / ".join(skipped)
+        egress = outcome.egress
+        if outcome.mode == "exact" and egress is not None and egress.resolution == "transip":
+            detail = texts.MODE_DETAIL_TRANSIP_TR  # an exit's NAT address need not be public
         rows.append(("Açıklama", _x(detail)))
         self.add(self.kv(rows), Spacer(1, 5))
         self.bilingual(texts.METHOD_TR, texts.METHOD_EN)
