@@ -224,6 +224,15 @@ function LeaseDetail({ lease }: { lease: LeaseInfo }) {
   );
 }
 
+/**
+ * The interface whose session record gave a srcmac chain its MAC: the chain's own `srcmac_only`
+ * names it (an internal-mode chain is shown without a session row), else the session's `srcintf`.
+ */
+function srcmacInterface(chain: AttributionChain, traffic: TrafficInfo | null): string | null {
+  const named = chain.explanations.find((item) => item.key === 'srcmac_only')?.params.interface;
+  return typeof named === 'string' && named !== '' ? named : (traffic?.srcintf ?? null);
+}
+
 /** One attribution chain, step by step, every step with its evidence (spec 9.4). */
 function ChainSteps({
   chain,
@@ -279,7 +288,9 @@ function ChainSteps({
               </Badge>
             </span>
           }
-          detail={t('network.lookup.srcmacDetail', { interface: traffic?.srcintf ?? '—' })}
+          detail={t('network.lookup.srcmacDetail', {
+            interface: srcmacInterface(chain, traffic) ?? '—',
+          })}
           onOpen={onOpen}
         />
       ) : (
@@ -383,11 +394,17 @@ export function ChainView({
       ? t('network.lookup.srcmacOption', { number: index + 1 })
       : t('lookup.conflict.option', { number: index + 1 });
   // A srcmac that differs from the lease's MAC (D10): the same side by side view, its own words.
+  // Two leases on the IP keep the IP conflict's own statement beside it.
   const srcmac = chain.alternatives.some((item) => item.mac_source === 'srcmac');
-  const above = (item: AttributionChain) =>
+  const leaseConflict =
+    !srcmac || all.some((item) => item.explanations.some((note) => note.key === 'ip_conflict'));
+  const leaseChains = all.filter((item) => item.mac_source !== 'srcmac').length;
+  // The lease-step texts stand beside the lease step; the IP conflict's under its header.
+  const above = (item: AttributionChain, header: boolean) =>
     item.explanations.filter(
       (explanation) =>
-        explanation.key !== 'ip_conflict' && !LEASE_STEP_EXPLANATIONS.includes(explanation.key),
+        !(header && explanation.key === 'ip_conflict') &&
+        !LEASE_STEP_EXPLANATIONS.includes(explanation.key),
     );
   return (
     <div className="flex flex-col gap-3">
@@ -397,14 +414,19 @@ export function ChainView({
       </div>
       {conflict ? (
         <div className="flex flex-col gap-3" data-testid="ip-conflict">
-          <Alert
-            tone="danger"
-            title={t(srcmac ? 'network.lookup.srcmacConflictTitle' : 'lookup.conflict.title', {
-              count: all.length,
-            })}
-          >
-            {t(srcmac ? 'network.lookup.srcmacConflictBody' : 'lookup.conflict.body')}
-          </Alert>
+          {leaseConflict ? (
+            <Alert tone="danger" title={t('lookup.conflict.title', { count: leaseChains })}>
+              {t('lookup.conflict.body')}
+            </Alert>
+          ) : null}
+          {srcmac ? (
+            <Alert
+              tone="danger"
+              title={t('network.lookup.srcmacConflictTitle', { count: all.length })}
+            >
+              {t('network.lookup.srcmacConflictBody')}
+            </Alert>
+          ) : null}
           <div className="grid gap-3 xl:grid-cols-2">
             {all.map((item, index) => (
               <section
@@ -418,7 +440,7 @@ export function ChainView({
                 <p className="font-mono text-xs wrap-anywhere text-muted-strong">
                   {chainSummary(item, traffic, t)}
                 </p>
-                <ExplanationList explanations={above(item)} />
+                <ExplanationList explanations={above(item, leaseConflict)} />
                 <ChainSteps chain={item} traffic={traffic} onOpen={onOpen} />
               </section>
             ))}
@@ -432,7 +454,7 @@ export function ChainView({
           >
             {chainSummary(chain, traffic, t)}
           </p>
-          <ExplanationList explanations={above(chain)} />
+          <ExplanationList explanations={above(chain, false)} />
           <ChainSteps chain={chain} traffic={traffic} onOpen={onOpen} />
         </>
       )}

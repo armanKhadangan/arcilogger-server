@@ -357,9 +357,7 @@ describe('the other FortiGate DHCP settings', () => {
     // The logid map's own help (the server's) says it; the message map gets the hint.
     const rebuild = /yeniden oluşturulunca uygulanır/g;
     for (const key of ['dhcp.fortigate_logids', 'dhcp.fortigate_dhcp_msgs'])
-      expect(screen.getByTestId(`setting-${key}`).textContent?.match(rebuild), key).toHaveLength(
-        1,
-      );
+      expect(screen.getByTestId(`setting-${key}`).textContent.match(rebuild), key).toHaveLength(1);
     expect(screen.getByTestId('setting-dhcp.fortigate_dhcp_msgs')).toHaveTextContent(
       'Değişiklik geçmiş günlere ancak kiralar yeniden oluşturulunca uygulanır',
     );

@@ -244,6 +244,17 @@ export const EXIT_DMZ: EgressEntry = {
   interfaces: ['dmz'],
   port_preservation: 'unknown',
 };
+/** The implicit catch-all of the shipped `nat.egresses = {}` (name `""`, round-5 note). */
+export const EXIT_IMPLICIT: EgressEntry = {
+  name: '',
+  label: '',
+  mode: 'isp_nat',
+  public: [],
+  public_dynamic: false,
+  transips: [],
+  interfaces: [],
+  port_preservation: 'unknown',
+};
 
 function egressOf(
   resolution: LookupEgress['resolution'],
@@ -311,9 +322,46 @@ function lowered(chain: AttributionChain, item: Explanation): void {
   chain.explanations = [...chain.explanations, item];
 }
 
+/** `srcmac_only` for the session records of `name` (2.11). */
+function srcmacOnlyNote(name: string): Explanation {
+  return explanation(
+    'srcmac_only',
+    `Bu zincirde kira kaydı yok. MAC adresi FortiGate oturum kaydının srcmac alanından alındı (${name} arayüzü): FortiGate'in aygıt tanıma bilgisine göre kaynak IP adresi o anda bu MAC adresiyle ilişkilendirilmişti. Bu kısmi bir kanıttır; MAC adresinin bu oturumu gönderdiğini ya da adresin bir DHCP kirasıyla verildiğini kanıtlamaz. Cihaz ve kişi bu MAC adresine göre düşük güvenle gösterilir.`,
+    `This chain has no lease. The MAC address comes from the srcmac field of the FortiGate session record (interface ${name}): the FortiGate's device identification associated the source IP with this MAC address at that moment. This is partial evidence; it does not prove that this MAC sent the session or that a DHCP lease gave it the address. The device and the person are shown for this MAC address with low confidence.`,
+    { interface: name },
+  );
+}
+
+/**
+ * A srcmac that differs from the lease's MAC (D10): the lease chain lowered with
+ * `srcmac_mismatch` and, as its last alternative, the chain by the srcmac (no lease, no person).
+ */
+function srcmacMismatch(chain: AttributionChain, srcmac: string): void {
+  const mac = chain.lease?.mac ?? '';
+  const mismatch = explanation(
+    'srcmac_mismatch',
+    `FortiGate oturum kaydındaki srcmac (${srcmac}) kira kaydındaki MAC adresinden (${mac}) farklı: o anda bu IP adresini iki cihaz kullanmış olabilir. Zincir kira kaydına göre kuruldu, srcmac'e göre olası zincir de gösterildi; ikisi de düşük güvenlidir.`,
+    `The srcmac of the FortiGate session record (${srcmac}) differs from the lease's MAC address (${mac}): two devices may have used this IP address at that moment. The chain follows the lease and the possible chain by srcmac is shown too; both have low confidence.`,
+    { srcmac, mac },
+  );
+  lowered(chain, mismatch);
+  const other = structuredClone(chain);
+  other.lease = null;
+  other.mac_source = 'srcmac';
+  other.person = null;
+  other.department = null;
+  other.department_source = 'none';
+  other.explanations = [mismatch];
+  other.alternatives = [];
+  if (other.device)
+    other.device = { ...other.device, mac: srcmac, name: null, hostnames: [], confidence: 'low' };
+  chain.alternatives = [...chain.alternatives, other];
+}
+
 export interface CapturedLookups {
   exact: LookupOut;
   candidates: LookupOut;
+  conflict: LookupOut;
   internal: LookupOut;
   none: LookupOut;
 }
@@ -323,7 +371,9 @@ export interface CapturedLookups {
  * FortiGate-only exact match and its chain at `low` for the three lease reasons, a srcmac-only
  * chain, a srcmac conflict, the `hat-2` candidates with an unconfigured sender, a quiet line's
  * fallback, the NAT address of the DMZ, an unclaimed address, a match without a chain with the
- * unconverted FortiGate DHCP record, and the exact lookup as stored before ADR-0016.
+ * unconverted FortiGate DHCP record, candidates under the implicit catch-all of the shipped
+ * `nat.egresses = {}`, an internal-mode srcmac chain, an IP conflict beside a srcmac conflict,
+ * and the exact lookup as stored before ADR-0016.
  */
 export function wave3Lookups(base: CapturedLookups) {
   const copy = (lookup: LookupOut, id: number) => withId(structuredClone(lookup), id);
@@ -392,14 +442,7 @@ export function wave3Lookups(base: CapturedLookups) {
     chain.confidence = 'low';
     if (chain.device) chain.device.confidence = 'low';
     if (chain.person) chain.person.confidence = 'low';
-    chain.explanations = [
-      explanation(
-        'srcmac_only',
-        "Bu zincirde kira kaydı yok. MAC adresi FortiGate oturum kaydının srcmac alanından alındı (vlan42 arayüzü): FortiGate'in aygıt tanıma bilgisine göre kaynak IP adresi o anda bu MAC adresiyle ilişkilendirilmişti. Bu kısmi bir kanıttır; MAC adresinin bu oturumu gönderdiğini ya da adresin bir DHCP kirasıyla verildiğini kanıtlamaz. Cihaz ve kişi bu MAC adresine göre düşük güvenle gösterilir.",
-        "This chain has no lease. The MAC address comes from the srcmac field of the FortiGate session record (interface vlan42): the FortiGate's device identification associated the source IP with this MAC address at that moment. This is partial evidence; it does not prove that this MAC sent the session or that a DHCP lease gave it the address. The device and the person are shown for this MAC address with low confidence.",
-        { interface: 'vlan42' },
-      ),
-    ];
+    chain.explanations = [srcmacOnlyNote('vlan42')];
   }
 
   const srcmacConflict = copy(base.exact, 106);
@@ -412,31 +455,7 @@ export function wave3Lookups(base: CapturedLookups) {
       dstintf: 'wan1',
       srcmac: '00:00:5e:00:53:31',
     };
-    const chain = match.chain as AttributionChain;
-    const mismatch = explanation(
-      'srcmac_mismatch',
-      "FortiGate oturum kaydındaki srcmac (00:00:5e:00:53:31) kira kaydındaki MAC adresinden (00:00:5e:00:53:57) farklı: o anda bu IP adresini iki cihaz kullanmış olabilir. Zincir kira kaydına göre kuruldu, srcmac'e göre olası zincir de gösterildi; ikisi de düşük güvenlidir.",
-      "The srcmac of the FortiGate session record (00:00:5e:00:53:31) differs from the lease's MAC address (00:00:5e:00:53:57): two devices may have used this IP address at that moment. The chain follows the lease and the possible chain by srcmac is shown too; both have low confidence.",
-      { srcmac: '00:00:5e:00:53:31', mac: '00:00:5e:00:53:57' },
-    );
-    lowered(chain, mismatch);
-    const other = structuredClone(chain);
-    other.lease = null;
-    other.mac_source = 'srcmac';
-    other.person = null;
-    other.department = null;
-    other.department_source = 'none';
-    other.explanations = [mismatch];
-    other.alternatives = [];
-    if (other.device)
-      other.device = {
-        ...other.device,
-        mac: '00:00:5e:00:53:31',
-        name: null,
-        hostnames: [],
-        confidence: 'low',
-      };
-    chain.alternatives = [other];
+    srcmacMismatch(match.chain as AttributionChain, '00:00:5e:00:53:31');
   }
 
   const hat2 = copy(base.candidates, 107);
@@ -549,6 +568,51 @@ export function wave3Lookups(base: CapturedLookups) {
     ];
   }
 
+  const unconfigured = copy(base.candidates, 114);
+  {
+    // The shipped `nat.egresses = {}`: every match under the implicit catch-all (name `""`).
+    const outcome = outcomeOf(unconfigured);
+    outcome.egress = egressOf('unconfigured', [EXIT_IMPLICIT], {
+      unclaimed: true,
+      unclaimed_seen: ['100.64.12.9'],
+    });
+    for (const match of outcome.matches) {
+      match.egress = '';
+      match.traffic = { ...match.traffic, dstintf: 'wan1', srcintf: 'vlan42' };
+    }
+  }
+
+  const srcmacInternal = copy(base.internal, 115);
+  {
+    // Internal mode, the IP given, no lease, one usable srcmac (2.9): the chain without a session.
+    const outcome = outcomeOf(srcmacInternal);
+    const chain = outcome.attribution as AttributionChain;
+    const sighting = chain.lease?.evidence.find((ref) => ref.table === 'fg_traffic');
+    if (!sighting) throw new Error('the internal lookup cites no session record');
+    chain.lease = null;
+    chain.mac_source = 'srcmac';
+    chain.confidence = 'low';
+    if (chain.device) chain.device = { ...chain.device, confidence: 'low', evidence: [sighting] };
+    chain.explanations = [...chain.explanations, srcmacOnlyNote('vlan60')];
+    outcome.explanations = [
+      ...outcome.explanations,
+      explanation(
+        'no_lease',
+        `${chain.internal_ip} adresi için 09.10.2026 11:23:41 anında geçerli bir DHCP/ARP kaydı (kira) yok. En yakın kayıtlar: önce -, sonra -. DHCP ve saatlik ARP-LOG kayıtlarının ana yönlendiriciden (MikroTik, DHCP sunucusu) geldiğini kontrol edin; statik IP'li cihazlar yalnızca ARP-LOG ile görünür.`,
+        `No DHCP/ARP lease covers ${chain.internal_ip} at 09.10.2026 11:23:41. Nearest leases: before -, after -. Check that the main router (MikroTik, the DHCP server) sends DHCP and hourly ARP-LOG messages; static-IP devices only appear through ARP-LOG.`,
+        { ip: chain.internal_ip, at: '09.10.2026 11:23:41', before: '-', after: '-' },
+      ),
+    ];
+  }
+
+  const conflictSrcmac = copy(base.conflict, 116);
+  {
+    // Two leases on the IP (`ip_conflict`) and a srcmac that differs from the first one's MAC.
+    const match = outcomeOf(conflictSrcmac).matches[0] as NatMatch;
+    match.traffic = { ...match.traffic, srcintf: 'vlan42', srcmac: '00:00:5e:00:53:31' };
+    srcmacMismatch(match.chain as AttributionChain, '00:00:5e:00:53:31');
+  }
+
   const stored = copy(base.exact, 113);
   {
     // As stored before ADR-0016: none of its members (read with their 2.10 defaults).
@@ -585,6 +649,9 @@ export function wave3Lookups(base: CapturedLookups) {
     internalNat,
     noEgress,
     chainMissing,
+    unconfigured,
+    srcmacInternal,
+    conflictSrcmac,
     stored,
   };
 }

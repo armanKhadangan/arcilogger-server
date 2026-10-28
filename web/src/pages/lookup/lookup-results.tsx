@@ -153,10 +153,11 @@ function DataWindowNote({ window }: { window: DataWindow }) {
 
 /**
  * "Çıkış: hat-2 (Yedek hat) · dstintf wan2", as the PDF prints it on every match (contract 2.12);
- * "-" for a session no exit claims. `null` for a lookup stored before ADR-0016.
+ * "-" for a session no exit claims, also under the implicit catch-all of `nat.egresses = {}`,
+ * whose name is `""`. `null` for a lookup stored before ADR-0016.
  */
 function matchExit(match: NatMatch, exits: readonly EgressEntry[], shown: boolean): string | null {
-  const name = match.egress ?? null;
+  const name = match.egress || null;
   const dstintf = match.traffic.dstintf ?? null;
   if (!shown && name === null && dstintf === null) return null;
   const exit = exits.find((item) => item.name === name);

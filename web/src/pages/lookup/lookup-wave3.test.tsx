@@ -5,7 +5,7 @@ import i18n from '@/lib/i18n';
 import type { LookupOut } from '@/lib/api-types';
 import type { EgressEntry, LookupEgress } from '@/lib/lookup-types';
 import { LOOKUPS } from '@/test/samples';
-import { EXIT_DMZ, EXIT_HAT_1, EXIT_HAT_2, wave3Lookups } from '@/test/wave3-mocks';
+import { EXIT_DMZ, EXIT_HAT_1, EXIT_HAT_2, EXIT_IMPLICIT, wave3Lookups } from '@/test/wave3-mocks';
 
 import { egressLine, explanationTone } from './chain-text';
 import { LookupResults } from './lookup-results';
@@ -14,8 +14,9 @@ import { LookupResults } from './lookup-results';
  * The 5651 Sorgu result view of ADR-0016 (contract 2.13): the exit line with the eight labels of
  * the seven resolutions, every match's exit and dstintf, the unconfigured-sender badge, the
  * srcmac step and conflict, the FortiGate lease, the `low` lease reasons beside the lease step,
- * the no-chain text with the unconverted record, and a lookup stored before ADR-0016. Hand mocks
- * built from the captured lookups (`src/test/wave3-mocks.ts`).
+ * the no-chain text with the unconverted record, the implicit catch-all's candidates, an
+ * internal-mode srcmac chain, an IP conflict beside a srcmac one, and a lookup stored before
+ * ADR-0016. Hand mocks built from the captured lookups (`src/test/wave3-mocks.ts`).
  */
 
 const MOCKS = wave3Lookups(LOOKUPS);
@@ -49,7 +50,6 @@ function egress(resolution: LookupEgress['resolution'], exits: EgressEntry[]): L
 }
 
 describe('the exit line (one label table with the PDF)', () => {
-  const IMPLICIT: EgressEntry = { ...EXIT_HAT_2, name: '', label: '', public: [], transips: [] };
   it.each([
     ['public', [EXIT_HAT_1], 'Genel IP — hat-1 (Ana hat), Doğrudan'],
     ['transip', [EXIT_HAT_2], "NAT adresi — hat-2 (Yedek hat), Servis sağlayıcı NAT'ı"],
@@ -75,7 +75,7 @@ describe('the exit line (one label table with the PDF)', () => {
       [EXIT_HAT_2],
       "Genel adresi bilinmeyen hatlar — hat-2 (Yedek hat), Servis sağlayıcı NAT'ı",
     ],
-    ['unconfigured', [IMPLICIT], 'Çıkış tanımlı değil'],
+    ['unconfigured', [EXIT_IMPLICIT], 'Çıkış tanımlı değil'],
     ['no_egress', [EXIT_HAT_1, EXIT_HAT_2], 'Çıkış yok'],
   ] as const)('%s %#', (resolution, exits, line) => {
     expect(egressLine(egress(resolution, [...exits]), t)).toBe(line);
@@ -157,10 +157,52 @@ describe('the result view', () => {
     );
   });
 
+  it('candidates under the implicit catch-all of nat.egresses = {}: "-" as their exit', () => {
+    show(MOCKS.unconfigured);
+    expect(screen.getByTestId('lookup-exit')).toHaveTextContent('Çıkış tanımlı değil');
+    const matches = screen.getAllByTestId('match');
+    expect(matches.length).toBeGreaterThan(0);
+    for (const match of matches)
+      expect(within(match).getByTestId('match-exit')).toHaveTextContent(
+        /^Çıkış: - · dstintf wan1$/,
+      );
+  });
+
+  it('an internal-mode srcmac chain names the interface of its session record', () => {
+    show(MOCKS.srcmacInternal);
+    const card = screen.getByTestId('attribution');
+    const step = leaseStep();
+    expect(card).toContainElement(step);
+    expect(within(step).getByText('Kısmi kanıt: srcmac')).toBeVisible();
+    expect(step).toHaveTextContent('MAC 02:00:5e:00:53:64');
+    expect(step).toHaveTextContent(
+      'FortiGate oturum kaydının srcmac alanı (vlan60 arayüzü); kira kaydı yok',
+    );
+  });
+
+  it('an IP conflict beside a srcmac conflict keeps both statements', () => {
+    show(MOCKS.conflictSrcmac);
+    const conflict = screen.getByTestId('ip-conflict');
+    expect(within(conflict).getByText('IP çakışması: 2 olası cihaz')).toBeVisible();
+    expect(
+      within(conflict).getByText(/^Bu IP adresi bu anda birden fazla MAC adresinde görünüyor/),
+    ).toBeVisible();
+    expect(within(conflict).getByText('srcmac farklı: 3 olası cihaz')).toBeVisible();
+    expect(within(conflict).getByRole('region', { name: 'Olasılık 2' })).toHaveTextContent(
+      '00:0c:29:00:00:99',
+    );
+    expect(
+      within(conflict).getByRole('region', { name: 'Olasılık 3 (srcmac, kısmi kanıt)' }),
+    ).toHaveTextContent('00:00:5e:00:53:31');
+    // The engine's ip_conflict text is the header's, not repeated in each chain.
+    expect(conflict.querySelector('[data-explanation="ip_conflict"]')).toBeNull();
+  });
+
   it('a srcmac conflict shows both chains as alternatives', () => {
     show(MOCKS.srcmacConflict);
     const conflict = screen.getByTestId('ip-conflict');
     expect(within(conflict).getByText('srcmac farklı: 2 olası cihaz')).toBeVisible();
+    expect(within(conflict).queryByText(/^IP çakışması/)).not.toBeInTheDocument();
     const lease = within(conflict).getByRole('region', { name: 'Olasılık 1' });
     const srcmac = within(conflict).getByRole('region', {
       name: 'Olasılık 2 (srcmac, kısmi kanıt)',
