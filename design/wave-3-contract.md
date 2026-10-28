@@ -6120,7 +6120,9 @@ from section 0.2 are recorded here too, with the date and who decided.
   both paths, `engine._unconverted`), and an internal lookup whose answer is a srcmac chain
   keeps its `no_lease` and is probed too. The safe side: a covering pre-upgrade ACK beside a
   srcmac chain is named (`fortigate_dhcp_not_converted`) and, for an exact match or internal
-  mode, cited, never as an attribution; the srcmac chain keeps its confidence (`low`). Tests:
+  mode, cited, never as an attribution; the srcmac chain keeps its confidence (`low`). Beside a
+  srcmac chain, "no chain was built" in `fortigate_dhcp_not_converted` means no *lease* chain;
+  the text stays. Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease`
   (internal, exact and candidate). Fold into 2.8.3.
 
