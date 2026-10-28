@@ -5987,7 +5987,11 @@ from section 0.2 are recorded here too, with the date and who decided.
   chosen: such a row is the usual record of a long session, and refusing it would drop its D10
   conflict and its srcmac chain. 2.9's "the three cannot count differently" holds for the rows
   within the hour: the lookup's count also includes its own considered rows outside the hour,
-  while the alert and the observed endpoint are unchanged. Tests:
+  while the alert and the observed endpoint are unchanged. A residual is accepted for Wave 3
+  (the manager's final review of PR #30, Q5): an internal lookup of one address does not see a
+  router MAC's long session of another address logged after the hour, so its srcmac chain stays
+  `low` with `srcmac_only`; counting the sessions that overlap the hour in
+  `trust.srcmac_ip_counts` (WP-B) is #40. Tests:
   `worker/tests/test_lookup_srcmac.py::test_a_shared_mac_logged_after_the_guard_window_is_still_counted`,
   `::test_another_long_session_does_not_widen_the_guard_of_a_mac`,
   `::test_an_address_the_hour_shows_already_is_counted_once`,
