@@ -34,6 +34,9 @@
     arcilogger-db license verify FILE  [--json]    the checks of install, no write, no audit
     arcilogger-db license install FILE [--json]    install a licence file (audited)
     arcilogger-db license remove       [--yes]     remove the installed licence (audited)
+    arcilogger-db leases prepare-rollback [--config PATH]
+                                               before a rollback (the installer): FortiGate
+                                               leases to low confidence, prints the count
     arcilogger-db version
 
 ``settings set`` is the supported way to change a database setting until the settings page
@@ -52,6 +55,12 @@ file until the recount commits, so a file still being loaded can be recounted to
 ``counts_from_line``; ``verify`` reads rows and counts in one read-only snapshot and also prints
 how many names are not stored in lower case (``fg_dns.qname``, ``fg_web.hostname``: ``domain:``
 assumes lower case).
+
+``leases prepare-rollback`` is the lease step of ``Install-Arcilogger.ps1 -Rollback`` without
+``-RestoreDatabase`` (ADR-0016, round 6; :mod:`arcilogger_db.lease_rollback`): the previous
+version cannot read FortiGate DHCP lines, so every ``fg_dhcp`` lease is set to ``low`` in one
+transaction before the program is swapped; ``upgrade`` (its seed) restores the ones the previous
+version left as they were and prints both counts with the lease rebuild range.
 
 ``license …`` (offline licensing, licensing contract 6.8) is the only command that loads the
 licence code (:mod:`arcilogger_db.licensing`, imported inside its handler): ``upgrade``,
@@ -113,6 +122,7 @@ from arcilogger_db.backup import (
     verify_backup,
 )
 from arcilogger_db.engine import make_engine
+from arcilogger_db.lease_rollback import prepare_rollback
 from arcilogger_db.migrate import current_revisions, head_revisions, upgrade
 from arcilogger_db.models import IngestOffset, SearchCount
 from arcilogger_db.partitions import (
@@ -122,6 +132,7 @@ from arcilogger_db.partitions import (
     partition_status,
 )
 from arcilogger_db.searchcounts import rebuild_stream, verify
+from arcilogger_db.seed import SeedReport
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.settings_admin import change_setting, check_actor, list_settings
 
@@ -183,7 +194,24 @@ def cmd_upgrade(config: Config) -> int:
             f"Aylık bölümler: {len(result.partitions.tables)} tablo, "
             f"{len(result.partitions.created)} yeni bölüm"
         )
+    if seed.rollback_restored is not None:
+        _print_lease_restore(seed)
     return EXIT_OK
+
+
+def _print_lease_restore(seed: SeedReport) -> None:
+    """The re-upgrade after a rollback's lease step (:mod:`arcilogger_db.lease_rollback`)."""
+    print(
+        "Geri almadan sonra FortiGate kiraları [FortiGate leases after a rollback]: "
+        f"{_n(seed.rollback_restored or 0)} yüksek güvene döndü [restored to high], "
+        f"{_n(seed.rollback_still_low or 0)} hâlâ düşük güvende [still low]"
+    )
+    print(
+        f"  Kiraları {seed.rebuild_from} - {seed.rebuild_to} arasında yeniden oluşturun [rebuild "
+        "the leases of these days]: Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman "
+        "çizelgesi → Kiraları yeniden oluştur (bir istekte en çok 31 gün [at most 31 days per "
+        "request])"
+    )
 
 
 def cmd_partitions(config: Config) -> int:
@@ -843,6 +871,37 @@ def cmd_search_counts(config: Config, args: argparse.Namespace) -> int:
     return SEARCH_COUNTS_ACTIONS[args.search_counts_command](config, args)
 
 
+# -- leases (ADR-0016, round 6) -------------------------------------------------------------------
+
+
+def _leases_prepare_rollback(config: Config, args: argparse.Namespace) -> int:
+    engine = _engine(config)
+    try:
+        try:
+            connection = engine.connect()
+        except OperationalError as exc:
+            raise _UnreachableError(_describe(exc)) from exc
+        # One transaction on derived rows: the leases and the status row commit together; a lock
+        # or statement timeout is a database error (1), not an unreachable database.
+        with connection, connection.begin(), Session(bind=connection) as session:
+            report = prepare_rollback(session)
+            session.flush()
+    finally:
+        engine.dispose()
+    print(
+        "FortiGate kiraları düşük güvene indirildi [FortiGate leases lowered to low "
+        f"confidence]: {_n(report.count)}"
+    )
+    return EXIT_OK
+
+
+LEASES_ACTIONS = {"prepare-rollback": _leases_prepare_rollback}
+
+
+def cmd_leases(config: Config, args: argparse.Namespace) -> int:
+    return LEASES_ACTIONS[args.leases_command](config, args)
+
+
 # -- license (offline licensing, contract 6.8) ---------------------------------------------------
 
 #: A licence file larger than this is not read at all (the licence limit is 64 KiB).
@@ -1239,6 +1298,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     for sub in (counts, counts_status, counts_rebuild, counts_verify):
         sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+    leases = commands.add_parser("leases", help="the lease timeline: the step before a rollback")
+    leases_actions = leases.add_subparsers(dest="leases_command", metavar="<action>")
+    prepare = leases_actions.add_parser(
+        "prepare-rollback",
+        help="before a rollback: every FortiGate DHCP lease to low confidence (prints the count)",
+    )
+    for sub in (leases, prepare):
+        sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
     licence = commands.add_parser(
         "license", help="offline licence: state, request code, verify, install, remove"
     )
@@ -1280,6 +1347,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _license_handler(args)
     if args.command == "search-counts" and getattr(args, "search_counts_command", None):
         handler = _search_counts_handler(args)
+    if args.command == "leases" and getattr(args, "leases_command", None):
+        handler = _leases_handler(args)
     if handler is None:
         parser.print_help()
         return EXIT_USAGE
@@ -1319,6 +1388,10 @@ def _license_handler(args: argparse.Namespace) -> Any:
 
 def _search_counts_handler(args: argparse.Namespace) -> Any:
     return lambda config: cmd_search_counts(config, args)
+
+
+def _leases_handler(args: argparse.Namespace) -> Any:
+    return lambda config: cmd_leases(config, args)
 
 
 if __name__ == "__main__":
