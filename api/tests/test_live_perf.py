@@ -3,7 +3,10 @@
 a typed filter.
 
 * The hub's CPU — the whole test process's ``process_time``, which also holds the server and the
-  three readers — stays at or below 0.4 s per wall second.
+  three readers — stays at or below 0.4 s per wall second on a core as fast as the one the budget
+  was set on. The same work costs more CPU on a slower or busier core (a slower CI runner,
+  neighbours on the same machine), so a gauge process times fixed work shaped like the hub's per
+  line while the writer runs, and the budget grows in proportion (never below 0.4 s).
 * Every stream stays at or below its rate cap, and the rest is reported: delivered + dropped =
   matching lines, exactly (the filters here match every line, so the count is known).
 * The buffer stays bounded; a line written once the burst is over arrives within 1.5 s.
@@ -38,6 +41,27 @@ pytestmark = pytest.mark.perf
 LINES_PER_SECOND = 10_000
 SECONDS = 10
 CPU_PER_SECOND = 0.4
+#: CPU seconds of one round of ``GAUGE`` on the core the budget was set on, where the hub took
+#: 0.31 s a second. Side by side on a 4-CPU Linux machine shared with other work the hub took
+#: 0.37 to 0.40 s a second with rounds of 6.7 to 7.8 ms: about 0.052 s per millisecond of round.
+GAUGE_ROUND = 0.006
+#: The gauge: ``python -c GAUGE <spool line> <seconds>`` prints its CPU seconds per round of 5,000
+#: lines cut, decoded, time-parsed, folded and searched, about a fifth of a core for ``seconds``.
+GAUGE = """
+import sys, time
+from datetime import datetime
+lines, seconds = [sys.argv[1].encode()] * 5_000, float(sys.argv[2])
+rounds, began, end = 0, time.process_time(), time.monotonic() + seconds
+while time.monotonic() < end:
+    for line in lines:
+        stamp, sender, message = line.split(b" ", 2)
+        datetime.fromisoformat(stamp.decode("ascii"))
+        sender.decode("ascii")
+        b'type="traffic"' in message.lower()
+    rounds += 1
+    time.sleep(0.03)
+print((time.process_time() - began) / rounds)
+"""
 #: The writer: ``python -c WRITER <file> <file> <lines a second> <seconds> <message>``.
 WRITER = """
 import sys, time
@@ -105,21 +129,33 @@ def test_three_streams_under_ten_thousand_lines_a_second(
     try:
         for reader in readers:
             reader.wait(lambda r: bool(r.of("hello")))
+        line = format_line(datetime.now(UTC), "172.31.255.1", traffic().encode())
         cpu, wall = time.process_time(), time.monotonic()
-        writer = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                WRITER,
-                *map(str, paths),
-                str(LINES_PER_SECOND),
-                str(SECONDS),
-                traffic(),
-            ],
-            check=True,
-            timeout=SECONDS + 30,
-        )
+        # the gauge runs beside the writer, so it sees the same core speed and neighbours; its
+        # CPU is its own process's, not in ``used``
+        with subprocess.Popen(
+            [sys.executable, "-c", GAUGE, line.decode().rstrip("\n"), str(SECONDS)],
+            stdout=subprocess.PIPE,
+            text=True,
+        ) as gauge:
+            writer = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    WRITER,
+                    *map(str, paths),
+                    str(LINES_PER_SECOND),
+                    str(SECONDS),
+                    traffic(),
+                ],
+                check=True,
+                timeout=SECONDS + 30,
+            )
+            gauged = float(gauge.communicate(timeout=30)[0])
         assert writer.returncode == 0
+        # a slower or busier core than the budget's raises it in proportion, a faster one does not
+        # lower it
+        budget = CPU_PER_SECOND * max(1.0, gauged / GAUGE_ROUND)
         written = LINES_PER_SECOND * SECONDS
         # the hub catches up: every line shown or counted, nothing left in a queue
         deadline = time.monotonic() + 30
@@ -130,7 +166,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         used, elapsed = time.process_time() - cpu, time.monotonic() - wall
         print(
             f"\nlive tail: {used:.2f} s CPU in {elapsed:.2f} s ({used / elapsed:.2f} s/s), "
-            f"{len(hub.buffer)} lines buffered"
+            f"{len(hub.buffer)} lines buffered; budget {budget:.2f} s/s "
+            f"(gauge {gauged * 1000:.1f} ms a round)"
         )
         for stream_id in streams:
             stream = hub.streams[stream_id]
@@ -140,7 +177,7 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         typed = hub.streams[streams[2]]
         assert typed.dropped.get("parse_budget", 0) > 0  # most lines were beyond the parse budget
         assert len(hub.buffer) <= hub.settings.buffer_lines
-        assert used / elapsed <= CPU_PER_SECOND
+        assert used / elapsed <= budget
         # once the burst is over, a single line arrives at once
         time.sleep(1.5)
         before = len(readers[0].lines())
