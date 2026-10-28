@@ -758,3 +758,11 @@ def test_a_logged_fortigate_lease_ends_the_lease_itself() -> None:
     assert settings.lease_timeout_seconds("dhcp61") == 3960  # configured: x 1.1
     assert settings.lease_timeout_seconds("dhcp61", None) == 3960
     assert settings.lease_timeout_seconds(None) == 95040
+    # The half-lease test of lease_renewal_not_seen reads the configured time without the margin
+    # from the same helper, so the two cannot disagree (2.7).
+    for server in ("dhcp61", "dhcp60", None):
+        assert settings.lease_timeout_seconds(server) == (
+            settings.server_lease_seconds(server) * settings.lease_timeout_percent // 100
+        )
+    assert settings.server_lease_seconds("dhcp61") == 3600
+    assert settings.server_lease_seconds(None) == 86400

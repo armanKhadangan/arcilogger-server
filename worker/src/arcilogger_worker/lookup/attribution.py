@@ -614,7 +614,11 @@ class Attributor:
                 notes.append(explain("fortigate_format_unverified"))
             record = self.record(lease, at)
             if record is not None:
-                length = record.lease or lease.lease_seconds or self._server_seconds(lease)
+                length = (
+                    record.lease
+                    or lease.lease_seconds
+                    or self.settings.server_lease_seconds(lease.server)
+                )
                 if at > record.time + timedelta(seconds=length / 2):
                     confidence = "low"
                     notes.append(
@@ -638,9 +642,3 @@ class Attributor:
         if later:
             notes.append(explain("source_configured_later", sources=", ".join(later)))
         return confidence, notes
-
-    def _server_seconds(self, lease: StoredLease) -> int:
-        """The configured lease time of the lease's server (no timeout margin)."""
-        return self.settings.lease_server_seconds.get(
-            lease.server or "", self.settings.lease_default_seconds
-        )

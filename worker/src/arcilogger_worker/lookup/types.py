@@ -909,8 +909,12 @@ class LookupSettings:
         only an estimate of the server's lease."""
         if lease_seconds is not None:
             return lease_seconds
-        lease = self.lease_server_seconds.get(server or "", self.lease_default_seconds)
-        return lease * self.lease_timeout_percent // 100
+        return self.server_lease_seconds(server) * self.lease_timeout_percent // 100
+
+    def server_lease_seconds(self, server: str | None) -> int:
+        """The configured lease time of ``server`` (``lease.server_seconds``, else
+        ``lease.default_seconds``), without the timeout margin."""
+        return self.lease_server_seconds.get(server or "", self.lease_default_seconds)
 
     @classmethod
     def from_settings(cls, values: Mapping[str, Any]) -> LookupSettings:
