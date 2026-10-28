@@ -57,7 +57,7 @@ hızlı olduğunu açar.
 | IP (`srcip`, `dstip`, `natip`, `ip`, `sender`) | `172.20.41.5`, `172.20.41.0/24`, `172.20.41.*`, `172.20.*` | IPv6 yazılabilir; IPv6 ağları desteklenen kapsamın dışındadır |
 | Port ve sayı (`srcport`, `dstport`, `natport`, `port`, `sessionid`) | `443`, `1000-2000`, `>1024`, `>=1`, `<10`, `<=10`, virgüllü liste | |
 | Protokol (`proto`) | `tcp`, `udp`, `icmp` ya da protokol numarası | |
-| MAC (`mac`) | her ayraç ve harf büyüklüğüyle (`00-00-5E-00-53-21`, `0000.5e00.5321`); üretici öneki `00:00:5e:*` | |
+| MAC (`mac`, `srcmac`) | her ayraç ve harf büyüklüğüyle (`00-00-5E-00-53-21`, `0000.5e00.5321`); üretici öneki `00:00:5e:*` | |
 | Alan adı (`domain`) | `example.com` (ad ve alt alan adları), `*.example.com` (yalnızca alt alan adları); küçük harfe çevrilir, uluslararası adlar punycode'a | |
 | DNS adı (`qname`) | tam ad | |
 | Sabit değer (`action`, `qtype`, `level`, `logid`) | tam değer; küçük harfe çevrilerek karşılaştırılır | |
@@ -169,6 +169,11 @@ indekssiz alanlar ya da yalnızca tersine çevrilmiş koşullar içeren bir sorg
 taranır; sayfa bunu `query_not_selective` bildirimiyle söyler ("Daha hızlı sonuç için srcip:,
 domain:, mac: veya qname: gibi bir alan ekleyin"). Ölçülen süreler bölüm 13'tedir.
 
+`srcmac:` bilerek indekssizdir: en büyük tablo olan FortiGate oturum kayıtlarının kaynak MAC
+adresini okur, bu yüzden zaman dilimleriyle taranır; uzun bir aralıkta `srcip:` ekleyin ya da
+aralığı kısaltın. `mac:` oturum kayıtlarını hiç okumaz: bir FortiGate DHCP istemcisi için
+`type:event mac:<MAC>` FortiGate DHCP kayıtlarının indeksini kullanır (ADR-0016).
+
 ## 6. Kayıt türleri
 
 `type:` alanının değerleri; aynı adlar istatistiklerde ve dışa aktarmada kullanılır.
@@ -246,7 +251,8 @@ yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir 
   her hücre metin. Sütunlar: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür, Alt tür, Kaynak IP,
   Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL, Kullanıcı,
   Uygulama, Kategori, MAC, Metin (en fazla 2.000 karakter), Ham kayıt
-  (`kaynak/gün/satır/konum`). CSV'de `=`, `+`, `-`, `@`, sekme (TAB) ya da satır başı karakteri
+  (`kaynak/gün/satır/konum`). MAC sütunu `mac:` alanının MAC adresidir (FortiGate DHCP kaydınınki
+  dahil); oturum kaydının `srcmac` değeri bir sütun değildir (ham kayıtta ve metinde bulunur). CSV'de `=`, `+`, `-`, `@`, sekme (TAB) ya da satır başı karakteri
   (CR) ile başlayan değerler formül olarak çalışmasın diye başına `'` alır; Excel'de her hücre
   metindir. Denetim ve görünmez karakterler iki biçimde de görünür kaçışlarla (`\u0007`) yazılır.
 - **Dosya mühürlü değildir.** "Bilgi" sayfası bunu söyler: "Bu dosya mühürlü değildir; bütünlük
@@ -306,7 +312,10 @@ göndermediğini görmenin en kısa yoludur ([DEVICE-SETUP.md](DEVICE-SETUP.md))
 
 - Filtre Arama ile aynı sorgu dilidir (boş olabilir). Ayrıştırılan alanlar "önizleme" olarak
   gösterilir (ingest'in son kaydı ayrıntıda farklı olabilir); toplayıcı biçiminde olmayan bir
-  satır "biçim dışı" rozetiyle gösterilir.
+  satır "biçim dışı" rozetiyle gösterilir. Bir FortiGate DHCP kaydı, Arama'daki gibi `event`
+  (FortiGate olayı) türünde gösterilir: Canlı Akış DHCP kaydını başka bir FortiGate olayından
+  ayırmaz; `type:event logid:0100026001` yalnızca DHCP Ack kayıtlarını gösterir
+  (docs/DEVICE-SETUP.md bölüm 2.4 ham satırı karşılaştırmak için bunu kullanır).
 - **Sınırlar:** akış başına saniyede en fazla `live.max_lines_per_second` (100) satır; sunucuda
   aynı anda `live.max_streams_total` (4), kullanıcı başına `live.max_streams_per_user` (2) akış
   (`live_stream_limit`). Gösterilemeyen satırlar sayılır ve nedeniyle bildirilir; 30 saniye
@@ -334,7 +343,9 @@ iyisidir.
 Ölçüm (2026-10-26): 4 işlemcili, başka işlerle paylaşılan bir Linux geliştirme makinesi, PostgreSQL 16 yerel aylık bölümlerle (TimescaleDB yok); 4.913.180 `messages` satırı 130 saniyede yazıldı, özet tablo ve istatistiklerle birlikte veri 689 saniyede hazırdı. TimescaleDB'li CI işi aynı testi 7 günden eski parçalar sıkıştırılmış olarak çalıştırır.
 Bu ölçümden sonra veriye günde 4.320 MikroTik olayı (`mt_event`; Q6 artık olay indeksini de
 denetler) eklendi; aşağıdaki sayılar bu ekten önceki veriyle alınmıştır. TimescaleDB'nin
-sayıları tablonun ardındadır; Windows CI işininkiler henüz kaydedilmedi.
+sayıları tablonun ardındadır; Windows CI işininkiler henüz kaydedilmedi. Veride FortiGate DHCP
+kaydı yoktur (revizyon `0017_fortigate_dhcp`); bu kayıtlar `mac:` ve `ip:` sorgularına küçük
+`fg_dhcp` tablosunun `(mac, time)` ve `(ip, time)` indeksleri üzerinde bir dal ekler.
 
 | # | Sorgu | Aralık | Bütçe | İlk çalıştırma | En iyi | Not |
 |---|---|---|---|---|---|---|
