@@ -587,6 +587,45 @@ def test_a_missed_close_needs_the_lease_interface_and_vdom(
         assert UNCONVERTED not in chain_keys(chain)
 
 
+def test_each_chain_is_checked_against_its_own_window(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """One post-lease query serves both chains of a candidate lookup, and each chain is tested
+    against its own window (round 6): X's last ACK is at T - 10 h, Y's at T - 2 h. A line naming
+    Y's address at T - 5 h lies inside the union of the windows but before Y's last ACK, so Y
+    stays as it was; the line naming X's address at the same time lowers X only."""
+    x, y = "172.20.42.81", "172.20.42.82"
+    x_mac, y_mac = "00:00:5e:00:53:81", "00:00:5e:00:53:82"
+    evidence.fortigate_dhcp(AT - timedelta(hours=10), x, x_mac)
+    evidence.fortigate_dhcp(AT - timedelta(hours=20), y, y_mac)
+    evidence.fortigate_dhcp(AT - timedelta(hours=2), y, y_mac)
+    unconverted_line(evidence, AT - timedelta(hours=5), y, OTHER)
+    evidence.traffic(AT, x, 51001, transip=WAN)
+    evidence.traffic(AT, y, 51002, transip=WAN)
+    build(db_session, DAY - timedelta(days=1), DAY)
+    first = lookup(db_session, public_ip="198.51.100.20")
+    chains = {m.traffic.srcip: m.chain for m in first.matches}
+    for ip in (x, y):
+        chain = chains[ip]
+        assert chain is not None
+        assert chain.lease is not None
+        assert (chain.confidence, chain.lease.confidence) == ("high", "high")
+        assert UNCONVERTED not in chain_keys(chain)
+    unconverted_line(evidence, AT - timedelta(hours=5), x, OTHER)
+    db_session.commit()
+    outcome = lookup(db_session, public_ip="198.51.100.20")
+    chains = {m.traffic.srcip: m.chain for m in outcome.matches}
+    lowered, kept_chain = chains[x], chains[y]
+    assert lowered is not None
+    assert lowered.lease is not None
+    assert (lowered.confidence, lowered.lease.confidence) == ("low", "low")
+    assert note(lowered, UNCONVERTED) == {"last": iso(AT - timedelta(hours=10)), "ip": x}
+    assert kept_chain is not None
+    assert kept_chain.lease is not None
+    assert (kept_chain.confidence, kept_chain.lease.confidence) == ("high", "high")
+    assert UNCONVERTED not in chain_keys(kept_chain)
+
+
 def test_the_moment_of_the_missed_close_itself(db_session: Session, evidence: Evidence) -> None:
     """The window of converted rows is open at the moment (2.7): a row exactly at ``at`` that
     the timeline applied ends the lease at ``at``; an ``fg_event`` line at ``at`` counts."""
@@ -1316,6 +1355,22 @@ def test_a_mac_only_lookup_finds_the_line_by_its_mac(
     other = lookup(db_session, mac="00:00:5e:00:53:58")
     assert NOT_CONVERTED not in keys(other)
     assert other.unconverted_dhcp == ()
+
+
+def test_a_newer_converted_row_of_the_mac_silences_the_mac_only_probe(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The MAC-only probe keeps the newest-row rule: a kept ``fg_dhcp`` ACK of the MAC (for
+    .58, its 1-day lease over two days before the moment) newer than its covering ``fg_event``
+    line means the timeline saw that event: no text, no citation."""
+    unconverted_line(evidence, AT - timedelta(days=4), PC, PC_MAC, hostname=HOST, lease=WEEK)
+    evidence.fortigate_dhcp(AT - timedelta(days=2), "172.20.42.58", PC_MAC, hostname=HOST)
+    build(db_session, DAY - timedelta(days=2), DAY)
+    outcome = lookup(db_session, mac=PC_MAC)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert "no_lease_for_mac" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
 
 
 # -- two DHCP origins (D27) -----------------------------------------------------------------------
