@@ -1050,7 +1050,8 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     """3.8: the round-7 converted-row query of 2.7 for the MACs of 100 chains on
     ``ix_fg_dhcp_mac_time`` over the 100-day cap (no fallback), at the load generator's
     FortiGate DHCP rate over 400 days (the chains' MACs on the staff Wi-Fi: read, every chain's
-    rows returned, and no move under D33's key), under 0.2 s."""
+    rows returned, and no move under D33's key), with its branch for the chains' addresses on
+    ``ix_fg_dhcp_ip_time`` (deviation c2) in the same statement, under 0.2 s."""
     moves: list[_Timed] = []
 
     def measure() -> None:
@@ -1075,8 +1076,10 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
     assert min(moments) == MT_AT - attribution.MISSED_MOVE_WINDOW
     with event_site.connect() as connection:
         rows = connection.exec_driver_sql(sql, parameters).all()
-    assert {n for n, _ip, _interface, _vd in rows} == set(range(1, 101))
-    assert {(str(ip).startswith("172.20.60."), interface) for _n, ip, interface, _vd in rows} == {
-        (True, "vlan60")
-    }
+    # The MAC branch reads every chain's rows; the address branch (deviation c2) reads the
+    # chains' own addresses, which no FortiGate row names (a healthy site returns none).
+    assert {n for n, _ip, _interface, _vd, _held in rows} == set(range(1, 101))
+    assert {
+        (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
+    } == {(True, "vlan60", False)}
     assert timed.seconds < 0.2, f"the converted-row query took {timed.seconds:.3f} s"

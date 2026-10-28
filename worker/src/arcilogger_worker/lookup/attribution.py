@@ -61,9 +61,11 @@ shows usable DHCP rows of two origins within W of the moment is ``low`` with
 chain, its alternatives too) with ``fortigate_dhcp_not_converted_since_lease`` when, between its
 lease's last DHCP record and the moment, a mapped FortiGate DHCP line in ``fg_event`` names its
 IP or its MAC (D8), or a converted ACK moves its MAC to another address in a way D33 would have
-closed the lease on with today's networks (round 7). A MAC on another address counts unless
-both addresses lie in configured networks and those differ (D33's key). Nothing of those rows
-is cited or copied into the outcome: they may be another client's (KVKK).
+closed the lease on with today's networks (round 7), or a converted ACK gives its IP to another
+MAC (to any MAC for a MikroTik lease, D5) that the build refused and today's settings accept
+(deviation c2: a sender or HA member configured later, a logid mapped later). A MAC on another
+address counts unless both addresses lie in configured networks and those differ (D33's key).
+Nothing of those rows is cited or copied into the outcome: they may be another client's (KVKK).
 """
 
 from __future__ import annotations
@@ -76,7 +78,21 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Final
 
-from sqlalchemy import ColumnElement, and_, case, cast, func, not_, or_, select, true
+from sqlalchemy import (
+    Boolean,
+    ColumnElement,
+    and_,
+    case,
+    cast,
+    false,
+    func,
+    not_,
+    null,
+    or_,
+    select,
+    true,
+    union_all,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, INET, MACADDR, TIMESTAMP
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
@@ -832,8 +848,9 @@ class Attributor:
     def checked(self, chains: Sequence[AttributionChain]) -> list[AttributionChain]:
         """``chains`` (every chain of one lookup, in order) after the checks of 2.7 that read
         across them, in the contract's order: two DHCP origins (D27), then FortiGate DHCP lines
-        in ``fg_event`` after the lease (D8), then converted ACKs of a MAC move the lease build
-        missed (D33, round 7). Lookups only: the usage rollups ignore confidence."""
+        in ``fg_event`` after the lease (D8), then converted ACKs the lease build missed: a MAC
+        move (D33, round 7) or the address given to another client (deviation c2). Lookups
+        only: the usage rollups ignore confidence."""
         if not self.lookup or not chains:
             return list(chains)
         groups = [[chain, *chain.alternatives] for chain in chains]
@@ -967,11 +984,19 @@ class Attributor:
                 self._lower(group)
 
     def _missed_moves(self, groups: list[list[AttributionChain]]) -> None:
-        """Round 7: one query on ``fg_dhcp`` (``ix_fg_dhcp_mac_time``) for kept ACKs of a
-        target's MAC for another IP inside the target's own ``(since, at)``, each address,
-        interface and VDOM once per target (the window is matched in the query: 100 days of a
-        MAC's ACKs are hundreds of rows, 3.8); in memory, for an ``fg_dhcp`` lease its interface
-        and (when its record is a row) its VDOM, and D33's key."""
+        """Round 7 and the c2 deviation: one statement on ``fg_dhcp`` for the kept ACKs the
+        lease build did not apply inside a target's own ``(since, at)`` (the window is matched in
+        the statement: 100 days of a MAC's ACKs are hundreds of rows, 3.8), in two branches:
+
+        * ``ix_fg_dhcp_mac_time``: the target's MAC for another IP, each address, interface and
+          VDOM once per target; in memory, for an ``fg_dhcp`` lease its interface and (when its
+          record is a row) its VDOM, and D33's key;
+        * ``ix_fg_dhcp_ip_time``: the target's IP for another MAC (an ``fg_dhcp`` lease) or for
+          any MAC (an ``mt_dhcp`` lease, D5), once per target and without any value of the row:
+          the build supersedes every open lease of an address at such an ACK, so it is one the
+          build refused and today's settings accept (a sender or HA member configured later,
+          D24; a logid mapped later), and a healthy timeline never returns one.
+        """
         targets = self._targets(groups, MISSED_MOVE_WINDOW)
         assigned = sorted(
             logid
@@ -988,44 +1013,72 @@ class Attributor:
                 cast([chain.internal_ip for _, chain, _, _ in targets], ARRAY(INET)),
                 cast([since for _, _, _, since in targets], ARRAY(TIMESTAMP(timezone=True))),
                 cast([chain.at for _, chain, _, _ in targets], ARRAY(TIMESTAMP(timezone=True))),
+                cast(
+                    [lease.source_table != FG_DHCP_TABLE for _, _, lease, _ in targets],
+                    ARRAY(Boolean),
+                ),
             )
-            .table_valued("mac", "ip", "since", "at", with_ordinality="n")
+            .table_valued("mac", "ip", "since", "at", "any_mac", with_ordinality="n")
             .render_derived("windows")
         )
-        query = (
+        low = min(since for _, _, _, since in targets)
+        high = max(chain.at for _, chain, _, _ in targets)
+        inside = and_(
+            FgDhcp.time > windows.c.since,
+            FgDhcp.time < windows.c.at,
+            FgDhcp.time > low,
+            FgDhcp.time < high,
+            FgDhcp.logid.in_(assigned),
+            self._kept,
+        )
+        moves = (
             select(
                 windows.c.n,
                 FgDhcp.ip,
                 FgDhcp.interface,
                 FgDhcp.extra["vd"].astext,
+                false().label("held"),
+            )
+            .distinct()
+            .join_from(
+                windows, FgDhcp, and_(FgDhcp.mac == windows.c.mac, FgDhcp.ip != windows.c.ip)
+            )
+            .where(FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})), inside)
+        )
+        held = (
+            select(
+                windows.c.n,
+                cast(null(), INET),
+                cast(null(), Text),
+                cast(null(), Text),
+                true().label("held"),
             )
             .distinct()
             .join_from(
                 windows,
                 FgDhcp,
                 and_(
-                    FgDhcp.mac == windows.c.mac,
-                    FgDhcp.time > windows.c.since,
-                    FgDhcp.time < windows.c.at,
-                    FgDhcp.ip != windows.c.ip,
+                    FgDhcp.ip == windows.c.ip,
+                    or_(windows.c.any_mac, FgDhcp.mac != windows.c.mac),
                 ),
             )
-            .where(
-                FgDhcp.mac.in_(sorted({lease.mac for _, _, lease, _ in targets})),
-                FgDhcp.time > min(since for _, _, _, since in targets),
-                FgDhcp.time < max(chain.at for _, chain, _, _ in targets),
-                FgDhcp.logid.in_(assigned),
-                self._kept,
-            )
+            .where(FgDhcp.ip.in_(sorted({chain.internal_ip for _, chain, _, _ in targets})), inside)
         )
-        rows = self.session.execute(query).all()
+        rows = self.session.execute(union_all(moves, held)).all()
         if not rows:
             return
         found: dict[int, list[tuple[str, str | None, str | None]]] = defaultdict(list)
-        for n, address, interface, vd in rows:
-            found[n - 1].append((address, interface, vd))
-        self._load_subnets(address for _n, address, _interface, _vd in rows)
+        superseded: set[int] = set()
+        for n, address, interface, vd, by_address in rows:
+            if by_address:
+                superseded.add(n - 1)
+            else:
+                found[n - 1].append((address, interface, vd))
+        self._load_subnets(address for _n, address, _i, _vd, by_address in rows if not by_address)
         for index, (group, chain, lease, _since) in enumerate(targets):
+            if index in superseded:
+                self._lower(group)
+                continue
             record = self.record(lease, chain.at)
             for address, interface, vd in found.get(index, ()):
                 if lease.source_table == FG_DHCP_TABLE:
