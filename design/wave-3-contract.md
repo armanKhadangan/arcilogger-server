@@ -5981,7 +5981,9 @@ from section 0.2 are recorded here too, with the date and who decided.
   withdrawn. The other-lease check is not widened for a row outside the hour: a lease covering
   a moment of the hour around T is what 2.9 asks. Refusing a row outside the hour was not
   chosen: such a row is the usual record of a long session, and refusing it would drop its D10
-  conflict and its srcmac chain. Tests:
+  conflict and its srcmac chain. 2.9's "the three cannot count differently" holds for the rows
+  within the hour: the lookup's count also includes its own considered rows outside the hour,
+  while the alert and the observed endpoint are unchanged. Tests:
   `worker/tests/test_lookup_srcmac.py::test_a_shared_mac_logged_after_the_guard_window_is_still_counted`,
   `::test_another_long_session_does_not_widen_the_guard_of_a_mac`,
   `::test_an_address_the_hour_shows_already_is_counted_once`,
