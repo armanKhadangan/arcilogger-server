@@ -32,12 +32,27 @@ the same lines, byte for byte):
   on site; ports are given out in time order over all devices once a day is generated),
   performance statistics every 5 minutes.
 
+Wave 3 site plans (ADR-0016; every new option defaults to the behaviour above, byte for byte):
+
+* ``--dhcp-server fortigate``: a FortiGate-only site. The FortiGate is every VLAN's gateway and
+  DHCP server: FortiGate DHCP Ack (26001) lines in the shape of the synthetic fixture on
+  assignment and on renewal at half the lease (a simulation assumption, sahada doğrula: F7), a
+  26002 line only when a guest leaves (every other lease expires unlogged, a simulation choice),
+  ``srcintf="vlan<VLAN>"`` on client traffic, and no ``core-r1``/``switch-1`` line or ARP-LOG.
+  ``both``: MikroTik for VLAN 41-43, the FortiGate for the Wi-Fi VLANs 60/61.
+* ``--srcmac``: traffic lines carry ``srcmac`` (lower case): the client's MAC behind the
+  FortiGate, the core router's MAC for every client behind the router (the shared case).
+* ``--egress NAME:TRANSIP:DSTINTF:SHARE`` (repeatable, shares sum to 100): internet exits (dual
+  WAN). Each session leaves by one exit (``dstintf``, source NAT to its ``transip``), drawn per
+  session; ``waninfo`` of the performance statistics lists the exits' interfaces.
+
 Outputs: ``spool`` writes the raw spool files of the days (``spool/<source>/<day>.log``, each
 line through :func:`arcilogger_core.rawlog.format_line`, exactly as the collector writes them);
 ``send`` sends the messages over UDP and/or TCP (octet counting, RFC 6587) at ``--rate``;
-``truth`` prints the ground truth (sessions with their device and person, DHCP leases) as JSON
-lines (UTF-8, also on a Windows console); ``stats`` counts lines per source and kind. Python
-API: :class:`Settings`, :class:`Simulation`, :func:`write_spool`, :func:`send_messages`.
+``truth`` prints the ground truth (sessions with their device, person and exit, DHCP leases with
+the table that holds their evidence) as JSON lines (UTF-8, also on a Windows console); ``stats``
+counts lines per source and kind. Python API: :class:`Settings`, :class:`Simulation`,
+:func:`write_spool`, :func:`send_messages`.
 
 **Never on the production server.** ``spool`` refuses a data folder that is in use (sealed
 days, a ``state`` folder, spool files it did not write) unless ``--i-know-this-is-not-production``
@@ -136,6 +151,9 @@ SWITCH_ADDRESS: Final = "172.20.10.21"
 SWITCH_PORTS: Final = 48
 #: The core router's port to the firewall (the firewall's ARP entry is on it, not on a VLAN).
 ROUTER_UPLINK: Final = "ether1"
+#: The core router's MAC on the transit link (172.31.255.2; it follows the address like the
+#: infrastructure's): the ``srcmac`` the firewall logs for every client behind the router.
+ROUTER_MAC: Final = "00:00:5e:00:53:02"
 
 #: The department VLANs of the example network (DHCP server ``dhcp<VLAN>``): VLAN → department.
 DEPARTMENTS: Final = {
@@ -146,6 +164,9 @@ DEPARTMENTS: Final = {
 #: Everyone's phone is on the staff Wi-Fi; guests are on the guest Wi-Fi (short leases).
 STAFF_WIFI: Final = 60
 GUEST_WIFI: Final = 61
+#: ``--dhcp-server both``: the VLANs whose gateway and DHCP server is the FortiGate (the core
+#: router keeps the department VLANs).
+FORTIGATE_VLANS_BOTH: Final = (STAFF_WIFI, GUEST_WIFI)
 #: Static network devices (switches, access points, printers, the admin PC) and servers.
 DEVICE_VLAN: Final = 10
 SERVER_VLAN: Final = 20
@@ -204,6 +225,20 @@ TLS_APP: Final = {
 }
 
 
+DhcpServer = Literal["mikrotik", "fortigate", "both"]
+
+
+@dataclass(frozen=True)
+class Egress:
+    """An internet exit (``--egress NAME:TRANSIP:DSTINTF:SHARE``): ``share`` per cent of the
+    sessions leave by ``dstintf`` with source NAT to ``transip``."""
+
+    name: str
+    transip: str
+    dstintf: str
+    share: int
+
+
 @dataclass(frozen=True)
 class Settings:
     seed: int = 5651
@@ -218,6 +253,44 @@ class Settings:
     #: Share of the people who come in at the weekend.
     weekend_presence: float = 0.06
     sources: tuple[Source, ...] = DEFAULT_SOURCES
+    #: Gateway and DHCP server of the VLANs: the core router, the FortiGate (a FortiGate-only
+    #: site), or both (:data:`FORTIGATE_VLANS_BOTH` on the FortiGate).
+    dhcp_server: DhcpServer = "mikrotik"
+    #: Traffic lines carry ``srcmac`` (FortiGate device identification).
+    srcmac: bool = False
+    #: Internet exits; none: every session leaves by ``wan1`` with ``transip``.
+    egresses: tuple[Egress, ...] = ()
+
+
+def check_egresses(egresses: Sequence[Egress]) -> None:
+    """Names unique, ``transip`` an IPv4 address, shares of 1-100 that sum to 100."""
+    if not egresses:
+        return
+    names = [egress.name for egress in egresses]
+    if len(set(names)) != len(names):
+        raise LoadgenError(
+            f"--egress adları tekrarlanıyor / --egress names repeat: {', '.join(names)}"
+        )
+    for egress in egresses:
+        try:
+            address = ipaddress.ip_address(egress.transip)
+        except ValueError:
+            address = None
+        if address is None or address.version != 4:
+            raise LoadgenError(
+                f"--egress {egress.name}: TRANSIP bir IPv4 adresi olmalı / must be an IPv4 "
+                f"address: {egress.transip!r}"
+            )
+        if not 1 <= egress.share <= 100:
+            raise LoadgenError(
+                f"--egress {egress.name}: SHARE 1-100 olmalı / must be 1-100: {egress.share}"
+            )
+    total = sum(egress.share for egress in egresses)
+    if total != 100:
+        raise LoadgenError(
+            f"--egress paylarının toplamı 100 olmalı, {total} / the --egress shares must sum to "
+            f"100, not {total}"
+        )
 
 
 # -- the simulated network ------------------------------------------------------------------------
@@ -393,6 +466,14 @@ class SessionTruth:
     user: int | None
     person: str | None
     department: str | None
+    #: The exit the session left by (``--egress``); ``None`` without exits.
+    egress: str | None = None
+
+
+#: The table that holds a lease's DHCP evidence; ``none``: no DHCP or ARP-LOG line places the
+#: device at its address (a static device behind the FortiGate; with ``--srcmac`` its traffic
+#: lines carry its MAC, partial evidence only).
+Evidence = Literal["mt_dhcp", "fg_dhcp", "none"]
 
 
 @dataclass(frozen=True)
@@ -406,6 +487,7 @@ class LeaseTruth:
     end: datetime | None
     device: str
     user: int | None
+    evidence: Evidence = "mt_dhcp"
 
 
 @dataclass
@@ -482,6 +564,7 @@ class _Nat:
     start: datetime
     end: datetime
     sessionid: int
+    transip: str
     port: int | None = None
     #: Index of the session's truth record in the day's ``sessions``.
     truth: int | None = None
@@ -502,6 +585,8 @@ class _Lease:
     expires: datetime
     #: The day output whose ``leases`` holds this lease's truth record, and its index there.
     truth: tuple[DayOutput, int] | None = None
+    #: A FortiGate lease: the time of its last ACK (``None``: a MikroTik lease).
+    acked: datetime | None = None
 
 
 @dataclass
@@ -520,19 +605,29 @@ class Simulation:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
+        check_egresses(self.settings.egresses)
         self.users = build_users(self.settings)
         self.infrastructure = infrastructure()
-        self.sources = {source.name: source for source in self.settings.sources}
+        # A FortiGate-only site has no MikroTik: no core-r1/switch-1 line at all.
+        self.sources = {
+            source.name: source
+            for source in self.settings.sources
+            if self.settings.dhcp_server != "fortigate" or source.type != "mikrotik"
+        }
         self._leases: dict[str, _Lease] = {}  # by MAC
         self._sticky: dict[str, str] = {}  # device key -> last IP
         self._next_session = 3_200_000
         self._ports: dict[str, int] = {}
-        self._transport_busy: dict[int, datetime] = {}
+        self._transport_busy: dict[tuple[str, int], datetime] = {}  # (transip, port) -> until
         self._nat: list[_Nat] = []
         self._order = 0
         self._out: DayOutput | None = None
         #: Per device: (from, until, ip) of the leases seen on the current day.
         self._windows: dict[str, list[tuple[datetime, datetime, str]]] = {}
+        self._statics_recorded = False
+        #: Per IP: when its last lease ended. ``day`` handles one device at a time, so a lease that
+        #: ended later than another device's ``begin`` is already gone from ``_leases`` then.
+        self._ended: dict[str, datetime] = {}
 
     # -- public -------------------------------------------------------------------------------
 
@@ -568,6 +663,7 @@ class Simulation:
         ]
         for device in devices:
             self._dhcp(device, day, activity.get(device.key, []), start, end)
+        self._record_statics(start)
         self._arp(day, devices, activity, start)
         self._heartbeats(start)
         self._switch_links(plans, day)
@@ -600,6 +696,12 @@ class Simulation:
     def _at(self, day: date, hour: float) -> datetime:
         local = datetime.combine(day, dtime(0), tzinfo=SITE_TZ) + timedelta(hours=hour)
         return local.astimezone(UTC)
+
+    def _fortigate_gateway(self, vlan: int) -> bool:
+        """Whether the FortiGate is the gateway and DHCP server of ``vlan`` (``--dhcp-server``);
+        otherwise it is the core router, as on the example network."""
+        mode = self.settings.dhcp_server
+        return mode == "fortigate" or (mode == "both" and vlan in FORTIGATE_VLANS_BOTH)
 
     def _plan(self, user: User, day: date) -> _DayPlan:
         rng = self._rng("plan", user.index, day.isoformat())
@@ -648,8 +750,12 @@ class Simulation:
     def _lease_seconds(self, server: str | None) -> int:
         return LEASE_SECONDS_BY_SERVER.get(server or "", LEASE_SECONDS)
 
-    def _free_ip(self, device: Device) -> str:
+    def _free_ip(self, device: Device, at: datetime) -> str:
         held = {lease.ip for lease in self._leases.values()}
+        if self._fortigate_gateway(device.vlan):
+            # A DHCP server never hands out an address before its lease has ended. (The MikroTik
+            # VLANs keep the earlier allocation, so the default output keeps its bytes.)
+            held |= {ip for ip, ended in self._ended.items() if ended > at}
         sticky = self._sticky.get(device.key)
         if sticky is not None and sticky not in held:
             return sticky
@@ -674,9 +780,46 @@ class Simulation:
         identity = self.sources["core-r1"].identity if "core-r1" in self.sources else "CORE-R1"
         self._emit(at, "core-r1", mikrotik(identity, "dhcp,info", text), f"dhcp.{action}")
 
+    def _fortigate_dhcp_line(self, lease: _Lease, at: datetime, *, release: bool = False) -> None:
+        """A FortiGate DHCP server record in the shape of the synthetic fixture lines
+        (``tests/fixtures/synthetic/fortigate-synthetic.log``; FortiOS 7.6 field list, MAC upper
+        case as in the community sample). The ACK is 26001; the RELEASE logid is derived and its
+        ``dhcp_msg``/``msg`` are the fixture's placeholders (sahada doğrula)."""
+        device = lease.device
+        fields: list[tuple[str, object]] = [
+            ("logdesc", "DHCP Release log" if release else "DHCP Ack log"),
+            ("interface", f"vlan{device.vlan}"),
+            ("dhcp_msg", "Release" if release else "Ack"),
+            ("mac", lease.mac.upper()),
+            ("ip", lease.ip),
+        ]
+        if not release:
+            fields.append(("lease", self._lease_seconds(device.server)))
+        if device.hostname:
+            fields.append(("hostname", device.hostname))
+        fields.append(
+            ("msg", "sentetik: DHCP release" if release else "DHCP server sends a DHCPACK")
+        )
+        logid = "0100026002" if release else "0100026001"
+        render = fortigate(190, logid, "event", "system", "information", fields)
+        self._emit(at, "fortigate", render, "fg-dhcp.release" if release else "fg-dhcp.ack")
+
+    def _ack(self, lease: _Lease, at: datetime) -> None:
+        """The FortiGate ACKs the lease at ``at``: it now ends one lease time later."""
+        lease.acked = at
+        lease.expires = at + timedelta(seconds=self._lease_seconds(lease.device.server))
+        self._fortigate_dhcp_line(lease, at)
+
     def _expire(self, lease: _Lease, at: datetime) -> None:
-        self._dhcp_line(lease.device, "deassigned", lease.ip, lease.mac, at)
+        """The lease ends at ``at``: RouterOS logs it; a FortiGate lease runs out unlogged (a
+        simulation choice: FortiOS documents no expiry record)."""
+        if lease.acked is None:
+            self._dhcp_line(lease.device, "deassigned", lease.ip, lease.mac, at)
+        self._end(lease, at)
+
+    def _end(self, lease: _Lease, at: datetime) -> None:
         del self._leases[lease.mac]
+        self._ended[lease.ip] = max(at, self._ended.get(lease.ip, at))
         if lease.truth is not None:
             output, index = lease.truth
             output.leases[index] = replace(output.leases[index], end=at)
@@ -693,17 +836,21 @@ class Simulation:
             return
         mac = device.mac_for(day, self.settings.seed)
         lease_time = timedelta(seconds=self._lease_seconds(device.server))
+        fortigate_dhcp = self._fortigate_gateway(device.vlan)
         for begin, finish in intervals:
             for other in [lease for lease in self._leases.values() if lease.device is device]:
                 if other.expires <= begin:
                     self._expire(other, other.expires)
             lease = self._leases.get(mac)
             if lease is None:
-                ip = self._free_ip(device)
+                ip = self._free_ip(device, begin)
                 lease = _Lease(mac, ip, device, begin, begin)
                 self._leases[mac] = lease
                 self._sticky[device.key] = ip
-                self._dhcp_line(device, "assigned", ip, mac, begin)
+                if fortigate_dhcp:
+                    self._ack(lease, begin)
+                else:
+                    self._dhcp_line(device, "assigned", ip, mac, begin)
                 lease.truth = (self._out, len(self._out.leases))
                 self._out.leases.append(
                     LeaseTruth(
@@ -716,13 +863,55 @@ class Simulation:
                         None,
                         device.key,
                         device.owner,
+                        "fg_dhcp" if fortigate_dhcp else "mt_dhcp",
                     )
                 )
-            lease.expires = max(lease.expires, finish + lease_time)
+            if lease.acked is None:
+                lease.expires = max(lease.expires, finish + lease_time)
+            else:
+                # The client renews once half the lease has passed (sahada doğrula: F7): at that
+                # moment while connected, or as soon as it is back. So a lease never runs out
+                # while its device is on the network.
+                half = lease_time / 2
+                if begin >= lease.acked + half:
+                    self._ack(lease, begin)
+                while lease.acked + half <= finish:
+                    self._ack(lease, lease.acked + half)
+                if device.kind == "guest":  # the only 26002: a guest's phone leaves
+                    self._fortigate_dhcp_line(lease, finish, release=True)
+                    self._windows.setdefault(device.key, []).append((begin, finish, lease.ip))
+                    self._end(lease, finish)
+                    continue
             self._windows.setdefault(device.key, []).append((begin, lease.expires, lease.ip))
         for lease in [lease for lease in self._leases.values() if lease.device is device]:
             if start <= lease.expires < end:
                 self._expire(lease, lease.expires)
+
+    def _record_statics(self, start: datetime) -> None:
+        """Static devices behind the FortiGate: no DHCP and no ARP-LOG places them at their
+        address, so the truth lists them once, with the evidence ``none``."""
+        if self._statics_recorded or self._out is None:
+            return
+        self._statics_recorded = True
+        for device in self.infrastructure:
+            if device.static_ip is None or device.kind == "firewall":
+                continue
+            if not self._fortigate_gateway(device.vlan):
+                continue
+            self._out.leases.append(
+                LeaseTruth(
+                    device.static_ip,
+                    device.base_mac,
+                    None,
+                    device.vlan,
+                    None,
+                    start,
+                    None,
+                    device.key,
+                    None,
+                    "none",
+                )
+            )
 
     def ip_at(self, device: Device, at: datetime) -> str | None:
         """The device's address at ``at`` (static, or the lease it held then)."""
@@ -743,12 +932,14 @@ class Simulation:
         start: datetime,
     ) -> None:
         """Hourly ARP-LOG of every dynamic ARP entry (docs/PARSERS.md): devices active at the
-        hour."""
+        hour (the core router's, so none of a VLAN whose gateway is the FortiGate)."""
         identity = self.sources["core-r1"].identity if "core-r1" in self.sources else "CORE-R1"
         recent = timedelta(minutes=10)
         for hour in range(24):
             mark = start + timedelta(hours=hour, seconds=5)
             for offset, device in enumerate(devices):
+                if self._fortigate_gateway(device.vlan):
+                    continue
                 spans = activity.get(device.key, [])
                 if not any(begin - recent <= mark <= end + recent for begin, end in spans):
                     continue
@@ -776,6 +967,17 @@ class Simulation:
                 at = start + timedelta(minutes=slot * HEARTBEAT_MINUTES, seconds=1)
                 self._emit(at, "fortigate", self._perf_stats(slot), "perf-stats")
 
+    def _waninfo(self, slot: int) -> str:
+        """``waninfo`` of the performance statistics (the format sample's layout): the exits'
+        interfaces, with made-up counters."""
+        interfaces = list(dict.fromkeys(egress.dstintf for egress in self.settings.egresses))
+        parts = []
+        for number, name in enumerate(interfaces, 1):
+            sent, received = (slot + 1) * 7_340_032 * number, (slot + 1) * 912_680 * number
+            packets_out, packets_in = (slot + 1) * 6120 * number, (slot + 1) * 2890 * number
+            parts.append(f"name={name},bytes={sent}/{received},packets={packets_out}/{packets_in};")
+        return "".join(parts)
+
     def _perf_stats(self, slot: int) -> Callable[[datetime], bytes]:
         sessions = 120 + (slot * 37) % 900
         fields: list[tuple[str, object]] = [
@@ -796,6 +998,8 @@ class Simulation:
                 f"Performance statistics: average CPU: {slot % 9}, concurrent sessions: {sessions}",
             ),
         ]
+        if self.settings.egresses:
+            fields.insert(-1, ("waninfo", self._waninfo(slot)))
         return fortigate(189, "0100040704", "event", "system", "notice", fields)
 
     def _switch_links(self, plans: Mapping[int, _DayPlan], day: date) -> None:
@@ -843,19 +1047,19 @@ class Simulation:
         self._ports[device.key] = current
         return current
 
-    def _transport(self, srcport: int, start: datetime, end: datetime) -> int:
-        """``transport`` = the source port unless another session still uses it (called in
-        time order: :meth:`_assign_nat`)."""
+    def _transport(self, transip: str, srcport: int, start: datetime, end: datetime) -> int:
+        """``transport`` = the source port unless another session still uses it on the same
+        ``transip`` (called in time order: :meth:`_assign_nat`)."""
         port = srcport
-        while self._transport_busy.get(port, start) > start:
+        while self._transport_busy.get((transip, port), start) > start:
             port = port + 1 if port < EPHEMERAL[1] else EPHEMERAL[0]
-        self._transport_busy[port] = end + NAT_GRACE
+        self._transport_busy[(transip, port)] = end + NAT_GRACE
         return port
 
     def _assign_nat(self, out: DayOutput) -> None:
         """Give every session of the day its NAT port, earliest session first."""
         for nat in sorted(self._nat, key=lambda n: (n.start, n.sessionid)):
-            nat.port = self._transport(nat.srcport, nat.start, nat.end)
+            nat.port = self._transport(nat.transip, nat.srcport, nat.start, nat.end)
             if nat.truth is not None:
                 out.sessions[nat.truth] = replace(out.sessions[nat.truth], transport=nat.port)
         self._nat = []
@@ -898,6 +1102,24 @@ class Simulation:
     def _pick_site(self, rng: random.Random) -> Site:
         return rng.choices(SITES, weights=[site.weight for site in SITES])[0]
 
+    def _egress(self, sessionid: int) -> Egress | None:
+        """The exit a session leaves by: drawn by ``rng(seed, "egress", session)`` with the
+        shares as weights, so the other choices of the day stay as they are."""
+        egresses = self.settings.egresses
+        if not egresses:
+            return None
+        rng = self._rng("egress", sessionid)
+        return rng.choices(egresses, weights=[egress.share for egress in egresses])[0]
+
+    def _srcmac(self, device: Device, day: date) -> str | None:
+        """``srcmac`` of the device's traffic (``--srcmac``): its own MAC when the FortiGate is
+        its gateway, the core router's for every client behind the router."""
+        if not self.settings.srcmac:
+            return None
+        if self._fortigate_gateway(device.vlan):
+            return device.mac_for(day, self.settings.seed)
+        return ROUTER_MAC
+
     def _session(
         self,
         user: User | None,
@@ -909,7 +1131,9 @@ class Simulation:
     ) -> None:
         site = self._pick_site(rng)
         dstip = site.addresses[rng.randrange(2)]
-        self._dns(ip, at, site, rng)
+        # The FortiGate's port to the core router, or the client's VLAN when it is the gateway.
+        srcintf = f"vlan{device.vlan}" if self._fortigate_gateway(device.vlan) else "port2"
+        self._dns(ip, at, site, rng, srcintf)
         start = at + timedelta(milliseconds=rng.randint(30, 120))
         sessionid = self._next_session
         self._next_session += 1
@@ -920,18 +1144,26 @@ class Simulation:
             typical = site.duration
             duration = max(1, int(rng.lognormvariate(0, 0.9) * typical))
         end = start + timedelta(seconds=max(duration, 1))
-        transport = _Nat(srcport, start, end, sessionid)
+        egress = self._egress(sessionid)
+        transip = self.settings.transip if egress is None else egress.transip
+        transport = _Nat(srcport, start, end, sessionid, transip)
         self._nat.append(transport)
-        common: list[tuple[str, object]] = [
+        source: list[tuple[str, object]] = [
             ("srcip", ip),
             ("srcport", srcport),
-            ("srcintf", "port2"),
+            ("srcintf", srcintf),
+        ]
+        destination: list[tuple[str, object]] = [
             ("srcintfrole", "undefined"),
             ("dstip", dstip),
             ("dstport", 443),
-            ("dstintf", "wan1"),
+            ("dstintf", "wan1" if egress is None else egress.dstintf),
             ("dstintfrole", "wan"),
         ]
+        common = [*source, *destination]
+        srcmac = self._srcmac(device, day)
+        # srcmac only in the traffic logs, after srcintf as in the synthetic fixture.
+        traffic_common = common if srcmac is None else [*source, ("srcmac", srcmac), *destination]
         url = rng.choice(("/", "/giris", "/haberler/gundem", "/api/v1/mesajlar", "/izle?v=42"))
         web: list[tuple[str, object]] = [
             ("policyid", POLICYID),
@@ -1005,7 +1237,7 @@ class Simulation:
                 start + timedelta(seconds=elapsed),
                 "0000000020",
                 "accept",
-                common,
+                traffic_common,
                 sessionid,
                 transport,
                 now,
@@ -1024,7 +1256,7 @@ class Simulation:
             end,
             "0000000013",
             action,
-            common,
+            traffic_common,
             sessionid,
             transport,
             final,
@@ -1041,7 +1273,7 @@ class Simulation:
                     proto=6,
                     srcip=ip,
                     srcport=srcport,
-                    transip=self.settings.transip,
+                    transip=transip,
                     transport=0,  # assigned with the day's other NAT ports (_assign_nat)
                     dstip=dstip,
                     dstport=443,
@@ -1055,6 +1287,7 @@ class Simulation:
                     user=user.index if user is not None else None,
                     person=user.name if user is not None else None,
                     department=user.department if user is not None else None,
+                    egress=None if egress is None else egress.name,
                 )
             )
 
@@ -1085,7 +1318,7 @@ class Simulation:
             ("policyname", "internet-out"),
             ("service", "HTTPS"),
             ("trandisp", "snat"),
-            ("transip", self.settings.transip),
+            ("transip", transport.transip),
             ("transport", transport),
             ("appid", int(TLS_APP["appid"])),
             ("app", TLS_APP["app"]),
@@ -1112,7 +1345,7 @@ class Simulation:
         render = fortigate(189, logid, "traffic", "forward", "notice", fields)
         self._emit(at, "fortigate", render, "traffic")
 
-    def _dns(self, ip: str, at: datetime, site: Site, rng: random.Random) -> None:
+    def _dns(self, ip: str, at: datetime, site: Site, rng: random.Random, srcintf: str) -> None:
         sessionid = self._next_session
         self._next_session += 1
         srcport = rng.randint(50000, 65000)
@@ -1121,10 +1354,10 @@ class Simulation:
             ("sessionid", sessionid),
             ("srcip", ip),
             ("srcport", srcport),
-            ("srcintf", "port2"),
+            ("srcintf", srcintf),
             ("dstip", DNS_SERVER),
             ("dstport", 53),
-            ("dstintf", "port2"),
+            ("dstintf", f"vlan{SERVER_VLAN}" if self._fortigate_gateway(SERVER_VLAN) else "port2"),
             ("proto", 17),
             ("qname", f"www.{site.hostname}" if rng.random() < 0.3 else site.hostname),
             ("qtype", "A"),
@@ -1388,6 +1621,21 @@ def _pairs(values: Sequence[str]) -> dict[str, str]:
     return found
 
 
+def parse_egress(value: str) -> Egress:
+    """``NAME:TRANSIP:DSTINTF:SHARE`` (``--egress``); :func:`check_egresses` checks the set."""
+    parts = value.split(":")
+    if len(parts) != 4 or not all(parts):
+        raise argparse.ArgumentTypeError(f"expected NAME:TRANSIP:DSTINTF:SHARE, got {value!r}")
+    name, transip, dstintf, share = parts
+    try:
+        address = ipaddress.ip_address(transip)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r}: {exc}") from exc
+    if not share.isdigit():
+        raise argparse.ArgumentTypeError(f"{value!r}: SHARE is a whole percentage")
+    return Egress(name, str(address), dstintf, int(share))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="arcilogger_loadgen.py",
@@ -1408,7 +1656,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--day", type=date.fromisoformat, default=None, help="first day YYYY-MM-DD (default today)"
     )
     parser.add_argument("--days", type=int, default=1, help="number of days (default 1)")
-    parser.add_argument("--transip", default=DEFAULT_TRANSIP, help="FortiGate SNAT address")
+    parser.add_argument(
+        "--transip", default=None, help=f"FortiGate SNAT address (default {DEFAULT_TRANSIP})"
+    )
     parser.add_argument(
         "--interim-seconds",
         type=int,
@@ -1416,6 +1666,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="interim traffic log interval (a FortiGate setting: verify on site)",
     )
     parser.add_argument("--only", action="append", default=[], help="only this source (repeat)")
+    parser.add_argument(
+        "--dhcp-server",
+        choices=("mikrotik", "fortigate", "both"),
+        default=Settings.dhcp_server,
+        help=(
+            "gateway and DHCP server of the VLANs: the core router (default), the FortiGate (a "
+            "FortiGate-only site: FortiGate DHCP lines, no MikroTik lines), or both (FortiGate "
+            "for the Wi-Fi VLANs 60/61)"
+        ),
+    )
+    parser.add_argument(
+        "--srcmac",
+        action="store_true",
+        help="traffic lines carry srcmac (the client's MAC behind the FortiGate, the core "
+        "router's behind the router)",
+    )
+    parser.add_argument(
+        "--egress",
+        action="append",
+        default=[],
+        type=parse_egress,
+        metavar="NAME:TRANSIP:DSTINTF:SHARE",
+        help="an internet exit (repeat; shares sum to 100), e.g. hat-1:100.64.12.9:wan1:60; "
+        "default: every session by wan1 with --transip",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     spool = commands.add_parser("spool", help="write raw spool files exactly as the collector")
     spool.add_argument("--data-dir", type=Path, required=True, help="ARCILOGGER data folder")
@@ -1477,12 +1752,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
+    if args.transip is not None and args.egress:
+        raise LoadgenError(
+            "--transip ve --egress birlikte kullanılamaz: her çıkış kendi TRANSIP adresini verir. "
+            "/ --transip and --egress exclude each other: each exit gives its own TRANSIP."
+        )
     settings = Settings(
         seed=args.seed,
         users=args.users,
         intensity=args.intensity,
-        transip=str(ipaddress.ip_address(args.transip)),
+        transip=str(ipaddress.ip_address(args.transip or DEFAULT_TRANSIP)),
         interim_seconds=args.interim_seconds,
+        dhcp_server=args.dhcp_server,
+        srcmac=args.srcmac,
+        egresses=tuple(args.egress),
     )
     if args.only:
         wanted = set(args.only)

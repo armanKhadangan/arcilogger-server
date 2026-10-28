@@ -35,7 +35,9 @@ The collector is never restarted for a configuration change (ADR-0014): the same
 that does not load keeps the running sources; a change of ``[collector]`` or ``data_dir`` (a
 hand edit) is only reported. The status file's ``config`` block names the SHA-256 of the file
 the sources came from: the browser administration widens the firewall for a new sender only
-once that SHA is reported, so its first datagram already finds its source.
+once that SHA is reported, so its first datagram already finds its source. A status write that
+fails (on Windows the replace is refused while another process reads the file) is tried again
+every ``fsync_interval_seconds`` until it succeeds.
 """
 
 from __future__ import annotations
@@ -552,7 +554,12 @@ class Collector:
             await asyncio.sleep(settings.fsync_interval_seconds)
             try:
                 self.maintain_once()
-                if self.reload_config() or loop.time() >= next_status:
+                if self.reload_config():
+                    # What it reports about its configuration changed: due now, and still due
+                    # after a failed write (on Windows a reader holding the file refuses the
+                    # replace), so the next round tries again, not a status interval later.
+                    next_status = loop.time()
+                if loop.time() >= next_status:
                     self.write_status()
                     next_status = loop.time() + settings.status_interval_seconds
             except OSError:
