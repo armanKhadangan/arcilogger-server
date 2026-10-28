@@ -187,7 +187,8 @@
         "5": "FortiGate satırlarının ayrıştırma hataları"
       },
       "use": "Kullan",
-      "useExample": "Kullan — bu örneği sorguya yaz: {{query}}",
+      "useExample": "Bu örneği sorguya yaz: {{query}}",
+      "useThisExample": "Kullan — bu örneği sorguya yaz: {{query}}",
       "speedTitle": "Hangi sorgular hızlıdır",
       "speed": {
         "indexedFields": "“İndeksli” işaretli alanlar (srcip:, domain:, mac:, qname:, sessionid: …) indeks kullanır ve uzun aralıklarda da hızlıdır.",

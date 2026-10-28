@@ -81,7 +81,7 @@ export function SyntaxHelp({
                     variant="link"
                     size="sm"
                     className="h-auto"
-                    aria-label={t('search.help.useExample', { query: example })}
+                    aria-label={t('search.help.useThisExample', { query: example })}
                     onClick={() => {
                       onUse(example);
                     }}

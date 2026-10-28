@@ -187,7 +187,8 @@
         "5": "Parse errors of FortiGate lines"
       },
       "use": "Use",
-      "useExample": "Use — write this example into the query: {{query}}",
+      "useExample": "Write this example into the query: {{query}}",
+      "useThisExample": "Use — write this example into the query: {{query}}",
       "speedTitle": "Which queries are fast",
       "speed": {
         "indexedFields": "Fields marked “Indexed” (srcip:, domain:, mac:, qname:, sessionid: …) use an index and stay fast over long ranges.",
