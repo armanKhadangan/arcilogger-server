@@ -116,17 +116,17 @@ function emptyMonth(month: string): Calendar {
 export interface RecordsOptions {
   /** Which credit sample `/credits` answers (default: Kamu SM production-like history). */
   credits?: 'kamusm' | 'mock' | 'kamusm_low';
-  /** Milliseconds a new evidence package stays `queued`, then `building`, before `ready`. */
-  buildMs?: number;
 }
+
+/** What the reads of a new package's detail answer: the first `queued`, the next `building`. */
+const BUILD_STEPS = ['queued', 'building', 'ready'] as const;
 
 export class RecordsMock {
   readonly lookups = new Map<number, LookupOut>();
-  readonly packages = new Map<number, EvidenceDetail & { readyAt?: number }>();
+  readonly packages = new Map<number, EvidenceDetail & { reads?: number }>();
   nextLookupId: number;
   nextPackageId: number;
   credits: 'kamusm' | 'mock' | 'kamusm_low';
-  buildMs: number;
   /** The next evidence creation answers with this captured refusal. */
   refuseNextCreate: ErrorSample | null = null;
   /** The next day verification answers with this captured result (default: ok). */
@@ -149,7 +149,6 @@ export class RecordsMock {
     this.nextLookupId = Math.max(...this.lookups.keys()) + 1;
     this.nextPackageId = Math.max(...this.packages.keys()) + 1;
     this.credits = options.credits ?? 'kamusm';
-    this.buildMs = options.buildMs ?? 2_500;
   }
 
   answer(call: RecordedCall, host: MockHost): Answer | null {
@@ -323,12 +322,15 @@ export class RecordsMock {
 
   // -- evidence packages ------------------------------------------------------------------------
 
-  /** The package as the API shows it now (a new one moves queued → building → ready). */
-  private current(id: number): (EvidenceDetail & { readyAt?: number }) | undefined {
-    const item = this.packages.get(id);
-    if (!item?.readyAt) return item;
-    const left = item.readyAt - Date.now();
-    const status = left <= 0 ? 'ready' : left > this.buildMs / 2 ? 'queued' : 'building';
+  /**
+   * A read of the package's detail: a new one moves queued → building → ready, one step per read
+   * (the drawer polls it), not by the clock, so slow test steps cannot skip a state. The list
+   * shows the state the last read left.
+   */
+  private read(item: EvidenceDetail & { reads?: number }): EvidenceDetail {
+    if (item.reads === undefined) return item;
+    const status = BUILD_STEPS[Math.min(item.reads, BUILD_STEPS.length - 1)] ?? 'ready';
+    item.reads += 1;
     if (status !== item.status) {
       item.status = status;
       const labels = EVIDENCE.status_labels[status];
@@ -338,8 +340,8 @@ export class RecordsMock {
         const ready = EVIDENCE.details['1'];
         if (!ready) throw new Error('ready package sample missing');
         Object.assign(item, {
-          package_name: `KP-E2E-${String(id).padStart(4, '0')}`,
-          file: `ARCILOGGER-kanit-KP-E2E-${id}.zip`,
+          package_name: `KP-E2E-${String(item.id).padStart(4, '0')}`,
+          file: `ARCILOGGER-kanit-KP-E2E-${item.id}.zip`,
           size: ZIP.length,
           sha256: sha256(ZIP),
           index_sha256: ready.index_sha256,
@@ -348,7 +350,7 @@ export class RecordsMock {
           finished_at: new Date().toISOString(),
           downloadable: true,
         });
-        delete item.readyAt;
+        delete item.reads;
       }
     }
     return item;
@@ -362,7 +364,7 @@ export class RecordsMock {
   }
 
   private out(item: EvidenceDetail): EvidenceOut {
-    return omit(item, 'extract', 'downloads', 'readyAt');
+    return omit(item, 'extract', 'downloads', 'reads');
   }
 
   private listPackages(call: RecordedCall, host: MockHost): Answer {
@@ -370,7 +372,7 @@ export class RecordsMock {
     if (Array.isArray(account)) return account;
     const items = [...this.packages.keys()]
       .sort((a, b) => b - a)
-      .map((id) => this.out(this.current(id) as EvidenceDetail))
+      .map((id) => this.out(this.packages.get(id) as EvidenceDetail))
       .filter((item) => this.packageVisible(account, item));
     return [200, { items, next_cursor: null }];
   }
@@ -378,9 +380,9 @@ export class RecordsMock {
   private getPackage(call: RecordedCall, host: MockHost, id: number): Answer {
     const account = host.requirePermission(call, 'evidence.read');
     if (Array.isArray(account)) return account;
-    const item = this.current(id);
+    const item = this.packages.get(id);
     if (!item || !this.packageVisible(account, item)) return host.error(404, 'not_found');
-    return [200, copy(omit(item, 'readyAt'))];
+    return [200, copy(omit(this.read(item), 'reads'))];
   }
 
   private createPackage(call: RecordedCall, host: MockHost): Answer {
@@ -430,7 +432,7 @@ export class RecordsMock {
       ...pkg,
       extract: body.extract ?? [],
       downloads: [],
-      readyAt: now.getTime() + this.buildMs,
+      reads: 0,
     });
     return [
       202,
@@ -447,7 +449,7 @@ export class RecordsMock {
     const account = host.requirePermission(call, 'evidence.download', true);
     if (Array.isArray(account)) return account;
     if (!account.privacy_accepted) return host.error(403, 'privacy_notice_required');
-    const item = this.current(id);
+    const item = this.packages.get(id);
     if (!item || !this.packageVisible(account, item)) return host.error(404, 'not_found');
     if (item.status === 'failed') return sample(EVIDENCE.errors.download_failed_package);
     // Like the API: past its expiry a package is gone even before the purge marks it.
