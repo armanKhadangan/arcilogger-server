@@ -111,7 +111,10 @@
                 (also after a failed upgrade), its Python must load arcilogger.toml; a
                 configuration the browser changed in a way it does not know (enabled = false of
                 a log source) is replaced by the copy kept before the upgrade, and the installer
-                says so: the later browser changes are undone, the audit log keeps them.
+                says so: the later browser changes are undone, the audit log keeps them. Without
+                -RestoreDatabase, before the swap, this version sets every FortiGate DHCP lease to
+                low confidence (arcilogger-db leases prepare-rollback; the previous version cannot
+                read FortiGate DHCP lines) and prints the count; the next upgrade restores them.
     -Uninstall: removes services, scheduled tasks, the Event Log source ARCILOGGER-Admin, firewall
                 rules and the ARCILOGGER program folders (only folders that this installer
                 created) and restores the power settings Set-ArciPower.ps1 recorded. It NEVER
@@ -265,6 +268,7 @@ $script:MigrationStarted = $false    # arcilogger-db upgrade was started (the sc
 $script:RestoreStarted = $false      # pg_restore was started (the database content may have changed)
 $script:LastDump = $null
 $script:ConfigRestored = $false      # Restore-ConfigForProgram put the copy from before the upgrade back
+$script:LeasesLowered = $false       # a rollback lowered the FortiGate leases and this version still runs
 $PreviousDir = $null
 $ConfigPath = $null
 $transcript = $null
@@ -2953,6 +2957,10 @@ function Complete-FailedChange {
     if ($swapBack) { Write-Host 'Önceki sürüm geri getiriliyor [restoring the previous version] ...' -ForegroundColor Yellow }
     else { Write-Host 'Hizmetler ve görevler geri getiriliyor [bringing services and tasks back] ...' -ForegroundColor Yellow }
     $problems = @(Restore-ArciRuntime -SwapBack:$swapBack -CollectorOnly:$databaseUncertain)
+    if ($Operation -eq 'rollback' -and $script:LeasesLowered) {
+        # This version runs on and keeps the low confidence; its seed restores it (contract 2.2.1).
+        $problems += 'FortiGate kiraları düşük güvende kaldı; kurulumu parametresiz yeniden çalıştırın, onarımdaki arcilogger-db upgrade onları geri getirir [FortiGate leases stay at low confidence: run the installer again without parameters, the repair''s arcilogger-db upgrade restores them]: powershell -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $InstallDir 'installer\Install-Arcilogger.ps1')
+    }
     $dump = $script:LastDump
     Write-InstallState @{
         last_failure = [pscustomobject]@{ operation = $Operation; reason = $Reason; at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'); database_uncertain = $databaseUncertain; manual_steps = $problems }
@@ -3108,6 +3116,34 @@ function Invoke-DatabaseOnlyRestore {
     }
 }
 
+function Invoke-LeaseRollbackStep {
+    <#
+    Contract 2.2.1: the previous version cannot read FortiGate DHCP lines, so while this version's
+    program is still in place and PostgreSQL runs, "arcilogger-db leases prepare-rollback" sets
+    every FortiGate lease to low confidence (derived rows only) and prints the count. A failure
+    does not stop the rollback: it is a warning that says what it means for the lookups.
+    #>
+    $detail = [pscustomobject]@{ command = 'arcilogger-db leases prepare-rollback'; lowered = $null }
+    Invoke-Step 'leases.prepare-rollback' 'FortiGate kiraları düşük güvene indiriliyor, önceki sürüm FortiGate DHCP satırlarını okuyamaz [lowering FortiGate leases to low confidence, the previous version cannot read FortiGate DHCP lines]' {
+        $result = $null
+        $problem = $null
+        # The command's own limits (lock 30 s, statement 10 min) end it first.
+        try { $result = Invoke-ArciProcess -FilePath $DbExe -ArgumentList @('leases', 'prepare-rollback', '--config', $ConfigPath) -AllowFailure -TimeoutSeconds 900 }
+        catch { $problem = $_.Exception.Message }
+        if ($result -and $result.ExitCode -eq 0) {
+            $line = @(([string]$result.StdOut) -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) | Select-Object -Last 1
+            Write-ArciInfo $line
+            if ($line -match ':\s*([\d.,]+)$') { $detail.lowered = [int]($Matches[1] -replace '[.,]', '') }
+            $script:LeasesLowered = $true
+            return
+        }
+        if ($result) { $problem = Get-DbLicenseProblem $result }
+        $message = 'FortiGate kiraları düşük güvene indirilemedi [FortiGate leases not lowered] ({0}). Geri alınan sürümdeki FortiGate zincirleri bir adresin önceki sahibini gösterebilir; geri alma sonrasındaki anlar için FortiGate-DHCP sorgularını yeniden yükseltmeden sonra yapın [FortiGate chains in the previous version may name a former holder of an address; make FortiGate-DHCP lookups of moments after the rollback after the re-upgrade].' -f $problem
+        Write-ArciWarn $message
+        $script:Warnings.Add($message)
+    } $detail
+}
+
 function Invoke-RollbackMode {
     $previousState = Get-ArciProgramFolderState -Path $PreviousDir
     if ($previousState -eq 'foreign') {
@@ -3123,6 +3159,8 @@ function Invoke-RollbackMode {
     try {
         Invoke-Step 'tasks.disable' 'Zamanlanmış görevler duraklatılıyor [pausing scheduled tasks]' { Disable-ArciTasks }
         Invoke-Step 'services.stop' 'Hizmetler durduruluyor [stopping services]' { Stop-ArciServices }
+        # With -RestoreDatabase the dump replaces the database: nothing to lower.
+        if (-not $RestoreDatabase) { Invoke-LeaseRollbackStep }
         Invoke-Step 'program.swap' ("{0} geri getiriliyor [restoring]" -f $PreviousDir) {
             $aside = '{0}.rolled-back-{1}' -f $InstallDir, [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
             $movedAside = $false
@@ -3136,6 +3174,8 @@ function Invoke-RollbackMode {
                 if ($movedAside) { Rename-ArciFolder -LiteralPath $aside -NewName (Split-Path -Leaf $InstallDir) }
                 throw
             }
+            # From here on the previous version runs on the lowered leases: nothing to undo.
+            $script:LeasesLowered = $false
         }
         Invoke-Step 'services.remove' 'Hizmet kayıtları kaldırılıyor [removing service registrations]' { Remove-ArciServices }
         if ($RestoreDatabase) {
