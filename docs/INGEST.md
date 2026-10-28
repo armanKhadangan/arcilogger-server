@@ -400,8 +400,9 @@ Both gates hold. Gate 1's lines reach only the routing rule's key check, as expe
 `event` lines (10 %) carry no `dhcp_msg`, and its traffic lines have no `srcmac` (ingest process
 CPU, median: 55.2 / 55.4 s in-process). Gate 2 is the case the change costs something in: every
 FortiGate DHCP line now converts a MAC and an address and is written to `fg_dhcp` instead of
-`fg_event`, and every traffic line converts `srcmac` (ingest process CPU, median: 60.4 / 62.8 s in-process, +3.9 %;
-with 2 workers the parsing runs in the workers and the medians show no cost). The per-campaign
+`fg_event`, and every traffic line converts `srcmac` (ingest process CPU, median: 60.4 / 62.8 s
+in-process, +3.9 %; with 2 workers the parsing runs in the workers and the medians show no cost).
+The per-campaign
 medians (one ABBA round each, 6 runs per tree): gate 1 −0.8 % / +1.8 % in-process and +6.3 % /
 −2.4 % with 2 workers; gate 2 −2.0 % / −3.3 % in-process and −1.2 % / −0.7 % with 2 workers. The
 machine got slower during gate 2's second campaign (both trees, about 3.5–5 % in-process and
