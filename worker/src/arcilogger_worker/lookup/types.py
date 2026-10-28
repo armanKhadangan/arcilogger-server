@@ -77,6 +77,9 @@ PersonLink = Literal["history", "current"]
 #: ``srcmac`` — the srcmac field of the FortiGate session record on an interface listed in
 #: ``lookup.srcmac_interfaces`` (low confidence, partial evidence, never a lease).
 MacSource = Literal["lease", "srcmac"]
+#: The explanations that make a chain with alternatives: an IP conflict of leases (spec 9.1)
+#: and a srcmac that names another MAC than the lease (D10).
+CONFLICT_KEYS = frozenset({"ip_conflict", "srcmac_mismatch"})
 #: How the requested public IP was resolved against the internet exits (``nat.egresses``,
 #: ADR-0016): ``public`` (an exit's public address), ``transip`` (an exit's NAT address),
 #: ``fallback`` (a direct or NAT address whose log check failed), ``observed`` (an address the
@@ -495,9 +498,11 @@ class AttributionChain:
     confidence: Confidence
     explanations: tuple[Explanation, ...] = ()
     #: IP conflict (spec 9.1): the other chains for the same IP at the same moment (another MAC
-    #: held an overlapping lease). Requires ``confidence="low"`` and the ``ip_conflict``
-    #: explanation; the engine marks every alternative the same way (not enforced here, so
-    #: lookups stored earlier still load); alternatives have no alternatives of their own.
+    #: held an overlapping lease, or, ADR-0016 D10, the session record's srcmac names another
+    #: MAC than the lease). Requires ``confidence="low"`` and the ``ip_conflict`` (or
+    #: ``srcmac_mismatch``) explanation; the engine marks every alternative the same way (not
+    #: enforced here, so lookups stored earlier still load); alternatives have no alternatives
+    #: of their own.
     alternatives: tuple[AttributionChain, ...] = ()
     #: Where the MAC comes from (``srcmac``: partial evidence, ``low``; ADR-0016).
     mac_source: MacSource = "lease"
@@ -507,8 +512,11 @@ class AttributionChain:
         if self.alternatives:
             if self.confidence != "low":
                 raise ValueError("a chain with alternatives (IP conflict) must be low confidence")
-            if not any(e.key == "ip_conflict" for e in self.explanations):
-                raise ValueError("a chain with alternatives needs the ip_conflict explanation")
+            if not any(e.key in CONFLICT_KEYS for e in self.explanations):
+                raise ValueError(
+                    "a chain with alternatives needs the ip_conflict explanation "
+                    "(srcmac_mismatch for a srcmac conflict)"
+                )
             for other in self.alternatives:
                 if other.alternatives:
                     raise ValueError("alternatives must not have alternatives of their own")

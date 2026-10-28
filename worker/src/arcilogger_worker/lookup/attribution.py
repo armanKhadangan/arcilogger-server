@@ -47,6 +47,13 @@ and chain) when ``at`` lies more than half the lease after that record
 (``fortigate_dhcp_no_network``), and names cited rows of an ``unknown-<ip>`` sender that is
 trusted now (``source_configured_later``).
 
+**srcmac** (ADR-0016 D10, contract 2.9): with a usable srcmac of the session (the lookup's
+guards passed), an IP without a lease gets the srcmac chain (:meth:`Attributor.srcmac_chain`: no
+lease, the device and person of that MAC, ``low``, ``mac_source="srcmac"``, ``srcmac_only``); a
+lease chain gets ``srcmac_agrees`` when the MACs are equal, otherwise the conflict of D10 (the
+lease chain first, the srcmac chain as its alternative, both ``low``, ``srcmac_mismatch``).
+Nothing of it is written (no lease, no device).
+
 **Checks across the chains of a lookup** (:meth:`Attributor.checked`, after the lease steps;
 contract 2.7), one query each for every chain of the lookup: a chain whose configured network
 shows usable DHCP rows of two origins within W of the moment is ``low`` with
@@ -227,6 +234,11 @@ class _Record:
     lease: int | None
     row: bool = False
     vd: str | None = None
+
+
+#: A usable srcmac of a session (2.9): the MAC, the session record it was read from and the
+#: record's source interface.
+Srcmac = tuple[str, EvidenceRef, str]
 
 
 @dataclass(frozen=True)
@@ -500,29 +512,54 @@ class Attributor:
 
     def leases_of_mac(self, mac: str, low: datetime, high: datetime) -> list[StoredLease]:
         """Leases of ``mac`` that overlap ``[low, high]`` (MAC lookups)."""
+        return self.leases_of_macs([mac], low, high).get(mac, [])
+
+    def leases_of_macs(
+        self, macs: Collection[str], low: datetime, high: datetime
+    ) -> dict[str, list[StoredLease]]:
+        """Per MAC of ``macs``, its leases that overlap ``[low, high]``, oldest first (one
+        query; the srcmac guard of a lookup reads every MAC it considers at once)."""
+        found: dict[str, list[StoredLease]] = defaultdict(list)
+        if not macs:
+            return found
         query = select(Lease).where(
-            Lease.mac == mac, Lease.start <= high, or_(Lease.end.is_(None), Lease.end > low)
+            Lease.mac.in_(sorted(macs)),
+            Lease.start <= high,
+            or_(Lease.end.is_(None), Lease.end > low),
         )
-        return [
-            StoredLease.from_row(row) for row in self.session.scalars(query.order_by(Lease.start))
-        ]
+        for row in self.session.scalars(query.order_by(Lease.start, Lease.id)):
+            found[row.mac].append(StoredLease.from_row(row))
+        return found
+
+    def prefetch_devices(self, macs: Iterable[str]) -> None:
+        """Load the devices (and their persons) of ``macs`` at once (srcmac candidates)."""
+        self._load_devices(set(macs))
 
     # -- chains -----------------------------------------------------------------------------------
 
     def chain(
-        self, ip: str, at: datetime, *, prefer_mac: str | None = None
+        self,
+        ip: str,
+        at: datetime,
+        *,
+        prefer_mac: str | None = None,
+        srcmac: Srcmac | None = None,
     ) -> AttributionChain | None:
-        """The chain of ``ip`` at ``at`` (``None`` when no lease covers it)."""
+        """The chain of ``ip`` at ``at`` (``None`` when no lease covers it).
+
+        ``srcmac``: a usable srcmac of the session (2.9; the lookup's guards passed): without a
+        lease it gives the srcmac chain (:meth:`srcmac_chain`); with one it agrees
+        (``srcmac_agrees``) or makes the conflict of D10 (:meth:`_srcmac_conflict`)."""
         leases = self.leases_at(ip, at)
         if not leases:
-            return None
+            return None if srcmac is None else self.srcmac_chain(ip, at, *srcmac)
         regular = [lease for lease in leases if not self.is_infrastructure(lease.mac)]
         considered = regular or leases[:1]
         if prefer_mac is not None:
             considered.sort(key=lambda lease: lease.mac != prefer_mac)
         primary = self._single(ip, at, considered[0])
         if len(considered) == 1:
-            return primary
+            return primary if srcmac is None else self._srcmac_conflict(primary, srcmac)
 
         def conflicted(single: AttributionChain) -> AttributionChain:
             # Every chain of a conflict is equally uncertain: none may look more reliable than
@@ -534,7 +571,81 @@ class Attributor:
             )
 
         others = tuple(conflicted(self._single(ip, at, lease)) for lease in considered[1:])
-        return replace(conflicted(primary), alternatives=others)
+        chain = replace(conflicted(primary), alternatives=others)
+        return chain if srcmac is None else self._srcmac_conflict(chain, srcmac)
+
+    def srcmac_chain(
+        self, ip: str, at: datetime, mac: str, ref: EvidenceRef, interface: str
+    ) -> AttributionChain:
+        """The chain of ``ip`` at ``at`` by the srcmac of a session record on a listed
+        interface (2.9, D10): no lease; the device of ``mac`` as ``devices`` knows it (nothing
+        is written there), resting on the session record ``ref``; the person valid at ``at``,
+        the VLAN of the subnet; ``low`` throughout, ``mac_source="srcmac"``, ``srcmac_only``."""
+        vlan, department = self._vlan(ip)
+        device = self._device(mac)
+        randomized = device.randomized if device is not None else is_randomized(mac)
+        device_info = DeviceInfo(
+            mac=mac,
+            name=None if device is None else device.name,
+            hostnames=tuple(device.hostnames or ()) if device is not None else (),
+            vendor=None if device is None else device.vendor,
+            randomized=randomized,
+            type=None if device is None else device.type,
+            infrastructure=False,
+            confidence="low",
+            evidence=(ref,),
+        )
+        person, person_notes = self._person(device, at)
+        explanations = [explain("srcmac_only", interface=interface)]
+        if vlan is not None and vlan.guest:
+            explanations.append(explain("guest_vlan"))
+        if randomized:
+            explanations.append(explain("randomized_mac"))
+        explanations += person_notes
+        if person is not None and person.department:
+            dept, source = person.department, "person"
+        elif department is not None:
+            dept, source = department.department, "vlan"
+            if person is None and not person_notes:
+                explanations.append(explain("no_person"))
+        else:
+            dept, source = None, "none"
+        return AttributionChain(
+            internal_ip=ip,
+            at=at,
+            vlan=None if vlan is None else vlan.vlan_id,
+            vlan_name=None if vlan is None else vlan.name_tr,
+            lease=None,
+            device=device_info,
+            person=person,
+            department=dept,
+            department_source=source,  # type: ignore[arg-type]
+            confidence="low",
+            explanations=tuple(explanations),
+            mac_source="srcmac",
+        )
+
+    def _srcmac_conflict(self, chain: AttributionChain, srcmac: Srcmac) -> AttributionChain:
+        """A lease chain beside a usable srcmac (D10): the MAC of a lease (the chain's or an
+        alternative's) adds ``srcmac_agrees`` to that chain; another MAC is the conflict, as
+        ``ip_conflict`` is one: the lease chain stays first, the srcmac chain is added as an
+        alternative, every chain ``low`` with ``srcmac_mismatch``."""
+        mac, ref, interface = srcmac
+        group = [chain, *chain.alternatives]
+        for index, single in enumerate(group):
+            if single.lease is not None and single.lease.mac == mac:
+                agrees = explain("srcmac_agrees", mac=mac)
+                group[index] = replace(single, explanations=(*single.explanations, agrees))
+                return replace(group[0], alternatives=tuple(group[1:]))
+        leased = chain.lease.mac if chain.lease is not None else None
+        mismatch = explain("srcmac_mismatch", srcmac=mac, mac=leased)
+        by_srcmac = self.srcmac_chain(chain.internal_ip, chain.at, mac, ref, interface)
+        group.append(by_srcmac)
+        marked = [
+            replace(single, confidence="low", explanations=(mismatch, *single.explanations))
+            for single in group
+        ]
+        return replace(marked[0], alternatives=tuple(marked[1:]))
 
     def _person(
         self, device: Device | None, at: datetime
