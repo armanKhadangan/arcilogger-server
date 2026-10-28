@@ -1,5 +1,5 @@
 import { KeyRound } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -118,13 +118,17 @@ export function CreateUserDialog({
   const [errors, setErrors] = useState<FieldErrors<UserField>>({});
   const [failure, setFailure] = useState<{ field: UserField | null; text: string } | null>(null);
 
-  useEffect(() => {
+  // The form begins anew while rendering when the dialog opens, so its first frame never shows the
+  // previous entries: an effect would run only after that frame.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setValues({ username: '', displayName: '', email: '', role: '' });
       setErrors({});
       setFailure(null);
     }
-  }, [open]);
+  }
 
   function set(field: UserField, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -280,14 +284,18 @@ export function EditUserDialog({
   const [errors, setErrors] = useState<FieldErrors<'displayName' | 'email'>>({});
   const [failure, setFailure] = useState<string | null>(null);
 
-  useEffect(() => {
+  // The form begins while rendering when the dialog opens for an account, so its first frame
+  // already shows that account's values: an effect would run only after that frame.
+  const [begunFor, setBegunFor] = useState<UserOut | null>(null);
+  if (user !== begunFor) {
+    setBegunFor(user);
     if (user) {
       setDisplayName(user.display_name);
       setEmail(user.email ?? '');
       setErrors({});
       setFailure(null);
     }
-  }, [user]);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -397,12 +405,15 @@ export function RoleDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const lang = currentLang();
 
-  useEffect(() => {
+  // Begins while rendering, like the edit dialog: the first frame shows the account's role.
+  const [begunFor, setBegunFor] = useState<UserOut | null>(null);
+  if (user !== begunFor) {
+    setBegunFor(user);
     if (user) {
       setRole(user.role);
       setFailure(null);
     }
-  }, [user]);
+  }
 
   async function submit() {
     if (!user || !isRole(role)) return;

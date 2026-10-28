@@ -70,14 +70,21 @@ export function AssignDialog({
   const [errors, setErrors] = useState<FieldErrors<AssignField>>({});
   const [failure, setFailure] = useState<{ text: string; conflict: boolean } | null>(null);
 
-  useEffect(() => {
+  // The form begins anew while rendering when the dialog opens, so its first frame never shows
+  // the previous entries: an effect would run only after that frame. The request's last answer
+  // is cleared in an effect (a side effect).
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setDraft(initialDraft(new Date()));
       setPerson(null);
       setErrors({});
       setFailure(null);
-      reset();
     }
+  }
+  useEffect(() => {
+    if (open) reset();
   }, [open, reset]);
 
   const latest = latestAssignedSince(devices);
