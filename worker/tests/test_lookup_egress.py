@@ -527,6 +527,48 @@ def test_e_c5_a_line_that_carried_the_address_stays_exact(
     assert "public_ip_not_transip" not in keys(outcome)
 
 
+def test_e_c5_a_moment_within_the_tolerance_of_the_switch(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Legacy (d) as converted, the moment 25 s after line 1's modem was reset to router mode
+    (A's last session 18:13:00-18:14:00, W from 18:14): a session through A that ended before
+    the moment is no evidence that the FortiGate held A then, so the answer is the fallback
+    with the requester's session through W, never a bare "no session"; a session through A on
+    the requested port inside the tolerance stays exact. The mirror: the moment 20 s before the
+    first session through A (a switch to bridge mode)."""
+    for minute in range(4, 15, 2):
+        at = tr(DAY, 18) + timedelta(minutes=minute)
+        evidence.traffic(at, PHONE, 41000 + minute, "203.0.113.20", transip=A, duration=60)
+    for minute in range(14, 31, 2):
+        at = tr(DAY, 18) + timedelta(minutes=minute)
+        evidence.traffic(at, PHONE, 40000 + minute, "203.0.113.20", transip=T1)
+    evidence.traffic(tr(DAY, 18, 14, 25), PC, 51001, DEST, 443, transip=T1, duration=5)
+    settings = legacy(db_session, [A], T1)
+    request = {"public_ip": A, "public_port": 51001, "tolerance_seconds": 60}
+    outcome = lookup(db_session, settings, at=tr(DAY, 18, 14, 25), **request)
+    assert (outcome.mode, resolution(outcome)) == ("candidates", ("fallback", ["genel-1", "wan"]))
+    assert (PC, 51001, T1) in sessions(outcome)
+    assert "public_ip_not_transip" in keys(outcome)
+    assert not {"no_match", "no_match_exact"} & set(keys(outcome))
+    # The requester's session through A:51001 ended 45 s before the moment: exact.
+    evidence.traffic(tr(DAY, 18, 13, 40), PC, 51001, DEST, 443, transip=A, duration=5)
+    db_session.commit()
+    found = lookup(db_session, settings, at=tr(DAY, 18, 14, 25), **request)
+    assert (found.mode, sessions(found)) == ("exact", [(PC, 51001, A)])
+    # The mirror, on the same line an hour later.
+    for minute in range(0, 24, 2):
+        at = tr(DAY, 19) + timedelta(minutes=minute)
+        evidence.traffic(at, PHONE, 40100 + minute, "203.0.113.20", transip=T1)
+    evidence.traffic(tr(DAY, 19, 23, 50), PC, 51001, DEST, 443, transip=T1, duration=5)
+    for minute in range(24, 41, 2):
+        at = tr(DAY, 19) + timedelta(minutes=minute, seconds=20)
+        evidence.traffic(at, PHONE, 41100 + minute, "203.0.113.20", transip=A)
+    db_session.commit()
+    mirror = lookup(db_session, settings, at=tr(DAY, 19, 23, 50), **request)
+    assert resolution(mirror) == ("fallback", ["genel-1", "wan"])
+    assert (PC, 51001, T1) in sessions(mirror)
+
+
 # -- E-d, E-d2: a line that does not pass the FortiGate ------------------------------------------
 
 

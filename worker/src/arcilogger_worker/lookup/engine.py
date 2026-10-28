@@ -39,12 +39,13 @@ the logs show as the FortiGate's own NAT address of a session overlapping the mo
 nobody (``no_egress``). Settings are not time-scoped, so an exact address is checked against the
 logs first (D15): it is the FortiGate's NAT address around the moment when the logs show it
 there, or show no private or shared NAT address outside the exit's own set; otherwise, or when
-it is seen beside such an address while nothing went through it, the answer is the warned
-``fallback`` over the address and the exits the line may share
-(``public_ip_not_transip``), never a false "the FortiGate logged no session". Only private or
-shared NAT addresses count as double-NAT evidence or as unclaimed candidates: a public NAT
-address no exit claims is the FortiGate's own (an IP pool, an unconfigured line). Every probe
-reads trusted senders only (D24). Every match names its exit (the row nearest the moment).
+it is seen beside such an address while no session through it spans the moment and its search
+finds none, the answer is the warned ``fallback`` over the address and the exits the line may
+share (``public_ip_not_transip``), never a false "the FortiGate logged no session". Only
+private or shared NAT addresses count as double-NAT evidence or as unclaimed candidates: a
+public NAT address no exit claims is the FortiGate's own (an IP pool, an unconfigured line).
+Every probe reads trusted senders only (D24). Every match names its exit (the row nearest the
+moment).
 
 **Data minimisation (spec 3.3), both NAT modes:** when the request names a destination (IP,
 port or domain) and no session goes to it, the answer is ``none`` with
@@ -888,8 +889,9 @@ class _Lookup:
         return None
 
     def _answer(self, plan: _Plan) -> tuple[LookupMode, list[NatMatch], _Plan]:
-        """Run the plan's search (a "seen, but not alone" pass whose address carried nothing in
-        the window becomes the fallback, its own notes discarded)."""
+        """Run the plan's search (a "seen, but not alone" pass whose address carried nothing at
+        the moment and whose search would find no session becomes the fallback, its own notes
+        discarded)."""
         request = self.request
         if plan.nobody:
             self.explanations.extend(plan.notes)
@@ -908,23 +910,36 @@ class _Lookup:
         return ("candidates" if matches else "none"), matches, plan
 
     def _carried(self, address: str) -> bool:
-        """A session of a trusted sender through ``address`` overlaps the window, on any port
-        and to any destination (D15 "seen, but not alone", round 7: while the FortiGate held the
-        address at the moment, the line was not double-NATed then)."""
+        """The search on ``address`` keeps its answer (D15 "seen, but not alone", round 7): a
+        session of a trusted sender through it spans the moment itself, on any port and to any
+        destination (the FortiGate held the address then, so the line was not double-NATed), or
+        the search would find a session through it in the window (with the requested port when
+        one is given), before any destination filter. A session that ended before the moment
+        or began after it shows neither: within the tolerance of a change of the line's mode it
+        belongs to the other mode."""
+        request = self.request
         started = FgTraffic.time - func.make_interval(
             0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
         )
-        clauses = [
-            FgTraffic.transip == address,
+        common = [FgTraffic.transip == address]
+        if request.protocol is not None:
+            common.append(FgTraffic.proto == request.protocol)
+        if self.untrusted:
+            common.append(_not_in(FgTraffic.source, self.untrusted))
+        spans = [
+            FgTraffic.time >= request.at,
+            FgTraffic.time <= request.at + timedelta(seconds=self.settings.max_session_seconds),
+            started <= request.at,
+        ]
+        found = [
             FgTraffic.time >= self.window.low,
             FgTraffic.time <= self.window.scan_end,
             started <= self.window.high,
         ]
-        if self.request.protocol is not None:
-            clauses.append(FgTraffic.proto == self.request.protocol)
-        if self.untrusted:
-            clauses.append(_not_in(FgTraffic.source, self.untrusted))
-        return bool(self.session.scalar(select(exists().where(*clauses))))
+        if request.public_port is not None:
+            found.append(FgTraffic.transport == request.public_port)
+        query = select(or_(exists().where(*common, *spans), exists().where(*common, *found)))
+        return bool(self.session.scalar(query))
 
     def _unmapped_note(self, plan: _Plan) -> None:
         """``egress_unmapped_seen``: NAT addresses no exit claims near the moment (public ones
