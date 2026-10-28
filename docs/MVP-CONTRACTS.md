@@ -897,6 +897,10 @@ Decision: ADR-0010; operator view: docs/ALERTS.md (TR: docs/UYARILAR.md).
   `arcilogger_worker.alerts.license`, docs/ALERTS.md); see docs/CORRELATION.md section 4. Commands:
   `arcilogger-worker alerts test-email --to ADDRESS` and `arcilogger-worker alerts list [--open]
   [--limit N]` (exit codes as `run`: 0 ok, 1 not sent, 2 configuration, 3 database unreachable).
+- **Lease evidence and internet exits (ADR-0016):** `alerts.system` also runs
+  `check_lease_evidence` (`R20-lease:<cause>`) and `check_nat_exits` (`R20-nat:<cause>`), each in
+  its own transaction; the causes, severities, dedup keys and details are listed in section 18.6
+  (operator view: UYARILAR/ALERTS section 2).
 - **Tables** (revision `0009_alert_delivery`): `alerts.created_at`, `alerts.resolved_at`;
   `alert_deliveries` (`alert_id`, `kind` new / resolved, `recipient`, `status` queued / sent /
   failed / suppressed, `attempts`, `last_error`, `next_attempt_at`, `message_id`, `created_at`,
@@ -1023,6 +1027,12 @@ expected columns named in a `csv_header` error are the template's (`id` is the e
 
 Test support: `arcilogger_api.directory_testing` (`add_device`, `add_person`, `department_id`).
 
+ADR-0016: the usable FortiGate DHCP rows (`fg_dhcp` through `trust.kept`) are DHCP events of the
+lease timeline like MikroTik DHCP rows, so their MACs and host names reach the device inventory
+(`upsert_devices`) and leases with `source_table = fg_dhcp`, read under the existing permissions
+(section 18.4). A srcmac chain names a device and its person at `low` without creating a lease or
+a device sighting.
+
 *Verify on site:* that the Windows PostgreSQL 16 build on the server ships the contrib module
 `btree_gist` (`SELECT * FROM pg_available_extensions WHERE name = 'btree_gist'`); without it the
 migration installs the equivalent trigger (`db/tests/test_assignments.py` covers both), so this
@@ -1041,6 +1051,9 @@ categories only for sessions without a host name). Rollup tables (revision `0010
 `usage_hourly`, `usage_blocked`, `usage_urls`, `domain_categories`, `usage_rebuilds`;
 `persons.usage_excluded`. Jobs `usage.today`, `usage.daily`, `usage.reattribute`,
 `usage.requests`, `usage.retention`; command `arcilogger-worker usage rebuild --from --to`.
+ADR-0016: FortiGate DHCP leases feed the subjects like every lease (no change in the usage
+code); srcmac never feeds usage, and a bad `nat.egresses` never stops the rollups (they never
+parse it).
 
 **API** (base `/api/v1/usage`, group 2 contract section 2 plus the lead's addition of
 2026-10-20). Common query parameters: `from`, `to` (site days, inclusive; `to` defaults to today
@@ -1434,6 +1447,7 @@ row's state stands. Texts: `admin_channel.texts(code)` (the API's `TEXTS`, then
 | `GET /settings` | `settings.manage` | `SettingsOut` (below) |
 | `PATCH /settings` | `settings.manage`; re-auth for `REAUTH_KEYS` | `SettingsPatch {changes: [{key, old, value}]}` → `SettingsPatchResult {changed: [{key, old, new}], unchanged: [key]}` |
 | `POST /settings/{key}/reset` | `settings.manage`; re-auth for `REAUTH_KEYS` | the shipped default → `SettingsPatchResult` |
+| `GET /settings/fortigate/observed?hours=24` | `settings.manage` | NAT addresses and srcmac interfaces seen in the FortiGate logs (below; ADR-0016) |
 
 **A change of a section** (`routers/admin_config.py`): a field left out of the body stays as it
 is. The `etag` (`"<section>:<sha256 of the canonical editable values>"`, `rules.etag`) must
@@ -1598,9 +1612,47 @@ through `settings_admin.change_setting(actor=username, actor_id=, ip=)` (audit `
 {old, new}`; a reset adds `reset: true`); a value equal to the one in force is `unchanged` and
 not written.
 
+**NAT addresses and srcmac interfaces seen in the logs** (`GET /settings/fortigate/observed`,
+`routers/settings.py`, ADR-0016; the "Kayıtlarda görülen NAT adresleri" / "NAT addresses seen in
+the logs" table under the exit editor): `hours` 1-72 (default 24); `settings.manage`
+(administrators), the permission of the whole settings router; **not audited** (counts and the
+firewall's own addresses only, no client address or MAC). The expensive counts are cached
+5 minutes per `hours`; what depends on the current settings (each row's `egress`,
+`trandisp_known`, `unmapped_transips`, `unknown_trandisp`, `exits_invalid`, an interface's
+`configured`) is computed from them on every request, so a saved exit shows at once. The counts
+run under `statement_deadline` of 5 s; past it 504 **`fortigate_observed_timeout`**: "FortiGate
+kayıtları {seconds} saniyede özetlenemedi; biraz sonra yeniden deneyin." / "The FortiGate
+records could not be summarised within {seconds} s; try again a little later."
+
+```json
+{"generated_at": "…",
+ "nat": {"hours": 24, "truncated": false,
+         "rows": [{"transip": "100.64.13.9", "dstintf": "wan2", "trandisp": "snat",
+                   "sessions": 18234, "first_seen": "…", "last_seen": "…",
+                   "egress": null, "trandisp_known": true}],
+         "unmapped_transips": ["100.64.13.9"], "unknown_trandisp": []},
+ "srcmac": {"hours": 1, "truncated": false,
+            "interfaces": [{"srcintf": "vlan42", "rows": 4012, "macs": 37,
+                            "max_ips_per_mac": 1, "configured": true}]}}
+```
+
+NAT part: `GROUP BY transip, dstintf, trandisp` over the trusted `fg_traffic` rows of the last
+`hours` with `transip IS NOT NULL`, `ORDER BY count DESC LIMIT 100` (`truncated` when more
+groups exist); `egress` is the exit that claims the row (`null` when none), `trandisp_known`
+whether `nat.snat_trandisp` lists the value, `unmapped_transips` the addresses no exit claims,
+`unknown_trandisp` the values the setting does not list. When the stored `nat.egresses` cannot be
+parsed, every row has `egress: null` and `nat` carries `"exits_invalid": true` (a 200, never a
+500; the panel points to `R20-nat:invalid`); the key is absent otherwise. srcmac part: the last
+hour, trusted rows with `srcmac IS NOT NULL` grouped by `srcintf` (`rows`, distinct `macs`, and
+the most distinct IPv4 `srcip` per MAC, as the lookup's guard counts them,
+`trust.srcmac_ip_counts` with `interfaces=None`), `LIMIT 50`; `configured` is whether
+`lookup.srcmac_interfaces` lists the interface. Budget (perf guard): < 2 s at 1 M rows a day over
+24 h.
+
 Captured answers: `web/e2e/samples/admin.json` (`kamusm`, `sources` and the refusals in
-`errors`), `settings.json`, the seal now and credit query samples in `seals.json` /
-`credits.json`.
+`errors`), `settings.json` (with the ADR-0016 keys and a 422 `nat.egresses` refusal),
+`settings-observed.json` (with an `exits_invalid` answer), the seal now and credit query samples
+in `seals.json` / `credits.json`.
 
 ## 17. Search, live tail and sources API (Wave 2, ADR-0015)
 
@@ -1632,6 +1684,9 @@ performance). Base `/api/v1`; nothing here is licence-gated (5651 Temel,
   case-insensitive text with `*` patterns, severity, parse error pattern, VLAN ids, departments,
   free text ≥ 3 characters). `SiteNetwork.load(session, config)` resolves VLANs, departments and
   network sources (`ap` also matches `ap-<ip>`).
+- **ADR-0016** (section 18.7): the field `srcmac:` (alias `kaynakmac:`, `fg_traffic.srcmac`, not
+  indexed); `fg_dhcp` rows are kind `event` (found with `mac:`, `ip:`, `interface:`, `logid:`,
+  `level:`); the `dhcp` kind is labelled "DHCP (MikroTik)".
 
 ### 17.2 Planner and SQL
 
@@ -1844,6 +1899,48 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
   (the kinds and the most common host of the sender's newest 1,000 messages of the last 24 h).
   Items by name; a configured network is followed by its members (both `configured: true`, the
   members with `network_of`; the network sums them and is `active` when a member is).
+- **`lease_evidence`** (ADR-0016; the "Kira kanıtı" / "Lease evidence" card): `SourcesOverview`
+  gains the required, never-null member
+
+  ```json
+  {"hours": 24,
+   "mt_dhcp": {"rows": 1234, "last_hour": "…", "leases_current": 310},
+   "fg_dhcp": {"rows": 0, "last_hour": null, "leases_current": 0, "refused_rows": 0,
+               "excluded_rows": 0, "format_verified": false},
+   "mt_arp": {"rows": 560, "last_hour": "…", "leases_current": 42},
+   "srcmac": {"interfaces": [], "rows_last_hour": null},
+   "state": "ok | none | refused", "none_tables": []}
+  ```
+
+  part of the cached overview, under `sources.read` (administrators), not audited; counts, times,
+  interface names and the format state only, never a client MAC, IP or host name.
+  - `rows`: the **usable** rows of the last 24 h (`mt_dhcp` `assigned`/`deassigned`, `mt_arp`,
+    `fg_dhcp` through `trust.kept`; primary-key time ranges), not `search_counts`, which counts
+    refused and unknown-sender rows too. `last_hour`: the time of the newest usable row within the
+    last hour, `null` when none arrived in it. `leases_current`: the leases of that
+    `source_table` open or ended in the last 24 h (`ix_leases_source_table_end`), for
+    information.
+  - `fg_dhcp.refused_rows`: the `fg_dhcp` rows of the last 24 h that rules 1 and 4-7 refuse
+    (`trust.refusal` without `trust.CONFIGURATION`), counted only while `dhcp.fortigate_logids`
+    is not empty (the alert's gate: with FortiGate evidence off every row would be refused);
+    `excluded_rows`: those of the excluded-interface and IPv6 rules, shown as an information line
+    ("hariç tutulan arayüzler: N kayıt" / "excluded interfaces: N records"), never as refused;
+    `format_verified`: `dhcp.fortigate_format_verified`.
+  - `state`, in this order: `refused` while `fg_dhcp.refused_rows > 0` (the live count, same
+    predicate and 24-h window as `R20-lease:fortigate-refused`, so it clears as soon as the
+    setting or source is corrected and the leases rebuilt; it **wins over `none`**: the records
+    do arrive); else `none` while an `R20-lease:none:<table>` or `R20-lease:absent` alert is
+    active (read from the active alerts, up to 5 minutes behind the check), with `none_tables`
+    the tables of the active `none` causes (empty for `absent`); else `ok`.
+  - When the `dhcp.fortigate_*` values cannot be read (written around the validator), the member
+    is still returned: `refused_rows` and `excluded_rows` are 0 and the state comes from the
+    alerts only (logged).
+  - `srcmac {interfaces, rows_last_hour}`: `interfaces` = `lookup.srcmac_interfaces`;
+    `rows_last_hour` counts the `fg_traffic` rows with `srcmac` of the last hour on those
+    interfaces, computed only when interfaces are configured, cached 60 s, under a 2-s deadline
+    (`null` on a timeout and without interfaces).
+  - Budgets (perf guards): < 0.5 s for the counts, < 1 s for the srcmac count. Sample
+    `sources.json` holds the states `ok`, `none` with `none_tables` and `refused`.
 - `GET /sources/{name}` (cached 30 s) → `SourceDetail` (+ `hourly` 48 h from `search_counts`
   when complete, `daily` 14 days, `gaps` 30 days from the manifests of sealed days and, today, the
   open gap of an enabled, expected source silent longer than `[seal] gap_minutes`,
@@ -1948,3 +2045,267 @@ all have their client address and text. The measured numbers: ARAMA.md / SEARCH.
   `test_search_perf.py`, `test_live_perf.py` and the sources sparkline guard on the TimescaleDB
   and Windows jobs at tier 1 (recorded: native partitions at tier 1, TimescaleDB at a tenth and
   at half of it).
+
+## 18. FortiGate DHCP, srcmac and internet exits (Wave 3, ADR-0016)
+
+Decision: [ADR-0016](adr/0016-fortigate-dhcp-and-internet-exits.md); binding design:
+`design/wave-3-contract.md`. This section collects what Wave 3 added, by kind, and points to the
+section that describes each part. Base `/api/v1`; no new path checks the licence (parser, lease
+job, lookup, alerts, endpoints: 5651 Temel). Nothing here claims legal compliance; FortiGate
+format details that are not confirmed on site are settings or loud checks ("sahada doğrula",
+ADR-0016).
+
+### 18.1 Fields and explanation keys
+
+- **Outcome** (`lookups.outcome`, `LookupOut.outcome`; section 5): `LeaseInfo.source_table`,
+  `lease_seconds`, `last_dhcp_evidence`; `AttributionChain.mac_source`; `TrafficInfo.srcintf`,
+  `dstintf`, `srcmac`; `NatMatch.egress`, `untrusted_sources`; `LookupOutcome.egress`
+  (`LookupEgress {resolution, egresses: EgressEntry[], searched: EgressSearched, changes:
+  EgressChange[], changed_after_event}`), `unconverted_dhcp`. Resolutions `public`, `transip`,
+  `fallback`, `observed`, `public_unknown`, `unconfigured`, `no_egress`; exit modes `direct`,
+  `isp_nat`, `not_logged`, `internal`. A lookup stored before the upgrade lacks these members;
+  `from_dict` and every client read an absent member as its default (section 5), and the
+  web's `web/src/lib/lookup-types.ts` declares them optional.
+- **`LookupSettings`** (section 5): `nat_egresses` with `egresses()`, `snat_trandisp`,
+  `srcmac_interfaces`, `srcmac_max_ips`, `fortigate_logids`, `fortigate_dhcp_msgs`,
+  `use_logged_lease`, `fortigate_traffic_extends`, `fortigate_interfaces_excluded`,
+  `fortigate_format_verified`, `lease_timeout_seconds(server, lease_seconds=None)`,
+  `server_lease_seconds(server)`.
+- **New explanation keys** (`arcilogger_worker.lookup.texts`, TR/EN texts there):
+  `chain_missing`, `fortigate_dhcp_not_converted`, `srcmac_only`, `srcmac_agrees`,
+  `srcmac_mismatch`, `srcmac_ambiguous`, `srcmac_shared`, `srcmac_other_lease`,
+  `srcmac_infrastructure`, `egress_search`, `egress_public_unknown`, `public_ip_no_egress`,
+  `egress_not_logged`, `egress_transip_not_seen`, `egress_interface_not_seen`,
+  `egress_interface_not_seen_kept`, `egress_unmapped_seen`, `egress_unconfigured`,
+  `nat_unknown_trandisp`, `fortigate_format_unverified`, `fortigate_format_verified`,
+  `lease_renewal_not_seen`, `fortigate_dhcp_not_converted_since_lease`,
+  `fortigate_dhcp_no_network`, `egress_observed_not_configured`, `egress_changed_after_event`,
+  `session_changed_exit`, `egress_not_logged_but_seen`, `dhcp_sources_overlap`,
+  `session_from_unknown_source`, `source_configured_later`, `egress_public_dynamic`,
+  `egress_internal`, `source_clock_offset`; rewritten: `no_lease`, `no_lease_for_mac`,
+  `port_hint` (`{egresses}`), `public_ip_not_transip`. Retired, kept for stored lookups and never
+  emitted: `public_ip_not_configured`, `wan_transip_not_seen`. `srcmac_mismatch` is a conflict
+  key like `ip_conflict` (`types.CONFLICT_KEYS`).
+- **Report names** (`reports/texts.py`): `EXIT_LABELS` (keys `public`, `transip`,
+  `fallback_direct`, `fallback_transip`, `observed`, `public_unknown`, `unconfigured`,
+  `no_egress`), `EXIT_MODES`, `READING_TABLE_KEYS` (the keys of the reading table in
+  docs/RAPOR.md), `TABLES["fg_dhcp"]`.
+
+### 18.2 Settings, status rows and codes
+
+- **Keys** (group `lookup`): `nat.egresses`, `nat.snat_trandisp`, `lookup.srcmac_interfaces`,
+  `lookup.srcmac_max_ips`, `dhcp.fortigate_logids`, `dhcp.fortigate_dhcp_msgs`,
+  `dhcp.fortigate_use_logged_lease`, `dhcp.fortigate_traffic_extends`,
+  `dhcp.fortigate_interfaces_excluded`, `dhcp.fortigate_format_verified`, with defaults and
+  bounds in section 5 ("Settings read by the worker"); the TR/EN labels and help texts are in
+  `arcilogger_db.settings_meta`. `REAUTH_KEYS` and `LOCKED_KEYS` are unchanged.
+- **Status rows** (section 3): `nat.egresses_migration`, `nat.egresses_changes`,
+  `leases.rollback_lowered`.
+- **Removed keys:** `nat.public_ips`, `nat.wan_transip`, `lookup.port_hint` (converted by
+  revision `0018_nat_egresses`, administrator rows kept unread for one version), and with them
+  the refusal code `setting_ip_invalid`, which no setting uses any more.
+- **Refusal codes** (`arcilogger_db.settings.SETTING_ERRORS`; `PATCH /settings` answers 422
+  `setting_invalid` with `details [{key, code, message_tr, message_en}]`, no field path; the
+  texts never repeat a submitted value; ranges are written with a hyphen). The exit rules'
+  codes are `arcilogger_db.egress.ERROR_CODES`:
+
+  | Code | Türkçe | English |
+  |---|---|---|
+  | `setting_logid_invalid` | logid 10 rakamdan oluşmalı ve anlamı assigned ya da deassigned olmalı (en çok 16 kayıt). | A logid has 10 digits and its meaning is assigned or deassigned (at most 16 entries). |
+  | `setting_dhcp_msg_invalid` | Her logid 10 rakamdan oluşmalı; değeri 1-8 ileti türünden (her biri 1-32 karakter, kontrol karakteri yok) oluşan bir liste olmalı. | Each logid has 10 digits; its value is a list of 1-8 message types (each 1-32 characters, no control characters). |
+  | `setting_interface_invalid` | Arayüz adı 1-35 karakter olmalı; kontrol karakteri ve baş/son boşluk içeremez. | An interface name has 1-35 characters, without control characters or leading/trailing spaces. |
+  | `setting_trandisp_invalid` | trandisp değerleri küçük harfle başlamalı (en çok 16 karakter); liste boş olamaz, en çok 8 değer. | trandisp values start with a lower-case letter (at most 16 characters); the list cannot be empty, at most 8 values. |
+  | `setting_egress_name` | Çıkış adı küçük harf, rakam ve tire içermeli (en çok 32 karakter), ör. hat-1. | An exit name has lower-case letters, digits and hyphens (at most 32 characters), e.g. hat-1. |
+  | `setting_egress_field` | Çıkışta bilinmeyen ya da eksik bir alan var; alanlar: label, mode (zorunlu), public, public_dynamic, transips, interfaces, port_preservation. | An exit has an unknown or missing field; the fields are label, mode (required), public, public_dynamic, transips, interfaces, port_preservation. |
+  | `setting_egress_dynamic` | "Genel IP değişebilir" yalnızca servis sağlayıcı NAT'ı olan çıkışlarda seçilebilir. | "Public IP may change" can only be chosen for an ISP NAT exit. |
+  | `setting_egress_mode` | NAT türü direct, isp_nat, not_logged ya da internal olmalı. | The NAT type must be direct, isp_nat, not_logged or internal. |
+  | `setting_egress_label` | Açıklama en çok 64 karakter olabilir ve kontrol karakteri içeremez. | A label has at most 64 characters and no control characters. |
+  | `setting_egress_address` | Geçersiz adres: IPv4 adresi ya da en az /24 bir IPv4 ağı bekleniyor (ağ adresi, ör. 203.0.113.208/29). | Invalid address: an IPv4 address or an IPv4 network of at least /24 is expected (the network address, e.g. 203.0.113.208/29). |
+  | `setting_ipv6_not_supported` | IPv6 adresleri bu sürümde desteklenmiyor. | IPv6 addresses are not supported in this version. |
+  | `setting_egress_overlap` | Bir genel adres ya da NAT adresi iki çıkışta birden olamaz; aynı transip yalnızca iki çıkışın arayüzleri ayrıysa kullanılabilir. | A public or NAT address cannot be in two exits; the same transip is allowed only when the two exits have separate interfaces. |
+  | `setting_egress_direct` | Doğrudan çıkış en az bir genel adres ister; transip girilmez (FortiGate genel adresi kendisi kullanır) ve port koruma 'unknown' kalır. | A direct exit needs at least one public address; it has no transip (the FortiGate uses the public address itself) and port preservation stays 'unknown'. |
+  | `setting_egress_not_logged` | FortiGate'ten geçmeyen çıkışa yalnızca genel adres ve açıklama girilir. | An exit that does not pass the FortiGate has only public addresses and a label. |
+  | `setting_egress_internal` | İnternet çıkışı olmayan NAT tanımına yalnızca NAT adresleri (en az bir), arayüzler ve açıklama girilir. | An exit that is not an internet exit has only NAT addresses (at least one), interfaces and a label. |
+  | `setting_egress_port_preservation` | Port koruma unknown, preserved ya da not_preserved olmalı. | Port preservation must be unknown, preserved or not_preserved. |
+  | `setting_egress_catch_all` | NAT adresi boş (tanımsız adresleri kapsayan) en çok bir çıkış olabilir. | At most one exit may have no NAT address (the one that covers unclaimed addresses). |
+  | `setting_egress_public_private` | Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin. | A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit. |
+  | `setting_egress_isp_nat_direct` | NAT adresi genel adresiyle aynı olan hat doğrudandır: türünü Doğrudan yapın. | A line whose NAT address is its public address is direct: set its type to Direct. |
+- `setting_too_many` (existing, "En çok {limit} öğe girilebilir." / "At most {limit} items are
+  allowed.") covers more than 8 exits, more than 16 addresses or 8 interfaces per exit
+  (`egress.MAX_EGRESSES`, `MAX_ADDRESSES`, `MAX_INTERFACES`) and more than 32 entries of the
+  interface lists (`settings.MAX_INTERFACE_LIST`); `setting_type` (existing) a `nat.egresses`
+  value that is no object. Where the contract names no code, the validator's choice is pinned by
+  `tests/fixtures/egress-cases.json`: a field of the wrong JSON type, `null`, an unknown field, a
+  missing mode or an exit that is no object → `setting_egress_field`; an address entry that is
+  no text, netmask notation, host bits, an empty or /33 prefix, an octet with a leading zero, a
+  network wider than /24 → `setting_egress_address`; an interface entry that is no text →
+  `setting_interface_invalid`; `port_preservation` `null` or unknown →
+  `setting_egress_port_preservation`; `public_dynamic` on `direct` → `setting_egress_dynamic`,
+  on `not_logged` → `setting_egress_not_logged`, on `internal` → `setting_egress_internal`;
+  limits count after de-duplication.
+- **HTTP codes of the wave:**
+
+  | Status | Code | Where |
+  |---|---|---|
+  | 422 | `setting_invalid` (the details above) | `PATCH /settings` |
+  | 503 | `lookup_settings_invalid` (new text, section 6.1) | `POST /lookup/5651` with a public IP while `nat.egresses` cannot be parsed |
+  | 504 | `fortigate_observed_timeout` (new, section 16) | `GET /settings/fortigate/observed` |
+  | 422 | `ipv6_not_supported` (unchanged, section 6.1) | `POST /lookup/5651` |
+
+### 18.3 Endpoints
+
+| Endpoint | Access | Change | Section |
+|---|---|---|---|
+| `POST /lookup/5651`, `GET /lookup/{id}` | `lookup.run` + KVKK | the 2.10 fields; `lookup.run` details `egress {resolution, names}`; the new 503 text; a stored outcome returned as stored | 5, 6.1 |
+| `GET /lookup/{id}/report.pdf` | `lookup.run` + KVKK | exit rows, method paragraphs, double-NAT variants, srcmac rows, FortiGate lease row, unconverted citation, cross-check of `fg_dhcp` and srcmac claims | 6.1 |
+| `GET /settings/fortigate/observed?hours=24` | `settings.manage` | new; not audited; counts cached 5 min, claims current; 504 after 5 s | 16 |
+| `GET /sources` | `sources.read` | gains `lease_evidence` (required, never null); not audited | 17.8 |
+| `GET /settings`, `PATCH /settings` | `settings.manage` | the ten keys of group `lookup`; the codes of 18.2 | 5, 16 |
+
+### 18.4 Audit and personal data
+
+- **No new audit action.** `settings.change` covers every new key and the v0018 conversion,
+  written once by the seed after `upgrade` (target `setting:nat.egresses`, `details` `{old:
+  null, new, migration: "0018_nat_egresses", from, dropped [{value, reason}],
+  conversion_failed}`); the change record `nat.egresses_changes` is a status row beside it, the
+  audit log stays the record of every old value. `lookup.run` details gain `egress {resolution,
+  names}`. Not audited: `GET /settings/fortigate/observed` and the `lease_evidence` member of
+  `GET /sources` (counts and the firewall's own addresses only).
+- **Command:** `arcilogger-db leases prepare-rollback` (the installer's rollback step; one
+  transaction on derived `leases` rows and the status row `leases.rollback_lowered`; exit 0 with
+  the count, 1 on a database error, 3 database unreachable). Raw and sealed data are not
+  touched.
+- **Personal data** ([roles.md](roles.md)): FortiGate DHCP host names and MACs (`fg_dhcp`,
+  `leases`, the device inventory) under the existing permissions (`lookup.run`, `search.read`,
+  the devices pages); srcmac chains under `lookup.run`; `srcmac:` under `search.read`;
+  `TrafficInfo.srcmac` only for listed interfaces. On an interface with FortiGate device
+  identification every session line carries the client's MAC, device name, OS, hardware vendor
+  and version, device type and passively learned user names; raw lines in Search, the raw-line
+  view, the PDF and evidence packages show them as they are, other people's candidate sessions
+  included (D21). `srcmac_ambiguous` names at most 3 MACs.
+- **Alert details** hold counts, VLAN numbers, a cause and a table code, a day, clock offsets in
+  seconds and at most five logids, `dhcp_msg` values, interface, VDOM and source names or the
+  firewall's own NAT addresses (log-supplied texts from trusted rows only, cut to 32 characters
+  with MAC- and IPv4-looking parts replaced by "…", `alerts.system.masked`); never a client
+  MAC; `fortigate-decline` lists at most five declined pool addresses (Security page only).
+  E-mails carry only the rule, the cause's one-line action and the whitelisted counts, VLAN
+  numbers, table and seconds (`alerts.texts` describers `_lease`, `_nat`).
+
+### 18.5 Parsers and tables
+
+- **Routing** (`arcilogger_ingest.parsers.fortigate`, docs/PARSERS.md): an `event` line with the
+  keys `ip`, `mac` and `dhcp_msg` (`fortigate.DHCP_KEYS`) is an `fg_dhcp` row when `ip` converts
+  to an address and `mac` to a MAC; otherwise it stays `fg_event` and the line is the parse
+  failure `fortigate.dhcp` ("DHCP event without a usable ip/mac: ip=<valid|invalid|empty>,
+  mac=<valid|invalid|empty>", never the values). The rule uses the line's shape only, never a
+  setting; which logid means `assigned` or `deassigned` is decided in the worker
+  (`dhcp.fortigate_logids`). An IPv6 `ip` with a MAC is an `fg_dhcp` row that the worker ignores.
+- **`fg_dhcp` columns** (section 3, docs/DATA-MODEL.md): the time-series columns, `logid`,
+  `subtype`, `level`, `logdesc`, `dhcp_msg`, `interface`, `ip` (NOT NULL), `mac` (NOT NULL),
+  `hostname`, `lease` (seconds as logged), `msg`, `device_time` (NOT NULL: `true` when `time` is
+  the FortiGate's event time, `false` when the receive time was used, `fortigate.time`; the
+  worker never uses such a row as lease evidence), `extra`.
+- **`fg_traffic`:** `srcmac` (field kind `mac`; an empty value is NULL, a value that does not
+  convert stays in `extra` with `fortigate.value`) beside the existing `srcintf`/`dstintf`;
+  `mastersrcmac`, `srcmacvendor` and the device identification fields stay in `extra`.
+- **Kinds** (`arcilogger_db.kinds`): `fg_dhcp` belongs to the kind `event`; `CLIENT_IP["fg_dhcp"]
+  = "ip"`; no `action` column.
+
+### 18.6 Alerts `R20-lease` and `R20-nat`
+
+`arcilogger_worker.alerts.system` `check_lease_evidence` / `check_nat_exits` (registered in
+`CHECKS` as `lease_evidence` and `nat_exits`); one-line actions `alerts.texts.LEASE_CAUSES` /
+`NAT_CAUSES`, titles and what-to-do texts `LEASE_TEXTS` / `NAT_TEXTS`; every finding's details
+hold `cause`, `title_en`, `action_tr`, `action_en` besides the keys below. The dedup key is
+`<rule>:<cause>` unless the table gives another; operator view: UYARILAR/ALERTS section 2.
+
+| Dedup key | Severity | Details |
+|---|---|---|
+| `R20-lease:none:<table>` (`fg_dhcp`, `mt_dhcp`, `mt_arp`) | high (`mt_dhcp`: medium) | `table`, `hours` |
+| `R20-lease:absent` | info | — |
+| `R20-lease:fortigate-refused` | medium, high | `count`, `rows`, `kept`, `excluded`, `reasons`, `logids`, `dhcp_msgs`, `sources`, `first_day` |
+| `R20-lease:fortigate-unconverted` | high | `count`, `rows`, `failures` |
+| `R20-lease:fortigate-renewals-missing` | high | `count` |
+| `R20-lease:fortigate-renewals-not-logged` | info | `count` |
+| `R20-lease:fortigate-decline:<net>` | high | `count`, `vlan`, `network`, `addresses` |
+| `R20-lease:dhcp-sources-overlap:<net>` | high | `vlan`, `network`, `origins` |
+| `R20-lease:fortigate-lease-unlimited` | high | `count` |
+| `R20-lease:fortigate-lease` | low | `count` |
+| `R20-lease:fortigate-dhcp-subnet` | low | `count`, `interfaces`, `first_day` |
+| `R20-lease:fortigate-unverified` | info | — |
+| `R20-lease:source-clock` | high | `seconds`, `sources`, `offsets` |
+| `R20-lease:fortigate-dhcp-mac` | medium | `count` |
+| `R20-lease:srcmac-shared:<interface>` | medium | `count`, `interface`, `most`, `limit` |
+| `R20-nat:conversion-failed` | high | — |
+| `R20-nat:invalid` | high | `code` |
+| `R20-nat:legacy-changed` | medium | `keys` |
+| `R20-nat:unmapped-transip` | medium | `count`, `addresses [{address, kind}]` |
+
+`<net>` is the configured network's VLAN number, else its subnet with `_` for `/`
+(`Network.key`); `vlan` is present only for a network with a VLAN number. `fortigate-refused`'s
+`reasons` counts the refused rows per rule, by the names `untrusted`, `unmapped`,
+`unexpected_msg`, `receive_time`, `bad_mac` (`REFUSAL_NAMES`).
+
+### 18.7 Search
+
+- `srcmac:` (alias `kaynakmac:`): `fg_traffic.srcmac`, kind `mac`, typed, **not indexed**
+  (scanned in time slices); `mac:` deliberately does not include it.
+- `fg_dhcp` rows are found under `type:event` by `mac:` and `ip:` (both indexed),
+  `interface:`, `logid:` (e.g. `logid:0100026001`) and `level:`.
+- The `dhcp` kind is labelled "DHCP (MikroTik)" / "DHCP (MikroTik)"; ARAMA/SEARCH section 6
+  points FortiGate DHCP records to `type:event`. Pinned by `api/tests/test_search_fields.py`,
+  `test_kinds.py` and `tests/test_search_docs.py`.
+
+### 18.8 Captured answers, mirrors and guards
+
+- **Samples** (`web/scripts/capture_api_samples.py`; regenerate, then `--check`):
+  `settings.json` with the new keys and a 422 `nat.egresses` refusal; `lookups.json` with a
+  FortiGate-only internal and candidate chain, a chain at `low` through
+  `lease_renewal_not_seen`, a srcmac-only chain, a srcmac conflict, a `hat-2` candidate list, a
+  quiet `direct` → `none`, `fallback` (direct and transip), `observed` (with and without exits),
+  `not_logged` and `not_logged` seen, `public_ip_no_egress` (listing every configured exit),
+  `egress_public_unknown`, `egress_public_dynamic`, `egress_internal`,
+  `egress_changed_after_event`, `source_clock_offset`, an `unconverted_dhcp` citation, a match
+  with `untrusted_sources`; `sources.json` with `lease_evidence` (`ok`, `none` with
+  `none_tables`, `refused`); `settings-observed.json`; `web/src/generated/api-schemas.json`.
+  The capture enters `nat.egresses` with `updated_at` 2026-10-01 09:00 site time, so the samples
+  carry no wall-clock change warning and `--check` is stable.
+- **Mirrors:** `web/src/lib/lookup-types.ts`, `sources-types.ts` (`lease_evidence` required)
+  and the observed answer in `api-types.ts`.
+- **Budgets** (`poe test-perf`, contract 3.8): observed endpoint < 2 s at 1 M rows a day over
+  24 h (deadline 5 s); `lease_evidence` < 0.5 s, its srcmac count < 1 s; each `R20-lease` query
+  < 1 s, `source-clock` < 0.5 s, `R20-nat:unmapped-transip` < 0.2 s; the D8 probe for 20 IPs and
+  the post-lease checks within the lookup's own guards.
+
+### 18.9 Decided while building (where the plan of ADR-0016 was refined)
+
+Recorded in the contract's "Deviations" sections; what touches the API, the outcome or the
+report:
+
+- **day0:** the ADR-0016 members of `lookup-types.ts` are optional, and the router returns a
+  stored outcome as stored (no `from_dict` round trip); `LookupSettings.from_settings` reads the
+  lookup-only values leniently; ranges in the new refusal texts use a hyphen.
+- **c1:** "seen, but not alone" falls back only when no trusted session through P spans T and
+  the search on P finds none; `public_unknown` keeps each exit's interface rule and the not-seen
+  widening; `double_nat` of a request without a public IP is "no `direct` exit" (an unreadable
+  `nat.egresses` counts as true); an IPv6 public IP lists no session, NAT66 included;
+  `egress_changed_after_event` joins exits with "; " and words internal authors; the validator
+  codes of 18.2; `setting_ip_invalid` is gone; the samples backdate the exits.
+- **b:** ARP never moves the deadline of an `fg_dhcp` lease; `arcilogger-db leases
+  prepare-rollback` exits 0/1/3 and keeps the recorded `at` when run again; the describers read
+  only `cause`, `count`, `vlan`, `table`, `seconds`.
+- **c2:** a RELEASE mapped after the build ends the lease in the lookup; D27 outside configured
+  networks uses the address as `{network}`; the D8 probe also runs for a MAC-only lookup; the
+  per-lookup clock check reads the rows nearest T with the 120-s limit for lease searches; the
+  srcmac guard counts a used row outside the hour by its own address; the D8 probe window and
+  the `mt_dhcp` cap of the `fg_event` post-lease check are 604,800 s (the converted-row check
+  keeps 8,640,000 s).
+- **e1:** `lease_evidence.<table>.last_hour` is the newest usable row within the last hour
+  (section 17.8); the web judges "as converted" by the converter's shape.
+- **WP-D:** `lease_evidence` is required and never null (the `dhcp.fortigate_*` values
+  unreadable: `refused_rows`/`excluded_rows` 0, state from the alerts only); the observed
+  endpoint caches the counts and computes the exit claims on every request; the double-NAT
+  variant and the CGNAT sentence only for a request with a public IP; no `double_nat` bullets
+  beside the `fallback` paragraph; `build_site(srcmac=True)` gives the phone `vlan60` (its own
+  network) where the contract wrote `vlan42`. They are listed in the WP-D pull request and,
+  where they depart from the contract, in its "Deviations — d".
