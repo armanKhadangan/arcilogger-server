@@ -11,12 +11,13 @@ keep the machine form: UTC ISO-8601 strings and integers).
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Final
 
 from arcilogger_core.fmt import format_date, format_datetime
-from arcilogger_worker.lookup.types import EXPLANATIONS, Explanation
+from arcilogger_db.egress import Egress
+from arcilogger_worker.lookup.types import EXPLANATIONS, EgressChange, EgressEntry, Explanation
 
 ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
     "no_lease": (
@@ -79,11 +80,12 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "(Settings → NAT), so only a candidate search is possible.",
     ),
     "port_hint": (
-        "Sıralamada FortiGate çıkış portunun talepteki portla aynı olması da dikkate alındı. "
-        "Bu, ISS modeminin kaynak portu koruduğu varsayımına dayanır ve sahada "
-        "doğrulanmalıdır.",
-        "The ranking also favours sessions whose FortiGate port equals the requested port. "
-        "This assumes the ISP router keeps source ports and must be verified on site.",
+        "{egresses} çıkışında servis sağlayıcının kaynak portu koruduğu sahada doğrulanmış olarak "
+        "işaretli: FortiGate NAT portu istenen genel porta eşit adaylar öne alındı. Bu yalnızca "
+        "sıralamadır; kesin eşleşme değildir.",
+        "Exit(s) {egresses} are marked as verified on site to keep source ports at the ISP router: "
+        "candidates whose FortiGate NAT port equals the requested public port are ranked first. "
+        "This is only a ranking, not an exact match.",
     ),
     "multiple_exact": (
         "Aynı genel adres ve port bu aralıkta {count} farklı oturumda kullanılmış; hepsi "
@@ -129,13 +131,17 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
     ),
     "public_ip_not_transip": (
         "Talepteki {address} adresi bu zaman aralığında FortiGate kayıtlarında çıkış (kaynak "
-        "NAT) adresi olarak görünmüyor; kayıtlarda başka bir çıkış adresi var. ISS modemi bu "
-        "tarihte hâlâ NAT yapıyor olabilir (çift NAT) veya Ayarlar → NAT değeri bu tarih için "
-        "doğru değil. Bu nedenle kesin eşleşme yerine aday araması yapıldı.",
-        "The requested address {address} does not appear as the FortiGate's source-NAT address "
-        "in its logs around this moment; the logs show another address. The ISP router may "
-        "still have translated at that date (double NAT), or the NAT setting does not apply to "
-        "that date. A candidate search was therefore made instead of an exact match.",
+        "NAT) adresi olarak görünmüyor ya da yalnızca bir kısmında görünüyor; kayıtlarda başka "
+        "bir çıkış adresi de var. ISS modemi bu tarihte hâlâ NAT yapıyor olabilir (çift NAT) "
+        "veya Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet "
+        "çıkışları (NAT) değeri bu tarih için doğru değil. Bu nedenle kesin eşleşme yerine aday "
+        "araması yapıldı.",
+        "The requested address {address} does not appear, or only part of the time, as the "
+        "FortiGate's source-NAT address in its logs around this moment; the logs also show "
+        "another address. The ISP router may still have translated at that date (double NAT), or "
+        "the value in Settings → Application settings → 5651 lookup and lease timeline → "
+        "Internet exits (NAT) does not apply to that date. A candidate search was therefore made "
+        "instead of an exact match.",
     ),
     "wan_transip_not_seen": (
         "Ayarlardaki FortiGate WAN adresi ({address}) bu zaman aralığında FortiGate "
@@ -606,3 +612,37 @@ def explain(key: str, **params: str | int | None) -> Explanation:
     return Explanation(
         key=key, text_tr=text_tr.format(**shown), text_en=text_en.format(**shown), params=params
     )
+
+
+#: Internal authors of a settings row, in words (D32: never the raw ``:migration``).
+_AUTHORS: Final[Mapping[str, tuple[str, str]]] = {
+    ":migration": (
+        "yükseltme (eski NAT ayarlarından aktarıldı)",
+        "upgrade (converted from the old NAT settings)",
+    ),
+    ":seed": ("varsayılan değer", "shipped default"),
+    ":system": ("varsayılan değer", "shipped default"),
+}
+
+
+def exit_changes(changes: Sequence[EgressChange], exits: Sequence[Egress]) -> tuple[str, str]:
+    """The changed exits of ``egress_changed_after_event`` in Turkish and in English (one
+    placeholder each, ``{changes_tr}``/``{changes_en}``): name, time and author of the change,
+    and what the exit holds now — "hat-2 (20.10.2026 08:12:00, yonetici; şimdi: genel
+    198.51.100.77, NAT 100.64.13.9)", or "silindi" / "deleted"."""
+    now = {egress.name: EgressEntry.from_egress(egress) for egress in exits}
+    turkish, english = [], []
+    for change in changes:
+        when = format_datetime(change.changed_at)
+        by_tr, by_en = _AUTHORS.get(change.changed_by, (change.changed_by, change.changed_by))
+        entry = now.get(change.name)
+        if change.deleted or entry is None:
+            held_tr, held_en = "silindi", "deleted"
+        else:
+            public = ", ".join(entry.public) or "-"
+            nat = ", ".join(entry.transips) or "-"
+            held_tr = f"şimdi: genel {public}, NAT {nat}"
+            held_en = f"now: public {public}, NAT {nat}"
+        turkish.append(f"{change.name} ({when}, {by_tr}; {held_tr})")
+        english.append(f"{change.name} ({when}, {by_en}; {held_en})")
+    return "; ".join(turkish), "; ".join(english)

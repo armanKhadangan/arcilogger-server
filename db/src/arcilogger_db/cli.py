@@ -40,9 +40,10 @@
 (M6): it validates the key and the value, writes ``updated_by = NAME`` (so ``upgrade`` never
 puts the default back) and appends ``settings.change`` with the old and new value to the
 hash-chained audit log (:mod:`arcilogger_db.settings_admin`). A string value may be given
-without JSON quotes (``100.64.12.9``); Windows PowerShell 5.1 drops the inner double quotes of
-native-command arguments, so pipe lists in: ``'["203.0.113.200"]' | arcilogger-db settings
-set nat.public_ips - --by tolga``.
+without JSON quotes (``settings set privacy.notice_version v2``); Windows PowerShell 5.1 drops
+the inner double quotes of native-command arguments, so pipe lists and objects in:
+``'{"hat-1": {"mode": "direct", "public": ["203.0.113.200"]}}' | arcilogger-db settings set
+nat.egresses - --by tolga``.
 
 ``search-counts …`` looks after ``search_counts``, which the ingest loader writes with the rows
 and the worker job ``search.counts_backfill`` fills in for files loaded before revision

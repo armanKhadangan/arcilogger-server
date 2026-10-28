@@ -28,7 +28,15 @@ parameter per value (PostgreSQL accepts at most 65,535).
   domain (another client's DNS/web log — CDN addresses serve many names) 35 (+port 40); IP
   with no or another port 45/30; port only 20; nothing requested 25 (neutral); requested but
   not matched 0;
-* port hint, 0 or 5 (setting ``lookup.port_hint``, off by default — see docs/CORRELATION.md).
+* port hint, 0 or 5: the exit whose search found the candidate is marked ``preserved`` (its ISP
+  router keeps source ports; ``nat.egresses``, ADR-0016 D16) and the candidate's FortiGate NAT
+  port equals the requested public port — only a ranking, never exact.
+
+**NAT addresses searched** (``build_query``; the internet exits of ``nat.egresses``, ADR-0016):
+``transip`` (exact mode), ``transip_in`` (an exit's NAT addresses, any ``trandisp``) and
+``unclaimed`` (every private or shared source-NAT address no exit claims, with a ``trandisp`` of
+``nat.snat_trandisp``), optionally narrowed to ``dstintfs``; a search without a NAT address (a
+destination-only request) takes every session whose ``trandisp`` is listed.
 
 The label (:data:`~arcilogger_worker.lookup.types.DestinationMatch`) keeps the weaker kinds
 apart, so a report never presents them as plain matches: ``ip_other_port`` (requested IP,
@@ -38,17 +46,19 @@ another port), ``domain_other_port`` (the session is tied to the name, another p
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from ipaddress import IPv4Network
 from typing import Any, Final
 
-from sqlalchemy import Select, all_, any_, cast, exists, func, literal, or_, select
-from sqlalchemy.dialects.postgresql import ARRAY, INET
+from sqlalchemy import Select, Text, and_, any_, cast, exists, func, literal, not_, or_, select
+from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import ClauseElement, ColumnElement, Executable
 
+from arcilogger_db.egress import NOT_PUBLIC
 from arcilogger_db.models import FgApp, FgDns, FgTraffic, FgWeb
 from arcilogger_worker.lookup.refs import traffic_ref
 from arcilogger_worker.lookup.types import (
@@ -102,6 +112,9 @@ _COLUMNS = (
     FgTraffic.raw_day,
     FgTraffic.raw_line,
     FgTraffic.raw_offset,
+    FgTraffic.srcintf,
+    FgTraffic.dstintf,
+    FgTraffic.srcmac,
 )
 
 
@@ -127,6 +140,10 @@ class TrafficRow:
     raw_offset: int
     #: The session's own web filter / application control log names the requested domain.
     named: bool = False
+    #: The FortiGate interfaces of the row and its srcmac (ADR-0016).
+    srcintf: str | None = None
+    dstintf: str | None = None
+    srcmac: str | None = None
 
     @property
     def start(self) -> datetime:
@@ -183,6 +200,7 @@ class SessionGroup:
             traffic_ref(r) for r in sorted(cited.values(), key=lambda r: (r.time, r.id))
         )
         first = self.first
+        nearest = self.nearest(at)
         return TrafficInfo(
             sessionid=first.sessionid,
             proto=first.proto,
@@ -195,7 +213,13 @@ class SessionGroup:
             start=self.start,
             end=self.end,
             evidence=evidence,
+            srcintf=nearest.srcintf,
+            dstintf=nearest.dstintf,
         )
+
+    def nearest(self, at: datetime) -> TrafficRow:
+        """The row nearest to ``at`` (its exit and interfaces are the match's, ADR-0016 D32)."""
+        return min(self.rows, key=lambda r: (abs((r.time - at).total_seconds()), r.time, r.id))
 
 
 def group_sessions(rows: Iterable[TrafficRow]) -> list[SessionGroup]:
@@ -255,9 +279,39 @@ def _inet_any(values: Collection[str]) -> ColumnElement[Any]:
     return any_(cast(literal(sorted(values), ARRAY(INET)), ARRAY(INET)))
 
 
-def _inet_all(values: Collection[str]) -> ColumnElement[Any]:
-    """``<> ALL(CAST(:values AS inet[]))``: one parameter however many values."""
-    return all_(cast(literal(sorted(values), ARRAY(INET)), ARRAY(INET)))
+def _text_any(values: Collection[str]) -> ColumnElement[Any]:
+    """``= ANY(CAST(:values AS text[]))``."""
+    return any_(cast(literal(sorted(values), ARRAY(Text)), ARRAY(Text)))
+
+
+def within(column: Any, networks: Sequence[IPv4Network]) -> ColumnElement[bool]:
+    """``column`` is one of ``networks``: ``= ANY(inet[])`` when every entry is a single address
+    (the ``(transip, transport, time)`` index applies), otherwise ``<<= ANY(cidr[])``."""
+    clause: ColumnElement[bool]
+    if all(n.prefixlen == n.max_prefixlen for n in networks):
+        addresses = [str(n.network_address) for n in networks]
+        clause = column == any_(cast(literal(addresses, ARRAY(INET)), ARRAY(INET)))
+    else:
+        texts = [str(n) for n in networks]
+        clause = column.op("<<=")(any_(cast(literal(texts, ARRAY(CIDR)), ARRAY(CIDR))))
+    return clause
+
+
+def unclaimed_nat(
+    claimed: Sequence[IPv4Network], snat_types: Collection[str]
+) -> ColumnElement[bool]:
+    """The rows whose ``transip`` is a private or shared source-NAT address no exit claims
+    (``claimed``: every exit's NAT addresses and every direct exit's public addresses) with a
+    listed ``trandisp``. A **public** NAT address no exit claims is the FortiGate's own address
+    (an IP pool, a line nobody configured): its sessions never left through the requested one."""
+    clauses = [
+        FgTraffic.transip.is_not(None),
+        within(FgTraffic.transip, NOT_PUBLIC),
+        FgTraffic.trandisp == _text_any(snat_types),
+    ]
+    if claimed:
+        clauses.append(not_(within(FgTraffic.transip, claimed)))
+    return and_(*clauses)
 
 
 def _named_by_logs(domain: str, window: Window) -> ColumnElement[bool]:
@@ -293,16 +347,22 @@ def build_query(
     dstport: int | None = None,
     domain: str | None = None,
     domain_only: bool = True,
-    snat_only: bool = True,
-    exclude_transips: Collection[str] | None = None,
+    transip_in: Sequence[IPv4Network] = (),
+    unclaimed: Sequence[IPv4Network] | None = None,
+    dstintfs: Collection[str] | None = None,
+    snat_types: Collection[str] = ("snat",),
 ) -> AnySelect | None:
     """Rows whose session overlaps the window (bounded scan); ``None`` for an empty filter.
 
     ``domain``: only sessions whose own web/app log names it, or — with ``dstips`` — sessions to
     one of those addresses *or* named by their logs (one scan; ``TrafficRow.named`` tells which).
     ``domain_only=False`` only marks the rows (``named``) without filtering on the domain.
-    ``exclude_transips``: leave out sessions translated to one of these addresses (the
-    FortiGate's other public addresses, when the search is not narrowed to one ``transip``).
+
+    NAT addresses: ``transip`` (exact); otherwise the rows translated to ``transip_in`` (an
+    exit's NAT addresses) **or**, with ``unclaimed`` (the claimed networks), to a private or
+    shared address no exit claims (:func:`unclaimed_nat`); with neither, every row whose
+    ``trandisp`` is one of ``snat_types``. ``dstintfs``: only rows that left by one of these
+    interfaces (an exit's ``interfaces``).
     """
     columns: list[Any] = list(_COLUMNS)
     query_filters: list[ColumnElement[bool]] = [
@@ -313,17 +373,19 @@ def build_query(
     ]
     if transip is not None:
         query_filters.append(FgTraffic.transip == transip)
+    elif transip_in or unclaimed is not None:
+        parts = [within(FgTraffic.transip, transip_in)] if transip_in else []
+        if unclaimed is not None:
+            parts.append(unclaimed_nat(unclaimed, snat_types))
+        query_filters.append(or_(*parts))
+    else:
+        query_filters.append(FgTraffic.trandisp == _text_any(snat_types))
     if transport is not None:
         query_filters.append(FgTraffic.transport == transport)
-    if snat_only and transip is None:
-        query_filters.append(FgTraffic.trandisp == "snat")
-    if exclude_transips:
-        query_filters.append(
-            or_(
-                FgTraffic.transip.is_(None),
-                FgTraffic.transip != _inet_all(exclude_transips),
-            )
-        )
+    if dstintfs is not None:
+        if not dstintfs:
+            return None
+        query_filters.append(FgTraffic.dstintf == _text_any(dstintfs))
     if proto is not None:
         query_filters.append(FgTraffic.proto == proto)
     if srcips is not None:

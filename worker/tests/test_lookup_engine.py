@@ -1,12 +1,17 @@
 """5651 lookup engine against PostgreSQL (spec 9.3-9.5, 17): exact, double-NAT candidates (with
 and without destination, interim + final rows grouped), internal IP and MAC lookups, none,
-truncation, the data window, IP conflicts and the raw lines behind every chain."""
+truncation, the data window, IP conflicts and the raw lines behind every chain.
+
+The NAT tests set the Wave 2 keys (``nat.public_ips``, ``nat.wan_transip``,
+``lookup.port_hint``) as revision ``0018_nat_egresses`` converts them (:func:`legacy`), and keep
+their Wave 2 assertions: they are part of the legacy equivalence of the internet exits (Wave 3
+contract 3.4 E-j). Where the answer differs on purpose, the test names the exception."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from typing import Any
 
 import pytest
@@ -15,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.layout import Layout
+from arcilogger_db.egress import MIGRATION_KEY, legacy_egresses
 from arcilogger_db.models import Department, Device, Person
 from arcilogger_db.settings import DEFAULT_SETTINGS, get_settings, set_setting
 from arcilogger_worker.correlation.leases import rebuild_day
@@ -85,6 +91,22 @@ def settings_for(session: Session, **overrides: Any) -> LookupSettings:
     return LookupSettings.from_settings(values)
 
 
+def legacy(
+    session: Session,
+    public_ips: list[str] | None = None,
+    wan_transip: str = "",
+    port_hint: bool = False,
+) -> LookupSettings:
+    """The Wave 2 NAT settings as revision 0018 converts them: the exits, and the status row
+    that keeps them *as converted* (contract 2.8.2, D15)."""
+    exits, _dropped = legacy_egresses(public_ips or [], wan_transip, port_hint)
+    set_setting(session, "nat.egresses", exits, updated_by=":migration")
+    status = {"migration": "0018_nat_egresses", "new": exits}
+    set_setting(session, MIGRATION_KEY, status, updated_by=":migration")
+    session.commit()
+    return settings_for(session)
+
+
 def lookup(
     session: Session, *, settings: LookupSettings | None = None, **request: Any
 ) -> LookupOutcome:
@@ -104,7 +126,7 @@ def keys(outcome: LookupOutcome) -> list[str]:
 
 
 def test_exact_match_with_the_fortigate_wan_address(db_session: Session, site: Site) -> None:
-    settings = settings_for(db_session, **{"nat.wan_transip": WAN})
+    settings = legacy(db_session, wan_transip=WAN)
     outcome = lookup(
         db_session, settings=settings, public_ip=WAN, public_port=51001, protocol="tcp"
     )
@@ -141,14 +163,21 @@ def test_exact_match_with_the_fortigate_wan_address(db_session: Session, site: S
 
 
 def test_exact_lookup_finds_nothing_on_another_port(db_session: Session, site: Site) -> None:
-    # The configured public address is the transip the FortiGate logs show (bridge mode).
-    settings = settings_for(db_session, **{"nat.public_ips": [WAN]})
+    # The configured address is the transip the FortiGate logs show. Entered in Wave 2 as a
+    # public address, the private 100.64.12.9 is the converted exit wan's NAT address (2.8.2
+    # case (h)): the same exact search, now with double_nat true (an E-j exception, (h)).
+    settings = legacy(db_session, [WAN])
     outcome = lookup(db_session, settings=settings, public_ip=WAN, public_port=40001)
     assert outcome.mode == "none"
     assert outcome.matches == ()
     assert {"no_match", "no_match_exact"} <= set(keys(outcome))
     assert "public_ip_not_transip" not in keys(outcome)
-    assert outcome.double_nat is False
+    assert outcome.double_nat is True
+    assert outcome.egress is not None
+    assert (outcome.egress.resolution, [e.name for e in outcome.egress.egresses]) == (
+        "transip",
+        ["wan"],
+    )
 
 
 def _port_reuse(evidence: Evidence, db_session: Session) -> None:
@@ -165,7 +194,7 @@ def test_exact_lookup_lists_only_sessions_to_the_requested_destination(
     """NAT port reuse inside the window: the session to another destination is not an exact
     match of the request (spec 3.3), only counted."""
     _port_reuse(evidence, db_session)
-    settings = settings_for(db_session, **{"nat.wan_transip": WAN})
+    settings = legacy(db_session, wan_transip=WAN)
     asked = {"public_ip": WAN, "public_port": 51001}
     outcome = lookup(db_session, settings=settings, dest_ip="203.0.113.10", dest_port=443, **asked)
     assert outcome.mode == "exact"
@@ -218,7 +247,7 @@ def test_exact_domain_only_request_without_dns_logs_keeps_the_session_unverified
     """Domain-only request, no FortiGate DNS/web/app log for the name (resolved by another
     DNS server, DoH, a cached answer): the NAT port still identifies the session. A missing
     log is not another destination, so the answer is never a false "no session"."""
-    settings = settings_for(db_session, **{"nat.wan_transip": WAN})
+    settings = legacy(db_session, wan_transip=WAN)
     asked = {"public_ip": WAN, "public_port": 51001, "dest_domain": "akamai.example"}
     outcome = lookup(db_session, settings=settings, **asked)
     assert outcome.mode == "exact"
@@ -251,7 +280,7 @@ def test_exact_domain_only_request_lists_only_the_sessions_tied_to_the_name(
     _port_reuse(evidence, db_session)
     evidence.dns(tr(DAY, 11, 22, 56), PC, "akamai.example", ["203.0.113.10"])
     db_session.commit()
-    settings = settings_for(db_session, **{"nat.wan_transip": WAN})
+    settings = legacy(db_session, wan_transip=WAN)
     outcome = lookup(
         db_session,
         settings=settings,
@@ -278,7 +307,7 @@ def test_public_ip_that_is_not_the_transip_falls_back_to_candidates(
     """nat.public_ips set while the ISP router still translates (or for a moment before the
     switch to bridge mode): the logs show another transip, so the answer is a double-NAT
     candidate search instead of a false "the FortiGate logged no session"."""
-    settings = settings_for(db_session, **{"nat.public_ips": ["203.0.113.200"]})
+    settings = legacy(db_session, ["203.0.113.200"])
     asked = {"public_ip": "203.0.113.200", "dest_ip": "203.0.113.10", "dest_port": 443}
     outcome = lookup(db_session, settings=settings, public_port=45123, **asked)
     assert outcome.mode == "candidates"
@@ -294,9 +323,10 @@ def test_public_ip_that_is_not_the_transip_falls_back_to_candidates(
     assert without_port.mode == "candidates"
     assert "port_missing" not in keys(without_port)
     assert "public_ip_not_transip" in keys(without_port)
-    # A wrong nat.wan_transip does not narrow the search to an address nobody used either; it
-    # has its own explanation (no exact match was possible for this request anyway).
-    wrong_wan = settings_for(db_session, **{"nat.wan_transip": "10.9.9.9"})
+    # A wrong nat.wan_transip does not narrow the search to an address nobody used either: the
+    # converted exit's NAT address is not seen, so the search is widened to the unclaimed
+    # private or shared NAT addresses (O5; no exact match was possible for this request).
+    wrong_wan = legacy(db_session, wan_transip="10.9.9.9")
     found = lookup(
         db_session,
         settings=wrong_wan,
@@ -306,11 +336,18 @@ def test_public_ip_that_is_not_the_transip_falls_back_to_candidates(
     )
     assert found.mode == "candidates"
     assert "public_ip_not_transip" not in keys(found)
-    wan_note = next(e for e in found.explanations if e.key == "wan_transip_not_seen")
-    assert wan_note.params == {"address": "10.9.9.9"}
+    wan_note = next(e for e in found.explanations if e.key == "egress_transip_not_seen")
+    assert wan_note.params == {
+        "egress": "wan",
+        "transips": "10.9.9.9",
+        "at": AT.astimezone(UTC).isoformat(),
+        "seen": WAN,
+        "interfaces": "-",
+    }
     assert "kesin eşleşme yerine" not in wan_note.text_tr
-    assert "tüm kaynak NAT oturumlarında" in wan_note.text_tr
+    assert "bütün özel ya da paylaşılan kaynak NAT adreslerine genişletildi" in wan_note.text_tr
     assert "double_nat" in keys(found)
+    assert "wan_transip_not_seen" not in keys(found)  # retired
 
 
 def test_another_configured_public_ip_is_not_double_nat(
@@ -319,10 +356,14 @@ def test_another_configured_public_ip_is_not_double_nat(
     """Dual WAN / IP pool: around the moment the logs show only the FortiGate's other
     configured public address. That is not double NAT: the answer for the requested address
     is "no session", never the other address's sessions as candidates."""
-    settings = settings_for(db_session, **{"nat.public_ips": [WAN, "203.0.113.200"]})
+    quiet = tr(DAY, 3)  # the site's sessions all use the private 100.64.12.9
+    evidence.traffic(quiet, PC, 51001, "203.0.113.10", 443, transip="203.0.113.201")
+    db_session.commit()
+    settings = legacy(db_session, ["203.0.113.201", "203.0.113.200"])
     outcome = lookup(
         db_session,
         settings=settings,
+        at=quiet,
         public_ip="203.0.113.200",
         public_port=51001,
         dest_ip="203.0.113.10",
@@ -335,6 +376,29 @@ def test_another_configured_public_ip_is_not_double_nat(
     assert PC not in json.dumps(outcome.to_dict())
 
 
+def test_a_private_address_entered_as_public_is_a_nat_address(
+    db_session: Session, site: Site
+) -> None:
+    """Wave 2's version of the test above listed the private WAN address 100.64.12.9 as the
+    "other public address". That is the FortiGate's address behind an ISP router: the
+    conversion makes it the wan exit's NAT address (2.8.2 case (h)), so the private address
+    seen near the moment is double-NAT evidence and the quiet public address falls back (E-j
+    exception (h); Wave 2 answered "no session")."""
+    settings = legacy(db_session, [WAN, "203.0.113.200"])
+    outcome = lookup(
+        db_session,
+        settings=settings,
+        public_ip="203.0.113.200",
+        public_port=51001,
+        dest_ip="203.0.113.10",
+        dest_port=443,
+    )
+    assert outcome.mode == "candidates"
+    assert [(m.traffic.srcip, m.traffic.transip) for m in outcome.matches] == [(PC, WAN)]
+    assert {"public_ip_not_transip", "double_nat"} <= set(keys(outcome))
+    assert outcome.double_nat is True
+
+
 def test_the_double_nat_fallback_leaves_out_the_other_public_addresses(
     db_session: Session, evidence: Evidence, site: Site
 ) -> None:
@@ -345,7 +409,7 @@ def test_the_double_nat_fallback_leaves_out_the_other_public_addresses(
         AT, PHONE, 51000, "203.0.113.10", 443, transip="203.0.113.201", transport=40000
     )
     db_session.commit()
-    settings = settings_for(db_session, **{"nat.public_ips": ["203.0.113.200", "203.0.113.201"]})
+    settings = legacy(db_session, ["203.0.113.200", "203.0.113.201"])
     outcome = lookup(
         db_session,
         settings=settings,
@@ -364,7 +428,7 @@ def test_a_quiet_period_does_not_contradict_the_configured_address(
     db_session: Session, site: Site
 ) -> None:
     """No source-NAT row at all near the moment: the setting is trusted (exact mode)."""
-    settings = settings_for(db_session, **{"nat.public_ips": ["203.0.113.200"]})
+    settings = legacy(db_session, ["203.0.113.200"])
     outcome = lookup(
         db_session, settings=settings, at=tr(DAY, 3), public_ip="203.0.113.200", public_port=1
     )
@@ -444,6 +508,7 @@ def test_unknown_destination_lists_nobody(db_session: Session, site: Site) -> No
         "no_match",
         "destination_not_found",
         "no_match_candidates",
+        "egress_unconfigured",  # no internet exits defined: one implicit double-NAT exit
     ]
     note = outcome.explanations[2]
     assert note.params == {"destination": "1.1.1.1"}
@@ -459,25 +524,37 @@ def test_unknown_destination_lists_nobody(db_session: Session, site: Site) -> No
 
 
 @pytest.mark.parametrize(
-    ("request_fields", "first_key"),
+    ("request_fields", "first_key", "egress_key"),
     [
-        ({"public_ip": "192.0.2.44", "public_port": 40001}, "double_nat_no_candidates"),
-        ({"public_ip": WAN}, "port_missing"),
-        ({"public_ip": "192.0.2.45", "public_port": 1}, "public_ip_not_configured"),
-        ({"dest_ip": "203.0.113.40"}, "destination_search"),
+        ({"public_ip": "192.0.2.44", "public_port": 40001}, "double_nat_no_candidates", None),
+        ({"public_ip": WAN}, "port_missing", "egress_search"),
+        # Wave 2's public_ip_not_configured (retired): an address no exit claims is searched in
+        # the exits whose public address is not defined, and the outcome says so.
+        (
+            {"public_ip": "192.0.2.45", "public_port": 1},
+            "double_nat_no_candidates",
+            "egress_public_unknown",
+        ),
+        ({"dest_ip": "203.0.113.40"}, "destination_search", None),
     ],
 )
 def test_nothing_found_never_promises_a_list(
-    db_session: Session, site: Site, request_fields: dict[str, Any], first_key: str
+    db_session: Session,
+    site: Site,
+    request_fields: dict[str, Any],
+    first_key: str,
+    egress_key: str | None,
 ) -> None:
     """In mode ``none`` no explanation says candidates are "listed below" (spec 12.4 text only
     together with candidates); each still says why only a candidate search was possible."""
-    settings = settings_for(db_session, **{"nat.wan_transip": WAN, "nat.public_ips": []})
-    if first_key == "public_ip_not_configured":
-        settings = settings_for(db_session, **{"nat.public_ips": ["192.0.2.44"]})
+    settings = legacy(db_session, wan_transip=WAN)
+    if egress_key == "egress_public_unknown":
+        settings = legacy(db_session, ["192.0.2.44"])
     outcome = lookup(db_session, settings=settings, at=tr(DAY, 3), **request_fields)
     assert outcome.mode == "none"
     assert keys(outcome)[0] == first_key
+    assert egress_key is None or egress_key in keys(outcome)
+    assert not {"public_ip_not_configured", "wan_transip_not_seen"} & set(keys(outcome))
     assert {"no_match", "no_match_candidates"} <= set(keys(outcome))
     assert "double_nat" not in keys(outcome)
     assert "candidates_without_destination" not in keys(outcome)
@@ -540,11 +617,14 @@ def test_port_hint_is_off_by_default_and_ranks_when_enabled(
 ) -> None:
     plain = lookup(db_session, public_ip="192.0.2.44", public_port=51001)
     assert "port_hint" not in keys(plain)
-    set_setting(db_session, "lookup.port_hint", True, updated_by="tolga")
-    db_session.commit()
-    hinted = lookup(db_session, public_ip="192.0.2.44", public_port=51001)
+    # lookup.port_hint = true converts to the catch-all exit tanimsiz marked "preserved".
+    settings = legacy(db_session, port_hint=True)
+    hinted = lookup(db_session, settings=settings, public_ip="192.0.2.44", public_port=51001)
     assert "port_hint" in keys(hinted)
     assert (hinted.matches[0].traffic.transport, hinted.matches[0].score) == (51001, 70)
+    note = next(e for e in hinted.explanations if e.key == "port_hint")
+    assert note.params == {"egresses": "tanimsiz"}
+    assert "tanimsiz çıkışında" in note.text_tr
 
 
 def test_public_ip_with_internal_ip_lists_only_that_client(db_session: Session, site: Site) -> None:
@@ -565,12 +645,13 @@ def test_no_ipv4_session_is_a_candidate_for_an_ipv6_address(
     db_session.commit()
     ipv4 = lookup(db_session, public_ip="192.0.2.44")
     assert {m.traffic.srcport for m in ipv4.matches} == {51001, 51002, 51005}
+    # The unclaimed NAT addresses an implicit double-NAT exit searches are IPv4 private or
+    # shared addresses (ADR-0016), so the NAT66 session is no candidate either (Wave 2 listed
+    # it for an IPv6 public address the API refuses anyway).
     ipv6 = lookup(db_session, public_ip="2001:db8::45")
-    assert [(m.traffic.srcip, m.traffic.transip) for m in ipv6.matches] == [
-        ("fd00:0:0:42::57", "2001:db8::44")
-    ]
+    assert (ipv6.mode, ipv6.matches) == ("none", ())
     # Narrowed to the FortiGate's (IPv4) WAN address, the search finds only IPv4 sessions.
-    narrowed = settings_for(db_session, **{"nat.wan_transip": WAN})
+    narrowed = legacy(db_session, wan_transip=WAN)
     assert len(lookup(db_session, settings=narrowed, public_ip="192.0.2.44").matches) == 3
     requests: list[tuple[LookupSettings | None, dict[str, Any]]] = [
         (narrowed, {}),
@@ -712,7 +793,7 @@ def test_guest_network_explanation(db_session: Session, evidence: Evidence) -> N
 def test_every_chain_points_at_the_raw_lines(
     db_session: Session, evidence: Evidence, site: Site
 ) -> None:
-    settings = settings_for(db_session, **{"nat.wan_transip": WAN})
+    settings = legacy(db_session, wan_transip=WAN)
     outcome = lookup(db_session, settings=settings, public_ip=WAN, public_port=51001)
     (match,) = outcome.matches
     (traffic_ref,) = match.traffic.evidence
@@ -779,10 +860,12 @@ def test_lease_timeline_behind_is_reported(db_session: Session, site: Site) -> N
 
 
 def test_shipped_defaults_are_double_nat(db_session: Session) -> None:
-    assert LookupSettings.from_settings(DEFAULT_SETTINGS).double_nat
+    assert LookupSettings.from_settings(DEFAULT_SETTINGS).egresses() == ()  # one implicit exit
     empty = lookup(db_session, public_ip="192.0.2.44", public_port=1)
     assert empty.mode == "none"
     assert empty.double_nat
+    assert empty.egress is not None
+    assert empty.egress.resolution == "unconfigured"
     assert {"double_nat_no_candidates", "no_match", "no_match_candidates"} <= set(keys(empty))
     assert "double_nat" not in keys(empty)  # its spec 12.4 text promises candidates below
 

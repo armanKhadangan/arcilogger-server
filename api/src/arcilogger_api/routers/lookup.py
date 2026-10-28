@@ -639,6 +639,8 @@ def run_5651(
     try:
         settings = LookupSettings.from_settings(values)
         limit = min(max(int(values.get(TIMEOUT_SETTING, DEFAULT_TIMEOUT_SECONDS)), 1), 300)
+        if lookup_request.public_ip is not None:  # the internet exits: public-IP lookups only
+            settings.egresses()
     except (TypeError, ValueError) as exc:
         raise _error(503, "lookup_settings_invalid") from exc
     started = monotonic()

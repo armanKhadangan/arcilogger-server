@@ -8,11 +8,13 @@ lists, objects): times are ISO-8601 strings in UTC, there are **no floats** (sco
 
 Vocabulary:
 
-* **exact** — the request's public IP is the FortiGate's own public address (setting
-  ``nat.public_ips``) or its WAN ``transip`` (``nat.wan_transip``), so ``transip:transport``
-  identifies the session.
+* **exact** — the request's public IP is the FortiGate's own address: a ``direct`` internet
+  exit's public address, an exit's NAT address (``transip``) or an address the logs show as the
+  FortiGate's NAT address near the moment (setting ``nat.egresses``, ADR-0016), so
+  ``transip:transport`` identifies the session.
 * **candidates** — double NAT (2.3): the ISP router's translation is unknown, so sessions in
-  the time window (± tolerance), optionally to the requested destination, are ranked.
+  the time window (± tolerance) that left through the exit the public IP resolved to,
+  optionally to the requested destination, are ranked.
 * **internal** — the request names an internal IP or a MAC directly (no NAT step).
 
 **NAT matching rule** (spec 9.3; ``fg_traffic.time`` is the time of the log line, i.e. the
@@ -854,8 +856,6 @@ class LookupSettings:
     ``arcilogger_db.settings``). Only values: what needs a settings row's author or time is read
     by the lookup itself."""
 
-    public_ips: tuple[str, ...] = ()
-    wan_transip: str | None = None
     tolerance_seconds: int = 60
     max_candidates: int = 100
     #: Longest FortiGate session the lookup considers (bounds the time-range scan).
@@ -900,22 +900,6 @@ class LookupSettings:
             object.__setattr__(self, "_egresses", parsed)
         return parsed
 
-    @property
-    def double_nat(self) -> bool:
-        """No public address configured: the ISP router translates once more."""
-        return not self.public_ips
-
-    def exact_addresses(self) -> frozenset[str]:
-        """Addresses for which ``transip:transport`` identifies a session exactly.
-
-        Canonical text (:func:`arcilogger_core.iputil.canonical_ip`), the form PostgreSQL returns
-        for ``INET`` values.
-        """
-        found = set(self.public_ips)
-        if self.wan_transip:
-            found.add(self.wan_transip)
-        return frozenset(found)
-
     def lease_timeout_seconds(self, server: str | None, lease_seconds: int | None = None) -> int:
         """Seconds after the last evidence until an open lease of ``server`` times out.
 
@@ -930,21 +914,15 @@ class LookupSettings:
 
     @classmethod
     def from_settings(cls, values: Mapping[str, Any]) -> LookupSettings:
-        """From ``get_settings(session)`` (keys like ``nat.public_ips``).
+        """From ``get_settings(session)`` (keys like ``lookup.tolerance_seconds``).
 
-        Addresses are validated and normalised (``ValueError`` names the bad setting). The lease
-        job and the usage rollups call this too, so the values only the lookup reads (the exits,
-        ``nat.snat_trandisp``, the srcmac settings) never raise here: the exits are parsed by
+        ``ValueError`` names a bad setting. The lease job and the usage rollups call this too,
+        so the values only the lookup reads (the exits, ``nat.snat_trandisp``, the srcmac
+        settings) never raise here: the exits are kept as stored and parsed by
         :meth:`egresses`, the others fall back to the shipped default for a value of another
         shape (written around the validator, CORRELATION §5).
         """
-        transip = str(values.get("nat.wan_transip") or "").strip()
-        public = values.get("nat.public_ips") or ()
-        if isinstance(public, str):
-            raise ValueError("nat.public_ips must be a list of IP addresses")
         return cls(
-            public_ips=tuple(cast(str, _ip(str(address), "nat.public_ips")) for address in public),
-            wan_transip=_ip(transip, "nat.wan_transip") if transip else None,
             tolerance_seconds=int(values.get("lookup.tolerance_seconds", 60)),
             max_candidates=int(values.get("lookup.max_candidates", 100)),
             max_session_seconds=int(values.get("lookup.max_session_seconds", 86400)),
