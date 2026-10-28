@@ -271,7 +271,7 @@ def _check_downgraded(engine: Engine, before: dict[str, tuple[Any, str]], traffi
         k: v for k, v in before.items() if k != "db.timescale"
     }
     assert after["db.timescale"] == before["db.timescale"]
-    assert upgrade(engine).after == (REVISION,)  # and up again
+    assert upgrade(engine, revision=REVISION).after == (REVISION,)  # and up again
     status = _scalar(engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     assert TABLE in status["hypertables"] + status["partitioned"]
     with engine.connect() as connection:
@@ -303,7 +303,7 @@ def test_up_and_down_on_native_partitions(empty_engine: Engine) -> None:
     assert TABLE not in inspect(empty_engine).get_table_names()
     at = _old_data(empty_engine, 20)
     before = _upgrade_alone(empty_engine)
-    assert upgrade(empty_engine, timescale="off").after == (REVISION,)  # seed and partitions
+    assert upgrade(empty_engine, revision=REVISION, timescale="off").after == (REVISION,)
     _check_upgraded(empty_engine, "partitioned")
     status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     assert status["hypertables"] == []
@@ -337,7 +337,7 @@ def test_up_and_down_on_timescaledb_with_a_compressed_chunk(empty_engine: Engine
         ).scalar_one()
     assert compressed >= 1
     before = _upgrade_alone(empty_engine)
-    assert upgrade(empty_engine).after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION).after == (REVISION,)
     _check_upgraded(empty_engine, "hypertables")
     status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     assert status["partitioned"] == []
@@ -458,7 +458,7 @@ def test_a_refused_compression_of_fg_dhcp_on_timescaledb(empty_engine: Engine) -
             assert current_revisions(connection) == (BEFORE,)
         assert TABLE not in inspect(empty_engine).get_table_names()
         assert _settings(empty_engine) == before
-        assert upgrade(empty_engine).after == (REVISION,)  # auto
+        assert upgrade(empty_engine, revision=REVISION).after == (REVISION,)  # auto
     finally:
         event.remove(empty_engine, "before_cursor_execute", _refuse_the_policy)
     status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
@@ -479,7 +479,7 @@ def test_a_refused_compression_of_fg_dhcp_on_timescaledb(empty_engine: Engine) -
             text("UPDATE settings SET value = CAST(:value AS jsonb) WHERE key = 'db.timescale'"),
             {"value": json.dumps(stale)},
         )
-    assert upgrade(empty_engine).after == (REVISION,)
+    assert upgrade(empty_engine, revision=REVISION).after == (REVISION,)
     status = _scalar(empty_engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     assert "compression_reason" not in status
     assert status["hypertables"] == list(TIME_SERIES_TABLES)
