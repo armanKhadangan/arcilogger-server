@@ -48,9 +48,9 @@ Optional: `uv tool install pre-commit && pre-commit install` runs the fast check
 
 1. **Erişim (bir kez).** Depo sahibi GitHub hesabınızı depoya *collaborator* olarak ekler. Siz de
    claude.ai hesabınızla <https://claude.ai/connect-github> adresinden GitHub'ı bağlarsınız.
-2. **Ortam (bir kez).** claude.ai/code'da bu depoyla bir oturum açın. Oturum başlığındaki ortam
-   menüsü → *Edit* → *Setup script* alanına `tools/dev/cloud-setup.sh` dosyasının içeriğini
-   yapıştırın. Betik, testlerin istediği PostgreSQL 16'yı ve test kullanıcısını kurar.
+2. **Ortam.** Ayrıca bir şey yapmanız gerekmez: ajan her oturumun başında `tools/dev/cloud-setup.sh`
+   betiğini kendisi çalıştırır (`CLAUDE.md`). Betik, testlerin istediği PostgreSQL 16'yı ve test
+   kullanıcısını kurar.
 3. **Göreviniz.** GitHub *Issues* altında size atanmış issue bir iş paketidir: başlangıç dalı,
    okunacak sözleşme bölümleri (`design/`), sizin dosyalarınız, dokunulmayacak dosyalar, "bitti"
    listesi ve komutlar oradadır.
@@ -68,9 +68,8 @@ Optional: `uv tool install pre-commit && pre-commit install` runs the fast check
 
 1. **Access (once).** The repository owner adds your GitHub account as a collaborator. You connect
    GitHub to your claude.ai account at <https://claude.ai/connect-github>.
-2. **Environment (once).** Start a session with this repository in claude.ai/code. In the
-   environment menu of the session's title bar → *Edit* → *Setup script*, paste the contents of
-   `tools/dev/cloud-setup.sh`. It installs the PostgreSQL 16 and the test role the suites need.
+2. **Environment.** Nothing to do: the agent runs `tools/dev/cloud-setup.sh` itself at the start of
+   every session (`CLAUDE.md`). It installs the PostgreSQL 16 and the test role the suites need.
 3. **Your task.** The GitHub issue assigned to you is one work package: it names the branch to
    start from, the contract sections to read (`design/`), the files you own, the files not to
    touch, the done-when list and the commands.

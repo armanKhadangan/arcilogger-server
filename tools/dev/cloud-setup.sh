@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Setup script for a Claude Code cloud environment working on ARCILOGGER (Ubuntu 24.04 image).
 #
-# Paste this file into the environment's settings (the environment menu in the session's title
-# bar, then Edit, then "Setup script"). It installs PostgreSQL 16 with the test role the suites
-# use (as the CI job does: arci_test / arci_test, CREATEDB, no superuser) and starts the server.
+# The agent runs it at the start of every session (CLAUDE.md); it can also be pasted as a cloud
+# environment's setup script. It installs PostgreSQL 16 with the test role the suites use (as the
+# CI job does: arci_test / arci_test, CREATEDB, no superuser) and starts the server. Running it
+# again is harmless.
 # The repository's own dependencies are installed by the session (uv sync --locked
 # --all-packages; cd web && npm ci), see CLAUDE.md. TimescaleDB, PowerShell and Caddy are not
 # installed: their tests skip here and run in CI.

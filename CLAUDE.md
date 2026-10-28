@@ -49,9 +49,12 @@ installer in `deploy/windows/`. Read `CONTRIBUTING.md` (ground rules, team workf
 
 ## Environment
 
-- PostgreSQL 16 on `127.0.0.1:5432` with the test role `arci_test` / `arci_test` (CREATEDB). In a
-  Claude Code cloud environment `tools/dev/cloud-setup.sh` installs it; if the server is down:
-  `service postgresql start`.
+- **First thing in every new session** (after checking out your branch from `origin/wave-3`):
+  `bash tools/dev/cloud-setup.sh`. It is safe to run again: it installs PostgreSQL 16 and the test
+  role if they are missing and starts the server. If it fails (for example, no network access to
+  the Ubuntu package mirrors), say so in the pull request and run the tests that need no database.
+- PostgreSQL 16 on `127.0.0.1:5432` with the test role `arci_test` / `arci_test` (CREATEDB); if the
+  server is down later: `service postgresql start`.
 - `export ARCILOGGER_TEST_PG=postgresql://arci_test:arci_test@127.0.0.1:5432/postgres ARCILOGGER_REQUIRE_DB=1`
 - `uv sync --locked --all-packages`, and `cd web && npm ci` before web checks.
 - TimescaleDB, PowerShell (`ARCILOGGER_PWSH`) and Caddy (`ARCILOGGER_CADDY`) are usually missing in a
