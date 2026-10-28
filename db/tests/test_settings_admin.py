@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from arcilogger_db.audit import verify_audit_chain
+from arcilogger_db.egress import CHANGES_KEY, fingerprint
 from arcilogger_db.egress import ERROR_CODES as EGRESS_ERROR_CODES
 from arcilogger_db.models import ROLES, AuditLog, Setting, User
 from arcilogger_db.settings import (
@@ -385,3 +386,121 @@ def test_reset_puts_the_shipped_default_back_and_is_audited(db_session: Session)
     with pytest.raises(SettingValueError) as caught:
         reset_setting(db_session, "no.such.key", actor="ayse")
     assert caught.value.code == "setting_unknown"
+
+
+# -- the change record of the internet exits (ADR-0016 D32) ---------------------------------------
+
+HAT_1 = {"label": "Ana hat", "mode": "direct", "public": ["203.0.113.200"], "interfaces": ["wan1"]}
+HAT_2 = {
+    "label": "Yedek hat",
+    "mode": "isp_nat",
+    "public": ["198.51.100.77"],
+    "transips": ["100.64.13.9"],
+    "interfaces": ["wan2"],
+}
+
+
+def _changes(session: Session) -> dict[str, Any]:
+    value = get_setting(session, CHANGES_KEY)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def test_a_change_of_the_exits_is_recorded_per_exit(db_session: Session) -> None:
+    first = change_setting(db_session, "nat.egresses", {"hat-1": HAT_1}, actor="ayse")
+    entry = db_session.get(AuditLog, first.audit_id)
+    assert entry is not None
+    record = _changes(db_session)
+    assert record == {
+        "hat-1": {
+            "fingerprint": fingerprint(first.new["hat-1"]),
+            "changed_at": entry.time.isoformat(),
+            "changed_by": "ayse",
+            "deleted": False,
+        }
+    }
+    row = db_session.get(Setting, CHANGES_KEY)
+    assert row is not None
+    assert row.updated_by == ":system"  # a status row, never an editable setting
+    assert CHANGES_KEY not in DEFAULT_SETTINGS
+    # A new exit is recorded; the unchanged one keeps its entry.
+    change_setting(db_session, "nat.egresses", {"hat-1": HAT_1, "hat-2": HAT_2}, actor="tolga")
+    after = _changes(db_session)
+    assert after["hat-1"] == record["hat-1"]
+    assert after["hat-2"]["changed_by"] == "tolga"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("label", "Yedek hat (eski)"),
+        ("interfaces", ["wan2", "wan3"]),
+        ("port_preservation", "preserved"),
+    ],
+)
+def test_an_edit_that_decides_no_address_is_not_recorded(
+    db_session: Session, field: str, value: Any
+) -> None:
+    """A label, the interfaces or port preservation only narrow or reorder a search (D32)."""
+    change_setting(db_session, "nat.egresses", {"hat-2": HAT_2}, actor="ayse")
+    record = _changes(db_session)
+    change_setting(db_session, "nat.egresses", {"hat-2": {**HAT_2, field: value}}, actor="tolga")
+    assert _changes(db_session) == record
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("mode", "direct"),
+        ("public", ["198.51.100.78"]),
+        ("transips", ["100.64.13.10"]),
+        ("public_dynamic", True),
+    ],
+)
+def test_an_edit_of_the_content_is_recorded(db_session: Session, field: str, value: Any) -> None:
+    change_setting(db_session, "nat.egresses", {"hat-1": HAT_1, "hat-2": HAT_2}, actor="ayse")
+    before = _changes(db_session)
+    edited = {**HAT_2, field: value}
+    if field == "mode":  # a direct exit takes no NAT address
+        edited.pop("transips")
+    change = change_setting(
+        db_session, "nat.egresses", {"hat-1": HAT_1, "hat-2": edited}, actor="tolga"
+    )
+    after = _changes(db_session)
+    assert after["hat-1"] == before["hat-1"]
+    assert after["hat-2"]["fingerprint"] == fingerprint(change.new["hat-2"])
+    assert after["hat-2"]["fingerprint"] != before["hat-2"]["fingerprint"]
+    assert (after["hat-2"]["changed_by"], after["hat-2"]["deleted"]) == ("tolga", False)
+
+
+def test_a_deleted_exit_is_recorded_and_its_return_too(db_session: Session) -> None:
+    change_setting(db_session, "nat.egresses", {"hat-1": HAT_1, "hat-2": HAT_2}, actor="ayse")
+    before = _changes(db_session)
+    change_setting(db_session, "nat.egresses", {"hat-1": HAT_1}, actor="tolga")
+    deleted = _changes(db_session)["hat-2"]
+    assert (deleted["deleted"], deleted["changed_by"]) == (True, "tolga")
+    assert deleted["fingerprint"] == before["hat-2"]["fingerprint"]  # what it held, by content
+    reset_setting(db_session, "nat.egresses", actor="ayse")  # {}: every exit deleted
+    assert {name: entry["deleted"] for name, entry in _changes(db_session).items()} == {
+        "hat-1": True,
+        "hat-2": True,  # already deleted: its entry stays as it was
+    }
+    assert _changes(db_session)["hat-2"] == deleted
+    change_setting(db_session, "nat.egresses", {"hat-2": HAT_2}, actor="ayse")
+    assert _changes(db_session)["hat-2"]["deleted"] is False
+
+
+def test_the_change_record_is_in_the_audited_transaction(db_session: Session) -> None:
+    change_setting(db_session, "nat.egresses", {"hat-1": HAT_1}, actor="ayse")
+    db_session.rollback()
+    assert _changes(db_session) == {}
+    assert _entries(db_session) == []
+    change_setting(db_session, "nat.egresses", {"hat-1": HAT_1}, actor="ayse")
+    db_session.commit()
+    assert sorted(_changes(db_session)) == ["hat-1"]
+    assert len(_entries(db_session)) == 1
+    assert verify_audit_chain(db_session).ok
+
+
+def test_other_settings_leave_the_change_record_alone(db_session: Session) -> None:
+    change_setting(db_session, "nat.snat_trandisp", ["snat", "dnat"], actor="ayse")
+    assert db_session.get(Setting, CHANGES_KEY) is None
