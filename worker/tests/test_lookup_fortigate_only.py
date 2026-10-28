@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, event, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import to_site
@@ -1917,6 +1917,42 @@ def test_arp_sightings_after_a_release_mapped_later_name_the_client(
         (lease.source_table, lease.start) for lease in db_session.scalars(select(Lease))
     ) == [("fg_dhcp", T0), ("mt_arp", opening)]
     assert (answers(), cited()) == (stale, refs)
+
+
+def test_the_arp_interval_after_a_late_mapped_release_is_read_once(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The ARP interval after a RELEASE mapped later is read once per lease and moment: asking
+    an attributor twice for the leases covering one moment sends one ``mt_arp`` query, and both
+    answers are the same interval."""
+    set_setting(db_session, "dhcp.fortigate_logids", {"0100026001": "assigned"}, updated_by="tolga")
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(
+        tr(DAY, 12), PC, PC_MAC, logid="0100026002", dhcp_msg="Release", lease=None
+    )
+    for hour in (12, 13, 14):
+        evidence.arp(tr(DAY, hour, 30), PC, PC_MAC, interface="vlan42")
+    build(db_session, DAY, DAY)
+    mapped = {"0100026001": "assigned", "0100026002": "deassigned"}
+    set_setting(db_session, "dhcp.fortigate_logids", mapped, updated_by="tolga")
+    db_session.commit()
+    attributor = Attributor(db_session, settings_for(db_session), lookup=True)
+    statements: list[str] = []
+
+    def executed(*args: Any) -> None:
+        statements.append(str(args[2]))
+
+    bind = db_session.get_bind()
+    event.listen(bind, "before_cursor_execute", executed)
+    try:
+        first = attributor.leases_at(PC, tr(DAY, 14, 45))
+        second = attributor.leases_at(PC, tr(DAY, 14, 45))
+    finally:
+        event.remove(bind, "before_cursor_execute", executed)
+    db_session.rollback()
+    assert [lease.source_table for lease in first] == ["mt_arp"]
+    assert first == second
+    assert len([sql for sql in statements if "FROM mt_arp" in sql]) == 1
 
 
 def test_a_release_and_a_renewal_in_one_second_keep_the_new_lease(

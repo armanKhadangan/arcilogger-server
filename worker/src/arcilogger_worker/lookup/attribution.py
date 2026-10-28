@@ -331,6 +331,9 @@ class Attributor:
         self._kept: ColumnElement[bool] | None = None
         #: Per ``(lease id, moment)`` the lease's own newest DHCP record (``None``: none).
         self._records: dict[tuple[int, datetime], _Record | None] = {}
+        #: Per ``(lease id, moment)`` the ARP interval after a RELEASE mapped later (``None``:
+        #: none), so each lease and moment reads its sightings once.
+        self._arp_intervals: dict[tuple[int, datetime], StoredLease | None] = {}
         #: The stored lease of every chain built, by lease id (the lookup's checks read them).
         self._stored: dict[int, StoredLease] = {}
         self._leases: dict[str, list[StoredLease]] = {}
@@ -546,6 +549,14 @@ class Attributor:
         less than the ARP interval before ``at``. One query on ``ix_mt_arp_ip_time``; the
         interval has no ``leases`` row (``stored=False``) and keeps the refs the timeline keeps
         (the opening sighting and the latest)."""
+        key = (lease.id, at)
+        if key not in self._arp_intervals:
+            self._arp_intervals[key] = self._read_arp_after_release(lease, released, at)
+        return self._arp_intervals[key]
+
+    def _read_arp_after_release(
+        self, lease: StoredLease, released: datetime, at: datetime
+    ) -> StoredLease | None:
         grace = timedelta(seconds=self.settings.arp_release_grace_seconds)
         rows = self.session.execute(
             select(
