@@ -849,7 +849,10 @@ for (const width of [1280, 1440, 1920]) {
       /\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/g,
     );
     expect(times).toHaveLength(2); // the device's time and the receive time
-    const overflow = await results(page).evaluate((element) => {
+    // Measured in the shipped fonts: they load with `font-display: swap`, and the fallback has
+    // other widths.
+    const overflow = await results(page).evaluate(async (element) => {
+      await document.fonts.ready;
       const box = element.parentElement;
       return box ? box.scrollWidth - box.clientWidth : -1;
     });

@@ -245,9 +245,13 @@ test.describe('Panel — parse failures', () => {
   });
 });
 
-/** Every card title on screen fits its box: it wraps instead of being cut ("Log..."). */
+/**
+ * Every card title on screen fits its box: it wraps instead of being cut ("Log..."). Measured in
+ * the shipped fonts: they load with `font-display: swap`, and the fallback has other widths.
+ */
 async function titlesFit(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
+    await document.fonts.ready;
     const titles = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="card-"] h3'));
     return titles.flatMap((title) => {
       const parts = [title, ...Array.from(title.querySelectorAll<HTMLElement>('*'))];
