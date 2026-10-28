@@ -5,9 +5,8 @@ rule, the cause's fixed action and its counts only."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
+from datetime import date, datetime, timedelta
+from string import Formatter
 from typing import Any, NamedTuple
 
 import pytest
@@ -33,11 +32,12 @@ from arcilogger_db.models import (
 from arcilogger_db.settings import MIGRATION_AUTHOR, SEED_AUTHOR, set_setting
 from arcilogger_worker.alerts import system
 from arcilogger_worker.alerts.mail import MailItem, render_text
-from arcilogger_worker.alerts.system import masked, run_system_checks
+from arcilogger_worker.alerts.system import run_system_checks
 from arcilogger_worker.alerts.texts import (
     LEASE_CAUSES,
     LEASE_TEXTS,
     NAT_CAUSES,
+    NAT_TEXTS,
     RULES,
     describe,
     runbook,
@@ -80,13 +80,13 @@ def config(layout: Layout) -> Config:
 @pytest.fixture
 def check(
     sessions: sessionmaker[Session], layout: Layout, config: Config, db_session: Session
-) -> Iterator[Any]:
+) -> Any:
     def run(now: datetime = NOW) -> dict[str, Alert]:
         db_session.commit()
         run_system_checks(sessions, layout, config, now=now)
         return active(db_session)
 
-    yield run
+    return run
 
 
 def active(session: Session) -> dict[str, Alert]:
@@ -510,3 +510,422 @@ def _item(alert: Alert) -> MailItem:
     return MailItem(
         alert.id, "new", alert.rule, alert.severity, alert.state, alert.time, None, alert.details
     )
+
+
+# -- source clocks --------------------------------------------------------------------------------
+
+
+def _clock(
+    session: Session,
+    name: str,
+    offset: timedelta,
+    *,
+    kind: str = "fortigate",
+    table: str = "fg_traffic",
+    rows: int = 20,
+    late: int = 0,
+    start: datetime = NOW - timedelta(minutes=50),
+) -> None:
+    """``rows`` lines of ``name`` received in the last hour whose device time is ``offset``
+    from the receive time (``late`` more lines received with a 10-minute delay), and the
+    search counts that say its files hold rows of ``table``."""
+    if session.get(Source, name) is None:
+        session.add(Source(name=name, type=kind, address="172.31.255.1"))
+    session.add(
+        SearchCount(hour=start.replace(minute=0), source=name, raw_day=DAY, kind="traffic",
+                    tbl=table, n=rows + late)
+    )  # fmt: skip
+    for k in range(rows + late):
+        received = start + timedelta(minutes=2 * k)
+        lag = offset if k < rows else -timedelta(minutes=10)
+        session.add(
+            Message(time=received + lag, time_received=received, source=name,
+                    sender="172.31.255.1", raw_day=DAY, raw_line=k + 1, raw_offset=100 * k,
+                    type="traffic", text="")
+        )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("offset", "kind", "table"),
+    [
+        (-timedelta(minutes=8), "fortigate", "fg_traffic"),
+        (-timedelta(hours=3), "fortigate", "fg_dhcp"),
+        (timedelta(hours=3), "fortigate", "fg_traffic"),
+        (-timedelta(minutes=8), "mikrotik", "mt_dhcp"),
+    ],
+)
+def test_a_source_whose_clock_is_off(
+    check: Any, db_session: Session, offset: timedelta, kind: str, table: str
+) -> None:
+    _clock(db_session, "core-r1" if kind == "mikrotik" else "fortigate", offset, kind=kind,
+           table=table)  # fmt: skip
+    alert = check()["R20-lease:source-clock"]
+    seconds = int(offset.total_seconds())
+    assert alert.severity == "high"
+    assert (alert.details["seconds"], alert.details["sources"]) == (
+        seconds, ["core-r1" if kind == "mikrotik" else "fortigate"],
+    )  # fmt: skip
+    mail = render_text([_item(alert)], "https://arcilogger.example.com")
+    assert f"({seconds} sn)" in mail
+    assert "fortigate" not in mail.replace("FortiGate", "")
+    assert "core-r1" not in mail
+
+
+def test_a_clock_alert_resolves_at_the_next_good_measurement(
+    check: Any, db_session: Session
+) -> None:
+    _clock(db_session, "fortigate", -timedelta(minutes=8))
+    assert "R20-lease:source-clock" in check()
+    later = NOW + timedelta(hours=2)
+    _clock(db_session, "fortigate", timedelta(milliseconds=3), start=later - timedelta(minutes=50))
+    assert "R20-lease:source-clock" not in check(later)
+    assert resolved(db_session)["R20-lease:source-clock"] == "clock_ok"
+
+
+def test_clocks_that_are_not_judged(check: Any, db_session: Session) -> None:
+    # A few late lines among on-time ones: the median ignores them.
+    _clock(db_session, "fortigate", timedelta(milliseconds=3), late=4)
+    # Receive-time rows (no usable device time) say nothing about the clock.
+    _clock(db_session, "fortigate-2", timedelta(0))
+    # A switch 10 minutes off whose files hold no row a lookup reads.
+    _clock(db_session, "switch-1", -timedelta(minutes=10), kind="generic", table="")
+    # A source with too few recent rows.
+    _clock(db_session, "fortigate-3", -timedelta(minutes=8), rows=9)
+    assert "R20-lease:source-clock" not in check()
+
+
+def test_the_worker_pins_the_ingest_clock_skew() -> None:
+    from arcilogger_ingest.parsers.syslog import DEFAULT_MAX_CLOCK_SKEW
+
+    assert system.MAX_CLOCK_SKEW == DEFAULT_MAX_CLOCK_SKEW
+
+
+# -- renewals -------------------------------------------------------------------------------------
+
+
+def _clients(
+    evidence: Evidence,
+    *,
+    network: str = "172.20.42",
+    interface: str = "vlan42",
+    lease: int = 3600,
+    away: tuple[int, int] | None = None,
+    count: int = 4,
+) -> None:
+    """``count`` clients ACKed five hours ago with ``lease`` and no renewal, each sending
+    traffic every 10 minutes since (``away``: minutes after the ACK when it left and came
+    back)."""  # fmt: skip
+    start = NOW - timedelta(hours=5)
+    for n in range(count):
+        ip, mac = f"{network}.{80 + n}", f"00:00:5e:00:53:{80 + n:02x}"
+        evidence.fortigate_dhcp(start, ip, mac, interface=interface, lease=lease)
+        minute = 10
+        while start + timedelta(minutes=minute) < NOW:
+            if away is None or not away[0] <= minute < away[1]:
+                evidence.traffic(start + timedelta(minutes=minute), ip, 40000 + minute)
+            minute += 10
+
+
+def _lease_runs(session: Session, renewals: dict[datetime, int] | None = None) -> None:
+    """Build the leases in several incremental runs, recording each run as the service does;
+    ``renewals``: earlier runs that counted renewal ACKs."""
+    from arcilogger_worker.correlation.leases import run_incremental
+
+    session.commit()
+    moment = NOW - timedelta(hours=6)
+    while moment <= NOW:
+        report = run_incremental(session, now=moment)
+        session.add(JobRun(job="leases.incremental", started_at=moment, finished_at=moment,
+                           status="ok", details=report.details()))  # fmt: skip
+        session.commit()
+        moment += timedelta(minutes=45)
+    for at, count in (renewals or {}).items():
+        session.add(JobRun(job="leases.incremental", started_at=at, finished_at=at, status="ok",
+                           details={"stats": {"fg_renewal_ack": count}}))  # fmt: skip
+    session.commit()
+
+
+def test_renewals_that_never_appear(check: Any, db_session: Session, evidence: Evidence) -> None:
+    _clients(evidence)
+    _lease_runs(db_session)
+    leases = db_session.scalars(select(Lease)).all()
+    assert {(lease.end_reason, lease.lease_seconds) for lease in leases} == {("timeout", 3600)}
+    alert = check()["R20-lease:fortigate-renewals-missing"]
+    assert (alert.severity, alert.details["count"]) == ("high", 4)
+    assert "R20-lease:fortigate-refused" in alert.details["action_tr"]
+    for text in (alert.details["action_tr"], alert.details["action_en"]):
+        assert "fortigate_traffic_extends" not in text
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        {"network": "172.20.61", "interface": "vlan61", "away": (40, 90)},  # guests' phones
+        {"lease": 172800 // 48, "away": (50, 300)},  # back long after the lease ended
+    ],
+)
+def test_clients_that_left_are_no_missing_renewal(
+    check: Any, db_session: Session, evidence: Evidence, case: dict[str, Any]
+) -> None:
+    _clients(evidence, **case)
+    _lease_runs(db_session)
+    alerts = check()
+    assert "R20-lease:fortigate-renewals-missing" not in alerts
+    assert "R20-lease:fortigate-renewals-not-logged" not in alerts
+
+
+def test_renewals_seen_elsewhere_or_a_verified_site(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    _clients(evidence)
+    _lease_runs(db_session, renewals={NOW - timedelta(days=2): 3})
+    alerts = check()
+    assert "R20-lease:fortigate-renewals-missing" not in alerts
+    # A verified site that has never logged a renewal: the accepted set-up, info only.
+    db_session.execute(update(JobRun).values(details={}))
+    set_setting(db_session, "dhcp.fortigate_format_verified", True, updated_by="tolga")
+    alerts = check()
+    assert alerts["R20-lease:fortigate-renewals-not-logged"].severity == "info"
+    assert "R20-lease:fortigate-renewals-missing" not in alerts
+    # The same site whose renewals stopped after being seen ten days ago: high.
+    db_session.add(JobRun(job="leases.nightly", started_at=NOW - timedelta(days=10),
+                          status="ok", details={"stats": {"fg_renewal_ack": 5}}))  # fmt: skip
+    alerts = check()
+    assert alerts["R20-lease:fortigate-renewals-missing"].severity == "high"
+
+
+def test_unlimited_leases_are_never_counted(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    _clients(evidence, lease=0)
+    _lease_runs(db_session)
+    assert "R20-lease:fortigate-renewals-missing" not in check()
+
+
+# -- srcmac ---------------------------------------------------------------------------------------
+
+
+def test_a_shared_srcmac_per_listed_interface(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    set_setting(db_session, "lookup.srcmac_interfaces", ["vlan42", "vlan43"], updated_by="tolga")
+    at = NOW - timedelta(minutes=20)
+    for port, ip in ((50001, "172.20.42.57"), (50002, "172.20.42.58")):
+        evidence.traffic(at, ip, port, srcintf="vlan42", srcmac="00:00:5e:00:53:01")
+    # One MAC, one IPv4 and two IPv6 addresses (a dual-stack client): not shared.
+    for port, ip in ((50003, "172.20.43.57"), (50004, "2001:db8::57"), (50005, "2001:db8::58")):
+        evidence.traffic(at, ip, port, srcintf="vlan43", srcmac="00:00:5e:00:53:02",
+                         transip=None if ":" in ip else "100.64.12.9")  # fmt: skip
+    alerts = check()
+    alert = alerts["R20-lease:srcmac-shared:vlan42"]
+    assert alert.severity == "medium"
+    assert (alert.details["count"], alert.details["most"], alert.details["limit"]) == (1, 2, 1)
+    assert alert.title == "srcmac arayüzünde paylaşılan MAC adresi: vlan42"
+    assert "R20-lease:srcmac-shared:vlan43" not in alerts
+    assert "00:00:5e" not in str(alert.details)
+
+
+# -- the 24 hours without the problem -------------------------------------------------------------
+
+
+def test_a_cause_resolves_after_a_clean_day(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    evidence.fortigate_dhcp(NOW - HOUR, "172.20.42.57", "00:00:5e:00:53:57", lease=0)
+    key = "R20-lease:fortigate-lease-unlimited"
+    assert key in check()
+    assert key in check(NOW + timedelta(hours=12))  # the row is still in the window
+    assert key in check(NOW + timedelta(hours=30))  # gone, but not for a day yet
+    assert key not in check(NOW + timedelta(hours=37))
+    assert resolved(db_session)[key] == "clean_24h"
+
+
+# -- internet exits -------------------------------------------------------------------------------
+
+EXITS = {"hat-1": {"mode": "isp_nat", "public": ["198.51.100.77"], "transips": ["100.64.12.9"]}}
+
+
+def test_a_failed_conversion_until_the_exits_are_written(check: Any, db_session: Session) -> None:
+    db_session.add(Setting(key="nat.egresses_migration", value={"conversion_failed": True},
+                           updated_by=MIGRATION_AUTHOR))  # fmt: skip
+    set_setting(db_session, "nat.egresses", {}, updated_by=MIGRATION_AUTHOR)
+    alert = check()["R20-nat:conversion-failed"]
+    assert (alert.rule, alert.severity) == ("R20-nat", "high")
+    set_setting(db_session, "nat.egresses", EXITS, updated_by="tolga")
+    assert "R20-nat:conversion-failed" not in check()
+    assert resolved(db_session)["R20-nat:conversion-failed"] == "exits_written"
+
+
+def test_an_unclaimed_nat_address_in_use(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    set_setting(db_session, "nat.egresses", EXITS, updated_by="tolga")
+    at = NOW - timedelta(minutes=30)
+    for n in range(49):
+        evidence.traffic(at, "172.20.42.57", 50000 + n, transip="100.64.13.9")
+    assert "R20-nat:unmapped-transip" not in check()
+    evidence.traffic(at, "172.20.42.57", 50099, transip="100.64.13.9")
+    for n in range(60):  # the exit's own address
+        evidence.traffic(at, "172.20.42.58", 51000 + n, transip="100.64.12.9")
+    alert = check()["R20-nat:unmapped-transip"]
+    assert alert.severity == "medium"
+    assert alert.details["count"] == 50
+    assert alert.details["addresses"] == [{"address": "100.64.13.9", "kind": "private"}]
+    assert "100.64.13.9 (özel/paylaşılan)" in alert.details["action_tr"]
+    mail = render_text([_item(alert)], "https://arcilogger.example.com")
+    assert "100.64.13.9" not in mail
+    set_setting(db_session, "nat.egresses",
+                {**EXITS, "hat-2": {"mode": "isp_nat", "transips": ["100.64.13.9"]}},
+                updated_by="tolga")  # fmt: skip
+    assert "R20-nat:unmapped-transip" not in check()
+    assert resolved(db_session)["R20-nat:unmapped-transip"] == "claimed"
+
+
+def test_an_unreadable_exit_value_leaves_every_lease_cause_working(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    set_setting(db_session, "nat.egresses", "not an object", updated_by="tolga")
+    evidence.fortigate_dhcp(NOW - timedelta(days=5), "172.20.42.50", "00:00:5e:00:53:50")
+    evidence.fortigate_dhcp(NOW - HOUR, "172.20.42.57", "00:00:5e:00:53:57", dhcp_msg="DHCPACK")
+    _fg_event(db_session, {"ip": "172.20.42.59", "dhcp_msg": "Ack"})
+    office_traffic(evidence)
+    alerts = check()
+    assert alerts["R20-nat:invalid"].severity == "high"
+    assert alerts["R20-nat:invalid"].details["code"] == "setting_type"
+    for cause in ("none:fg_dhcp", "fortigate-refused", "fortigate-unconverted"):
+        assert f"R20-lease:{cause}" in alerts
+    # Everything fixed a day later: every cause resolves in the same run.
+    later = NOW + timedelta(days=1, hours=1)
+    set_setting(db_session, "nat.egresses", EXITS, updated_by="tolga")
+    set_setting(db_session, "dhcp.fortigate_dhcp_msgs", {}, updated_by="tolga")
+    db_session.execute(update(FgEvent).values(logid="0100026003"))
+    evidence.fortigate_dhcp(later - HOUR, "172.20.42.57", "00:00:5e:00:53:57")
+    alerts = check(later)
+    assert sorted(key for key in alerts if key.startswith(("R20-nat", "R20-lease"))) == [
+        "R20-lease:fortigate-unverified"
+    ]
+    assert {
+        key: reason for key, reason in resolved(db_session).items() if "unverified" not in key
+    } == {
+        "R20-nat:invalid": "parsed",
+        "R20-lease:none:fg_dhcp": "evidence_arrived",
+        "R20-lease:fortigate-refused": "no_refused_rows",
+        "R20-lease:fortigate-unconverted": "clean_24h",
+    }
+
+
+def _legacy(session: Session, key: str, value: Any, at: datetime) -> None:
+    session.add(Setting(key=key, value=value, updated_by="tolga"))
+    session.flush()
+    session.execute(update(Setting).where(Setting.key == key).values(updated_at=at))
+
+
+@pytest.mark.parametrize("converted", [True, False])
+def test_legacy_rows_changed_during_a_rollback(
+    check: Any, db_session: Session, converted: bool
+) -> None:
+    """Rollback, a legacy edit in the previous version, re-upgrade: named until an
+    administrator writes the exits (also on a site that had the shipped NAT defaults)."""
+    author = MIGRATION_AUTHOR if converted else SEED_AUTHOR
+    set_setting(db_session, "nat.egresses", EXITS if converted else {}, updated_by=author)
+    written = update(Setting).where(Setting.key == "nat.egresses")
+    db_session.execute(written.values(updated_at=NOW - timedelta(days=9)))
+    if converted:
+        db_session.add(Setting(key="nat.egresses_migration", value={"conversion_failed": False},
+                               updated_by=MIGRATION_AUTHOR))  # fmt: skip
+        _legacy(db_session, "lookup.port_hint", True, NOW - timedelta(days=10))  # before: no
+    _legacy(db_session, "nat.wan_transip", "100.64.12.10", NOW - timedelta(days=2))
+    alert = check()["R20-nat:legacy-changed"]
+    assert (alert.severity, alert.details["keys"]) == ("medium", ["nat.wan_transip"])
+    set_setting(db_session, "nat.egresses", EXITS, updated_by="tolga")
+    assert "R20-nat:legacy-changed" not in check()
+    assert db_session.get(Setting, "nat.wan_transip") is not None  # the rows stay, unread
+
+
+# -- e-mails and the catalogue --------------------------------------------------------------------
+
+
+def test_a_high_cause_is_mailed_with_its_line_and_counts_only(
+    check: Any, db_session: Session, evidence: Evidence
+) -> None:
+    db_session.add(Source(name="unknown-192.0.2.7", type="fortigate", address="192.0.2.7",
+                          unknown=True))  # fmt: skip
+    for n in range(12):
+        evidence.fortigate_dhcp(NOW - HOUR, f"172.20.42.{60 + n}", f"00:00:5e:00:53:{60 + n:02x}",
+                                source="unknown-192.0.2.7", logid="0100026099",
+                                interface="port 9")  # fmt: skip
+    alert = check()["R20-lease:fortigate-refused"]
+    mail = render_text([_item(alert)], "https://arcilogger.example.com")
+    assert "R20-lease — Kira kanıtı sorunu" in mail
+    assert f"{LEASE_CAUSES['fortigate-refused'][0]} (12 kayıt)" in mail
+    assert f"{LEASE_CAUSES['fortigate-refused'][1]} (12 records)" in mail
+    for hidden in (
+        "unknown-192.0.2.7",
+        "192.0.2.7",
+        "0100026099",
+        "port 9",
+        "172.20.42.",
+        "00:00:5e",
+    ):
+        assert hidden not in mail, hidden
+
+
+def test_every_cause_has_its_line_texts_and_runbook() -> None:
+    assert set(LEASE_TEXTS) == set(LEASE_CAUSES)
+    assert set(NAT_TEXTS) == set(NAT_CAUSES)
+    for rule, causes in (("R20-lease", LEASE_CAUSES), ("R20-nat", NAT_CAUSES)):
+        assert rule in RULES
+        assert runbook(rule)[0].startswith("1. ")
+        for cause, (line_tr, line_en) in causes.items():
+            assert describe(rule, {"cause": cause}) == (line_tr, line_en)
+            assert "{" not in line_tr + line_en
+    for catalogue in (LEASE_TEXTS, NAT_TEXTS):
+        for cause, texts in catalogue.items():
+            names = [{n for _, n, _, _ in Formatter().parse(t) if n} for t in texts]
+            assert names[0] == names[1], cause
+            assert names[2] == names[3], cause
+    assert describe("R20-lease", {"cause": "none", "table": "mt_arp"})[0].endswith(
+        "(MikroTik ARP-LOG)"
+    )
+    assert describe("R20-lease", {"cause": "other"}) == describe("R20-lease", {})
+
+
+def test_no_e_mail_or_report_line_carries_an_address_a_name_or_a_log_value() -> None:
+    """2.16 and the round-5 note: scheduled reports list alerts through the same describe(),
+    so nothing but the cause's line, counts and VLAN numbers leaves the server."""
+    leaky = {
+        "count": 3,
+        "vlan": 42,
+        "rows": 7,
+        "addresses": ["172.20.42.57", {"address": "100.64.13.9", "kind": "private"}],
+        "sources": ["unknown-192.0.2.7"],
+        "source": "unknown-192.0.2.7",
+        "interfaces": ["port9"],
+        "interface": "port9",
+        "logids": ["0100026099"],
+        "dhcp_msgs": ["Nak"],
+        "origins": ["FortiGate DHCP (VDOM root)"],
+        "network": "Ofis (172.20.70.0/24)",
+        "first_day": "2026-10-14",
+        "keys": ["nat.wan_transip"],
+        "code": "setting_type",
+        "offsets": {"fortigate": -480},
+    }
+    for rule, causes in (("R20-lease", LEASE_CAUSES), ("R20-nat", NAT_CAUSES)):
+        for cause in causes:
+            for sentence in describe(rule, {**leaky, "cause": cause}):
+                for value in (
+                    "172.20",
+                    "100.64",
+                    "192.0.2",
+                    "port9",
+                    "0100026099",
+                    "Nak",
+                    "VDOM",
+                    "Ofis",
+                    "14.10",
+                    "nat.wan",
+                    "setting_type",
+                    "fortigate",
+                ):
+                    assert value not in sentence, (cause, value)  # fmt: skip
