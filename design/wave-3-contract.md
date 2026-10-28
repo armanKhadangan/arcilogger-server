@@ -5899,6 +5899,16 @@ from section 0.2 are recorded here too, with the date and who decided.
   rollups (no per-moment query) still read the stored lease until the rebuild. Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_release_mapped_after_the_build_ends_the_lease`.
   Fold into 2.7.
+- **D27 for a chain outside every configured network: the address stands for its network**
+  (2.7, round-6 note "a network not entered on a mixed site", its suggested handling). The one
+  `usable_dhcp_origins` query of a lookup also covers, for each chain whose IP lies in no
+  configured network, that IP itself (as a /32 subnet), so a forgotten FortiGate DHCP server
+  beside MikroTik DHCP on a subnet nobody entered lowers the MikroTik chain to `low` with
+  `dhcp_sources_overlap` instead of leaving it `medium`. No new key and no extra query; only the
+  `{network}` parameter differs from 2.11 there: it is the address (`172.20.44.30`), since no
+  configured network has a name. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_two_origins_on_a_subnet_nobody_entered`.
+  Fold into 2.7 and the 2.11 parameter cell.
 
 ---
 

@@ -702,15 +702,11 @@ class Attributor:
         """D27: one :func:`.trust.usable_dhcp_origins` query for the configured networks of all
         chains over ``[T - W, T + W]``, W the largest alive window of their leases and at least
         the longest configured DHCP window; a chain whose network shows two origins is ``low``
-        with ``dhcp_sources_overlap`` (the network and the origins, never a client's value)."""
+        with ``dhcp_sources_overlap`` (the network and the origins, never a client's value). The
+        address of a chain outside every configured network stands for its network in the same
+        query (round 6: a forgotten DHCP server on a subnet nobody entered)."""
         every = [chain for group in groups for chain in group]
-        networks = {
-            chain.internal_ip: vlan
-            for chain in every
-            if (vlan := self._vlan(chain.internal_ip)[0]) is not None
-        }
-        if not networks:
-            return
+        scopes = {chain.internal_ip: self._scope(chain.internal_ip) for chain in every}
         servers = [None, *self.settings.lease_server_seconds]
         windows = [self.settings.lease_timeout_seconds(server) for server in servers]
         windows += [self._alive(lease) for c in every if (lease := self._stored_lease(c))]
@@ -720,25 +716,36 @@ class Attributor:
             self.session,
             self.settings,
             self.untrusted,
-            sorted({str(vlan.subnet) for vlan in networks.values()}),
+            sorted({subnet for subnet, _ in scopes.values()}),
             min(moments) - width,
             max(moments) + width,
         )
         for group in groups:
             for index, chain in enumerate(group):
-                vlan = networks.get(chain.internal_ip)
-                found = set() if vlan is None else origins[str(vlan.subnet)]
-                if vlan is None or len(found) < 2:
+                subnet, name = scopes[chain.internal_ip]
+                found = origins[subnet]
+                if len(found) < 2:
                     continue
                 overlap = explain(
                     "dhcp_sources_overlap",
-                    network=_network_name(vlan),
+                    network=name,
                     at=chain.at.isoformat(),
                     sources=", ".join(sorted(_origin_name(origin) for origin in found)),
                 )
                 group[index] = replace(
                     chain, confidence="low", explanations=(*chain.explanations, overlap)
                 )
+
+    def _scope(self, ip: str) -> tuple[str, str]:
+        """The subnet whose DHCP origins bear on a chain of ``ip`` and its name in a text: the
+        configured network (``VLAN 42``, else its name and subnet, as 2.6.3 names it), else the
+        address alone."""
+        vlan = self._vlan(ip)[0]
+        if vlan is None:
+            return str(ipaddress.ip_network(ip)), ip
+        if vlan.vlan_id is not None:
+            return str(vlan.subnet), f"VLAN {vlan.vlan_id}"
+        return str(vlan.subnet), f"{vlan.name_tr} ({vlan.subnet})"
 
     def _targets(
         self, groups: list[list[AttributionChain]]
@@ -880,14 +887,6 @@ class Attributor:
                 lease=None if chain.lease is None else replace(chain.lease, confidence="low"),
                 explanations=notes,
             )
-
-
-def _network_name(vlan: Vlan) -> str:
-    """A configured network as 2.6.3 names it: ``VLAN 42``, else its name and subnet (site
-    configuration, never client data)."""
-    if vlan.vlan_id is not None:
-        return f"VLAN {vlan.vlan_id}"
-    return f"{vlan.name_tr} ({vlan.subnet})"
 
 
 def _origin_name(origin: tuple[str, str | None]) -> str:

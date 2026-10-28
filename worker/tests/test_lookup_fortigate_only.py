@@ -970,6 +970,30 @@ def test_two_dhcp_origins_lower_the_chain_while_both_are_near(
     assert OVERLAP not in chain_keys(alone)
 
 
+def test_two_origins_on_a_subnet_nobody_entered(db_session: Session, evidence: Evidence) -> None:
+    """Round 6 (implementation note, D27): a forgotten FortiGate DHCP server beside MikroTik DHCP
+    on a subnet that is not entered. The MikroTik ACK logged last gives C's chain, which the
+    other origin's row of the same address lowers (the address stands for its network)."""
+    unlisted = "172.20.44.30"
+    evidence.fortigate_dhcp(T0, unlisted, A_MAC, interface="vlan44")
+    evidence.dhcp(T0 + timedelta(hours=1), "assigned", unlisted, C_MAC, server="dhcp44")
+    build(db_session, DAY, DAY)
+    moment = T0 + timedelta(hours=1, minutes=30)
+    chain = internal(db_session, unlisted, moment).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert (chain.lease.mac, chain.lease.source_table, chain.confidence) == (
+        C_MAC,
+        "mt_dhcp",
+        "low",
+    )
+    assert note(chain, OVERLAP) == {
+        "network": unlisted,
+        "at": iso(moment),
+        "sources": "FortiGate DHCP (VDOM root), MikroTik DHCP",
+    }
+
+
 def test_an_ha_pair_is_one_origin(db_session: Session, evidence: Evidence) -> None:
     """Two FortiGate senders of one VDOM (an HA pair, two serial numbers): the same DHCP service,
     never two origins (D27)."""
