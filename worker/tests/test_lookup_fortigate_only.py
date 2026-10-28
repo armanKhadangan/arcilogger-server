@@ -2223,7 +2223,8 @@ def exact_request(session: Session, **request: Any) -> LookupOutcome:
         pytest.param(-timedelta(seconds=30), 20, None, id="30-seconds"),
         pytest.param(BEHIND, 8, None, id="9-rows"),
         pytest.param(BEHIND, 9, -480, id="10-rows"),
-        pytest.param(-timedelta(seconds=120.4), 20, None, id="120.4-seconds"),
+        pytest.param(-timedelta(seconds=120), 20, None, id="120-seconds"),
+        pytest.param(-timedelta(seconds=120.4), 20, -121, id="120.4-seconds"),
         pytest.param(-timedelta(seconds=120.5), 20, -121, id="120.5-seconds"),
         pytest.param(timedelta(seconds=120.5), 20, 121, id="120.5-seconds-ahead"),
         pytest.param(-timedelta(seconds=120.6), 20, -121, id="120.6-seconds"),
@@ -2235,10 +2236,10 @@ def test_a_cited_source_whose_clock_was_off_lowers_every_chain(
     """3.4 "source clock": the FortiGate's rows around T are 8 minutes behind their receive
     time; an exact request at T names the FortiGate with about -480 s, every chain is ``low``
     (its lease step too) and the match stays ``exact``. 30 s, or fewer than 10 rows of the source
-    around T (the session row and the lines without a typed row), add nothing. The offset
-    compared with the limit is the whole number printed, so a printed offset always exceeds
-    the limit (120.4 s prints 120: nothing); a half second rounds away from zero (120.5 s is
-    beyond the limit and prints 121)."""
+    around T (the session row and the lines without a typed row), add nothing. The unrounded
+    median is compared with the limit (120 s is not beyond it, 120.4 s is) and the offset
+    printed is rounded up, away from zero, so a printed offset always exceeds the limit
+    (120.4 s, 120.5 s and 120.6 s print 121)."""
     evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
     evidence.traffic(AT, PC, 51001, transip=WAN)
     clock_lines(evidence, offset, lines)

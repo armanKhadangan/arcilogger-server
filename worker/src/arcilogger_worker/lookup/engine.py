@@ -274,9 +274,9 @@ def _joined(items: Sequence[str]) -> str:
 
 
 def _whole_seconds(seconds: float) -> int:
-    """``seconds`` to the whole second, a half away from zero (``round`` gives 120 for 120.5):
-    a clock offset beyond its limit prints beyond it."""
-    whole = math.floor(abs(seconds) + 0.5)
+    """``seconds`` rounded up to the next whole second, away from zero (120.4 s prints 121): a
+    clock offset beyond its limit prints beyond it."""
+    whole = math.ceil(abs(seconds))
     return -whole if seconds < 0 else whole
 
 
@@ -1635,10 +1635,10 @@ class _Lookup:
         for name, lease in sources.items():
             limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
             measured = self._clock(name)
-            # The whole seconds printed are the ones compared: a named offset exceeds its limit.
-            offset = None if measured is None else _whole_seconds(measured[0])
-            if offset is not None and abs(offset) > limit:
-                offsets[name] = offset
+            # The unrounded median is compared, as R20-lease:source-clock compares it; the
+            # offset printed is rounded up, so a named offset still exceeds its limit.
+            if measured is not None and abs(measured[0]) > limit:
+                offsets[name] = _whole_seconds(measured[0])
                 limits.append(limit)
         if not offsets:
             return attribution, matches
