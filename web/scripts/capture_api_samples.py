@@ -1458,7 +1458,8 @@ def capture_devices(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
 
 def capture_lookup_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
     """The Wave 3 lookups (``samples_lookups``) on a second lookup site, a database and data
-    directory of their own: merged into ``lookups.json``, their cited lines into ``raw.json``."""
+    directory of their own: merged into ``lookups.json``, their cited lines into ``raw.json``
+    (a lookup id or raw-line key the main site already holds stops the capture)."""
     with server.database(template) as name:
         engine = engine_from_url(server.url_for(name), application="capture", poolclass=NullPool)
         try:
@@ -1469,7 +1470,14 @@ def capture_lookup_site(capture: Capture, server: TestServer, template: str, roo
             if twice := lookups.keys() & found.keys():
                 raise SystemExit(f"samples_lookups: {sorted(twice)} are captured here already")
             lookups.update(found)
-            capture_lines(site, admin, found.values(), capture.samples["raw"]["lines"])
+            # A key both sites hold names two different lines (the sites' data differ): stop
+            # rather than keep the main site's line for a lookup of this one.
+            lines: dict[str, Any] = {}
+            capture_lines(site, admin, found.values(), lines)
+            main = capture.samples["raw"]["lines"]
+            if twice := main.keys() & lines.keys():
+                raise SystemExit(f"samples_lookups: raw lines {sorted(twice)} are captured already")
+            main.update(lines)
         finally:
             engine.dispose()
 
