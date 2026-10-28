@@ -355,7 +355,7 @@ export function UiKitPage() {
             onClick={() => {
               setPreference(resolved === 'dark' ? 'light' : 'dark');
             }}
-            aria-label={t('uiKit.themeToggle')}
+            aria-label={resolved === 'dark' ? t('auth.themeLight') : t('auth.themeDark')}
             data-testid="ui-kit-theme-toggle"
           >
             {resolved === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
