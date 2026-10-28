@@ -1025,6 +1025,37 @@ def test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing(
     assert note(lowered, UNCONVERTED) == {"last": iso(tr(DAY, 11)), "ip": PC}
 
 
+@pytest.mark.parametrize(
+    ("ip", "lowered"),
+    [
+        ("fe80::1%eth0", True),
+        ("2001:db8::1", True),
+        ("172.20.43.121/24", True),
+        ("172.20.43.121", False),
+    ],
+    ids=["zone-id", "ipv6", "with-a-prefix", "another-configured-network"],
+)
+def test_an_unreadable_ip_of_the_mac_after_the_lease_counts(
+    db_session: Session, evidence: Evidence, example: list[int], ip: str, lowered: bool
+) -> None:
+    """2.7: a line of the chain's MAC after the 11:00 ACK counts unless its ``ip`` lies in
+    another configured network (D33's key); an ``ip`` that is no plain IPv4 address is
+    unreadable and counts, and it never reaches PostgreSQL's ``inet`` (a zone id would end the
+    lookup's transaction)."""
+    unconverted_line(evidence, tr(DAY, 11, 10), ip, PC_MAC)
+    db_session.commit()
+    chain = internal(db_session, PC, AT).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    if lowered:
+        assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+        assert note(chain, UNCONVERTED) == {"last": iso(tr(DAY, 11)), "ip": PC}
+    else:
+        assert (chain.confidence, chain.lease.confidence) == ("medium", "high")
+        assert UNCONVERTED not in chain_keys(chain)
+    assert ip not in outcome_text(internal(db_session, PC, AT))
+
+
 # -- a rollback window (D8, 2.2.1) ----------------------------------------------------------------
 
 

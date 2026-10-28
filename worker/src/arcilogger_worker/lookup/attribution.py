@@ -1056,13 +1056,15 @@ class Attributor:
         """The configured network of each readable address of ``addresses`` not known yet (the
         most specific ``vlans`` subnet holding it, :func:`find_vlan`'s rule; ``None``: none), in
         one query: the post-lease checks test every address that a row of a chain's MAC names
-        (D33's key), not one query per address."""
+        (D33's key), not one query per address. Readable is a plain IPv4 address: a line's
+        ``ip`` is the log's text, and what Python reads as an address PostgreSQL's ``inet`` may
+        refuse (an IPv6 zone id), which would end the lookup's transaction."""
         wanted = set()
         for address in addresses:
             if address is None or address in self._subnets:
                 continue
             try:
-                ipaddress.ip_address(address)
+                ipaddress.IPv4Address(address)
             except ValueError:
                 self._subnets[address] = _UNREADABLE
                 continue
