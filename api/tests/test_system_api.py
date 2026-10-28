@@ -268,7 +268,7 @@ def test_system_summary_shape(
             "lag_bytes": 30,
             "lag_seconds": 2.0,
             "lines_per_second": 1.5,
-            "unfinished_days": 2,
+            "unfinished_days": 1,  # both members list the same day
             "has_error": True,
         },
     ]

@@ -416,10 +416,15 @@ def ingest_info(layout: Layout, config: Config, now: datetime) -> IngestInfo:
                 lag_bytes=sum(_number(member.get("lag_bytes")) for member in members),
                 lag_seconds=_largest(_float(member.get("lag_seconds")) for member in members),
                 lines_per_second=_sum(_float(member.get("lines_per_second")) for member in members),
-                unfinished_days=sum(
-                    len(days)
-                    for member in members
-                    if isinstance(days := member.get("unfinished_days"), list)
+                # Days, not streams: every member of a network lists the same day.
+                unfinished_days=len(
+                    {
+                        day
+                        for member in members
+                        if isinstance(days := member.get("unfinished_days"), list)
+                        for day in days
+                        if isinstance(day, str)
+                    }
                 ),
                 has_error=any(member.get("last_error") is not None for member in members),
             )
