@@ -2377,10 +2377,20 @@ report:
   keeps 8,640,000 s).
 - **e1:** `lease_evidence.<table>.last_hour` is the newest usable row within the last hour
   (section 17.8); the web judges "as converted" by the converter's shape.
-- **WP-D:** `lease_evidence` is required and never null (the `dhcp.fortigate_*` values
-  unreadable: `refused_rows`/`excluded_rows` 0, state from the alerts only); the observed
-  endpoint caches the counts and computes the exit claims on every request; the double-NAT
-  variant and the CGNAT sentence only for a request with a public IP; no `double_nat` bullets
-  beside the `fallback` paragraph; `build_site(srcmac=True)` gives the phone `vlan60` (its own
-  network) where the contract wrote `vlan42`. They are listed in the WP-D pull request and,
-  where they depart from the contract, in its "Deviations — d".
+- **d (WP-D):** no `double_nat` bullets beside the `fallback` paragraph (d-1) and no bullet for
+  a text a paragraph quotes (d-2); the isp_nat paragraph says what was searched when the search
+  went wider than the exit's addresses (d-3); a `fallback` prints the result and advice (a)
+  under "Kesin eşleşme için / For an exact answer" (d-4); "bu hatta" only for an exit with
+  interfaces (d-5); a shared-interface variant of the `fallback` addition (d-6); the
+  `no_egress` paragraph speaks of the configured FortiGate sources (d-7); a catch-all exit's
+  NAT addresses in words (d-8); the double-NAT variant and the CGNAT sentence only for a request
+  with a public IP (d-9); a session that changed exit names the other exit only when the stored
+  outcome can tell it (d-10); bilingual labels for `fg_dhcp`/`fg_event` only (d-11); the
+  format note once and never beside the chains (d-13); `inputs.py` cites `unconverted_dhcp`
+  (d-14); `lease_evidence` is required and never null, with `refused_rows`/`excluded_rows` 0
+  and the state from the alerts only when the `dhcp.fortigate_*` values cannot be read (d-15);
+  `none_tables` whatever the state (d-16); the observed endpoint caches the counts and computes
+  the exit claims on every request (d-17), counts IPv4 srcmac rows (d-18) and claims by
+  `dstintf`, then the first exit by name (d-20); the card's srcmac count has no family filter
+  (d-19); `build_site(dhcp="fortigate", srcmac=True)` puts the phone on `vlan60` where the
+  contract wrote `vlan42` (d-21). Contract "Deviations — d" has each with its tests.
