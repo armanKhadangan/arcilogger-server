@@ -61,7 +61,14 @@ from arcilogger_db.cli import _build_parser as db_parser
 from arcilogger_db.models import LICENSE_MAX_BYTES, Base
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_worker.alerts.mail import MAX_LISTED, MailItem, render_text, subject
-from arcilogger_worker.alerts.texts import DESCRIBERS, describe, source_name
+from arcilogger_worker.alerts.texts import (
+    DESCRIBERS,
+    LEASE_CAUSES,
+    NAT_CAUSES,
+    RULES,
+    describe,
+    source_name,
+)
 from arcilogger_worker.cli import _build_parser as worker_parser
 from arcilogger_worker.reports.runner import REPORT_RULE, UNLICENSED_NOTE
 from arcilogger_worker.service import default_jobs
@@ -1981,3 +1988,33 @@ def test_installer_and_first_steps_point_to_the_settings_guide() -> None:
     for name in ("ILK-ADIMLAR.md", "FIRST-STEPS.md", "KURULUM.md", "INSTALL.md"):
         guide = "AYARLAR.md" if name in ("ILK-ADIMLAR.md", "KURULUM.md") else "SETTINGS.md"
         assert f"]({guide})" in _doc(name), name
+
+
+#: Section 2's severity words, per document (the first word of the severity cell).
+SEVERITY_WORDS: Final[dict[str, set[str]]] = {
+    "UYARILAR.md": {"Kritik", "Yüksek", "Orta", "Düşük", "Bilgi"},
+    "ALERTS.md": {"Critical", "High", "Medium", "Low", "Info"},
+}
+
+
+@pytest.mark.parametrize("name", ["UYARILAR.md", "ALERTS.md"])
+def test_alert_documents_list_every_lease_and_nat_cause(name: str) -> None:
+    """Section 2 has a row for every ``R20-lease`` cause and the four ``R20-nat`` causes
+    (ADR-0016, contract 2.6.3), each with a severity and the cause's one-line action of
+    ``alerts/texts.py`` (the e-mail line); the rules' names are in the section's opening."""
+    language = 0 if name == "UYARILAR.md" else 1
+    section = _section(_doc(name), "## 2.", "## 3.")
+    rows = _table_rows(section, r"`(R20-(?:lease|nat):[a-z-]+)(?::<[^`>]+>)?`")
+    assert set(NAT_CAUSES) == {"conversion-failed", "invalid", "legacy-changed", "unmapped-transip"}
+    expected = {f"R20-lease:{cause}" for cause in LEASE_CAUSES}
+    expected |= {f"R20-nat:{cause}" for cause in NAT_CAUSES}
+    assert sorted(rows) == sorted(expected)
+    for key, cells in rows.items():
+        rule, _, cause = key.partition(":")
+        action = (LEASE_CAUSES if rule == "R20-lease" else NAT_CAUSES)[cause][language]
+        assert re.split(r"[\s(;,]", cells[2])[0] in SEVERITY_WORDS[name], key
+        assert cells[4].startswith(action), key
+    intro = _flat(section.split("\n| ", 1)[0])
+    for rule in ("R20-lease", "R20-nat"):
+        assert f"`{rule}`" in intro
+        assert (RULES[rule].name_tr, RULES[rule].name_en)[language] in intro, rule
