@@ -76,8 +76,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Final
 
-from sqlalchemy import ColumnElement, and_, case, func, not_, or_, select, true
+from sqlalchemy import ColumnElement, and_, case, cast, func, not_, or_, select, true
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
+from sqlalchemy.types import Text
 
 from arcilogger_db.assignments import Slot, covering, load_history
 from arcilogger_db.models import (
@@ -121,6 +123,8 @@ _REF_LEASE: Final = re.compile(r", lease (\d+)\)$")
 UNCONVERTED_WINDOW: Final = timedelta(seconds=8_640_000)
 #: The chains the post-lease check looks at (a ``low`` chain is warned already).
 _CHECKED: Final = ("high", "medium")
+#: The subnet of a logged address that is no address (the post-lease checks count its row).
+_UNREADABLE: Final = "-"
 #: How 2.6.3 renders a log-supplied VDOM name: MAC- and IPv4-looking parts masked, cut.
 _MAC_LIKE: Final = re.compile(
     r"[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}"
@@ -285,6 +289,9 @@ class Attributor:
         self._history: dict[str, list[Slot]] = {}
         self._persons: dict[int, _PersonRow | None] = {}
         self._vlans: dict[str, tuple[Vlan | None, VlanDepartment | None]] = {}
+        #: Per address the configured subnet holding it (the post-lease checks; ``None``: none,
+        #: :data:`_UNREADABLE`: no address).
+        self._subnets: dict[str, str | None] = {}
 
     # -- loading ----------------------------------------------------------------------------------
 
@@ -939,14 +946,16 @@ class Attributor:
         rows = self.session.execute(query).all()
         if not rows:
             return
+        by_ip: dict[str | None, list[datetime]] = defaultdict(list)
+        by_mac: dict[str | None, list[tuple[str | None, datetime]]] = defaultdict(list)
+        for address, moved, time in rows:
+            by_ip[address].append(time)
+            by_mac[moved].append((address, time))
+        self._load_subnets(address for address, _moved, _time in rows)
         for group, chain, lease, since in targets:
-            if any(
-                since < time <= chain.at
-                and (
-                    address == chain.internal_ip
-                    or (moved == lease.mac and self._move_counts(chain.internal_ip, address))
-                )
-                for address, moved, time in rows
+            if any(since < time <= chain.at for time in by_ip.get(chain.internal_ip, ())) or any(
+                since < time <= chain.at and self._move_counts(chain.internal_ip, address)
+                for address, time in by_mac.get(lease.mac, ())
             ):
                 self._lower(group)
 
@@ -976,10 +985,14 @@ class Attributor:
         rows = self.session.execute(query).all()
         if not rows:
             return
+        by_mac: dict[str, list[tuple[str, str | None, str | None, datetime]]] = defaultdict(list)
+        for address, mac, interface, vd, time in rows:
+            by_mac[mac].append((address, interface, vd, time))
+        self._load_subnets(address for address, _mac, _interface, _vd, _time in rows)
         for group, chain, lease, since in targets:
             record = self.record(lease, chain.at)
-            for address, mac, interface, vd, time in rows:
-                if mac != lease.mac or address == chain.internal_ip:
+            for address, interface, vd, time in by_mac.get(lease.mac, ()):
+                if address == chain.internal_ip:
                     continue
                 if not since < time < chain.at:
                     continue
@@ -997,12 +1010,43 @@ class Attributor:
         not when both lie in configured networks and those differ (D33's key: a laptop or a NAS
         on two configured networks); an unreadable address, or one outside every configured
         network on either side, counts."""
-        try:
-            ipaddress.ip_address(other or "")
-        except ValueError:
+        if other is None:
             return True
-        own, theirs = self._vlan(ip)[0], self._vlan(str(other))[0]
-        return own is None or theirs is None or str(own.subnet) == str(theirs.subnet)
+        if other not in self._subnets:
+            self._load_subnets([other])
+        theirs = self._subnets[other]
+        if theirs == _UNREADABLE:
+            return True
+        own = self._vlan(ip)[0]
+        return own is None or theirs is None or str(own.subnet) == theirs
+
+    def _load_subnets(self, addresses: Iterable[str | None]) -> None:
+        """The configured network of each readable address of ``addresses`` not known yet (the
+        most specific ``vlans`` subnet holding it, :func:`find_vlan`'s rule; ``None``: none), in
+        one query: the post-lease checks test every address that a row of a chain's MAC names
+        (D33's key), not one query per address."""
+        wanted = set()
+        for address in addresses:
+            if address is None or address in self._subnets:
+                continue
+            try:
+                ipaddress.ip_address(address)
+            except ValueError:
+                self._subnets[address] = _UNREADABLE
+                continue
+            wanted.add(address)
+        if not wanted:
+            return
+        given = select(func.unnest(cast(sorted(wanted), ARRAY(Text))).label("ip")).subquery("given")
+        holding = (
+            select(cast(Vlan.subnet, Text))
+            .where(Vlan.subnet.op(">>=")(func.inet(given.c.ip)))
+            .order_by(func.masklen(Vlan.subnet).desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        for address, subnet in self.session.execute(select(given.c.ip, holding)):
+            self._subnets[str(address)] = None if subnet is None else str(subnet)
 
     def _lower(self, group: list[AttributionChain]) -> None:
         """The chain and its alternatives ``low`` (lease and chain) with
