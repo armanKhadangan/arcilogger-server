@@ -3,10 +3,13 @@
 a typed filter.
 
 * The hub's CPU — the whole test process's ``process_time``, which also holds the server and the
-  three readers — stays at or below 0.4 s per wall second on a core as fast as the one the budget
-  was set on. The same work costs more CPU on a slower or busier core (a slower CI runner,
-  neighbours on the same machine), so a gauge process times fixed work shaped like the hub's per
-  line while the writer runs, and the budget grows in proportion (never below 0.4 s).
+  three readers — stays at or below 0.4 s per wall second, and the hub's read thread needs at most
+  60 µs of CPU a line. The hub reads at most 1 MiB per file per poll, so under this load it reads
+  all the time: its CPU per wall second grows little when its work costs more, and drops when
+  other work on the machine keeps it waiting for a core; its CPU per line grows in full.
+* Both budgets hold on a core as fast as the one they were set on. The same work costs more CPU
+  on a slower core (a slower CI runner), so a gauge process times fixed work shaped like the
+  hub's per line while the writer runs, and the budgets grow in proportion (never shrink).
 * Every stream stays at or below its rate cap, and the rest is reported: delivered + dropped =
   matching lines, exactly (the filters here match every line, so the count is known).
 * The buffer stays bounded; a line written once the burst is over arrives within 1.5 s.
@@ -18,6 +21,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,7 +30,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
-from arcilogger_api.live.hub import Hub
+from arcilogger_api.live.hub import Hub, Plan, ReadResult
 from arcilogger_api.live.testing import LiveServer, sign_in
 from arcilogger_api.testing import EXAMPLE_SITE_NAME
 from arcilogger_core.config import Config
@@ -41,26 +45,32 @@ pytestmark = pytest.mark.perf
 LINES_PER_SECOND = 10_000
 SECONDS = 10
 CPU_PER_SECOND = 0.4
-#: CPU seconds of one round of ``GAUGE`` on the core the budget was set on, where the hub took
-#: 0.31 s a second. Side by side on a 4-CPU Linux machine shared with other work the hub took
-#: 0.37 to 0.40 s a second with rounds of 6.7 to 7.8 ms: about 0.052 s per millisecond of round.
-GAUGE_ROUND = 0.006
-#: The gauge: ``python -c GAUGE <spool line> <seconds>`` prints its CPU seconds per round of 5,000
-#: lines cut, decoded, time-parsed, folded and searched, about a fifth of a core for ``seconds``.
+#: The gauge's round on the core the budgets were set on, where the hub took 0.31 s a second
+#: (4.19 s of CPU). Estimated on a 4-CPU Linux machine where rounds took 5.8 to 6.4 ms and the hub
+#: 0.35 to 0.42 s a second (5.3 to 6.9 s of CPU): a core about a sixth slower.
+GAUGE_ROUND = 0.005
+#: The read thread's CPU a line on that core. Measured 34 to 44 µs (40 to 57 µs on the machine
+#: above, the more the busier it was); a hub whose reading costs twice as much took 86 µs and more.
+READ_CPU_PER_LINE = 60e-6
+#: The gauge: ``python -c GAUGE <spool line> <seconds>`` times rounds of 5,000 lines cut, decoded,
+#: time-parsed, folded and searched, about a fifth of a core for ``seconds``, and prints the 10th
+#: percentile of the rounds' seconds: the speed of the core, which neighbours taking the core away
+#: for a while (slower rounds) do not change.
 GAUGE = """
 import sys, time
 from datetime import datetime
 lines, seconds = [sys.argv[1].encode()] * 5_000, float(sys.argv[2])
-rounds, began, end = 0, time.process_time(), time.monotonic() + seconds
+rounds, end = [], time.monotonic() + seconds
 while time.monotonic() < end:
+    began = time.perf_counter()
     for line in lines:
         stamp, sender, message = line.split(b" ", 2)
         datetime.fromisoformat(stamp.decode("ascii"))
         sender.decode("ascii")
         b'type="traffic"' in message.lower()
-    rounds += 1
+    rounds.append(time.perf_counter() - began)
     time.sleep(0.03)
-print((time.process_time() - began) / rounds)
+print(sorted(rounds)[len(rounds) // 10])
 """
 #: The writer: ``python -c WRITER <file> <file> <lines a second> <seconds> <message>``.
 WRITER = """
@@ -110,6 +120,7 @@ def test_three_streams_under_ten_thousand_lines_a_second(
     server: LiveServer,
     layout: Layout,
     app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     today = site_day(datetime.now(UTC))
     paths = [layout.spool_file(folder, today) for folder in ("fortigate", "fortigate2")]
@@ -126,13 +137,14 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         streams.append(response.json()["stream_id"])
         readers.append(Reader(client, streams[-1]))
     hub: Hub = app.state.arci_live
+    reads = _count_reads(hub, monkeypatch)
     try:
         for reader in readers:
             reader.wait(lambda r: bool(r.of("hello")))
         line = format_line(datetime.now(UTC), "172.31.255.1", traffic().encode())
         cpu, wall = time.process_time(), time.monotonic()
-        # the gauge runs beside the writer, so it sees the same core speed and neighbours; its
-        # CPU is its own process's, not in ``used``
+        # the gauge runs beside the writer, on the same cores at the same time; its CPU is its own
+        # process's, not in ``used``
         with subprocess.Popen(
             [sys.executable, "-c", GAUGE, line.decode().rstrip("\n"), str(SECONDS)],
             stdout=subprocess.PIPE,
@@ -153,9 +165,9 @@ def test_three_streams_under_ten_thousand_lines_a_second(
             )
             gauged = float(gauge.communicate(timeout=30)[0])
         assert writer.returncode == 0
-        # a slower or busier core than the budget's raises it in proportion, a faster one does not
-        # lower it
-        budget = CPU_PER_SECOND * max(1.0, gauged / GAUGE_ROUND)
+        # a slower core than the budgets' raises them in proportion; a faster one leaves them
+        scale = max(1.0, gauged / GAUGE_ROUND)
+        budget = CPU_PER_SECOND * scale
         written = LINES_PER_SECOND * SECONDS
         # the hub catches up: every line shown or counted, nothing left in a queue
         deadline = time.monotonic() + 30
@@ -167,7 +179,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         print(
             f"\nlive tail: {used:.2f} s CPU in {elapsed:.2f} s ({used / elapsed:.2f} s/s), "
             f"{len(hub.buffer)} lines buffered; budget {budget:.2f} s/s "
-            f"(gauge {gauged * 1000:.1f} ms a round)"
+            f"(gauge {gauged * 1000:.2f} ms a round); read thread {reads.seconds:.2f} s CPU for "
+            f"{reads.lines} lines ({reads.seconds / reads.lines * 1e6:.1f} µs a line)"
         )
         for stream_id in streams:
             stream = hub.streams[stream_id]
@@ -178,6 +191,7 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         assert typed.dropped.get("parse_budget", 0) > 0  # most lines were beyond the parse budget
         assert len(hub.buffer) <= hub.settings.buffer_lines
         assert used / elapsed <= budget
+        assert reads.seconds / reads.lines <= READ_CPU_PER_LINE * scale
         # once the burst is over, a single line arrives at once
         time.sleep(1.5)
         before = len(readers[0].lines())
@@ -197,6 +211,30 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         for client, stream_id in zip(clients, streams, strict=True):
             client.delete(f"/api/v1/live/streams/{stream_id}", headers=STREAM_HEADERS)
             client.close()
+
+
+@dataclass
+class ReadCost:
+    seconds: float = 0.0
+    lines: int = 0
+
+
+def _count_reads(hub: Hub, monkeypatch: pytest.MonkeyPatch) -> ReadCost:
+    """The CPU of the hub's read thread (``Hub._read`` runs there, one cycle at a time) and the
+    lines it read, from now on; a cycle that skipped a backlog (``behind``: lines counted, not
+    read) is left out."""
+    cost, read = ReadCost(), hub._read
+
+    def timed(plan: Plan) -> ReadResult:
+        began = time.thread_time()
+        result = read(plan)
+        if not result.behind:
+            cost.seconds += time.thread_time() - began
+            cost.lines += len(result.entries)
+        return result
+
+    monkeypatch.setattr(hub, "_read", timed)
+    return cost
 
 
 def _settled(hub: Hub, stream_id: str, written: int) -> bool:
