@@ -188,6 +188,7 @@
       },
       "use": "Use",
       "useExample": "Write this example into the query: {{query}}",
+      "useThisExample": "Use — write this example into the query: {{query}}",
       "speedTitle": "Which queries are fast",
       "speed": {
         "indexedFields": "Fields marked “Indexed” (srcip:, domain:, mac:, qname:, sessionid: …) use an index and stay fast over long ranges.",

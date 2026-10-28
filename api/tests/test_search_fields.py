@@ -279,6 +279,41 @@ def test_the_tables_a_query_reads() -> None:
     )
 
 
+def test_fortigate_dhcp_rows_are_events_and_srcmac_is_the_session_mac() -> None:
+    """ADR-0016 (contract 2.4): FortiGate DHCP rows are under ``type:event`` (the ``dhcp`` kind
+    is MikroTik's) and found by ``mac:``, ``ip:``, ``interface:``, ``logid:`` and ``level:``;
+    ``srcmac:`` (alias ``kaynakmac:``) reads only the session record and has no index."""
+    assert _tables("type:event ip:172.20.42.57") == ("fg_event", "fg_dhcp")
+    assert _tables("type:event logid:0100026001") == ("fg_event", "fg_dhcp")
+    assert _tables("mac:0000.5E00.5357 type:event") == ("fg_dhcp",)
+    assert _tables("type:dhcp ip:172.20.42.57") == ("mt_dhcp", "mt_event")
+    assert (_tables("interface:vlan42") or ())[-2:] == ("mt_event", "fg_dhcp")
+    assert _tables("level:information") == ("fg_event", "mt_event", "fg_dhcp")
+    assert _tables("kaynakmac:00-00-5E-00-53-57") == ("fg_traffic",)
+    assert _tables("type:traffic srcmac:*") == ("fg_traffic",)
+    with pytest.raises(SearchQueryError) as caught:
+        _tables("type:event srcmac:00:00:5e:00:53:57")
+    assert (caught.value.code, caught.value.params) == (
+        "search_fields_incompatible",
+        {"fields": "type, srcmac"},
+    )
+    with pytest.raises(SearchQueryError) as caught:
+        parse_query("srcmac:00:00:5e:00:53")
+    assert (caught.value.code, caught.value.params["format"]) == ("search_value_invalid", "mac")
+    kinds = {kind["key"]: kind for kind in catalogue_kinds()}
+    assert kinds["dhcp"]["label_tr"] == kinds["dhcp"]["label_en"] == "DHCP (MikroTik)"
+    (srcmac,) = [entry for entry in catalogue_fields() if entry["name"] == "srcmac"]
+    assert (srcmac["tables"], srcmac["indexed"], srcmac["kind"]) == (["fg_traffic"], [], "mac")
+    assert srcmac["help_tr"] == (
+        "FortiGate oturum kaydındaki kaynak MAC adresi (yalnızca aygıt tanıma açık arayüzlerde "
+        "dolu; dizinsiz, zaman dilimleriyle taranır)."
+    )
+    assert srcmac["help_en"] == (
+        "Source MAC of the FortiGate session record (filled only on interfaces with device "
+        "detection; not indexed, scanned in time slices)."
+    )
+
+
 @pytest.mark.parametrize(
     ("text", "fields"),
     [
