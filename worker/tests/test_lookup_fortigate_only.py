@@ -1801,6 +1801,8 @@ def exact_request(session: Session, **request: Any) -> LookupOutcome:
         pytest.param(BEHIND, 8, None, id="9-rows"),
         pytest.param(BEHIND, 9, -480, id="10-rows"),
         pytest.param(-timedelta(seconds=120.4), 20, None, id="120.4-seconds"),
+        pytest.param(-timedelta(seconds=120.5), 20, -121, id="120.5-seconds"),
+        pytest.param(timedelta(seconds=120.5), 20, 121, id="120.5-seconds-ahead"),
         pytest.param(-timedelta(seconds=120.6), 20, -121, id="120.6-seconds"),
     ],
 )
@@ -1812,7 +1814,8 @@ def test_a_cited_source_whose_clock_was_off_lowers_every_chain(
     (its lease step too) and the match stays ``exact``. 30 s, or fewer than 10 rows of the source
     around T (the session row and the lines without a typed row), add nothing. The offset
     compared with the limit is the whole number printed, so a printed offset always exceeds
-    the limit (120.4 s prints 120: nothing)."""
+    the limit (120.4 s prints 120: nothing); a half second rounds away from zero (120.5 s is
+    beyond the limit and prints 121)."""
     evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
     evidence.traffic(AT, PC, 51001, transip=WAN)
     clock_lines(evidence, offset, lines)
@@ -1835,8 +1838,8 @@ def test_a_cited_source_whose_clock_was_off_lowers_every_chain(
     params = outcome_note(outcome, CLOCK)
     assert (params["at"], params["limit"]) == (iso(AT), 120)
     text = next(e for e in outcome.explanations if e.key == CLOCK)
-    assert f"fortigate: {printed} (sınır 120 saniye)" in text.text_tr
-    assert f"fortigate: {printed} (limit 120 seconds)" in text.text_en
+    assert f"fortigate: {printed:+d} (sınır 120 saniye)" in text.text_tr
+    assert f"fortigate: {printed:+d} (limit 120 seconds)" in text.text_en
     # The internal lookup rests on the same lease rows of the same clock.
     chain = internal(db_session, PC, AT).attribution
     assert chain is not None

@@ -88,6 +88,7 @@ stores the lookup and writes the audit entry.
 from __future__ import annotations
 
 import ipaddress
+import math
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -270,6 +271,13 @@ def _text_order(value: str) -> tuple[int, int, str]:
 
 def _joined(items: Sequence[str]) -> str:
     return ", ".join(items) if items else "-"
+
+
+def _whole_seconds(seconds: float) -> int:
+    """``seconds`` to the whole second, a half away from zero (``round`` gives 120 for 120.5):
+    a clock offset beyond its limit prints beyond it."""
+    whole = math.floor(abs(seconds) + 0.5)
+    return -whole if seconds < 0 else whole
 
 
 def _lowered(chain: AttributionChain) -> AttributionChain:
@@ -1605,7 +1613,7 @@ class _Lookup:
             limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
             measured = self._clock(name)
             # The whole seconds printed are the ones compared: a named offset exceeds its limit.
-            offset = None if measured is None else round(measured[0])
+            offset = None if measured is None else _whole_seconds(measured[0])
             if offset is not None and abs(offset) > limit:
                 offsets[name] = offset
                 limits.append(limit)
