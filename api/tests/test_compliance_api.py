@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from arcilogger_api import security
 from arcilogger_api.app import API_PREFIX
 from arcilogger_api.compliance import routes
-from arcilogger_api.compliance.cards import CONFIG_BACKUP_CONFIRM
+from arcilogger_api.compliance.cards import CONFIG_BACKUP_CONFIRM, compute_status
 from arcilogger_api.compliance.models import ComplianceStatus
 from arcilogger_api.deps import TtlCache
 from arcilogger_api.licensing import MODULE_MARKER
@@ -73,11 +73,10 @@ def app(app: FastAPI) -> FastAPI:
 def computed(monkeypatch: pytest.MonkeyPatch) -> list[datetime]:
     """The ``now`` of every computation of the cards by a route."""
     calls: list[datetime] = []
-    real = routes.compute_status
 
     def counting(*args: Any) -> ComplianceStatus:
         calls.append(args[-1])
-        return real(*args)
+        return compute_status(*args)
 
     monkeypatch.setattr(routes, "compute_status", counting)
     return calls
@@ -236,9 +235,7 @@ def test_auditor_reads_the_cards_and_the_report(
     assert entry.details["sha256"] == hashlib.sha256(report.content).hexdigest()
 
 
-def test_compliance_is_not_licence_gated(
-    app: FastAPI, client: TestClient, login_as: Login
-) -> None:
+def test_compliance_is_not_licence_gated(app: FastAPI, client: TestClient, login_as: Login) -> None:
     for route in routes.router.routes:
         assert isinstance(route, APIRoute)
         assert not [

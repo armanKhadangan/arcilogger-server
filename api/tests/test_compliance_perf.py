@@ -11,9 +11,7 @@ yesterday's ``state/clock`` files (24 samples each); 30 sealed days in the vault
 real code, ``arcilogger_worker.vaulttesting``); the collector's status file with 20 sources.
 
 **Timing:** :func:`arcilogger_api.compliance.cards.compute_status` (what the page and the PDF
-compute), best of three after one cold run, which is printed too. The database backup has never
-run (no ``state/backup/last.json``), so card 10 also asks ``job_runs`` for the installation's
-first run, the most expensive path.
+compute), best of three after one cold run, which is printed too.
 """
 
 from __future__ import annotations
@@ -38,6 +36,7 @@ from arcilogger_core.timeutil import SITE_TZ, day_window, isoformat_site
 from arcilogger_db.models import Alert, Source
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.searchcounts import rebuild_stream
+from arcilogger_db.testing import pause_compression_jobs
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 pytestmark = pytest.mark.perf
@@ -75,7 +74,7 @@ MESSAGES_SQL = text(
     _SERIES  # noqa: S608 - fixed SQL fragments
     + f"INSERT INTO messages ({_COLUMNS}, severity, facility, host, type, subtype, text) "
     + f"SELECT {_COMMON}, 6, 23, 'FIREWALL-01', 'utm', :subtype, "
-    + "'logid=\"0000000000\" type=\"utm\" subtype=\"' || :subtype || '\" n=' || n FROM g"
+    + '\'logid="0000000000" type="utm" subtype="\' || :subtype || \'" n=\' || n FROM g'
 )
 TYPED_SQL = {
     "webfilter": text(
@@ -197,6 +196,15 @@ def _state_files(layout: Layout) -> None:
     )
 
 
+def _timescale(engine: Engine) -> bool:
+    with engine.connect() as connection:
+        return bool(
+            connection.scalar(
+                text("SELECT count(*) FROM pg_extension WHERE extname = 'timescaledb'")
+            )
+        )
+
+
 def _source_names() -> list[str]:
     return [*FORTIGATES, *(f"switch-{n}" for n in range(STATUS_SOURCES - len(FORTIGATES)))]
 
@@ -210,6 +218,8 @@ def perf_site(
 ) -> Iterator[sessionmaker[Session]]:
     began = time.perf_counter()
     days = [NEWEST - timedelta(days=offset) for offset in range(OLDER_DAYS + 1)]
+    if _timescale(db_engine):
+        pause_compression_jobs(db_engine)  # as test_search_perf.py: no chunk compressed mid-load
     with db_engine.begin() as connection:
         ensure_partitions(connection, today=NEWEST, months_back=1)
     for day in days:
@@ -224,6 +234,9 @@ def perf_site(
     with db_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         connection.execute(text("ANALYZE"))
     with db_engine.begin() as connection:
+        # The oldest two days sit at the edge of the fresh statistics: the recount's join was
+        # planned as a nested loop over the typed rows there (about 50 s a file instead of 0.5).
+        connection.execute(text("SET LOCAL enable_nestloop = off"))
         for day in days:
             for source in FORTIGATES:
                 rebuild_stream(connection, source, day)
