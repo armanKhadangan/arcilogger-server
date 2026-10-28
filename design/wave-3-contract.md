@@ -5968,7 +5968,16 @@ from section 0.2 are recorded here too, with the date and who decided.
   an empty `last_dhcp_evidence`"). `fg_event` has no index on a line's address (A0 adds none),
   so the probe and the round-6 post-lease query read every `system` line of their window.
   Measured by the 3.8 guards (`test_lookup_performance.py`, 50,000 `system` lines a day: a
-  twentieth of 1 M FortiGate lines, the share the alert guard writes) on the 100-day window: the
+  twentieth of 1 M FortiGate lines, the share the alert guard writes) on the 100-day window. The
+  event site writes 50,000 `fg_event` `system` lines a day over the 101 days the queries can
+  read (one every 5 minutes for the 300 days before; `ARCILOGGER_PERF_EVENTS` sets the rate),
+  **not** 3.8's "400 days of `fg_event` at 1 M lines a day": every one of these queries reads
+  `ix_fg_event_subtype_time` with `subtype = 'system'`, and of a FortiGate's 1 M lines a day the
+  traffic lines (the bulk) are `fg_traffic` rows since Wave 2 and never `fg_event` rows, so the
+  `system` lines are the share that costs (the load generator writes 0.3 %, the alert guard a
+  twentieth); 400 M rows would not fit a CI job's disk or time either. The cost grows linearly
+  with that rate (below), so a site with more `system` lines a day reads proportionally longer.
+  On that window the
   probe for 20 addresses without a DHCP row 2.1 s in its round-5 form and 0.64 s with the key
   read once per row (an `IN` before the per-key bounds, the round-5 note's form), the post-lease
   query for 100 chains 0.93 s; both miss 0.5 s. So the probe's window is `max(longest_window,
@@ -5997,7 +6006,16 @@ from section 0.2 are recorded here too, with the date and who decided.
   stays logs a line at least every half lease (if FortiOS logs renewals, F7, sahada doğrula),
   so the window holds one, but a client that left logs none (path 1). An `fg_dhcp` chain's own
   window `(last_dhcp_evidence, at]` is not capped (at most half its lease while the chain is
-  not `low`). The cost grows with the `system` lines of the window (about 0.13-0.19 s per
+  not `low`). Its cost (the manager's review of PR #30, item 4): FortiOS allows lease-times up to
+  8,640,000 s, so that window reaches up to 50 days; in the guard
+  `test_lookup_performance.py::test_the_post_lease_query_of_long_fortigate_leases_is_fast` (20
+  chains with a 30-day lease half a lease after their last ACK, about 750,000 `system` lines in
+  the window) the query takes 0.17-0.19 s, and with a 100-day lease (50 days, about 2.5 M lines;
+  measured once, not a guard) 0.44 s, both under 0.5 s, so the window is not capped: a cap
+  would leave a line between the lease's last record and the cap unread (a wrong person
+  without a warning, path 1's shape for an `fg_dhcp` chain). Above about 55,000 `system` lines
+  a day a lease-time near the FortiOS maximum misses 0.5 s; the expression indexes below would
+  remove that cost too. The cost grows with the `system` lines of the window (about 0.13-0.19 s per
   million here): the 100-day window would pass below about 25,000 lines a day, and the fallback
   misses 0.5 s above about 400,000; expression indexes on `(extra->>'ip', time)` and on the
   normalised `extra->>'mac'` for `subtype = 'system'` (a WP-A revision) would restore the 100
