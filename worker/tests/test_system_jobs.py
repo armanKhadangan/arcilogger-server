@@ -173,3 +173,36 @@ def test_a_drive_that_cannot_be_measured_is_left_out(
         "day": "2026-10-12",
         "drives": 0,
     }
+
+
+def test_a_passing_read_error_keeps_the_history(
+    tmp_path: Path, disks: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sharing violation or a permission error fails the run (the worker retries it); the
+    days already kept are not replaced by today's sample alone."""
+    layout = Layout(tmp_path)
+    layout.state.mkdir(parents=True)
+    kept = {
+        "schema": 1,
+        "days": [
+            {"day": f"2026-10-{day:02d}", "drives": [{"path": "D:", "total": 10, "used": day}]}
+            for day in range(1, 11)
+        ],
+    }
+    layout.system_history.write_text(json.dumps(kept), encoding="utf-8")
+    before = layout.system_history.read_bytes()
+    real_read = Path.read_bytes
+
+    def locked(path: Path) -> bytes:
+        if path == layout.system_history:
+            raise PermissionError(13, "The process cannot access the file", str(path))
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", locked)
+    with pytest.raises(PermissionError):
+        job_system_sample(context(layout, datetime(2026, 10, 12, 9, 0, tzinfo=UTC)))
+    monkeypatch.undo()
+    assert layout.system_history.read_bytes() == before
+    # The API's reader stays lenient: no history for this request, no failure.
+    monkeypatch.setattr(Path, "read_bytes", locked)
+    assert read_history(layout.system_history) == []

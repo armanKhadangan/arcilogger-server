@@ -9,9 +9,10 @@ atomically, so a reader never sees half of it. The drives are those of the R20 d
 (:func:`arcilogger_worker.alerts.system.drives`): the data drive and, when it is another device,
 the system drive, by their label; the byte counts are integers.
 
-The file holds nothing but drive labels and byte counts. A file that cannot be read (damaged, of
-another schema) is started again from this sample, which is logged; the forecast then waits for
-seven new samples (:mod:`arcilogger_api.system.forecast`).
+The file holds nothing but drive labels and byte counts. A damaged file or one of another schema
+is started again from this sample, which is logged; the forecast then waits for seven new samples
+(:mod:`arcilogger_api.system.forecast`). A file that cannot be read at the moment fails the run,
+which the worker retries: the days already kept are never thrown away for a passing error.
 """
 
 from __future__ import annotations
@@ -53,14 +54,23 @@ def _day_entry(value: Any) -> bool:
     return isinstance(drives_, list) and all(_drive_entry(drive) for drive in drives_)
 
 
-def read_history(path: Path) -> list[dict[str, Any]]:
-    """The day entries of the history file, oldest first; ``[]`` when there is none or it cannot
-    be read (an entry of another shape is left out)."""
+def read_history(path: Path, *, strict: bool = False) -> list[dict[str, Any]]:
+    """The day entries of the history file, oldest first; ``[]`` when there is none, it is
+    damaged or of another schema (an entry of another shape is left out).
+
+    A file that cannot be read at the moment (a sharing violation of a virus scanner or a backup,
+    a permission) also gives ``[]``, unless ``strict``: then the :class:`OSError` is raised, so
+    the job fails and runs again instead of starting the history anew."""
     try:
         data = json.loads(path.read_bytes())
     except FileNotFoundError:
         return []
-    except (OSError, ValueError) as exc:
+    except OSError as exc:
+        if strict:
+            raise
+        log.warning("%s cannot be read: %s", path, exc)
+        return []
+    except ValueError as exc:
         log.warning("%s cannot be read: %s", path, exc)
         return []
     if not isinstance(data, dict) or data.get("schema") != HISTORY_SCHEMA:
@@ -92,7 +102,7 @@ def job_system_sample(ctx: JobContext) -> Mapping[str, Any]:
     day = site_day(ctx.now).isoformat()
     sampled = sample_drives(ctx.layout.root)
     path = ctx.layout.system_history
-    days = [entry for entry in read_history(path) if entry["day"] != day]
+    days = [entry for entry in read_history(path, strict=True) if entry["day"] != day]
     days.append({"day": day, "drives": sampled})
     days.sort(key=lambda entry: entry["day"])
     path.parent.mkdir(parents=True, exist_ok=True)
