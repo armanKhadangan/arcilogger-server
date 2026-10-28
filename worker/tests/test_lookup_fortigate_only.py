@@ -2716,7 +2716,10 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
         "test_lookup_egress.py",
         "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
     ),
-    "public_ip_not_transip": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "public_ip_not_transip": (
+        "test_lookup_egress.py",
+        "test_e_j_d2_a_quiet_public_address_falls_back_to_w",
+    ),
     "randomized_mac": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
     "session_changed_exit": ("test_lookup_egress.py", "test_e_k3_a_session_that_changes_exit"),
     "session_from_unknown_source": (
@@ -2791,6 +2794,16 @@ def read_module(name: str) -> tuple[dict[str, Any], dict[str, ast.FunctionDef]]:
     return constants, functions
 
 
+def asserted(node: ast.AST) -> list[ast.AST]:
+    """``node`` and the nodes below it, without those under a ``not`` or a ``not in``: a test
+    that asserts a key absent does not emit it."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return []
+    if isinstance(node, ast.Compare) and any(isinstance(op, ast.NotIn) for op in node.ops):
+        return []
+    return [node, *(below for child in ast.iter_child_nodes(node) for below in asserted(child))]
+
+
 def names_key(module: str, test: str, key: str) -> bool:
     constants, functions = read_module(module)
     if test not in functions:
@@ -2798,7 +2811,7 @@ def names_key(module: str, test: str, key: str) -> bool:
     function = functions[test]
     helpers = [
         functions[node.func.id]
-        for node in ast.walk(function)
+        for node in asserted(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id in functions
@@ -2807,7 +2820,21 @@ def names_key(module: str, test: str, key: str) -> bool:
         (isinstance(node, ast.Constant) and node.value == key)
         or (isinstance(node, ast.Name) and constants.get(node.id) == key)
         for body in (function, *helpers)
-        for node in ast.walk(body)
+        for node in asserted(body)
+    )
+
+
+def test_a_key_asserted_absent_is_not_named() -> None:
+    """``names_key`` skips a mention under ``not`` or ``not in``: the internal NAT address test
+    names ``public_ip_not_transip`` only in ``assert not {…} & keys``, so it emits nothing of
+    it; the quiet-W test asserts it present."""
+    assert not names_key(
+        "test_lookup_egress.py", "test_e_q_an_internal_nat_address", "public_ip_not_transip"
+    )
+    assert names_key(
+        "test_lookup_egress.py",
+        "test_e_j_d2_a_quiet_public_address_falls_back_to_w",
+        "public_ip_not_transip",
     )
 
 
