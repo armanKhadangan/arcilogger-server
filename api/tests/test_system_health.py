@@ -429,13 +429,18 @@ def test_verify_tasks_read_the_names_the_cli_writes(
 # -- worker jobs ----------------------------------------------------------------------------------
 
 
-def write_worker_status(layout: Layout, jobs: dict[str, JobState]) -> None:
+def write_worker_status(
+    layout: Layout, jobs: dict[str, JobState], started_at: datetime | None = None
+) -> None:
+    """The worker's status file as it writes it between its ticks (started an hour ago)."""
+    now = utc_now()
     write_json(
         layout.worker_status,
         {
             "service": "arcilogger-worker",
             "state": "running",
-            "updated_at": isoformat_site(utc_now()),
+            "started_at": (started_at or now - timedelta(hours=1)).isoformat(),
+            "updated_at": isoformat_site(now),
             "jobs": {name: state.as_json() for name, state in jobs.items()},
         },
     )
@@ -489,9 +494,10 @@ def test_jobs_from_worker_status_and_job_runs(
                 last_finished=now - timedelta(minutes=4),
                 last_status="skipped",
             ),
+            # The worker writes its status between ticks: the run it is in is in job_runs only.
             "leases.incremental": JobState(
-                last_started=now - timedelta(seconds=5),
-                last_finished=now - timedelta(seconds=65),
+                last_started=now - timedelta(seconds=65),
+                last_finished=now - timedelta(seconds=64),
                 last_status="ok",
             ),
             "partitions.ensure": JobState(),  # never ran since the worker started
@@ -509,8 +515,13 @@ def test_jobs_from_worker_status_and_job_runs(
         ("license.check", now - timedelta(days=8), 99, "ok"),
         ("license.check", now - timedelta(minutes=7), 2000, "failed"),
         ("license.check", now - timedelta(minutes=2), 1234, "ok"),
-        ("license.check", now - timedelta(seconds=1), None, "running"),
+        ("leases.incremental", now - timedelta(seconds=65), 1000, "ok"),
+        ("leases.incremental", now - timedelta(seconds=5), None, "running"),
+        # The run the status file names as done, whose end the database did not take.
+        ("alerts.system", now - timedelta(minutes=1), None, "running"),
         ("evidence.purge", now - timedelta(hours=5), 321, "ok"),
+        # Left behind by a worker that stopped in the middle of the run (before the restart).
+        ("evidence.purge", now - timedelta(hours=3), None, "running"),
         ("reports.purge", now - timedelta(days=9), 50, "ok"),
     )
     login_as(client, "admin")
@@ -533,7 +544,12 @@ def test_jobs_from_worker_status_and_job_runs(
     assert named["usage.today"]["module"] == next(
         j.module for j in listed if j.name == "usage.today"
     )
-    assert named["leases.incremental"]["state"] == "running"
+    running = named["leases.incremental"]
+    assert running["state"] == "running"
+    assert moment(running["last_started"]) == now - timedelta(seconds=5)
+    assert moment(running["last_finished"]) == now - timedelta(seconds=64)
+    # The status and duration of the run before (the running row has none).
+    assert (running["last_status"], running["duration_ms"]) == ("ok", 1000)
     assert (
         named["leases.incremental"]["schedule_tr"],
         named["leases.incremental"]["schedule_en"],
@@ -576,11 +592,12 @@ def test_schedule_texts_of_every_unit() -> None:
     assert texts(daily_after=time(6, 0)) == ("Her gün 06:00'dan sonra", "Daily after 06:00")
 
 
-def test_health_reads_one_bounded_probe_per_job(
+def test_health_reads_bounded_probes_per_job(
     client: TestClient, login_as: Login, db_engine: Engine, api_config: Config
 ) -> None:
-    """``job_runs`` is not purged (owner question Q21): one ``LIMIT 1`` probe of the last 7
-    days per job, never a ``DISTINCT ON`` over the table."""
+    """``job_runs`` is not purged (owner question Q21): per job one ``LIMIT 1`` probe of the
+    last 7 days for the last finished run and one past it for the run in progress, never a
+    ``DISTINCT ON`` over the table."""
     login_as(client, "admin")
     statements: list[str] = []
 
@@ -593,11 +610,17 @@ def test_health_reads_one_bounded_probe_per_job(
         get(client)
     finally:
         event.remove(db_engine, "before_cursor_execute", record)
-    assert len(statements) == len(default_jobs(api_config.worker.interval_seconds))
+    jobs = len(default_jobs(api_config.worker.interval_seconds))
+    assert len(statements) == 2 * jobs
     for statement in statements:
         assert "DISTINCT" not in statement.upper()
         assert "LIMIT" in statement.upper()
-        assert "job_runs.started_at >=" in statement
+        assert "job_runs.job =" in statement
+    finished = [s for s in statements if "job_runs.status !=" in s]
+    running = [s for s in statements if "job_runs.status =" in s]
+    assert (len(finished), len(running)) == (jobs, jobs)
+    assert all("job_runs.started_at >=" in statement for statement in finished)
+    assert all("job_runs.started_at >" in statement for statement in running)
 
 
 def test_health_returns_no_job_error_text(

@@ -5,8 +5,12 @@ The list is :func:`arcilogger_worker.service.default_jobs` as the worker builds 
 into ``state/worker-status.json`` and, for the duration, with the newest finished ``job_runs``
 row of the last 7 days of each job: one probe of the index ``(job, started_at)`` per job, never a
 ``DISTINCT ON`` over the table, which is not purged and grows about 17,000 rows a day (owner
-question Q21). A job's error text (``last_error``, the details of a failed run) is never read
-into the answer: the page names the job, the alert ``R20-job`` and the worker's log tell more.
+question Q21). The worker writes its status file between its ticks only, so a job that runs now
+is seen in ``job_runs`` alone: a second probe of the same index, only past the newest finished
+run, finds its ``running`` row (one a stopped worker left behind is older than the worker's
+``started_at``, or than the run its status file names). A job's error text (``last_error``, the
+details of a failed run) is never read into the answer: the page names the job, the alert
+``R20-job`` and the worker's log tell more.
 """
 
 from __future__ import annotations
@@ -93,25 +97,45 @@ def last_run(db: Session, job: str, since: datetime) -> LastRun | None:
     return None if row is None else LastRun(row.status, row.started_at, row.finished_at)
 
 
-def worker_jobs(layout: Layout) -> Mapping[str, Mapping[str, Any]]:
-    """``jobs`` of ``state/worker-status.json`` (empty when it is missing or unreadable)."""
+def running_since(db: Session, job: str, after: datetime) -> datetime | None:
+    """The start of the newest run of ``job`` after ``after`` that has not finished: a probe of
+    the same index that reads only the rows past the newest finished run."""
+    return db.scalar(
+        select(JobRun.started_at)
+        .where(JobRun.job == job, JobRun.status == "running", JobRun.started_at > after)
+        .order_by(JobRun.started_at.desc())
+        .limit(1)
+    )
+
+
+def worker_status(layout: Layout) -> tuple[datetime | None, Mapping[str, Mapping[str, Any]]]:
+    """``started_at`` and ``jobs`` of ``state/worker-status.json`` (None and empty when it is
+    missing or unreadable)."""
     try:
         data = json.loads(layout.worker_status.read_bytes())
     except (OSError, ValueError):
-        return {}
-    jobs = data.get("jobs") if isinstance(data, dict) else None
-    if not isinstance(jobs, dict):
-        return {}
-    return {name: state for name, state in jobs.items() if isinstance(state, dict)}
+        return None, {}
+    if not isinstance(data, dict):
+        return None, {}
+    jobs = data.get("jobs")
+    states = (
+        {name: state for name, state in jobs.items() if isinstance(state, dict)}
+        if isinstance(jobs, dict)
+        else {}
+    )
+    return aware_time(data.get("started_at")), states
 
 
 def _site(value: datetime | None) -> datetime | None:
     return None if value is None else to_site(value)
 
 
-def job_row(job: Job, state: Mapping[str, Any], run: LastRun | None) -> JobHealth:
-    """A job from its worker state (``JobState.as_json``, ``last_error`` left out) and its last
-    finished run; without a state (the worker never wrote one) the run alone."""
+def job_row(
+    job: Job, state: Mapping[str, Any], run: LastRun | None, running: datetime | None = None
+) -> JobHealth:
+    """A job from its worker state (``JobState.as_json``, ``last_error`` left out), its last
+    finished run and the start of the run it is in (``running``, from ``job_runs``); without a
+    state (the worker never wrote one) the runs alone."""
     started = aware_time(state.get("last_started"))
     finished = aware_time(state.get("last_finished"))
     status = state.get("last_status")
@@ -120,12 +144,18 @@ def job_row(job: Job, state: Mapping[str, Any], run: LastRun | None) -> JobHealt
     failures = count if type(count) is int and count > 0 else 0
     if started is None and run is not None:
         started, finished, last_status = run.started_at, run.finished_at, run.status
+    # A run in progress shows its start beside the end and status of the run before; a row the
+    # status file already names as done (its end could not be written) is not running.
+    if running is not None and (started is None or running > started):
+        started = running
+    else:
+        running = None
     # A run the database refused ("database unreachable") is started, never finished, and
-    # failed without counting as a failure in a row: failing, not running.
+    # failed without counting as a failure in a row: failing.
     failed = failures > 0 or last_status == "failed"
     if started is None:
         health: JobHealthState = "never"
-    elif (finished is None or started > finished) and last_status != "failed":
+    elif running is not None:
         health = "running"
     elif failed:
         health = "failing"
@@ -153,9 +183,13 @@ def job_health(
     db: Session, layout: Layout, interval_seconds: int, now: datetime
 ) -> list[JobHealth]:
     """Every job of the worker, in its order (``default_jobs``)."""
-    states = worker_jobs(layout)
+    worker_started, states = worker_status(layout)
     since = now - JOB_WINDOW
-    return [
-        job_row(job, states.get(job.name, {}), last_run(db, job.name, since))
-        for job in default_jobs(interval_seconds)
-    ]
+    found = []
+    for job in default_jobs(interval_seconds):
+        run = last_run(db, job.name, since)
+        running = running_since(db, job.name, since if run is None else run.started_at)
+        if running is not None and worker_started is not None and running < worker_started:
+            running = None  # left behind by a worker that stopped in the middle of the run
+        found.append(job_row(job, states.get(job.name, {}), run, running))
+    return found
