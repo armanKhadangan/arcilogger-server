@@ -225,7 +225,8 @@ def test_the_observed_summary_of_a_day_is_fast(db_engine: Engine) -> None:
 
 @pytest.mark.perf
 def test_lease_evidence_is_fast(db_engine: Engine) -> None:
-    """30 days of DHCP and ARP rows and leases; 1 M ``fg_traffic`` rows a day with srcmac."""
+    """30 days of DHCP and ARP rows and leases; 1 M ``fg_traffic`` rows a day with srcmac, a day
+    of them in the month before (pruned by the srcmac count)."""
     _prepare(db_engine)
     params = {
         "now": NOW,
@@ -236,6 +237,7 @@ def test_lease_evidence_is_fast(db_engine: Engine) -> None:
     with db_engine.begin() as connection:
         for statement in LEASE_SITE:
             connection.execute(text(statement), params)
+    _traffic(db_engine, NOW - timedelta(days=3), 24)  # 29 to 30 September
     _traffic(db_engine, NOW - timedelta(hours=26), 26)
     _analyze(db_engine, "fg_dhcp", "mt_dhcp", "mt_arp", "leases", "fg_traffic", "alerts")
 
@@ -263,6 +265,10 @@ def test_lease_evidence_is_fast(db_engine: Engine) -> None:
     )
     assert count is not None
     assert 0.69 * ROWS_A_DAY / 24 < count < 0.71 * ROWS_A_DAY / 24
+    assert (pruned := _outside_only(db_engine, NOW - sourcehealth.LAST_HOUR, NOW)), (
+        "the load put no rows outside the hour"
+    )
+    assert not {node["Relation Name"] for node in nodes} & pruned, (nodes, pruned)
     assert count_seconds < SRCMAC_BUDGET_SECONDS
 
     # With the interfaces configured the card carries the same count.
