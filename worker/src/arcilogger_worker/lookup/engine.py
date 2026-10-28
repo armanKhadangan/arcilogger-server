@@ -62,7 +62,13 @@ requested time; IP conflicts appear as chain alternatives (low confidence). A ch
 the device-person assignment **valid at that moment** (assignment history, ADR-0008) and the
 person's current department (``person_department_current``); only a device without any
 assignment history falls back to its owner at lookup time, and the outcome then says so
-(``person_link_at_lookup_time``). Both functions
+(``person_link_at_lookup_time``). A match without a chain ends at the session and the internal IP
+(``chain_missing``). When no chain could be built (an internal lookup without a lease, a match
+without a chain), the newest FortiGate DHCP row of a trusted sender before the moment is looked
+up for the address (at most 20; the MAC of a MAC-only request): a covering ACK that stayed an
+``fg_event`` row (loaded before the upgrade, unreadable fields, loaded by the previous version
+after a rollback) is named (``fortigate_dhcp_not_converted``) and, in internal mode and for an
+exact match, cited in ``unconverted_dhcp``, never as an attribution (ADR-0016 D8). Both functions
 only read (JIT compilation is switched off for the caller's transaction, ``SET LOCAL``); the API
 stores the lookup and writes the audit entry.
 """
@@ -81,6 +87,7 @@ from sqlalchemy import (
     ColumnElement,
     and_,
     any_,
+    case,
     cast,
     exists,
     func,
@@ -90,7 +97,7 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, distinct_on
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
 
@@ -103,10 +110,10 @@ from arcilogger_db.egress import (
     NOT_PUBLIC,
     Egress,
 )
-from arcilogger_db.models import FgTraffic, Setting
+from arcilogger_db.models import FgDhcp, FgEvent, FgTraffic, Setting
 from arcilogger_db.settings import get_setting, get_settings
 from arcilogger_worker.correlation.watermark import get_watermark
-from arcilogger_worker.lookup.attribution import Attributor
+from arcilogger_worker.lookup.attribution import UNCONVERTED_WINDOW, Attributor, usable_lease
 from arcilogger_worker.lookup.sessions import (
     CANDIDATE_MAX_SCORE,
     PORT_HINT_POINTS,
@@ -122,7 +129,7 @@ from arcilogger_worker.lookup.sessions import (
     within,
 )
 from arcilogger_worker.lookup.texts import exit_changes, explain
-from arcilogger_worker.lookup.trust import untrusted_sources
+from arcilogger_worker.lookup.trust import kept, untrusted_sources
 from arcilogger_worker.lookup.types import (
     AttributionChain,
     DataWindow,
@@ -131,6 +138,7 @@ from arcilogger_worker.lookup.types import (
     EgressEntry,
     EgressResolution,
     EgressSearched,
+    EvidenceRef,
     Explanation,
     LookupEgress,
     LookupMode,
@@ -139,6 +147,7 @@ from arcilogger_worker.lookup.types import (
     LookupSettings,
     MatchKind,
     NatMatch,
+    RawRef,
 )
 from arcilogger_worker.lookup.window import data_window
 
@@ -167,6 +176,12 @@ _DESTINATION_ORDER = {
 #: Resolutions whose address no exit claims now (D32: every exit changed after the moment is
 #: named; ``observed`` rests on the FortiGate's own record and is left out).
 _UNCLAIMED_RESOLUTIONS = frozenset({"public_unknown", "no_egress", "unconfigured"})
+#: The D8 probe (2.8.3) looks at the IPs of this many chainless matches of one lookup at most.
+PROBE_IPS = 20
+#: How the D8 probe cites a FortiGate DHCP record that never entered the lease timeline.
+UNCONVERTED_SUMMARY = (
+    "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
+)
 
 
 def _ip_order(ip: str) -> tuple[int, int]:
@@ -180,6 +195,14 @@ def _host(address: str) -> IPv4Network:
 
 def _texts(networks: Sequence[IPv4Network]) -> list[str]:
     return [str(n.network_address) if n.prefixlen == n.max_prefixlen else str(n) for n in networks]
+
+
+def _text_order(value: str) -> tuple[int, int, str]:
+    """IP addresses in address order, anything else (a MAC) after them."""
+    try:
+        return (*_ip_order(value), "")
+    except ValueError:
+        return 9, 0, value
 
 
 def _joined(items: Sequence[str]) -> str:
@@ -507,6 +530,29 @@ class _Part:
     dstintfs: tuple[str, ...] | None = None
 
 
+@dataclass(frozen=True)
+class _DhcpLine:
+    """A FortiGate DHCP line that stayed an ``fg_event`` row (D8): the probe's key (the IP, or
+    the MAC of a MAC-only request), the row and the DHCP fields it needs (log-supplied text)."""
+
+    key: str
+    id: int
+    time: datetime
+    logid: str | None
+    ip: str | None
+    lease: str | None
+    interface: str | None
+    source: str
+    raw_day: Any
+    raw_line: int
+    raw_offset: int
+
+    def ref(self) -> EvidenceRef:
+        """The row as the outcome cites it: never an attribution (2.8.3)."""
+        raw = RawRef(self.source, self.raw_day, self.raw_line, self.raw_offset)
+        return EvidenceRef("fg_event", self.id, self.time, raw, UNCONVERTED_SUMMARY)
+
+
 @dataclass
 class _Plan:
     """How a public IP is answered (2.8.3): the resolution, the exits recorded, the search
@@ -557,6 +603,9 @@ class _Lookup:
         self._exits: tuple[Egress, ...] | None = None
         self._probe: _Probe | None = None
         self._untrusted: frozenset[str] | None = None
+        #: What an internal lookup could not build a chain for: ``("ip", address, at)``, or
+        #: ``("mac", mac, at)`` for a MAC-only request (the D8 probe, 2.8.3).
+        self._unbuilt: tuple[str, str, datetime] | None = None
 
     # -- entry ------------------------------------------------------------------------------------
 
@@ -585,7 +634,11 @@ class _Lookup:
             plan = self._resolve_egress()
             mode, matches, plan = self._answer(plan)
         attribution, matches = self._across_chains(attribution, matches)
-        return self._outcome(mode, matches, attribution, window, plan)
+        missing = sum(1 for match in matches if match.chain is None)
+        if missing:
+            self.explanations.append(explain("chain_missing", count=missing))
+        unconverted = self._unconverted(matches)
+        return self._outcome(mode, matches, attribution, window, plan, unconverted)
 
     def _across_chains(
         self, attribution: AttributionChain | None, matches: list[NatMatch]
@@ -606,6 +659,7 @@ class _Lookup:
         attribution: AttributionChain | None,
         window: DataWindow,
         plan: _Plan | None,
+        unconverted: tuple[EvidenceRef, ...] = (),
     ) -> LookupOutcome:
         chains = [m.chain for m in matches if m.chain is not None]
         if attribution is not None:
@@ -634,6 +688,7 @@ class _Lookup:
             generated_at=self.now,
             truncated=self.truncated,
             egress=egress,
+            unconverted_dhcp=unconverted,
         )
 
     def _watermark_note(self) -> None:
@@ -1064,6 +1119,7 @@ class _Lookup:
             ]
             if not leases:
                 self.explanations.append(explain("no_lease_for_mac", mac=mac, at=at.isoformat()))
+                self._unbuilt = ("mac", mac, at)
                 return None
             ips = sorted({lease.ip for lease in leases})
             if len(ips) > 1:
@@ -1084,6 +1140,7 @@ class _Lookup:
                     after=None if after is None else after.isoformat(),
                 )
             )
+            self._unbuilt = ("ip", ip, at)
             return None
         if mac is not None and request.internal_ip is not None:
             macs = {chain.lease.mac if chain.lease else None} | {
@@ -1092,6 +1149,164 @@ class _Lookup:
             if mac not in macs:
                 self.explanations.append(explain("mac_not_at_ip", mac=mac, ip=ip))
         return chain
+
+    # -- FortiGate DHCP rows that did not become lease evidence (D8 probe) -------------------------
+
+    def _unconverted(self, matches: Sequence[NatMatch]) -> tuple[EvidenceRef, ...]:
+        """The D8 probe (2.8.3) for what no chain could be built for: the internal lookup's
+        address (its MAC for a MAC-only request), else the IPs of the first :data:`PROBE_IPS`
+        chainless matches, each at its chain's moment. Per IP the newest DHCP-shaped row before
+        the moment from a trusted sender decides, in ``fg_event`` or ``fg_dhcp``: only an
+        ``fg_event`` row of a logid mapped to ``assigned`` that would have covered the moment
+        counts (``fortigate_dhcp_not_converted``). In internal mode and for an exact match the
+        row is cited (never as an attribution); for a candidate nothing is (KVKK). No row after
+        the moment is read: another client's later ACK says nothing about it."""
+        targets: dict[str, datetime] = {}
+        cited: set[str] = set()
+        by_mac = False
+        if self._unbuilt is not None:
+            kind, value, at = self._unbuilt
+            by_mac = kind == "mac"
+            targets[value] = at
+            cited.add(value)
+        for match in matches:
+            ip = match.traffic.srcip
+            if match.chain is not None or ip in targets:
+                continue
+            if len(targets) == PROBE_IPS:
+                break
+            targets[ip] = min(max(self.request.at, match.traffic.start), match.traffic.end)
+            if match.kind == "exact":
+                cited.add(ip)
+        if not targets or not self.settings.fortigate_logids:
+            return ()
+        newest = self._newest_dhcp(targets, by_mac=by_mac)
+        counted = [
+            newest[key]
+            for key, moment in targets.items()
+            if key in newest and self._would_cover(newest[key], moment)
+        ]
+        if not counted:
+            return ()
+        ips = [self._named(line) if by_mac else line.key for line in counted]
+        self.explanations.append(
+            explain("fortigate_dhcp_not_converted", ips=", ".join(sorted(ips, key=_text_order)))
+        )
+        return tuple(
+            line.ref()
+            for line in sorted(counted, key=lambda line: _text_order(line.key))
+            if line.key in cited
+        )
+
+    def _newest_dhcp(
+        self, targets: Mapping[str, datetime], *, by_mac: bool
+    ) -> dict[str, _DhcpLine]:
+        """Per target key the ``fg_event`` DHCP line of the probe when it is the newest
+        DHCP-shaped row of trusted senders in ``[moment - window, moment]``: one ``DISTINCT ON``
+        query per table (``ix_fg_event_subtype_time``, ``ix_fg_dhcp_ip_time``; round 5's cost
+        note), each key bounded by its own moment. A converted row (``trust.kept``) as new or
+        newer means the timeline saw that event: nothing is said."""
+        # The lease timeline imports this package (its refs), so its rules are imported here.
+        from arcilogger_worker.correlation.timeline import TimelineRules
+
+        longest = timedelta(seconds=TimelineRules.from_settings(self.settings).longest_window)
+        width = max(longest, UNCONVERTED_WINDOW)
+        low, high = min(targets.values()) - width, max(targets.values())
+        logids = self.settings.fortigate_logids
+        released = sorted(logid for logid, meaning in logids.items() if meaning == "deassigned")
+        event_key = (
+            func.lower(func.replace(FgEvent.extra["mac"].astext, "-", ":"))
+            if by_mac
+            else FgEvent.extra["ip"].astext
+        )
+        events = (
+            select(
+                event_key,
+                FgEvent.id,
+                FgEvent.time,
+                FgEvent.logid,
+                FgEvent.extra["ip"].astext,
+                FgEvent.extra["lease"].astext,
+                FgEvent.extra["interface"].astext,
+                FgEvent.source,
+                FgEvent.raw_day,
+                FgEvent.raw_line,
+                FgEvent.raw_offset,
+            )
+            .where(
+                FgEvent.subtype == "system",
+                FgEvent.time >= low,
+                FgEvent.time <= high,
+                FgEvent.logid.in_(sorted(logids)),
+                or_(
+                    *(
+                        and_(event_key == key, FgEvent.time >= at - width, FgEvent.time <= at)
+                        for key, at in targets.items()
+                    )
+                ),
+            )
+            .ext(distinct_on(event_key))
+            # At equal times an assignment is the newer row, as in the timeline's feed order.
+            .order_by(
+                event_key,
+                FgEvent.time.desc(),
+                case((FgEvent.logid.in_(released), 1), else_=0),
+                FgEvent.id.desc(),
+            )
+        )
+        if self.untrusted:
+            events = events.where(_not_in(FgEvent.source, self.untrusted))
+        lines = [_DhcpLine(*row) for row in self.session.execute(events)]
+        if not lines:
+            return {}
+        dhcp_key = FgDhcp.mac if by_mac else FgDhcp.ip
+        converted = (
+            select(dhcp_key, FgDhcp.time)
+            .where(
+                FgDhcp.time >= low,
+                FgDhcp.time <= high,
+                or_(
+                    *(
+                        and_(
+                            dhcp_key == line.key,
+                            FgDhcp.time >= targets[line.key] - width,
+                            FgDhcp.time <= targets[line.key],
+                        )
+                        for line in lines
+                    )
+                ),
+                kept(self.settings, self.untrusted),
+            )
+            .ext(distinct_on(dhcp_key))
+            .order_by(dhcp_key, FgDhcp.time.desc())
+        )
+        seen = {str(key): time for key, time in self.session.execute(converted)}
+        return {
+            line.key: line for line in lines if line.key not in seen or seen[line.key] < line.time
+        }
+
+    def _would_cover(self, line: _DhcpLine, moment: datetime) -> bool:
+        """An ACK (a logid mapped to ``assigned``) whose lease would have covered ``moment``: its
+        logged lease when usable, else its interface's configured time x
+        ``lease.timeout_percent`` (the lease formula, D6)."""
+        if self.settings.fortigate_logids.get(line.logid or "") != "assigned":
+            return False
+        try:
+            logged = None if line.lease is None else int(line.lease)
+        except ValueError:
+            logged = None
+        lease = usable_lease(self.settings, logged)
+        timeout = self.settings.lease_timeout_seconds(line.interface, lease)
+        return moment <= line.time + timedelta(seconds=timeout)
+
+    @staticmethod
+    def _named(line: _DhcpLine) -> str:
+        """The address a MAC's line names in the text (the requested MAC's own record), the MAC
+        when its ``ip`` cannot be read."""
+        try:
+            return str(ipaddress.ip_address(line.ip or ""))
+        except ValueError:
+            return line.key
 
     # -- exact ------------------------------------------------------------------------------------
 

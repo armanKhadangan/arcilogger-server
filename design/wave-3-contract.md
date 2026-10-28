@@ -5909,6 +5909,17 @@ from section 0.2 are recorded here too, with the date and who decided.
   configured network has a name. Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_two_origins_on_a_subnet_nobody_entered`.
   Fold into 2.7 and the 2.11 parameter cell.
+- **The D8 probe also runs for a MAC-only internal lookup, keyed on the MAC** (2.8.3, round-6
+  note "MAC-only internal lookups", its first option). When a request names only a MAC and no
+  lease of it covers the moment (`no_lease_for_mac`), the probe looks for the newest DHCP-shaped
+  row of that MAC before the moment instead of an IP's: `fg_event` rows by
+  `lower(replace(extra->>'mac', '-', ':'))` (the form 2.7 uses) and kept `fg_dhcp` rows by `mac`,
+  with the same window, sender filter and coverage rule. A counting row gives the same
+  `fortigate_dhcp_not_converted`, `{ips}` = the address that row names (the requested MAC's own
+  record; the MAC itself when the row's `ip` cannot be read), and is cited in `unconverted_dhcp`
+  (internal mode). No new key, no text change, no extra query for any other lookup. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_mac_only_lookup_finds_the_line_by_its_mac`.
+  Fold into 2.8.3.
 
 ---
 
