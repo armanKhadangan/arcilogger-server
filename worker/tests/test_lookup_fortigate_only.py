@@ -11,8 +11,8 @@ missing renewal (D6), the DECLINE shapes of D33 (those the lease build decides a
 build made before a network was entered missed), relayed networks, the migrations from MikroTik
 DHCP (D5, D33's MikroTik variant, a move loaded before the upgrade), a rollback window (D8), two
 DHCP origins (D27), the probe for FortiGate DHCP lines that never became lease evidence when no
-chain could be built (D8, 2.8.3), a RELEASE mapped after the build, and unconfigured senders
-(D24).
+chain could be built (D8, 2.8.3), a RELEASE mapped after the build, unconfigured senders (D24)
+and a FortiGate clock that was off at the moment (D28).
 """
 
 from __future__ import annotations
@@ -31,14 +31,20 @@ from arcilogger_db.egress import validate_egresses
 from arcilogger_db.models import (
     Department,
     Device,
+    FgDhcp,
     FgEvent,
+    FgTraffic,
     Lease,
+    Message,
     Person,
+    SearchCount,
     Setting,
     Source,
     Vlan,
 )
+from arcilogger_db.searchcounts import rebuild_stream
 from arcilogger_db.settings import get_settings, set_setting
+from arcilogger_worker.alerts import system
 from arcilogger_worker.correlation.leases import rebuild_day
 from arcilogger_worker.lookup import (
     AttributionChain,
@@ -46,6 +52,7 @@ from arcilogger_worker.lookup import (
     LookupRequest,
     LookupSettings,
     attribution,
+    engine,
     run_lookup,
     trust,
 )
@@ -1627,3 +1634,289 @@ def test_a_sender_configured_later_is_named_on_the_chain(
     assert chain.lease.evidence[0].raw.source == sender
     assert note(chain, "source_configured_later") == {"sources": sender}
     assert chain.lease.confidence == "high"  # information only
+
+
+# -- the source clock at the requested moment (D28, 2.7) ------------------------------------------
+
+#: A FortiGate clock set back by 8 minutes: its rows are stamped 8 minutes before they arrive
+#: (an offset is the device time minus the receive time).
+BEHIND = -timedelta(minutes=8)
+CLOCK = "source_clock_offset"
+
+
+def clock_lines(
+    evidence: Evidence, offset: timedelta, count: int = 20, *, source: str = "fortigate"
+) -> None:
+    """``count`` lines of ``source`` without a typed row around the moment (device times every
+    five minutes from AT - 50 min) whose device time is ``offset`` from their receive time."""
+    for k in range(count):
+        time = AT - timedelta(minutes=50) + timedelta(minutes=5 * k)
+        evidence.heartbeat(time, source=source, received=time - offset)
+
+
+def as_loaded(session: Session, offset: timedelta) -> None:
+    """The configured FortiGate's typed rows as ingest loads them from a clock ``offset`` off:
+    received ``-offset`` after their device time, each with its ``messages`` row, and its files'
+    ``search_counts`` counted from the rows as the ingest loader counts them."""
+    if session.get(Source, "fortigate") is None:
+        session.add(Source(name="fortigate", type="fortigate", address=FIREWALL))
+    days = set()
+    for model, kind in ((FgTraffic, "traffic"), (FgDhcp, "event")):
+        session.execute(
+            update(model)
+            .where(model.source == "fortigate")
+            .values(time_received=model.time - offset)
+        )
+        for row in session.execute(
+            select(model.time, model.time_received, model.sender, model.raw_day, model.raw_line,
+                   model.raw_offset, model.subtype).where(model.source == "fortigate")
+        ).all():  # fmt: skip
+            session.add(
+                Message(time=row.time, time_received=row.time_received, source="fortigate",
+                        sender=row.sender, raw_day=row.raw_day, raw_line=row.raw_line,
+                        raw_offset=row.raw_offset, type=kind, subtype=row.subtype, text="")
+            )  # fmt: skip
+            days.add(row.raw_day)
+    session.flush()
+    days |= set(session.scalars(select(Message.raw_day).where(Message.source == "fortigate")))
+    for day in days:
+        rebuild_stream(session.connection(), "fortigate", day)
+    session.commit()
+
+
+def offsets(outcome: LookupOutcome) -> dict[str, int]:
+    """The sources ``source_clock_offset`` names, with their offsets in seconds."""
+    named = outcome_note(outcome, CLOCK)["offsets"]
+    assert isinstance(named, str)
+    pairs = (item.split(": ") for item in named.split(", "))
+    return {name: int(value) for name, value in pairs}
+
+
+def exact_request(session: Session, **request: Any) -> LookupOutcome:
+    return lookup(session, public_ip=WAN, public_port=51001, protocol="tcp", **request)
+
+
+@pytest.mark.parametrize(
+    ("offset", "lines", "warned"),
+    [
+        pytest.param(BEHIND, 20, True, id="8-minutes-behind"),
+        pytest.param(-timedelta(seconds=30), 20, False, id="30-seconds"),
+        pytest.param(BEHIND, 8, False, id="9-rows"),
+        pytest.param(BEHIND, 9, True, id="10-rows"),
+    ],
+)
+def test_a_cited_source_whose_clock_was_off_lowers_every_chain(
+    db_session: Session, evidence: Evidence, offset: timedelta, lines: int, warned: bool
+) -> None:
+    """3.4 "source clock": the FortiGate's rows around T are 8 minutes behind their receive
+    time; an exact request at T names the FortiGate with about -480 s, every chain is ``low``
+    (its lease step too) and the match stays ``exact``. 30 s, or fewer than 10 rows of the source
+    around T (the session row and the lines without a typed row), add nothing."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.traffic(AT, PC, 51001, transip=WAN)
+    clock_lines(evidence, offset, lines)
+    as_loaded(db_session, offset)
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    outcome = exact_request(db_session)
+    assert outcome.mode == "exact"
+    (match,) = outcome.matches
+    assert match.kind == "exact"
+    chain = match.chain
+    assert chain is not None
+    assert chain.lease is not None
+    if not warned:
+        assert CLOCK not in keys(outcome)
+        assert (chain.confidence, chain.lease.confidence) == ("high", "high")
+        return
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert offsets(outcome) == {"fortigate": -480}
+    params = outcome_note(outcome, CLOCK)
+    assert (params["at"], params["limit"]) == (iso(AT), 120)
+    text = next(e for e in outcome.explanations if e.key == CLOCK)
+    assert "fortigate: -480 (sınır 120 saniye)" in text.text_tr
+    assert "fortigate: -480 (limit 120 seconds)" in text.text_en
+    # The internal lookup rests on the same lease rows of the same clock.
+    chain = internal(db_session, PC, AT).attribution
+    assert chain is not None
+    assert chain.confidence == "low"
+
+
+def test_rows_stamped_with_the_receive_time_say_nothing_about_the_clock(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Lines whose device time ingest replaced by the receive time are left out of the median:
+    they neither hide an offset nor count towards the 10 rows."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.traffic(AT, PC, 51001, transip=WAN)
+    clock_lines(evidence, BEHIND, 10)
+    clock_lines(evidence, timedelta(0), 15)
+    as_loaded(db_session, BEHIND)
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    assert offsets(exact_request(db_session)) == {"fortigate": -480}
+
+
+def test_the_clock_of_a_session_search_alone_may_reach_the_tolerance(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A MikroTik lease and FortiGate sessions 8 minutes off: the FortiGate is cited for the
+    session search only, whose limit is max(120 s, the tolerance); the lease's router keeps a
+    good clock."""
+    evidence.dhcp(tr(DAY, 8), "assigned", PC, PC_MAC, server="dhcp42", hostname=HOST)
+    evidence.traffic(AT, PC, 51001, transip=WAN)
+    clock_lines(evidence, BEHIND)
+    as_loaded(db_session, BEHIND)
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    narrow = exact_request(db_session)
+    assert offsets(narrow) == {"fortigate": -480}
+    assert outcome_note(narrow, CLOCK)["limit"] == 120
+    (match,) = narrow.matches
+    assert match.chain is not None
+    assert match.chain.confidence == "low"
+    wide = exact_request(db_session, tolerance_seconds=600)
+    assert CLOCK not in keys(wide)
+    (match,) = wide.matches
+    assert match.chain is not None
+    assert match.chain.confidence == "high"
+
+
+@pytest.fixture
+def clock_behind(db_session: Session, evidence: Evidence) -> None:
+    """The empty-result site of 3.4 "source clock" (round 5): the FortiGate's clock 8 minutes
+    behind, the PC's real session (received at AT) logged at device time AT - 8 min, nothing in
+    the device-time window of an exact request at AT, no lease of the PC (another client's ACK
+    of the morning is in the FortiGate's file of the day)."""
+    evidence.fortigate_dhcp(tr(DAY, 8), "172.20.42.58", OTHER)
+    evidence.traffic(AT + BEHIND, PC, 51001, transip=WAN)
+    clock_lines(evidence, BEHIND)
+    as_loaded(db_session, BEHIND)
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    counted = db_session.execute(
+        select(SearchCount.tbl).where(SearchCount.source == "fortigate").distinct()
+    )
+    assert {"fg_traffic", "fg_dhcp"} <= set(counted.scalars())
+
+
+def test_an_empty_exact_search_names_the_clock_of_the_searched_source(
+    db_session: Session, clock_behind: None
+) -> None:
+    outcome = exact_request(db_session)
+    assert (outcome.mode, outcome.matches, outcome.attribution) == ("none", (), None)
+    assert outcome.unconverted_dhcp == ()
+    assert "no_match_exact" in keys(outcome)
+    assert offsets(outcome) == {"fortigate": -480}
+    assert outcome_note(outcome, CLOCK)["limit"] == 120
+
+
+def test_an_internal_lookup_without_a_lease_names_the_clock(
+    db_session: Session, clock_behind: None
+) -> None:
+    outcome = internal(db_session, PC, AT)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert "no_lease" in keys(outcome)
+    assert offsets(outcome) == {"fortigate": -480}
+    # The lease search uses the moment, not the tolerance: the fixed limit (round 6).
+    wide = lookup(db_session, internal_ip=PC, tolerance_seconds=600)
+    assert outcome_note(wide, CLOCK)["limit"] == 120
+
+
+def test_the_tolerance_widened_by_the_offset_finds_the_session(
+    db_session: Session, clock_behind: None
+) -> None:
+    """The text's remedy: the session is found; its chain is still missing (no lease), and the
+    lease search that found nothing keeps the fixed limit, so the offset stays named."""
+    outcome = exact_request(db_session, tolerance_seconds=600)
+    assert outcome.mode == "exact"
+    (match,) = outcome.matches
+    assert (match.kind, match.traffic.srcip, match.chain) == ("exact", PC, None)
+    assert outcome_note(outcome, MISSING) == {"count": 1}
+    assert offsets(outcome) == {"fortigate": -480}
+    assert outcome_note(outcome, CLOCK)["limit"] == 120
+
+
+def test_a_no_egress_answer_measures_nothing(db_session: Session, clock_behind: None) -> None:
+    value = validate_egresses(
+        {"wan": {"mode": "isp_nat", "public": ["198.51.100.20"], "transips": [WAN]}}
+    )
+    set_setting(db_session, "nat.egresses", value, updated_by="tolga")
+    db_session.commit()
+    outcome = lookup(db_session, public_ip="203.0.113.99", public_port=51001, protocol="tcp")
+    assert (outcome.mode, outcome.egress and outcome.egress.resolution) == ("none", "no_egress")
+    assert CLOCK not in keys(outcome)
+
+
+def test_at_most_five_sources_are_measured_the_cited_ones_first(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Round 7 note (b): the cited sources first, then the searched ones by their rows in the
+    files of the day; a sixth source is never measured. Six more FortiGates whose files hold
+    session and DHCP rows (counts 60 … 10); only the clock of the one with the fewest is off: an
+    empty search names nobody; once the fifth is off too, it is named."""
+    evidence.traffic(AT + BEHIND, PC, 51001, transip=WAN)
+    as_loaded(db_session, timedelta(seconds=-1))
+    names = [f"fw-{k}" for k in range(1, 7)]
+    for k, name in enumerate(names):
+        db_session.add(Source(name=name, type="fortigate", address=f"192.0.2.{10 + k}"))
+        for table in ("fg_traffic", "fg_dhcp"):
+            db_session.add(
+                SearchCount(hour=tr(DAY, 11).astimezone(UTC), source=name, raw_day=DAY,
+                            kind="traffic", tbl=table, n=60 - 10 * k)
+            )  # fmt: skip
+        clock_lines(evidence, BEHIND if name == "fw-6" else timedelta(seconds=5), source=name)
+    # A disabled source and an unconfigured sender are never chosen.
+    db_session.add(Source(name="fw-old", type="fortigate", address="192.0.2.30", enabled=False))
+    db_session.add(Source(name=STRANGER, type="fortigate", address="192.0.2.7", unknown=True))
+    for name in ("fw-old", STRANGER):
+        db_session.add(
+            SearchCount(hour=tr(DAY, 11).astimezone(UTC), source=name, raw_day=DAY,
+                        kind="traffic", tbl="fg_traffic", n=500)
+        )  # fmt: skip
+        clock_lines(evidence, BEHIND, source=name)
+    db_session.commit()
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    outcome = exact_request(db_session)
+    assert outcome.mode == "none"
+    assert CLOCK not in keys(outcome)
+    db_session.execute(delete(Message).where(Message.source == "fw-5"))
+    clock_lines(evidence, BEHIND, source="fw-5")  # fw-5's clock is off as well now
+    db_session.commit()
+    assert offsets(exact_request(db_session)) == {"fw-5": -480}
+    # A found session cites the FortiGate first (its lease search found nothing): it and the
+    # four searched sources with the most rows are measured, fw-5 no longer.
+    found = exact_request(db_session, tolerance_seconds=600)
+    assert found.mode == "exact"
+    assert CLOCK not in keys(found)
+
+
+def test_the_clock_is_measured_on_the_rows_nearest_the_moment(
+    db_session: Session, evidence: Evidence, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 5 note "clock sample": the rows nearest the moment on each side of it, not the
+    first rows of the hour before it. The clock was right until it was set back ten minutes
+    before T; with ten rows a side (2,500 in the shipped sample) only the shifted rows count."""
+    monkeypatch.setattr(engine, "CLOCK_SIDE_ROWS", 10)
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.traffic(AT, PC, 51001, transip=WAN)
+    for k in range(20):  # T - 60 min … T - 41 min: still on time
+        time = AT - timedelta(minutes=60 - k)
+        evidence.heartbeat(time, source="fortigate", received=time + timedelta(seconds=1))
+    for k in range(-10, 10):  # T - 10 min … T + 9 min: 8 minutes behind
+        time = AT + timedelta(minutes=k, seconds=30)
+        evidence.heartbeat(time, source="fortigate", received=time - BEHIND)
+    as_loaded(db_session, BEHIND)
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    assert offsets(exact_request(db_session)) == {"fortigate": -480}
+
+
+def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
+    """``source_clock_offset`` and ``R20-lease:source-clock`` use the same limit and the same
+    minimum of rows (D28)."""
+    assert (engine.CLOCK_LIMIT_SECONDS, engine.CLOCK_MIN_ROWS) == (
+        system.CLOCK_LIMIT_SECONDS,
+        system.CLOCK_MIN_ROWS,
+    )
