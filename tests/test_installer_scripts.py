@@ -995,6 +995,118 @@ def _free_port() -> int:
         return port
 
 
+#: How Caddy's log says that the port it was given could not be bound (``listen tcp :<port>:
+#: bind: …``): EADDRINUSE on Linux and WSAEADDRINUSE on Windows (another socket took it), and
+#: WSAEACCES, Windows' answer for a port another socket holds exclusively or a reserved range.
+_CADDY_PORT_TAKEN = (
+    "address already in use",
+    "Only one usage of each socket address",
+    "An attempt was made to access a socket in a way forbidden by its access permissions",
+)
+#: Ports tried, each free when it is picked, before a test gives up starting Caddy.
+_CADDY_PORT_TRIES = 5
+
+
+class _CaddyPortTakenError(Exception):
+    """Caddy stopped because the port it was given could not be bound."""
+
+
+def _caddy_errors(log: Path, start: int) -> list[str]:
+    """The ``error`` messages of Caddy's log file from byte ``start`` on. The Caddyfile sends
+    Caddy's own log to a file in ``ARCILOGGER_LOG_DIR``, so a failed start leaves stderr empty."""
+    if not log.is_file():
+        return []
+    with log.open("rb") as handle:
+        handle.seek(start)
+        lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    errors = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("level") == "error":
+            errors.append(str(entry.get("msg")))
+    return errors
+
+
+def _caddy_port_taken(errors: list[str], port: int) -> bool:
+    """Whether Caddy stopped because ``port`` could not be bound, for TCP or for HTTP/3's UDP."""
+    return any(
+        f"listen {network} :{port}: bind: {reason}" in error
+        for error in errors
+        for network in ("tcp", "udp")
+        for reason in _CADDY_PORT_TAKEN
+    )
+
+
+def _start_caddy(
+    tmp_path: Path, web: Path, upstream: str
+) -> tuple[subprocess.Popen[bytes], int, ssl.SSLContext]:
+    """The real Caddyfile on a free port, serving ``web`` and proxying the API to ``upstream``;
+    returns it, the port and a TLS context that trusts its local CA once it answers.
+
+    The port is free when it is picked, but only Caddy binds it, later and in its own process, so
+    another process can take it in between. Only when Caddy's log says so is another port tried.
+    """
+    failures: list[str] = []
+    for _ in range(_CADDY_PORT_TRIES):
+        port = _free_port()
+        try:
+            process, context = _run_caddy(tmp_path, port, web, upstream)
+        except _CaddyPortTakenError as taken:
+            failures.append(str(taken))
+            continue
+        return process, port, context
+    raise AssertionError(f"Caddy's port was taken {_CADDY_PORT_TRIES} times: {failures}")
+
+
+def _run_caddy(
+    tmp_path: Path, port: int, web: Path, upstream: str
+) -> tuple[subprocess.Popen[bytes], ssl.SSLContext]:
+    """The real Caddyfile on ``port``; returns it and a TLS context that trusts its local CA once
+    it answers, or raises :class:`_CaddyPortTakenError`."""
+    assert CADDY is not None
+    env = _caddy_env(
+        tmp_path,
+        {
+            "ARCILOGGER_SITE_ADDRESSES": f"https://localhost:{port}",
+            "ARCILOGGER_WEB_ROOT": web.as_posix(),
+            "ARCILOGGER_API_UPSTREAM": upstream,
+        },
+    )
+    log = tmp_path / "logs" / "caddy.log"
+    start = log.stat().st_size if log.is_file() else 0
+    process = subprocess.Popen(
+        [CADDY, "run", "--config", str(CADDYFILE), "--adapter", "caddyfile"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    root = tmp_path / "data" / "caddy" / "pki" / "authorities" / "local" / "root.crt"
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if root.is_file():
+            context = ssl.create_default_context(cafile=str(root))
+            try:
+                with (
+                    socket.create_connection(("127.0.0.1", port), timeout=2) as raw,
+                    context.wrap_socket(raw, server_hostname="localhost"),
+                ):
+                    return process, context
+            except OSError:
+                pass
+        if process.poll() is not None:
+            _, stderr = process.communicate()
+            errors = _caddy_errors(log, start)
+            if _caddy_port_taken(errors, port):
+                raise _CaddyPortTakenError("; ".join(errors))
+            raise AssertionError(f"Caddy stopped: {stderr.decode()} {errors}")
+        time.sleep(0.3)
+    process.kill()
+    raise AssertionError("Caddy did not answer within 30 s")
+
+
 class _ApiStub(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         body = json.dumps({"status": "ok", "path": self.path}).encode()
@@ -1028,39 +1140,8 @@ def test_caddy_serves_spa_and_proxies_api(tmp_path: Path, api_stub: int) -> None
     (web / "assets").mkdir(parents=True)
     (web / "index.html").write_text("<!doctype html><title>ARCILOGGER</title>", encoding="utf-8")
     (web / "assets" / "app-1a2b3c.js").write_text("console.log(1)", encoding="utf-8")
-    port = _free_port()
-    env = _caddy_env(
-        tmp_path,
-        {
-            "ARCILOGGER_SITE_ADDRESSES": f"https://localhost:{port}",
-            "ARCILOGGER_WEB_ROOT": web.as_posix(),
-            "ARCILOGGER_API_UPSTREAM": f"127.0.0.1:{api_stub}",
-        },
-    )
-    process = subprocess.Popen(
-        [CADDY, "run", "--config", str(CADDYFILE), "--adapter", "caddyfile"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
+    process, port, context = _start_caddy(tmp_path, web, f"127.0.0.1:{api_stub}")
     try:
-        root = tmp_path / "data" / "caddy" / "pki" / "authorities" / "local" / "root.crt"
-        context: ssl.SSLContext | None = None
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            if root.is_file():
-                context = ssl.create_default_context(cafile=str(root))
-                try:
-                    with (
-                        socket.create_connection(("127.0.0.1", port), timeout=2) as raw,
-                        context.wrap_socket(raw, server_hostname="localhost"),
-                    ):
-                        break
-                except OSError:
-                    pass
-            assert process.poll() is None, process.stderr.read() if process.stderr else ""
-            time.sleep(0.3)
-        assert context is not None, "Caddy did not create its local CA"
 
         def get(path: str) -> tuple[int, dict[str, str], bytes]:
             with urllib.request.urlopen(

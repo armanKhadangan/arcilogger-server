@@ -1481,6 +1481,51 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   (`used * 100 // total`); on Linux a drive's `path` is the label R20-disk uses (the data
   directory's path, `/` for the system drive). Nothing to fold.
 
+## Deviations — W4-D
+
+- **English interval texts in the singular for one:** "Every 1 minute" / "Every 1 hour", not
+  "Every 1 minutes" (2.6.2 "Every {n} seconds/minutes/hours"); plural from two on. English grammar.
+  Tests: `test_schedule_texts_of_every_unit`, `test_jobs_from_worker_status_and_job_runs`
+  (`leases.incremental`). W4-G: MVP-CONTRACTS (Sistem job texts).
+- **Turkish "from" suffix by how the time is read:** `daily_after` reads "Her gün 00:15'ten sonra",
+  "03:30'dan sonra", "01:00'den sonra" (vowel harmony and consonant assimilation of the spoken
+  minutes, or of the hour on the full hour), not a literal "{HH:MM}'den" for every time; the task
+  table of 2.6.2 already writes "00:10'dan", "00:40'tan", "00:05'ten" this way. Tests:
+  `test_schedule_texts_of_every_unit`, `test_task_times_carry_the_turkish_suffix_of_how_they_are_read`.
+- **`failing` also when `last_status` is `failed` with `failures` 0:** a run whose `job_runs` row
+  the database refused is recorded by the worker as `last_status = "failed"`, `last_error =
+  "database unreachable"` without counting a failure (`worker/src/arcilogger_worker/service.py`,
+  `run_job`); 2.6.2 says "`failing` (`failures` ≥ 1)". Showing it `ok` would hide that the job did
+  not run. Test: `test_jobs_from_worker_status_and_job_runs` (`alerts.import`).
+- **`running` from `job_runs`, a second bounded probe per job:** the worker writes
+  `state/worker-status.json` only between its ticks and a tick runs each due job to its end, so the
+  file never shows a job in progress. Per job, after the duration probe of 2.6.2, one more probe of
+  `ix_job_runs_job_started_at`: `WHERE job = :job AND status = 'running' AND started_at > :after
+  ORDER BY started_at DESC LIMIT 1`, `:after` = the start of the newest finished run (else the 7-day
+  bound), so it reads only the rows past that run. A row older than the worker's `started_at` (left
+  by a worker that stopped mid-run) or not newer than the run the status file names (its end could
+  not be written) is not running. While running, `last_started` is the running row's start;
+  `last_finished`, `last_status` and `duration_ms` stay those of the run before. A worker that
+  stopped mid-run and was not started again shows that job `running` (ArciWorker itself shows
+  `stale`). Tests: `test_jobs_from_worker_status_and_job_runs` (`leases.incremental`,
+  `alerts.system`, `evidence.purge`), `test_health_reads_bounded_probes_per_job`,
+  `test_health_within_one_second` (both probes explained). W4-G: MVP-CONTRACTS.
+- **Seal evidence skips the states Retention wrote:** the newest modification time of a
+  `state\seal\<YYYY-MM-DD>.json` whose `status` is not `deleted`, not of every file in the folder:
+  Retention rewrites the state of each day it deletes (`status = "deleted"`,
+  `core/src/arcilogger_core/retention.py` `_delete_day`), which on an installation older than its
+  retention period would read as Seal evidence every day. The files are listed newest first (a stat
+  each) and read until one is not deleted. A fixed window of recent days would miss a time-stamp
+  outage of days: `seal_due` stops at the first failure, so Seal retries and rewrites only its
+  oldest unsealed day. Test: `test_task_states_from_evidence_files` (an old day's `deleted` state
+  written now leaves Seal `late`, then `missing`; a day six days back rewritten five minutes ago
+  makes it `ok`). W4-G: MVP-CONTRACTS (Sistem task table).
+- **Perf guard data:** `test_health_within_one_second` loads the part of the §3 perf data this
+  endpoint reads: `job_runs` 17,000 rows a day for 180 days, today's and yesterday's `state/clock`
+  files, status files with 20 sources, 30 days sealed in the vault (mock TSA), the verification
+  results. `fg_web`, `fg_dns`, `search_counts` and the 200 active alerts are not loaded: the endpoint
+  reads none of those tables.
+
 ## Deviations — W4-A
 
 - **Card 4 reads its alerts by rule, not by dedup-key prefix (2.3.2).** The retention task's

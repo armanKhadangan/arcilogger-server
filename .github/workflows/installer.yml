@@ -77,7 +77,8 @@ permissions:
 
 concurrency:
   group: installer-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push still cancels its pull request's run; runs on wave-*, main and tags finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Actions are pinned by commit SHA, the same versions as ci.yml. Only the release job uploads
 # artifacts, and only the release job may write to the repository (its draft release).
