@@ -42,6 +42,7 @@ from arcilogger_api.pdftext import normalized, pdf_text
 from arcilogger_api.reports import render, texts
 from arcilogger_api.reports.render import exit_label_key
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core.fmt import format_datetime
 from arcilogger_core.layout import Layout
 from arcilogger_db.egress import MIGRATION_KEY, legacy_egresses
 from arcilogger_db.settings import set_setting
@@ -175,6 +176,21 @@ LEADS = {
     "varsayıldı ve FortiGate'in",
     "no_egress": "kurumun tanımlı internet çıkışlarından hiçbirine ait değil ve o sırada",
 }
+#: The same opening words in English.
+LEADS_EN = {
+    "public_direct": "Exit hat-1 (Ana hat) is defined as direct: the public IP address",
+    "isp_nat": "is defined as ISP NAT: by this definition the ISP router",
+    "not_logged": "belongs to exit misafir, which does not pass the FortiGate",
+    "internal": "By the definition dmz, 172.20.99.1 is the address of the FortiGate's source NAT",
+    "fallback_direct": "hat-1 (Ana hat) is defined as direct, but around that moment",
+    "fallback_transip": "Exit hat-2 (Yedek hat) is defined as ISP NAT; around that moment its "
+    "NAT address",
+    "fallback_other": "Some of the searched addresses belong to exit",
+    "observed": "is not defined in any internet exit, but around",
+    "public_unknown": "is not the public address of any exit. The search was made in the exits",
+    "unconfigured": "No internet exits are defined: a second NAT by the ISP router was assumed",
+    "no_egress": "belongs to none of the organisation's defined internet exits and does not",
+}
 HAT_1 = _exit("hat-1", "direct", "Ana hat", public=[P1])
 HAT_2 = _exit("hat-2", "isp_nat", "Yedek hat", public=[P2], transips=[T2])
 MISAFIR = _exit("misafir", "not_logged", public=["198.51.100.90"])
@@ -283,11 +299,30 @@ def test_one_method_paragraph_per_resolution_and_mode(
         double_nat=case in DOUBLE_NAT,
     )
     method = _section_4(text)
-    for name, lead in LEADS.items():
-        assert (lead in method) is (name in printed), (case, name)
+    for leads in (LEADS, LEADS_EN):
+        for name, lead in leads.items():
+            assert (lead in method) is (name in printed), (case, name, lead)
     assert f"Çıkış / Exit {label}" in method
     if case == "public_unknown":
         assert "yapıldı: hat-2 (Yedek hat); bu çıkışlarda" in method  # {exits}: name (label)
+        # the hedge, in full in each language
+        assert (
+            "Adres bu hatlardan birine ait değilse liste ilgisiz kullanıcıları gösterebilir."
+            in (method)
+        )
+        assert (
+            "If the address belongs to none of these lines, the list may show unrelated users."
+            in method
+        )
+    if case == "unconfigured":
+        assert (
+            "genel bir NAT adresiyle çıkan oturumlar FortiGate'in kendi adresinden çıktığı için "
+            "aranmadı." in method
+        )
+        assert (
+            "sessions that left with a public NAT address left through the FortiGate's own "
+            "address and were not searched." in method
+        )
     if case == "fallback_other":
         assert (
             "Aranan adreslerin bir kısmı wan (WAN) çıkışına aittir: bu çıkış yükseltmede" in method
@@ -560,7 +595,7 @@ def test_a_wave_2_outcome_renders_without_exit_rows(stored: str) -> None:
     assert "Çıkış / Exit" not in text
     assert "dstintf" not in text
     assert "İnternet çıkışı / Internet exit" not in text
-    for lead in LEADS.values():
+    for lead in (*LEADS.values(), *LEADS_EN.values()):
         assert lead not in text
     assert "Çift NAT varsayımı: bu adres için" in text
     assert "(CGNAT)" in text
@@ -1010,10 +1045,16 @@ def test_e_k4_exits_changed_after_the_event_in_the_method(
     signed_in(client, login_as, app_session_factory)
     _data, text = report(client, public_ip=P2)
     method = _section_4(text)
+    changed_at = format_datetime(tr(DAY, 12))
     assert "anından sonra şu internet çıkışlarının tanımı değişti: hat-2 (" in method
-    assert "yükseltme (eski NAT ayarlarından aktarıldı)" in method
-    assert "upgrade (converted from the old NAT settings)" in method
-    assert "şimdi: genel 198.51.100.77, 198.51.100.78" in method
+    assert (
+        f"hat-2 ({changed_at}, yükseltme (eski NAT ayarlarından aktarıldı); şimdi: genel "
+        "198.51.100.77, 198.51.100.78, NAT 100.64.13.9)" in method
+    )
+    assert (
+        f"hat-2 ({changed_at}, upgrade (converted from the old NAT settings); now: public "
+        "198.51.100.77, 198.51.100.78, NAT 100.64.13.9)" in method
+    )
 
     converted, _dropped = legacy_egresses([P1], "", False)  # genel-1 + tanimsiz
     exits(app_session_factory, converted, converted=True)
@@ -1335,6 +1376,14 @@ def test_e_p2_unconfigured_sender_row(
     )
     assert text.count("Bu eşleşmenin kayıtları yapılandırmada tanımlı olmayan") == 1
     assert warning in text
+    # the warning row stands in that candidate's block, and in no other
+    results = text.split("5. Sonuçlar", 1)[1].split("6. Kanıt listesi", 1)[0]
+    blocks = re.split(r"Aday \d+: puan", results)[1:]
+    assert len(blocks) == 20
+    warned = [block for block in blocks if "UYARI / Warning" in block]
+    assert len(warned) == 1
+    assert "172.20.42.120:51021" in warned[0]
+    assert warning in warned[0]
     assert "1 eşleşmenin kayıtları yapılandırmada tanımlı olmayan bir göndericiden geldi" in (
         _section_4(text)
     )
