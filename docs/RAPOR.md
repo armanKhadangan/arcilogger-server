@@ -83,18 +83,22 @@ kullandığı tek bir Türkçe/İngilizce tablodan gelir:
 - türler: "Doğrudan" / "Direct", "Servis sağlayıcı NAT'ı" / "ISP NAT", "FortiGate'ten geçmiyor" /
   "Does not pass the FortiGate", "İnternet çıkışı değil" / "Not an internet exit".
 
-Her eşleşme de kendi satırını alır: "Çıkış / Exit: {ad} ({açıklama}) · dstintf {dstintf}"
-(kanıt satırının NAT adresini tanımlayan çıkış; hiçbir çıkış tanımlamıyorsa "-"). Böylece
-`public_unknown`, `unconfigured` ya da `fallback` yanıtında her adayın hangi hattan çıktığı
-görülür. Saklanan sonuç her eşleşme için tek bir çıkış tutar (o ana en yakın kayıt satırının).
-Kayıtları farklı çıkışlarda görünen bir oturumda (`session_changed_exit`) satıra şu eklenir:
-yalnızca bir oturum çıkış değiştirdiyse ve bu eşleşmenin kanıt satırları birden çok çıkış
-gösteriyorsa öbür çıkış "oturumun kayıtlarında ayrıca: {çıkışlar}" / "the session's records also
-show: {exits}" diye adıyla yazılır; aksi hâlde satırların kendi değerleri yazılır: "oturumun
-kayıtları birden çok çıkış gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the session's
-records show more than one exit: …". Her kanıt satırının çıkışı, sorgu motorunun yaptığı gibi
-NAT adresi ve arayüzüyle saklanan çıkışlardan bulunur; aynı çıkışın iki arayüzü arasında geçen
-bir oturum çıkış değiştirmiş sayılmaz ve satırına bu ek yazılmaz.
+Her eşleşme de kendi satırını alır: "Çıkış / Exit: {ad} ({açıklama}) · dstintf {dstintf}" (kanıt
+satırının NAT adresini tanımlayan çıkış; hiçbir çıkış tanımlamıyorsa "-"). "-" yalnızca talep bir
+genel IP adresi içerdiğinde görülür: iç IP, MAC ya da yalnızca hedefle yapılan bir sorguda çıkış hiç
+belirlenmez ve satır "çıkış belirlenmedi (talepte genel IP yok) / exit not determined (no public IP
+in the request) · dstintf {dstintf}" der. Böylece `public_unknown`, `unconfigured` ya da `fallback`
+yanıtında her adayın hangi hattan çıktığı görülür. Saklanan sonuç her eşleşme için tek bir çıkış
+tutar (o ana en yakın kayıt satırının). Kayıtları farklı çıkışlarda görünen bir oturumda
+(`session_changed_exit`) satıra şu eklenir: yalnızca bir oturum çıkış değiştirdiyse ve bu eşleşmenin
+kanıt satırları birden çok çıkış gösteriyorsa öbür çıkış "oturumun kayıtlarında ayrıca: {çıkışlar}"
+/ "the session's records also show: {exits}" diye adıyla yazılır (öbür adres hiçbir çıkışa tanımlı
+değilse adı yerine "hiçbir çıkışa tanımlı olmayan bir NAT adresi" / "a NAT address no exit claims");
+aksi hâlde satırların kendi değerleri yazılır: "oturumun kayıtları birden çok çıkış gösteriyor: NAT
+{transip} · dstintf {dstintf}; …" / "the session's records show more than one exit: …". Her kanıt
+satırının çıkışı, sorgu motorunun yaptığı gibi NAT adresi ve arayüzüyle saklanan çıkışlardan
+bulunur; aynı çıkışın iki arayüzü arasında geçen bir oturum çıkış değiştirmiş sayılmaz ve satırına
+bu ek yazılmaz.
 
 Yöntem bölümü her (yanıt, tür) için bir paragraf yazar, toplam on bir paragraf. Her paragraf
 neyin çıkış tanımına (ayara), neyin kayıtlara dayandığını ayırır. `{searched}` sonucun saklanan
@@ -105,18 +109,20 @@ arama bilgisindeki, gerçekten aranan adreslerdir:
   karşılaştırılır; port yoksa o adresle çıkan oturumlar aday olarak sıralanır.
 - `public` ya da `transip`, servis sağlayıcı NAT'ı: tanıma göre servis sağlayıcının yönlendiricisi
   FortiGate'in bu hattaki NAT adresini ({transips}) ikinci kez çevirir ve bu dönüşümün kaydı
-  ARCILOGGER'da yoktur. Arama yalnızca bu çıkışın NAT adresleriyle yapıldıysa paragraf "Arama
-  bu çıkışın NAT adresleriyle{ ve arayüzleriyle (…)} sınırlandı." der. Arama tanımsız adresleri
-  de kapsadıysa (tanımsız adresleri kapsayan bir çıkış ya da çıkışın NAT adresi o anda
-  görülmediği için genişletilen arama) bu cümlenin yerine "Arama {searched} adresleriyle{ ve
-  arayüzleriyle (…)} yapıldı." yazılır. Arayüz eki yalnızca arama arayüz koşulunu koruduysa
-  yazılır. Port koruma ya kullanılmamıştır ya da yalnızca sıralamada kullanılmıştır
-  (sahada doğrulandı olarak işaretliyse). NAT adresi girilmemiş, tanımsız adresleri kapsayan bir
-  çıkışta {transips} yerine "hiçbir çıkışa tanımlı olmayan özel ya da paylaşılan NAT adresleri"
-  yazılır. `transip` yanıtında istenen adres FortiGate'in bu çıkıştaki kendi NAT adresidir ve
-  eşleşme FortiGate kaydında transip ve transport ile yapılır. Genel adresi "değişebilir"
-  işaretli bir çıkışın `public` yanıtında paragraf `egress_public_dynamic` metnini de taşır:
-  adresin o anda bu hatta ait olduğunu yalnızca servis sağlayıcı doğrulayabilir.
+  ARCILOGGER'da yoktur. Arama yalnızca bu çıkışın NAT adresleriyle yapıldıysa paragraf "Arama bu
+  çıkışın NAT adresleriyle{ ve arayüzleriyle (…)} sınırlandı." der. Arama tanımsız adresleri de
+  kapsadıysa (tanımsız adresleri kapsayan bir çıkış ya da çıkışın NAT adresi o anda görülmediği için
+  genişletilen arama) bu cümlenin yerine "Arama {searched} adresleriyle{ ve arayüzleriyle (…)}
+  yapıldı." yazılır. Arayüz eki yalnızca arama arayüz koşulunu koruduysa yazılır. Port koruma ya
+  kullanılmamıştır ya da yalnızca sıralamada kullanılmıştır (sahada doğrulandı olarak işaretliyse).
+  NAT adresi girilmemiş, tanımsız adresleri kapsayan bir çıkışta {transips} yerine "hiçbir çıkışa
+  tanımlı olmayan özel ya da paylaşılan NAT adresleri" yazılır. `transip` yanıtında istenen adres
+  FortiGate'in bu çıkıştaki kendi NAT adresidir ve eşleşme FortiGate kaydında transip ve transport
+  ile yapılır. Kesin eşleşmede 4. bölümün "Açıklama" satırı da "Talepteki adres FortiGate'in bu
+  çıkıştaki kendi NAT (WAN) adresidir; …" der: adres paylaşılan (RFC 6598) bir adres olabileceği
+  için "genel" denmez. Genel adresi "değişebilir" işaretli bir çıkışın `public` yanıtında paragraf
+  `egress_public_dynamic` metnini de taşır: adresin o anda bu hatta ait olduğunu yalnızca servis
+  sağlayıcı doğrulayabilir.
 - `fallback`, doğrudan çıkış ("Doğrudan hat doğrulanamadı"): istenen adres o anın çevresinde
   FortiGate kayıtlarında NAT adresi olarak görünmüyor ya da yalnızca bir kısmında görünüyor;
   kayıtlar o sırada özel ya da paylaşılan başka kaynak NAT adreslerini de ({seen}, en çok 5)
@@ -167,8 +173,10 @@ arama bilgisindeki, gerçekten aranan adreslerdir:
   sorgunun saklanan sonucundan gelir, bugünkü ayardan değil.
 
 Tanımsız adresler de arandıysa `{searched}` "… ve hiçbir çıkışa tanımlı olmayan bütün özel ya da
-paylaşılan kaynak NAT adresleri (T çevresinde görülenler: …)" diye biter. T istenen andır. Böylece
-listede görülmeyen bir tanımsız adresten gelen bir aday da yazılı aramanın içinde kalır.
+paylaşılan kaynak NAT adresleri ({an} çevresinde görülenler: …)" / "(seen around {at}: …)" diye
+biter. {an} istenen andır ve raporun zaman biçimiyle yazılır (`egress_transip_not_seen` notunun
+yazdığı gibi). Böylece listede görülmeyen bir tanımsız adresten gelen bir aday da yazılı aramanın
+içinde kalır.
 
 `no_egress`, `not_logged` ve internet çıkışı olmayan bir NAT adresi hiç oturum aramaz. Bu yüzden 4.
 ve 5. bölüm, kayıtlara dayalı bir "kimse yok" gibi okunacak "Ölçütlere uyan kayıt bulunamadı"
@@ -300,12 +308,16 @@ ayrıştırıcıyla yeniden okunur ve raporda gösterilen değerlerle karşıla�
 - IP-MAC kaydının (MikroTik DHCP, FortiGate DHCP, ARP-LOG) IP ve MAC adresi;
 - her satırda kayıt türü ve zamanı.
 
-Bir kirayı bitiren DHCP satırı (MikroTik ya da FortiGate) yalnızca kirayla paylaştığı alanı
-taşır. Kiranın IP adresini taşıyorsa yalnızca IP karşılaştırılır: adresi başka bir cihaz aldı
-ya da aynı adres ve MAC öbür DHCP kaynağının kaydıyla sürdü. Başka bir IP adresi taşıyorsa
-yalnızca MAC karşılaştırılır: aynı MAC adresi başka bir adres aldı. Böylece doğru bir zincir
-yanlış bir "uyuşmuyor" uyarısı almaz. Kira zaman çizelgesine girmemiş FortiGate DHCP satırları
-(bölüm 6'da notlu) karşılaştırılmaz.
+Bir kirayı bitiren DHCP satırı (MikroTik ya da FortiGate) kirayla paylaştığı alanı ve yazdığı IP
+adresini taşır. Kiranın IP adresini taşıyorsa yalnızca IP karşılaştırılır: adresi başka bir cihaz
+aldı ya da aynı adres ve MAC öbür DHCP kaynağının kaydıyla sürdü. Başka bir IP adresi taşıyorsa
+satırın yazdığı o IP adresi ve kiranın MAC adresi karşılaştırılır: aynı MAC adresi başka bir adres
+aldı. Böylece doğru bir zincir yanlış bir "uyuşmuyor" uyarısı almaz; veritabanında üçüncü bir adrese
+değiştirilmiş bir satır ise "uyuşmuyor" diye yazılır. Bu üç durumun hepsinde kira satırının bitiş
+nedeni "sonraki bir DHCP atamasıyla kapandı" / "closed by a later DHCP assignment" diye yazılır:
+kirayı bitiren kayıt başka bir cihazın, aynı MAC adresinin başka bir adresinin ya da öbür DHCP
+kaynağının kaydı olabilir; rapor bunlardan birini olgu olarak yazmaz. Kira zaman çizelgesine
+girmemiş FortiGate DHCP satırları (bölüm 6'da notlu) karşılaştırılmaz.
 Bir fark varsa rapor bunu kırmızı uyarıyla yazar (bölüm 4 ve 5'in başında; farklar bölüm 6'da
 ilgili kanıtın altında, "raporda X, ham satırda Y"); o sonuç **"kesin eşleşme" olarak değil
 "kanıtla uyuşmayan sonuç"** olarak gösterilir ve zincire güven düzeyi verilmez. Karşılaştırma
@@ -422,11 +434,11 @@ found**, in red), how to verify the report, and the legal note; every page is nu
 stored when a cited file exists but cannot be read now (503 `report_access_denied` /
 `report_evidence_unreadable`) or the layout fails (500 `report_render_failed`); the next request
 tries again. Every cited raw line is parsed again with the ingest parser and compared with what the
-report shows from the database (session addresses, ports, protocol, session number, NAT; `srcip`
-and `srcmac` of a srcmac chain's session line; IP and MAC of an IP-MAC record, MikroTik or
-FortiGate DHCP or ARP-LOG, where the line that ended a lease claims only the field it shares with
-the lease; record type and time): a difference is printed in red, and that result is shown
-as "contradicted by its evidence", never as an exact match or with a confidence. The check finds a
+report shows from the database (session addresses, ports, protocol, session number, NAT; `srcip` and
+`srcmac` of a srcmac chain's session line; IP and MAC of an IP-MAC record, MikroTik or FortiGate
+DHCP or ARP-LOG, where the line that ended a lease claims the field it shares with the lease and the
+IP it names; record type and time): a difference is printed in red, and that result is shown as
+"contradicted by its evidence", never as an exact match or with a confidence. The check finds a
 database changed after ingest, not a defect of the parser itself. With `lookup.report_timestamp` the
 PDF's hash is time-stamped (1 kontör), the `.zd` is stored next to it and the PDF names the provider
 and warns when it is not the Kamu SM production server (it never states that a stamp is legally
@@ -442,40 +454,47 @@ address", "No exits defined", "No exit"; modes "Direct", "ISP NAT", "Does not pa
 "Not an internet exit"). The method section prints one paragraph per (resolution, mode), eleven in
 all, each separating what the exit definition states from what the logs show; the `no_egress`
 paragraph speaks of "the records of the configured FortiGate sources" and lists the exits defined
-at the time of the lookup. The ISP NAT paragraph says "The search was limited to this exit's NAT
-addresses" only when it was; when the search also covered the addresses no exit claims (a
-catch-all exit, or the widened search) it says "The search covered {searched}" instead, as the
-`public_unknown` paragraph then does; there "on the interfaces (…)" is printed only when every
-exit searched kept its interface condition (an exit without interfaces, or one whose interfaces
-were not seen in the logs, was searched on every interface). The direct `fallback` paragraph says "on this line" only for
-an exit with interfaces, and its addition names the other exit as converted without interfaces or
-as sharing an interface. The double-NAT paragraph is never
-printed for resolution `transip`. It reads "Double NAT" for a configured ISP NAT exit and "Double
-NAT assumed" for `unconfigured` and `public_unknown`, with the CGNAT sentence; for a `fallback`
-the method paragraph stands in for it, and "For an exact answer" prints the result sentence and
-advice (a) alone (with the bridge-mode check for a failed direct exit). The variant sentence and the CGNAT sentence appear only
-when the request names a public IP. The report never states as a fact that a line sits behind an ISP router, and never
-advises defining a line as Direct when it already is, or for a `transip` fallback. Method notes
-(clock offset, changing public address, internal NAT, exits changed after the event, the
-FortiGate DHCP format note) come from the stored outcome, never from today's settings.
+at the time of the lookup. For a `transip` answer the mode row calls the requested address the
+FortiGate's own NAT (WAN) address on that exit, never a public one. The ISP NAT paragraph says "The
+search was limited to this exit's NAT addresses" only when it was; when the search also covered the
+addresses no exit claims (a catch-all exit, or the widened search) it says "The search covered
+{searched}" instead, as the `public_unknown` paragraph then does (the unclaimed addresses "seen
+around {at}", the requested moment); there "on the interfaces (…)" is printed only when every exit
+searched kept its interface condition (an exit without interfaces, or one whose interfaces were not
+seen in the logs, was searched on every interface). The direct `fallback` paragraph says "on this
+line" only for an exit with interfaces, and its addition names the other exit as converted without
+interfaces or as sharing an interface. The double-NAT paragraph is never printed for resolution
+`transip`. It reads "Double NAT" for a configured ISP NAT exit and "Double NAT assumed" for
+`unconfigured` and `public_unknown`, with the CGNAT sentence; for a `fallback` the method paragraph
+stands in for it, and "For an exact answer" prints the result sentence and advice (a) alone (with
+the bridge-mode check for a failed direct exit). The variant sentence and the CGNAT sentence appear
+only when the request names a public IP. The report never states as a fact that a line sits behind
+an ISP router, and never advises defining a line as Direct when it already is, or for a `transip`
+fallback. Method notes (clock offset, changing public address, internal NAT, exits changed after the
+event, the FortiGate DHCP format note) come from the stored outcome, never from today's settings.
 
-Every match prints its exit and `dstintf` (for a session that changed exit, the other exit when
-the stored outcome can tell it, else the NAT address and `dstintf` of each of its cited lines;
-each line's exit is found from its NAT address and interface as the lookup engine does, so a
-session that moved between two interfaces of one exit did not change exit); a
-match whose records came from an unconfigured sender
-gets a "UYARI / Warning" row. `no_egress`, `not_logged` and an address that is not an internet exit
-print "No session was searched: …" instead of the generic no-match text. A srcmac step, the row
-"MAC adresi / MAC address", reads "MAC address (partial evidence)" and never says that the MAC sent the session; a srcmac conflict prints
-both MACs, the alternative under "Possible other chain (srcmac, partial evidence)". A FortiGate
-DHCP lease row adds its source, lease time and last DHCP evidence, both from the lease's own last
-record at or before the moment (section 6 labels such lines "FortiGate DHCP kaydı / FortiGate DHCP
-record" and unconverted ones "FortiGate olay kaydı / FortiGate event record"); a `low` chain prints its reason beside it (`lease_renewal_not_seen`,
+Every match prints its exit and `dstintf` ("-" when no exit claims the NAT address, which happens
+only when a public IP was requested; without one, "exit not determined (no public IP in the
+request)"; for a session that changed exit, the other exit when the stored outcome can tell it, an
+unclaimed one as "a NAT address no exit claims", else the NAT address and `dstintf` of each of its
+cited lines; each line's exit is found from its NAT address and interface as the lookup engine does,
+so a session that moved between two interfaces of one exit did not change exit); a match whose
+records came from an unconfigured sender gets a "UYARI / Warning" row. `no_egress`, `not_logged` and
+an address that is not an internet exit print "No session was searched: …" instead of the generic
+no-match text. A srcmac step, the row "MAC adresi / MAC address", reads "MAC address (partial
+evidence)" and never says that the MAC sent the session; a srcmac conflict prints both MACs, the
+alternative under "Possible other chain (srcmac, partial evidence)". A FortiGate DHCP lease row adds
+its source, lease time and last DHCP evidence, both from the lease's own last record at or before
+the moment (section 6 labels such lines "FortiGate DHCP kaydı / FortiGate DHCP record" and
+unconverted ones "FortiGate olay kaydı / FortiGate event record"). A lease ended by a later DHCP
+record, whether another device took the address, the lease's MAC took another address or the other
+DHCP source recorded the same pair, reads "sonraki bir DHCP atamasıyla kapandı" / "closed by a later
+DHCP assignment"; a `low` chain prints its reason beside it (`lease_renewal_not_seen`,
 `fortigate_dhcp_not_converted_since_lease`, `fortigate_dhcp_no_network`). An unconverted FortiGate
 DHCP line is cited in section 6 only for an internal lookup or an exact match, marked "not in the
-lease timeline; no chain built; no confidence given"; a candidate report carries the text alone.
-Raw session lines of an interface with FortiGate device identification show `srcmac`, the device
-name, OS and passively learned user names as logged, other people's candidate sessions included.
+lease timeline; no chain built; no confidence given"; a candidate report carries the text alone. Raw
+session lines of an interface with FortiGate device identification show `srcmac`, the device name,
+OS and passively learned user names as logged, other people's candidate sessions included.
 
 A lookup made before the upgrade to this version is printed, on its first download, without exit
 rows, per-resolution paragraphs or FortiGate lease additions; a double-NAT answer to a public-IP

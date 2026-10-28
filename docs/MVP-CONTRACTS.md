@@ -554,14 +554,20 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
   **`lookup_timeout`**, the attempt is audited as `lookup.run_failed` (`reason: timeout`) and no
   `lookups` row is stored. 503 **`lookup_settings_invalid`** when the stored `nat.egresses`
   cannot be parsed, for a public-IP request only (`settings.egresses()` is called inside the
-  router's `try` only when `public_ip` is set; other lookups never parse it): "5651 sorgu
+  router's `try` only when `public_ip` is set; other lookups read an unparsable value as having
+  no `direct` exit (`double_nat`), never as a 503): "5651 sorgu
   ayarları geçersiz: İnternet çıkışları (nat.egresses) değeri okunamadı (Ayarlar → Uygulama
   ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)); sistem yöneticisi
   düzeltmelidir." / "The 5651 lookup settings are invalid: the internet exits value
   (nat.egresses) cannot be read (Settings → Application settings → 5651 lookup and lease
-  timeline → Internet exits (NAT)); an administrator must fix it." The same 503 and text cover
-  any other `TypeError`/`ValueError` of the settings read there (`LookupSettings.from_settings`,
-  `lookup.timeout_seconds`).
+  timeline → Internet exits (NAT)); an administrator must fix it." When
+  `LookupSettings.from_settings` or `lookup.timeout_seconds` fails (a `TypeError`/`ValueError`),
+  any lookup, with or without a public IP, answers the same code with a second text that does
+  not name the key (the exception is logged at WARNING): "5651 sorgu ayarları geçersiz: kayıtlı
+  bir sorgu ya da kira ayarı okunamadı (Ayarlar → Uygulama ayarları); sistem yöneticisi
+  düzeltmelidir." / "The 5651 lookup settings are invalid: a stored lookup or lease setting
+  cannot be read (Settings → Application settings); an administrator must fix it." (WP-D,
+  "Deviations — d" d-28).
 - **Visibility (spec 13 + KVKK):** administrators see every lookup; every other role with
   `lookup.run` (the auditor) only its own — results are shown only to whoever entered a reason
   (spec 9.5). Another user's lookup answers **404** (not 403). The rule also covers evidence
@@ -620,14 +626,21 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     unknown public address", `unconfigured` "Çıkış tanımlı değil" / "No exits defined",
     `no_egress` "Çıkış yok" / "No exit"; `texts.EXIT_MODES`: "Doğrudan" / "Direct", "Servis
     sağlayıcı NAT'ı" / "ISP NAT", "FortiGate'ten geçmiyor" / "Does not pass the FortiGate",
-    "İnternet çıkışı değil" / "Not an internet exit"). Every match row gains "Çıkış / Exit:
-    {name} ({label}) · dstintf {dstintf}" from `NatMatch.egress` and the cited row ("-" when
-    unclaimed). The outcome stores one exit per match, so a match of a session whose cited
+    "İnternet çıkışı değil" / "Not an internet exit"). For resolution `transip` the
+    "Açıklama" row of an exact answer reads "Talepteki adres FortiGate'in bu çıkıştaki kendi NAT
+    (WAN) adresidir; …", never "genel/WAN" (the address may be a shared one; d-32). Every match
+    row gains "Çıkış / Exit: {name} ({label}) · dstintf {dstintf}" from `NatMatch.egress` and the
+    cited row ("-" when no exit claims the NAT address, so only when a public IP was requested);
+    without a public IP (`outcome.egress` null) it reads "çıkış belirlenmedi (talepte genel IP
+    yok) / exit not determined (no public IP in the request) · dstintf {dstintf}" (d-27). The
+    outcome stores one exit per match, so a match of a session whose cited
     `fg_traffic` lines map to more than one exit (each (`transip`, `dstintf`) as the engine maps a
     row, over the stored exits; another interface of the same exit is no change) while the
     outcome carries `session_changed_exit` adds "oturumun kayıtlarında ayrıca: {exits}" / "the
-    session's records also show: {exits}" (the other exits named in the explanation) when the
-    explanation counts one such session and only this match's lines vary, else "oturumun
+    session's records also show: {exits}" (the other exits named in the explanation; an
+    unclaimed one, "-" in the explanation, as "hiçbir çıkışa tanımlı olmayan bir NAT adresi" / "a
+    NAT address no exit claims", d-33) when the explanation counts one such session and only
+    this match's lines vary, else "oturumun
     kayıtları birden çok çıkış gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the
     session's records show more than one exit: …" read from its raw lines; a match whose lines
     map to one exit prints that exit alone (WP-D, "Deviations — d"). For `no_egress`, `not_logged`
@@ -643,10 +656,11 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     "Exits defined at the time of the lookup: {configured}.", each exit as "name (label): mode,
     public addresses", from the stored outcome). `{searched}` names the addresses actually
     searched (`egress.searched`); when `searched.unclaimed` is true it adds (or reads alone)
-    "hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak NAT adresleri (T çevresinde
-    görülenler: {seen})" / "every private or shared source-NAT address no exit claims (seen near
-    T: {seen})", "T" printed as the contract writes it and `{seen}` the private or shared ones of
-    `searched.unclaimed_seen`; `{seen}` of the two `fallback` paragraphs is
+    "hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak NAT adresleri ({at}
+    çevresinde görülenler: {seen})" / "every private or shared source-NAT address no exit claims
+    (seen around {at}: {seen})", `{at}` the requested moment in the report's time format (as
+    `egress_transip_not_seen` says it; the contract's "T", d-29) and `{seen}` the private or
+    shared ones of `searched.unclaimed_seen`; `{seen}` of the two `fallback` paragraphs is
     `searched.outside_seen`. The WP-D wording choices ("Deviations — d"):
     - the isp_nat paragraph says "Arama bu çıkışın NAT adresleriyle{ ve arayüzleriyle (…)}
       sınırlandı." / "The search was limited to this exit's NAT addresses{ and interfaces (…)}."
@@ -685,8 +699,8 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     belgelerindeki biçime göre okundu." / "The FortiGate DHCP record format has not been verified
     on site at this installation; the leases were read by the format of the FortiOS
     documentation.", one with `fortigate_format_verified` its stored text instead (each distinct
-    stored text once, never both), once in the method section; neither key is repeated beside
-    the chains.
+    stored text once, never both; when both keys reach one outcome the unverified sentence wins,
+    d-13), once in the method section; neither key is repeated beside the chains.
   - **Double-NAT variants.** The double-NAT paragraph of a candidates or `none` answer with
     `double_nat` true has three variants and is never printed for resolution `transip`:
     configured `isp_nat` "Çift NAT: {exit} çıkışı servis sağlayıcı NAT'ı olarak tanımlı; …" /
@@ -717,6 +731,11 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     "Possible other chain (srcmac, partial evidence)" (the `ip_conflict` header stays for the
     others). A chain without a lease prints "Zincir kurulamadı: o anda bu iç IP adresi için kira
     kaydı yok." / "No chain: no lease covered this internal IP address at that moment."
+  - **End reason.** Every `superseded` lease, whatever closed it (another MAC took the IP, the
+    lease's MAC took another address, D33, or the other DHCP table's ACK of the same pair, D5),
+    prints the end reason "sonraki bir DHCP atamasıyla kapandı" / "closed by a later DHCP
+    assignment", never "IP başka bir MAC adresine verildi" (`texts.END_REASONS`; no new
+    `end_reason` value; d-26).
   - **FortiGate lease row.** The lease row of an `fg_dhcp` lease (`source_table == "fg_dhcp"`
     only) adds "· kaynak: FortiGate DHCP kaydı · kira süresi (FortiGate kaydı): {lease} sn · son
     DHCP kanıtı: {last}" and, below it, "source: FortiGate DHCP record · lease time (FortiGate
@@ -742,9 +761,10 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     raw lines are never modified).
   - **Cross-check.** `fg_dhcp` lines are re-parsed and checked (`PARSER_OF_TABLE["fg_dhcp"] =
     "fortigate"`): a ref claims `ip` and `mac` like an `mt_dhcp` ref, except the line that ended
-    a `superseded` lease (a DHCP ref with `time >= end`), which claims only the field it shares
-    with the lease (`ip` when it names the lease's IP, `mac` when it names another IP, read with
-    `refs.dhcp_ip`; a ref without a summary claims `ip`); a srcmac chain claims `{srcip,
+    a `superseded` lease (a DHCP ref with `time >= end`), which claims the IP it names: `{ip:
+    lease.ip}` when it names the lease's IP, `{ip: refs.dhcp_ip(ref), mac: lease.mac}` when it
+    names another IP (D33 and its MikroTik variant), `ip` for a ref without a summary, so a
+    summary edited to a third IP gives "uyuşmuyor" (d-30); a srcmac chain claims `{srcip,
     srcmac}` on its cited `fg_traffic` row (a mismatch names the field "kaynak MAC (srcmac)",
     `CHECK_FIELDS["srcmac"]`, and the check's paragraph in section 4 lists "srcmac zincirinde
     oturum kaydının kaynak IP ve srcmac alanı" / "source IP and srcmac of the session record of
@@ -1701,7 +1721,9 @@ records could not be summarised within {seconds} s; try again a little later."
 ```
 
 NAT part: `GROUP BY transip, dstintf, trandisp` over the trusted `fg_traffic` rows of the last
-`hours` with `transip IS NOT NULL` (no address-family filter), `ORDER BY count DESC LIMIT 100`
+`hours` with an IPv4 `transip` (`family(transip) = 4`, as `R20-nat:unmapped-transip` reads it:
+exits refuse IPv6, so the rows, `unmapped_transips` and `unknown_trandisp` never hold an IPv6
+address; contract "Deviations — d" d-31), `ORDER BY count DESC LIMIT 100`
 (`truncated`: more than 100 groups exist and the 100 busiest are listed); `egress` is the exit
 that claims the row's `transip` as a public or NAT address by the current `nat.egresses`
 (`internal` exits included, as `R20-nat:unmapped-transip` reads it; of several claiming exits the
@@ -2006,10 +2028,14 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
     `fg_dhcp`, `mt_arp`; empty for `absent`) **whatever the state**, so it is filled under
     `refused` too; the web shows it only for `none`.
   - When the `dhcp.fortigate_*` values cannot be read (written around the validator,
-    `LookupSettings.from_settings` refuses them), the member is still returned (never null):
-    `fg_dhcp.rows` and `last_hour` count the rows of trusted senders (the one rule that needs no
-    setting), `refused_rows` and `excluded_rows` are 0, `format_verified` is the stored value read
-    as a boolean, and the state comes from the alerts only; a warning is logged.
+    `LookupSettings.from_settings` refuses them), the member is still returned (never null) and
+    no `fg_dhcp` row counts as usable: `rows` 0, `last_hour` null, `refused_rows` and
+    `excluded_rows` 0, because the lease job cannot use any row then (`Context.load` raises);
+    the trusted senders' rows are no usable count either, since rules 3, 6 and 7 of
+    `trust.refusal` (IPv6, `device_time = false`, a zero or multicast MAC), which need no setting,
+    refuse some of them. `format_verified` is
+    true only for a stored JSON `true`; the state comes from the alerts only; a warning is
+    logged (contract "Deviations — d" d-15).
   - `srcmac {interfaces, rows_last_hour}`: `interfaces` = `lookup.srcmac_interfaces`;
     `rows_last_hour` counts the `fg_traffic` rows of trusted senders with `srcmac` of the last
     hour whose `srcintf` is one of those interfaces (any address family), computed only when
@@ -2227,7 +2253,7 @@ ADR-0016).
   | Status | Code | Where |
   |---|---|---|
   | 422 | `setting_invalid` (the details above) | `PATCH /settings` |
-  | 503 | `lookup_settings_invalid` (new text, section 6.1) | `POST /lookup/5651` with a public IP while `nat.egresses` cannot be parsed |
+  | 503 | `lookup_settings_invalid` (new text, section 6.1) | `POST /lookup/5651` with a public IP while `nat.egresses` cannot be parsed; also any lookup when another lookup setting cannot be read (`LookupSettings.from_settings`, `lookup.timeout_seconds`), with the second text: "5651 sorgu ayarları geçersiz: kayıtlı bir sorgu ya da kira ayarı okunamadı (Ayarlar → Uygulama ayarları); sistem yöneticisi düzeltmelidir." / "The 5651 lookup settings are invalid: a stored lookup or lease setting cannot be read (Settings → Application settings); an administrator must fix it." |
   | 504 | `fortigate_observed_timeout` (new, section 16) | `GET /settings/fortigate/observed` |
   | 422 | `ipv6_not_supported` (unchanged, section 6.1) | `POST /lookup/5651` |
 
@@ -2391,10 +2417,19 @@ report:
   with a public IP (d-9); a session that changed exit names the other exit only when the stored
   outcome can tell it (d-10); bilingual labels for `fg_dhcp`/`fg_event` only (d-11); the
   format note once and never beside the chains (d-13); `inputs.py` cites `unconverted_dhcp`
-  (d-14); `lease_evidence` is required and never null, with `refused_rows`/`excluded_rows` 0
-  and the state from the alerts only when the `dhcp.fortigate_*` values cannot be read (d-15);
+  (d-14); `lease_evidence` is required and never null, with no usable `fg_dhcp` row (`rows` 0,
+  `last_hour` null, `refused_rows`/`excluded_rows` 0) and the state from the alerts only when
+  the `dhcp.fortigate_*` values cannot be read (d-15);
   `none_tables` whatever the state (d-16); the observed endpoint caches the counts and computes
   the exit claims on every request (d-17), counts IPv4 srcmac rows (d-18) and claims by
   `dstintf`, then the first exit by name (d-20); the card's srcmac count has no family filter
   (d-19); `build_site(dhcp="fortigate", srcmac=True)` puts the phone on `vlan60` where the
-  contract wrote `vlan42` (d-21). Contract "Deviations — d" has each with its tests.
+  contract wrote `vlan42` (d-21); every `superseded` lease prints "sonraki bir DHCP atamasıyla
+  kapandı" / "closed by a later DHCP assignment" (d-26); a match in a report without a public
+  IP prints "çıkış belirlenmedi (talepte genel IP yok)" as its exit (d-27); the 503
+  `lookup_settings_invalid` has a second text for the other lookup settings (d-28); "T" is
+  printed as the requested moment (d-29); a closing line that names an IP claims that IP
+  (d-30); the observed NAT part counts IPv4 NAT addresses only (d-31); an exact `transip`
+  answer is not called "genel" (d-32); an unclaimed other exit of a changed session is named in
+  words (d-33); the 3.5 report tests live in `test_report_exits.py`, `test_report_fortigate.py`
+  and `test_lookup_testing_sites.py` (d-34). Contract "Deviations — d" has each with its tests.
