@@ -33,6 +33,13 @@ from arcilogger_ingest.parsers.fortigate import (
 )
 from arcilogger_ingest.parsers.kv import tokenize
 from arcilogger_ingest.parsers.values import to_mac
+from arcilogger_ingest.testing import (
+    DAY,
+    World,
+    fortigate_dhcp_message,
+    fortigate_srcmac_message,
+    write_realistic_spool,
+)
 
 FIXTURES = Path(__file__).parents[2] / "tests" / "fixtures"
 #: Awaited: the masked first device capture (tests/fixtures/format/README.md).
@@ -517,3 +524,36 @@ def test_real_fortigate_dhcp_sample(record_property: Any) -> None:
         else:
             release_values.add(values["dhcp_msg"])
     record_property("release_dhcp_msg", sorted(release_values))
+
+
+# -- the fortigate-only benchmark mix (bench_throughput.py --mix, docs/INGEST.md) -------------
+
+
+def test_the_benchmark_mix_lines_are_srcmac_traffic_and_dhcp_rows() -> None:
+    for index in range(30):
+        traffic = typed(parse(fortigate_srcmac_message(index)))
+        assert traffic[0] == "fg_traffic"
+        assert traffic[1]["srcmac"] == f"00:00:5e:00:53:{index % 250:02x}"
+        outcome = parse(fortigate_dhcp_message(index))
+        assert outcome.error is None
+        table, values = typed(outcome)
+        assert (table, values["device_time"]) == ("fg_dhcp", True)
+        release = index % 10 == 9
+        assert values["logid"] == ("0100026002" if release else "0100026001")
+        assert values["lease"] == (None if release else 86400)
+        assert values["ip"] == f"172.20.42.{100 + index % 150}"
+
+
+def test_the_fortigate_only_mix_writes_seventy_thirty_into_the_fortigate_file(
+    tmp_path: Path,
+) -> None:
+    world = World.create(tmp_path)
+    size = write_realistic_spool(world, DAY, 200, mix="fortigate-only")
+    (path,) = sorted(path for path in world.layout.spool.glob("*/*") if path.is_file())
+    assert path == world.layout.spool_file("fortigate", DAY)
+    lines = path.read_bytes().splitlines(keepends=True)
+    assert (len(lines), sum(map(len, lines))) == (200, size)
+    assert sum(b'type="traffic"' in line and b" srcmac=" in line for line in lines) == 140
+    assert sum(b' dhcp_msg="' in line for line in lines) == 60
+    with pytest.raises(ValueError, match="unknown mix"):
+        write_realistic_spool(world, DAY, 1, mix="mikrotik-only")
