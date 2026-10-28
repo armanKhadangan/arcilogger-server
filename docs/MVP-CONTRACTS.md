@@ -607,9 +607,11 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
 - **Report changes of Wave 3** (ADR-0016; `reports/render.py`, `reports/texts.py`,
   `reports/consistency.py`; docs/RAPOR.md). Everything is derived from the stored outcome, never
   from a setting at render time (a report is rendered on its first download).
-  - **Exit row.** Section 4 of a public-IP report gains "Çıkış / Exit: {resolution label} —
-    {name} ({label}), {mode}" for the exits of `outcome.egress.egresses` (no name for
-    `unconfigured` and `no_egress`); labels and mode names come from one TR/EN table shared with
+  - **Exit row.** Section 4 of a public-IP report gains the row "Çıkış / Exit" with "{label TR} /
+    {label EN} — {name} ({label}), {mode TR} / {mode EN}", one "{name} ({label}), {mode}" per exit
+    of `outcome.egress.egresses` joined with "; " (the name alone for an exit without a label; no
+    exit for `unconfigured` and `no_egress`; `render.exit_row`, `render.exit_label_key`); labels
+    and mode names come from one TR/EN table shared with
     the web header line and the reading table (`texts.EXIT_LABELS`: `public` "Genel IP" / "Public
     IP", `transip` "NAT adresi" / "NAT address", `fallback` of a `direct` exit "Doğrudan hat
     doğrulanamadı" / "Direct line not confirmed", `fallback` of a `transip` resolution "NAT adresi
@@ -620,25 +622,67 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     sağlayıcı NAT'ı" / "ISP NAT", "FortiGate'ten geçmiyor" / "Does not pass the FortiGate",
     "İnternet çıkışı değil" / "Not an internet exit"). Every match row gains "Çıkış / Exit:
     {name} ({label}) · dstintf {dstintf}" from `NatMatch.egress` and the cited row ("-" when
-    unclaimed); a `session_changed_exit` match names both exits. For `no_egress`, `not_logged`
+    unclaimed). The outcome stores one exit per match, so a match of a session whose cited
+    `fg_traffic` lines show more than one (`transip`, `dstintf`) while the outcome carries
+    `session_changed_exit` adds "oturumun kayıtlarında ayrıca: {exits}" / "the session's records
+    also show: {exits}" (the other exits named in the explanation) when the explanation counts
+    one such session and only this match's lines vary, else "oturumun kayıtları birden çok çıkış
+    gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the session's records show more than one
+    exit: …" read from its raw lines (WP-D, "Deviations — d"). For `no_egress`, `not_logged`
     and an `internal` exit, sections 4 and 5 print "Oturum aranmadı: …" / "No session was
     searched: …" (the address and the exit) instead of the generic `none` texts.
   - **Method paragraphs.** The Yöntem / Method section prints one paragraph per (resolution,
-    mode), eleven in all: `public` direct, `public`/`transip` isp_nat, `not_logged`, `transip`
-    internal, `fallback` direct, `fallback` transip, the `fallback` addition when the search
-    entered another exit's addresses, `observed`, `public_unknown`, `unconfigured`, `no_egress`
-    (the last with "Sorgu anında tanımlı çıkışlar: {configured}." / "Exits defined at the time of
-    the lookup: {configured}."). `{searched}` names the addresses actually searched
-    (`egress.searched`), with the unclaimed ones when `searched.unclaimed` is true; `{seen}` of
-    the two `fallback` paragraphs is `searched.outside_seen`. `source_clock_offset`,
-    `egress_public_dynamic`, `egress_internal` and `egress_changed_after_event` (with what each
-    changed exit holds now, or "silindi" / "deleted") are printed in the method section; keys
-    whose text a paragraph already quotes are not repeated as bullets (`texts.py` module
-    docstring). A chain with `fortigate_format_unverified` prints "FortiGate DHCP kayıt biçimi bu
-    kurulumda sahada doğrulanmadı; kira kayıtları FortiOS belgelerindeki biçime göre okundu." /
-    "The FortiGate DHCP record format has not been verified on site at this installation; the
-    leases were read by the format of the FortiOS documentation.", one with
-    `fortigate_format_verified` its stored text instead, once in the method section.
+    mode) under "İnternet çıkışı / Internet exit", eleven in all: `public` direct,
+    `public`/`transip` isp_nat, `not_logged`, `transip` internal, `fallback` direct, `fallback`
+    transip, the `fallback` addition when the search entered another exit's addresses,
+    `observed` (the stored text of `egress_observed_not_configured`, or of
+    `egress_not_logged_but_seen` when the answer names an exit), `public_unknown`,
+    `unconfigured`, `no_egress` (the last with "Sorgu anında tanımlı çıkışlar: {configured}." /
+    "Exits defined at the time of the lookup: {configured}.", each exit as "name (label): mode,
+    public addresses", from the stored outcome). `{searched}` names the addresses actually
+    searched (`egress.searched`); when `searched.unclaimed` is true it adds (or reads alone)
+    "hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak NAT adresleri (T çevresinde
+    görülenler: {seen})" / "every private or shared source-NAT address no exit claims (seen near
+    T: {seen})", "T" printed as the contract writes it and `{seen}` the private or shared ones of
+    `searched.unclaimed_seen`; `{seen}` of the two `fallback` paragraphs is
+    `searched.outside_seen`. The WP-D wording choices ("Deviations — d"):
+    - the isp_nat paragraph says "Arama bu çıkışın NAT adresleriyle{ ve arayüzleriyle (…)}
+      sınırlandı." / "The search was limited to this exit's NAT addresses{ and interfaces (…)}."
+      only when the search stayed on the exit's own addresses; when it also covered the unclaimed
+      ones (a catch-all exit, or the O5 widening) it says "Arama {searched} adresleriyle{ ve
+      arayüzleriyle (…)} yapıldı." / "The search covered {searched}{ on the interfaces (…)}.",
+      and the `public_unknown` paragraph adds the same sentence then; the interface clause only
+      while the search kept its interface condition; a catch-all exit's `{transips}` reads
+      "hiçbir çıkışa tanımlı olmayan özel ya da paylaşılan NAT adresleri" / "the private or
+      shared NAT addresses no exit claims";
+    - the direct `fallback` paragraph says "bu hatta" / "on this line" only when the exit
+      declares interfaces;
+    - the `fallback` addition has two variants: "Aranan adreslerin bir kısmı {other} çıkışına
+      aittir: bu çıkış yükseltmede eski ayarlardan aktarıldı ve arayüz tanımlanmadığı için aynı
+      hat sayıldı. Liste o hattın kullanıcılarını da içerebilir; her hattın arayüzleri girilince
+      bu olmaz." when the failed exit declares no interfaces, and "Aranan adreslerin bir kısmı
+      {other} çıkışına aittir: bu çıkış {exit} çıkışıyla aynı arayüzü ({interfaces}) paylaştığı
+      için aynı hat sayıldı. Liste o hattın kullanıcılarını da içerebilir." / "Some of the
+      searched addresses belong to exit {other}: it shares an interface ({interfaces}) with exit
+      {exit}, so it was counted as the same line. The list may contain that line's users too."
+      when it does;
+    - the `no_egress` paragraph reads "… ve o sırada yapılandırılmış FortiGate kaynaklarının
+      kayıtlarında da görünmüyor; …" / "… and does not appear in the records of the configured
+      FortiGate sources at that time either, …".
+
+    `source_clock_offset`, `egress_internal` and `egress_changed_after_event` (with what each
+    changed exit holds now, or "silindi" / "deleted") are printed in the method section's
+    explanation list; `egress_public_dynamic` is appended to the isp_nat paragraph of a `public`
+    answer. Keys whose text a paragraph already quotes (`egress_observed_not_configured`,
+    `egress_not_logged_but_seen`, `egress_public_dynamic`) are not repeated as bullets, nor the
+    stored `double_nat` / `double_nat_no_candidates` beside a `fallback` paragraph; every other
+    key stays a bullet (`render.py` module docstring). A chain with `fortigate_format_unverified`
+    prints "FortiGate DHCP kayıt biçimi bu kurulumda sahada doğrulanmadı; kira kayıtları FortiOS
+    belgelerindeki biçime göre okundu." / "The FortiGate DHCP record format has not been verified
+    on site at this installation; the leases were read by the format of the FortiOS
+    documentation.", one with `fortigate_format_verified` its stored text instead (each distinct
+    stored text once, never both), once in the method section; neither key is repeated beside
+    the chains.
   - **Double-NAT variants.** The double-NAT paragraph of a candidates or `none` answer with
     `double_nat` true has three variants and is never printed for resolution `transip`:
     configured `isp_nat` "Çift NAT: {exit} çıkışı servis sağlayıcı NAT'ı olarak tanımlı; …" /
@@ -648,25 +692,36 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     başka müşterilerle paylaşılıyorsa (CGNAT) aday listesi doğru oturumu içermeyebilir; …" / "If
     the public address is shared with other customers (CGNAT), the candidate list may not contain
     the right session; …"), then the result sentence and the advice: (a) the ISP's NAT record,
-    (b) bridge mode with the exit defined as "Doğrudan" / "Direct"; `fallback` prints (a) only
-    (for a failed `direct` exit with "or confirmation from the ISP that the line was in bridge
-    mode on that date"), and (b) is never printed for a `direct` exit or a `transip` fallback.
+    (b) bridge mode with the exit defined as "Doğrudan" / "Direct", under "Çift NAT / Double
+    NAT". `fallback` prints, under "Kesin eşleşme için / For an exact answer", the result
+    sentence and (a) only: "Kesin eşleşme için (a) servis sağlayıcının ilgili zamana ait NAT
+    kaydı (genel port → FortiGate çıkış portu) gerekir." / "An exact answer needs (a) the ISP's
+    NAT record for that time (public port → FortiGate port).", for a failed `direct` exit with
+    " ya da hattın o tarihte köprü modunda olduğunun servis sağlayıcıdan doğrulanması" / " or
+    confirmation from the ISP that the line was in bridge mode on that date" before "gerekir";
+    (b) is never printed for a `direct` exit or a `transip` fallback.
     The ISP modem is never stated as a fact. The variant and the CGNAT sentence are printed only
     when the request names a public IP (otherwise only the result sentence and the advice), and
     the stored `double_nat` / `double_nat_no_candidates` explanations are not repeated as bullets
     where the `fallback` paragraph is printed (WP-D deviations, contract "Deviations — d").
-  - **srcmac rows.** A srcmac step prints "MAC adresi (kısmi kanıt): FortiGate oturum kaydının
-    srcmac alanı, {interface} arayüzü; …; kira kaydı yok" / "MAC address (partial evidence):
-    srcmac field of the FortiGate session record, interface {interface}; …; no lease"; a
+  - **srcmac rows.** A srcmac step prints the row "MAC adresi / MAC address" with "MAC {mac} ·
+    MAC adresi (kısmi kanıt): FortiGate oturum kaydının srcmac alanı, {interface} arayüzü; …;
+    kira kaydı yok" and "MAC address (partial evidence): srcmac field of the FortiGate session
+    record, interface {interface}; …; no lease" (`texts.SRCMAC_STEP`, `{interface}` from the
+    chain's `srcmac_only`); a
     `srcmac_mismatch` alternative is printed under "Olası diğer zincir (srcmac, kısmi kanıt)" /
     "Possible other chain (srcmac, partial evidence)" (the `ip_conflict` header stays for the
     others). A chain without a lease prints "Zincir kurulamadı: o anda bu iç IP adresi için kira
     kaydı yok." / "No chain: no lease covered this internal IP address at that moment."
-  - **FortiGate lease row.** The lease row of an `fg_dhcp` lease adds "kira süresi (FortiGate
-    kaydı): {lease} sn · son DHCP kanıtı: {last}" / "lease time (FortiGate record): {lease} s ·
-    last DHCP evidence: {last}" (`lease_seconds`, `last_dhcp_evidence`; "ayarlardaki süre" /
-    "configured time" when `lease_seconds` is null) and names its source "FortiGate DHCP kaydı /
-    FortiGate DHCP record" (`TABLES["fg_dhcp"]`). A chain at `low` through
+  - **FortiGate lease row.** The lease row of an `fg_dhcp` lease (`source_table == "fg_dhcp"`
+    only) adds "· kaynak: FortiGate DHCP kaydı · kira süresi (FortiGate kaydı): {lease} sn · son
+    DHCP kanıtı: {last}" and, below it, "source: FortiGate DHCP record · lease time (FortiGate
+    record): {lease} s · last DHCP evidence: {last}" (`lease_seconds`, `last_dhcp_evidence`;
+    "ayarlardaki süre" / "configured time" when `lease_seconds` is null; `TABLES["fg_dhcp"]`,
+    `TABLES_EN["fg_dhcp"]`). In section 6 the tables added by ADR-0016 are labelled in both
+    languages, "FortiGate DHCP kaydı / FortiGate DHCP record" and "FortiGate olay kaydı /
+    FortiGate event record" (`TABLES_EN` holds only these two); the older table labels stay
+    Turkish only, as reports printed them. A chain at `low` through
     `lease_renewal_not_seen`, `fortigate_dhcp_not_converted_since_lease` or
     `fortigate_dhcp_no_network` prints that text beside its lease row (the second cites no
     `fg_event` line). Method item (2) names "MikroTik DHCP, FortiGate DHCP olayları" / "MikroTik
@@ -685,8 +740,11 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     "fortigate"`): a ref claims `ip` and `mac` like an `mt_dhcp` ref, except the line that ended
     a `superseded` lease (a DHCP ref with `time >= end`), which claims only the field it shares
     with the lease (`ip` when it names the lease's IP, `mac` when it names another IP, read with
-    `refs.dhcp_ip`); a srcmac chain claims `{srcip, srcmac}` on its cited `fg_traffic` row.
-    `fg_event` lines (the unconverted citation) stay `not_checked`.
+    `refs.dhcp_ip`; a ref without a summary claims `ip`); a srcmac chain claims `{srcip,
+    srcmac}` on its cited `fg_traffic` row (a mismatch names the field "kaynak MAC (srcmac)",
+    `CHECK_FIELDS["srcmac"]`, and the check's paragraph in section 4 lists "srcmac zincirinde
+    oturum kaydının kaynak IP ve srcmac alanı" / "source IP and srcmac of the session record of
+    a srcmac chain"). `fg_event` lines (the unconverted citation) stay `not_checked`.
   - **Outcomes stored before the upgrade** (`egress` null, `TrafficInfo.dstintf` null,
     `LeaseInfo.source_table` null) print no exit row in section 4 or on their matches, no
     per-resolution method paragraph and no FortiGate lease additions; a `double_nat` answer
@@ -1617,9 +1675,11 @@ not written.
 the logs" table under the exit editor): `hours` 1-72 (default 24); `settings.manage`
 (administrators), the permission of the whole settings router; **not audited** (counts and the
 firewall's own addresses only, no client address or MAC). The expensive counts are cached
-5 minutes per `hours`; what depends on the current settings (each row's `egress`,
-`trandisp_known`, `unmapped_transips`, `unknown_trandisp`, `exits_invalid`, an interface's
-`configured`) is computed from them on every request, so a saved exit shows at once. The counts
+5 minutes per `hours` (`ObservedState`); what depends on the current settings (each row's
+`egress`, `trandisp_known`, `unmapped_transips`, `unknown_trandisp`, `exits_invalid`, an
+interface's `configured`) is computed from them on every request, so a saved exit shows at once.
+`generated_at` is when the counts were made, so it can be up to 5 minutes old while the claims
+are current (WP-D, contract "Deviations — d"). The counts
 run under `statement_deadline` of 5 s; past it 504 **`fortigate_observed_timeout`**: "FortiGate
 kayıtları {seconds} saniyede özetlenemedi; biraz sonra yeniden deneyin." / "The FortiGate
 records could not be summarised within {seconds} s; try again a little later."
@@ -1637,15 +1697,21 @@ records could not be summarised within {seconds} s; try again a little later."
 ```
 
 NAT part: `GROUP BY transip, dstintf, trandisp` over the trusted `fg_traffic` rows of the last
-`hours` with `transip IS NOT NULL`, `ORDER BY count DESC LIMIT 100` (`truncated` when more
-groups exist); `egress` is the exit that claims the row (`null` when none), `trandisp_known`
-whether `nat.snat_trandisp` lists the value, `unmapped_transips` the addresses no exit claims,
-`unknown_trandisp` the values the setting does not list. When the stored `nat.egresses` cannot be
-parsed, every row has `egress: null` and `nat` carries `"exits_invalid": true` (a 200, never a
-500; the panel points to `R20-nat:invalid`); the key is absent otherwise. srcmac part: the last
-hour, trusted rows with `srcmac IS NOT NULL` grouped by `srcintf` (`rows`, distinct `macs`, and
-the most distinct IPv4 `srcip` per MAC, as the lookup's guard counts them,
-`trust.srcmac_ip_counts` with `interfaces=None`), `LIMIT 50`; `configured` is whether
+`hours` with `transip IS NOT NULL` (no address-family filter), `ORDER BY count DESC LIMIT 100`
+(`truncated`: more than 100 groups exist and the 100 busiest are listed); `egress` is the exit
+that claims the row's `transip` as a public or NAT address by the current `nat.egresses`
+(`internal` exits included, as `R20-nat:unmapped-transip` reads it; of several claiming exits the
+one whose interfaces hold the row's `dstintf`, else the first by name; `null` when none),
+`trandisp_known` whether `nat.snat_trandisp` lists the value, `unmapped_transips` the listed
+addresses no exit claims (in row order), `unknown_trandisp` the listed values the setting does
+not name (sorted). When the stored `nat.egresses` cannot be parsed, every row has `egress: null`
+and `nat` carries `"exits_invalid": true` (a 200, never a 500; the panel points to
+`R20-nat:invalid`); otherwise `exits_invalid` is `false` (the key is always present in the
+answer; optional in the OpenAPI schema because it has a default). srcmac part: the last hour,
+trusted rows with `srcmac` and `srcintf` set and an **IPv4** `srcip` grouped by `srcintf`
+(`rows`, distinct `macs`, and the most distinct IPv4 `srcip` per MAC, the rows and count of the
+lookup's guard, `trust.srcmac_ip_counts` with `interfaces=None`), busiest first; at most 50
+interfaces are listed (`truncated` when more exist); `configured` is whether
 `lookup.srcmac_interfaces` lists the interface. Budget (perf guard): < 2 s at 1 M rows a day over
 24 h.
 
@@ -1921,8 +1987,9 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
     `source_table` open or ended in the last 24 h (`ix_leases_source_table_end`), for
     information.
   - `fg_dhcp.refused_rows`: the `fg_dhcp` rows of the last 24 h that rules 1 and 4-7 refuse
-    (`trust.refusal` without `trust.CONFIGURATION`), counted only while `dhcp.fortigate_logids`
-    is not empty (the alert's gate: with FortiGate evidence off every row would be refused);
+    (`trust.refusal` without `trust.CONFIGURATION`; untrusted senders' rows included), counted
+    only while `dhcp.fortigate_logids` is not empty (the gate of `R20-lease:fortigate-refused`:
+    with FortiGate evidence off every row would be refused);
     `excluded_rows`: those of the excluded-interface and IPv6 rules, shown as an information line
     ("hariç tutulan arayüzler: N kayıt" / "excluded interfaces: N records"), never as refused;
     `format_verified`: `dhcp.fortigate_format_verified`.
@@ -1930,15 +1997,21 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
     predicate and 24-h window as `R20-lease:fortigate-refused`, so it clears as soon as the
     setting or source is corrected and the leases rebuilt; it **wins over `none`**: the records
     do arrive); else `none` while an `R20-lease:none:<table>` or `R20-lease:absent` alert is
-    active (read from the active alerts, up to 5 minutes behind the check), with `none_tables`
-    the tables of the active `none` causes (empty for `absent`); else `ok`.
-  - When the `dhcp.fortigate_*` values cannot be read (written around the validator), the member
-    is still returned: `refused_rows` and `excluded_rows` are 0 and the state comes from the
-    alerts only (logged).
+    active (read from the active alerts, up to 5 minutes behind the check); else `ok`.
+    `none_tables` lists the tables of the active `none` causes in card order (`mt_dhcp`,
+    `fg_dhcp`, `mt_arp`; empty for `absent`) **whatever the state**, so it is filled under
+    `refused` too; the web shows it only for `none`.
+  - When the `dhcp.fortigate_*` values cannot be read (written around the validator,
+    `LookupSettings.from_settings` refuses them), the member is still returned (never null):
+    `fg_dhcp.rows` and `last_hour` count the rows of trusted senders (the one rule that needs no
+    setting), `refused_rows` and `excluded_rows` are 0, `format_verified` is the stored value read
+    as a boolean, and the state comes from the alerts only; a warning is logged.
   - `srcmac {interfaces, rows_last_hour}`: `interfaces` = `lookup.srcmac_interfaces`;
-    `rows_last_hour` counts the `fg_traffic` rows with `srcmac` of the last hour on those
-    interfaces, computed only when interfaces are configured, cached 60 s, under a 2-s deadline
-    (`null` on a timeout and without interfaces).
+    `rows_last_hour` counts the `fg_traffic` rows of trusted senders with `srcmac` of the last
+    hour whose `srcintf` is one of those interfaces (any address family), computed only when
+    interfaces are configured, kept 60 s for the same interface list (a changed list recounts),
+    in a savepoint under its own 2-s `statement_timeout` (`null` on a timeout, which is not
+    kept, and without interfaces).
   - Budgets (perf guards): < 0.5 s for the counts, < 1 s for the srcmac count. Sample
     `sources.json` holds the states `ok`, `none` with `none_tables` and `refused`.
 - `GET /sources/{name}` (cached 30 s) → `SourceDetail` (+ `hourly` 48 h from `search_counts`
@@ -2089,7 +2162,9 @@ ADR-0016).
 - **Report names** (`reports/texts.py`): `EXIT_LABELS` (keys `public`, `transip`,
   `fallback_direct`, `fallback_transip`, `observed`, `public_unknown`, `unconfigured`,
   `no_egress`), `EXIT_MODES`, `READING_TABLE_KEYS` (the keys of the reading table in
-  docs/RAPOR.md), `TABLES["fg_dhcp"]`.
+  docs/RAPOR.md, in the order of its rows), `TABLES["fg_dhcp"]`, `TABLES["fg_event"]` and
+  `TABLES_EN` (English labels of those two only), `CHECK_FIELDS["srcmac"]`; `render.exit_label_key`
+  maps an outcome's exit to its `EXIT_LABELS` key.
 
 ### 18.2 Settings, status rows and codes
 
@@ -2158,7 +2233,7 @@ ADR-0016).
 |---|---|---|---|
 | `POST /lookup/5651`, `GET /lookup/{id}` | `lookup.run` + KVKK | the 2.10 fields; `lookup.run` details `egress {resolution, names}`; the new 503 text; a stored outcome returned as stored | 5, 6.1 |
 | `GET /lookup/{id}/report.pdf` | `lookup.run` + KVKK | exit rows, method paragraphs, double-NAT variants, srcmac rows, FortiGate lease row, unconverted citation, cross-check of `fg_dhcp` and srcmac claims | 6.1 |
-| `GET /settings/fortigate/observed?hours=24` | `settings.manage` | new; not audited; counts cached 5 min, claims current; 504 after 5 s | 16 |
+| `GET /settings/fortigate/observed?hours=24` | `settings.manage` | new; not audited; counts cached 5 min per `hours` (`generated_at` their time), claims current; 504 after 5 s | 16 |
 | `GET /sources` | `sources.read` | gains `lease_evidence` (required, never null); not audited | 17.8 |
 | `GET /settings`, `PATCH /settings` | `settings.manage` | the ten keys of group `lookup`; the codes of 18.2 | 5, 16 |
 
@@ -2302,10 +2377,20 @@ report:
   keeps 8,640,000 s).
 - **e1:** `lease_evidence.<table>.last_hour` is the newest usable row within the last hour
   (section 17.8); the web judges "as converted" by the converter's shape.
-- **WP-D:** `lease_evidence` is required and never null (the `dhcp.fortigate_*` values
-  unreadable: `refused_rows`/`excluded_rows` 0, state from the alerts only); the observed
-  endpoint caches the counts and computes the exit claims on every request; the double-NAT
-  variant and the CGNAT sentence only for a request with a public IP; no `double_nat` bullets
-  beside the `fallback` paragraph; `build_site(srcmac=True)` gives the phone `vlan60` (its own
-  network) where the contract wrote `vlan42`. They are listed in the WP-D pull request and,
-  where they depart from the contract, in its "Deviations — d".
+- **d (WP-D):** no `double_nat` bullets beside the `fallback` paragraph (d-1) and no bullet for
+  a text a paragraph quotes (d-2); the isp_nat paragraph says what was searched when the search
+  went wider than the exit's addresses (d-3); a `fallback` prints the result and advice (a)
+  under "Kesin eşleşme için / For an exact answer" (d-4); "bu hatta" only for an exit with
+  interfaces (d-5); a shared-interface variant of the `fallback` addition (d-6); the
+  `no_egress` paragraph speaks of the configured FortiGate sources (d-7); a catch-all exit's
+  NAT addresses in words (d-8); the double-NAT variant and the CGNAT sentence only for a request
+  with a public IP (d-9); a session that changed exit names the other exit only when the stored
+  outcome can tell it (d-10); bilingual labels for `fg_dhcp`/`fg_event` only (d-11); the
+  format note once and never beside the chains (d-13); `inputs.py` cites `unconverted_dhcp`
+  (d-14); `lease_evidence` is required and never null, with `refused_rows`/`excluded_rows` 0
+  and the state from the alerts only when the `dhcp.fortigate_*` values cannot be read (d-15);
+  `none_tables` whatever the state (d-16); the observed endpoint caches the counts and computes
+  the exit claims on every request (d-17), counts IPv4 srcmac rows (d-18) and claims by
+  `dstintf`, then the first exit by name (d-20); the card's srcmac count has no family filter
+  (d-19); `build_site(dhcp="fortigate", srcmac=True)` puts the phone on `vlan60` where the
+  contract wrote `vlan42` (d-21). Contract "Deviations — d" has each with its tests.
