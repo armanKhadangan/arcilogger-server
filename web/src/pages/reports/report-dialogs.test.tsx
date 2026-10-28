@@ -48,7 +48,7 @@ function period(dialog: HTMLElement): [boolean | undefined, string | undefined] 
   ];
 }
 
-/** Chooses "Özel dönem" and types a start day in the open dialog `name`; returns its `close`. */
+/** Picks "Özel dönem" and a start day in the open dialog `name`; returns it and its `close`. */
 async function chooseCustomPeriod(name: string, close: string) {
   const user = userEvent.setup();
   const dialog = await screen.findByRole('dialog', { name });
