@@ -1486,14 +1486,16 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   `stale`). Tests: `test_jobs_from_worker_status_and_job_runs` (`leases.incremental`,
   `alerts.system`, `evidence.purge`), `test_health_reads_bounded_probes_per_job`,
   `test_health_within_one_second` (both probes explained). W4-G: MVP-CONTRACTS.
-- **Seal evidence narrowed to the last 3 site days:** the newest modification time of
-  `state\seal\<YYYY-MM-DD>.json` of today, yesterday and the day before, not of every file in the
-  folder: Retention rewrites the state of each day it deletes (`status = "deleted"`,
+- **Seal evidence skips the states Retention wrote:** the newest modification time of a
+  `state\seal\<YYYY-MM-DD>.json` whose `status` is not `deleted`, not of every file in the folder:
+  Retention rewrites the state of each day it deletes (`status = "deleted"`,
   `core/src/arcilogger_core/retention.py` `_delete_day`), which on an installation older than its
-  retention period would read as Seal evidence every day. Seal writes yesterday's state after
-  00:10, and no day that young is ever deleted (`[retention] days` ≥ 730, `MIN_RETENTION_DAYS`). Test:
-  `test_task_states_from_evidence_files` (an old day's `deleted` state written now leaves Seal
-  `late`, then `missing`). W4-G: MVP-CONTRACTS (Sistem task table).
+  retention period would read as Seal evidence every day. The files are listed newest first (a stat
+  each) and read until one is not deleted. A fixed window of recent days would miss a time-stamp
+  outage of days: `seal_due` stops at the first failure, so Seal retries and rewrites only its
+  oldest unsealed day. Test: `test_task_states_from_evidence_files` (an old day's `deleted` state
+  written now leaves Seal `late`, then `missing`; a day six days back rewritten five minutes ago
+  makes it `ok`). W4-G: MVP-CONTRACTS (Sistem task table).
 - **Perf guard data:** `test_health_within_one_second` loads the part of the §3 perf data this
   endpoint reads: `job_runs` 17,000 rows a day for 180 days, today's and yesterday's `state/clock`
   files, status files with 20 sources, 30 days sealed in the vault (mock TSA), the verification

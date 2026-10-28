@@ -303,6 +303,16 @@ def test_task_states_from_evidence_files(
     assert by(get(client)["tasks"], "task")["Seal"]["state"] == "late"
     layout.seal_state(yesterday).unlink()
     assert by(get(client)["tasks"], "task")["Seal"]["state"] == "missing"
+    # A time-stamp outage of days: Seal retries its oldest unsealed day only (``seal_due`` stops at
+    # the first failure) and rewrites that day's state on every run.
+    retried = site_day(now) - timedelta(days=6)
+    write_json(layout.seal_state(retried), {"day": retried.isoformat(), "status": "failed"})
+    touch(layout.seal_state(retried), now - timedelta(minutes=5))
+    tasks = by(get(client)["tasks"], "task")
+    assert tasks["Seal"]["state"] == "ok"
+    retried_at = moment(tasks["Seal"]["last_evidence_at"])
+    assert retried_at is not None
+    assert abs(retried_at - (now - timedelta(minutes=5))) < timedelta(seconds=1)
 
 
 def test_unreadable_evidence_is_no_evidence(

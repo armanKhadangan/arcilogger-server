@@ -6,8 +6,8 @@ by the newest evidence it leaves where ArciApi may read:
 =============  ========================================================  ==========  ==========
 Task           Evidence (below the data folder)                          Late after  Not used
 =============  ========================================================  ==========  ==========
-Seal           newest modification of ``state/seal/<day>.json`` (the     26 h        —
-               last 3 days)
+Seal           newest modification of a ``state/seal/<day>.json`` that   26 h        —
+               Retention did not write (status not ``deleted``)
 VerifyDaily    ``at`` of ``state/verify/last-last-1.json`` or ``-2``     26 h        —
 VerifyWeekly   newest ``at`` of ``state/verify/last-last-<N>.json``,     8 days      —
                N ≥ 3
@@ -29,8 +29,9 @@ ApplySystem    ``at`` of ``admin/system/status.json``                    15 min 
 (the task's XML) plus a grace, not a setting. The names of the verification results are the ones
 ``arcilogger-core verify`` really writes (contract Implementation note 7): it puts ``last-``
 before its kind, and the kind of ``--last N`` is ``last-<days verified>`` (:func:`verify_state`).
-Seal is judged by the states of the last days only: Retention rewrites the state of each day it
-deletes (``status = "deleted"``, ``retention._delete_day``), which says nothing about Seal.
+Seal is judged by every day's state except those Retention rewrote: it marks each day it deletes
+(``status = "deleted"``, ``retention._delete_day``), which says nothing about Seal, while Seal
+itself may rewrite any day's state, also an old one it retries after a time-stamp outage.
 A file that cannot be read is no evidence; it never fails the request.
 """
 
@@ -39,7 +40,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -47,15 +48,13 @@ from arcilogger_api.sealinfo import credit_history
 from arcilogger_api.system_health.models import TaskHealth, TaskName
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
+from arcilogger_core.seal import DELETED
 from arcilogger_core.timeutil import site_day, to_site
 from arcilogger_worker.alerts.system import backup_state_path
 
 #: ``verify --last 2`` (VerifyDaily) checks 1 day on a chain of one sealed day, else 2; more
 #: days are the weekly ``--last 90`` (on a young chain: every sealed day there is).
 DAILY_VERIFY_DAYS: Final = (1, 2)
-#: Days of ``state/seal`` read, ending today (Seal writes yesterday's state after 00:10; a day
-#: this young is never one Retention deletes).
-SEAL_DAYS: Final = 3
 #: Days of ``state/replica`` read, ending today (a day is copied after it was sealed).
 REPLICA_DAYS: Final = 3
 
@@ -143,11 +142,26 @@ def _modified(path: Path) -> datetime | None:
 
 
 def _seal(evidence: Evidence) -> datetime | None:
-    today = site_day(evidence.now)
-    return _newest(
-        _modified(evidence.layout.seal_state(today - timedelta(days=back)))
-        for back in range(SEAL_DAYS)
-    )
+    """The newest state Seal wrote: the day states newest first (a stat each), read until one is
+    not a day Retention deleted. During a time-stamp outage Seal retries its oldest unsealed day
+    only (``seal_due`` stops at the first failure), so any day's state may be the newest."""
+    states: list[tuple[datetime, Path]] = []
+    try:
+        for path in (evidence.layout.state / "seal").glob("*.json"):
+            try:
+                date.fromisoformat(path.stem)
+            except ValueError:
+                continue
+            modified = _modified(path)
+            if modified is not None:
+                states.append((modified, path))
+    except OSError:
+        return None
+    for modified, path in sorted(states, reverse=True):
+        data = _read_json(path)
+        if isinstance(data, dict) and data.get("status") != DELETED:
+            return modified
+    return None
 
 
 def _verify_daily(evidence: Evidence) -> datetime | None:
