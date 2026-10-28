@@ -37,12 +37,13 @@ from __future__ import annotations
 import ipaddress
 import logging
 import threading
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from sqlalchemy import func, select, text
+from sqlalchemy import Executable, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -368,15 +369,11 @@ def observed_state(request: Request) -> ObservedState:
     return state
 
 
-def observed_counts(session: Session, hours: int, now: datetime) -> dict[str, Any]:
-    """The database part of the observed answer (no setting is read): the NAT groups of the
-    trusted ``fg_traffic`` rows of ``[now - hours, now]`` with a NAT address, busiest first (one
-    more than :data:`OBSERVED_ROWS`, to tell a truncated list), and per ``srcintf`` the srcmac
-    rows of the last hour with an IPv4 source, their MACs and the most IPv4 sources of one MAC
-    (:func:`arcilogger_worker.lookup.trust.srcmac_ip_counts`, the srcmac guard's count)."""
-    untrusted = sorted(trust.untrusted_sources(session))
+def observed_nat_query(hours: int, now: datetime, untrusted: Collection[str]) -> Executable:
+    """The NAT groups of the trusted ``fg_traffic`` rows of ``[now - hours, now]`` with a NAT
+    address, busiest first; one more than :data:`OBSERVED_ROWS`, to tell a truncated list."""
     sessions = func.count().label("sessions")
-    nat = (
+    query = (
         select(
             FgTraffic.transip,
             FgTraffic.dstintf,
@@ -395,7 +392,17 @@ def observed_counts(session: Session, hours: int, now: datetime) -> dict[str, An
         .limit(OBSERVED_ROWS + 1)
     )
     if untrusted:
-        nat = nat.where(FgTraffic.source.not_in(untrusted))
+        query = query.where(FgTraffic.source.not_in(sorted(untrusted)))
+    return query
+
+
+def observed_counts(session: Session, hours: int, now: datetime) -> dict[str, Any]:
+    """The database part of the observed answer (no setting is read): the NAT groups
+    (:func:`observed_nat_query`), and per ``srcintf`` the srcmac rows of the last hour with an
+    IPv4 source, their MACs and the most IPv4 sources of one MAC
+    (:func:`arcilogger_worker.lookup.trust.srcmac_ip_counts`, the srcmac guard's count)."""
+    untrusted = sorted(trust.untrusted_sources(session))
+    nat = observed_nat_query(hours, now, untrusted)
     groups = [
         {
             "transip": str(ipaddress.ip_address(str(transip))),
