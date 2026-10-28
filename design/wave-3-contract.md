@@ -5920,6 +5920,22 @@ from section 0.2 are recorded here too, with the date and who decided.
   (internal mode). No new key, no text change, no extra query for any other lookup. Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_mac_only_lookup_finds_the_line_by_its_mac`.
   Fold into 2.8.3.
+- **The per-lookup clock check: the rows nearest T on each side, and the fixed limit for lease
+  searches** (2.7 "Source clock at the requested moment", round-5 note "2.7 clock sample" and
+  round-6 note "`source_clock_offset` of an internal lookup", their suggested handling). A
+  source's sample is its `messages` rows with `time <> time_received` nearest T on each side
+  within [T − 1 h, T + 1 h], at most 2,500 before and 2,500 from T (one `UNION ALL` query on
+  `ix_messages_source_time`, median by `percentile_cont`), not the first 5,000 of the range. The
+  limit is 120 s, not max(120 s, tolerance), for every source of an internal lookup and for a
+  source measured for a lease table (cited lease evidence, or searched for `mt_dhcp`, `fg_dhcp`,
+  `mt_arp`): the lease search uses the moment, not the tolerance; a source measured only for the
+  session search keeps max(120 s, tolerance). `{limit}` prints the smallest limit of the named
+  sources. The 2.11 text is unchanged (its remedy "widen the tolerance by the offset" is not
+  reworded for internal lookups). Tests: `worker/tests/test_lookup_fortigate_only.py::test_the_clock_is_measured_on_the_rows_nearest_the_moment`,
+  `::test_the_clock_of_a_session_search_alone_may_reach_the_tolerance`,
+  `::test_an_internal_lookup_without_a_lease_names_the_clock`,
+  `::test_the_tolerance_widened_by_the_offset_finds_the_session`. Fold into 2.7, 2.15's reading
+  table and 2.17.
 
 ---
 
