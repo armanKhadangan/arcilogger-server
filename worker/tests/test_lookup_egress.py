@@ -591,6 +591,26 @@ def test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address(
     assert outcome.double_nat is False
 
 
+def test_e_e_the_exits_of_unknown_public_address_keep_their_interfaces_and_widen(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """A quiet line without a public address: its search widens to the unclaimed addresses
+    (O5), on its own interfaces only."""
+    evidence.traffic(AT, PHONE, 51002, DEST, 443, transip="100.64.12.77", dstintf="wan2")
+    evidence.traffic(AT, PC, 51001, DEST, 443, transip="100.64.12.78", dstintf="wan1")
+    hat_2 = isp_nat([T2], interfaces=["wan2"])
+    settings = exits(db_session, {"hat-1": direct([P1], interfaces=["wan1"]), "hat-2": hat_2})
+    outcome = lookup(db_session, settings, public_ip="192.0.2.44")
+    assert resolution(outcome) == ("public_unknown", ["hat-2"])
+    assert sessions(outcome) == [(PHONE, 51002, "100.64.12.77")]
+    assert {"egress_public_unknown", "egress_transip_not_seen"} <= set(keys(outcome))
+    assert outcome.egress is not None
+    assert (outcome.egress.searched.interfaces, outcome.egress.searched.unclaimed) == (
+        ("wan2",),
+        True,
+    )
+
+
 def test_e_e2_e_e3_an_address_the_fortigate_used_itself(
     db_session: Session, evidence: Evidence
 ) -> None:
