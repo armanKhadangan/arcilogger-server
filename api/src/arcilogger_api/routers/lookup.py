@@ -30,8 +30,10 @@ lookup, which carry its report (:func:`arcilogger_api.routers.evidence.visible_p
 
 **Audit details are minimal** (the audit log is sealed and kept): inputs in machine form, the
 request's authority, file number and date, the SHA-256 of the reason (the text itself stays in
-``lookups``, which retention can delete) and result **ids** (traffic rows, leases, persons) —
-never names, MAC addresses or raw lines.
+``lookups``, which retention can delete), result **ids** (traffic rows, leases, persons) and, for
+a public-IP lookup, the internet exit it resolved to as ``egress: {resolution, names}`` (``null``
+without a public IP; exit names are firewall configuration) — never names of people, MAC
+addresses or raw lines.
 """
 
 from __future__ import annotations
@@ -103,8 +105,12 @@ MESSAGES: Final = {
         "tolerance or add destination details; tell the administrator if it persists.",
     ),
     "lookup_settings_invalid": (
-        "5651 sorgu ayarları geçersiz (Ayarlar → NAT); sistem yöneticisi düzeltmelidir.",
-        "The 5651 lookup settings are invalid (Settings → NAT); an administrator must fix them.",
+        "5651 sorgu ayarları geçersiz: İnternet çıkışları (nat.egresses) değeri okunamadı "
+        "(Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları "
+        "(NAT)); sistem yöneticisi düzeltmelidir.",
+        "The 5651 lookup settings are invalid: the internet exits value (nat.egresses) cannot be "
+        "read (Settings → Application settings → 5651 lookup and lease timeline → Internet exits "
+        "(NAT)); an administrator must fix it.",
     ),
     "ipv6_not_supported": (
         "Bu sürümde IPv6 adresleriyle 5651 sorgusu yapılamaz: ARCILOGGER, IPv6 adreslerini "
@@ -491,7 +497,8 @@ class LookupOut(BaseModel):
     query: dict[str, Any]
     mode: str | None
     result_count: int
-    #: ``LookupOutcome.to_dict()`` (docs/MVP-CONTRACTS.md section 5).
+    #: ``LookupOutcome.to_dict()`` as stored (docs/MVP-CONTRACTS.md section 5): a lookup stored
+    #: before ADR-0016 lacks the members it added (``egress``, ``unconverted_dhcp``, ...).
     outcome: dict[str, Any] | None
     report: ReportOut | None
     #: Time the lookup took (only in the answer to ``POST /lookup/5651``).
@@ -567,6 +574,18 @@ def result_ids(outcome: LookupOutcome) -> list[dict[str, Any]]:
     if outcome.attribution is not None:
         results.append({"kind": "internal", **_chain_ids(outcome.attribution)})
     return results
+
+
+def egress_details(outcome: LookupOutcome) -> dict[str, Any] | None:
+    """The internet exit of the audit entry in machine form: the resolution and the names of
+    ``egress.egresses`` in their order (``""`` for the implicit exit of ``unconfigured``);
+    ``None`` for a lookup without a public IP."""
+    if outcome.egress is None:
+        return None
+    return {
+        "resolution": outcome.egress.resolution,
+        "names": [entry.name for entry in outcome.egress.egresses],
+    }
 
 
 def _request_details(row: Lookup | RequestDetails) -> dict[str, Any]:
@@ -699,6 +718,7 @@ def run_5651(
             "truncated": outcome.truncated,
             "results": results[:AUDIT_RESULTS],
             "results_listed": min(len(results), AUDIT_RESULTS),
+            "egress": egress_details(outcome),
         },
         ip=client_ip(request),
     )
