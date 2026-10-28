@@ -1205,6 +1205,39 @@ def test_every_match_row_prints_its_exit_and_dstintf(
     assert "Çift NAT varsayımı" in text
 
 
+def test_a_destination_search_determines_no_exit(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    site: Site,
+) -> None:
+    """Without a public IP in the request no exit is resolved: the match's exit row says so and
+    never prints "-", which states that no exit claims the NAT address (deviation d)."""
+    traffic(
+        app_session_factory,
+        layout,
+        {
+            "at": AT,
+            "srcip": PC,
+            "srcport": 51041,
+            "dstip": "198.51.100.44",
+            "dstport": 8443,
+            "dstintf": "wan1",
+        },
+    )
+    exits(app_session_factory, {"hat-1": {"mode": "isp_nat", "transips": [T1], "public": [P1]}})
+    signed_in(client, login_as, app_session_factory)
+    data, text = report(client, dest_ip="198.51.100.44", dest_port=8443)
+    (match,) = data["outcome"]["matches"]
+    assert (data["outcome"]["egress"], match["egress"]) == (None, None)
+    assert (
+        "Çıkış / Exit çıkış belirlenmedi (talepte genel IP yok) / exit not determined (no public "
+        "IP in the request) · dstintf wan1 Oturum aralığı" in text
+    )
+    assert "Çıkış / Exit -" not in text
+
+
 def test_e_p2_unconfigured_sender_row(
     client: TestClient,
     login_as: Login,

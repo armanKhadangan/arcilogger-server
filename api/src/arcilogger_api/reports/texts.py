@@ -408,6 +408,12 @@ CHANGED_ROWS: Final = (
     "oturumun kayıtları birden çok çıkış gösteriyor: {rows}",
     "the session's records show more than one exit: {rows}",
 )
+#: A match's exit without a public IP in the request (a destination search): no exit was
+#: determined, which "-" (no exit claims the NAT address) would misstate (deviation d).
+EXIT_NOT_DETERMINED: Final = (
+    "çıkış belirlenmedi (talepte genel IP yok)",
+    "exit not determined (no public IP in the request)",
+)
 NO_CHAIN: Final = (
     "Zincir kurulamadı: o anda bu iç IP adresi için kira kaydı yok.",
     "No chain: no lease covered this internal IP address at that moment.",

@@ -892,10 +892,14 @@ class _Builder:
         return self.contradicting(self.match_evidence(match))
 
     def match_exit(self, match: NatMatch) -> str:
-        """``hat-2 (Hat 2) · dstintf wan2`` ("-" for an unclaimed row), and for the session
-        whose rows left by more than one exit (``session_changed_exit``, each row's exit as
-        :func:`_exit_key` tells it) the other exit."""
-        exits = self.outcome.egress.egresses if self.outcome.egress is not None else ()
+        """``hat-2 (Hat 2) · dstintf wan2`` ("-" for an unclaimed row; no exit determined
+        without a public IP in the request), and for the session whose rows left by more than
+        one exit (``session_changed_exit``, each row's exit as :func:`_exit_key` tells it) the
+        other exit."""
+        if self.outcome.egress is None:  # a destination search: no exit was resolved
+            not_determined = " / ".join(texts.EXIT_NOT_DETERMINED)
+            return f"{not_determined} · dstintf {match.traffic.dstintf or '-'}"
+        exits = self.outcome.egress.egresses
         labels = {entry.name: _exit_name(entry) for entry in exits}
         name = "-" if match.egress is None else labels.get(match.egress, match.egress)
         text = f"{name} · dstintf {match.traffic.dstintf or '-'}"
