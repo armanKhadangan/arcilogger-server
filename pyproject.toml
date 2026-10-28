@@ -170,6 +170,12 @@ test-core = "pytest -n auto core/tests tests --cov=arcilogger_core --cov-report=
 # all three run in CI (.github/workflows/ci.yml, Linux job).
 test-ingest = "pytest -n auto ingest/tests -m 'not perf' --cov=arcilogger_ingest --cov-report=term --cov-fail-under=85"
 test-api = "pytest -n auto api/tests -m 'not perf' --cov=arcilogger_api --cov-report=term --cov-fail-under=80"
+# CI runs each test once, not "test" next to the gates. Linux job: test-core, test-ingest,
+# test-api and test-rest, which reports the coverage of the packages without a gate. Windows
+# jobs: test-core and test-others (no coverage: Windows gates only core). Either set names every
+# testpaths directory exactly once (tests/test_ci_workflows.py checks it).
+test-rest = "pytest -n auto db/tests collector/tests worker/tests -m 'not perf' --cov=arcilogger_db --cov=arcilogger_collector --cov=arcilogger_worker --cov-report=term"
+test-others = "pytest -n auto db/tests collector/tests ingest/tests api/tests worker/tests -m 'not perf'"
 test-db = "pytest -n auto db/tests --cov=arcilogger_db --cov-report=term"
 api-dev = "uvicorn arcilogger_api.app:create_app --factory --reload --host 127.0.0.1 --port 8000"
 check = ["lint", "test"]
