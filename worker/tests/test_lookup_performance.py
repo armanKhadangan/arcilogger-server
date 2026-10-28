@@ -1095,16 +1095,18 @@ def test_the_post_lease_query_of_long_fortigate_leases_is_fast(
 
 @pytest.mark.perf
 def test_the_post_lease_query_of_a_hundred_chains_is_fast(
-    event_site: Engine, timer: _Timer
+    event_site: Engine, timer: _Timer, executed: _Executed
 ) -> None:
     """3.8: the round-6 post-lease query of 2.7 as one query for 100 chains
     (``lookup.max_candidates``), ``mt_dhcp`` chains whose windows reach the cap (their last
     DHCP record is 150 days old; the cap is the fallback, 604,800 s, deviation c2), by IP or
-    MAC, under 0.5 s."""
+    MAC, under 0.5 s. The statement reads from the cap before the moment, at least 7 days of
+    the site's ``system`` lines."""
     lines: list[_Timed] = []
 
     def measure() -> None:
         lines.append(timer.time(Attributor, "_unconverted_lines"))
+        executed.record(event_site)
 
     outcome = _guard_lookup(event_site, LookupRequest(at=MT_AT, public_ip=PUBLIC), measure)
     timer.report(f"round-6 post-lease query, {EVENT_ROWS} system lines a day")
@@ -1119,6 +1121,20 @@ def test_the_post_lease_query_of_a_hundred_chains_is_fast(
         assert chain.confidence in ("high", "medium")
     (timed,) = lines
     assert len(timed.calls) == 1
+    _sql, parameters = executed.one("FROM fg_event", "extra ->> ")
+    moments = _moments(parameters)
+    low, high = min(moments), max(moments)
+    assert low == MT_AT - attribution.UNCONVERTED_WINDOW
+    assert high == max(chain.at for chain in chains if chain)
+    with event_site.connect() as connection:
+        read = connection.execute(
+            text(
+                "SELECT count(*) FROM fg_event WHERE subtype = 'system' "
+                "AND time > :low AND time <= :high"
+            ),
+            {"low": low, "high": high},
+        ).scalar_one()
+    assert read >= 7 * EVENT_ROWS
     assert timed.seconds < 0.5, f"the post-lease query took {timed.seconds:.3f} s"
 
 
