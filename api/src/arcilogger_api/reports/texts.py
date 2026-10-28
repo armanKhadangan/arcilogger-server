@@ -603,10 +603,12 @@ DESTINATION: Final[Mapping[str, str]] = {
     "not_requested": "talepte hedef yok",
 }
 CONFIDENCE: Final[Mapping[str, str]] = {"high": "yüksek", "medium": "orta", "low": "düşük"}
+#: ``superseded`` has one neutral label for every cause: another MAC took the address, the
+#: lease's MAC took another address (D33), or the other DHCP table's ACK of the same pair (D5).
 END_REASONS: Final[Mapping[str, str]] = {
     "dhcp": "DHCP bırakma (deassigned)",
     "timeout": "kira süresi doldu (zaman aşımı)",
-    "superseded": "IP başka bir MAC adresine verildi",
+    "superseded": "sonraki bir DHCP atamasıyla kapandı / closed by a later DHCP assignment",
     "arp": "ARP-LOG aralığı sona erdi",
     "open": "açık (sürüyor)",
 }

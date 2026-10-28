@@ -253,7 +253,11 @@ def test_a_lease_superseded_early_prints_its_own_last_ack(
     row = _lease_row(text)
     assert "kira süresi (FortiGate kaydı): 604800 sn · son DHCP kanıtı: 12.10.2026 08:00:00" in row
     assert "son DHCP kanıtı: 17.10.2026" not in row  # B's ACK only ended the interval
-    assert "12.10.2026 08:00:00 - 17.10.2026 08:00:00 · bitiş: IP başka bir MAC adresine" in row
+    assert (
+        "12.10.2026 08:00:00 - 17.10.2026 08:00:00 · bitiş: sonraki bir DHCP atamasıyla kapandı / "
+        "closed by a later DHCP assignment · güven:" in row
+    )
+    assert "IP başka bir MAC adresine verildi" not in text
     assert "Kira notu / Lease note Bu kiranın istenen andan önceki son DHCP kaydı" in row
 
 

@@ -48,6 +48,10 @@ DHCP = b"<30>2026-10-12T10:42:18.000+03:00 CORE-R1 dhcp,info dhcp42 assigned 172
 D33_FIRST, D33_SECOND = tr(DAY, 8, 41, 10), tr(DAY, 8, 41, 14)
 MAC_31, MAC_32 = "00:00:5e:00:53:31", "00:00:5e:00:53:32"
 PC_58 = "172.20.42.58"
+#: The lease row's end of a ``superseded`` lease, whatever ended it; never the old text, which
+#: says another MAC took the address (not so for D33 or D5).
+SUPERSEDED = "bitiş: sonraki bir DHCP atamasıyla kapandı / closed by a later DHCP assignment"
+OTHER_MAC_TOOK_IT = "IP başka bir MAC adresine verildi"
 
 Login = Callable[..., LoggedIn]
 
@@ -433,6 +437,8 @@ def test_a_d33_lease_cited_in_a_report_has_no_mismatch(
     assert closing[0]["check"] == {"ok": True, "mismatches": [], "error": None}
     assert inputs["consistency"]["ok"] is True
     assert "uyuşmuyor" not in text
+    assert SUPERSEDED in text
+    assert OTHER_MAC_TOOK_IT not in text
 
 
 def test_a_mikrotik_lease_closed_by_a_fortigate_ack_has_no_mismatch(
@@ -452,3 +458,5 @@ def test_a_mikrotik_lease_closed_by_a_fortigate_ack_has_no_mismatch(
     assert {"mt_dhcp", "fg_dhcp"} <= tables
     assert all(item["check"]["ok"] for item in inputs["evidence"])
     assert "uyuşmuyor" not in text
+    assert SUPERSEDED in text
+    assert OTHER_MAC_TOOK_IT not in text
