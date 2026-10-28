@@ -1851,16 +1851,29 @@ def test_the_clock_lowers_every_alternative_and_every_match(
 ) -> None:
     """Under the 8-minute clock every chain of the outcome is ``low`` with its lease step: the
     PC's chain whose session srcmac contradicts its lease (D10) and that srcmac chain, its
-    alternative, in the exact request; both matches' chains of one candidate request."""
-    stranger = "00:00:5e:00:53:66"
+    alternative, in the exact request; both matches' chains of one candidate request, the
+    ``ip_conflict`` of .58 (two stored DHCP leases of two clients cover the moment) with the
+    lease step of its alternative, ``high`` without the clock."""
+    stranger, third = "00:00:5e:00:53:66", "00:00:5e:00:53:59"
     evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
     evidence.fortigate_dhcp(tr(DAY, 8, 5), "172.20.42.58", OTHER)
+    evidence.fortigate_dhcp(tr(DAY, 8, 10), "172.20.42.58", third)
     evidence.traffic(AT, PC, 51001, transip=WAN, srcintf="vlan42", dstintf="wan1",
                      srcmac=stranger)  # fmt: skip
     evidence.traffic(AT, "172.20.42.58", 51002, transip=WAN)
     clock_lines(evidence, BEHIND)
     as_loaded(db_session, BEHIND)
     build(db_session, DAY, DAY)
+    # The build closes OTHER's lease at the 08:10 ACK; kept open as long, both leases cover AT.
+    conflict = {
+        lease.mac: lease
+        for lease in db_session.scalars(select(Lease).where(Lease.ip == "172.20.42.58"))
+    }
+    conflict[OTHER].end, conflict[OTHER].end_reason = (
+        conflict[third].end,
+        conflict[third].end_reason,
+    )
+    db_session.commit()
     set_setting(db_session, "lookup.srcmac_interfaces", ["vlan42"], updated_by="tolga")
     wan_exit(db_session)
     exact = exact_request(db_session)
@@ -1883,6 +1896,13 @@ def test_the_clock_lowers_every_alternative_and_every_match(
         every = [match.chain, *match.chain.alternatives]
         assert {c.confidence for c in every} == {"low"}
         assert {c.lease.confidence for c in every if c.lease is not None} == {"low"}
+    conflicted = next(m.chain for m in found.matches if m.traffic.srcip == "172.20.42.58")
+    assert conflicted is not None
+    assert chain_keys(conflicted)[0] == "ip_conflict"
+    (alternative,) = conflicted.alternatives
+    assert alternative.lease is not None
+    assert (alternative.lease.mac, alternative.lease.source_table) == (OTHER, "fg_dhcp")
+    assert (alternative.confidence, alternative.lease.confidence) == ("low", "low")
 
 
 def test_rows_stamped_with_the_receive_time_say_nothing_about_the_clock(
