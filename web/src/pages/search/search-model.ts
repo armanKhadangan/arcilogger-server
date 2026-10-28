@@ -25,6 +25,16 @@ import type {
 } from '@/lib/search-types';
 import { codePointLength } from '@/lib/validation';
 
+/** Example queries (contract 2.2.2), each explained in `search.help.examples.<index>`. */
+export const EXAMPLES = [
+  'srcip:172.20.41.105 type:web action:blocked',
+  'domain:example.com -action:passthrough',
+  '"login failure" source:core-r1',
+  'vlan:41 dstport:80,443',
+  'type:dhcp mac:00:00:5e:00:53:21',
+  'error:fortigate.*',
+] as const;
+
 /** The evidence extract's maximum (`routers.evidence.MAX_EXTRACT_LINES`). */
 export const MAX_REFS = 10_000;
 

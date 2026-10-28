@@ -316,8 +316,9 @@ sends logs ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
   "önizleme" (preview; ingest's final record may differ in details); a line not in the
   collector's format is shown with the badge "biçim dışı" (malformed). A FortiGate DHCP record
   is shown under the kind `event` (FortiGate event), as in Search: the live tail does not tell a
-  DHCP record from another FortiGate event; `type:event logid:0100026001` shows only the DHCP ACKs
-  (docs/DEVICE-SETUP.md section 2.4 uses it to compare a raw line).
+  DHCP record from another FortiGate event; `type:event logid:0100026001` shows the lines with
+  the FortiGate DHCP Ack log ID (other `dhcp_msg` values may arrive under it; verify on site;
+  docs/DEVICE-SETUP.md section 2.4 uses it to compare a raw line).
 - **Limits:** at most `live.max_lines_per_second` (100) lines a second per stream;
   `live.max_streams_total` (4) streams on the server at a time, `live.max_streams_per_user` (2)
   per user (`live_stream_limit`). Lines that could not be shown are counted and reported with
@@ -348,7 +349,8 @@ After this measurement the data gained 4,320 MikroTik events a day (`mt_event`; 
 the event index too); the numbers below are from the data before that addition. TimescaleDB's
 numbers follow the table; the Windows CI job's are not recorded yet. The data has no FortiGate DHCP
 record (revision `0017_fortigate_dhcp`); such records add one branch, on the small `fg_dhcp`
-table's `(mac, time)` and `(ip, time)` indexes, to `mac:` and `ip:` queries.
+table's `(ip, time)` and `(mac, time)` indexes, to `srcip:`, `vlan:`, `department:`, `ip:` and
+`mac:` queries without a kind that excludes `event` (not to `type:dhcp`, Q6).
 
 | # | Query | Range | Budget | First run | Best | Note |
 |---|---|---|---|---|---|---|

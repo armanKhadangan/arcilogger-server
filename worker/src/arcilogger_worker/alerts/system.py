@@ -53,6 +53,17 @@ Key                              Problem (setting)
                                  server unreachable) resolved by a later clock sample within the
                                  limit. A clock step or stray spool file seen by sealing
                                  (``R20-clock:<key>``) is left to a person
+``R20-lease:<cause>``            ADR-0016 lease evidence (:func:`check_lease_evidence`): a DHCP or
+                                 ARP-LOG feed that stopped (``none:<table>``) or never ran
+                                 (``absent``), FortiGate DHCP rows refused or not converted,
+                                 renewals not seen, a static device in a DHCP pool, two DHCP
+                                 sources in one network, unusable lease times, rows outside every
+                                 network, the unverified format, a source's clock, a MAC on many
+                                 addresses, a shared srcmac (docs/UYARILAR.md); counted on usable
+                                 rows (``trust.kept``)
+``R20-nat:<cause>``              ADR-0016 internet exits (:func:`check_nat_exits`): the legacy
+                                 conversion failed, ``nat.egresses`` cannot be parsed, legacy rows
+                                 changed during a rollback, an unclaimed NAT address in use
 ``R20-admin:heartbeat``          the agent ArciAdmin's heartbeat (``admin\\status\\agent.json``)
                                  older than 2 minutes or missing, from 5 minutes after the
                                  worker's start (ADR-0014; the agent starts after the other
@@ -72,15 +83,32 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
+import statistics
 import sys
+from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from pathlib import Path
 from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import (
+    ColumnElement,
+    Text,
+    and_,
+    cast,
+    exists,
+    func,
+    not_,
+    or_,
+    select,
+    true,
+    tuple_,
+)
+from sqlalchemy.dialects.postgresql import CIDR, array
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.admin.contract import (
@@ -97,14 +125,55 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ, day_window, isoformat_site, site_day
 from arcilogger_core.tsa.base import StampResult, TsaError
-from arcilogger_db.models import Alert, JobRun, Message, SealVerification
-from arcilogger_db.settings import get_settings
+from arcilogger_db.egress import (
+    LEGACY_KEYS,
+    MIGRATION_KEY,
+    NOT_PUBLIC,
+    Egress,
+    EgressValueError,
+    parse_egresses,
+)
+from arcilogger_db.models import (
+    LEASE_SECONDS_RANGE,
+    Alert,
+    FgDhcp,
+    FgEvent,
+    FgTraffic,
+    JobRun,
+    Lease,
+    Message,
+    MtArp,
+    MtDhcp,
+    ParseFailure,
+    SealVerification,
+    SearchCount,
+    Setting,
+    Source,
+    Vlan,
+)
+from arcilogger_db.settings import MIGRATION_AUTHOR, get_setting, get_settings
 from arcilogger_worker.alerts.store import (
     active_alerts,
     last_occurrence,
+    last_seen,
     open_alert,
     resolve,
 )
+from arcilogger_worker.alerts.texts import (
+    EVIDENCE_TABLES,
+    LEASE_TEXTS,
+    NAT_TEXTS,
+    REFUSAL_REASONS,
+    REFUSED_HIGH_TITLE,
+)
+from arcilogger_worker.lookup import trust
+from arcilogger_worker.lookup.refs import (
+    ARP_TABLE,
+    DHCP_TABLE,
+    FG_DHCP_TABLE,
+    last_dhcp_evidence,
+)
+from arcilogger_worker.lookup.types import EvidenceRef, LookupSettings
 
 log = logging.getLogger("arcilogger_worker.alerts")
 
@@ -857,6 +926,862 @@ def check_admin(ctx: CheckContext) -> Outcome:
     return Outcome([finding], owns, lambda alert: None)
 
 
+# -- lease evidence (ADR-0016: R20-lease) ---------------------------------------------------------
+
+LEASE_RULE: Final = "R20-lease"
+NAT_RULE: Final = "R20-nat"
+#: Most problems are judged on this window, and resolved this long after they were last found.
+LEASE_WINDOW: Final = timedelta(hours=24)
+#: Evidence that arrived in this period before a table's window was a working feed.
+EVIDENCE_HISTORY: Final = timedelta(days=30)
+TRAFFIC_WINDOW: Final = timedelta(hours=1)
+#: How far back the first day to rebuild from is looked for (``first_day``).
+REBUILD_HISTORY: Final = timedelta(days=100)
+RENEWALS_RECENT: Final = timedelta(days=7)
+RENEWALS_BEFORE: Final = timedelta(days=30)
+#: Slack around a lease's half and end for the sessions that show its address in use.
+SESSION_SLACK: Final = timedelta(minutes=15)
+#: A lease ended by its MAC's next ACK this soon after its own (D33) is a quick move.
+DECLINE_SECONDS: Final = 300
+#: A MAC that got more distinct addresses than this in one origin, interface and network.
+DHCP_MAC_IPS: Final = 3
+#: ``source-clock`` (D28): the newest rows per source, of which this many must be recent, and
+#: the median offset beyond which the clock is off.
+CLOCK_ROWS: Final = 200
+CLOCK_MIN_ROWS: Final = 10
+CLOCK_LIMIT_SECONDS: Final = 120
+#: Ingest accepts a device time this far from the receive time (``arcilogger_ingest.parsers.
+#: syslog.DEFAULT_MAX_CLOCK_SKEW``, which the worker cannot import; a test pins both equal).
+MAX_CLOCK_SKEW: Final = timedelta(days=1)
+#: Tables lookups read: a source whose files hold none of them has its clock left alone.
+LOOKUP_TABLES: Final = ("fg_traffic", "fg_dhcp", "mt_dhcp", "mt_arp")
+#: ``R20-nat:unmapped-transip``: sessions an unclaimed NAT address carried in the last hour.
+UNMAPPED_SESSIONS: Final = 50
+#: Most values of one kind (addresses, names, log values) listed in an alert's details.
+LISTED: Final = 5
+#: Log-supplied texts in details are cut to this length (the setting values' own limit).
+TEXT_CUT: Final = 32
+#: The private networks (RFC 1918) whose traffic shows internal clients at work.
+PRIVATE_NETWORKS: Final = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+_MAC_LIKE: Final = re.compile(
+    r"[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}"
+)
+_IPV4_LIKE: Final = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+_LOGID: Final = re.compile(r"^\d{10}$")
+#: The ``details.reasons`` names of the refusal codes of ``trust.refusal`` (rules 1, 4-7).
+REFUSAL_NAMES: Final[Mapping[str, str]] = {
+    trust.UNTRUSTED_SOURCE: "untrusted",
+    trust.UNMAPPED: "unmapped",
+    trust.UNEXPECTED_MSG: "unexpected_msg",
+    trust.RECEIVE_TIME: "receive_time",
+    trust.BAD_MAC: "bad_mac",
+}
+
+
+def masked(value: str | None) -> str:
+    """A log-supplied text as an alert's details may show it: MAC- and IPv4-looking parts
+    replaced by "…", cut to :data:`TEXT_CUT` characters."""
+    text = _IPV4_LIKE.sub("…", _MAC_LIKE.sub("…", value or ""))
+    return text[:TEXT_CUT]
+
+
+def _private(column: Any) -> ColumnElement[bool]:
+    return or_(*(column.op("<<")(cast(network, CIDR)) for network in PRIVATE_NETWORKS))
+
+
+@dataclass(frozen=True)
+class Network:
+    """A configured network (``vlans`` row): its key in a dedup key and its name in a text."""
+
+    subnet: IPv4Network | IPv6Network
+    vlan: int | None
+    name: str
+
+    @property
+    def key(self) -> str:
+        """``42``, else the subnet with ``_`` for ``/`` (``172.20.42.0_24``)."""
+        return str(self.vlan) if self.vlan is not None else str(self.subnet).replace("/", "_")
+
+    @property
+    def label(self) -> str:
+        """``VLAN 42``, else the network's name and subnet (site configuration, never client
+        data); the same in both languages."""
+        return f"VLAN {self.vlan}" if self.vlan is not None else f"{self.name} ({self.subnet})"
+
+
+class Networks:
+    """The configured networks, most specific first (``find_vlan``'s order), read once."""
+
+    def __init__(self, session: Session) -> None:
+        rows = session.execute(select(cast(Vlan.subnet, Text), Vlan.vlan_id, Vlan.name_tr)).all()
+        self.all = sorted(
+            (Network(ip_network(subnet), vlan, name) for subnet, vlan, name in rows),
+            key=lambda n: -n.subnet.prefixlen,
+        )
+
+    def of(self, ip: str) -> Network | None:
+        try:
+            address = ip_address(ip)
+        except ValueError:
+            return None
+        return next((n for n in self.all if address in n.subnet), None)
+
+
+@dataclass
+class _Check:
+    """One run of the lease evidence or the exit check: what it found, and per cause how an
+    active alert of it that was not found again is resolved (default: 24 hours clean)."""
+
+    ctx: CheckContext
+    rule: str
+    findings: list[Finding] = field(default_factory=list)
+    clears: dict[str, Callable[[Alert], str | None]] = field(default_factory=dict)
+
+    @property
+    def now(self) -> datetime:
+        return self.ctx.now
+
+    @property
+    def session(self) -> Session:
+        return self.ctx.session
+
+    def add(
+        self,
+        cause: str,
+        severity: str,
+        params: Mapping[str, Any],
+        details: Mapping[str, Any],
+        *,
+        key: str | None = None,
+        params_en: Mapping[str, Any] | None = None,
+        title: tuple[str, str] | None = None,
+    ) -> None:
+        """A finding of ``cause``: its title and what to do from the catalogue (``title``: another
+        title), formatted with ``params`` (``params_en`` for the English texts, when a value is
+        worded); ``details`` holds what the Security page and the describer may show."""
+        catalogue = LEASE_TEXTS if self.rule == LEASE_RULE else NAT_TEXTS
+        title_tr, title_en, action_tr, action_en = catalogue[cause]
+        if title is not None:
+            title_tr, title_en = title
+        english = params if params_en is None else params_en
+        self.findings.append(
+            Finding(
+                key=key or f"{self.rule}:{cause}",
+                rule=self.rule,
+                severity=severity,
+                title=title_tr.format(**params),
+                details={
+                    "cause": cause,
+                    **details,
+                    "title_en": title_en.format(**english),
+                    "action_tr": action_tr.format(**params),
+                    "action_en": action_en.format(**english),
+                },
+            )
+        )
+
+    def clean_for_a_day(self, alert: Alert) -> str | None:
+        """The default resolution: 24 hours without the problem."""
+        return "clean_24h" if self.now - last_seen(alert) >= LEASE_WINDOW else None
+
+    def outcome(self) -> Outcome:
+        prefix = f"{self.rule}:"
+
+        def clear(alert: Alert) -> str | None:
+            cause = (alert.dedup_key or "").removeprefix(prefix).split(":", 1)[0]
+            return self.clears.get(cause, self.clean_for_a_day)(alert)
+
+        return Outcome(self.findings, lambda key: key.startswith(prefix), clear)
+
+
+@dataclass
+class _LeaseCheck(_Check):
+    """The lease evidence check: the settings, the trust rules and the networks of the run."""
+
+    settings: LookupSettings = field(default_factory=LookupSettings)
+    untrusted: frozenset[str] = frozenset()
+    networks: Networks | None = None
+
+    @property
+    def network(self) -> Networks:
+        if self.networks is None:  # pragma: no cover - check_lease_evidence always sets it
+            raise RuntimeError("the networks are not loaded")
+        return self.networks
+
+    def kept(self) -> ColumnElement[bool]:
+        return trust.kept(self.settings, self.untrusted)
+
+    def any_row(self, model: Any, predicate: ColumnElement[bool], lo: datetime) -> bool:
+        query = select(model.id).where(model.time >= lo, model.time <= self.now, predicate)
+        return self.session.scalar(query.limit(1)) is not None
+
+
+def check_lease_evidence(ctx: CheckContext) -> Outcome:
+    """The ``R20-lease:*`` causes (ADR-0016 D9, D30; docs/UYARILAR.md). Never parses
+    ``nat.egresses`` (:func:`check_nat_exits` has its own transaction)."""
+    session = ctx.session
+    check = _LeaseCheck(
+        ctx,
+        LEASE_RULE,
+        settings=LookupSettings.from_settings(get_settings(session)),
+        untrusted=trust.untrusted_sources(session),
+        networks=Networks(session),
+    )
+    _evidence_stopped(check)
+    _refused(check)
+    _unconverted(check)
+    _renewals(check)
+    _declines(check)
+    _overlaps(check)
+    _lease_values(check)
+    _outside_networks(check)
+    _unverified(check)
+    _source_clocks(check)
+    _shared_macs(check)
+    _srcmac_shared(check)
+    return check.outcome()
+
+
+def _evidence_stopped(check: _LeaseCheck) -> None:
+    """``none:<table>`` (one per evidence table) and ``absent`` (D30)."""
+    now, session = check.now, check.session
+    traffic = check.any_row(
+        FgTraffic,
+        and_(_private(FgTraffic.srcip), FgTraffic.source.not_in(sorted(check.untrusted)))
+        if check.untrusted
+        else _private(FgTraffic.srcip),
+        now - TRAFFIC_WINDOW,
+    )
+    longest = session.scalar(
+        select(func.max(Lease.lease_seconds)).where(
+            Lease.source_table == FG_DHCP_TABLE, Lease.end.is_(None)
+        )
+    )
+    usable: dict[str, tuple[Any, ColumnElement[bool]]] = {
+        FG_DHCP_TABLE: (FgDhcp, check.kept()),
+        ARP_TABLE: (MtArp, true()),
+        DHCP_TABLE: (MtDhcp, MtDhcp.action.in_(("assigned", "deassigned"))),
+    }
+    windows = dict.fromkeys(usable, LEASE_WINDOW)
+    if longest:  # a FortiGate client renews at half its lease
+        windows[FG_DHCP_TABLE] = LEASE_WINDOW + timedelta(seconds=longest // 2)
+    recent = {
+        table: check.any_row(model, predicate, now - windows[table])
+        for table, (model, predicate) in usable.items()
+    }
+
+    def before(table: str) -> bool:
+        model, predicate = usable[table]
+        lo = now - windows[table] - EVIDENCE_HISTORY
+        query = select(model.id).where(
+            model.time >= lo, model.time < now - windows[table], predicate
+        )
+        return session.scalar(query.limit(1)) is not None
+
+    earlier = {table: not recent[table] and before(table) for table in usable}
+    ever = {table: recent[table] or earlier[table] for table in usable}
+    if traffic and not any(ever.values()):
+        check.add("absent", "info", {}, {})
+    for table, (severity, quiet) in {
+        FG_DHCP_TABLE: ("high", False),
+        ARP_TABLE: ("high", False),
+        # RouterOS logs no renewals: only while ARP-LOG is quiet too (O20).
+        DHCP_TABLE: ("medium", recent[ARP_TABLE]),
+    }.items():
+        if traffic and earlier[table] and not quiet:
+            hours = int(windows[table] / timedelta(hours=1))
+            check.add(
+                "none",
+                severity,
+                {"evidence": EVIDENCE_TABLES[table], "hours": hours},
+                {"table": table, "hours": hours},
+                key=f"{LEASE_RULE}:none:{table}",
+            )
+
+    def none_cleared(alert: Alert) -> str | None:
+        table = (alert.details or {}).get("table")
+        return "evidence_arrived" if recent.get(str(table)) else None
+
+    check.clears["none"] = none_cleared
+    check.clears["absent"] = lambda alert: "evidence_arrived" if any(ever.values()) else None
+
+
+def _refused(check: _LeaseCheck) -> None:
+    """``fortigate-refused`` (D30): the rows of the last 24 hours ``trust.refusal`` refuses,
+    re-read with today's settings and sources."""
+    if not check.settings.fortigate_logids:  # FortiGate DHCP evidence switched off
+        check.clears["fortigate-refused"] = lambda alert: "fortigate_dhcp_off"
+        return
+    now, session = check.now, check.session
+    code = trust.refusal(check.settings, check.untrusted)
+    window = (FgDhcp.time >= now - LEASE_WINDOW, FgDhcp.time <= now)
+    rows = select(code.label("code")).where(*window).subquery()
+    counts = {
+        found: int(n)
+        for found, n in session.execute(select(rows.c.code, func.count()).group_by(rows.c.code))
+    }
+    excluded = sum(n for found, n in counts.items() if found in trust.CONFIGURATION)
+    refused = {REFUSAL_NAMES[found]: n for found, n in counts.items() if found in REFUSAL_NAMES}
+    considered = sum(counts.values()) - excluded
+    total = sum(refused.values())
+    kept = considered - total
+    check.clears["fortigate-refused"] = lambda alert: "no_refused_rows"
+    if not total:
+        return
+
+    def values(column: Any, wanted: str) -> list[str]:
+        query = select(column).distinct().where(*window, code == wanted).order_by(column)
+        return [str(value) for value in session.scalars(query.limit(50)) if value is not None]
+
+    logids = [v for v in values(FgDhcp.logid, trust.UNMAPPED) if _LOGID.match(v)][:LISTED]
+    messages = sorted({masked(v) for v in values(FgDhcp.dhcp_msg, trust.UNEXPECTED_MSG)})
+    senders = values(FgDhcp.source, trust.UNTRUSTED_SOURCE)[:LISTED]
+    first = session.scalar(
+        select(func.min(FgDhcp.time)).where(
+            FgDhcp.time >= now - REBUILD_HISTORY,
+            FgDhcp.time <= now,
+            code.is_not(None),
+            code.not_in(sorted(trust.CONFIGURATION)),
+        )
+    )
+    first_day = site_day(first if first is not None else now)
+    shown = {"unmapped": logids, "unexpected_msg": messages[:LISTED], "untrusted": senders}
+    reasons = []
+    for language in (0, 1):
+        parts = []
+        for name, n in sorted(refused.items()):
+            seen = shown.get(name) or []
+            tail = f" ({', '.join(seen)})" if seen else ""
+            parts.append(f"{REFUSAL_REASONS[name][language]} {n}{tail}")
+        reasons.append("; ".join(parts))
+    high = considered >= 10 and kept * 10 < considered
+    params = {
+        "rows": considered,
+        "refused": total,
+        "kept": kept,
+        "excluded": excluded,
+        "first_day": format_date(first_day),
+    }
+    check.add(
+        "fortigate-refused",
+        "high" if high else "medium",
+        {**params, "reasons": reasons[0]},
+        {
+            "count": total,
+            "rows": considered,
+            "kept": kept,
+            "excluded": excluded,
+            "reasons": refused,
+            "logids": logids,
+            "dhcp_msgs": messages[:LISTED],
+            "sources": senders,
+            "first_day": first_day.isoformat(),
+        },
+        params_en={**params, "reasons": reasons[1]},
+        title=REFUSED_HIGH_TITLE if high else None,
+    )
+
+
+def _unconverted(check: _LeaseCheck) -> None:
+    """``fortigate-unconverted``: a mapped logid that kept the ``fg_event`` shape, or
+    ``fortigate.dhcp`` parse failures (V1)."""
+    now, session = check.now, check.session
+    rows = 0
+    if check.settings.fortigate_logids:
+        rows = int(
+            session.scalar(
+                select(func.count())
+                .select_from(FgEvent)
+                .where(
+                    FgEvent.subtype == "system",
+                    FgEvent.time >= now - LEASE_WINDOW,
+                    FgEvent.time <= now,
+                    FgEvent.logid.in_(sorted(check.settings.fortigate_logids)),
+                    not_(FgEvent.extra.has_all(array(["ip", "mac", "dhcp_msg"]))),
+                )
+            )
+            or 0
+        )
+    failures = int(
+        session.scalar(
+            select(func.coalesce(func.sum(ParseFailure.count), 0)).where(
+                ParseFailure.pattern == "fortigate.dhcp",
+                ParseFailure.day >= site_day(now) - timedelta(days=1),
+            )
+        )
+        or 0
+    )
+    if rows or failures:
+        check.add(
+            "fortigate-unconverted",
+            "high",
+            {"rows": rows, "failures": failures},
+            {"count": rows + failures, "rows": rows, "failures": failures},
+        )
+
+
+def _renewals(check: _LeaseCheck) -> None:
+    """``fortigate-renewals-missing`` / ``fortigate-renewals-not-logged`` (D26): FortiGate
+    leases with a logged lease time that ended ``timeout`` in the last 24 hours while their
+    address was in use in the second half of the lease and right after its end."""
+    now, session, settings = check.now, check.session, check.settings
+    leases = session.scalars(
+        select(Lease).where(
+            Lease.source_table == FG_DHCP_TABLE,
+            Lease.end_reason == "timeout",
+            Lease.end >= now - LEASE_WINDOW,
+            Lease.end <= now,
+            Lease.lease_seconds.is_not(None),
+        )
+    ).all()
+    longest = timedelta(seconds=settings.max_session_seconds)
+    begin = FgTraffic.time - func.make_interval(
+        0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
+    )
+
+    def started(ip: str, lo: datetime, hi: datetime) -> bool:
+        if hi < lo:
+            return False
+        query = select(FgTraffic.id).where(
+            FgTraffic.srcip == ip,
+            FgTraffic.time >= lo,
+            FgTraffic.time <= hi + longest,
+            begin >= lo,
+            begin <= hi,
+        )
+        if check.untrusted:
+            query = query.where(FgTraffic.source.not_in(sorted(check.untrusted)))
+        return session.scalar(query.limit(1)) is not None
+
+    counted = 0
+    for lease in leases:
+        refs = [EvidenceRef.from_dict(item) for item in lease.evidence or ()]
+        sources = {r.raw.source for r in refs if r.table == FG_DHCP_TABLE and r.raw is not None}
+        if lease.end is None or lease.lease_seconds is None or sources & check.untrusted:
+            continue
+        last = last_dhcp_evidence(refs, lease.end, lease.end_reason) or lease.start
+        half = last + timedelta(seconds=lease.lease_seconds // 2) + SESSION_SLACK
+        if started(lease.ip, half, lease.end) and started(
+            lease.ip, lease.end, lease.end + SESSION_SLACK
+        ):
+            counted += 1
+    total = int(
+        session.scalar(
+            select(func.count())
+            .select_from(Lease)
+            .where(
+                Lease.source_table == FG_DHCP_TABLE,
+                Lease.start <= now,
+                Lease.end.is_(None) | (Lease.end >= now - LEASE_WINDOW),
+            )
+        )
+        or 0
+    )
+
+    def renewals(lo: datetime, hi: datetime) -> bool:
+        query = select(JobRun.id).where(
+            JobRun.job.startswith("leases."),
+            JobRun.started_at >= lo,
+            JobRun.started_at < hi,
+            JobRun.details["stats"]["fg_renewal_ack"].as_integer() > 0,
+        )
+        return session.scalar(query.limit(1)) is not None
+
+    recent = renewals(now - RENEWALS_RECENT, now + timedelta(seconds=1))
+    earlier = renewals(now - RENEWALS_RECENT - RENEWALS_BEFORE, now - RENEWALS_RECENT)
+    check.clears["fortigate-renewals-not-logged"] = lambda alert: (
+        "renewal_seen" if recent else check.clean_for_a_day(alert)
+    )
+    if counted < 3 or counted * 20 < total or recent:
+        return
+    verified = settings.fortigate_format_verified
+    if not verified or earlier:
+        check.add("fortigate-renewals-missing", "high", {"count": counted}, {"count": counted})
+    else:
+        check.add("fortigate-renewals-not-logged", "info", {"count": counted}, {"count": counted})
+
+
+def _declines(check: _LeaseCheck) -> None:
+    """``fortigate-decline:<net>`` (D33): an address left within minutes of its ACK, for the
+    same MAC's lease on another address of the same network, at least twice in 24 hours."""
+    now, session = check.now, check.session
+    quick = session.execute(
+        select(Lease.ip, Lease.mac, Lease.end).where(
+            Lease.source_table == FG_DHCP_TABLE,
+            Lease.end_reason == "superseded",
+            Lease.end >= now - LEASE_WINDOW,
+            Lease.end <= now,
+            Lease.end - Lease.start <= timedelta(seconds=DECLINE_SECONDS),
+        )
+    ).all()
+    if not quick:
+        return
+    pairs = sorted({(mac, end) for _ip, mac, end in quick})
+    moved: dict[tuple[str, datetime], set[str]] = defaultdict(set)
+    for first in range(0, len(pairs), 500):
+        query = select(Lease.mac, Lease.start, Lease.ip).where(
+            Lease.source_table == FG_DHCP_TABLE,
+            tuple_(Lease.mac, Lease.start).in_(pairs[first : first + 500]),
+        )
+        for mac, start, ip in session.execute(query):
+            moved[(mac, start)].add(ip)
+    per_address: Counter[str] = Counter()
+    for ip, mac, end in quick:
+        network = check.network.of(ip)
+        if network is None or end is None:
+            continue
+        if any(other != ip and check.network.of(other) == network for other in moved[(mac, end)]):
+            per_address[ip] += 1
+    by_network: dict[Network, list[str]] = defaultdict(list)
+    for ip, n in per_address.items():
+        network = check.network.of(ip)
+        if n >= 2 and network is not None:
+            by_network[network].append(ip)
+    for network, addresses in sorted(by_network.items(), key=lambda item: item[0].key):
+        count = sum(per_address[ip] for ip in addresses)
+        check.add(
+            "fortigate-decline",
+            "high",
+            {"network": network.label, "count": count},
+            {
+                "count": count,
+                **({"vlan": network.vlan} if network.vlan is not None else {}),
+                "network": network.label,
+                "addresses": sorted(addresses, key=ip_address)[:LISTED],
+            },
+            key=f"{LEASE_RULE}:fortigate-decline:{network.key}",
+        )
+
+
+def _origin_name(origin: tuple[str, str | None]) -> str:
+    table, vd = origin
+    if table == DHCP_TABLE:
+        return "MikroTik DHCP"
+    return "FortiGate DHCP" if vd is None else f"FortiGate DHCP (VDOM {masked(vd)})"
+
+
+def _overlaps(check: _LeaseCheck) -> None:
+    """``dhcp-sources-overlap:<net>`` (D27): usable DHCP rows of two origins in one network."""
+    subnets = {str(network.subnet): network for network in check.network.all}
+    origins = trust.usable_dhcp_origins(
+        check.session,
+        check.settings,
+        check.untrusted,
+        sorted(subnets),
+        check.now - LEASE_WINDOW,
+        check.now,
+    )
+    for subnet, found in sorted(origins.items()):
+        if len(found) < 2:
+            continue
+        network = subnets[subnet]
+        names = sorted(_origin_name(origin) for origin in found)
+        check.add(
+            "dhcp-sources-overlap",
+            "high",
+            {"network": network.label, "sources": ", ".join(names)},
+            {
+                **({"vlan": network.vlan} if network.vlan is not None else {}),
+                "network": network.label,
+                "origins": names,
+            },
+            key=f"{LEASE_RULE}:dhcp-sources-overlap:{network.key}",
+        )
+
+
+def _lease_values(check: _LeaseCheck) -> None:
+    """``fortigate-lease-unlimited`` (``lease=0``) and ``fortigate-lease`` (out of range)."""
+    now, session = check.now, check.session
+    low, high = LEASE_SECONDS_RANGE
+
+    def rows(predicate: ColumnElement[bool]) -> int:
+        query = (
+            select(func.count())
+            .select_from(FgDhcp)
+            .where(FgDhcp.time >= now - LEASE_WINDOW, FgDhcp.time <= now, check.kept(), predicate)
+        )
+        return int(session.scalar(query) or 0)
+
+    unlimited = rows(FgDhcp.lease == 0)
+    if unlimited:
+        check.add("fortigate-lease-unlimited", "high", {"rows": unlimited}, {"count": unlimited})
+    odd = rows((FgDhcp.lease != 0) & ((FgDhcp.lease < low) | (FgDhcp.lease > high)))
+    if odd:
+        check.add("fortigate-lease", "low", {"rows": odd}, {"count": odd})
+
+
+def _outside_networks(check: _LeaseCheck) -> None:
+    """``fortigate-dhcp-subnet`` (D28, D33): usable rows whose address lies in no configured
+    network, with the day to rebuild from once it is entered (round 7)."""
+    now, session = check.now, check.session
+    outside = and_(
+        check.kept(), ~exists(select(Vlan.subnet).where(Vlan.subnet.op(">>=")(FgDhcp.ip)))
+    )
+    window = (FgDhcp.time >= now - LEASE_WINDOW, FgDhcp.time <= now, outside)
+    rows = int(session.scalar(select(func.count()).select_from(FgDhcp).where(*window)) or 0)
+    if not rows:
+        return
+    names = session.scalars(
+        select(FgDhcp.interface).distinct().where(*window).order_by(FgDhcp.interface).limit(50)
+    )
+    interfaces = sorted({masked(name) for name in names if name})[:LISTED]
+    first = session.scalar(
+        select(func.min(FgDhcp.time)).where(
+            FgDhcp.time >= now - REBUILD_HISTORY, FgDhcp.time <= now, outside
+        )
+    )
+    first_day = site_day(first if first is not None else now)
+    check.add(
+        "fortigate-dhcp-subnet",
+        "low",
+        {
+            "rows": rows,
+            "interfaces": ", ".join(interfaces) or "-",
+            "first_day": format_date(first_day),
+        },
+        {"count": rows, "interfaces": interfaces, "first_day": first_day.isoformat()},
+    )
+
+
+def _unverified(check: _LeaseCheck) -> None:
+    """``fortigate-unverified`` (D29): FortiGate DHCP rows arrive while the site check of
+    DEVICE-SETUP 2.4 is not marked done; resolved only by the setting."""
+    verified = check.settings.fortigate_format_verified
+    check.clears["fortigate-unverified"] = lambda alert: "format_verified" if verified else None
+    if verified:
+        return
+    if check.any_row(FgDhcp, true(), check.now - RENEWALS_RECENT):
+        check.add("fortigate-unverified", "info", {}, {})
+
+
+def _source_clocks(check: _LeaseCheck) -> None:
+    """``source-clock`` (D28): a configured source whose files of today or yesterday hold rows
+    lookups read, and whose latest records' device times differ from their receive times by a
+    median beyond :data:`CLOCK_LIMIT_SECONDS`."""
+    now, session = check.now, check.session
+    today = site_day(now)
+    checked = session.scalars(
+        select(SearchCount.source)
+        .distinct()
+        .where(
+            SearchCount.raw_day.in_([today - timedelta(days=1), today]),
+            SearchCount.tbl.in_(LOOKUP_TABLES),
+            SearchCount.source.in_(
+                select(Source.name).where(Source.enabled.is_(True), Source.unknown.is_(False))
+            ),
+        )
+        .order_by(SearchCount.source)
+    ).all()
+    offsets: dict[str, int] = {}
+    for source in checked:
+        rows = session.execute(
+            select(Message.time, Message.time_received)
+            .where(
+                Message.source == source,
+                Message.time >= now - TRAFFIC_WINDOW - MAX_CLOCK_SKEW,
+                Message.time <= now + TRAFFIC_WINDOW + MAX_CLOCK_SKEW,
+                Message.time != Message.time_received,  # receive-time rows say nothing
+            )
+            .order_by(Message.time.desc())
+            .limit(CLOCK_ROWS)
+        ).all()
+        counted = [
+            (time - received).total_seconds()
+            for time, received in rows
+            if now - TRAFFIC_WINDOW <= received <= now
+        ]
+        if len(counted) < CLOCK_MIN_ROWS:
+            continue
+        offset = statistics.median(counted)
+        if abs(offset) > CLOCK_LIMIT_SECONDS:
+            offsets[source] = int(offset)
+    check.clears["source-clock"] = lambda alert: "clock_ok"
+    if not offsets:
+        return
+    listed = sorted(offsets, key=lambda name: (-abs(offsets[name]), name))[:LISTED]
+    worst = offsets[listed[0]]
+    check.add(
+        "source-clock",
+        "high",
+        {"seconds": worst, "sources": ", ".join(f"{n} ({offsets[n]:+d} sn)" for n in listed)},
+        {
+            "seconds": worst,
+            "sources": listed,
+            "offsets": {name: offsets[name] for name in listed},
+        },
+        params_en={
+            "seconds": worst,
+            "sources": ", ".join(f"{n} ({offsets[n]:+d} s)" for n in listed),
+        },
+    )
+
+
+def _shared_macs(check: _LeaseCheck) -> None:
+    """``fortigate-dhcp-mac`` (D28): a MAC given more than :data:`DHCP_MAC_IPS` distinct
+    addresses within one origin, interface and network in 24 hours (counted on the rows: D33
+    closes the previous lease at every ACK)."""
+    assigned = sorted(
+        logid for logid, meaning in check.settings.fortigate_logids.items() if meaning == "assigned"
+    )
+    if not assigned:
+        return
+    rows = check.session.execute(
+        select(FgDhcp.mac, FgDhcp.interface, FgDhcp.extra["vd"].astext, FgDhcp.ip)
+        .distinct()
+        .where(
+            FgDhcp.time >= check.now - LEASE_WINDOW,
+            FgDhcp.time <= check.now,
+            check.kept(),
+            FgDhcp.logid.in_(assigned),
+        )
+    ).all()
+    addresses: dict[tuple[str, str | None, str | None, Network], set[str]] = defaultdict(set)
+    for mac, interface, vd, ip in rows:
+        network = check.network.of(ip)
+        if network is not None:
+            addresses[(mac, interface, vd, network)].add(ip)
+    shared = len({key[0] for key, ips in addresses.items() if len(ips) > DHCP_MAC_IPS})
+    if shared:
+        check.add("fortigate-dhcp-mac", "medium", {"shared": shared}, {"count": shared})
+
+
+def _srcmac_shared(check: _LeaseCheck) -> None:
+    """``srcmac-shared:<interface>`` (D10): a listed interface where a srcmac came from more
+    IPv4 addresses than ``lookup.srcmac_max_ips`` in the last hour."""
+    interfaces = check.settings.srcmac_interfaces
+    if not interfaces:
+        return
+    limit = check.settings.srcmac_max_ips
+    counts = trust.srcmac_ip_counts(
+        check.session, check.now - TRAFFIC_WINDOW, check.now, interfaces, check.untrusted
+    )
+    for interface in sorted(set(interfaces)):
+        over = [n for (name, _mac), n in counts.items() if name == interface and n > limit]
+        if not over:
+            continue
+        check.add(
+            "srcmac-shared",
+            "medium",
+            {"interface": interface, "macs": len(over), "count": max(over), "limit": limit},
+            {"count": len(over), "interface": interface, "most": max(over), "limit": limit},
+            key=f"{LEASE_RULE}:srcmac-shared:{interface}",
+        )
+
+
+# -- internet exits (ADR-0016: R20-nat) -----------------------------------------------------------
+
+
+def check_nat_exits(ctx: CheckContext) -> Outcome:
+    """The ``R20-nat:*`` causes (D18, D20). A stored ``nat.egresses`` that cannot be parsed is
+    the finding ``invalid``, never an error of the check (nor of the lease check)."""
+    session, now = ctx.session, ctx.now
+    check = _Check(ctx, NAT_RULE)
+    row = session.get(Setting, "nat.egresses")
+    exits: tuple[Egress, ...] | None
+    try:
+        exits = parse_egresses(row.value if row is not None else {})
+    except ValueError as exc:
+        exits = None
+        code = exc.code if isinstance(exc, EgressValueError) else "setting_type"
+        check.add("invalid", "high", {"code": code}, {"code": code})
+    check.clears["invalid"] = lambda alert: "parsed" if exits is not None else None
+
+    status = session.get(Setting, MIGRATION_KEY)
+    failed = (
+        status is not None
+        and isinstance(status.value, Mapping)
+        and status.value.get("conversion_failed") is True
+        and row is not None
+        and row.updated_by == MIGRATION_AUTHOR
+    )
+    if failed:
+        check.add("conversion-failed", "high", {}, {})
+    check.clears["conversion-failed"] = lambda alert: "exits_written"
+
+    legacy = session.scalars(select(Setting).where(Setting.key.in_(LEGACY_KEYS))).all()
+    changed = sorted(
+        item.key
+        for item in legacy
+        if not item.updated_by.startswith(":") and (row is None or item.updated_at > row.updated_at)
+    )
+    if changed:
+        check.add(
+            "legacy-changed",
+            "medium",
+            {"keys": ", ".join(changed)},
+            {"keys": changed},
+        )
+    check.clears["legacy-changed"] = lambda alert: "exits_written"
+
+    unclaimed: list[tuple[str, int]] = []
+    if exits:
+        untrusted = trust.untrusted_sources(session)
+        listed = get_setting(session, "nat.snat_trandisp", ["snat"])
+        trandisp = [str(v) for v in listed] if isinstance(listed, list) else ["snat"]
+        query = (
+            select(FgTraffic.transip, func.count())
+            .where(
+                FgTraffic.time >= now - TRAFFIC_WINDOW,
+                FgTraffic.time <= now,
+                FgTraffic.transip.is_not(None),
+                func.family(FgTraffic.transip) == 4,
+                FgTraffic.trandisp.in_(trandisp),
+            )
+            .group_by(FgTraffic.transip)
+        )
+        if untrusted:
+            query = query.where(FgTraffic.source.not_in(sorted(untrusted)))
+        for address, n in session.execute(query):
+            ip = str(ip_address(str(address)))
+            if n >= UNMAPPED_SESSIONS and not _claimed(exits, ip):
+                unclaimed.append((ip, int(n)))
+    if unclaimed:
+        unclaimed.sort(key=lambda item: (-item[1], ip_address(item[0])))
+        shown = [
+            {"address": ip, "kind": "private" if _not_public(ip) else "public"}
+            for ip, _n in unclaimed[:LISTED]
+        ]
+        count = sum(n for _ip, n in unclaimed)
+        words = {"private": ("özel/paylaşılan", "private/shared"), "public": ("genel", "public")}
+
+        def listed_as(language: int) -> str:
+            return ", ".join(f"{a['address']} ({words[a['kind']][language]})" for a in shown)
+
+        check.add(
+            "unmapped-transip",
+            "medium",
+            {"count": count, "addresses": listed_as(0)},
+            {"count": count, "addresses": shown},
+            params_en={"count": count, "addresses": listed_as(1)},
+        )
+
+    def unmapped_cleared(alert: Alert) -> str | None:
+        listed = [
+            item.get("address")
+            for item in (alert.details or {}).get("addresses") or []
+            if isinstance(item, Mapping)
+        ]
+        if exits and listed and all(isinstance(a, str) and _claimed(exits, a) for a in listed):
+            return "claimed"
+        return check.clean_for_a_day(alert)
+
+    check.clears["unmapped-transip"] = unmapped_cleared
+    return check.outcome()
+
+
+def _claimed(exits: tuple[Egress, ...], ip: str) -> bool:
+    """An address some exit claims as a public or NAT address (``internal`` exits included)."""
+    try:
+        return any(e.claims_public(ip) or e.claims_transip(ip) for e in exits)
+    except ValueError:
+        return False
+
+
+def _not_public(ip: str) -> bool:
+    address = ip_address(ip)
+    return any(address in network for network in NOT_PUBLIC)
+
+
 CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("disk", check_disk),
     ("seal", check_seal),
@@ -868,6 +1793,10 @@ CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("backup", check_backup),
     ("clock", check_clock),
     ("admin", check_admin),
+    # ADR-0016: separate checks (transactions), so an exit value that cannot be read never
+    # stops a lease evidence alert.
+    ("lease_evidence", check_lease_evidence),
+    ("nat_exits", check_nat_exits),
 )
 
 
