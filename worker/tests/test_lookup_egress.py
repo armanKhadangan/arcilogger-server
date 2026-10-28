@@ -1007,6 +1007,15 @@ def test_e_l_an_unlisted_trandisp(db_session: Session, evidence: Evidence) -> No
     assert resolution(counted) == ("public_unknown", ["tanimsiz"])
     assert counted.matches == ()
     assert note(counted, "nat_unknown_trandisp") == {"count": 2, "values": "snat+dnat"}
+    # Nor is such a row evidence against a direct line (the D15 check reads the listed values).
+    quiet = lookup(db_session, catch_all, public_ip=P1, public_port=51009)
+    assert (quiet.mode, resolution(quiet)) == ("none", ("public", ["hat-1"]))
+    assert "public_ip_not_transip" not in keys(quiet)
+    # A value outside the setting's pattern is never printed.
+    evidence.traffic(AT, PC, 51003, DEST, 443, transip="100.64.12.78", trandisp="SNAT x")
+    db_session.commit()
+    masked = lookup(db_session, catch_all, public_ip="192.0.2.44")
+    assert note(masked, "nat_unknown_trandisp") == {"count": 3, "values": "…, snat+dnat"}
 
 
 def test_e_m_an_unclaimed_nat_address_near_the_moment_is_named(
