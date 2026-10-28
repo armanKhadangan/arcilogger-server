@@ -466,6 +466,13 @@ def test_jobs_from_worker_status_and_job_runs(
                 last_status="ok",
             ),
             "partitions.ensure": JobState(),  # never ran since the worker started
+            # The database refused the run's row: started, never finished, not counted.
+            "alerts.import": JobState(
+                last_started=now - timedelta(minutes=1),
+                last_finished=now - timedelta(minutes=2),
+                last_status="failed",
+                last_error="database unreachable",
+            ),
         },
     )
     add_runs(
@@ -492,6 +499,7 @@ def test_jobs_from_worker_status_and_job_runs(
 
     assert named["alerts.system"]["state"] == "failing"
     assert named["alerts.system"]["failures"] == 2
+    assert named["alerts.import"]["state"] == "failing"
     assert named["usage.today"]["state"] == "skipped"
     assert named["usage.today"]["module"] == next(
         j.module for j in listed if j.name == "usage.today"

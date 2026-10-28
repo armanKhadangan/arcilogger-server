@@ -120,11 +120,14 @@ def job_row(job: Job, state: Mapping[str, Any], run: LastRun | None) -> JobHealt
     failures = count if type(count) is int and count > 0 else 0
     if started is None and run is not None:
         started, finished, last_status = run.started_at, run.finished_at, run.status
+    # A run the database refused ("database unreachable") is started, never finished, and
+    # failed without counting as a failure in a row: failing, not running.
+    failed = failures > 0 or last_status == "failed"
     if started is None:
         health: JobHealthState = "never"
-    elif finished is None or started > finished:
+    elif (finished is None or started > finished) and last_status != "failed":
         health = "running"
-    elif failures or last_status == "failed":
+    elif failed:
         health = "failing"
     elif last_status == "skipped":
         health = "skipped"
