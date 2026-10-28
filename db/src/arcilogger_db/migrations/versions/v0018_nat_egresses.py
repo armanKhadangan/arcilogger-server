@@ -372,7 +372,7 @@ def _iso(at: datetime) -> str:
 
 def _storable(value: Any) -> Any:
     """``value`` with every number canonical JSON refuses (a float, an integer beyond
-    ±(2^53 − 1)) as its text: the legacy rows were stored without validation (2.8.2 (g)), and
+    ±(2^53 - 1)) as its text: the legacy rows were stored without validation (2.8.2 (g)), and
     the seed copies the status row's ``from`` into the audit entry, whose details are canonical
     (a refused entry would stop every later upgrade at the seed)."""
     if isinstance(value, float) or (
