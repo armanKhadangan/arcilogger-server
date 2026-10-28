@@ -13,14 +13,17 @@ DHCP (D5, D33's MikroTik variant, a move loaded before the upgrade), a rollback 
 DHCP origins (D27), the probe for FortiGate DHCP lines that never became lease evidence when no
 chain could be built (D8, 2.8.3), a RELEASE mapped after the build, unconfigured senders (D24),
 ACKs the build refused and today's settings accept (deviation c2) and a FortiGate clock that was
-off at the moment (D28).
+off at the moment (D28). Last, the list of every explanation the engine can emit with a test
+that emits it (4.3 WP-C, "done when").
 """
 
 from __future__ import annotations
 
+import ast
 import ipaddress
 import json
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -58,7 +61,8 @@ from arcilogger_worker.lookup import (
     trust,
 )
 from arcilogger_worker.lookup.attribution import Attributor
-from arcilogger_worker.lookup.types import EvidenceRef
+from arcilogger_worker.lookup.texts import ENGINE_EXPLANATIONS
+from arcilogger_worker.lookup.types import EXPLANATIONS, EvidenceRef
 from arcilogger_worker.testing import FIREWALL, FORTIGATE_DHCP_TEXTS, Evidence, tr
 
 DAY = date(2026, 10, 12)
@@ -2355,3 +2359,274 @@ def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
         system.CLOCK_LIMIT_SECONDS,
         system.CLOCK_MIN_ROWS,
     )
+
+
+# -- every engine explanation has a test that emits it (4.3 WP-C, "done when") --------------------
+
+#: Per key the lookup engine can emit, a test that emits it and asserts it: the test names the
+#: key (its text, or a module constant holding it), itself or in a module helper it calls. The
+#: keys are those of the catalogue that an engine module names.
+EMITTED_BY: dict[str, tuple[str, str]] = {
+    "arp_only": ("test_lookup_engine.py", "test_ip_conflict_lists_every_device"),
+    "candidates_without_destination": (
+        "test_lookup_engine.py",
+        "test_double_nat_candidates_without_destination",
+    ),
+    "chain_missing": (
+        "test_lookup_fortigate_only.py",
+        "test_the_probe_reads_twenty_addresses_at_most",
+    ),
+    "destination_not_found": ("test_lookup_engine.py", "test_unknown_destination_lists_nobody"),
+    "destination_search": ("test_lookup_engine.py", "test_destination_only_request"),
+    "dhcp_sources_overlap": (
+        "test_lookup_fortigate_only.py",
+        "test_one_origins_query_serves_every_chain",
+    ),
+    "double_nat": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
+    "double_nat_no_candidates": ("test_lookup_engine.py", "test_shipped_defaults_are_double_nat"),
+    "egress_changed_after_event": (
+        "test_lookup_egress.py",
+        "test_e_k4_a_content_change_of_the_exit_used_is_named",
+    ),
+    "egress_interface_not_seen": (
+        "test_lookup_egress.py",
+        "test_e_n2_the_widening_keeps_the_interfaces",
+    ),
+    "egress_interface_not_seen_kept": (
+        "test_lookup_egress.py",
+        "test_e_k_the_interface_condition_drops_only_on_evidence",
+    ),
+    "egress_internal": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "egress_not_logged": ("test_lookup_egress.py", "test_e_d_e_d2_a_not_logged_line"),
+    "egress_not_logged_but_seen": (
+        "test_lookup_fortigate_only.py",
+        "test_a_not_logged_exit_the_logs_saw_measures_the_search",
+    ),
+    "egress_observed_not_configured": (
+        "test_lookup_egress.py",
+        "test_e_e2_e_e3_an_address_the_fortigate_used_itself",
+    ),
+    "egress_public_dynamic": (
+        "test_lookup_egress.py",
+        "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
+    ),
+    "egress_public_unknown": (
+        "test_lookup_egress.py",
+        "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
+    ),
+    "egress_search": ("test_lookup_egress.py", "test_e_n_an_isp_nat_line_not_seen_is_widened"),
+    "egress_transip_not_seen": (
+        "test_lookup_egress.py",
+        "test_e_n2_the_widening_keeps_the_interfaces",
+    ),
+    "egress_unconfigured": ("test_lookup_engine.py", "test_unknown_destination_lists_nobody"),
+    "egress_unmapped_seen": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "exact_domain_unverified": (
+        "test_lookup_engine.py",
+        "test_exact_domain_only_request_without_dns_logs_keeps_the_session_unverified",
+    ),
+    "exact_nat": ("test_lookup_egress.py", "test_e_d_e_d2_a_not_logged_line"),
+    "exact_only_other_destinations": (
+        "test_lookup_engine.py",
+        "test_exact_lookup_lists_only_sessions_to_the_requested_destination",
+    ),
+    "exact_other_destinations": (
+        "test_lookup_engine.py",
+        "test_exact_lookup_lists_only_sessions_to_the_requested_destination",
+    ),
+    "exact_unverified_destinations": (
+        "test_lookup_engine.py",
+        "test_exact_domain_only_request_lists_only_the_sessions_tied_to_the_name",
+    ),
+    "fortigate_dhcp_no_network": (
+        "test_lookup_fortigate_only.py",
+        "test_a_decline_in_no_configured_network_is_low",
+    ),
+    "fortigate_dhcp_not_converted": (
+        "test_lookup_fortigate_only.py",
+        "test_the_probe_reads_twenty_addresses_at_most",
+    ),
+    "fortigate_dhcp_not_converted_since_lease": (
+        "test_lookup_fortigate_only.py",
+        "test_a_line_loaded_in_a_rollback_window",
+    ),
+    "fortigate_format_unverified": (
+        "test_lookup_fortigate_only.py",
+        "test_the_example_chain_from_fortigate_dhcp_alone",
+    ),
+    "fortigate_format_verified": (
+        "test_lookup_fortigate_only.py",
+        "test_the_format_note_names_who_verified_it_and_when",
+    ),
+    "future_time": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "guest_vlan": ("test_lookup_engine.py", "test_guest_network_explanation"),
+    "infrastructure_device": (
+        "test_lookup_srcmac.py",
+        "test_a_lease_of_an_infrastructure_mac_still_names_the_device",
+    ),
+    "ip_conflict": (
+        "test_lookup_fortigate_only.py",
+        "test_the_clock_lowers_every_alternative_and_every_match",
+    ),
+    "lease_renewal_not_seen": ("test_lookup_fortigate_only.py", "test_no_renewal_and_traffic_only"),
+    "lease_timeline_behind": ("test_lookup_engine.py", "test_lease_timeline_behind_is_reported"),
+    "mac_multiple_ips": (
+        "test_lookup_srcmac.py",
+        "test_a_mac_only_lookup_finds_the_address_by_its_srcmac",
+    ),
+    "mac_not_at_ip": ("test_lookup_engine.py", "test_internal_ip_mac_and_none_modes"),
+    "multiple_exact": (
+        "test_lookup_engine.py",
+        "test_exact_lookup_lists_only_sessions_to_the_requested_destination",
+    ),
+    "nat_unknown_trandisp": ("test_lookup_egress.py", "test_e_l_an_unlisted_trandisp"),
+    "no_data_for_day": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "no_lease": ("test_lookup_fortigate_only.py", "test_no_renewal_and_traffic_only"),
+    "no_lease_for_mac": (
+        "test_lookup_fortigate_only.py",
+        "test_a_mac_only_lookup_finds_the_line_by_its_mac",
+    ),
+    "no_match": ("test_lookup_egress.py", "test_e_c5_a_line_that_carried_the_address_stays_exact"),
+    "no_match_candidates": ("test_lookup_engine.py", "test_shipped_defaults_are_double_nat"),
+    "no_match_exact": (
+        "test_lookup_fortigate_only.py",
+        "test_an_empty_exact_search_names_the_clock_of_the_searched_source",
+    ),
+    "no_person": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
+    "not_in_database": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "older_than_db_retention": (
+        "test_lookup_engine.py",
+        "test_data_window_for_days_outside_the_database",
+    ),
+    "only_in_vault": ("test_lookup_engine.py", "test_data_window_for_days_outside_the_database"),
+    "person_department_current": (
+        "test_lookup_assignments.py",
+        "test_a_later_reassignment_does_not_change_the_person_at_t",
+    ),
+    "person_link_at_lookup_time": ("test_lookup_engine.py", "test_ip_conflict_lists_every_device"),
+    "person_link_backfilled": (
+        "test_lookup_assignments.py",
+        "test_a_backfilled_assignment_says_its_start_is_not_known",
+    ),
+    "person_unassigned_at_time": (
+        "test_lookup_assignments.py",
+        "test_a_device_unassigned_at_t_names_nobody",
+    ),
+    "port_hint": (
+        "test_lookup_egress.py",
+        "test_e_g_the_port_hint_ranks_only_a_preserved_exits_candidates",
+    ),
+    "port_missing": (
+        "test_lookup_egress.py",
+        "test_e_e2_e_e3_an_address_the_fortigate_used_itself",
+    ),
+    "public_ip_no_egress": (
+        "test_lookup_egress.py",
+        "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
+    ),
+    "public_ip_not_transip": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "randomized_mac": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
+    "session_changed_exit": ("test_lookup_egress.py", "test_e_k3_a_session_that_changes_exit"),
+    "session_from_unknown_source": (
+        "test_lookup_egress.py",
+        "test_e_p2_a_forged_session_is_marked_on_its_match",
+    ),
+    "source_clock_offset": (
+        "test_lookup_fortigate_only.py",
+        "test_a_not_logged_exit_the_logs_saw_measures_the_search",
+    ),
+    "source_configured_later": (
+        "test_lookup_fortigate_only.py",
+        "test_a_sender_configured_later_is_named_on_the_chain",
+    ),
+    "srcmac_agrees": ("test_lookup_srcmac.py", "test_a_lease_with_the_same_srcmac_agrees"),
+    "srcmac_ambiguous": (
+        "test_lookup_srcmac.py",
+        "test_four_srcmacs_of_one_address_name_the_count_and_three",
+    ),
+    "srcmac_infrastructure": ("test_lookup_srcmac.py", "test_an_infrastructure_mac_is_not_used"),
+    "srcmac_mismatch": (
+        "test_lookup_fortigate_only.py",
+        "test_a_srcmac_that_contradicts_the_lease",
+    ),
+    "srcmac_only": ("test_lookup_fortigate_only.py", "test_a_srcmac_that_contradicts_the_lease"),
+    "srcmac_other_lease": (
+        "test_lookup_srcmac.py",
+        "test_a_mac_with_a_lease_of_another_address_is_not_used",
+    ),
+    "srcmac_shared": ("test_lookup_srcmac.py", "test_one_mac_on_two_ipv4_addresses_is_shared"),
+    "truncated": ("test_lookup_engine.py", "test_truncation_keeps_the_best_and_says_so"),
+}
+#: Retired keys: only the catalogue names them (stored lookups still render).
+NEVER_EMITTED = frozenset({"public_ip_not_configured", "wan_transip_not_seen"})
+
+
+def engine_keys(catalogue: set[str]) -> set[str]:
+    """The catalogue's keys that a module of the lookup package other than the catalogue's own
+    (``texts.py``, ``types.py``) names."""
+    package = Path(attribution.__file__).parent
+    named: set[str] = set()
+    for path in sorted(package.glob("*.py")):
+        if path.name in ("texts.py", "types.py"):
+            continue
+        for node in ast.walk(ast.parse(path.read_text("utf-8"))):
+            if isinstance(node, ast.Constant) and node.value in catalogue:
+                named.add(node.value)
+    return named
+
+
+def read_module(name: str) -> tuple[dict[str, Any], dict[str, ast.FunctionDef]]:
+    """A test module's string constants and functions, by name."""
+    tree = ast.parse((Path(__file__).parent / name).read_text("utf-8"))
+    constants: dict[str, Any] = {}
+    functions: dict[str, ast.FunctionDef] = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            functions[node.name] = node
+        targets = node.targets if isinstance(node, ast.Assign) else []
+        value = node.value if isinstance(node, ast.Assign) else None
+        if isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        for target in targets:
+            pairs = (
+                zip(target.elts, value.elts, strict=False)
+                if isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple)
+                else [(target, value)]
+            )
+            for name_node, constant in pairs:
+                if isinstance(name_node, ast.Name) and isinstance(constant, ast.Constant):
+                    constants[name_node.id] = constant.value
+    return constants, functions
+
+
+def names_key(module: str, test: str, key: str) -> bool:
+    constants, functions = read_module(module)
+    if test not in functions:
+        return False
+    function = functions[test]
+    helpers = [
+        functions[node.func.id]
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in functions
+    ]
+    return any(
+        (isinstance(node, ast.Constant) and node.value == key)
+        or (isinstance(node, ast.Name) and constants.get(node.id) == key)
+        for body in (function, *helpers)
+        for node in ast.walk(body)
+    )
+
+
+def test_every_engine_explanation_has_a_test_that_emits_it() -> None:
+    """4.3 WP-C, done when: "every engine explanation has a test that emits it". Every key of
+    the catalogue that the engine names is listed with its test, every listed test exists and
+    names its key, and only the retired keys are named by no engine module."""
+    catalogue = set(EXPLANATIONS) | set(ENGINE_EXPLANATIONS)
+    emitted = engine_keys(catalogue)
+    assert catalogue - emitted == NEVER_EMITTED
+    assert sorted(emitted - set(EMITTED_BY)) == []
+    assert sorted(set(EMITTED_BY) - emitted) == []
+    unnamed = {key: where for key, where in EMITTED_BY.items() if not names_key(*where, key)}
+    assert unnamed == {}

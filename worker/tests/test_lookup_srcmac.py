@@ -404,6 +404,26 @@ def test_an_infrastructure_mac_is_not_used(
     assert note(outcome, "srcmac_infrastructure") == {"mac": ROUTER_MAC}
 
 
+@pytest.mark.parametrize("marked", ["setting", "device"])
+def test_a_lease_of_an_infrastructure_mac_still_names_the_device(
+    db_session: Session, evidence: Evidence, marked: str
+) -> None:
+    """Only the srcmac of an infrastructure MAC is never used: the router's own lease gives its
+    chain, which says that the device is infrastructure (``infrastructure_device``)."""
+    if marked == "setting":
+        set_setting(db_session, "devices.infrastructure_macs", [ROUTER_MAC], updated_by="tolga")
+    else:
+        db_session.add(Device(mac=ROUTER_MAC, name="CORE-SW1", infrastructure=True))
+    evidence.fortigate_dhcp(AT - timedelta(hours=1), ROUTER_IP, ROUTER_MAC)
+    build(db_session, DAY, DAY)
+    chain = internal(db_session, ROUTER_IP).attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.device is not None
+    assert (chain.device.mac, chain.device.infrastructure) == (ROUTER_MAC, True)
+    assert "infrastructure_device" in keys(chain)
+
+
 def test_one_guard_query_serves_every_match(
     db_session: Session, evidence: Evidence, selin: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
