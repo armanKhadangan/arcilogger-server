@@ -233,11 +233,12 @@ METHOD_SEARCHED_INTERFACES: Final = (
     " on the interfaces ({interfaces})",
 )
 #: ``{searched}`` when the search covered the unclaimed addresses: after the addresses searched
-#: (joined with " ve " / " and "), or alone. "T" is the requested moment, as 2.12 writes it.
+#: (joined with " ve " / " and "), or alone. ``{at}`` is the requested moment in the report's
+#: time format, where 2.12 writes "T", as ``egress_transip_not_seen`` says it (deviation d).
 UNCLAIMED_SEARCHED: Final = (
     "hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak NAT adresleri "
-    "(T çevresinde görülenler: {seen})",
-    "every private or shared source-NAT address no exit claims (seen near T: {seen})",
+    "({at} çevresinde görülenler: {seen})",
+    "every private or shared source-NAT address no exit claims (seen around {at}: {seen})",
 )
 METHOD_PORT: Final = ("Port koruma: {port}.", "Port preservation: {port}.")
 PORT_USED: Final = (

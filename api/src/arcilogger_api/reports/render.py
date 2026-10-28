@@ -266,15 +266,15 @@ def _private_or_shared(address: str) -> bool:
     return any(found in network for network in PRIVATE_OR_SHARED)
 
 
-def _searched(searched: EgressSearched) -> tuple[str, str]:
+def _searched(searched: EgressSearched, at: datetime) -> tuple[str, str]:
     """``{searched}``: the addresses searched, and, when the search covered the unclaimed ones,
-    those in words with the private or shared ones the logs showed near the moment (the
+    those in words with the private or shared ones the logs showed near the moment ``at`` (the
     predicate never covers a public address)."""
     addresses = ", ".join(searched.transips)
     if not searched.unclaimed:
         return addresses or "-", addresses or "-"
     seen = ", ".join(a for a in searched.unclaimed_seen if _private_or_shared(a)) or "-"
-    unclaimed_tr, unclaimed_en = _pair(texts.UNCLAIMED_SEARCHED, seen=seen)
+    unclaimed_tr, unclaimed_en = _pair(texts.UNCLAIMED_SEARCHED, at=_time(at), seen=seen)
     if not addresses:
         return unclaimed_tr, unclaimed_en
     return f"{addresses} ve {unclaimed_tr}", f"{addresses} and {unclaimed_en}"
@@ -350,7 +350,7 @@ def _isp_nat_paragraph(
     text_en = texts.METHOD_ISP_NAT_EN.format(exit=_exit_name(entry), transips=named[1])
     if searched.unclaimed:  # a catch-all, or widened by O5: the search went beyond its addresses
         clause_tr, clause_en = _interfaces(searched, texts.METHOD_SEARCHED_INTERFACES)
-        found_tr, found_en = _searched(searched)
+        found_tr, found_en = _searched(searched, outcome.request.at)
         text_tr += " " + texts.METHOD_SEARCHED[0].format(searched=found_tr, interfaces=clause_tr)
         text_en += " " + texts.METHOD_SEARCHED[1].format(searched=found_en, interfaces=clause_en)
     else:
@@ -370,10 +370,10 @@ def _isp_nat_paragraph(
     return text_tr, text_en
 
 
-def _fallback_paragraphs(egress: LookupEgress, address: str) -> list[tuple[str, str]]:
+def _fallback_paragraphs(egress: LookupEgress, address: str, at: datetime) -> list[tuple[str, str]]:
     failed, others = egress.egresses[0], egress.egresses[1:]
     seen = ", ".join(egress.searched.outside_seen) or "-"
-    found_tr, found_en = _searched(egress.searched)
+    found_tr, found_en = _searched(egress.searched, at)
     values = {"exit": _exit_name(failed), "address": address, "seen": seen}
     if failed.mode == "direct":
         on_tr, on_en = texts.ON_LINE if failed.interfaces else ("", "")
@@ -427,7 +427,7 @@ def method_paragraphs(outcome: LookupOutcome) -> tuple[list[tuple[str, str]], se
             text = (texts.METHOD_INTERNAL_TR, texts.METHOD_INTERNAL_EN)
             paragraphs.append(_pair(text, **values))
     elif resolution == "fallback" and entry is not None:
-        paragraphs += _fallback_paragraphs(egress, address)
+        paragraphs += _fallback_paragraphs(egress, address, outcome.request.at)
         quoted |= _FALLBACK_LEFT_OUT
     elif resolution == "observed":
         key = "egress_not_logged_but_seen" if egress.egresses else "egress_observed_not_configured"
@@ -447,7 +447,7 @@ def method_paragraphs(outcome: LookupOutcome) -> tuple[list[tuple[str, str]], se
                 if any(_interfaces_dropped(outcome, e) for e in egress.egresses)
                 else _interfaces(egress.searched, texts.METHOD_SEARCHED_INTERFACES)
             )
-            found_tr, found_en = _searched(egress.searched)
+            found_tr, found_en = _searched(egress.searched, outcome.request.at)
             paragraph_tr += " " + texts.METHOD_SEARCHED[0].format(
                 searched=found_tr, interfaces=clause_tr
             )

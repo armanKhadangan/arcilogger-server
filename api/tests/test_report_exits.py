@@ -351,7 +351,7 @@ def test_the_isp_nat_paragraph_states_what_was_searched() -> None:
     assert "Arama bu çıkışın NAT adresleriyle" not in text
     assert (
         "Arama hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak NAT adresleri "
-        "(T çevresinde görülenler: 100.64.12.77) adresleriyle yapıldı." in text
+        "(12.10.2026 11:23:41 çevresinde görülenler: 100.64.12.77) adresleriyle yapıldı." in text
     )
     assert "198.51.100.250" not in text  # a public address is never in the unclaimed predicate
 
@@ -377,7 +377,8 @@ def test_public_unknown_names_no_interface_when_an_exit_searched_them_all() -> N
     text = _section_4(_text("public_unknown", (on_wan1, everywhere), searched=searched))
     assert (
         "Arama 100.64.13.9 ve hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak "
-        "NAT adresleri (T çevresinde görülenler: 100.64.12.77) adresleriyle yapıldı." in text
+        "NAT adresleri (12.10.2026 11:23:41 çevresinde görülenler: 100.64.12.77) adresleriyle "
+        "yapıldı." in text
     )
     assert "ve arayüzleriyle" not in text
     assert "on the interfaces" not in text
@@ -412,10 +413,10 @@ def test_public_unknown_names_the_interfaces_when_every_exit_kept_them() -> None
         )
     )
     assert (
-        "(T çevresinde görülenler: 100.64.12.77) adresleriyle ve arayüzleriyle (wan1, wan3) "
-        "yapıldı." in text
+        "(12.10.2026 11:23:41 çevresinde görülenler: 100.64.12.77) adresleriyle ve arayüzleriyle "
+        "(wan1, wan3) yapıldı." in text
     )
-    assert "(seen near T: 100.64.12.77) on the interfaces (wan1, wan3)." in text
+    assert "(seen around 12.10.2026 11:23:41: 100.64.12.77) on the interfaces (wan1, wan3)." in text
 
 
 def test_a_fallback_says_bu_hatta_only_for_an_exit_with_interfaces() -> None:
@@ -650,7 +651,7 @@ def test_e_c2_fallback_report(
     )
     assert "kayıtlar o sırada bu hatta özel ya da paylaşılan başka kaynak NAT adresleri" in method
     assert "(100.64.12.9) de gösteriyor" in method
-    assert "(T çevresinde görülenler: 100.64.12.9)" in method
+    assert "(12.10.2026 11:23:41 çevresinde görülenler: 100.64.12.9)" in method
     assert "ya da hattın o tarihte köprü modunda olduğunun servis sağlayıcıdan doğrulanması" in text
     assert "'Doğrudan' olarak tanımlayın" not in text
     assert "ISS modeminin" not in text  # the stored double_nat note is left out (X2)
@@ -1118,9 +1119,16 @@ def test_e_n_an_unclaimed_search_is_stated(
     assert "Arama bu çıkışın NAT adresleriyle" not in method
     assert (
         "Arama 100.64.13.9 ve hiçbir çıkışa tanımlı olmayan bütün özel ya da paylaşılan kaynak NAT "
-        "adresleri (T çevresinde görülenler: 100.64.12.9) adresleriyle yapıldı." in method
+        "adresleri (12.10.2026 11:23:41 çevresinde görülenler: 100.64.12.9) adresleriyle "
+        "yapıldı." in method
     )
-    assert "(seen near T: 100.64.12.9)" in method
+    assert (
+        "The search covered 100.64.13.9 and every private or shared source-NAT address no exit "
+        "claims (seen around 12.10.2026 11:23:41: 100.64.12.9)." in method
+    )
+    # "T" glossed as the requested moment in the report's time format, never left bare
+    assert "T çevresinde" not in text
+    assert "near T" not in text
     assert "Çıkış / Exit - · dstintf -" in text  # its candidates left by an unclaimed address
 
 
