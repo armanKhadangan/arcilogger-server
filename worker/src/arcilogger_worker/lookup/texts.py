@@ -584,15 +584,17 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "kira zaman çizelgesi cihazın zamanlarını kullandı: doğru oturum ya da kira bu fark kadar "
         "kaymış bir zaman aralığında olabilir; doğru oturum bulunmamış ve başka bir oturum "
         "bulunmuş olabilir, kira da o anı kapsamıyor olabilir. Bu sonuçta zincir varsa düşük "
-        "güvenle gösterildi; sonuç boşsa toleransı bu fark kadar genişletip sorguyu yeniden "
-        "çalıştırın.",
+        "güvenle gösterildi. Sonuç boşsa sorguyu yeniden çalıştırın: genel IP sorgusunda "
+        "toleransı bu fark kadar genişleterek, iç IP ya da MAC adresi sorgusunda istenen anı bu "
+        "fark kadar kaydırarak (fark artıysa ileri, eksiyse geri).",
         "Around {at} the record times of these sources differed from ARCILOGGER's receive time by "
         "a median of (in seconds): {offsets} (limit {limit} seconds). The search and the lease "
         "timeline used the device's times: the right session or lease may lie in a window shifted "
         "by that offset; the right session may have been missed and another found, and the lease "
         "may not cover the moment. Any chain of this result is therefore shown with low "
-        "confidence; if the result is empty, widen the tolerance by the offset and run the lookup "
-        "again.",
+        "confidence. If the result is empty, run the lookup again: for a public IP with the "
+        "tolerance widened by the offset, for an internal IP or a MAC address at the requested "
+        "moment shifted by the offset (later for a positive offset, earlier for a negative one).",
     ),
 }
 
