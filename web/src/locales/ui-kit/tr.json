@@ -9,7 +9,6 @@
   "uiKit": {
     "title": "Bileşen Kiti",
     "intro": "ARCILOGGER arayüzünün bütün yapı taşları, açık ve koyu temada. Sayfalar bu bileşenlerden oluşturulur.",
-    "themeToggle": "Temayı değiştir",
     "sections": {
       "colors": "Renkler",
       "typography": "Tipografi",

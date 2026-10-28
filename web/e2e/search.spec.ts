@@ -370,7 +370,7 @@ test.describe('Arama', () => {
     await expect(sheet).toBeHidden();
 
     // "Ham satır" in the row opens the raw line directly.
-    await results(page).getByRole('button', { name: 'Ham satırı aç: fortigate, satır 27' }).click();
+    await results(page).getByRole('button', { name: 'Ham satır: fortigate, satır 27' }).click();
     await expect(raw).toBeVisible();
     expect(api.callsTo('GET', '/raw').at(-1)?.query.toString()).toBe(
       'source=fortigate&day=2026-10-09&line=27&offset=10260',

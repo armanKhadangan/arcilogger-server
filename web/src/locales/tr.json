@@ -530,7 +530,7 @@
         "restores": "Geri yükleme",
         "withSecrets": "Ayarlar; gizli bilgiler de geri yüklenir",
         "withoutSecrets": "Yalnızca ayarlar; gizli bilgiler artık saklanmıyor",
-        "openRequest": "{{number}} numaralı sürümün isteğini aç",
+        "openRequest": "{{id}}: {{number}} numaralı sürümün isteğini aç",
         "console": "Sunucu konsolu",
         "restore": "Bir sürüm yalnızca sunucu konsolundan geri yüklenir ve o sürümün değişikliğinden önceki ayarlara döner. Örneğin son değişikliği geri almak için:",
         "command": "Sunucu konsolu komutu"
@@ -2869,7 +2869,7 @@
         "files": "Dosya",
         "trigger": "Başlatan"
       },
-      "open": "Çalışma #{{id}} ayrıntıları",
+      "open": "{{started}}: Çalışma #{{id}} ayrıntıları",
       "detailTitle": "Çalışma #{{id}}",
       "deletedSchedule": "Silinmiş zamanlama",
       "delivered": "{{sent}}/{{total}} gönderildi",
