@@ -3180,7 +3180,9 @@ function settingProblem(
     // Of the exit rules (`arcilogger_db.egress`), the one the specs send: a public address in
     // private, shared or reserved space.
     const exits = Object.values(value as Record<string, { public?: unknown }>);
-    const addresses = exits.flatMap((exit) => (Array.isArray(exit.public) ? exit.public : []));
+    const addresses = exits.flatMap((exit): unknown[] =>
+      Array.isArray(exit.public) ? (exit.public as unknown[]) : [],
+    );
     if (addresses.some((address) => typeof address === 'string' && NOT_PUBLIC.test(address)))
       return { code: 'setting_egress_public_private', facts: {} };
   }
