@@ -2650,10 +2650,20 @@ lease timeline or a lease alert, both 5651 Temel (test in 3.3). Today's coupling
 #### 2.8.2 Legacy conversion (`legacy_egresses`; frozen copy in `v0018`)
 
 ```python
-_NOT_PUBLIC = tuple(ipaddress.ip_network(n) for n in (        # rule 5 of 2.8.1, explicit list
-    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"))   # RFC 1918, RFC 6598
-_RESERVED = tuple(ipaddress.ip_network(n) for n in (
-    "0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "240.0.0.0/4"))
+_NOT_PUBLIC = tuple(
+    ipaddress.ip_network(n)
+    for n in (  # rule 5 of 2.8.1, explicit list
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "100.64.0.0/10",
+    )
+)  # RFC 1918, RFC 6598
+_RESERVED = tuple(
+    ipaddress.ip_network(n)
+    for n in ("0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "240.0.0.0/4")
+)
+
 
 def _v4(text, dropped):
     """The canonical IPv4 text of a legacy value, or None (reported in ``dropped``)."""
@@ -2663,37 +2673,56 @@ def _v4(text, dropped):
         dropped.append({"value": str(text)[:64], "reason": "invalid"})  # stored unvalidated
         return None
     if address.version != 4:
-        dropped.append({"value": str(address), "reason": "ipv6"})       # storable before
+        dropped.append({"value": str(address), "reason": "ipv6"})  # storable before
         return None
     if any(address in net for net in _RESERVED):
         dropped.append({"value": str(address), "reason": "reserved"})
         return None
     return str(address)
 
+
 def legacy_egresses(public_ips, wan_transip, port_hint):
     dropped = []
     items = public_ips if isinstance(public_ips, list) else [public_ips]
     found = list(dict.fromkeys(a for a in (_v4(x, dropped) for x in items) if a))
     private = [a for a in found if any(ipaddress.ip_address(a) in n for n in _NOT_PUBLIC)]
-    keep = [a for a in found if a not in private]       # real public addresses
+    keep = [a for a in found if a not in private]  # real public addresses
     wan = _v4(wan_transip, dropped) if str(wan_transip or "").strip() else None
     pp = "preserved" if port_hint is True else "unknown"
     out = {}
-    for i in range(0, len(keep), 16):                       # one direct exit; split past 16
+    for i in range(0, len(keep), 16):  # one direct exit; split past 16
         out[f"genel-{i // 16 + 1}"] = {
-            "label": "Genel IP (yükseltmede aktarıldı)", "mode": "direct",
-            "public": keep[i:i + 16], "public_dynamic": False, "transips": [],
-            "interfaces": [], "port_preservation": "unknown"}
-    transips = list(dict.fromkeys(
-        [*([wan] if wan is not None and wan not in keep else []), *private]))
-    if transips:                                            # > 16 fails validation -> {}
-        out["wan"] = {"label": "FortiGate WAN adresi (yükseltmede aktarıldı)", "mode": "isp_nat",
-                      "public": [], "public_dynamic": False, "transips": transips,
-                      "interfaces": [], "port_preservation": pp}
+            "label": "Genel IP (yükseltmede aktarıldı)",
+            "mode": "direct",
+            "public": keep[i : i + 16],
+            "public_dynamic": False,
+            "transips": [],
+            "interfaces": [],
+            "port_preservation": "unknown",
+        }
+    transips = list(
+        dict.fromkeys([*([wan] if wan is not None and wan not in keep else []), *private])
+    )
+    if transips:  # > 16 fails validation -> {}
+        out["wan"] = {
+            "label": "FortiGate WAN adresi (yükseltmede aktarıldı)",
+            "mode": "isp_nat",
+            "public": [],
+            "public_dynamic": False,
+            "transips": transips,
+            "interfaces": [],
+            "port_preservation": pp,
+        }
     elif keep or port_hint is True:
-        out["tanimsiz"] = {"label": "Genel adresi tanımlanmamış hatlar", "mode": "isp_nat",
-                           "public": [], "public_dynamic": False, "transips": [],
-                           "interfaces": [], "port_preservation": pp}
+        out["tanimsiz"] = {
+            "label": "Genel adresi tanımlanmamış hatlar",
+            "mode": "isp_nat",
+            "public": [],
+            "public_dynamic": False,
+            "transips": [],
+            "interfaces": [],
+            "port_preservation": pp,
+        }
     return out, dropped
 ```
 
