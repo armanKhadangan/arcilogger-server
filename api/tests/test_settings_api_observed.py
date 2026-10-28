@@ -49,6 +49,8 @@ Login = Callable[..., LoggedIn]
 URL = "/api/v1/settings/fortigate/observed"
 #: A public address of a direct exit (RFC 5737).
 PUBLIC = "198.51.100.7"
+#: An IPv6 NAT address (RFC 3849): exits refuse IPv6, so the observed part leaves it out.
+NAT6 = "2001:db8:0:12::9"
 #: Two exits share WAN2 on separate interfaces: the row's dstintf picks one.
 SHARED = {
     "a-hat": {"mode": "isp_nat", "transips": [WAN2], "interfaces": ["wan3"]},
@@ -290,6 +292,33 @@ def test_an_unreadable_exit_value_gives_exits_invalid(
     assert data["nat"]["rows"]
     assert all(row["egress"] is None for row in data["nat"]["rows"])
     assert data["nat"]["unmapped_transips"] == [WAN, WAN2, PUBLIC]
+
+
+def test_ipv6_nat_addresses_are_not_listed(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    now: datetime,
+) -> None:
+    """Only IPv4 NAT addresses are listed (``family(transip) = 4``): exits refuse IPv6, so an
+    IPv6 row would stay unmapped for ever; the ``R20-nat:unmapped-transip`` check leaves it out
+    the same way, and its ``trandisp`` is not reported either (review Q9)."""
+    rows: list[tuple[datetime, dict[str, Any]]] = [
+        (now - timedelta(hours=1), {"transip": WAN, "dstintf": "wan1"}),
+        (now - timedelta(minutes=30), {"transip": NAT6, "dstintf": "wan1"}),
+        (now - timedelta(minutes=20), {"transip": NAT6, "dstintf": "wan1", "trandisp": "snat6"}),
+    ]
+    sessions(app_session_factory, layout, rows)
+    admin(client, login_as, app_session_factory)
+    response = client.get(URL)
+    assert response.status_code == 200, response.text
+    nat = response.json()["nat"]
+    assert [(r["transip"], r["dstintf"], r["sessions"]) for r in nat["rows"]] == [
+        (WAN, "wan1", 1)
+    ]
+    assert (nat["unmapped_transips"], nat["unknown_trandisp"]) == ([WAN], [])
+    assert "2001:db8" not in response.text
 
 
 def test_a_truncated_list_keeps_the_busiest_groups(
