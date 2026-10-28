@@ -725,6 +725,8 @@ def test_the_new_settings_refuse_values_of_another_shape(
         {"lookup.srcmac_interfaces": "vlan42"},
         {"lookup.srcmac_max_ips": "2"},
         {"lookup.srcmac_max_ips": True},
+        {"arp.ignore_after_release_seconds": -1},
+        {"arp.ignore_after_release_seconds": "60"},
         {"nat.snat_trandisp": None, "lookup.srcmac_interfaces": {"vlan42": 1}},
     ],
 )

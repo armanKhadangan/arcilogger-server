@@ -1210,7 +1210,7 @@ def test_a_static_client_gives_a_match_without_a_chain(
     assert outcome.unconverted_dhcp == ()
 
 
-@pytest.mark.parametrize("grace", [60, 0])
+@pytest.mark.parametrize("grace", [60, 0, -1])
 def test_the_probe_runs_with_a_short_arp_interval(
     db_session: Session, evidence: Evidence, grace: int
 ) -> None:
@@ -1218,11 +1218,17 @@ def test_the_probe_runs_with_a_short_arp_interval(
     (``arp.ignore_after_release_seconds``, at most ``arp.interval_seconds``), as the lease job
     builds them: with a 120 s ARP interval an internal lookup without a lease, a candidate
     lookup whose static client has no chain and a MAC-only lookup without a lease give their
-    answer, never an error."""
+    answer, never an error. A negative grace written around the validator (CORRELATION §5)
+    after the build (the lease job refuses it) reads as the shipped default, which the probe
+    caps at the ARP interval."""
     set_setting(db_session, "arp.interval_seconds", 120, updated_by="tolga")
-    set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
+    built = max(grace, 0)
+    set_setting(db_session, "arp.ignore_after_release_seconds", built, updated_by="tolga")
     evidence.traffic(AT, "172.20.42.200", 51001, transip=WAN)
     build(db_session, DAY, DAY)
+    if grace < 0:
+        set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
+        db_session.commit()
     alone = internal(db_session, "172.20.42.200", AT)
     assert (alone.mode, alone.attribution) == ("none", None)
     assert "no_lease" in keys(alone)
@@ -1237,6 +1243,7 @@ def test_the_probe_runs_with_a_short_arp_interval(
     for outcome in (alone, candidates, by_mac):
         assert NOT_CONVERTED not in keys(outcome)
         assert outcome.unconverted_dhcp == ()
+    assert settings_for(db_session).arp_release_grace_seconds == (grace if grace >= 0 else 300)
 
 
 def test_a_covering_line_that_stayed_an_event_row_is_named_and_cited(
