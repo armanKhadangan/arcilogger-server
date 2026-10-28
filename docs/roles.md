@@ -152,8 +152,8 @@ chain's person step) the assignment valid at that moment: the person's name, dep
 and the assignment's start and end.
 
 **FortiGate DHCP, srcmac ve aygıt tanıma (ADR-0016).** Yeni bir izin yoktur. FortiGate DHCP
-kayıtlarındaki ana bilgisayar adları ve MAC adresleri (kira kanıtı, cihaz listesi) mevcut
-izinlerle okunur: 5651 sonuçlarında `lookup.run`, Arama'da `search.read`, Cihazlar ve Kişiler
+kayıtlarındaki ana bilgisayar adları ve MAC adresleri (5651 sonuçlarındaki kira adımı, Arama'daki
+fg_dhcp satırları, cihaz listesi) mevcut izinlerle okunur: 5651 sonuçlarında `lookup.run`, Arama'da `search.read`, Cihazlar ve Kişiler
 sayfasında `devices.read`. `lookup.run` (Yönetici, Denetçi) ile bir 5651 sonucu, kira kaydı
 olmayan bir oturumda cihazı ve kişiyi `lookup.srcmac_interfaces` ayarındaki arayüzlerde
 FortiGate oturum kaydının srcmac alanından da gösterebilir ("kısmi kanıt", düşük güven). Ham
@@ -167,8 +167,8 @@ bilgilendirmesinin onayını ister ve yanıt vermeden önce denetim kaydına yaz
 `lookup.view`, `lookup.report`, `raw.view`, `search.run`).
 
 **FortiGate DHCP, srcmac and device identification (ADR-0016).** There is no new permission.
-FortiGate DHCP host names and MAC addresses (lease evidence, the device list) are read under the
-existing permissions: `lookup.run` in 5651 results, `search.read` in Search, `devices.read` on
+FortiGate DHCP host names and MAC addresses (the lease step of 5651 results, fg_dhcp rows in
+Search, the device list) are read under the existing permissions: `lookup.run` in 5651 results, `search.read` in Search, `devices.read` on
 the devices page. With `lookup.run` (admin, auditor) a 5651 result may also name the device and
 the person of a session without a lease through the srcmac field of the FortiGate session record
 on the interfaces of `lookup.srcmac_interfaces` ("kısmi kanıt", partial evidence, low
