@@ -16,7 +16,7 @@ import secrets
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +37,11 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, site_day
 from arcilogger_db.models import AuditLog
 
-FAST = Timing(poll=0.02, listing=0.05, idle_stop=60.0, linger=0.5, slow_client=0.5)
+# A stream lingers from the moment it is created until it is attached, and the cycle that opens
+# it may seed hundreds of lines (0.13 s with coverage on Linux, several times that on a slow
+# Windows runner): a 0.5 s linger on the real clock ran out before the test attached. Lingering
+# out is tested in test_time_limit_and_lingering_out_are_audited, on the clock the test moves.
+FAST = Timing(poll=0.02, listing=0.05, idle_stop=60.0, linger=60.0, slow_client=0.5)
 FIREWALL = "172.31.255.1"
 
 
@@ -84,7 +88,9 @@ class Clock:
 
 @pytest.fixture
 def clock() -> Clock:
-    return Clock(datetime.now(UTC))
+    # A fixed mid-day site moment, never the real now: a test that writes a line and then moves
+    # the clock (or reads site_day a moment later) must not cross a real site midnight.
+    return Clock(datetime(2026, 10, 26, 12, 0, tzinfo=SITE_TZ))
 
 
 @pytest.fixture
@@ -494,9 +500,13 @@ def test_time_limit_and_lingering_out_are_audited(
         assert b'"code":"time_limit"' in connection.controls[-1]
         assert "5 dakika" in connection.controls[-1].decode()
         hub.detach(limited, connection)  # the writer sent the end and returned
+        # Its live.close is written by a worker thread (``Hub._finish``), and so is the lingered
+        # one below: held up 30 ms on a busy runner, it was committed second (read by id below).
+        await until(lambda: not hub._background)
         paused = stream(hub)
         held = await connect(hub, paused)
         hub.detach(paused, held)
+        clock.extra += FAST.linger  # paused for the whole linger, without waiting for it
         await until(lambda: paused.closed == "lingered", seconds=3)
         await until(lambda: not hub._background)
         await hub.stop()

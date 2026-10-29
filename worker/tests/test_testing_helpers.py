@@ -1,14 +1,21 @@
-"""The test helper's FortiGate session lines: the interfaces and srcmac of ADR-0016 are written
-only when given, so every line written without them stays byte for byte as before."""
+"""The test helper's FortiGate lines: the interfaces and srcmac of ADR-0016 are written only when
+given, so every session line written without them stays byte for byte as before; and every
+FortiGate DHCP and session line it writes re-parses, with the shipped parser, to the row it
+inserted (the report's cross-check re-reads cited lines that way)."""
 
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
+import pytest
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from arcilogger_db.models import FgTraffic
+from arcilogger_core.rawlog import parse_line as parse_raw
+from arcilogger_db.models import FgDhcp, FgTraffic
+from arcilogger_ingest.parsers import PARSERS, LinePosition
 from arcilogger_worker.testing import Evidence, tr
 
 DAY = date(2026, 10, 12)
@@ -58,3 +65,84 @@ def test_interfaces_and_srcmac_are_written_when_given(
     assert line.endswith(' duration=10 srcmac="00:00:5e:00:53:57"\n')
     row = _row(db_session, row_id)
     assert (row.srcintf, row.dstintf) == ("vlan42", "wan1")
+
+
+# -- the re-parse test (ADR-0016): what the helper writes is what the shipped parser makes ------
+
+
+def _reparsed(evidence: Evidence, row: Any) -> dict[str, Any]:
+    """The row the shipped FortiGate parser makes of ``row``'s raw line (as the report's
+    cross-check re-reads it)."""
+    raw = evidence.raw_line(row.source, row.raw_day, row.raw_line, row.raw_offset)
+    outcome = PARSERS["fortigate"].parse(
+        parse_raw(raw.rstrip(b"\n")),
+        LinePosition(
+            source=row.source,
+            source_type="fortigate",
+            raw_day=row.raw_day,
+            raw_line=row.raw_line,
+            raw_offset=row.raw_offset,
+        ),
+    )
+    (parsed,) = outcome.rows
+    assert parsed.table == row.__tablename__
+    return dict(parsed.values)
+
+
+def _columns(row: Any, *, skip: tuple[str, ...] = ()) -> dict[str, Any]:
+    names = [c.key for c in sa_inspect(type(row)).mapper.column_attrs]
+    return {name: getattr(row, name) for name in names if name not in ("id", *skip)}
+
+
+def _comparable(values: dict[str, Any]) -> dict[str, Any]:
+    return {key: str(value) if key in ("ip", "srcip", "dstip", "transip", "sender") else value
+            for key, value in values.items()}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        {"hostname": "PLN-PC14"},
+        {},
+        {"hostname": ""},
+        {"logid": "0100026002", "dhcp_msg": "Release", "lease": None, "hostname": "PLN-PC14"},
+        {"dhcp_msg": "Nak", "mac": "00:00:00:00:00:00"},
+        {"device_time": False},
+        {"source": "unknown-172.31.254.3", "vd": None, "interface": None},
+        {"lease": 0, "dhcp_msg": "", "interface": ""},
+    ],
+)
+def test_a_fortigate_dhcp_line_reparses_to_its_row(
+    db_session: Session, evidence: Evidence, call: dict[str, Any]
+) -> None:
+    mac = str(call.pop("mac", "00:00:5e:00:53:57"))
+    row_id = evidence.fortigate_dhcp(tr(DAY, 9, 46, 18), "172.20.42.57", mac, **call)
+    row = db_session.scalars(select(FgDhcp).where(FgDhcp.id == row_id)).one()
+    assert _comparable(_columns(row)) == _comparable(_reparsed(evidence, row))
+    assert row.device_time is call.get("device_time", True)
+    assert row.time == tr(DAY, 9, 46, 18)
+
+
+def test_a_fortigate_dhcp_line_needs_its_dhcp_msg(evidence: Evidence) -> None:
+    with pytest.raises(ValueError, match="dhcp_msg"):
+        evidence.fortigate_dhcp(tr(DAY, 9), "172.20.42.57", "00:00:5e:00:53:57", dhcp_msg=None)
+
+
+def test_a_session_line_reparses_to_its_row_srcmac_included(
+    db_session: Session, evidence: Evidence
+) -> None:
+    row_id = evidence.traffic(
+        tr(DAY, 11, 23, 41),
+        "172.20.42.57",
+        51001,
+        srcintf="vlan42",
+        dstintf="wan1",
+        srcmac="00:00:5E:00:53:57",
+    )
+    row = _row(db_session, row_id)
+    assert row.srcmac == "00:00:5e:00:53:57"
+    parsed = _reparsed(evidence, row)
+    # The helper leaves the untyped fields out of ``extra``; every typed column agrees.
+    assert _comparable(_columns(row, skip=("extra",))) == _comparable(
+        {key: value for key, value in parsed.items() if key != "extra"}
+    )

@@ -164,11 +164,18 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings/application?group=lookup');
     const lookup = group(page, 'lookup');
-    await lookup.getByLabel('Genel IP adresleri (NAT)').fill('198.51.100.7\nnot-an-ip');
+    // The internet exits through the generic JSON editor: a private address as a public one.
+    await lookup
+      .getByLabel('İnternet çıkışları (NAT)')
+      .fill('{"hat-1": {"mode": "direct", "public": ["100.64.12.9"]}}');
     await lookup.getByRole('button', { name: 'Kaydet' }).click();
-    // `validate_setting`'s text (`setting_ip_invalid`), never the value it refused.
+    // `validate_setting`'s text (`setting_egress_public_private`), never the value it refused.
     await expect(
-      lookup.getByTestId('setting-nat.public_ips').getByText('Geçersiz IP adresi.'),
+      lookup
+        .getByTestId('setting-nat.egresses')
+        .getByText('Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış', {
+          exact: false,
+        }),
     ).toBeVisible();
     await expect(
       lookup.getByText('Bazı ayar değerleri geçersiz; işaretli ayarları düzeltin.'),

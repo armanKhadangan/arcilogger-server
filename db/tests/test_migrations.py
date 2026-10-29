@@ -30,7 +30,7 @@ from arcilogger_db.testing import TestServer
 
 BASELINE = "0001_baseline"
 #: Newest revision (re-chained by the orchestrator when parallel revisions are merged).
-HEAD = "0016_search"
+HEAD = "0018_nat_egresses"
 
 
 @pytest.fixture
@@ -130,10 +130,27 @@ def test_spec_indexes_exist(db_engine: Engine) -> None:
     assert {("ip", "time"), ("mac", "time")} <= indexed("mt_dhcp")
     assert ("ip", "time") in indexed("mt_arp")
     assert {("ip", "start"), ("mac", "start")} <= indexed("leases")
+    # ADR-0016 (revision 0017): FortiGate DHCP rows by address and MAC, leases by source table;
+    # srcmac is scanned in time slices, never indexed (the largest table, contract 2.4).
+    assert {("ip", "time"), ("mac", "time")} <= indexed("fg_dhcp")
+    assert ("source_table", "end") in indexed("leases")
+    assert not any("srcmac" in columns for columns in indexed("fg_traffic"))
     for table in ("fg_web", "fg_app"):
         assert {("sessionid",), ("srcip", "time")} <= indexed(table)
     assert ("source", "time") in indexed("messages")
     assert ("time",) in indexed("audit_log")
+
+
+def test_lease_checks_name_every_lease_source(db_engine: Engine) -> None:
+    """``ck_leases_source_table`` and ``ck_leases_lease_seconds`` (0017) are in place."""
+    checks = {
+        check["name"]: str(check["sqltext"])
+        for check in inspect(db_engine).get_check_constraints("leases")
+    }
+    for table in ("mt_dhcp", "mt_arp", "fg_dhcp"):
+        assert f"'{table}'" in checks["ck_leases_source_table"], table
+    assert "300" in checks["ck_leases_lease_seconds"]
+    assert "8640000" in checks["ck_leases_lease_seconds"]
 
 
 def test_timescale_mode_matches_the_server(db_engine: Engine) -> None:

@@ -213,15 +213,15 @@ test.describe('Panel — parse failures', () => {
     await expect(patterns.first()).toContainText('fortigate · 30 satır');
     // A line not in the collector's format is not in the database: its example only.
     await expect(
-      card.getByRole('button', { name: 'rawlog.invalid kalıbını Aramada göster' }),
+      card.getByRole('button', { name: 'Aramada göster: rawlog.invalid kalıbı' }),
     ).toHaveCount(0);
-    await card.getByRole('button', { name: 'rawlog.invalid kalıbının örnek satırını aç' }).click();
+    await card.getByRole('button', { name: 'Örnek satır: rawlog.invalid kalıbı' }).click();
     const raw = page.getByRole('dialog', { name: 'Ham kayıt satırı' });
     await expect(raw).toContainText(RAW.lines['core-r1|2026-10-09|4']?.sha256 ?? '-');
     expect(api.callsTo('GET', '/raw').at(-1)?.query.get('line')).toBe('4');
     await raw.getByRole('button', { name: 'Kapat' }).click();
 
-    await card.getByRole('button', { name: 'fortigate.kv kalıbını Aramada göster' }).click();
+    await card.getByRole('button', { name: 'Aramada göster: fortigate.kv kalıbı' }).click();
     await expect(page).toHaveURL(/\/search$/);
     expect(await page.evaluate(() => JSON.stringify(window.history.state))).not.toContain(
       'fortigate.kv',

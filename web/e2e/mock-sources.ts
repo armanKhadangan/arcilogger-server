@@ -32,7 +32,6 @@ import type {
   LeaseEvidence,
   SourcesOverviewWithLease,
 } from '../src/pages/sources/lease-evidence-model';
-import { leaseEvidenceOk } from '../src/test/wave3-mocks';
 
 import type { MockApi, MockUser, RecordedCall } from './mock-api';
 import { copy, RAW, SAMPLE_TODAY, SOURCES } from './samples';
@@ -359,8 +358,8 @@ export function sampleParseFailures(): DashboardParseFailures {
 export interface SourcesOptions {
   /** The list (default: `sampleSources()`). */
   items?: SourceHealth[];
-  /** The lease-evidence counts (default: a healthy mixed site; `null`: a server without them). */
-  leaseEvidence?: LeaseEvidence | null;
+  /** The lease-evidence counts (default: the captured sample's). */
+  leaseEvidence?: LeaseEvidence;
   /** The Panel's parse-failure box (default: `sampleParseFailures()`; `null`: none). */
   parseFailures?: DashboardParseFailures | null;
 }
@@ -368,7 +367,7 @@ export interface SourcesOptions {
 export class SourcesMock {
   items: SourceHealth[];
   parseFailures: DashboardParseFailures | null;
-  leaseEvidence: LeaseEvidence | null;
+  leaseEvidence: LeaseEvidence;
 
   constructor(
     private readonly api: MockApi,
@@ -377,8 +376,7 @@ export class SourcesMock {
     this.items = options.items ?? sampleSources();
     this.parseFailures =
       options.parseFailures === undefined ? sampleParseFailures() : options.parseFailures;
-    this.leaseEvidence =
-      options.leaseEvidence === undefined ? leaseEvidenceOk() : options.leaseEvidence;
+    this.leaseEvidence = options.leaseEvidence ?? copy(SOURCES.overview.lease_evidence);
   }
 
   async install(page: Page): Promise<void> {
@@ -433,7 +431,7 @@ export class SourcesMock {
         today: SAMPLE_TODAY,
         collector: { updated_at: at(0.5), fresh: true },
         items: this.items,
-        ...(this.leaseEvidence ? { lease_evidence: structuredClone(this.leaseEvidence) } : {}),
+        lease_evidence: structuredClone(this.leaseEvidence),
       };
       return [200, overview];
     }

@@ -36,7 +36,6 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.canonical import CanonicalJsonError, canonical_json
 from arcilogger_core.config import EMAIL_ADDRESS
-from arcilogger_core.iputil import canonical_ip
 from arcilogger_db.egress import (
     EgressValueError,
     has_control_characters,
@@ -52,15 +51,11 @@ MIGRATION_AUTHOR: Final = ":migration"
 
 #: Every known setting with its shipped default (build specification sections in comments).
 DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
-    # 2.3 NAT. The FortiGate's public/WAN address(es). Empty = the ISP router does a second NAT
-    # ("double NAT"): 5651 lookups by public IP + port can only return ranked candidates.
-    "nat.public_ips": [],
-    # The FortiGate's own WAN address as seen in ``transip`` (e.g. a private address behind the
-    # ISP router). Unknown until configured on site; never assumed.
-    "nat.wan_transip": "",
-    # ADR-0016 internet exits: one entry per line (direct, ISP NAT, not through the FortiGate,
-    # or an internal NAT address that is no internet exit); arcilogger_db.egress. Empty = one
-    # implicit double-NAT exit. Entered on site, never assumed.
+    # 2.3 NAT, ADR-0016 internet exits: one entry per line (direct, ISP NAT, not through the
+    # FortiGate, or an internal NAT address that is no internet exit); arcilogger_db.egress.
+    # Empty = one implicit double-NAT exit ("double NAT": 5651 lookups by public IP + port can
+    # only return ranked candidates). Entered on site, never assumed. It replaces the Wave 2 keys
+    # nat.public_ips, nat.wan_transip and lookup.port_hint (revision 0018_nat_egresses).
     "nat.egresses": {},
     # The FortiGate trandisp values a candidate search takes for addresses no exit claims (only
     # "snat" was seen in logs; verify on site).
@@ -74,9 +69,6 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     # 14 "5651 lookup < 5 s for a ±60 s window": the API stops a lookup after this many seconds
     # (PostgreSQL statement timeout of the remaining time) and answers 504 lookup_timeout.
     "lookup.timeout_seconds": 5,
-    # 9.5 ranking hint: favour candidates whose FortiGate port equals the requested public port.
-    # Assumes the ISP router keeps source ports — verify on site before switching it on.
-    "lookup.port_hint": False,
     # 9.5 a DNS answer this old (seconds) still links a requested domain to an address.
     "lookup.dns_lookback_seconds": 3600,
     # 9.5 time-stamp the SHA-256 of every official PDF report with the configured [tsa]
@@ -332,7 +324,6 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
         "{low} ile {high} arasında olmalı.",
         "Must be between {low} and {high}.",
     ),
-    "setting_ip_invalid": ("Geçersiz IP adresi.", "Invalid IP address."),
     "setting_mac_invalid": ("Geçersiz MAC adresi.", "Invalid MAC address."),
     "setting_role_unknown": (
         "Bilinmeyen rol; geçerli roller: {roles}.",
@@ -659,19 +650,6 @@ _TYPE_NAMES_EN: Final[Mapping[type, str]] = {
 }
 
 
-def _ip(key: str, value: Any) -> str:
-    if not isinstance(value, str):
-        raise SettingValueError(
-            key, "setting_ip_invalid", f"{key}: IP adresi bekleniyor, verilen {value!r}"
-        )
-    try:
-        return canonical_ip(value.strip())
-    except ValueError as exc:
-        raise SettingValueError(
-            key, "setting_ip_invalid", f"{key}: geçersiz IP adresi {value!r}"
-        ) from exc
-
-
 def _mac(key: str, value: Any) -> str:
     digits = re.sub(r"[:.\-]", "", value.strip()).lower() if isinstance(value, str) else ""
     if not _MAC_DIGITS.match(digits):
@@ -689,8 +667,9 @@ def validate_setting(key: str, value: Any) -> Any:
 
     Only known keys (:data:`DEFAULT_SETTINGS`) are accepted, with the JSON type of their
     default (a ``bool`` is not an integer), within :data:`INTEGER_RANGES`; addresses are checked
-    and written in canonical form (IP addresses as PostgreSQL prints them, MAC addresses
-    ``aa:bb:cc:dd:ee:ff``), so a typing error cannot stop the lookups that read them.
+    and written in canonical form (the internet exits' addresses as :mod:`arcilogger_db.egress`
+    writes them, MAC addresses ``aa:bb:cc:dd:ee:ff``), so a typing error cannot stop the lookups
+    that read them.
     """
     if key not in DEFAULT_SETTINGS:
         raise SettingValueError(key, "setting_unknown", f"bilinmeyen ayar: {key}")
@@ -715,10 +694,6 @@ def validate_setting(key: str, value: Any) -> Any:
             raise SettingValueError(
                 key, code, f"{key}: en az {low}{upper} olmalı", low=low, high=high
             )
-    if key == "nat.public_ips":
-        return _unique([_ip(key, item) for item in value])
-    if key == "nat.wan_transip":
-        return _ip(key, value) if value.strip() else ""
     if key == "devices.infrastructure_macs":
         return _unique([_mac(key, item) for item in value])
     if key == "auth.totp_required_roles":

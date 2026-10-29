@@ -12,9 +12,10 @@ TSA, never legally valid) and the clocks where the code takes one:
 3. the first administrator through the setup flow (one-time token as ``arcilogger-api
    setup-token`` issues it), sign-in with real TOTP codes (RFC 6238, computed with ``pyotp`` as an
    authenticator app would), the KVKK notice;
-4. NAT settings for the double-NAT case (no public address configured: candidates) and the
-   exact case (``nat.wan_transip``); 5651 lookups of a session from the generator's ground truth;
-   the attribution chain must name the expected MAC, device and person;
+4. NAT settings for the double-NAT case (no internet exit configured: candidates) and the
+   exact case (the exit ``wan`` that Wave 2's ``nat.wan_transip`` converts to); 5651 lookups
+   of a session from the generator's ground truth; the attribution chain must name the
+   expected MAC, device and person;
 5. the official PDF report; sealing of the closed days with the core sealer and the chain
    verification; an evidence package of the lookup through the API (recent re-authentication),
    downloaded and verified by the standalone verifier in a separate ``python -I -S`` process —
@@ -64,6 +65,7 @@ from arcilogger_core.rawlog import format_line
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
 from arcilogger_core.tsa.mock import MockTsa, MockTsaProvider
+from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import (
     AuditLog,
@@ -392,7 +394,8 @@ def test_mvp_end_to_end(tmp_path: Path, db_engine: Engine) -> None:
 
         # -- exact: the FortiGate's WAN address is what transip shows ---------------------------
         with sessions() as session:
-            set_setting(session, "nat.wan_transip", TRANSIP, updated_by=USERNAME)
+            exits, _dropped = legacy_egresses([], TRANSIP, False)
+            set_setting(session, "nat.egresses", exits, updated_by=USERNAME)
             session.commit()
         response = client.post(
             "/api/v1/lookup/5651",

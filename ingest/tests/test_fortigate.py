@@ -26,6 +26,7 @@ from arcilogger_ingest.parsers.fortigate import (
     table_for,
 )
 from arcilogger_ingest.parsers.kv import tokenize
+from arcilogger_ingest.parsers.values import to_mac
 
 FIXTURES = Path(__file__).parents[2] / "tests" / "fixtures"
 SAMPLES = (FIXTURES / "format" / "fortigate-sample.log").read_bytes().splitlines()
@@ -71,6 +72,8 @@ def columns(table: str, **values: Any) -> dict[str, Any]:
         base["is_interim"] = False
     if table == "fg_dns":
         base["answers"] = None
+    if table == "fg_dhcp":
+        base["device_time"] = False
     unknown = set(values) - set(base) - {"extra"}
     assert not unknown, unknown
     return {**base, **values}
@@ -434,9 +437,12 @@ def test_no_field_is_lost(raw: bytes) -> None:
         return
     table, values = typed(outcome)
     mapped = {key: column for column, key, _ in SPECS[table]}
+    macs = {key for _, key, kind in SPECS[table] if kind == "mac"}
     for key, value in fields.items():
         if key in values["extra"]:
             assert values["extra"][key] == value
+        elif key in macs:  # normalised: lower case with colons (values.to_mac)
+            assert values[mapped[key]] == to_mac(value), key
         elif key in mapped:
             column_value = values[mapped[key]]
             assert str(column_value) == value or column_value == value, key
@@ -810,6 +816,51 @@ def test_synthetic_eventtime_units_and_fallbacks() -> None:
     assert prefixed.error is None
 
 
+def test_forward_traffic_with_srcmac() -> None:
+    """ADR-0016: ``srcmac`` is a column (lower case with colons); ``mastersrcmac`` and
+    ``srcmacvendor`` stay in ``extra`` (FortiGate DHCP lines: test_fortigate_dhcp.py)."""
+    (line,) = [line for line in SYNTHETIC if b"sessionid=3100119 " in line]
+    outcome = parse(line)
+    assert outcome.error is None
+    assert (outcome.message["type"], outcome.message["subtype"]) == ("traffic", "forward")
+    assert outcome.message["time"] == utc(2026, 9, 23, 6, 46, 25)
+    assert typed(outcome) == (
+        "fg_traffic",
+        columns(
+            "fg_traffic",
+            logid="0000000013",
+            subtype="forward",
+            action="close",
+            policyid=12,
+            policyname="internet-out",
+            proto=6,
+            sessionid=3100119,
+            srcip="172.20.42.57",
+            srcport=50005,
+            dstip="203.0.113.44",
+            dstport=443,
+            srcintf="vlan42",
+            srcmac="00:00:5e:00:53:57",
+            dstintf="wan1",
+            transip="100.64.12.9",
+            transport=50005,
+            trandisp="snat",
+            service="HTTPS",
+            duration=30,
+            sentbyte=1200,
+            rcvdbyte=34000,
+            sentpkt=12,
+            rcvdpkt=30,
+            extra={
+                **COMMON_EXTRA,
+                "level": "notice",
+                "mastersrcmac": "00:00:5e:00:53:57",
+                "srcmacvendor": "sentetik",
+            },
+        ),
+    )
+
+
 def test_unmapped_subtype_keeps_every_field_in_messages_extra() -> None:
     outcome = synthetic("9900000018")
     assert outcome.rows == ()
@@ -828,6 +879,7 @@ def test_unmapped_subtype_keeps_every_field_in_messages_extra() -> None:
         ("traffic", "forward", "fg_traffic"),
         ("traffic", "sniffer", "fg_traffic"),
         ("event", "vpn", "fg_event"),
+        ("event", "system", "fg_event"),  # a DHCP server line is routed by its shape later
         ("utm", "webfilter", "fg_web"),
         ("utm", "dns", "fg_dns"),
         ("utm", "app-ctrl", "fg_app"),
@@ -1014,11 +1066,12 @@ def test_every_spec_column_exists_in_the_model() -> None:
     for table, spec in SPECS.items():
         model_columns = set(Base.metadata.tables[table].columns.keys())
         assert {column for column, _, _ in spec} <= model_columns, table
-    # Spec 7.3 fg_traffic list, all present as columns (the rest of the line goes to extra).
+    # Spec 7.3 fg_traffic list and srcmac (ADR-0016), all present as columns (the rest of the
+    # line goes to extra).
     assert {column for column, _, _ in FG_TRAFFIC} | {"is_interim"} == {
         "logid", "subtype", "action", "policyid", "policyname", "sessionid", "proto", "srcip",
-        "srcport", "srcintf", "dstip", "dstport", "dstintf", "transip", "transport", "trandisp",
-        "service", "dstinetsvc", "app", "appid", "appcat", "apprisk", "dstcountry", "duration",
-        "sentbyte", "rcvdbyte", "sentpkt", "rcvdpkt", "sentdelta", "rcvddelta", "durationdelta",
-        "is_interim", "utmaction", "crscore",
+        "srcport", "srcintf", "srcmac", "dstip", "dstport", "dstintf", "transip", "transport",
+        "trandisp", "service", "dstinetsvc", "app", "appid", "appcat", "apprisk", "dstcountry",
+        "duration", "sentbyte", "rcvdbyte", "sentpkt", "rcvdpkt", "sentdelta", "rcvddelta",
+        "durationdelta", "is_interim", "utmaction", "crscore",
     }  # fmt: skip

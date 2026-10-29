@@ -24,6 +24,7 @@ from arcilogger_core.rawlog import format_line
 from arcilogger_core.timeutil import site_day, to_site
 from arcilogger_db.models import (
     FgApp,
+    FgDhcp,
     FgDns,
     FgTraffic,
     FgWeb,
@@ -36,6 +37,12 @@ from arcilogger_db.models import (
 TR = timezone(timedelta(hours=3))
 ROUTER = "172.20.10.1"
 FIREWALL = "172.31.255.1"
+#: FortiGate DHCP server events (ADR-0016; the logids of ``dhcp.fortigate_logids``): ``logdesc``
+#: and ``msg`` as the synthetic fixture lines write them (RELEASE texts are placeholders).
+FORTIGATE_DHCP_TEXTS = {
+    "0100026001": ("DHCP Ack log", "DHCP server sends a DHCPACK"),
+    "0100026002": ("DHCP Release log", "sentetik: DHCP release"),
+}
 
 
 def tr(day: date, hour: int, minute: int = 0, second: int = 0) -> datetime:
@@ -179,7 +186,8 @@ class Evidence:
         ``srcintf``/``dstintf`` (the session's FortiGate interfaces, e.g. ``vlan42``/``wan1``)
         and ``srcmac`` (device identification on the source interface, ADR-0016) are written
         only when given, so every line written without them stays byte for byte as before;
-        ``srcmac`` goes into the raw line only."""
+        ``srcmac`` goes into the raw line as given and into the row normalised (lower case,
+        colons), as the parser stores it."""
         local = to_site(time)
         logid = "0000000020" if interim else "0000000013"
         nat = (
@@ -244,6 +252,95 @@ class Evidence:
                 trandisp=trandisp if transip else None,
                 duration=duration,
                 is_interim=interim,
+                srcmac=None if not srcmac else srcmac.lower().replace("-", ":"),
+            )
+        )
+
+    def fortigate_dhcp(
+        self,
+        time: datetime,
+        ip: str,
+        mac: str,
+        *,
+        logid: str = "0100026001",
+        interface: str | None = "vlan42",
+        hostname: str | None = None,
+        lease: int | None = 86400,
+        dhcp_msg: str | None = "Ack",
+        source: str = "fortigate",
+        device_time: bool = True,
+        vd: str | None = "root",
+        devid: str = "FGT0000000000000",
+    ) -> int:
+        """A FortiGate DHCP server event (ADR-0016: an ACK ``0100026001`` by default, a RELEASE
+        with ``logid="0100026002"``) in the format of the synthetic fixture lines, and the
+        ``fg_dhcp`` row the shipped parser makes of it (``extra`` included).
+
+        ``source``: the spool folder (``unknown-<ip>`` for an unconfigured sender, which then
+        sends from that address). ``device_time=False``: the line's own date and ``eventtime``
+        lie two days before ``time`` (beyond the parser's clock skew), so the row's time is the
+        receive time ``time`` (``fortigate.time``). ``None`` leaves a field out of the line
+        (without ``dhcp_msg`` the parser files it under ``fg_event``: ``ValueError``); ``""``
+        writes an empty one, whose column is then ``NULL`` (``dhcp_msg=""``: a row without a
+        ``dhcp_msg``). ``devid``: the unit's serial number (the two members of an HA pair log
+        two)."""
+        if dhcp_msg is None:
+            raise ValueError("a FortiGate DHCP line without dhcp_msg is no fg_dhcp row")
+        sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
+        stamp = time if device_time else time - timedelta(days=2)
+        local = to_site(stamp)
+        logdesc, msg = FORTIGATE_DHCP_TEXTS.get(logid, ("sentetik: DHCP", "sentetik: DHCP"))
+        fields = {
+            "interface": interface,
+            "dhcp_msg": dhcp_msg,
+            "mac": mac.upper(),
+            "ip": ip,
+            "lease": lease,
+            "hostname": hostname,
+            "msg": msg,
+        }
+        tail = "".join(
+            f" {key}={value}" if key in ("ip", "lease") else f' {key}="{value}"'
+            for key, value in fields.items()
+            if value is not None
+        )
+        domain = f' vd="{vd}"' if vd is not None else ""
+        message = (
+            f'<190>date={local:%Y-%m-%d} time={local:%H:%M:%S} devname="FIREWALL-01" '
+            f'devid="{devid}" eventtime={int(stamp.timestamp() * 1e9)} tz="+0300" '
+            f'logid="{logid}" type="event" subtype="system" level="information"{domain} '
+            f'logdesc="{logdesc}"{tail}'
+        )
+        common = self._write(source, sender, time, message, None if device_time else time)
+        extra: dict[str, Any] = {"devid": devid}
+        if vd is not None:
+            extra["vd"] = vd
+        if not device_time:  # the parser keeps a device time it did not use
+            extra.update(
+                date=f"{local:%Y-%m-%d}",
+                time=f"{local:%H:%M:%S}",
+                eventtime=str(int(stamp.timestamp() * 1e9)),
+                tz="+0300",
+            )
+        extra.update(
+            {key: "" for key in ("interface", "dhcp_msg", "hostname") if fields[key] == ""}
+        )
+        return self._add(
+            FgDhcp(
+                **common,
+                logid=logid,
+                subtype="system",
+                level="information",
+                logdesc=logdesc,
+                dhcp_msg=dhcp_msg or None,
+                interface=interface or None,
+                ip=ip,
+                mac=mac.lower().replace("-", ":"),
+                hostname=hostname or None,
+                lease=lease,
+                msg=msg,
+                device_time=device_time,
+                extra=extra,
             )
         )
 

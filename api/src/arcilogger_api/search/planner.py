@@ -24,7 +24,8 @@
   and the completeness of the counts are checked when the statistics run (``stats.py``).
 
 Branch ranks are the positions in ``models.TIME_SERIES_TABLES`` (``messages`` 0, ``fg_traffic``
-1 … ``mt_event`` 14): rows of one moment are ordered by rank, which the cursor relies on.
+1 … ``mt_event`` 14, ``fg_dhcp`` 15, appended by revision ``0017_fortigate_dhcp``): rows of one
+moment are ordered by rank, which the cursor relies on.
 """
 
 from __future__ import annotations

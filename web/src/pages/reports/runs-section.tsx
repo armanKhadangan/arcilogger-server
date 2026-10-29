@@ -193,7 +193,10 @@ export function RunsSection({
                       <button
                         type="button"
                         className="rounded-sm text-left text-accent-ink hover:underline"
-                        aria-label={t('reports.runs.open', { id: run.id })}
+                        aria-label={t('reports.runs.open', {
+                          started: formatDateTime(run.started_at),
+                          id: run.id,
+                        })}
                         onClick={() => {
                           onOpenRun(run.id);
                         }}

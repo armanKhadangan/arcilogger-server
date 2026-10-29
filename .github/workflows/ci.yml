@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Work branches are tested through their pull request, not once more for every push.
   push:
-    branches: [main, 'claude/**']
+    branches: [main, 'wave-*']
   pull_request:
   workflow_dispatch:
 
@@ -11,12 +12,15 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push still cancels its pull request's run; runs on wave-* and main finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Actions are pinned by commit SHA (supply-chain hygiene); Dependabot keeps them current.
 jobs:
-  # Database tests really run in both Python jobs: ARCILOGGER_REQUIRE_DB=1 turns a missing
+  # Database tests really run in every Python job: ARCILOGGER_REQUIRE_DB=1 turns a missing
   # ARCILOGGER_TEST_PG into a failure instead of a skip (see docs/MVP-CONTRACTS.md).
+  # Each test runs once per operating system: the poe tasks of a platform together name every
+  # testpaths directory once (tests/test_ci_workflows.py checks it); "poe test" is for local use.
   python-linux:
     name: Python (ubuntu-latest, PostgreSQL 16 + TimescaleDB)
     runs-on: ubuntu-latest
@@ -48,7 +52,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: '3.12'
           enable-cache: true
@@ -66,27 +70,30 @@ jobs:
           -c "ALTER SYSTEM SET log_min_messages = fatal"
           -c "ALTER SYSTEM SET log_min_error_statement = panic"
           -c "SELECT pg_reload_conf()"
-      - name: Tests (incl. database tests on TimescaleDB)
-        run: uv run poe test
       - name: Web API types match the API (OpenAPI contract)
         run: uv run python web/scripts/export_api_contract.py --check
       # The mocked E2E tests answer with web/e2e/samples/*.json: keys, types and enum-like values
       # (states, statuses, modes, tones, error codes) must still be what the real API sends.
       - name: E2E samples match the real API
         run: uv run python web/scripts/capture_api_samples.py --check
-      # Spec 17 coverage gates (each package measured with its own tests).
-      - name: Core coverage gate (>= 90 %)
+      # The tests, incl. the database tests on TimescaleDB, with the spec 17 coverage gates (each
+      # package measured with its own tests); test-rest reports the other packages' coverage.
+      - name: Tests of core and tests/ with the core coverage gate (>= 90 %)
         run: uv run poe test-core
-      - name: Ingest coverage gate (>= 85 %)
+      - name: Tests of ingest with the ingest coverage gate (>= 85 %)
         run: uv run poe test-ingest
-      - name: API coverage gate (>= 80 %)
+      - name: Tests of api with the API coverage gate (>= 80 %)
         run: uv run poe test-api
-      - name: Ingest throughput guard (no coverage tracing)
+      - name: Tests of db, collector and worker (coverage report, no gate)
+        run: uv run poe test-rest
+      - name: Throughput guards (alone, no coverage tracing)
         run: uv run poe test-perf
 
-  python-windows:
-    name: Python (windows-latest, PostgreSQL)
-    # Windows is the production platform.
+  # Windows is the production platform. Three jobs in parallel, each test once: the core gate
+  # (with lint and the wheels), every other test directory, and the throughput guards alone on
+  # their runner.
+  python-windows-core:
+    name: Python (windows-latest, PostgreSQL) — lint, core gate, wheels
     runs-on: windows-latest
     env:
       ARCILOGGER_REQUIRE_DB: '1'
@@ -94,58 +101,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: '3.12'
           enable-cache: true
+      # Prints what the runner image has, fails with a clear message if PostgreSQL cannot be
+      # started and passes ARCILOGGER_TEST_PG to the later steps.
       - name: Start the PostgreSQL preinstalled on the runner image
-        # The runner image documents PGBIN/PGROOT/PGDATA and a disabled postgresql service.
-        # These facts cannot be checked from the repository: print what is there and fail
-        # with a clear message if PostgreSQL cannot be started.
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $false  # exit codes are checked below
-          Write-Host "PGBIN=$env:PGBIN PGROOT=$env:PGROOT PGDATA=$env:PGDATA PGUSER=$env:PGUSER"
-          $service = Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $service -or -not $env:PGBIN) {
-            Get-ChildItem 'C:\Program Files\PostgreSQL' -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Write-Host
-            Write-Host '::error::No preinstalled PostgreSQL service/PGBIN found on this runner image; database tests cannot run.'
-            exit 1
-          }
-          Write-Host "Service $($service.Name): status=$($service.Status) start=$($service.StartType)"
-          Set-Service -Name $service.Name -StartupType Manual
-          Start-Service -Name $service.Name
-          $ready = $false
-          for ($i = 0; $i -lt 30 -and -not $ready; $i++) {
-            & (Join-Path $env:PGBIN 'pg_isready.exe') -h 127.0.0.1 -p 5432
-            $ready = ($LASTEXITCODE -eq 0)
-            if (-not $ready) { Start-Sleep -Seconds 2 }
-          }
-          if (-not $ready) {
-            Get-ChildItem (Join-Path $env:PGDATA 'log') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 50 | Write-Host
-            Write-Host '::error::PostgreSQL did not become ready on 127.0.0.1:5432.'
-            exit 1
-          }
-          $user = if ($env:PGUSER) { $env:PGUSER } else { 'postgres' }
-          $password = if ($env:PGPASSWORD) { $env:PGPASSWORD } else { 'root' }
-          $env:PGPASSWORD = $password
-          & (Join-Path $env:PGBIN 'psql.exe') -h 127.0.0.1 -U $user -d postgres -w -c 'SELECT version();' -c 'SHOW server_encoding;'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Cannot log in to PostgreSQL as $user (PGUSER/PGPASSWORD of the runner image)."
-            exit 1
-          }
-          "ARCILOGGER_TEST_PG=postgresql://${user}:${password}@127.0.0.1:5432/postgres" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        run: ./tools/ci/start-windows-postgres.ps1
       - name: Install workspace
         run: uv sync --locked --all-packages
       - name: Lint (ruff) and types (mypy --strict, Linux and Windows)
         run: uv run poe lint
-      - name: Tests (incl. database tests on plain PostgreSQL)
-        run: uv run poe test
-      - name: Core coverage gate (>= 90 %)
+      - name: Tests of core and tests/ with the core coverage gate (>= 90 %)
         run: uv run poe test-core
-      - name: Ingest throughput guard (no coverage tracing)
-        run: uv run poe test-perf
       - name: Build wheels (packaging check)
         run: uv build --all-packages --out-dir dist/wheels
       - name: The db wheel ships its migrations
@@ -155,6 +125,49 @@ jobs:
           names = zipfile.ZipFile(glob.glob('dist/wheels/arcilogger_db-*.whl')[0]).namelist();
           assert any(n.endswith('migrations/versions/v0001_baseline.py') for n in names), names;
           assert any(n.endswith('migrations/env.py') for n in names), names"
+
+  python-windows-tests:
+    name: Python (windows-latest, PostgreSQL) — other tests
+    runs-on: windows-latest
+    env:
+      ARCILOGGER_REQUIRE_DB: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - name: Start the PostgreSQL preinstalled on the runner image
+        shell: pwsh
+        run: ./tools/ci/start-windows-postgres.ps1
+      - name: Install workspace
+        run: uv sync --locked --all-packages
+      - name: Tests of db, collector, ingest, api, worker (database tests on plain PostgreSQL)
+        run: uv run poe test-others
+
+  python-windows-perf:
+    name: Python (windows-latest, PostgreSQL) — throughput guards
+    runs-on: windows-latest
+    env:
+      ARCILOGGER_REQUIRE_DB: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - name: Start the PostgreSQL preinstalled on the runner image
+        shell: pwsh
+        run: ./tools/ci/start-windows-postgres.ps1
+      - name: Install workspace
+        run: uv sync --locked --all-packages
+      # Alone on this runner: the guards measure speed (serial, no coverage tracing).
+      - name: Throughput guards (alone, no coverage tracing)
+        run: uv run poe test-perf
 
   web:
     name: Web interface

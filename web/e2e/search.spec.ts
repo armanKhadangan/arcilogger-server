@@ -27,10 +27,12 @@ async function openSearch(
   user = 'tolga',
   options: { api?: MockOptions; search?: SearchOptions; path?: string; clock?: boolean } = {},
 ): Promise<{ api: MockApi; search: SearchMock }> {
-  // The browser's clock at 15:00 site time on the sample day (`useSampleClock`). Not for a drag
-  // across the histogram: recharts throttles mouse moves by `Date.now()`, which a fixed clock stops.
-  if (options.clock !== false)
-    await page.clock.setFixedTime(new Date(`${SAMPLE_TODAY}T15:00:00+03:00`));
+  // The browser's clock at 15:00 site time on the sample day (`useSampleClock`). For a drag across
+  // the histogram it runs on from there: recharts throttles mouse moves by `Date.now()`, which a
+  // fixed clock stops.
+  const sampleTime = new Date(`${SAMPLE_TODAY}T15:00:00+03:00`);
+  if (options.clock !== false) await page.clock.setFixedTime(sampleTime);
+  else await page.clock.install({ time: sampleTime });
   const api = await mockApi(page, { signedInAs: user, ...options.api });
   const search = await mockSearch(page, api, options.search);
   await page.goto(options.path ?? '/search');
@@ -173,7 +175,12 @@ test.describe('Arama', () => {
     const box = queryBox(page);
     await box.fill('kay');
     const list = page.getByRole('listbox', { name: 'Öneriler' });
-    await expect(list.getByRole('option')).toHaveText([/^kaynak:/, /^kaynakip:/, /^kaynakport:/]);
+    await expect(list.getByRole('option')).toHaveText([
+      /^kaynak:/,
+      /^kaynakip:/,
+      /^kaynakport:/,
+      /^kaynakmac:/, // srcmac: (ADR-0016), in catalogue order
+    ]);
     await box.press('ArrowDown');
     await expect(list.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
     await box.press('Enter');
@@ -222,8 +229,12 @@ test.describe('Arama', () => {
     const { api } = await openSearch(page, 'tolga', { clock: false });
     await runQuery(page, 'srcip:172.20.42.57');
     const chart = page.getByTestId('histogram');
-    await expect(chart.locator('.recharts-surface')).toBeVisible();
+    const runs = () => api.callsTo('POST', '/search').map((call) => call.body);
     const drag = async (start: number, end: number) => {
+      // On the newest run's chart: the previous run's is replaced when the run answers, and the
+      // newest one's statistics are asked for only after that.
+      await expect.poll(() => api.callsTo('POST', '/search/stats').length).toBe(runs().length);
+      await expect(chart.locator('.recharts-surface')).toBeVisible();
       const box = await chart.boundingBox();
       if (!box) throw new Error('no histogram');
       // The plot lies right of the 48 px value axis.
@@ -235,7 +246,6 @@ test.describe('Arama', () => {
       await page.mouse.move(x(end), y, { steps: 5 });
       await page.mouse.up();
     };
-    const runs = () => api.callsTo('POST', '/search').map((call) => call.body);
 
     // Across every bar: the hourly buckets start before the range and end after it, and the zoom
     // is cut to the search's own range (a longer one could exceed `search.max_days`).
@@ -254,7 +264,9 @@ test.describe('Arama', () => {
     expect(Date.parse(to ?? '')).toBeLessThan(Date.parse(first.to));
     expect(runs()[2]).toEqual({ q: 'srcip:172.20.42.57', from, to });
     await expect(
-      page.getByRole('button', { name: /^Zaman aralığı: \d{2}\.\d{2}\.2026/ }),
+      page.getByRole('button', {
+        name: new RegExp(`^Zaman aralığı: \\d{2}\\.\\d{2}\\.${SAMPLE_TODAY.slice(0, 4)}`),
+      }),
     ).toBeVisible();
     expect(await keptAnywhere(page, '172.20.42.57')).toBe(false);
   });
@@ -358,7 +370,7 @@ test.describe('Arama', () => {
     await expect(sheet).toBeHidden();
 
     // "Ham satır" in the row opens the raw line directly.
-    await results(page).getByRole('button', { name: 'Ham satırı aç: fortigate, satır 27' }).click();
+    await results(page).getByRole('button', { name: 'Ham satır: fortigate, satır 27' }).click();
     await expect(raw).toBeVisible();
     expect(api.callsTo('GET', '/raw').at(-1)?.query.toString()).toBe(
       'source=fortigate&day=2026-10-09&line=27&offset=10260',

@@ -72,6 +72,11 @@ NAMING_CONVENTION: Final = {
 ROLES: Final = ("admin", "auditor", "hr", "viewer")
 SOURCE_TYPES: Final = ("fortigate", "mikrotik", "generic")
 LEASE_END_REASONS: Final = ("dhcp", "timeout", "superseded", "arp", "open")
+#: The tables a lease interval is built from (``fg_dhcp`` since revision ``0017_fortigate_dhcp``).
+LEASE_SOURCE_TABLES: Final = ("mt_dhcp", "mt_arp", "fg_dhcp")
+#: The FortiOS DHCP ``lease-time`` range in seconds (ADR-0016, D6): a logged lease outside it
+#: (``0`` = unlimited included) is not stored in ``leases.lease_seconds``.
+LEASE_SECONDS_RANGE: Final = (300, 8_640_000)
 CONFIDENCE_LEVELS: Final = ("high", "medium", "low")
 DEVICE_TYPES: Final = ("pc", "phone", "printer", "ip_phone", "ap", "server", "camera", "other")
 ALERT_SEVERITIES: Final = ("info", "low", "medium", "high", "critical")
@@ -256,6 +261,10 @@ class FgTraffic(TimeSeries, Base):
     srcip: Mapped[str | None] = mapped_column(INET)
     srcport: Mapped[int | None] = mapped_column(Integer)
     srcintf: Mapped[str | None] = mapped_column(Text)
+    #: "MAC address associated with the Source IP" (FortiOS ``srcmac``; filled only where device
+    #: identification is on). Revision ``0017_fortigate_dhcp``; no index (search field
+    #: ``srcmac:``, scanned). Never lease evidence (ADR-0016, D10).
+    srcmac: Mapped[str | None] = mapped_column(MACADDR)
     dstip: Mapped[str | None] = mapped_column(INET)
     dstport: Mapped[int | None] = mapped_column(Integer)
     dstintf: Mapped[str | None] = mapped_column(Text)
@@ -451,6 +460,43 @@ class FgEvent(TimeSeries, Base):
     cfgobj: Mapped[str | None] = mapped_column(Text)
     cfgattr: Mapped[str | None] = mapped_column(Text)
     msg: Mapped[str | None] = mapped_column(Text)
+
+
+class FgDhcp(TimeSeries, Base):
+    """FortiGate DHCP server events (ADR-0016, revision ``0017_fortigate_dhcp``).
+
+    A ``type="event"`` line with ``ip``, ``mac`` and ``dhcp_msg`` that convert becomes a row here
+    instead of in ``fg_event`` (the parser decides by the shape of the line, D3). What a row
+    means (an ACK that assigns, a RELEASE) is decided by the worker from its ``logid`` and the
+    settings ``dhcp.fortigate_*`` (D4, D25), so old rows are re-read after a settings change.
+    """
+
+    __tablename__ = "fg_dhcp"
+    __table_args__ = _ts_args(
+        "fg_dhcp",
+        Index("ix_fg_dhcp_ip_time", "ip", "time"),
+        Index("ix_fg_dhcp_mac_time", "mac", "time"),
+        comment=(
+            "FortiGate DHCP server events (ACK/RELEASE by logid): which MAC got which IP when."
+        ),
+    )
+
+    logid: Mapped[str | None] = mapped_column(Text)
+    subtype: Mapped[str | None] = mapped_column(Text)
+    level: Mapped[str | None] = mapped_column(Text)
+    logdesc: Mapped[str | None] = mapped_column(Text)
+    dhcp_msg: Mapped[str | None] = mapped_column(Text)
+    #: The FortiGate interface of the DHCP server (``leases.server`` of its leases, D7).
+    interface: Mapped[str | None] = mapped_column(Text)
+    ip: Mapped[str] = mapped_column(INET, nullable=False)
+    mac: Mapped[str] = mapped_column(MACADDR, nullable=False)
+    hostname: Mapped[str | None] = mapped_column(Text)
+    #: ``lease`` as logged (seconds, uint32; ``0`` = unlimited; verify on site); NULL when absent.
+    lease: Mapped[int | None] = mapped_column(BigInteger)
+    msg: Mapped[str | None] = mapped_column(Text)
+    #: ``True``: ``time`` is the FortiGate's event time; ``False``: the receive time (no usable
+    #: device time, ``fortigate.time``), never lease evidence (D28).
+    device_time: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 # -- MikroTik -------------------------------------------------------------------------------------
@@ -833,8 +879,17 @@ class Lease(Base):
         CheckConstraint(_in("confidence", CONFIDENCE_LEVELS), name="confidence"),
         CheckConstraint('"end" IS NULL OR "end" >= start', name="end_after_start"),
         CheckConstraint("(end_reason = 'open') = (\"end\" IS NULL)", name="open_iff_no_end"),
+        CheckConstraint(_in("source_table", LEASE_SOURCE_TABLES), name="source_table"),
+        CheckConstraint(
+            "lease_seconds IS NULL OR lease_seconds BETWEEN "
+            f"{LEASE_SECONDS_RANGE[0]} AND {LEASE_SECONDS_RANGE[1]}",
+            name="lease_seconds",
+        ),
         Index("ix_leases_ip_start", "ip", "start"),
         Index("ix_leases_mac_start", "mac", "start"),
+        # open and recently ended leases per table (the FortiGate lease alerts, the Kira kanıtı
+        # card; revision 0017_fortigate_dhcp)
+        Index("ix_leases_source_table_end", "source_table", "end"),
         {"comment": "Lease timeline: which MAC held which IP when (derived, rebuildable)."},
     )
 
@@ -850,10 +905,15 @@ class Lease(Base):
     end: Mapped[datetime | None] = mapped_column(TZ)
     end_reason: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
     confidence: Mapped[str] = mapped_column(Text, nullable=False)
-    #: Table the interval was built from: ``mt_dhcp`` or ``mt_arp``.
+    #: Table the interval was built from: ``mt_dhcp``, ``mt_arp`` or ``fg_dhcp``
+    #: (:data:`LEASE_SOURCE_TABLES`).
     source_table: Mapped[str] = mapped_column(Text, nullable=False)
     #: Time of the latest evidence that kept the interval alive (timeout is computed from it).
     last_evidence: Mapped[datetime | None] = mapped_column(TZ)
+    #: The lease time a FortiGate ACK logged, when usable (:data:`LEASE_SECONDS_RANGE`): the
+    #: interval then ends that long after its last DHCP evidence (ADR-0016, D6). NULL for every
+    #: other lease (configured or fallback time). Revision ``0017_fortigate_dhcp``.
+    lease_seconds: Mapped[int | None] = mapped_column(Integer)
     #: Evidence references: a list of ``arcilogger_worker.lookup.EvidenceRef.to_dict()`` objects,
     #: ``{"table", "row_id", "time", "raw": {source, day, line, offset} | null, "summary"}``.
     evidence: Mapped[list[Any]] = mapped_column(
@@ -2085,6 +2145,9 @@ TIME_SERIES_MODELS: Final = (
     MtInterface,
     MtConfig,
     MtEvent,
+    # appended (revision 0017_fortigate_dhcp): search branch ranks and saved cursors are
+    # positions in this tuple, so nothing existing moves
+    FgDhcp,
 )
 TIME_SERIES_TABLES: Final = tuple(model.__tablename__ for model in TIME_SERIES_MODELS)
 

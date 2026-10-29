@@ -2189,7 +2189,7 @@
     "valid_until": null
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:30.426962+00:00",
+    "captured_at": "2026-10-13T04:01:17.864635+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

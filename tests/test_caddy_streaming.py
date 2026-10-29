@@ -19,6 +19,7 @@ from __future__ import annotations
 import gzip
 import http.client
 import http.server
+import json
 import os
 import re
 import socket
@@ -35,6 +36,7 @@ import pytest
 from sqlalchemy import Engine
 
 from arcilogger_api.app import create_app
+from arcilogger_api.live.hub import hub_of
 from arcilogger_api.live.testing import LiveServer, read_events, sign_in, spool_line
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
@@ -49,6 +51,16 @@ needs_caddy = pytest.mark.skipif(
 )
 #: Sent by the stub upstream for every other API path: long enough for Caddy to compress it.
 PLAIN_BODY = b'{"items": [' + b", ".join(b'"%04d"' % n for n in range(400)) + b"]}"
+#: How Caddy's log says that the port it was given could not be bound (``listen tcp :<port>:
+#: bind: …``): EADDRINUSE on Linux and WSAEADDRINUSE on Windows (another socket took it), and
+#: WSAEACCES, Windows' answer for a port another socket holds exclusively or a reserved range.
+PORT_TAKEN = (
+    "address already in use",
+    "Only one usage of each socket address",
+    "An attempt was made to access a socket in a way forbidden by its access permissions",
+)
+#: Ports tried, each free when it is picked, before a test gives up starting Caddy.
+CADDY_PORT_TRIES = 5
 
 
 def _site_block(text: str) -> str:
@@ -125,15 +137,71 @@ def caddy_env(tmp_path: Path, extra: dict[str, str]) -> dict[str, str]:
     return env
 
 
+class PortTakenError(Exception):
+    """Caddy stopped because the port it was given could not be bound."""
+
+
+def caddy_errors(log: Path, start: int) -> list[str]:
+    """The ``error`` messages of Caddy's log file from byte ``start`` on. The Caddyfile sends
+    Caddy's own log to a file in ``ARCILOGGER_LOG_DIR``, so a failed start leaves stderr empty."""
+    if not log.is_file():
+        return []
+    with log.open("rb") as handle:
+        handle.seek(start)
+        lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    errors = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("level") == "error":
+            errors.append(str(entry.get("msg")))
+    return errors
+
+
+def port_taken(errors: list[str], port: int) -> bool:
+    """Whether Caddy stopped because ``port`` could not be bound, for TCP or for HTTP/3's UDP."""
+    return any(
+        f"listen {network} :{port}: bind: {reason}" in error
+        for error in errors
+        for network in ("tcp", "udp")
+        for reason in PORT_TAKEN
+    )
+
+
 def start_caddy(
+    tmp_path: Path, upstream: str
+) -> tuple[subprocess.Popen[bytes], int, ssl.SSLContext]:
+    """The real Caddyfile on a free port in front of ``upstream``; returns it, the port and a TLS
+    context that trusts its local CA once it answers.
+
+    The port is free when it is picked, but only Caddy binds it, later and in its own process, so
+    another process can take it in between. Only when Caddy's log says so is another port tried.
+    """
+    failures: list[str] = []
+    for _ in range(CADDY_PORT_TRIES):
+        port = free_port()
+        try:
+            process, context = run_caddy(tmp_path, port, upstream)
+        except PortTakenError as taken:
+            failures.append(str(taken))
+            continue
+        return process, port, context
+    raise AssertionError(f"Caddy's port was taken {CADDY_PORT_TRIES} times: {failures}")
+
+
+def run_caddy(
     tmp_path: Path, port: int, upstream: str
 ) -> tuple[subprocess.Popen[bytes], ssl.SSLContext]:
     """The real Caddyfile on ``port`` in front of ``upstream``; returns it and a TLS context that
-    trusts its local CA once it answers."""
+    trusts its local CA once it answers, or raises :class:`PortTakenError`."""
     assert CADDY is not None
     web = tmp_path / "web"
     web.mkdir(exist_ok=True)
     (web / "index.html").write_text("<!doctype html><title>ARCILOGGER</title>", encoding="utf-8")
+    log = tmp_path / "logs" / "caddy.log"
+    start = log.stat().st_size if log.is_file() else 0
     process = subprocess.Popen(
         [CADDY, "run", "--config", str(CADDYFILE), "--adapter", "caddyfile"],
         env=caddy_env(
@@ -161,8 +229,11 @@ def start_caddy(
             except OSError:
                 pass
         if process.poll() is not None:
-            stderr = process.stderr.read().decode() if process.stderr else ""
-            raise AssertionError(f"Caddy stopped: {stderr}")
+            _, stderr = process.communicate()
+            errors = caddy_errors(log, start)
+            if port_taken(errors, port):
+                raise PortTakenError("; ".join(errors))
+            raise AssertionError(f"Caddy stopped: {stderr.decode()} {errors}")
         time.sleep(0.3)
     process.kill()
     raise AssertionError("Caddy did not answer within 30 s")
@@ -179,8 +250,7 @@ def stop_caddy(process: subprocess.Popen[bytes]) -> None:
 
 @needs_caddy
 def test_events_pass_caddy_at_once_and_uncompressed(tmp_path: Path, upstream: int) -> None:
-    port = free_port()
-    process, context = start_caddy(tmp_path, port, f"127.0.0.1:{upstream}")
+    process, port, context = start_caddy(tmp_path, f"127.0.0.1:{upstream}")
     try:
         connection = http.client.HTTPSConnection("localhost", port, context=context, timeout=10)
         started = time.monotonic()
@@ -223,13 +293,17 @@ def test_a_spool_line_reaches_the_live_tail_through_caddy(
         }
     )
     layout = Layout(config.data_dir)
-    spool = layout.spool_file("fortigate", site_day(utc_now()))
+    # The hub follows the spool file of its own site day: with its own clock, a site midnight
+    # (21:00 UTC) between choosing this file and opening the stream, or before the append,
+    # leaves the line in a file it no longer reads. It reads the test's moment instead.
+    moment = utc_now()
+    spool = layout.spool_file("fortigate", site_day(moment))
     spool.parent.mkdir(parents=True)
     spool.write_bytes(spool_line('logid="0000000013" type="traffic" srcip=172.20.41.105'))
     app = create_app(config, db_engine, audit_flush_seconds=None)
+    hub_of(app).now = lambda: moment
     with LiveServer(app) as api:
-        port = free_port()
-        process, context = start_caddy(tmp_path, port, f"127.0.0.1:{api.port}")
+        process, port, context = start_caddy(tmp_path, f"127.0.0.1:{api.port}")
         try:
             with httpx.Client(
                 base_url=f"https://localhost:{port}", verify=context, timeout=10

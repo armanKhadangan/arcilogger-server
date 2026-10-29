@@ -233,24 +233,6 @@ _ALERTS = _group(
 _LOOKUP = _group(
     "lookup",
     (
-        "nat.public_ips",
-        "Genel IP adresleri (NAT)",
-        "Public IP addresses (NAT)",
-        "Güvenlik duvarının genel (WAN) adresleri. Boş: servis sağlayıcının yönlendiricisi "
-        "ikinci bir NAT yapıyor; genel IP ve porta göre sorgular yalnızca aday listesi verebilir.",
-        "The firewall's public (WAN) addresses. Empty: the ISP router does a second NAT; "
-        "lookups by public IP and port can only give ranked candidates.",
-    ),
-    (
-        "nat.wan_transip",
-        "Güvenlik duvarının WAN adresi (transip)",
-        "Firewall WAN address (transip)",
-        "FortiGate'in transip alanında görünen kendi WAN adresi (ör. servis sağlayıcının "
-        "yönlendiricisinin arkasındaki özel adres). Kurulum yerinde girilir, tahmin edilmez.",
-        "The FortiGate's own WAN address as seen in transip (e.g. a private address behind the "
-        "ISP router). Entered on site, never assumed.",
-    ),
-    (
         "nat.egresses",
         "İnternet çıkışları (NAT)",
         "Internet exits (NAT)",
@@ -317,16 +299,6 @@ _LOOKUP = _group(
         "Lookup timeout (seconds)",
         "Sorgu bu süreden sonra durdurulur ve zaman aşımı bildirilir.",
         "A lookup is stopped after this time and reports a timeout.",
-    ),
-    (
-        "lookup.port_hint",
-        "Port ipucu",
-        "Port hint",
-        "Adaylar sıralanırken FortiGate portu istenen genel porta eşit olanlar öne alınır. "
-        "Servis sağlayıcının yönlendiricisinin kaynak portları koruduğunu yerinde doğrulamadan "
-        "açmayın.",
-        "Candidates whose FortiGate port equals the requested public port rank first. Verify on "
-        "site that the ISP router keeps source ports before switching it on.",
     ),
     (
         "lookup.dns_lookback_seconds",

@@ -60,6 +60,7 @@ CONTRACT_FIELDS = {
     "sessionid": ("oturum",),
     "user": ("kullanici",),
     "mac": (),
+    "srcmac": ("kaynakmac",),
     "vlan": (),
     "department": ("departman",),
     "interface": ("arayuz",),
@@ -78,11 +79,11 @@ CONTRACT_INDEXED = {
     "srcip": _CLIENT_INDEXED,
     "dstip": {"fg_traffic", "mt_fw"},
     "natip": {"fg_traffic"},
-    "ip": {"fg_traffic", "mt_fw", "mt_dhcp", "mt_arp", "mt_account"},
+    "ip": {"fg_traffic", "mt_fw", "mt_dhcp", "mt_arp", "mt_account", "fg_dhcp"},
     "domain": {"fg_web"},
     "qname": {"fg_dns"},
     "sessionid": {"fg_traffic", "fg_web", "fg_app"},
-    "mac": {"mt_dhcp", "mt_arp"},
+    "mac": {"mt_dhcp", "mt_arp", "fg_dhcp"},
     "vlan": _CLIENT_INDEXED,
     "department": _CLIENT_INDEXED,
 }
@@ -118,6 +119,17 @@ def test_every_column_exists() -> None:
     assert FIELDS["ip"].columns["fg_traffic"] == ("srcip", "dstip", "transip")
     assert FIELDS["ip"].columns["mt_fw"] == ("src", "dst")
     assert FIELDS["policy"].columns == {"fg_traffic": ("policyid", "policyname")}
+    # ADR-0016: FortiGate DHCP rows are found by mac:, ip:, interface:, logid: and level:; the
+    # session record's srcmac only by srcmac:, so mac: never scans fg_traffic
+    for name in ("mac", "ip", "interface", "logid", "level", "srcip", "vlan", "department"):
+        assert "fg_dhcp" in FIELDS[name].columns, name
+    assert FIELDS["ip"].columns["fg_dhcp"] == ("ip",)
+    assert "fg_traffic" not in FIELDS["mac"].columns
+    assert FIELDS["srcmac"].columns == {"fg_traffic": ("srcmac",)}
+    assert FIELDS["srcmac"].form == "mac"
+    assert FIELDS["srcmac"].indexed == ()
+    for name in ("dstip", "action"):  # columns fg_dhcp does not have
+        assert "fg_dhcp" not in FIELDS[name].columns, name
 
 
 def _leading(index: Index) -> str:
@@ -221,9 +233,27 @@ def test_the_tables_a_query_reads() -> None:
     assert _tables('type:web source:fortigate host:fw1 "login failure" severity:<=err') is None
     assert _tables("srcip:172.20.41.105 type:web action:blocked") == ("fg_web",)
     assert _tables("type:dhcp mac:00:00:5e:00:53:21") == ("mt_dhcp", "mt_event")
-    assert _tables("mac:00:00:5e:00:53:21") == ("mt_dhcp", "mt_arp", "mt_fw", "mt_event")
-    assert _tables("-type:wifi,dhcp,heartbeat mac:*") == ("mt_arp", "mt_fw", "mt_event")
-    assert _tables("-type:log -type:wifi,dhcp,heartbeat mac:*") == ("mt_arp", "mt_fw")
+    assert _tables("mac:00:00:5e:00:53:21") == (
+        "mt_dhcp",
+        "mt_arp",
+        "mt_fw",
+        "mt_event",
+        "fg_dhcp",
+    )
+    assert _tables("-type:wifi,dhcp,heartbeat mac:*") == ("mt_arp", "mt_fw", "mt_event", "fg_dhcp")
+    assert _tables("-type:log -type:wifi,dhcp,heartbeat mac:*") == ("mt_arp", "mt_fw", "fg_dhcp")
+    assert _tables("type:event mac:00:00:5e:00:53:57") == ("fg_dhcp",)  # FortiGate DHCP
+    assert _tables("logid:0100026001") == (
+        "fg_traffic",
+        "fg_web",
+        "fg_dns",
+        "fg_app",
+        "fg_ips",
+        "fg_virus",
+        "fg_event",
+        "fg_dhcp",
+    )
+    assert _tables("srcmac:00:00:5e:00:53:57") == ("fg_traffic",)
     assert _tables("domain:example.com") == ("fg_web", "fg_dns", "fg_app", "fg_virus")
     assert _tables("dstport:3389 action:deny") == (
         "fg_traffic",
@@ -246,6 +276,41 @@ def test_the_tables_a_query_reads() -> None:
         "mt_dhcp",
         "mt_account",
         "mt_config",
+    )
+
+
+def test_fortigate_dhcp_rows_are_events_and_srcmac_is_the_session_mac() -> None:
+    """ADR-0016 (contract 2.4): FortiGate DHCP rows are under ``type:event`` (the ``dhcp`` kind
+    is MikroTik's) and found by ``mac:``, ``ip:``, ``interface:``, ``logid:`` and ``level:``;
+    ``srcmac:`` (alias ``kaynakmac:``) reads only the session record and has no index."""
+    assert _tables("type:event ip:172.20.42.57") == ("fg_event", "fg_dhcp")
+    assert _tables("type:event logid:0100026001") == ("fg_event", "fg_dhcp")
+    assert _tables("mac:0000.5E00.5357 type:event") == ("fg_dhcp",)
+    assert _tables("type:dhcp ip:172.20.42.57") == ("mt_dhcp", "mt_event")
+    assert (_tables("interface:vlan42") or ())[-2:] == ("mt_event", "fg_dhcp")
+    assert _tables("level:information") == ("fg_event", "mt_event", "fg_dhcp")
+    assert _tables("kaynakmac:00-00-5E-00-53-57") == ("fg_traffic",)
+    assert _tables("type:traffic srcmac:*") == ("fg_traffic",)
+    with pytest.raises(SearchQueryError) as caught:
+        _tables("type:event srcmac:00:00:5e:00:53:57")
+    assert (caught.value.code, caught.value.params) == (
+        "search_fields_incompatible",
+        {"fields": "type, srcmac"},
+    )
+    with pytest.raises(SearchQueryError) as caught:
+        parse_query("srcmac:00:00:5e:00:53")
+    assert (caught.value.code, caught.value.params["format"]) == ("search_value_invalid", "mac")
+    kinds = {kind["key"]: kind for kind in catalogue_kinds()}
+    assert kinds["dhcp"]["label_tr"] == kinds["dhcp"]["label_en"] == "DHCP (MikroTik)"
+    (srcmac,) = [entry for entry in catalogue_fields() if entry["name"] == "srcmac"]
+    assert (srcmac["tables"], srcmac["indexed"], srcmac["kind"]) == (["fg_traffic"], [], "mac")
+    assert srcmac["help_tr"] == (
+        "FortiGate oturum kaydındaki kaynak MAC adresi (yalnızca aygıt tanıma açık arayüzlerde "
+        "dolu; dizinsiz, zaman dilimleriyle taranır)."
+    )
+    assert srcmac["help_en"] == (
+        "Source MAC of the FortiGate session record (filled only on interfaces with device "
+        "detection; not indexed, scanned in time slices)."
     )
 
 

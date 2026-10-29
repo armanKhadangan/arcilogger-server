@@ -39,6 +39,7 @@ MESSAGE_TYPES: Final[Mapping[str, tuple[str, str | None]]] = {
     "mt_account": ("account", "login"),
     "mt_interface": ("interface", None),
     "mt_config": ("config", None),
+    "fg_dhcp": ("event", "system"),
 }
 MT_EVENT_TYPES: Final[Mapping[str, str]] = {
     "dhcp_offering": "dhcp",
@@ -61,6 +62,7 @@ REQUIRED: Final[Mapping[str, Mapping[str, Any]]] = {
     "mt_account": {"action": "login"},
     "mt_interface": {"interface": "ether1", "state": "up"},
     "mt_event": {"event": "heartbeat"},
+    "fg_dhcp": {"ip": "172.20.42.57", "mac": "00:00:5e:00:53:57", "device_time": True},
 }
 SENDERS: Final = {"fortigate": "172.31.255.1", "core-r1": "172.20.10.1"}
 LINE_BYTES: Final = 400

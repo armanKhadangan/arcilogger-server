@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shlex
 import sys
 import tomllib
 from pathlib import Path
@@ -40,16 +41,127 @@ def test_linux_job_runs_every_gate_in_order() -> None:
     runs = _runs(_jobs(WORKFLOWS / "ci.yml")["python-linux"])
     expected = [
         "uv run poe lint",
-        "uv run poe test",
         "uv run python web/scripts/export_api_contract.py --check",
         "uv run python web/scripts/capture_api_samples.py --check",
         "uv run poe test-core",
         "uv run poe test-ingest",
         "uv run poe test-api",
+        "uv run poe test-rest",
         "uv run poe test-perf",
     ]
     positions = [runs.index(command) for command in expected]
     assert positions == sorted(positions), runs
+    assert "uv run poe test" not in runs, "the whole suite next to the gates runs each test twice"
+
+
+def _testpaths() -> list[str]:
+    tool = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
+    paths: list[str] = tool["pytest"]["ini_options"]["testpaths"]
+    assert paths, "no testpaths"
+    return paths
+
+
+def _test_paths(task: str) -> list[str]:
+    """The test paths a pytest poe task names (its arguments that are not options)."""
+    tool = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
+    tokens = shlex.split(tool["poe"]["tasks"][task])
+    assert tokens[0] == "pytest", task
+    paths: list[str] = []
+    rest = iter(tokens[1:])
+    for token in rest:
+        if token in ("-n", "-m", "-k", "-p"):
+            next(rest)  # the option's value
+        elif not token.startswith("-"):
+            paths.append(token)
+    return paths
+
+
+def _poe_test_tasks(runs: list[str]) -> list[str]:
+    """The "uv run poe test-*" tasks of a job that run the ordinary (not perf) tests."""
+    found = [m.group(1) for run in runs if (m := re.fullmatch(r"uv run poe (test[\w-]*)", run))]
+    return [task for task in found if task != "test-perf"]
+
+
+def test_linux_job_runs_every_test_directory_once() -> None:
+    """test-core, test-ingest, test-api and test-rest together name every testpaths entry exactly
+    once: a new test directory cannot drop out of CI, and no test runs twice."""
+    tasks = _poe_test_tasks(_runs(_jobs(WORKFLOWS / "ci.yml")["python-linux"]))
+    assert tasks == ["test-core", "test-ingest", "test-api", "test-rest"], tasks
+    named = [path for task in tasks for path in _test_paths(task)]
+    assert sorted(named) == sorted(_testpaths()), named
+
+
+def _windows_jobs() -> dict[str, str]:
+    jobs = _jobs(WORKFLOWS / "ci.yml")
+    return {name: job for name, job in jobs.items() if "runs-on: windows-latest" in job}
+
+
+def _code(text: str) -> str:
+    """Workflow text without its comment lines."""
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
+def test_windows_jobs_run_every_test_once_with_the_database() -> None:
+    """Windows (the production platform) runs test-core, test-others and test-perf in parallel
+    jobs, each with the runner's PostgreSQL started before its first "uv run" and required. The
+    first two together name every testpaths entry exactly once; the perf guards run alone."""
+    jobs = _windows_jobs()
+    tasks: dict[str, str] = {}
+    for name, job in jobs.items():
+        env = re.search(r"(?m)^    env:\n((?:      .*\n)+)", job)
+        assert env, name
+        assert "      ARCILOGGER_REQUIRE_DB: '1'" in env.group(1).splitlines(), name
+        steps = _steps(job)
+        starts = [
+            index
+            for index, step in enumerate(steps)
+            if "run: ./tools/ci/start-windows-postgres.ps1" in step
+        ]
+        assert len(starts) == 1, name
+        assert "shell: pwsh" in steps[starts[0]], name
+        first_run = next(index for index, step in enumerate(steps) if "uv run " in _code(step))
+        assert starts[0] < first_run, name
+        for task in re.findall(r"(?m)^\s+run: uv run poe (test[\w-]*)$", job):
+            assert task not in tasks, (task, name, tasks.get(task))
+            tasks[task] = name
+    assert sorted(tasks) == ["test-core", "test-others", "test-perf"], tasks
+    perf = _code(jobs[tasks["test-perf"]])
+    assert perf.count("uv run ") == 1, "the throughput guards run alone on their runner"
+    named = _test_paths("test-core") + _test_paths("test-others")
+    assert sorted(named) == sorted(_testpaths()), named
+    script = (REPO / "tools" / "ci" / "start-windows-postgres.ps1").read_text(encoding="utf-8-sig")
+    assert '"ARCILOGGER_TEST_PG=postgresql://${user}:${password}@127.0.0.1:5432/postgres"' in script
+    assert "Out-File -FilePath $env:GITHUB_ENV -Append" in script
+    assert script.count("::error::") == 3
+    assert script.count("exit 1") == 3
+
+
+def test_windows_jobs_lint_and_build_the_wheels() -> None:
+    """Lint and the packaging check (the db wheel ships its migrations) also run on Windows."""
+    jobs = _windows_jobs()
+    assert any("uv run poe lint" in _runs(job) for job in jobs.values())
+    builds = [
+        job for job in jobs.values() if "uv build --all-packages --out-dir dist/wheels" in job
+    ]
+    assert len(builds) == 1
+    steps = _steps(builds[0])
+    build = next(i for i, s in enumerate(steps) if "uv build --all-packages" in s)
+    check = next(i for i, s in enumerate(steps) if "The db wheel ships its migrations" in s)
+    assert build < check
+    assert "glob.glob('dist/wheels/arcilogger_db-*.whl')" in steps[check]
+    assert "n.endswith('migrations/versions/v0001_baseline.py')" in steps[check]
+    assert "n.endswith('migrations/env.py')" in steps[check]
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "installer.yml"])
+def test_only_pull_request_runs_are_cancelled(workflow: str) -> None:
+    """A new push cancels its pull request's run; a run on wave-*, main or a tag finishes."""
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    block = re.search(r"(?m)^concurrency:\n((?:  .*\n)+)", text)
+    assert block, workflow
+    lines = [line for line in block.group(1).splitlines() if not line.lstrip().startswith("#")]
+    assert "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in lines
+    assert text.count("cancel-in-progress:") == 1, "no job cancels on its own terms"
 
 
 def test_coverage_gates_have_the_spec_thresholds() -> None:
@@ -109,11 +221,22 @@ def test_every_action_is_pinned_by_its_commit_sha() -> None:
             assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", action), (workflow.name, action)
 
 
+def test_pull_requests_run_the_installer_on_the_same_paths() -> None:
+    """Work branches are tested through their pull request: it runs on the paths a push does."""
+    text = (WORKFLOWS / "installer.yml").read_text(encoding="utf-8")
+    block = re.search(r"(?m)^  pull_request:\n    paths:\n((?:      - .*\n)+)", text)
+    assert block, "installer.yml: no pull_request paths filter"
+    paths = [line.split("- ", 1)[1].strip().strip("'\"") for line in block.group(1).splitlines()]
+    assert paths == _push_paths(WORKFLOWS / "installer.yml")
+
+
 def test_release_job_runs_only_for_tags_and_manual_runs() -> None:
     """A v* tag runs the release job; ordinary branch pushes keep their path filter."""
     workflow = (WORKFLOWS / "installer.yml").read_text(encoding="utf-8")
     trigger = workflow[workflow.index("\non:\n") : workflow.index("\npermissions:")]
-    assert re.search(r"(?m)^    branches:\n      - '\*\*'$", trigger), "branch pushes still run"
+    assert re.search(r"(?m)^    branches:\n      - main\n      - 'wave-\*'$", trigger), (
+        "pushes to main and the integration branches still run"
+    )
     assert re.search(r"(?m)^    tags:\n      - 'v\*'$", trigger)
     assert re.search(r"(?m)^  workflow_dispatch:$", trigger)
     release = _jobs(WORKFLOWS / "installer.yml")["release"]

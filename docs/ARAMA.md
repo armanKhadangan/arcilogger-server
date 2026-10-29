@@ -57,7 +57,7 @@ hızlı olduğunu açar.
 | IP (`srcip`, `dstip`, `natip`, `ip`, `sender`) | `172.20.41.5`, `172.20.41.0/24`, `172.20.41.*`, `172.20.*` | IPv6 yazılabilir; IPv6 ağları desteklenen kapsamın dışındadır |
 | Port ve sayı (`srcport`, `dstport`, `natport`, `port`, `sessionid`) | `443`, `1000-2000`, `>1024`, `>=1`, `<10`, `<=10`, virgüllü liste | |
 | Protokol (`proto`) | `tcp`, `udp`, `icmp` ya da protokol numarası | |
-| MAC (`mac`) | her ayraç ve harf büyüklüğüyle (`00-00-5E-00-53-21`, `0000.5e00.5321`); üretici öneki `00:00:5e:*` | |
+| MAC (`mac`, `srcmac`) | her ayraç ve harf büyüklüğüyle (`00-00-5E-00-53-21`, `0000.5e00.5321`); üretici öneki `00:00:5e:*` | |
 | Alan adı (`domain`) | `example.com` (ad ve alt alan adları), `*.example.com` (yalnızca alt alan adları); küçük harfe çevrilir, uluslararası adlar punycode'a | |
 | DNS adı (`qname`) | tam ad | |
 | Sabit değer (`action`, `qtype`, `level`, `logid`) | tam değer; küçük harfe çevrilerek karşılaştırılır | |
@@ -87,10 +87,10 @@ karşılaştırır). "Hızlı" sütunu, alanın tek başına bir indeksle okundu
 | `program` (`konu`) | metin | syslog programı ya da MikroTik konuları | — |
 | `severity` (`onem`) | önem | syslog önemi | — |
 | `error` (`hata`) | hata | satırın ayrıştırılamayan kalıbı | — |
-| `srcip` (`kaynakip`, `istemci`) | IP | istemcinin adresi ya da ağı — en hızlı alan | trafik, web, DNS, uygulama, IPS, virüs, DHCP, ARP, MikroTik güvenlik duvarı, oturum açma |
+| `srcip` (`kaynakip`, `istemci`) | IP | istemcinin adresi ya da ağı — en hızlı alan | trafik, web, DNS, uygulama, IPS, virüs, DHCP, ARP, MikroTik güvenlik duvarı, oturum açma, FortiGate DHCP |
 | `dstip` (`hedefip`) | IP | bağlanılan adres | trafik, MikroTik güvenlik duvarı |
 | `natip` (`transip`) | IP | FortiGate'in kaynak NAT sonrası adresi | trafik |
-| `ip` (`adres`) | IP | kaynak, hedef ya da NAT adreslerinden biri | trafik, MikroTik güvenlik duvarı, DHCP, ARP, oturum açma |
+| `ip` (`adres`) | IP | kaynak, hedef ya da NAT adreslerinden biri; FortiGate DHCP kayıtlarında kiralanan adres | trafik, MikroTik güvenlik duvarı, DHCP, ARP, oturum açma, FortiGate DHCP |
 | `srcport` (`kaynakport`) | port | istemcinin portu | — |
 | `dstport` (`hedefport`) | port | bağlanılan port | `dstip:` ile birlikte trafik |
 | `natport` (`transport`) | port | kaynak NAT sonrası port | `natip:` ile birlikte trafik |
@@ -108,15 +108,16 @@ karşılaştırır). "Hızlı" sütunu, alanın tek başına bir indeksle okundu
 | `policy` (`politika`) | politika | FortiGate politika numarası ya da adı | — |
 | `sessionid` (`oturum`) | sayı | FortiGate oturum numarası | trafik, web, uygulama |
 | `user` (`kullanici`) | metin | cihaza giriş yapan ya da değişiklik yapan kullanıcı | — |
-| `mac` | MAC | cihazın MAC adresi ya da üretici öneki | DHCP, ARP |
+| `mac` | MAC | cihazın MAC adresi ya da üretici öneki (MikroTik DHCP, ARP, güvenlik duvarı ve olayları, FortiGate DHCP); FortiGate oturum kaydındaki MAC'i aramaz, onun için `srcmac` | DHCP, ARP, FortiGate DHCP |
+| `srcmac` (`kaynakmac`) | MAC | FortiGate oturum kaydındaki kaynak MAC adresi (yalnızca aygıt tanıma açık arayüzlerde dolu); dizinsizdir, zaman dilimleriyle taranır | — |
 | `vlan` | VLAN | istemci adresinin VLAN'ı | `srcip` gibi |
 | `department` (`departman`) | departman | istemci adresinin VLAN'ına tanımlı departman | `srcip` gibi |
-| `interface` (`arayuz`) | metin | gelen ya da giden arayüz | — |
+| `interface` (`arayuz`) | metin | gelen ya da giden arayüz; FortiGate DHCP kayıtlarında DHCP sunucusunun arayüzü | — |
 | `qtype` | sabit | DNS sorgusunun tipi (A, AAAA, MX …) | — |
 | `attack` (`saldiri`) | metin | IPS imzasının adı | — |
 | `virus` | metin | bulunan virüsün adı | — |
-| `logid` | sabit | FortiGate `logid` alanı | — |
-| `level` | sabit | olayın seviyesi (FortiGate, MikroTik) | — |
+| `logid` | sabit | FortiGate `logid` alanı (FortiGate DHCP kayıtları dahil) | — |
+| `level` | sabit | olayın seviyesi (FortiGate, FortiGate DHCP, MikroTik) | — |
 | `text` (`metin`) | serbest metin | kaydın metni (bölüm 4); alan adı yazmadan da aranır | — |
 
 ## 4. Serbest metin
@@ -168,6 +169,11 @@ indekssiz alanlar ya da yalnızca tersine çevrilmiş koşullar içeren bir sorg
 taranır; sayfa bunu `query_not_selective` bildirimiyle söyler ("Daha hızlı sonuç için srcip:,
 domain:, mac: veya qname: gibi bir alan ekleyin"). Ölçülen süreler bölüm 13'tedir.
 
+`srcmac:` bilerek indekssizdir: en büyük tablo olan FortiGate oturum kayıtlarının kaynak MAC
+adresini okur, bu yüzden zaman dilimleriyle taranır; uzun bir aralıkta `srcip:` ekleyin ya da
+aralığı kısaltın. `mac:` oturum kayıtlarını hiç okumaz: bir FortiGate DHCP istemcisi için
+`type:event mac:<MAC>` FortiGate DHCP kayıtlarının indeksini kullanır (ADR-0016).
+
 ## 6. Kayıt türleri
 
 `type:` alanının değerleri; aynı adlar istatistiklerde ve dışa aktarmada kullanılır.
@@ -181,8 +187,8 @@ domain:, mac: veya qname: gibi bir alan ekleyin"). Ölçülen süreler bölüm 1
 | `ips` | Saldırı önleme | FortiGate UTM IPS |
 | `virus` | Virüs | FortiGate UTM antivirüs |
 | `utm` | Diğer UTM | diğer FortiGate UTM alt türleri |
-| `event` | FortiGate olayı | FortiGate olayları |
-| `dhcp` | DHCP | MikroTik DHCP (havuz olayları dahil) |
+| `event` | FortiGate olayı | FortiGate olayları; FortiGate DHCP kayıtları `type:event` altındadır; `type:event mac:<MAC>`, `ip:` ya da `logid:0100026001` onları bulur |
+| `dhcp` | DHCP (MikroTik) | MikroTik DHCP (havuz olayları dahil); FortiGate DHCP kayıtları `type:event` altındadır; `type:event mac:<MAC>`, `ip:` ya da `logid:0100026001` onları bulur |
 | `arp` | ARP | MikroTik ARP |
 | `fw` | MikroTik güvenlik duvarı | MikroTik firewall |
 | `account` | Oturum açma | MikroTik oturum açma |
@@ -245,7 +251,8 @@ yön değiştirme) içeremez. Kayıtlı bir aramayı çalıştırmak normal bir 
   her hücre metin. Sütunlar: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür, Alt tür, Kaynak IP,
   Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL, Kullanıcı,
   Uygulama, Kategori, MAC, Metin (en fazla 2.000 karakter), Ham kayıt
-  (`kaynak/gün/satır/konum`). CSV'de `=`, `+`, `-`, `@`, sekme (TAB) ya da satır başı karakteri
+  (`kaynak/gün/satır/konum`). MAC sütunu `mac:` alanının MAC adresidir (FortiGate DHCP kaydınınki
+  dahil); oturum kaydının `srcmac` değeri bir sütun değildir (ham kayıtta ve metinde bulunur). CSV'de `=`, `+`, `-`, `@`, sekme (TAB) ya da satır başı karakteri
   (CR) ile başlayan değerler formül olarak çalışmasın diye başına `'` alır; Excel'de her hücre
   metindir. Denetim ve görünmez karakterler iki biçimde de görünür kaçışlarla (`\u0007`) yazılır.
 - **Dosya mühürlü değildir.** "Bilgi" sayfası bunu söyler: "Bu dosya mühürlü değildir; bütünlük
@@ -305,7 +312,11 @@ göndermediğini görmenin en kısa yoludur ([DEVICE-SETUP.md](DEVICE-SETUP.md))
 
 - Filtre Arama ile aynı sorgu dilidir (boş olabilir). Ayrıştırılan alanlar "önizleme" olarak
   gösterilir (ingest'in son kaydı ayrıntıda farklı olabilir); toplayıcı biçiminde olmayan bir
-  satır "biçim dışı" rozetiyle gösterilir.
+  satır "biçim dışı" rozetiyle gösterilir. Bir FortiGate DHCP kaydı, Arama'daki gibi `event`
+  (FortiGate olayı) türünde gösterilir: Canlı Akış DHCP kaydını başka bir FortiGate olayından
+  ayırmaz; `type:event logid:0100026001` FortiGate'in DHCP Ack kayıt kimliğiyle (logid) gelen
+  satırları gösterir (bu kimlikle başka `dhcp_msg` değerleri de gelebilir; sahada doğrulayın;
+  docs/DEVICE-SETUP.md bölüm 2.4 ham satırı karşılaştırmak için bunu kullanır).
 - **Sınırlar:** akış başına saniyede en fazla `live.max_lines_per_second` (100) satır; sunucuda
   aynı anda `live.max_streams_total` (4), kullanıcı başına `live.max_streams_per_user` (2) akış
   (`live_stream_limit`). Gösterilemeyen satırlar sayılır ve nedeniyle bildirilir; 30 saniye
@@ -333,7 +344,10 @@ iyisidir.
 Ölçüm (2026-10-26): 4 işlemcili, başka işlerle paylaşılan bir Linux geliştirme makinesi, PostgreSQL 16 yerel aylık bölümlerle (TimescaleDB yok); 4.913.180 `messages` satırı 130 saniyede yazıldı, özet tablo ve istatistiklerle birlikte veri 689 saniyede hazırdı. TimescaleDB'li CI işi aynı testi 7 günden eski parçalar sıkıştırılmış olarak çalıştırır.
 Bu ölçümden sonra veriye günde 4.320 MikroTik olayı (`mt_event`; Q6 artık olay indeksini de
 denetler) eklendi; aşağıdaki sayılar bu ekten önceki veriyle alınmıştır. TimescaleDB'nin
-sayıları tablonun ardındadır; Windows CI işininkiler henüz kaydedilmedi.
+sayıları tablonun ardındadır; Windows CI işininkiler henüz kaydedilmedi. Veride FortiGate DHCP
+kaydı yoktur (revizyon `0017_fortigate_dhcp`); bu kayıtlar, `event` türünü dışlamayan `srcip:`,
+`vlan:`, `department:`, `ip:` ve `mac:` sorgularına küçük `fg_dhcp` tablosunun `(ip, time)` ve
+`(mac, time)` indeksleri üzerinde bir dal ekler (`type:dhcp` sorgularına, Q6, eklemez).
 
 | # | Sorgu | Aralık | Bütçe | İlk çalıştırma | En iyi | Not |
 |---|---|---|---|---|---|---|

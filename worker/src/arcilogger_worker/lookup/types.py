@@ -8,11 +8,13 @@ lists, objects): times are ISO-8601 strings in UTC, there are **no floats** (sco
 
 Vocabulary:
 
-* **exact** — the request's public IP is the FortiGate's own public address (setting
-  ``nat.public_ips``) or its WAN ``transip`` (``nat.wan_transip``), so ``transip:transport``
-  identifies the session.
+* **exact** — the request's public IP is the FortiGate's own address: a ``direct`` internet
+  exit's public address, an exit's NAT address (``transip``) or an address the logs show as the
+  FortiGate's NAT address near the moment (setting ``nat.egresses``, ADR-0016), so
+  ``transip:transport`` identifies the session.
 * **candidates** — double NAT (2.3): the ISP router's translation is unknown, so sessions in
-  the time window (± tolerance), optionally to the requested destination, are ranked.
+  the time window (± tolerance) that left through the exit the public IP resolved to,
+  optionally to the requested destination, are ranked.
 * **internal** — the request names an internal IP or a MAC directly (no NAT step).
 
 **NAT matching rule** (spec 9.3; ``fg_traffic.time`` is the time of the log line, i.e. the
@@ -75,6 +77,9 @@ PersonLink = Literal["history", "current"]
 #: ``srcmac`` — the srcmac field of the FortiGate session record on an interface listed in
 #: ``lookup.srcmac_interfaces`` (low confidence, partial evidence, never a lease).
 MacSource = Literal["lease", "srcmac"]
+#: The explanations that make a chain with alternatives: an IP conflict of leases (spec 9.1)
+#: and a srcmac that names another MAC than the lease (D10).
+CONFLICT_KEYS = frozenset({"ip_conflict", "srcmac_mismatch"})
 #: How the requested public IP was resolved against the internet exits (``nat.egresses``,
 #: ADR-0016): ``public`` (an exit's public address), ``transip`` (an exit's NAT address),
 #: ``fallback`` (a direct or NAT address whose log check failed), ``observed`` (an address the
@@ -493,9 +498,11 @@ class AttributionChain:
     confidence: Confidence
     explanations: tuple[Explanation, ...] = ()
     #: IP conflict (spec 9.1): the other chains for the same IP at the same moment (another MAC
-    #: held an overlapping lease). Requires ``confidence="low"`` and the ``ip_conflict``
-    #: explanation; the engine marks every alternative the same way (not enforced here, so
-    #: lookups stored earlier still load); alternatives have no alternatives of their own.
+    #: held an overlapping lease, or, ADR-0016 D10, the session record's srcmac names another
+    #: MAC than the lease). Requires ``confidence="low"`` and the ``ip_conflict`` (or
+    #: ``srcmac_mismatch``) explanation; the engine marks every alternative the same way (not
+    #: enforced here, so lookups stored earlier still load); alternatives have no alternatives
+    #: of their own.
     alternatives: tuple[AttributionChain, ...] = ()
     #: Where the MAC comes from (``srcmac``: partial evidence, ``low``; ADR-0016).
     mac_source: MacSource = "lease"
@@ -505,8 +512,11 @@ class AttributionChain:
         if self.alternatives:
             if self.confidence != "low":
                 raise ValueError("a chain with alternatives (IP conflict) must be low confidence")
-            if not any(e.key == "ip_conflict" for e in self.explanations):
-                raise ValueError("a chain with alternatives needs the ip_conflict explanation")
+            if not any(e.key in CONFLICT_KEYS for e in self.explanations):
+                raise ValueError(
+                    "a chain with alternatives needs the ip_conflict explanation "
+                    "(srcmac_mismatch for a srcmac conflict)"
+                )
             for other in self.alternatives:
                 if other.alternatives:
                     raise ValueError("alternatives must not have alternatives of their own")
@@ -854,8 +864,6 @@ class LookupSettings:
     ``arcilogger_db.settings``). Only values: what needs a settings row's author or time is read
     by the lookup itself."""
 
-    public_ips: tuple[str, ...] = ()
-    wan_transip: str | None = None
     tolerance_seconds: int = 60
     max_candidates: int = 100
     #: Longest FortiGate session the lookup considers (bounds the time-range scan).
@@ -866,6 +874,11 @@ class LookupSettings:
     #: "x 1.1"). An integer, because every setting must be auditable as canonical JSON.
     lease_timeout_percent: int = 110
     arp_interval_seconds: int = 3600
+    #: ``arp.ignore_after_release_seconds``: an ARP sighting of a pair this soon after its
+    #: release is a stale ARP table entry (the lease timeline's rule 6, whose default
+    #: ``DEFAULT_RELEASE_GRACE`` this equals; the lookup reads it for a RELEASE mapped after the
+    #: build, round 6).
+    arp_release_grace_seconds: int = 300
     infrastructure_macs: tuple[str, ...] = ()
     #: ``nat.egresses`` as stored: parsed only where it is used (:meth:`egresses`), so a value
     #: that cannot be parsed never stops the lease timeline or the usage rollups.
@@ -900,22 +913,6 @@ class LookupSettings:
             object.__setattr__(self, "_egresses", parsed)
         return parsed
 
-    @property
-    def double_nat(self) -> bool:
-        """No public address configured: the ISP router translates once more."""
-        return not self.public_ips
-
-    def exact_addresses(self) -> frozenset[str]:
-        """Addresses for which ``transip:transport`` identifies a session exactly.
-
-        Canonical text (:func:`arcilogger_core.iputil.canonical_ip`), the form PostgreSQL returns
-        for ``INET`` values.
-        """
-        found = set(self.public_ips)
-        if self.wan_transip:
-            found.add(self.wan_transip)
-        return frozenset(found)
-
     def lease_timeout_seconds(self, server: str | None, lease_seconds: int | None = None) -> int:
         """Seconds after the last evidence until an open lease of ``server`` times out.
 
@@ -925,26 +922,27 @@ class LookupSettings:
         only an estimate of the server's lease."""
         if lease_seconds is not None:
             return lease_seconds
-        lease = self.lease_server_seconds.get(server or "", self.lease_default_seconds)
-        return lease * self.lease_timeout_percent // 100
+        return self.server_lease_seconds(server) * self.lease_timeout_percent // 100
+
+    def server_lease_seconds(self, server: str | None) -> int:
+        """The configured lease time of ``server`` (``lease.server_seconds``, else
+        ``lease.default_seconds``), without the timeout margin."""
+        return self.lease_server_seconds.get(server or "", self.lease_default_seconds)
 
     @classmethod
     def from_settings(cls, values: Mapping[str, Any]) -> LookupSettings:
-        """From ``get_settings(session)`` (keys like ``nat.public_ips``).
+        """From ``get_settings(session)`` (keys like ``lookup.tolerance_seconds``).
 
-        Addresses are validated and normalised (``ValueError`` names the bad setting). The lease
-        job and the usage rollups call this too, so the values only the lookup reads (the exits,
-        ``nat.snat_trandisp``, the srcmac settings) never raise here: the exits are parsed by
+        ``ValueError`` names a bad setting. The lease job and the usage rollups call this too,
+        so the values only the lookup reads (the exits, ``nat.snat_trandisp``, the srcmac
+        settings) never raise here: the exits are kept as stored and parsed by
         :meth:`egresses`, the others fall back to the shipped default for a value of another
-        shape (written around the validator, CORRELATION §5).
+        shape (written around the validator, CORRELATION §5). The FortiGate flags
+        (``dhcp.fortigate_use_logged_lease``, ``…_traffic_extends``, ``…_format_verified``) read
+        only a JSON ``true`` or ``false``, any other value gives their default; a negative
+        ``arp.ignore_after_release_seconds`` gives its default too.
         """
-        transip = str(values.get("nat.wan_transip") or "").strip()
-        public = values.get("nat.public_ips") or ()
-        if isinstance(public, str):
-            raise ValueError("nat.public_ips must be a list of IP addresses")
         return cls(
-            public_ips=tuple(cast(str, _ip(str(address), "nat.public_ips")) for address in public),
-            wan_transip=_ip(transip, "nat.wan_transip") if transip else None,
             tolerance_seconds=int(values.get("lookup.tolerance_seconds", 60)),
             max_candidates=int(values.get("lookup.max_candidates", 100)),
             max_session_seconds=int(values.get("lookup.max_session_seconds", 86400)),
@@ -954,6 +952,9 @@ class LookupSettings:
             },
             lease_timeout_percent=int(values.get("lease.timeout_percent", 110)),
             arp_interval_seconds=int(values.get("arp.interval_seconds", 3600)),
+            arp_release_grace_seconds=_lookup_count(
+                values, "arp.ignore_after_release_seconds", 300, minimum=0
+            ),
             infrastructure_macs=tuple(
                 normalize_mac(str(mac)) for mac in values.get("devices.infrastructure_macs") or ()
             ),
@@ -971,10 +972,10 @@ class LookupSettings:
                     values, "dhcp.fortigate_dhcp_msgs", FORTIGATE_DHCP_MSGS
                 )
             },
-            use_logged_lease=bool(values.get("dhcp.fortigate_use_logged_lease", True)),
-            fortigate_traffic_extends=bool(values.get("dhcp.fortigate_traffic_extends", False)),
+            use_logged_lease=_flag(values, "dhcp.fortigate_use_logged_lease", True),
+            fortigate_traffic_extends=_flag(values, "dhcp.fortigate_traffic_extends", False),
             fortigate_interfaces_excluded=_texts(values, "dhcp.fortigate_interfaces_excluded", ()),
-            fortigate_format_verified=bool(values.get("dhcp.fortigate_format_verified", False)),
+            fortigate_format_verified=_flag(values, "dhcp.fortigate_format_verified", False),
         )
 
 
@@ -1005,7 +1006,19 @@ def _lookup_texts(values: Mapping[str, Any], key: str, default: tuple[str, ...])
     return tuple(str(item) for item in items) if isinstance(items, list | tuple) else default
 
 
-def _lookup_count(values: Mapping[str, Any], key: str, default: int) -> int:
-    """An integer setting only the lookup reads; ``default`` for any other value."""
+def _flag(values: Mapping[str, Any], key: str, default: bool) -> bool:
+    """A JSON ``true``/``false`` setting; ``default`` for any other value (``bool("false")`` is
+    true, so a text written around the validator would switch the setting on)."""
     value = values.get(key, default)
-    return value if isinstance(value, int) and not isinstance(value, bool) else default
+    return value if isinstance(value, bool) else default
+
+
+def _lookup_count(
+    values: Mapping[str, Any], key: str, default: int, *, minimum: int | None = None
+) -> int:
+    """An integer setting only the lookup reads; ``default`` for any other value, and for one
+    below ``minimum`` (a negative ARP grace would stop the probe's timeline rules)."""
+    value = values.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        return default
+    return default if minimum is not None and value < minimum else value

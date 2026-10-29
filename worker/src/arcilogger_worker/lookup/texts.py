@@ -11,22 +11,26 @@ keep the machine form: UTC ISO-8601 strings and integers).
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Final
 
 from arcilogger_core.fmt import format_date, format_datetime
-from arcilogger_worker.lookup.types import EXPLANATIONS, Explanation
+from arcilogger_db.egress import Egress
+from arcilogger_worker.lookup.types import EXPLANATIONS, EgressChange, EgressEntry, Explanation
 
 ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
     "no_lease": (
-        "{ip} adresi için {at} anında geçerli bir DHCP/ARP kaydı (kira) yok. En yakın kayıtlar: "
-        "önce {before}, sonra {after}. DHCP ve saatlik ARP-LOG kayıtlarının ana "
-        "yönlendiriciden (MikroTik, DHCP sunucusu) geldiğini kontrol edin; statik IP'li "
-        "cihazlar yalnızca ARP-LOG ile görünür.",
-        "No DHCP/ARP lease covers {ip} at {at}. Nearest leases: before {before}, after "
-        "{after}. Check that the main router (MikroTik, the DHCP server) sends DHCP and hourly "
-        "ARP-LOG messages; static-IP devices only appear through ARP-LOG.",
+        "{ip} adresi için {at} anında geçerli bir kira kaydı yok. En yakın kayıtlar: önce "
+        "{before}, sonra {after}. Kira kanıtı DHCP sunucusunun kayıtlarından (MikroTik DHCP ya "
+        "da FortiGate DHCP olayları) ve MikroTik ARP-LOG kayıtlarından gelir: DHCP sunucusunun "
+        'kayıt gönderdiğini Kaynaklar sayfasındaki "Kira kanıtı" kutusunda kontrol edin. Statik '
+        "IP'li cihazlar yalnızca ARP-LOG ile (ya da srcmac ile kısmi kanıt olarak) görünür.",
+        "No lease covers {ip} at {at}. Nearest leases: before {before}, after {after}. Lease "
+        "evidence comes from the DHCP server's records (MikroTik DHCP or FortiGate DHCP events) "
+        'and from MikroTik ARP-LOG lines: check on the Sources page ("Lease evidence") that the '
+        "DHCP server sends them. Static-IP devices only appear through ARP-LOG (or, as partial "
+        "evidence, through srcmac).",
     ),
     "no_match_exact": (
         "FortiGate bu zaman aralığında {address}:{port} için oturum kaydetmemiş. Saati ve saat "
@@ -79,11 +83,12 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "(Settings → NAT), so only a candidate search is possible.",
     ),
     "port_hint": (
-        "Sıralamada FortiGate çıkış portunun talepteki portla aynı olması da dikkate alındı. "
-        "Bu, ISS modeminin kaynak portu koruduğu varsayımına dayanır ve sahada "
-        "doğrulanmalıdır.",
-        "The ranking also favours sessions whose FortiGate port equals the requested port. "
-        "This assumes the ISP router keeps source ports and must be verified on site.",
+        "{egresses} çıkışında servis sağlayıcının kaynak portu koruduğu sahada doğrulanmış olarak "
+        "işaretli: FortiGate NAT portu istenen genel porta eşit adaylar öne alındı. Bu yalnızca "
+        "sıralamadır; kesin eşleşme değildir.",
+        "Exit(s) {egresses} are marked as verified on site to keep source ports at the ISP router: "
+        "candidates whose FortiGate NAT port equals the requested public port are ranked first. "
+        "This is only a ranking, not an exact match.",
     ),
     "multiple_exact": (
         "Aynı genel adres ve port bu aralıkta {count} farklı oturumda kullanılmış; hepsi "
@@ -129,13 +134,17 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
     ),
     "public_ip_not_transip": (
         "Talepteki {address} adresi bu zaman aralığında FortiGate kayıtlarında çıkış (kaynak "
-        "NAT) adresi olarak görünmüyor; kayıtlarda başka bir çıkış adresi var. ISS modemi bu "
-        "tarihte hâlâ NAT yapıyor olabilir (çift NAT) veya Ayarlar → NAT değeri bu tarih için "
-        "doğru değil. Bu nedenle kesin eşleşme yerine aday araması yapıldı.",
-        "The requested address {address} does not appear as the FortiGate's source-NAT address "
-        "in its logs around this moment; the logs show another address. The ISP router may "
-        "still have translated at that date (double NAT), or the NAT setting does not apply to "
-        "that date. A candidate search was therefore made instead of an exact match.",
+        "NAT) adresi olarak görünmüyor ya da yalnızca bir kısmında görünüyor; kayıtlarda başka "
+        "bir çıkış adresi de var. ISS modemi bu tarihte hâlâ NAT yapıyor olabilir (çift NAT) "
+        "veya Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet "
+        "çıkışları (NAT) değeri bu tarih için doğru değil. Bu nedenle kesin eşleşme yerine aday "
+        "araması yapıldı.",
+        "The requested address {address} does not appear, or only part of the time, as the "
+        "FortiGate's source-NAT address in its logs around this moment; the logs also show "
+        "another address. The ISP router may still have translated at that date (double NAT), or "
+        "the value in Settings → Application settings → 5651 lookup and lease timeline → "
+        "Internet exits (NAT) does not apply to that date. A candidate search was therefore made "
+        "instead of an exact match.",
     ),
     "wan_transip_not_seen": (
         "Ayarlardaki FortiGate WAN adresi ({address}) bu zaman aralığında FortiGate "
@@ -210,8 +219,8 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "{mac} did not hold {ip} at that moment; the chain shows who held {ip} then.",
     ),
     "no_lease_for_mac": (
-        "{mac} için {at} anında geçerli bir DHCP/ARP kaydı yok.",
-        "No DHCP/ARP lease of {mac} covers {at}.",
+        "{mac} için {at} anında geçerli bir kira kaydı (DHCP ya da ARP-LOG) yok.",
+        "No lease (DHCP or ARP-LOG) of {mac} covers {at}.",
     ),
     "lease_timeline_behind": (
         "IP-MAC zaman çizelgesi {watermark} anına kadar hesaplandı; daha yeni anlar için "
@@ -436,25 +445,30 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "da bu kiranın MAC adresi için kira zaman çizelgesinin bu kiraya uygulamadığı FortiGate "
         "DHCP kayıtları var (ör. bu sürüme yükseltmeden önce yüklendi, bir geri almadan sonra "
         "önceki sürüm yükledi, alanları okunamadı ya da kiralar bir ağ tanımlanmadan veya "
-        "değiştirilmeden önce oluşturuldu). Bu kayıtlar adresin bırakıldığını, başka bir cihaza "
-        "verildiğini ya da bu MAC adresinin başka bir adres aldığını gösteriyor olabilir; zincir "
-        "bu nedenle düşük güvenle gösterildi. Kayıtlar başka bir istemciye ait olabileceği için "
-        "gösterilmez; ham kayıtlar saklanır ve gece mühürlenir (Arama'da type:event). Ağlar "
-        "(Cihazlar ve Kişiler → Departmanlar ve VLAN'lar) sonradan tanımlandı ya da "
-        "değiştirildiyse kiraları bu kiranın başladığı günden bugüne Ayarlar → Uygulama ayarları → "
-        "5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun "
-        "(bir istekte en çok 31 gün).",
+        "değiştirilmeden, gönderen FortiGate (ör. bir HA üyesi) kaynak olarak tanımlanmadan ya da "
+        "FortiGate DHCP ayarları (ör. logid listesi) değiştirilmeden önce oluşturuldu). Bu "
+        "kayıtlar adresin bırakıldığını, başka bir cihaza verildiğini ya da bu MAC adresinin "
+        "başka bir adres aldığını gösteriyor olabilir; zincir bu nedenle düşük güvenle "
+        "gösterildi. Kayıtlar başka bir istemciye ait olabileceği için gösterilmez; ham kayıtlar "
+        "saklanır ve gece mühürlenir (Arama'da type:event). Ağlar (Cihazlar ve Kişiler → "
+        "Departmanlar ve VLAN'lar), FortiGate kaynakları (Kaynaklar) ya da FortiGate DHCP "
+        "ayarları sonradan tanımlandı ya da değiştirildiyse kiraları bu kiranın başladığı günden "
+        "bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları "
+        "yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün).",
         "After this lease's last DHCP record at {last} and before the requested moment there are "
         "FortiGate DHCP records for {ip} or for this lease's MAC address that the lease timeline "
         "did not apply to this lease (e.g. loaded before the upgrade to this version, loaded by "
         "the previous version after a rollback, fields that could not be read, or leases built "
-        "before a network was entered or changed). They may show that the address was released or "
-        "given to another device, or that this MAC address took another address, so the chain is "
-        "shown with low confidence. The records are not shown, because they may belong to another "
+        "before a network was entered or changed, before the sending FortiGate (e.g. an HA "
+        "member) was configured as a source, or before the FortiGate DHCP settings (e.g. the "
+        "logid list) were changed). They may show that the address was released or given to "
+        "another device, or that this MAC address took another address, so the chain is shown "
+        "with low confidence. The records are not shown, because they may belong to another "
         "client; the raw lines are kept and sealed every night (Search, type:event). If networks "
-        "(Devices and people → Departments and VLANs) were entered or changed later, rebuild the "
-        "leases from this lease's start day to today in Settings → Application settings → 5651 "
-        "lookup and lease timeline → Rebuild the leases (at most 31 days per request).",
+        "(Devices and people → Departments and VLANs), FortiGate sources (Sources) or the "
+        "FortiGate DHCP settings were entered or changed later, rebuild the leases from this "
+        "lease's start day to today in Settings → Application settings → 5651 lookup and lease "
+        "timeline → Rebuild the leases (at most 31 days per request).",
     ),
     "fortigate_dhcp_no_network": (
         "{ip} adresi tanımlı hiçbir ağda değil (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar). "
@@ -570,15 +584,17 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "kira zaman çizelgesi cihazın zamanlarını kullandı: doğru oturum ya da kira bu fark kadar "
         "kaymış bir zaman aralığında olabilir; doğru oturum bulunmamış ve başka bir oturum "
         "bulunmuş olabilir, kira da o anı kapsamıyor olabilir. Bu sonuçta zincir varsa düşük "
-        "güvenle gösterildi; sonuç boşsa toleransı bu fark kadar genişletip sorguyu yeniden "
-        "çalıştırın.",
+        "güvenle gösterildi. Sonuç boşsa sorguyu yeniden çalıştırın: genel IP sorgusunda "
+        "toleransı bu fark kadar genişleterek, iç IP ya da MAC adresi sorgusunda istenen anı bu "
+        "fark kadar kaydırarak (fark artıysa ileri, eksiyse geri).",
         "Around {at} the record times of these sources differed from ARCILOGGER's receive time by "
         "a median of (in seconds): {offsets} (limit {limit} seconds). The search and the lease "
         "timeline used the device's times: the right session or lease may lie in a window shifted "
         "by that offset; the right session may have been missed and another found, and the lease "
         "may not cover the moment. Any chain of this result is therefore shown with low "
-        "confidence; if the result is empty, widen the tolerance by the offset and run the lookup "
-        "again.",
+        "confidence. If the result is empty, run the lookup again: for a public IP with the "
+        "tolerance widened by the offset, for an internal IP or a MAC address at the requested "
+        "moment shifted by the offset (later for a positive offset, earlier for a negative one).",
     ),
 }
 
@@ -606,3 +622,37 @@ def explain(key: str, **params: str | int | None) -> Explanation:
     return Explanation(
         key=key, text_tr=text_tr.format(**shown), text_en=text_en.format(**shown), params=params
     )
+
+
+#: Internal authors of a settings row, in words (D32: never the raw ``:migration``).
+_AUTHORS: Final[Mapping[str, tuple[str, str]]] = {
+    ":migration": (
+        "yükseltme (eski NAT ayarlarından aktarıldı)",
+        "upgrade (converted from the old NAT settings)",
+    ),
+    ":seed": ("varsayılan değer", "shipped default"),
+    ":system": ("varsayılan değer", "shipped default"),
+}
+
+
+def exit_changes(changes: Sequence[EgressChange], exits: Sequence[Egress]) -> tuple[str, str]:
+    """The changed exits of ``egress_changed_after_event`` in Turkish and in English (one
+    placeholder each, ``{changes_tr}``/``{changes_en}``): name, time and author of the change,
+    and what the exit holds now — "hat-2 (20.10.2026 08:12:00, yonetici; şimdi: genel
+    198.51.100.77, NAT 100.64.13.9)", or "silindi" / "deleted"."""
+    now = {egress.name: EgressEntry.from_egress(egress) for egress in exits}
+    turkish, english = [], []
+    for change in changes:
+        when = format_datetime(change.changed_at)
+        by_tr, by_en = _AUTHORS.get(change.changed_by, (change.changed_by, change.changed_by))
+        entry = now.get(change.name)
+        if change.deleted or entry is None:
+            held_tr, held_en = "silindi", "deleted"
+        else:
+            public = ", ".join(entry.public) or "-"
+            nat = ", ".join(entry.transips) or "-"
+            held_tr = f"şimdi: genel {public}, NAT {nat}"
+            held_en = f"now: public {public}, NAT {nat}"
+        turkish.append(f"{change.name} ({when}, {by_tr}; {held_tr})")
+        english.append(f"{change.name} ({when}, {by_en}; {held_en})")
+    return "; ".join(turkish), "; ".join(english)

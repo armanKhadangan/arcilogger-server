@@ -133,7 +133,9 @@ def test_the_issuer_works_without_network(
         "--passphrase-file", str(passphrase),
     ]) == 0  # fmt: skip
     public = (keys_dir / "arci-net1.public.txt").read_text(encoding="utf-8").split('"')[3]
-    assert main(["verify", str(lic), "--public-key", public, "--server-id", server_id]) == 0
+    # With "=", as the issuer's README says: one key in 64 starts with "-", and a separate
+    # argument "-…" is an option to argparse.
+    assert main(["verify", str(lic), f"--public-key={public}", "--server-id", server_id]) == 0
     monkeypatch.setattr(keys, "TRUSTED_KEYS", MappingProxyType({"arci-net1": public}))
     assert main(["verify", str(lic), "--committed-keys", "--at", "2027-10-20"]) == 0
     assert load_license(lic.read_bytes()).payload.server_ids == (server_id,)

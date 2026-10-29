@@ -108,6 +108,7 @@ def test_typed_rows_have_the_kind_of_their_messages_row() -> None:
             seen.add(table)
     # the fixtures reach most typed tables: a broken mapping cannot hide behind an empty set
     assert {"fg_traffic", "fg_web", "fg_dns", "fg_app", "mt_dhcp", "mt_arp", "mt_fw"} <= seen
+    assert {"fg_event", "fg_dhcp"} <= seen  # FortiGate DHCP lines are events (ADR-0016)
 
 
 def test_kinds_name_every_typed_table_and_mt_event_event() -> None:
@@ -120,6 +121,9 @@ def test_kinds_name_every_typed_table_and_mt_event_event() -> None:
         assert kind_of_row("mt_event", event) == kind
     assert kind_of_row("mt_event", "something_new") is None
     assert tables_of(["dhcp"]) == ("mt_dhcp", "mt_event")
+    # FortiGate DHCP rows are of the FortiGate kind event, as their messages rows (event/system)
+    assert tables_of(["event"]) == ("fg_event", "fg_dhcp")
+    assert TABLE_KINDS["fg_dhcp"] == kind_of("event", "system") == "event"
     assert tables_of(["web", "traffic"]) == ("fg_traffic", "fg_web")
     assert tables_of(["syslog", "unknown", "other", "utm"]) == ()
 
@@ -144,6 +148,8 @@ def test_kinds_have_turkish_and_english_labels_and_a_family() -> None:
         assert kind.key == key
         assert kind.label_tr.strip()
         assert kind.label_en.strip()
+    # the MikroTik kind says so: on a FortiGate-only site DHCP records are under type:event
+    assert (KINDS["dhcp"].label_tr, KINDS["dhcp"].label_en) == ("DHCP (MikroTik)",) * 2
     assert family_of(["traffic", "web"]) == "fortigate"
     assert family_of(["dhcp", "heartbeat"]) == "mikrotik"
     assert family_of(["traffic", "dhcp"]) is None
@@ -161,6 +167,9 @@ def test_client_ip_and_action_columns_exist() -> None:
             assert isinstance(columns[CLIENT_IP[table]].type, INET), table
         assert ("action" in columns) == (table in ACTION_TABLES), table
     assert set(CLIENT_IP) == set(TYPED_TABLES) - {"mt_interface", "mt_config"}
+    assert CLIENT_IP["fg_dhcp"] == "ip"
+    assert "fg_dhcp" not in ACTION_TABLES  # no action column: the meaning is the worker's
+    assert list(CLIENT_IP) == [t for t in TYPED_TABLES if t in CLIENT_IP]  # branch-rank order
 
 
 def test_ascii_lower_folds_ascii_letters_only() -> None:
