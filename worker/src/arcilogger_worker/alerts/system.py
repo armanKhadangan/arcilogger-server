@@ -72,6 +72,14 @@ Key                              Problem (setting)
                                  invalid), nor, when the worker may not read that file, before
                                  the agent ever wrote a heartbeat. Resolved by a fresh
                                  heartbeat, or when the browser administration is switched off
+``R20-filter:none``              no web or DNS filter record (``fg_web``, ``fg_dns``) of the
+                                 enabled FortiGate sources for ``alerts.filter_quiet_hours`` (24)
+                                 hours while every site day of that window is expected
+                                 (``alerts.filter_days``, every day; not the days of
+                                 ``usage.holidays`` while ``alerts.filter_skip_holidays``;
+                                 :mod:`~arcilogger_worker.compliance_filter`, card 7 of Uyum
+                                 Durumu) — high; resolved once a record arrives or the window is
+                                 no longer expected
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -166,6 +174,7 @@ from arcilogger_worker.alerts.texts import (
     REFUSAL_REASONS,
     REFUSED_HIGH_TITLE,
 )
+from arcilogger_worker.compliance_filter import filter_evidence
 from arcilogger_worker.lookup import trust
 from arcilogger_worker.lookup.refs import (
     ARP_TABLE,
@@ -1782,6 +1791,39 @@ def _not_public(ip: str) -> bool:
     return any(address in network for network in NOT_PUBLIC)
 
 
+# -- content-filter evidence (Wave 4 contract 2.4: R20-filter) -----------------------------------
+
+FILTER_RULE: Final = "R20-filter"
+FILTER_KEY: Final = f"{FILTER_RULE}:none"
+
+
+def _filter_key(key: str) -> bool:
+    return key.startswith(FILTER_RULE)
+
+
+def check_filter(ctx: CheckContext) -> Outcome:
+    """``R20-filter:none``: no web or DNS filter record of the enabled FortiGate sources for
+    ``alerts.filter_quiet_hours`` while every site day of that window is expected
+    (:func:`~arcilogger_worker.compliance_filter.filter_evidence`, shared with card 7 of Uyum
+    Durumu). Resolved as soon as that no longer holds: a record arrived, the window touches a day
+    that is not expected, or no FortiGate source is left."""
+    found = filter_evidence(ctx.session, now=ctx.now)
+    if not found.alert_due:
+        return Outcome([], _filter_key)
+    hours = found.window_hours
+    finding = Finding(
+        key=FILTER_KEY,
+        rule=FILTER_RULE,
+        severity="high",
+        title=f"İçerik filtresi kaydı gelmiyor: son {hours} saat",
+        details={
+            "hours": hours,
+            "last_at": isoformat_site(found.last_at, "seconds") if found.last_at else None,
+        },
+    )
+    return Outcome([finding], _filter_key)
+
+
 CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     ("disk", check_disk),
     ("seal", check_seal),
@@ -1797,6 +1839,7 @@ CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
     # stops a lease evidence alert.
     ("lease_evidence", check_lease_evidence),
     ("nat_exits", check_nat_exits),
+    ("filter", check_filter),
 )
 
 
