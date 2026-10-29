@@ -1,0 +1,209 @@
+{
+  "network": {
+    "egress": {
+      "title": "Internet exits",
+      "empty": "No exits defined: one double-NAT exit is assumed.",
+      "add": "Add exit",
+      "remove": "Remove: {{name}}",
+      "exit": "Exit {{name}}",
+      "unnamed": "unnamed exit",
+      "name": "Name",
+      "nameHint": "Lower-case letters, digits and hyphens, e.g. hat-1",
+      "label": "Label",
+      "mode": "NAT type",
+      "modes": {
+        "direct": "Direct (public IP on the FortiGate)",
+        "isp_nat": "ISP NAT (double NAT)",
+        "not_logged": "Does not pass the FortiGate",
+        "internal": "Not an internet exit (NAT towards a DMZ, VLAN, VPN or branch)"
+      },
+      "public": "Public addresses",
+      "publicHint": "One IPv4 address or a network of at least /24 per line, e.g. 203.0.113.208/29",
+      "transips": "NAT addresses (transip)",
+      "transipsHint": "The FortiGate's source-NAT addresses on this line, one per line",
+      "interfaces": "Interfaces (dstintf)",
+      "interfacesHint": "One FortiGate interface name per line, e.g. wan1",
+      "portPreservation": "Port preservation",
+      "preservation": {
+        "unknown": "Unknown",
+        "preserved": "Kept (verified on site)",
+        "not_preserved": "Not kept"
+      },
+      "dynamic": "Public IP may change (dynamic)",
+      "warnings": {
+        "noPublic": "No public address: this exit is searched for every public IP that no exit claims.",
+        "dynamic": "Public IP may change: besides its listed addresses, this exit is also searched for public IPs that no exit claims.",
+        "catchAll": "Covers every unclaimed NAT address.",
+        "interfaces": "Enter each line's interfaces (dstintf); without them a lookup cannot tell by which line a session left, and at moments when a line cannot be confirmed the search falls back to unclaimed addresses only.",
+        "publicNat": "The NAT address is a public address: if the FortiGate holds it itself, the line is direct; set its type to Direct.",
+        "converted": "Converted at the upgrade: while the converted exits stay without interfaces and unchanged, lookups treat them as one line, as the old NAT settings did; the NAT addresses of an exit added later are outside that. Enter each line's public address and interfaces (INSTALL.md section 13)."
+      },
+      "kept": {
+        "note": "This exit cannot be shown in the editor as it is stored; its stored value is below and is kept unchanged. To correct it, remove the exit and add it again with valid values.",
+        "value": "Stored value"
+      },
+      "storedUnreadable": "The stored exit definition cannot be read: {{reason}} Once you add an exit and save, it replaces the stored value.",
+      "codes": {
+        "setting_type": "Wrong type of value: {{expected_en}} expected.",
+        "setting_too_many": "At most {{limit}} items are allowed.",
+        "setting_interface_invalid": "An interface name has 1-35 characters, without control characters or leading/trailing spaces.",
+        "setting_egress_name": "An exit name has lower-case letters, digits and hyphens (at most 32 characters), e.g. hat-1.",
+        "setting_egress_field": "An exit has an unknown or missing field; the fields are label, mode (required), public, public_dynamic, transips, interfaces, port_preservation.",
+        "setting_egress_dynamic": "\"Public IP may change\" can only be chosen for an ISP NAT exit.",
+        "setting_egress_mode": "The NAT type must be direct, isp_nat, not_logged or internal.",
+        "setting_egress_label": "A label has at most 64 characters and no control characters.",
+        "setting_egress_address": "Invalid address: an IPv4 address or an IPv4 network of at least /24 is expected (the network address, e.g. 203.0.113.208/29).",
+        "setting_ipv6_not_supported": "IPv6 addresses are not supported in this version.",
+        "setting_egress_overlap": "A public or NAT address cannot be in two exits; the same transip is allowed only when the two exits have separate interfaces.",
+        "setting_egress_direct": "A direct exit needs at least one public address; it has no transip (the FortiGate uses the public address itself) and port preservation stays 'unknown'.",
+        "setting_egress_not_logged": "An exit that does not pass the FortiGate has only public addresses and a label.",
+        "setting_egress_internal": "An exit that is not an internet exit has only NAT addresses (at least one), interfaces and a label.",
+        "setting_egress_port_preservation": "Port preservation must be unknown, preserved or not_preserved.",
+        "setting_egress_catch_all": "At most one exit may have no NAT address (the one that covers unclaimed addresses).",
+        "setting_egress_public_private": "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit.",
+        "setting_egress_isp_nat_direct": "A line whose NAT address is its public address is direct: set its type to Direct.",
+        "egress_duplicate_name": "Two exits cannot have the same name."
+      },
+      "removeShort": "Remove"
+    },
+    "settings": {
+      "rebuildHint": "A change applies to past days only once the leases are rebuilt (at the end of this group: Rebuild the leases)."
+    },
+    "observed": {
+      "title": "NAT addresses seen in the logs (last 24 hours)",
+      "refresh": "Refresh",
+      "failed": "The NAT addresses seen in the logs could not be read",
+      "exitsInvalid": "The stored exit definition cannot be read; the exit column is empty. Correct the value and save it (alert R20-nat:invalid).",
+      "empty": "No session with a source-NAT address (transip) was logged in the last 24 hours.",
+      "caption": "Source-NAT addresses seen in the FortiGate's session records",
+      "columns": {
+        "transip": "NAT address (transip)",
+        "dstintf": "Interface (dstintf)",
+        "trandisp": "NAT type (trandisp)",
+        "sessions": "Sessions",
+        "seen": "First / last seen",
+        "egress": "Exit",
+        "action": "Action"
+      },
+      "unknownTrandisp": "Not in the settings",
+      "unknownTrandispNote": "NAT types that are not in the settings were seen: {{values}}. These sessions are not taken into the candidate search for unclaimed addresses; verify the nat.snat_trandisp setting on site.",
+      "unmapped": "Unclaimed",
+      "inDraft": "In the draft: {{name}} (not saved)",
+      "inDraftShort": "In the draft (not saved)",
+      "add": "Add as exit",
+      "addInternal": "Add as not an internet exit",
+      "internalHint": "Choose this for the address of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch; no session is searched on such addresses.",
+      "join": {
+        "transips": "Add to the NAT addresses of {{name}}",
+        "public": "Add to the public addresses of {{name}}"
+      },
+      "truncated": "The 100 addresses with the most sessions are shown.",
+      "srcmacTitle": "Interfaces with srcmac (last hour)",
+      "srcmacCaption": "FortiGate interfaces whose session records carry srcmac",
+      "srcmacEmpty": "No session record with srcmac in the last hour (device identification may be off).",
+      "srcmacColumns": {
+        "srcintf": "Interface (srcintf)",
+        "rows": "Records",
+        "macs": "Distinct MACs",
+        "maxIps": "Most IPs per MAC",
+        "action": "Action"
+      },
+      "srcmacUsed": "srcmac in use",
+      "srcmacAdd": "Use for srcmac",
+      "srcmacShared": "One MAC address was seen with {{count}} distinct IP addresses (limit {{limit}}): a router or switch may sit behind the interface.",
+      "srcmacTruncated": "At most 50 interfaces are shown.",
+      "srcmacHint": "Never add an interface that faces a routed (L3) network; when layer-2 switches sit in between, add the interface only after checking it on site with two known clients (DEVICE-SETUP.md section 2.5)."
+    },
+    "leaseEvidence": {
+      "title": "Lease evidence",
+      "states": {
+        "ok": "Records arrive",
+        "none": "No records arrive",
+        "refused": "Records are not used"
+      },
+      "refused": "FortiGate DHCP records arrive but {{refused}} of the last 24 hours were not used; the reasons are in the alert.",
+      "toAlert": "Open the alert (Security)",
+      "toSettings": "FortiGate DHCP settings",
+      "toAlerts": "Alerts",
+      "noneTable": "No usable {{evidence}} record arrives (it did before): 5651 lookups that rest on these records may stop at the internal IP. Make the source send its records (DEVICE-SETUP.md sections 2.4 and 3).",
+      "noneMikrotikDhcp": "No new MikroTik DHCP record in the last 24 hours; existing MikroTik leases continue with traffic, new clients may have no chain; check that the records arrive (DEVICE-SETUP.md section 3).",
+      "absent": "No usable DHCP or ARP-LOG record arrives: 5651 lookups stop at the internal IP (installation guide section 0.1). For lease evidence, make the DHCP server send its records (DEVICE-SETUP.md sections 2.4 and 3).",
+      "evidence": {
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG",
+        "mt_dhcp": "MikroTik DHCP"
+      },
+      "tables": {
+        "mt_dhcp": "MikroTik DHCP",
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG"
+      },
+      "rows_one": "{{formatted}} usable record in the last 24 hours",
+      "rows_other": "{{formatted}} usable records in the last 24 hours",
+      "leases_one": "{{formatted}} current lease",
+      "leases_other": "{{formatted}} current leases",
+      "lastHour": "Latest record {{time}}",
+      "noneLastHour": "No record in the last hour",
+      "refusedRows_one": "{{formatted}} FortiGate DHCP record of the last 24 hours was not used as lease evidence.",
+      "refusedRows_other": "{{formatted}} FortiGate DHCP records of the last 24 hours were not used as lease evidence.",
+      "excluded": "Excluded interfaces: {{excluded}} records (not lease evidence)",
+      "unverified": "FortiGate DHCP record format not verified on site (DEVICE-SETUP.md section 2.4).",
+      "srcmac": "srcmac partial-evidence interfaces: {{interfaces}} · {{rows}} records in the last hour",
+      "srcmacUncounted": "srcmac partial-evidence interfaces: {{interfaces}} · the records of the last hour could not be counted"
+    },
+    "topology": {
+      "title": "Supported network setups",
+      "items": {
+        "site": "One site with one FortiGate at the internet edge.",
+        "leases": "Lease evidence: MikroTik DHCP and ARP-LOG records, FortiGate DHCP event records (to be verified on site), or both (on different networks).",
+        "statics": "On FortiGate-only networks static-IP devices have no lease; the chain ends at the internal IP. Optional srcmac gives partial evidence only on networks whose gateway is the FortiGate, after a site check.",
+        "otherDhcp": "Another DHCP server (e.g. Windows): leases only through MikroTik ARP-LOG, with medium confidence.",
+        "lines": "Several internet lines: each line is defined, with its interfaces, in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).",
+        "doubleNat": "When the ISP does a second NAT, lookups give a candidate list; when the public IP is shared with other customers (CGNAT), the list may not contain the right session.",
+        "unsupported": "Not supported: IPv6 lookups; two DHCP servers on one network; FortiGate leases where the FortiGate is a DHCP relay; several branches with the same address range; lookups for lines that do not pass the FortiGate; srcmac behind a router or an L3 switch."
+      },
+      "details": "Details: installation guide section 0.1"
+    },
+    "sources": {
+      "fortigateHint": "If you use the FortiGate's DHCP server, its system event records must go to syslog (DEVICE-SETUP.md section 2.4)."
+    },
+    "lookup": {
+      "exit": "Exit",
+      "matchExit": "Exit: {{exit}}",
+      "exitNotDetermined": "exit not determined (no public IP in the request)",
+      "resolution": {
+        "public": "Public IP",
+        "transip": "NAT address",
+        "fallback_direct": "Direct line not confirmed",
+        "fallback_transip": "NAT address not confirmed",
+        "observed": "Address seen in the logs",
+        "public_unknown": "Lines with unknown public address",
+        "unconfigured": "No exits defined",
+        "no_egress": "No exit"
+      },
+      "mode": {
+        "direct": "Direct",
+        "isp_nat": "ISP NAT",
+        "not_logged": "Does not pass the FortiGate",
+        "internal": "Not an internet exit"
+      },
+      "untrusted": "Unconfigured sender: {{sources}}",
+      "srcmacStep": "MAC (srcmac)",
+      "srcmacBadge": "Partial evidence: srcmac",
+      "srcmacDetail": "srcmac field of the FortiGate session record (interface {{interface}}); no lease",
+      "srcmacConflictTitle_one": "srcmac differs: {{count}} possible device",
+      "srcmacConflictTitle_other": "srcmac differs: {{count}} possible devices",
+      "srcmacConflictBody": "The srcmac of the FortiGate session record differs from the lease's MAC address. No single device or person can be named with certainty; the chain by the lease and the possible chain by srcmac are listed below with the same weight.",
+      "srcmacOption": "Possibility {{number}} (srcmac, partial evidence)",
+      "leaseSource": "Source: {{source}}",
+      "fortigateLease": "lease time (FortiGate record): {{lease}} s · last DHCP evidence: {{last}}",
+      "fortigateLeaseConfigured": "lease time: configured time · last DHCP evidence: {{last}}",
+      "unconvertedTitle": "FortiGate DHCP record not in the lease timeline",
+      "unconvertedNote": "not in the lease timeline; no chain built; no confidence given",
+      "unconvertedSummary": "FortiGate DHCP record (not in the lease timeline; no chain built; no confidence given)"
+    }
+  },
+  "evidenceTables": {
+    "fg_event": "FortiGate event record"
+  }
+}

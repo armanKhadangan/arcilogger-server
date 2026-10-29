@@ -1,0 +1,209 @@
+{
+  "network": {
+    "egress": {
+      "title": "İnternet çıkışları",
+      "empty": "Tanımlı çıkış yok: tek bir çift NAT çıkışı varsayılır.",
+      "add": "Çıkış ekle",
+      "remove": "Kaldır: {{name}}",
+      "exit": "Çıkış {{name}}",
+      "unnamed": "adsız çıkış",
+      "name": "Ad",
+      "nameHint": "Küçük harf, rakam ve tire, ör. hat-1",
+      "label": "Açıklama",
+      "mode": "NAT türü",
+      "modes": {
+        "direct": "Doğrudan (genel IP FortiGate'te)",
+        "isp_nat": "Servis sağlayıcı NAT'ı (çift NAT)",
+        "not_logged": "FortiGate'ten geçmiyor",
+        "internal": "İnternet çıkışı değil (DMZ, VLAN, VPN ya da şubeye NAT)"
+      },
+      "public": "Genel adresler",
+      "publicHint": "Her satıra bir IPv4 adresi ya da en az /24 bir ağ, ör. 203.0.113.208/29",
+      "transips": "NAT adresleri (transip)",
+      "transipsHint": "FortiGate'in bu hattaki kaynak NAT adresleri, her satıra bir tane",
+      "interfaces": "Arayüzler (dstintf)",
+      "interfacesHint": "Her satıra bir FortiGate arayüz adı, ör. wan1",
+      "portPreservation": "Port koruma",
+      "preservation": {
+        "unknown": "Bilinmiyor",
+        "preserved": "Korunuyor (sahada doğrulandı)",
+        "not_preserved": "Korunmuyor"
+      },
+      "dynamic": "Genel IP değişebilir (dinamik)",
+      "warnings": {
+        "noPublic": "Genel adres girilmedi: bu çıkış, hiçbir çıkışa tanımlı olmayan her genel IP için aranır.",
+        "dynamic": "Genel IP değişebilir: bu çıkış, tanımlı adreslerinin yanında hiçbir çıkışa tanımlı olmayan genel IP'ler için de aranır.",
+        "catchAll": "Tanımsız tüm NAT adreslerini kapsar.",
+        "interfaces": "Her hattın arayüzlerini (dstintf) girin; girilmezse sorgu bir çıkışın oturumunu hangi hattan çıktığına göre ayıramaz ve bir hattın doğrulanamadığı anlarda arama yalnızca tanımsız adreslere yönelir.",
+        "publicNat": "NAT adresi genel bir adres: FortiGate bu adresi kendisi tutuyorsa hat doğrudandır, türünü Doğrudan yapın.",
+        "converted": "Yükseltmede aktarıldı: aktarılan çıkışlar arayüzsüz ve değiştirilmeden kaldıkça sorgular onları eski NAT ayarlarındaki gibi tek hat sayar; sonradan eklenen bir çıkışın NAT adresleri bunun dışındadır. Her hattın genel adresini ve arayüzlerini girin (KURULUM.md bölüm 13)."
+      },
+      "kept": {
+        "note": "Bu çıkış kaydedildiği biçimiyle düzenleyicide gösterilemiyor; kayıtlı değeri aşağıda ve değiştirilmeden korunur. Düzeltmek için çıkışı kaldırıp doğru değerlerle yeniden ekleyin.",
+        "value": "Kayıtlı değer"
+      },
+      "storedUnreadable": "Kayıtlı çıkış tanımı okunamıyor: {{reason}} Bir çıkış ekleyip kaydettiğinizde kayıtlı değerin yerine geçer.",
+      "codes": {
+        "setting_type": "Değer türü yanlış: {{expected_tr}} bekleniyor.",
+        "setting_too_many": "En çok {{limit}} öğe girilebilir.",
+        "setting_interface_invalid": "Arayüz adı 1-35 karakter olmalı; kontrol karakteri ve baş/son boşluk içeremez.",
+        "setting_egress_name": "Çıkış adı küçük harf, rakam ve tire içermeli (en çok 32 karakter), ör. hat-1.",
+        "setting_egress_field": "Çıkışta bilinmeyen ya da eksik bir alan var; alanlar: label, mode (zorunlu), public, public_dynamic, transips, interfaces, port_preservation.",
+        "setting_egress_dynamic": "\"Genel IP değişebilir\" yalnızca servis sağlayıcı NAT'ı olan çıkışlarda seçilebilir.",
+        "setting_egress_mode": "NAT türü direct, isp_nat, not_logged ya da internal olmalı.",
+        "setting_egress_label": "Açıklama en çok 64 karakter olabilir ve kontrol karakteri içeremez.",
+        "setting_egress_address": "Geçersiz adres: IPv4 adresi ya da en az /24 bir IPv4 ağı bekleniyor (ağ adresi, ör. 203.0.113.208/29).",
+        "setting_ipv6_not_supported": "IPv6 adresleri bu sürümde desteklenmiyor.",
+        "setting_egress_overlap": "Bir genel adres ya da NAT adresi iki çıkışta birden olamaz; aynı transip yalnızca iki çıkışın arayüzleri ayrıysa kullanılabilir.",
+        "setting_egress_direct": "Doğrudan çıkış en az bir genel adres ister; transip girilmez (FortiGate genel adresi kendisi kullanır) ve port koruma 'unknown' kalır.",
+        "setting_egress_not_logged": "FortiGate'ten geçmeyen çıkışa yalnızca genel adres ve açıklama girilir.",
+        "setting_egress_internal": "İnternet çıkışı olmayan NAT tanımına yalnızca NAT adresleri (en az bir), arayüzler ve açıklama girilir.",
+        "setting_egress_port_preservation": "Port koruma unknown, preserved ya da not_preserved olmalı.",
+        "setting_egress_catch_all": "NAT adresi boş (tanımsız adresleri kapsayan) en çok bir çıkış olabilir.",
+        "setting_egress_public_private": "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin.",
+        "setting_egress_isp_nat_direct": "NAT adresi genel adresiyle aynı olan hat doğrudandır: türünü Doğrudan yapın.",
+        "egress_duplicate_name": "İki çıkış aynı adı taşıyamaz."
+      },
+      "removeShort": "Kaldır"
+    },
+    "settings": {
+      "rebuildHint": "Değişiklik geçmiş günlere ancak kiralar yeniden oluşturulunca uygulanır (bu grubun sonunda: Kiraları yeniden oluştur)."
+    },
+    "observed": {
+      "title": "Kayıtlarda görülen NAT adresleri (son 24 saat)",
+      "refresh": "Yenile",
+      "failed": "Kayıtlarda görülen NAT adresleri okunamadı",
+      "exitsInvalid": "Kayıtlı çıkış tanımı okunamıyor; çıkış sütunu boş. Değeri düzeltip kaydedin (uyarı R20-nat:invalid).",
+      "empty": "Son 24 saatte kaynak NAT adresiyle (transip) kaydedilmiş oturum yok.",
+      "caption": "FortiGate oturum kayıtlarında görülen kaynak NAT adresleri",
+      "columns": {
+        "transip": "NAT adresi (transip)",
+        "dstintf": "Arayüz (dstintf)",
+        "trandisp": "NAT türü (trandisp)",
+        "sessions": "Oturum",
+        "seen": "İlk / son görülme",
+        "egress": "Çıkış",
+        "action": "İşlem"
+      },
+      "unknownTrandisp": "Ayarlarda yok",
+      "unknownTrandispNote": "Ayarlarda tanımlı olmayan NAT türleri görüldü: {{values}}. Bu oturumlar tanımsız adreslerin aday aramasına alınmaz; nat.snat_trandisp ayarını sahada doğrulayın.",
+      "unmapped": "Tanımsız",
+      "inDraft": "Taslakta: {{name}} (kaydedilmedi)",
+      "inDraftShort": "Taslakta (kaydedilmedi)",
+      "add": "Çıkış olarak ekle",
+      "addInternal": "İnternet çıkışı değil olarak ekle",
+      "internalHint": "FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı NAT'ın adresiyse bunu seçin; bu adreslerde oturum aranmaz.",
+      "join": {
+        "transips": "{{name}} çıkışının NAT adreslerine ekle",
+        "public": "{{name}} çıkışının genel adreslerine ekle"
+      },
+      "truncated": "En çok oturumu olan 100 adres gösterildi.",
+      "srcmacTitle": "srcmac görülen arayüzler (son 1 saat)",
+      "srcmacCaption": "Oturum kayıtlarında srcmac taşıyan FortiGate arayüzleri",
+      "srcmacEmpty": "Son 1 saatte srcmac taşıyan oturum kaydı yok (aygıt tanıma kapalı olabilir).",
+      "srcmacColumns": {
+        "srcintf": "Arayüz (srcintf)",
+        "rows": "Kayıt",
+        "macs": "Farklı MAC",
+        "maxIps": "Bir MAC için en çok IP",
+        "action": "İşlem"
+      },
+      "srcmacUsed": "srcmac kullanılıyor",
+      "srcmacAdd": "srcmac için ekle",
+      "srcmacShared": "Bir MAC adresi {{count}} farklı IP adresiyle görüldü (sınır {{limit}}): arayüzün arkasında bir yönlendirici ya da anahtar olabilir.",
+      "srcmacTruncated": "En çok 50 arayüz gösterildi.",
+      "srcmacHint": "Yönlendirilmiş (L3) bir ağa bakan arayüzü eklemeyin; arada katman 2 anahtarlar varsa arayüzü iki bilinen istemciyle sahada doğruladıktan sonra ekleyin (DEVICE-SETUP.md bölüm 2.5)."
+    },
+    "leaseEvidence": {
+      "title": "Kira kanıtı",
+      "states": {
+        "ok": "Kayıtlar geliyor",
+        "none": "Kayıt gelmiyor",
+        "refused": "Kayıtlar kullanılmıyor"
+      },
+      "refused": "FortiGate DHCP kayıtları geliyor ama son 24 saatte {{refused}} tanesi kullanılmadı; nedenler uyarıda.",
+      "toAlert": "Uyarıyı aç (Güvenlik)",
+      "toSettings": "FortiGate DHCP ayarları",
+      "toAlerts": "Uyarılar",
+      "noneTable": "Kullanılabilir {{evidence}} kaydı gelmiyor (daha önce geliyordu): bu kayıtlara dayanan 5651 sorguları iç IP adresinde durabilir. Kaynağın kayıt göndermesini sağlayın (DEVICE-SETUP.md bölüm 2.4 ve 3).",
+      "noneMikrotikDhcp": "Son 24 saatte yeni MikroTik DHCP kaydı gelmedi; mevcut MikroTik kiraları trafikle sürer, yeni istemciler zincirsiz kalabilir; kayıtların geldiğini denetleyin (DEVICE-SETUP.md bölüm 3).",
+      "absent": "Kullanılabilir DHCP ya da ARP-LOG kaydı gelmiyor: 5651 sorguları iç IP adresinde durur (Kurulum kılavuzu bölüm 0.1). Kira kanıtı isteniyorsa DHCP sunucusunun kayıt göndermesini sağlayın (DEVICE-SETUP.md bölüm 2.4 ve 3).",
+      "evidence": {
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG",
+        "mt_dhcp": "MikroTik DHCP"
+      },
+      "tables": {
+        "mt_dhcp": "MikroTik DHCP",
+        "fg_dhcp": "FortiGate DHCP",
+        "mt_arp": "MikroTik ARP-LOG"
+      },
+      "rows_one": "Son 24 saatte {{formatted}} kullanılabilir kayıt",
+      "rows_other": "Son 24 saatte {{formatted}} kullanılabilir kayıt",
+      "leases_one": "{{formatted}} güncel kira",
+      "leases_other": "{{formatted}} güncel kira",
+      "lastHour": "Son kayıt {{time}}",
+      "noneLastHour": "Son bir saatte kayıt yok",
+      "refusedRows_one": "Son 24 saatte {{formatted}} FortiGate DHCP kaydı kira kanıtı olarak kullanılmadı.",
+      "refusedRows_other": "Son 24 saatte {{formatted}} FortiGate DHCP kaydı kira kanıtı olarak kullanılmadı.",
+      "excluded": "Hariç tutulan arayüzler: {{excluded}} kayıt (kira kanıtı sayılmaz)",
+      "unverified": "FortiGate DHCP kayıt biçimi sahada doğrulanmadı (DEVICE-SETUP.md bölüm 2.4).",
+      "srcmac": "srcmac kısmi kanıt arayüzleri: {{interfaces}} · son bir saatte {{rows}} kayıt",
+      "srcmacUncounted": "srcmac kısmi kanıt arayüzleri: {{interfaces}} · son bir saatin kayıtları sayılamadı"
+    },
+    "topology": {
+      "title": "Desteklenen ağ yapıları",
+      "items": {
+        "site": "Tek yerleşke ve internete çıkışta bir FortiGate.",
+        "leases": "Kira kanıtı: MikroTik DHCP ve ARP-LOG kayıtları, FortiGate DHCP olay kayıtları (sahada doğrulanmalı) ya da ikisi (farklı ağlarda).",
+        "statics": "Yalnız-FortiGate ağlarda statik IP'li cihazların kira kaydı olmaz; zincir iç IP adresinde biter. İsteğe bağlı srcmac yalnızca ağ geçidi FortiGate olan ve sahada denetlenmiş ağlarda kısmi kanıt verir.",
+        "otherDhcp": "Başka bir DHCP sunucusu (ör. Windows): kira kaydı yalnızca MikroTik ARP-LOG ile, orta güvenle.",
+        "lines": "Birden çok internet hattı: her hat, arayüzleriyle birlikte, Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlanır.",
+        "doubleNat": "Servis sağlayıcı ikinci bir NAT yapıyorsa sorgu aday listesi verir; genel IP başka müşterilerle paylaşılıyorsa (CGNAT) liste doğru oturumu içermeyebilir.",
+        "unsupported": "Desteklenmeyenler: IPv6 sorguları; aynı ağa iki DHCP sunucusu; FortiGate'in DHCP aktarıcı (relay) olduğu ağlarda FortiGate kira kaydı; aynı adres aralığını kullanan birden çok şube; FortiGate'ten geçmeyen hatlarda sorgu; bir yönlendiricinin ya da L3 anahtarın arkasındaki ağlarda srcmac."
+      },
+      "details": "Ayrıntılar: Kurulum kılavuzu bölüm 0.1"
+    },
+    "sources": {
+      "fortigateHint": "FortiGate'in DHCP sunucusunu kullanıyorsanız sistem olay kayıtları syslog'a gönderilmelidir (DEVICE-SETUP.md bölüm 2.4)."
+    },
+    "lookup": {
+      "exit": "Çıkış",
+      "matchExit": "Çıkış: {{exit}}",
+      "exitNotDetermined": "çıkış belirlenmedi (talepte genel IP yok)",
+      "resolution": {
+        "public": "Genel IP",
+        "transip": "NAT adresi",
+        "fallback_direct": "Doğrudan hat doğrulanamadı",
+        "fallback_transip": "NAT adresi doğrulanamadı",
+        "observed": "Kayıtlarda görülen adres",
+        "public_unknown": "Genel adresi bilinmeyen hatlar",
+        "unconfigured": "Çıkış tanımlı değil",
+        "no_egress": "Çıkış yok"
+      },
+      "mode": {
+        "direct": "Doğrudan",
+        "isp_nat": "Servis sağlayıcı NAT'ı",
+        "not_logged": "FortiGate'ten geçmiyor",
+        "internal": "İnternet çıkışı değil"
+      },
+      "untrusted": "Tanımsız gönderici: {{sources}}",
+      "srcmacStep": "MAC (srcmac)",
+      "srcmacBadge": "Kısmi kanıt: srcmac",
+      "srcmacDetail": "FortiGate oturum kaydının srcmac alanı ({{interface}} arayüzü); kira kaydı yok",
+      "srcmacConflictTitle_one": "srcmac farklı: {{count}} olası cihaz",
+      "srcmacConflictTitle_other": "srcmac farklı: {{count}} olası cihaz",
+      "srcmacConflictBody": "FortiGate oturum kaydındaki srcmac kira kaydındaki MAC adresinden farklı. Tek bir cihaz veya kişi kesin olarak belirlenemez; kira kaydına göre kurulan zincir ve srcmac'e göre olası zincir aşağıda eşit ağırlıkta listelenmiştir.",
+      "srcmacOption": "Olasılık {{number}} (srcmac, kısmi kanıt)",
+      "leaseSource": "Kaynak: {{source}}",
+      "fortigateLease": "kira süresi (FortiGate kaydı): {{lease}} sn · son DHCP kanıtı: {{last}}",
+      "fortigateLeaseConfigured": "kira süresi: ayarlardaki süre · son DHCP kanıtı: {{last}}",
+      "unconvertedTitle": "Kira zaman çizelgesine girmemiş FortiGate DHCP kaydı",
+      "unconvertedNote": "kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez",
+      "unconvertedSummary": "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
+    }
+  },
+  "evidenceTables": {
+    "fg_event": "FortiGate olay kaydı"
+  }
+}

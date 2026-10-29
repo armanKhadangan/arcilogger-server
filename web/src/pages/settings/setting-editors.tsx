@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { LockedValue } from '@/components/admin/locked-field';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -25,6 +26,10 @@ import { currentLang } from '@/lib/i18n';
 import { roleLabel, ROLE_IDS } from '@/lib/permissions';
 import type { SettingOut } from '@/lib/settings-types';
 
+import { EgressEditor } from './egress-editor';
+import { EGRESSES_KEY, type EgressRow } from './egress-model';
+import { FortiGateObservedPanel, type SrcmacDrafts } from './fortigate-observed-panel';
+import { parseInteger } from './settings-validation';
 import {
   HOLIDAYS_KEY,
   isWorkHours,
@@ -32,6 +37,7 @@ import {
   SERVER_SECONDS_KEY,
   SEVERITIES,
   SEVERITY_KEY,
+  stringListItems,
   TOTP_MANDATORY_ROLES,
   TOTP_ROLES_KEY,
   validHoliday,
@@ -44,6 +50,37 @@ import {
 } from './setting-values';
 
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
+/** FortiGate lease evidence (ADR-0016): its help is a warning while the switch is on. */
+const TRAFFIC_EXTENDS_KEY = 'dhcp.fortigate_traffic_extends';
+/**
+ * Maps that a lease rebuild applies to past days (the rebuild is the group's last section) and
+ * whose server help does not say so: `dhcp.fortigate_logids` states it in its own help.
+ */
+const REBUILD_HINT_KEYS = new Set(['dhcp.fortigate_dhcp_msgs']);
+const SRCMAC_INTERFACES_KEY = 'lookup.srcmac_interfaces';
+const SRCMAC_MAX_IPS_KEY = 'lookup.srcmac_max_ips';
+
+/** The drafts of the other settings of the group (the observed panel adds srcmac interfaces). */
+export interface GroupDrafts {
+  draft: (key: string) => Draft | undefined;
+  edit: (key: string, draft: Draft) => void;
+}
+
+/** "srcmac için ekle": the interfaces and the IP limit of the group's drafts, `null` without them. */
+function srcmacDrafts(group: GroupDrafts | undefined): SrcmacDrafts | null {
+  const interfaces = group?.draft(SRCMAC_INTERFACES_KEY);
+  if (!group || typeof interfaces !== 'string') return null;
+  const limit = group.draft(SRCMAC_MAX_IPS_KEY);
+  // Read as the setting's own list editor reads it (`fromDraft`).
+  const listed = stringListItems(interfaces);
+  return {
+    interfaces: listed,
+    maxIps: (typeof limit === 'string' ? parseInteger(limit) : null) ?? 1,
+    add: (name) => {
+      if (!listed.includes(name)) group.edit(SRCMAC_INTERFACES_KEY, [...listed, name].join('\n'));
+    },
+  };
+}
 
 /** `01-01` → "1 Ocak (her yıl)", `2026-03-20` → "20.03.2026". */
 function holidayText(entry: string, t: TFunction): string {
@@ -372,17 +409,23 @@ export function SettingField({
   draft,
   onChange,
   error,
+  errorCode,
   disabled,
   onReset,
   resetting = false,
+  group,
 }: {
   setting: SettingOut;
   draft: Draft;
   onChange: (draft: Draft) => void;
   error?: string | undefined;
+  /** The code of a refusal of the server (shown for the exits, whose 422 has no field path). */
+  errorCode?: string | undefined;
   disabled: boolean;
   onReset: () => void;
   resetting?: boolean;
+  /** The other drafts of the settings group (`nat.egresses` adds srcmac interfaces). */
+  group?: GroupDrafts;
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
@@ -419,6 +462,15 @@ export function SettingField({
     );
   else if (setting.key === TOTP_ROLES_KEY && Array.isArray(draft))
     editor = <RolesEditor {...common} draft={draft as string[]} onChange={onChange} />;
+  else if (setting.key === EGRESSES_KEY && Array.isArray(draft))
+    editor = (
+      <EgressEditor
+        {...common}
+        draft={draft as EgressRow[]}
+        stored={setting.value}
+        onChange={onChange}
+      />
+    );
   else if (setting.key === SEVERITY_KEY)
     editor = (
       <Select value={draftText(draft)} onValueChange={onChange} disabled={disabled}>
@@ -522,15 +574,27 @@ export function SettingField({
       {error ? (
         <p id={errorId} className="text-xs text-danger-ink">
           {error}
+          {errorCode && setting.key === EGRESSES_KEY ? (
+            <span className="font-mono"> ({errorCode})</span>
+          ) : null}
         </p>
       ) : null}
-      <p id={helpId} className="text-xs text-muted">
-        {help}
-        {bounds ? ` ${bounds}` : ''}
-        {setting.type === 'string_list' || setting.type === 'integer_list'
-          ? ` ${t('settings.application.onePerLine')}`
-          : ''}
-      </p>
+      {setting.key === TRAFFIC_EXTENDS_KEY && draft === true ? (
+        <div id={helpId}>
+          <Alert tone="warning" assertive={false} data-testid="traffic-extends-warning">
+            {help}
+          </Alert>
+        </div>
+      ) : (
+        <p id={helpId} className="text-xs text-muted">
+          {help}
+          {bounds ? ` ${bounds}` : ''}
+          {setting.type === 'string_list' || setting.type === 'integer_list'
+            ? ` ${t('settings.application.onePerLine')}`
+            : ''}
+          {REBUILD_HINT_KEYS.has(setting.key) ? ` ${t('network.settings.rebuildHint')}` : ''}
+        </p>
+      )}
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-strong">
         <span>{t('settings.application.default', { value: shown(setting.default) })}</span>
         {setting.updated_at && !setting.is_default ? (
@@ -556,6 +620,15 @@ export function SettingField({
           </Button>
         ) : null}
       </p>
+      {setting.key === EGRESSES_KEY && Array.isArray(draft) ? (
+        <FortiGateObservedPanel
+          rows={draft as EgressRow[]}
+          onRows={onChange}
+          disabled={disabled}
+          editorId={id}
+          srcmac={srcmacDrafts(group)}
+        />
+      ) : null}
     </div>
   );
 }
