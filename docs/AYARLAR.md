@@ -31,10 +31,27 @@ değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 
 | **Saklama** (`/settings/retention`) | süresi dolan günleri silme açık/kapalı, saklama süresi (en az 730 gün); silinecek gün sayısı önceden gösterilir ve yazılarak onaylanır | — |
 | **Yedekleme** (`/settings/backup`) | açık/kapalı, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; son yedeğin ayrıntıları bu sürümde sayfada gösterilmez, başarısız bir yedek `R20-backup` uyarısıdır | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
 | **Değişiklik geçmişi** (`/settings/history`) | isteklerin listesi ve durumları, değişiklikleri, denetim kaydına bağlantı; **İptal et**, **Geri al**; yapılandırma sürümleri; **Tanılama paketini indir** (destek için ZIP, gizli bilgi içermez) | bir sürümü geri yüklemek (`versions restore`, sayfa komutu gösterir) |
+| **İlk kurulum sihirbazı** (`/settings/setup`) | kendisi hiçbir değeri değiştirmez: kurulumdan sonraki adımları sırayla gösterir ve her adımda yukarıdaki sayfalardan birini açar (aşağıda) | — |
 
 Hiçbir sayfa şunları değiştirmez: `data_dir`, `secrets_dir`, `[database]`, `[api]`, `[ingest]`,
 `[worker]`, `[seal]`, veritabanı parolası, kullanım takma ad anahtarı. Bunlar kurulumun ve
 yöneticinin işidir.
+
+**İlk kurulum sihirbazı** (`/settings/setup`) kurulumdan sonra yapılacakları bir denetim listesi
+olarak gösterir: Yönetici ve iki adımlı doğrulama, Site ayarları, Log kaynakları, Kamu SM: test
+sunucusu, Kamu SM: üretim, Replika, E-posta ve Özet. Ayarlar ana sayfasındaki **İlk kurulum
+sihirbazı** kartından ve Uyum Durumu sayfasındaki **İlk kurulum sihirbazını aç** bağlantısından
+açılır; ilk girişten sonra kendiliğinden açılmaz. Sihirbazın kendi formu yoktur ve hiçbir şey
+saklamaz: her adımın durumu ("Tamam" / "Eksik") sunucunun yapılandırmasından ve istek geçmişindeki
+damga testlerinden her açılışta yeniden çıkarılır; Log kaynakları adımı ayrıca her yapılandırılmış
+kaynaktan veri gelip gelmediğini gösterir (adımın durumunu değiştirmez).
+**Ayarlar'da aç** ilgili sayfayı açar, değişiklik orada her zamanki gibi kaydedilir ve denetlenir;
+**Bu adımı şimdilik atla** sonraki adıma geçer, atlanan adım "Eksik" kalır. E-posta adımı ancak
+e-posta gönderimi açıkken, SMTP sunucusu ve gönderen de ayarlıysa "Tamam" olur. Sihirbazdan açılan
+bir sayfanın geri dönüş bağlantısı **Ayarlar** yerine **Kurulum sihirbazına dön** olur ve
+`/settings/setup` adresine götürür (Kamu SM sihirbazının adımları arasında da); bu durum yalnızca o
+tarayıcı sekmesinde hatırlanır, sihirbaza ya da Ayarlar ana sayfasına dönünce biter. Adımlar ve ne
+zaman "Tamam" sayıldıkları: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 5.
 
 **Bir kaynağı kapatmak** (`enabled = false`): güvenlik duvarı o göndericinin 514 iznini kaldırır,
 sessiz kaynak uyarısı (R15) ve mühürlemenin boşluk denetimi onu artık beklemez. Kapalı kaynaktan
@@ -78,6 +95,25 @@ istek ayarları yeniden okur (canlı akış, açıldığında):
 | `live.buffer_lines` | 5000 | 500–50000 | sürdürme için sunucuda tutulan en yeni satırlar |
 | `live.max_minutes` | 60 | 5–480 | bir akışın süresi (gözetimsiz ekran); Sürdür ile yeniden başlar |
 | `live.backfill_lines` | 50 | 0–200 | akış açılırken hemen gösterilen son satırlar |
+
+**Uyarılar ve e-posta** grubundaki üç `alerts.filter_*` ayarı içerik filtresi kayıtlarının
+beklendiği zamanı söyler; Uyum Durumu sayfasının 7. kartının ve `R20-filter` uyarısının ("İçerik
+filtresi kaydı gelmiyor", önem yüksek) eşikleridir. Etkin bir FortiGate kaynağı varken son
+`alerts.filter_quiet_hours` saattir ne web ne de DNS filtresi kaydı gelmediyse ve bu sürenin değdiği
+her gün beklenen bir günse kart 7 **Sorun** gösterir ve uyarı açılır; süre beklenmeyen bir güne
+değiyorsa kart **Dikkat** gösterir, uyarı açılmaz. İki türden biri yeter, yeni bir kayıt gelince
+uyarı kendiliğinden kapanır. Bir gün, ISO hafta günü `alerts.filter_days` içindeyse ve
+(`alerts.filter_skip_holidays` açıkken) **Kullanım analizi** grubundaki tatil listesinde
+(`usage.holidays`) değilse beklenir. Varsayılanlar sahibin kararıdır (2026-10-28): haftanın her
+günü, listedeki tatiller hariç, 24 saat. `usage.holidays` yalnızca sabit tarihli resmî tatillerle
+gelir; dinî bayramların tarihlerini her yıl yönetici girer. Ayrıntılar:
+[UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.7, [UYARILAR.md](UYARILAR.md) bölüm 2.
+
+| Ayar | Varsayılan | Sınırlar | Anlamı |
+|---|---|---|---|
+| `alerts.filter_days` | `[1,2,3,4,5,6,7]` (her gün) | her biri 1–7 (1 = Pazartesi, 7 = Pazar), sıralı ve tekrarsız saklanır; boş olabilir (hiçbir gün beklenmez) | içerik filtresi kaydı beklenen ISO hafta günleri; sayfada her satıra bir gün numarası |
+| `alerts.filter_skip_holidays` | açık | — | açıkken `usage.holidays` listesindeki günlerde kayıt beklenmez; kapalıyken resmî tatiller de beklenen gün sayılır |
+| `alerts.filter_quiet_hours` | 24 | 6–168 | beklenen günlerde kayıtsız geçebilecek en uzun süre (saat) |
 
 ## 2. Nasıl çalışır?
 
@@ -329,6 +365,7 @@ değiştiren ya da bir işlem başlatan her uç `202` ile isteğin numarasını 
 | Yedekleme | `POST /admin/config/backup/check`, `PUT /admin/config/backup` |
 | Değişiklik geçmişi | `GET /admin/requests`, `GET /admin/requests/{id}`, `DELETE /admin/requests/{id}` (İptal et), `POST /admin/requests/{id}/revert` (Geri al), `GET /admin/config/versions`, `GET /admin/diagnostics` |
 | Mühürleme | `POST /seals/{day}/seal` (Şimdi mühürle), `GET /credits`, `POST /credits/query` (Kontör sorgula) |
+| İlk kurulum sihirbazı | yalnızca okur: `GET /admin/config`, `GET /admin/status`, `GET /admin/requests?kind=action.tsa_test` (damga testleri), `GET /sources` (log kaynakları adımı) |
 
 Uygulama ayarları ve worker işlemleri (test e-postası, kiraların yeniden oluşturulması)
 veritabanından geçer ve yönetim hizmetini beklemez; diğer her şey imzalı istekle ArciAdmin'e

@@ -240,6 +240,106 @@ The owner decisions D1–D10 of the Wave 2 contract, with the default that is im
 | AR9 | An idle viewer of Canlı Akış is **signed out** after `auth.idle_minutes` (the stream's requests are background requests, so an unattended screen ends the session) | none recommended | [ARAMA.md](ARAMA.md) |
 | AR10 | Saved searches are **personal** only | administrators may share them | [ARAMA.md](ARAMA.md) |
 
+## Uyum Durumu, Sistem, ilk kurulum sihirbazı: Wave 4 (2026-10-28)
+
+The owner questions Q1–Q21 of the Wave 4 contract (`design/wave-4-contract.md`, "Owner questions")
+with the answer or the default that is implemented
+([ADR-0017](adr/0017-compliance-and-system-pages.md); the pages and the wizard:
+[UYUM-DURUMU.md](UYUM-DURUMU.md) / [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)). Both pages and the
+wizard are 5651 Temel: no licence state closes them. "Uyum Durumu" is the page's name, not a
+verdict: its ten cards are technical checks of log collection, sealing and backups by a product
+designed to support 5651 obligations ("5651 yükümlülüklerini desteklemek için tasarlanmıştır"),
+neither a legal assessment nor a statement of conformity.
+
+### Owner decisions of 2026-10-28
+
+| # | Decision | Date | Where |
+|---|---|---|---|
+| Q1 | **Uyum Durumu for the administrator and the auditor:** `compliance.read` is held by `admin` and `auditor`; the auditor opens the page with its ten cards and downloads the **Uyum Durumu Raporu** (`GET /compliance/report.pdf` needs `compliance.read` only; the auditor's export is audited as `compliance.report_export` like the administrator's). Everything that changes state stays administrator-only: the confirmation **Yapılandırma yedeğini aldım** (`settings.manage`), every setting and the first-run wizard. The cards keep their active alerts (rule, severity, time opened) in the auditor's view although `alerts.read` stays administrator-only; the web hides the links the auditor cannot open (Kaynaklar, Güvenlik, Ayarlar, Sistem; Mühürleme and Arama stay). The cards and the report carry no data about log subjects, so there is no KVKK notice gate and viewing is not audited. Answers open question 5 of roles.md for Uyum Durumu (kept open for the other pages) | 2026-10-28 | [roles.md](roles.md), [UYUM-DURUMU.md](UYUM-DURUMU.md) §1, [DENETCI-KILAVUZU.md](DENETCI-KILAVUZU.md) |
+| Q10 | **Card 7's expected days:** content-filter records are expected on **every day of the week** (`alerts.filter_days` `[1, 2, 3, 4, 5, 6, 7]`, ISO weekdays) except the days listed in `usage.holidays` (`alerts.filter_skip_holidays` `true`; the list ships the fixed-date national holidays, the administrator enters the others, U7); a **rolling window of 24 hours** (`alerts.filter_quiet_hours` 24, bounds 6–168); a **web or a DNS** filter record is enough; the alert **`R20-filter`** (dedup key `R20-filter:none`) is **high**. Card 7 is **Sorun** and `R20-filter` opens when no web or DNS filter record of an enabled FortiGate source arrived within the window and every site day the window touches is expected; the alert closes by itself when a record arrives. A window that includes a day on which none is expected, or one kind silent while the other arrives, makes the card **Dikkat** without an alert; without an enabled FortiGate source the card is **Bilgi yok**. The three settings are in Ayarlar → Uygulama ayarları → Uyarılar ve e-posta | 2026-10-28 | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.7, [UYARILAR.md](UYARILAR.md), [AYARLAR.md](AYARLAR.md) |
+
+### Defaults of the open owner questions (not yet confirmed)
+
+Each is implemented as written; changing one is a small follow-up.
+
+| # | Default | Alternative | Where |
+|---|---|---|---|
+| Q2 | **Sistem and the Panel's Disk card are administrator-only** (`system.read`); the İK Raporları (`hr`) and Rapor İzleyici (`viewer`) roles hold none of `compliance.read`, `system.read`, `settings.manage` | grant `system.read` to the auditor | [roles.md](roles.md) |
+| Q3 | A fourth state **Bilgi yok** / No data (`neutral`): no data yet, or the check does not apply, always with its reason; a card whose check cannot be run is `neutral` with "Bu denetim şu anda yapılamadı: {error code}" (the exception's class name) and the other cards are unaffected | three states only | [UYUM-DURUMU.md](UYUM-DURUMU.md) §1 |
+| Q4 | Card 1 with no watched source: **Dikkat** (amber) | red | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.1 |
+| Q5 | A stamp not from the Kamu SM production server (mock, RFC 3161, Kamu SM test server): card 5 **Sorun** (red); card 2 **Dikkat** (amber) when yesterday is otherwise sealed and verified | another card or colour | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.2, §2.5 |
+| Q6 | Card 3 judges the verification tasks as they run (VerifyDaily the last 2 days, VerifyWeekly the last 90 days, VerifyMonthly the whole chain, deep); a full chain check older than 35 days, or none while the first sealed day is 35 days old, is **Dikkat** | change the tasks to the specification (30 days daily, the full chain weekly) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.3 |
+| Q7 | Card 4: the installation's age is its **first sealed day**, deleted days included (the earlier of the oldest sealed day in the vault and the oldest day deleted by retention); retention switched off with sealed days older than `retention.days` is **Dikkat** (amber). The card reads the retention task's active alerts by rule (`R20-retention`, severity other than `info`): they are imported without a dedup key | red | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.4 |
+| Q8 | Card 5: no extra "days of credit left" threshold: **Dikkat** at `[tsa] credit_alert_threshold` (500) with the estimated days, **Sorun** at a credit of 0 or below; the TSA certificate of the newest stamp is **Sorun** only once expired, **Dikkat** within 180 days; a credit reading older than two days is **Dikkat** | an extra days threshold; red before expiry | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.5 |
+| Q9 | Card 6 counts an offset **equal to** the limit (`[clock] alert_offset_ms`, 1000 ms) as a problem (the specification's "< 1 s"); the Panel's clock box keeps `<=` | align the Panel | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.6 |
+| Q11 | Card 8 follows the **configured lease evidence**: rows of `mt_dhcp`, `mt_arp` and `fg_dhcp` of the watched sources in the last 24 hours and the active `R20-lease:` alerts, not "DHCP and ARP" literally (a FortiGate-only site has no ARP log) | require DHCP and ARP records | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.8 |
+| Q12 | Card 9: the replica switched off is **Sorun** (red) | amber | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.9 |
+| Q13 | Card 10: the administrator's confirmation **Yapılandırma yedeğini aldım** is accepted as evidence of the offline copy of `arcilogger.toml`, `secret.key` and the Caddy CA folder (B12): an audit entry `compliance.config_backup_confirm` with the configuration file's SHA-256, compared with the current file; never confirmed, or confirmed for another SHA-256, is **Dikkat**. It is the administrator's statement, not a check of the media. A `state\backup\last.json` that does not parse counts as a failed backup (**Sorun**); one that cannot be read at all leaves the card **Bilgi yok** | report the database dumps only | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.10, [YEDEKLEME.md](YEDEKLEME.md) §3 |
+| Q14 | The **Uyum Durumu Raporu** (PDF) is made **on request only**: no schedule, no e-mail, not stored, not a report kind of Raporlar; **not time-stamped** (it uses no credit): its SHA-256 is in the audit entry `compliance.report_export` and in the `X-Arci-Sha256` header | a scheduled e-mail (to whom); a time stamp per export | [UYUM-DURUMU.md](UYUM-DURUMU.md) §3 |
+| Q15 | Cards name their document **as text** ("UYUM-DURUMU.md bölüm 2.{n}" / "COMPLIANCE-STATUS.md section 2.{n}"); the web app serves no documents | serve the bundled documents in the web app | [UYUM-DURUMU.md](UYUM-DURUMU.md) §1 |
+| Q16 | Processor, memory and uptime through the **standard library** (`arcilogger_core.hostinfo`: `ctypes` on Windows, `/proc` on Linux); the CPU percentage is measured between two readings of the API process, so the first answer shows "ölçülüyor"; no new third-party dependency | `psutil` (per-process figures, a new third-party notice) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.1 |
+| Q17 | Disk forecast: a straight line (least squares) over the newest **30 daily samples** of `state\system-history.json` (worker job `system.sample`, daily after 00:30, the newest 120 days kept), shown from **7 samples**; a date more than 100 years away is not given (the state stays "estimated"); whether a drive is already above the warning mark is read from its measured use | another model or sample count | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.2 |
+| Q18 | The first-run wizard (Ayarlar → **İlk kurulum sihirbazı**, `/settings/setup`) **stores nothing**: each step's state is derived from the configuration and the request history, a skipped step stays "Eksik"; it opens from the Ayarlar overview and from Uyum Durumu, never by itself after the first sign-in. The e-mail step is done only when sending is switched on (`[smtp] enabled`) besides a server and a sender | remember skipped steps; redirect the first administrator after the first sign-in | [UYUM-DURUMU.md](UYUM-DURUMU.md) §5, [AYARLAR.md](AYARLAR.md) |
+| Q19 | No Windows service-manager or Task Scheduler query: the services are judged by their status files and the scheduled tasks by their **evidence files** (Seal's ignores the states Retention rewrote for deleted days); Retention and Requests are "izlenemiyor" (not observable), and a task disabled in the Task Scheduler shows only once its evidence is late | read the Windows states (needs a status file written by SYSTEM) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.5–4.6 |
+| Q20 | The **Uyum Durumu Raporu texts are on the lawyer review list**, like the 5651 lookup report's ([RAPOR.md](RAPOR.md)); see the note below | no review | [UYUM-DURUMU.md](UYUM-DURUMU.md) §3 |
+| Q21 | **No purge of `job_runs`** in Wave 4 (about 17,000 rows a day); the Sistem page reads it with bounded probes per job (the newest finished run of the last 7 days, and a run in progress after it) | a purge after N days | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.7 |
+
+### Lawyer review (Q20)
+
+The texts of the Uyum Durumu Raporu (the notice at the top, the card titles, the reasons and facts,
+the verify-on-site notes, the state words "[TAMAM] / [OK]" … "[BİLGİ YOK] / [NO DATA]" and the
+footer note) and of the Uyum Durumu page go to the organisation's legal counsel for review before
+the report is first presented in an audit, together with the lookup report's wording. The report
+is a listing of technical checks, not a legal assessment ("teknik denetim, hukuki değerlendirme
+değil"); the choice of the ten cards and their thresholds are technical assumptions of this file.
+The report carries the notice that ARCILOGGER is designed to support 5651 obligations ("5651
+yükümlülüklerini desteklemek için tasarlanmıştır") and that the cards are neither a legal assessment
+nor a statement of conformity; legal review is recommended.
+
+### Verify on site (Wave 4)
+
+What the two pages cannot check from ARCILOGGER; the page or card shows each as "Sahada
+doğrulayın" / "Verify on site" ([UYUM-DURUMU.md](UYUM-DURUMU.md) §6):
+
+- **DNS filter profile** (card 7): no profile name is read from FortiGate DNS filter records (the
+  table has no profile column; card 7 lists web filter profiles only). Verify on the device which
+  DNS filter profile each policy uses.
+- **Firewall filter logging** (card 7, `R20-filter`): the card counts only the records that arrive.
+  Verify on the device that every policy using web or DNS filtering logs these events and sends
+  them to ARCILOGGER ([DEVICE-SETUP.md](DEVICE-SETUP.md) §2, commands to verify on site); if the
+  organisation produces no filtered traffic on some days, correct `alerts.filter_days` (Q10).
+- **Credit format** (card 5): the credit is read from the Kamu SM client's output with
+  `[tsa] credit_regex`; the format is not confirmed (kamusm.md K4). Compare the value read on the
+  test server with the one Kamu SM shows.
+- **WORM** (card 9): whether the replica target is write-once cannot be checked from ARCILOGGER;
+  verify the target's WORM setting and retention on site (see also the list below).
+- **Windows rights** (Sistem, cards 3 and 10): the pages read the status files and the Windows API
+  with the rights the installer gives `NT SERVICE\ArciApi`. After the first night, check on the
+  Sistem page that processor, memory and uptime show (not "bu platformda okunamıyor") and that no
+  task's evidence is missing; broken rights are repaired with `Set-ArciVaultAcl.ps1`.
+- **Kamu SM root fingerprints** (wizard, Kamu SM steps): stamps of the test server have no legal
+  validity; before switching to production compare the root fingerprints with the values Kamu SM
+  publishes ([kamusm.md](kamusm.md)).
+- **Device settings** (wizard, Log sources step): the wizard names DEVICE-SETUP.md sections 1 and 4
+  as references and shows no device commands; verify the commands on site, and open port 514 by
+  hand where ARCILOGGER does not manage the firewall ([KURULUM.md](KURULUM.md) §12).
+
+### Deviations from the specification (Wave 4)
+
+- SPEC 12.3 "rsyslog stats": the product has its own collector (ADR-0002); Sistem shows its
+  statistics.
+- SPEC 3.4 card 3 (a daily 30-day and a weekly full-chain check): the tasks verify 2 days daily,
+  90 days weekly and the whole chain monthly; card 3 judges those results (Q6).
+- SPEC 3.4 card 8 "DHCP + ARP logs": the card follows the configured lease evidence (Q11).
+- SPEC 3.1(a) "profile names seen" for DNS: no DNS filter profile is stored; card 7 says so,
+  "sahada doğrula".
+- SPEC 12.3 page 12 and the roadmap's "compliance" schedule kind in Raporlar: not in Wave 4 (Q14).
+- SPEC 12.3 page 17 pre-fills the sources from a customer's device list: the product ships no
+  customer data (P4, P5); the wizard pre-fills nothing.
+- SPEC 13's encrypted nightly dump of database and configuration to the replica target: the
+  dumps stay on the server's disk and the configuration is copied by hand (B9, B12); card 10
+  reports what exists.
+
 ## Technical assumptions to verify on site
 
 - MikroTik remote syslog wire format (BSD header, ISO-8601 time, topics string) — parser stays

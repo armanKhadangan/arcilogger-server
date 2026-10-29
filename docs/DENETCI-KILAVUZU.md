@@ -21,6 +21,7 @@
 7. [Doğrulayıcı çıktısını yorumlamak](#7-doğrulayıcı-çıktısını-yorumlamak)
 8. [Sahada netleşecek konular](#8-sahada-netleşecek-konular)
 9. [Arama, Canlı Akış ve Kaynaklar denetim kayıtları](#9-arama-canlı-akış-ve-kaynaklar-denetim-kayıtları)
+10. [Uyum Durumu Raporu'nu okumak](#10-uyum-durumu-raporunu-okumak)
 
 ## 1. Delil zinciri nasıl çalışır?
 
@@ -487,6 +488,83 @@ denetim kaydında sırayla `search.refs` (satır sayısı ve listenin özeti), a
 `evidence.request` ve `evidence.create` girdileri görünür; paket her paket gibi bölüm 5'e göre
 doğrulanır.
 
+## 10. Uyum Durumu Raporu'nu okumak
+
+Web arayüzündeki **Uyum Durumu** sayfası (`/compliance`) kayıt toplama, mühürleme ve yedeklemenin
+on teknik denetimini kart olarak gösterir; sayfadaki **Uyum Durumu Raporu (PDF)** düğmesi aynı
+kartları o anki hâlleriyle A4 bir PDF olarak indirir. Her kartın neyi denetlediği, hangi koşulda
+hangi durumu gösterdiği ve ne yapılması gerektiği [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2'de,
+raporun içeriği bölüm 3'tedir (İngilizcesi: [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)).
+
+**Teknik denetim, hukuki değerlendirme değil.** ARCILOGGER, 5651 yükümlülüklerini desteklemek için
+tasarlanmıştır. Rapor, ARCILOGGER'ın kendi kaydettiklerinin teknik bir dökümüdür: kaynakların veri
+gönderip göndermediği, dünün mühürlenmesi ve doğrulanması, mühür zinciri, saklama süresi, Kamu SM
+kontörü ve TSA sertifikası, sunucu saati, içerik filtresi kayıtları, DHCP ve ARP kayıtları, replika
+ve yedekler. On kartın hepsi **Tamam** olsa da rapor bir uygunluk beyanı değildir ve kurumun
+yükümlülüklerini yerine getirdiğini göstermez; "Uyum Durumu" sayfanın adıdır, bir hüküm değildir.
+Raporun başındaki not ve her sayfanın altındaki dipnot ("ARCILOGGER, 5651 yükümlülüklerini
+desteklemek için tasarlanmıştır; bu rapor hukuki uygunluk beyanı değildir.") bunu söyler. Rapordan
+bir sonuç çıkarmadan ya da raporu bir denetime veya bir kuruma sunmadan önce metinlerini ve
+sonuçlarını **hukuk müşavirinizle gözden geçirin**.
+
+**Raporu almak.** Denetçi hesabıyla oturum açın, menüden **Uyum Durumu**'nu açın ve **Uyum Durumu
+Raporu (PDF)** düğmesine basın. Uyum Durumu sayfası ve raporu yönetici ile denetçiye açıktır
+(`compliance.read`; sahibin kararı, 2026-10-28, [roles.md](roles.md)). Denetçi bütün kartları,
+kartların açık uyarı sayısını ve PDF düğmesini görür (her uyarının kuralı, önemi ve açılış zamanı
+PDF'te yazar); yapılandırma
+yedeğinin onayı ("Yapılandırma yedeğini aldım") ve ilk kurulum sihirbazı yalnızca yöneticiye
+açıktır. Bir kartın ayrıntı sayfasına giden bağlantı, kullanıcı o sayfayı açamıyorsa gizlenir
+(denetçi için Kaynaklar, Güvenlik, Ayarlar ve Sistem; Mühürleme ve Arama bağlantıları kalır); kartın
+kendisi her zaman gösterilir. Sayfayı açmak denetim kaydına yazılmaz, raporu indirmek yazılır.
+
+**Raporun yapısı.** Başta başlık ("Uyum Durumu Raporu / Compliance status report"), kurum adı,
+"Oluşturulma / Generated" zamanı (Europe/Istanbul), "Oluşturan / Exported by" satırında raporu
+indiren ARCILOGGER hesabının görünen adı ve kullanıcı adı, özet satırı ("{toplam} denetimden
+{tamam} tanesi tamam") ve yukarıdaki not durur. Sonra her kart için sırayla: numara ve başlık
+(Türkçe / İngilizce), köşeli parantez içinde metin olarak durum, Türkçe ve İngilizce gerekçe, iki
+sütunlu bilgi tablosu (Türkçe etiket ve değer), varsa "Sahada doğrulayın / Verify on site" notu,
+varsa "Açık uyarılar / Active alerts" (kural, önem, açılış zamanı) ve kartın "Denetlendi /
+Checked" zamanı.
+
+**Durumlar.** Durum her zaman metinle yazılır; renk yalnızca bunu tekrarlar.
+
+| PDF'te | Sayfada | Anlamı | Okurken |
+|---|---|---|---|
+| **[TAMAM] / [OK]** | Tamam | Denetim bir sorun bulmadı. | Yalnızca ARCILOGGER'ın kaydettiklerine dayanır; kartta "Sahada doğrulayın" notu varsa o konu ayrıca sahada doğrulanmalıdır. |
+| **[DİKKAT] / [ATTENTION]** | Dikkat | İlgilenilmesi gereken ama henüz kanıt kaybı olmayan bir durum (bekleyen bir iş, yaklaşan bir eşik, eksik bir ayar). | Gerekçe ne beklendiğini ve hangi eşiğe ne kadar kaldığını söyler; durumun ne zamandan beri sürdüğünü yöneticiye sorun. |
+| **[SORUN] / [PROBLEM]** | Sorun | Kanıtın toplanmasını, mühürlenmesini ya da korunmasını şimdi etkileyen bir durum. | Gerekçedeki günler ve açık uyarılar etkilenen dönemi gösterir; o günleri bölüm 3 ve 5'e göre doğrulayın, yöneticiden ne yapıldığını isteyin. |
+| **[BİLGİ YOK] / [NO DATA]** | Bilgi yok | Henüz veri yok ya da denetim bu kurulum için geçerli değil; gerekçesi her zaman yazılıdır. Hesaplanamayan bir kart da bu durumdadır: "Bu denetim şu anda yapılamadı: {hata kodu}". | Bir sonuç değildir: **Tamam** olarak okunmamalıdır. |
+
+**Bir anın görüntüsü.** Kartlar her indirmede yeniden hesaplanır; rapor indirildiği anın durumunu
+gösterir. Her kartın kendi dönemi vardır (ör. kart 2 dünü, kart 3 son 30 günü, kart 9 son 7 günü
+değerlendirir); geçmiş bir tarihteki durum rapordan okunamaz. Önceki raporlar sunucuda saklanmaz;
+denetim kaydında yalnızca SHA-256 özetleri ve kart sayıları kalır. Rapor bir kanıt değildir: mühürlü
+günlerin bütünlüğünü kanıt paketi ve bağımsız doğrulama gösterir (bölüm 4 ve 5); rapor bunların
+yerine geçmez.
+
+**SHA-256 ve denetim kaydı.** Rapor Kamu SM ile zaman damgalanmaz (kontör harcanmaz) ve sunucuda
+saklanmaz. Rapor gönderilmeden önce denetim kaydına `compliance.report_export` ("Uyum Durumu Raporu
+indirildi") girdisi yazılır; `details` alanında PDF dosyasının SHA-256 özeti (`sha256`) ve her
+durumdaki kart sayısı (`ok`, `warning`, `error`, `neutral`) bulunur. Yanıtın `X-Arci-Sha256`
+başlığı aynı özeti taşır; dosya adı `ARCILOGGER-uyum-durumu-YYYYAAGG-SSDD.pdf`'dir (Türkiye saati).
+Elinizdeki dosyanın ARCILOGGER'ın ürettiği rapor olduğunu denetlemek için `Get-FileHash -Algorithm
+SHA256 <dosya>` çıktısını Denetim Kaydı sayfasındaki girdinin `sha256` değeriyle karşılaştırın
+(büyük ya da küçük harf fark etmez); girdi raporu indiren kullanıcıyı ve zamanı da gösterir.
+Özetler aynıysa dosya indirildiğinden beri değişmemiştir. Bu, kartların doğru olduğunu değil,
+ARCILOGGER'ın o anda bu dosyayı ürettiğini gösterir. İki indirme, oluşturulma zamanı farklı olduğu
+için farklı özet verir.
+
+**Kişisel veri.** Kartlarda ve raporda log öznelerine ait veri yoktur: istemci IP ya da MAC adresi,
+kişi adı, cihaz ana bilgisayar adı, gönderici adresi ve replika hedefinin yolu yer almaz. Tek
+istisna raporu indiren hesabın görünen adı ve kullanıcı adıdır. Bu yüzden sayfa KVKK bilgilendirme
+metni onayı istemez.
+
+**Sahada doğrulanacaklar.** "Sahada doğrulayın" notları ARCILOGGER'ın kendisinin denetleyemediği
+konulardır: kontör değerinin okunma biçimi (kart 5), güvenlik duvarının web ve DNS filtresi
+olaylarını kaydedip gönderdiği (kart 7; DNS filtresi kayıtlarından profil adı okunmaz) ve replika
+hedefinin değiştirilemez (WORM) olduğu (kart 9). Bunlar raporla değil, sahada doğrulanır
+([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 6).
+
 ---
 
 <a id="english"></a>
@@ -626,3 +704,62 @@ print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source
 carries it as `Repr-Digest`); an export is not sealed, as its "Bilgi" sheet says: the evidence
 package is the integrity proof. A package built from a search shows `search.refs`, then the same
 user's `evidence.request` and `evidence.create`, and verifies like any package (section 5).
+
+**Reading the Uyum Durumu Raporu (section 10).** The **Uyum Durumu** page (`/compliance`) shows ten
+technical checks of log collection, sealing and backups as cards; its **Uyum Durumu Raporu (PDF)**
+button ("Compliance status report") downloads the same cards, as they are at that moment, as an A4
+PDF. What each card checks, when it shows which state and what to do:
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 2; the report: section 3. **Technical checks,
+not a legal assessment:** ARCILOGGER is designed to support 5651 obligations; the report lists what
+ARCILOGGER itself recorded (sources sending, yesterday sealed and verified, the seal chain,
+retention, the Kamu SM credit and TSA certificate, the server clock, content filter records, DHCP
+and ARP records, the replica, the backups). Even with all ten cards OK it is not a statement of
+conformity and does not show that the organisation meets its obligations, as the notice at its top
+and the footer of every page say ("Designed to support 5651 obligations; this report is not a
+statement of legal compliance."). Review its texts and results **with your legal counsel** before
+drawing a conclusion from it or handing it to an inspection.
+
+Getting it: sign in with the auditor account, open **Uyum Durumu** in the menu and press **Uyum
+Durumu Raporu (PDF)**. The page and the report are open to administrators and auditors
+(`compliance.read`; owner decision of 2026-10-28, [roles.md](roles.md)). The auditor sees every
+card, the number of its open alerts and the PDF button (each alert's rule, severity and opening
+time are in the PDF); the configuration backup
+confirmation and the first-run wizard stay administrator-only, and links to pages the user may not
+open (for the auditor Kaynaklar, Güvenlik, Ayarlar and Sistem) are hidden while the card itself is
+always shown. Opening the page is not audited; exporting the report is. The report holds the
+title, the site name, "Oluşturulma / Generated" (Europe/Istanbul), "Oluşturan / Exported by" (the
+display name and username of the exporting ARCILOGGER account), the summary line ("{ok} of {total}
+checks OK") and the notice; then per card its number and titles, the state as text in brackets,
+the reasons in Turkish and English, the facts (Turkish label and value), the "Sahada doğrulayın /
+Verify on site" note and the "Açık uyarılar / Active alerts" when present, and the "Denetlendi /
+Checked" time.
+
+States (always written as text; colour only repeats it): **[TAMAM] / [OK]** the check found no
+problem — based only on what ARCILOGGER recorded, and a verify-on-site note still has to be checked
+on site; **[DİKKAT] / [ATTENTION]** something needs attention but no evidence is lost yet (a pending
+task, an approaching threshold, a missing setting) — ask the administrator how long it has lasted;
+**[SORUN] / [PROBLEM]** collection, sealing or protection of the evidence is affected now — the
+days in the reason and the open alerts show the period: verify those days (sections 3 and 5) and
+ask the administrator what was done; **[BİLGİ YOK] / [NO DATA]** no data yet or the check does not
+apply, always with the reason (a card that could not be computed reads "Bu denetim şu anda
+yapılamadı: {error code}") — not a result, never to be read as OK.
+
+The report is a snapshot: the cards are computed again for every export, each over its own period
+(card 2 yesterday, card 3 the last 30 days, card 9 the last 7 days); a past state cannot be read
+from it, earlier reports are not stored, and it is not evidence: the integrity of sealed days is
+shown by evidence packages and independent verification (sections 4 and 5). It is not time-stamped
+with Kamu SM (no credit is spent). Before it is sent, the audit entry `compliance.report_export`
+("Compliance status report exported") is written with the PDF's SHA-256 (`sha256`) and the number
+of cards in each state (`ok`, `warning`, `error`, `neutral`); the `X-Arci-Sha256` header carries the
+same hash, and the file is named `ARCILOGGER-uyum-durumu-YYYYMMDD-HHMM.pdf` (Turkish time). Compare
+`Get-FileHash -Algorithm SHA256 <file>` with the entry's `sha256` on the Denetim Kaydı page (case
+does not matter); the entry also names the user and the time. Equal hashes show that the file is
+unchanged since ARCILOGGER produced it then, not that the cards are right; two exports give
+different hashes (their generation times differ). The cards and the report hold no data about log
+subjects (no client IP or MAC address, no person's name, no device host name, no sender address, no
+replica target path); the only exception is the exporting account's display name and username, so
+the page needs no KVKK notice. The "Sahada doğrulayın" notes name what ARCILOGGER cannot check
+itself — the format the credit is read in (card 5), that the firewall logs and sends its web and DNS
+filter events (card 7; no profile name is read from DNS filter records) and that the replica target
+is write-once (WORM, card 9); they are verified on site, not by the report
+([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 6).

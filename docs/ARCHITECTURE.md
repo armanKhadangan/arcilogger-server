@@ -20,6 +20,10 @@
   bırakır; yapılandırmayı ayrı bir hizmet (ArciAdmin) yazar, güvenlik duvarını ve saati SYSTEM
   görevi ApplySystem kendi türettiği değerlerle günceller. Bir ayar değişikliği mühürlemeyi
   hiçbir zaman durdurmaz.
+- **Uyum Durumu** sayfası kayıt toplama, mühürleme ve yedeklemenin on teknik denetimini (ve
+  bunların PDF'ini), **Sistem** sayfası sunucunun kaynaklarını, hizmetlerini, zamanlanmış
+  görevlerini ve saatini gösterir. İkisi de yalnızca okur: hiçbir cihaza ve Kamu SM'ye soru sormaz
+  ([UYUM-DURUMU.md](UYUM-DURUMU.md)). Kartlar teknik denetimdir, hukuki değerlendirme değil.
 
 ## Summary (EN)
 
@@ -30,6 +34,9 @@ Kamu SM qualified time stamp). The evidence path does not depend on the database
 The server's settings change from the browser through a separate administration service and a
 SYSTEM task that derives the firewall and time settings itself (ADR-0014); a settings change never
 stops collection or sealing.
+Two read-only pages report on the server itself: Uyum Durumu (ten technical checks of collection,
+sealing and backups, with a PDF; not a legal assessment) and Sistem (resources, services,
+scheduled tasks, clock); neither asks a device or Kamu SM (ADR-0017).
 
 ## Deployment model
 
@@ -52,8 +59,8 @@ Windows services (automatic start, restart on failure, each under its own virtua
 |---|---|---|---|---|
 | `ArciCollector` | `arcilogger_collector` (Python) | Receives syslog, writes the raw spool **first** | UDP/TCP 514 (and TLS 6514, optional) on the server address (`[collector] bind`) | M1 |
 | `ArciIngest` | `arcilogger_ingest` | Tails the spool (or the sealed vault copy), parses, loads PostgreSQL | — | MVP (M2) |
-| `ArciApi` | `arcilogger_api` (FastAPI, Uvicorn) | HTTP API for the web interface: auth/TOTP, users, audit log, 5651 lookup + PDF report, evidence packages, seals, devices and persons, alerts (state workflow, notes), the dashboard summary, Arama (search), Canlı Akış (the live tail of the spool) and Kaynaklar (source health) | 127.0.0.1:8000 | MVP; Wave 2; more pages M4–M6 |
-| `ArciWorker` | `arcilogger_worker` | Today: lease timeline, devices and IP conflicts, partitions, evidence purge, audit import, alerts (import of `alerts.jsonl`, R15/R20 checks, alert e-mail; ADR-0010), usage rollups (`usage.*` jobs, estimated time per person/site/category; ADR-0011, docs/USAGE.md), the licence check (`license.check`, ADR-0013). Later: NAT index, the rule engine and its detections (M5) | — | MVP (M3); M4–M5 |
+| `ArciApi` | `arcilogger_api` (FastAPI, Uvicorn) | HTTP API for the web interface: auth/TOTP, users, audit log, 5651 lookup + PDF report, evidence packages, seals, devices and persons, alerts (state workflow, notes), the dashboard summary, Arama (search), Canlı Akış (the live tail of the spool) and Kaynaklar (source health), Uyum Durumu (the ten compliance checks and their PDF) and Sistem (server resources and health; [below](#uyum-durumu-and-sistem)) | 127.0.0.1:8000 | MVP; Wave 2; Wave 4; more pages M4–M6 |
+| `ArciWorker` | `arcilogger_worker` | Today: lease timeline, devices and IP conflicts, partitions, evidence purge, audit import, alerts (import of `alerts.jsonl`, R15/R20 checks, alert e-mail; ADR-0010), usage rollups (`usage.*` jobs, estimated time per person/site/category; ADR-0011, docs/USAGE.md), the licence check (`license.check`, ADR-0013), the daily disk sample of the Sistem page (`system.sample`, Wave 4). Later: NAT index, the rule engine and its detections (M5) | — | MVP (M3); M4–M5 |
 | `ArciWeb` | Caddy | HTTPS (internal CA), serves the web interface, proxies `/api` | server address:443 | MVP (installer) |
 | `ArciAdmin` | `arcilogger_core.admin` (Python) | The administration agent of the browser administration ([ADR-0014](adr/0014-browser-administration.md)): checks the API's signed requests in `admin\inbox` again and applies them (the only writer of `arcilogger.toml` and `secrets.json`), keeps the versions, follows the services reloading, writes signed task requests (Seal now, credit query, tests) | — (no listener, no database) | Wave 1 |
 | `postgresql-x64-16` | PostgreSQL 16 (operator-installed); TimescaleDB optional, otherwise native monthly partitions ([ADR-0005](adr/0005-database-and-mvp-contracts.md)) | Derived, rebuildable data, plus users, lookups and the audit log | 127.0.0.1:5432 | MVP (M2) |
@@ -169,6 +176,60 @@ that loads the rows (counted directly where it is not complete yet). Kaynaklar's
 source is the rule of R15 and the Panel (newest of what ingest loaded and what the collector
 received); its "Son satırlar" tab reads the spool like the live tail and is audited (`raw.tail`).
 
+## Uyum Durumu and Sistem
+
+Two pages of the web interface report on the server itself
+([ADR-0017](adr/0017-compliance-and-system-pages.md); what each card and block shows:
+[UYUM-DURUMU.md](UYUM-DURUMU.md) / [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)). They **only
+read** what the services and tasks already write: files under `state\` and `admin\`, the vault,
+the database and the active alerts. They never ask a device or Kamu SM, never download or install
+anything, have no table or migration of their own, and are 5651 Temel (no licence module gates
+them). Neither shows data about log subjects (no client or sender address, no person, no device
+host name, no replica target), so opening them is not audited.
+
+| Page | API (`ArciApi`) | Reads | Permission |
+|---|---|---|---|
+| **Uyum Durumu** (`/compliance`) | `GET /api/v1/compliance` (the ten cards, kept 30 s per API process), `GET /api/v1/compliance/report.pdf` (the Uyum Durumu Raporu), `POST /api/v1/compliance/config-backup` (`arcilogger_api.compliance`) | the vault and the seal, verify, credit, clock and backup state through the Sealing page's `sealinfo` and the Panel's helpers; `search_counts`, `fg_web`, `fg_dns`, `sources`, `job_runs`; the active alerts (a plain `SELECT`, never a lock on the worker's rows); the configuration file's SHA-256 and the newest `compliance.config_backup_confirm` in the audit log | `compliance.read` (administrator, auditor); the backup confirmation `settings.manage` |
+| **Sistem** (`/system`) | `GET /api/v1/system`, `GET /api/v1/system/disk` (`arcilogger_api.system`), `GET /api/v1/system/health` (`arcilogger_api.system_health`) | `arcilogger_core.hostinfo`; the drives of the `R20-disk` check; `state\system-history.json`; database and table sizes (kept 5 min); the collector, ingest and worker status files; ArciAdmin's heartbeat and ApplySystem's status (`admin\`); the evidence files of the scheduled tasks; `job_runs`; `state\clock\` | `system.read` (administrator) |
+
+- **One computation, two outputs.** `arcilogger_api.compliance.cards.compute_status` computes the
+  ten cards fully worded in Turkish and English; the page shows the server's text and the PDF
+  prints the same. The Uyum Durumu Raporu is rendered in ArciApi with reportlab and the shared
+  fonts and styles of `arcilogger_worker.pdf`, on request: it is not stored and not time-stamped;
+  its SHA-256 goes into the audit entry `compliance.report_export` and the `X-Arci-Sha256` header.
+  The configuration backup confirmation is the audit entry `compliance.config_backup_confirm`
+  with the configuration's SHA-256, not a table row.
+- **Content-filter evidence** (`arcilogger_worker.compliance_filter`) is shared by card 7 and the
+  worker's alert check `R20-filter` (severity high; `alerts.filter_days`,
+  `alerts.filter_skip_holidays`, `alerts.filter_quiet_hours`). The API may import the worker,
+  never the reverse.
+- **`hostinfo`.** `arcilogger_core.hostinfo` reads processor time, memory and uptime with the
+  Python standard library only: on Windows `kernel32` through `ctypes` (`GetSystemTimes`,
+  `GlobalMemoryStatusEx`, `GetTickCount64`), on Linux `/proc/stat`, `/proc/meminfo` and
+  `/proc/uptime`; anything else gives no value. The figures are the whole machine's, never a
+  process's. Processor use is the difference of two readings: each API process keeps its previous
+  reading, so its first request has no percentage yet (the page shows "ölçülüyor"). No `psutil`: no
+  new third-party package in the offline bundle.
+- **Disk history.** The worker job `system.sample` (daily after 00:30, 5651 Temel) appends one
+  sample a day of the data drive and, when it is another device, the system drive (drive label,
+  total and used bytes; nothing else) to `state\system-history.json` (`Layout.system_history`,
+  `{"schema": 1, "days": [...]}`), replaces an entry of the same day, keeps the newest 120 days and
+  writes the file atomically under the existing rights of `state\`. ArciApi reads it for the disk
+  forecast of the Sistem page and the Panel's disk card (`arcilogger_api.system.forecast`: linear
+  over the newest 30 samples, shown from 7). The file is not evidence: deleting it loses only the
+  forecast.
+- **Health without asking Windows.** ArciCollector, ArciIngest and ArciWorker are judged by their
+  status files (fresh within 2 minutes), ArciApi by answering, ArciAdmin by its heartbeat,
+  ApplySystem by its status file, the scheduled tasks by the files they leave (Retention and
+  Requests leave none ArciApi can read: "not observable"), the worker jobs by
+  `state\worker-status.json` and bounded index probes of `job_runs`. No Service Control Manager or
+  Task Scheduler query, no new rights. Sender addresses from the status files are never returned:
+  senders that are not a configured source are only counted.
+- **First-run wizard** (`/settings/setup`, administrators): a guided checklist in the web app
+  that opens the existing Ayarlar pages. Each step's state is derived from `GET /admin/config`,
+  `GET /admin/status`, the request history and `GET /sources`; nothing is stored and it has no
+  API of its own.
+
 ## Directories
 
 | Path | Content |
@@ -181,7 +242,7 @@ received); its "Son satırlar" tab reads the spool like the live tail and is aud
 | `D:\ARCILOGGER\vault\renewals\`, `vault\deletions\` | Re-stamping and sealed deletion records |
 | `D:\ARCILOGGER\exports\` | Evidence packages `ARCILOGGER-kanit-*.zip` (kept `evidence.keep_days`, 30 days; the purge touches only these) |
 | `D:\ARCILOGGER\exports\reports\` | Stored official 5651 reports (`ARCILOGGER-5651-rapor-<id>.pdf` and `.zd`), rendered once and served unchanged; **not purged** (no retention job yet, [RAPOR.md](RAPOR.md)) |
-| `D:\ARCILOGGER\state\` | Status files of the services, alerts, per-day job state; `license-status.json` (the licence state for the installer, never trusted by the product); `requests\` (signed task requests and their results) |
+| `D:\ARCILOGGER\state\` | Status files of the services, alerts, per-day job state; `license-status.json` (the licence state for the installer, never trusted by the product); `system-history.json` (the daily disk samples of `system.sample`, the newest 120 days, for the disk forecast); `requests\` (signed task requests and their results) |
 | `D:\ARCILOGGER\logs\`, `backups\` | Service logs (rotated); database dumps: `backups\db\` before upgrades, `backups\scheduled\` nightly ([YEDEKLEME.md](YEDEKLEME.md)) |
 | `D:\ARCILOGGER\db\` | PostgreSQL data directory |
 
