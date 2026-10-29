@@ -63,12 +63,68 @@ export interface SourceHealth {
   suggested: Suggested | null;
 }
 
+/** Usable rows of one evidence table in the last 24 hours. */
+export interface LeaseTableCounts {
+  rows: number;
+  /** The newest usable row within the last hour, `null` when none arrived in it. */
+  last_hour: DateTimeString | null;
+  /** Leases of this table open or ended in the last 24 hours. */
+  leases_current: number;
+}
+
+export interface FortigateDhcpCounts extends LeaseTableCounts {
+  /**
+   * Rows the lease job refuses (untrusted sender, unmapped logid, `dhcp_msg`, receive time, MAC);
+   * 0 while `dhcp.fortigate_logids` is empty.
+   */
+  refused_rows: number;
+  /** Rows of excluded interfaces and IPv6 rows: configuration, never refusals. */
+  excluded_rows: number;
+  /** `dhcp.fortigate_format_verified` (D29). */
+  format_verified: boolean;
+}
+
+export interface SrcmacCounts {
+  /** `lookup.srcmac_interfaces`. */
+  interfaces: string[];
+  /**
+   * Trusted `fg_traffic` rows with srcmac on those interfaces in the last hour; `null` without
+   * interfaces or when the count did not finish within 2 s.
+   */
+  rows_last_hour: number | null;
+}
+
+export type LeaseTable = 'mt_dhcp' | 'fg_dhcp' | 'mt_arp';
+/** `refused` wins over `none` (records arrive, so "make them arrive" would be the wrong fix). */
+export type LeaseEvidenceState = 'ok' | 'none' | 'refused';
+
+/** The "Kira kanıtı" card (contract 2.12): counts only, no client address. */
+export interface LeaseEvidence {
+  hours: number;
+  mt_dhcp: LeaseTableCounts;
+  fg_dhcp: FortigateDhcpCounts;
+  mt_arp: LeaseTableCounts;
+  srcmac: SrcmacCounts;
+  /**
+   * `refused` (refused rows in the window) wins over `none` (an active `R20-lease:none:<table>`
+   * or `R20-lease:absent` alert), else `ok`.
+   */
+  state: LeaseEvidenceState;
+  /**
+   * The tables of the active `R20-lease:none:<table>` alerts; empty for `absent`. Also filled
+   * while the state is `refused` (the card names them only for `none`).
+   */
+  none_tables: LeaseTable[];
+}
+
 /** `GET /sources` (`sources.read`; cached 15 s on the server, refreshed every 30 s here). */
 export interface SourcesOverview {
   generated_at: DateTimeString;
   today: DateString;
   collector: CollectorState;
   items: SourceHealth[];
+  /** Always present (never `null`). */
+  lease_evidence: LeaseEvidence;
 }
 
 export interface HourCount {

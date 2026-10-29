@@ -7,7 +7,8 @@ add dialog filled in with ``suggested``.
 ==============================  ====================================================  ===========
 Endpoint                        Permission                                            Audit
 ==============================  ====================================================  ===========
-``GET /sources``                ``sources.read`` (counts only; cached 15 s)           —
+``GET /sources``                ``sources.read`` (counts only; cached 15 s; its       —
+                                ``lease_evidence`` srcmac count 60 s)
 ``GET /sources/{name}``         ``sources.read`` (cached 30 s per source); a          —
                                 pattern's ``error`` only with ``search.read`` or
                                 ``lookup.run`` and the KVKK notice (it can echo a
@@ -71,6 +72,8 @@ MESSAGES: Final = {
 RAW_PERMISSIONS: Final = ("search.read", "lookup.run")
 OVERVIEW_SECONDS: Final = 15.0
 DETAIL_SECONDS: Final = 30.0
+#: ``lease_evidence.srcmac.rows_last_hour`` is kept this long (contract 2.12).
+SRCMAC_SECONDS: Final = 60.0
 #: ``GET /sources/{name}/tail``: requests per user and window (seconds).
 TAIL_LIMIT: Final = (30, 60.0)
 TAIL_MAX: Final = 200
@@ -94,10 +97,29 @@ class SourcesState:
 
     def __init__(self) -> None:
         self.overview: TtlCache[dict[str, Any]] = TtlCache(OVERVIEW_SECONDS)
+        #: The srcmac count with the interfaces it was made for (a change of them recounts).
+        self.srcmac: TtlCache[tuple[tuple[str, ...], int]] = TtlCache(SRCMAC_SECONDS)
         self.details: dict[str, TtlCache[dict[str, Any]]] = {}
         self.detail_seconds = DETAIL_SECONDS
         self.tail_limit = RateLimiter(*TAIL_LIMIT)
         self._lock = threading.Lock()
+
+    def srcmac_count(self, db: Session) -> sourcehealth.SrcmacCount:
+        """:func:`arcilogger_api.sourcehealth.srcmac_rows_last_hour` kept 60 s for the same
+        interfaces; a count stopped by its deadline (None) is not kept."""
+
+        def count(
+            interfaces: tuple[str, ...], untrusted: frozenset[str], now: datetime
+        ) -> int | None:
+            kept = self.srcmac.get()
+            if kept is not None and kept[0] == interfaces:
+                return kept[1]
+            value = sourcehealth.srcmac_rows_last_hour(db, interfaces, untrusted, now)
+            if value is not None:
+                self.srcmac.put((interfaces, value))
+            return value
+
+        return count
 
     def detail(self, name: str) -> TtlCache[dict[str, Any]]:
         with self._lock:
@@ -167,11 +189,55 @@ class SourceHealth(Answer):
     suggested: Suggested | None
 
 
+class LeaseTableCounts(Answer):
+    """Usable rows of one evidence table in the last 24 hours."""
+
+    rows: int
+    #: The newest usable row within the last hour; None when none arrived in it.
+    last_hour: datetime | None
+    #: Leases of this table open or ended in the last 24 hours.
+    leases_current: int
+
+
+class FortigateDhcpCounts(LeaseTableCounts):
+    #: Rows the lease job refuses (untrusted sender, unmapped logid, ``dhcp_msg``, receive time,
+    #: MAC); 0 while ``dhcp.fortigate_logids`` is empty.
+    refused_rows: int
+    #: Rows of excluded interfaces and IPv6 rows: configuration, never refusals.
+    excluded_rows: int
+    #: ``dhcp.fortigate_format_verified`` (D29).
+    format_verified: bool
+
+
+class SrcmacCounts(Answer):
+    #: ``lookup.srcmac_interfaces``.
+    interfaces: list[str]
+    #: Trusted ``fg_traffic`` rows with srcmac on those interfaces in the last hour; None without
+    #: interfaces or when the count did not finish within 2 s.
+    rows_last_hour: int | None
+
+
+class LeaseEvidence(Answer):
+    """The "Kira kanıtı" card (contract 2.12): counts only, no client address."""
+
+    hours: int
+    mt_dhcp: LeaseTableCounts
+    fg_dhcp: FortigateDhcpCounts
+    mt_arp: LeaseTableCounts
+    srcmac: SrcmacCounts
+    #: ``refused`` (refused rows in the window) wins over ``none`` (an active
+    #: ``R20-lease:none:<table>`` or ``R20-lease:absent`` alert), else ``ok``.
+    state: Literal["ok", "none", "refused"]
+    #: The tables of the active ``R20-lease:none:<table>`` alerts; empty for ``absent``.
+    none_tables: list[Literal["mt_dhcp", "fg_dhcp", "mt_arp"]]
+
+
 class SourcesOverview(Answer):
     generated_at: datetime
     today: date
     collector: CollectorState
     items: list[SourceHealth]
+    lease_evidence: LeaseEvidence
 
 
 class HourCount(Answer):
@@ -252,8 +318,9 @@ class SourceTail(Answer):
 def _overview(
     request: Request, db: DbSession, config: ConfigDep, layout: LayoutDep
 ) -> dict[str, Any]:
-    return state_of(request).overview.get_or_compute(
-        lambda: sourcehealth.overview(db, config, layout, utc_now())
+    state = state_of(request)
+    return state.overview.get_or_compute(
+        lambda: sourcehealth.overview(db, config, layout, utc_now(), state.srcmac_count(db))
     )
 
 

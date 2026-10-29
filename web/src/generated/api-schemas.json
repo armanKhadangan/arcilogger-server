@@ -323,6 +323,9 @@
       "get",
       "patch"
     ],
+    "/api/v1/settings/fortigate/observed": [
+      "get"
+    ],
     "/api/v1/settings/{key}/reset": [
       "post"
     ],
@@ -5031,6 +5034,74 @@
       "title": "FixedRange",
       "type": "object"
     },
+    "FortigateDhcpCounts": {
+      "properties": {
+        "excluded_rows": {
+          "title": "Excluded Rows",
+          "type": "integer"
+        },
+        "format_verified": {
+          "title": "Format Verified",
+          "type": "boolean"
+        },
+        "last_hour": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Hour"
+        },
+        "leases_current": {
+          "title": "Leases Current",
+          "type": "integer"
+        },
+        "refused_rows": {
+          "title": "Refused Rows",
+          "type": "integer"
+        },
+        "rows": {
+          "title": "Rows",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rows",
+        "last_hour",
+        "leases_current",
+        "refused_rows",
+        "excluded_rows",
+        "format_verified"
+      ],
+      "title": "FortigateDhcpCounts",
+      "type": "object"
+    },
+    "FortigateObserved": {
+      "properties": {
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "nat": {
+          "$ref": "#/components/schemas/ObservedNat"
+        },
+        "srcmac": {
+          "$ref": "#/components/schemas/ObservedSrcmac"
+        }
+      },
+      "required": [
+        "generated_at",
+        "nat",
+        "srcmac"
+      ],
+      "title": "FortigateObserved",
+      "type": "object"
+    },
     "GeneralBody": {
       "additionalProperties": false,
       "properties": {
@@ -5396,6 +5467,59 @@
       "title": "LeaseBrief",
       "type": "object"
     },
+    "LeaseEvidence": {
+      "description": "The \"Kira kanıtı\" card (contract 2.12): counts only, no client address.",
+      "properties": {
+        "fg_dhcp": {
+          "$ref": "#/components/schemas/FortigateDhcpCounts"
+        },
+        "hours": {
+          "title": "Hours",
+          "type": "integer"
+        },
+        "mt_arp": {
+          "$ref": "#/components/schemas/LeaseTableCounts"
+        },
+        "mt_dhcp": {
+          "$ref": "#/components/schemas/LeaseTableCounts"
+        },
+        "none_tables": {
+          "items": {
+            "enum": [
+              "mt_dhcp",
+              "fg_dhcp",
+              "mt_arp"
+            ],
+            "type": "string"
+          },
+          "title": "None Tables",
+          "type": "array"
+        },
+        "srcmac": {
+          "$ref": "#/components/schemas/SrcmacCounts"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "none",
+            "refused"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hours",
+        "mt_dhcp",
+        "fg_dhcp",
+        "mt_arp",
+        "srcmac",
+        "state",
+        "none_tables"
+      ],
+      "title": "LeaseEvidence",
+      "type": "object"
+    },
     "LeaseRebuildBody": {
       "additionalProperties": false,
       "properties": {
@@ -5415,6 +5539,38 @@
         "to"
       ],
       "title": "LeaseRebuildBody",
+      "type": "object"
+    },
+    "LeaseTableCounts": {
+      "description": "Usable rows of one evidence table in the last 24 hours.",
+      "properties": {
+        "last_hour": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Hour"
+        },
+        "leases_current": {
+          "title": "Leases Current",
+          "type": "integer"
+        },
+        "rows": {
+          "title": "Rows",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rows",
+        "last_hour",
+        "leases_current"
+      ],
+      "title": "LeaseTableCounts",
       "type": "object"
     },
     "LegalRootBody": {
@@ -7011,6 +7167,184 @@
         "params"
       ],
       "title": "Notice",
+      "type": "object"
+    },
+    "ObservedNat": {
+      "properties": {
+        "exits_invalid": {
+          "default": false,
+          "title": "Exits Invalid",
+          "type": "boolean"
+        },
+        "hours": {
+          "title": "Hours",
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/components/schemas/ObservedNatRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "unknown_trandisp": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unknown Trandisp",
+          "type": "array"
+        },
+        "unmapped_transips": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unmapped Transips",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hours",
+        "truncated",
+        "rows",
+        "unmapped_transips",
+        "unknown_trandisp"
+      ],
+      "title": "ObservedNat",
+      "type": "object"
+    },
+    "ObservedNatRow": {
+      "description": "One ``(transip, dstintf, trandisp)`` of the trusted ``fg_traffic`` rows of the window.",
+      "properties": {
+        "dstintf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dstintf"
+        },
+        "egress": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Egress"
+        },
+        "first_seen": {
+          "format": "date-time",
+          "title": "First Seen",
+          "type": "string"
+        },
+        "last_seen": {
+          "format": "date-time",
+          "title": "Last Seen",
+          "type": "string"
+        },
+        "sessions": {
+          "title": "Sessions",
+          "type": "integer"
+        },
+        "trandisp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Trandisp"
+        },
+        "trandisp_known": {
+          "title": "Trandisp Known",
+          "type": "boolean"
+        },
+        "transip": {
+          "title": "Transip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "transip",
+        "dstintf",
+        "trandisp",
+        "sessions",
+        "first_seen",
+        "last_seen",
+        "egress",
+        "trandisp_known"
+      ],
+      "title": "ObservedNatRow",
+      "type": "object"
+    },
+    "ObservedSrcmac": {
+      "properties": {
+        "hours": {
+          "title": "Hours",
+          "type": "integer"
+        },
+        "interfaces": {
+          "items": {
+            "$ref": "#/components/schemas/ObservedSrcmacInterface"
+          },
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hours",
+        "truncated",
+        "interfaces"
+      ],
+      "title": "ObservedSrcmac",
+      "type": "object"
+    },
+    "ObservedSrcmacInterface": {
+      "properties": {
+        "configured": {
+          "title": "Configured",
+          "type": "boolean"
+        },
+        "macs": {
+          "title": "Macs",
+          "type": "integer"
+        },
+        "max_ips_per_mac": {
+          "title": "Max Ips Per Mac",
+          "type": "integer"
+        },
+        "rows": {
+          "title": "Rows",
+          "type": "integer"
+        },
+        "srcintf": {
+          "title": "Srcintf",
+          "type": "string"
+        }
+      },
+      "required": [
+        "srcintf",
+        "rows",
+        "macs",
+        "max_ips_per_mac",
+        "configured"
+      ],
+      "title": "ObservedSrcmacInterface",
       "type": "object"
     },
     "OpenBySeverity": {
@@ -12765,6 +13099,9 @@
           "title": "Items",
           "type": "array"
         },
+        "lease_evidence": {
+          "$ref": "#/components/schemas/LeaseEvidence"
+        },
         "today": {
           "format": "date",
           "title": "Today",
@@ -12775,9 +13112,38 @@
         "generated_at",
         "today",
         "collector",
-        "items"
+        "items",
+        "lease_evidence"
       ],
       "title": "SourcesOverview",
+      "type": "object"
+    },
+    "SrcmacCounts": {
+      "properties": {
+        "interfaces": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "rows_last_hour": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rows Last Hour"
+        }
+      },
+      "required": [
+        "interfaces",
+        "rows_last_hour"
+      ],
+      "title": "SrcmacCounts",
       "type": "object"
     },
     "StagedJar": {

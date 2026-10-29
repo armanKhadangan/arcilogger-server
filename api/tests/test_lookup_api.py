@@ -1,35 +1,42 @@
 """5651 lookup API end to end (spec 9.5, 12.3 page 6, 13, 14, 17): real spool lines and rows, the
 lease timeline rebuilt by the worker job, then ``POST /lookup/5651`` — exact, double-NAT
 candidates, internal, none; request details, time zones, roles, the KVKK notice, the audit
-entries, visibility of other users' lookups, the list and the statement timeout."""
+entries (with the exit, contract 2.12), visibility of other users' lookups, the list and the
+statement timeout; the Wave 3 fields (the egress block, a FortiGate lease, srcmac and the
+interfaces, a second exit, a stored Wave 2 outcome) and the 503 of unreadable exits."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from collections.abc import Callable, Iterator
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.lookup_testing import (
     AT,
+    DAY,
+    FORTIGATE_LEASE,
     PC,
     PC_MAC,
     PERSON_NAME,
     PHONE,
     PHONE_MAC,
     WAN,
+    WAN2,
     Site,
     accept_privacy,
     build_site,
+    enter_exits,
     iso,
 )
 from arcilogger_api.routers import lookup as lookup_router
@@ -42,7 +49,8 @@ from arcilogger_core.layout import Layout
 from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.models import AuditLog, Department, Lease, Lookup
 from arcilogger_db.settings import set_setting
-from arcilogger_worker.lookup import EXPLANATIONS
+from arcilogger_worker.lookup import EXPLANATIONS, run_lookup
+from arcilogger_worker.testing import tr
 
 #: The FortiGate's WAN address behind the ISP router as revision 0018 converts Wave 2's
 #: nat.public_ips = [WAN] or nat.wan_transip = WAN: the NAT address of the isp_nat exit wan
@@ -187,6 +195,8 @@ def test_exact_lookup_with_a_configured_public_ip(
             "person": site.person_id,
         }
     ]
+    # The exit in machine form (contract 2.12): exit names are firewall configuration.
+    assert details["egress"] == {"resolution": "transip", "names": ["wan"]}
     stored = canonical_json(details).decode()
     for personal in (PERSON_NAME, PC_MAC, "PLN-PC14", REASON.splitlines()[0]):
         assert personal not in stored  # the sealed audit log keeps ids, not names or text
@@ -236,6 +246,8 @@ def test_double_nat_answers_ranked_candidates(
     (entry,) = audits(app_session_factory, "lookup.run")
     assert entry.details["results"][0]["kind"] == "candidate"
     assert entry.details["results"][0]["traffic"] == [site.s1]
+    # No exits configured: the implicit exit, kept with its empty name.
+    assert entry.details["egress"] == {"resolution": "unconfigured", "names": [""]}
 
 
 def test_unknown_destination_lists_nobody(
@@ -275,6 +287,7 @@ def test_internal_lookup_returns_the_chain(
     assert entry.details["results"] == [
         {"kind": "internal", "lease": lease_id(app_session_factory, PHONE_MAC), "person": None}
     ]
+    assert entry.details["egress"] is None  # no public IP, no exit
 
 
 def test_vlan_changes_reach_the_next_lookup_and_keep_stored_ones(
@@ -553,21 +566,263 @@ def test_ipv6_lookups_are_refused_and_audited(
     assert client.post("/api/v1/lookup/5651", json=body(internal_ip=PC)).status_code == 201
 
 
+#: The 503 of a stored exit value the router cannot read (contract 2.12), Turkish first.
+SETTINGS_INVALID_TR = (
+    "5651 sorgu ayarları geçersiz: İnternet çıkışları (nat.egresses) değeri okunamadı (Ayarlar → "
+    "Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)); sistem "
+    "yöneticisi düzeltmelidir."
+)
+SETTINGS_INVALID_EN = (
+    "The 5651 lookup settings are invalid: the internet exits value (nat.egresses) cannot be read "
+    "(Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT)); "
+    "an administrator must fix it."
+)
+SETTINGS_UNREADABLE_TR = (
+    "5651 sorgu ayarları geçersiz: kayıtlı bir sorgu ya da kira ayarı okunamadı (Ayarlar → "
+    "Uygulama ayarları); sistem yöneticisi düzeltmelidir."
+)
+SETTINGS_UNREADABLE_EN = (
+    "The 5651 lookup settings are invalid: a stored lookup or lease setting cannot be read "
+    "(Settings → Application settings); an administrator must fix it."
+)
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {"hat-1": {"mode": "direct", "public": ["x"]}},  # an address the rules refuse
+        ["hat-1"],  # not even an object
+        {"hat-1": {"mode": "bridge", "public": ["198.51.100.7"]}},  # an unknown mode
+    ],
+    ids=["bad-address", "not-an-object", "bad-mode"],
+)
 def test_invalid_nat_settings_are_reported(
-    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    site: Site,
+    stored: Any,
 ) -> None:
     """A stored nat.egresses the exit rules refuse (written around the validator) stops the
-    public-IP lookups with 503 lookup_settings_invalid; lookups that need no exit (an internal
-    IP or MAC) still answer (contract 2.8.1, implementation note round 5)."""
-    setting(app_session_factory, "nat.egresses", {"hat-1": {"mode": "direct", "public": ["x"]}})
+    public-IP lookups with 503 lookup_settings_invalid, never 500 (the router parses the exits
+    inside its try, C1's line), with the text naming the setting and where it is edited;
+    lookups that need no exit (an internal IP or MAC) still answer (contract 2.8.1, 2.12,
+    implementation note round 5)."""
+    setting(app_session_factory, "nat.egresses", stored)
+    signed_in(client, login_as, app_session_factory)
+    for query in ({"public_ip": WAN, "public_port": 51001}, {"public_ip": WAN}):
+        response = client.post("/api/v1/lookup/5651", json=body(**query))
+        assert response.status_code == 503, response.text
+        error = response.json()["error"]
+        assert (error["code"], error["message_tr"], error["message_en"]) == (
+            "lookup_settings_invalid",
+            SETTINGS_INVALID_TR,
+            SETTINGS_INVALID_EN,
+        )
+        assert "Ayarlar → NAT" not in response.text  # the Wave 2 page that does not exist
+        assert "Settings → NAT" not in response.text
+    assert lookup_router.MESSAGES["lookup_settings_invalid"] == (
+        SETTINGS_INVALID_TR,
+        SETTINGS_INVALID_EN,
+    )
+    assert client.post("/api/v1/lookup/5651", json=body(internal_ip=PC)).status_code == 201
+    assert client.post("/api/v1/lookup/5651", json=body(mac=PC_MAC)).status_code == 201
+    assert audits(app_session_factory, "lookup.run_failed") == []
+
+
+@pytest.mark.parametrize(
+    ("key", "stored"),
+    [
+        ("dhcp.fortigate_logids", ["0100026001"]),  # not an object
+        ("lookup.timeout_seconds", "beş"),  # not a number
+        ("lease.server_seconds", ["x"]),  # not an object: AttributeError in from_settings
+        ("lease.server_seconds", "abc"),
+        ("lease.server_seconds", 5),
+        ("lease.server_seconds", True),
+    ],
+    ids=[
+        "fortigate-logids",
+        "timeout",
+        "server-list",
+        "server-text",
+        "server-number",
+        "server-true",
+    ],
+)
+def test_another_unreadable_lookup_setting_answers_the_same_503(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    site: Site,
+    caplog: pytest.LogCaptureFixture,
+    key: str,
+    stored: Any,
+) -> None:
+    """``LookupSettings.from_settings`` is strict for the ``dhcp.fortigate_*`` values and
+    ``lease.server_seconds`` (an object), and ``lookup.timeout_seconds`` must be a number: one
+    written around the validator stops every lookup with the same code, never 500, but with the
+    second text, which names no key (the key is in the WARNING of the system log; review Q1,
+    final review 1)."""
+    setting(app_session_factory, key, stored)
+    signed_in(client, login_as, app_session_factory)
+    caplog.set_level(logging.WARNING, logger="arcilogger.api.lookup")
+    for query in ({"internal_ip": PC}, {"public_ip": WAN, "public_port": 51001}):
+        caplog.clear()
+        response = client.post("/api/v1/lookup/5651", json=body(**query))
+        assert response.status_code == 503, response.text
+        error = response.json()["error"]
+        assert (error["code"], error["message_tr"], error["message_en"]) == (
+            "lookup_settings_invalid",
+            SETTINGS_UNREADABLE_TR,
+            SETTINGS_UNREADABLE_EN,
+        )
+        assert key not in response.text
+        assert "nat.egresses" not in response.text
+        (record,) = [r for r in caplog.records if r.name == "arcilogger.api.lookup"]
+        assert record.levelno == logging.WARNING
+    assert lookup_router.SETTINGS_UNREADABLE == (SETTINGS_UNREADABLE_TR, SETTINGS_UNREADABLE_EN)
+    assert audits(app_session_factory, "lookup.run_failed") == []
+
+
+# -- the Wave 3 fields of the outcome (contract 2.10, 2.12) ---------------------------------------
+
+#: The exits of the dual-WAN site: line 1 through WAN, line 2 through WAN2 on wan2.
+EXITS = {
+    "hat-1": {"mode": "isp_nat", "transips": [WAN], "interfaces": ["wan1"]},
+    "hat-2": {"mode": "isp_nat", "transips": [WAN2], "interfaces": ["wan2"]},
+}
+
+
+def test_the_egress_block_of_a_public_ip_lookup(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
+) -> None:
+    enter_exits(app_session_factory, WAN_EXIT, at=AT - timedelta(days=30), by="yonetici")
     signed_in(client, login_as, app_session_factory)
     response = client.post("/api/v1/lookup/5651", json=body(public_ip=WAN, public_port=51001))
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "lookup_settings_invalid"
-    assert client.post("/api/v1/lookup/5651", json=body(internal_ip=PC)).status_code == 201
-    setting(app_session_factory, "nat.egresses", ["hat-1"])  # not even an object
-    response = client.post("/api/v1/lookup/5651", json=body(public_ip=WAN))
-    assert response.status_code == 503
+    assert response.status_code == 201, response.text
+    outcome = response.json()["outcome"]
+    egress = outcome["egress"]
+    assert set(egress) == {"resolution", "egresses", "searched", "changes", "changed_after_event"}
+    (entry,) = egress["egresses"]
+    assert set(entry) == {
+        "name",
+        "label",
+        "mode",
+        "public",
+        "public_dynamic",
+        "transips",
+        "interfaces",
+        "port_preservation",
+    }
+    assert (entry["name"], entry["mode"], entry["transips"]) == ("wan", "isp_nat", [WAN])
+    assert set(egress["searched"]) == {
+        "transips",
+        "unclaimed",
+        "unclaimed_seen",
+        "outside_seen",
+        "interfaces",
+        "interface_filter",
+    }
+    assert egress["searched"]["transips"] == [WAN]
+    assert egress["changed_after_event"] is False
+    assert [change["name"] for change in egress["changes"]] == ["wan"]
+    assert outcome["matches"]
+    for match in outcome["matches"]:
+        assert (match["egress"], match["untrusted_sources"]) == ("wan", [])
+    assert outcome["unconverted_dhcp"] == []
+
+
+def test_a_fortigate_lease_in_the_response(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+) -> None:
+    site = build_site(app_session_factory, layout, dhcp="fortigate")
+    signed_in(client, login_as, app_session_factory)
+    response = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC))
+    assert response.status_code == 201, response.text
+    outcome = response.json()["outcome"]
+    assert outcome["mode"] == "internal"
+    chain = outcome["attribution"]
+    lease = chain["lease"]
+    assert (lease["source_table"], lease["lease_seconds"]) == ("fg_dhcp", FORTIGATE_LEASE)
+    assert lease["last_dhcp_evidence"] == tr(DAY, 10, 42, 18).astimezone(UTC).isoformat()
+    assert next(ref["row_id"] for ref in lease["evidence"] if ref["table"] == "fg_dhcp") == (
+        site.dhcp_pc
+    )
+    assert (chain["mac_source"], chain["person"]["name"]) == ("lease", PERSON_NAME)
+    assert outcome["unconverted_dhcp"] == []
+    assert outcome["egress"] is None
+
+
+def test_srcmac_and_interfaces_in_the_response(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+) -> None:
+    """The session's interfaces are always in the response; its srcmac only while its
+    interface is listed in lookup.srcmac_interfaces (contract 2.9)."""
+    build_site(app_session_factory, layout, srcmac=True)
+    enter_exits(app_session_factory, WAN_EXIT, at=AT - timedelta(days=30), by="yonetici")
+    signed_in(client, login_as, app_session_factory)
+
+    def traffic() -> dict[str, Any]:
+        response = client.post("/api/v1/lookup/5651", json=body(public_ip=WAN, public_port=51001))
+        assert response.status_code == 201, response.text
+        (match,) = response.json()["outcome"]["matches"]
+        found: dict[str, Any] = match["traffic"]
+        return found
+
+    off = traffic()
+    assert (off["srcintf"], off["dstintf"], off["srcmac"]) == ("vlan42", None, None)
+    setting(app_session_factory, "lookup.srcmac_interfaces", ["vlan42"])
+    on = traffic()
+    assert (on["srcintf"], on["srcmac"]) == ("vlan42", PC_MAC)
+
+
+def test_a_second_exit(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+) -> None:
+    """A lookup by the second exit's NAT address lists only the session that left through it,
+    with its exit on the match."""
+    site = build_site(app_session_factory, layout, srcmac=True, wan2=True)
+    enter_exits(app_session_factory, EXITS, at=AT - timedelta(days=30), by="yonetici")
+    signed_in(client, login_as, app_session_factory)
+    response = client.post("/api/v1/lookup/5651", json=body(public_ip=WAN2))
+    assert response.status_code == 201, response.text
+    outcome = response.json()["outcome"]
+    assert outcome["egress"]["resolution"] == "transip"
+    assert [entry["name"] for entry in outcome["egress"]["egresses"]] == ["hat-2"]
+    (match,) = outcome["matches"]
+    assert match["egress"] == "hat-2"
+    assert (match["traffic"]["srcip"], match["traffic"]["dstintf"]) == (PHONE, "wan2")
+    assert [ref["row_id"] for ref in match["traffic"]["evidence"]] == [site.wan2]
+    (entry,) = audits(app_session_factory, "lookup.run")
+    assert entry.details["egress"] == {"resolution": "transip", "names": ["hat-2"]}
+
+
+def test_a_stored_wave_2_outcome_is_returned_as_stored(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], site: Site
+) -> None:
+    """A lookup stored before ADR-0016 keeps its outcome as it was stored: no egress block, no
+    FortiGate fields are added on the way out (contract 2.12, day-0 deviation)."""
+    signed_in(client, login_as, app_session_factory)
+    created = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC)).json()
+    stored = dict(created["outcome"])
+    for key in ("egress", "unconverted_dhcp"):
+        stored.pop(key)
+    with app_session_factory() as session:
+        session.get_one(Lookup, created["id"]).outcome = stored
+        session.commit()
+    fetched = client.get(f"/api/v1/lookup/{created['id']}")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["outcome"] == stored
+    assert "egress" not in fetched.json()["outcome"]
 
 
 # -- permissions ----------------------------------------------------------------------------------
@@ -774,6 +1029,35 @@ def test_other_database_errors_are_not_reported_as_timeouts(
     response = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC))
     assert (response.status_code, response.json()["error"]["code"]) == (500, "internal_error")
     assert audits(app_session_factory, "lookup.run_failed") == []
+
+
+def test_the_custom_plans_last_as_long_as_the_lookup_transaction(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    site: Site,
+) -> None:
+    """The lookup's statements are planned with their values; the statements after it on its
+    pooled connection are planned as before."""
+    show = select(func.current_setting("plan_cache_mode"))
+    seen: list[tuple[Any, Any]] = []
+
+    def watched(session: Session, *args: Any, **kwargs: Any) -> Any:
+        seen.append((session.scalar(show), session.connection().connection.dbapi_connection))
+        return run_lookup(session, *args, **kwargs)
+
+    monkeypatch.setattr(lookup_router, "run_lookup", watched)
+    signed_in(client, login_as, app_session_factory)
+    response = client.post("/api/v1/lookup/5651", json=body(internal_ip=PC))
+    assert response.status_code == 201, response.text
+    assert response.json()["outcome"]["attribution"]["person"]["name"] == PERSON_NAME
+    ((inside, pooled),) = seen
+    assert pooled is not None
+    after = pooled.execute("SELECT current_setting('plan_cache_mode')").fetchone()
+    pooled.rollback()  # back to the pool as it was
+    assert inside == "force_custom_plan"
+    assert after == ("auto",)
 
 
 def test_statement_deadline_limits_each_statement_to_the_remaining_time(

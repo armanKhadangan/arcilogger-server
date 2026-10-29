@@ -183,6 +183,7 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("GET", f"{V}/settings"): None,
     ("PATCH", f"{V}/settings"): None,
     ("POST", f"{V}/settings/{{key}}/reset"): None,
+    ("GET", f"{V}/settings/fortigate/observed"): None,
     # Arama (ADR-0015): 5651 Temel, never gated.
     ("POST", f"{V}/search"): None,
     ("POST", f"{V}/search/page"): None,
@@ -256,7 +257,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 122
+    assert len(ROUTES) - len(gated) == 123
 
 
 def test_the_module_markers_equal_the_table() -> None:
