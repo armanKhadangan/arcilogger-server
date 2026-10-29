@@ -6607,6 +6607,116 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
     and `busy` failed against the one-statement index order on TimescaleDB (the Merge Append above).
     Fold into 2.8.3 and 3.8.
 
+## Deviations — e2 (WP-E part 2, 2026-10-29)
+
+- **d-27 in the web** (2.12; supersedes part 1's "Small additions" clause that a match shows its
+  exit row also when only `dstintf` or `egress` is set). A match of a lookup whose outcome has no
+  `egress` (no public IP in the request) reads "çıkış belirlenmedi (talepte genel IP yok) / exit
+  not determined (no public IP in the request) · {dstintf}" (`network.lookup.exitNotDetermined`),
+  as the report prints it; "-" appears only when a public IP was requested and no exit claims the
+  NAT address. Tests: `web/src/pages/lookup/lookup-wave3.test.tsx`. Fold into 2.12.
+- **A fifth changed key in `tr.json`/`en.json`** (2.13 "Locales" names four):
+  `lookup.endReason.superseded` reads "sonraki bir DHCP atamasıyla kapandı" / "closed by a later
+  DHCP assignment" instead of "başka cihaza verildi" / "given to another device". A lease closed
+  `superseded` is not always given to another device (d-26, D33: a lease of the same MAC moved to
+  another IP of the network closes the same way), and the report prints it so. Fold into 2.12.
+- **The srcmac step carries the lease step's notes** (2.12). A srcmac chain is never drawn as a
+  lease row, and the list above the chain leaves out the keys the lease step shows (e.g.
+  `lease_renewal_not_seen`); so when such a chain carries a lease, its srcmac step lists those
+  notes as the lease step does, so every low reason is shown somewhere. Tests:
+  `web/src/pages/lookup/lookup-wave3.test.tsx`. Fold into 2.12.
+- **English plural of the excluded line** (2.13 "Kira kanıtı"; e2 review, question 3). The English
+  text read "1 records"; `network.leaseEvidence.excluded` is now `excluded_one` "Excluded
+  interfaces: {formatted} record (not lease evidence)" / `excluded_other` "… {formatted} records
+  …", with `count` and the locale-formatted number as the sibling `refusedRows_*` keys have it.
+  Turkish keeps its one text in both keys (the locale test requires the same keys in both
+  languages). Tests: `web/src/pages/sources/lease-evidence-card.test.tsx`,
+  `web/e2e/sources.spec.ts`. Fold into 2.13.
+- **`settings-group-form.tsx` takes the server's answer after a save** (2.13; e2 review, item 1;
+  WP-E's file under part 1's recorded deviation). The group took a new answer of the server only
+  while the drafts equalled the last answer shown; an exit added in the editor has a row key
+  (`new-<n>`) the stored exit never opens with, so after saving it every later answer (a reset,
+  another administrator's change) was dropped and the next save sent stale values that passed the
+  conflict check. After a save the server reports as changing something, the group now takes the
+  next answer whatever the drafts hold. Tests: `web/src/pages/settings/egress-editor.test.tsx`
+  ("takes the server answer again after saving a new exit"). Fold into 2.13.
+- **Three more exit-rule cases** (e2 review, item 2; the fixture now has 97 cases, where c1's
+  entry says 94): an IPv6 address with a `%zone` (`fe80::1%wan1`) and one with a prefix that is no
+  number (`2001:db8::/abc`) → `setting_ipv6_not_supported`; two `::` (`1::2::3`) →
+  `setting_egress_address`. The web mirror now decides IPv6 on the part before the first `/` as
+  `ipaddress.ip_address` reads it. Tests: `db/tests/test_egress.py`,
+  `web/src/pages/settings/egress-model.test.ts`. Nothing to fold.
+
+## Deviations — f2 (WP-F2, 2026-10-29)
+
+Each entry says what the contract says, what was written, and why. Test paths are under `tests/`.
+
+- **f2-1. The §13 catch-all exit is conditional** (2.15 KURULUM/INSTALL §13 paragraph, "genel
+  adresi olmayan hatlar için "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir,
+  `lookup.port_hint` o çıkışın port koruma değerine geçer"). The converter (2.8.2, the reference
+  code and `v0018_nat_egresses.py`) adds `tanimsiz` only when no `wan` exit is made and a public
+  address or `port_hint` is carried over, and gives `port_hint` to the `wan` exit when there is
+  one. The docs say so: "…, "FortiGate WAN adresi" çıkışı yapılmadıysa ve bir genel IP ya da
+  `lookup.port_hint` aktarıldıysa, "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir;
+  `lookup.port_hint` "FortiGate WAN adresi" çıkışının, o yoksa bu çıkışın port koruma değerine
+  geçer." (INSTALL the same in English). Fold into 2.15.
+- **f2-2. §13 carries the manager's rollback notes** (2.15 §13 text; rounds 5–7, manager's docs
+  items on #10). Beyond the 2.15 text the rollback paragraph says that the previous version
+  closes the FortiGate leases by its own settings ("varsayılanlarla kiranın son DHCP kaydından
+  yaklaşık 26 saat sonra") and deletes those that start on the rollback day or the day before in
+  its own rebuild, and those that start on the days it rebuilds for late records ("(ve geç gelen
+  kayıtlar için yeniden oluşturduğu günlerde başlayanları)" / "(and those that started on the days
+  it rebuilds for late records)", 2.2.1); to download the official reports before `-Rollback`; and
+  that the re-upgrade prints the days to rebuild. The srcmac sentence of item 2 is in §13 and CORRELATION §7. Fold
+  into 2.15.
+- **f2-3. Wording of the examples and labels.** The rebuild button is "Rebuild the leases" in
+  English, as in ALERTS.md and the web; the settings examples keep the existing `--by tolga` of
+  FIRST-STEPS instead of `--by <kullanıcı>`. Fold into 2.15.
+- **f2-4. CORRELATION §7 names the D8 probe window as max(longest window, 604,800 s)** (manager's
+  item 1 on #10, after "Deviations — c2"), and the clock limits apart: a fixed 120 s for the
+  `R20-lease:source-clock` alert (`alerts/system.py`), max(120 s, the lookup tolerance) for
+  lowering the chain of a source measured only for the session search (round-5 note "2.17 vs 2.7
+  clock limit"; DEVICE-SETUP 2.1 says the same). **§2.17 reads alike:** its clock bullet "unless the lookup tolerance is lower" becomes
+  "the limit is 120 s, or max(120 s, the lookup tolerance) for a source measured only for the
+  session search", and it gains the residual of the manager's item 3, as the manager corrected it in
+  the review of #52 (the first wording, "the safe side, never a wrong person", holds only for
+  changes that add evidence: stored leases are not checked again against today's settings, and the
+  automatic rebuilds cover only today, yesterday and the days rebuilt for late records): "**A
+  `dhcp.fortigate_*` setting (other than `dhcp.fortigate_format_verified`) or a FortiGate source
+  changed later** applies to past leases only after a rebuild from the first affected day. After a
+  change that adds evidence (a logid or `dhcp_msg` value mapped, a FortiGate source added), moments
+  before the rebuild answer without a chain until then (the safe side). After a change that removes
+  or narrows evidence (an interface added to `dhcp.fortigate_interfaces_excluded`,
+  `dhcp.fortigate_traffic_extends` or `dhcp.fortigate_use_logged_lease` switched off, a logid or
+  `dhcp_msg` value removed, a FortiGate source removed or retyped), the leases built under the old
+  settings stay, at their old confidence, until the rebuild, so a moment can still name the earlier
+  device: rebuild at once, from the first affected day." The same split is in AYARLAR / SETTINGS,
+  DEVICE-SETUP 2.4, ILK-ADIMLAR / FIRST-STEPS section 6 and CORRELATION sections 1 and
+  7. Fold into 2.17.
+- **f2-5. DEVICE-SETUP §2.** 2.1–2.3 keep the existing content under the titles "Syslog ve
+  saat", "Web ve DNS filtre profilleri", "Politikalar ve isteğe bağlı kayıtlar" (Turkish only, as
+  before); the English blocks of O11 are in the new 2.4–2.6. The rebuild statement of item 3 in
+  2.4 and in the `dhcp.fortigate_*` help leaves out `dhcp.fortigate_format_verified`, which
+  changes no lease. Fold into 2.15.
+- **f2-6. Placement.** The DENETCI-KILAVUZU reading table is a new section 10 "5651 raporunu
+  okumak (okuma tablosu)", in RAPOR's one-table bilingual shape (d-23) with the same two c2
+  cells; the English part points to it. KULLANIM/USAGE did not hold the literal "MikroTik DHCP
+  sunucusunun kiraları", so the source sentence is added where usage names the lease ("Kiralar
+  DHCP sunucusunun (MikroTik ya da FortiGate) kira kayıtlarından …"), with srcmac not used for
+  usage. Fold into 2.15.
+- **f2-7. The §3.7 end-to-end sites call the lookup engine directly** (3.7 "FortiGate-only site",
+  "dual-WAN site"). `test_mvp_end_to_end.py::test_fortigate_only_site` and
+  `::test_dual_wan_site` load the generator's lines through the shipped ingest, run the worker's
+  lease build, change settings with `settings_admin.change_setting` and answer with `run_lookup`
+  at a chosen `now` on fixed days (2026-10-13/14), as the API runs it (`lookup_now`: today's
+  settings, the data directory), not through HTTP: the HTTP route, the PDF and the evidence
+  package are already covered by the Wave 2 site in the same file (`test_mvp_end_to_end`), and a
+  chosen `now` keeps the half-lease and timeout checks independent of the wall clock.
+- **f2-8. The reading-table test matches whole labels** (3.9). An exit label counts only quoted
+  or in parentheses, so "NAT adresi" is not satisfied by "NAT adresi doğrulanamadı" or a
+  sentence. Test: `test_docs_consistency.py::test_reading_tables_cover_every_key_and_exit_label`.
+
+
 ---
 
 ## Implementation notes — round 5

@@ -2391,33 +2391,80 @@ hold `cause`, `title_en`, `action_tr`, `action_en` besides the keys below. The d
 - **Budgets** (`poe test-perf`, contract 3.8): observed endpoint < 2 s at 1 M rows a day over
   24 h (deadline 5 s); `lease_evidence` < 0.5 s, its srcmac count < 1 s; each `R20-lease` query
   < 1 s, `source-clock` < 0.5 s, `R20-nat:unmapped-transip` < 0.2 s; the D8 probe for 20 IPs and
-  the post-lease checks within the lookup's own guards.
+  the post-lease checks within the lookup's own guards; the overlap probe of an unclaimed
+  address < 0.2 s, except a busy address with no session overlapping the probe window, < 1 s
+  (18.9, c3).
 
 ### 18.9 Decided while building (where the plan of ADR-0016 was refined)
 
 Recorded in the contract's "Deviations" sections; what touches the API, the outcome or the
-report:
+report. What changes only the contract's own lists (package files, test lists) or another
+document (ADR-0016, CORRELATION, ASSUMPTIONS, the documents of contract 2.15) is folded there.
 
 - **day0:** the ADR-0016 members of `lookup-types.ts` are optional, and the router returns a
   stored outcome as stored (no `from_dict` round trip); `LookupSettings.from_settings` reads the
-  lookup-only values leniently; ranges in the new refusal texts use a hyphen.
+  lookup-only values leniently; ranges in the new refusal texts use a hyphen; more than 16
+  `dhcp.fortigate_dhcp_msgs` entries are refused with `setting_dhcp_msg_invalid`, whose text
+  does not name that limit, and `nat.snat_trandisp` and the interface lists are de-duplicated
+  before they are counted; the English texts of `fortigate_dhcp_not_converted_since_lease` and
+  `fortigate_dhcp_no_network` name the pages by the web's English labels ("Devices and people →
+  Departments and VLANs", "… → Rebuild the leases";
+  `worker/tests/test_lookup_texts.py::test_the_settings_path_is_the_one_the_web_interface_shows`).
+- **a0:** `fg_traffic.srcmac` is a column on TimescaleDB too: V13 (TimescaleDB 2.30.2,
+  PostgreSQL 16, 2026-10-27) showed `ADD COLUMN` accepted with compressed chunks in place, their
+  rows reading `srcmac` as NULL, so the fallback of contract 2.2.1 (srcmac in `extra`) is not
+  used (`db/tests/test_migration_0017.py`).
 - **c1:** "seen, but not alone" falls back only when no trusted session through P spans T and
   the search on P finds none; `public_unknown` keeps each exit's interface rule and the not-seen
   widening; `double_nat` of a request without a public IP is "no `direct` exit" (an unreadable
   `nat.egresses` counts as true); an IPv6 public IP lists no session, NAT66 included;
   `egress_changed_after_event` joins exits with "; " and words internal authors; the validator
-  codes of 18.2; `setting_ip_invalid` is gone; the samples backdate the exits.
+  codes of 18.2; `setting_ip_invalid` is gone; the samples backdate the exits;
+  `egress_unmapped_seen` leaves the requested address out only when it was answered `observed`,
+  so an `isp_nat` exit's public address that the FortiGate itself used near T is named
+  (`engine._unmapped_note`); the downgrade of `0018_nat_egresses` rebuilds the legacy keys
+  (author `:migration`) only from a `nat.egresses` row an administrator wrote: the single
+  addresses of `direct` exits → `nat.public_ips`, one `isp_nat` exit with one single NAT
+  address and no interfaces → `nat.wan_transip`, a `preserved` exit → `lookup.port_hint`; what
+  the previous version cannot read (networks, other modes, public addresses of ISP NAT exits)
+  is logged as a warning.
 - **b:** ARP never moves the deadline of an `fg_dhcp` lease; `arcilogger-db leases
   prepare-rollback` exits 0/1/3 and keeps the recorded `at` when run again; the describers read
-  only `cause`, `count`, `vlan`, `table`, `seconds`.
+  only `cause`, `count`, `vlan`, `table`, `seconds`; `R20-nat:unmapped-transip` counts IPv4
+  `transip` values only, and an address is claimed when it is a public or NAT address of any
+  exit, `internal` exits included; `R20-nat:legacy-changed` is also raised when no
+  `nat.egresses` row exists; `R20-lease:fortigate-unverified` looks at any `fg_dhcp` row of the
+  last 7 days, not only usable ones; `prepare-rollback` runs with `lock_timeout` 30 s and
+  `statement_timeout` 10 min; the re-upgrade's restore gives the restored rows a fresh
+  `updated_at`, deletes a status row whose `at` cannot be read without restoring anything, and
+  names the rebuild range from the site day of `at` minus the longest `fg_dhcp`
+  `lease_seconds` (else 604,800 s) to today (`arcilogger_db.lease_rollback`).
 - **c2:** a RELEASE mapped after the build ends the lease in the lookup; D27 outside configured
   networks uses the address as `{network}`; the D8 probe also runs for a MAC-only lookup; the
   per-lookup clock check reads the rows nearest T with the 120-s limit for lease searches; the
   srcmac guard counts a used row outside the hour by its own address; the D8 probe window and
   the `mt_dhcp` cap of the `fg_event` post-lease check are 604,800 s (the converted-row check
-  keeps 8,640,000 s).
+  keeps 8,640,000 s); the converted-row check also reads the chain's address: `fg_dhcp` rows
+  that `trust.kept` accepts with today's settings, of an `assigned` logid, inside the chain's
+  own window, of another MAC for an `fg_dhcp` chain and of any MAC for an `mt_dhcp` chain, lower
+  it to `low` with `fortigate_dhcp_not_converted_since_lease` (the branch returns no value of the
+  row and cites nothing); the post-lease check and the D8 probe apply D25's `dhcp_msg` rule and
+  D28's interface and MAC rules to `fg_event` lines (`attribution.event_kept`): a line without
+  `dhcp_msg` or without a readable MAC passes, and the receive-time rule is not applied; the D8
+  probe also runs for a match or an internal lookup whose only chain is a srcmac chain, which
+  keeps its `low`; the clock offset compared with the limit is the unrounded median, the one
+  printed is rounded up away from zero, and `{limit}` is the smallest limit of the named sources.
+  Interpretations accepted in the manager's final review of PR #30: a match is probed at its
+  chain's moment, never after T; a converted row at the same second wins over an `fg_event`
+  line; `srcmac_shared`, `srcmac_infrastructure` and `srcmac_other_lease` are outcome
+  explanations, each key once; a destination-only search that found nothing measures the
+  sources of `fg_traffic` for the clock.
 - **e1:** `lease_evidence.<table>.last_hour` is the newest usable row within the last hour
-  (section 17.8); the web judges "as converted" by the converter's shape.
+  (section 17.8); the web judges "as converted" by the converter's shape; a stored exit that the
+  rules of one exit refuse, or whose editor row would not give it back unchanged, is kept as
+  stored (`EgressRow.stored` in `web/src/pages/settings/egress-model.ts`): shown read-only with
+  the rule it breaks, sent unchanged in every save of the exits until the administrator removes
+  it, and left out of the warnings, the prefill and the observed panel's claims.
 - **d (WP-D):** no `double_nat` bullets beside the `fallback` paragraph (d-1) and no bullet for
   a text a paragraph quotes (d-2); the isp_nat paragraph says what was searched when the search
   went wider than the exit's addresses (d-3); a `fallback` prints the result and advice (a)
@@ -2446,4 +2493,25 @@ report:
   and `test_lookup_testing_sites.py` (d-34); the lookup's transaction plans its statements with
   `plan_cache_mode = force_custom_plan` (d-35); the "Özet / Summary" row of an unconverted
   citation prints the fixed bilingual label `texts.UNCONVERTED_SUMMARY`, never the Turkish-only
-  stored summary (d-36). Contract "Deviations — d" has each with its tests.
+  stored summary (d-36); the exit row and the srcmac step print as section 6.1 writes them, each
+  step with its section-6 evidence numbers (d-12); the Wave 3 lookup samples (ids 101-121) come
+  from a second capture site with its own database and data directory
+  (`web/scripts/samples_lookups.py`), `settings-observed.json` from
+  `web/scripts/samples_network.py` (d-24); the `lease_evidence` samples are captured as `ok`,
+  `none` and `refused` in that order, `absent` is not captured (d-25). Contract "Deviations —
+  d" has each with its tests.
+- **f2 (WP-F2):** documentation only (KURULUM/INSTALL §13, CORRELATION §7, DEVICE-SETUP §2,
+  DENETCI-KILAVUZU section 10, KULLANIM/USAGE); nothing in the API, the outcome or the report
+  changes. The FortiGate-only and dual-WAN end-to-end sites (`tests/test_mvp_end_to_end.py`)
+  load the load generator's lines through the shipped ingest and answer with `run_lookup` at a
+  chosen `now`, not over HTTP (f2-7); the reading-table docs test counts an exit label only
+  quoted or in parentheses (f2-8).
+- **c3 (WP-C3):** the overlap probe of an unclaimed address (`_Probe.seen_overlap`, D31 (a))
+  asks for the first row in the order of `ix_fg_traffic_transip_transport_time` (`ORDER BY
+  transip, transport, time LIMIT 1`, not `EXISTS`) in two steps: the rows logged in the probe
+  window, then, only when none of them overlaps, the tail up to `lookup.max_session_seconds`
+  after it; the answer is the same. Its guard keeps 0.2 s, except for a busy unclaimed address
+  with no session overlapping the window (`busy_before`, about 0.5 s at 1 M rows a day), which
+  has a bound of its own, 1 s (`OVERLAP_SECONDS` in `worker/tests/test_lookup_performance.py`;
+  the manager's answer (a) to Q-C3-1 on #47; an index the probe can answer from is a follow-up
+  in #40).

@@ -13,7 +13,8 @@
  * source that never sent, an unknown sender in the site's network (`unknown-172.20.10.40`, the
  * "Kaynak olarak tanımla" case) and one promoted to `edge-1`. Example and tail lines are captured
  * raw lines (`samples/raw.json`), so their raw drawer opens (the capture's own lines of today are
- * not in `raw.json`).
+ * not in `raw.json`). The overview carries the "Kira kanıtı" counts (`lease_evidence`, Wave 3
+ * contract 2.12), the captured overview's unless a test passes another.
  */
 
 import { createHash } from 'node:crypto';
@@ -22,6 +23,7 @@ import type { Page, Request, Route } from '@playwright/test';
 
 import type { DashboardParseFailures } from '../src/lib/api-types';
 import type {
+  LeaseEvidence,
   SourceDetail,
   SourceHealth,
   SourceParseFailure,
@@ -354,6 +356,8 @@ export function sampleParseFailures(): DashboardParseFailures {
 export interface SourcesOptions {
   /** The list (default: `sampleSources()`). */
   items?: SourceHealth[];
+  /** The lease-evidence counts (default: the captured sample's). */
+  leaseEvidence?: LeaseEvidence;
   /** The Panel's parse-failure box (default: `sampleParseFailures()`; `null`: none). */
   parseFailures?: DashboardParseFailures | null;
 }
@@ -361,6 +365,7 @@ export interface SourcesOptions {
 export class SourcesMock {
   items: SourceHealth[];
   parseFailures: DashboardParseFailures | null;
+  leaseEvidence: LeaseEvidence;
 
   constructor(
     private readonly api: MockApi,
@@ -369,6 +374,7 @@ export class SourcesMock {
     this.items = options.items ?? sampleSources();
     this.parseFailures =
       options.parseFailures === undefined ? sampleParseFailures() : options.parseFailures;
+    this.leaseEvidence = options.leaseEvidence ?? copy(SOURCES.overview.lease_evidence);
   }
 
   async install(page: Page): Promise<void> {
@@ -423,7 +429,7 @@ export class SourcesMock {
         today: SAMPLE_TODAY,
         collector: { updated_at: at(0.5), fresh: true },
         items: this.items,
-        lease_evidence: copy(SOURCES.overview.lease_evidence),
+        lease_evidence: structuredClone(this.leaseEvidence),
       };
       return [200, overview];
     }

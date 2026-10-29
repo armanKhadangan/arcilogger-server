@@ -8,18 +8,21 @@
  * It creates the first administrator with the console setup token, enrols TOTP with a code
  * computed here from the key the page shows (RFC 6238), accepts the KVKK notice, checks the audit
  * log (chain verified by the server, entry hashes recomputed by the browser), creates a user,
- * signs in as that user with the temporary password and changes it.
+ * signs in as that user with the temporary password and changes it. What the FortiGate's records
+ * show (`GET /settings/fortigate/observed`, Wave 3) is refused to that user and answered to the
+ * administrator.
  *
  * With a seeded stack (`live_stack.py --seed`: one sealed day of real-format logs, mock TSA) it
  * goes on: a 5651 lookup through the browser (exact chain WAN → internal IP → MAC → device →
- * person), a raw line from the sealed vault, the official PDF report (its SHA-256 checked here
- * and in the browser), an evidence package from that lookup (built by the API, downloaded and
- * checked against `Repr-Digest`), and the day on the sealing page verified again. Then Wave 2:
- * Arama finds the seeded firewall session on the sealed day, its record and raw line open, and
- * "Kanıt paketine aktar" builds a package that the standalone verifier accepts (`verify.py`, run
- * here); Canlı Akış shows a line written to today's spool file after the stream opened;
- * Kaynaklar lists the configured sources and reads that line back with its SHA-256; every read is
- * in the audit log.
+ * person; exact through the internet exit `wan` that `live_stack.py` stores in `nat.egresses`, as
+ * revision `0018_nat_egresses` converts Wave 2's `nat.wan_transip`), a raw line from the sealed
+ * vault, the official PDF report (its SHA-256 checked here and in the browser), an evidence package
+ * from that lookup (built by the API, downloaded and checked against `Repr-Digest`), and the day on
+ * the sealing page verified again. Then Wave 2: Arama finds the seeded firewall session on the
+ * sealed day, its record and raw line open, and "Kanıt paketine aktar" builds a package that the
+ * standalone verifier accepts (`verify.py`, run here); Canlı Akış shows a line written to today's
+ * spool file after the stream opened; Kaynaklar lists the configured sources and reads that line
+ * back with its SHA-256; every read is in the audit log.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -86,6 +89,26 @@ async function signIn(page: Page, username: string, password: string) {
   await page.getByLabel('Kullanıcı adı').fill(username);
   await page.getByLabel('Parola', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Giriş yap' }).click();
+}
+
+/**
+ * `GET /settings/fortigate/observed?hours=24` from the page: the status, the error code, and the
+ * `hours` of the NAT and srcmac parts of an answer (Wave 3 contract 2.12).
+ */
+async function observed(page: Page) {
+  return page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/fortigate/observed?hours=24');
+    const body = (await response.json()) as {
+      error?: { code: string };
+      nat?: { hours: number };
+      srcmac?: { hours: number };
+    };
+    return {
+      status: response.status,
+      code: body.error?.code ?? null,
+      hours: body.nat && body.srcmac ? [body.nat.hours, body.srcmac.hours] : null,
+    };
+  });
 }
 
 test.skip(!LIVE_DIR, 'ARCI_LIVE_DIR is not set: start web/scripts/live_stack.py first');
@@ -204,6 +227,9 @@ test('first administrator, TOTP, KVKK, audit log, a second user — against the 
     'Panel',
     'Kullanım',
   ]);
+  // What the FortiGate's records show (the exit editor's observed panel) needs settings.manage:
+  // the real API refuses this role.
+  expect(await observed(page)).toEqual({ status: 403, code: 'forbidden', hours: null });
 
   // 8. Back as the administrator: the next TOTP step (the enrolment code cannot be replayed).
   await page.getByRole('button', { name: /Kullanıcı menüsü/ }).click();
@@ -216,6 +242,8 @@ test('first administrator, TOTP, KVKK, audit log, a second user — against the 
   await page.goto('/audit');
   await expect(page.getByText(/^Zincir doğrulandı · \d+ kayıt$/)).toBeVisible();
   await expect(table.getByText('Parola değiştirildi', { exact: true })).toBeVisible();
+  // ... and answers the administrator (the NAT addresses over 24 hours, srcmac over the last one).
+  expect(await observed(page)).toEqual({ status: 200, code: null, hours: [24, 1] });
 
   const seed = readSeed();
   if (!seed) return;

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Sparkline } from '@/components/charts/sparkline';
 import { RawLineSheet, type RawLineTarget } from '@/components/evidence/raw-line-sheet';
 import { PageHeader } from '@/components/layout/page-header';
+import { SupportedTopologies } from '@/components/network/supported-topologies';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ import { useSourcesOverview } from '@/lib/sources-hooks';
 import type { SourceHealth } from '@/lib/sources-types';
 import { cn } from '@/lib/utils';
 
+import { LeaseEvidenceCard } from './lease-evidence-card';
 import { LicenceStrip } from './licence-strip';
 import { SourceSheet } from './source-sheet';
 import {
@@ -53,7 +55,9 @@ function filterOf(params: URLSearchParams): SourceFilter {
  * background); the sources are edited in Ayarlar → Kaynaklar (`pages/settings/sources-page.tsx`,
  * `SourcesPage`), where "Kaynak olarak tanımla" opens the add dialog filled in. A row opens the
  * source's drawer (`source-sheet.tsx`). The filter (`?filter=`) and the open source
- * (`?source=`: a device's name, not personal data) are in the address.
+ * (`?source=`: a device's name, not personal data) are in the address. Above the list, the
+ * "Kira kanıtı" card says whether the DHCP and ARP-LOG records the 5651 lookup's lease timeline
+ * rests on arrive and are used (ADR-0016), with the supported network set-ups beside it.
  */
 export function SourcesHealthPage() {
   const { t } = useTranslation();
@@ -375,6 +379,8 @@ export function SourcesHealthPage() {
             </p>
             <LicenceStrip />
           </div>
+          <LeaseEvidenceCard evidence={data.lease_evidence} />
+          <SupportedTopologies />
           {!data.collector.fresh ? (
             <Alert tone="warning" assertive={false} data-testid="collector-stale">
               {t('sources.collectorStale')}

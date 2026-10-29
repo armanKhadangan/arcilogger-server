@@ -31,14 +31,24 @@ paket (`include_audit_log`) girdileri gerçek kullanım hedefleri ve özetleriyl
 
 Kapsam iki yoldan biriyle seçilir:
 
-- **5651 sorgusundan** (`lookup_id`): sorgu sonucunun dayandığı ham satırlar (FortiGate oturumu,
-  DHCP/ARP kayıtları, IP çakışmasındaki diğer cihazlar dahil) ve sorgu günü pakete girer.
+- **5651 sorgusundan** (`lookup_id`): sorgu sonucunun dayandığı ham satırlar (FortiGate
+  oturumları, çift NAT yanıtında başka kişilerin aday oturumları dahil; DHCP sunucusunun
+  (MikroTik ya da FortiGate) kira kayıtları ve `ARP-LOG` kayıtları, IP çakışmasındaki diğer
+  cihazlar dahil) ve sorgu günü pakete girer.
   Makam ve dosya no paketin referansı olur. `full_days` ile (varsayılan) paket, bu günlerin
   **tüm kaynaklarının** mühürlü dosyalarını tam olarak içerir (yalnızca sorgunun dayandığı
   kaynakları değil; `sources` verilirse yalnızca onlar ve alıntılanan satırların kaynakları);
   alıntılanan satırlar ayrıca `extract/` altındadır. Yalnızca dayanılan kaynakların tam
   dosyaları isteniyorsa `content: "extract"` seçilir.
 - **Elle** (`from` / `to`, en fazla 31 gün; isteğe bağlı `sources` ve satır listesi `extract`).
+
+**Aygıt tanıma alanları:** FortiGate'in aygıt tanıması açık olan bir arayüzün oturum satırları
+kaynak MAC adresini (`srcmac`), cihaz adını, işletim sistemini, donanım üreticisini ve sürümünü,
+cihaz türünü ve FortiGate'in pasif olarak öğrendiği kullanıcı adlarını taşır. Paket ham satırları
+değiştirmez: bu alanlar, Ayarlar'daki srcmac arayüz listesinden bağımsız olarak, alıntılanan her
+oturum satırında (`extract/`, başka kişilerin aday oturumları dahil), paketteki mühürlü dosyalarda
+ve paketteki resmi raporun ham satırlarında görünür ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5,
+[legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md)).
 
 İçerik (`content`): `full_days` — seçilen kaynakların o günlerdeki mühürlü dosyalarının tamamı
 (alıntılanan satırlar ayrıca `extract/` altında); `extract` — alıntılanan satırlar ve yalnızca bu
@@ -190,11 +200,20 @@ ARCILOGGER is *designed to support* Law 5651 obligations; it does not claim lega
   hidden in the same way from a reader who sees pseudonyms on the Kullanım pages (the auditor
   while `usage.pseudonymize_anonymous_role` is on; [USAGE.md](USAGE.md) section 6).
 - **Create** (`POST /api/v1/evidence`): scope from a 5651 lookup (`lookup_id`: the raw lines its
-  result cites and the lookup day; with `full_days`, the default, the package holds the complete
-  sealed files of **all** sources of those days — not only the cited ones — unless `sources`
-  narrows them, plus the cited lines under `extract/`) or explicit (`from`/`to`, at most 31 days, optional `sources`
-  and `extract` lines). `content`: `full_days` (all sealed files of the chosen sources) or
-  `extract` (the cited lines plus the complete sealed files of their sources on those days).
+  result cites — FortiGate sessions, other people's candidate sessions of a double-NAT answer
+  included; the leases of the DHCP server (MikroTik or FortiGate) and `ARP-LOG` records, the other
+  devices of an IP conflict included — and the lookup day; with `full_days`, the default, the
+  package holds the complete sealed files of **all** sources of those days — not only the cited ones
+  — unless `sources` narrows them, plus the cited lines under `extract/`) or explicit (`from`/`to`,
+  at most 31 days, optional `sources` and `extract` lines). **Device identification:** the session
+  lines of an interface with FortiGate device identification on carry the source MAC address
+  (`srcmac`), the device name, the operating system, the hardware vendor and version, the device
+  type and the user names the FortiGate learned passively. A package never changes raw lines:
+  whatever the srcmac interface list in the settings says, these fields appear in every cited
+  session line (`extract/`, other people's candidate sessions included), in the package's sealed
+  files and in the raw lines of its official report ([DEVICE-SETUP.md](DEVICE-SETUP.md) section
+  2.5). `content`: `full_days` (all sealed files of the chosen sources) or `extract` (the cited
+  lines plus the complete sealed files of their sources on those days).
   ARCILOGGER's own audit log (`audit.jsonl.gz`) is **left out by default** (KVKK data
   minimisation: it holds every other lookup of the day and staff data); `paket.json` lists it in
   the day's `excluded` with `kind: "audit_log"` and its sealed SHA-256, and `verify.py` reports it
