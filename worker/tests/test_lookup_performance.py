@@ -36,6 +36,11 @@ Timings and plans are printed (run with ``-s`` to see them).
 lookup's srcmac guard and sightings, the D8 probe, the post-lease checks, the clock measurement
 and the DHCP-origin query, each under its own bound, on two sites written once for the module
 (see the comment above :data:`GUARD_AT`).
+
+**The exit guards** (contract 3.8, WP-C3): the two-exit ``= ANY`` candidate search, the unclaimed
+search with a ``<<= ANY`` exclusion, a direct exit with a /29 public network and the overlap probe
+of an unclaimed address, on the traffic site; on TimescaleDB, the event site's FortiGate DHCP
+checks once more on compressed chunks (their seconds in the ``C3-compressed:`` line of the log).
 """
 
 from __future__ import annotations
@@ -1508,3 +1513,172 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
         (str(ip).startswith("172.20.60."), interface, held) for _n, ip, interface, _vd, held in rows
     } == {(True, "vlan60", False)}
     assert timed.seconds < 0.2, f"the converted-row query took {timed.seconds:.3f} s"
+
+
+# -- the event site on compressed chunks (WP-C3; the manager's answer to Q1 of PR #30) ------------
+#
+# On TimescaleDB every chunk older than 7 days is compressed, and a compressed chunk's btree
+# indexes hold only its rows that are not compressed: the D8 probe, the post-lease queries and
+# the converted-row query, which read up to 100 days back, read such chunks for most requests.
+# Measured once on the Linux CI job, not a guard with its own bound: one follows only if a query
+# takes more than 1 s. The job log's line ``C3-compressed: d8_probe=…s post_lease=…s
+# post_lease_long=…s converted_row=…s`` gives the numbers.
+
+#: The tables :data:`EVENT_SITE` writes into hypertables.
+EVENT_TABLES = ("fg_event", "fg_dhcp", "mt_dhcp", "fg_traffic")
+
+
+def _compress_all(site: Engine, tables: Sequence[str]) -> dict[str, tuple[int, int]]:
+    """Every chunk of ``tables`` compressed, one chunk per statement (a statement for all of a
+    table's 400 chunks would hold their locks at once), then the statistics as autovacuum
+    gathers them; the chunks and the compressed ones per table."""
+    with site.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        for table in tables:
+            chunks = connection.execute(
+                text("SELECT CAST(c AS text) FROM show_chunks(CAST(:table AS regclass)) AS c"),
+                {"table": table},
+            ).scalars()
+            for chunk in list(chunks):
+                connection.execute(
+                    text(
+                        "SELECT compress_chunk(CAST(:chunk AS regclass), if_not_compressed => true)"
+                    ),
+                    {"chunk": chunk},
+                )
+        connection.execute(text(f"ANALYZE {', '.join(tables)}"))
+        rows = connection.execute(
+            text(
+                "SELECT hypertable_name, count(*), count(*) FILTER (WHERE is_compressed) "
+                "FROM timescaledb_information.chunks WHERE hypertable_name = ANY(:tables) "
+                "GROUP BY hypertable_name"
+            ),
+            {"tables": list(tables)},
+        ).all()
+    return {table: (total, done) for table, total, done in rows}
+
+
+def _system_lines(site: Engine, low: datetime, high: datetime, *, after: bool) -> int:
+    """The ``fg_event`` ``system`` lines up to ``high`` from ``low`` (``after``: from just
+    after it, as the post-lease query reads): what the probe and the post-lease query read on
+    ``ix_fg_event_subtype_time`` or in the compressed batches of that range."""
+    query = (
+        "SELECT count(*) FROM fg_event WHERE subtype = 'system' AND time > :low AND time <= :high"
+        if after
+        else "SELECT count(*) FROM fg_event WHERE subtype = 'system' "
+        "AND time >= :low AND time <= :high"
+    )
+    with site.connect() as connection:
+        return int(connection.execute(text(query), {"low": low, "high": high}).scalar_one())
+
+
+def _measured_lookup(
+    site: Engine, at: datetime, *names: str
+) -> tuple[LookupOutcome, list[_Timed], _Executed]:
+    """A guard lookup of ``PUBLIC`` at ``at`` on ``site`` with the engine's functions ``names``
+    timed (``_newest_dhcp`` of the lookup, the others the attributor's; unpatched again
+    afterwards, so the next lookup's timers are its own) and its statements recorded."""
+    recorded = _Executed()
+    timed: list[_Timed] = []
+    with pytest.MonkeyPatch.context() as patch:
+        timer = _Timer(patch)
+
+        def measure() -> None:
+            owners = {"_newest_dhcp": lookup_engine._Lookup}
+            timed.extend(timer.time(owners.get(name, Attributor), name) for name in names)
+            recorded.record(site)
+
+        try:
+            outcome = _guard_lookup(site, LookupRequest(at=at, public_ip=PUBLIC), measure)
+        finally:
+            recorded.stop()
+    timer.report(f"compressed chunks, {', '.join(names)}")
+    return outcome, timed, recorded
+
+
+@pytest.mark.perf
+def test_the_fortigate_dhcp_checks_on_compressed_chunks(
+    pg_server: TestServer, pg_template: str
+) -> None:
+    """The D8 probe, the post-lease queries (100 ``mt_dhcp`` chains on the 7-day cap, 20
+    ``fg_dhcp`` chains of a 30-day lease) and the converted-row query of the event site's guards,
+    on its chunks compressed (TimescaleDB with compression only; a database of its own, so the
+    guards above keep their uncompressed chunks). Each runs through the lookup, as in its guard,
+    and reads what it read there; the bound is the lookup's 5 s budget (Q1: a guard of its own
+    follows only if one takes more than 1 s). On the Linux CI job
+    (``ARCILOGGER_EXPECT_TIMESCALE=1``) a server without compression fails instead of
+    skipping."""
+    with pg_server.database(pg_template) as name:
+        empty = engine_from_url(pg_server.dsn_for(name))
+        try:
+            compression = _compression(empty)
+        finally:
+            empty.dispose()
+    if not compression:
+        if os.environ.get("ARCILOGGER_EXPECT_TIMESCALE") == "1":
+            pytest.fail("TimescaleDB with compression expected (ARCILOGGER_EXPECT_TIMESCALE=1)")
+        pytest.skip("TimescaleDB with compression only (the Linux CI job runs this)")
+    for site in _site(pg_server, pg_template, EVENT_SITE):
+        began = time.perf_counter()
+        compressed = _compress_all(site, EVENT_TABLES)
+        print(f"\nevent site compressed in {time.perf_counter() - began:.1f} s: {compressed}")
+        # Every row the queries read is in a compressed chunk.
+        assert set(compressed) == set(EVENT_TABLES)
+        assert all(total == done for total, done in compressed.values()), compressed
+
+        # The D8 probe of 20 addresses without a DHCP row, on the fallback window (deviation c2).
+        outcome, (probe,), recorded = _measured_lookup(site, PROBE_AT, "_newest_dhcp")
+        assert [m.chain for m in outcome.matches] == [None] * 20
+        (call,) = probe.calls
+        assert len(call[1]) == 20
+        _sql, parameters = recorded.one("FROM fg_event", "DISTINCT ON")
+        moments = _moments(parameters)
+        assert (min(moments), max(moments)) == (PROBE_AT - attribution.UNCONVERTED_WINDOW, PROBE_AT)
+        assert _system_lines(site, min(moments), PROBE_AT, after=False) >= 7 * EVENT_ROWS
+
+        # The post-lease query of 100 mt_dhcp chains (the 7-day cap) and the converted-row query
+        # of their MACs and addresses over 100 days, in one lookup.
+        outcome, (lines, moves), recorded = _measured_lookup(
+            site, MT_AT, "_unconverted_lines", "_missed_moves"
+        )
+        chains = [m.chain for m in outcome.matches]
+        assert len(chains) == 100
+        assert all(c is not None and c.lease is not None for c in chains)
+        assert all(c is not None and c.confidence != "low" for c in chains)
+        assert (len(lines.calls), len(moves.calls)) == (1, 1)
+        _sql, parameters = recorded.one("FROM fg_event", "extra ->> ")
+        low = min(_moments(parameters))
+        assert low == MT_AT - attribution.UNCONVERTED_WINDOW
+        assert _system_lines(site, low, max(_moments(parameters)), after=True) >= 7 * EVENT_ROWS
+        sql, parameters = recorded.one("WITH ORDINALITY", "JOIN fg_dhcp")
+        assert min(_moments(parameters)) == MT_AT - attribution.MISSED_MOVE_WINDOW
+        with site.connect() as connection:
+            rows = connection.exec_driver_sql(sql, parameters).all()
+        assert {n for n, _ip, _interface, _vd, _held in rows} == set(range(1, 101))
+
+        # The post-lease query of 20 fg_dhcp chains half a 30-day lease after their last ACK.
+        outcome, (long_lines,), recorded = _measured_lookup(site, LONG_AT, "_unconverted_lines")
+        half = timedelta(seconds=LONG_LEASE // 2 - 60)
+        chains = [m.chain for m in outcome.matches]
+        assert len(chains) == 20
+        assert all(c is not None and c.lease is not None for c in chains)
+        assert {c.lease.last_dhcp_evidence for c in chains if c and c.lease} == {LONG_AT - half}
+        assert len(long_lines.calls) == 1
+        _sql, parameters = recorded.one("FROM fg_event", "extra ->> ")
+        low = min(_moments(parameters))
+        assert low == LONG_AT - half
+        high = max(_moments(parameters))
+        assert _system_lines(site, low, high, after=True) >= 14 * EVENT_ROWS
+
+        seconds = {
+            "d8_probe": probe.seconds,
+            "post_lease": lines.seconds,
+            "post_lease_long": long_lines.seconds,
+            "converted_row": moves.seconds,
+        }
+        print(
+            "\nC3-compressed: "
+            + " ".join(f"{name}={value:.3f}s" for name, value in seconds.items())
+            + f" ({EVENT_ROWS} system lines a day)"
+        )
+        for name, value in seconds.items():
+            assert value < LIMIT_SECONDS, f"{name} took {value:.3f} s on compressed chunks"
