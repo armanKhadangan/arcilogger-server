@@ -500,6 +500,15 @@ test.describe('Kira kanıtı', () => {
     await expect(page).toHaveURL(/\/security\?rule=R20-lease$/);
   });
 
+  test('in English the excluded line counts one record', async ({ page }) => {
+    await usePreferences(page, { lang: 'en' });
+    await open(page, {}, leaseEvidence('overview_lease_refused'));
+    await page.goto('/sources');
+    await expect(
+      page.getByTestId('lease-evidence').getByTestId('lease-evidence-excluded'),
+    ).toHaveText('Excluded interfaces: 1 record (not lease evidence)');
+  });
+
   test('the supported set-ups open', async ({ page }) => {
     await open(page);
     await page.goto('/sources');

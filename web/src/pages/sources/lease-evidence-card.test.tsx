@@ -113,6 +113,29 @@ describe('the lease-evidence card', () => {
     expect(box).not.toHaveTextContent('Kira kanıtı');
   });
 
+  it('in English: the excluded line counts its records', async () => {
+    serve(CAPTURED.overview_lease_refused);
+    act(() => {
+      setLanguage('en');
+    });
+    expect(within(await card()).getByTestId('lease-evidence-excluded')).toHaveTextContent(
+      /^Excluded interfaces: 1 record \(not lease evidence\)$/,
+    );
+  });
+
+  it('in English: several excluded records', async () => {
+    // Not captured: the captured `refused` state with three excluded rows.
+    const several = structuredClone(CAPTURED.overview_lease_refused);
+    several.lease_evidence.fg_dhcp.excluded_rows = 3;
+    serve(several);
+    act(() => {
+      setLanguage('en');
+    });
+    expect(within(await card()).getByTestId('lease-evidence-excluded')).toHaveTextContent(
+      /^Excluded interfaces: 3 records \(not lease evidence\)$/,
+    );
+  });
+
   it('none: one line per table, the hedged MikroTik DHCP text', async () => {
     serve(CAPTURED.overview_lease_none);
     const box = await card();

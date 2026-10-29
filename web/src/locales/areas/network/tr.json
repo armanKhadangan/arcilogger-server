@@ -146,7 +146,8 @@
       "noneLastHour": "Son bir saatte kayıt yok",
       "refusedRows_one": "Son 24 saatte {{formatted}} FortiGate DHCP kaydı kira kanıtı olarak kullanılmadı.",
       "refusedRows_other": "Son 24 saatte {{formatted}} FortiGate DHCP kaydı kira kanıtı olarak kullanılmadı.",
-      "excluded": "Hariç tutulan arayüzler: {{excluded}} kayıt (kira kanıtı sayılmaz)",
+      "excluded_one": "Hariç tutulan arayüzler: {{formatted}} kayıt (kira kanıtı sayılmaz)",
+      "excluded_other": "Hariç tutulan arayüzler: {{formatted}} kayıt (kira kanıtı sayılmaz)",
       "unverified": "FortiGate DHCP kayıt biçimi sahada doğrulanmadı (DEVICE-SETUP.md bölüm 2.4).",
       "srcmac": "srcmac kısmi kanıt arayüzleri: {{interfaces}} · son bir saatte {{rows}} kayıt",
       "srcmacUncounted": "srcmac kısmi kanıt arayüzleri: {{interfaces}} · son bir saatin kayıtları sayılamadı"

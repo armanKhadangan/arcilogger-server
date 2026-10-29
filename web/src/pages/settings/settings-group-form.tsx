@@ -72,6 +72,11 @@ export function SettingsGroupForm({
   const [conflict, setConflict] = useState(false);
   const [resetting, setResetting] = useState<string | null>(null);
   const shown = useRef(JSON.stringify(drafts(settings)));
+  /**
+   * A save went through: the server's next answer replaces the drafts that were saved, even when
+   * they read differently from it (an exit added in the editor has a row key of its own).
+   */
+  const resync = useRef(false);
   const serverText = JSON.stringify(drafts(settings));
 
   /**
@@ -93,9 +98,10 @@ export function SettingsGroupForm({
   const dirty = changed.length > 0;
 
   // A new answer of the server (after a save, a reset, someone else's change) is taken when
-  // nothing is being edited.
+  // nothing is being edited, and always right after a save.
   useEffect(() => {
-    if (JSON.stringify(values) === shown.current) setValues(drafts(settings));
+    if (resync.current || JSON.stringify(values) === shown.current) setValues(drafts(settings));
+    resync.current = false;
     shown.current = serverText;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverText]);
@@ -137,6 +143,9 @@ export function SettingsGroupForm({
     }
     try {
       const result = await withReauth(() => patch.mutateAsync({ changes }));
+      // The settings were fetched again before the request settled; the group renders them next
+      // (a save the server found unchanged brings no new answer to wait for).
+      if (result.changed.length > 0) resync.current = true;
       toast({
         title: t('settings.application.saved', { count: result.changed.length }),
         variant: 'success',

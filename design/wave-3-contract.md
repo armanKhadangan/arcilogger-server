@@ -6663,6 +6663,46 @@ Each entry says what the contract says, what was written, and why. Test paths ar
     and `busy` failed against the one-statement index order on TimescaleDB (the Merge Append above).
     Fold into 2.8.3 and 3.8.
 
+## Deviations — e2 (WP-E part 2, 2026-10-29)
+
+- **d-27 in the web** (2.12; supersedes part 1's "Small additions" clause that a match shows its
+  exit row also when only `dstintf` or `egress` is set). A match of a lookup whose outcome has no
+  `egress` (no public IP in the request) reads "çıkış belirlenmedi (talepte genel IP yok) / exit
+  not determined (no public IP in the request) · {dstintf}" (`network.lookup.exitNotDetermined`),
+  as the report prints it; "-" appears only when a public IP was requested and no exit claims the
+  NAT address. Tests: `web/src/pages/lookup/lookup-wave3.test.tsx`. Fold into 2.12.
+- **A fifth changed key in `tr.json`/`en.json`** (2.13 "Locales" names four):
+  `lookup.endReason.superseded` reads "sonraki bir DHCP atamasıyla kapandı" / "closed by a later
+  DHCP assignment" instead of "başka cihaza verildi" / "given to another device". A lease closed
+  `superseded` is not always given to another device (d-26, D33: a lease of the same MAC moved to
+  another IP of the network closes the same way), and the report prints it so. Fold into 2.12.
+- **The srcmac step carries the lease step's notes** (2.12). A srcmac chain is never drawn as a
+  lease row, and the list above the chain leaves out the keys the lease step shows (e.g.
+  `lease_renewal_not_seen`); so when such a chain carries a lease, its srcmac step lists those
+  notes as the lease step does, so every low reason is shown somewhere. Tests:
+  `web/src/pages/lookup/lookup-wave3.test.tsx`. Fold into 2.12.
+- **English plural of the excluded line** (2.13 "Kira kanıtı"; e2 review, question 3). The English
+  text read "1 records"; `network.leaseEvidence.excluded` is now `excluded_one` "Excluded
+  interfaces: {formatted} record (not lease evidence)" / `excluded_other` "… {formatted} records
+  …", with `count` and the locale-formatted number as the sibling `refusedRows_*` keys have it.
+  Turkish keeps its one text in both keys (the locale test requires the same keys in both
+  languages). Tests: `web/src/pages/sources/lease-evidence-card.test.tsx`,
+  `web/e2e/sources.spec.ts`. Fold into 2.13.
+- **`settings-group-form.tsx` takes the server's answer after a save** (2.13; e2 review, item 1;
+  WP-E's file under part 1's recorded deviation). The group took a new answer of the server only
+  while the drafts equalled the last answer shown; an exit added in the editor has a row key
+  (`new-<n>`) the stored exit never opens with, so after saving it every later answer (a reset,
+  another administrator's change) was dropped and the next save sent stale values that passed the
+  conflict check. After a save the server reports as changing something, the group now takes the
+  next answer whatever the drafts hold. Tests: `web/src/pages/settings/egress-editor.test.tsx`
+  ("takes the server answer again after saving a new exit"). Fold into 2.13.
+- **Three more exit-rule cases** (e2 review, item 2; the fixture now has 97 cases, where c1's
+  entry says 94): an IPv6 address with a `%zone` (`fe80::1%wan1`) and one with a prefix that is no
+  number (`2001:db8::/abc`) → `setting_ipv6_not_supported`; two `::` (`1::2::3`) →
+  `setting_egress_address`. The web mirror now decides IPv6 on the part before the first `/` as
+  `ipaddress.ip_address` reads it. Tests: `db/tests/test_egress.py`,
+  `web/src/pages/settings/egress-model.test.ts`. Nothing to fold.
+
 ---
 
 ## Implementation notes — round 5

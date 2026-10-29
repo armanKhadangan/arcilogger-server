@@ -146,7 +146,8 @@
       "noneLastHour": "No record in the last hour",
       "refusedRows_one": "{{formatted}} FortiGate DHCP record of the last 24 hours was not used as lease evidence.",
       "refusedRows_other": "{{formatted}} FortiGate DHCP records of the last 24 hours were not used as lease evidence.",
-      "excluded": "Excluded interfaces: {{excluded}} records (not lease evidence)",
+      "excluded_one": "Excluded interfaces: {{formatted}} record (not lease evidence)",
+      "excluded_other": "Excluded interfaces: {{formatted}} records (not lease evidence)",
       "unverified": "FortiGate DHCP record format not verified on site (DEVICE-SETUP.md section 2.4).",
       "srcmac": "srcmac partial-evidence interfaces: {{interfaces}} · {{rows}} records in the last hour",
       "srcmacUncounted": "srcmac partial-evidence interfaces: {{interfaces}} · the records of the last hour could not be counted"

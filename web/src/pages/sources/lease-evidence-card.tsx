@@ -137,7 +137,8 @@ export function LeaseEvidenceCard({ evidence }: { evidence: LeaseEvidence }) {
       {fg.excluded_rows > 0 ? (
         <p className="text-13 text-muted-strong" data-testid="lease-evidence-excluded">
           {t('network.leaseEvidence.excluded', {
-            excluded: formatNumber(fg.excluded_rows, 0, lang),
+            count: fg.excluded_rows,
+            formatted: formatNumber(fg.excluded_rows, 0, lang),
           })}
         </p>
       ) : null}

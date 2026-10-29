@@ -5,7 +5,7 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { setLanguage } from '@/lib/i18n';
-import type { SettingGroup, SettingsOut, SettingValue } from '@/lib/settings-types';
+import type { SettingChange, SettingGroup, SettingsOut, SettingValue } from '@/lib/settings-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 import type { ErrorSample } from '@/test/samples';
@@ -257,6 +257,70 @@ describe('the exit editor', () => {
           },
         },
       ],
+    });
+  });
+
+  it('takes the server answer again after saving a new exit', async () => {
+    // A server that keeps what it is sent: PATCH stores the values, a reset stores the default.
+    const stored: Record<string, SettingValue> = {
+      'nat.egresses': {},
+      'lookup.max_candidates': 150,
+    };
+    const sent: unknown[] = [];
+    const calls = installFetch((request) => {
+      if (request.path === '/api/v1/auth/me') return jsonResponse(200, makeMe('admin'));
+      if (request.path === '/api/v1/settings' && request.method === 'GET') {
+        const answer = groups(stored['nat.egresses'] as Egresses, stored);
+        for (const setting of answer[0]?.settings ?? [])
+          setting.is_default = JSON.stringify(setting.value) === JSON.stringify(setting.default);
+        return jsonResponse(200, { groups: answer } satisfies SettingsOut);
+      }
+      if (request.path === '/api/v1/settings' && request.method === 'PATCH') {
+        sent.push(request.body);
+        const { changes } = request.body as { changes: SettingChange[] };
+        for (const change of changes) stored[change.key] = change.value;
+        return jsonResponse(200, {
+          changed: changes.map(({ key, old, value }) => ({ key, old, new: value })),
+          unchanged: [],
+        });
+      }
+      if (request.path === '/api/v1/settings/lookup.max_candidates/reset') {
+        stored['lookup.max_candidates'] = 100;
+        return jsonResponse(200, {
+          changed: [{ key: 'lookup.max_candidates', old: 150, new: 100 }],
+          unchanged: [],
+        });
+      }
+      return errorResponse(404, 'not_found');
+    });
+    const box = await editor();
+    const user = userEvent.setup();
+    await user.click(within(box).getByRole('button', { name: 'Çıkış ekle' }));
+    const row = within(box).getByRole('group', { name: 'Çıkış adsız çıkış' });
+    await user.type(within(row).getByLabelText('Ad'), 'hat-1');
+    await user.type(within(row).getByLabelText('Genel adresler'), '203.0.113.200');
+    const save = screen.getByRole('button', { name: 'Kaydet' });
+    await user.click(save);
+    await waitFor(() => {
+      expect(save).toBeDisabled();
+    });
+    expect(sent).toHaveLength(1);
+    const candidates = screen.getByTestId('setting-lookup.max_candidates');
+    await user.click(within(candidates).getByRole('button', { name: 'Varsayılana dön' }));
+    await waitFor(() => {
+      expect(within(candidates).getByRole('textbox')).toHaveValue('100');
+    });
+    expect(within(candidates).queryByRole('button', { name: 'Varsayılana dön' })).toBeNull();
+    expect(screen.queryByText(/^\d+ değişiklik$/)).not.toBeInTheDocument();
+    expect(save).toBeDisabled();
+    // The next save sends only its own change, never the value from before the reset.
+    await user.click(screen.getByRole('switch', { name: 'Trafik FortiGate kirasını uzatır' }));
+    await user.click(save);
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(2);
+    });
+    expect(sent[1]).toEqual({
+      changes: [{ key: 'dhcp.fortigate_traffic_extends', old: false, value: true }],
     });
   });
 

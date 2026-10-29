@@ -136,9 +136,38 @@ export function isPrivateOrShared(text: string): boolean {
   return range !== null && PRIVATE_RANGES.some((space) => overlaps(range, space));
 }
 
-/** Looks like an IPv6 address or network (refused with its own code). */
+/** An IPv6 address as `ipaddress.IPv6Address` reads it: a `%zone` and `::` allowed, at most one. */
+function isIpv6Address(text: string): boolean {
+  const [address = '', ...zone] = text.split('%');
+  if (zone.length > 1 || zone[0] === '') return false;
+  const parts = address.split(':');
+  if (parts.length < 3) return false;
+  // An IPv4-style suffix stands for the last two hextets.
+  if (parts.at(-1)?.includes('.')) {
+    if (addressNumber(parts.pop() as string) === null) return false;
+    parts.push('0', '0');
+  }
+  if (parts.length > 9) return false;
+  const skips = parts.slice(1, -1).filter((part) => part === '').length;
+  if (skips > 1) return false;
+  let hextets = parts;
+  if (skips === 1) {
+    const skip = parts.indexOf('', 1);
+    const [high, low] = [parts.slice(0, skip), parts.slice(skip + 1)];
+    if (high[0] === '' && high.length > 1) return false;
+    if (low.at(-1) === '' && low.length > 1) return false;
+    hextets = [...high, ...low].filter((part) => part !== '');
+    if (hextets.length > 7) return false;
+  } else if (parts.length !== 8) return false;
+  return hextets.every((part) => /^[0-9A-Fa-f]{1,4}$/.test(part));
+}
+
+/**
+ * An IPv6 address or network (refused with its own code): decided on the part before the first
+ * `/`, as the server does, whatever follows the `/`.
+ */
 function looksIpv6(text: string): boolean {
-  return /^[0-9A-Fa-f:.]+(\/\d{1,3})?$/.test(text) && (text.match(/:/g)?.length ?? 0) >= 2;
+  return isIpv6Address(text.split('/')[0] ?? '');
 }
 
 // -- the server's rules ---------------------------------------------------------------------------
