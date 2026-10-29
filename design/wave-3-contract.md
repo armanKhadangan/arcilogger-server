@@ -6298,14 +6298,20 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
 - **d-12. Smaller report choices** (2.12, 3.5). (a) The section-4 exit row is bilingual inline:
   "{label TR} / {label EN} — {name} ({label}), {mode TR} / {mode EN}", exits joined with "; "
   (`render.exit_row`). (b) The srcmac step is the row "MAC adresi / MAC address" whose value is
-  "MAC {mac} · " and the contract sentence verbatim, then its English. (c)
+  "MAC {mac} · " and the contract sentence verbatim, then its English. Both end with
+  " · kanıt: {refs}" / " · evidence: {refs}", the section-6 numbers (`render.refs`) of
+  `chain.device.evidence`, the session line the MAC comes from, as the lease row and the other
+  steps cite theirs (2.12 gives the sentence only; without the number, an internal or MAC-only
+  answer never named the line in section 5 while the method paragraph says every step cites its
+  row; manager's final review, item 2); MVP-CONTRACTS §6.1 and RAPOR (TR and EN) say so. (c)
   `CHECK_FIELDS["srcmac"] = "kaynak MAC (srcmac)"`, and `CONSISTENCY_TR/EN` list "srcmac
   zincirinde oturum kaydının kaynak IP ve srcmac alanı" / "source IP and srcmac of the session
   record of a srcmac chain" among the fields compared. (d) The stored Wave 2 outcome of 3.5 is an
   inline literal in `test_report_exits.py`, not a JSON fixture file, and its one real-world
   address (`93.184.216.34`) was replaced by `203.0.113.40` (RFC 5737). Tests:
   `test_report_exits.py::test_the_exit_row_names_the_exits_except_for_unconfigured_and_no_egress`,
-  `test_report_fortigate.py::test_srcmac_step_and_conflict`,
+  `test_report_fortigate.py::test_srcmac_step_and_conflict` ("kira kaydı yok · kanıt: K1", K1
+  the session line),
   `test_report_consistency.py::test_srcmac_chain_claims_pass_and_mismatch` (the field, not its
   label text), `test_report_exits.py::test_a_wave_2_outcome_renders_without_exit_rows`. Nothing
   to fold beyond 2.12's row texts.
@@ -6327,18 +6333,25 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   not list `inputs.py` for WP-D; the pull request lists it under "Files outside my ownership".
   Tests: `test_report_fortigate.py::test_unconverted_dhcp_is_cited_in_internal_mode_only`,
   `::test_chainless_candidates_name_their_ips_and_cite_no_event_line`. Fold into 4.1.
-- **d-15. `lease_evidence` when the `dhcp.fortigate_*` values cannot be read** (2.12
-  `GET /sources`; decision X8). The contract gives no rule for a value written around the
-  validator. `lease_evidence` stays required and never null: `LookupSettings.from_settings`
-  refusing the values is logged, and no `fg_dhcp` row counts as usable: `rows` 0, `last_hour`
-  null, `refused_rows` and `excluded_rows` 0. Why: the lease job cannot use any row then
+- **d-15. `lease_evidence` when `LookupSettings.from_settings` refuses a stored value** (2.12
+  `GET /sources`; decision X8; manager's final review, items 1 and 3). The contract gives no
+  rule for a value written around the validator. `lease_evidence` stays required and never null
+  when `LookupSettings.from_settings` refuses a stored value (a `lookup.*`, `lease.*`, `arp.*`,
+  `devices.infrastructure_macs` or `dhcp.fortigate_*` value written around the validator; the
+  `AttributeError` of a non-object `lease.server_seconds` is caught with `TypeError` and
+  `ValueError`, the worker's root fix is #45): the refusal is logged, and no `fg_dhcp` row counts
+  as usable: `rows` 0, `last_hour` null, `refused_rows` and `excluded_rows` 0; the `mt_dhcp` and
+  `mt_arp` counts stay. Why: `fg_dhcp` usability is `trust.kept`, which needs the settings; the
+  `mt_dhcp`/`mt_arp` usability of 2.12 needs none; the lease job cannot use any row then either
   (`Context.load` raises), and 2.12 has `rows` count usable rows. (The first version counted the
   trusted senders' rows as "the one refusal rule that needs no setting"; that was wrong: rules 3,
   6 and 7 of `trust.refusal`, IPv6, `device_time = false` and a zero or multicast MAC, need no
   setting either, and those rows were counted as usable.) `format_verified` is true only for
   a stored JSON `true`, and the state comes from the active alerts alone (`refused` cannot be
   decided). Tests: `test_sources_api.py::test_unreadable_dhcp_settings_keep_the_card` (its IPv6
-  and receive-time rows of a trusted sender count nothing). Fold into 2.12.
+  and receive-time rows of a trusted sender count nothing; `[fortigate-logids]` and the
+  `lease.server_seconds` rows `[server-list]`, `[server-text]`, `[server-number]`,
+  `[server-true]`). Fold into 2.12.
 - **d-16. `none_tables` is filled whatever the state** (2.12 "`none_tables` naming the tables of
   the active `none` causes"). The list holds the tables of the active `R20-lease:none:<table>`
   alerts in card order also when the state is `refused` (which wins); the web shows it only for
@@ -6463,7 +6476,8 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
 - **d-28. A second text for the 503 `lookup_settings_invalid`** (2.12 "Lookup schemas", the 503
   text; review 1, Q1). The router's `try` maps a `TypeError`/`ValueError` of
   `LookupSettings.from_settings`, of `lookup.timeout_seconds` and of `settings.egresses()` to the
-  503, whose one text names `nat.egresses`. The code and the contract text stay for an
+  503, whose one text names `nat.egresses`; the `try` around `from_settings` also maps its
+  `AttributeError` (a non-object `lease.server_seconds`; manager's final review, item 1). The code and the contract text stay for an
   unreadable `nat.egresses`; when `LookupSettings.from_settings` or `lookup.timeout_seconds`
   fails, the 503 has the same code and a second text, for any lookup (with or without a public
   IP), the exception is logged at WARNING, and the response does not name the key: "5651 sorgu
@@ -6471,7 +6485,8 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
   ayarları); sistem yöneticisi düzeltmelidir." / "The 5651 lookup settings are invalid: a stored
   lookup or lease setting cannot be read (Settings → Application settings); an administrator
   must fix it." Tests: `test_lookup_api.py::test_another_unreadable_lookup_setting_answers_the_same_503`
-  (`[fortigate-logids]`, `[timeout]`), `::test_invalid_nat_settings_are_reported` (the contract
+  (`[fortigate-logids]`, `[timeout]`, `[server-list]`, `[server-text]`, `[server-number]`,
+  `[server-true]`), `::test_invalid_nat_settings_are_reported` (the contract
   text kept). Fold into 2.12.
 - **d-29. "T" of the unclaimed search printed as the moment** (2.12 `{searched}` "(T çevresinde
   görülenler: …)" / "(seen near T: …)"; review 1, Q2). A reader of the PDF does not know "T".

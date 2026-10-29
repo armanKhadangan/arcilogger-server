@@ -727,9 +727,11 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     where the `fallback` paragraph is printed (WP-D deviations, contract "Deviations — d").
   - **srcmac rows.** A srcmac step prints the row "MAC adresi / MAC address" with "MAC {mac} ·
     MAC adresi (kısmi kanıt): FortiGate oturum kaydının srcmac alanı, {interface} arayüzü; …;
-    kira kaydı yok" and "MAC address (partial evidence): srcmac field of the FortiGate session
-    record, interface {interface}; …; no lease" (`texts.SRCMAC_STEP`, `{interface}` from the
-    chain's `srcmac_only`); a
+    kira kaydı yok · kanıt: {refs}" and "MAC address (partial evidence): srcmac field of the
+    FortiGate session record, interface {interface}; …; no lease · evidence: {refs}"
+    (`texts.SRCMAC_STEP`, `{interface}` from the chain's `srcmac_only`, `{refs}` the section-6
+    numbers of `chain.device.evidence`, the session line the MAC comes from, as the other steps
+    cite theirs; d-12); a
     `srcmac_mismatch` alternative is printed under "Olası diğer zincir (srcmac, kısmi kanıt)" /
     "Possible other chain (srcmac, partial evidence)" (the `ip_conflict` header stays for the
     others) with its srcmac row, never a lease row (its `lease` is null). A chain without a lease
@@ -2035,15 +2037,16 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
     `none_tables` lists the tables of the active `none` causes in card order (`mt_dhcp`,
     `fg_dhcp`, `mt_arp`; empty for `absent`) **whatever the state**, so it is filled under
     `refused` too; the web shows it only for `none`.
-  - When the `dhcp.fortigate_*` values cannot be read (written around the validator,
-    `LookupSettings.from_settings` refuses them), the member is still returned (never null) and
-    no `fg_dhcp` row counts as usable: `rows` 0, `last_hour` null, `refused_rows` and
-    `excluded_rows` 0, because the lease job cannot use any row then (`Context.load` raises);
-    the trusted senders' rows are no usable count either, since rules 3, 6 and 7 of
-    `trust.refusal` (IPv6, `device_time = false`, a zero or multicast MAC), which need no setting,
-    refuse some of them. `format_verified` is
-    true only for a stored JSON `true`; the state comes from the alerts only; a warning is
-    logged (contract "Deviations — d" d-15).
+  - When `LookupSettings.from_settings` refuses a stored value (a `lookup.*`, `lease.*`,
+    `arp.*`, `devices.infrastructure_macs` or `dhcp.fortigate_*` value written around the
+    validator), the member is still returned (never null) and no `fg_dhcp` row counts as
+    usable: `rows` 0, `last_hour` null, `refused_rows` and `excluded_rows` 0; the `mt_dhcp` and
+    `mt_arp` counts stay. `fg_dhcp` usability is `trust.kept`, which needs the settings; the
+    `mt_dhcp`/`mt_arp` usability of 2.12 needs none. The lease job cannot use any row then
+    either (`Context.load` raises); the trusted senders' rows are no usable count, since rules 3,
+    6 and 7 of `trust.refusal` (IPv6, `device_time = false`, a zero or multicast MAC), which need
+    no setting, refuse some of them. `format_verified` is true only for a stored JSON `true`;
+    the state comes from the alerts only; a warning is logged (contract "Deviations — d" d-15).
   - `srcmac {interfaces, rows_last_hour}`: `interfaces` = `lookup.srcmac_interfaces`;
     `rows_last_hour` counts the `fg_traffic` rows of trusted senders with `srcmac` of the last
     hour whose `srcintf` is one of those interfaces (any address family), computed only when
@@ -2427,7 +2430,7 @@ report:
   format note once and never beside the chains (d-13); `inputs.py` cites `unconverted_dhcp`
   (d-14); `lease_evidence` is required and never null, with no usable `fg_dhcp` row (`rows` 0,
   `last_hour` null, `refused_rows`/`excluded_rows` 0) and the state from the alerts only when
-  the `dhcp.fortigate_*` values cannot be read (d-15);
+  `LookupSettings.from_settings` refuses a stored value (d-15);
   `none_tables` whatever the state (d-16); the observed endpoint caches the counts and computes
   the exit claims on every request (d-17), counts IPv4 srcmac rows (d-18) and claims by
   `dstintf`, then the first exit by name (d-20); the card's srcmac count has no family filter
@@ -2440,4 +2443,7 @@ report:
   (d-30); the observed NAT part counts IPv4 NAT addresses only (d-31); an exact `transip`
   answer is not called "genel" (d-32); an unclaimed other exit of a changed session is named in
   words (d-33); the 3.5 report tests live in `test_report_exits.py`, `test_report_fortigate.py`
-  and `test_lookup_testing_sites.py` (d-34). Contract "Deviations — d" has each with its tests.
+  and `test_lookup_testing_sites.py` (d-34); the lookup's transaction plans its statements with
+  `plan_cache_mode = force_custom_plan` (d-35); the "Özet / Summary" row of an unconverted
+  citation prints the fixed bilingual label `texts.UNCONVERTED_SUMMARY`, never the Turkish-only
+  stored summary (d-36). Contract "Deviations — d" has each with its tests.
