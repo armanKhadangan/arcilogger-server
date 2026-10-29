@@ -1552,6 +1552,16 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   `test_an_answer_with_a_card_that_could_not_be_computed_is_not_cached`. W4-G: UYUM-DURUMU /
   COMPLIANCE-STATUS §2.3 and §2.10.
 
+## Deviations — W4-C
+
+- **The wizard's `smtp` step is done only when sending is switched on (manager decision on #37).**
+  2.8.4 says "SMTP server and sender set"; the step also needs `smtp.enabled`, because while it is
+  off (the default) no alert or report e-mail is sent, and "Tamam" would say otherwise. Switched
+  off, the step lists "E-posta gönderimi kapalı." / "Sending e-mail is switched off." besides a
+  missing server or sender. Tests: `wizard-model.test.ts` "e-mail: switched off is not done, even
+  with a server and a sender", `e2e/setup-wizard.spec.ts` (the fresh installation's e-mail step).
+  W4-G: AYARLAR/SETTINGS (the wizard entry) and UYUM-DURUMU/COMPLIANCE-STATUS §5.
+
 ## Deviations — W4-F (2026-10-29)
 
 - **W4F-1: five fractional fields are `Float`, not `number` (manager decision on #27).**

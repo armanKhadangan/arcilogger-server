@@ -1,5 +1,5 @@
 import { CircleHelp, Search } from 'lucide-react';
-import { useId, useMemo, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -58,6 +58,7 @@ export function QueryBar({
   const [dismissed, setDismissed] = useState(false);
   const [active, setActive] = useState(-1);
   const [scroll, setScroll] = useState(0);
+  const placeCaret = useRef<number | null>(null);
 
   const found = useMemo(
     () => (focused && !dismissed ? completions(value, caret, catalogue, facets, lang) : null),
@@ -84,11 +85,18 @@ export function QueryBar({
     onChange(next);
     setActive(-1);
     setCaret(position);
-    window.requestAnimationFrame(() => {
-      input.current?.setSelectionRange(position, position);
-      track();
-    });
+    placeCaret.current = position;
   }
+
+  // The caret goes behind a taken completion as soon as the input holds it, before the next key
+  // is handled: a later frame would pull it back from what was typed meanwhile.
+  useLayoutEffect(() => {
+    const position = placeCaret.current;
+    if (position === null) return;
+    placeCaret.current = null;
+    input.current?.setSelectionRange(position, position);
+    track();
+  });
 
   function keyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (!found) return;

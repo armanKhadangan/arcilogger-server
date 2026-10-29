@@ -1006,6 +1006,7 @@ REFUSED_LINES = {
     "nak": ("Nak", "vlan42", None),
     "excluded": ("Ack", "ipsec1", None),
     "bad-mac": ("Ack", "vlan42", "01:00:5e:00:00:fb"),
+    "zero-mac": ("Ack", "vlan42", "00:00:00:00:00:00"),
 }
 
 
@@ -1020,8 +1021,8 @@ def test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing(
 ) -> None:
     """The post-lease check (2.7) applies D25 and D28's interface and MAC rules to its
     ``fg_event`` lines too: a NAK for the PC's address under 0100026001, an ACK of an excluded
-    interface or an ACK for a multicast MAC after the 11:00 ACK leaves the chain as it was; the
-    same line as an ACK of another client on vlan42 lowers it."""
+    interface or an ACK for a multicast or zero MAC after the 11:00 ACK leaves the chain as it
+    was; the same line as an ACK of another client on vlan42 lowers it."""
     message, interface, mac = REFUSED_LINES[variant]
     exclude_ipsec(db_session)
     unconverted_line(evidence, tr(DAY, 11, 10), PC, mac or OTHER, interface=interface,
@@ -1437,8 +1438,8 @@ def test_a_line_that_is_never_lease_evidence_is_never_named(
 ) -> None:
     """D25 and D28's interface and MAC rules hold for the probe's ``fg_event`` lines as
     ``trust.kept`` holds them for ``fg_dhcp`` rows: a covering NAK under 0100026001, a covering
-    ACK of an excluded interface or a covering ACK for a multicast MAC is never named or cited;
-    such a line newer than a covering ACK does not hide that ACK either."""
+    ACK of an excluded interface or a covering ACK for a multicast or zero MAC is never named or
+    cited; such a line newer than a covering ACK does not hide that ACK either."""
     message, interface, mac = REFUSED_LINES[variant]
     exclude_ipsec(db_session)
     unconverted_line(evidence, AT - timedelta(days=1), PC, mac or PC_MAC, hostname=HOST,

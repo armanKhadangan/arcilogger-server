@@ -48,10 +48,11 @@ function fieldOf(code: string): SetupField | null {
 }
 
 /**
- * İlk kurulum (spec 12.3 page 17 — the administrator step; the other wizard steps follow in M6):
- * the one-time token printed by `arcilogger-api setup-token` on the server console, the first
- * administrator's account; TOTP enrolment follows at the first sign-in. Only while
- * `/auth/setup/status` says no administrator exists.
+ * İlk kurulum (spec 12.3 page 17 — the administrator step): the one-time token printed by
+ * `arcilogger-api setup-token` on the server console, the first administrator's account; TOTP
+ * enrolment follows at the first sign-in, the other steps in the first-run wizard of Ayarlar
+ * (`/settings/setup`, Wave 4 contract 2.8.4). Only while `/auth/setup/status` says no
+ * administrator exists.
  */
 export function SetupPage() {
   const { t } = useTranslation();
@@ -136,6 +137,7 @@ export function SetupPage() {
   const steps = [
     { id: 'admin', title: t('setup.stepAdmin') },
     { id: 'totp', title: t('setup.stepTotp'), description: t('setup.stepTotpHint') },
+    { id: 'wizard', title: t('setup.stepWizard'), description: t('setup.stepWizardHint') },
   ];
 
   return (

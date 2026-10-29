@@ -86,6 +86,7 @@ def test_three_streams_under_ten_thousand_lines_a_second(
     server: LiveServer,
     layout: Layout,
     app_session_factory: sessionmaker[Session],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     today = site_day(datetime.now(UTC))
     paths = [layout.spool_file(folder, today) for folder in ("fortigate", "fortigate2")]
@@ -128,13 +129,19 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         ):
             time.sleep(0.05)
         used, elapsed = time.process_time() - cpu, time.monotonic() - wall
-        print(
-            f"\nlive tail: {used:.2f} s CPU in {elapsed:.2f} s ({used / elapsed:.2f} s/s), "
-            f"{len(hub.buffer)} lines buffered"
-        )
+        # Shown also when the test passes (CI's log), as the ingest throughput gate does.
+        with capsys.disabled():
+            print(
+                f"\nlive tail: {used:.2f} s CPU in {elapsed:.2f} s ({used / elapsed:.2f} s/s), "
+                f"{len(hub.buffer)} lines buffered"
+            )
+            for stream_id in streams:
+                stream = hub.streams[stream_id]
+                print(
+                    f"  {stream.query or '(empty)'}: {stream.delivered} delivered, {stream.dropped}"
+                )
         for stream_id in streams:
             stream = hub.streams[stream_id]
-            print(f"  {stream.query or '(empty)'}: {stream.delivered} delivered, {stream.dropped}")
             assert stream.delivered + sum(stream.dropped.values()) == written, stream.query
             assert stream.delivered <= stream.settings.max_lines_per_second * (elapsed + 1)
         typed = hub.streams[streams[2]]
