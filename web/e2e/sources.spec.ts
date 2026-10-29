@@ -1,17 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import type { LeaseEvidence } from '../src/lib/sources-types';
-import {
-  leaseEvidenceAbsent,
-  leaseEvidenceNone,
-  leaseEvidenceOk,
-  leaseEvidenceRefused,
-} from '../src/test/wave3-mocks';
+import type { LeaseEvidence, SourcesOverview } from '../src/lib/sources-types';
 
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockApi } from './mock-api';
 import { mockSources } from './mock-sources';
-import { RAW, SAMPLE_TODAY, SOURCES } from './samples';
+import { copy, RAW, SAMPLE_TODAY, SOURCES } from './samples';
 
 /**
  * Kaynaklar (contract 2.16 and 2.22.4, `sources.read`): every source with its state, networks
@@ -417,34 +411,52 @@ test.describe('Kaynaklar', () => {
 
 /**
  * "Kira kanıtı" (Wave 3 contract 2.13, D30): the card of `GET /sources` `lease_evidence` in its
- * three states, `refused` winning over `none`. HAND MOCKS of the counts (`src/test/wave3-mocks.ts`)
- * until the server side captures them.
+ * three states, `refused` winning over `none`, as the API answered them (`samples/sources.json`,
+ * `overview_lease_*`). `absent` is not captured (d-25): the captured `none` without its tables.
  */
+const CAPTURED = SOURCES as typeof SOURCES &
+  Record<'overview_lease_ok' | 'overview_lease_none' | 'overview_lease_refused', SourcesOverview>;
+
+function leaseEvidence(
+  state: 'overview_lease_ok' | 'overview_lease_none' | 'overview_lease_refused',
+): LeaseEvidence {
+  return copy(CAPTURED[state].lease_evidence);
+}
+
+function leaseEvidenceAbsent(): LeaseEvidence {
+  return { ...leaseEvidence('overview_lease_none'), none_tables: [] };
+}
+
 test.describe('Kira kanıtı', () => {
   test.beforeEach(async ({ page }) => {
     await useSampleClock(page, SAMPLE_TODAY);
   });
 
   test('ok: the usable records and current leases per table', async ({ page }) => {
-    await open(page, {}, leaseEvidenceOk());
+    await open(page, {}, leaseEvidence('overview_lease_ok'));
     await page.goto('/sources');
     const card = page.getByTestId('lease-evidence');
     await expect(card.getByRole('heading', { name: 'Kira kanıtı' })).toBeVisible();
     await expect(card).toContainText('Kayıtlar geliyor');
-    await expect(card.locator('[data-table="fg_dhcp"]')).toContainText(
-      'Son 24 saatte 412 kullanılabilir kayıt',
+    const fortigate = card.locator('[data-table="fg_dhcp"]');
+    await expect(fortigate).toContainText('Son 24 saatte 2 kullanılabilir kayıt');
+    await expect(fortigate).toContainText('2 güncel kira');
+    await expect(card.locator('[data-table="mt_dhcp"]')).toContainText(
+      'Son 24 saatte 0 kullanılabilir kayıt',
     );
-    await expect(card.locator('[data-table="mt_dhcp"]')).toContainText('310 güncel kira');
+    await expect(card).toContainText('srcmac kısmi kanıt arayüzleri: vlan42');
+    await expect(card.getByTestId('lease-evidence-unverified')).toBeVisible();
     await expect(card.locator('[data-none]')).toHaveCount(0);
   });
 
   test('none: one line per table, the hedged MikroTik DHCP line', async ({ page }) => {
-    await open(page, {}, leaseEvidenceNone());
+    await open(page, {}, leaseEvidence('overview_lease_none'));
     await page.goto('/sources');
     const card = page.getByTestId('lease-evidence');
     await expect(card).toContainText('Kayıt gelmiyor');
-    await expect(card.locator('[data-none="fg_dhcp"]')).toContainText(
-      'Kullanılabilir FortiGate DHCP kaydı gelmiyor (daha önce geliyordu)',
+    await expect(card.locator('[data-none]')).toHaveCount(2);
+    await expect(card.locator('[data-none="mt_arp"]')).toContainText(
+      'Kullanılabilir MikroTik ARP-LOG kaydı gelmiyor (daha önce geliyordu)',
     );
     await expect(card.locator('[data-none="mt_dhcp"]')).toContainText(
       'Son 24 saatte yeni MikroTik DHCP kaydı gelmedi;',
@@ -462,18 +474,22 @@ test.describe('Kira kanıtı', () => {
   test('refused wins over none; the alert and the settings are one click away', async ({
     page,
   }) => {
-    await open(page, {}, leaseEvidenceRefused());
+    await open(page, {}, leaseEvidence('overview_lease_refused'));
     await page.goto('/sources');
     const card = page.getByTestId('lease-evidence');
     await expect(card.getByTestId('lease-evidence-refused')).toContainText(
-      'FortiGate DHCP kayıtları geliyor ama son 24 saatte 214 tanesi kullanılmadı; nedenler uyarıda.',
+      'FortiGate DHCP kayıtları geliyor ama son 24 saatte 1 tanesi kullanılmadı; nedenler uyarıda.',
     );
     await expect(card.locator('[data-none]')).toHaveCount(0);
     await expect(card.getByTestId('lease-evidence-excluded')).toHaveText(
-      'Hariç tutulan arayüzler: 12 kayıt (kira kanıtı sayılmaz)',
+      'Hariç tutulan arayüzler: 1 kayıt (kira kanıtı sayılmaz)',
     );
     await expect(card.getByTestId('lease-evidence-unverified')).toContainText(
       'FortiGate DHCP kayıt biçimi sahada doğrulanmadı (DEVICE-SETUP.md bölüm 2.4).',
+    );
+    await expect(card.getByRole('link', { name: 'FortiGate DHCP ayarları' })).toHaveAttribute(
+      'href',
+      '/settings/application?group=lookup',
     );
     await card.getByRole('link', { name: 'Uyarıyı aç (Güvenlik)' }).click();
     await expect(page).toHaveURL(/\/security\?rule=R20-lease$/);
@@ -491,14 +507,11 @@ test.describe('Kira kanıtı', () => {
 });
 
 for (const theme of ['light', 'dark'] as Theme[]) {
-  for (const [state, evidence] of [
-    ['refused', leaseEvidenceRefused()],
-    ['none', leaseEvidenceNone()],
-  ] as const) {
+  for (const state of ['refused', 'none'] as const) {
     test(`Kira kanıtı accessibility — ${state}, ${theme}`, async ({ page }) => {
       await usePreferences(page, { theme });
       await useSampleClock(page, SAMPLE_TODAY);
-      await open(page, {}, evidence);
+      await open(page, {}, leaseEvidence(`overview_lease_${state}`));
       await page.goto('/sources');
       await expect(page.getByTestId('lease-evidence')).toBeVisible();
       await page
