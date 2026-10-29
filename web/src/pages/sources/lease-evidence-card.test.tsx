@@ -20,6 +20,26 @@ import { SOURCES } from '@/test/samples';
 const CAPTURED = SOURCES as typeof SOURCES &
   Record<'overview_lease_ok' | 'overview_lease_none' | 'overview_lease_refused', SourcesOverview>;
 
+/** The seven supported set-ups of contract 2.13, in its order. */
+const TOPOLOGIES_TR = [
+  'Tek yerleşke ve internete çıkışta bir FortiGate.',
+  'Kira kanıtı: MikroTik DHCP ve ARP-LOG kayıtları, FortiGate DHCP olay kayıtları (sahada doğrulanmalı) ya da ikisi (farklı ağlarda).',
+  "Yalnız-FortiGate ağlarda statik IP'li cihazların kira kaydı olmaz; zincir iç IP adresinde biter. İsteğe bağlı srcmac yalnızca ağ geçidi FortiGate olan ve sahada denetlenmiş ağlarda kısmi kanıt verir.",
+  'Başka bir DHCP sunucusu (ör. Windows): kira kaydı yalnızca MikroTik ARP-LOG ile, orta güvenle.',
+  'Birden çok internet hattı: her hat, arayüzleriyle birlikte, Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlanır.',
+  'Servis sağlayıcı ikinci bir NAT yapıyorsa sorgu aday listesi verir; genel IP başka müşterilerle paylaşılıyorsa (CGNAT) liste doğru oturumu içermeyebilir.',
+  "Desteklenmeyenler: IPv6 sorguları; aynı ağa iki DHCP sunucusu; FortiGate'in DHCP aktarıcı (relay) olduğu ağlarda FortiGate kira kaydı; aynı adres aralığını kullanan birden çok şube; FortiGate'ten geçmeyen hatlarda sorgu; bir yönlendiricinin ya da L3 anahtarın arkasındaki ağlarda srcmac.",
+];
+const TOPOLOGIES_EN = [
+  'One site with one FortiGate at the internet edge.',
+  'Lease evidence: MikroTik DHCP and ARP-LOG records, FortiGate DHCP event records (to be verified on site), or both (on different networks).',
+  'On FortiGate-only networks static-IP devices have no lease; the chain ends at the internal IP. Optional srcmac gives partial evidence only on networks whose gateway is the FortiGate, after a site check.',
+  'Another DHCP server (e.g. Windows): leases only through MikroTik ARP-LOG, with medium confidence.',
+  'Several internet lines: each line is defined, with its interfaces, in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT).',
+  'When the ISP does a second NAT, lookups give a candidate list; when the public IP is shared with other customers (CGNAT), the list may not contain the right session.',
+  'Not supported: IPv6 lookups; two DHCP servers on one network; FortiGate leases where the FortiGate is a DHCP relay; several branches with the same address range; lookups for lines that do not pass the FortiGate; srcmac behind a router or an L3 switch.',
+];
+
 beforeAll(async () => {
   await import('@/pages/sources/sources-page');
 }, 120_000);
@@ -112,9 +132,10 @@ describe('the lease-evidence card', () => {
   });
 
   it('none without tables: the absent text', async () => {
-    // Not captured (d-25): the captured `none` state with an empty `none_tables`.
-    const overview = structuredClone(CAPTURED.overview_lease_none);
-    overview.lease_evidence.none_tables = [];
+    // Not captured (d-25): the captured overview, where no table has a usable row and
+    // `none_tables` is empty, in the state `none` (no usable row of any table, 2.12).
+    const overview = structuredClone(SOURCES.overview);
+    overview.lease_evidence.state = 'none';
     serve(overview);
     const box = await card();
     const lines = [...box.querySelectorAll('[data-none]')].map((line) =>
@@ -124,6 +145,9 @@ describe('the lease-evidence card', () => {
     expect(box.querySelector('[data-none="absent"]')).toHaveTextContent(
       'Kullanılabilir DHCP ya da ARP-LOG kaydı gelmiyor: 5651 sorguları iç IP adresinde durur (Kurulum kılavuzu bölüm 0.1).',
     );
+    // No FortiGate DHCP row arrives: nothing whose format is unverified.
+    expect(within(box).queryByTestId('lease-evidence-unverified')).not.toBeInTheDocument();
+    expect(box).not.toHaveTextContent('sahada doğrulanmadı');
   });
 
   it('refused wins over none, with the counts, the unverified format and the excluded rows', async () => {
@@ -179,9 +203,24 @@ describe('the lease-evidence card', () => {
     const items = within(note)
       .getAllByRole('listitem')
       .map((item) => item.textContent);
-    expect(items).toHaveLength(7);
-    expect(items[0]).toBe('Tek yerleşke ve internete çıkışta bir FortiGate.');
-    expect(items[6]).toMatch(/^Desteklenmeyenler: IPv6 sorguları; /);
+    expect(items).toEqual(TOPOLOGIES_TR);
     expect(note).toHaveTextContent('Ayrıntılar: Kurulum kılavuzu bölüm 0.1');
+  });
+
+  it('the supported set-ups in English, in the same order', async () => {
+    serve(SOURCES.overview);
+    act(() => {
+      setLanguage('en');
+    });
+    renderApp('/sources');
+    const note = await screen.findByTestId('supported-topologies');
+    await userEvent
+      .setup()
+      .click(within(note).getByRole('button', { name: 'Supported network setups' }));
+    const items = within(note)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(items).toEqual(TOPOLOGIES_EN);
+    expect(note).toHaveTextContent('Details: installation guide section 0.1');
   });
 });

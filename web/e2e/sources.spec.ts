@@ -412,7 +412,7 @@ test.describe('Kaynaklar', () => {
 /**
  * "Kira kanıtı" (Wave 3 contract 2.13, D30): the card of `GET /sources` `lease_evidence` in its
  * three states, `refused` winning over `none`, as the API answered them (`samples/sources.json`,
- * `overview_lease_*`). `absent` is not captured (d-25): the captured `none` without its tables.
+ * `overview_lease_*`). `absent` is not captured (d-25): the captured overview without rows, `none`.
  */
 const CAPTURED = SOURCES as typeof SOURCES &
   Record<'overview_lease_ok' | 'overview_lease_none' | 'overview_lease_refused', SourcesOverview>;
@@ -423,8 +423,9 @@ function leaseEvidence(
   return copy(CAPTURED[state].lease_evidence);
 }
 
+/** `absent`: the captured overview, where no table has a usable row, in the state `none`. */
 function leaseEvidenceAbsent(): LeaseEvidence {
-  return { ...leaseEvidence('overview_lease_none'), none_tables: [] };
+  return { ...copy(SOURCES.overview.lease_evidence), state: 'none' };
 }
 
 test.describe('Kira kanıtı', () => {
@@ -466,9 +467,11 @@ test.describe('Kira kanıtı', () => {
   test('none without tables: the absent line', async ({ page }) => {
     await open(page, {}, leaseEvidenceAbsent());
     await page.goto('/sources');
-    await expect(page.getByTestId('lease-evidence').locator('[data-none="absent"]')).toContainText(
+    const card = page.getByTestId('lease-evidence');
+    await expect(card.locator('[data-none="absent"]')).toContainText(
       'Kullanılabilir DHCP ya da ARP-LOG kaydı gelmiyor: 5651 sorguları iç IP adresinde durur',
     );
+    await expect(card.getByTestId('lease-evidence-unverified')).toHaveCount(0);
   });
 
   test('refused wins over none; the alert and the settings are one click away', async ({
