@@ -27,6 +27,12 @@
   olmadan) **oturum açmış her kullanıcıya** açıktır: bantlar ve kilitli sayfalar herkese görünür
   ([LISANS.md](LISANS.md)). Lisansta kapalı bir modül, rolü ne olursa olsun kimseye açılmaz;
   rol, modül açıkken kimin göreceğini belirler.
+- **Uyum Durumu** (on denetim kartı ve Uyum Durumu Raporu, PDF) sahibin 2026-10-28 kararıyla
+  **Yönetici** ve **Denetçi**ye açıktır (`compliance.read`); kart 10'daki "Yapılandırma yedeğini
+  aldım" onayı, ilk kurulum sihirbazı ve bütün ayarlar yalnızca Yöneticidedir (`settings.manage`).
+  **Sistem** sayfası ve Panel'deki **Disk** kartı yalnızca Yöneticiye açıktır (`system.read`). İK
+  Raporları ve Rapor İzleyici bunların hiçbirini görmez. Hiçbir lisans durumu bu sayfaları kapatmaz
+  (5651 Temel); aşağıda "Uyum Durumu ve Sistem".
 
 ## Summary (EN)
 
@@ -44,6 +50,12 @@ re-authentication); the licence state itself (`GET /license` without its details
 signed-in user, so everybody sees the banners and the locked pages ([LICENSING.md](LICENSING.md)).
 A module that is off in the licence is locked for every role; the role decides who sees it while it
 is on.
+By the owner decision of 2026-10-28 Uyum Durumu (the ten check cards and the Uyum Durumu Raporu,
+PDF) is open to admin and auditor (`compliance.read`); the "Yapılandırma yedeğini aldım"
+confirmation of card 10, the first-run wizard and every setting stay admin-only
+(`settings.manage`). The Sistem page and the Panel's Disk card are admin-only (`system.read`). hr
+and viewer see none of them. No licence state closes these pages (5651 Core); "Uyum Durumu ve
+Sistem" below.
 
 ## The spec 13 table
 
@@ -72,7 +84,9 @@ is on.
 | `settings.manage` | ✔ | — | — | — | Ayarlar |
 | `users.manage` | ✔ | — | — | — | Kullanıcılar (this package: `/api/v1/users`) |
 | `audit.read` | ✔ | ✔ | — | — | Denetim kaydı (`/api/v1/audit`, `/api/v1/audit/verify`) |
-| `sources.*`, `devices.*`, `alerts.*`, `reports.manage`, `compliance.read`, `system.read` | ✔ | — | — | — | Pages the spec table does not list: admin only until decided |
+| `compliance.read` | ✔ | ✔ | — | — | Uyum Durumu: the ten cards and the Uyum Durumu Raporu (PDF); not in the spec 13 table (owner decision 2026-10-28, "Kararlar / Decisions" below) |
+| `system.read` | ✔ | — | — | — | Sistem page and the Panel's Disk card (not in the spec 13 table: admin only, open question 5 below); also the Panel's clock box (which `seal.read` opens as well) |
+| `sources.*`, `devices.*`, `alerts.*`, `reports.manage` | ✔ | — | — | — | Pages the spec table does not list: admin only until decided |
 
 Independent of the role:
 
@@ -266,6 +280,7 @@ may not see is `null`:
 | boxes `seal`, `credit` | `seal.read` | ✔ | ✔ | — | — |
 | box `clock` | `system.read` or `seal.read` | ✔ | ✔ | — | — |
 | box `alerts` | `alerts.read` | ✔ | — | — | — |
+| card "Disk" (`GET /system/disk`, requested only with `system.read`) | `system.read` | ✔ | — | — | — |
 
 Every change of an alert's state is audited as `alert.state` (from/to, rule), every note as
 `alert.note` with its length only — a note is free text and may name people, so its text never
@@ -368,6 +383,66 @@ section 11), and the sources list with its `lease_evidence` card. `api/tests/tes
 without the notice, without a session, with a pending password change and in every licence
 state.
 
+## Uyum Durumu ve Sistem / Compliance status and system pages
+
+Uyum Durumu (`/compliance`) ve Sistem (`/system`) şartname 13 tablosunda yoktur. Sahibin
+2026-10-28 kararıyla (aşağıda "Kararlar") **Uyum Durumu** **Yönetici** ve **Denetçi**ye açıktır
+(`compliance.read`): ikisi de on denetim kartını görür ve **Uyum Durumu Raporu (PDF)**'yi indirir.
+Durum değiştiren her şey yalnızca Yöneticidedir: kart 10'daki "Yapılandırma yedeğini aldım" onayı
+(`POST /compliance/config-backup`, `settings.manage`), ilk kurulum sihirbazı (Ayarlar → İlk kurulum
+sihirbazı, `/settings/setup`, `settings.manage`) ve bütün ayarlar. Denetçiye yedek onayı düğmesi ve
+"İlk kurulum sihirbazını aç" bağlantısı gösterilmez; kartların Kaynaklar, Güvenlik, Ayarlar ve
+Sistem sayfalarına giden bağlantıları da gizlenir (Mühürleme ve Arama bağlantıları kalır), kartın
+kendisi her zaman gösterilir. Kartın açık uyarılarının sayısı denetçiye de gösterilir, Güvenlik
+sayfasına bağlantısı olmadan (kuralı, önemi ve açılış zamanı raporda, PDF'te yer alır); Güvenlik
+sayfası ve uyarıların ayrıntısı (`alerts.read`) yine yalnızca Yöneticidedir. **Sistem** sayfası ve
+Panel'deki **Disk** kartı yalnızca Yöneticiye açıktır (`system.read`; açık soru 5). İK Raporları ve
+Rapor İzleyici bu üç yetkinin hiçbirine sahip değildir. Kartlarda, raporda ve Sistem sayfasında log
+öznelerine ait veri yoktur (raporda yalnızca onu indiren hesabın görünen adı ve kullanıcı adı yer
+alır): KVKK bilgilendirmesinin onayı istenmez ve görüntüleme denetim kaydına yazılmaz. Raporun
+indirilmesi (`compliance.report_export`, dosyanın SHA-256 değeriyle) ve yedek onayı
+(`compliance.config_backup_confirm`) yanıt verilmeden önce denetim kaydına yazılır; denetçinin
+indirdiği rapor da yöneticininki gibi yazılır. Hiçbir lisans durumu bu sayfaları kapatmaz (5651
+Temel). Rapor teknik denetimlerin bir dökümüdür, hukuki bir değerlendirme değildir; bir denetime
+sunmadan önce metinlerini hukuk müşavirinizle gözden geçirin. Ayrıntı:
+[UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 1, 3 ve 4.
+
+Uyum Durumu (`/compliance`) and Sistem (`/system`) are not in the spec 13 table. By the owner
+decision of 2026-10-28 ("Kararlar / Decisions" below) **Uyum Durumu** is open to **administrators**
+and **auditors** (`compliance.read`): both see the ten check cards and download the **Uyum Durumu
+Raporu (PDF)**. Everything that changes state is administrator-only: the "Yapılandırma yedeğini
+aldım" (I have copied the configuration) confirmation of card 10 (`POST /compliance/config-backup`,
+`settings.manage`), the first-run wizard (Ayarlar → İlk kurulum sihirbazı, `/settings/setup`,
+`settings.manage`) and every setting. The auditor is not shown the confirmation button nor the
+"İlk kurulum sihirbazını aç" (open the first-run wizard) link; the cards' links to Kaynaklar,
+Güvenlik, Ayarlar and Sistem are hidden too (the links to Mühürleme and Arama stay), while the card
+itself is always shown. The number of a card's active alerts is shown to the auditor too, without a
+link to the Güvenlik page (their rule, severity and opening time are in the PDF report); the
+Güvenlik page and the alerts' details (`alerts.read`) stay administrator-only. The **Sistem** page
+and the Panel's **Disk** card are administrator-only (`system.read`; open question 5). hr and viewer
+hold none of the three permissions. The cards, the report and the Sistem page carry no data about
+log subjects (the report names only the account that exported it): no KVKK notice is asked for and
+viewing is not audited. Downloading the report (`compliance.report_export`, with the file's SHA-256)
+and the confirmation (`compliance.config_backup_confirm`) are audited before they answer; the
+auditor's download is audited like the administrator's. No licence state closes these pages (5651
+Core). The report is a record of technical checks, not a legal assessment; review its texts with
+your legal counsel before you hand it to an inspection. Details:
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) sections 1, 3 and 4.
+
+| Endpoint / page | Access | admin | auditor | hr | viewer |
+|---|---|---|---|---|---|
+| `GET /compliance` | `compliance.read` (not audited; one answer kept 30 s for every user) | ✔ | ✔ | — | — |
+| `GET /compliance/report.pdf` | `compliance.read` (audited `compliance.report_export` with the file's SHA-256 before it is sent) | ✔ | ✔ | — | — |
+| `POST /compliance/config-backup` | `settings.manage` (audited `compliance.config_backup_confirm`; 409 `config_backup_unreadable` when `arcilogger.toml` cannot be read) | ✔ | — | — | — |
+| `GET /system`, `GET /system/disk`, `GET /system/health` | `system.read` (not audited) | ✔ | — | — | — |
+| `/settings/setup` (İlk kurulum sihirbazı, web page) | `settings.manage` (no endpoint of its own: reads `GET /admin/config`, `/admin/status` and `/admin/requests?kind=action.tsa_test` (the stamp tests) above, the sources step also `GET /sources` with `sources.read`) | ✔ | — | — | — |
+
+`api/tests/test_compliance_api.py` (`test_compliance_is_refused_without_compliance_read`,
+`test_auditor_reads_the_cards_and_the_report`, `test_config_backup_is_refused_for_the_auditor`),
+`api/tests/test_system_api.py` (`test_system_is_refused_without_system_read`) and
+`api/tests/test_system_health.py` (`test_health_is_refused_without_system_read`) check the roles;
+`api/tests/test_security.py` pins the holders against `ROLE_PERMISSIONS`.
+
 ## Kararlar / Decisions
 
 - **Denetçi ve kanıt paketi** (karar 2026-10-12, [ASSUMPTIONS.md](ASSUMPTIONS.md) D4): şartname 13
@@ -377,6 +452,17 @@ state.
   değiştirilecek.
 - **Sorguların görünürlüğü** (ASSUMPTIONS D5): yönetici olmayan roller yalnızca kendi 5651
   sorgularını ve bunlardan oluşturulan kanıt paketlerini görür.
+- **Uyum Durumu: Yönetici ve Denetçi** (sahibin 2026-10-28 kararı, Wave 4 sahip sorusu Q1;
+  ADR-0017 D15; [ASSUMPTIONS.md](ASSUMPTIONS.md)): `compliance.read` Yönetici ve Denetçidedir.
+  Denetçi Uyum Durumu sayfasını kartlarıyla açar ve Uyum Durumu Raporu'nu (PDF) indirir; durum
+  değiştiren her şey (kart 10'daki yedek onayı, ilk kurulum sihirbazı, bütün ayarlar;
+  `settings.manage`) yalnızca Yöneticidedir. `system.read` (Sistem sayfası, Panel'deki Disk kartı)
+  yalnızca Yöneticidedir (sahip sorusu Q2'nin Wave 4 varsayılanı; açık soru 5). / Owner decision of
+  2026-10-28 (Wave 4 owner question Q1): `compliance.read` is held by admin and auditor; the auditor
+  opens Uyum Durumu with its cards and downloads the Uyum Durumu Raporu (PDF); everything that
+  changes state (the backup confirmation of card 10, the first-run wizard, every setting;
+  `settings.manage`) stays admin-only. `system.read` (the Sistem page, the Panel's Disk card) is
+  admin-only (the Wave 4 default of owner question Q2; open question 5).
 
 ## Açık sorular / Open questions (owner decision needed)
 
@@ -395,8 +481,10 @@ state.
    `privacy.notice_version` ayarıdır.
 4. **Rapor İzleyici ve tam panel:** şartname panel için ✔ verir; panelde güvenlik uyarıları ve mühür
    durumu da var. İzleyici bunları görsün mü, yoksa yalnızca kullanım kutularını mı?
-5. **Tabloda olmayan sayfalar** (Kaynaklar, Cihazlar ve Kişiler, Güvenlik, Raporlar, Uyum Durumu,
-   Sistem): şimdilik yalnızca yönetici. Denetçi örneğin "Uyum Durumu"nu görmeli mi?
+5. **Tabloda olmayan sayfalar** (Kaynaklar, Cihazlar ve Kişiler, Güvenlik, Raporlar, Sistem):
+   şimdilik yalnızca yönetici; Sistem ve Panel'deki Disk kartı da (`system.read`, Wave 4 sahip
+   sorusu Q2). **Uyum Durumu** için karar verildi (2026-10-28): Yönetici ve Denetçi (yukarıdaki
+   "Kararlar" bölümü). Denetçi örneğin Güvenlik ya da Sistem sayfasını görmeli mi?
 6. **Geçici parola süresi:** yöneticinin oluşturduğu geçici parolanın bir son kullanma süresi yok
    (ilk girişte değiştirilmesi zorunlu). Süre sınırı (ör. 72 saat) istenir mi?
 7. **Denetim kaydını okumak** kendisi denetlenmez (her sayfa açılışında kayıt üretirdi). İstenirse

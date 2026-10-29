@@ -31,10 +31,28 @@ endpoints the pages use are in section 10.
 | **Retention** (`/settings/retention`) | deleting expired days on/off, the retention period (at least 730 days); the number of days it deletes is shown first and typed to confirm | — |
 | **Backup** (`/settings/backup`) | on/off, `[backup] keep_daily`, `[backup] keep_weekly`, `[backup] keep_monthly`, `[backup] min_free_gb`; this version does not show the last backup's details on the page, a failed backup is an `R20-backup` alert | `[backup] dir`, `[backup] pg_dump`, `[backup] pg_restore` |
 | **Change history** (`/settings/history`) | the requests, their states and changes, a link to the audit log; **Cancel**, **Revert**; the configuration versions; **Download the diagnostics package** (a ZIP for support, no secrets) | restoring a version (`versions restore`, the page shows the command) |
+| **First-run wizard** (`/settings/setup`) | changes no value itself: it shows the steps after the installation in order and opens one of the pages above in each step (below) | — |
 
 No page changes `data_dir`, `secrets_dir`, `[database]`, `[api]`, `[ingest]`, `[worker]`,
 `[seal]`, the database password or the usage pseudonym key. They belong to the installer and the
 administrator.
+
+The **first-run wizard** ("İlk kurulum sihirbazı", `/settings/setup`) shows what is left to do after
+the installation as a checklist: Administrator and two-step verification, Site settings, Log
+sources, Kamu SM: test server, Kamu SM: production, Replica, E-mail and Summary. It opens from the
+**First-run wizard** card on the Settings overview and from the **Open the first-run wizard** link
+on the Uyum Durumu page; it does not open by itself after the first sign-in. The wizard has no form
+of its own and stores nothing: each step's state ("OK" / "Missing") is derived again on every
+visit from the server's configuration and the stamp tests in the request history; the Log sources
+step also shows whether data arrived from each configured source (this does not change the step's
+state). **Open in Settings** opens the page concerned, where the change is
+saved and checked as always; **Skip this step for now** goes on to the next step, and the skipped
+step stays "Missing". The e-mail step is "OK" only while sending e-mail is switched on and an
+SMTP server and a sender are set. On a page opened from the wizard the way back reads **Back to the
+first-run wizard** ("Kurulum sihirbazına dön") instead of **Settings** and leads to
+`/settings/setup` (also between the steps of the Kamu SM wizard); this is remembered in that
+browser tab only and ends back in the wizard or on the Settings overview. The steps and when each
+counts as "OK": [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 5.
 
 **Switching a source off** (`enabled = false`): the firewall removes the sender's 514 opening;
 the silent-source alert (R15) and the sealer's gap check no longer expect it. A message that
@@ -79,6 +97,27 @@ reads them again (a live tail when it opens):
 | `live.buffer_lines` | 5000 | 500–50000 | newest lines the server keeps for a resume |
 | `live.max_minutes` | 60 | 5–480 | duration of one tail (unattended screen); Resume starts it again |
 | `live.backfill_lines` | 50 | 0–200 | recent lines shown at once when a tail opens |
+
+The three `alerts.filter_*` settings of the **Alerts and e-mail** group say when content filter
+records are expected; they are the thresholds of card 7 of the Uyum Durumu page and of the
+`R20-filter` alert ("No content filter records", severity high). While an enabled FortiGate source
+exists, if neither a web nor a DNS filter record has arrived for the last
+`alerts.filter_quiet_hours` hours and every day the window touches is an expected day, card 7 shows
+**Problem** and the alert opens; if the window touches a day that is not expected, card 7 shows
+**Attention** without an alert. Either kind of record is enough, and the alert closes by itself
+when a new record arrives. A day is expected
+when its ISO weekday is in `alerts.filter_days` and (while `alerts.filter_skip_holidays` is on) it
+is not in the holiday list of the **Usage analytics** group (`usage.holidays`). The defaults are
+the owner's decision (2026-10-28): every day of the week except the listed holidays, 24 hours.
+`usage.holidays` ships only the fixed-date national holidays; the administrator enters the dates
+of the religious holidays every year. Details: [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)
+section 2.7, [ALERTS.md](ALERTS.md) section 2.
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `alerts.filter_days` | `[1,2,3,4,5,6,7]` (every day) | each 1–7 (1 = Monday, 7 = Sunday), stored sorted without duplicates; may be empty (no day expected) | the ISO weekdays on which content filter records are expected; one day number per line on the page |
+| `alerts.filter_skip_holidays` | on | — | on: no record is expected on the days of `usage.holidays`; off: public holidays count as expected days |
+| `alerts.filter_quiet_hours` | 24 | 6–168 | the longest time without a record on expected days (hours) |
 
 ## 2. How it works
 
@@ -329,6 +368,7 @@ carries `code`, `message_tr` and `message_en`.
 | Backup | `POST /admin/config/backup/check`, `PUT /admin/config/backup` |
 | Change history | `GET /admin/requests`, `GET /admin/requests/{id}`, `DELETE /admin/requests/{id}` (Cancel), `POST /admin/requests/{id}/revert` (Revert), `GET /admin/config/versions`, `GET /admin/diagnostics` |
 | Sealing | `POST /seals/{day}/seal` (Seal now), `GET /credits`, `POST /credits/query` (Query credit) |
+| First-run wizard | reads only: `GET /admin/config`, `GET /admin/status`, `GET /admin/requests?kind=action.tsa_test` (the stamp tests), `GET /sources` (the log sources step) |
 
 The application settings and the worker's actions (the test e-mail, the lease rebuild) go
 through the database and do not wait for the administration service; everything else reaches

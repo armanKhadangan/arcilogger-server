@@ -36,10 +36,10 @@ run, and the 5651 functions always run. Request code, licence file, modules and 
 | 6 | Copy and verify the bundle | Server |
 | 7 | Install ARCILOGGER | Server |
 | 8 | Install the root certificate on the admin PC | Admin PC |
-| 9 | First login (first administrator) | Server + browser |
+| 9 | First login (first administrator), first-run wizard | Server + browser |
 | 10 | Kamu SM connection (test → production) | Server |
 | 11 | Device setup | FortiGate, MikroTik |
-| 12 | Checks after installation; then [FIRST-STEPS.md](FIRST-STEPS.md) | Server |
+| 12 | Checks after installation (console, the Uyum Durumu and Sistem pages); then [FIRST-STEPS.md](FIRST-STEPS.md) | Server + browser |
 
 ## 0. Requirements
 
@@ -629,6 +629,40 @@ with step 2. If you lost it, or ran the installer as a script with redirected ou
    & "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-api.exe" create-admin --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
    ```
 
+**First-run wizard.** After sign-in, **Ayarlar → İlk kurulum sihirbazı** (Settings → First-run
+wizard, `/settings/setup`) shows the remaining steps of the installation in order; only
+administrators can open it (`settings.manage`). It does not open by itself after the first
+sign-in: the first-run setup page shows it as its third step ("Kurulum sihirbazı — Girişten sonra,
+Ayarlar'da", First-run wizard — After sign-in, in Settings), and the link **İlk kurulum sihirbazını
+aç** (Open the first-run wizard) on the Uyum Durumu page opens it too (while a card is not
+**Tamam**, OK). The wizard has no forms of its own and stores nothing: each step's state ("Tamam" /
+"Eksik", done / missing) is read again from the server's configuration and request history every
+time it opens. The wizard opens on the first step that is not done; **Ayarlar'da aç** (Open in
+Settings) opens the matching Settings page (whose way-back link then reads **Kurulum sihirbazına
+dön**, Back to the first-run wizard), **Bu adımı şimdilik atla** (Skip this step for now) goes on to
+the next step and the skipped step stays "Eksik".
+
+| Step | Done when | Opens (in this document) |
+|---|---|---|
+| Administrator and two-step verification | always (steps 1–3 above) | — |
+| Site settings | no configuration problem of level error about the organisation name or the time servers | Ayarlar → Genel (sections 1, 7.1) |
+| Log sources | at least one enabled source is defined | Ayarlar → Kaynaklar (section 11) |
+| Kamu SM: test server | a successful and verified stamp test in the request history, or the production server is selected | Ayarlar → Kamu SM, test step (section 10) |
+| Kamu SM: production | the production server is selected and sealing is ready | Ayarlar → Kamu SM, production step (section 10, "Switching to production") |
+| Replica | the replica is on | Ayarlar → Replika (section 10, "Replica") |
+| E-mail | sending e-mail is switched on, an SMTP server and a sender address are set | Ayarlar → E-posta |
+
+The last step is **Özet** (Summary): every step with its state, all configuration problems (every
+level), "Checks after installation: INSTALL.md section 12" and a link to the Uyum Durumu page. The
+**Log sources** step shows for each defined source whether data arrived, and the firewall's state
+(when the firewall is not managed by ARCILOGGER, open 514 by hand, section 12); for the device
+settings it only refers to [DEVICE-SETUP.md](DEVICE-SETUP.md) sections 1 and 4 (verify the commands
+on site): the web interface has no device commands and no pre-filled device list. The **Kamu SM**
+steps remind you that stamps of the test server have no legal validity and that the root
+fingerprints are to be compared with the values Kamu SM publishes before switching to production
+(verify on site). Details: [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 5,
+[SETTINGS.md](SETTINGS.md).
+
 Other users (the auditor etc.) and what comes next: [FIRST-STEPS.md](FIRST-STEPS.md).
 
 ## 10. Kamu SM connection (test → production)
@@ -737,6 +771,40 @@ Get-NetFirewallRule -Group ARCILOGGER | Format-Table DisplayName, Direction, Ena
 The last command prints the licence state, the modules that are on and the limits (trial: the
 days left; [LICENSING.md](LICENSING.md) section 5).
 
+**On the web.** Two pages show most of the same checks; both only read and refresh every 30
+seconds. The console commands stay valid: only they ask Windows for the state of the services and
+scheduled tasks and for the firewall rules.
+
+- **Uyum Durumu** (Compliance, `/compliance`, administrator and auditor): ten technical checks of
+  log collection, sealing and backups (log sources, yesterday's records sealed and verified, seal
+  chain, retention period, Kamu SM credit and time-stamp certificate, server clock, content filter
+  records, DHCP and ARP records, replica, backups). Each card gives its state with an icon and a
+  text ("Tamam", "Dikkat", "Sorun", "Bilgi yok": OK, Attention, Problem, No data), the reason and
+  what to do ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 2). On a new installation some
+  cards are not **Tamam** until the first sealing, verification and nightly backup have run; look
+  again after the first night. Once the configuration files are copied to offline media, the
+  administrator confirms it on card 10 with **Yapılandırma yedeğini aldım** (I have copied the
+  configuration; [BACKUP.md](BACKUP.md) section 3). The **Uyum Durumu Raporu (PDF)** (Compliance
+  status report) writes the same cards to a PDF file; every export is written to the audit log.
+  ARCILOGGER is designed to support 5651 obligations ("5651 yükümlülüklerini desteklemek için
+  tasarlanmıştır"): the page and the report are technical checks, not a legal assessment; confirm
+  the results and how you use the report with your legal counsel
+  ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) sections 1 and 3).
+- **Sistem** (System, `/system`, administrator only): resource use, drives and the disk forecast,
+  database size, collector and ingest, services (ArciCollector, ArciIngest and ArciWorker from their
+  status files, the administration service from its heartbeat, ApplySystem from its last result),
+  scheduled tasks (each task's state is derived from its evidence file, not asked of the Task
+  Scheduler), worker jobs, clock, version and maintenance (section 13;
+  [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 4). For the disk forecast the worker job
+  `system.sample` writes one sample a day after 00:30 to `state\system-history.json`; the forecast
+  shows after at least 7 days of samples. After the first night check on the Sistem page that the
+  resource values show (not "bu platformda okunamıyor", cannot be read on this platform) and that
+  the daily tasks do not show "Kanıt yok", No evidence (verify on site; Windows rights:
+  [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 6). VerifyWeekly shows "Kanıt yok" until the
+  first Sunday, VerifyMonthly until the first of the month; Requests and (with retention on)
+  Retention have no readable evidence ("İzlenemiyor", Not observable); the task of a feature that
+  is off (e.g. replica or retention off) shows "Kullanılmıyor" (Not used).
+
 Firewall (`Set-ArciFirewall.ps1`):
 
 - **Inbound:** default Block; allowed are only UDP/TCP 514 from `[[sources]]` (without any
@@ -781,6 +849,10 @@ Firewall (`Set-ArciFirewall.ps1`):
   powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
   Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker
   ```
+- **When the firewall is not managed by ARCILOGGER** (Ayarlar → Kaynaklar and the first-run
+  wizard's Log sources step say so): after an installation with `-SkipFirewall`, open UDP/TCP 514 to
+  the addresses of the enabled sources in your own firewall by hand; with the browser
+  administration off, run the script above yourself after a change of the sources.
 - `-Remove` (run by the uninstaller) deletes ARCILOGGER's rules and restores the disabled rules
   and the profile settings found before the first run.
 
@@ -797,6 +869,18 @@ is lost, UDP does not retransmit):
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -DryRun
 powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade
 ```
+
+After the upgrade, check the new version and release date in the **Sürüm ve güncelleme** (Version
+and upgrades) block of the **Sistem** page, the services in its **Hizmetler** (Services) block, and
+the **Uyum Durumu** cards (section 12).
+
+**Installed version and maintenance on the web:** the **Sürüm ve güncelleme** block of the
+**Sistem** page (`/system`, administrator only) shows the product version, the core version, the
+release date and the licence's maintenance period (as in Ayarlar → Lisans); comparing a new
+bundle's release date with that maintenance period tells you beforehand whether the upgrade is
+covered (below). The block also says: "To upgrade, copy the new offline bundle to the server and
+follow INSTALL.md section 13. ARCILOGGER downloads no updates." An upgrade is always made with the
+offline bundle as this section describes.
 
 **Licence and maintenance** ([LICENSING.md](LICENSING.md) sections 7 and 8): before changing
 anything, an upgrade compares the new bundle's release date with the maintenance date of the

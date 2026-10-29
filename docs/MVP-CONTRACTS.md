@@ -455,7 +455,8 @@ final rows. *Verify on site that FortiGate interim logs carry the cumulative `du
 | `settings.manage` | ✔ | — | — | — | Ayarlar |
 | `users.manage` | ✔ | — | — | — | Kullanıcılar |
 | `audit.read` | ✔ | ✔ | — | — | Denetim |
-| `sources.*`, `devices.*`, `alerts.*`, `reports.manage`, `compliance.read`, `system.read` | ✔ | — | — | — | not in the table: admin only until the owner decides |
+| `compliance.read` | ✔ | ✔ | — | — | Uyum Durumu (incl. the Uyum Durumu Raporu; owner decision 2026-10-28, section 19) |
+| `sources.*`, `devices.*`, `alerts.*`, `reports.manage`, `system.read` | ✔ | — | — | — | not in the table: admin only until the owner decides |
 
   TOTP is mandatory for `auth.totp_required_roles` (admin, auditor).
 - **Errors:** `raise ApiError(status, code, message_tr=None, message_en=None)`; every error
@@ -481,7 +482,8 @@ final rows. *Verify on site that FortiGate interim logs carry the cumulative `du
   `user.create`, `settings.change`, `lookup.run`, `evidence.create`, `evidence.download`,
   `usage.person.view`, `seal.manual`, `search.run`, `search.event`, `search.refs`,
   `search.export`, `search.saved_create`, `search.saved_update`, `search.saved_delete`,
-  `live.open`, `live.close`, `raw.tail`, …; section 17.9 lists the search details).
+  `live.open`, `live.close`, `raw.tail`, …; section 17.9 lists the search details, section 19.7
+  the Wave 4 actions).
 - **One audit writer (W3-I):** the chain step has a single implementation,
   `arcilogger_db.audit.append_entry(session, actor_id=, actor=, action=, target=, details=,
   ip=)` — canonical entry, hash, `pg_advisory_xact_lock`, READ COMMITTED check, `jsonable`
@@ -514,7 +516,7 @@ final rows. *Verify on site that FortiGate interim logs carry the cumulative `du
   (below); `evidence`, `seals`, `credits` → W2/W3 (implemented, docs/KANIT-PAKETI.md);
   `devices`, `persons`, `departments`, `vlans`, `imports` → devices and persons (section 11);
   `license` → offline licensing (section 15); `search` → Wave 2 WP-B, `live` and `sources` →
-  Wave 2 WP-C (section 17).
+  Wave 2 WP-C (section 17); `compliance`, `system`, `system_health` → Wave 4 (section 19).
 
 ### 6.1 5651 lookup, official report and raw lines (W2-A)
 
@@ -993,6 +995,9 @@ Decision: ADR-0010; operator view: docs/ALERTS.md (TR: docs/UYARILAR.md).
   `check_lease_evidence` (`R20-lease:<cause>`) and `check_nat_exits` (`R20-nat:<cause>`), each in
   its own transaction; the causes, severities, dedup keys and details are listed in section 18.6
   (operator view: UYARILAR/ALERTS section 2).
+- **Content-filter evidence (ADR-0017):** `alerts.system` also runs `check_filter`
+  (`R20-filter:none`, high) on the settings `alerts.filter_days`, `alerts.filter_skip_holidays`
+  and `alerts.filter_quiet_hours`; section 19.6.
 - **Tables** (revision `0009_alert_delivery`): `alerts.created_at`, `alerts.resolved_at`;
   `alert_deliveries` (`alert_id`, `kind` new / resolved, `recipient`, `status` queued / sent /
   failed / suppressed, `attempts`, `last_error`, `next_attempt_at`, `message_id`, `created_at`,
@@ -2447,3 +2452,352 @@ report:
   `plan_cache_mode = force_custom_plan` (d-35); the "Özet / Summary" row of an unconverted
   citation prints the fixed bilingual label `texts.UNCONVERTED_SUMMARY`, never the Turkish-only
   stored summary (d-36). Contract "Deviations — d" has each with its tests.
+
+## 19. Uyum Durumu, Sistem and the first-run wizard (Wave 4, ADR-0017)
+
+Decision: [ADR-0017](adr/0017-compliance-and-system-pages.md); binding design:
+`design/wave-4-contract.md`; operator view: [UYUM-DURUMU.md](UYUM-DURUMU.md) /
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md). Base `/api/v1`. Both pages are 5651 Temel: no route
+here is licence-gated (no `require_module`, in any licence state). They only read (files under
+`state\` and `admin\`, the vault, the database, active alerts); they never ask a device or Kamu SM
+and never download or install anything. **No new table and no migration:** the disk samples go to
+`state\system-history.json`, the configuration backup confirmation is an audit entry. ARCILOGGER
+is "5651 yükümlülüklerini desteklemek için tasarlanmıştır" / "designed to support 5651
+obligations": the cards and the Uyum Durumu Raporu are technical checks, not a legal assessment
+(teknik denetim, hukuki değerlendirme değil), and never say that a site conforms; have their texts
+reviewed by legal counsel (owner question Q20, docs/ASSUMPTIONS.md).
+
+### 19.1 Endpoints
+
+The code lives in packages outside `routers/` (contract D2): `arcilogger_api.compliance`
+(`APIRouter(prefix="/compliance", tags=["compliance"])`), `arcilogger_api.system`
+(`prefix="/system"`, tag `system`) and `arcilogger_api.system_health` (`prefix="/system/health"`,
+tag `system`); the two-line modules `routers/compliance.py`, `routers/system.py` and
+`routers/system_health.py` mount them, and `api/tests/test_license_routes.py` lists the six routes
+as never gated. Dependencies use `require(...)`; 401/403 as every route, 503 `unavailable` when the
+database is down.
+
+| Endpoint | Permission | Licence | Audit | Cache | Response |
+|---|---|---|---|---|---|
+| `GET /compliance` | `compliance.read` (admin, auditor) | none (5651 Temel) | no | 30 s, one answer per API process (`TtlCache` on `app.state`); not kept while a card could not be computed; cleared by the confirmation | `ComplianceStatus` (19.2) |
+| `GET /compliance/report.pdf` | `compliance.read` (admin, auditor) | none | `compliance.report_export` | none (computed fresh) | `200 application/pdf` (19.3) |
+| `POST /compliance/config-backup` | `settings.manage` (admin) | none | `compliance.config_backup_confirm` | — | `ConfigBackupOut`; 409 `config_backup_unreadable` (19.3) |
+| `GET /system` | `system.read` (admin) | none | no | database sizes 5 min (`resources.DATABASE_TTL`), the rest per request | `SystemSummary` (19.4) |
+| `GET /system/disk` | `system.read` (admin) | none | no | none | `SystemDisk` (19.4) |
+| `GET /system/health` | `system.read` (admin) | none | no | none | `SystemHealth` (19.5) |
+
+The web app polls `GET /compliance`, `GET /system`, `GET /system/health` and (Panel disk card)
+`GET /system/disk` every 30 s with `X-Arci-Background: 1`. Viewing is not audited (as the
+Panel): neither page nor the PDF carries data about log subjects (no client IP or MAC, no person,
+no device host name, no sender address, no replica target path), so there is no KVKK notice
+gate; the PDF names only the signed-in account that exported it. `POST` is CSRF-checked as every
+change.
+
+### 19.2 Uyum Durumu: `ComplianceStatus`
+
+Models `compliance/models.py`, mirrored verbatim by `web/src/lib/compliance-types.ts`; every
+field is required, times are site time with offset (`to_site`):
+
+`ComplianceStatus {generated_at, site_name: string | null, counts: ComplianceCounts {ok, warning,
+error, neutral}, cards: ComplianceCard[], notice_tr, notice_en}`; `ComplianceCard {id, number,
+tone: "ok" | "warning" | "error" | "neutral", title_tr, title_en, reason_tr, reason_en, facts:
+[ComplianceFact {key, label_tr, label_en, value_tr, value_en}], alerts: [ComplianceAlertRef {id,
+rule, severity, opened_at}], page: "sources" | "sealing" | "search" | "settings" | "system",
+doc_tr, doc_en, verify_on_site_tr: string | null, verify_on_site_en: string | null,
+checked_at}`; `ConfigBackupOut {confirmed_at, config_sha256}`.
+
+- `cards` always holds the ten cards in this order (`number` 1-10), each computed by
+  `cards.card_<id>(ctx)` inside `cards.compute_status(db, layout, config, channel, now)`, the one
+  function the page and the PDF share (contract D3). Cards come back fully worded, TR and EN.
+  `page` is a nav key (`web/src/nav.ts`); the web hides a link the user may not open
+  (`linkTarget`), the card stays. `doc_tr` / `doc_en` = "UYUM-DURUMU.md bölüm 2.{number}" /
+  "COMPLIANCE-STATUS.md section 2.{number}".
+
+  | # | `id` | `page` | Active alerts listed (`open`, `acknowledged`) |
+  |---|---|---|---|
+  | 1 | `sources` | `sources` | dedup key prefix `R15:` |
+  | 2 | `seal_yesterday` | `sealing` | `R20-seal:<yesterday>` exact |
+  | 3 | `chain` | `sealing` | `R20-verify` exact |
+  | 4 | `retention` | `sealing` | rule `R20-retention`, severity not `info` (W4-A deviation, 19.8) |
+  | 5 | `tsa` | `sealing` | `R20-credit` exact |
+  | 6 | `clock` | `system` | prefix `R20-clock` |
+  | 7 | `content_filter` | `search` | prefix `R20-filter:` |
+  | 8 | `lease_evidence` | `sources` | prefix `R20-lease:` |
+  | 9 | `replica` | `sealing` | prefix `R20-replica` |
+  | 10 | `backup` | `settings` | prefix `R20-backup` |
+
+- `alerts`: at most 5 per card, newest first, read with a plain `SELECT` (never
+  `active_alerts`, which locks rows). The auditor's answer keeps them although `alerts.read`
+  stays admin-only; the web hides their link.
+- A card whose computation raises is `neutral` with "Bu denetim şu anda yapılamadı:
+  {error_code}" / "This check could not be run now: {error_code}" (the exception class name,
+  never its message; the error is logged); the other cards are unaffected, and such an answer is
+  not kept in the 30-s cache (`cards.fully_computed`).
+- `site_name`: `null` when not set. Tones `ok`, `warning`, `error`, `neutral` (`neutral` = no
+  data yet or does not apply, always with a reason). Each card's conditions and reasons:
+  UYUM-DURUMU / COMPLIANCE-STATUS section 2.
+- `notice_tr` = "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır. Bu kartlar
+  kayıt toplama, mühürleme ve yedeklemenin teknik denetimlerinin sonucudur; hukuki bir
+  değerlendirme ya da uygunluk beyanı değildir. Sonuçları hukuk müşavirinizle teyit edin.";
+  `notice_en` = "ARCILOGGER is designed to support 5651 obligations. These cards are the results
+  of technical checks of log collection, sealing and backups; they are neither a legal assessment
+  nor a statement of conformity. Confirm the results with your legal counsel."
+  (`compliance/texts.py` `NOTICE`).
+
+### 19.3 Uyum Durumu Raporu and the backup confirmation
+
+- **`GET /compliance/report.pdf`** ("Uyum Durumu Raporu" / "Compliance status report",
+  `compliance/pdf.py`): `compute_status` computed fresh and rendered with ReportLab and the shared
+  fonts and styles of `arcilogger_worker.pdf`, A4. Content in order: title TR and EN; site name;
+  "Oluşturulma / Generated: {time} (Europe/Istanbul)"; "Oluşturan / Exported by: {display name}
+  ({username})"; the summary line; `notice_tr` and `notice_en`; per card "{number}. {title_tr} /
+  {title_en}", the tone in brackets ("[TAMAM] / [OK]", "[DİKKAT] / [ATTENTION]", "[SORUN] /
+  [PROBLEM]", "[BİLGİ YOK] / [NO DATA]"), `reason_tr`, `reason_en`, the facts as a two-column
+  table, the verify-on-site note when present, the active alerts (rule, severity, opened) and
+  `checked_at`; every page's footer `FOOTER_NOTE_TR` / `FOOTER_NOTE_EN` (`reports/texts.py`) and
+  "Sayfa n / N". Headers: `Content-Disposition: attachment;
+  filename="ARCILOGGER-uyum-durumu-<YYYYMMDD-HHMM>.pdf"` (site time), `X-Arci-Sha256: <hex>`. The
+  PDF is not stored and not time-stamped (owner question Q14; no schedule, no `compliance` kind
+  in Raporlar). Audited before the response (19.7).
+- **`POST /compliance/config-backup`** (no body): the administrator confirms that
+  `arcilogger.toml`, `secret.key` and the Caddy CA folder (with its private key) were copied to
+  encrypted offline media kept apart from the backups (`secrets.json` optional; YEDEKLEME.md /
+  BACKUP.md section 3). The route reads the configuration file's current SHA-256
+  (`Channel.files.sha256`): `None` → 409 `config_backup_unreadable` (nothing recorded); otherwise
+  it writes the audit entry, commits, clears the 30-s cache and answers `ConfigBackupOut`
+  (`confirmed_at` = the entry's time). Card 10 compares the newest confirmation's
+  `config_sha256` with the file. A repeated confirmation is allowed (a new entry).
+
+### 19.4 Sistem: `SystemSummary`, `SystemDisk`
+
+Models `system/models.py`, mirrored by `web/src/lib/system-types.ts`; every field required; byte
+counts and percents are integers, `lag_seconds` and `lines_per_second` fractional (`float`):
+
+`SystemSummary {checked_at, host: HostInfo, drives: DriveInfo[], database: DatabaseInfo,
+collector: CollectorInfo, ingest: IngestInfo, version: VersionInfo}`; `SystemDisk {checked_at,
+drives: DriveInfo[]}`; `HostInfo {platform: "windows" | "linux" | "other", cpu_percent,
+memory_total_bytes, memory_used_bytes, uptime_seconds}` (each `| null`); `DriveInfo {role: "data"
+| "system", path, total_bytes, used_bytes, free_bytes, used_percent, warning_percent,
+critical_percent, forecast: DiskForecast {state: "estimated" | "insufficient" | "not_growing",
+samples, growth_bytes_per_day | null, warning_on: date | null, full_on: date | null}}`;
+`DatabaseInfo {storage: "postgresql" | "timescaledb", total_bytes | null, tables: [TableSize {name,
+bytes}], measured_at | null}`; `CollectorInfo {state: "running" | "stale" | "missing", updated_at
+| null, started_at | null, sources: [CollectorSource {name, messages, bytes, last_received |
+null}], unknown_senders: UnknownSenders {count, messages, bytes}, dropped_unknown,
+dropped_transport, write_failures, write_error_since | null, torn_lines, tcp_connections,
+tcp_framing_errors}`; `IngestInfo {state, service_state | null, updated_at | null, database_ok |
+null, workers_configured | null, workers_active | null, lines_per_second | null, sources:
+[IngestSource {name, lag_bytes, lag_seconds | null, lines_per_second | null, unfinished_days,
+has_error}], unknown_sources}`; `VersionInfo {product, version, core_version, release_date}`.
+
+- **Host** (`arcilogger_core.hostinfo`, standard library only: `ctypes` on Windows, `/proc` on
+  Linux, owner question Q16): CPU % is computed between two readings kept in the API process
+  (at least 1 s apart), so the first request answers `cpu_percent: null`; any other platform or
+  error gives `null`.
+- **Drives:** those of the R20-disk check (`alerts.system.drives(config.data_dir)`): the data
+  drive, then the system drive when it is another device; `path` is the drive label (`D:`; on
+  Linux the data directory's path and `/`); `used_percent` = `used * 100 // total`;
+  `warning_percent` = `alerts.disk_used_percent`, `critical_percent` = 95.
+- **Forecast** (`system/forecast.py`, owner question Q17): per drive the newest 30 daily samples
+  of `state\system-history.json`; fewer than 7 → `insufficient`; least-squares slope of used
+  bytes per day ≤ 0 → `not_growing`; else `estimated` with `growth_bytes_per_day` the rounded
+  slope, `warning_on` the first day the line reaches `warning_percent` and `full_on` the first
+  day it reaches the total, never before today. `warning_on` is `null` when a measurement (the
+  drive's use now, else its newest sample) is already at or above the mark; either date is
+  `null` beyond `forecast.HORIZON_DAYS` = 36,500 days while `state` stays `estimated` (W4-B
+  deviations, 19.8). Days without a sample are gaps, not zeros.
+- **Database:** `pg_database_size(current_database())` and the 10 largest top-level tables of
+  `Base.metadata` with every descendant in `pg_inherits` (with TimescaleDB `hypertable_size()`);
+  measured at most every 5 minutes (`measured_at`); a query error gives `total_bytes: null`,
+  `tables: []` and is logged.
+- **Collector / ingest** (`layout.collector_status`, `layout.ingest_status`): `state` `missing`
+  (no file), `stale` (`updated_at` older than 2 minutes, `SERVICE_FRESH`), else `running`.
+  **Sender addresses are never returned:** `sources` lists configured sources that have an entry
+  in the status file, under their configured name (a network source's members summed under its
+  name: counts and lags summed, times and `lag_seconds` the largest, `has_error` any); every other
+  entry (`unknown-<ip>`, …) is only counted (`unknown_senders`, `unknown_sources`). A configured
+  source that has not sent yet has no row here (Kaynaklar lists every source). `has_error` says
+  that the ingest recorded an error; the text is not returned.
+- **Version:** the product name, the API `__version__`, `arcilogger_core.__version__`,
+  `RELEASE_DATE`; maintenance comes from the existing `GET /license` (section 15). Upgrades stay
+  manual (offline bundle, KURULUM / INSTALL section 13); ARCILOGGER downloads no updates.
+- `GET /system/disk` is `drives` alone (the Panel's "Disk" card, requested only with
+  `system.read`).
+
+### 19.5 Sistem: `SystemHealth`
+
+Models `system_health/models.py`, mirrored by `web/src/lib/system-health-types.ts`; every field
+required; `offset_ms` and `delay_ms` fractional (`float`):
+
+`SystemHealth {checked_at, services: [ServiceHealth {name: ServiceName, state: "running" |
+"stale" | "missing", updated_at | null}], agent: AgentHealth {state: "ok" | "stale" | "missing" |
+"disabled", heartbeat_at | null}, apply_system: ApplySystemHealth {state: "ok" | "failed" |
+"never" | "disabled", at | null, code | null}, tasks: [TaskHealth {task, schedule_tr,
+schedule_en, state: "ok" | "late" | "missing" | "not_used" | "not_observable", last_evidence_at
+| null, evidence}], jobs: [JobHealth {job, schedule_tr, schedule_en, module | null, state: "ok" |
+"failing" | "skipped" | "running" | "never", last_status | null, last_started | null,
+last_finished | null, duration_ms | null, failures, next_due | null}], time: TimeHealth
+{ntp_server | null, fallback_server | null, alert_offset_ms, applied_peers | null, applied_at |
+null, samples: [ClockSampleOut {time, server | null, ok, offset_ms | null, delay_ms | null,
+stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly`, `VerifyMonthly`,
+`Replica`, `Retention`, `Credit`, `ClockCheck`, `Backup`, `Requests`, `ApplySystem`.
+
+- **Services:** ArciCollector, ArciIngest, ArciWorker from their status files (`updated_at`, else
+  the file's modification time; `running` within 2 minutes); ArciApi is always `running` (it
+  answers). **Agent:** `Channel.agent_state` and the ArciAdmin heartbeat. **ApplySystem:**
+  `disabled` when browser administration is off (`policy.json`), `never` without
+  `admin\system\status.json`, `failed` when its `ok` is false, else `ok`.
+- **Tasks** (`system_health/tasks.py`, one row per file of `deploy/windows/tasks/`; no Task
+  Scheduler or service-manager query, owner question Q19). `missing` = no evidence yet, `late` =
+  evidence older than the limit (each task's cadence plus a grace, not a setting); a file that
+  cannot be read is no evidence and never fails the request:
+
+  | `task` | `schedule_tr` / `schedule_en` | Evidence (below the data folder) | Late after | `not_used` when |
+  |---|---|---|---|---|
+  | Seal | Her gün 00:10'dan sonra 5 dakikada bir / Every 5 minutes from 00:10 | newest modification time of a `state\seal\<YYYY-MM-DD>.json` whose `status` is not `deleted` (W4-D deviation) | 26 h | — |
+  | VerifyDaily | Her gün 01:00 / Daily at 01:00 | `at` of the newer of `state\verify\last-last-1.json`, `last-last-2.json` | 26 h | — |
+  | VerifyWeekly | Pazar 03:00 / Sundays at 03:00 | newest `at` of `state\verify\last-last-<N>.json`, N ≥ 3 | 8 days | — |
+  | VerifyMonthly | Ayın 1'i 04:00 / 1st of the month at 04:00 | `at` of `state\verify\last-full.json` | 32 days | — |
+  | Replica | Saatte bir, 00:40'tan / Hourly from 00:40 | newest `verified_at` of `state\replica\<day>.json` (last 3 days) | 26 h | `[replica] enabled = false` |
+  | Retention | Her gün 02:00 / Daily at 02:00 | none readable: `not_observable` | — | `[retention] enabled = false` |
+  | Credit | Her gün 06:00 / Daily at 06:00 | newest `time` of `state\credit.jsonl` | 26 h | `[tsa] provider` ≠ `zamane` |
+  | ClockCheck | Saatte bir, 00:05'ten / Hourly from 00:05 | newest `time` of `state\clock\<day>.jsonl` (today, yesterday) | 2 h | — |
+  | Backup | Her gün 01:40 / Daily at 01:40 | `finished` of `state\backup\last.json` | 26 h | `[backup] enabled = false` |
+  | Requests | Olayla ve 5 dakikada bir / On event and every 5 minutes | `state\requests`, not readable by ArciApi: `not_observable` | — | — |
+  | ApplySystem | Olayla ve 5 dakikada bir / On event and every 5 minutes | `at` of `admin\system\status.json` | 15 min | browser administration off |
+
+  The verification results carry the names `arcilogger-core verify` writes: it puts `last-`
+  before its kind, so `--last 2` writes `last-last-2.json` and only `--all` writes
+  `last-full.json` (contract Implementation note 7).
+- **Jobs** (`system_health/jobs.py`): every job of `default_jobs(config.worker.interval_seconds)`
+  in its order, joined with `state\worker-status.json` (`last_error` is never returned) and two
+  bounded probes of `ix_job_runs_job_started_at` per job (never a `DISTINCT ON` over the unpurged
+  table, owner question Q21): the newest finished run of the last 7 days for `duration_ms`, then
+  a `running` row newer than that run (else within the 7 days). A running row older than the
+  worker's `started_at`, or not newer than the run the status file names, is not running; while a
+  job runs, `last_started` is that row's start and the other fields stay those of the run before.
+  `state`: `never` (no state, no row), `running`, `failing` (`failures` ≥ 1, or `last_status`
+  `failed` with `failures` 0), `skipped`, else `ok`. `module` is the licence module of a paid job
+  (skipped while it is off), `null` for 5651 Temel. Schedule texts: `every` → "Her {n}
+  saniyede/dakikada/saatte bir" / "Every {n} second(s)/minute(s)/hour(s)" (English singular for
+  1); `daily_after` → "Her gün {HH:MM}'{ablative} sonra" / "Daily after {HH:MM}", the Turkish
+  suffix as the time is read ("00:15'ten", "00:30'dan", "01:00'den"). W4-D deviations, 19.8.
+- **Time:** `[clock] ntp_server`, `fallback_server` (`null` when empty), `alert_offset_ms`;
+  `applied_peers` / `applied_at` from ApplySystem's report (`time.peers`, `time.changed_at`;
+  `null` without it); `samples` = the clock samples of the last 24 h, newest first (today's and
+  yesterday's `state\clock\<day>.jsonl`), `offset_ms` = `offset_us` / 1000 and `delay_ms` =
+  `delay_us` / 1000 when `ok`, else `null`.
+- **`setup_problems` in TR and EN:** `routers/admin_config.py` `_BILINGUAL` also accepts
+  `[[name]]` inside the English part, so every problem of `GET /admin/config` (section 16),
+  the `sources` one included, comes back split into `message_tr` and `message_en` (the wizard's
+  summary and Ayarlar show them).
+
+### 19.6 Settings, `R20-filter`, the job `system.sample`
+
+- **Settings** (group `alerts`, "Uyarılar ve e-posta"; `DEFAULT_SETTINGS`, TR/EN labels and help
+  texts in `arcilogger_db.settings_meta`; no new group, no new refusal code):
+
+  | Key | Default | Bounds |
+  |---|---|---|
+  | `alerts.filter_days` | `[1, 2, 3, 4, 5, 6, 7]` (every day) | ISO weekdays 1-7; stored sorted without duplicates; may be empty; a non-integer or out-of-range day → `setting_work_hours_days` |
+  | `alerts.filter_skip_holidays` | `true` | boolean |
+  | `alerts.filter_quiet_hours` | `24` | 6-168 |
+
+  A site day is **expected** when its ISO weekday is in `alerts.filter_days` and not
+  (`alerts.filter_skip_holidays` and the day is in `usage.holidays`, "MM-DD" every year or
+  "YYYY-MM-DD" once). Owner question Q10, answered 2026-10-28: every day of the week is expected
+  except the listed holidays, a 24-hour rolling window, a web **or** a DNS filter record is
+  enough, `R20-filter` is high.
+- **Content-filter evidence** (`arcilogger_worker.compliance_filter.filter_evidence(session, *,
+  now) -> FilterEvidence`, shared by card 7 and `R20-filter`): it applies when an enabled,
+  non-unknown source of type `fortigate` exists; counts from `search_counts` (`tbl IN ('fg_web',
+  'fg_dns')`, the FortiGate sources, the last 8 days), `last_at` the newest `time` of `fg_web` or
+  `fg_dns` within 8 days, the web filter profiles of the newest 10,000 `fg_web` rows of 24 h (DNS
+  filter rows have no profile column); `alert_due` = it applies, no record in the window of
+  `alerts.filter_quiet_hours` and every site day the window touches is expected.
+- **`R20-filter`** (`alerts.system.check_filter`, in `CHECKS` as `("filter", check_filter)`):
+  when `alert_due`, one finding, dedup key `R20-filter:none`, severity `high`, title "İçerik
+  filtresi kaydı gelmiyor: son {hours} saat", details `{"hours": n, "last_at": iso | null}`;
+  resolved (`details.auto_resolved`) when `alert_due` no longer holds (a record arrived, the
+  window touches a day that is not expected, no FortiGate source is left). Catalogue
+  (`alerts.texts`): `RULES["R20-filter"]` "İçerik filtresi kaydı gelmiyor" / "No content filter
+  records", `_STEPS["R20-filter"]` (the four steps of contract 2.4; device steps by reference to
+  DEVICE-SETUP.md, "sahada doğrulayın"), `DESCRIBERS["R20-filter"]` "Son {hours} saatte içerik
+  filtresi kaydı yok." / "No content filter record in the last {hours} hours." (`hours` only).
+  Operator view: UYARILAR / ALERTS, ILK-ADIMLAR / FIRST-STEPS section 9.
+- **Job `system.sample`** (`arcilogger_worker.system_jobs.job_system_sample`, 5651 Temel, daily
+  after 00:30, after `reports.purge` in `default_jobs`): appends `{"day": "YYYY-MM-DD", "drives":
+  [{"path", "total", "used"}]}` (integers) for the site day to `state\system-history.json` =
+  `{"schema": 1, "days": [...]}` (`Layout.system_history`), replacing an entry of the same day,
+  keeping the newest 120 days, written with `atomic_write_text`; returns `{"day", "drives": n}`.
+  A damaged file or one of another schema is started again from this sample (logged); a file
+  that cannot be read at the moment fails the run, which the worker retries. Drive labels and
+  byte counts only.
+
+### 19.7 Error code, audit actions, permissions
+
+- **Error code** (`compliance/routes.py` `MESSAGES`, raised through its `_error()` helper):
+
+  | Code | HTTP | message_tr | message_en |
+  |---|---|---|---|
+  | `config_backup_unreadable` | 409 | Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi. | The configuration file could not be read; the backup confirmation was not recorded. |
+
+- **Audit actions** (details integers and strings only; labels in the web's `auditActions`):
+
+  | Action | Target | Details | Label TR / EN |
+  |---|---|---|---|
+  | `compliance.report_export` | `null` | `{"sha256": "<hex>", "ok": n, "warning": n, "error": n, "neutral": n}` | Uyum Durumu Raporu indirildi / Compliance status report exported |
+  | `compliance.config_backup_confirm` | `null` | `{"config_sha256": "<hex>"}` | Yapılandırma yedeği onaylandı / Configuration backup confirmed |
+
+  Not audited: `GET /compliance`, `GET /system`, `GET /system/disk`, `GET /system/health`.
+- **Permissions** (contract D15, section 6 table, [roles.md](roles.md)): `compliance.read` is
+  held by `admin` and `auditor` (owner question Q1, answered 2026-10-28): the auditor opens Uyum
+  Durumu with its cards and downloads the Uyum Durumu Raporu, and the auditor's export is audited
+  like the administrator's. Everything that changes state stays admin-only: the backup
+  confirmation (`settings.manage`), every setting and the first-run wizard (`/settings/setup`,
+  `settings.manage`). `system.read` (Sistem, the Panel's disk card) stays admin-only (owner
+  question Q2, default). hr and viewer hold none of the three permissions.
+- **Captured answers and mirrors:** `web/scripts/samples_compliance.py` and `samples_system.py`
+  (in `SAMPLE_MODULES`) capture the answers into `web/e2e/samples/`; the mirrors
+  `compliance-types.ts`, `system-types.ts`, `system-health-types.ts` are in the type tests'
+  `TYPES_FILES`.
+
+### 19.8 Decided while building (where the plan of ADR-0017 was refined)
+
+Recorded in the contract's "Deviations" sections; what touches the API, its answers or the
+alert:
+
+- **contract:** the specification's "rsyslog stats" are the own collector's statistics; card 3
+  judges the existing 2-day, 90-day and monthly verification results (Q6); card 8 follows the
+  configured lease evidence (Q11); no DNS filter profile is stored, card 7 says so ("sahada
+  doğrula"); no `compliance` schedule kind in Raporlar (D8, Q14); the wizard pre-fills no source;
+  card 10 reports the same-disk dump and the hand-made configuration copy that exist.
+- **W4-A:** card 4 reads its alerts by rule (`rule = 'R20-retention'`, severity not `info`),
+  because the retention task's alerts are imported without a dedup key; card 5 reads a newest
+  known credit `≤ 0` as used up; a `state\backup\last.json` that does not parse or is not an
+  object takes card 10's error row (manager decision on #41), a file that cannot be read at all
+  makes a card `neutral` "could not be checked", and an answer with such a card is not kept in
+  the 30-s cache.
+- **W4-B:** a forecast date more than `forecast.HORIZON_DAYS` (36,500 days) away is `null` while
+  `state` stays `estimated` (`growth_bytes_per_day` 0 below half a byte a day); "already above
+  the warning mark" is decided by a measurement (`used_bytes`, else the newest sample), and a
+  line that has passed the mark while no measurement has gives `warning_on` = today; the
+  collector and ingest blocks list the configured sources that have an entry in the status file;
+  `used_percent` is R20-disk's whole percent.
+- **W4-C:** the wizard's `smtp` step is done only when sending is switched on (`smtp.enabled`,
+  manager decision on #37; otherwise it lists "E-posta gönderimi kapalı." / "Sending e-mail is
+  switched off."); the Sistem forecast sentence has three variants beside the fixed `estimated`
+  text: English "(~1 day)" in the singular, "%{warning} eşiğine ulaşıldı; bu hızla dolmaya
+  {full_on} (~{days} gün)." / "The {warning}% mark is reached; at this rate the drive is full on
+  {full_on} (~{days} days)." with `warning_on` null, and "Disk kullanımı çok yavaş artıyor; dolma
+  tarihi öngörülemiyor." / "Disk use grows very slowly; no date can be given." with `full_on`
+  null; a null CPU reads "bu platformda okunamıyor" on platform `other`, "ölçülüyor" on Windows
+  and Linux.
+- **W4-D:** English interval texts in the singular for one ("Every 1 minute"); the Turkish
+  "from" suffix by how the time is read ("00:15'ten", "03:30'dan", "01:00'den"); a job is
+  `failing` also when `last_status` is `failed` with `failures` 0 (a run whose `job_runs` row the
+  database refused); `running` comes from a second bounded `job_runs` probe per job, because the
+  status file never shows a job in progress; Seal's evidence skips the day states Retention wrote
+  (`status = "deleted"`); the 1-s guard of `GET /system/health` loads only the tables it reads.
+
+Contract "Deviations — W4-x" has each with its tests.
