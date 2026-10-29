@@ -288,8 +288,8 @@ const CARD_PARTS: Record<
       fact(
         'days',
         ['Son 7 gün', 'Last 7 days'],
-        '12.10: 21407 · 11.10: 9876 · 10.10: 8455 · 09.10: 22310 · 08.10: 23012 · 07.10: 22745 · ' +
-          '06.10: 21998',
+        '13.10: 1834 · 12.10: 21407 · 11.10: 9876 · 10.10: 8455 · 09.10: 22310 · 08.10: 23012 · ' +
+          '07.10: 22745',
       ),
       fact(
         'profiles',
@@ -420,8 +420,8 @@ export const COMPLIANCE_REASONS: Record<ComplianceCardId, Record<ComplianceTone,
       'Yesterday (12.10.2026) is sealed but not verified yet (VerifyDaily runs at 01:00).',
     ],
     error: [
-      "Dün (12.10.2026) saat 9:00'a kadar mühürlenmedi.",
-      'Yesterday (12.10.2026) was not sealed by 9:00.',
+      "Dün (12.10.2026) saat 09:00'a kadar mühürlenmedi.",
+      'Yesterday (12.10.2026) was not sealed by 09:00.',
     ],
     neutral: [
       'Dün için kayıt yok; henüz izlenen kaynak tanımlanmadı.',
@@ -452,10 +452,10 @@ export const COMPLIANCE_REASONS: Record<ComplianceCardId, Record<ComplianceTone,
         'days.',
     ],
     warning: [
-      'Saklama kapalı ve 365 günden eski 8 mühürlü gün kasada duruyor (en eskisi 05.10.2025). ' +
+      'Saklama kapalı ve 730 günden eski 8 mühürlü gün kasada duruyor (en eskisi 05.10.2024). ' +
         'Kişisel verilerin gereğinden uzun saklanmaması için saklamayı açın.',
-      'Retention is off and 8 sealed day(s) older than 365 days are in the vault (the oldest ' +
-        '05.10.2025). Turn retention on so that personal data is not kept longer than needed.',
+      'Retention is off and 8 sealed day(s) older than 730 days are in the vault (the oldest ' +
+        '05.10.2024). Turn retention on so that personal data is not kept longer than needed.',
     ],
     error: ['Saklama görevinin açık bir uyarısı var.', 'The retention task has an open alert.'],
     neutral: ['Henüz mühürlü gün yok.', 'No sealed day yet.'],
