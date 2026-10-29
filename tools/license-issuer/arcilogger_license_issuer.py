@@ -566,6 +566,12 @@ class KeyResult:
         """The line for ``TRUSTED_KEYS`` in ``keys.py`` (the content of ``.public.txt``)."""
         return f'"{self.key_id}": "{self.public_key}",'
 
+    @property
+    def verify_option(self) -> str:
+        """The ``verify`` option, ready to paste: written with ``=``, since about one key in 64
+        starts with ``-`` and argparse takes ``--public-key -…`` for a missing value."""
+        return f"--public-key={self.public_key}"
+
 
 def check_key_id(key_id: str) -> str:
     if not KEY_ID_PATTERN.fullmatch(key_id) or key_id.startswith("test-"):
@@ -1090,6 +1096,7 @@ def cmd_keygen(args: argparse.Namespace) -> int:
     print(f"  {result.private_path}  (şifreli özel anahtar [encrypted private key])")
     print(f"  {result.public_path}  (keys.py satırı [line for keys.py])")
     print(f"  public key: {result.public_key}")
+    print(f"  verify: {result.verify_option}")
     print(f"  public key sha256: {result.public_sha256}")
     say(
         "Özel anahtarı iki ayrı çevrimdışı ortama yedekleyin. Yalnızca .public.txt satırını "
