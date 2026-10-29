@@ -157,6 +157,34 @@ describe('the top bar’s search box', () => {
   });
 });
 
+describe('a hand-over with a range', () => {
+  it.each([false, true])(
+    'Arama searches it once, on its range, and the address holds it (StrictMode %s)',
+    async (strict) => {
+      const calls = installFetch((request) =>
+        request.path === '/api/v1/auth/me'
+          ? jsonResponse(200, makeMe('admin'))
+          : errorResponse(404, 'not_found'),
+      );
+      handoff.put('/search', { q: 'source:fortigate', range: { preset: 'today' } });
+      const { router } = renderApp('/search', { strict });
+      // Arama has answered (this mock refuses the search).
+      expect(await screen.findByText('TR not_found')).toBeInTheDocument();
+      // The address's default range (the last 24 h) does not run it again.
+      const searches = calls.filter((c) => c.method === 'POST' && c.path === '/api/v1/search');
+      expect(searches.map((call) => call.body)).toEqual([
+        {
+          q: 'source:fortigate',
+          from: expect.stringMatching(/T00:00:00\+03:00$/) as string,
+          to: expect.any(String) as string,
+        },
+      ]);
+      expect(router.state.location.search).toBe('?range=today');
+      expect(router.state.location.state).toBeNull();
+    },
+  );
+});
+
 /*
  * Signing out, or a session the server ended, must not leave a query (an IP, a MAC, a name) for
  * whoever signs in next on the same browser.
