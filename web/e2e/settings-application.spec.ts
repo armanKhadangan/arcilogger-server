@@ -169,7 +169,7 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     await page.goto('/settings/application?group=lookup');
     const lookup = group(page, 'lookup');
     // An edit the browser's mirror of the exit rules accepts (the converted exit's label); the
-    // server refuses it with its captured 422 (`setting_invalid_egress`).
+    // server's refusal is forced, its captured 422 (`setting_invalid_egress`), whatever the value.
     await lookup
       .getByRole('group', { name: 'Çıkış wan' })
       .getByLabel('Açıklama')
@@ -177,7 +177,7 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
     network.refuseNext = true;
     await lookup.getByRole('button', { name: 'Kaydet' }).click();
     await expect.poll(() => api.callsTo('PATCH', '/settings').length).toBe(1);
-    // `validate_setting`'s text (`setting_egress_public_private`), never the value it refused.
+    // `validate_setting`'s text (`setting_egress_public_private`) at the exits' setting.
     await expect(
       lookup
         .getByTestId('setting-nat.egresses')

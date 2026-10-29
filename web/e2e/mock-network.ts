@@ -9,10 +9,11 @@
  *   `observed_exits_invalid` when the exit rules refuse that value, as `parse_egresses` does),
  *   `trandisp_known` from `nat.snat_trandisp` and each interface's `configured` from
  *   `lookup.srcmac_interfaces`; its captured refusals (the 504 of `failNext`, `hours` above 72);
- * - `PATCH /settings` refused once with the captured `setting_invalid_egress` (`refuseNext`: a
- *   rule of the server that the browser's mirror cannot see); every other change goes to the
- *   main mock, which checks the body against the API's model and the value against the exit
- *   rules, and stores it.
+ * - `PATCH /settings` refused once with the captured `setting_invalid_egress`, whatever the value
+ *   (`refuseNext`: the mirror refuses every rule it knows, so a server refusal can only be
+ *   forced; it is the only exit refusal captured); every other change goes to the main mock,
+ *   which checks the body against the API's model and the value against the exit rules, and
+ *   stores it.
  */
 
 import { readFileSync } from 'node:fs';
