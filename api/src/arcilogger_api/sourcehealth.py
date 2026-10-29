@@ -535,7 +535,7 @@ def lease_evidence(
     settings: LookupSettings | None
     try:
         settings = LookupSettings.from_settings(values)
-    except (TypeError, ValueError) as exc:
+    except (AttributeError, TypeError, ValueError) as exc:
         log.warning("lease evidence without the refusal rules: %s", exc)
         settings = None
     untrusted = trust.untrusted_sources(db)
