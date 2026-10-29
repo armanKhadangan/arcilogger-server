@@ -71,9 +71,14 @@ export function DriveMeter({
           className={cn('h-full rounded-full', FILL[level])}
           style={{ width: `${clamp(drive.used_percent)}%` }}
         />
-        {[drive.warning_percent, drive.critical_percent].map((mark) => (
+        {(
+          [
+            ['warning', drive.warning_percent],
+            ['critical', drive.critical_percent],
+          ] as const
+        ).map(([name, mark]) => (
           <span
-            key={mark}
+            key={name}
             aria-hidden="true"
             className="absolute -top-1 -bottom-1 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
             style={{ left: `${clamp(mark)}%` }}

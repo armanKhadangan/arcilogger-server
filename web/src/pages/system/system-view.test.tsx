@@ -148,6 +148,19 @@ describe('SystemView', () => {
     ]);
   });
 
+  it('draws both marks when the warning mark is the critical one', () => {
+    // `alerts.disk_used_percent` may be 95, the critical mark: two marks, no duplicate key.
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderView({
+      summary: withSummary(
+        (summary) => (summary.drives = [{ ...driveInfo('data'), warning_percent: 95 }]),
+      ),
+    });
+    expect(screen.getByRole('meter').querySelectorAll('span[aria-hidden="true"]')).toHaveLength(2);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it('says when the disk use did not grow', () => {
     renderView({
       summary: withSummary(
