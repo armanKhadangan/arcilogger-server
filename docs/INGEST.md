@@ -179,7 +179,10 @@ transaction, from exactly the lines whose rows loaded in it:
   status` lists the files still to count, `rebuild --source S --day YYYY-MM-DD` recounts one at
   once (also one still being loaded: it locks the file's `ingest_offsets` row, so ingest's next
   batch of that file waits until the recount commits), `verify --hours 2` recounts the recent
-  hours from the rows and exits 1 on a difference.
+  hours from the rows and exits 1 on a difference. A recount reads every row of its file through
+  a cursor planned for all its rows and never as a nested loop (`searchcounts.RECOUNT_PLANNER`):
+  a quiet day beside a busy one is recounted as fast as any other, guarded by
+  `worker/tests/test_search_counts_performance.py` (`perf`: the plan and the time).
 
 Tests: `ingest/tests/test_loader_counts.py` (shared batches over three sources and two days, a
 damaged line, a dropped typed row, the `COPY` salvage, vault continuation, a file half loaded

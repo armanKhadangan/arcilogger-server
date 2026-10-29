@@ -81,6 +81,13 @@ UPSERT: Final = text(
 )
 #: Rows fetched at a time while recounting.
 FETCH_ROWS: Final = 20_000
+#: Planner settings of the recount statement, for the rest of the caller's transaction until it
+#: has run. It reads every row, so the plan for its first rows that a server-side cursor asks for
+#: (``cursor_tuple_fraction`` 0.1) is never wanted, nor a nested loop joining a file's messages to
+#: its typed rows: with a few large days in a partition's statistics the small days' rows were
+#: underestimated, and the cursor's nested loop compared every message with every typed row
+#: (36 s for 27,500 lines instead of 0.3 s; ``worker/tests/test_search_counts_performance.py``).
+RECOUNT_PLANNER: Final = (("cursor_tuple_fraction", "1"), ("enable_nestloop", "off"))
 #: Private IPv4 ranges whose /24 is counted (RFC 1918 and the shared address space RFC 6598).
 PRIVATE_NETWORKS: Final = tuple(
     ipaddress.IPv4Network(network)
@@ -208,30 +215,49 @@ def _typed_union(tables: Iterable[str], where: Any) -> FromClause | None:
     return (union_all(*parts) if len(parts) > 1 else parts[0]).subquery("typed")
 
 
-def _recount(
-    connection: Connection, messages_where: Any, typed: FromClause | None
-) -> Counter[CountKey]:
+def recount_query(messages_where: Any, typed: FromClause | None) -> Select[Any]:
+    """The rows :func:`_recount` counts: the ``messages`` rows of ``messages_where``, each with
+    its typed row of ``typed`` (:func:`_typed_union`) when it has one."""
     m = Message.__table__
     columns = [m.c.time, m.c.source, m.c.raw_day, m.c.type, m.c.subtype]
     if typed is None:
-        query = select(*columns).where(messages_where)
-    else:
-        query = (
-            select(*columns, typed.c.tbl, typed.c.action, typed.c.client)
-            .select_from(
-                m.outerjoin(
-                    typed,
-                    and_(
-                        typed.c.time == m.c.time,
-                        typed.c.source == m.c.source,
-                        typed.c.raw_day == m.c.raw_day,
-                        typed.c.raw_line == m.c.raw_line,
-                    ),
-                )
+        return select(*columns).where(messages_where)
+    return (
+        select(*columns, typed.c.tbl, typed.c.action, typed.c.client)
+        .select_from(
+            m.outerjoin(
+                typed,
+                and_(
+                    typed.c.time == m.c.time,
+                    typed.c.source == m.c.source,
+                    typed.c.raw_day == m.c.raw_day,
+                    typed.c.raw_line == m.c.raw_line,
+                ),
             )
-            .where(messages_where)
         )
+        .where(messages_where)
+    )
+
+
+def recount_planner(connection: Connection) -> dict[str, str]:
+    """Set :data:`RECOUNT_PLANNER` for the caller's transaction (``set_config`` with
+    ``is_local``, as ``SET LOCAL``); the values before, for :func:`restore_planner`."""
+    previous = {}
+    for name, value in RECOUNT_PLANNER:
+        previous[name] = str(connection.scalar(select(func.current_setting(name))))
+        connection.execute(select(func.set_config(name, value, True)))
+    return previous
+
+
+def restore_planner(connection: Connection, previous: Mapping[str, str]) -> None:
+    for name, value in previous.items():
+        connection.execute(select(func.set_config(name, value, True)))
+
+
+def _recount(connection: Connection, query: Select[Any]) -> Counter[CountKey]:
+    """The keys of :func:`recount_query`'s rows, read with :data:`RECOUNT_PLANNER`."""
     counts: Counter[CountKey] = Counter()
+    previous = recount_planner(connection)
     # Statement options: Connection.execution_options would stream every later statement too.
     result = connection.execute(query.execution_options(stream_results=True, yield_per=FETCH_ROWS))
     for row in result.mappings():
@@ -241,6 +267,8 @@ def _recount(
             client = CLIENT_IP.get(table)
             values = {"action": row["action"], **({client: row["client"]} if client else {})}
         counts[count_key(row, table, values)] += 1
+    # A failed recount rolls the caller's transaction back, and the settings with it.
+    restore_planner(connection, previous)
     return counts
 
 
@@ -260,9 +288,9 @@ class RebuildResult:
     keys: int
 
 
-def rebuild_stream(connection: Connection, source: str, day: date) -> RebuildResult:
-    """Count the file ``spool/<source>/<day>.log`` again from its rows (the caller's
-    transaction; the caller clears ``ingest_offsets.counts_from_line`` in it)."""
+def file_recount_query(connection: Connection, source: str, day: date) -> Select[Any]:
+    """:func:`recount_query` of the file ``spool/<source>/<day>.log``: its rows, joined to the
+    typed tables of the kinds it holds."""
     lo, hi = stream_window(day)
     m = Message.__table__
     in_file = and_(m.c.source == source, m.c.raw_day == day, m.c.time >= lo, m.c.time < hi)
@@ -278,7 +306,13 @@ def rebuild_stream(connection: Connection, source: str, day: date) -> RebuildRes
             table.c.source == source, table.c.raw_day == day, table.c.time >= lo, table.c.time < hi
         )
 
-    counts = _recount(connection, in_file, _typed_union(tables_of(kinds), typed_in_file))
+    return recount_query(in_file, _typed_union(tables_of(kinds), typed_in_file))
+
+
+def rebuild_stream(connection: Connection, source: str, day: date) -> RebuildResult:
+    """Count the file ``spool/<source>/<day>.log`` again from its rows (the caller's
+    transaction; the caller clears ``ingest_offsets.counts_from_line`` in it)."""
+    counts = _recount(connection, file_recount_query(connection, source, day))
     connection.execute(
         delete(SearchCount).where(SearchCount.raw_day == day, SearchCount.source == source)
     )
@@ -349,7 +383,7 @@ def verify(connection: Connection, hours: int, *, now: datetime | None = None) -
     def in_range(table: Any) -> Any:
         return and_(table.c.time >= start, table.c.time < end)
 
-    counted = _recount(connection, in_range(m), _typed_union(TYPED_TABLES, in_range))
+    counted = _recount(connection, recount_query(in_range(m), _typed_union(TYPED_TABLES, in_range)))
     stored: Counter[CountKey] = Counter()
     c = SearchCount
     for hour, source, raw_day, kind, tbl, action, net, n in connection.execute(
