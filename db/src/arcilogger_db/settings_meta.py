@@ -511,8 +511,10 @@ _LOOKUP = _group(
         "arp.interval_seconds",
         "ARP kaydı aralığı (saniye)",
         "ARP log interval (seconds)",
-        "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı.",
-        "The ARP-LOG interval of the MikroTik scheduler script.",
+        "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı (en az 'Bırakmadan sonra ARP'yi yok "
+        "say' süresi kadar).",
+        "The ARP-LOG interval of the MikroTik scheduler script (at least as long as 'Ignore ARP "
+        "after a release').",
     ),
     (
         "arp.ignore_after_release_seconds",
