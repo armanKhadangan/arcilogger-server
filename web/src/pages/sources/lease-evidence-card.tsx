@@ -9,14 +9,9 @@ import { Card } from '@/components/ui/card';
 import { useAuth } from '@/lib/auth';
 import { formatDateTime, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
+import type { LeaseEvidence, LeaseEvidenceState } from '@/lib/sources-types';
 
-import {
-  formatUnverified,
-  LEASE_TABLES,
-  noneLines,
-  type LeaseEvidence,
-  type LeaseEvidenceState,
-} from './lease-evidence-model';
+import { formatUnverified, LEASE_TABLES, noneLines } from './lease-evidence-model';
 
 const STATE: Record<
   LeaseEvidenceState,

@@ -1,13 +1,12 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import type { FortigateObserved } from '@/lib/api-types';
 import { setLanguage } from '@/lib/i18n';
 import type { SettingGroup, SettingOut, SettingsOut } from '@/lib/settings-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 import { HAT_1, observedExitsInvalid, observedSample } from '@/test/wave3-mocks';
-
-import type { FortigateObserved } from './egress-model';
 
 /*
  * "Kayıtlarda görülen NAT adresleri" under the exit editor (contract 2.13): the observed

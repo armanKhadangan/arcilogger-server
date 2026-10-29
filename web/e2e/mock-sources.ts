@@ -14,7 +14,7 @@
  * "Kaynak olarak tanımla" case) and one promoted to `edge-1`. Example and tail lines are captured
  * raw lines (`samples/raw.json`), so their raw drawer opens (the capture's own lines of today are
  * not in `raw.json`). The overview carries the "Kira kanıtı" counts (`lease_evidence`, Wave 3
- * contract 2.12): a HAND MOCK (`src/test/wave3-mocks.ts`) until the server side captures it.
+ * contract 2.12), the captured overview's unless a test passes another.
  */
 
 import { createHash } from 'node:crypto';
@@ -23,15 +23,13 @@ import type { Page, Request, Route } from '@playwright/test';
 
 import type { DashboardParseFailures } from '../src/lib/api-types';
 import type {
+  LeaseEvidence,
   SourceDetail,
   SourceHealth,
   SourceParseFailure,
+  SourcesOverview,
   SourceTail,
 } from '../src/lib/sources-types';
-import type {
-  LeaseEvidence,
-  SourcesOverviewWithLease,
-} from '../src/pages/sources/lease-evidence-model';
 
 import type { MockApi, MockUser, RecordedCall } from './mock-api';
 import { copy, RAW, SAMPLE_TODAY, SOURCES } from './samples';
@@ -426,7 +424,7 @@ export class SourcesMock {
     if (Array.isArray(account)) return account;
     if (call.method !== 'GET') return this.api.error(405, 'method_not_allowed');
     if (call.path === '/sources') {
-      const overview: SourcesOverviewWithLease = {
+      const overview: SourcesOverview = {
         generated_at: NOW,
         today: SAMPLE_TODAY,
         collector: { updated_at: at(0.5), fresh: true },

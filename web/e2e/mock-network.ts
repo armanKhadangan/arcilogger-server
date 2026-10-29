@@ -14,8 +14,9 @@
 
 import type { Page, Request, Route } from '@playwright/test';
 
+import type { FortigateObserved } from '../src/lib/api-types';
 import type { SettingProblem } from '../src/lib/settings-types';
-import { validateEgresses, type FortigateObserved } from '../src/pages/settings/egress-model';
+import { validateEgresses } from '../src/pages/settings/egress-model';
 import { observedSample } from '../src/test/wave3-mocks';
 
 import { bodyProblems, type MockApi, type RecordedCall } from './mock-api';

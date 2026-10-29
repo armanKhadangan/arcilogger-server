@@ -9,7 +9,7 @@
  * (172.20.x, 100.64.12.9 / 100.64.13.9 behind the ISP routers, RFC 5737 public addresses).
  */
 
-import type { LookupOut } from '../lib/api-types';
+import type { FortigateObserved, LookupOut } from '../lib/api-types';
 import type {
   AttributionChain,
   EgressEntry,
@@ -19,8 +19,8 @@ import type {
   LookupOutcome,
   NatMatch,
 } from '../lib/lookup-types';
-import type { Egresses, FortigateObserved } from '../pages/settings/egress-model';
-import type { LeaseEvidence } from '../pages/sources/lease-evidence-model';
+import type { Egresses } from '../pages/settings/egress-model';
+import type { LeaseEvidence } from '../lib/sources-types';
 
 // -- GET /settings/fortigate/observed (2.12) -------------------------------------------------------
 

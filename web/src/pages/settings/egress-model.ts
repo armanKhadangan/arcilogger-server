@@ -15,7 +15,7 @@
 import type { TFunction } from 'i18next';
 
 // Relative imports: the E2E mocks import this module, outside the `@/` alias.
-import type { DateTimeString } from '../../lib/api-types';
+import type { ObservedNatRow } from '../../lib/api-types';
 import type { EgressMode, PortPreservation } from '../../lib/lookup-types';
 import { codePointLength } from '../../lib/validation';
 
@@ -611,58 +611,6 @@ export function egressWarnings(rows: readonly EgressRow[]): {
 }
 
 // -- the observed NAT addresses (`GET /settings/fortigate/observed`, contract 2.12) -------------
-//
-// Interim types: WP-D adds them to `lib/api-types.ts` with the endpoint; until then they are
-// declared here, exactly as 2.12 gives the JSON.
-
-/** One `(transip, dstintf, trandisp)` of trusted `fg_traffic` rows of the window. */
-export interface ObservedNatRow {
-  transip: string;
-  dstintf: string | null;
-  trandisp: string | null;
-  sessions: number;
-  first_seen: DateTimeString;
-  last_seen: DateTimeString;
-  /** The exit that claims the address (by the stored `nat.egresses`), `null` when none does. */
-  egress: string | null;
-  /** `trandisp` is one of `nat.snat_trandisp`. */
-  trandisp_known: boolean;
-}
-
-export interface ObservedNat {
-  hours: number;
-  /** More than 100 groups: the busiest are listed. */
-  truncated: boolean;
-  rows: ObservedNatRow[];
-  unmapped_transips: string[];
-  unknown_trandisp: string[];
-  /** The stored `nat.egresses` cannot be read: every row has `egress: null`. */
-  exits_invalid?: boolean;
-}
-
-/** srcmac per `srcintf` in the last hour: rows, distinct MACs and the most IPv4s of one MAC. */
-export interface ObservedSrcmacInterface {
-  srcintf: string;
-  rows: number;
-  macs: number;
-  max_ips_per_mac: number;
-  /** Listed in `lookup.srcmac_interfaces`. */
-  configured: boolean;
-}
-
-export interface ObservedSrcmac {
-  hours: number;
-  truncated: boolean;
-  interfaces: ObservedSrcmacInterface[];
-}
-
-/** `GET /settings/fortigate/observed?hours=24` (`settings.manage`; counts and the firewall's own
- * addresses only, not audited). */
-export interface FortigateObserved {
-  generated_at: DateTimeString;
-  nat: ObservedNat;
-  srcmac: ObservedSrcmac;
-}
 
 /**
  * What "Çıkış olarak ekle" offers for an observed address: `join` — add it to an exit of the

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api, errorMessage } from '@/lib/api';
+import type { FortigateObserved, ObservedNatRow } from '@/lib/api-types';
 import { formatDateTime, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 
@@ -15,8 +16,6 @@ import {
   draftClaim,
   prefillOptions,
   type EgressRow,
-  type FortigateObserved,
-  type ObservedNatRow,
   type PrefillOption,
 } from './egress-model';
 

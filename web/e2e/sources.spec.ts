@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import type { LeaseEvidence } from '../src/pages/sources/lease-evidence-model';
+import type { LeaseEvidence } from '../src/lib/sources-types';
 import {
   leaseEvidenceAbsent,
   leaseEvidenceNone,
@@ -25,7 +25,7 @@ import { RAW, SAMPLE_TODAY, SOURCES } from './samples';
 async function open(
   page: Page,
   options: Parameters<typeof mockApi>[1] = {},
-  leaseEvidence?: LeaseEvidence | null,
+  leaseEvidence?: LeaseEvidence,
 ): Promise<MockApi> {
   const api = await mockApi(page, { signedInAs: 'tolga', ...options });
   await mockSources(page, api, leaseEvidence === undefined ? {} : { leaseEvidence });
@@ -479,13 +479,10 @@ test.describe('Kira kanıtı', () => {
     await expect(page).toHaveURL(/\/security\?rule=R20-lease$/);
   });
 
-  test('a server without the counts shows no card; the supported set-ups open', async ({
-    page,
-  }) => {
-    await open(page, {}, null);
+  test('the supported set-ups open', async ({ page }) => {
+    await open(page);
     await page.goto('/sources');
     await expect(table(page)).toBeVisible();
-    await expect(page.getByTestId('lease-evidence')).toHaveCount(0);
     const note = page.getByTestId('supported-topologies');
     await note.getByRole('button', { name: 'Desteklenen ağ yapıları' }).click();
     await expect(note.getByRole('listitem')).toHaveCount(7);

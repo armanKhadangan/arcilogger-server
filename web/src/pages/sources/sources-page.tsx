@@ -23,7 +23,6 @@ import type { SourceHealth } from '@/lib/sources-types';
 import { cn } from '@/lib/utils';
 
 import { LeaseEvidenceCard } from './lease-evidence-card';
-import { leaseEvidenceOf } from './lease-evidence-model';
 import { LicenceStrip } from './licence-strip';
 import { SourceSheet } from './source-sheet';
 import {
@@ -314,7 +313,6 @@ export function SourcesHealthPage() {
 
   const updatedAt = overview.dataUpdatedAt;
   const data = overview.data;
-  const leaseEvidence = leaseEvidenceOf(data);
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -381,7 +379,7 @@ export function SourcesHealthPage() {
             </p>
             <LicenceStrip />
           </div>
-          {leaseEvidence ? <LeaseEvidenceCard evidence={leaseEvidence} /> : null}
+          <LeaseEvidenceCard evidence={data.lease_evidence} />
           <SupportedTopologies />
           {!data.collector.fresh ? (
             <Alert tone="warning" assertive={false} data-testid="collector-stale">

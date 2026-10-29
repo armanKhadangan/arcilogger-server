@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import type { SourcesOverview } from '@/lib/sources-types';
+import type { LeaseEvidence, SourcesOverview } from '@/lib/sources-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 import { SOURCES } from '@/test/samples';
@@ -11,8 +11,6 @@ import {
   leaseEvidenceOk,
   leaseEvidenceRefused,
 } from '@/test/wave3-mocks';
-
-import type { LeaseEvidence } from './lease-evidence-model';
 
 /*
  * "Kira kanıtı" on Kaynaklar (contract 2.13): the three states with `refused` winning over
