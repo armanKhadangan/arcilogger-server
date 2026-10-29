@@ -13,7 +13,13 @@
   The lookup must finish within ``lookup.timeout_seconds`` (spec 14: < 5 s for ±60 s): each
   statement gets the remaining time as PostgreSQL ``statement_timeout``; past the limit the
   answer is 504 ``lookup_timeout`` (audited as ``lookup.run_failed``) instead of a hanging
-  request. The lookup is stored (``lookups``) and audited (``lookup.run``).
+  request. Its transaction plans every statement with its values (``plan_cache_mode =
+  force_custom_plan``, transaction-local, as the search does). The lookup is stored
+  (``lookups``) and audited (``lookup.run``).
+  A stored setting the lookup cannot read (written around the validator) answers 503
+  ``lookup_settings_invalid``: for ``nat.egresses`` (public-IP lookups only) with the text that
+  names it, for any other lookup or lease setting (``LookupSettings.from_settings``,
+  ``lookup.timeout_seconds``) with a second text that names no key, logged at WARNING.
 * ``GET /lookup/{id}`` — one lookup with its outcome (audited ``lookup.view``).
 * ``GET /lookup/{id}/report.pdf`` — the official report: rendered and stored on the first call
   (``lookup.report``), the same bytes on every call (``lookup.report_download``);
@@ -30,14 +36,17 @@ lookup, which carry its report (:func:`arcilogger_api.routers.evidence.visible_p
 
 **Audit details are minimal** (the audit log is sealed and kept): inputs in machine form, the
 request's authority, file number and date, the SHA-256 of the reason (the text itself stays in
-``lookups``, which retention can delete) and result **ids** (traffic rows, leases, persons) —
-never names, MAC addresses or raw lines.
+``lookups``, which retention can delete), result **ids** (traffic rows, leases, persons) and, for
+a public-IP lookup, the internet exit it resolved to as ``egress: {resolution, names}`` (``null``
+without a public IP; exit names are firewall configuration) — never names of people, MAC
+addresses or raw lines.
 """
 
 from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -64,6 +73,7 @@ from arcilogger_api.auth.privacy import require_privacy_notice
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
 from arcilogger_api.errors import ApiError
 from arcilogger_api.reports import Person, ReportError, load_or_create, read_token
+from arcilogger_api.search.sql import custom_plans_statement
 from arcilogger_api.security import CurrentUser, client_ip
 from arcilogger_core.iputil import canonical_ip
 from arcilogger_core.timeutil import SITE_TZ_NAME, site_day, utc_now
@@ -81,6 +91,7 @@ from arcilogger_worker.lookup import (
 from arcilogger_worker.lookup.types import MAX_TOLERANCE_SECONDS
 
 router = APIRouter(prefix="/lookup", tags=["lookup"])
+log = logging.getLogger("arcilogger.api.lookup")
 
 RunnerDep = Annotated[CurrentUser, Depends(require_privacy_notice("lookup.run"))]
 
@@ -103,8 +114,12 @@ MESSAGES: Final = {
         "tolerance or add destination details; tell the administrator if it persists.",
     ),
     "lookup_settings_invalid": (
-        "5651 sorgu ayarları geçersiz (Ayarlar → NAT); sistem yöneticisi düzeltmelidir.",
-        "The 5651 lookup settings are invalid (Settings → NAT); an administrator must fix them.",
+        "5651 sorgu ayarları geçersiz: İnternet çıkışları (nat.egresses) değeri okunamadı "
+        "(Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları "
+        "(NAT)); sistem yöneticisi düzeltmelidir.",
+        "The 5651 lookup settings are invalid: the internet exits value (nat.egresses) cannot be "
+        "read (Settings → Application settings → 5651 lookup and lease timeline → Internet exits "
+        "(NAT)); an administrator must fix it.",
     ),
     "ipv6_not_supported": (
         "Bu sürümde IPv6 adresleriyle 5651 sorgusu yapılamaz: ARCILOGGER, IPv6 adreslerini "
@@ -158,6 +173,14 @@ MESSAGES: Final = {
         "(details are in the system log).",
     ),
 }
+#: The second text of ``lookup_settings_invalid``: a stored lookup or lease setting other than
+#: ``nat.egresses`` cannot be read (the key is named only in the system log).
+SETTINGS_UNREADABLE: Final = (
+    "5651 sorgu ayarları geçersiz: kayıtlı bir sorgu ya da kira ayarı okunamadı (Ayarlar → "
+    "Uygulama ayarları); sistem yöneticisi düzeltmelidir.",
+    "The 5651 lookup settings are invalid: a stored lookup or lease setting cannot be read "
+    "(Settings → Application settings); an administrator must fix it.",
+)
 #: HTTP status of each report error (``report_missing``/``report_damaged``: the stored file is
 #: gone or changed; the others: the report could not be made now and nothing was stored).
 REPORT_STATUS: Final = {
@@ -491,7 +514,8 @@ class LookupOut(BaseModel):
     query: dict[str, Any]
     mode: str | None
     result_count: int
-    #: ``LookupOutcome.to_dict()`` (docs/MVP-CONTRACTS.md section 5).
+    #: ``LookupOutcome.to_dict()`` as stored (docs/MVP-CONTRACTS.md section 5): a lookup stored
+    #: before ADR-0016 lacks the members it added (``egress``, ``unconverted_dhcp``, ...).
     outcome: dict[str, Any] | None
     report: ReportOut | None
     #: Time the lookup took (only in the answer to ``POST /lookup/5651``).
@@ -569,6 +593,18 @@ def result_ids(outcome: LookupOutcome) -> list[dict[str, Any]]:
     return results
 
 
+def egress_details(outcome: LookupOutcome) -> dict[str, Any] | None:
+    """The internet exit of the audit entry in machine form: the resolution and the names of
+    ``egress.egresses`` in their order (``""`` for the implicit exit of ``unconfigured``);
+    ``None`` for a lookup without a public IP."""
+    if outcome.egress is None:
+        return None
+    return {
+        "resolution": outcome.egress.resolution,
+        "names": [entry.name for entry in outcome.egress.egresses],
+    }
+
+
 def _request_details(row: Lookup | RequestDetails) -> dict[str, Any]:
     return {
         "authority": row.authority,
@@ -639,6 +675,10 @@ def run_5651(
     try:
         settings = LookupSettings.from_settings(values)
         limit = min(max(int(values.get(TIMEOUT_SETTING, DEFAULT_TIMEOUT_SECONDS)), 1), 300)
+    except (TypeError, ValueError) as exc:
+        log.warning("lookup settings cannot be read: %s", exc)
+        raise ApiError(503, "lookup_settings_invalid", *SETTINGS_UNREADABLE) from exc
+    try:
         if lookup_request.public_ip is not None:  # the internet exits: public-IP lookups only
             settings.egresses()
     except (TypeError, ValueError) as exc:
@@ -646,6 +686,10 @@ def run_5651(
     started = monotonic()
     try:
         with statement_deadline(db, limit):
+            # Every statement planned with its values, for this transaction only: psycopg prepares
+            # a statement sent five times, and PostgreSQL may then keep a generic plan, made
+            # without the values, which prunes no partition of the time range.
+            db.execute(custom_plans_statement())
             outcome = run_lookup(db, lookup_request, settings, layout=layout)
     except (LookupTimeoutError, DBAPIError) as exc:
         if isinstance(exc, DBAPIError) and not _is_timeout(exc):
@@ -699,6 +743,7 @@ def run_5651(
             "truncated": outcome.truncated,
             "results": results[:AUDIT_RESULTS],
             "results_listed": min(len(results), AUDIT_RESULTS),
+            "egress": egress_details(outcome),
         },
         ip=client_ip(request),
     )

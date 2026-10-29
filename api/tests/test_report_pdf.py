@@ -192,9 +192,14 @@ def test_double_nat_report_content(
     assert "41234" in text
     assert "± 60 sn" in text
     assert "Aday listesi (zamana ve hedefe göre sıralı)" in text
-    assert "Çift NAT" in text
-    assert "ISS modeminin ilgili zamana ait NAT kaydı" in text
+    # no exits: a second NAT assumed (2.12), with the CGNAT caveat and what would make it exact
+    assert "Çıkış / Exit Çıkış tanımlı değil / No exits defined" in text
+    assert "Çift NAT varsayımı: bu adres için servis sağlayıcının ikinci bir NAT yaptığı" in text
+    assert "(CGNAT) aday listesi doğru oturumu içermeyebilir" in text
+    assert "(a) servis sağlayıcının ilgili zamana ait NAT kaydı" in text
     assert "köprü (bridge) moduna" in text
+    assert "ISS modeminin arkasındadır" not in text  # never stated as a fact
+    assert "Ayarlar → NAT" not in text  # a settings page that does not exist
     assert (
         "Kesin eşleşme için ISS modeminin NAT kaydı gerekir; aşağıda zaman ve hedefe göre "
         "adaylar listelenmiştir." in text
@@ -543,7 +548,9 @@ def test_ip_conflict_unknown_client_and_wrong_offset_in_the_report(
     found = re.search(r"Zincir güveni / Confidence (\S+)", alternative)
     assert found is not None
     assert found.group(1) == "düşük"
-    assert "172.20.41.77 adresi için bu anda geçerli bir IP-MAC kaydı (kira) yok" in text
+    # the session without a lease: a missing chain prints its reason (2.12)
+    assert "Zincir kurulamadı: o anda bu iç IP adresi için kira kaydı yok." in text
+    assert "No chain: no lease covered this internal IP address at that moment." in text
     assert "UYARI: satır, veritabanında kayıtlı bayt konumunda başlamıyor." in text
     inputs = report_row(app_session_factory, data["id"]).inputs
     moved = next(item for item in inputs["evidence"] if item["row_id"] == site.s3)
@@ -725,7 +732,9 @@ def test_double_nat_without_candidates_does_not_promise_a_candidate_list(
     assert "Çift NAT" in text
     assert "kesin olarak eşlenemez" in text
     assert "aday oturum da bulunamadı; bu nedenle rapor bir sonuç içermez" in text
-    assert "ISS modeminin ilgili zamana ait NAT kaydı" in text  # what would make it exact
+    assert "(a) servis sağlayıcının ilgili zamana ait NAT kaydı" in text  # what makes it exact
+    assert "Çift NAT varsayımı" in text
+    assert "(CGNAT)" in text
     assert "aday listesidir" not in text
     assert "The result is a list of candidate sessions" not in text
 

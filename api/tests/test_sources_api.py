@@ -5,6 +5,12 @@ or direct count, equal), days, gaps from a sealed vault and today's open one, pa
 their detail only for raw-line readers, and the audited tail: permissions, KVKK, rate limit, the
 no-file case and a ``range_sha256`` an auditor recomputes from the file. The sparkline query and
 the suggestion for a busy unknown sender are guarded at 300,000 rows an hour (``poe test-perf``).
+
+The lease evidence card (``lease_evidence``, contract 2.12, 3.5): usable rows only, refused and
+excluded rows apart, the empty logid map, the verified format, current leases, ``none`` read from
+the active alerts, ``refused`` live and winning over ``none``, unreadable DHCP settings, and the
+srcmac count only with interfaces, kept 60 s, null past its 2-s deadline; counts only, never a
+client's address, never audited. Its perf guards are in ``test_observed_perf.py``.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, delete, select, text
+from sqlalchemy import Engine, delete, func, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api import security, sourcehealth
@@ -34,9 +40,22 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.timeutil import day_window, site_day, to_site
 from arcilogger_db.engine import session_factory
-from arcilogger_db.models import AuditLog, IngestOffset, Message, ParseFailure, Source
+from arcilogger_db.models import (
+    Alert,
+    AuditLog,
+    FgTraffic,
+    IngestOffset,
+    Lease,
+    Message,
+    ParseFailure,
+    Source,
+)
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_db.searchcounts import rebuild_stream
+from arcilogger_db.settings import set_setting
+from arcilogger_worker.alerts import system
+from arcilogger_worker.alerts.system import run_system_checks
+from arcilogger_worker.testing import Evidence
 from arcilogger_worker.vaulttesting import at_site, make_vault
 
 Login = Callable[..., LoggedIn]
@@ -757,6 +776,479 @@ def test_the_overview_is_cached(
         session.add(Source(name="new-device", type="generic", address="172.20.10.47"))
         session.commit()
     assert overview(client).keys() == first.keys()  # within 15 s: the same answer
+
+
+# -- the lease evidence card (contract 2.12, 3.5) -------------------------------------------------
+
+PC, PC_MAC = "172.20.42.57", "00:00:5e:00:53:57"
+#: An unconfigured sender (RFC 5737) and a logid the default map does not name.
+UNKNOWN = "unknown-192.0.2.7"
+UNMAPPED_LOGID = "0100026099"
+
+
+def audit_count(factory: sessionmaker[Session]) -> int:
+    with factory() as session:
+        return int(session.scalar(select(func.count()).select_from(AuditLog)) or 0)
+
+
+def lease_card(client: TestClient) -> dict[str, Any]:
+    response = client.get("/api/v1/sources")
+    assert response.status_code == 200, response.text
+    data = SourcesOverview.model_validate(response.json())
+    evidence: dict[str, Any] = response.json()["lease_evidence"]
+    assert data.lease_evidence.model_dump(mode="json") == evidence
+    return evidence
+
+
+def set_value(factory: sessionmaker[Session], key: str, value: Any) -> None:
+    with factory() as session:
+        set_setting(session, key, value, updated_by="admin")
+        session.commit()
+
+
+def add_alert(factory: sessionmaker[Session], key: str, state: str = "open") -> None:
+    with factory() as session:
+        session.add(
+            Alert(
+                rule="R20-lease", severity="high", state=state, title="Kira kanıtı", dedup_key=key
+            )
+        )
+        session.commit()
+
+
+@pytest.fixture
+def lease_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the lease evidence check of ``alerts.system`` runs (in its own transaction)."""
+    checks = tuple((name, check) for name, check in system.CHECKS if name == "lease_evidence")
+    monkeypatch.setattr(system, "CHECKS", checks)
+
+
+@pytest.fixture
+def evidence_rows(
+    app_session_factory: sessionmaker[Session], layout: Layout, now: datetime
+) -> None:
+    """DHCP and ARP rows of the last 24 hours, usable and not, and leases."""
+    with app_session_factory() as session:
+        session.add(Source(name=UNKNOWN, type="fortigate", address="192.0.2.7", unknown=True))
+        evidence = Evidence(session, layout)
+        evidence.fortigate_dhcp(now - timedelta(hours=3), PC, PC_MAC)
+        evidence.fortigate_dhcp(now - timedelta(minutes=30), PC, PC_MAC)
+        evidence.fortigate_dhcp(now - timedelta(hours=30), PC, PC_MAC)  # outside 24 h
+        # refused: an unconfigured sender, the receive time, an unmapped logid
+        evidence.fortigate_dhcp(now - timedelta(hours=2), PC, PC_MAC, source=UNKNOWN)
+        evidence.fortigate_dhcp(now - timedelta(minutes=20), PC, PC_MAC, device_time=False)
+        evidence.fortigate_dhcp(now - timedelta(minutes=10), PC, PC_MAC, logid=UNMAPPED_LOGID)
+        # excluded (configuration): an IPv6 address
+        evidence.fortigate_dhcp(now - timedelta(hours=4), "fd00:0:0:42::57", PC_MAC)
+        evidence.dhcp(now - timedelta(hours=5), "assigned", "172.20.43.20", "00:00:5e:00:53:20")
+        evidence.dhcp(
+            now - timedelta(minutes=45), "deassigned", "172.20.43.20", "00:00:5e:00:53:20"
+        )
+        evidence.arp(now - timedelta(hours=2), "172.20.43.21", "00:00:5e:00:53:21")
+        evidence.arp(now - timedelta(minutes=90), "172.20.43.22", "00:00:5e:00:53:22")
+        session.add_all(
+            [
+                lease("fg_dhcp", now - timedelta(hours=3), None),  # open
+                lease("mt_dhcp", now - timedelta(hours=5), now - timedelta(hours=2)),
+                lease("mt_dhcp", now - timedelta(days=3), now - timedelta(days=2)),  # not current
+            ]
+        )
+        session.commit()
+
+
+def lease(table: str, start: datetime, end: datetime | None) -> Lease:
+    """A lease of ``table`` (open without ``end``); fictional addresses."""
+    return Lease(
+        ip="172.20.43.30",
+        mac="00:00:5e:00:53:30",
+        start=start,
+        end=end,
+        end_reason="open" if end is None else "dhcp" if table != "mt_arp" else "arp",
+        confidence="high",
+        source_table=table,
+    )
+
+
+def test_lease_evidence_counts_usable_rows_only(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    evidence_rows: None,
+    now: datetime,
+) -> None:
+    """``rows`` are the rows the lease job uses: the unknown sender's, the receive-time and the
+    unmapped-logid rows are refused, the IPv6 row is excluded; none of them is in ``rows``."""
+    reader(client, login_as, app_session_factory)
+    before = audit_count(app_session_factory)
+    response = client.get("/api/v1/sources")
+    card = lease_card(client)
+    assert card == {
+        "hours": 24,
+        "mt_dhcp": {
+            "rows": 2,
+            "last_hour": to_site(now - timedelta(minutes=45)).isoformat(),
+            "leases_current": 1,
+        },
+        "fg_dhcp": {
+            "rows": 2,
+            "last_hour": to_site(now - timedelta(minutes=30)).isoformat(),
+            "leases_current": 1,
+            "refused_rows": 3,
+            "excluded_rows": 1,
+            "format_verified": False,
+        },
+        "mt_arp": {"rows": 2, "last_hour": None, "leases_current": 0},
+        "srcmac": {"interfaces": [], "rows_last_hour": None},
+        "state": "refused",
+        "none_tables": [],
+    }
+    # counts only: no client address or MAC, and nothing audited (sources.read, admin only)
+    text_of = json.dumps(response.json()["lease_evidence"])
+    for personal in (PC, PC_MAC, "172.20.43.", "00:00:5e", "192.0.2.7"):
+        assert personal not in text_of
+    assert audit_count(app_session_factory) == before
+
+
+def test_last_hour_is_the_newest_usable_row(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    now: datetime,
+) -> None:
+    reader(client, login_as, app_session_factory)
+    with app_session_factory() as session:
+        evidence = Evidence(session, layout)
+        evidence.fortigate_dhcp(now - timedelta(hours=2), PC, PC_MAC)
+        # refused rows of the last hour do not make it
+        evidence.fortigate_dhcp(now - timedelta(minutes=5), PC, PC_MAC, logid=UNMAPPED_LOGID)
+        session.commit()
+    card = lease_card(client)
+    assert (card["fg_dhcp"]["rows"], card["fg_dhcp"]["last_hour"]) == (1, None)
+    with app_session_factory() as session:
+        Evidence(session, layout).fortigate_dhcp(now - timedelta(minutes=30), PC, PC_MAC)
+        Evidence(session, layout).fortigate_dhcp(now - timedelta(minutes=50), PC, PC_MAC)
+        session.commit()
+    card = lease_card(client)
+    assert card["fg_dhcp"]["rows"] == 3
+    assert card["fg_dhcp"]["last_hour"] == to_site(now - timedelta(minutes=30)).isoformat()
+
+
+def test_excluded_interfaces_are_not_refused(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    now: datetime,
+) -> None:
+    set_value(app_session_factory, "dhcp.fortigate_interfaces_excluded", ["ipsec1"])
+    with app_session_factory() as session:
+        evidence = Evidence(session, layout)
+        evidence.fortigate_dhcp(now - timedelta(hours=1), PC, PC_MAC)
+        for minutes in (10, 20):
+            evidence.fortigate_dhcp(
+                now - timedelta(minutes=minutes), "172.20.90.5", PC_MAC, interface="ipsec1"
+            )
+        session.commit()
+    reader(client, login_as, app_session_factory)
+    card = lease_card(client)
+    fortigate = card["fg_dhcp"]
+    assert (fortigate["rows"], fortigate["refused_rows"], fortigate["excluded_rows"]) == (1, 0, 2)
+    assert card["state"] == "ok"
+
+
+def test_an_empty_logid_map_refuses_nothing_on_the_card(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    evidence_rows: None,
+) -> None:
+    """FortiGate DHCP evidence switched off (``dhcp.fortigate_logids = {}``): no row is usable
+    and none counts as refused, as the alert reads it (round-5 note)."""
+    set_value(app_session_factory, "dhcp.fortigate_logids", {})
+    reader(client, login_as, app_session_factory)
+    card = lease_card(client)
+    assert (card["fg_dhcp"]["rows"], card["fg_dhcp"]["refused_rows"]) == (0, 0)
+    assert card["fg_dhcp"]["excluded_rows"] == 1  # configuration stays configuration
+    assert card["state"] == "ok"
+
+
+def test_format_verified_follows_the_setting(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], now: datetime
+) -> None:
+    reader(client, login_as, app_session_factory)
+    assert lease_card(client)["fg_dhcp"]["format_verified"] is False
+    set_value(app_session_factory, "dhcp.fortigate_format_verified", True)
+    assert lease_card(client)["fg_dhcp"]["format_verified"] is True
+
+
+def test_leases_current_per_table(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    evidence_rows: None,
+    now: datetime,
+) -> None:
+    """Open or ended in the last 24 hours: the open fg_dhcp lease and the mt_dhcp lease that
+    ended 2 hours ago; not the one that ended 2 days ago."""
+    with app_session_factory() as session:
+        session.add(lease("mt_arp", now - timedelta(hours=30), now - timedelta(hours=23)))
+        session.commit()
+    reader(client, login_as, app_session_factory)
+    card = lease_card(client)
+    assert [card[table]["leases_current"] for table in ("mt_dhcp", "fg_dhcp", "mt_arp")] == [
+        1,
+        1,
+        1,
+    ]
+
+
+def test_lease_evidence_none_follows_the_active_alerts(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    api_config: Config,
+    now: datetime,
+    lease_checks: None,
+) -> None:
+    """``none`` is read from the alerts the check opened, never recomputed: an old ACK and
+    office traffic open ``R20-lease:none:fg_dhcp``; an acknowledged alert still counts; once a
+    usable ACK arrives and the check resolves it, the card is ``ok``."""
+    with app_session_factory() as session:
+        evidence = Evidence(session, layout)
+        evidence.fortigate_dhcp(now - timedelta(days=5), PC, PC_MAC)
+        evidence.traffic(now - timedelta(minutes=10), "172.20.43.20", 50000)
+        session.commit()
+    reader(client, login_as, app_session_factory)
+    assert lease_card(client)["state"] == "ok"  # nothing read until the check ran
+    run_system_checks(app_session_factory, layout, api_config, now=now)
+    card = lease_card(client)
+    assert (card["state"], card["none_tables"]) == ("none", ["fg_dhcp"])
+    with app_session_factory() as session:
+        alert = session.scalars(
+            select(Alert).where(Alert.dedup_key == "R20-lease:none:fg_dhcp")
+        ).one()
+        alert.state = "acknowledged"
+        session.commit()
+    assert (lease_card(client)["state"], lease_card(client)["none_tables"]) == ("none", ["fg_dhcp"])
+    with app_session_factory() as session:
+        Evidence(session, layout).fortigate_dhcp(now - timedelta(minutes=5), PC, PC_MAC)
+        session.commit()
+    assert lease_card(client)["state"] == "none"  # until the check resolves it
+    run_system_checks(app_session_factory, layout, api_config, now=now)
+    card = lease_card(client)
+    assert (card["state"], card["none_tables"]) == ("ok", [])
+
+
+def test_absent_gives_none_without_tables(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session], now: datetime
+) -> None:
+    add_alert(app_session_factory, "R20-lease:absent")
+    add_alert(app_session_factory, "R20-lease:none:mt_arp", state="resolved")  # not active
+    add_alert(app_session_factory, "R20-lease:renewals-missing")  # another cause
+    reader(client, login_as, app_session_factory)
+    card = lease_card(client)
+    assert (card["state"], card["none_tables"]) == ("none", [])
+    add_alert(app_session_factory, "R20-lease:none:mt_arp")
+    add_alert(app_session_factory, "R20-lease:none:mt_dhcp")
+    card = lease_card(client)
+    assert (card["state"], card["none_tables"]) == ("none", ["mt_dhcp", "mt_arp"])
+
+
+def test_refused_wins_over_none(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    now: datetime,
+) -> None:
+    """Every row of the feed refused while its ``none`` alert is active: the records arrive, so
+    the card says ``refused``."""
+    with app_session_factory() as session:
+        evidence = Evidence(session, layout)
+        for minutes in (10, 70, 130):
+            evidence.fortigate_dhcp(
+                now - timedelta(minutes=minutes), PC, PC_MAC, logid=UNMAPPED_LOGID
+            )
+        session.commit()
+    add_alert(app_session_factory, "R20-lease:none:fg_dhcp")
+    reader(client, login_as, app_session_factory)
+    card = lease_card(client)
+    assert (card["fg_dhcp"]["rows"], card["fg_dhcp"]["refused_rows"]) == (0, 3)
+    assert (card["state"], card["none_tables"]) == ("refused", ["fg_dhcp"])
+
+
+def test_a_corrected_setting_leaves_refused_at_once(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    api_config: Config,
+    now: datetime,
+    lease_checks: None,
+) -> None:
+    """The refused count is live: once the logid is mapped the card leaves ``refused`` without
+    waiting for the alert, which is still open until its check runs."""
+    with app_session_factory() as session:
+        evidence = Evidence(session, layout)
+        for minutes in (10, 70):
+            evidence.fortigate_dhcp(
+                now - timedelta(minutes=minutes), PC, PC_MAC, logid=UNMAPPED_LOGID
+            )
+        evidence.traffic(now - timedelta(minutes=10), "172.20.43.20", 50000)
+        session.commit()
+    run_system_checks(app_session_factory, layout, api_config, now=now)
+    reader(client, login_as, app_session_factory)
+    card = lease_card(client)
+    assert (card["state"], card["fg_dhcp"]["refused_rows"]) == ("refused", 2)
+    logids = {"0100026001": "assigned", "0100026002": "deassigned", UNMAPPED_LOGID: "assigned"}
+    set_value(app_session_factory, "dhcp.fortigate_logids", logids)
+    card = lease_card(client)
+    assert (card["fg_dhcp"]["rows"], card["fg_dhcp"]["refused_rows"]) == (2, 0)
+    # no longer refused; the absent cause the check opened (no usable row then) is read as it
+    # stands until the check runs again
+    assert (card["state"], card["none_tables"]) == ("none", [])
+    with app_session_factory() as session:
+        active = dict(
+            session.execute(
+                select(Alert.dedup_key, Alert.state).where(
+                    Alert.state.in_(("open", "acknowledged"))
+                )
+            ).all()
+        )
+    assert active.get("R20-lease:fortigate-refused") == "open"
+    assert active.get("R20-lease:absent") == "open"
+    run_system_checks(app_session_factory, layout, api_config, now=now)
+    assert lease_card(client)["state"] == "ok"
+
+
+def test_unreadable_dhcp_settings_keep_the_card(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    evidence_rows: None,
+) -> None:
+    """A ``dhcp.fortigate_*`` value written around the validator: never a 500 and never a card
+    without lease evidence; the lease job cannot use any ``fg_dhcp`` row then (``Context.load``
+    raises), so no row counts as usable, refused or excluded, ``format_verified`` is only a
+    stored JSON ``true`` and the state comes from the alerts (decision X8, review 3, Q10)."""
+    set_value(app_session_factory, "dhcp.fortigate_logids", ["0100026001"])
+    set_value(app_session_factory, "dhcp.fortigate_format_verified", "true")
+    reader(client, login_as, app_session_factory)
+    card = lease_card(client)
+    fortigate = card["fg_dhcp"]
+    # the IPv6 row and the receive-time row of the fixture are not counted as usable either
+    assert fortigate == {
+        "rows": 0,
+        "last_hour": None,
+        "leases_current": 1,
+        "refused_rows": 0,
+        "excluded_rows": 0,
+        "format_verified": False,
+    }
+    assert (card["mt_dhcp"]["rows"], card["state"]) == (2, "ok")
+    set_value(app_session_factory, "dhcp.fortigate_format_verified", True)
+    assert lease_card(client)["fg_dhcp"]["format_verified"] is True
+    add_alert(app_session_factory, "R20-lease:none:mt_arp")
+    assert lease_card(client)["state"] == "none"
+
+
+# -- the srcmac count of the card -----------------------------------------------------------------
+
+
+def test_srcmac_rows_only_with_interfaces(
+    app: FastAPI,
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with app_session_factory() as session:
+        session.add(Source(name=UNKNOWN, type="fortigate", address="192.0.2.7", unknown=True))
+        evidence = Evidence(session, layout)
+        for minutes, srcintf, srcmac in (
+            (30, "vlan42", PC_MAC),  # counted
+            (40, "vlan42", PC_MAC),  # counted
+            (90, "vlan42", PC_MAC),  # older than the hour
+            (20, "vlan99", PC_MAC),  # another interface
+            (10, "vlan42", None),  # without srcmac
+        ):
+            evidence.traffic(
+                now - timedelta(minutes=minutes),
+                PC,
+                50000 + minutes,
+                srcintf=srcintf,
+                srcmac=srcmac,
+            )
+        row = evidence.traffic(
+            now - timedelta(minutes=5), PC, 50100, srcintf="vlan42", srcmac=PC_MAC
+        )
+        session.execute(update(FgTraffic).where(FgTraffic.id == row).values(source=UNKNOWN))
+        session.commit()
+    reader(client, login_as, app_session_factory)
+
+    def never(*args: Any) -> Any:
+        raise AssertionError("no fg_traffic count without configured interfaces")
+
+    monkeypatch.setattr(sourcehealth, "srcmac_query", never)
+    assert lease_card(client)["srcmac"] == {"interfaces": [], "rows_last_hour": None}
+    monkeypatch.undo()
+    monkeypatch.setattr("arcilogger_api.routers.sources.utc_now", lambda: now)
+    set_value(app_session_factory, "lookup.srcmac_interfaces", ["vlan42"])
+    assert lease_card(client)["srcmac"] == {"interfaces": ["vlan42"], "rows_last_hour": 2}
+    # kept 60 s for the same interfaces; other interfaces are counted at once
+    with app_session_factory() as session:
+        Evidence(session, layout).traffic(
+            now - timedelta(minutes=1), PC, 50200, srcintf="vlan42", srcmac=PC_MAC
+        )
+        session.commit()
+    assert state_of_app(app).srcmac.ttl == 60.0
+    assert lease_card(client)["srcmac"]["rows_last_hour"] == 2
+    set_value(app_session_factory, "lookup.srcmac_interfaces", ["vlan42", "vlan99"])
+    assert lease_card(client)["srcmac"] == {
+        "interfaces": ["vlan42", "vlan99"],
+        "rows_last_hour": 4,
+    }
+
+
+def test_srcmac_count_times_out_to_null(
+    app: FastAPI,
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past its 2-s deadline the count is null and the rest of the overview is answered; the
+    request's transaction stays usable (a savepoint), and a null is not kept."""
+    set_value(app_session_factory, "lookup.srcmac_interfaces", ["vlan42"])
+    monkeypatch.setattr(
+        sourcehealth, "srcmac_query", lambda *args: text("SELECT count(*) FROM pg_sleep(30)")
+    )
+    reader(client, login_as, app_session_factory)
+    started = time.monotonic()
+    card = lease_card(client)
+    assert time.monotonic() - started < 15  # never the 30-s sleep
+    assert card["srcmac"] == {"interfaces": ["vlan42"], "rows_last_hour": None}
+    assert card["state"] == "ok"
+    assert state_of_app(app).srcmac.get() is None
+    # the request's own statement timeout is kept, and its transaction stays usable
+    with app_session_factory() as session:
+        session.execute(text("SET LOCAL statement_timeout TO '7s'"))
+        assert sourcehealth.srcmac_rows_last_hour(session, ["vlan42"], [], now) is None
+        assert session.execute(text("SHOW statement_timeout")).scalar_one() == "7s"
+        session.rollback()
+    monkeypatch.undo()
+    monkeypatch.setattr("arcilogger_api.routers.sources.utc_now", lambda: now)
+    assert lease_card(client)["srcmac"]["rows_last_hour"] == 0
+    with app_session_factory() as session:
+        session.execute(text("SET LOCAL statement_timeout TO '7s'"))
+        assert sourcehealth.srcmac_rows_last_hour(session, ["vlan42"], [], now) == 0
+        assert session.execute(text("SHOW statement_timeout")).scalar_one() == "7s"
 
 
 # -- performance ----------------------------------------------------------------------------------
