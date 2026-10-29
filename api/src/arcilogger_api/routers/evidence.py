@@ -339,12 +339,14 @@ def _chain_refs(chain: AttributionChain | None) -> list[EvidenceRef]:
 
 
 def lookup_refs(outcome: LookupOutcome) -> set[RawRef]:
-    """Every raw line a lookup result cites (sessions, leases, devices, alternatives)."""
+    """Every raw line a lookup result cites (sessions, leases, devices, alternatives, and the
+    unconverted FortiGate DHCP lines its report shows)."""
     refs: list[EvidenceRef] = []
     for match in outcome.matches:
         refs += match.traffic.evidence
         refs += _chain_refs(match.chain)
     refs += _chain_refs(outcome.attribution)
+    refs += outcome.unconverted_dhcp  # shown in section 6 of the report, as no attribution (D8)
     return {
         RawRef(day=ref.raw.day, source=ref.raw.source, line=ref.raw.line)
         for ref in refs
