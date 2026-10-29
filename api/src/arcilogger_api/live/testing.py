@@ -61,6 +61,7 @@ class LiveServer:
         deadline = time.monotonic() + 20
         while not self.server.started:
             if not self.thread.is_alive() or time.monotonic() > deadline:
+                self.__exit__(None, None, None)  # the pre-bound socket too
                 raise RuntimeError("the test server did not start")
             time.sleep(0.02)
         return self

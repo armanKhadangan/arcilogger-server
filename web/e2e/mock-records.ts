@@ -325,7 +325,8 @@ export class RecordsMock {
   /**
    * A read of the package's detail: a new one moves queued → building → ready, one step per read
    * (the drawer polls it), not by the clock, so slow test steps cannot skip a state. The list
-   * shows the state the last read left.
+   * shows the state the last read left. `ready` is the third read: two `EVIDENCE_POLL_MS` (3 s)
+   * polls after the drawer opens.
    */
   private read(item: EvidenceDetail & { reads?: number }): EvidenceDetail {
     if (item.reads === undefined) return item;
