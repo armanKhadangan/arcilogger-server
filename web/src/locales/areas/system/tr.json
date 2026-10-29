@@ -1,0 +1,221 @@
+{
+  "system": {
+    "description": "Sunucunun kaynakları, hizmetleri, zamanlanmış görevleri ve saati.",
+    "updated": "Güncellendi {{time}}",
+    "refresh": "Yenile",
+    "loadFailed": "Sistem durumu alınamadı.",
+    "none": "—",
+    "blocks": {
+      "resources": "Kaynak kullanımı",
+      "disks": "Diskler",
+      "database": "Veritabanı",
+      "collector": "Toplayıcı",
+      "ingest": "İçe aktarma",
+      "services": "Hizmetler",
+      "tasks": "Zamanlanmış görevler",
+      "jobs": "Worker işleri",
+      "clock": "Saat",
+      "version": "Sürüm ve güncelleme"
+    },
+    "host": {
+      "cpu": "İşlemci",
+      "memory": "Bellek",
+      "uptime": "Çalışma süresi",
+      "measuring": "ölçülüyor",
+      "unreadable": "bu platformda okunamıyor"
+    },
+    "drive": {
+      "role": {
+        "data": "Veri sürücüsü",
+        "system": "Sistem sürücüsü"
+      },
+      "meter": "{{path}} sürücüsünün doluluğu",
+      "full": "{{percent}} dolu",
+      "usage": "{{used}} / {{total}} kullanılıyor, {{free}} boş",
+      "marks": "Uyarı eşiği {{warning}} · kritik eşik {{critical}}",
+      "noDrives": "Okunabilen sürücü yok."
+    },
+    "forecast": {
+      "estimated_one": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{count}} gün).",
+      "estimated_other": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{count}} gün).",
+      "estimatedFull_one": "%{{warning}} eşiği aşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
+      "estimatedFull_other": "%{{warning}} eşiği aşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
+      "growth": "Disk kullanımı günde yaklaşık {{size}} artıyor.",
+      "insufficient": "Tahmin için en az 7 günlük ölçüm gerekiyor ({{samples}}/7).",
+      "notGrowing": "Son 30 günde disk kullanımı artmadı."
+    },
+    "database": {
+      "storage": "Depolama",
+      "storageName": {
+        "postgresql": "PostgreSQL",
+        "timescaledb": "PostgreSQL ve TimescaleDB"
+      },
+      "total": "Toplam boyut",
+      "unmeasured": "Boyut ölçülemedi.",
+      "measuredAt": "Ölçüm zamanı",
+      "tablesCaption": "En büyük tablolar",
+      "table": "Tablo",
+      "size": "Boyut"
+    },
+    "collector": {
+      "updatedAt": "Durum dosyasının son yazılışı",
+      "startedAt": "Hizmetin başlangıcı",
+      "staleNote": "Durum dosyası 2 dakikadan eski; gösterilen değerler son yazılanlardır. Toplayıcı hizmetinin (ArciCollector) çalıştığını denetleyin.",
+      "missingNote": "Toplayıcının durum dosyası yok; hizmet hiç çalışmamış ya da dosya okunamıyor.",
+      "sourcesCaption": "Kaynaklara göre alınan mesajlar",
+      "source": "Kaynak",
+      "messages": "Mesaj",
+      "bytes": "Boyut",
+      "lastReceived": "Son mesaj",
+      "never": "Hiç mesaj yok",
+      "noSources": "Toplayıcı henüz tanımlı bir kaynaktan mesaj almadı.",
+      "unknownSenders": "Tanımlı olmayan göndericiler",
+      "unknownSendersValue_one": "{{formatted}} gönderici, {{messages}} mesaj, {{size}}",
+      "unknownSendersValue_other": "{{formatted}} gönderici, {{messages}} mesaj, {{size}}",
+      "unknownSendersHint": "Adresleri burada gösterilmez; Kaynaklar sayfasında listelenir.",
+      "droppedUnknown": "Bilinmeyen göndericiden atılan mesaj",
+      "droppedTransport": "Aktarım sırasında atılan mesaj",
+      "writeFailures": "Diske yazma hatası",
+      "writeErrorSince": "Yazma hatası başlangıcı",
+      "tornLines": "Yarım kalan satır",
+      "tcpConnections": "Açık TCP bağlantısı",
+      "tcpFramingErrors": "TCP çerçeve hatası"
+    },
+    "ingest": {
+      "updatedAt": "Durum dosyasının son yazılışı",
+      "staleNote": "Durum dosyası 2 dakikadan eski; gösterilen değerler son yazılanlardır. İçe aktarma hizmetinin (ArciIngest) çalıştığını denetleyin.",
+      "missingNote": "İçe aktarmanın durum dosyası yok; hizmet hiç çalışmamış ya da dosya okunamıyor.",
+      "serviceState": "Hizmetin bildirdiği durum",
+      "database": "Veritabanı bağlantısı",
+      "workers": "Etkin işçi",
+      "workersValue": "{{active}} / {{configured}}",
+      "rate": "Satır/sn",
+      "sourcesCaption": "Kaynaklara göre içe aktarma",
+      "source": "Kaynak",
+      "lagBytes": "Bekleyen",
+      "lagSeconds": "Gecikme",
+      "unfinishedDays": "Bitmemiş gün",
+      "error": "Hata",
+      "hasError": "Hata var",
+      "noError": "Hata yok",
+      "noSources": "İçe aktarma henüz tanımlı bir kaynağı işlemedi.",
+      "unknownSources": "Tanımlı olmayan kaynak dosyası"
+    },
+    "services": {
+      "caption": "Hizmetlerin durumu",
+      "name": "Hizmet",
+      "state": "Durum",
+      "updatedAt": "Son işaret",
+      "agent": "Yönetim hizmeti",
+      "heartbeat": "Son yanıt",
+      "applySystem": "Sistem ayarlarının uygulanması (ApplySystem)",
+      "appliedAt": "Son çalışma",
+      "code": "Sonuç kodu"
+    },
+    "tasks": {
+      "caption": "Zamanlanmış görevlerin son kanıtı",
+      "task": "Görev",
+      "schedule": "Çizelge",
+      "state": "Durum",
+      "lastEvidence": "Son kanıt",
+      "evidence": "Kanıt dosyası"
+    },
+    "jobs": {
+      "caption": "Worker işlerinin son çalışması",
+      "job": "İş",
+      "schedule": "Çizelge",
+      "module": "Lisans modülü",
+      "state": "Durum",
+      "lastStarted": "Son başlangıç",
+      "duration": "Süre",
+      "failures": "Ardışık hata",
+      "nextDue": "Sonraki çalışma"
+    },
+    "clock": {
+      "ntpServer": "Saat sunucusu",
+      "fallbackServer": "Yedek saat sunucusu",
+      "alertOffset": "Uyarı sınırı",
+      "appliedPeers": "Windows'a uygulanan saat sunucuları",
+      "appliedAt": "Uygulanma zamanı",
+      "notApplied": "Uygulanmadı",
+      "notSet": "Ayarlanmamış",
+      "samplesCaption": "Son 24 saatin saat ölçümleri",
+      "time": "Zaman",
+      "server": "Sunucu",
+      "state": "Durum",
+      "offset": "Fark",
+      "delay": "Gecikme",
+      "stratum": "Katman",
+      "noSamples": "Son 24 saatte saat ölçümü yok.",
+      "ms": "{{value}} ms"
+    },
+    "version": {
+      "product": "Ürün",
+      "version": "Sürüm",
+      "core": "Çekirdek sürümü",
+      "releaseDate": "Yayın tarihi",
+      "maintenance": "Bakım",
+      "maintenanceUntil": "{{until}} tarihine kadar",
+      "coversVersion": "Kurulu sürüm bakım süresi içinde yayımlandı.",
+      "notCoversVersion": "Kurulu sürüm bakım süresi bittikten sonra yayımlandı.",
+      "upgrade": "Yükseltme için yeni çevrimdışı paketi sunucuya kopyalayıp KURULUM.md bölüm 13'teki adımları izleyin. ARCILOGGER güncelleme indirmez."
+    },
+    "state": {
+      "file": {
+        "running": "Çalışıyor",
+        "stale": "Güncel değil",
+        "missing": "Durum dosyası yok"
+      },
+      "agent": {
+        "ok": "Çalışıyor",
+        "stale": "Yanıtı gecikiyor",
+        "missing": "Çalışmıyor",
+        "disabled": "Kapalı"
+      },
+      "apply": {
+        "ok": "Uygulandı",
+        "failed": "Başarısız",
+        "never": "Henüz çalışmadı",
+        "disabled": "Tarayıcıdan yönetim kapalı"
+      },
+      "task": {
+        "ok": "Zamanında",
+        "late": "Gecikti",
+        "missing": "Kanıt yok",
+        "not_used": "Kullanılmıyor",
+        "not_observable": "İzlenemiyor"
+      },
+      "job": {
+        "ok": "Tamam",
+        "failing": "Hata veriyor",
+        "skipped": "Atlandı",
+        "running": "Çalışıyor",
+        "never": "Hiç çalışmadı"
+      },
+      "drive": {
+        "ok": "Olağan",
+        "warning": "Uyarı eşiğinin üstünde",
+        "critical": "Kritik"
+      },
+      "sample": {
+        "ok": "Sınır içinde",
+        "over": "Sınırın üstünde",
+        "noAnswer": "Yanıt yok"
+      },
+      "database": {
+        "ok": "Erişilebilir",
+        "failed": "Erişilemiyor",
+        "unknown": "Bilinmiyor"
+      },
+      "maintenance": {
+        "valid": "Geçerli",
+        "endsSoon": "Yakında bitiyor",
+        "expired": "Süresi doldu",
+        "none": "Bakım bilgisi yok"
+      }
+    },
+    "diskCard": {
+      "title": "Disk"
+    }
+  }
+}

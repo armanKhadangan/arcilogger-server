@@ -1,0 +1,221 @@
+{
+  "system": {
+    "description": "The server's resources, services, scheduled tasks and clock.",
+    "updated": "Updated {{time}}",
+    "refresh": "Refresh",
+    "loadFailed": "The system status could not be read.",
+    "none": "—",
+    "blocks": {
+      "resources": "Resource use",
+      "disks": "Disks",
+      "database": "Database",
+      "collector": "Collector",
+      "ingest": "Import",
+      "services": "Services",
+      "tasks": "Scheduled tasks",
+      "jobs": "Worker jobs",
+      "clock": "Clock",
+      "version": "Version and upgrades"
+    },
+    "host": {
+      "cpu": "Processor",
+      "memory": "Memory",
+      "uptime": "Uptime",
+      "measuring": "being measured",
+      "unreadable": "cannot be read on this platform"
+    },
+    "drive": {
+      "role": {
+        "data": "Data drive",
+        "system": "System drive"
+      },
+      "meter": "Use of drive {{path}}",
+      "full": "{{percent}} used",
+      "usage": "{{used}} of {{total}} used, {{free}} free",
+      "marks": "Warning mark {{warning}} · critical mark {{critical}}",
+      "noDrives": "No drive could be read."
+    },
+    "forecast": {
+      "estimated_one": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{count}} day).",
+      "estimated_other": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{count}} days).",
+      "estimatedFull_one": "The {{warning}}% mark is passed; at this rate the drive is full on {{fullOn}} (~{{count}} day).",
+      "estimatedFull_other": "The {{warning}}% mark is passed; at this rate the drive is full on {{fullOn}} (~{{count}} days).",
+      "growth": "Disk use grows by about {{size}} a day.",
+      "insufficient": "A forecast needs at least 7 days of samples ({{samples}}/7).",
+      "notGrowing": "Disk use did not grow in the last 30 days."
+    },
+    "database": {
+      "storage": "Storage",
+      "storageName": {
+        "postgresql": "PostgreSQL",
+        "timescaledb": "PostgreSQL with TimescaleDB"
+      },
+      "total": "Total size",
+      "unmeasured": "The size could not be measured.",
+      "measuredAt": "Measured at",
+      "tablesCaption": "Largest tables",
+      "table": "Table",
+      "size": "Size"
+    },
+    "collector": {
+      "updatedAt": "Status file last written",
+      "startedAt": "Service started",
+      "staleNote": "The status file is older than 2 minutes; the values shown are the last ones written. Check that the collector service (ArciCollector) is running.",
+      "missingNote": "The collector has no status file; the service never ran or the file cannot be read.",
+      "sourcesCaption": "Messages received per source",
+      "source": "Source",
+      "messages": "Messages",
+      "bytes": "Size",
+      "lastReceived": "Last message",
+      "never": "No message yet",
+      "noSources": "The collector has not received messages from a configured source yet.",
+      "unknownSenders": "Senders not configured",
+      "unknownSendersValue_one": "{{formatted}} sender, {{messages}} messages, {{size}}",
+      "unknownSendersValue_other": "{{formatted}} senders, {{messages}} messages, {{size}}",
+      "unknownSendersHint": "Their addresses are not shown here; the Sources page lists them.",
+      "droppedUnknown": "Messages of unknown senders dropped",
+      "droppedTransport": "Messages dropped in transport",
+      "writeFailures": "Disk write failures",
+      "writeErrorSince": "Write failures since",
+      "tornLines": "Incomplete lines",
+      "tcpConnections": "Open TCP connections",
+      "tcpFramingErrors": "TCP framing errors"
+    },
+    "ingest": {
+      "updatedAt": "Status file last written",
+      "staleNote": "The status file is older than 2 minutes; the values shown are the last ones written. Check that the import service (ArciIngest) is running.",
+      "missingNote": "The import has no status file; the service never ran or the file cannot be read.",
+      "serviceState": "State the service reports",
+      "database": "Database connection",
+      "workers": "Active workers",
+      "workersValue": "{{active}} / {{configured}}",
+      "rate": "Lines/s",
+      "sourcesCaption": "Import per source",
+      "source": "Source",
+      "lagBytes": "Waiting",
+      "lagSeconds": "Lag",
+      "unfinishedDays": "Unfinished days",
+      "error": "Error",
+      "hasError": "Has an error",
+      "noError": "No error",
+      "noSources": "The import has not processed a configured source yet.",
+      "unknownSources": "Source files not configured"
+    },
+    "services": {
+      "caption": "State of the services",
+      "name": "Service",
+      "state": "State",
+      "updatedAt": "Last sign",
+      "agent": "Administration service",
+      "heartbeat": "Last answer",
+      "applySystem": "Applying the system settings (ApplySystem)",
+      "appliedAt": "Last run",
+      "code": "Result code"
+    },
+    "tasks": {
+      "caption": "Latest evidence of the scheduled tasks",
+      "task": "Task",
+      "schedule": "Schedule",
+      "state": "State",
+      "lastEvidence": "Latest evidence",
+      "evidence": "Evidence file"
+    },
+    "jobs": {
+      "caption": "Latest run of the worker jobs",
+      "job": "Job",
+      "schedule": "Schedule",
+      "module": "Licence module",
+      "state": "State",
+      "lastStarted": "Last started",
+      "duration": "Duration",
+      "failures": "Failures in a row",
+      "nextDue": "Next run"
+    },
+    "clock": {
+      "ntpServer": "Time server",
+      "fallbackServer": "Fallback time server",
+      "alertOffset": "Alert limit",
+      "appliedPeers": "Time servers applied to Windows",
+      "appliedAt": "Applied at",
+      "notApplied": "Not applied",
+      "notSet": "Not set",
+      "samplesCaption": "Clock samples of the last 24 hours",
+      "time": "Time",
+      "server": "Server",
+      "state": "State",
+      "offset": "Offset",
+      "delay": "Delay",
+      "stratum": "Stratum",
+      "noSamples": "No clock sample in the last 24 hours.",
+      "ms": "{{value}} ms"
+    },
+    "version": {
+      "product": "Product",
+      "version": "Version",
+      "core": "Core version",
+      "releaseDate": "Release date",
+      "maintenance": "Maintenance",
+      "maintenanceUntil": "Until {{until}}",
+      "coversVersion": "The installed version was released within the maintenance period.",
+      "notCoversVersion": "The installed version was released after the maintenance period ended.",
+      "upgrade": "To upgrade, copy the new offline bundle to the server and follow INSTALL.md section 13. ARCILOGGER downloads no updates."
+    },
+    "state": {
+      "file": {
+        "running": "Running",
+        "stale": "Not current",
+        "missing": "No status file"
+      },
+      "agent": {
+        "ok": "Running",
+        "stale": "Answers late",
+        "missing": "Not running",
+        "disabled": "Switched off"
+      },
+      "apply": {
+        "ok": "Applied",
+        "failed": "Failed",
+        "never": "Not run yet",
+        "disabled": "Browser administration off"
+      },
+      "task": {
+        "ok": "On time",
+        "late": "Late",
+        "missing": "No evidence",
+        "not_used": "Not used",
+        "not_observable": "Not observable"
+      },
+      "job": {
+        "ok": "OK",
+        "failing": "Failing",
+        "skipped": "Skipped",
+        "running": "Running",
+        "never": "Never run"
+      },
+      "drive": {
+        "ok": "Normal",
+        "warning": "Above the warning mark",
+        "critical": "Critical"
+      },
+      "sample": {
+        "ok": "Within the limit",
+        "over": "Over the limit",
+        "noAnswer": "No answer"
+      },
+      "database": {
+        "ok": "Reachable",
+        "failed": "Not reachable",
+        "unknown": "Unknown"
+      },
+      "maintenance": {
+        "valid": "Valid",
+        "endsSoon": "Ends soon",
+        "expired": "Ended",
+        "none": "No maintenance information"
+      }
+    },
+    "diskCard": {
+      "title": "Disk"
+    }
+  }
+}
