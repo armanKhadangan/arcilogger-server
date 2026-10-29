@@ -6157,6 +6157,47 @@ from section 0.2 are recorded here too, with the date and who decided.
     for the clock.
   Fold into 2.7, 2.8.3 and 2.9.
 
+## Deviations — c3 (WP-C3, 2026-10-29)
+
+- **`seen_overlap(P)` reads the transip index in its own order, the first overlapping row** (2.8.3,
+  D31 (a); 3.8).
+  - **The query.** 2.8.3 states the query, `transip = P AND time >= T − probe AND time <= T +
+    probe + max_session_seconds AND time − duration <= T + probe`, on
+    `ix_fg_traffic_transip_transport_time`. The lookup asks it as `SELECT time … ORDER BY transip,
+    transport, time LIMIT 1` (`_Probe.seen_overlap`), not as `EXISTS`. The answer is the same (a row
+    or none).
+  - **Why not `EXISTS`.** For a busy P the planner expected an early match and scanned the partition
+    sequentially, also reading the rows before the range: 0.9 s on a partition of 10 days at 1 M
+    rows a day.
+  - **Why not time order.** The first fix, `ORDER BY time LIMIT 1`, read every address's rows of the
+    24 h range on the primary key when none of P's sessions overlaps the window: 0.29 s (1,029,271
+    rows removed by the filter) at 1 M rows a day for an address with about 1 % of them; the index's
+    order reads that address's 8,437 rows in 4 ms.
+  - **What the plan reads now.** The index's order keeps the plan on the index 2.8.3 names. It reads
+    P's own rows of the range only, and stops at the first overlapping one. Measured on the guard
+    site (1 M rows a day): no rows 0.001 s, a busy P overlapping T 0.002–0.004 s, an address with
+    1 % of the rows and no overlap 0.004 s.
+  - **2.8.3's premise does not hold for one case.** "An address no exit claims has few rows, so the
+    scan stays short" fails for a busy unclaimed P with no session overlapping the window (for
+    example the FortiGate's address of a line asked about before its first row, or of a line that
+    came up later that day). Such a P has every row of its range read, since `duration` is in no
+    index and each row must be fetched to know it does not overlap: 885,416 rows, 0.50–0.53 s at 1 M
+    rows a day, over 3.8's 0.2 s. No form of the query reaches 0.2 s with the shipped indexes
+    (`EXISTS` 0.30 s on a sequential scan that grows with the partition, time order 0.35 s, index
+    order 0.49–0.61 s). The whole lookup stays at about 1 s, inside its 5 s.
+  - **The guard.** 3.8's overlap guard measures that case (`busy_before`: P = the busy exit address
+    5 h before its first row) under a bound of its own, 1 s (`OVERLAP_SECONDS` in
+    `worker/tests/test_lookup_performance.py`), until the owner answers Q-C3-1 (accept a bound for
+    this shape in 3.8, or WP-A adds an index the probe can answer from, such as an expression index
+    on `(transip, time − duration)` or `INCLUDE (duration)` on the transip index; the bound then
+    goes back to 0.2 s). Every other case stays under 0.2 s. The guard asserts the plan is on the
+    transip index and that it read P's rows of the range and no other address's.
+  - **Tests.**
+    `worker/tests/test_lookup_performance.py::test_the_overlap_probe_of_an_unclaimed_address_is_fast`
+    (`no_rows`, `busy`, `busy_late`, `busy_before`, `later_line`): `busy` failed against `EXISTS` (a
+    sequential scan), and 4 of the 5 cases failed against the time order (a plan on the primary
+    key). Fold into 2.8.3 and 3.8.
+
 ## Deviations — d (WP-D, 2026-10-28)
 
 Each entry says what the contract says, what was built, why, and the tests that pin it. Test
