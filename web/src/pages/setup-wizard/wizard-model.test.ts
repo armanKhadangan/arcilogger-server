@@ -65,6 +65,7 @@ describe('every step’s state from the configuration', () => {
     ]);
     expect(states.replica.missing).toEqual([{ key: 'setupWizard.missing.replicaOff' }]);
     expect(states.smtp.missing).toEqual([
+      { key: 'setupWizard.missing.smtpOff' },
       { key: 'setupWizard.missing.smtpServer' },
       { key: 'setupWizard.missing.smtpSender' },
     ]);
@@ -169,6 +170,15 @@ describe('every step’s state from the configuration', () => {
     expect(stepState('smtp', { config, tested: false }).missing).toEqual([
       { key: 'setupWizard.missing.smtpSender' },
     ]);
+  });
+
+  it('e-mail: switched off is not done, even with a server and a sender', () => {
+    const config = completeConfig();
+    config.sections.smtp.enabled = false;
+    expect(stepState('smtp', { config, tested: false })).toEqual({
+      done: false,
+      missing: [{ key: 'setupWizard.missing.smtpOff' }],
+    });
   });
 });
 

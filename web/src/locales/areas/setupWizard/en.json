@@ -53,6 +53,7 @@
       "notProduction": "Time stamps do not come from the Kamu SM production server.",
       "sealNotReady": "Sealing is not ready.",
       "replicaOff": "The replica is switched off.",
+      "smtpOff": "Sending e-mail is switched off.",
       "smtpServer": "No SMTP server is set.",
       "smtpSender": "No sender address is set."
     },

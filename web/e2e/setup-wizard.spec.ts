@@ -256,9 +256,10 @@ test.describe('İlk kurulum sihirbazı', () => {
       await expectNoA11yViolations(page);
       await skip(card);
 
-      // 7. E-mail: neither server nor sender.
+      // 7. E-mail: switched off, neither server nor sender.
       card = await expectStep(page, 'smtp', 'E-posta', 'Eksik');
       await expect(card.getByTestId('wizard-missing').getByRole('listitem')).toHaveText([
+        'E-posta gönderimi kapalı.',
         'SMTP sunucusu ayarlanmamış.',
         'Gönderen adresi ayarlanmamış.',
       ]);

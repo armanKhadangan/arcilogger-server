@@ -53,6 +53,7 @@
       "notProduction": "Zaman damgası Kamu SM'nin üretim sunucusundan alınmıyor.",
       "sealNotReady": "Mühürleme hazır değil.",
       "replicaOff": "Replika kapalı.",
+      "smtpOff": "E-posta gönderimi kapalı.",
       "smtpServer": "SMTP sunucusu ayarlanmamış.",
       "smtpSender": "Gönderen adresi ayarlanmamış."
     },

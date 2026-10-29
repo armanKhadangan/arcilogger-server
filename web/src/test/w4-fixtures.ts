@@ -51,13 +51,14 @@ export function freshConfig(): AdminConfig {
   return config;
 }
 
-/** Every step done: production server, sealing ready, replica and e-mail set. */
+/** Every step done: production server, sealing ready, replica on and e-mail switched on. */
 export function completeConfig(): AdminConfig {
   const config = capturedConfig();
   config.problems = [];
   config.sections.tsa.provider = 'zamane';
   config.sections.tsa.server = 'production';
   config.sections.tsa.seal_ready = { ok: true, causes: [] };
+  config.sections.smtp.enabled = true;
   config.sections.smtp.host = 'smtp.ornek.example';
   config.sections.smtp.from_address = 'arcilogger@ornek.example';
   return config;

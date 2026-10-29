@@ -135,7 +135,9 @@ export function stepState(step: CheckedStepId, { config, tested }: WizardInput):
     case 'replica':
       return state(sections.replica.enabled ? [] : [missing('replicaOff')]);
     case 'smtp':
+      // Only switched-on sending counts: while it is off no alert or report e-mail goes out.
       return state([
+        ...(sections.smtp.enabled ? [] : [missing('smtpOff')]),
         ...(filled(sections.smtp.host) ? [] : [missing('smtpServer')]),
         ...(filled(sections.smtp.from_address) ? [] : [missing('smtpSender')]),
       ]);
