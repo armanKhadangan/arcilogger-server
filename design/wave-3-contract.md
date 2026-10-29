@@ -6298,14 +6298,20 @@ report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
 - **d-12. Smaller report choices** (2.12, 3.5). (a) The section-4 exit row is bilingual inline:
   "{label TR} / {label EN} — {name} ({label}), {mode TR} / {mode EN}", exits joined with "; "
   (`render.exit_row`). (b) The srcmac step is the row "MAC adresi / MAC address" whose value is
-  "MAC {mac} · " and the contract sentence verbatim, then its English. (c)
+  "MAC {mac} · " and the contract sentence verbatim, then its English. Both end with
+  " · kanıt: {refs}" / " · evidence: {refs}", the section-6 numbers (`render.refs`) of
+  `chain.device.evidence`, the session line the MAC comes from, as the lease row and the other
+  steps cite theirs (2.12 gives the sentence only; without the number, an internal or MAC-only
+  answer never named the line in section 5 while the method paragraph says every step cites its
+  row; manager's final review, item 2); MVP-CONTRACTS §6.1 and RAPOR (TR and EN) say so. (c)
   `CHECK_FIELDS["srcmac"] = "kaynak MAC (srcmac)"`, and `CONSISTENCY_TR/EN` list "srcmac
   zincirinde oturum kaydının kaynak IP ve srcmac alanı" / "source IP and srcmac of the session
   record of a srcmac chain" among the fields compared. (d) The stored Wave 2 outcome of 3.5 is an
   inline literal in `test_report_exits.py`, not a JSON fixture file, and its one real-world
   address (`93.184.216.34`) was replaced by `203.0.113.40` (RFC 5737). Tests:
   `test_report_exits.py::test_the_exit_row_names_the_exits_except_for_unconfigured_and_no_egress`,
-  `test_report_fortigate.py::test_srcmac_step_and_conflict`,
+  `test_report_fortigate.py::test_srcmac_step_and_conflict` ("kira kaydı yok · kanıt: K1", K1
+  the session line),
   `test_report_consistency.py::test_srcmac_chain_claims_pass_and_mismatch` (the field, not its
   label text), `test_report_exits.py::test_a_wave_2_outcome_renders_without_exit_rows`. Nothing
   to fold beyond 2.12's row texts.

@@ -727,9 +727,11 @@ All need a session, the KVKK notice and `lookup.run` (raw lines: `search.read` *
     where the `fallback` paragraph is printed (WP-D deviations, contract "Deviations — d").
   - **srcmac rows.** A srcmac step prints the row "MAC adresi / MAC address" with "MAC {mac} ·
     MAC adresi (kısmi kanıt): FortiGate oturum kaydının srcmac alanı, {interface} arayüzü; …;
-    kira kaydı yok" and "MAC address (partial evidence): srcmac field of the FortiGate session
-    record, interface {interface}; …; no lease" (`texts.SRCMAC_STEP`, `{interface}` from the
-    chain's `srcmac_only`); a
+    kira kaydı yok · kanıt: {refs}" and "MAC address (partial evidence): srcmac field of the
+    FortiGate session record, interface {interface}; …; no lease · evidence: {refs}"
+    (`texts.SRCMAC_STEP`, `{interface}` from the chain's `srcmac_only`, `{refs}` the section-6
+    numbers of `chain.device.evidence`, the session line the MAC comes from, as the other steps
+    cite theirs; d-12); a
     `srcmac_mismatch` alternative is printed under "Olası diğer zincir (srcmac, kısmi kanıt)" /
     "Possible other chain (srcmac, partial evidence)" (the `ip_conflict` header stays for the
     others) with its srcmac row, never a lease row (its `lease` is null). A chain without a lease
