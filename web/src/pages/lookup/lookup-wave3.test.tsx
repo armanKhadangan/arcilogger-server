@@ -18,8 +18,8 @@ import { LookupResults } from './lookup-results';
  * stored before ADR-0016. The captured Wave 3 lookups (`lookups.json`); derived from them only
  * what no capture has: the two `low` reasons other than the renewal (the captured renewal chain
  * with its explanation swapped for the opening of the engine's text), an IP conflict beside a
- * srcmac conflict, a srcmac chain that carries a lease, a `superseded` lease end and the stored
- * form before ADR-0016.
+ * srcmac conflict, a srcmac chain that carries a lease, a `superseded` lease end, a match of a
+ * search without a public IP and the stored form before ADR-0016.
  */
 
 type Wave3Lookup =
@@ -227,6 +227,28 @@ describe('the result view', () => {
     expect(screen.getByTestId('lookup-exit')).toHaveTextContent('Çıkış tanımlı değil');
     const exits = screen.getAllByTestId('match-exit').map((item) => item.textContent);
     expect(exits).toEqual(['Çıkış: - · dstintf -', 'Çıkış: - · dstintf wan2']);
+  });
+
+  it('without a public IP in the request no exit was determined, never "-" (d-27)', () => {
+    // The captured hat-2 match as a destination search returns it: no exit resolved.
+    const lookup = sample('hat2_candidates');
+    const found = outcome(lookup);
+    found.egress = null;
+    for (const match of found.matches) match.egress = null;
+    show(lookup);
+    expect(screen.queryByTestId('lookup-exit')).not.toBeInTheDocument();
+    const exit = screen.getByTestId('match-exit');
+    expect(exit).toHaveTextContent(
+      'Çıkış: çıkış belirlenmedi (talepte genel IP yok) · dstintf wan2',
+    );
+    expect(exit).not.toHaveTextContent('Çıkış: -');
+    act(() => {
+      setLanguage('en');
+    });
+    expect(screen.getByTestId('match-exit')).toHaveTextContent(
+      'Exit: exit not determined (no public IP in the request) · dstintf wan2',
+    );
+    expect(screen.getByTestId('match-exit')).not.toHaveTextContent('Exit: -');
   });
 
   it('a srcmac conflict shows both chains as alternatives, the srcmac one never as a lease', () => {

@@ -171,6 +171,7 @@
     "lookup": {
       "exit": "Çıkış",
       "matchExit": "Çıkış: {{exit}}",
+      "exitNotDetermined": "çıkış belirlenmedi (talepte genel IP yok)",
       "resolution": {
         "public": "Genel IP",
         "transip": "NAT adresi",

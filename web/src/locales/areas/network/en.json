@@ -171,6 +171,7 @@
     "lookup": {
       "exit": "Exit",
       "matchExit": "Exit: {{exit}}",
+      "exitNotDetermined": "exit not determined (no public IP in the request)",
       "resolution": {
         "public": "Public IP",
         "transip": "NAT address",

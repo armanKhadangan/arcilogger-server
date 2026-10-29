@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next';
 import {
   CircleCheck,
   CircleDashed,
@@ -21,7 +22,7 @@ import {
   outcomeOf,
   queryOf,
   type DataWindow,
-  type EgressEntry,
+  type LookupEgress,
   type LookupMode,
   type NatMatch,
 } from '@/lib/lookup-types';
@@ -154,15 +155,21 @@ function DataWindowNote({ window }: { window: DataWindow }) {
 /**
  * "Çıkış: hat-2 (Yedek hat) · dstintf wan2", as the PDF prints it on every match (contract 2.12);
  * "-" for a session no exit claims, also under the implicit catch-all of `nat.egresses = {}`,
- * whose name is `""`. `null` for a lookup stored before ADR-0016.
+ * whose name is `""`. Without a public IP in the request (`egress` null) no exit was determined,
+ * which "-" would misstate (d-27). `null` for a lookup stored before ADR-0016.
  */
-function matchExit(match: NatMatch, exits: readonly EgressEntry[], shown: boolean): string | null {
+function matchExit(
+  match: NatMatch,
+  egress: LookupEgress | null | undefined,
+  t: TFunction,
+): string | null {
+  if (egress === undefined) return null;
+  const dstintf = `dstintf ${match.traffic.dstintf ?? '-'}`;
+  if (egress === null) return `${t('network.lookup.exitNotDetermined')} · ${dstintf}`;
   const name = match.egress || null;
-  const dstintf = match.traffic.dstintf ?? null;
-  if (!shown && name === null && dstintf === null) return null;
-  const exit = exits.find((item) => item.name === name);
+  const exit = egress.egresses.find((item) => item.name === name);
   const label = exit?.label ? ` (${visibleText(exit.label)})` : '';
-  return `${name === null ? '-' : `${name}${label}`} · dstintf ${dstintf ?? '-'}`;
+  return `${name === null ? '-' : `${name}${label}`} · ${dstintf}`;
 }
 
 function MatchCard({
@@ -297,11 +304,7 @@ export function LookupResults({ lookup, onOpen }: { lookup: LookupOut; onOpen: O
                   key={`${match.traffic.sessionid ?? 'x'}-${match.traffic.end}-${index}`}
                   match={match}
                   rank={index + 1}
-                  exitText={matchExit(
-                    match,
-                    outcome.egress?.egresses ?? [],
-                    (outcome.egress ?? null) !== null,
-                  )}
+                  exitText={matchExit(match, outcome.egress, t)}
                   onOpen={onOpen}
                 />
               ))}
