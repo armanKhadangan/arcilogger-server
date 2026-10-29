@@ -725,8 +725,6 @@ def test_the_new_settings_refuse_values_of_another_shape(
         {"lookup.srcmac_interfaces": "vlan42"},
         {"lookup.srcmac_max_ips": "2"},
         {"lookup.srcmac_max_ips": True},
-        {"arp.ignore_after_release_seconds": -1},
-        {"arp.ignore_after_release_seconds": "60"},
         {"nat.snat_trandisp": None, "lookup.srcmac_interfaces": {"vlan42": 1}},
     ],
 )
@@ -738,6 +736,20 @@ def test_the_lookup_only_settings_never_stop_the_lease_timeline(values: dict[str
     assert settings == LookupSettings()
     assert settings.snat_trandisp == ("snat",)
     assert (settings.srcmac_interfaces, settings.srcmac_max_ips) == ((), 1)
+
+
+@pytest.mark.parametrize("value", [-1, "60"])
+def test_the_lookup_reads_an_arp_grace_of_another_shape_as_its_default(value: Any) -> None:
+    """``arp.ignore_after_release_seconds`` written around the validator (CORRELATION §5) as a
+    negative number or another value than an integer gives the lookup its shipped 300 s (round
+    6), as the lease timeline's ``DEFAULT_RELEASE_GRACE``. The key is not the lookup's alone:
+    the lease job's ``Context.load`` reads it itself, and what a stored value does there is that
+    job's (#40)."""
+    settings = LookupSettings.from_settings(
+        {**DEFAULT_SETTINGS, "arp.ignore_after_release_seconds": value}
+    )
+    assert settings == LookupSettings()
+    assert settings.arp_release_grace_seconds == 300
 
 
 @pytest.mark.parametrize(
