@@ -883,9 +883,9 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   `dhcp.fortigate_interfaces_excluded`, `dhcp.fortigate_traffic_extends` or
   `dhcp.fortigate_use_logged_lease` switched off, a logid or `dhcp_msg` value removed, a FortiGate
   source removed or retyped), the leases built under the old settings stay, at their old confidence,
-  until the rebuild: stored leases are not checked again against today's settings, and only today
-  and yesterday are rebuilt automatically, so a moment can still name the earlier device. **Rebuild
-  at once**, from the first affected day.
+  until the rebuild: stored leases are not checked again against today's settings, and the automatic
+  rebuilds cover only today, yesterday and the days rebuilt for late records (section 1), so a
+  moment can still name the earlier device. **Rebuild at once**, from the first affected day.
 - **Long FortiGate leases.** Without a logged Release a FortiGate lease stays open until its last
   DHCP evidence + the lease time (7 days with the FortiOS default); traffic does not extend it by
   default. Past half the lease without a renewal its chain is `low` (`lease_renewal_not_seen`).
@@ -936,12 +936,13 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   without it a moment between such an early end and the FortiGate's own end may answer a plain
   `no_lease`, or a chain `low`. The lines the previous version loaded stay `fg_event` rows and
   are named as above.
-- **Source clocks.** A device clock that is off by less than the limit (120 s; max(120 s, the
-  lookup tolerance) for a source measured only for the session search) is neither alerted
-  (`R20-lease:source-clock`) nor lowers a chain, yet with the default ±60 s tolerance a drift of
-  one to two minutes can still move a session out of the window. A source with fewer than 10 rows
-  around T is not measured. An empty result states the searched sources' offset
-  (`source_clock_offset`) but is not corrected: run the lookup again as its text says.
+- **Source clocks.** A device clock that is off by less than 120 s is not alerted
+  (`R20-lease:source-clock`, a fixed 120 s for every source) and lowers no chain below max(120 s,
+  the lookup tolerance) for a source measured only for the session search (120 s otherwise), yet
+  with the default ±60 s tolerance a drift of one to two minutes can still move a session out of the
+  window. A source with fewer than 10 rows around T is not measured. An empty result states the
+  searched sources' offset (`source_clock_offset`) but is not corrected: run the lookup again as its
+  text says.
 - **srcmac is only as good as the interface setting.** The shared-MAC guard, the other-lease
   refusal and `R20-lease:srcmac-shared` catch a routed segment or a switch listed as directly
   connected; a layer-2 segment with a single client behind a NAT device is not caught (not

@@ -127,10 +127,10 @@ end
 ```
 
 `diagnose sys ntp status` NTP sunucularının bilgisini listeler (**doğrulayın**, sonucu
-[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati 120 saniyeden (yalnız oturum araması
-için ölçülen bir kaynakta, sorgu toleransı daha büyükse tolerans; [CORRELATION.md](CORRELATION.md)
-bölüm 7) fazla kayarsa `R20-lease:source-clock` uyarısı açılır ve o anların 5651 zincirleri düşük
-güvenle gösterilir.
+[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati 120 saniyeden fazla kayarsa
+`R20-lease:source-clock` uyarısı açılır ve o anların 5651 zincirleri düşük güvenle gösterilir;
+yalnız oturum araması için ölçülen bir kaynakta zincirin düşürülme sınırı, sorgu toleransı daha
+büyükse toleranstır ([CORRELATION.md](CORRELATION.md) bölüm 7).
 
 ### 2.2 Web ve DNS filtre profilleri
 
