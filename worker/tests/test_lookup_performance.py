@@ -1259,6 +1259,26 @@ def test_a_direct_exit_with_a_29_public_network_is_fast(
     read, kept = _rows_in(traffic_site, window, on_wan1, wan=WAN)
     assert read >= WINDOW_ROWS
     assert kept > 100
+    # In the search the /29 is an exclusion with no effect (its predicate also asks for a private
+    # or shared address); it is read in the D15 probes of ± 15 minutes: the exit's own rows
+    # (``interface_evidence``, one CIDR array for both EXISTS) and the private or shared NAT
+    # addresses outside them on wan1 (``outside``), which found WAN.
+    probe = timedelta(seconds=lookup_engine.TRANSIP_PROBE_SECONDS)
+    low, high = GUARD_AT - probe, GUARD_AT + probe
+    sql, parameters = executed.one("SELECT EXISTS", "fg_traffic.dstintf = ANY", "CIDR[]")
+    assert _bound(sql, parameters, "CIDR[]") == [["203.0.113.200/29"]] * 2
+    assert sorted(_moments(parameters)) == [low, low, high, high]
+    sql, parameters = executed.one("GROUP BY fg_traffic.transip", "fg_traffic.dstintf = ANY")
+    not_public, own = _bound(sql, parameters, "CIDR[]")
+    assert "100.64.0.0/10" in not_public
+    assert own == ["203.0.113.200/29"]
+    assert ["wan1"] in _bound(sql, parameters, "TEXT[]")
+    assert sorted(_moments(parameters)) == [low, high]
+    # The /29 has no row near the moment; WAN on wan1 has those of the half hour.
+    own_rows = "transip <<= CAST('203.0.113.200/29' AS cidr)"
+    assert _rows_of(traffic_site, low, high, high, own_rows) == (0, 0)
+    read, _kept = _rows_of(traffic_site, low, high, high, on_wan1, wan=WAN)
+    assert read >= WINDOW_ROWS // 50
     assert seconds < LIMIT_SECONDS, f"the /29 exit's lookup took {seconds:.3f} s"
 
 
