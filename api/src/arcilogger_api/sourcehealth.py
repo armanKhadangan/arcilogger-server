@@ -524,12 +524,15 @@ def lease_evidence(
       recomputed: up to the alert check's lag), else ``ok``; ``none_tables``: the tables of the
       active ``none`` alerts, in card order, whatever the state.
 
-    The settings are validated when they are written; a ``dhcp.fortigate_*`` value written
-    around the validator (``LookupSettings.from_settings`` refuses it) is logged and counts no
-    ``fg_dhcp`` row as usable: ``rows`` 0, ``last_hour`` None, ``refused_rows`` and
-    ``excluded_rows`` 0 (the lease job cannot use any row then, ``Context.load`` raises, and the
-    refusal rules need the settings), ``format_verified`` only for a stored JSON ``true``, so the
-    state comes from the alerts alone.
+    The settings are validated when they are written; when ``LookupSettings.from_settings``
+    refuses a stored value (a ``lookup.*``, ``lease.*``, ``arp.*``,
+    ``devices.infrastructure_macs`` or ``dhcp.fortigate_*`` value written around the
+    validator), the refusal is logged and no ``fg_dhcp`` row counts as usable: ``rows`` 0,
+    ``last_hour`` None, ``refused_rows`` and ``excluded_rows`` 0 (``fg_dhcp`` usability is
+    ``trust.kept``, which needs the settings; the ``mt_dhcp``/``mt_arp`` usability of 2.12
+    needs none; the lease job cannot use any row then, ``Context.load`` raises),
+    ``format_verified`` only for a stored JSON ``true``, so the state comes from the alerts
+    alone.
     """
     values = get_settings(db)
     settings: LookupSettings | None

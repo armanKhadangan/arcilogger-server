@@ -2037,15 +2037,16 @@ with the codes `vault_only_before` (`from` before the oldest `messages.time`, ca
     `none_tables` lists the tables of the active `none` causes in card order (`mt_dhcp`,
     `fg_dhcp`, `mt_arp`; empty for `absent`) **whatever the state**, so it is filled under
     `refused` too; the web shows it only for `none`.
-  - When the `dhcp.fortigate_*` values cannot be read (written around the validator,
-    `LookupSettings.from_settings` refuses them), the member is still returned (never null) and
-    no `fg_dhcp` row counts as usable: `rows` 0, `last_hour` null, `refused_rows` and
-    `excluded_rows` 0, because the lease job cannot use any row then (`Context.load` raises);
-    the trusted senders' rows are no usable count either, since rules 3, 6 and 7 of
-    `trust.refusal` (IPv6, `device_time = false`, a zero or multicast MAC), which need no setting,
-    refuse some of them. `format_verified` is
-    true only for a stored JSON `true`; the state comes from the alerts only; a warning is
-    logged (contract "Deviations — d" d-15).
+  - When `LookupSettings.from_settings` refuses a stored value (a `lookup.*`, `lease.*`,
+    `arp.*`, `devices.infrastructure_macs` or `dhcp.fortigate_*` value written around the
+    validator), the member is still returned (never null) and no `fg_dhcp` row counts as
+    usable: `rows` 0, `last_hour` null, `refused_rows` and `excluded_rows` 0; the `mt_dhcp` and
+    `mt_arp` counts stay. `fg_dhcp` usability is `trust.kept`, which needs the settings; the
+    `mt_dhcp`/`mt_arp` usability of 2.12 needs none. The lease job cannot use any row then
+    either (`Context.load` raises); the trusted senders' rows are no usable count, since rules 3,
+    6 and 7 of `trust.refusal` (IPv6, `device_time = false`, a zero or multicast MAC), which need
+    no setting, refuse some of them. `format_verified` is true only for a stored JSON `true`;
+    the state comes from the alerts only; a warning is logged (contract "Deviations — d" d-15).
   - `srcmac {interfaces, rows_last_hour}`: `interfaces` = `lookup.srcmac_interfaces`;
     `rows_last_hour` counts the `fg_traffic` rows of trusted senders with `srcmac` of the last
     hour whose `srcintf` is one of those interfaces (any address family), computed only when
@@ -2429,7 +2430,7 @@ report:
   format note once and never beside the chains (d-13); `inputs.py` cites `unconverted_dhcp`
   (d-14); `lease_evidence` is required and never null, with no usable `fg_dhcp` row (`rows` 0,
   `last_hour` null, `refused_rows`/`excluded_rows` 0) and the state from the alerts only when
-  the `dhcp.fortigate_*` values cannot be read (d-15);
+  `LookupSettings.from_settings` refuses a stored value (d-15);
   `none_tables` whatever the state (d-16); the observed endpoint caches the counts and computes
   the exit claims on every request (d-17), counts IPv4 srcmac rows (d-18) and claims by
   `dstintf`, then the first exit by name (d-20); the card's srcmac count has no family filter
