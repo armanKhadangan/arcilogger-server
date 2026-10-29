@@ -278,26 +278,40 @@ describe('useSearchSession', () => {
   });
 
   it('does not ask again for a search that a newer one replaced while it waited', async () => {
-    const calls = installFetch((request) =>
-      (request.body as { q: string }).q === 'old' ? busy(1) : jsonResponse(200, page()),
-    );
-    const { result } = renderHook(() => useSearchSession(), { wrapper });
-    let old: Promise<SearchPage | null> = Promise.resolve(null);
-    act(() => {
-      old = result.current.run({ ...INPUT, q: 'old' });
-    });
-    await waitFor(() => {
-      expect(bodies(calls, '/search')).toHaveLength(1);
-    });
-    await act(async () => {
-      await result.current.run({ ...INPUT, q: 'new' });
-      await old;
-    });
-    expect(bodies(calls, '/search').map((body) => (body as { q: string }).q)).toEqual([
-      'old',
-      'new',
-    ]);
-    expect(result.current.state.error).toBeNull();
+    // The old search's 1 s Retry-After ends only when the test moves the clock: on a slow
+    // machine a real one could end before the new search starts.
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const calls = installFetch((request) =>
+        (request.body as { q: string }).q === 'old' ? busy(1) : jsonResponse(200, page()),
+      );
+      const { result } = renderHook(() => useSearchSession(), { wrapper });
+      let old: Promise<SearchPage | null> = Promise.resolve(null);
+      act(() => {
+        old = result.current.run({ ...INPUT, q: 'old' });
+      });
+      // vi.waitFor: RTL's waitFor needs a real setTimeout. Same 5 s budget as RTL's
+      // asyncUtilTimeout (src/test/setup.ts); each poll moves the fake clock by only 50 ms.
+      await vi.waitFor(
+        () => {
+          expect(bodies(calls, '/search')).toHaveLength(1);
+          expect(vi.getTimerCount()).toBe(1);
+        },
+        { timeout: 5_000 },
+      );
+      await act(async () => {
+        await result.current.run({ ...INPUT, q: 'new' });
+        await vi.advanceTimersByTimeAsync(1_000);
+        await old;
+      });
+      expect(bodies(calls, '/search').map((body) => (body as { q: string }).q)).toEqual([
+        'old',
+        'new',
+      ]);
+      expect(result.current.state.error).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clears the rows when a run is refused', async () => {
