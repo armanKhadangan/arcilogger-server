@@ -289,8 +289,14 @@ After changing any `dhcp.fortigate_*` setting (except `dhcp.fortigate_format_ver
 changes the lookup and report texts) or a FortiGate source (Settings → Sources), rebuild the leases
 from the first affected day to today in Settings → Application settings → 5651 lookup and lease
 timeline → Rebuild the leases (at most 31 days per request): the change applies to past days only
-after the rebuild. Until then a 5651 lookup for moments of those days may answer without a chain
-(the safe side: no wrong person is named).
+after the rebuild. After a **change that adds evidence** (a logid or `dhcp_msg` value mapped, a
+FortiGate source added), a 5651 lookup for moments of those days may answer without a chain until
+then (the safe side). After a **change that removes or narrows evidence** (an interface added to
+`dhcp.fortigate_interfaces_excluded`, `dhcp.fortigate_traffic_extends` or
+`dhcp.fortigate_use_logged_lease` switched off, a logid or `dhcp_msg` value removed, a FortiGate
+source removed or retyped), the leases built under the old settings stay, at their old confidence,
+until the rebuild, so a moment can still name the earlier device. **Rebuild at once**, from the
+first affected day.
 
 ## 7. Limits of this release
 
