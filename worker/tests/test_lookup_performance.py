@@ -1240,6 +1240,67 @@ def test_a_direct_exit_with_a_29_public_network_is_fast(
     assert seconds < LIMIT_SECONDS, f"the /29 exit's lookup took {seconds:.3f} s"
 
 
+#: The overlap probe's cases (D31 (a), no exit configured): an unclaimed address with no row at
+#: all, and the site's busy NAT address (its sessions overlap the moment) at the guards' moment
+#: and 20 hours later, when the partition holds 22 hours of the address's rows before the probe's
+#: range.
+OVERLAP = {
+    "no_rows": (PUBLIC, GUARD_AT),
+    "busy": (WAN, GUARD_AT),
+    "busy_late": (WAN, GUARD_AT + timedelta(hours=20)),
+}
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("case", sorted(OVERLAP))
+def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed, case: str
+) -> None:
+    """3.8: the overlap-aware ``seen_overlap(P)`` probe (D31 (a), 2.8.3) for an unclaimed P with
+    no rows and for a busy unclaimed P (:data:`OVERLAP`), under 0.2 s; through the lookup's own
+    probe (``_Probe.seen_overlap``), whose plan reads no row outside its range."""
+    address, at = OVERLAP[case]
+    probes: list[_Timed] = []
+
+    def measure() -> None:
+        probes.append(timer.time(lookup_engine._Probe, "seen_overlap"))
+        executed.record(traffic_site)
+
+    outcome = _guard_lookup(traffic_site, LookupRequest(at=at, public_ip=address), measure)
+    executed.stop()
+    timer.report(f"overlap probe, {case}")
+    max_session = LookupSettings().max_session_seconds
+    (timed,) = probes
+    (call,) = timed.calls
+    assert call[1:] == (address, max_session)
+    assert outcome.egress is not None
+    assert outcome.egress.resolution == ("unconfigured" if case == "no_rows" else "observed")
+    ((sql, parameters),) = [
+        (sql, parameters)
+        for sql, parameters in executed.statements
+        if "make_interval" in sql and SEARCH not in sql and address in parameters.values()
+    ]
+    probe = timedelta(seconds=lookup_engine.TRANSIP_PROBE_SECONDS)
+    low, high = at - probe, at + probe
+    end = high + timedelta(seconds=max_session)
+    assert sorted(_moments(parameters)) == [low, high, end]
+    # The address's rows in the probe's range, and those overlapping the probe window.
+    condition = "transip = CAST(:address AS inet)"
+    read, kept = _rows_of(traffic_site, low, end, high, condition, address=address)
+    if case == "no_rows":
+        assert (read, kept) == (0, 0)
+    else:
+        assert kept > 0
+        assert read >= (WINDOW_ROWS if case == "busy" else 5 * WINDOW_ROWS // 24)
+    # It reads its range only: a sequential scan of the partition also read its rows before the
+    # range (``EXISTS`` did for a busy address; 0.9 s on a partition of 10 days at 1 M a day).
+    with traffic_site.connect() as connection:
+        plan = connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
+    print("\n".join(plan))
+    assert not any("Seq Scan" in line for line in plan), case
+    assert timed.seconds < 0.2, f"{case}: the overlap probe took {timed.seconds:.3f} s"
+
+
 # -- the event site -----------------------------------------------------------------------------
 
 
