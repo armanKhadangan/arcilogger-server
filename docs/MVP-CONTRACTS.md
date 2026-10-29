@@ -2443,4 +2443,6 @@ report:
   (d-30); the observed NAT part counts IPv4 NAT addresses only (d-31); an exact `transip`
   answer is not called "genel" (d-32); an unclaimed other exit of a changed session is named in
   words (d-33); the 3.5 report tests live in `test_report_exits.py`, `test_report_fortigate.py`
-  and `test_lookup_testing_sites.py` (d-34). Contract "Deviations — d" has each with its tests.
+  and `test_lookup_testing_sites.py` (d-34); the "Özet / Summary" row of an unconverted citation
+  prints the fixed bilingual label `texts.UNCONVERTED_SUMMARY`, never the Turkish-only stored
+  summary (d-36). Contract "Deviations — d" has each with its tests.
