@@ -183,8 +183,10 @@ def event_kept(settings: LookupSettings) -> ColumnElement[bool]:
     timeline missed. A line **without** ``dhcp_msg`` passes: under D3 such a line of a DHCP
     logid is exactly the one ingest kept as an ``fg_event`` row (the c2 deviation); only a
     present value that is not listed is refused. A missing or unreadable MAC passes in the
-    same way. D28's receive-time rule cannot be checked here (an ``fg_event`` row has no
-    ``device_time``). The sender rule is each query's own (``untrusted``)."""
+    same way. D28's receive-time rule is deliberately not applied: ``time = time_received``
+    marks such a row (the marker ``engine._clock`` uses), but a receive-time line is still
+    counted and named, the warning side, and a citation is never an attribution. The sender
+    rule is each query's own (``untrusted``)."""
     interface = FgEvent.extra["interface"].astext
     message = FgEvent.extra["dhcp_msg"].astext
     mac = func.lower(func.replace(FgEvent.extra["mac"].astext, "-", ":"))

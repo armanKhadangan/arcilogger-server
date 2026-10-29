@@ -6109,15 +6109,16 @@ from section 0.2 are recorded here too, with the date and who decided.
   normalised `lower(replace(extra->>'mac', '-', ':'))` (a local copy of 2.6.1 rule 7, since
   `trust.py` is WP-B's) and refuses only a readable MAC (`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`) that
   is `00:00:00:00:00:00` or has an odd second hex digit; a missing or unreadable MAC passes, as
-  a missing `dhcp_msg` does. D28's receive-time rule cannot be checked on an `fg_event` row
-  (it has no `device_time`), so such a line is still counted and named: the warning side, and a
-  citation is never an attribution. The filter refuses a line of a logid that
-  `dhcp.fortigate_dhcp_msgs` lists only when its `dhcp_msg` is **present** and not listed: a
-  line without the field passes, because under D3 a DHCP line without `dhcp_msg` is exactly the
-  one ingest keeps as an `fg_event` row (the shape of a line the timeline never saw), while
-  D25's "a NULL `dhcp_msg` included" (2.6.1 rule 5) is a rule for `fg_dhcp` rows, which always
-  carry the field. An earlier form refused such a line too, so the probe and the post-lease
-  check never saw the lines they are for. Tests:
+  a missing `dhcp_msg` does. D28's receive-time rule is **deliberately not applied**: it could be
+  checked on an `fg_event` row (it has no `device_time`, but `time = time_received` is the marker of
+  a receive-time row, the one `engine._clock` uses), yet such a line is still counted and named,
+  because that is the warning side, and a citation is never an attribution. The filter refuses a
+  line of a logid that `dhcp.fortigate_dhcp_msgs` lists only when its `dhcp_msg` is **present** and
+  not listed: a line without the field passes, because under D3 a DHCP line without `dhcp_msg` is
+  exactly the one ingest keeps as an `fg_event` row (the shape of a line the timeline never saw),
+  while D25's "a NULL `dhcp_msg` included" (2.6.1 rule 5) is a rule for `fg_dhcp` rows, which always
+  carry the field. An earlier form refused such a line too, so the probe and the post-lease check
+  never saw the lines they are for. Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_line_after_the_lease_without_dhcp_msg_counts`,
   `::test_a_covering_line_without_dhcp_msg_is_named` (both failed before),
   `::test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing`,
@@ -6603,6 +6604,64 @@ Each entry says what the contract says, what was written, and why. Test paths ar
 - **f2-8. The reading-table test matches whole labels** (3.9). An exit label counts only quoted
   or in parentheses, so "NAT adresi" is not satisfied by "NAT adresi doğrulanamadı" or a
   sentence. Test: `test_docs_consistency.py::test_reading_tables_cover_every_key_and_exit_label`.
+
+## Deviations — c3 (WP-C3, 2026-10-29)
+
+- **`seen_overlap(P)` reads the transip index in its own order, the first overlapping row, the
+  probe window first** (2.8.3, D31 (a); 3.8).
+  - **The query.** 2.8.3 states the query, `transip = P AND time >= T − probe AND time <= T +
+    probe + max_session_seconds AND time − duration <= T + probe`, on
+    `ix_fg_traffic_transip_transport_time`. The lookup asks it as `SELECT time … ORDER BY transip,
+    transport, time LIMIT 1` (`_Probe.seen_overlap`), not as `EXISTS`, in two steps: first the rows
+    logged in the probe window itself (`time >= T − probe AND time <= T + probe`), then, only when
+    none of them overlaps, the tail (`time > T + probe AND time <= T + probe +
+    max_session_seconds`); both keep `time − duration <= T + probe` and the untrusted-source filter.
+    The answer is the same (a row or none).
+  - **Why not `EXISTS`.** For a busy P the planner expected an early match and scanned the partition
+    sequentially, also reading the rows before the range: 0.9 s on a partition of 10 days at 1 M
+    rows a day.
+  - **Why not time order.** The first fix, `ORDER BY time LIMIT 1`, read every address's rows of the
+    24 h range on the primary key when none of P's sessions overlaps the window: 0.29 s (1,029,271
+    rows removed by the filter) at 1 M rows a day for an address with about 1 % of them; the index's
+    order reads that address's 8,437 rows in 4 ms.
+  - **Why two steps.** As one statement over TimescaleDB's 1-day chunks the plan is a Merge Append
+    of each chunk's index scan, which needs a first row from every chunk before it returns one:
+    the chunk of the next day, in the 24 h tail, had no session overlapping the window, and its scan
+    read and filtered out all of the busy P's rows there. Measured on CI: `busy` 0.18 s, 471,352 rows
+    removed (2,601 in T's chunk, the rest in the next day's); the same on daily partitions here,
+    0.22 s and 471,352 rows. Asked first, the probe window answers a busy P at once: 0.008 s, no row
+    removed, on daily partitions.
+  - **What the plan reads now.** The index's order keeps the plans on the index 2.8.3 names. Each
+    reads P's own rows of its range only, and stops at the first overlapping one. Measured on the
+    guard site (1 M rows a day, monthly partitions): no rows 0.003 s, a busy P overlapping T
+    0.009–0.028 s (the window step alone), an address with 1 % of the rows and no overlap 0.007 s.
+    For a probe window with no row at all the planner may scan the primary key instead, which then
+    reads nothing.
+  - **2.8.3's premise does not hold for one case.** "An address no exit claims has few rows, so the
+    scan stays short" fails for a busy unclaimed P with no session overlapping the window (for
+    example the FortiGate's address of a line asked about before its first row, or of a line that
+    came up later that day). Such a P has every row of its range read, since `duration` is in no
+    index and each row must be fetched to know it does not overlap: 885,416 rows, 0.48–0.53 s at 1 M
+    rows a day (the tail step; the window step reads nothing), over 3.8's 0.2 s. No form of the
+    query reaches 0.2 s with the shipped indexes (`EXISTS` 0.30 s on a sequential scan that grows
+    with the partition, time order 0.35 s, index order 0.49–0.61 s). The whole lookup stays at
+    about 1 s, inside its 5 s.
+  - **The guard.** 3.8's overlap guard measures that case (`busy_before`: P = the busy exit address
+    5 h before its first row) under a bound of its own, 1 s (`OVERLAP_SECONDS` in
+    `worker/tests/test_lookup_performance.py`), until the owner answers Q-C3-1 (accept a bound for
+    this shape in 3.8, or WP-A adds an index the probe can answer from, such as an expression index
+    on `(transip, time − duration)` or `INCLUDE (duration)` on the transip index; the bound then
+    goes back to 0.2 s). Every other case stays under 0.2 s. The guard asserts which steps ran with
+    which bounds (`busy` and `busy_late` the window step only, the others both), that each plan is on
+    the transip index (another index only where it fetched no row), over partitions or chunks, and
+    that it read P's rows of its range and no other address's; a busy P's window step removes under
+    a tenth of P's rows of the window.
+  - **Tests.**
+    `worker/tests/test_lookup_performance.py::test_the_overlap_probe_of_an_unclaimed_address_is_fast`
+    (`no_rows`, `busy`, `busy_late`, `busy_before`, `later_line`): `busy` failed against `EXISTS` (a
+    sequential scan), 4 of the 5 cases failed against the time order (a plan on the primary key),
+    and `busy` failed against the one-statement index order on TimescaleDB (the Merge Append above).
+    Fold into 2.8.3 and 3.8.
 
 ---
 
