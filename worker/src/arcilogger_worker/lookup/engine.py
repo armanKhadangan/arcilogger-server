@@ -473,7 +473,12 @@ class _Probe:
 
     def seen_overlap(self, address: str, max_session: int) -> bool:
         """``address`` is the ``transip`` of a session overlapping the probe window, also one
-        logged once, at its end, after it (bounded like the session search)."""
+        logged once, at its end, after it (bounded like the session search).
+
+        The first such row by time, not ``EXISTS``: for a busy address the planner expects an
+        early match and scanned the partition sequentially, reading its rows before the window
+        too (3.8 guard; 0.9 s on a partition of 10 days at 1 M rows a day). In time order the
+        scan starts at the window's low bound and stops at the first overlapping session."""
 
         def compute() -> bool:
             started = FgTraffic.time - func.make_interval(
@@ -487,7 +492,8 @@ class _Probe:
             ]
             if self.untrusted:
                 clauses.append(_not_in(FgTraffic.source, self.untrusted))
-            return bool(self.session.scalar(select(exists().where(*clauses))))
+            first = select(FgTraffic.time).where(*clauses).order_by(FgTraffic.time).limit(1)
+            return self.session.scalar(first) is not None
 
         return bool(self._cached(("overlap", address), compute))
 
