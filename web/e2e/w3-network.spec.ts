@@ -3,16 +3,31 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockApi } from './mock-api';
 import { mockNetwork, type NetworkMock } from './mock-network';
-import { SAMPLE_TODAY } from './samples';
+import { SAMPLE_TODAY, SETTINGS } from './samples';
 
 /**
  * Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi, the internet exits (Wave 3
  * contract 2.13, ADR-0016): the exit editor with its rules on the field and its warnings, the
  * server's refusal at the editor level, "Kayıtlarda görülen NAT adresleri" with "Çıkış olarak
  * ekle" and "srcmac için ekle", and Ayarlar → Kaynaklar's FortiGate hint and supported set-ups.
- * The settings are the captured ones (`mock-admin.ts`); the observed addresses and the exit
- * refusal are HAND MOCKS (`mock-network.ts`) until the server side captures them.
+ * The settings, the observed addresses and the exit refusal are the API's captured answers
+ * (`mock-admin.ts`, `mock-network.ts`): the stored exits are the upgrade's converted `wan`
+ * (ISP NAT, NAT address 100.64.12.9, no interfaces), which claims the first observed address.
  */
+
+/** The captured `nat.egresses`: the exit `wan` the upgrade converted. */
+const CONVERTED = SETTINGS.list.groups
+  .flatMap((group) => group.settings)
+  .find((item) => item.key === 'nat.egresses')?.value;
+const WAN = {
+  label: 'FortiGate WAN adresi (yükseltmede aktarıldı)',
+  mode: 'isp_nat',
+  public: [],
+  public_dynamic: false,
+  transips: ['100.64.12.9'],
+  interfaces: [],
+  port_preservation: 'unknown',
+};
 
 /** A stored exit the editor cannot read (an unknown mode, written around the rules). */
 const UNREADABLE = { misafir: { mode: 'notlogged', public: ['198.51.100.90'] } };
@@ -58,24 +73,41 @@ test.describe('İnternet çıkışları (NAT)', () => {
   test('the observed addresses become exits by the prefill rule, then are saved', async ({
     page,
   }) => {
+    expect(CONVERTED).toEqual({ wan: WAN });
     const { api } = await open(page);
     const editor = page.getByTestId('egress-editor');
-    await expect(editor).toContainText('Tanımlı çıkış yok: tek bir çift NAT çıkışı varsayılır.');
+    // The converted exit alone: an ISP NAT exit without a public address; the converted warning
+    // waits for a converted partner beside it (2.13).
+    const wan = exit(page, 'wan');
+    await expect(wan.getByRole('combobox', { name: 'NAT türü' })).toHaveText(
+      "Servis sağlayıcı NAT'ı (çift NAT)",
+    );
+    await expect(wan.getByLabel('NAT adresleri (transip)')).toHaveValue('100.64.12.9');
+    await expect(wan).toContainText('Genel adres girilmedi: bu çıkış, hiçbir çıkışa tanımlı');
+    await expect(wan).not.toContainText('Yükseltmede aktarıldı');
+    await expect(editor).not.toContainText('Tanımlı çıkış yok');
     const call = api.callsTo('GET', '/settings/fortigate/observed')[0];
     expect(call?.query.get('hours')).toBe('24');
+    await expect(observedRow(page, '100.64.12.9').getByRole('cell').nth(4)).toHaveText('wan');
+    await expect(observedRow(page, '100.64.12.9').getByRole('button')).toHaveCount(0);
 
-    // A public address prefills Direct with it and the row's dstintf.
-    await observedRow(page, '203.0.113.200')
-      .getByRole('button', { name: 'Çıkış olarak ekle: 203.0.113.200' })
+    // A public address prefills Direct with it and the row's dstintf (`wan` lists no interface,
+    // so there is no exit on that line to join).
+    await expect(observedRow(page, '198.51.100.20').getByRole('button')).toHaveText([
+      'Çıkış olarak ekle',
+    ]);
+    await observedRow(page, '198.51.100.20')
+      .getByRole('button', { name: 'Çıkış olarak ekle: 198.51.100.20' })
       .click();
     const hat1 = exit(page, 'hat-1');
     await expect(hat1.getByLabel('Ad', { exact: true })).toBeFocused();
     await expect(hat1.getByRole('combobox', { name: 'NAT türü' })).toHaveText(
       "Doğrudan (genel IP FortiGate'te)",
     );
-    await expect(hat1.getByLabel('Genel adresler')).toHaveValue('203.0.113.200');
+    await expect(hat1.getByLabel('Genel adresler')).toHaveValue('198.51.100.20');
     await expect(hat1.getByLabel('Arayüzler (dstintf)')).toHaveValue('wan1');
     await hat1.getByLabel('Açıklama').fill('Ana hat');
+    await expect(editor).toContainText('Her hattın arayüzlerini (dstintf) girin;');
 
     // 100.64.13.9 (RFC 6598) prefills ISP NAT with no public address, and warns.
     const shared = observedRow(page, '100.64.13.9');
@@ -88,6 +120,7 @@ test.describe('İnternet çıkışları (NAT)', () => {
       "Servis sağlayıcı NAT'ı (çift NAT)",
     );
     await expect(hat2.getByLabel('NAT adresleri (transip)')).toHaveValue('100.64.13.9');
+    await expect(hat2.getByLabel('Arayüzler (dstintf)')).toHaveValue('wan2');
     await expect(hat2.getByLabel('Genel adresler')).toHaveValue('');
     await expect(hat2).toContainText('Genel adres girilmedi: bu çıkış, hiçbir çıkışa tanımlı');
     await expect(shared).toContainText('Taslakta: hat-2 (kaydedilmedi)');
@@ -114,12 +147,13 @@ test.describe('İnternet çıkışları (NAT)', () => {
       changes: [
         {
           key: 'nat.egresses',
-          old: {},
+          old: CONVERTED,
           value: {
+            wan: WAN,
             'hat-1': {
               label: 'Ana hat',
               mode: 'direct',
-              public: ['203.0.113.200'],
+              public: ['198.51.100.20'],
               public_dynamic: false,
               transips: [],
               interfaces: ['wan1'],
@@ -148,13 +182,15 @@ test.describe('İnternet çıkışları (NAT)', () => {
       ],
     });
     // Read again after the save: the server's exits claim the addresses now.
+    await expect(observedRow(page, '198.51.100.20').getByRole('cell').nth(4)).toHaveText('hat-1');
     await expect(observedRow(page, '100.64.13.9').getByRole('cell').nth(4)).toHaveText('hat-2');
     await expect(observedRow(page, '172.20.99.1').getByRole('cell').nth(4)).toHaveText('nat-1');
-    // A public address on hat-1's line is offered to hat-1 first.
-    await expect(observedRow(page, '198.51.100.20').getByRole('button')).toHaveText([
-      'hat-1 çıkışının genel adreslerine ekle',
-      'Çıkış olarak ekle',
-    ]);
+    await expect(observedRow(page, '100.64.12.9').getByRole('cell').nth(4)).toHaveText('wan');
+    await expect(
+      page.getByRole('table', {
+        name: 'FortiGate oturum kayıtlarında görülen kaynak NAT adresleri',
+      }),
+    ).not.toContainText('Tanımsız');
   });
 
   test('the rules on the field, the warnings, and a refusal of the server at the editor', async ({
@@ -175,6 +211,12 @@ test.describe('İnternet çıkışları (NAT)', () => {
 
     await exit(page, 'hat-1').getByLabel('Genel adresler').fill('203.0.113.200');
     await expect(exit(page, 'hat-1').getByText(refusal)).toHaveCount(0);
+    // A public address on hat-1's line is offered to hat-1 first.
+    await exit(page, 'hat-1').getByLabel('Arayüzler (dstintf)').fill('wan1');
+    await expect(observedRow(page, '198.51.100.20').getByRole('button')).toHaveText([
+      'hat-1 çıkışının genel adreslerine ekle',
+      'Çıkış olarak ekle',
+    ]);
     await page.getByRole('button', { name: 'Çıkış ekle' }).click();
     const second = page.getByTestId('egress-new-2');
     await second.getByLabel('Ad', { exact: true }).fill('hat-2');
@@ -188,12 +230,35 @@ test.describe('İnternet çıkışları (NAT)', () => {
       'Her hattın arayüzlerini (dstintf) girin;',
     );
 
-    network.refuseNext = 'setting_egress_overlap';
+    // The browser's mirror accepts the draft; the server refuses it (its captured 422), and the
+    // refusal is shown at the editor with its code.
+    network.refuseNext = true;
     await page.getByTestId('settings-group-lookup').getByRole('button', { name: 'Kaydet' }).click();
+    await expect.poll(() => patches(api).length).toBe(1);
     const field = page.getByTestId('setting-nat.egresses');
-    await expect(
-      field.getByText(/^Bir genel adres ya da NAT adresi iki çıkışta birden olamaz/),
-    ).toContainText('(setting_egress_overlap)');
+    await expect(field.getByText(/^Genel adres özel \(RFC 1918\)/)).toContainText(
+      '(setting_egress_public_private)',
+    );
+    await expect(exit(page, 'hat-1').getByText(refusal)).toHaveCount(0);
+  });
+
+  test('the observed addresses could not be summarised in time: said, then read again', async ({
+    page,
+  }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    const network = await mockNetwork(page, api);
+    network.failNext = 'fortigate_observed_timeout';
+    await page.goto('/settings/application?group=lookup');
+    const panel = page.getByTestId('fortigate-observed');
+    await expect(panel).toContainText('Kayıtlarda görülen NAT adresleri okunamadı');
+    await expect(panel).toContainText(
+      'FortiGate kayıtları 5 saniyede özetlenemedi; biraz sonra yeniden deneyin.',
+    );
+    await expect(page.getByTestId('egress-editor')).toBeVisible();
+    await panel.getByRole('button', { name: 'Yenile' }).click();
+    await expect(observedRow(page, '100.64.13.9')).toBeVisible();
+    expect(api.callsTo('GET', '/settings/fortigate/observed')).toHaveLength(2);
   });
 
   test('"srcmac için ekle" fills lookup.srcmac_interfaces; not behind a router', async ({
@@ -213,6 +278,10 @@ test.describe('İnternet çıkışları (NAT)', () => {
     expect(patches(api)[0]?.body).toEqual({
       changes: [{ key: 'lookup.srcmac_interfaces', old: [], value: ['vlan42'] }],
     });
+    // Read again after the save: the server lists vlan42 as used.
+    await expect(table.getByRole('row').filter({ hasText: 'vlan42' })).toContainText(
+      'srcmac kullanılıyor',
+    );
   });
 
   test('the FortiGate DHCP settings: the traffic warning, the rebuild hint', async ({ page }) => {

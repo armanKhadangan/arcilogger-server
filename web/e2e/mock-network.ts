@@ -2,31 +2,38 @@
  * The mocked internet-exit endpoints of the E2E tests (Wave 3 contract 2.12, ADR-0016), on top of
  * `mock-api.ts` (`page.route`: the newest route wins, so install it after `mockApi`):
  *
- * - `GET /settings/fortigate/observed` (`settings.manage`): the observed NAT addresses of a
- *   dual-WAN day (`src/test/wave3-mocks.ts`, a HAND MOCK until the endpoint's sample is
- *   captured), each row's `egress` computed from the `nat.egresses` the main mock stores, as the
- *   server claims addresses (`exits_invalid` when the exit rules refuse that value, as the
- *   server's `parse_egresses` does);
- * - `PATCH /settings` refused once with a captured-shape 422 (`refuseNext`, the server's exit
- *   rules that the browser's mirror cannot see); every other change goes to the main mock, which
- *   checks the body against the API's model and stores it.
+ * - `GET /settings/fortigate/observed` (`settings.manage`): the observed NAT addresses and srcmac
+ *   interfaces as the API answered them (`samples/settings-observed.json`), with what the API
+ *   computes on every request taken from the settings the main mock stores, as
+ *   `observed_answer` does: each row's `egress` from `nat.egresses` (the captured
+ *   `observed_exits_invalid` when the exit rules refuse that value, as `parse_egresses` does),
+ *   `trandisp_known` from `nat.snat_trandisp` and each interface's `configured` from
+ *   `lookup.srcmac_interfaces`; its captured refusals (the 504 of `failNext`, `hours` above 72);
+ * - `PATCH /settings` refused once with the captured `setting_invalid_egress` (`refuseNext`: a
+ *   rule of the server that the browser's mirror cannot see); every other change goes to the
+ *   main mock, which checks the body against the API's model and the value against the exit
+ *   rules, and stores it.
  */
+
+import { readFileSync } from 'node:fs';
 
 import type { Page, Request, Route } from '@playwright/test';
 
 import type { FortigateObserved } from '../src/lib/api-types';
-import type { SettingProblem } from '../src/lib/settings-types';
+import type { SettingValue } from '../src/lib/settings-types';
 import { validateEgresses } from '../src/pages/settings/egress-model';
-import { observedSample } from '../src/test/wave3-mocks';
 
 import { bodyProblems, type MockApi, type RecordedCall } from './mock-api';
+import { copy, SETTINGS, type ErrorSample, type SampleMeta } from './samples';
 
-/** `SETTING_ERRORS` texts of the exit rules a spec makes the server refuse with. */
-const EXIT_ERRORS: Record<string, [string, string]> = {
-  setting_egress_overlap: [
-    'Bir genel adres ya da NAT adresi iki çıkışta birden olamaz; aynı transip yalnızca iki çıkışın arayüzleri ayrıysa kullanılabilir.',
-    'A public or NAT address cannot be in two exits; the same transip is allowed only when the two exits have separate interfaces.',
-  ],
+/** `samples/settings-observed.json`, read as `samples.ts` reads the others (it does not load it). */
+const OBSERVED = JSON.parse(
+  readFileSync(new URL('./samples/settings-observed.json', import.meta.url), 'utf8'),
+) as {
+  meta: SampleMeta;
+  observed: FortigateObserved;
+  observed_exits_invalid: FortigateObserved;
+  errors: Record<string, ErrorSample>;
 };
 
 function addressNumber(text: string): number | null {
@@ -46,16 +53,91 @@ function holds(entry: string, address: string): boolean {
 }
 
 interface StoredExit {
-  public?: string[];
-  transips?: string[];
-  interfaces?: string[];
+  public: string[];
+  transips: string[];
+  interfaces: string[];
+}
+
+/** The exits of a stored `nat.egresses`, `null` when the exit rules refuse it. */
+function exitsOf(value: unknown): Record<string, StoredExit> | null {
+  return validateEgresses(value).value ?? null;
+}
+
+/**
+ * `_claim`: the exit whose public or NAT addresses hold `transip` (`internal` exits included);
+ * of several, the one whose interfaces hold `dstintf`, else the first by name.
+ */
+function claim(
+  exits: Record<string, StoredExit>,
+  transip: string,
+  dstintf: string | null,
+): string | null {
+  const claims = Object.entries(exits)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .filter(([, exit]) =>
+      [...exit.public, ...exit.transips].some((entry) => holds(entry, transip)),
+    );
+  const onLine = claims.find(([, exit]) => dstintf !== null && exit.interfaces.includes(dstintf));
+  return (onLine ?? claims[0])?.[0] ?? null;
+}
+
+/** `observed_answer` on the captured counts and the given settings. */
+function observedAnswer(settings: (key: string) => SettingValue | undefined): FortigateObserved {
+  const exits = exitsOf(settings('nat.egresses') ?? {});
+  const answer = copy(exits === null ? OBSERVED.observed_exits_invalid : OBSERVED.observed);
+  const snat = (settings('nat.snat_trandisp') as string[] | undefined) ?? ['snat'];
+  const listed = (settings('lookup.srcmac_interfaces') as string[] | undefined) ?? [];
+  const rows = answer.nat.rows.map((row) => ({
+    ...row,
+    egress: exits === null ? null : claim(exits, row.transip, row.dstintf),
+    trandisp_known: row.trandisp !== null && snat.includes(row.trandisp),
+  }));
+  answer.nat = {
+    ...answer.nat,
+    rows,
+    unmapped_transips: [
+      ...new Set(rows.filter((row) => row.egress === null).map((row) => row.transip)),
+    ],
+    unknown_trandisp: [
+      ...new Set(
+        rows.flatMap((row) => (row.trandisp !== null && !row.trandisp_known ? [row.trandisp] : [])),
+      ),
+    ].sort(),
+    exits_invalid: exits === null,
+  };
+  answer.srcmac.interfaces = answer.srcmac.interfaces.map((item) => ({
+    ...item,
+    configured: listed.includes(item.srcintf),
+  }));
+  return answer;
+}
+
+{
+  // The claims the mock computes must be the API's: on the settings of the capture (the
+  // converted `wan` claims 100.64.12.9), and with an unreadable value (nothing is claimed).
+  // `configured` is left out: the two answers were captured on another site's srcmac settings.
+  const captured = new Map(
+    SETTINGS.list.groups.flatMap((group) => group.settings).map((item) => [item.key, item.value]),
+  );
+  const checks: [FortigateObserved, FortigateObserved][] = [
+    [observedAnswer((key) => captured.get(key)), OBSERVED.observed],
+    [
+      observedAnswer((key) =>
+        key === 'nat.egresses' ? { wan: { mode: 'x' } } : captured.get(key),
+      ),
+      OBSERVED.observed_exits_invalid,
+    ],
+  ];
+  for (const [computed, sample] of checks)
+    if (JSON.stringify(computed.nat) !== JSON.stringify(sample.nat))
+      throw new Error('mock-network: the computed claims differ from the captured answer');
 }
 
 export class NetworkMock {
-  /** The observed answer before the claims are computed (a spec may replace it). */
-  observed: FortigateObserved = observedSample();
-  /** The next `PATCH /settings` that changes `nat.egresses` is refused with this code. */
-  refuseNext: string | null = null;
+  /** The next `PATCH /settings` that changes `nat.egresses` is refused (the captured 422). */
+  refuseNext = false;
+  /** The next `GET /settings/fortigate/observed` is refused with this captured error. */
+  failNext: 'fortigate_observed_timeout' | null = null;
 
   constructor(private readonly api: MockApi) {}
 
@@ -97,25 +179,18 @@ export class NetworkMock {
     });
   }
 
-  /** The stored exits (the main mock's `nat.egresses`), `null` when the value is unreadable. */
-  private exits(): Record<string, StoredExit> | null {
-    for (const group of this.api.admin.settings) {
-      const found = group.settings.find((item) => item.key === 'nat.egresses');
-      if (!found) continue;
-      const value = validateEgresses(found.value).value;
-      return value ?? null;
-    }
-    return {};
+  private captured(sample: ErrorSample | undefined): [number, unknown] {
+    if (!sample) throw new Error('mock-network: the captured refusal is missing');
+    return [sample.status, copy(sample.body)];
   }
 
-  private claim(exits: Record<string, StoredExit>, transip: string, dstintf: string | null) {
-    const claims = Object.entries(exits).filter(([, exit]) =>
-      [...(exit.public ?? []), ...(exit.transips ?? [])].some((entry) => holds(entry, transip)),
-    );
-    const onLine = claims.find(
-      ([, exit]) => dstintf !== null && exit.interfaces?.includes(dstintf),
-    );
-    return (onLine ?? claims[0])?.[0] ?? null;
+  /** A setting as the main mock stores it now. */
+  private setting(key: string): SettingValue | undefined {
+    for (const group of this.api.admin.settings) {
+      const found = group.settings.find((item) => item.key === key);
+      if (found) return found.value;
+    }
+    return undefined;
   }
 
   private async observedRoute(route: Route, request: Request): Promise<void> {
@@ -126,18 +201,17 @@ export class NetworkMock {
     if (call.method !== 'GET')
       return this.fulfill(route, this.api.error(405, 'method_not_allowed'));
     const hours = Number(call.query.get('hours') ?? 24);
-    if (!Number.isInteger(hours) || hours < 1 || hours > 72)
+    if (Number.isInteger(hours) && hours > 72)
+      return this.fulfill(route, this.captured(OBSERVED.errors.validation_error));
+    if (!Number.isInteger(hours) || hours < 1)
       return this.fulfill(route, this.api.error(422, 'validation_error'));
-    const exits = this.exits();
-    const answer = structuredClone(this.observed);
-    answer.nat.rows = answer.nat.rows.map((row) => ({
-      ...row,
-      egress: exits === null ? null : this.claim(exits, row.transip, row.dstintf),
-    }));
-    answer.nat.unmapped_transips = [
-      ...new Set(answer.nat.rows.filter((row) => row.egress === null).map((row) => row.transip)),
-    ];
-    if (exits === null) answer.nat.exits_invalid = true;
+    if (this.failNext !== null) {
+      const code = this.failNext;
+      this.failNext = null;
+      return this.fulfill(route, this.captured(OBSERVED.errors[code]));
+    }
+    const answer = observedAnswer((key) => this.setting(key));
+    answer.nat.hours = hours;
     return this.fulfill(route, [200, answer]);
   }
 
@@ -145,7 +219,7 @@ export class NetworkMock {
     const call = this.record(request);
     const body = call.body as { changes?: { key: string }[] } | undefined;
     const exitsChange = body?.changes?.some((change) => change.key === 'nat.egresses') ?? false;
-    if (call.method !== 'PATCH' || !exitsChange || this.refuseNext === null) {
+    if (call.method !== 'PATCH' || !exitsChange || !this.refuseNext) {
       await route.fallback();
       return;
     }
@@ -155,13 +229,8 @@ export class NetworkMock {
       return this.fulfill(route, this.api.error(422, 'validation_error', problems));
     const account = this.api.requirePermission(call, 'settings.manage');
     if (Array.isArray(account)) return this.fulfill(route, account);
-    const code = this.refuseNext;
-    this.refuseNext = null;
-    const [tr, en] = EXIT_ERRORS[code] ?? [code, code];
-    const details: SettingProblem[] = [
-      { key: 'nat.egresses', code, message_tr: tr, message_en: en },
-    ];
-    return this.fulfill(route, this.api.error(422, 'setting_invalid', details));
+    this.refuseNext = false;
+    return this.fulfill(route, this.captured(SETTINGS.errors.setting_invalid_egress));
   }
 }
 
