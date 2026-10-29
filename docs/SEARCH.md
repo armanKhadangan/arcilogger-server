@@ -56,7 +56,7 @@ Examples: `srcip:172.20.41.105 type:web action:blocked` · `domain:example.com -
 | IP (`srcip`, `dstip`, `natip`, `ip`, `sender`) | `172.20.41.5`, `172.20.41.0/24`, `172.20.41.*`, `172.20.*` | IPv6 can be written; IPv6 networks are outside the supported scope |
 | Port and number (`srcport`, `dstport`, `natport`, `port`, `sessionid`) | `443`, `1000-2000`, `>1024`, `>=1`, `<10`, `<=10`, comma lists | |
 | Protocol (`proto`) | `tcp`, `udp`, `icmp` or the protocol number | |
-| MAC (`mac`) | any separator and case (`00-00-5E-00-53-21`, `0000.5e00.5321`); vendor prefix `00:00:5e:*` | |
+| MAC (`mac`, `srcmac`) | any separator and case (`00-00-5E-00-53-21`, `0000.5e00.5321`); vendor prefix `00:00:5e:*` | |
 | Domain (`domain`) | `example.com` (the name and its subdomains), `*.example.com` (subdomains only); lowercased, international names in punycode | |
 | DNS name (`qname`) | the exact name | |
 | Token (`action`, `qtype`, `level`, `logid`) | the exact value, compared after lowercasing | |
@@ -168,6 +168,11 @@ index such as `action:` or `user:`, or of negated conditions alone is scanned sl
 page says so with the notice `query_not_selective` ("Add a field such as srcip:, domain:, mac: or
 qname: for faster results"). The measured times are in section 13.
 
+`srcmac:` has no index on purpose: it reads the source MAC of the FortiGate session records, the
+largest table, so it is scanned in time slices; over a long range add `srcip:` or a short time
+range. `mac:` never reads the session records: for a FortiGate DHCP client `type:event
+mac:<MAC>` uses the index of the FortiGate DHCP records (ADR-0016).
+
 ## 6. Record kinds
 
 The values of the `type:` field; the same names are used in the statistics and the export.
@@ -247,7 +252,9 @@ runs.
   (results) and "Bilgi", every cell text. Columns: Zaman, Alınma zamanı, Kaynak, Gönderici, Tür,
   Alt tür, Kaynak IP, Kaynak port, Hedef IP, Hedef port, NAT IP, NAT port, Eylem, Alan adı, URL,
   Kullanıcı, Uygulama, Kategori, MAC, Metin (at most 2,000 characters), Ham kayıt
-  (`source/day/line/offset`). In the CSV, values starting with `=`, `+`, `-`, `@`, a tab or a
+  (`source/day/line/offset`). The MAC column holds the `mac:` field's MAC (a FortiGate DHCP
+  record's included); a session record's `srcmac` is not a column (it is in the raw record and in
+  the text). In the CSV, values starting with `=`, `+`, `-`, `@`, a tab or a
   carriage return get a leading `'` so they never run as formulas; in Excel every cell is text.
   Control and invisible characters are written as visible escapes (`\u0007`) in both.
 - **The file is not sealed.** The "Bilgi" sheet says so: "This file is not sealed; use an
@@ -307,7 +314,11 @@ sends logs ([DEVICE-SETUP.md](DEVICE-SETUP.md)).
 
 - The filter is the query language of Search (it may be empty). Parsed fields are labelled
   "önizleme" (preview; ingest's final record may differ in details); a line not in the
-  collector's format is shown with the badge "biçim dışı" (malformed).
+  collector's format is shown with the badge "biçim dışı" (malformed). A FortiGate DHCP record
+  is shown under the kind `event` (FortiGate event), as in Search: the live tail does not tell a
+  DHCP record from another FortiGate event; `type:event logid:0100026001` shows the lines with
+  the FortiGate DHCP Ack log ID (other `dhcp_msg` values may arrive under it; verify on site;
+  docs/DEVICE-SETUP.md section 2.4 uses it to compare a raw line).
 - **Limits:** at most `live.max_lines_per_second` (100) lines a second per stream;
   `live.max_streams_total` (4) streams on the server at a time, `live.max_streams_per_user` (2)
   per user (`live_stream_limit`). Lines that could not be shown are counted and reported with
@@ -336,7 +347,10 @@ find. Times through the API (no browser), the best of three after one warm-up ru
 Measured (2026-10-26) on a 4-CPU Linux development machine shared with other work, PostgreSQL 16 with native monthly partitions (no TimescaleDB); 4,913,180 `messages` rows were written in 130 seconds, ready with the summary table and statistics in 689 seconds. The TimescaleDB CI job runs the same test with the chunks older than 7 days compressed.
 After this measurement the data gained 4,320 MikroTik events a day (`mt_event`; Q6 now checks
 the event index too); the numbers below are from the data before that addition. TimescaleDB's
-numbers follow the table; the Windows CI job's are not recorded yet.
+numbers follow the table; the Windows CI job's are not recorded yet. The data has no FortiGate DHCP
+record (revision `0017_fortigate_dhcp`); such records add one branch, on the small `fg_dhcp`
+table's `(ip, time)` and `(mac, time)` indexes, to `srcip:`, `vlan:`, `department:`, `ip:` and
+`mac:` queries without a kind that excludes `event` (not to `type:dhcp`, Q6).
 
 | # | Query | Range | Budget | First run | Best | Note |
 |---|---|---|---|---|---|---|

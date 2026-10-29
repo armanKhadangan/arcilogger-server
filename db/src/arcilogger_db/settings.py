@@ -166,6 +166,13 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "alerts.job_failures": 3,
     "alerts.backup_stale_hours": 36,
     "alerts.backup_missing_hours": 48,
+    # Content-filter evidence (Uyum Durumu card 7, R20-filter; Wave 4 contract 2.4, owner
+    # question Q10): the ISO weekdays on which FortiGate web or DNS filter records are expected
+    # (every day), whether the days of usage.holidays are left out, and the longest time (hours)
+    # without such a record on expected days.
+    "alerts.filter_days": [1, 2, 3, 4, 5, 6, 7],
+    "alerts.filter_skip_holidays": True,
+    "alerts.filter_quiet_hours": 24,
     # --- Area U: usage analytics (spec 10, docs/KULLANIM.md, ADR-0011) ------------------------
     # Starting values of spec 10.2-10.4, not measured facts (ASSUMPTIONS U1-U12). Every number
     # the rollups produce is an estimate; a changed value applies to the days rebuilt after it
@@ -584,6 +591,7 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "alerts.job_failures": (1, 100),
     "alerts.backup_stale_hours": (1, 720),
     "alerts.backup_missing_hours": (1, 720),
+    "alerts.filter_quiet_hours": (6, 168),
     # Area U (usage analytics).
     "usage.active_bytes_threshold": (1, 1_000_000_000),
     "usage.background_session_bytes": (0, 1_000_000_000),
@@ -775,7 +783,8 @@ def email_addresses(
 
 
 def _validate_alert_setting(key: str, value: Any) -> Any:
-    """Area E: e-mail addresses, the severity name and the web address of the alert e-mail."""
+    """Area E: e-mail addresses, the severity name and the web address of the alert e-mail;
+    the content filter's expected weekdays."""
     if key == "alerts.email_recipients":
         return email_addresses(key, value)
     if key == "alerts.email_min_severity":
@@ -798,6 +807,14 @@ def _validate_alert_setting(key: str, value: Any) -> Any:
                 "https://10.0.0.10 (boş: yapılandırmadan)",
             )
         return url
+    if key == "alerts.filter_days":
+        if any(type(day) is not int or not 1 <= day <= 7 for day in value):
+            raise SettingValueError(
+                key,
+                "setting_work_hours_days",
+                f"{key}: 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı",
+            )
+        return sorted(set(value))
     return value
 
 

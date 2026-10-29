@@ -58,6 +58,25 @@
       "headers": {},
       "status": 422
     },
+    "setting_invalid_egress": {
+      "body": {
+        "error": {
+          "code": "setting_invalid",
+          "details": [
+            {
+              "code": "setting_egress_public_private",
+              "key": "nat.egresses",
+              "message_en": "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit.",
+              "message_tr": "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin."
+            }
+          ],
+          "message_en": "Some setting values are invalid; correct the marked settings.",
+          "message_tr": "Bazı ayar değerleri geçersiz; işaretli ayarları düzeltin."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
     "setting_locked": {
       "body": {
         "error": {
@@ -364,6 +383,73 @@
             "updated_at": null,
             "updated_by": null,
             "value": 48
+          },
+          {
+            "default": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "help_en": "ISO weekdays (1 = Monday, 7 = Sunday). If no web or DNS filter record arrives for the time below on these days, card 7 of the Uyum Durumu page turns red and the R20-filter alert opens. Default: every day of the week.",
+            "help_tr": "ISO hafta günleri (1 = Pazartesi, 7 = Pazar). Bu günlerde aşağıdaki süre boyunca web ya da DNS filtresi kaydı gelmezse Uyum Durumu'nun 7. kartı kırmızı olur ve R20-filter uyarısı açılır. Varsayılan: haftanın her günü.",
+            "is_default": true,
+            "key": "alerts.filter_days",
+            "label_en": "Days on which content filter records are expected",
+            "label_tr": "İçerik filtresi kaydı beklenen günler",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "integer_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "default": true,
+            "help_en": "On (the default): the days in the holiday list of usage analytics (usage.holidays) are not expected. Off: public holidays count as expected days.",
+            "help_tr": "Açıkken (varsayılan) Kullanım analizi'nin tatil listesindeki (usage.holidays) günler beklenmez. Kapalıyken resmî tatiller de beklenen gün sayılır.",
+            "is_default": true,
+            "key": "alerts.filter_skip_holidays",
+            "label_en": "Expect no content filter records on public holidays",
+            "label_tr": "Resmî tatillerde içerik filtresi kaydı bekleme",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": true
+          },
+          {
+            "default": 24,
+            "help_en": "The longest time without a record on expected days.",
+            "help_tr": "Beklenen günlerde kayıtsız geçebilecek en uzun süre.",
+            "is_default": true,
+            "key": "alerts.filter_quiet_hours",
+            "label_en": "Hours allowed without content filter records",
+            "label_tr": "İçerik filtresi kaydı olmadan geçebilecek süre (saat)",
+            "locked": false,
+            "max": 168,
+            "min": 6,
+            "reauth": false,
+            "type": "integer",
+            "updated_at": null,
+            "updated_by": null,
+            "value": 24
           }
         ]
       },
@@ -452,7 +538,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T02:18:54.884287Z",
+            "updated_at": "2026-10-29T01:01:24.149840Z",
             "updated_by": "capture",
             "value": 100
           },
@@ -486,7 +572,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T02:18:57.305592Z",
+            "updated_at": "2026-10-29T01:01:26.370042Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -520,7 +606,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-28T02:18:55.625299Z",
+            "updated_at": "2026-10-29T01:01:24.827025Z",
             "updated_by": "capture",
             "value": false
           },
@@ -588,7 +674,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-28T02:18:52.262688Z",
+            "updated_at": "2026-10-29T01:01:22.162518Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -1643,7 +1729,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T02:19:02.700881Z",
+            "updated_at": "2026-10-29T01:01:31.219616Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -2170,6 +2256,73 @@
             "updated_at": null,
             "updated_by": null,
             "value": 48
+          },
+          {
+            "default": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "help_en": "ISO weekdays (1 = Monday, 7 = Sunday). If no web or DNS filter record arrives for the time below on these days, card 7 of the Uyum Durumu page turns red and the R20-filter alert opens. Default: every day of the week.",
+            "help_tr": "ISO hafta günleri (1 = Pazartesi, 7 = Pazar). Bu günlerde aşağıdaki süre boyunca web ya da DNS filtresi kaydı gelmezse Uyum Durumu'nun 7. kartı kırmızı olur ve R20-filter uyarısı açılır. Varsayılan: haftanın her günü.",
+            "is_default": true,
+            "key": "alerts.filter_days",
+            "label_en": "Days on which content filter records are expected",
+            "label_tr": "İçerik filtresi kaydı beklenen günler",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "integer_list",
+            "updated_at": null,
+            "updated_by": null,
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "default": true,
+            "help_en": "On (the default): the days in the holiday list of usage analytics (usage.holidays) are not expected. Off: public holidays count as expected days.",
+            "help_tr": "Açıkken (varsayılan) Kullanım analizi'nin tatil listesindeki (usage.holidays) günler beklenmez. Kapalıyken resmî tatiller de beklenen gün sayılır.",
+            "is_default": true,
+            "key": "alerts.filter_skip_holidays",
+            "label_en": "Expect no content filter records on public holidays",
+            "label_tr": "Resmî tatillerde içerik filtresi kaydı bekleme",
+            "locked": false,
+            "max": null,
+            "min": null,
+            "reauth": false,
+            "type": "boolean",
+            "updated_at": null,
+            "updated_by": null,
+            "value": true
+          },
+          {
+            "default": 24,
+            "help_en": "The longest time without a record on expected days.",
+            "help_tr": "Beklenen günlerde kayıtsız geçebilecek en uzun süre.",
+            "is_default": true,
+            "key": "alerts.filter_quiet_hours",
+            "label_en": "Hours allowed without content filter records",
+            "label_tr": "İçerik filtresi kaydı olmadan geçebilecek süre (saat)",
+            "locked": false,
+            "max": 168,
+            "min": 6,
+            "reauth": false,
+            "type": "integer",
+            "updated_at": null,
+            "updated_by": null,
+            "value": 24
           }
         ]
       },
@@ -2258,7 +2411,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T02:19:12.505259Z",
+            "updated_at": "2026-10-29T01:01:39.262491Z",
             "updated_by": "tolga",
             "value": 150
           },
@@ -2292,7 +2445,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T02:18:57.305592Z",
+            "updated_at": "2026-10-29T01:01:26.370042Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -2326,7 +2479,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-28T02:18:55.625299Z",
+            "updated_at": "2026-10-29T01:01:24.827025Z",
             "updated_by": "capture",
             "value": false
           },
@@ -2394,7 +2547,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-28T02:18:52.262688Z",
+            "updated_at": "2026-10-29T01:01:22.162518Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -3449,7 +3602,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T02:19:02.700881Z",
+            "updated_at": "2026-10-29T01:01:31.219616Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -3699,7 +3852,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.511645+00:00",
+    "captured_at": "2026-10-13T04:01:17.864635+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

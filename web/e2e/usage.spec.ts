@@ -269,7 +269,7 @@ test.describe('Kullanım', () => {
     // A period (generated): the table per day with its total, no timeline.
     await page.goto('/usage?tab=persons&subject=person%3A1&from=2026-10-05&to=2026-10-11');
     await expect(page.getByTestId('period')).toHaveAccessibleName(
-      'Dönem: Geçen hafta, 05.10.2026 – 11.10.2026',
+      'Dönem: Geçen hafta, 05.10.2026 – 11.10.2026, 7 gün',
     );
     await expect(page.getByRole('table', { name: 'Günlere göre' }).getByRole('row')).toHaveCount(8);
     await expect(page.getByText(/^Toplam: aktif /)).toBeVisible();
@@ -315,7 +315,7 @@ test.describe('Kullanım', () => {
     await expect(page).toHaveURL(/from=2026-09-28&to=2026-10-04&hours=off/);
     await page.reload();
     await expect(page.getByTestId('period')).toHaveAccessibleName(
-      'Dönem: Özel aralık, 28.09.2026 – 04.10.2026',
+      'Dönem: Özel aralık, 28.09.2026 – 04.10.2026, 7 gün',
     );
     await expect(
       page.getByRole('group', { name: 'Saatler' }).getByRole('button', { name: 'Mesai dışı' }),

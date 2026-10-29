@@ -95,6 +95,12 @@ class Layout:
         return self.state / "worker-status.json"
 
     @property
+    def system_history(self) -> Path:
+        """Daily disk samples of the Sistem page's forecast (the worker job ``system.sample``,
+        Wave 4): drive labels and byte counts only."""
+        return self.state / "system-history.json"
+
+    @property
     def requests(self) -> Path:
         """Signed task requests (``arcilogger_core.admin.contract.TaskRequest``): the
         administration agent writes them, the LOCAL SERVICE tasks run and delete them."""

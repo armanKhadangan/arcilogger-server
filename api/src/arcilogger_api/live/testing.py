@@ -91,6 +91,9 @@ def sign_in(
         if notice:
             accept_privacy(session, row.id, privacy_version(session), ip=None)
         session.commit()
+    # Replace, not add to, the cookies the server set earlier (see `arcilogger_api.testing.login`).
+    for name in (SESSION_COOKIE, CSRF_COOKIE):
+        client.cookies.delete(name)
     client.cookies.set(SESSION_COOKIE, issued.token)
     client.cookies.set(CSRF_COOKIE, issued.csrf_token)
     client.headers[CSRF_HEADER] = issued.csrf_token

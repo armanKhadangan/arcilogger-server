@@ -1457,6 +1457,101 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   repository dumps on the same disk and copies the configuration by hand (`docs/YEDEKLEME.md:117-137`);
   card 10 reports what exists.
 
+## Deviations — W4-B (2026-10-28)
+
+- **A forecast date more than 100 years away is `null`** (2.5.2 "Forecast"). A drive that grows by
+  a few bytes a day has a positive least-squares slope, so it is `estimated`, but its marks lie
+  thousands of years ahead, past the calendar (the first version answered 500 for such a drive).
+  `forecast.HORIZON_DAYS` = 36,500: a mark further away gets `warning_on`/`full_on` = `null` while
+  `state` stays `estimated` (with `growth_bytes_per_day` the rounded slope, 0 for less than half a
+  byte a day). **W4-C:** the `estimated` text needs a variant for `full_on: null`, e.g. "Disk
+  kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor." / "Disk use grows very slowly; no
+  date can be given." Tests: `api/tests/test_system_forecast.py::
+  test_a_drive_that_hardly_grows_gets_no_date`. Fold into 2.5.2 and W4-C's texts.
+- **"Already above the warning mark" is decided by a measurement** (reading of 2.5.2): the drive's
+  use at the moment of the request (`DriveInfo.used_bytes`), else the newest sample. A trend line
+  that has passed the mark while no measurement has gives `warning_on` = today. `warning_on` is
+  therefore `null` when the drive is at or above the mark, or when the mark lies beyond the
+  horizon (deviation above); whether a drive is already above the mark is read from
+  `used_bytes`/`used_percent` against `warning_percent`, never from the `null`. Tests:
+  `test_forecast_already_above_the_warning_mark`. Fold into 2.5.2.
+- **The collector and ingest blocks list the configured sources that have an entry in the status
+  file** (reading of 2.5.2): a configured source that has not sent yet has no row (the Kaynaklar
+  page lists every configured source). `used_percent` is the R20-disk check's whole percent
+  (`used * 100 // total`); on Linux a drive's `path` is the label R20-disk uses (the data
+  directory's path, `/` for the system drive). Nothing to fold.
+
+## Deviations — W4-D
+
+- **English interval texts in the singular for one:** "Every 1 minute" / "Every 1 hour", not
+  "Every 1 minutes" (2.6.2 "Every {n} seconds/minutes/hours"); plural from two on. English grammar.
+  Tests: `test_schedule_texts_of_every_unit`, `test_jobs_from_worker_status_and_job_runs`
+  (`leases.incremental`). W4-G: MVP-CONTRACTS (Sistem job texts).
+- **Turkish "from" suffix by how the time is read:** `daily_after` reads "Her gün 00:15'ten sonra",
+  "03:30'dan sonra", "01:00'den sonra" (vowel harmony and consonant assimilation of the spoken
+  minutes, or of the hour on the full hour), not a literal "{HH:MM}'den" for every time; the task
+  table of 2.6.2 already writes "00:10'dan", "00:40'tan", "00:05'ten" this way. Tests:
+  `test_schedule_texts_of_every_unit`, `test_task_times_carry_the_turkish_suffix_of_how_they_are_read`.
+- **`failing` also when `last_status` is `failed` with `failures` 0:** a run whose `job_runs` row
+  the database refused is recorded by the worker as `last_status = "failed"`, `last_error =
+  "database unreachable"` without counting a failure (`worker/src/arcilogger_worker/service.py`,
+  `run_job`); 2.6.2 says "`failing` (`failures` ≥ 1)". Showing it `ok` would hide that the job did
+  not run. Test: `test_jobs_from_worker_status_and_job_runs` (`alerts.import`).
+- **`running` from `job_runs`, a second bounded probe per job:** the worker writes
+  `state/worker-status.json` only between its ticks and a tick runs each due job to its end, so the
+  file never shows a job in progress. Per job, after the duration probe of 2.6.2, one more probe of
+  `ix_job_runs_job_started_at`: `WHERE job = :job AND status = 'running' AND started_at > :after
+  ORDER BY started_at DESC LIMIT 1`, `:after` = the start of the newest finished run (else the 7-day
+  bound), so it reads only the rows past that run. A row older than the worker's `started_at` (left
+  by a worker that stopped mid-run) or not newer than the run the status file names (its end could
+  not be written) is not running. While running, `last_started` is the running row's start;
+  `last_finished`, `last_status` and `duration_ms` stay those of the run before. A worker that
+  stopped mid-run and was not started again shows that job `running` (ArciWorker itself shows
+  `stale`). Tests: `test_jobs_from_worker_status_and_job_runs` (`leases.incremental`,
+  `alerts.system`, `evidence.purge`), `test_health_reads_bounded_probes_per_job`,
+  `test_health_within_one_second` (both probes explained). W4-G: MVP-CONTRACTS.
+- **Seal evidence skips the states Retention wrote:** the newest modification time of a
+  `state\seal\<YYYY-MM-DD>.json` whose `status` is not `deleted`, not of every file in the folder:
+  Retention rewrites the state of each day it deletes (`status = "deleted"`,
+  `core/src/arcilogger_core/retention.py` `_delete_day`), which on an installation older than its
+  retention period would read as Seal evidence every day. The files are listed newest first (a stat
+  each) and read until one is not deleted. A fixed window of recent days would miss a time-stamp
+  outage of days: `seal_due` stops at the first failure, so Seal retries and rewrites only its
+  oldest unsealed day. Test: `test_task_states_from_evidence_files` (an old day's `deleted` state
+  written now leaves Seal `late`, then `missing`; a day six days back rewritten five minutes ago
+  makes it `ok`). W4-G: MVP-CONTRACTS (Sistem task table).
+- **Perf guard data:** `test_health_within_one_second` loads the part of the §3 perf data this
+  endpoint reads: `job_runs` 17,000 rows a day for 180 days, today's and yesterday's `state/clock`
+  files, status files with 20 sources, 30 days sealed in the vault (mock TSA), the verification
+  results. `fg_web`, `fg_dns`, `search_counts` and the 200 active alerts are not loaded: the endpoint
+  reads none of those tables.
+
+## Deviations — W4-A
+
+- **Card 4 reads its alerts by rule, not by dedup-key prefix (2.3.2).** The retention task's
+  alerts are imported without a dedup key (`core/src/arcilogger_core/retention.py:214-225`,
+  `:479-487` give no `key` fact; `worker/src/arcilogger_worker/alerts/importer.py` `import_key`
+  has no `R20-retention` case and the rule is not in `ONE_ACTIVE`), so the prefix
+  `R20-retention` never matched a real alert and the card's error row could not fire. Card 4
+  therefore reads active alerts with `rule = 'R20-retention'` and `severity <> 'info'` (the
+  `info` alert only notes days deleted as configured, as `worker/src/arcilogger_worker/evidence_jobs.py:424`
+  reads it). Test: `test_retention_card_states` inserts the alerts as the importer stores them
+  (no dedup key). The other cards' patterns match the keys the importer and the worker write.
+  W4-G: fold into UYUM-DURUMU/COMPLIANCE-STATUS §2.4 if the section names the alert key.
+- **Card 5 "the newest known credit is 0" is read as `≤ 0`.** The credit log may hold a negative
+  reading (`api/src/arcilogger_api/routers/dashboard.py` `estimated_days` handles one); a
+  negative credit is used up too. Test: `test_tsa_card_states`.
+- **Card 10: a damaged `state/backup/last.json` takes the error row (manager decision on #41).** A
+  file that does not parse or is not an object is a failed backup, as the worker's backup check
+  opens `R20-backup` for it ("Yedek durum dosyası okunamıyor"); a file that cannot be read at all
+  (access denied, a sharing violation) raises, so the card is `neutral` "could not be checked"
+  (2.3.2), as every other unreadable file of every card (card 3's `last-full.json` included: an
+  unreadable result is never a failed chain check). A status with a card from that error path is
+  not kept in the 30 s cache (2.2). Tests: `test_backup_card_reads_a_damaged_state_file_as_a_failed_backup`,
+  `test_chain_card_cannot_be_checked_with_an_unreadable_full_check`,
+  `test_an_answer_with_a_card_that_could_not_be_computed_is_not_cached`. W4-G: UYUM-DURUMU /
+  COMPLIANCE-STATUS §2.3 and §2.10.
+
 ---
 
 ## Owner questions
