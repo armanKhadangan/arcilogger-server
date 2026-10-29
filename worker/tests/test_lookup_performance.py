@@ -1596,8 +1596,8 @@ def test_the_converted_row_query_of_a_hundred_chains_is_fast(
 # indexes hold only its rows that are not compressed: the D8 probe, the post-lease queries and
 # the converted-row query, which read up to 100 days back, read such chunks for most requests.
 # Measured once on the Linux CI job, not a guard with its own bound: one follows only if a query
-# takes more than 1 s. The job log's line ``C3-compressed: d8_probe=…s post_lease=…s
-# post_lease_long=…s converted_row=…s`` gives the numbers.
+# takes more than 1 s. The job log's line ``C3-compressed: d8_probe=…s lease_checks=…s
+# post_lease=…s post_lease_long=…s converted_row=…s`` gives the numbers.
 
 #: The tables :data:`EVENT_SITE` writes into hypertables.
 EVENT_TABLES = ("fg_event", "fg_dhcp", "mt_dhcp", "fg_traffic")
@@ -1674,14 +1674,15 @@ def _measured_lookup(
 def test_the_fortigate_dhcp_checks_on_compressed_chunks(
     pg_server: TestServer, pg_template: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The D8 probe, the post-lease queries (100 ``mt_dhcp`` chains on the 7-day cap, 20
-    ``fg_dhcp`` chains of a 30-day lease) and the converted-row query of the event site's guards,
-    on its chunks compressed (TimescaleDB with compression only; a database of its own, so the
-    guards above keep their uncompressed chunks). Each runs through the lookup, as in its guard,
-    and reads what it read there; the bound is the lookup's 5 s budget (Q1: a guard of its own
-    follows only if one takes more than 1 s). On the Linux CI job
-    (``ARCILOGGER_EXPECT_TIMESCALE=1``) a server without compression fails instead of
-    skipping."""
+    """The D8 probe, the round-5 lease checks (20 ``fg_dhcp`` chains of a 7-day lease: their
+    ``fg_dhcp`` row of the moment and the post-lease query), the post-lease queries (100
+    ``mt_dhcp`` chains on the 7-day cap, 20 ``fg_dhcp`` chains of a 30-day lease) and the
+    converted-row query of the event site's guards, on its chunks compressed (TimescaleDB with
+    compression only; a database of its own, so the guards above keep their uncompressed
+    chunks). Each runs through the lookup, as in its guard, and reads what it read there; the
+    bound is the lookup's 5 s budget (Q1: a guard of its own follows only if one takes more than
+    1 s). On the Linux CI job (``ARCILOGGER_EXPECT_TIMESCALE=1``) a server without compression
+    fails instead of skipping."""
     with pg_server.database(pg_template) as name:
         empty = engine_from_url(pg_server.dsn_for(name))
         try:
@@ -1709,6 +1710,38 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
         moments = _moments(parameters)
         assert (min(moments), max(moments)) == (PROBE_AT - attribution.UNCONVERTED_WINDOW, PROBE_AT)
         assert _system_lines(site, min(moments), PROBE_AT, after=False) >= 7 * EVENT_ROWS
+
+        # The round-5 lease checks of 20 fg_dhcp chains half a 7-day lease after their last ACK:
+        # each chain's fg_dhcp row of the moment, read from its lease's start (about 28 days, nine
+        # ACKs), and the post-lease query from that ACK.
+        outcome, (records, fg_lines), recorded = _measured_lookup(
+            site, FG_AT, "_row_record", "_unconverted_lines"
+        )
+        acked = FG_AT - timedelta(seconds=302_340)
+        chains = [m.chain for m in outcome.matches]
+        assert len(chains) == 20
+        for chain in chains:
+            assert chain is not None
+            assert chain.lease is not None
+            assert chain.lease.source_table == "fg_dhcp"
+            assert chain.lease.last_dhcp_evidence == acked
+            assert chain.at - chain.lease.last_dhcp_evidence > timedelta(days=3.4)
+        assert (len(records.calls), len(fg_lines.calls)) == (20, 1)
+        starts = {lease.start for _attributor, lease, _at in records.calls}
+        assert starts == {acked - 8 * timedelta(seconds=302_400)}
+        with site.connect() as connection:
+            acks = connection.execute(
+                text(
+                    "SELECT count(*) FROM fg_dhcp WHERE ip <<= CAST('172.20.42.96/27' AS cidr) "
+                    "AND time >= :start AND time <= :at"
+                ),
+                {"start": min(starts), "at": FG_AT},
+            ).scalar_one()
+        assert acks == 20 * 9
+        _sql, parameters = recorded.one("FROM fg_event", "extra ->> ")
+        low = min(_moments(parameters))
+        assert low == acked
+        assert _system_lines(site, low, max(_moments(parameters)), after=True) >= 3 * EVENT_ROWS
 
         # The post-lease query of 100 mt_dhcp chains (the 7-day cap) and the converted-row query
         # of their MACs and addresses over 100 days, in one lookup.
@@ -1746,6 +1779,7 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
 
         seconds = {
             "d8_probe": probe.seconds,
+            "lease_checks": records.seconds + fg_lines.seconds,
             "post_lease": lines.seconds,
             "post_lease_long": long_lines.seconds,
             "converted_row": moves.seconds,
