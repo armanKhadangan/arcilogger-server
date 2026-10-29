@@ -253,6 +253,11 @@ function ChainSteps({
     : chain.department_source === 'vlan'
       ? t('lookup.chain.departmentFromVlan')
       : null;
+  // The `low` reasons of the lease, beside the step that shows the MAC: the lease step, or the
+  // srcmac step in its place (never lost: the list above the chain leaves them out).
+  const leaseNotes = chain.explanations.filter((item) =>
+    LEASE_STEP_EXPLANATIONS.includes(item.key),
+  );
   return (
     <ol className="flex flex-col">
       {traffic?.transip ? (
@@ -291,6 +296,7 @@ function ChainSteps({
           detail={t('network.lookup.srcmacDetail', {
             interface: srcmacInterface(chain, traffic) ?? '—',
           })}
+          notes={leaseNotes}
           onOpen={onOpen}
         />
       ) : (
@@ -310,7 +316,7 @@ function ChainSteps({
           detail={lease ? <LeaseDetail lease={lease} /> : undefined}
           confidence={lease?.confidence}
           evidence={lease?.evidence}
-          notes={chain.explanations.filter((item) => LEASE_STEP_EXPLANATIONS.includes(item.key))}
+          notes={leaseNotes}
           onOpen={onOpen}
         />
       )}

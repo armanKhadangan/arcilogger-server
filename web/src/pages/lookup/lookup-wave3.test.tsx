@@ -288,12 +288,20 @@ describe('the result view', () => {
   });
 
   it('a srcmac chain is never drawn as a lease, even when it carries one', () => {
-    // Not captured: the srcmac alternative of srcmac_conflict given the main chain's lease.
+    // Not captured: the srcmac alternative of srcmac_conflict given the main chain's lease and
+    // the captured renewal reason of fortigate_renewal_low.
     const lookup = sample('srcmac_conflict');
     const chain = chainOf(lookup);
     const other = need(chain.alternatives[0], 'srcmac alternative');
     expect(other.mac_source).toBe('srcmac');
     other.lease = structuredClone(chain.lease);
+    const renewal = need(
+      chainOf(sample('fortigate_renewal_low')).explanations.find(
+        (item) => item.key === 'lease_renewal_not_seen',
+      ),
+      'renewal reason',
+    );
+    other.explanations = [...other.explanations, renewal];
     show(lookup);
     const srcmac = screen.getByRole('region', { name: 'Olasılık 2 (srcmac, kısmi kanıt)' });
     expect(within(srcmac).getByText('Kısmi kanıt: srcmac')).toBeVisible();
@@ -302,6 +310,10 @@ describe('the result view', () => {
     expect(step).toHaveTextContent('MAC 00:00:5e:00:53:57');
     expect(step).not.toHaveTextContent('00:00:5e:00:53:77');
     expect(srcmac).toHaveTextContent('MAC 00:00:5e:00:53:57 (Kısmi kanıt: srcmac)');
+    // A lease-step reason stays beside the step that stands in for the lease, never lost.
+    expect(step.querySelector('[data-explanation="lease_renewal_not_seen"]')).toHaveTextContent(
+      renewal.text_tr,
+    );
   });
 
   it('an IP conflict beside a srcmac conflict keeps both statements', () => {
