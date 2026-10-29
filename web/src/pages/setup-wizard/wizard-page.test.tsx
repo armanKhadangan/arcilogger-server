@@ -1,6 +1,7 @@
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { queryKeys } from '@/lib/api-hooks';
 import { setLanguage } from '@/lib/i18n';
 import type { AdminConfig, AdminRequestOut } from '@/lib/settings-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
@@ -121,6 +122,33 @@ describe('İlk kurulum sihirbazı', () => {
     expect(await stepLink(/Site ayarları/)).toHaveTextContent('Eksik');
     // Nothing is stored: skipping sends no request that changes anything.
     expect(calls.filter((call) => call.method !== 'GET')).toEqual([]);
+  });
+
+  it('reads the configuration again when the agent has applied a change', async () => {
+    // The wizard was opened again before the agent wrote the new file: replica still off.
+    let config = capturedConfig();
+    config.sections.replica.enabled = false;
+    let status = { ...ADMIN.status, config_sha256: config.config_sha256 };
+    installFetch((request) => {
+      if (request.path === '/api/v1/auth/me') return jsonResponse(200, makeMe('admin'));
+      if (request.path === '/api/v1/admin/config') return jsonResponse(200, config);
+      if (request.path === '/api/v1/admin/status') return jsonResponse(200, status);
+      if (request.path === '/api/v1/admin/requests')
+        return jsonResponse(200, { items: [], next_cursor: null });
+      return errorResponse(404, 'not_found');
+    });
+    const { client } = renderApp('/settings/setup?step=replica');
+    expect(await stepLink(/Replika/)).toHaveTextContent('Eksik');
+
+    // The agent applies it; the next status poll names the file's new hash.
+    config = capturedConfig();
+    config.sections.replica.enabled = true;
+    config.config_sha256 = 'b'.repeat(64);
+    status = { ...status, config_sha256: config.config_sha256 };
+    await act(() => client.invalidateQueries({ queryKey: queryKeys.adminStatus }));
+    await waitFor(async () => {
+      expect(await stepLink(/Replika/)).toHaveTextContent('Tamam');
+    });
   });
 
   it('a step changed from inside the panel takes the focus along', async () => {

@@ -8,7 +8,7 @@ import { PageSkeleton } from '@/components/layout/route-frames';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/lib/api';
-import { useAdminConfig, useAdminRequests } from '@/lib/api-hooks';
+import { useAdminConfig, useAdminRequests, useAdminStatus } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
 import { useSourcesOverview } from '@/lib/sources-hooks';
 import type { AdminConfig } from '@/lib/settings-types';
@@ -81,12 +81,21 @@ export function WizardPage() {
   const { can } = useAuth();
   const [params] = useSearchParams();
   const config = useAdminConfig();
+  const status = useAdminStatus();
   const tests = useAdminRequests('action.tsa_test');
   const panel = useRef<HTMLDivElement>(null);
   const focusPanel = useRef(false);
   useEffect(() => {
     endWizardMode();
   }, []);
+  // A change the agent applied after the wizard was opened again: the status (polled by the
+  // frame) names the file's new hash, and the steps are derived from the configuration anew.
+  const appliedSha = status.data?.config_sha256;
+  const shownSha = config.data?.config_sha256;
+  const { refetch } = config;
+  useEffect(() => {
+    if (appliedSha && shownSha && appliedSha !== shownSha) void refetch();
+  }, [appliedSha, shownSha, refetch]);
   const tested = verifiedStampTest(tests.data?.pages.flatMap((page) => page.items) ?? []);
   const states = useMemo(
     () => (config.data ? wizardStates({ config: config.data, tested }) : undefined),
