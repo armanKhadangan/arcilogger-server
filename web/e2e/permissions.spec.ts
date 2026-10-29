@@ -103,6 +103,7 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
     '/settings/retention',
     '/settings/backup',
     '/settings/history',
+    '/settings/setup',
     '/lookup',
     '/evidence',
     '/sealing',
@@ -138,13 +139,14 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
   ).toEqual([]);
 });
 
-// Uyum Durumu: administrator and auditor; Sistem: administrator only (Wave 4 contract D15).
+// Uyum Durumu: administrator and auditor; Sistem and the first-run wizard (`settings.manage`):
+// administrator only (Wave 4 contract D15).
 for (const [username, paths] of [
-  ['ayse.yilmaz', ['/system']],
-  ['mehmet.kaya', ['/compliance', '/system']],
-  ['zeynep', ['/compliance', '/system']],
+  ['ayse.yilmaz', ['/system', '/settings/setup']],
+  ['mehmet.kaya', ['/compliance', '/system', '/settings/setup']],
+  ['zeynep', ['/compliance', '/system', '/settings/setup']],
 ] as const) {
-  test(`Uyum Durumu and Sistem stay closed by URL outside the role — ${username}`, async ({
+  test(`Uyum Durumu, Sistem and the first-run wizard stay closed by URL outside the role — ${username}`, async ({
     page,
   }) => {
     const api = await mockApi(page, { signedInAs: username });
@@ -154,10 +156,13 @@ for (const [username, paths] of [
         page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
       ).toBeVisible();
     }
-    // Nothing was even asked of the API for those pages.
+    // Nothing was even asked of the API for those pages (the wizard reads the configuration, the
+    // administration service's requests and the sources).
     expect(
       api.calls.filter((call) =>
-        ['/compliance', '/system'].some((prefix) => call.path.startsWith(prefix)),
+        ['/compliance', '/system', '/admin', '/settings', '/sources'].some((prefix) =>
+          call.path.startsWith(prefix),
+        ),
       ),
     ).toEqual([]);
   });
@@ -231,6 +236,7 @@ test('browser administration is for administrators: the API refuses everyone els
     '/settings/retention',
     '/settings/backup',
     '/settings/history',
+    '/settings/setup',
   ]) {
     await page.goto(path);
     await expect(
