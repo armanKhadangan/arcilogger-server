@@ -431,12 +431,13 @@ and invocation. The Wave 2 tree is `c5f14a4` with the method of gates 1–2 (the
 `ingest/src`). `switch-1` is not a source of the harness's configuration: both trees parse its lines
 by content. Both trees load exactly the same bytes and write the same number of rows (435,368 and
 429,106 a run). Order: Wave 2, Wave 3, Wave 3, Wave 2, eight times per day (ABBA ×8, run by run: 16
-runs per tree, day and worker count; two campaigns of ABBA ×4), the default day first, nothing else
-of the integrator's running. This 4-vCPU VM (Xeon 2.10 GHz, 16 GB, PostgreSQL 16 without
-TimescaleDB) was shared at times with another agent's work: load average at the start of an
-invocation 1.8–2.6, except 2.7–5.9 for 7 invocations (14 runs) in the middle of the default day
-(16:44–16:53 UTC, the end of its first campaign and the start of its second). Min–max (median)
-lines/s, the difference of the medians to Wave 2:
+runs per tree, day and worker count; two campaigns of ABBA ×4), the default day first. This
+4-vCPU VM (Xeon 2.10 GHz, 16 GB, PostgreSQL 16 without TimescaleDB) was shared at times with other
+work, including this integration's own browser tests and live smoke (about 16:44–16:48 UTC): load
+average at the start of an invocation 1.8–2.6, except 2.7–5.9 for 7 invocations (14 runs) in the
+middle of the default day (16:44–16:53 UTC, the end of its first campaign and the start of its
+second), among them each tree's lowest run with 2 workers (5,503 and 6,234 lines/s). Min–max
+(median) lines/s, the difference of the medians to Wave 2:
 
 | `bench_throughput.py --spool`, 16 runs each | in-process | `--workers 2` |
 |---|---|---|
