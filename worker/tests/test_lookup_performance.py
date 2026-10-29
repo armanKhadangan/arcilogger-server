@@ -1597,7 +1597,7 @@ def _measured_lookup(
 
 @pytest.mark.perf
 def test_the_fortigate_dhcp_checks_on_compressed_chunks(
-    pg_server: TestServer, pg_template: str
+    pg_server: TestServer, pg_template: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The D8 probe, the post-lease queries (100 ``mt_dhcp`` chains on the 7-day cap, 20
     ``fg_dhcp`` chains of a 30-day lease) and the converted-row query of the event site's guards,
@@ -1675,10 +1675,12 @@ def test_the_fortigate_dhcp_checks_on_compressed_chunks(
             "post_lease_long": long_lines.seconds,
             "converted_row": moves.seconds,
         }
-        print(
-            "\nC3-compressed: "
-            + " ".join(f"{name}={value:.3f}s" for name, value in seconds.items())
-            + f" ({EVENT_ROWS} system lines a day)"
-        )
+        # Past the capture: ``poe test-perf`` runs without ``-s``, and the job log must show it.
+        with capsys.disabled():
+            print(
+                "\nC3-compressed: "
+                + " ".join(f"{name}={value:.3f}s" for name, value in seconds.items())
+                + f" ({EVENT_ROWS} system lines a day)"
+            )
         for name, value in seconds.items():
             assert value < LIMIT_SECONDS, f"{name} took {value:.3f} s on compressed chunks"
