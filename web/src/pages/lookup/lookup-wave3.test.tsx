@@ -18,8 +18,8 @@ import { LookupResults } from './lookup-results';
  * stored before ADR-0016. The captured Wave 3 lookups (`lookups.json`); derived from them only
  * what no capture has: the two `low` reasons other than the renewal (the captured renewal chain
  * with its explanation swapped for the opening of the engine's text), an IP conflict beside a
- * srcmac conflict, a srcmac chain that carries a lease, a `superseded` lease end, a match of a
- * search without a public IP and the stored form before ADR-0016.
+ * srcmac conflict, a srcmac chain that carries a lease, a `superseded` lease end, an exit line of
+ * two exits, a match of a search without a public IP and the stored form before ADR-0016.
  */
 
 type Wave3Lookup =
@@ -95,6 +95,22 @@ describe('the exit line (one label table with the PDF)', () => {
     ['no_egress', 'Çıkış yok'],
   ] as const)('%s', (key, line) => {
     expect(egressLine(need(outcome(sample(key)).egress, key), t)).toBe(line);
+  });
+
+  it('several exits: joined with "; ", a fallback named by the mode of the first', () => {
+    // Not captured (no lookup prints more than one exit): the captured two exits of `no_egress`
+    // under the resolutions that list them.
+    const both = need(outcome(sample('no_egress')).egress, 'egress');
+    const reversed = [...both.egresses].reverse();
+    expect(egressLine({ ...both, resolution: 'fallback' }, t)).toBe(
+      "Doğrudan hat doğrulanamadı — hat-1, Doğrudan; hat-2, Servis sağlayıcı NAT'ı",
+    );
+    expect(egressLine({ ...both, resolution: 'fallback', egresses: reversed }, t)).toBe(
+      "NAT adresi doğrulanamadı — hat-2, Servis sağlayıcı NAT'ı; hat-1, Doğrudan",
+    );
+    expect(egressLine({ ...both, resolution: 'public_unknown' }, t)).toBe(
+      "Genel adresi bilinmeyen hatlar — hat-1, Doğrudan; hat-2, Servis sağlayıcı NAT'ı",
+    );
   });
 
   it('in English too', () => {
