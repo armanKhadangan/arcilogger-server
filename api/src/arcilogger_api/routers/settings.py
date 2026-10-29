@@ -12,10 +12,11 @@ and the worker read them whenever they use them, so a change needs no reload.
 * ``PATCH /settings`` ``{"changes": [{"key", "old", "value"}]}`` — **all or nothing** in one
   transaction: every key must be known (422 ``setting_unknown``) and not locked (422
   ``setting_locked``), every value valid (422 ``setting_invalid`` with
-  ``details[{key, code, message_tr, message_en}]``, never the submitted value), also together with
-  the stored settings (:func:`arcilogger_db.settings.check_settings_together`: the ARP grace may
-  not be longer than the ARP interval, whichever of the two changes), ``old`` must still
-  be the value in force (409 ``setting_conflict``, ``details[{key, current}]``) and a key of
+  ``details[{key, code, message_tr, message_en}]``, never the submitted value), ``old`` must still
+  be the value in force (409 ``setting_conflict``, ``details[{key, current}]``), then the values
+  together with the stored settings (422 ``setting_invalid`` again,
+  :func:`arcilogger_db.settings.check_settings_together`: the ARP grace may not be longer than the
+  ARP interval, whichever of the two changes) and a key of
   ``REAUTH_KEYS`` needs a recent re-authentication (403 ``reauth_required``). Each change is
   written by :func:`arcilogger_db.settings_admin.change_setting` with the user's id and address
   (audit ``settings.change {old, new}``); a value equal to the one in force is left alone
@@ -321,8 +322,6 @@ def patch_settings(
             values.append((change.key, validate_setting(change.key, change.value)))
         except SettingValueError as exc:
             problems.append(_problem(exc))
-    if not problems:
-        problems = [_problem(exc) for exc in check_settings_together(db, dict(values))]
     if problems:
         raise _error(422, "setting_invalid", details=problems)
     conflicts = [
@@ -332,6 +331,10 @@ def patch_settings(
     ]
     if conflicts:
         raise _error(409, "setting_conflict", details=conflicts)
+    # The rules between keys read the stored values: judged once ``old`` is known to be current.
+    problems = [_problem(exc) for exc in check_settings_together(db, dict(values))]
+    if problems:
+        raise _error(422, "setting_invalid", details=problems)
     if any(SETTINGS[key].reauth for key in keys):
         ensure_recent_auth(user)
     return _write(db, request, user, values)

@@ -4,11 +4,12 @@ re-authentication and console-only keys, ``change_setting`` with the user and th
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.egress import CHANGES_KEY, fingerprint
@@ -450,6 +451,41 @@ def test_changes_of_one_write_are_checked_together(
         (INTERVAL, "setting_arp_interval_below_grace"),
     ]
     assert check_settings_together(db_session, {"lookup.tolerance_seconds": 90}) == []
+
+
+def test_two_writes_of_the_two_keys_at_once_are_checked_one_after_the_other(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Each change alone would pass against the other's old value (interval 600 >= grace 300,
+    grace 900 <= interval 3600); the second is checked once the first has committed."""
+    first, second = db_session_factory(), db_session_factory()
+    refused: list[SettingValueError] = []
+
+    def lengthen_the_grace() -> None:
+        try:
+            change_setting(second, GRACE, 900, actor="tolga")
+            second.commit()
+        except SettingValueError as exc:
+            refused.append(exc)
+            second.rollback()
+
+    try:
+        change_setting(first, INTERVAL, 600, actor="ayse")  # holds the lock until it commits
+        other = threading.Thread(target=lengthen_the_grace)
+        other.start()
+        other.join(1.0)
+        assert other.is_alive()  # waiting for the first write
+        first.commit()
+        other.join(10)
+        assert not other.is_alive()
+        assert [(exc.key, exc.code) for exc in refused] == [
+            (GRACE, "setting_arp_grace_above_interval")
+        ]
+        with db_session_factory() as session:
+            assert (get_setting(session, INTERVAL), get_setting(session, GRACE)) == (600, 300)
+    finally:
+        first.close()
+        second.close()
 
 
 def test_a_grace_written_around_the_validator_never_blocks_the_interval(

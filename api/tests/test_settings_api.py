@@ -254,6 +254,29 @@ def test_the_arp_grace_is_never_longer_than_the_arp_interval(
     assert (value(app_session_factory, interval), value(app_session_factory, grace)) == (3600, 300)
 
 
+def test_a_stale_page_gets_the_conflict_before_the_rule_between_keys(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session]
+) -> None:
+    """The rule between keys reads the stored values, so it is judged only once ``old`` is
+    current: a page that still shows the old interval is told to reload (409), not that its grace
+    is longer than an interval it never saw."""
+    login_as(client, "admin")
+    interval, grace = "arp.interval_seconds", "arp.ignore_after_release_seconds"
+    client.patch(
+        URL,
+        json={
+            "changes": [
+                {"key": interval, "old": 3600, "value": 200},
+                {"key": grace, "old": 300, "value": 100},
+            ]
+        },
+    )
+    stale = client.patch(URL, json={"changes": [{"key": grace, "old": 300, "value": 250}]})
+    assert stale.status_code == 409
+    assert stale.json()["error"]["details"] == [{"key": grace, "current": 100}]
+    assert value(app_session_factory, grace) == 100
+
+
 def test_only_administrators_change_settings(client: TestClient, login_as: Login) -> None:
     login_as(client, "auditor")
     assert client.get(URL).status_code == 403

@@ -679,6 +679,11 @@ AT_MOST_SETTINGS: Final[Mapping[str, tuple[str, str, str]]] = {
         "setting_arp_interval_below_grace",
     ),
 }
+_RULE_KEYS: Final = frozenset(
+    set(AT_MOST_SETTINGS) | {bound for bound, *_ in AT_MOST_SETTINGS.values()}
+)
+#: pg_advisory_xact_lock key ("ARCISETR" as a signed 64-bit integer) of the rules between keys.
+RULES_LOCK_KEY: Final = int.from_bytes(b"ARCISETR", "big") - 2**63
 
 
 def check_settings_together(session: Session, values: Mapping[str, Any]) -> list[SettingValueError]:
@@ -686,8 +691,14 @@ def check_settings_together(session: Session, values: Mapping[str, Any]) -> list
     write break together with the stored settings: one :class:`SettingValueError` for each key of
     a broken rule that ``values`` changes, an empty list when none. A key ``values`` does not
     change counts with its stored value (or the shipped default); one that is not an integer
-    (written around the validator) breaks no rule here."""
+    (written around the validator) breaks no rule here.
+
+    A write that changes a key of a rule first takes :data:`RULES_LOCK_KEY` for the rest of the
+    caller's transaction, so two writes of the two keys at once (each would pass against the
+    other's old value) are checked one after the other."""
     errors: list[SettingValueError] = []
+    if any(key in values for key in _RULE_KEYS):
+        session.execute(select(func.pg_advisory_xact_lock(RULES_LOCK_KEY)))
     for key, (bound, key_code, bound_code) in AT_MOST_SETTINGS.items():
         if key not in values and bound not in values:
             continue
