@@ -1123,17 +1123,31 @@ def test_a_corrected_setting_leaves_refused_at_once(
     assert lease_card(client)["state"] == "ok"
 
 
+@pytest.mark.parametrize(
+    ("key", "stored"),
+    [
+        ("dhcp.fortigate_logids", ["0100026001"]),  # not an object
+        ("lease.server_seconds", ["x"]),  # not an object: AttributeError in from_settings
+        ("lease.server_seconds", "abc"),
+        ("lease.server_seconds", 5),
+        ("lease.server_seconds", True),
+    ],
+    ids=["fortigate-logids", "server-list", "server-text", "server-number", "server-true"],
+)
 def test_unreadable_dhcp_settings_keep_the_card(
     client: TestClient,
     login_as: Login,
     app_session_factory: sessionmaker[Session],
     evidence_rows: None,
+    key: str,
+    stored: Any,
 ) -> None:
-    """A ``dhcp.fortigate_*`` value written around the validator: never a 500 and never a card
-    without lease evidence; the lease job cannot use any ``fg_dhcp`` row then (``Context.load``
-    raises), so no row counts as usable, refused or excluded, ``format_verified`` is only a
-    stored JSON ``true`` and the state comes from the alerts (decision X8, review 3, Q10)."""
-    set_value(app_session_factory, "dhcp.fortigate_logids", ["0100026001"])
+    """A ``dhcp.fortigate_*`` or ``lease.*`` value written around the validator (one
+    ``LookupSettings.from_settings`` refuses): never a 500 and never a card without lease
+    evidence; the lease job cannot use any ``fg_dhcp`` row then (``Context.load`` raises), so
+    no row counts as usable, refused or excluded, ``format_verified`` is only a stored JSON
+    ``true`` and the state comes from the alerts (decision X8, review 3, Q10, final review 1)."""
+    set_value(app_session_factory, key, stored)
     set_value(app_session_factory, "dhcp.fortigate_format_verified", "true")
     reader(client, login_as, app_session_factory)
     card = lease_card(client)

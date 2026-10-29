@@ -675,7 +675,7 @@ def run_5651(
     try:
         settings = LookupSettings.from_settings(values)
         limit = min(max(int(values.get(TIMEOUT_SETTING, DEFAULT_TIMEOUT_SECONDS)), 1), 300)
-    except (TypeError, ValueError) as exc:
+    except (AttributeError, TypeError, ValueError) as exc:  # AttributeError: a non-object lease.*
         log.warning("lookup settings cannot be read: %s", exc)
         raise ApiError(503, "lookup_settings_invalid", *SETTINGS_UNREADABLE) from exc
     try:
