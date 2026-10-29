@@ -2,10 +2,11 @@
  * What the "Panel" (spec 12.3 item 2) shows to whom, and the small calculations behind its cards
  * (no components here; unit-tested in `dashboard-model.test.ts`).
  *
- * Two requests feed the page: `GET /dashboard/summary` (`dashboard.view`; every block of it is
- * `null` when the user lacks that block's own permission) and today's `GET /usage/company`
- * (`dashboard.usage`, `usage.person` or `usage.anonymous`). A block the API leaves out, or a
- * request the user may not make, is not shown at all — it is not an error.
+ * Three requests feed the page: `GET /dashboard/summary` (`dashboard.view`; every block of it is
+ * `null` when the user lacks that block's own permission), today's `GET /usage/company`
+ * (`dashboard.usage`, `usage.person` or `usage.anonymous`) and `GET /system/disk` (`system.read`,
+ * the disk card). A block the API leaves out, or a request the user may not make, is not shown at
+ * all — it is not an error.
  */
 
 import type {
@@ -18,6 +19,7 @@ import type {
 import { isApiError } from '@/lib/api';
 import { formatDuration, formatNumber, formatTime, type Lang } from '@/lib/format';
 import { hasAny } from '@/lib/permissions';
+import type { SystemDisk } from '@/lib/system-types';
 import { NAV_ITEMS } from '@/nav';
 
 /** Who may ask `GET /dashboard/summary`. */
@@ -28,6 +30,8 @@ export const USAGE_PERMISSIONS: readonly string[] = [
   'usage.person',
   'usage.anonymous',
 ];
+/** Who may ask `GET /system/disk` (the disk card; administrators). */
+export const DISK_PERMISSIONS: readonly string[] = ['system.read'];
 
 export type DashboardBlock =
   | 'ingest'
@@ -35,6 +39,7 @@ export type DashboardBlock =
   | 'seal'
   | 'credit'
   | 'clock'
+  | 'disk'
   | 'usage'
   | 'alerts'
   | 'sites'
@@ -52,19 +57,26 @@ export function dashboardRequests(granted: ReadonlySet<string>): {
   };
 }
 
+/** Whether the page asks `GET /system/disk` for a user with `granted` permissions. */
+export function diskRequested(granted: ReadonlySet<string>): boolean {
+  return hasAny(granted, DISK_PERMISSIONS);
+}
+
 /** A refusal means "not for this user": the block is left out instead of showing an error. */
 export function isRefusal(error: unknown): boolean {
   return isApiError(error) && error.status === 403;
 }
 
 /**
- * The blocks to show once the answers are in. `summary`/`usage` are `undefined` while loading or
- * when not asked; a refused usage request hides the usage blocks.
+ * The blocks to show once the answers are in. `summary`/`usage`/`disk` are `undefined` while
+ * loading or when not asked; a refused usage request hides the usage blocks. The disk card shows
+ * only with an answer: not while loading, not on any error (the Sistem page shows the error).
  */
 export function visibleBlocks(
   granted: ReadonlySet<string>,
   summary: DashboardSummary | undefined,
   usage: { data: CompanyUsage | undefined; error: unknown },
+  disk?: SystemDisk,
 ): Set<DashboardBlock> {
   const asked = dashboardRequests(granted);
   const blocks = new Set<DashboardBlock>();
@@ -80,6 +92,7 @@ export function visibleBlocks(
     if (summary.clock) blocks.add('clock');
     if (summary.alerts) blocks.add('alerts');
   }
+  if (diskRequested(granted) && disk) blocks.add('disk');
   if (asked.usage && (usage.data || (usage.error && !isRefusal(usage.error)))) {
     blocks.add('usage');
     blocks.add('sites');

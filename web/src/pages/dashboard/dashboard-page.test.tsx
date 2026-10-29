@@ -23,9 +23,13 @@ import {
 import { formatBytes } from '@/lib/format';
 import { handoff } from '@/lib/handoff';
 import { setLanguage } from '@/lib/i18n';
+import { ROLES } from '@/lib/permissions';
+import { SYSTEM_POLL_MS, useSystemDisk } from '@/lib/system-hooks';
+import type { SystemDisk } from '@/lib/system-types';
 import { renderApp, testQueryClient } from '@/test/render';
 import { DASHBOARD, licenseSample, RAW, USAGE } from '@/test/samples';
 
+import { diskRequested } from './dashboard-model';
 import { DashCard } from './dashboard-parts';
 import { PARSE_FAILURES, withParseFailures } from './test-data';
 
@@ -118,6 +122,9 @@ describe('Panel — blocks by permission', () => {
     expect(screen.getByTestId('card-credit')).toHaveTextContent('~6 yıl yeter');
     expect(screen.getByTestId('card-credit')).not.toHaveTextContent('Eşiğin altında');
     expect(screen.getByTestId('card-clock')).toHaveTextContent('Normal');
+    expect(
+      within(screen.getByTestId('card-clock')).getByRole('link', { name: 'Sistem sayfasını aç' }),
+    ).toHaveAttribute('href', '/system');
     const alerts = screen.getByTestId('card-alerts');
     expect(within(alerts).getByRole('link', { name: /Yüksek 2/ })).toHaveAttribute(
       'href',
@@ -523,5 +530,32 @@ describe('Panel — polling', () => {
     const summary = count(calls, '/dashboard/summary');
     expect(summary).toHaveLength(2);
     expect(summary[1]?.headers.get(BACKGROUND_HEADER)).toBe('1');
+  });
+
+  it('the disk (system.read only) refreshes every 30 s in the background; "Yenile" is the user\'s', async () => {
+    expect(SYSTEM_POLL_MS).toBe(30_000);
+    const disk: SystemDisk = { checked_at: '2026-10-12T09:00:00Z', drives: [] };
+    const calls = installFetch(() => jsonResponse(200, disk));
+    const granted = (role: Role) =>
+      new Set(ROLES.find((item) => item.id === role)?.permissions ?? []);
+    for (const role of ['auditor', 'hr', 'viewer'] as const) {
+      renderHook(() => useSystemDisk(diskRequested(granted(role))), { wrapper });
+    }
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(count(calls, '/system/disk')).toEqual([]);
+
+    const { result } = renderHook(() => useSystemDisk(diskRequested(granted('admin'))), {
+      wrapper,
+    });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    await act(() => result.current.refresh());
+    const asked = count(calls, '/system/disk');
+    expect(asked.map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([
+      null,
+      '1',
+      '1',
+      null,
+    ]);
   });
 });
