@@ -276,7 +276,7 @@ function ChainSteps({
         }
         onOpen={onOpen}
       />
-      {chain.mac_source === 'srcmac' && !lease ? (
+      {chain.mac_source === 'srcmac' ? (
         <Step
           icon={ArrowRight}
           label={t('network.lookup.srcmacStep')}

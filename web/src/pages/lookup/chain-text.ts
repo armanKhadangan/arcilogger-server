@@ -147,11 +147,13 @@ export function chainSummary(
   const parts: string[] = [];
   if (traffic?.transip) parts.push(`WAN ${endpoint(traffic.transip, traffic.transport)}`);
   parts.push(endpoint(chain.internal_ip, traffic?.srcport ?? null));
-  if (chain.lease) {
+  // A srcmac chain is partial evidence, never a lease (as the chain view draws it).
+  if (chain.mac_source === 'srcmac') {
+    const mac = chain.device?.mac ?? traffic?.srcmac;
+    if (mac) parts.push(`MAC ${mac} (${t('network.lookup.srcmacBadge')})`);
+  } else if (chain.lease) {
     const host = chain.lease.hostname ? ` (${visibleText(chain.lease.hostname)})` : '';
     parts.push(`MAC ${chain.lease.mac}${host}`);
-  } else if (chain.mac_source === 'srcmac' && chain.device) {
-    parts.push(`MAC ${chain.device.mac} (${t('network.lookup.srcmacBadge')})`);
   }
   if (chain.device?.name)
     parts.push(`${t('lookup.chain.device')} "${visibleText(chain.device.name)}"`);
