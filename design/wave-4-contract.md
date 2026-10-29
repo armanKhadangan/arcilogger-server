@@ -1561,6 +1561,22 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   missing server or sender. Tests: `wizard-model.test.ts` "e-mail: switched off is not done, even
   with a server and a sender", `e2e/setup-wizard.spec.ts` (the fresh installation's e-mail step).
   W4-G: AYARLAR/SETTINGS (the wizard entry) and UYUM-DURUMU/COMPLIANCE-STATUS §5.
+- **The Sistem forecast sentence has three variants beside the fixed `estimated` text (2.8.2).**
+  (a) English says "(~1 day)" in the singular (the Turkish text needs none). (b) With a full day
+  but `warning_on` null (the drive has reached the mark, W4-B's second deviation): "%{warning}
+  eşiğine ulaşıldı; bu hızla dolmaya {full_on} (~{days} gün)." / "The {warning}% mark is reached;
+  at this rate the drive is full on {full_on} (~{days} days)." — "reached", not "passed", because
+  at exactly the mark the drive's badge still reads "Olağan". (c) With `full_on` null (W4-B's first
+  deviation, `forecast.HORIZON_DAYS`): "Disk kullanımı çok yavaş artıyor; dolma tarihi
+  öngörülemiyor." / "Disk use grows very slowly; no date can be given." Tests:
+  `system-model.test.ts` "says one day in the singular", "gives only the day it is full once the
+  drive has reached the warning mark", "agrees with the badge on a drive exactly at the warning
+  mark", "gives no day for a drive that grows too slowly to forecast". W4-G: MVP-CONTRACTS and
+  UYUM-DURUMU/COMPLIANCE-STATUS §4.
+- **A null CPU reads "bu platformda okunamıyor" on platform `other`** (reading of 2.8.2, which gives
+  "ölçülüyor" for a null CPU and "bu platformda okunamıyor" for null host values): on Windows and
+  Linux a null CPU is the first reading ("ölçülüyor"); on any other platform nothing is read.
+  Test: `system-model.test.ts` (`cpuPending`). Nothing to fold.
 
 ---
 
