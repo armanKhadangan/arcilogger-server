@@ -14,6 +14,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import Engine, text
 
+from arcilogger_core.testing import refused_port
 from arcilogger_ingest import __version__
 from arcilogger_ingest.cli import EXIT_CONFIG, EXIT_DB_UNAVAILABLE, EXIT_OK, main
 from arcilogger_ingest.status import read_status
@@ -65,13 +66,9 @@ def test_run_once_in_process(world: World, pg_dsn: str, db_engine: Engine) -> No
 
 
 def test_run_once_with_the_database_unreachable_exits_3(world: World, tmp_path: Path) -> None:
-    import socket
-
-    with socket.socket() as probe:  # a port nobody listens on
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    config = write_config_file(world, f"postgresql://nobody:pw@127.0.0.1:{port}/nothing")
-    assert main(["run", "--config", str(config), "--once"]) == EXIT_DB_UNAVAILABLE
+    with refused_port() as port:
+        config = write_config_file(world, f"postgresql://nobody:pw@127.0.0.1:{port}/nothing")
+        assert main(["run", "--config", str(config), "--once"]) == EXIT_DB_UNAVAILABLE
 
 
 def test_status_command(world: World, pg_dsn: str, capsys: pytest.CaptureFixture[str]) -> None:
