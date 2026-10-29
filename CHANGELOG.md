@@ -42,7 +42,8 @@ setting or has a loud check (sahada doğrula; KURULUM/INSTALL section 16 is the 
   before the requested moment. A chain is `low`, with the reason, more than half a lease after that
   record with no renewal seen (`lease_renewal_not_seen`), when two DHCP origins served its network
   (`dhcp_sources_overlap`), for an address in no configured network (`fortigate_dhcp_no_network`),
-  when a cited source's clock was more than 120 s off at the moment (`source_clock_offset`), and
+  when a cited source's clock was more than 120 s off at the moment (a source measured only for the
+  session search: more than the lookup tolerance, when that is wider; `source_clock_offset`), and
   when an unconverted FortiGate DHCP line (loaded before the upgrade, or during a rollback) of its
   IP or MAC follows its lease's last record (`fortigate_dhcp_not_converted_since_lease`). Such
   lines are not converted (O3): when no chain is built the lookup names a covering one
@@ -161,11 +162,12 @@ setting or has a loud check (sahada doğrula; KURULUM/INSTALL section 16 is the 
   simulation assumption).
 - **Performance:** ingest with `fg_dhcp` and `srcmac` stayed within the 5 % gate on the development
   machine: the default mix +0.8 % in-process and +0.7 % with 2 workers, a FortiGate-only spool
-  −3.5 % and +1.7 % (docs/INGEST.md). The lookup's probe of an address no exit claims reads the NAT
-  address index in its own order, the probe window first (a busy address in about 0.01 s); a busy
-  unclaimed address with no session over the moment takes about 0.5 s at a million lines a day,
-  under a bound of 1 s of its own, the whole lookup staying at about 1 s (contract, "Deviations —
-  c3").
+  −3.5 % and +1.7 %; on the load-generator days (the default options, and `--dhcp-server fortigate
+  --srcmac`; 16 alternating runs per tree) the medians were 2.4–3.2 % slower (docs/INGEST.md).
+  The lookup's probe of an address no exit claims reads the NAT address index in its own order,
+  the probe window first (a busy address in about 0.01 s); a busy unclaimed address with no
+  session over the moment takes about 0.5 s at a million lines a day, under a bound of 1 s of its
+  own, the whole lookup staying at about 1 s (contract, "Deviations — c3").
 - **Docs:** DEVICE-SETUP section 2.1–2.6 (NTP; FortiGate DHCP server records with the site check;
   srcmac and device identification; several internet lines), KURULUM/INSTALL sections 0.1, 13 and
   16, CORRELATION, RAPOR and DENETCI-KILAVUZU (how to read the new report rows), AYARLAR/SETTINGS,
@@ -576,7 +578,7 @@ obligations; nothing here is a claim of legal compliance.
   `usage.auto_rebuild_days` days (tested in `worker/tests/test_usage_jobs.py`).
 - **Texts:** the departments' empty-list hint no longer says the installer creates departments;
   the first-steps guides (ILK-ADIMLAR / FIRST-STEPS sections 5 and 12), KURULUM / INSTALL,
-  roles.md, DATA-MODEL, ARCHITECTURE and ASSUMPTIONS (P4, G6, V1–V4) describe entering the VLANs;
+  roles.md, DATA-MODEL, ARCHITECTURE and ASSUMPTIONS (P4, G6, VA1–VA4) describe entering the VLANs;
   the "VLAN list cannot be entered" limitation is gone.
 
 ### Usage reports
