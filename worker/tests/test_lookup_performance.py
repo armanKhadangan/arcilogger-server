@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import functools
 import os
+import re
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -973,6 +974,270 @@ def test_the_dhcp_origins_of_twenty_chains_are_one_fast_query(
     assert high - low >= timedelta(seconds=2 * 604_800)
     assert all("dhcp_sources_overlap" not in [e.key for e in c.explanations] for c in checked)
     assert timed.seconds < 0.2, f"usable_dhcp_origins took {timed.seconds:.3f} s"
+
+
+# -- the traffic site: the exit guards of 3.8 (WP-C3) -------------------------------------------
+#
+# The site's sessions leave by ``wan1``, translated to :data:`WAN` (shared address space). Each
+# guard gives its exits to its own lookup's settings (``nat.egresses`` of the site stays empty
+# for the guards above), times the whole lookup on the second run (3.8: < 5 s, spec 14's budget)
+# and checks what its candidate searches read: the window bound to each statement, its NAT
+# condition (``= ANY(inet[])`` or ``<<= ANY(cidr[])``, 2.8.3) and the rows of the window that
+# condition reads. 2.17 rests on these: "``<<= ANY(cidr[])`` candidate scans are time-bounded".
+
+#: The site's sessions in the bounded scan of a guard's search (``[T - 60 s, T + 60 s + 24 h]``):
+#: 1 M a day over 24 h and 2 minutes.
+WINDOW_ROWS = 1_000_000
+#: The search statement of :func:`~arcilogger_worker.lookup.sessions.build_query`.
+SEARCH = "ORDER BY fg_traffic.time, fg_traffic.id"
+
+
+def _exit_lookup(
+    site: Engine, request: LookupRequest, exits: dict[str, Any], measure: Any
+) -> tuple[LookupOutcome, float]:
+    """``request`` with ``exits`` as ``nat.egresses``, run as :func:`_guard_lookup` runs it; the
+    outcome and the wall time of the whole measured lookup."""
+    outcome, seconds = None, 0.0
+    for warm in (True, False):
+        if not warm:
+            measure()
+        with Session(site) as session:
+            values = {**get_settings(session), "nat.egresses": exits}
+            settings = LookupSettings.from_settings(values)
+            began = time.perf_counter()
+            outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
+            seconds = time.perf_counter() - began
+            session.rollback()
+    assert outcome is not None
+    return outcome, seconds
+
+
+def _searches(executed: _Executed) -> list[tuple[str, dict[str, Any]]]:
+    """The candidate searches the measured lookup sent, in order."""
+    return [(sql, params) for sql, params in executed.statements if SEARCH in sql]
+
+
+def _bound(sql: str, parameters: dict[str, Any], cast: str) -> list[Any]:
+    """The values of ``sql``'s parameters cast to ``cast`` (``INET[]``, ``CIDR[]``, ``TEXT[]``),
+    in the statement's order."""
+    names = re.findall(rf"%\((\w+)\)s::{re.escape(cast)}", sql)
+    return [parameters[name] for name in names]
+
+
+def _bounded_to(parameters: dict[str, Any], window: Window) -> None:
+    """The statement reads the window's bounded scan: from ``T - tolerance`` to the scan's end,
+    sessions that started by ``T + tolerance``."""
+    assert sorted(_moments(parameters)) == [window.low, window.high, window.scan_end]
+
+
+def _rows_of(
+    site: Engine, low: datetime, end: datetime, high: datetime, condition: str, **values: Any
+) -> tuple[int, int]:
+    """The ``fg_traffic`` rows of ``condition`` (fixed SQL, bound values) logged in ``[low,
+    end]``, the range a bounded scan reads, and those of them whose session started by
+    ``high``, the ones it keeps."""
+    with site.connect() as connection:
+        read, kept = connection.execute(
+            text(
+                "SELECT count(*), count(*) FILTER (WHERE time - make_interval(secs => "  # noqa: S608 - fixed SQL fragments
+                "coalesce(duration, 0)) <= :high) FROM fg_traffic "
+                f"WHERE time >= :low AND time <= :end AND {condition}"
+            ),
+            {"low": low, "end": end, "high": high, **values},
+        ).one()
+    return int(read), int(kept)
+
+
+def _rows_in(site: Engine, window: Window, condition: str, **values: Any) -> tuple[int, int]:
+    """:func:`_rows_of` over a candidate search's bounded scan."""
+    return _rows_of(site, window.low, window.scan_end, window.high, condition, **values)
+
+
+def _guard_window() -> Window:
+    """The window of the guards' searches (``lookup.tolerance_seconds`` and
+    ``lookup.max_session_seconds`` as shipped)."""
+    defaults = LookupSettings()
+    return Window(GUARD_AT, defaults.tolerance_seconds, defaults.max_session_seconds)
+
+
+@pytest.mark.perf
+def test_a_two_exit_candidate_search_is_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
+    """3.8: a two-exit ``= ANY`` candidate search: two ``isp_nat`` exits without a public
+    address that share the NAT address T1 (:data:`WAN`) on ``wan1`` and ``wan2`` (2.8.1 rule 9),
+    so an unclaimed public IP is searched over both (``public_unknown``), one search per
+    interface condition. Every session of the site left by ``wan1``: that search lists the best
+    100 of the window, the ``wan2`` search reads every row of T1 in the window and keeps none
+    (the address is shared, so its interface condition stays, ``egress_interface_not_seen_kept``).
+    Under 5 s, the whole lookup."""
+    exits = {
+        "hat-1": {"mode": "isp_nat", "transips": [WAN], "interfaces": ["wan1"]},
+        "hat-2": {"mode": "isp_nat", "transips": [WAN], "interfaces": ["wan2"]},
+    }
+    searches: list[_Timed] = []
+
+    def measure() -> None:
+        searches.append(timer.time(lookup_engine, "fetch_rows"))
+        executed.record(traffic_site)
+
+    outcome, seconds = _exit_lookup(
+        traffic_site, LookupRequest(at=GUARD_AT, public_ip=PUBLIC), exits, measure
+    )
+    executed.stop()
+    timer.report(f"two-exit candidate search, lookup {seconds:.3f} s")
+    assert outcome.egress is not None
+    assert outcome.egress.resolution == "public_unknown"
+    assert [e.name for e in outcome.egress.egresses] == ["hat-1", "hat-2"]
+    assert outcome.mode == "candidates"
+    assert outcome.truncated
+    assert len(outcome.matches) == 100
+    # A shared address's session belongs to the exit whose interfaces it left by (2.8.3).
+    assert {m.egress for m in outcome.matches} == {"hat-1"}
+    assert "egress_interface_not_seen_kept" in _keys(outcome)
+    (timed,) = searches
+    assert len(timed.calls) == 2
+    window = _guard_window()
+    found = _searches(executed)
+    assert len(found) == 2
+    interfaces = []
+    for sql, parameters in found:
+        _bounded_to(parameters, window)
+        assert "fg_traffic.transip = ANY (CAST(" in sql
+        assert "<<=" not in sql  # one address: = ANY(inet[]), the (transip, …) index applies
+        assert _bound(sql, parameters, "INET[]") == [[WAN]]
+        (dstintfs,) = [v for v in _bound(sql, parameters, "TEXT[]") if v != ["snat"]]
+        interfaces.append(dstintfs)
+    assert sorted(interfaces) == [["wan1"], ["wan2"]]
+    # Both statements read T1's rows of the scan, every session of the window (the ``wan1``
+    # search keeps the sessions overlapping it); the ``wan2`` search keeps none of them.
+    read, kept = _rows_in(traffic_site, window, "transip = CAST(:wan AS inet)", wan=WAN)
+    assert read >= WINDOW_ROWS
+    assert kept > 100
+    on_wan2 = "transip = CAST(:wan AS inet) AND dstintf = 'wan2'"
+    assert _rows_in(traffic_site, window, on_wan2, wan=WAN) == (0, 0)
+    assert seconds < LIMIT_SECONDS, f"the two-exit search took {seconds:.3f} s"
+
+
+#: The unclaimed search's exclusions: the site's own line, configured (every session of the
+#: window is excluded: the scan reads them all and lists nobody), and a quiet second line (none
+#: is: the scan lists the best 100). Each exit holds a /29 of shared NAT addresses, so the
+#: exclusion is ``NOT (transip <<= ANY(cidr[]))``.
+EXCLUDED = {
+    "busy_line": "100.64.12.8/29",
+    "quiet_line": "100.64.13.8/29",
+}
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("case", sorted(EXCLUDED))
+def test_an_unclaimed_search_with_an_excluded_network_is_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed, case: str
+) -> None:
+    """3.8: an unclaimed search with a non-empty ``<<= ANY`` exclusion: an unclaimed public IP
+    (``public_unknown`` through the catch-all ``tanimsiz``) is searched over every private or
+    shared NAT address no exit claims, and ``hat-2``'s NAT network (an ``isp_nat`` exit with a
+    public address, :data:`EXCLUDED`) is claimed. Under 5 s, the whole lookup."""
+    network = EXCLUDED[case]
+    exits = {
+        "hat-2": {"mode": "isp_nat", "public": ["198.51.100.77"], "transips": [network]},
+        "tanimsiz": {"mode": "isp_nat"},
+    }
+    searches: list[_Timed] = []
+
+    def measure() -> None:
+        searches.append(timer.time(lookup_engine, "fetch_rows"))
+        executed.record(traffic_site)
+
+    outcome, seconds = _exit_lookup(
+        traffic_site, LookupRequest(at=GUARD_AT, public_ip=PUBLIC), exits, measure
+    )
+    executed.stop()
+    timer.report(f"unclaimed search, {case} excluded, lookup {seconds:.3f} s")
+    assert outcome.egress is not None
+    assert outcome.egress.resolution == "public_unknown"
+    assert [e.name for e in outcome.egress.egresses] == ["tanimsiz"]
+    assert outcome.egress.searched.unclaimed
+    (timed,) = searches
+    assert len(timed.calls) == 1
+    window = _guard_window()
+    (sql, parameters) = _searches(executed)[0]
+    _bounded_to(parameters, window)
+    assert "NOT (fg_traffic.transip <<= ANY (CAST(" in sql
+    # The private or shared ranges (2.8.1 rule 5) and the claimed network, as one array each.
+    private, claimed = _bound(sql, parameters, "CIDR[]")
+    assert "100.64.0.0/10" in private
+    assert claimed == [network]
+    unclaimed = (
+        "transip <<= ANY(CAST(:private AS cidr[])) AND trandisp = 'snat' "
+        "AND NOT (transip <<= ANY(CAST(:claimed AS cidr[])))"
+    )
+    read, kept = _rows_in(traffic_site, window, unclaimed, private=private, claimed=claimed)
+    if case == "busy_line":
+        assert (outcome.mode, outcome.matches) == ("none", ())
+        assert (read, kept) == (0, 0)
+        # Nobody is listed, yet the scan read every session of the window to know it.
+        excluded = "transip <<= CAST(:network AS cidr)"
+        read, kept = _rows_in(traffic_site, window, excluded, network=network)
+        assert read >= WINDOW_ROWS
+        assert kept > 100
+    else:
+        assert outcome.mode == "candidates"
+        assert outcome.truncated
+        assert len(outcome.matches) == 100
+        assert {m.traffic.transip for m in outcome.matches} == {WAN}
+        assert read >= WINDOW_ROWS
+        assert kept > 100
+    assert seconds < LIMIT_SECONDS, f"{case}: the unclaimed search took {seconds:.3f} s"
+
+
+@pytest.mark.perf
+def test_a_direct_exit_with_a_29_public_network_is_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
+    """3.8: an exit with a /29 public network: a ``direct`` exit ``hat-1`` with
+    ``203.0.113.200/29`` on ``wan1``, asked for one of its addresses with a port. The site's
+    sessions on ``wan1`` all left through the shared address :data:`WAN` (the D15 check sees a
+    private or shared NAT address outside the exit's own set and the address itself not at all),
+    so the answer is the fallback: candidates over the requested address and the unclaimed
+    addresses, the /29 claimed (``NOT (transip <<= ANY(cidr[]))``), on the exit's interface.
+    Under 5 s, the whole lookup."""
+    exits = {"hat-1": {"mode": "direct", "public": ["203.0.113.200/29"], "interfaces": ["wan1"]}}
+    address = "203.0.113.203"
+    searches: list[_Timed] = []
+
+    def measure() -> None:
+        searches.append(timer.time(lookup_engine, "fetch_rows"))
+        executed.record(traffic_site)
+
+    request = LookupRequest(at=GUARD_AT, public_ip=address, public_port=40001)
+    outcome, seconds = _exit_lookup(traffic_site, request, exits, measure)
+    executed.stop()
+    timer.report(f"direct exit with a /29, lookup {seconds:.3f} s")
+    assert outcome.egress is not None
+    assert outcome.egress.resolution == "fallback"
+    assert [e.name for e in outcome.egress.egresses] == ["hat-1"]
+    assert outcome.egress.searched.outside_seen == (WAN,)
+    assert "public_ip_not_transip" in _keys(outcome)
+    assert outcome.mode == "candidates"
+    assert outcome.truncated
+    assert len(outcome.matches) == 100
+    (timed,) = searches
+    assert len(timed.calls) == 1
+    window = _guard_window()
+    (sql, parameters) = _searches(executed)[0]
+    _bounded_to(parameters, window)
+    assert _bound(sql, parameters, "INET[]") == [[address]]
+    _private, claimed = _bound(sql, parameters, "CIDR[]")
+    assert claimed == ["203.0.113.200/29"]
+    assert ["wan1"] in _bound(sql, parameters, "TEXT[]")
+    # The /29 itself: no session of the scan; the unclaimed part on wan1: every one.
+    assert _rows_in(traffic_site, window, "transip <<= CAST('203.0.113.200/29' AS cidr)") == (0, 0)
+    on_wan1 = "transip = CAST(:wan AS inet) AND dstintf = 'wan1'"
+    read, kept = _rows_in(traffic_site, window, on_wan1, wan=WAN)
+    assert read >= WINDOW_ROWS
+    assert kept > 100
+    assert seconds < LIMIT_SECONDS, f"the /29 exit's lookup took {seconds:.3f} s"
 
 
 # -- the event site -----------------------------------------------------------------------------
