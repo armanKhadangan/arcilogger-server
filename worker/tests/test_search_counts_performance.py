@@ -12,25 +12,29 @@ its rows and without a nested loop (:data:`arcilogger_db.searchcounts.RECOUNT_PL
 **Data**, written with ``INSERT … SELECT generate_series`` and analysed: one busy site day (75,000
 web filter and 125,000 DNS filter lines) and seven quiet days before it (5,000 and 8,750 each), from
 two FortiGate sources, with their typed rows; a quarter of the Uyum Durumu perf data, which still
-gave six of the eight days the nested loop on PostgreSQL 16 (about 9 s for a quiet day's file).
+gave six of the eight days the nested loop on PostgreSQL 16 (about 3 s for a quiet day's file).
 
-**Checked:** the plan each file's recount gets (``EXPLAIN`` of the cursor, with the recount's
-planner settings) has no nested loop, and the recount of the oldest day's files, through the
+**Checked:** the plan each file's recount gets has no nested loop: the settings in force and the
+``EXPLAIN`` of the cursor are caught from the recount itself as it declares its cursor (and, on
+plain PostgreSQL, the same statement without them still plans some files as a nested loop, so the
+data keeps showing the problem), and the recount of the oldest day's files, through the
 worker job, stays under :data:`FILE_SECONDS` each with every line counted.
 """
 
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Any
 
 import pytest
-from sqlalchemy import Connection, Engine, func, insert, select, text
+from sqlalchemy import Connection, Engine, event, func, insert, select, text
 
 from arcilogger_core.timeutil import day_window
 from arcilogger_db.models import IngestOffset, SearchCount
 from arcilogger_db.partitions import ensure_partitions
-from arcilogger_db.searchcounts import file_recount_query, recount_planner, restore_planner
+from arcilogger_db.searchcounts import RECOUNT_PLANNER, file_recount_query, rebuild_stream
 from arcilogger_db.testing import pause_compression_jobs
 from arcilogger_worker.search_jobs import backfill_counts
 
@@ -42,7 +46,7 @@ QUIET_DAYS = 7
 BUSY = (75_000, 125_000)
 QUIET = (5_000, 8_750)
 SOURCES = ("fortigate", "fortigate-2")
-#: Bound of one quiet file's recount (seconds); about 0.1 s measured, 9 s with the nested loop.
+#: Bound of one quiet file's recount (seconds); about 0.1 s measured, 3 s with the nested loop.
 FILE_SECONDS = 1.0
 
 _COLUMNS = "time, time_received, source, sender, raw_day, raw_line, raw_offset"
@@ -99,11 +103,7 @@ def _load_day(connection: Connection, day: date, lines: tuple[int, int]) -> None
 @pytest.fixture
 def skewed_site(db_engine: Engine) -> Engine:
     """One busy day beside seven quiet ones, analysed, every file marked for the recount."""
-    with db_engine.connect() as connection:
-        timescale = connection.scalar(
-            text("SELECT count(*) FROM pg_extension WHERE extname = 'timescaledb'")
-        )
-    if timescale:
+    if _timescale(db_engine):
         pause_compression_jobs(db_engine)  # no chunk compressed while the rows are written
     with db_engine.begin() as connection:
         ensure_partitions(connection, today=NEWEST, months_back=1)
@@ -123,26 +123,74 @@ def skewed_site(db_engine: Engine) -> Engine:
     return db_engine
 
 
-def _cursor_plan(engine: Engine, source: str, day: date) -> str:
-    """The plan of the file's recount as the cursor gets it, with the recount's settings."""
+@dataclass
+class _Declared:
+    """The recount's streamed statement as :func:`rebuild_stream` declared its cursor: the
+    planner settings then in force and the plan the cursor got."""
+
+    settings: dict[str, str] = field(default_factory=dict)
+    plan: str = ""
+
+
+def _recount_as_run(engine: Engine, source: str, day: date) -> _Declared:
+    """Run the file's recount (rolled back) and catch its cursor's settings and plan from the
+    same connection, just before the cursor is declared."""
+    declared = _Declared()
+
+    def before(
+        conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, many: Any
+    ) -> None:
+        if not context.execution_options.get("stream_results"):
+            return
+        probe = cursor.connection.cursor()  # the same session, so the same settings
+        for name, _ in RECOUNT_PLANNER:
+            probe.execute(f"SHOW {name}")
+            declared.settings[name] = probe.fetchone()[0]
+        probe.execute(f"EXPLAIN DECLARE c CURSOR FOR {statement}", parameters)
+        declared.plan = "\n".join(row[0] for row in probe.fetchall())
+        probe.close()
+
+    with engine.connect() as connection:
+        event.listen(connection, "before_cursor_execute", before)
+        with connection.begin() as transaction:
+            rebuild_stream(connection, source, day)
+            transaction.rollback()
+    return declared
+
+
+def _plan_without_settings(engine: Engine, source: str, day: date) -> str:
     with engine.begin() as connection:
         query = file_recount_query(connection, source, day)
         sql = query.compile(dialect=connection.dialect, compile_kwargs={"literal_binds": True})
-        previous = recount_planner(connection)
         explained = connection.execute(text(f"EXPLAIN DECLARE c CURSOR FOR {sql}"))
-        plan = "\n".join(row[0] for row in explained)
-        restore_planner(connection, previous)
-        assert connection.scalar(text("SHOW enable_nestloop")) == previous["enable_nestloop"]
-    return plan
+        return "\n".join(row[0] for row in explained)
+
+
+def _timescale(engine: Engine) -> bool:
+    with engine.connect() as connection:
+        return bool(
+            connection.scalar(
+                text("SELECT count(*) FROM pg_extension WHERE extname = 'timescaledb'")
+            )
+        )
 
 
 def test_the_recount_of_a_quiet_day_is_never_a_nested_loop(skewed_site: Engine) -> None:
+    unguarded = []
     for day in _days():
         for source in SOURCES:
-            plan = _cursor_plan(skewed_site, source, day)
-            print(f"\n{day} {source}: {plan.splitlines()[0]}")
-            assert "Nested Loop" not in plan, (day, source, plan)
-            assert "Hash" in plan or "Merge" in plan, (day, source, plan)
+            declared = _recount_as_run(skewed_site, source, day)
+            print(f"\n{day} {source}: {declared.plan.splitlines()[0]}")
+            assert declared.settings == dict(RECOUNT_PLANNER), (day, source)
+            assert "Nested Loop" not in declared.plan, (day, source, declared.plan)
+            assert "Hash" in declared.plan or "Merge" in declared.plan, (day, source)
+            if "Nested Loop" in _plan_without_settings(skewed_site, source, day):
+                unguarded.append(day)
+    print(f"\nnested loop without the recount's settings: {len(unguarded)} of 16 files")
+    if not _timescale(skewed_site):
+        # The data still shows the problem on plain PostgreSQL (1-day chunks with statistics of
+        # their own may plan every file well even without the settings).
+        assert unguarded
 
 
 def test_the_backfill_recounts_the_oldest_day_fast(skewed_site: Engine) -> None:
