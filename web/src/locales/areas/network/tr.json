@@ -38,7 +38,6 @@
         "publicNat": "NAT adresi genel bir adres: FortiGate bu adresi kendisi tutuyorsa hat doğrudandır, türünü Doğrudan yapın.",
         "converted": "Yükseltmede aktarıldı: aktarılan çıkışlar arayüzsüz ve değiştirilmeden kaldıkça sorgular onları eski NAT ayarlarındaki gibi tek hat sayar; sonradan eklenen bir çıkışın NAT adresleri bunun dışındadır. Her hattın genel adresini ve arayüzlerini girin (KURULUM.md bölüm 13)."
       },
-      "serverRefused": "Sunucu çıkış tanımını kabul etmedi ({{code}}).",
       "kept": {
         "note": "Bu çıkış kaydedildiği biçimiyle düzenleyicide gösterilemiyor; kayıtlı değeri aşağıda ve değiştirilmeden korunur. Düzeltmek için çıkışı kaldırıp doğru değerlerle yeniden ekleyin.",
         "value": "Kayıtlı değer"
