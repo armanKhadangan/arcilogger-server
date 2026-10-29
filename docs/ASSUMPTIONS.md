@@ -87,7 +87,7 @@ switches off a 5651 function.
 | G5 | Log sources (`[[sources]]`: names, addresses or networks, `heartbeat_minutes`, `transport`) | `arcilogger.toml`, by the administrator after the installation (none on a new installation) | the example's sources are fictional and commented out (P5); [DEVICE-SETUP.md](DEVICE-SETUP.md) §4 |
 | G6 | VLANs (subnet, VLAN id, name, DHCP server, guest flag) and departments | administrator: both on the Cihazlar ve Kişiler page (`/api/v1/vlans`, `/api/v1/departments`) | P4; a guest network that does not leave through the FortiGate is a VLAN with `guest` set ([DEVICE-SETUP.md](DEVICE-SETUP.md) §5) |
 | G7 | Lease time of DHCP servers with other leases than one day (e.g. a guest network) | `lease.server_seconds` (empty by default) | [ILK-ADIMLAR.md](ILK-ADIMLAR.md) §6 |
-| G8 | NAT: public addresses, FortiGate WAN address, ISP port behaviour | `nat.public_ips`, `nat.wan_transip`, `lookup.port_hint` | A9; [CORRELATION.md](CORRELATION.md) §8 |
+| G8 | Internet exits (NAT), one per line: its mode (`direct`, `isp_nat`, `not_logged`; `internal` for a NAT address towards a DMZ, another VLAN, a VPN or a branch, which is no internet exit), public addresses and whether they may change (`public_dynamic`), the FortiGate's NAT addresses on the line (`transips`), its `dstintf` interfaces (with two or more lines every line needs them; the editor warns while one has none), the ISP router's port behaviour (`port_preservation`, `preserved` only when measured) | `nat.egresses` (default `{}`: one implicit double-NAT exit), by the administrator in Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT), read from "Kayıtlarda görülen NAT adresleri"; the upgrade to revision `0018_nat_egresses` converts the Wave 2 keys `nat.public_ips`, `nat.wan_transip`, `lookup.port_hint` | A9, O4–O6, O17, O21, EX1–EX4 below; [CORRELATION.md](CORRELATION.md) §3 "Çıkışlar / Exits", §8; [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.6 |
 | G9 | Replica target (a NAS or another server, WORM if available) | `[replica] target`, `user` | A6 |
 | G10 | Infrastructure MAC addresses (router, firewall, switches) | `devices.infrastructure_macs` | [ILK-ADIMLAR.md](ILK-ADIMLAR.md) §6 |
 | G11 | Licence file (`.lic`) issued for this server from its request code | web Ayarlar → Lisans, `arcilogger-db license install`, or installer `-LicenseFile` | L4; [LISANS.md](LISANS.md) §4 |
@@ -115,7 +115,7 @@ switches off a 5651 function.
 | A6 | Second copy: WORM shared folder on a NAS or another server (`[replica] target`, G9; an independent device, since the server is physical) + monthly encrypted copy to an external disk kept off site | Confirm per installation |
 | A7 | Only the admin sees person names in usage reports until the lawyer approves the employee information text | Confirm |
 | A8 | SMTP server filled in later; development uses Mailpit | Which server? |
-| A9 | Public IP and ISP bridge mode: double NAT assumed until `nat.public_ips` / `nat.wan_transip` are set (G8) | Static IP? Bridge mode planned? (per installation) |
+| A9 | Public IP and ISP bridge mode: double NAT assumed until the internet exits (`nat.egresses`, G8) are entered | Static IP? Bridge mode planned? (per installation) |
 
 ## MVP defaults proposed on 2026-10-13 (not yet confirmed)
 
@@ -240,6 +240,97 @@ The owner decisions D1–D10 of the Wave 2 contract, with the default that is im
 | AR9 | An idle viewer of Canlı Akış is **signed out** after `auth.idle_minutes` (the stream's requests are background requests, so an unattended screen ends the session) | none recommended | [ARAMA.md](ARAMA.md) |
 | AR10 | Saved searches are **personal** only | administrators may share them | [ARAMA.md](ARAMA.md) |
 
+## Wave 3 — FortiGate DHCP, srcmac, internet exits: defaults of 2026-10-27 (not yet confirmed)
+
+The owner decisions O1–O22 of the Wave 3 contract (`design/wave-3-contract.md` §0.2), with the
+default that is implemented ([ADR-0016](adr/0016-fortigate-dhcp-and-internet-exits.md), "Open
+points (owner decision)"); changing one is a small follow-up. No owner answer to O1–O22 is
+recorded yet (2026-10-29), so every row below is the contract's default.
+Wave 3 sözleşmesinin sahip kararları O1–O22, uygulanan varsayılanlarıyla; sahip henüz yanıt
+vermedi, her satır sözleşmenin varsayılanıdır.
+
+### Owner decisions O1–O22 (Wave 3)
+
+| # | Question | Default implemented | Alternative | Where |
+|---|---|---|---|---|
+| O1 | Are FortiGate-only sites supported? | **yes**, with the FortiGate as the clients' DHCP server (server mode): its DHCP Ack and Release records are lease evidence; statically addressed devices end at the internal IP (except through srcmac, SM1), and the lookup says so | "not supported" in the offer | ADR-0016 D1; [KURULUM.md](KURULUM.md) §0.1 |
+| O2 | May srcmac name the MAC in a chain? | **yes**, only on interfaces listed in `lookup.srcmac_interfaces` (default none) whose gateway is the FortiGate (never behind a router; behind layer-2 switches only after the two-client check), at `low`, labelled "Kısmi kanıt: srcmac", never a lease; a SPEC 9.1 deviation (SM1, "Deviations from the specification" below) | never; or srcmac opens medium intervals (a larger SPEC 9.1 deviation) | ADR-0016 D10; [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.5 |
+| O3 | Convert the FortiGate DHCP lines loaded before the upgrade? | **no**: they stay `fg_event` rows (stored, searchable, sealed); when no chain is built the lookup names a covering one (`fortigate_dhcp_not_converted`), and a DHCP chain with such a line of its IP or MAC after its lease's last DHCP record is `low` (`fortigate_dhcp_not_converted_since_lease`) | a one-off re-parse (roadmap 2.2) | ADR-0016 D8; [CORRELATION.md](CORRELATION.md) §7 |
+| O4 | An address that no exit claims | the logs show it as the FortiGate's NAT address (`transip`) of a session overlapping the moment ± 15 minutes (or the lookup tolerance when wider): answered as the FortiGate's own address (`observed`, exact with a port) with a warning; otherwise searched in the `isp_nat` exits whose public address is unknown or `public_dynamic` (`egress_public_unknown`); none of them: nobody (`public_ip_no_egress`) (`engine._resolve_egress`, `lookup/engine.py:951`) | always nobody; or every unclaimed address goes to every `isp_nat` exit (the Wave 2 engine) | ADR-0016 D14, D31; EX2 below |
+| O5 | An `isp_nat` exit whose NAT addresses are not seen near the moment | the search is **widened** to its NAT addresses and the unclaimed private or shared source-NAT addresses, on its interfaces when it declares any, with `egress_transip_not_seen` (`engine._not_seen`, `lookup/engine.py:1091`) | nobody; or the unclaimed addresses only | ADR-0016 D15; [CORRELATION.md](CORRELATION.md) §3 |
+| O6 | The Wave 2 NAT keys (`nat.public_ips`, `nat.wan_transip`, `lookup.port_hint`) | **converted** into exits by revision `0018_nat_egresses`; the rows an administrator wrote are kept unread for one version, so a rollback without a database restore keeps its NAT values; they are to be deleted by the first revision after Wave 3 | deleted at the conversion (a rollback then needs `-RestoreDatabase`) | ADR-0016 D12, D18; [KURULUM.md](KURULUM.md) §13 |
+| O7 | IPv6 in exits | **refused** (`setting_ipv6_not_supported`, `arcilogger_db/egress.py:339`) until roadmap 3.2 | accepted but unused | ADR-0016 D13 |
+| O8 | Re-authentication for `nat.*`, `dhcp.*`, `lookup.srcmac_*` | **no**, as before | add them to `REAUTH_KEYS` | `REAUTH_KEYS` (`arcilogger_db/settings.py:528`) |
+| O9 | Exits valid from or until a date | **no**: every outcome records the exits' last change (`nat.egresses_changes`) and warns `egress_changed_after_event` when an exit changed after the moment; the earlier definitions are in the audit log | resolve the exits in force at the moment from the `settings.change` history; or `valid_from`/`valid_to` per exit | ADR-0016 D32 |
+| O10 | The lease time a FortiGate Ack logs | **used** (`dhcp.fortigate_use_logged_lease`, default on) | always the configured lease times | ADR-0016 D6; FD4 below |
+| O11 | Language of the device guide | the new sections 2.4–2.6 are Turkish with an English block inside the Turkish file | a separate English device guide | [DEVICE-SETUP.md](DEVICE-SETUP.md) |
+| O12 | The FortiGate's private WAN address in examples | `100.64.12.9` / `100.64.13.9` (RFC 6598 shared space) | RFC 5737 addresses | ADR-0016 |
+| O13 | DHCP servers other than MikroTik and FortiGate (e.g. Windows) | **not read**; leases only through the MikroTik ARP-LOG at `medium`, as before; the roadmap item "MikroTik dışı DHCP" stays an open scope decision | a later roadmap item for another DHCP source; or "not supported" in the offer | [KURULUM.md](KURULUM.md) §0.1 |
+| O14 | Does traffic keep a FortiGate lease alive? | **no** (`dhcp.fortigate_traffic_extends`, default off), loud when renewals seem missing; a SPEC 9.1 deviation (below) | yes, the RouterOS rule for both DHCP tables | ADR-0016 D26; FD3 below |
+| O15 | A FortiGate Ack of a MAC for another IP | **closes** that MAC's other open FortiGate interval of the same origin, interface and configured network (compared by the network's subnet, with or without a VLAN number) and its open MikroTik interval on another IP of the same network, each after its own deadline; nothing outside every configured network, where FortiGate chains are `low` (`fortigate_dhcp_no_network`); a MikroTik Ack closes nothing this way | also for MikroTik Acks (needs the RouterOS DECLINE behaviour checked on site) | ADR-0016 D33; `correlation/timeline.py` rule 1 |
+| O16 | What makes two DHCP authorities | two origins `(table, vd)`; the sender and `devid` are not compared, so an HA pair is one authority | also compare the sender (HA members sending from their own addresses then raise the alert) | ADR-0016 D27 |
+| O17 | Fallback of an upgraded site whose exits declare no interfaces | exits **as converted** by `0018_nat_egresses` keep Wave 2's narrowing to the old FortiGate WAN address (`as_converted`, `lookup/engine.py:395`) | treat converted exits like new ones | ADR-0016 D15 |
+| O18 | A FortiGate chain more than half a lease after its last DHCP record, no renewal seen | **`low`** with `lease_renewal_not_seen` | `medium`; or `high` with a warning | ADR-0016 D6 |
+| O19 | End of a FortiGate lease whose lease time is logged | the logged lease after its last DHCP record, the FortiGate's own end, **without** the `lease.timeout_percent` margin | lease × `lease.timeout_percent` (bridges one lost renewal line, but names the former client past the FortiGate's own end) | ADR-0016 D6; FD4 below |
+| O20 | `R20-lease:none:mt_dhcp` (MikroTik DHCP rows stopped) | **medium**, and only while no ARP-LOG row arrives either; `none:fg_dhcp` and `none:mt_arp` are high, each table on its own (`alerts/system.py:1185`) | high (an e-mail on most quiet weekends); or one cause for all tables | ADR-0016 D30; [ALERTS.md](ALERTS.md) §2 |
+| O21 | An unclaimed **public** NAT address (an IP pool, an unconfigured line) | the FortiGate's own address: answered as observed when asked, **never** double-NAT evidence for another exit and never an unclaimed candidate (`unclaimed_nat`, `lookup/sessions.py:345`) | searched as an unclaimed candidate, as Wave 2 did | ADR-0016 D15 |
+| O22 | A cited source's clock off at the requested moment | measured per lookup from the stored times; beyond 120 s (`CLOCK_LIMIT_SECONDS`, `lookup/engine.py:239`) the chains are `low` with `source_clock_offset` | shift the search window by the measured offset | ADR-0016 D28 |
+
+### FortiGate DHCP, srcmac, internet exits and `trandisp` (Wave 3)
+
+What ARCILOGGER assumes about the FortiGate's records and the organisation's lines. Every detail
+that no official source or real sample confirms is a setting or has a loud check (the "Wave 3"
+list under "Technical assumptions to verify on site" below); the settings are in
+[CORRELATION.md](CORRELATION.md) §5 and [AYARLAR.md](AYARLAR.md).
+
+| # | Default | Where |
+|---|---|---|
+| FD1 | **Logids.** A FortiGate event line with `dhcp_msg`, `ip` and `mac` is a DHCP server record by its shape alone (`DHCP_KEYS`, `ingest/parsers/fortigate.py:249`; the parser takes no setting): with a valid IP and MAC it becomes an `fg_dhcp` row, otherwise it stays an `fg_event` row and the parse failure `fortigate.dhcp`. What a record means is the worker's setting `dhcp.fortigate_logids`, default `0100026001` → `assigned` (the DHCP Ack, documented in the FortiOS 7.6 log reference, one real community sample) and `0100026002` → `deassigned` (the DHCP Release: **derived** from the documented logid numbering, no real sample — sahada doğrula, V2). A logid the map does not name is never used and is counted (`R20-lease:fortigate-refused`) | ADR-0016 D3, D4; [PARSERS.md](PARSERS.md) |
+| FD2 | **`dhcp_msg`.** Per logid the values its records may carry, case-insensitive (`dhcp.fortigate_dhcp_msgs`, default `Ack` for `0100026001`; a logid without an entry, the Release by default, is not restricted). `Ack` was seen once; the Release's values are unknown (V14). Another value (a NAK, an INFORM reply) is refused and counted (`lookup/trust.py` rule 5) | ADR-0016 D25 |
+| FD3 | **Renewals and traffic.** FortiOS is assumed to log every renewal as a DHCP Ack (V3): traffic and ARP sightings are kept as a FortiGate lease's evidence but do not move its end (`dhcp.fortigate_traffic_extends` off, `correlation/timeline.py` rule 3); an Ack at least 40 % of the lease after the interval's previous DHCP record counts as a renewal. Missing renewals are loud: `R20-lease:fortigate-renewals-missing` (high), `fortigate-renewals-not-logged` (info, a verified site that never logged one), `lease_renewal_not_seen` in lookups (O18) | ADR-0016 D26; [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.4 step 5 |
+| FD4 | **Lease unit.** The Ack's `lease` is read as **seconds**; used when it lies in 300–8,640,000 (`LEASE_SECONDS_RANGE`, `arcilogger_db/models.py:79`, the FortiOS 7.6 CLI range of `lease-time`): the lease ends exactly that long after its last DHCP record (O19). `0` (unlimited), a missing or out-of-range value fall back to the configured times (`lease.default_seconds`, `lease.server_seconds`, with the margin) and are counted (`lease_unlimited`, `lease_fallback`; alerts `fortigate-lease-unlimited` high, `fortigate-lease` low) — V4 | ADR-0016 D6 |
+| FD5 | **Device time.** A FortiGate DHCP record dated by the receive time instead of the FortiGate's own time (`fg_dhcp.device_time` false) is never lease evidence (`lookup/trust.py` rule 6). The FortiGate's clock is assumed right to within minutes (NTP, V16): `R20-lease:source-clock` opens on a median offset beyond ±120 s (`alerts/system.py:952`), and a lookup whose cited source was off at the moment lowers its chains (O22) | ADR-0016 D28; [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.1 |
+| FD6 | **Other guards.** Only configured FortiGate sources give FortiGate evidence (an `unknown-<ip>` sender only inside the address of an enabled, configured FortiGate source, `trust.untrusted_sources`); interfaces in `dhcp.fortigate_interfaces_excluded` (DHCP over IPsec), IPv6 addresses and zero, broadcast or multicast MACs are never lease evidence; two origins `(table, vd)` in one configured network make the chain `low` (`dhcp_sources_overlap`) | ADR-0016 D24, D27, D28 |
+| FD7 | **The record format is unverified until the site check.** `dhcp.fortigate_format_verified` stays false until the administrator marks it after [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.4; until then every FortiGate chain carries `fortigate_format_unverified` ("kayıt biçimi sahada doğrulanmadı") and `R20-lease:fortigate-unverified` (info) is open while FortiGate DHCP records arrive | ADR-0016 D29 |
+| SM1 | **srcmac.** Stored in `fg_traffic.srcmac`; used by a lookup only for a session of an interface in `lookup.srcmac_interfaces` (default `[]`, off), from a trusted sender, for a MAC that is no infrastructure MAC, shows at most `lookup.srcmac_max_ips` (default 1) IPv4 addresses on that interface within an hour of the moment and holds no lease of another address then (`_SrcmacGuard`, `lookup/engine.py:628`). A chain without a lease then gets the MAC, device and person at `low` with `srcmac_only`; a lease of another MAC makes both chains a `low` conflict (`srcmac_mismatch`). srcmac never opens or extends a lease. Assumed: the client's own MAC for directly connected clients, behind a layer-2 switch only if the two-client check shows it, never behind a router (V8). **SPEC 9.1 deviation** (D10, O2): see "Deviations from the specification" below | ADR-0016 D10; [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.5 |
+| EX1 | **`public_dynamic`.** Only an `isp_nat` exit may mark its public address as one that may change (`arcilogger_db/egress.py`, rule 8); every answer through that address carries `egress_public_dynamic` (only the ISP can confirm the address at the moment), and an exit with an unknown or changing public address is searched for every unclaimed public IP (O4). Whether each line's address is static is asked from the ISP (V15) | ADR-0016 D31; [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.6 |
+| EX2 | **Observed addresses.** An address no exit claims that the FortiGate used as `transip` in a session overlapping the moment ± 15 minutes (`TRANSIP_PROBE_SECONDS`, `lookup/engine.py:198`) is the FortiGate's own (`egress_observed_not_configured`). The administrator reads the values instead of guessing: "Kayıtlarda görülen NAT adresleri (son 24 saat)" under the exit editor (`GET /settings/fortigate/observed`, administrator only, `settings.manage`) lists the `transip`, `dstintf`, `trandisp` groups and srcmac counts, with "Çıkış olarak ekle"; `R20-nat:unmapped-transip` names an unclaimed NAT address that keeps carrying sessions (V9) | ADR-0016 D20, D31; [roles.md](roles.md) |
+| EX3 | **The mode `internal`.** A source-NAT address of the FortiGate towards a DMZ, another VLAN, a VPN or a branch is declared as an `internal` exit (NAT addresses required, no public address): claimed, so it is never double-NAT evidence or an unclaimed candidate, and never searched (`egress_internal`) | ADR-0016 D13; [DEVICE-SETUP.md](DEVICE-SETUP.md) §2.6 |
+| EX4 | **Unclaimed public NAT addresses.** Only private (RFC 1918) or shared (RFC 6598) NAT addresses count as double-NAT evidence or as unclaimed candidates (`PRIVATE_OR_SHARED`, `arcilogger_db/egress.py:73`); a public NAT address no exit claims is the FortiGate's own (O21). A public-looking WAN address behind an ISP router therefore needs an `isp_nat` exit with that address in `transips` to be found | ADR-0016 D15; [CORRELATION.md](CORRELATION.md) §3 |
+| TD1 | **`trandisp`.** A candidate search over unclaimed addresses, and a search without a NAT address, take only sessions whose `trandisp` is listed in `nat.snat_trandisp` (default `["snat"]`, the only value seen in logs; 1–8 values); sessions with another value are counted and named (`nat_unknown_trandisp`; the observed table's `unknown_trandisp`). Central NAT and IP pools may log other values (V10) | ADR-0016 D17 |
+
+### Decided during Wave 3
+
+| # | Decision | Date |
+|---|---|---|
+| RB1 | **The installer's rollback step stays unconditional in Wave 3.** `Install-Arcilogger.ps1 -Rollback` without `-RestoreDatabase` runs `arcilogger-db leases prepare-rollback` after the services stop and before the program is swapped (`Invoke-LeaseRollbackStep`, `Install-Arcilogger.ps1:3121`, called at `:3197`): every FortiGate lease, ended ones too, gets confidence `low` (derived rows only) and the count is printed and logged; the next `arcilogger-db upgrade` restores the leases the previous version left as they were (`restore_after_rollback`, `arcilogger_db/lease_rollback.py:121`, run by the seed). A rollback between two versions that **both** read FortiGate DHCP therefore shows FortiGate-DHCP chains `low` until the next `arcilogger-db upgrade` (false lows only, never a wrong person; [KURULUM.md](KURULUM.md) §13). Point (a) of the contract's round-7 implementation note on the rollback step (run it only when the previous program cannot read FortiGate DHCP) is declined for Wave 3; points (b) and (c) are in the code (a rollback that fails after the step and keeps this version restores the leases through `arcilogger-db upgrade`, `Restore-LoweredLeases`, `Install-Arcilogger.ps1:3160`; lock timeout 30 s and statement timeout 10 min, `lease_rollback.py:53`). **Follow-up** for a later installer change: skip the step when the previous program already has `arcilogger_db\lease_rollback.py` | 2026-10-28 (manager, issue #11, from the review of the part 1 pull request #33) |
+
+### Other open points for the owner (Wave 3 contract review rounds)
+
+Each default below is implemented; the contract's "Review notes" and "Deviations" sections give
+the alternatives.
+
+- The source-clock limit of ±120 s (`R20-lease:source-clock`, O22).
+- An `unknown-<ip>` sender is trusted once its address lies in an enabled, configured FortiGate
+  source (FD6); a stricter posture would wait for roadmap 2.2.
+- `fortigate-renewals-not-logged` stays open as an info alert on a verified site that never logged
+  a renewal (the alternative: no alert, KURULUM/INSTALL §16 as the only record).
+- The `fortigate-decline` alert's details list up to five declined pool addresses (the addresses
+  where a static device answers; no MAC, no host name) on the Güvenlik page: a KVKK reading for
+  the organisation's counsel.
+- On a FortiGate-DHCP site every network the FortiGate serves must be entered: FortiGate chains of
+  an address in no configured network are `low` (`fortigate_dhcp_no_network`), and a network
+  added or changed later applies to past leases only after a lease rebuild from the first day in
+  the `R20-lease:fortigate-dhcp-subnet` alert ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) §5).
+- How NAKs under the Ack logid are treated once V14 is answered on site (today a value other than
+  `Ack` is refused and counted, FD2).
+- An `isp_nat` line's public address that the FortiGate itself used near the moment (a line
+  switched to bridge mode, the exit not edited) is named by `egress_unmapped_seen` beside the
+  candidate search; answering it as observed needs a new explanation key (contract, "Deviations —
+  c1").
+- The 3.8 guard of the overlap probe allows 1 s for a busy unclaimed address with no session over
+  the moment (Q-C3-1: accept that bound, or add an index; contract, "Deviations — c3").
+
 ## Technical assumptions to verify on site
 
 - MikroTik remote syslog wire format (BSD header, ISO-8601 time, topics string) — parser stays
@@ -253,6 +344,34 @@ The owner decisions D1–D10 of the Wave 2 contract, with the default that is im
   Policy (`object-src 'none'`) check on the office browsers that the built-in PDF viewer shows it
   (a blocked tab falls back to a download).
 
+### Wave 3: FortiGate DHCP, srcmac, internet exits (contract §1.3)
+
+Sahada doğrula. Each item is a setting or has a loud check until it is confirmed on a real
+FortiGate; the numbers are the contract's (§1.3). V1–V6, V8, V11 and V14–V17 are on the
+operator's checklist with the recorded outcome and date ([KURULUM.md](KURULUM.md) bölüm 16 /
+[INSTALL.md](INSTALL.md) section 16), repeated after every FortiOS upgrade; the topics are
+explained in [CORRELATION.md](CORRELATION.md) §8.
+
+| # | Assumption | Setting or check | Loud signal |
+|---|---|---|---|
+| V1 | The real DHCP Ack line (logid `0100026001`) on the syslog wire: field names `ip`, `mac`, `dhcp_msg`, `lease`, `interface`, `hostname`, quoting, MAC case and separator, `hostname` missing or empty | parser constants; `dhcp.fortigate_logids` | `R20-lease:fortigate-unconverted` (high); `fortigate.dhcp` parse failures; until `dhcp.fortigate_format_verified` is set, `R20-lease:fortigate-unverified` (info) and "kayıt biçimi sahada doğrulanmadı" on the card and in the report (FD7) |
+| V2 | The Release logid `0100026002`, its `dhcp_msg`/`msg` values, and whether clients' releases are logged at all | `dhcp.fortigate_logids` | `R20-lease:fortigate-refused` (reason "unmapped", with the logids seen) |
+| V3 | Renewals produce a DHCP Ack (this decides whether traffic may keep a FortiGate lease alive) | `dhcp.fortigate_traffic_extends` (default off, FD3) | `R20-lease:fortigate-renewals-missing` (high) or `fortigate-renewals-not-logged` (info); `lease_renewal_not_seen` in lookups; DEVICE-SETUP §2.4 step 5 |
+| V4 | `lease` is in seconds; how `0` (unlimited) is written | `dhcp.fortigate_use_logged_lease`; bounds 300–8,640,000 (FD4) | `R20-lease:fortigate-lease-unlimited` (high), `fortigate-lease` (low); counters `lease_fallback`, `lease_unlimited` |
+| V5 | DHCP event lines reach syslog with the shipped DEVICE-SETUP settings (severity `information`, no exclude filter) | DEVICE-SETUP §2.4 | `R20-lease:none:<table>` (high for FortiGate DHCP and ARP-LOG, medium for MikroTik DHCP without ARP-LOG, O20), `absent` (info), `fortigate-refused` (high when nearly every row is refused); the Kaynaklar card "Kira kanıtı" |
+| V6 | Relay mode gives no FortiGate lines; IPsec-type DHCP servers (leases held after the tunnel is down, MACs unknown); whether a DHCPINFORM reply is logged as an Ack; the `interface` of a relayed client's Ack when one interface serves several networks | `dhcp.fortigate_interfaces_excluded`; `dhcp.fortigate_dhcp_msgs`; the configured networks (D33) | `R20-lease:none:fg_dhcp` / `absent`; `fortigate-dhcp-subnet` (address in no configured network, such chains `low`); `fortigate-refused` (zero, broadcast, multicast MAC); `fortigate-dhcp-mac` (one MAC acknowledged on more than 3 addresses of one interface and network in 24 h) |
+| V7 | `vd` and `devid` on HA pairs and multi-VDOM units | `vd` is part of a row's origin; `devid` is not compared (O16) | `R20-lease:dhcp-sources-overlap:<net>` |
+| V8 | srcmac comes only with device identification; it is the client's MAC for directly connected clients, behind a layer-2 switch only if the two-client check shows it, never behind a router; which device-identification fields a unit fills | `lookup.srcmac_interfaces` (default off), `lookup.srcmac_max_ips` (default 1); DEVICE-SETUP §2.5 two-client check | `R20-lease:srcmac-shared:<interface>`; `srcmac_shared`, `srcmac_other_lease`, `srcmac_mismatch` in lookups |
+| V9 | Each line's `transip` and `dstintf` (SD-WAN member names); whether a session changes exit between its interim and final logs | `nat.egresses` (mode `internal` for NAT addresses that are no internet exit) | the observed table (EX2); `egress_unmapped_seen`, `egress_interface_not_seen`, `session_changed_exit`; `R20-nat:unmapped-transip` |
+| V10 | `trandisp` values of outbound sessions (central NAT, IP pools) | `nat.snat_trandisp` (TD1) | `nat_unknown_trandisp`; the observed table's `unknown_trandisp` |
+| V11 | Whether each ISP router keeps source ports | `port_preservation` per exit; DEVICE-SETUP §2.6 measurement | the report's port note says the value is marked as verified on site |
+| V12 | Carrier-grade NAT at the ISP (a public address shared with other customers) | mode `isp_nat` | the double-NAT method paragraph of the report says the candidate list may not hold the right session |
+| V13 | `ALTER TABLE fg_traffic ADD COLUMN` on TimescaleDB with compressed chunks | `db/tests/test_migration_0017.py` in the Linux TimescaleDB CI job | the migration test; checked on 2026-10-27 with TimescaleDB 2.30.2 and PostgreSQL 16: accepted, chunks stay compressed (contract, "Deviations — a0") |
+| V14 | The `dhcp_msg` values FortiOS writes under each mapped logid (`Ack` seen once; the Release's unknown) | `dhcp.fortigate_dhcp_msgs` (FD2) | `R20-lease:fortigate-refused` (reason "unexpected `dhcp_msg`", with the distinct values) |
+| V15 | Whether each line's public address is static | `public_dynamic` per exit (EX1); DEVICE-SETUP §2.6 | `egress_observed_not_configured`, `egress_public_unknown`, `egress_public_dynamic`, `public_ip_no_egress`; `egress_changed_after_event` |
+| V16 | FortiGate DHCP lines carry a usable device time, and the FortiGate's clock is right to within minutes (NTP) | `fg_dhcp.device_time`; ingest's `max_clock_skew`; DEVICE-SETUP §2.1 NTP step (FD5) | `R20-lease:source-clock` (high, median offset beyond ±120 s); `source_clock_offset` in lookups (O22); `fortigate-refused` (reason "receive time"); `fortigate.time` parse failures |
+| V17 | Whether FortiOS logs a DHCPDECLINE or checks an address before it offers it; that a client holds one address per server interface and network | the D33 rule (O15; no setting) | `R20-lease:fortigate-decline:<net>` (high); `fg_mac_moved` in the lease job report; `fortigate_dhcp_no_network` outside every configured network |
+
 ## Deviations from the specification (technical)
 
 - **No `/api/docs` page** (spec 2: "OpenAPI docs at `/api/docs` (admin only)"): FastAPI's Swagger
@@ -261,3 +380,21 @@ The owner decisions D1–D10 of the Wave 2 contract, with the default that is im
   (`web/scripts/export_api_contract.py` → `web/src/generated/api-schemas.json`); a bundled,
   admin-only page can be added later if wanted. / Swagger sayfası dış CDN'den yüklendiği için
   sunulmuyor; API şeması depodaki dışa aktarılmış sözleşmededir.
+
+### Wave 3 (ADR-0016)
+
+- **SPEC 9.1, "FortiGate traffic … only proves the IP was active, not the MAC" (D10, O2, SM1).**
+  The srcmac field of a FortiGate session record may name the MAC, device and person of a chain,
+  only on interfaces listed in `lookup.srcmac_interfaces` (directly connected clients, default
+  none), at confidence `low` and labelled "Kısmi kanıt: srcmac"; it never opens or extends a
+  lease. / srcmac yalnızca listelenen arayüzlerde, düşük güvenle ve "kısmi kanıt" olarak bir
+  zincirin MAC adresini gösterebilir; kira açmaz, uzatmaz.
+- **SPEC 9.1, traffic extends an open lease (D26, O14, FD3).** Kept for MikroTik leases; not
+  applied to FortiGate leases by default (`dhcp.fortigate_traffic_extends` off), because SPEC 9.1
+  justifies it by RouterOS logging no renewals, which most likely does not hold for FortiOS
+  (sahada doğrula, V3). / Trafik FortiGate kiralarını varsayılan olarak uzatmaz.
+- **The lease timeline's rules, extended for FortiGate leases** ([CORRELATION.md](CORRELATION.md)
+  §1): an Ack from the other DHCP table supersedes an open lease of the same IP and MAC instead
+  of continuing it (D5); a FortiGate Ack of a MAC for another address closes that MAC's other
+  interval of the same origin, interface and network (D33, O15); a logged FortiGate lease ends
+  without the `lease.timeout_percent` margin (D6, O19).
