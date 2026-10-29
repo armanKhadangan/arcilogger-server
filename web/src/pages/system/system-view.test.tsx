@@ -7,6 +7,7 @@ import { setLanguage } from '@/lib/i18n';
 import type { SystemHealth } from '@/lib/system-health-types';
 import type { SystemSummary } from '@/lib/system-types';
 import { makeMe } from '@/test/api-mock';
+import { need } from '@/test/samples';
 import {
   collectorInfo,
   databaseInfo,
@@ -257,6 +258,10 @@ describe('SystemView', () => {
       'Yönetim hizmetiÇalışıyor13.10.2026 06:59:40',
       'Sistem ayarlarının uygulanması (ApplySystem)BaşarısızSonuç kodu: system_sync_failed13.10.2026 06:40:11',
     ]);
+    // The first cell names the row: a row header, so each cell is read with its row.
+    expect(within(need(services[0], 'service row')).getByRole('rowheader')).toHaveTextContent(
+      'ArciCollector',
+    );
     const tasks = within(block('tasks')).getAllByRole('row').slice(1);
     expect(tasks).toHaveLength(11);
     expect(tasks[4]).toHaveTextContent("ReplicaSaatte bir, 00:40'tanGecikti");

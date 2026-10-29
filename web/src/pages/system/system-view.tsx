@@ -129,7 +129,10 @@ function Facts({ items }: { items: readonly (readonly [string, ReactNode])[] }) 
   );
 }
 
-/** A small table with a visible caption; `numeric` columns align right. */
+/**
+ * A small table with a visible caption; `numeric` columns align right. The first cell of a row
+ * names it (service, task, job, source, table, sample time): a row header for screen readers.
+ */
 function Table({
   caption,
   columns,
@@ -163,17 +166,22 @@ function Table({
         <tbody>
           {rows.map((row) => (
             <tr key={row.key} className="border-b border-border last:border-b-0">
-              {row.cells.map((cell, index) => (
-                <td
-                  key={columns[index]?.label ?? index}
-                  className={cn(
-                    'px-2 py-1.5 align-top first:pl-0',
-                    columns[index]?.numeric && 'text-right tabular',
-                  )}
-                >
-                  {cell}
-                </td>
-              ))}
+              {row.cells.map((cell, index) => {
+                const className = cn(
+                  'px-2 py-1.5 align-top first:pl-0',
+                  columns[index]?.numeric && 'text-right tabular',
+                );
+                const key = columns[index]?.label ?? index;
+                return index === 0 ? (
+                  <th key={key} scope="row" className={cn(className, 'text-left font-normal')}>
+                    {cell}
+                  </th>
+                ) : (
+                  <td key={key} className={className}>
+                    {cell}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
