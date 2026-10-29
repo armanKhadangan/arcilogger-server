@@ -6109,15 +6109,16 @@ from section 0.2 are recorded here too, with the date and who decided.
   normalised `lower(replace(extra->>'mac', '-', ':'))` (a local copy of 2.6.1 rule 7, since
   `trust.py` is WP-B's) and refuses only a readable MAC (`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`) that
   is `00:00:00:00:00:00` or has an odd second hex digit; a missing or unreadable MAC passes, as
-  a missing `dhcp_msg` does. D28's receive-time rule cannot be checked on an `fg_event` row
-  (it has no `device_time`), so such a line is still counted and named: the warning side, and a
-  citation is never an attribution. The filter refuses a line of a logid that
-  `dhcp.fortigate_dhcp_msgs` lists only when its `dhcp_msg` is **present** and not listed: a
-  line without the field passes, because under D3 a DHCP line without `dhcp_msg` is exactly the
-  one ingest keeps as an `fg_event` row (the shape of a line the timeline never saw), while
-  D25's "a NULL `dhcp_msg` included" (2.6.1 rule 5) is a rule for `fg_dhcp` rows, which always
-  carry the field. An earlier form refused such a line too, so the probe and the post-lease
-  check never saw the lines they are for. Tests:
+  a missing `dhcp_msg` does. D28's receive-time rule is **deliberately not applied**: it could be
+  checked on an `fg_event` row (it has no `device_time`, but `time = time_received` is the marker of
+  a receive-time row, the one `engine._clock` uses), yet such a line is still counted and named,
+  because that is the warning side, and a citation is never an attribution. The filter refuses a
+  line of a logid that `dhcp.fortigate_dhcp_msgs` lists only when its `dhcp_msg` is **present** and
+  not listed: a line without the field passes, because under D3 a DHCP line without `dhcp_msg` is
+  exactly the one ingest keeps as an `fg_event` row (the shape of a line the timeline never saw),
+  while D25's "a NULL `dhcp_msg` included" (2.6.1 rule 5) is a rule for `fg_dhcp` rows, which always
+  carry the field. An earlier form refused such a line too, so the probe and the post-lease check
+  never saw the lines they are for. Tests:
   `worker/tests/test_lookup_fortigate_only.py::test_a_line_after_the_lease_without_dhcp_msg_counts`,
   `::test_a_covering_line_without_dhcp_msg_is_named` (both failed before),
   `::test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing`,
