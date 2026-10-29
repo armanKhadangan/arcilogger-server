@@ -5,6 +5,200 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### FortiGate DHCP, srcmac and internet exits (Wave 3)
+
+A 5651 lookup now follows the lease on sites whose FortiGate is the clients' DHCP server, may use
+the `srcmac` of a FortiGate session record as labelled partial evidence, and resolves a public IP
+to the internet exit (line) that holds it, so a site with two lines (one direct, one behind an ISP
+router) lists only that line's sessions
+([ADR-0016](docs/adr/0016-fortigate-dhcp-and-internet-exits.md); docs/CORRELATION.md; MVP-CONTRACTS
+§18). Decided by the developer on the owner's delegation; the owner may change it (the ADR lists
+the open points O1–O22, [ASSUMPTIONS](docs/ASSUMPTIONS.md) the implemented defaults, not yet
+confirmed). The rule behind every choice: a wrong person at high confidence is the worst outcome, a
+false "nobody" the second worst; where the logs cannot decide, the confidence is lowered and the
+reason given. Every FortiGate format detail that no official source or real sample confirms is a
+setting or has a loud check (sahada doğrula; KURULUM/INSTALL section 16 is the operator's list).
+
+- **FortiGate DHCP as lease evidence:** a FortiGate `event` line with `ip`, `mac` and `dhcp_msg` is
+  stored in the new table `fg_dhcp` by its shape alone (a value that does not convert keeps it an
+  `fg_event` row and the parse failure `fortigate.dhcp`). What a row means is the worker's setting
+  `dhcp.fortigate_logids`: the DHCP Ack `0100026001` assigns, the Release `0100026002` (derived
+  from the documented numbering, sahada doğrula) releases; `dhcp.fortigate_dhcp_msgs` allows `Ack`
+  under the Ack logid. Usable rows feed the same lease timeline as MikroTik DHCP: an Ack opens a
+  `high` lease, a Release ends it, an Ack from the other DHCP table supersedes it, and a FortiGate
+  Ack of a MAC for another address closes that MAC's other lease of the same origin, interface and
+  configured network. A logged lease of 300–8,640,000 s ends the lease exactly that long after its
+  last DHCP record, the FortiGate's own end; `0`, a missing or an out-of-range value use the
+  configured lease times. Traffic does not keep a FortiGate lease alive
+  (`dhcp.fortigate_traffic_extends`, off). A changed map applies to older rows after a lease
+  rebuild, without loading anything again.
+- **Only usable evidence counts:** FortiGate DHCP rows of an unconfigured sender (an
+  `unknown-<ip>` sender only inside the address of an enabled, configured FortiGate source), of an
+  interface in `dhcp.fortigate_interfaces_excluded` (DHCP over IPsec), without the FortiGate's own
+  time, with a zero, broadcast or multicast MAC, an unmapped logid or another `dhcp_msg` are never
+  lease evidence and are counted by reason; the lease job, the lookup, the alerts and the Kaynaklar
+  card read one rule for it (`lookup/trust.py`).
+- **5651 Sorgu:** a FortiGate lease prints its logged lease time and its last DHCP record at or
+  before the requested moment. A chain is `low`, with the reason, more than half a lease after that
+  record with no renewal seen (`lease_renewal_not_seen`), when two DHCP origins served its network
+  (`dhcp_sources_overlap`), for an address in no configured network (`fortigate_dhcp_no_network`),
+  when a cited source's clock was more than 120 s off at the moment (`source_clock_offset`), and
+  when an unconverted FortiGate DHCP line (loaded before the upgrade, or during a rollback) of its
+  IP or MAC follows its lease's last record (`fortigate_dhcp_not_converted_since_lease`). Such
+  lines are not converted (O3): when no chain is built the lookup names a covering one
+  (`fortigate_dhcp_not_converted`). Until `dhcp.fortigate_format_verified` is set after the site
+  check (DEVICE-SETUP section 2.4) every FortiGate chain says that the record format is not
+  verified on site. A match without a chain says so (`chain_missing`), and a match with rows of an
+  unconfigured sender is marked (`session_from_unknown_source`).
+- **srcmac, partial evidence:** the new column `fg_traffic.srcmac` keeps the session record's source
+  MAC (FortiOS fills it only with device identification on the source interface). A lookup uses it
+  only on interfaces listed in `lookup.srcmac_interfaces` (default none, so off), from a trusted
+  sender, for a MAC that is no infrastructure MAC, seen with at most `lookup.srcmac_max_ips` (1)
+  IPv4 addresses on that interface within an hour of the moment and holding no lease of another
+  address then. A chain without a lease then gets the MAC, device and person at `low`, labelled
+  **Kısmi kanıt: srcmac** (`srcmac_only`); a lease of another MAC makes both chains a `low`
+  conflict, listed side by side (`srcmac_mismatch`). srcmac never opens or extends a lease. This
+  departs from SPEC 9.1, as does traffic not extending a FortiGate lease (ASSUMPTIONS, "Deviations
+  from the specification").
+- **Internet exits:** one setting, `nat.egresses` (at most 8 exits by name), replaces
+  `nat.public_ips`, `nat.wan_transip` and `lookup.port_hint`. An exit is `direct` (the FortiGate
+  holds the public address: exact answers), `isp_nat` (an ISP router translates once more:
+  candidates), `not_logged` (the line bypasses the FortiGate) or `internal` (a source-NAT address
+  towards a DMZ, another VLAN, a VPN or a branch: claimed, never searched), with its public
+  addresses (never private, shared or reserved space; IPv6 refused), NAT addresses (`transips`),
+  interfaces (`dstintf`), port preservation (a ranking hint only) and `public_dynamic`. A lookup
+  matches the public IP against the exits, checks that the logs show the exit's NAT address within
+  ±15 minutes of the moment (a failed check is a warned fallback, e.g. "Doğrudan hat
+  doğrulanamadı") and searches that exit's sessions only. An address no exit claims is the
+  FortiGate's own when the logs show it as its NAT address near the moment; otherwise it is
+  searched only in the exits whose public address is unknown or dynamic, with a warning, else
+  nobody is listed (`public_ip_no_egress`). Only private or shared NAT addresses count as double-NAT
+  evidence; candidate searches over unclaimed addresses take only the `trandisp` values of
+  `nat.snat_trandisp` (`snat`) and name the others. Every answer records the exit it used and
+  warns when an exit changed after the moment (`egress_changed_after_event`; the earlier
+  definitions are in the audit log).
+- **Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi:** ten new settings (the six
+  `dhcp.fortigate_*`, `lookup.srcmac_interfaces`, `lookup.srcmac_max_ips`, `nat.egresses`,
+  `nat.snat_trandisp`) with Turkish and English validation, no re-authentication (O8).
+  **İnternet çıkışları (NAT)** is an editor of its own (a form per exit, the server's rules checked
+  in the browser, a stored exit it cannot give back never rewritten); under it, **Kayıtlarda
+  görülen NAT adresleri (son 24 saat)** lists the `transip`, `dstintf` and `trandisp` groups of
+  the trusted session records with the exit that claims each (**Çıkış olarak ekle**, **İnternet
+  çıkışı değil olarak ekle**) and the interfaces whose records carry srcmac (**srcmac için ekle**).
+- **Kaynaklar:** a **Kira kanıtı** card: per evidence table (MikroTik DHCP, FortiGate DHCP,
+  ARP-LOG) the usable rows of the last 24 hours, the newest of the last hour and the leases open
+  or ended in that time, the FortiGate DHCP rows not used and those of excluded interfaces,
+  whether the record format is verified, the srcmac interfaces with their rows of the last hour,
+  and a state (lease evidence arrives, none arrives, or it is refused). Counts only, no client
+  address. A **Desteklenen ağ yapıları** box (also on Ayarlar → Kaynaklar) says which network
+  set-ups are supported and which are not (KURULUM/INSTALL section 0.1).
+- **Alerts** (docs/UYARILAR.md / ALERTS.md): `R20-lease:<cause>` and `R20-nat:<cause>`, one alert
+  per cause, in the existing system job. Lease evidence stopped per table (`none:fg_dhcp`,
+  `none:mt_arp` high; `none:mt_dhcp` medium and only while no ARP-LOG row arrives either) or
+  absent (info); FortiGate DHCP records refused, not converted, not verified on site, without
+  renewals, with unlimited or unexpected lease times, outside the configured networks, many
+  addresses for one MAC; a static device in the DHCP pool (`fortigate-decline:<net>`); two DHCP
+  sources on one network; a source clock beyond ±120 s (`source-clock`); a shared MAC on a srcmac
+  interface; for the exits a failed conversion, an unreadable value, an old NAT row changed during
+  a rollback and a NAT address no exit defines that keeps carrying sessions (`unmapped-transip`).
+  An e-mail carries only the cause's fixed line, counts, a VLAN number, an evidence table and a
+  clock offset; addresses, MACs and source names show on the Güvenlik page only.
+- **Arama:** `fg_dhcp` rows belong to the kind **FortiGate olayı** (the MikroTik kind is now
+  **DHCP (MikroTik)**) and answer `srcip:`, `ip:`, `mac:`, `interface:`, `logid:` and `level:`;
+  the new field `srcmac:` (`kaynakmac:`) searches the session records' source MAC (no index,
+  scanned in time slices; `mac:` never reads the session records).
+- **Report (PDF):** section 4 names the exit (**Çıkış**) with the method paragraph of its
+  resolution and mode (double NAT, a shared public address, what would make the answer exact), and
+  each candidate's exit and `dstintf`; the chain shows a FortiGate lease's logged time and last
+  DHCP record, the srcmac step as partial evidence with its session line, and the
+  unconfigured-sender warning; a method note says whether the FortiGate DHCP record format was
+  verified (by whom and when). The cross-check re-parses FortiGate DHCP and srcmac lines with the
+  shipped parser; FortiGate DHCP lines outside the lease timeline are shown, not compared.
+- **Who sees what** (docs/roles.md): `GET /settings/fortigate/observed` administrators only
+  (`settings.manage`; counts and the firewall's own addresses, not audited); the Kira kanıtı card
+  with `GET /sources` (`sources.read`). srcmac and FortiGate DHCP host names are personal data,
+  shown under the same permissions as MikroTik leases. No new permission key and no new audit
+  action; `lookup.run` also records the exit's resolution and names (never a person, MAC or raw
+  line), and the upgrade writes one `settings.change` entry for the conversion of the old NAT keys.
+- **5651 Temel:** FortiGate DHCP, srcmac, the exits and both alert rules are basic functions; no
+  licence state blocks them.
+- **Database:** revision `0017_fortigate_dhcp` (the time-series table `fg_dhcp` with indexes on
+  `(ip, time)` and `(mac, time)`, a hypertable or monthly partitions like the other log tables;
+  `fg_traffic.srcmac`, added empty, also on TimescaleDB with compressed chunks;
+  `leases.lease_seconds`) and `0018_nat_egresses` (settings only: an administrator's old NAT values
+  become exits through a frozen copy of the conversion, a result that does not validate becomes
+  `{}` with `R20-nat:conversion-failed`, the old rows are kept unread for one version; status rows
+  `nat.egresses_migration` and `nat.egresses_changes`). FortiGate DHCP lines loaded before the
+  upgrade stay `fg_event` rows (stored, searchable, sealed).
+- **API:** `GET /settings/fortigate/observed?hours=` (1–72; 504 `fortigate_observed_timeout` after
+  5 s), `lease_evidence` on `GET /sources`, and in the lookup outcome `egress` (resolution, exits,
+  addresses searched, each exit's last change), each match's exit and unconfigured senders,
+  `unconverted_dhcp` and a chain's `mac_source`; 503 `lookup_settings_invalid` when a stored
+  lookup setting cannot be read; refusal codes `setting_egress_*`, `setting_ipv6_not_supported`,
+  `setting_logid_invalid`, `setting_dhcp_msg_invalid`, `setting_interface_invalid`,
+  `setting_trandisp_invalid` (MVP-CONTRACTS §18). A lookup's transaction plans every statement
+  with its values, as the search does.
+- **Rollback:** `Install-Arcilogger.ps1 -Rollback` without `-RestoreDatabase` runs the step
+  `leases.prepare-rollback` after the services stop and before the program is swapped:
+  `arcilogger-db leases prepare-rollback` sets every FortiGate lease to `low` (derived rows only,
+  one transaction) and the count is printed and logged; a failure or `-SkipDatabase` is a warning
+  that says what it means for the lookups, never a silent skip. The next `arcilogger-db upgrade`
+  sets the leases the previous version left as they were back to `high`, prints how many it
+  restored and how many stay `low`, and names the days to rebuild. The step runs on every such
+  rollback, so **a rollback between two versions that both read FortiGate DHCP shows FortiGate-DHCP
+  chains `low` until the next `arcilogger-db upgrade`** (false lows only, never a wrong person;
+  ASSUMPTIONS RB1).
+- **Upgrade:** the old NAT values become exits named "Genel IP (yükseltmede aktarıldı)", "FortiGate
+  WAN adresi (yükseltmede aktarıldı)" and, where needed, "Genel adresi tanımlanmamış hatlar";
+  until each line's public address and interfaces are entered, lookups of an address no exit
+  claims carry `egress_public_unknown`. On a FortiGate-DHCP site no chain is built for a client
+  until its first Ack in the new version (up to half its lease); do the record check of
+  DEVICE-SETUP section 2.4 and set `dhcp.fortigate_format_verified` (KURULUM/INSTALL section 13).
+- **Load generator** (tools/loadgen/README.md): site plans `--dhcp-server mikrotik|fortigate|both`,
+  `--srcmac` and `--egress NAME:TRANSIP:DSTINTF:SHARE` (dual WAN); the truth file names each
+  lease's evidence and each session's exit; the default output is unchanged, byte for byte. Its
+  FortiGate DHCP lines are synthetic (the Release logid derived, renewal at half the lease a
+  simulation assumption).
+- **Performance:** ingest with `fg_dhcp` and `srcmac` stayed within the 5 % gate on the development
+  machine: the default mix +0.8 % in-process and +0.7 % with 2 workers, a FortiGate-only spool
+  −3.5 % and +1.7 % (docs/INGEST.md). The lookup's probe of an address no exit claims reads the NAT
+  address index in its own order, the probe window first (a busy address in about 0.01 s); a busy
+  unclaimed address with no session over the moment takes about 0.5 s at a million lines a day,
+  under a bound of 1 s of its own, the whole lookup staying at about 1 s (contract, "Deviations —
+  c3").
+- **Docs:** DEVICE-SETUP section 2.1–2.6 (NTP; FortiGate DHCP server records with the site check;
+  srcmac and device identification; several internet lines), KURULUM/INSTALL sections 0.1, 13 and
+  16, CORRELATION, RAPOR and DENETCI-KILAVUZU (how to read the new report rows), AYARLAR/SETTINGS,
+  ILK-ADIMLAR/FIRST-STEPS, and the legal drafts (FortiGate DHCP host names and device-identification
+  fields as personal data, for the organisation's counsel).
+
+### Fixes and smaller additions (Wave 3)
+
+- **A 5651 lookup by domain on compressed TimescaleDB chunks** took 6.0–7.2 s at 3 million rows a
+  day, over its 5 s: the web and application sub-query's time bound used `COALESCE`, which
+  TimescaleDB does not carry into the compressed batches. It is now two plain sub-queries (rows
+  with and without a duration) with the same matches: 1.45–1.56 s.
+- **Arama** opened with a hand-over's range (from the Panel or Canlı Akış) searched again on the
+  default last 24 hours (the Panel's "today" search showed 24 hours and was audited twice); a
+  letter typed right after taking a completion could land before the caret; a search whose
+  budget ran out while its first window was still being halved returned an empty page that
+  repeated the scan, now 504 `search_timeout`.
+- **Dialogs** of the devices, reports and users pages and the evidence wizard show their form from
+  the first frame (an edit no longer opens on an empty form for one frame).
+- **Accessible names** contain the text on screen (WCAG 2.5.3, checked by axe-core 4.14) in both
+  languages: user menu, Panel parse failures, settings history, report runs, usage period, Arama's
+  raw line, the syntax help's examples.
+- **Collector:** a status write refused on Windows (the file open in another process) is tried
+  again at the next round, so a new configuration's report no longer waits for the next status
+  interval.
+- **Worker:** the search-counts backfill ends its run when its budget is used up also on a coarse
+  clock (Windows).
+- **Dependencies:** the Python, web runtime and web tooling groups and the CI actions updated
+  (Dependabot).
+- **Development:** `CLAUDE.md`, `CONTRIBUTING.md` and a pull request template for the team; CI
+  runs on pull requests and on the `wave-*` integration branches, each test once, the Windows job
+  in three parts; `tools/dev/cloud-setup.sh` prepares PostgreSQL 16 for a cloud session.
+
 ### Search, live tail and sources (Wave 2)
 
 Three of the menu's placeholder pages are real: **Arama**, **Canlı Akış** and **Kaynaklar**, plus
