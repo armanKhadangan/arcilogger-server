@@ -2,12 +2,15 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } from './fixtures';
 import { CSRF_TOKEN, mockApi } from './mock-api';
+import { mockNetwork } from './mock-network';
 
 /**
  * Ayarlar → Uygulama ayarları (contract 2.13, 2.17): the database settings by group with the
  * server's labels (the captured `GET /settings`, `samples/settings.json`), every kind of editor
  * (number, switch, list, the work hours and the holidays), the browser's and the server's
- * checks, re-authentication, the conflict and "Varsayılana dön".
+ * checks (an internet exit refused by the server: its captured 422, `mock-network.ts`),
+ * re-authentication, the conflict and "Varsayılana dön". The exit editor and the observed NAT
+ * addresses have their own spec (`w3-network.spec.ts`).
  */
 
 function group(page: Page, id: string) {
@@ -161,14 +164,19 @@ test.describe('Ayarlar → Uygulama ayarları', () => {
   });
 
   test("the server's refusal is shown at its setting, in Turkish", async ({ page }) => {
-    await mockApi(page, { signedInAs: 'tolga' });
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    const network = await mockNetwork(page, api);
     await page.goto('/settings/application?group=lookup');
     const lookup = group(page, 'lookup');
-    // The internet exits through the generic JSON editor: a private address as a public one.
+    // An edit the browser's mirror of the exit rules accepts (the converted exit's label); the
+    // server refuses it with its captured 422 (`setting_invalid_egress`).
     await lookup
-      .getByLabel('İnternet çıkışları (NAT)')
-      .fill('{"hat-1": {"mode": "direct", "public": ["100.64.12.9"]}}');
+      .getByRole('group', { name: 'Çıkış wan' })
+      .getByLabel('Açıklama')
+      .fill('FortiGate WAN adresi');
+    network.refuseNext = true;
     await lookup.getByRole('button', { name: 'Kaydet' }).click();
+    await expect.poll(() => api.callsTo('PATCH', '/settings').length).toBe(1);
     // `validate_setting`'s text (`setting_egress_public_private`), never the value it refused.
     await expect(
       lookup
