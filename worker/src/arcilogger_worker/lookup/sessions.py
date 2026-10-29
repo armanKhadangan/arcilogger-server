@@ -38,6 +38,11 @@ parameter per value (PostgreSQL accepts at most 65,535).
 ``nat.snat_trandisp``), optionally narrowed to ``dstintfs``; a search without a NAT address (a
 destination-only request) takes every session whose ``trandisp`` is listed.
 
+**srcmac** (ADR-0016 D10, contract 2.9): a session's ``srcmac`` is read only from rows of a
+listed source interface (``lookup.srcmac_interfaces``) and a trusted sender
+(:meth:`SessionGroup.srcmac_rows`, :func:`srcmac_sightings`, :func:`srcmac_rows_of_mac`), and
+``TrafficInfo.srcmac`` stays ``None`` for every other row.
+
 The label (:data:`~arcilogger_worker.lookup.types.DestinationMatch`) keeps the weaker kinds
 apart, so a report never presents them as plain matches: ``ip_other_port`` (requested IP,
 another port), ``domain_other_port`` (the session is tied to the name, another port) and
@@ -66,7 +71,7 @@ from sqlalchemy import (
     or_,
     select,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET
+from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET, distinct_on
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import ClauseElement, ColumnElement, Executable
@@ -204,7 +209,15 @@ class SessionGroup:
         """``at`` clamped into the session (the moment whose IP owner is attributed)."""
         return min(max(at, self.start), self.end)
 
-    def traffic(self, at: datetime) -> TrafficInfo:
+    def traffic(
+        self,
+        at: datetime,
+        interfaces: Collection[str] = (),
+        untrusted: Collection[str] = frozenset(),
+    ) -> TrafficInfo:
+        """The match's session; its ``srcmac`` only from a row of a listed interface
+        (``interfaces``: ``lookup.srcmac_interfaces``) and a trusted sender, the one nearest to
+        ``at`` (ADR-0016 2.9), so no MAC of another interface reaches a stored outcome."""
         rows = sorted(self.rows, key=lambda r: (abs((r.time - at).total_seconds()), r.time, r.id))
         cited = {r.id: r for r in rows[: EVIDENCE_PER_SESSION - 2]}
         cited.setdefault(self.rows[0].id, self.rows[0])
@@ -214,6 +227,7 @@ class SessionGroup:
         )
         first = self.first
         nearest = self.nearest(at)
+        listed = self.srcmac_rows(at, interfaces, untrusted)
         return TrafficInfo(
             sessionid=first.sessionid,
             proto=first.proto,
@@ -228,11 +242,28 @@ class SessionGroup:
             evidence=evidence,
             srcintf=nearest.srcintf,
             dstintf=nearest.dstintf,
+            srcmac=listed[0].srcmac if listed else None,
         )
 
     def nearest(self, at: datetime) -> TrafficRow:
         """The row nearest to ``at`` (its exit and interfaces are the match's, ADR-0016 D32)."""
         return min(self.rows, key=lambda r: (abs((r.time - at).total_seconds()), r.time, r.id))
+
+    def srcmac_rows(
+        self, at: datetime, interfaces: Collection[str], untrusted: Collection[str]
+    ) -> list[TrafficRow]:
+        """The rows whose srcmac the lookup may consider (2.9), nearest to ``at`` first: a
+        srcmac on a listed interface, from a trusted sender (D24)."""
+        return sorted(
+            (
+                row
+                for row in self.rows
+                if row.srcmac is not None
+                and row.srcintf in interfaces
+                and row.source not in untrusted
+            ),
+            key=lambda r: (abs((r.time - at).total_seconds()), r.time, r.id),
+        )
 
 
 def group_sessions(rows: Iterable[TrafficRow]) -> list[SessionGroup]:
@@ -459,6 +490,129 @@ def fetch_rows(session: Session, window: Window, **filters: Any) -> Fetched:
         return Fetched([])
     rows = [TrafficRow(**row._asdict()) for row in session.execute(query)]
     return Fetched(rows[:MAX_ROWS], capped=len(rows) > MAX_ROWS)
+
+
+def _srcmac_filters(
+    interfaces: Collection[str], untrusted: Collection[str]
+) -> list[ColumnElement[bool]]:
+    """Rows whose srcmac a lookup may read (2.9, D24): a listed source interface, a srcmac,
+    an IPv4 source (lookups are IPv4 only), a trusted sender."""
+    clauses = [
+        FgTraffic.srcintf == _text_any(interfaces),
+        FgTraffic.srcmac.is_not(None),
+        func.family(FgTraffic.srcip) == 4,
+    ]
+    if untrusted:
+        clauses.append(not_(FgTraffic.source == _text_any(untrusted)))
+    return clauses
+
+
+def _nearest_srcmac_rows(
+    session: Session, filters: Sequence[ColumnElement[bool]], at: datetime, limit: int
+) -> list[TrafficRow]:
+    """The rows of ``filters`` reduced to the nearest one to ``at`` (by row time) of each
+    ``(srcintf, srcmac, srcip)``, at most ``limit`` of them, nearest first, returned oldest
+    first. The router guard decides per ``(srcintf, srcmac, srcip)`` and a lookup uses the
+    nearest usable row of a key (``engine._usable_rows``), so no other row changes an answer;
+    a limit on the window's oldest rows instead would cut a second MAC or address logged later
+    (``srcmac_ambiguous`` / ``mac_multiple_ips`` would become one srcmac chain)."""
+    distance = func.greatest(FgTraffic.time - at, at - FgTraffic.time).label("distance")
+    nearest = (
+        select(*_COLUMNS, distance)
+        .where(*filters)
+        .ext(distinct_on(FgTraffic.srcintf, FgTraffic.srcmac, FgTraffic.srcip))
+        .order_by(FgTraffic.srcintf, FgTraffic.srcmac, FgTraffic.srcip, distance, FgTraffic.id)
+        .subquery()
+    )
+    query = (
+        select(*(nearest.c[column.key] for column in _COLUMNS))
+        .order_by(nearest.c.distance, nearest.c.time, nearest.c.id)
+        .limit(limit)
+    )
+    rows = [TrafficRow(**row._asdict()) for row in session.execute(query)]
+    return sorted(rows, key=lambda row: (row.time, row.id))
+
+
+def srcmac_sightings(
+    session: Session,
+    *,
+    srcips: Collection[str],
+    window: Window,
+    interfaces: Collection[str],
+    untrusted: Collection[str],
+    limit: int = 50,
+) -> list[TrafficRow]:
+    """The rows of ``srcips`` with a srcmac on a listed interface whose session overlaps the
+    window, trusted senders only: the nearest row to the moment of each srcmac (and interface),
+    oldest first (an internal lookup without a lease, 2.9; ``ix_fg_traffic_srcip_time``). Only
+    the typed ``srcmac`` column is read: a row loaded before the upgrade keeps its srcmac in
+    ``extra`` only, and the router guard (:func:`.trust.srcmac_ip_counts`) cannot count it
+    either."""
+    if not srcips or not interfaces:
+        return []
+    filters = [
+        FgTraffic.srcip == _inet_any(srcips),
+        FgTraffic.time >= window.low,
+        FgTraffic.time <= window.scan_end,
+        _session_start() <= window.high,
+        *_srcmac_filters(interfaces, untrusted),
+    ]
+    return _nearest_srcmac_rows(session, filters, window.at, limit)
+
+
+def srcmac_rows_of_mac(
+    session: Session,
+    *,
+    mac: str,
+    at: datetime,
+    low: datetime,
+    high: datetime,
+    interfaces: Collection[str],
+    untrusted: Collection[str],
+    limit: int = 50,
+) -> list[TrafficRow]:
+    """The rows whose srcmac is ``mac`` on a listed interface within ``[low, high]`` by row
+    time, trusted senders only: the nearest row to ``at`` of each address (and interface),
+    oldest first (a MAC-only internal lookup without a lease, 2.9): a primary-key time range,
+    as the srcmac column has no index (D10)."""
+    if not interfaces:
+        return []
+    filters = [
+        FgTraffic.time >= low,
+        FgTraffic.time <= high,
+        FgTraffic.srcmac == mac,
+        *_srcmac_filters(interfaces, untrusted),
+    ]
+    return _nearest_srcmac_rows(session, filters, at, limit)
+
+
+def srcmac_addresses_within(
+    session: Session,
+    *,
+    keys: Collection[tuple[str, str, str]],
+    low: datetime,
+    high: datetime,
+    untrusted: Collection[str],
+) -> set[tuple[str, str, str]]:
+    """Which of ``keys`` (``(srcintf, srcmac, srcip)``) have a trusted row within ``[low,
+    high]`` by row time (the router guard of 2.9 for a row it uses outside the hour around the
+    moment: is that row's address already among the ones counted there?). One query through
+    ``ix_fg_traffic_srcip_time``."""
+    if not keys:
+        return set()
+    query = (
+        select(FgTraffic.srcintf, FgTraffic.srcmac, FgTraffic.srcip)
+        .distinct()
+        .where(
+            FgTraffic.srcip == _inet_any({ip for _interface, _mac, ip in keys}),
+            FgTraffic.time >= low,
+            FgTraffic.time <= high,
+            FgTraffic.srcmac.in_(sorted({mac for _interface, mac, _ip in keys})),
+            *_srcmac_filters({interface for interface, _mac, _ip in keys}, untrusted),
+        )
+    )
+    found = {(str(interface), str(mac), str(ip)) for interface, mac, ip in session.execute(query)}
+    return found & set(keys)
 
 
 class Explain(Executable, ClauseElement):

@@ -725,6 +725,8 @@ def test_the_new_settings_refuse_values_of_another_shape(
         {"lookup.srcmac_interfaces": "vlan42"},
         {"lookup.srcmac_max_ips": "2"},
         {"lookup.srcmac_max_ips": True},
+        {"arp.ignore_after_release_seconds": -1},
+        {"arp.ignore_after_release_seconds": "60"},
         {"nat.snat_trandisp": None, "lookup.srcmac_interfaces": {"vlan42": 1}},
     ],
 )
@@ -736,6 +738,25 @@ def test_the_lookup_only_settings_never_stop_the_lease_timeline(values: dict[str
     assert settings == LookupSettings()
     assert settings.snat_trandisp == ("snat",)
     assert (settings.srcmac_interfaces, settings.srcmac_max_ips) == ((), 1)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "dhcp.fortigate_use_logged_lease",
+        "dhcp.fortigate_traffic_extends",
+        "dhcp.fortigate_format_verified",
+    ],
+)
+@pytest.mark.parametrize("value", ["false", "true", 1, 0, None])
+def test_a_fortigate_flag_reads_only_a_json_boolean(key: str, value: Any) -> None:
+    """A FortiGate flag written around the validator as another value than a JSON ``true`` or
+    ``false`` (CORRELATION §5) gives its shipped default: ``bool("false")`` would print "sahada
+    doğrulandı" or let traffic extend the FortiGate leases."""
+    settings = LookupSettings.from_settings({**DEFAULT_SETTINGS, key: value})
+    assert settings == LookupSettings()
+    assert (settings.use_logged_lease, settings.fortigate_traffic_extends) == (True, False)
+    assert settings.fortigate_format_verified is False
 
 
 def test_the_exits_are_parsed_only_when_asked_for_and_kept() -> None:
@@ -758,3 +779,11 @@ def test_a_logged_fortigate_lease_ends_the_lease_itself() -> None:
     assert settings.lease_timeout_seconds("dhcp61") == 3960  # configured: x 1.1
     assert settings.lease_timeout_seconds("dhcp61", None) == 3960
     assert settings.lease_timeout_seconds(None) == 95040
+    # The half-lease test of lease_renewal_not_seen reads the configured time without the margin
+    # from the same helper, so the two cannot disagree (2.7).
+    for server in ("dhcp61", "dhcp60", None):
+        assert settings.lease_timeout_seconds(server) == (
+            settings.server_lease_seconds(server) * settings.lease_timeout_percent // 100
+        )
+    assert settings.server_lease_seconds("dhcp61") == 3600
+    assert settings.server_lease_seconds(None) == 86400

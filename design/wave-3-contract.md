@@ -3098,7 +3098,7 @@ formatted eagerly and existing tests pin some of them (1.2).
 | `public_ip_not_transip` (warning, **text changed in C1**: "Ayarlar → NAT" → "Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)"; round 6, D15 "seen, but not alone": "görünmüyor" → "görünmüyor ya da yalnızca bir kısmında görünüyor", "başka bir çıkış adresi var" → "başka bir çıkış adresi de var") | unchanged otherwise | unchanged otherwise ("Settings → NAT" → the English path; "does not appear" → "does not appear, or only part of the time,", "show another address" → "also show another address") |
 | `fortigate_format_unverified` (info) | FortiGate DHCP kayıt biçimi bu kurulumda henüz sahada doğrulanmadı (DEVICE-SETUP.md bölüm 2.4); kira kaydı FortiOS belgelerindeki biçime göre okundu. | The FortiGate DHCP record format has not yet been verified on site at this installation (DEVICE-SETUP.md section 2.4); the lease was read by the format of the FortiOS documentation. |
 | `lease_renewal_not_seen` (warning) | Bu kiranın istenen andan önceki son DHCP kaydı {last} anında (kira süresi {lease} sn). İstenen an bundan kira süresinin yarısından fazla sonra ve arada bir yenileme kaydı yok. Adresi hâlâ tutan bir istemci kira süresinin yarısında yeniler; bu yenileme kayıtlarda yoksa ya yenileme kaydedilmedi ya da adresi o anda başka bir cihaz (ör. havuzda statik adresli bir cihaz) kullanıyordu. Kayıtlar hangisi olduğunu gösteremez; zincir bu nedenle düşük güvenle gösterildi. | The last DHCP record of this lease before the requested moment is at {last} (lease time {lease} s). The requested moment is more than half the lease time later, with no renewal record in between. A client that still holds the address renews at half the lease; if that renewal is not in the logs, either it was not logged or another device (e.g. a static device in the pool) used the address at that moment. The records cannot show which, so the chain is shown with low confidence. |
-| `fortigate_dhcp_not_converted_since_lease` (warning; round 5, D8; worded for every DHCP chain in round 6; converted rows of a MAC move the build missed in round 7, D33) | Bu kiranın {last} anındaki son DHCP kaydından sonra, istenen andan önce, {ip} adresi ya da bu kiranın MAC adresi için kira zaman çizelgesinin bu kiraya uygulamadığı FortiGate DHCP kayıtları var (ör. bu sürüme yükseltmeden önce yüklendi, bir geri almadan sonra önceki sürüm yükledi, alanları okunamadı ya da kiralar bir ağ tanımlanmadan veya değiştirilmeden önce oluşturuldu). Bu kayıtlar adresin bırakıldığını, başka bir cihaza verildiğini ya da bu MAC adresinin başka bir adres aldığını gösteriyor olabilir; zincir bu nedenle düşük güvenle gösterildi. Kayıtlar başka bir istemciye ait olabileceği için gösterilmez; ham kayıtlar saklanır ve gece mühürlenir (Arama'da type:event). Ağlar (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar) sonradan tanımlandı ya da değiştirildiyse kiraları bu kiranın başladığı günden bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün). | After this lease's last DHCP record at {last} and before the requested moment there are FortiGate DHCP records for {ip} or for this lease's MAC address that the lease timeline did not apply to this lease (e.g. loaded before the upgrade to this version, loaded by the previous version after a rollback, fields that could not be read, or leases built before a network was entered or changed). They may show that the address was released or given to another device, or that this MAC address took another address, so the chain is shown with low confidence. The records are not shown, because they may belong to another client; the raw lines are kept and sealed every night (Search, type:event). If networks (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar) were entered or changed later, rebuild the leases from this lease's start day to today in Settings → Application settings → 5651 lookup and lease timeline → Rebuild leases (at most 31 days per request). |
+| `fortigate_dhcp_not_converted_since_lease` (warning; round 5, D8; worded for every DHCP chain in round 6; converted rows of a MAC move the build missed in round 7, D33) | Bu kiranın {last} anındaki son DHCP kaydından sonra, istenen andan önce, {ip} adresi ya da bu kiranın MAC adresi için kira zaman çizelgesinin bu kiraya uygulamadığı FortiGate DHCP kayıtları var (ör. bu sürüme yükseltmeden önce yüklendi, bir geri almadan sonra önceki sürüm yükledi, alanları okunamadı ya da kiralar bir ağ tanımlanmadan veya değiştirilmeden, gönderen FortiGate (ör. bir HA üyesi) kaynak olarak tanımlanmadan ya da FortiGate DHCP ayarları (ör. logid listesi) değiştirilmeden önce oluşturuldu). Bu kayıtlar adresin bırakıldığını, başka bir cihaza verildiğini ya da bu MAC adresinin başka bir adres aldığını gösteriyor olabilir; zincir bu nedenle düşük güvenle gösterildi. Kayıtlar başka bir istemciye ait olabileceği için gösterilmez; ham kayıtlar saklanır ve gece mühürlenir (Arama'da type:event). Ağlar (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar), FortiGate kaynakları (Kaynaklar) ya da FortiGate DHCP ayarları sonradan tanımlandı ya da değiştirildiyse kiraları bu kiranın başladığı günden bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün). | After this lease's last DHCP record at {last} and before the requested moment there are FortiGate DHCP records for {ip} or for this lease's MAC address that the lease timeline did not apply to this lease (e.g. loaded before the upgrade to this version, loaded by the previous version after a rollback, fields that could not be read, or leases built before a network was entered or changed, before the sending FortiGate (e.g. an HA member) was configured as a source, or before the FortiGate DHCP settings (e.g. the logid list) were changed). They may show that the address was released or given to another device, or that this MAC address took another address, so the chain is shown with low confidence. The records are not shown, because they may belong to another client; the raw lines are kept and sealed every night (Search, type:event). If networks (Devices and people → Departments and VLANs), FortiGate sources (Sources) or the FortiGate DHCP settings were entered or changed later, rebuild the leases from this lease's start day to today in Settings → Application settings → 5651 lookup and lease timeline → Rebuild leases (at most 31 days per request). |
 | `fortigate_dhcp_no_network` (warning; round 6, D33) | {ip} adresi tanımlı hiçbir ağda değil (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar). Bir istemcinin FortiGate'ten aldığı adresi reddedip (DHCPDECLINE, ör. adresi havuzda statik adresli bir cihaz kullanıyorsa) başka bir adres aldığı yalnızca tanımlı ağlarda anlaşılır; bu kira o anda adresi kullanan cihazı göstermiyor olabilir, zincir bu nedenle düşük güvenle gösterildi. Ağı VLAN numarası olmasa da tanımlayın; sonra kiraları bu kiranın başladığı günden bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün): bir ağ geçmiş kiralara ancak yeniden oluşturmadan sonra uygulanır. | {ip} lies in no configured network (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar). A client that declines an address the FortiGate gave it (DHCPDECLINE, e.g. because a static device in the pool uses it) and takes another is only detected in configured networks; this lease may not show the device that used the address at that moment, so the chain is shown with low confidence. Define the network, even without a VLAN number, then rebuild the leases from this lease's start day to today in Settings → Application settings → 5651 lookup and lease timeline → Rebuild leases (at most 31 days per request): a network applies to past leases only after a rebuild. |
 | `egress_observed_not_configured` (warning) | {address} hiçbir internet çıkışında tanımlı değil, ancak {at} çevresinde (±15 dakika) FortiGate kayıtlarında kaynak NAT adresi olarak görünüyor: FortiGate bu adresi o sırada kendisi kullanıyordu (ör. değişken genel IP'li bir hat). Eşleşme FortiGate kaydında yapıldı. Adresin o tarihte kuruma ait olduğunu servis sağlayıcıdan doğrulayın ve hattı Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlayın. | {address} is not defined in any internet exit, but around {at} (±15 minutes) the FortiGate logs show it as a source-NAT address: the FortiGate itself used this address at that time (e.g. a line with a changing public IP). The match was made on the FortiGate record. Confirm with the ISP that the address belonged to the organisation on that date, and define the line in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT). |
 | `egress_changed_after_event` (warning) | {at} anından sonra şu internet çıkışlarının tanımı değişti: {changes_tr}. Sorgu bugünkü tanımlarla yapıldı; bu çıkışların o tarihteki adresleri farklıysa sonuç farklı olabilir. Önceki tanımlar kurumun denetim kaydındadır (settings.change) ve sistem yöneticisinden istenebilir. | These internet exits were changed after {at}: {changes_en}. The lookup used today's definitions; if these exits had other addresses on that date, the result may differ. The earlier definitions are in the organisation's audit log (settings.change) and can be requested from its administrator. |
@@ -3110,7 +3110,7 @@ formatted eagerly and existing tests pin some of them (1.2).
 | `source_configured_later` (info) | Bu sonuçtaki kayıtların bir kısmı {sources} kaynağından: gönderici, kayıtlar alındığında yapılandırmada tanımlı değildi ve adresi sonradan bir FortiGate kaynağı olarak tanımlandı (gönderici sonradan yapılandırıldı). Kayıtlar bu yüzden kanıt sayıldı. | Some records of this result come from {sources}: the sender was not configured when they arrived, and its address was configured as a FortiGate source later (sender configured later). The records were therefore used as evidence. |
 | `egress_public_dynamic` (warning) | {egress} hattının genel adresi değişebilir olarak işaretli; {address} adresinin {at} anında bu hatta ait olduğu yalnızca servis sağlayıcıdan doğrulanabilir. | The public address of {egress} is marked as changing; that {address} belonged to this line at {at} can only be confirmed by the ISP. |
 | `egress_internal` (warning) | {address}, {egress} tanımına göre FortiGate'in iç ağlara (DMZ, başka bir VLAN, VPN ya da şube) yaptığı kaynak NAT'ın adresidir, bir internet çıkışı değildir; oturum aranmadı ve kimse listelenmedi. Adres bir internet hattına aitse tanımı Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde düzeltin. | {address} is, by the definition {egress}, the address of the FortiGate's source NAT towards internal networks (a DMZ, another VLAN, a VPN or a branch), not an internet exit; no session was searched and nobody was listed. If the address belongs to an internet line, correct the definition in Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT). |
-| `source_clock_offset` (warning) | {at} çevresinde şu kaynakların kayıt zamanları ARCILOGGER'ın alma zamanından ortanca olarak saniye cinsinden şu kadar farklıydı: {offsets} (sınır {limit} saniye). Arama ve kira zaman çizelgesi cihazın zamanlarını kullandı: doğru oturum ya da kira bu fark kadar kaymış bir zaman aralığında olabilir; doğru oturum bulunmamış ve başka bir oturum bulunmuş olabilir, kira da o anı kapsamıyor olabilir. Bu sonuçta zincir varsa düşük güvenle gösterildi; sonuç boşsa toleransı bu fark kadar genişletip sorguyu yeniden çalıştırın. | Around {at} the record times of these sources differed from ARCILOGGER's receive time by a median of (in seconds): {offsets} (limit {limit} seconds). The search and the lease timeline used the device's times: the right session or lease may lie in a window shifted by that offset; the right session may have been missed and another found, and the lease may not cover the moment. Any chain of this result is therefore shown with low confidence; if the result is empty, widen the tolerance by the offset and run the lookup again. |
+| `source_clock_offset` (warning) | {at} çevresinde şu kaynakların kayıt zamanları ARCILOGGER'ın alma zamanından ortanca olarak saniye cinsinden şu kadar farklıydı: {offsets} (sınır {limit} saniye). Arama ve kira zaman çizelgesi cihazın zamanlarını kullandı: doğru oturum ya da kira bu fark kadar kaymış bir zaman aralığında olabilir; doğru oturum bulunmamış ve başka bir oturum bulunmuş olabilir, kira da o anı kapsamıyor olabilir. Bu sonuçta zincir varsa düşük güvenle gösterildi. Sonuç boşsa sorguyu yeniden çalıştırın: genel IP sorgusunda toleransı bu fark kadar genişleterek, iç IP ya da MAC adresi sorgusunda istenen anı bu fark kadar kaydırarak (fark artıysa ileri, eksiyse geri). | Around {at} the record times of these sources differed from ARCILOGGER's receive time by a median of (in seconds): {offsets} (limit {limit} seconds). The search and the lease timeline used the device's times: the right session or lease may lie in a window shifted by that offset; the right session may have been missed and another found, and the lease may not cover the moment. Any chain of this result is therefore shown with low confidence. If the result is empty, run the lookup again: for a public IP with the tolerance widened by the offset, for an internal IP or a MAC address at the requested moment shifted by the offset (later for a positive offset, earlier for a negative one). |
 
 **Retired keys:** `public_ip_not_configured` and `wan_transip_not_seen` stay in the catalogue
 and keep their tones, so stored lookups still render, but they are never emitted again; a test
@@ -5549,7 +5549,9 @@ from section 0.2 are recorded here too, with the date and who decided.
   the networks page "Devices and people → Departments and VLANs" (the labels of
   `web/src/locales/en.json`) instead of the Turkish path, and the rebuild section "→ Rebuild the
   leases" (`en.json` `settings.leaseRebuild.title`, as `docs/SETTINGS.md`) instead of 2.11's
-  "→ Rebuild leases" (review fix); the Turkish texts are unchanged. Tests:
+  "→ Rebuild leases" (review fix); the Turkish texts are unchanged. (Since the final review of
+  PR #30, Q3, the 2.11 English cell of `fortigate_dhcp_not_converted_since_lease` names the
+  networks page by its English labels too.) Tests:
   `worker/tests/test_lookup_texts.py::test_the_settings_path_is_the_one_the_web_interface_shows`,
   which takes every label of both paths from `web/src/locales/{tr,en}.json`. WP-B should use the
   same English labels in the `fortigate-dhcp-subnet` alert text (2.6.3 writes "Rebuild leases"
@@ -5892,6 +5894,267 @@ from section 0.2 are recorded here too, with the date and who decided.
 - **Left to other packages, as the contract assigns them:** the "Kira kanıtı" card and its
   `source_configured_later` wording (WP-C2/WP-D), the web's per-rule labels (WP-E), the installer
   step `leases.prepare-rollback` (integrator), CORRELATION/KURULUM texts (WP-F2).
+
+## Deviations — c2 (WP-C2, 2026-10-28)
+
+- **A RELEASE mapped after the build ends the lease in the lookup** (2.7, round-6 note "a release
+  mapped after the build", its second option). When the newest kept `fg_dhcp` row of a lease's
+  pair in `[lease.start, at]` (the per-moment query) has a logid mapped to `deassigned`, the
+  lookup treats the lease as not covering `at` (`Attributor.covering`). What covers `at` then is
+  what the rebuild opens after that RELEASE: the ARP interval of the pair (timeline rules 5 and
+  6), read from the `mt_arp` rows of the pair later than `arp.ignore_after_release_seconds`
+  after the RELEASE (sightings at most the ARP grace apart, the last one less than
+  `arp.interval_seconds` before `at`; one query on `ix_mt_arp_ip_time`), which gives the
+  `mt_arp` chain (`medium`, `arp_only`) with `lease_id` null, `end` null and the opening and
+  latest sightings up to `at` as its refs (the rebuilt lease has a row id, its end and its
+  last sighting, also one after `at`). Without such sightings there is no chain: an internal lookup answers
+  `no_lease` and a match `chain_missing`, as after the rebuild. No new explanation key and no
+  lowered chain with a text. The stored lease is unchanged; the usage rollups (no per-moment
+  query) still read the stored lease until the rebuild. Two shapes still differ from the
+  rebuild: between the stale lease's own timeout and the next sighting, the lookup keeps
+  `no_lease` until the rebuild (at most one sighting interval); after the pair's re-ACK, the
+  lease row's start and its cited opening ACK stay the stale ones (the MAC, the confidence and
+  `last_dhcp_evidence` are the rebuild's). ARP chains are no target of the post-lease checks,
+  so a late-accepted ACK beside such a derived ARP chain stays unseen until the rebuild, and the
+  chain stays `medium` with `arp_only` (the manager's final review of PR #30, Q8). Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_release_mapped_after_the_build_ends_the_lease`,
+  `::test_arp_sightings_after_a_release_mapped_later_name_the_client`. Fold into 2.7.
+- **D27 for a chain outside every configured network: the address stands for its network**
+  (2.7, round-6 note "a network not entered on a mixed site", its suggested handling). The one
+  `usable_dhcp_origins` query of a lookup also covers, for each chain whose IP lies in no
+  configured network, that IP itself (as a /32 subnet), so a forgotten FortiGate DHCP server
+  beside MikroTik DHCP on a subnet nobody entered lowers the MikroTik chain to `low` with
+  `dhcp_sources_overlap` instead of leaving it `medium`. No new key and no extra query; only the
+  `{network}` parameter differs from 2.11 there: it is the address (`172.20.44.30`), since no
+  configured network has a name. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_two_origins_on_a_subnet_nobody_entered`.
+  Fold into 2.7 and the 2.11 parameter cell.
+- **The D8 probe also runs for a MAC-only internal lookup, keyed on the MAC** (2.8.3, round-6
+  note "MAC-only internal lookups", its first option). When a request names only a MAC and no
+  lease of it covers the moment (`no_lease_for_mac`), the probe looks for the newest DHCP-shaped
+  row of that MAC before the moment instead of an IP's: `fg_event` rows by
+  `lower(replace(extra->>'mac', '-', ':'))` (the form 2.7 uses) and kept `fg_dhcp` rows by `mac`,
+  with the same window, sender filter and coverage rule. A counting row gives the same
+  `fortigate_dhcp_not_converted`, `{ips}` = the address that row names (the requested MAC's own
+  record; the MAC itself when the row's `ip` cannot be read), and is cited in `unconverted_dhcp`
+  (internal mode). A MAC-keyed line that counts must also pass the address rule for the
+  address it names: the IP probe at the same moment for that `ip` must find that same row as
+  the address's newest DHCP-shaped row (a newer converted or `fg_event` row of the address,
+  e.g. an ACK to another client, silences it; a line whose `ip` is no plain IPv4 address has no
+  address to read and counts). No new key, no text change, no extra query for any other lookup.
+  Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_mac_only_lookup_finds_the_line_by_its_mac`,
+  `::test_a_mac_only_probe_reads_the_address_of_its_line` (both variants failed before),
+  `::test_a_mac_only_probe_line_without_a_plain_address_still_counts`. Fold into 2.8.3.
+- **The per-lookup clock check: the rows nearest T on each side, and the fixed limit for lease
+  searches** (2.7 "Source clock at the requested moment", round-5 note "2.7 clock sample" and
+  round-6 note "`source_clock_offset` of an internal lookup", their suggested handling). A
+  source's sample is its `messages` rows with `time <> time_received` nearest T on each side
+  within [T − 1 h, T + 1 h], at most 2,500 before and 2,500 from T (one `UNION ALL` query on
+  `ix_messages_source_time`, median by `percentile_cont`), not the first 5,000 of the range. The
+  limit is 120 s, not max(120 s, tolerance), for every source of an internal lookup and for a
+  source with a cited `mt_dhcp`, `fg_dhcp` or `mt_arp` row, or searched for one of those tables:
+  the lease search uses the moment, not the tolerance; a source measured only for the session
+  search keeps max(120 s, tolerance). The unrounded median is compared with the limit, as
+  `R20-lease:source-clock` compares it, and the offset printed is the median rounded up to the
+  next whole second, away from zero (120.4 s prints 121), so a named offset always exceeds
+  `{limit}`. `{limit}` prints the smallest limit of the named sources. The 2.11 text's remedy
+  fits every lookup (the manager's final review of PR #30, Q4; its two cells changed with
+  `texts.py`): for a public IP, widen the tolerance by the offset; for an internal IP or a MAC
+  address, shift the requested moment by the offset (later for a positive offset, earlier for a
+  negative one). Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_the_clock_is_measured_on_the_rows_nearest_the_moment`,
+  `::test_the_clock_of_a_session_search_alone_may_reach_the_tolerance`,
+  `::test_an_internal_lookup_without_a_lease_names_the_clock`,
+  `::test_the_tolerance_widened_by_the_offset_finds_the_session`,
+  `::test_a_cited_source_whose_clock_was_off_lowers_every_chain` (120 s, 120.4 s and 120.6 s). Fold
+  into 2.7, 2.15's reading table and 2.17.
+- **The srcmac router guard counts a used row outside the hour by its own address** (2.9, the
+  slice-4 review: a long session logged at its end, or a sighting up to the scan end, lies
+  outside [T − 1 h, T + 1 h], so its srcmac was used uncounted). The one
+  `trust.srcmac_ip_counts` call of a lookup and its `Attributor.leases_of_macs` call (the
+  other-lease check) cover `[T − 1 h, T + 1 h]` exactly, for every MAC. A considered row (a
+  srcmac row on a listed interface from a trusted sender: the matches' session rows, the
+  internal sightings, the MAC-only rows) whose time lies outside that hour adds its own address
+  to the count of its `(srcintf, srcmac)` unless the hour shows that address with that MAC
+  already; one more query per lookup decides it (`sessions.srcmac_addresses_within`, through
+  `ix_fg_traffic_srcip_time`, only when such a row exists). Every considered row belongs to a
+  session overlapping the lookup window (tolerance ≤ 3600 s), so the address it adds was in use
+  within ±1 h of `{at}`, and the `srcmac_shared` text stays true; no new key. No row widens the
+  hour of another MAC: an earlier form of this fix widened the one window to every considered
+  row, so one candidate's long session counted another MAC's ordinary address change hours
+  later and dropped its D10 conflict (the lease chain kept its confidence); that form was
+  withdrawn. The other-lease check is not widened for a row outside the hour: a lease covering
+  a moment of the hour around T is what 2.9 asks. Refusing a row outside the hour was not
+  chosen: such a row is the usual record of a long session, and refusing it would drop its D10
+  conflict and its srcmac chain. 2.9's "the three cannot count differently" holds for the rows
+  within the hour: the lookup's count also includes its own considered rows outside the hour,
+  while the alert and the observed endpoint are unchanged. A residual is accepted for Wave 3
+  (the manager's final review of PR #30, Q5): an internal lookup of one address does not see a
+  router MAC's long session of another address logged after the hour, so its srcmac chain stays
+  `low` with `srcmac_only`; counting the sessions that overlap the hour in
+  `trust.srcmac_ip_counts` (WP-B) is #40. Tests:
+  `worker/tests/test_lookup_srcmac.py::test_a_shared_mac_logged_after_the_guard_window_is_still_counted`,
+  `::test_another_long_session_does_not_widen_the_guard_of_a_mac`,
+  `::test_an_address_the_hour_shows_already_is_counted_once`,
+  `::test_the_other_lease_check_of_a_row_after_the_window_reads_the_hour`. Fold into 2.9.
+- **The D8 probe window and the MikroTik cap of the `fg_event` post-lease check fall back to
+  604,800 s** (2.8.3 "Cost", 2.7, 3.8; round-5 note "2.8.3 D8 probe cost", round-7 notes "3.8
+  guard for the round-6 post-lease query" and "2.7 post-lease check, the MikroTik window cap and
+  an empty `last_dhcp_evidence`"). `fg_event` has no index on a line's address (A0 adds none),
+  so the probe and the round-6 post-lease query read every `system` line of their window.
+  Measured by the 3.8 guards (`test_lookup_performance.py`, 50,000 `system` lines a day: a
+  twentieth of 1 M FortiGate lines, the share the alert guard writes) on the 100-day window. The
+  event site writes 50,000 `fg_event` `system` lines a day over the 101 days the queries can
+  read (one every 5 minutes for the 300 days before; `ARCILOGGER_PERF_EVENTS` sets the rate),
+  **not** 3.8's "400 days of `fg_event` at 1 M lines a day": every one of these queries reads
+  `ix_fg_event_subtype_time` with `subtype = 'system'`, and of a FortiGate's 1 M lines a day the
+  traffic lines (the bulk) are `fg_traffic` rows since Wave 2 and never `fg_event` rows, so the
+  `system` lines are the share that costs (the load generator writes 0.3 %, the alert guard a
+  twentieth); 400 M rows would not fit a CI job's disk or time either. The cost grows linearly
+  with that rate (below), so a site with more `system` lines a day reads proportionally longer.
+  On that window the
+  probe for 20 addresses without a DHCP row 2.1 s in its round-5 form and 0.64 s with the key
+  read once per row (an `IN` before the per-key bounds, the round-5 note's form), the post-lease
+  query for 100 chains 0.93 s; both miss 0.5 s. So the probe's window is `max(longest_window,
+  604,800 s)` and the `mt_dhcp` cap of the `fg_event` post-lease query 604,800 s
+  (`attribution.UNCONVERTED_WINDOW`), as 2.8.3 and 3.8 provide: 0.08 s and 0.09 s. The round-7
+  converted-row query is not capped so: 3.8 gives it no fallback, and it keeps `at` −
+  8,640,000 s for an `mt_dhcp` chain (`attribution.MISSED_MOVE_WINDOW`). On those 100 days it
+  missed its 0.2 s too (0.89 s in its first form, 0.30-0.33 s with the rows grouped per MAC,
+  because it fetched about 45,000 rows for 100 MACs at the load generator's FortiGate DHCP rate
+  and matched them in memory), so it now matches each chain's own window in the query: one
+  join of the chains' `(mac, ip, since, at)` (an `unnest` of bound arrays) with `fg_dhcp`, still
+  `mac = ANY(:macs)` over the union of the windows on `ix_fg_dhcp_mac_time`, returning each
+  other address, interface and VDOM once per chain; interface, VDOM and D33's key are checked
+  in memory as 2.7 writes (0.08 s; the same answers). What the fallback costs: a pre-upgrade
+  ACK more than 7 days before the moment is not named (`fortigate_dhcp_not_converted`); a
+  MikroTik lease kept open by traffic is checked against the unconverted FortiGate DHCP lines
+  of the last 7 days only. Two wrong-person paths follow, each named at the chain's stored
+  confidence (`high` or `medium`) **without a warning**: (1) a client moved to another address
+  by an unconverted `fg_event` ACK (before the upgrade, or in a rollback window) **that then
+  left the site** logs nothing more, and its old MikroTik lease, kept open by another device's
+  traffic, names it in every lookup more than 7 days after that line (under the contract, more
+  than 100 days after; the round-7 note's residual, so a recorded residual of 2.17); a client
+  moved by a **converted** ACK keeps the contract's 100 days through the round-7 query; (2) a
+  FortiGate lease-time above the FortiOS default can leave such a chain without a line in the
+  7 days even while the client stays on the site; with lease-times up to 7 days a client that
+  stays logs a line at least every half lease (if FortiOS logs renewals, F7, sahada doğrula),
+  so the window holds one, but a client that left logs none (path 1). An `fg_dhcp` chain's own
+  window `(last_dhcp_evidence, at]` is not capped (at most half its lease while the chain is
+  not `low`). Its cost (the manager's review of PR #30, item 4): FortiOS allows lease-times up to
+  8,640,000 s, so that window reaches up to 50 days; in the guard
+  `test_lookup_performance.py::test_the_post_lease_query_of_long_fortigate_leases_is_fast` (20
+  chains with a 30-day lease half a lease after their last ACK, about 750,000 `system` lines in
+  the window) the query takes 0.17-0.19 s, and with a 100-day lease (50 days, about 2.5 M lines;
+  measured once, not a guard) 0.44 s, both under 0.5 s, so the window is not capped: a cap
+  would leave a line between the lease's last record and the cap unread (a wrong person
+  without a warning, path 1's shape for an `fg_dhcp` chain). Above about 55,000 `system` lines
+  a day a lease-time near the FortiOS maximum misses 0.5 s; the expression indexes below would
+  remove that cost too. The cost grows with the `system` lines of the window (about 0.13-0.19 s per
+  million here): the 100-day window would pass below about 25,000 lines a day, and the fallback
+  misses 0.5 s above about 400,000; expression indexes on `(extra->>'ip', time)` and on the
+  normalised `extra->>'mac'` for `subtype = 'system'` (a WP-A revision) would restore the 100
+  days and remove both paths' 7-day limit (a question to the manager in the pull request).
+  Tests: `worker/tests/test_lookup_performance.py::test_the_d8_probe_of_twenty_addresses_is_fast`,
+  `::test_the_post_lease_query_of_a_hundred_chains_is_fast`,
+  `::test_the_converted_row_query_of_a_hundred_chains_is_fast` (100 days),
+  `worker/tests/test_lookup_fortigate_only.py::test_a_mikrotik_lease_kept_open_reads_back_one_probe_window`
+  (an `fg_event` line 8 days back not counted, 6 days back counted; a converted row 8 and 99
+  days back counted, 101 days back not), `::test_an_ack_older_than_its_lease_is_not_named`
+  (the 3.4 golden's 100 days, and 6 days inside the window by the coverage rule),
+  `::test_a_line_inside_a_long_fortigate_lease_counts_beyond_the_fallback` (an `fg_dhcp` chain
+  of a 30-day lease: a line 7.5 days back lowers it, the uncapped window). Fold into
+  2.7, 2.8.3, 2.17 (the residual of path 1), 3.8 and CORRELATION §7 (WP-F2: the window of the
+  probe and of the `fg_event` post-lease check is 7 days; the converted-row check reads 100).
+- **The converted-row check also reads the chain's address** (2.7 "A MAC move the lease build
+  could not apply"; the manager's review of PR #30, item 1). Round 7 does not match converted
+  rows by the chain's IP because the build applies them; it does not apply a row it refused
+  that today's settings accept: an ACK of a sender or HA member configured later (D24), of a
+  logid mapped later, or, for an `mt_dhcp` chain, a FortiGate ACK of the same pair (D5) from
+  such a sender. The former holder then stays `high` (or `medium`) after the address was given
+  to another client, until a rebuild names that client or `no_lease`. The one statement of the
+  round-7 check gets a second branch (`UNION ALL`, on `ix_fg_dhcp_ip_time`): `fg_dhcp` rows
+  that `trust.kept(settings, untrusted)` accepts, with a logid mapped to `assigned`, with `ip`
+  = the chain's IP and `time` in the chain's own `(last_dhcp_evidence, at)` (the MAC branch's
+  window: `lease.start` without a record, at most 8,640,000 s for an `mt_dhcp` chain), of
+  another MAC for an `fg_dhcp` chain and of any MAC for an `mt_dhcp` chain. A match lowers the
+  chain and its alternatives to `low` with `fortigate_dhcp_not_converted_since_lease`, as the
+  MAC branch does. No interface, VDOM or network key applies: the build supersedes every open
+  lease of an address at such an ACK, whatever its origin (timeline rule 1, D5), so a healthy
+  timeline never returns one, and a lease still open past it is the stale build. The branch
+  returns the chain's ordinal only: no value of the row, nothing cited (KVKK, 2.16). Cost in the
+  3.8 guard of 100 `mt_dhcp` chains over 100 days: 0.12 s with the branch (0.08 s without;
+  both branches on their `(…, time)` index; the address branch reads no row there), under its
+  0.2 s. The 2.11 text names these causes (the manager's final review of PR #30, Q3; its two
+  cells changed with `texts.py`): its examples add leases built before the sending FortiGate
+  (e.g. an HA member) was configured as a source or before the FortiGate DHCP settings (e.g.
+  the logid list) were changed, and its remedy names the rebuild after a later change of the
+  FortiGate sources or the FortiGate DHCP settings too. Tests: `worker/tests/test_lookup_fortigate_only.py::test_another_clients_ack_from_a_sender_configured_after_the_build`,
+  `::test_another_clients_ack_under_a_logid_mapped_after_the_build`,
+  `::test_a_migration_ack_from_a_sender_configured_after_the_build` (the three shapes of the
+  review; each failed before), `::test_a_healthy_fortigate_site_keeps_its_chain` (applied and
+  still refused ACKs of another client inside the window lower nothing),
+  `::test_a_healthy_mixed_site_keeps_its_chains`,
+  `worker/tests/test_lookup_performance.py::test_the_converted_row_query_of_a_hundred_chains_is_fast`.
+  Fold into 2.7 (the round-7 bullet), 2.16 and 3.4.
+- **The lookup applies D25 and D28's interface and MAC rules to its `fg_event` lines, and a
+  missing `dhcp_msg` passes** (2.7 post-lease check, 2.8.3 D8 probe; the manager's review of
+  PR #30, item 2, and its final review, item 2). Neither predicate in 2.7 or 2.8.3 filters the
+  `fg_event` branch by D25 or D28; the lookup does (`attribution.event_kept`, used by the
+  post-lease query and the probe's `fg_event` query), so a NAK under 0100026001, an ACK of an
+  interface in `dhcp.fortigate_interfaces_excluded` or a line for a zero, broadcast or
+  multicast MAC is never counted or named, as `trust.kept` refuses such an `fg_dhcp` row, and
+  such a line newer than a covering ACK does not hide that ACK. The MAC rule reads the
+  normalised `lower(replace(extra->>'mac', '-', ':'))` (a local copy of 2.6.1 rule 7, since
+  `trust.py` is WP-B's) and refuses only a readable MAC (`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`) that
+  is `00:00:00:00:00:00` or has an odd second hex digit; a missing or unreadable MAC passes, as
+  a missing `dhcp_msg` does. D28's receive-time rule cannot be checked on an `fg_event` row
+  (it has no `device_time`), so such a line is still counted and named: the warning side, and a
+  citation is never an attribution. The filter refuses a line of a logid that
+  `dhcp.fortigate_dhcp_msgs` lists only when its `dhcp_msg` is **present** and not listed: a
+  line without the field passes, because under D3 a DHCP line without `dhcp_msg` is exactly the
+  one ingest keeps as an `fg_event` row (the shape of a line the timeline never saw), while
+  D25's "a NULL `dhcp_msg` included" (2.6.1 rule 5) is a rule for `fg_dhcp` rows, which always
+  carry the field. An earlier form refused such a line too, so the probe and the post-lease
+  check never saw the lines they are for. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_line_after_the_lease_without_dhcp_msg_counts`,
+  `::test_a_covering_line_without_dhcp_msg_is_named` (both failed before),
+  `::test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing`,
+  `::test_a_line_that_is_never_lease_evidence_is_never_named` (their `bad-mac` variants failed
+  before the MAC rule), `::test_a_covering_line_without_a_readable_mac_is_named`. Fold into 2.7
+  and 2.8.3.
+- **The D8 probe also runs for a match whose chain is a srcmac chain** (2.8.3 "When a chain
+  cannot be built for an IP (internal mode `no_lease`, or a match with `chain_missing`)"; the
+  manager's review of PR #30, item 2). A srcmac chain (D10, `srcmac_only`) is no lease chain:
+  the address had no lease at the moment, as with `chain_missing`, so the probe takes the IPs of
+  the first 20 matches **without a lease chain** (no chain, or a srcmac chain only; one rule for
+  both paths, `engine._unconverted`), and an internal lookup whose answer is a srcmac chain
+  keeps its `no_lease` and is probed too. The safe side: a covering pre-upgrade ACK beside a
+  srcmac chain is named (`fortigate_dhcp_not_converted`) and, for an exact match or internal
+  mode, cited, never as an attribution; the srcmac chain keeps its confidence (`low`). Beside a
+  srcmac chain, "no chain was built" in `fortigate_dhcp_not_converted` means no *lease* chain;
+  the text stays. Tests:
+  `worker/tests/test_lookup_fortigate_only.py::test_a_srcmac_chain_is_probed_as_a_chain_without_a_lease`
+  (internal, exact and candidate). Fold into 2.8.3.
+- **Interpretations** (readings of the contract where it says nothing explicit; accepted in the
+  manager's final review of PR #30, Q9; no new key, no text change):
+  - **A match is probed at its chain's moment, capped at T** (2.8.3): the D8 probe of a match
+    reads the rows before its chain's moment (the session moment nearest T, at most the
+    tolerance from T), never a row after T, and judges coverage at that moment. Test:
+    `worker/tests/test_lookup_fortigate_only.py::test_a_session_after_the_moment_is_probed_no_later_than_the_moment`.
+  - **A converted row at the same second wins over an `fg_event` line** (2.8.3): when the
+    newest DHCP-shaped row of an address is a converted `fg_dhcp` row and an `fg_event` line at
+    the same second, the converted row is the newest, so nothing is named or cited.
+  - **srcmac refusals are outcome explanations, de-duplicated by key** (2.9): `srcmac_shared`,
+    `srcmac_infrastructure` and `srcmac_other_lease` are explanations of the outcome, not of a
+    chain, and like every outcome explanation each key appears once, so a candidate list names
+    the first refused MAC of each kind only.
+  - **A destination-only empty search measures `fg_traffic`'s sources** (2.7 "A search that
+    found nothing"): a request with a destination and no public IP that found no session ran
+    the same session search as a public-IP request, so the sources of `fg_traffic` are measured
+    for the clock.
+  Fold into 2.7, 2.8.3 and 2.9.
 
 ---
 
