@@ -63,9 +63,14 @@ How the samples are made (everything is the production code, in this process):
    so the licence samples are the same on every capture.
 
 The search, live tail and sources pages' samples (``search.json``, ``live.json``,
-``sources.json``) come from modules of their own next to this script, each kept with its API
-(``samples_search.py``, ``samples_live_sources.py``): their ``capture`` runs on the main site after
-step 7's pages and returns ``{file name: data}``; a file whose data is empty is not written.
+``sources.json``) and the internet exits editor's observed panel (``settings-observed.json``)
+come from modules of their own next to this script, each kept with its API
+(``samples_search.py``, ``samples_live_sources.py``, ``samples_network.py``): their ``capture``
+runs on the main site after step 7's pages, in that order, and returns ``{file name: data}``; a
+file whose data is empty is not written. The Wave 3 lookups (FortiGate DHCP alone, srcmac, the
+internet exits' cases, a source clock, an unconverted DHCP line, an unconfigured sender;
+``samples_lookups.py``) run last, on a second lookup site with a database and data directory of
+its own, and are merged into ``lookups.json`` and ``raw.json``.
 
 Steps 1-7 run with every licence module on, as the tests do by default
 (``override_status(all_modules_status())``): those samples describe their own pages, not the
@@ -99,7 +104,7 @@ import sys
 import tempfile
 import time
 import zipfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -172,7 +177,7 @@ from arcilogger_db.models import (
     UserSession,
 )
 from arcilogger_db.seed import seed
-from arcilogger_db.settings import set_setting
+from arcilogger_db.settings import get_setting, set_setting
 from arcilogger_db.testing import TestServer, admin_dsn_from_env
 from arcilogger_worker.admin_jobs import process_requests as process_admin_requests
 from arcilogger_worker.alerts.importer import import_alerts
@@ -197,10 +202,13 @@ _SCRIPTS = str(Path(__file__).resolve().parent)
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 import samples_live_sources  # noqa: E402
+import samples_lookups  # noqa: E402
+import samples_network  # noqa: E402
 import samples_search  # noqa: E402
 
-#: The pages whose samples a module of their own captures (module text).
-SAMPLE_MODULES = (samples_search, samples_live_sources)
+#: The pages whose samples a module of their own captures (module text), in this order:
+#: ``samples_network`` writes sessions of the day before "now", after the others captured.
+SAMPLE_MODULES = (samples_search, samples_live_sources, samples_network)
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "e2e" / "samples"
 API = "/api/v1"
@@ -784,7 +792,8 @@ def capture_lookups(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
 
 
 def raw_refs(outcome: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    """Every raw reference in a stored outcome (matches, chains, alternatives)."""
+    """Every raw reference in a stored outcome (matches, chains, alternatives, unconverted
+    FortiGate DHCP lines)."""
 
     def chain(item: dict[str, Any] | None) -> Iterator[dict[str, Any]]:
         if not item:
@@ -798,29 +807,35 @@ def raw_refs(outcome: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield from match["traffic"].get("evidence") or []
         yield from chain(match.get("chain"))
     yield from chain(outcome.get("attribution"))
+    # FortiGate DHCP lines that stayed event rows: cited like every other row (2.8.3).
+    yield from outcome.get("unconverted_dhcp") or []
 
 
-def capture_raw(capture: Capture, admin: Any, odd: tuple[str, date, int]) -> None:
-    out = capture.samples["raw"]
-    seen: set[tuple[str, str, int]] = set()
-    lines = out.setdefault("lines", {})
-    for lookup in capture.samples["lookups"].values():
+def capture_lines(
+    capture: Capture, admin: Any, lookups: Iterable[Any], lines: dict[str, Any]
+) -> None:
+    """``GET /raw`` of every line the stored outcomes of ``lookups`` cite, on the site of
+    ``capture``, into ``lines`` (keyed ``source|day|line``; the sites' days differ)."""
+    for lookup in lookups:
         if not isinstance(lookup, dict) or "outcome" not in lookup or lookup["outcome"] is None:
             continue
         for ref in raw_refs(lookup["outcome"]):
             raw = ref.get("raw")
             if raw is None:
                 continue
-            key = (raw["source"], raw["day"], raw["line"])
-            if key in seen:
+            key = f"{raw['source']}|{raw['day']}|{raw['line']}"
+            if key in lines:
                 continue
-            seen.add(key)
             params = {"source": raw["source"], "day": raw["day"], "line": raw["line"]}
             if raw.get("offset") is not None:
                 params["offset"] = raw["offset"]
-            lines[f"{raw['source']}|{raw['day']}|{raw['line']}"] = capture.json(
-                admin.get(f"{API}/raw", params=params), 200
-            )
+            lines[key] = capture.json(admin.get(f"{API}/raw", params=params), 200)
+
+
+def capture_raw(capture: Capture, admin: Any, odd: tuple[str, date, int]) -> None:
+    out = capture.samples["raw"]
+    lines = out.setdefault("lines", {})
+    capture_lines(capture, admin, capture.samples["lookups"].values(), lines)
     # The day's first FortiGate line (the phone's DNS query, cited by no lookup): the E2E tests
     # check that the exact match's line 2 starts right after it.
     first = {"source": "fortigate", "day": SITE_DAY.isoformat(), "line": 1}
@@ -1439,6 +1454,32 @@ def capture_devices(capture: Capture, admin: Any, auditor: Any, newcomer: Any) -
 
 
 # -- usage ----------------------------------------------------------------------------------------
+
+
+def capture_lookup_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
+    """The Wave 3 lookups (``samples_lookups``) on a second lookup site, a database and data
+    directory of their own: merged into ``lookups.json``, their cited lines into ``raw.json``
+    (a lookup id or raw-line key the main site already holds stops the capture)."""
+    with server.database(template) as name:
+        engine = engine_from_url(server.url_for(name), application="capture", poolclass=NullPool)
+        try:
+            site = Capture(root / "lookup-site", engine)
+            admin = site.client("admin", "tolga", "Tolga Yılmaz")
+            found = samples_lookups.capture(site, admin)
+            lookups = capture.samples["lookups"]
+            if twice := lookups.keys() & found.keys():
+                raise SystemExit(f"samples_lookups: {sorted(twice)} are captured here already")
+            lookups.update(found)
+            # A key both sites hold names two different lines (the sites' data differ): stop
+            # rather than keep the main site's line for a lookup of this one.
+            lines: dict[str, Any] = {}
+            capture_lines(site, admin, found.values(), lines)
+            main = capture.samples["raw"]["lines"]
+            if twice := main.keys() & lines.keys():
+                raise SystemExit(f"samples_lookups: raw lines {sorted(twice)} are captured already")
+            main.update(lines)
+        finally:
+            engine.dispose()
 
 
 def capture_usage(server: TestServer, template: str, root: Path) -> dict[str, Any]:
@@ -2600,6 +2641,18 @@ def capture_settings(capture: Capture, admin: Any, auditor: Any) -> None:
     )
     locked = {"changes": [{"key": "devices.oui_file", "old": "", "value": "C:/oui.csv"}]}
     errors["setting_locked"] = capture.error(admin.patch(url, json=locked), 422, "setting_locked")
+    # An internet exit the validator refuses (contract 2.5): a private address as the public
+    # address of a direct line; its own key, as the pages check ``setting_invalid``'s details.
+    with capture.factory() as session:
+        exits = get_setting(session, "nat.egresses")
+    private = {"hat-1": {"mode": "direct", "public": ["100.64.12.9"]}}
+    egress = {"changes": [{"key": "nat.egresses", "old": exits, "value": private}]}
+    errors["setting_invalid_egress"] = capture.error(
+        admin.patch(url, json=egress), 422, "setting_invalid"
+    )
+    detail = errors["setting_invalid_egress"]["body"]["error"]["details"][0]
+    if detail["code"] != "setting_egress_public_private":
+        raise SystemExit(f"the private public address was refused with {detail}")
     idle = {"changes": [{"key": "auth.idle_minutes", "old": 15, "value": 20}]}
     capture.recent(admin, minutes_ago=10)
     errors["reauth_required"] = capture.error(admin.patch(url, json=idle), 403, "reauth_required")
@@ -3041,7 +3094,8 @@ def capture_admin_history(capture: Capture, admin: Any) -> None:
 
 def capture_site(capture: Capture, server: TestServer, template: str, root: Path) -> None:
     """Steps 1-7 of the module text: the lookup site and its pages (with the sample modules'
-    pages), then the usage site."""
+    pages), then the usage site and the second lookup site (last, so the other pages' times stay
+    as they were)."""
     build_site(capture)
     vault = seal_october(capture)
     odd = write_odd_line(capture)
@@ -3072,6 +3126,7 @@ def capture_site(capture: Capture, server: TestServer, template: str, root: Path
                 capture.samples[name] = data
     vault.unlock_all()
     capture.samples["usage"] = capture_usage(server, template, root)
+    capture_lookup_site(capture, server, template, root)
 
 
 def capture_all(server: TestServer) -> dict[str, dict[str, Any]]:
@@ -3154,6 +3209,12 @@ FILE_KEYS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "license": (MAP_KEYS - {"details"}, ENUM_KEYS | {"problem", "source", "from", "to"}),
     # A request's ``changes`` are keyed by the paths it changes, a root's by its fingerprint.
     "admin": (MAP_KEYS | {"changes"}, ENUM_KEYS),
+    # The lookup page maps an outcome's exit resolution, a chain's MAC source, a lease's table
+    # and end and an exit's port preservation to labels (contract 2.13).
+    "lookups": (
+        MAP_KEYS,
+        ENUM_KEYS | {"resolution", "mac_source", "source_table", "end_reason", "port_preservation"},
+    ),
     # The sample modules' files: their own keys added to the defaults (``SHAPE_KEYS``).
     **{
         name: (MAP_KEYS | maps, ENUM_KEYS | enums)

@@ -423,6 +423,7 @@ export class SourcesMock {
         today: SAMPLE_TODAY,
         collector: { updated_at: at(0.5), fresh: true },
         items: this.items,
+        lease_evidence: copy(SOURCES.overview.lease_evidence),
       };
       return [200, overview];
     }

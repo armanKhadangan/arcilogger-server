@@ -6156,6 +6156,383 @@ from section 0.2 are recorded here too, with the date and who decided.
     for the clock.
   Fold into 2.7, 2.8.3 and 2.9.
 
+## Deviations — d (WP-D, 2026-10-28)
+
+Each entry says what the contract says, what was built, why, and the tests that pin it. Test
+paths are under `api/tests/` unless written otherwise. What touches the API, the outcome or the
+report is summarised in `MVP-CONTRACTS.md` sections 6.1, 16, 17.8 and 18.9.
+
+- **d-1. No stored `double_nat` bullets beside a `fallback` paragraph** (2.12 "the double-NAT
+  paragraph is conditional", its `fallback` row; decision X2). The contract lets the `fallback`
+  method paragraph stand in for the double-NAT paragraph and says nothing of the stored
+  explanations; the engine still stores `double_nat` / `double_nat_no_candidates` for a
+  `fallback`, and their 2.11 texts name the ISP router as a fact, which the `fallback` paragraph
+  is worded to avoid. `render.py` leaves both keys out of the explanation list when the
+  `fallback` paragraph is printed (`_FALLBACK_LEFT_OUT`); they stay bullets for `isp_nat`,
+  `public_unknown`, `unconfigured` and outcomes stored before the upgrade. Tests:
+  `test_report_exits.py::test_the_double_nat_text_follows_the_resolution`,
+  `::test_e_c2_fallback_report`, `::test_e_k2_transip_fallback_report`. Fold into 2.12.
+- **d-2. A text a method paragraph quotes is not printed again as a bullet** (2.12 method
+  paragraphs, `observed` and the `egress_public_dynamic` addition; decision X3). The keys
+  `egress_observed_not_configured`, `egress_not_logged_but_seen` and `egress_public_dynamic` are
+  printed inside their paragraph (the `observed` paragraph is their stored text, the dynamic text
+  is appended to the isp_nat paragraph of a `public` answer) and left out of the "Sorgu
+  motorunun açıklamaları" list; every other key stays a bullet. The rule is stated in the
+  `render.py` module docstring. Why: the contract prints them in the method section and the
+  paragraph already does; printing them twice reads as two findings. Tests:
+  `test_report_exits.py::test_one_method_paragraph_per_resolution_and_mode` (the `observed` text
+  once), `::test_e_e_dynamic_public_address_report` (the dynamic text once),
+  `::test_e_e3_observed_without_exits_report`. Fold into 2.12.
+- **d-3. The isp_nat paragraph names what was searched when the search went wider** (2.12 isp_nat
+  text "Arama bu çıkışın NAT adresleriyle{ ve arayüzleriyle ({interfaces})} sınırlandı."; round-5
+  note "2.12 `isp_nat` paragraph and `egress_search` under O5"). When `searched.unclaimed` is true
+  (a catch-all exit, or the O5 widening), "sınırlandı" would contradict the candidates shown, so
+  the sentence becomes "Arama {searched} adresleriyle{ ve arayüzleriyle ({interfaces})} yapıldı."
+  / "The search covered {searched}{ on the interfaces ({interfaces})}." (`texts.METHOD_SEARCHED`,
+  `METHOD_SEARCHED_INTERFACES`), and the `public_unknown` paragraph is followed by the same
+  sentence then. The interface clause is printed only while the search kept its interface
+  condition (`searched.interface_filter`). The engine sets `interface_filter` when any exit's part
+  kept one, so in the `public_unknown` sentence the clause is printed only when no exit searched
+  lost it, judged from the stored outcome: an exit that declares no interfaces (a catch-all
+  without interfaces searched every one), or one whose interfaces the engine dropped
+  (`egress_interface_not_seen` with its name as `egress`; not the `_kept` note), leaves the clause
+  out. `egress_search` stays as stored (the engine's key is WP-C1's). Tests:
+  `test_report_exits.py::test_the_isp_nat_paragraph_states_what_was_searched`,
+  `::test_e_n_an_unclaimed_search_is_stated`,
+  `::test_public_unknown_names_no_interface_when_an_exit_searched_them_all`,
+  `::test_public_unknown_names_the_interfaces_when_every_exit_kept_them`. Fold into 2.12.
+- **d-4. The advice of a `fallback` under its own heading, with a one-item lead-in** (2.12, "For
+  `fallback` only (a) is printed"). The contract's advice sentence "Kesin eşleşme için şunlardan
+  biri gerekir: (a) …; (b) …" does not read with one item. A `fallback` prints, under "Kesin
+  eşleşme için / For an exact answer" (not "Çift NAT / Double NAT"), the result sentence and
+  "Kesin eşleşme için (a) servis sağlayıcının ilgili zamana ait NAT kaydı (genel port → FortiGate
+  çıkış portu){bridge} gerekir." / "An exact answer needs (a) the ISP's NAT record for that time
+  (public port → FortiGate port){bridge}." (`texts.DOUBLE_NAT_ADVICE_A_*`), `{bridge}` = " ya da
+  hattın o tarihte köprü modunda olduğunun servis sağlayıcıdan doğrulanması" / " or confirmation
+  from the ISP that the line was in bridge mode on that date" for a failed `direct` exit only. The
+  Wave 2 sentence "hedef IP … aday sayısını azaltır" is gone with the old texts. Tests:
+  `test_report_exits.py::test_the_double_nat_text_follows_the_resolution`,
+  `::test_e_c2_fallback_report`, `::test_e_k2_transip_fallback_report`. Fold into 2.12.
+- **d-5. "bu hatta / on this line" only for an exit that declares interfaces** (2.12 `fallback`
+  direct text; round-7 note "Wording of E-c5, E-c4, 2.10, 2.12 and the round-5 notes" (c);
+  decision X11). Without interfaces `{seen}` may be another line's NAT address, so the direct
+  `fallback` paragraph drops " bu hatta" / " on this line" (`texts.ON_LINE`, empty then); the
+  sentence then speaks of the FortiGate records only. The note's seen-but-not-alone variant ("the
+  exact search on {address}:{port} found no session") was not taken: the stored outcome cannot
+  tell a seen-but-not-alone pass from a failed check. Tests:
+  `test_report_exits.py::test_a_fallback_says_bu_hatta_only_for_an_exit_with_interfaces`. Fold
+  into 2.12.
+- **d-6. Two variants of the `fallback` addition** (2.12 `fallback` addition; round-5 note "2.12
+  fallback addition text"; decision X11). The contract's one text ("bu çıkış yükseltmede eski
+  ayarlardan aktarıldı ve arayüz tanımlanmadığı için aynı hat sayıldı …") is false when F was
+  reached through a shared interface. When the failed exit declares no interfaces the contract
+  text is printed; when it declares interfaces: "Aranan adreslerin bir kısmı {other} çıkışına
+  aittir: bu çıkış {exit} çıkışıyla aynı arayüzü ({interfaces}) paylaştığı için aynı hat sayıldı.
+  Liste o hattın kullanıcılarını da içerebilir." / "Some of the searched addresses belong to exit
+  {other}: it shares an interface ({interfaces}) with exit {exit}, so it was counted as the same
+  line. The list may contain that line's users too." (`texts.METHOD_FALLBACK_SHARED_*`,
+  `{interfaces}` the failed exit's interfaces that F also lists). Tests:
+  `test_report_exits.py::test_a_fallback_says_bu_hatta_only_for_an_exit_with_interfaces` (shared),
+  `::test_one_method_paragraph_per_resolution_and_mode` (case `fallback_other`),
+  `::test_legacy_d_fallback_names_the_address_seen_and_the_other_exit`. Fold into 2.12.
+- **d-7. The `no_egress` paragraph speaks of the configured FortiGate sources** (2.12 `no_egress`
+  text "… ve o sırada FortiGate kayıtlarında da görünmüyor …"; round-5 note "2.12 `no_egress`
+  text after an HA failover"; decision X11). The address check reads trusted senders' rows only
+  (D24), so the text reads "… ve o sırada yapılandırılmış FortiGate kaynaklarının kayıtlarında da
+  görünmüyor; bu nedenle oturum aranmadı. …" / "… and does not appear in the records of the
+  configured FortiGate sources at that time either, so no session was searched. …"
+  (`texts.METHOD_NO_EGRESS_*`). The note's second half (a `session_from_unknown_source`-style note
+  when untrusted rows show P) is not printed: the stored `no_egress` outcome does not record
+  whether untrusted rows showed P. Tests:
+  `test_report_exits.py::test_no_egress_and_not_logged_searched_no_session`. Fold into 2.12.
+- **d-8. A catch-all exit's `{transips}` in words** (2.12 isp_nat text "({transips})"; decision
+  X12). An `isp_nat` exit without NAT addresses would print "()". It prints "hiçbir çıkışa tanımlı
+  olmayan özel ya da paylaşılan NAT adresleri" / "the private or shared NAT addresses no exit
+  claims" (`texts.CATCH_ALL_TRANSIPS`). Tests:
+  `test_report_exits.py::test_the_isp_nat_paragraph_states_what_was_searched`. Fold into 2.12.
+- **d-9. The double-NAT variant and the CGNAT sentence only for a request with a public IP**
+  (2.12 double-NAT variants; decision X13). Under c1 a request without a public IP (internal IP,
+  MAC, destination only) has `double_nat` = "no `direct` exit" and no `egress`, and both the
+  assumed variant ("bu adres için") and the CGNAT sentence ("Genel adres …") speak of an address
+  the request does not hold. Such a report prints, under "Çift NAT / Double NAT", the result
+  sentence and the advice only. Tests:
+  `test_report_exits.py::test_a_request_without_a_public_ip_gets_no_double_nat_variant`. Fold
+  into 2.12.
+- **d-10. A session that changed exit names the other exit only when the stored outcome can
+  tell it** (2.12 "the `session_changed_exit` match names both exits"). The outcome stores one
+  exit per match (`NatMatch.egress`, the row nearest the moment), and a `transip` answer's
+  `egresses` lists only the exit used, so the second exit cannot be read from the stored exit
+  list. Each (`transip`, `dstintf`) of a match's cited `fg_traffic` lines maps to an exit as the
+  engine's `_exit_of` decides it, over the stored `egress.egresses`: the one exit whose
+  `transips` hold the `transip`; when several do, the first whose `interfaces` hold the
+  `dstintf`; else the exit whose `public` holds it; else an unknown key ("?", `transip`). When the
+  explanation names an exit the stored list lacks, the one claiming exit counts only on a
+  `dstintf` it declares (or while it declares none): the missing exit may share the address by
+  interface (`db/egress.py` allows it). A match varies only when its lines map to more than one
+  key, so a session that moved between two interfaces of one exit is no change. When the
+  explanation's `count` is 1, only one match varies, and that match's exit is one of the
+  explanation's `egresses`, the row adds "oturumun kayıtlarında ayrıca: {exits}" / "the
+  session's records also show: {exits}" (`texts.CHANGED_EXIT`); another varying match gets
+  "oturumun kayıtları birden çok çıkış gösteriyor: NAT {transip} · dstintf {dstintf}; …" / "the
+  session's records show more than one exit: …" (`texts.CHANGED_ROWS`), read from its own raw
+  lines; a match that does not vary prints its exit alone. With a short stored list the mapping
+  errs toward no change (the explanation bullet still states it). Tests:
+  `test_report_exits.py::test_e_k3_a_session_that_changed_exit_names_both_exits`,
+  `::test_a_session_on_two_interfaces_of_one_exit_did_not_change_exit`,
+  `::test_a_shared_nat_address_on_two_interfaces_of_one_exit_did_not_change_exit`. Fold into
+  2.12; storing every exit of a match in the outcome would let the row always name them (a WP-C1
+  question for a later wave).
+- **d-11. Table labels of the tables ADR-0016 added, in both languages; FortiGate lease additions
+  only for `fg_dhcp` leases** (2.12 "`TABLES["fg_dhcp"]` = "FortiGate DHCP kaydı" / "FortiGate
+  DHCP record"", "the source through `TABLES`"; decision X15). `TABLES` stays a Turkish map
+  (`"fg_dhcp": "FortiGate DHCP kaydı"`, new `"fg_event": "FortiGate olay kaydı"`) and the new
+  `TABLES_EN` holds `fg_dhcp` "FortiGate DHCP record" and `fg_event` "FortiGate event record"
+  only; section 6 prints those two as "TR / EN" and every older label Turkish only, byte-identical
+  to the reports printed so far. The lease row of a lease with `source_table == "fg_dhcp"` adds
+  "· kaynak: FortiGate DHCP kaydı · kira süresi (FortiGate kaydı): {lease} sn · son DHCP kanıtı:
+  {last}" with the English line "source: FortiGate DHCP record · lease time (FortiGate record):
+  {lease} s · last DHCP evidence: {last}"; no other lease row changes. Tests:
+  `test_report_fortigate.py::test_fortigate_only_report`,
+  `::test_unconverted_dhcp_is_cited_in_internal_mode_only` (the `fg_event` label),
+  `::test_a_mikrotik_report_has_no_fortigate_lease_additions`. Fold into 2.12.
+- **d-12. Smaller report choices** (2.12, 3.5). (a) The section-4 exit row is bilingual inline:
+  "{label TR} / {label EN} — {name} ({label}), {mode TR} / {mode EN}", exits joined with "; "
+  (`render.exit_row`). (b) The srcmac step is the row "MAC adresi / MAC address" whose value is
+  "MAC {mac} · " and the contract sentence verbatim, then its English. (c)
+  `CHECK_FIELDS["srcmac"] = "kaynak MAC (srcmac)"`, and `CONSISTENCY_TR/EN` list "srcmac
+  zincirinde oturum kaydının kaynak IP ve srcmac alanı" / "source IP and srcmac of the session
+  record of a srcmac chain" among the fields compared. (d) The stored Wave 2 outcome of 3.5 is an
+  inline literal in `test_report_exits.py`, not a JSON fixture file, and its one real-world
+  address (`93.184.216.34`) was replaced by `203.0.113.40` (RFC 5737). Tests:
+  `test_report_exits.py::test_the_exit_row_names_the_exits_except_for_unconfigured_and_no_egress`,
+  `test_report_fortigate.py::test_srcmac_step_and_conflict`,
+  `test_report_consistency.py::test_srcmac_chain_claims_pass_and_mismatch` (the field, not its
+  label text), `test_report_exits.py::test_a_wave_2_outcome_renders_without_exit_rows`. Nothing
+  to fold beyond 2.12's row texts.
+- **d-13. The FortiGate DHCP format note: once, deduplicated, never beside the chains** (2.12
+  "method notes for FortiGate leases"; decision X9). The method section prints each distinct
+  stored `fortigate_format_verified` text once, or the fixed unverified sentence
+  (`texts.FORMAT_UNVERIFIED`) when a chain carries `fortigate_format_unverified`, never both; if
+  both keys ever reach one outcome, the unverified sentence wins (the safe side). Both keys are
+  left out of the per-chain explanation lists (`texts.FORMAT_KEYS`), which 2.12 does not say.
+  Tests: `test_report_fortigate.py::test_fortigate_only_report`,
+  `::test_the_verified_fortigate_format_names_who_and_when`,
+  `::test_the_format_note_comes_from_the_stored_outcome_not_the_setting`,
+  `::test_the_unverified_format_note_wins_over_a_verified_one`. Fold into
+  2.12.
+- **d-14. `reports/inputs.py` cites `outcome.unconverted_dhcp`, outside WP-D's file list** (2.12
+  "unconverted FortiGate DHCP rows … are printed in section 6 like every cited row").
+  `cited_evidence` gains one line, `refs += outcome.unconverted_dhcp`, so the rows reach section 6
+  with their raw lines and seal facts; render marks them with `texts.UNCONVERTED_MARK`. 4.1 does
+  not list `inputs.py` for WP-D; the pull request lists it under "Files outside my ownership".
+  Tests: `test_report_fortigate.py::test_unconverted_dhcp_is_cited_in_internal_mode_only`,
+  `::test_chainless_candidates_name_their_ips_and_cite_no_event_line`. Fold into 4.1.
+- **d-15. `lease_evidence` when the `dhcp.fortigate_*` values cannot be read** (2.12
+  `GET /sources`; decision X8). The contract gives no rule for a value written around the
+  validator. `lease_evidence` stays required and never null: `LookupSettings.from_settings`
+  refusing the values is logged, and no `fg_dhcp` row counts as usable: `rows` 0, `last_hour`
+  null, `refused_rows` and `excluded_rows` 0. Why: the lease job cannot use any row then
+  (`Context.load` raises), and 2.12 has `rows` count usable rows. (The first version counted the
+  trusted senders' rows as "the one refusal rule that needs no setting"; that was wrong: rules 3,
+  6 and 7 of `trust.refusal`, IPv6, `device_time = false` and a zero or multicast MAC, need no
+  setting either, and those rows were counted as usable.) `format_verified` is true only for
+  a stored JSON `true`, and the state comes from the active alerts alone (`refused` cannot be
+  decided). Tests: `test_sources_api.py::test_unreadable_dhcp_settings_keep_the_card` (its IPv6
+  and receive-time rows of a trusted sender count nothing). Fold into 2.12.
+- **d-16. `none_tables` is filled whatever the state** (2.12 "`none_tables` naming the tables of
+  the active `none` causes"). The list holds the tables of the active `R20-lease:none:<table>`
+  alerts in card order also when the state is `refused` (which wins); the web shows it only for
+  `none`. Why: one rule, and the web needs no second source when the refusal clears. Tests:
+  `test_sources_api.py::test_refused_wins_over_none` (`("refused", ["fg_dhcp"])`),
+  `::test_lease_evidence_none_follows_the_active_alerts`, `::test_absent_gives_none_without_tables`.
+  Fold into 2.12.
+- **d-17. The observed endpoint caches its counts, not its answer** (2.12 "cached 5 minutes per
+  `hours`"; decision X16). Only the database counts are kept 5 minutes per `hours`
+  (`ObservedState`); each row's `egress`, `trandisp_known`, `unmapped_transips`,
+  `unknown_trandisp`, `exits_invalid` and each interface's `configured` are computed from the
+  current settings on every request, so an exit saved in the editor claims its rows at once.
+  `generated_at` is when the counts were made, up to 5 minutes old while the claims are current.
+  `exits_invalid` is always in the answer (`false` while the value parses). Tests:
+  `test_settings_api_observed.py::test_the_observed_answer_is_cached`,
+  `::test_the_observed_endpoint_counts_only`, `::test_an_unreadable_exit_value_gives_exits_invalid`.
+  Fold into 2.12.
+- **d-18. The observed srcmac `rows` count IPv4 sources with an interface** (2.12 "srcmac part:
+  the last hour, trusted rows with `srcmac IS NOT NULL` grouped by `srcintf`"). `rows` counts the
+  rows `trust.srcmac_ip_counts` counts: `srcmac` and `srcintf` set, an IPv4 `srcip`, a trusted
+  sender, so `rows`, `macs` and `max_ips_per_mac` describe the same rows. The 50-interface limit
+  is applied after grouping (`truncated` when more exist). Tests:
+  `test_settings_api_observed.py::test_the_observed_srcmac_part` (an IPv6 source raises neither
+  the count nor the rows). Fold into 2.12.
+- **d-19. The card's `srcmac.rows_last_hour` counts trusted senders, any address family** (2.12
+  "`rows_last_hour` counts `fg_traffic` rows with srcmac in the last hour on the configured
+  interfaces"). Untrusted senders' rows are left out, as everywhere on the card; no family filter
+  (the card says whether srcmac arrives, not what the guard counts). The count runs in a savepoint
+  with its own 2-s `statement_timeout`, is kept 60 s per interface list, and a timeout (`null`)
+  is not kept. Tests: `test_sources_api.py::test_srcmac_rows_only_with_interfaces`,
+  `::test_srcmac_count_times_out_to_null`; `test_observed_perf.py::test_lease_evidence_is_fast`.
+  Fold into 2.12.
+- **d-20. Which exit claims an observed row** (2.12 observed JSON, `egress` "the exit that claims
+  the row"). An exit claims a row whose `transip` is one of its public or NAT addresses,
+  `internal` exits included (as the `R20-nat:unmapped-transip` check's `_claimed` reads it); of
+  several claiming exits the one whose interfaces hold the row's `dstintf` wins, else the first by
+  name (`parse_egresses` order). Tests:
+  `test_settings_api_observed.py::test_the_observed_endpoint_counts_only` (the first by name),
+  `::test_an_internal_exit_claims_its_nat_address`. Fold into
+  2.12.
+- **d-21. `build_site`: the phone on `vlan60`, `Site.wan2`, the helper names** (2.12
+  "`lookup_testing.build_site`"; decision X7). `dhcp="fortigate"` writes the PC's ACK at 10:42:18
+  and renewal at 22:42:18 on `vlan42` (host `PLN-PC14`, lease 86400) and the phone's at 09:37:52
+  and 21:37:52 on `vlan60` (host `Telefon-12`), no `mt_dhcp` row, both `sources` rows kept;
+  `srcmac=True` gives the PC's sessions `srcintf` `vlan42` and `PC_MAC` and the phone's
+  `vlan60` and `PHONE_MAC`, where the contract writes `interface="vlan42"` and
+  `srcintf="vlan42"` without naming the phone: the phone's address `172.20.60.142` lies in VLAN
+  60's network, and a `vlan42` record for it is a shape no FortiGate writes (its lease would sit
+  on the PC's interface, outside that interface's network). `wan2=True` adds one phone
+  session at 11:23:50 through `100.64.13.9`, `dstintf` `wan2`, its row id in the new field
+  `Site.wan2: int | None = None`. The helpers are named `unconverted_dhcp_line`,
+  `device_identified_traffic`, `unknown_sender_traffic` and `enter_exits(factory, value, *, at,
+  by, changes=True)`. The defaults stay byte-identical. Tests:
+  `test_lookup_testing_sites.py::test_the_defaults_write_the_same_lines_and_rows_as_before`,
+  `::test_fortigate_dhcp_writes_acks_and_renewals_instead_of_mikrotik_rows`,
+  `::test_srcmac_puts_each_clients_interface_and_mac_on_its_sessions`,
+  `::test_wan2_adds_one_phone_session_through_the_second_exit`. Fold into 2.12 (a question in
+  the pull request: `vlan42` was meant literally?).
+- **d-22. `api/tests/test_license_routes.py` gains the observed route, outside WP-D's file list**
+  (decision X1). The route table lists `("GET", "/api/v1/settings/fortigate/observed")` as
+  ungated (`None`) and the ungated count goes from 122 to 123; without it the route
+  classification test fails. Listed under "Files outside my ownership". Tests:
+  `test_license_routes.py::test_every_route_is_classified`. Fold into 4.1.
+- **d-23. The RAPOR reading table follows the c2 deviations in two cells and is one bilingual
+  table** (2.15 reading table; decision X6). Two cells of `docs/RAPOR.md` differ from the 2.15
+  table because c2 changed the behaviour they describe: "Kaynak saati kayık" / `source_clock_offset`
+  reads "sınır: 120 saniye; yalnızca oturum araması için ölçülen bir kaynakta sorgu toleransı daha
+  büyükse tolerans" / "the limit: 120 seconds; the lookup tolerance when larger, for a source
+  measured only for the session search" ("Deviations — c2", the per-lookup clock check), and the
+  `dhcp_sources_overlap` "configured" cell adds "(tanımlı bir ağda olmayan adreste adresin
+  kendisi)" / "(for an address in no configured network, the address itself)" ("Deviations — c2",
+  D27 outside configured networks). The table is one table with "TR / EN" cells in the Turkish
+  part; the English part points to it in one sentence, instead of an English part carrying the EN
+  column. `docs/DENETCI-KILAVUZU.md` (WP-F2) must carry the same two cells. Tests: the behaviour
+  is pinned by the c2 tests named there; no docs test reads the cells yet (3.9's reading-table
+  test is WP-F2's). Fold into 2.15.
+- **d-24. The Wave 3 samples come from a second capture site** (2.12 "Samples"). The 21 Wave 3
+  lookups (ids 101-121: FortiGate DHCP, srcmac, the eight exit labels, `clock_offset`,
+  `unconverted_dhcp`, `untrusted_match`) are captured by `web/scripts/samples_lookups.py` on a
+  site with its own database from the template and its own data directory, run after the usage
+  capture, as `capture_usage` does: written into the main site they would move its `vault_only`
+  window, its seal and sources values, its raw-line keys and its lookup ids. Each lookup is
+  checked for its mode, exit resolution and explanation keys, and the capture stops when one no
+  longer shows them; it also stops, naming the key, when a lookup id or a raw-line key
+  (`source|day|line`) of the second site is one the main site already holds, rather than keep
+  the main site's line for a lookup of the second. `settings-observed.json` comes from
+  `web/scripts/samples_network.py` (a dual-WAN day; the 504 with the production 5-s deadline, so
+  the capture waits about 5 s), with the 5-minute cache off. `FILE_KEYS["lookups"]` compares the values of `resolution`,
+  `mac_source`, `source_table`, `end_reason` and `port_preservation`, so a renamed value is a
+  `--check` difference. Tests: `capture_api_samples.py --check`; `web/src/lib/api-samples.test.ts`.
+  Fold into 2.12.
+- **d-25. The lease evidence samples: three states in one order, no `absent`** (2.12 "the
+  `sources.json` `lease_evidence` states"). `overview_lease_ok` is captured first, with FortiGate
+  DHCP rows only and no client traffic in the last hour; then the worker's own
+  `check_lease_evidence` opens the `none` alerts of `mt_dhcp` and `mt_arp` (`overview_lease_none`);
+  then one refused and one excluded `fg_dhcp` row give `overview_lease_refused` while those alerts
+  stay open: refused rows stay in the 24-hour window, so this is the one order that gives all
+  three without deleting rows. The refused row uses logid `0100026003`, the unmapped logid of the
+  worker tests; it claims nothing about FortiGate. `absent` is not captured (2.12 names ok, none
+  and refused). `web/e2e/mock-sources.ts` (outside WP-D's list) serves
+  `SOURCES.overview.lease_evidence`, because the field is required (d-15); `api-samples.test.ts`
+  gains the type rules of the new keys. Tests: `capture_api_samples.py --check`;
+  `api-samples.test.ts`; `api-types.test.ts`. Fold into 2.12 and 4.1.
+- **d-26. One neutral end reason for every `superseded` lease** (2.12 lease row; manager's
+  review 1, item 1 and Q3). The lease row printed `END_REASONS["superseded"]` "IP başka bir MAC
+  adresine verildi" for every `superseded` lease, but Wave 3 also closes a lease as `superseded`
+  when its MAC took another address (D33, `_moved`, and its MikroTik variant) and at the other
+  DHCP table's ACK of the same pair (D5): there no other MAC took the IP, and the cited closing
+  line contradicted the row above it. Every `superseded` cause now prints one neutral label:
+  "sonraki bir DHCP atamasıyla kapandı" / "closed by a later DHCP assignment". No new
+  `end_reason` value in Wave 3; the web label is WP-E2's. Tests:
+  `test_report_consistency.py::test_a_d33_lease_cited_in_a_report_has_no_mismatch`,
+  `::test_a_mikrotik_lease_closed_by_a_fortigate_ack_has_no_mismatch`,
+  `test_report_fortigate.py::test_a_lease_superseded_early_prints_its_own_last_ack` (the new text
+  present, the old one absent). Fold into 2.12.
+- **d-27. A match's exit in a report without a public IP** (2.12 "every match row prints its
+  exit and `dstintf`"; review 1, item 2). Without a public IP the outcome has no `egress`, so
+  every match row read "Çıkış / Exit - · dstintf …", where "-" means that no exit claims the NAT
+  address. When `outcome.egress` is None the row reads "çıkış belirlenmedi (talepte genel IP
+  yok) / exit not determined (no public IP in the request) · dstintf {dstintf}"; "-" appears
+  only when a public IP was requested. Tests: `test_report_exits.py::test_a_destination_search_determines_no_exit`. Fold into 2.12.
+- **d-28. A second text for the 503 `lookup_settings_invalid`** (2.12 "Lookup schemas", the 503
+  text; review 1, Q1). The router's `try` maps a `TypeError`/`ValueError` of
+  `LookupSettings.from_settings`, of `lookup.timeout_seconds` and of `settings.egresses()` to the
+  503, whose one text names `nat.egresses`. The code and the contract text stay for an
+  unreadable `nat.egresses`; when `LookupSettings.from_settings` or `lookup.timeout_seconds`
+  fails, the 503 has the same code and a second text, for any lookup (with or without a public
+  IP), the exception is logged at WARNING, and the response does not name the key: "5651 sorgu
+  ayarları geçersiz: kayıtlı bir sorgu ya da kira ayarı okunamadı (Ayarlar → Uygulama
+  ayarları); sistem yöneticisi düzeltmelidir." / "The 5651 lookup settings are invalid: a stored
+  lookup or lease setting cannot be read (Settings → Application settings); an administrator
+  must fix it." Tests: `test_lookup_api.py::test_another_unreadable_lookup_setting_answers_the_same_503`
+  (`[fortigate-logids]`, `[timeout]`), `::test_invalid_nat_settings_are_reported` (the contract
+  text kept). Fold into 2.12.
+- **d-29. "T" of the unclaimed search printed as the moment** (2.12 `{searched}` "(T çevresinde
+  görülenler: …)" / "(seen near T: …)"; review 1, Q2). A reader of the PDF does not know "T".
+  The parenthesis reads "({at} çevresinde görülenler: {seen})" / "(seen around {at}: {seen})",
+  `{at}` the requested moment in the report's time format, as `egress_transip_not_seen` already
+  says. Tests: `test_report_exits.py::test_e_n_an_unclaimed_search_is_stated`,
+  `::test_the_isp_nat_paragraph_states_what_was_searched`,
+  `::test_public_unknown_names_the_interfaces_when_every_exit_kept_them`,
+  `::test_public_unknown_names_no_interface_when_an_exit_searched_them_all`,
+  `::test_e_c2_fallback_report`. Fold into 2.12.
+- **d-30. A closing line that names an IP also claims that IP** (2.12 "Report cross-check",
+  `_lease_claims`; review 1, Q4). The contract has the line that ended a `superseded` lease
+  claim only the field it shares with the lease, so a D33 closing line claimed `mac` alone and an
+  edited address in its summary went unchecked. Now a closing line whose summary names the
+  lease's IP claims `{ip: lease.ip}`; one that names another IP (D33 and its MikroTik variant)
+  claims `{ip: refs.dhcp_ip(ref), mac: lease.mac}`; a ref without a summary claims `ip` as
+  before. A summary edited to a third IP now gives "uyuşmuyor". Tests:
+  `test_report_consistency.py::test_a_lease_closed_by_its_macs_ack_for_another_address_claims_both`,
+  `::test_a_mikrotik_lease_closed_by_a_fortigate_ack_of_its_mac_claims_both`,
+  `::test_a_d33_lease_cited_in_a_report_has_no_mismatch`,
+  `::test_a_d33_closing_summary_edited_to_a_third_address_is_flagged`,
+  `::test_an_altered_closing_row_still_mismatches`. Fold into 2.12.
+- **d-31. The observed NAT part counts IPv4 NAT addresses only** (2.12 observed JSON, "NAT part
+  … `transip IS NOT NULL`"; review 1, Q9). The rows, `unmapped_transips` and `unknown_trandisp`
+  read only rows with `family(transip) = 4`, matching `R20-nat:unmapped-transip`: exits refuse
+  IPv6 (`setting_ipv6_not_supported`), so an IPv6 address could only ever be listed as unmapped.
+  The srcmac part stays IPv4 by `srcip` (d-18). Tests: `test_settings_api_observed.py::test_ipv6_nat_addresses_are_not_listed`. Fold into 2.12.
+- **d-32. The exact `transip` answer is not called "genel"** (2.12 method rows; review 1, nit 1).
+  The "Açıklama" row of an exact answer said "Talepteki genel IP adresi FortiGate'in kendi
+  genel/WAN adresidir; …", false for resolution `transip`, whose address may be a shared (RFC
+  6598) one. For `resolution == "transip"` it reads "Talepteki adres FortiGate'in bu çıkıştaki
+  kendi NAT (WAN) adresidir; …" (the rest of the sentence unchanged); `public` and `observed`
+  keep the old row. Tests: `test_report_exits.py::test_no_double_nat_paragraph_for_transip`
+  ("genel/WAN" absent). Fold into 2.12.
+- **d-33. "-" in the changed-exit addition is named** (d-10, `texts.CHANGED_EXIT`; review 1, nit
+  2). When the other exit of a session that changed exit is an unclaimed NAT address, the
+  addition printed "oturumun kayıtlarında ayrıca: -". The "-" now reads "hiçbir çıkışa tanımlı
+  olmayan bir NAT adresi" / "a NAT address no exit claims". Tests: `test_report_exits.py::test_a_session_that_left_by_an_unclaimed_row_names_it_in_words`. Fold into 2.12.
+- **d-34. Where the 3.5 report tests live** (3.5 "`test_report_pdf.py`"; review 1, nit 10). The
+  3.5 PDF cases live in `test_report_exits.py` and `test_report_fortigate.py`, with the
+  `lookup_testing` defaults in `test_lookup_testing_sites.py`. Fold into 3.5.
+- **d-35. The lookup plans every statement with its values** (4.3 WP-D, `routers/lookup.py`
+  "schemas, audit details and the 503 text only"; manager's review 2, item 1, Q7 of #30; a
+  manager extension). psycopg prepares a statement sent five times, and PostgreSQL may then keep
+  a generic plan, made without the values, which prunes no partition of the time range. The
+  router runs `search.sql.custom_plans_statement()` (`plan_cache_mode = force_custom_plan`,
+  transaction-local) inside the request transaction, under `statement_deadline` and before
+  `run_lookup`, as the search does (`windows.plan_with_values`); the transaction's commit or
+  rollback ends it, so it never stays on the pooled connection. Tests:
+  `test_lookup_api.py::test_the_custom_plans_last_as_long_as_the_lookup_transaction`. Fold into
+  2.12 and 4.3.
+- **d-36. The summary of an unconverted citation in both languages** (2.12 "unconverted FortiGate
+  DHCP rows"; manager's review 2, item 2, note 3, Q10 of #30). Section 6 printed the stored
+  `EvidenceRef.summary` of an `outcome.unconverted_dhcp` row, which is Turkish only. Its "Özet /
+  Summary" row now prints the fixed label `texts.UNCONVERTED_SUMMARY`: "FortiGate DHCP kaydı
+  (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez) / FortiGate DHCP
+  record (not in the lease timeline; no chain built; no confidence given)"; the "Not / Note"
+  warning row with the mark stays. Tests:
+  `test_report_fortigate.py::test_unconverted_dhcp_is_cited_in_internal_mode_only`. Fold into
+  2.12.
+
 ---
 
 ## Implementation notes — round 5

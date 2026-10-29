@@ -58,6 +58,25 @@
       "headers": {},
       "status": 422
     },
+    "setting_invalid_egress": {
+      "body": {
+        "error": {
+          "code": "setting_invalid",
+          "details": [
+            {
+              "code": "setting_egress_public_private",
+              "key": "nat.egresses",
+              "message_en": "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit.",
+              "message_tr": "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin."
+            }
+          ],
+          "message_en": "Some setting values are invalid; correct the marked settings.",
+          "message_tr": "Bazı ayar değerleri geçersiz; işaretli ayarları düzeltin."
+        }
+      },
+      "headers": {},
+      "status": 422
+    },
     "setting_locked": {
       "body": {
         "error": {
@@ -519,7 +538,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T14:09:48.784077Z",
+            "updated_at": "2026-10-29T01:01:24.149840Z",
             "updated_by": "capture",
             "value": 100
           },
@@ -553,7 +572,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T14:09:51.841617Z",
+            "updated_at": "2026-10-29T01:01:26.370042Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -587,7 +606,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-28T14:09:49.956575Z",
+            "updated_at": "2026-10-29T01:01:24.827025Z",
             "updated_by": "capture",
             "value": false
           },
@@ -655,7 +674,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-28T14:09:45.443609Z",
+            "updated_at": "2026-10-29T01:01:22.162518Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -1710,7 +1729,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T14:09:58.343667Z",
+            "updated_at": "2026-10-29T01:01:31.219616Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -2392,7 +2411,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T14:10:13.440248Z",
+            "updated_at": "2026-10-29T01:01:39.262491Z",
             "updated_by": "tolga",
             "value": 150
           },
@@ -2426,7 +2445,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T14:09:51.841617Z",
+            "updated_at": "2026-10-29T01:01:26.370042Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -2460,7 +2479,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-28T14:09:49.956575Z",
+            "updated_at": "2026-10-29T01:01:24.827025Z",
             "updated_by": "capture",
             "value": false
           },
@@ -2528,7 +2547,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-28T14:09:45.443609Z",
+            "updated_at": "2026-10-29T01:01:22.162518Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -3583,7 +3602,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-28T14:09:58.343667Z",
+            "updated_at": "2026-10-29T01:01:31.219616Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -3833,7 +3852,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:35.771350+00:00",
+    "captured_at": "2026-10-13T04:01:17.864635+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

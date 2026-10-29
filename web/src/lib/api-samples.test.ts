@@ -330,6 +330,32 @@ const RULES: Record<string, Record<string, Rule>> = {
     auditor_run: lookupSample,
     exact_with_report: lookupSample,
     candidates_with_report: lookupSample,
+    // The Wave 3 lookups of the second capture site (contract 2.12, `samples_lookups.py`).
+    ...Object.fromEntries(
+      [
+        'fortigate_internal',
+        'fortigate_candidates',
+        'hat2_candidates',
+        'fortigate_renewal_low',
+        'srcmac_only',
+        'srcmac_conflict',
+        'direct_quiet_none',
+        'fallback_direct',
+        'fallback_transip',
+        'observed',
+        'observed_no_exits',
+        'not_logged',
+        'not_logged_seen',
+        'public_unknown',
+        'public_dynamic',
+        'no_egress',
+        'internal_exit',
+        'clock_offset',
+        'unconverted_dhcp',
+        'untrusted_match',
+        'changed_after_event',
+      ].map((name) => [name, lookupSample]),
+    ),
     list_admin: 'LookupPage',
     list_admin_mine: 'LookupPage',
     list_auditor: 'LookupPage',
@@ -457,6 +483,12 @@ const RULES: Record<string, Record<string, Rule>> = {
     patch: 'SettingsPatchResult',
     reset: 'SettingsPatchResult',
     errors: adminErrors,
+  },
+  // The observed panel of the internet exits editor (contract 2.12).
+  'settings-observed': {
+    observed: 'FortigateObserved',
+    observed_exits_invalid: 'FortigateObserved',
+    errors,
   },
   devices: {
     list: 'DevicePage',
@@ -623,6 +655,10 @@ const RULES: Record<string, Record<string, Rule>> = {
   // Kaynaklar (contract 2.16) and the Panel with today's parse failures (2.17).
   sources: {
     overview: 'SourcesOverview',
+    // The "Kira kanıtı" card's states (contract 2.12; `overview` is `ok` without rows).
+    overview_lease_ok: 'SourcesOverview',
+    overview_lease_none: 'SourcesOverview',
+    overview_lease_refused: 'SourcesOverview',
     detail: each('SourceDetail'),
     tail: each('SourceTail'),
     dashboard: 'DashboardSummary',
