@@ -90,7 +90,8 @@ describe('the observed NAT addresses', () => {
     const request = calls.find((call) => call.path === '/api/v1/settings/fortigate/observed');
     expect(request?.params.get('hours')).toBe('24');
     const claimed = observedRow(found, '100.64.12.9');
-    expect(claimed).toHaveTextContent('wan');
+    // The exit cell itself (the dstintf cell holds wan1).
+    expect(within(claimed).getAllByRole('cell')[4]).toHaveTextContent(/^wan$/);
     expect(within(claimed).queryByRole('button')).not.toBeInTheDocument();
     for (const address of OBSERVED.observed.nat.unmapped_transips)
       expect(observedRow(found, address)).toHaveTextContent('Tanımsız');
