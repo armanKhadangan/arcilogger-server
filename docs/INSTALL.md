@@ -937,10 +937,12 @@ at the upgrade]", `nat.wan_transip` becomes an ISP NAT exit named "FortiGate WAN
 when the address is one of the public IPs; a private or shared address in `nat.public_ips`, e.g.
 100.64.x.x, becomes a NAT address of this exit too), an exit named "Genel adresi tanımlanmamış
 hatlar [lines without a defined public address]" is added for the lines without a public
-address, and `lookup.port_hint` becomes that exit's port preservation value. The conversion is
-written to the audit log as `settings.change` (`details.migration = "0018_nat_egresses"`; the
-dropped invalid, IPv6 or reserved values in `details.dropped`). When the conversion cannot give
-a valid definition, the exits stay empty and the alert `R20-nat:conversion-failed` opens.
+address when no "FortiGate WAN adresi" exit is made and a public IP or `lookup.port_hint` is
+carried over, and `lookup.port_hint` becomes the port preservation value of the "FortiGate WAN
+adresi" exit, or of this exit when there is none. The conversion is written to the audit log
+as `settings.change` (`details.migration = "0018_nat_egresses"`; the dropped invalid, IPv6 or
+reserved values in `details.dropped`). When the conversion cannot give a valid definition, the
+exits stay empty and the alert `R20-nat:conversion-failed` opens.
 
 **After the upgrade:**
 
@@ -1131,8 +1133,9 @@ forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
 
 **FortiGate DHCP, srcmac and internet exits.** The assumptions below rest on the FortiOS
-documentation or depend on the organisation's network; they are verified on site (the numbers
-are those of the list in [CORRELATION.md](CORRELATION.md) section 8). Write down each row's
+documentation or depend on the organisation's network; they are verified on site (the V numbers
+are this list's own; [CORRELATION.md](CORRELATION.md) section 8 describes the same assumptions by
+topic). Write down each row's
 outcome and the date of the check. Repeat the checks **after every FortiOS upgrade** (the record
 fields may change between releases) and add the new outcome with its date; do not delete the old
 one. When an outcome differs from what is expected, correct the setting by the branches of

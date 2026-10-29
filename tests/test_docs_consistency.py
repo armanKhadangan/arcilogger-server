@@ -2042,7 +2042,7 @@ def test_reading_tables_cover_every_key_and_exit_label(name: str) -> None:
     """Wave 3 contract 3.9: the reading table of RAPOR.md and DENETCI-KILAVUZU.md names every
     explanation key the PDF prints (``READING_TABLE_KEYS``) in backticks in a row's first column,
     and no other key; and every Turkish exit label of the 2.12 label table is in a first
-    column."""
+    column, as a whole label."""
     from arcilogger_api.reports.texts import EXIT_LABELS, READING_TABLE_KEYS
 
     rows = _reading_table(name)
@@ -2053,5 +2053,12 @@ def test_reading_tables_cover_every_key_and_exit_label(name: str) -> None:
     assert sorted(set(READING_TABLE_KEYS) - set(named)) == [], name
     assert sorted(set(named) - set(READING_TABLE_KEYS)) == [], name
     assert len(named) == len(set(named)), name
+    # A label counts only whole: quoted or in parentheses, not as part of a longer label ("NAT
+    # adresi" in "NAT adresi doğrulanamadı") or of a sentence.
     labels = [tr for tr, _en in EXIT_LABELS.values()]
-    assert [label for label in labels if not any(label in first for first in firsts)] == [], name
+    whole = [re.compile(rf'(?:^|["(]){re.escape(label)}(?:[")]| /|$)') for label in labels]
+    assert [
+        label
+        for label, pattern in zip(labels, whole, strict=True)
+        if not any(pattern.search(first) for first in firsts)
+    ] == [], name

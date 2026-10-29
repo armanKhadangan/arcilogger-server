@@ -870,9 +870,9 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
 - **A network added or edited later** applies to past leases only after a rebuild (section 1,
   "Manual repair"); until then the lookup lowers the chains a missed D33 close leaves open to
   `low` with `fortigate_dhcp_not_converted_since_lease`. **After a change of a `dhcp.fortigate_*`
-  setting or a FortiGate source** the leases must be rebuilt from the first affected day as well;
-  moments before the rebuild answer without a chain until then (the safe side: never a wrong
-  person).
+  setting (other than `dhcp.fortigate_format_verified`) or a FortiGate source** the leases must be
+  rebuilt from the first affected day as well; moments before the rebuild answer without a chain
+  until then (the safe side: never a wrong person).
 - **Long FortiGate leases.** Without a logged Release a FortiGate lease stays open until its last
   DHCP evidence + the lease time (7 days with the FortiOS default); traffic does not extend it by
   default. Past half the lease without a renewal its chain is `low` (`lease_renewal_not_seen`).

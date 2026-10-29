@@ -1078,11 +1078,13 @@ adresleri "Genel IP (yükseltmede aktarıldı)" adlı doğrudan bir çıkış, `
 "FortiGate WAN adresi (yükseltmede aktarıldı)" adlı bir servis sağlayıcı NAT'ı çıkışı olur
 (adres genel IP'lerden biriyse ayrı çıkış yapılmaz; `nat.public_ips` içinde özel ya da
 paylaşılan bir adres, ör. 100.64.x.x, varsa o da bu çıkışın NAT adresi olur), genel adresi
-olmayan hatlar için "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir,
-`lookup.port_hint` o çıkışın port koruma değerine geçer. Dönüşüm denetim kaydına
-`settings.change` olarak yazılır (`details.migration = "0018_nat_egresses"`; atılan geçersiz,
-IPv6 ya da ayrılmış değerler `details.dropped` içinde). Dönüşüm geçerli bir tanım veremezse
-çıkışlar boş kalır ve `R20-nat:conversion-failed` uyarısı açılır.
+olmayan hatlar için, "FortiGate WAN adresi" çıkışı yapılmadıysa ve bir genel IP ya da
+`lookup.port_hint` aktarıldıysa, "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir;
+`lookup.port_hint` "FortiGate WAN adresi" çıkışının, o yoksa bu çıkışın port koruma değerine
+geçer. Dönüşüm denetim kaydına `settings.change` olarak yazılır (`details.migration =
+"0018_nat_egresses"`; atılan geçersiz, IPv6 ya da ayrılmış değerler `details.dropped` içinde).
+Dönüşüm geçerli bir tanım veremezse çıkışlar boş kalır ve `R20-nat:conversion-failed` uyarısı
+açılır.
 
 **Yükseltmeden sonra:**
 
@@ -1283,8 +1285,9 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
 
 **FortiGate DHCP, srcmac ve internet çıkışları.** Aşağıdaki varsayımlar FortiOS belgelerine
-dayanır ya da kurumun ağına bağlıdır; sahada doğrulanır (numaralar
-[CORRELATION.md](CORRELATION.md) bölüm 8'deki listeninkilerdir). Her satırın sonucunu ve
+dayanır ya da kurumun ağına bağlıdır; sahada doğrulanır (V numaraları bu listenin kendi
+numaralarıdır; aynı varsayımlar [CORRELATION.md](CORRELATION.md) bölüm 8'de konularına göre
+anlatılır). Her satırın sonucunu ve
 denetimin tarihini yazın. Denetimleri **her FortiOS yükseltmesinden sonra** yineleyin (kayıt
 alanları sürümler arasında değişebilir) ve yeni sonucu tarihiyle ekleyin; eskisini silmeyin.
 Bir sonuç beklenenden farklıysa [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4'teki dallara göre
