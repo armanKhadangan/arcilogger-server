@@ -269,11 +269,12 @@ paragrafı sonuç cümlesi ve öneriyle sınırlıdır.
   MAC adresinden sonra şudur: "MAC adresi (kısmi kanıt):
   FortiGate oturum kaydının srcmac alanı, {interface} arayüzü; FortiGate'in aygıt tanıma
   bilgisine göre kaynak IP adresi o anda bu MAC adresiyle ilişkilendirilmişti; kira kaydı yok".
-  Satır MAC adresinin oturumu gönderdiğini söylemez; güven düşüktür. srcmac kira kaydındaki MAC
-  adresinden farklıysa kira zinciri ve srcmac'e göre olası zincir iki MAC adresiyle birlikte
-  yazılır. Olası zincir "Olası diğer zincir (srcmac, kısmi kanıt)" başlığı altındadır; ikisi de
-  düşük güvenlidir. Zinciri hiç kurulamayan bir eşleşme "Zincir kurulamadı: o anda bu iç IP adresi
-  için kira kaydı yok." yazar.
+  Diğer adımlar gibi satır da dayandığı kaydı kanıt numarasıyla gösterir: MAC adresinin alındığı
+  oturum kaydı ("· kanıt: K1"). Satır MAC adresinin oturumu gönderdiğini söylemez; güven
+  düşüktür. srcmac kira kaydındaki MAC adresinden farklıysa kira zinciri ve srcmac'e göre olası
+  zincir iki MAC adresiyle birlikte yazılır. Olası zincir "Olası diğer zincir (srcmac, kısmi
+  kanıt)" başlığı altındadır; ikisi de düşük güvenlidir. Zinciri hiç kurulamayan bir eşleşme
+  "Zincir kurulamadı: o anda bu iç IP adresi için kira kaydı yok." yazar.
 - **Kira zaman çizelgesine girmemiş FortiGate DHCP kaydı.** Bazı FortiGate DHCP kayıtları kira
   kanıtına çevrilmemiştir: yükseltmeden önce yüklenmiş, alanları okunamamış ya da bir geri
   almadan sonra önceki sürümün yüklediği kayıtlar. Bir iç IP sorgusunda ya da kesin eşleşmede,
@@ -484,11 +485,12 @@ so a session that moved between two interfaces of one exit did not change exit);
 records came from an unconfigured sender gets a "UYARI / Warning" row. `no_egress`, `not_logged` and
 an address that is not an internet exit print "No session was searched: …" instead of the generic
 no-match text. A srcmac step, the row "MAC adresi / MAC address", reads "MAC address (partial
-evidence)" and never says that the MAC sent the session; a srcmac conflict prints both MACs, the
-alternative under "Possible other chain (srcmac, partial evidence)". A FortiGate DHCP lease row adds
-its source, lease time and last DHCP evidence, both from the lease's own last record at or before
-the moment (section 6 labels such lines "FortiGate DHCP kaydı / FortiGate DHCP record" and
-unconverted ones "FortiGate olay kaydı / FortiGate event record"). A lease ended by a later DHCP
+evidence)", cites the session line the MAC comes from by its evidence number ("· evidence: K1") as
+the other steps cite theirs, and never says that the MAC sent the session; a srcmac conflict prints
+both MACs, the alternative under "Possible other chain (srcmac, partial evidence)". A FortiGate DHCP
+lease row adds its source, lease time and last DHCP evidence, both from the lease's own last record
+at or before the moment (section 6 labels such lines "FortiGate DHCP kaydı / FortiGate DHCP record"
+and unconverted ones "FortiGate olay kaydı / FortiGate event record"). A lease ended by a later DHCP
 record, whether another device took the address, the lease's MAC took another address or the other
 DHCP source recorded the same pair, reads "sonraki bir DHCP atamasıyla kapandı" / "closed by a later
 DHCP assignment"; a `low` chain prints its reason beside it (`lease_renewal_not_seen`,

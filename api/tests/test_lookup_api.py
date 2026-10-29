@@ -635,8 +635,19 @@ def test_invalid_nat_settings_are_reported(
     [
         ("dhcp.fortigate_logids", ["0100026001"]),  # not an object
         ("lookup.timeout_seconds", "beş"),  # not a number
+        ("lease.server_seconds", ["x"]),  # not an object: AttributeError in from_settings
+        ("lease.server_seconds", "abc"),
+        ("lease.server_seconds", 5),
+        ("lease.server_seconds", True),
     ],
-    ids=["fortigate-logids", "timeout"],
+    ids=[
+        "fortigate-logids",
+        "timeout",
+        "server-list",
+        "server-text",
+        "server-number",
+        "server-true",
+    ],
 )
 def test_another_unreadable_lookup_setting_answers_the_same_503(
     client: TestClient,
@@ -647,10 +658,11 @@ def test_another_unreadable_lookup_setting_answers_the_same_503(
     key: str,
     stored: Any,
 ) -> None:
-    """``LookupSettings.from_settings`` is strict for the ``dhcp.fortigate_*`` values, and
-    ``lookup.timeout_seconds`` must be a number: one written around the validator stops every
-    lookup with the same code, never 500, but with the second text, which names no key (the
-    key is in the WARNING of the system log; review Q1)."""
+    """``LookupSettings.from_settings`` is strict for the ``dhcp.fortigate_*`` values and
+    ``lease.server_seconds`` (an object), and ``lookup.timeout_seconds`` must be a number: one
+    written around the validator stops every lookup with the same code, never 500, but with the
+    second text, which names no key (the key is in the WARNING of the system log; review Q1,
+    final review 1)."""
     setting(app_session_factory, key, stored)
     signed_in(client, login_as, app_session_factory)
     caplog.set_level(logging.WARNING, logger="arcilogger.api.lookup")

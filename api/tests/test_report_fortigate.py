@@ -526,14 +526,16 @@ def test_srcmac_step_and_conflict(
     assert (
         f"MAC adresi / MAC address MAC {static_mac} · MAC adresi (kısmi kanıt): FortiGate oturum "
         "kaydının srcmac alanı, vlan42 arayüzü; FortiGate'in aygıt tanıma bilgisine göre kaynak IP "
-        "adresi o anda bu MAC adresiyle ilişkilendirilmişti; kira kaydı yok" in text
+        "adresi o anda bu MAC adresiyle ilişkilendirilmişti; kira kaydı yok · kanıt: K1" in text
     )
     assert "MAC address (partial evidence): srcmac field of the FortiGate session record" in text
+    assert "at that moment; no lease · evidence: K1" in text
     assert "geldiğini gösterir" not in text
     inputs = report_row(app_session_factory, data["id"]).inputs
     assert inputs["consistency"]["ok"] is True  # srcip and srcmac of the session line agree
     (session_line,) = [item for item in inputs["evidence"] if item["table"] == "fg_traffic"]
     assert session_line["check"] == {"ok": True, "mismatches": [], "error": None}
+    assert session_line["no"] == 1  # the K1 the srcmac step cites
 
     data, text = _report(client, public_ip="198.51.100.20", public_port=51061)
     conflicted = [m for m in data["outcome"]["matches"] if m["traffic"]["srcport"] == 51061]

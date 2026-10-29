@@ -1078,10 +1078,14 @@ class _Builder:
             found = notes.get("srcmac_only")
             interface = str(found.params.get("interface") or "-") if found is not None else "-"
             step_tr, step_en = _pair(texts.SRCMAC_STEP, interface=interface)
+            refs = self.refs(chain.device.evidence)  # the session line the MAC comes from
             rows.append(
                 (
                     "MAC adresi / MAC address",
-                    self.both(f"MAC {chain.device.mac} · {step_tr}", step_en),
+                    self.both(
+                        f"MAC {chain.device.mac} · {step_tr} · kanıt: {refs}",
+                        f"{step_en} · evidence: {refs}",
+                    ),
                 )
             )
         device = chain.device
