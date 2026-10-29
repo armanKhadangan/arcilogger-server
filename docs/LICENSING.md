@@ -108,6 +108,8 @@ licence state.
 | `/license` | Licence state, upload and removal of the licence file | 5651 Core |
 | `/admin` | Settings: the machine configuration, the administration service's state, change requests and their history | 5651 Core |
 | `/settings` | Application settings (the database settings) | 5651 Core |
+| `/compliance` | Uyum Durumu: the ten check cards, the status report (PDF), the configuration backup confirmation | 5651 Core |
+| `/system` | System page: resource use, disk forecast, database size, services, scheduled tasks, clock | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
@@ -140,6 +142,7 @@ data of a module that is off is not deleted.
 | `usage.retention` | — (deletion of personal data) | always runs |
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
+| `system.sample` | 5651 Core | always runs |
 | `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off

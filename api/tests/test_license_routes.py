@@ -68,8 +68,8 @@ ROUTES: dict[tuple[str, str], str | None] = {
     # Module bulk_import: 2 routes
     ("POST", f"{V}/imports/{{kind}}"): BI,
     ("GET", f"{V}/imports/{{kind}}/template.csv"): BI,
-    # 5651 Temel, never gated: 62 routes, the 3 of the licence, the 38 of the browser
-    # administration (ADR-0014) and the 12 of Arama (ADR-0015)
+    # 5651 Temel, never gated: 129 routes, among them the 3 of the licence, the browser
+    # administration (ADR-0014), Canlı Akış, Kaynaklar, Arama (ADR-0015), Uyum Durumu and Sistem
     ("GET", f"{V}/health"): None,
     ("GET", f"{V}/alerts"): None,
     ("GET", f"{V}/alerts/summary"): None,
@@ -197,6 +197,13 @@ ROUTES: dict[tuple[str, str], str | None] = {
     ("POST", f"{V}/search/saved"): None,
     ("PUT", f"{V}/search/saved/{{saved_id}}"): None,
     ("DELETE", f"{V}/search/saved/{{saved_id}}"): None,
+    # Uyum Durumu and Sistem (Wave 4 contract 2.2): 5651 Temel, never gated.
+    ("GET", f"{V}/compliance"): None,
+    ("GET", f"{V}/compliance/report.pdf"): None,
+    ("POST", f"{V}/compliance/config-backup"): None,
+    ("GET", f"{V}/system"): None,
+    ("GET", f"{V}/system/disk"): None,
+    ("GET", f"{V}/system/health"): None,
 }
 PLACEHOLDERS = {
     "{key}": "x",
@@ -257,7 +264,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
     assert found == sorted(ROUTES)
     gated = [key for key, module in ROUTES.items() if module is not None]
     assert len(gated) == 23
-    assert len(ROUTES) - len(gated) == 123
+    assert len(ROUTES) - len(gated) == 129
 
 
 def test_the_module_markers_equal_the_table() -> None:
