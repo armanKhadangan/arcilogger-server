@@ -106,10 +106,16 @@ Eski `nat.public_ips`, `nat.wan_transip` ve `lookup.port_hint` ayarları yoktur:
 (`dhcp.fortigate_format_verified` dışında: o yalnızca sorgu ve rapor metnini değiştirir) ya da bir
 FortiGate kaynağını (**Kaynaklar**) değiştirdikten sonra kiraları etkilenen ilk günden bugüne aynı
 gruptaki **Kiraları yeniden oluştur** ile yeniden oluşturun (bir istekte en çok 31 gün; daha uzun
-bir aralık için birkaç istek): değişiklik geçmiş günlere ancak yeniden oluşturmadan sonra
-uygulanır. O zamana kadar o günlerin anları için 5651 sorgusu zincir kurmadan yanıt verebilir
-(güvenli taraf: yanlış kişi gösterilmez). Sonradan eklenen ya da değiştirilen bir ağ için:
-[ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 5.
+bir aralık için birkaç istek): değişiklik geçmiş günlere ancak yeniden oluşturmadan sonra uygulanır.
+**Kanıt ekleyen bir değişiklikten** sonra (bir logid ya da `dhcp_msg` değeri eşlendi, bir FortiGate
+kaynağı eklendi) o zamana kadar o günlerin anları için 5651 sorgusu zincir kurmadan yanıt verebilir
+(güvenli taraf). **Kanıtı kaldıran ya da daraltan bir değişiklikten** sonra (bir arayüz
+`dhcp.fortigate_interfaces_excluded` listesine eklendi, `dhcp.fortigate_traffic_extends` ya da
+`dhcp.fortigate_use_logged_lease` kapatıldı, bir logid ya da `dhcp_msg` değeri çıkarıldı, bir
+FortiGate kaynağı kaldırıldı ya da türü değiştirildi) eski ayarlarla oluşturulan kiralar yeniden
+oluşturmaya kadar eski güven düzeyleriyle kalır; bir an hâlâ önceki cihazı gösterebilir. Bu durumda
+kiraları **hemen**, etkilenen ilk günden yeniden oluşturun. Sonradan eklenen ya da değiştirilen bir
+ağ için: [ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 5.
 
 **İnternet çıkışları (NAT) düzenleyicisi** (`nat.egresses`). Her çıkış bir satırdır: ad,
 açıklama, tür, genel adresler, NAT adresleri, arayüzler (dstintf) ve port koruma. Türler:

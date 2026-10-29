@@ -6624,8 +6624,10 @@ Each entry says what the contract says, what was written, and why. Test paths ar
   items on #10). Beyond the 2.15 text the rollback paragraph says that the previous version
   closes the FortiGate leases by its own settings ("varsayılanlarla kiranın son DHCP kaydından
   yaklaşık 26 saat sonra") and deletes those that start on the rollback day or the day before in
-  its own rebuild; to download the official reports before `-Rollback`; and that the re-upgrade
-  prints the days to rebuild. The srcmac sentence of item 2 is in §13 and CORRELATION §7. Fold
+  its own rebuild, and those that start on the days it rebuilds for late records ("(ve geç gelen
+  kayıtlar için yeniden oluşturduğu günlerde başlayanları)" / "(and those that started on the days
+  it rebuilds for late records)", 2.2.1); to download the official reports before `-Rollback`; and
+  that the re-upgrade prints the days to rebuild. The srcmac sentence of item 2 is in §13 and CORRELATION §7. Fold
   into 2.15.
 - **f2-3. Wording of the examples and labels.** The rebuild button is "Rebuild the leases" in
   English, as in ALERTS.md and the web; the settings examples keep the existing `--by tolga` of
@@ -6635,11 +6637,21 @@ Each entry says what the contract says, what was written, and why. Test paths ar
   the lookup tolerance) for a source measured only for the session search" (round-5 note "2.17
   vs 2.7 clock limit"). **§2.17 reads alike:** its clock bullet "unless the lookup tolerance is
   lower" becomes "the limit is 120 s, or max(120 s, the lookup tolerance) for a source measured
-  only for the session search", and it gains the residual of the manager's item 3: "**A
-  `dhcp.fortigate_*` setting (other than `dhcp.fortigate_format_verified`) or a FortiGate source
-  changed later** applies to past leases only after a rebuild from the first affected day;
-  moments before the rebuild answer without a chain until then (the safe side, never a wrong
-  person)." Fold into 2.17.
+  only for the session search", and it gains the residual of the manager's item 3, as the manager
+  corrected it in the review of #52 (the first wording, "the safe side, never a wrong person",
+  holds only for changes that add evidence: stored leases are not checked again against today's
+  settings, and only today and yesterday are rebuilt automatically): "**A `dhcp.fortigate_*`
+  setting (other than `dhcp.fortigate_format_verified`) or a FortiGate source changed later**
+  applies to past leases only after a rebuild from the first affected day. After a change that
+  adds evidence (a logid or `dhcp_msg` value mapped, a FortiGate source added), moments before the
+  rebuild answer without a chain until then (the safe side). After a change that removes or
+  narrows evidence (an interface added to `dhcp.fortigate_interfaces_excluded`,
+  `dhcp.fortigate_traffic_extends` or `dhcp.fortigate_use_logged_lease` switched off, a logid or
+  `dhcp_msg` value removed, a FortiGate source removed or retyped), the leases built under the old
+  settings stay, at their old confidence, until the rebuild, so a moment can still name the
+  earlier device: rebuild at once, from the first affected day." The same split is in AYARLAR /
+  SETTINGS, DEVICE-SETUP 2.4, ILK-ADIMLAR / FIRST-STEPS section 6 and CORRELATION sections 1 and
+  7. Fold into 2.17.
 - **f2-5. DEVICE-SETUP §2.** 2.1–2.3 keep the existing content under the titles "Syslog ve
   saat", "Web ve DNS filtre profilleri", "Politikalar ve isteğe bağlı kayıtlar" (Turkish only, as
   before); the English blocks of O11 are in the new 2.4–2.6. The rebuild statement of item 3 in

@@ -288,9 +288,15 @@ yeniden başlatmak gerekmez. Sahada belirlenip girilecekler ([CORRELATION.md](CO
 ve rapor metnini değiştirir) ya da bir FortiGate kaynağını (Ayarlar → Kaynaklar) değiştirdikten
 sonra kiraları etkilenen ilk günden bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman
 çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün):
-değişiklik geçmiş günlere ancak yeniden oluşturmadan sonra uygulanır. O zamana kadar o günlerin
-anları için 5651 sorgusu zincir kurmadan yanıt verebilir (güvenli taraf: yanlış kişi
-gösterilmez).
+değişiklik geçmiş günlere ancak yeniden oluşturmadan sonra uygulanır. **Kanıt ekleyen bir
+değişiklikten** sonra (bir logid ya da `dhcp_msg` değeri eşlendi, bir FortiGate kaynağı eklendi) o
+zamana kadar o günlerin anları için 5651 sorgusu zincir kurmadan yanıt verebilir (güvenli taraf).
+**Kanıtı kaldıran ya da daraltan bir değişiklikten** sonra (bir arayüz
+`dhcp.fortigate_interfaces_excluded` listesine eklendi, `dhcp.fortigate_traffic_extends` ya da
+`dhcp.fortigate_use_logged_lease` kapatıldı, bir logid ya da `dhcp_msg` değeri çıkarıldı, bir
+FortiGate kaynağı kaldırıldı ya da türü değiştirildi) eski ayarlarla oluşturulan kiralar yeniden
+oluşturmaya kadar eski güven düzeyleriyle kalır; bir an hâlâ önceki cihazı gösterebilir. Bu durumda
+kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 
 ## 7. Bu sürümün sınırları
 

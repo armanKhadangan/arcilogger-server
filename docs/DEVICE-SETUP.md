@@ -127,8 +127,10 @@ end
 ```
 
 `diagnose sys ntp status` NTP sunucularının bilgisini listeler (**doğrulayın**, sonucu
-[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati 120 saniyeden fazla kayarsa
-`R20-lease:source-clock` uyarısı açılır ve o anların 5651 zincirleri düşük güvenle gösterilir.
+[KURULUM.md](KURULUM.md) bölüm 16'ya yazın). Bir kaynağın saati 120 saniyeden (yalnız oturum araması
+için ölçülen bir kaynakta, sorgu toleransı daha büyükse tolerans; [CORRELATION.md](CORRELATION.md)
+bölüm 7) fazla kayarsa `R20-lease:source-clock` uyarısı açılır ve o anların 5651 zincirleri düşük
+güvenle gösterilir.
 
 ### 2.2 Web ve DNS filtre profilleri
 
@@ -254,12 +256,18 @@ tanımlı bir ağda olmayan adreslerin zincirleri düşük güvenle gösterilir.
    başına değil ağ başına bir adres tutar. Sonucu bölüm 16'ya yazın.
 
 **Ayar değişikliğinden sonra.** `dhcp.fortigate_*` ayarlarından birini
-(`dhcp.fortigate_format_verified` dışında: o yalnızca sorgu ve rapor metnini değiştirir) ya da
-bir FortiGate kaynağını (Ayarlar → Kaynaklar) değiştirdikten sonra kiraları etkilenen ilk günden
-bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden
-oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün): değişiklik geçmiş günlere ancak
-yeniden oluşturmadan sonra uygulanır. O zamana kadar o günlerin anları için 5651 sorgusu zincir
-kurmadan yanıt verebilir (güvenli taraf: yanlış kişi gösterilmez).
+(`dhcp.fortigate_format_verified` dışında: o yalnızca sorgu ve rapor metnini değiştirir) ya da bir
+FortiGate kaynağını (Ayarlar → Kaynaklar) değiştirdikten sonra kiraları etkilenen ilk günden bugüne
+Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur
+bölümünde yeniden oluşturun (bir istekte en çok 31 gün): değişiklik geçmiş günlere ancak yeniden
+oluşturmadan sonra uygulanır. **Kanıt ekleyen bir değişiklikten** sonra (bir logid ya da `dhcp_msg`
+değeri eşlendi, bir FortiGate kaynağı eklendi) o zamana kadar o günlerin anları için 5651 sorgusu
+zincir kurmadan yanıt verebilir (güvenli taraf). **Kanıtı kaldıran ya da daraltan bir
+değişiklikten** sonra (bir arayüz `dhcp.fortigate_interfaces_excluded` listesine eklendi,
+`dhcp.fortigate_traffic_extends` ya da `dhcp.fortigate_use_logged_lease` kapatıldı, bir logid ya da
+`dhcp_msg` değeri çıkarıldı, bir FortiGate kaynağı kaldırıldı ya da türü değiştirildi) eski
+ayarlarla oluşturulan kiralar yeniden oluşturmaya kadar eski güven düzeyleriyle kalır; bir an hâlâ
+önceki cihazı gösterebilir. Bu durumda kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 
 **English.** For networks whose DHCP server is the FortiGate only ([INSTALL.md](INSTALL.md)
 section 0.1). The FortiGate DHCP server's event records (DHCP Ack, DHCP Release) feed the lease
@@ -347,11 +355,16 @@ are shown with low confidence.
 
 **After a settings change.** After changing any `dhcp.fortigate_*` setting (except
 `dhcp.fortigate_format_verified`, which only changes the lookup and report texts) or a FortiGate
-source (Settings → Sources), rebuild the leases from the first affected day to today in
-Settings → Application settings → 5651 lookup and lease timeline → Rebuild the leases (at most 31
-days per request): the change applies to past days only after the rebuild. Until then a 5651
-lookup for moments of those days may answer without a chain (the safe side: no wrong person is
-named).
+source (Settings → Sources), rebuild the leases from the first affected day to today in Settings →
+Application settings → 5651 lookup and lease timeline → Rebuild the leases (at most 31 days per
+request): the change applies to past days only after the rebuild. After a **change that adds
+evidence** (a logid or `dhcp_msg` value mapped, a FortiGate source added), a 5651 lookup for moments
+of those days may answer without a chain until then (the safe side). After a **change that removes
+or narrows evidence** (an interface added to `dhcp.fortigate_interfaces_excluded`,
+`dhcp.fortigate_traffic_extends` or `dhcp.fortigate_use_logged_lease` switched off, a logid or
+`dhcp_msg` value removed, a FortiGate source removed or retyped), the leases built under the old
+settings stay, at their old confidence, until the rebuild, so a moment can still name the earlier
+device. **Rebuild at once**, from the first affected day.
 
 ### 2.5 srcmac ve aygıt tanıma (isteğe bağlı; ağ geçidi FortiGate olan ağlar) / srcmac and device identification (optional; networks whose gateway is the FortiGate)
 

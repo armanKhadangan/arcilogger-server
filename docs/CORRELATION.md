@@ -62,12 +62,17 @@
   Genel veya iç adresi IPv6 olan bir sorgu sonuç yerine açık bir retle yanıtlanır
   (`ipv6_not_supported`); böyle bir talep başka yollarla yanıtlanmalıdır. Hiçbir IPv4 oturumu bir
   IPv6 adresinin adayı olamaz.
-- Geç gelen kayıtlar (ingest kesintisi sonrası birikmiş günler) otomatik olarak yeniden işlenir.
-  Bir `dhcp.fortigate_*` ayarı (`dhcp.fortigate_format_verified` dışında), bir FortiGate kaynağı
-  ya da bir ağ (VLAN alt ağı) değiştirildiğinde ise kiralar etkilenen ilk günden yeniden
-  oluşturulmalıdır (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları
-  yeniden oluştur); o zamana kadar o günlerin anları zincir kurulmadan yanıtlanabilir (güvenli
-  taraf: yanlış kişi gösterilmez).
+- Geç gelen kayıtlar (ingest kesintisi sonrası birikmiş günler) otomatik olarak yeniden işlenir. Bir
+  `dhcp.fortigate_*` ayarı (`dhcp.fortigate_format_verified` dışında), bir FortiGate kaynağı ya da
+  bir ağ (VLAN alt ağı) değiştirildiğinde ise kiralar etkilenen ilk günden yeniden oluşturulmalıdır
+  (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur);
+  kanıt ekleyen bir değişiklikte (bir logid ya da `dhcp_msg` değeri eşlendi, bir FortiGate kaynağı
+  eklendi) o zamana kadar o günlerin anları zincir kurulmadan yanıtlanabilir (güvenli taraf). Kanıtı
+  kaldıran ya da daraltan bir değişiklikte (bir arayüz dışlandı, `dhcp.fortigate_traffic_extends` ya
+  da `dhcp.fortigate_use_logged_lease` kapatıldı, bir logid ya da `dhcp_msg` değeri çıkarıldı, bir
+  FortiGate kaynağı kaldırıldı ya da türü değiştirildi) eski ayarlarla oluşturulan kiralar yeniden
+  oluşturmaya kadar eski güven düzeyleriyle kalır ve bir an hâlâ önceki cihazı gösterebilir:
+  kiraları hemen yeniden oluşturun.
 - **Yükseltmeden önce yüklenen kayıtlar:** o zamanki FortiGate DHCP kayıtları kira zaman
   çizelgesine çevrilmez; sorgu bunu belirtir (`fortigate_dhcp_not_converted`). Yükseltmeden önce
   (ya da bir geri alma sırasında önceki sürümce) yüklenen FortiGate oturum kayıtlarının srcmac
@@ -304,18 +309,19 @@ names them where they matter (sections 2 and 3).
 - **Traffic volume**: per source IP only the first and last row of every 5-minute bucket are read
   (exact because the bucket is shorter than the shortest lease timeout; checked at start). The
   rebuild of a day with 1,000,000 traffic rows and 300 devices took **2.4 s** (section 6).
-- **Manual repair**: `arcilogger-worker rebuild --day 2026-10-12 [--to 2026-10-20]` (one
-  transaction and one `job_runs` row per day), or in the browser Ayarlar → Uygulama ayarları →
-  5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur (Settings → Application settings
-  → 5651 lookup and lease timeline → Rebuild the leases; at most 31 days per request, run by the
-  job `admin.requests`). Run it for the affected range, **in order**, from the first affected
-  day to today, after changing lease settings (`lease.*`, `arp.*`, `dhcp.server_vlan_regex`, every
+- **Manual repair**: `arcilogger-worker rebuild --day 2026-10-12 [--to 2026-10-20]` (one transaction
+  and one `job_runs` row per day), or in the browser Ayarlar → Uygulama ayarları → 5651 sorgu ve
+  kira zaman çizelgesi → Kiraları yeniden oluştur (Settings → Application settings → 5651 lookup and
+  lease timeline → Rebuild the leases; at most 31 days per request, run by the job
+  `admin.requests`). Run it for the affected range, **in order**, from the first affected day to
+  today, after changing lease settings (`lease.*`, `arp.*`, `dhcp.server_vlan_regex`, every
   `dhcp.fortigate_*` key except `dhcp.fortigate_format_verified`, which only changes texts), a
   FortiGate source (a sender configured later, a type changed) or a network on the Cihazlar ve
-  Kişiler page (D33 compares configured networks): stored rows were computed with the old rules
-  and are the next day's seeds. A change applies to past days only after the rebuild; until then
-  lookups of moments of those days may answer without a chain, or with a chain lowered to `low`
-  (section 7).
+  Kişiler page (D33 compares configured networks): stored rows were computed with the old rules and
+  are the next day's seeds. A change applies to past days only after the rebuild. Until then a
+  change that adds evidence may leave moments of those days without a chain, or with a chain lowered
+  to `low`; after a change that removes or narrows evidence the old leases still name the earlier
+  device at their old confidence, so rebuild at once (section 7).
 
 ### Devices (`correlation/devices.py`, spec 9.2)
 
@@ -868,11 +874,18 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   `high` until half its lease, then `low`. FortiGate chains of addresses outside every configured
   network are `low` (`fortigate_dhcp_no_network`).
 - **A network added or edited later** applies to past leases only after a rebuild (section 1,
-  "Manual repair"); until then the lookup lowers the chains a missed D33 close leaves open to
-  `low` with `fortigate_dhcp_not_converted_since_lease`. **After a change of a `dhcp.fortigate_*`
-  setting (other than `dhcp.fortigate_format_verified`) or a FortiGate source** the leases must be
-  rebuilt from the first affected day as well; moments before the rebuild answer without a chain
-  until then (the safe side: never a wrong person).
+  "Manual repair"); until then the lookup lowers the chains a missed D33 close leaves open to `low`
+  with `fortigate_dhcp_not_converted_since_lease`. **After a change of a `dhcp.fortigate_*` setting
+  (other than `dhcp.fortigate_format_verified`) or a FortiGate source** the leases must be rebuilt
+  from the first affected day as well. After a change that adds evidence (a logid or `dhcp_msg`
+  value mapped, a FortiGate source added), moments before the rebuild answer without a chain until
+  then (the safe side). After a change that removes or narrows evidence (an interface added to
+  `dhcp.fortigate_interfaces_excluded`, `dhcp.fortigate_traffic_extends` or
+  `dhcp.fortigate_use_logged_lease` switched off, a logid or `dhcp_msg` value removed, a FortiGate
+  source removed or retyped), the leases built under the old settings stay, at their old confidence,
+  until the rebuild: stored leases are not checked again against today's settings, and only today
+  and yesterday are rebuilt automatically, so a moment can still name the earlier device. **Rebuild
+  at once**, from the first affected day.
 - **Long FortiGate leases.** Without a logged Release a FortiGate lease stays open until its last
   DHCP evidence + the lease time (7 days with the FortiOS default); traffic does not extend it by
   default. Past half the lease without a renewal its chain is `low` (`lease_renewal_not_seen`).
