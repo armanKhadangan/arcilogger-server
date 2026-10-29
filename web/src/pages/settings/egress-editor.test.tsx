@@ -5,91 +5,37 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { setLanguage } from '@/lib/i18n';
-import type { SettingGroup, SettingOut, SettingsOut } from '@/lib/settings-types';
+import type { SettingGroup, SettingsOut, SettingValue } from '@/lib/settings-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
+import type { ErrorSample } from '@/test/samples';
 
 import type { Egresses } from './egress-model';
 
 /*
  * Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi: the editor of the internet
- * exits (`nat.egresses`, contract 2.13). Hand mock of the settings group (the day-0 settings with
- * the server's labels); the captured settings sample replaces it in WP-E's second step.
+ * exits (`nat.egresses`, contract 2.13). The group is the captured `GET /settings` group `lookup`
+ * (`settings.json`) with the exits of each test in place of the stored converted `wan`; the
+ * server's refusal is the captured 422 `setting_invalid_egress`.
  */
+
+/** `samples/settings.json`, read as `src/test/samples.ts` reads the samples (it does not load it). */
+const SETTINGS = JSON.parse(
+  readFileSync(join(process.cwd(), 'e2e', 'samples', 'settings.json'), 'utf8'),
+) as { list: SettingsOut; errors: Record<string, ErrorSample> };
 
 beforeAll(async () => {
   await import('@/pages/settings/application-page');
 }, 120_000);
 
-function setting(
-  key: string,
-  type: SettingOut['type'],
-  value: SettingOut['value'],
-  extra: Partial<SettingOut> = {},
-): SettingOut {
-  return {
-    key,
-    value,
-    default: type === 'object' ? {} : value,
-    is_default: true,
-    type,
-    min: type === 'integer' ? 1 : null,
-    max: type === 'integer' ? 16 : null,
-    reauth: false,
-    locked: false,
-    label_tr: `Etiket ${key}`,
-    label_en: `Label ${key}`,
-    help_tr: `Yardım ${key}`,
-    help_en: `Help ${key}`,
-    updated_by: ':seed',
-    updated_at: '2026-09-30T09:12:00+03:00',
-    ...extra,
-  };
-}
-
-/** The server's help of a setting as the captured `GET /settings` gives it. */
-function capturedHelp(key: string): Pick<SettingOut, 'help_tr' | 'help_en'> {
-  const sample = JSON.parse(
-    readFileSync(join(process.cwd(), 'e2e', 'samples', 'settings.json'), 'utf8'),
-  ) as { list: SettingsOut };
-  const found = sample.list.groups
-    .flatMap((group) => group.settings)
-    .find((item) => item.key === key);
-  if (!found) throw new Error(`${key} is not in the captured settings`);
-  return { help_tr: found.help_tr, help_en: found.help_en };
-}
-
-function groups(egresses: Egresses, more: SettingOut[] = []): SettingGroup[] {
-  return [
-    {
-      id: 'lookup',
-      label_tr: '5651 sorgu ve kira zaman çizelgesi',
-      label_en: '5651 lookup and lease timeline',
-      settings: [
-        setting('nat.egresses', 'object', egresses, {
-          label_tr: 'İnternet çıkışları (NAT)',
-          label_en: 'Internet exits (NAT)',
-        }),
-        setting(
-          'dhcp.fortigate_logids',
-          'object',
-          { '0100026001': 'assigned', '0100026002': 'deassigned' },
-          capturedHelp('dhcp.fortigate_logids'),
-        ),
-        setting(
-          'dhcp.fortigate_dhcp_msgs',
-          'object',
-          { '0100026001': ['Ack'] },
-          capturedHelp('dhcp.fortigate_dhcp_msgs'),
-        ),
-        setting('dhcp.fortigate_traffic_extends', 'boolean', false, {
-          help_tr: 'Kapalı (önerilen): FortiGate kirası yalnızca DHCP kayıtlarıyla açık kalır.',
-        }),
-        setting('lease.server_seconds', 'object', { dhcp61: 3600 }),
-        ...more,
-      ],
-    },
-  ];
+/** The captured group `lookup`, with `egresses` and `values` in place of stored values. */
+function groups(egresses: Egresses, values: Record<string, SettingValue> = {}): SettingGroup[] {
+  const group = structuredClone(SETTINGS.list.groups.find((item) => item.id === 'lookup'));
+  if (!group) throw new Error('sample missing: settings group lookup');
+  const stored: Record<string, SettingValue> = { 'nat.egresses': egresses, ...values };
+  for (const setting of group.settings)
+    if (setting.key in stored) setting.value = stored[setting.key] as SettingValue;
+  return [group];
 }
 
 const TWO_LINES: Egresses = {
@@ -113,11 +59,15 @@ const TWO_LINES: Egresses = {
   },
 };
 
-function serve(egresses: Egresses, patch?: (body: unknown) => Response, more: SettingOut[] = []) {
+function serve(
+  egresses: Egresses,
+  patch?: (body: unknown) => Response,
+  values: Record<string, SettingValue> = {},
+) {
   return installFetch((request) => {
     if (request.path === '/api/v1/auth/me') return jsonResponse(200, makeMe('admin'));
     if (request.path === '/api/v1/settings' && request.method === 'GET')
-      return jsonResponse(200, { groups: groups(egresses, more) } satisfies SettingsOut);
+      return jsonResponse(200, { groups: groups(egresses, values) } satisfies SettingsOut);
     if (request.path === '/api/v1/settings' && request.method === 'PATCH' && patch)
       return patch(request.body);
     return errorResponse(404, 'not_found');
@@ -311,29 +261,22 @@ describe('the exit editor', () => {
   });
 
   it('shows a refusal of the server at the editor level with its code and message', async () => {
-    serve(TWO_LINES, () =>
-      errorResponse(422, 'setting_invalid', {
-        tr: 'Ayarlar geçersiz.',
-        details: [
-          {
-            key: 'nat.egresses',
-            code: 'setting_egress_overlap',
-            message_tr:
-              'Bir genel adres ya da NAT adresi iki çıkışta birden olamaz; aynı transip yalnızca iki çıkışın arayüzleri ayrıysa kullanılabilir.',
-            message_en:
-              'A public or NAT address cannot be in two exits; the same transip is allowed only when the two exits have separate interfaces.',
-          },
-        ],
-      }),
-    );
+    const refusal = SETTINGS.errors.setting_invalid_egress;
+    if (!refusal) throw new Error('sample missing: settings error setting_invalid_egress');
+    serve(TWO_LINES, () => jsonResponse(refusal.status, refusal.body));
     await editor();
     const user = userEvent.setup();
     await user.type(within(exit('hat-2')).getByLabelText('Arayüzler (dstintf)'), 'wan2');
     await user.click(screen.getByRole('button', { name: 'Kaydet' }));
     const field = screen.getByTestId('setting-nat.egresses');
     expect(
-      await within(field).findByText(/^Bir genel adres ya da NAT adresi iki çıkışta birden olamaz/),
-    ).toHaveTextContent('(setting_egress_overlap)');
+      await within(field).findByText(
+        /^Genel adres özel \(RFC 1918\), paylaşılan \(RFC 6598\) ya da ayrılmış bir adres olamaz;/,
+      ),
+    ).toHaveTextContent('(setting_egress_public_private)');
+    expect(
+      screen.getByText('Bazı ayar değerleri geçersiz; işaretli ayarları düzeltin.'),
+    ).toBeVisible();
     await waitFor(() => {
       expect(screen.getByTestId('egress-editor')).toHaveFocus();
     });
@@ -365,7 +308,7 @@ describe('a stored value the rows cannot give back as stored', () => {
     const save = screen.getByRole('button', { name: 'Kaydet' });
     expect(save).toBeDisabled();
     const user = userEvent.setup();
-    await user.click(screen.getByRole('switch', { name: 'Etiket dhcp.fortigate_traffic_extends' }));
+    await user.click(screen.getByRole('switch', { name: 'Trafik FortiGate kirasını uzatır' }));
     await user.click(save);
     await waitFor(() => {
       expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
@@ -384,13 +327,13 @@ describe('a stored value the rows cannot give back as stored', () => {
         sent = body;
         return jsonResponse(200, { changed: [], unchanged: [] });
       },
-      [setting('lookup.srcmac_interfaces', 'string_list', ['a,b'])],
+      { 'lookup.srcmac_interfaces': ['a,b'] },
     );
     await editor();
     const save = screen.getByRole('button', { name: 'Kaydet' });
     expect(save).toBeDisabled();
     const user = userEvent.setup();
-    await user.click(screen.getByRole('switch', { name: 'Etiket dhcp.fortigate_traffic_extends' }));
+    await user.click(screen.getByRole('switch', { name: 'Trafik FortiGate kirasını uzatır' }));
     await user.click(save);
     await waitFor(() => {
       expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
@@ -469,9 +412,10 @@ describe('the other FortiGate DHCP settings', () => {
     await editor();
     expect(screen.queryByTestId('traffic-extends-warning')).not.toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(screen.getByRole('switch', { name: 'Etiket dhcp.fortigate_traffic_extends' }));
+    await user.click(screen.getByRole('switch', { name: 'Trafik FortiGate kirasını uzatır' }));
+    // The server's help of the switch (captured).
     expect(screen.getByTestId('traffic-extends-warning')).toHaveTextContent(
-      'Kapalı (önerilen): FortiGate kirası yalnızca DHCP kayıtlarıyla açık kalır.',
+      'Kapalı (önerilen): FortiGate kirası yalnızca DHCP kayıtlarıyla (Ack, yenileme) açık kalır;',
     );
   });
 
