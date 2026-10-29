@@ -6,6 +6,7 @@ import type {
   TaskHealth,
 } from '@/lib/system-health-types';
 import type { StatusFileState } from '@/lib/system-types';
+import { need } from '@/test/samples';
 import {
   CLOCK_SAMPLES,
   driveInfo,
@@ -194,7 +195,7 @@ describe('state badges', () => {
       'noAnswer',
       'ok',
     ]);
-    const sample = { ...CLOCK_SAMPLES[0]!, offset_ms: -1000 };
+    const sample = { ...need(CLOCK_SAMPLES[0], 'clock sample'), offset_ms: -1000 };
     expect(sampleState(sample, 1000)).toBe('over');
     expect(sampleState({ ...sample, offset_ms: 999.9 }, 1000)).toBe('ok');
     expectWorded(SAMPLE_STYLE);
@@ -211,7 +212,7 @@ describe('state badges', () => {
   });
 
   it('take the schedule in the interface language', () => {
-    const seal = TASKS[0]!;
+    const seal = need(TASKS[0], 'Seal task');
     expect(scheduleText(seal, 'tr')).toBe("Her gün 00:10'dan sonra 5 dakikada bir");
     expect(scheduleText(seal, 'en')).toBe('Every 5 minutes from 00:10');
   });
