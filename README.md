@@ -34,9 +34,9 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
   yolları ve çalıştırılan programlar bilerek sunucu konsolunda kalır
   ([docs/AYARLAR.md](docs/AYARLAR.md) bölüm 5, English: [docs/SETTINGS.md](docs/SETTINGS.md)).
 - Uyarılar: sessiz kalan log kaynağı (R15) ve sistem denetimleri (R20: mühürleme, doğrulama, disk,
-  saat, kontör, replika, veritabanı yedeği …); yüksek ve kritik uyarılar `[smtp]` ayarlıysa
-  e-postayla bildirilir. **Güvenlik** sayfasında listelenir, durumu değiştirilir ve not eklenir
-  ([docs/UYARILAR.md](docs/UYARILAR.md)).
+  saat, kontör, replika, veritabanı yedeği, içerik filtresi …); yüksek ve kritik uyarılar `[smtp]`
+  ayarlıysa e-postayla bildirilir. **Güvenlik** sayfasında listelenir, durumu değiştirilir ve not
+  eklenir ([docs/UYARILAR.md](docs/UYARILAR.md)).
 - Kişi, cihaz ve departman bazında **tahmini** internet kullanımı (çevrimiçi ve aktif süre, siteler,
   kategoriler, URL'ler, engellenen denemeler), varsayılan olarak **adlarla** (sahip kararı
   20.10.2026; [docs/KULLANIM.md](docs/KULLANIM.md); kişi düzeyindeki görünümler için hukuki
