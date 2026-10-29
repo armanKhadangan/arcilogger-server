@@ -937,7 +937,10 @@ class LookupSettings:
         so the values only the lookup reads (the exits, ``nat.snat_trandisp``, the srcmac
         settings) never raise here: the exits are kept as stored and parsed by
         :meth:`egresses`, the others fall back to the shipped default for a value of another
-        shape (written around the validator, CORRELATION §5).
+        shape (written around the validator, CORRELATION §5). The FortiGate flags
+        (``dhcp.fortigate_use_logged_lease``, ``…_traffic_extends``, ``…_format_verified``) read
+        only a JSON ``true`` or ``false``, any other value gives their default; a negative
+        ``arp.ignore_after_release_seconds`` gives its default too.
         """
         return cls(
             tolerance_seconds=int(values.get("lookup.tolerance_seconds", 60)),
@@ -950,7 +953,7 @@ class LookupSettings:
             lease_timeout_percent=int(values.get("lease.timeout_percent", 110)),
             arp_interval_seconds=int(values.get("arp.interval_seconds", 3600)),
             arp_release_grace_seconds=_lookup_count(
-                values, "arp.ignore_after_release_seconds", 300
+                values, "arp.ignore_after_release_seconds", 300, minimum=0
             ),
             infrastructure_macs=tuple(
                 normalize_mac(str(mac)) for mac in values.get("devices.infrastructure_macs") or ()
@@ -969,10 +972,10 @@ class LookupSettings:
                     values, "dhcp.fortigate_dhcp_msgs", FORTIGATE_DHCP_MSGS
                 )
             },
-            use_logged_lease=bool(values.get("dhcp.fortigate_use_logged_lease", True)),
-            fortigate_traffic_extends=bool(values.get("dhcp.fortigate_traffic_extends", False)),
+            use_logged_lease=_flag(values, "dhcp.fortigate_use_logged_lease", True),
+            fortigate_traffic_extends=_flag(values, "dhcp.fortigate_traffic_extends", False),
             fortigate_interfaces_excluded=_texts(values, "dhcp.fortigate_interfaces_excluded", ()),
-            fortigate_format_verified=bool(values.get("dhcp.fortigate_format_verified", False)),
+            fortigate_format_verified=_flag(values, "dhcp.fortigate_format_verified", False),
         )
 
 
@@ -1003,7 +1006,19 @@ def _lookup_texts(values: Mapping[str, Any], key: str, default: tuple[str, ...])
     return tuple(str(item) for item in items) if isinstance(items, list | tuple) else default
 
 
-def _lookup_count(values: Mapping[str, Any], key: str, default: int) -> int:
-    """An integer setting only the lookup reads; ``default`` for any other value."""
+def _flag(values: Mapping[str, Any], key: str, default: bool) -> bool:
+    """A JSON ``true``/``false`` setting; ``default`` for any other value (``bool("false")`` is
+    true, so a text written around the validator would switch the setting on)."""
     value = values.get(key, default)
-    return value if isinstance(value, int) and not isinstance(value, bool) else default
+    return value if isinstance(value, bool) else default
+
+
+def _lookup_count(
+    values: Mapping[str, Any], key: str, default: int, *, minimum: int | None = None
+) -> int:
+    """An integer setting only the lookup reads; ``default`` for any other value, and for one
+    below ``minimum`` (a negative ARP grace would stop the probe's timeline rules)."""
+    value = values.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        return default
+    return default if minimum is not None and value < minimum else value

@@ -274,9 +274,9 @@ def _joined(items: Sequence[str]) -> str:
 
 
 def _whole_seconds(seconds: float) -> int:
-    """``seconds`` to the whole second, a half away from zero (``round`` gives 120 for 120.5):
-    a clock offset beyond its limit prints beyond it."""
-    whole = math.floor(abs(seconds) + 0.5)
+    """``seconds`` rounded up to the next whole second, away from zero (120.4 s prints 121): a
+    clock offset beyond its limit prints beyond it."""
+    whole = math.ceil(abs(seconds))
     return -whole if seconds < 0 else whole
 
 
@@ -1459,7 +1459,9 @@ class _Lookup:
         counted = [
             newest[key]
             for key, moment in targets.items()
-            if key in newest and self._would_cover(newest[key], moment)
+            if key in newest
+            and self._would_cover(newest[key], moment)
+            and (not by_mac or self._newest_of_its_address(newest[key], moment))
         ]
         if not counted:
             return ()
@@ -1487,7 +1489,12 @@ class _Lookup:
         # The lease timeline imports this package (its refs), so its rules are imported here.
         from arcilogger_worker.correlation.timeline import TimelineRules
 
-        longest = timedelta(seconds=TimelineRules.from_settings(self.settings).longest_window)
+        # The configured ARP grace, at most the ARP interval (the rules refuse a longer one), as
+        # the lease job builds them; the window does not depend on it.
+        settings = self.settings
+        grace = min(settings.arp_release_grace_seconds, settings.arp_interval_seconds)
+        rules = TimelineRules.from_settings(settings, release_grace=grace)
+        longest = timedelta(seconds=rules.longest_window)
         width = max(longest, UNCONVERTED_WINDOW)
         until = {key: min(at, self.request.at) for key, at in targets.items()}
         low, high = min(targets.values()) - width, max(until.values())
@@ -1572,6 +1579,21 @@ class _Lookup:
             line.key: line for line in lines if line.key not in seen or seen[line.key] < line.time
         }
 
+    def _newest_of_its_address(self, line: _DhcpLine, moment: datetime) -> bool:
+        """The address rule for a MAC's line (the c2 deviation): it counts only while it is
+        also the newest DHCP-shaped row of the address it names, by the IP probe at the same
+        moment; a newer row of that address, converted or not, says the address went on (to
+        another client, or to the MAC again in a row the timeline saw). A line whose ``ip`` is
+        no plain IPv4 address has no address to read (it never reaches PostgreSQL's ``inet``)
+        and counts as found."""
+        address = line.ip or ""
+        try:
+            ipaddress.IPv4Address(address)
+        except ValueError:
+            return True
+        same = self._newest_dhcp({address: moment}, by_mac=False).get(address)
+        return same is not None and same.id == line.id
+
     def _would_cover(self, line: _DhcpLine, moment: datetime) -> bool:
         """An ACK (a logid mapped to ``assigned``) whose lease would have covered ``moment``: its
         logged lease when usable, else its interface's configured time x
@@ -1613,10 +1635,10 @@ class _Lookup:
         for name, lease in sources.items():
             limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
             measured = self._clock(name)
-            # The whole seconds printed are the ones compared: a named offset exceeds its limit.
-            offset = None if measured is None else _whole_seconds(measured[0])
-            if offset is not None and abs(offset) > limit:
-                offsets[name] = offset
+            # The unrounded median is compared, as R20-lease:source-clock compares it; the
+            # offset printed is rounded up, so a named offset still exceeds its limit.
+            if measured is not None and abs(measured[0]) > limit:
+                offsets[name] = _whole_seconds(measured[0])
                 limits.append(limit)
         if not offsets:
             return attribution, matches

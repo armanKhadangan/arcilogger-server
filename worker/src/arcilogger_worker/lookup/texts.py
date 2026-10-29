@@ -445,25 +445,30 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "da bu kiranın MAC adresi için kira zaman çizelgesinin bu kiraya uygulamadığı FortiGate "
         "DHCP kayıtları var (ör. bu sürüme yükseltmeden önce yüklendi, bir geri almadan sonra "
         "önceki sürüm yükledi, alanları okunamadı ya da kiralar bir ağ tanımlanmadan veya "
-        "değiştirilmeden önce oluşturuldu). Bu kayıtlar adresin bırakıldığını, başka bir cihaza "
-        "verildiğini ya da bu MAC adresinin başka bir adres aldığını gösteriyor olabilir; zincir "
-        "bu nedenle düşük güvenle gösterildi. Kayıtlar başka bir istemciye ait olabileceği için "
-        "gösterilmez; ham kayıtlar saklanır ve gece mühürlenir (Arama'da type:event). Ağlar "
-        "(Cihazlar ve Kişiler → Departmanlar ve VLAN'lar) sonradan tanımlandı ya da "
-        "değiştirildiyse kiraları bu kiranın başladığı günden bugüne Ayarlar → Uygulama ayarları → "
-        "5651 sorgu ve kira zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun "
-        "(bir istekte en çok 31 gün).",
+        "değiştirilmeden, gönderen FortiGate (ör. bir HA üyesi) kaynak olarak tanımlanmadan ya da "
+        "FortiGate DHCP ayarları (ör. logid listesi) değiştirilmeden önce oluşturuldu). Bu "
+        "kayıtlar adresin bırakıldığını, başka bir cihaza verildiğini ya da bu MAC adresinin "
+        "başka bir adres aldığını gösteriyor olabilir; zincir bu nedenle düşük güvenle "
+        "gösterildi. Kayıtlar başka bir istemciye ait olabileceği için gösterilmez; ham kayıtlar "
+        "saklanır ve gece mühürlenir (Arama'da type:event). Ağlar (Cihazlar ve Kişiler → "
+        "Departmanlar ve VLAN'lar), FortiGate kaynakları (Kaynaklar) ya da FortiGate DHCP "
+        "ayarları sonradan tanımlandı ya da değiştirildiyse kiraları bu kiranın başladığı günden "
+        "bugüne Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → Kiraları "
+        "yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31 gün).",
         "After this lease's last DHCP record at {last} and before the requested moment there are "
         "FortiGate DHCP records for {ip} or for this lease's MAC address that the lease timeline "
         "did not apply to this lease (e.g. loaded before the upgrade to this version, loaded by "
         "the previous version after a rollback, fields that could not be read, or leases built "
-        "before a network was entered or changed). They may show that the address was released or "
-        "given to another device, or that this MAC address took another address, so the chain is "
-        "shown with low confidence. The records are not shown, because they may belong to another "
+        "before a network was entered or changed, before the sending FortiGate (e.g. an HA "
+        "member) was configured as a source, or before the FortiGate DHCP settings (e.g. the "
+        "logid list) were changed). They may show that the address was released or given to "
+        "another device, or that this MAC address took another address, so the chain is shown "
+        "with low confidence. The records are not shown, because they may belong to another "
         "client; the raw lines are kept and sealed every night (Search, type:event). If networks "
-        "(Devices and people → Departments and VLANs) were entered or changed later, rebuild the "
-        "leases from this lease's start day to today in Settings → Application settings → 5651 "
-        "lookup and lease timeline → Rebuild the leases (at most 31 days per request).",
+        "(Devices and people → Departments and VLANs), FortiGate sources (Sources) or the "
+        "FortiGate DHCP settings were entered or changed later, rebuild the leases from this "
+        "lease's start day to today in Settings → Application settings → 5651 lookup and lease "
+        "timeline → Rebuild the leases (at most 31 days per request).",
     ),
     "fortigate_dhcp_no_network": (
         "{ip} adresi tanımlı hiçbir ağda değil (Cihazlar ve Kişiler → Departmanlar ve VLAN'lar). "
@@ -579,15 +584,17 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "kira zaman çizelgesi cihazın zamanlarını kullandı: doğru oturum ya da kira bu fark kadar "
         "kaymış bir zaman aralığında olabilir; doğru oturum bulunmamış ve başka bir oturum "
         "bulunmuş olabilir, kira da o anı kapsamıyor olabilir. Bu sonuçta zincir varsa düşük "
-        "güvenle gösterildi; sonuç boşsa toleransı bu fark kadar genişletip sorguyu yeniden "
-        "çalıştırın.",
+        "güvenle gösterildi. Sonuç boşsa sorguyu yeniden çalıştırın: genel IP sorgusunda "
+        "toleransı bu fark kadar genişleterek, iç IP ya da MAC adresi sorgusunda istenen anı bu "
+        "fark kadar kaydırarak (fark artıysa ileri, eksiyse geri).",
         "Around {at} the record times of these sources differed from ARCILOGGER's receive time by "
         "a median of (in seconds): {offsets} (limit {limit} seconds). The search and the lease "
         "timeline used the device's times: the right session or lease may lie in a window shifted "
         "by that offset; the right session may have been missed and another found, and the lease "
         "may not cover the moment. Any chain of this result is therefore shown with low "
-        "confidence; if the result is empty, widen the tolerance by the offset and run the lookup "
-        "again.",
+        "confidence. If the result is empty, run the lookup again: for a public IP with the "
+        "tolerance widened by the offset, for an internal IP or a MAC address at the requested "
+        "moment shifted by the offset (later for a positive offset, earlier for a negative one).",
     ),
 }
 

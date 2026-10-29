@@ -131,6 +131,13 @@ def test_the_settings_path_is_the_one_the_web_interface_shows() -> None:
         assert networks_tr in text_tr, key
         assert networks_en in text_en, key
         assert "Cihazlar" not in text_en
+    # A sender configured later (D24) or a logid mapped later is rebuilt from the Sources page
+    # and the FortiGate DHCP settings (the manager's final review of PR #30, Q3).
+    text_tr, text_en = ENGINE_EXPLANATIONS["fortigate_dhcp_not_converted_since_lease"]
+    assert f"FortiGate kaynakları ({tr['nav']['sources']})" in text_tr
+    assert f"FortiGate sources ({en['nav']['sources']})" in text_en
+    assert "FortiGate DHCP ayarları (ör. logid listesi)" in text_tr
+    assert "FortiGate DHCP settings (e.g. the logid list)" in text_en
 
 
 def test_the_changed_exits_are_one_value_per_language() -> None:
@@ -146,3 +153,16 @@ def test_the_changed_exits_are_one_value_per_language() -> None:
     assert "now: public" not in note.text_tr
     assert "now: public 198.51.100.77" in note.text_en
     assert "şimdi" not in note.text_en
+
+
+def test_the_clock_remedy_fits_every_lookup() -> None:
+    """``source_clock_offset`` also names an internal or MAC lookup without a lease (D28): its
+    remedy widens the tolerance for a public IP and shifts the moment for the others, in the
+    direction of the offset's sign (the manager's final review of PR #30, Q4)."""
+    text_tr, text_en = ENGINE_EXPLANATIONS["source_clock_offset"]
+    assert "genel IP sorgusunda toleransı bu fark kadar genişleterek" in text_tr
+    assert "iç IP ya da MAC adresi sorgusunda istenen anı bu fark kadar kaydırarak" in text_tr
+    assert "(fark artıysa ileri, eksiyse geri)" in text_tr
+    assert "for a public IP with the tolerance widened by the offset" in text_en
+    assert "for an internal IP or a MAC address at the requested moment shifted" in text_en
+    assert "(later for a positive offset, earlier for a negative one)" in text_en

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, event, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import to_site
@@ -136,7 +136,7 @@ def unconverted_line(
     evidence: Evidence,
     time: datetime,
     ip: str,
-    mac: str,
+    mac: str | None,
     *,
     hostname: str | None = None,
     lease: int | None = 86400,
@@ -151,7 +151,7 @@ def unconverted_line(
     or by the previous version after a rollback): its spool line and the row that version
     stored, every DHCP field in ``extra``; returns the row id. ``dhcp_msg``: another message
     than the logid's own ("Ack" / "Release"); ``without_dhcp_msg``: a line without the field,
-    which D3 keeps as an ``fg_event`` row today too."""
+    which D3 keeps as an ``fg_event`` row today too; ``mac=None``: a line without the field."""
     sender = source.removeprefix("unknown-") if source.startswith("unknown-") else FIREWALL
     local = to_site(time)
     logdesc, msg = FORTIGATE_DHCP_TEXTS[logid]
@@ -159,7 +159,7 @@ def unconverted_line(
     fields = {
         "interface": interface,
         "dhcp_msg": None if without_dhcp_msg else kind,
-        "mac": mac.upper(),
+        "mac": None if mac is None else mac.upper(),
         "ip": ip,
         "lease": None if lease is None else str(lease),
         "hostname": hostname,
@@ -1000,8 +1000,13 @@ def test_a_migration_loaded_before_the_upgrade(
 
 
 #: An ``fg_event`` line that D25 or D28 says is never lease evidence: a NAK under the ACK's
-#: logid (``dhcp.fortigate_dhcp_msgs``) and an ACK of an excluded interface (an IPsec server).
-REFUSED_LINES = {"nak": ("Nak", "vlan42"), "excluded": ("Ack", "ipsec1")}
+#: logid (``dhcp.fortigate_dhcp_msgs``), an ACK of an excluded interface (an IPsec server) and
+#: an ACK for a multicast MAC; ``None``: the test's own client.
+REFUSED_LINES = {
+    "nak": ("Nak", "vlan42", None),
+    "excluded": ("Ack", "ipsec1", None),
+    "bad-mac": ("Ack", "vlan42", "01:00:5e:00:00:fb"),
+}
 
 
 def exclude_ipsec(session: Session) -> None:
@@ -1013,12 +1018,14 @@ def exclude_ipsec(session: Session) -> None:
 def test_a_line_after_the_lease_that_is_never_lease_evidence_lowers_nothing(
     db_session: Session, evidence: Evidence, example: list[int], variant: str
 ) -> None:
-    """The post-lease check (2.7) applies D25 and D28 to its ``fg_event`` lines too: a NAK for
-    the PC's address under 0100026001, or an ACK of an excluded interface, after the 11:00 ACK
-    leaves the chain as it was; the same line as an ACK on vlan42 lowers it."""
-    message, interface = REFUSED_LINES[variant]
+    """The post-lease check (2.7) applies D25 and D28's interface and MAC rules to its
+    ``fg_event`` lines too: a NAK for the PC's address under 0100026001, an ACK of an excluded
+    interface or an ACK for a multicast MAC after the 11:00 ACK leaves the chain as it was; the
+    same line as an ACK of another client on vlan42 lowers it."""
+    message, interface, mac = REFUSED_LINES[variant]
     exclude_ipsec(db_session)
-    unconverted_line(evidence, tr(DAY, 11, 10), PC, OTHER, interface=interface, dhcp_msg=message)
+    unconverted_line(evidence, tr(DAY, 11, 10), PC, mac or OTHER, interface=interface,
+                     dhcp_msg=message)  # fmt: skip
     db_session.commit()
     chain = internal(db_session, PC, AT).attribution
     assert chain is not None
@@ -1121,6 +1128,32 @@ def test_a_line_loaded_in_a_rollback_window(
     assert "pln-nb44" not in text
 
 
+def test_a_line_inside_a_long_fortigate_lease_counts_beyond_the_fallback(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The ``fg_dhcp`` post-lease window has no 7-day fallback (deviation c2, the manager's
+    review of PR #30): the PC's converted ACK at t0 with a 30-day lease, then an ACK of .57 to
+    :77 that stayed an ``fg_event`` row at t0 + 1 d. A lookup at t0 + 8.5 d, more than 7 days
+    after that line and less than half the lease after t0, is ``low`` with its lease step;
+    nothing is cited and :77 appears nowhere. A capped window would name the PC at ``high``
+    without a warning."""
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, lease=2592000)
+    unconverted_line(evidence, T0 + timedelta(days=1), PC, OTHER, hostname="PLN-NB77")
+    build(db_session, DAY, DAY + timedelta(days=1))
+    outcome = internal(db_session, PC, T0 + timedelta(days=8, hours=12))
+    chain = outcome.attribution
+    assert chain is not None
+    assert chain.lease is not None
+    assert chain.lease.mac == PC_MAC
+    assert (chain.confidence, chain.lease.confidence) == ("low", "low")
+    assert note(chain, UNCONVERTED) == {"last": iso(T0), "ip": PC}
+    assert [ref.table for ref in chain.lease.evidence] == ["fg_dhcp"]
+    assert outcome.unconverted_dhcp == ()
+    text = outcome_text(outcome)
+    assert OTHER not in text
+    assert "pln-nb77" not in text
+
+
 # -- FortiGate DHCP rows that did not become lease evidence (D8 probe, 2.8.3) ---------------------
 
 #: The probe's text, its citation label (2.8.3) and the static-client warning (2.11).
@@ -1175,6 +1208,42 @@ def test_a_static_client_gives_a_match_without_a_chain(
     assert outcome_note(outcome, MISSING) == {"count": 1}
     assert NOT_CONVERTED not in keys(outcome)
     assert outcome.unconverted_dhcp == ()
+
+
+@pytest.mark.parametrize("grace", [60, 0, -1])
+def test_the_probe_runs_with_a_short_arp_interval(
+    db_session: Session, evidence: Evidence, grace: int
+) -> None:
+    """The probe reads its window from the lease timeline's rules with the configured ARP grace
+    (``arp.ignore_after_release_seconds``, at most ``arp.interval_seconds``), as the lease job
+    builds them: with a 120 s ARP interval an internal lookup without a lease, a candidate
+    lookup whose static client has no chain and a MAC-only lookup without a lease give their
+    answer, never an error. A negative grace written around the validator (CORRELATION §5)
+    after the build (the lease job refuses it) reads as the shipped default, which the probe
+    caps at the ARP interval."""
+    set_setting(db_session, "arp.interval_seconds", 120, updated_by="tolga")
+    built = max(grace, 0)
+    set_setting(db_session, "arp.ignore_after_release_seconds", built, updated_by="tolga")
+    evidence.traffic(AT, "172.20.42.200", 51001, transip=WAN)
+    build(db_session, DAY, DAY)
+    if grace < 0:
+        set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
+        db_session.commit()
+    alone = internal(db_session, "172.20.42.200", AT)
+    assert (alone.mode, alone.attribution) == ("none", None)
+    assert "no_lease" in keys(alone)
+    candidates = lookup(db_session, public_ip="198.51.100.20")
+    assert candidates.mode == "candidates"
+    (match,) = candidates.matches
+    assert (match.traffic.srcip, match.chain) == ("172.20.42.200", None)
+    assert outcome_note(candidates, MISSING) == {"count": 1}
+    by_mac = lookup(db_session, mac=PC_MAC)
+    assert (by_mac.mode, by_mac.attribution) == ("none", None)
+    assert "no_lease_for_mac" in keys(by_mac)
+    for outcome in (alone, candidates, by_mac):
+        assert NOT_CONVERTED not in keys(outcome)
+        assert outcome.unconverted_dhcp == ()
+    assert settings_for(db_session).arp_release_grace_seconds == (grace if grace >= 0 else 300)
 
 
 def test_a_covering_line_that_stayed_an_event_row_is_named_and_cited(
@@ -1366,14 +1435,14 @@ def test_a_refused_converted_row_does_not_silence_the_probe(
 def test_a_line_that_is_never_lease_evidence_is_never_named(
     db_session: Session, evidence: Evidence, variant: str
 ) -> None:
-    """D25 and D28 hold for the probe's ``fg_event`` lines as ``trust.kept`` holds them for
-    ``fg_dhcp`` rows: a covering NAK under 0100026001, or a covering ACK of an excluded
-    interface, is never named or cited; such a line newer than a covering ACK does not hide
-    that ACK either."""
-    message, interface = REFUSED_LINES[variant]
+    """D25 and D28's interface and MAC rules hold for the probe's ``fg_event`` lines as
+    ``trust.kept`` holds them for ``fg_dhcp`` rows: a covering NAK under 0100026001, a covering
+    ACK of an excluded interface or a covering ACK for a multicast MAC is never named or cited;
+    such a line newer than a covering ACK does not hide that ACK either."""
+    message, interface, mac = REFUSED_LINES[variant]
     exclude_ipsec(db_session)
-    unconverted_line(evidence, AT - timedelta(days=1), PC, PC_MAC, hostname=HOST, lease=WEEK,
-                     interface=interface, dhcp_msg=message)  # fmt: skip
+    unconverted_line(evidence, AT - timedelta(days=1), PC, mac or PC_MAC, hostname=HOST,
+                     lease=WEEK, interface=interface, dhcp_msg=message)  # fmt: skip
     build(db_session, DAY, DAY)
     outcome = internal(db_session, PC, AT)
     assert "no_lease" in keys(outcome)
@@ -1400,6 +1469,28 @@ def test_a_covering_line_without_dhcp_msg_is_named(db_session: Session, evidence
     assert "no_lease" in keys(outcome)
     assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
     assert_cited(outcome, row, acked, evidence)
+
+
+@pytest.mark.parametrize("mac", [None, "0000.5e00.5357"], ids=["missing", "unreadable"])
+def test_a_covering_line_without_a_readable_mac_is_named(
+    db_session: Session, evidence: Evidence, mac: str | None
+) -> None:
+    """D28's MAC rule refuses only a readable MAC that is zero, broadcast or multicast: the
+    covering pre-upgrade ACK of the PC's address without a ``mac`` field, or with one in
+    another notation, is named and cited by the IP probe, as a line without ``dhcp_msg`` is."""
+    acked = AT - timedelta(days=4)
+    row = unconverted_line(evidence, acked, PC, mac, hostname=HOST, lease=WEEK)
+    build(db_session, DAY, DAY)
+    outcome = internal(db_session, PC, AT)
+    assert "no_lease" in keys(outcome)
+    assert outcome_note(outcome, NOT_CONVERTED) == {"ips": PC}
+    (ref,) = outcome.unconverted_dhcp
+    assert (ref.table, ref.row_id, ref.time, ref.summary) == (
+        "fg_event",
+        row,
+        acked,
+        UNCONVERTED_LABEL,
+    )
 
 
 def test_a_line_of_an_unknown_sender_is_never_cited(
@@ -1541,6 +1632,56 @@ def test_a_newer_converted_row_of_the_mac_silences_the_mac_only_probe(
     assert "no_lease_for_mac" in keys(outcome)
     assert NOT_CONVERTED not in keys(outcome)
     assert outcome.unconverted_dhcp == ()
+
+
+@pytest.mark.parametrize("converted", [True, False], ids=["converted", "unconverted"])
+def test_a_mac_only_probe_reads_the_address_of_its_line(
+    db_session: Session, evidence: Evidence, converted: bool
+) -> None:
+    """The MAC-only probe keeps the address rule for the line it finds: the PC's pre-upgrade
+    ACK of .57 two days before the moment, then an ACK of .57 to :77 twelve hours before it
+    (a converted ``fg_dhcp`` row, or a line that stayed an ``fg_event`` row too). The IP
+    lookup gives :77's answer; the MAC-only lookup of the PC names and cites nothing, because
+    the newest row of .57 is :77's, and nothing of :77 shows."""
+    unconverted_line(evidence, AT - timedelta(days=2), PC, PC_MAC, hostname=HOST, lease=WEEK)
+    if converted:
+        evidence.fortigate_dhcp(AT - timedelta(hours=12), PC, OTHER, hostname="MUH-NB03")
+    else:
+        newer = unconverted_line(
+            evidence, AT - timedelta(hours=12), PC, OTHER, hostname="MUH-NB03", lease=WEEK
+        )
+    build(db_session, DAY - timedelta(days=2), DAY)
+    by_ip = internal(db_session, PC, AT)
+    if converted:
+        chain = by_ip.attribution
+        assert chain is not None
+        assert chain.lease is not None
+        assert chain.lease.mac == OTHER
+    else:
+        assert outcome_note(by_ip, NOT_CONVERTED) == {"ips": PC}
+        assert [ref.row_id for ref in by_ip.unconverted_dhcp] == [newer]
+    outcome = lookup(db_session, mac=PC_MAC)
+    assert (outcome.mode, outcome.attribution) == ("none", None)
+    assert "no_lease_for_mac" in keys(outcome)
+    assert NOT_CONVERTED not in keys(outcome)
+    assert outcome.unconverted_dhcp == ()
+    text = outcome_text(outcome)
+    assert OTHER not in text
+    assert "muh-nb03" not in text
+
+
+def test_a_mac_only_probe_line_without_a_plain_address_still_counts(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The address rule reads only a plain IPv4 address: the MAC's covering line whose ``ip``
+    carries an IPv6 zone id has no address to read and is named and cited as found, and the
+    zone id never reaches PostgreSQL's ``inet`` (it would end the lookup's transaction)."""
+    acked = AT - timedelta(days=2)
+    row = unconverted_line(evidence, acked, "fe80::1%eth0", PC_MAC, lease=WEEK)
+    build(db_session, DAY, DAY)
+    outcome = lookup(db_session, mac=PC_MAC)
+    assert NOT_CONVERTED in keys(outcome)
+    assert [ref.row_id for ref in outcome.unconverted_dhcp] == [row]
 
 
 # -- two DHCP origins (D27) -----------------------------------------------------------------------
@@ -1710,8 +1851,9 @@ def test_arp_sightings_after_a_release_mapped_later_name_the_client(
     stale build they only touched the open FortiGate lease; the rebuild ends that lease at the
     RELEASE and opens an ARP interval at the first sighting after ``arp.ignore_after_release_
     seconds`` (by default 12:02 is a stale ARP entry and 12:30 opens it; 0 switches the rule
-    off). The lookup answers as after the rebuild: the ARP chain (``medium``, ``arp_only``),
-    never an unwarned "nobody"."""
+    off). At the moments the sightings cover, the lookup answers as after the rebuild: the ARP
+    chain (``medium``, ``arp_only``); between the stale lease's own timeout and the next
+    sighting it keeps ``no_lease`` until the rebuild (deviation c2, the late-mapped RELEASE)."""
     if grace is not None:
         set_setting(db_session, "arp.ignore_after_release_seconds", grace, updated_by="tolga")
     assert settings_for(db_session).arp_release_grace_seconds == (300 if grace is None else 0)
@@ -1782,6 +1924,42 @@ def test_arp_sightings_after_a_release_mapped_later_name_the_client(
         (lease.source_table, lease.start) for lease in db_session.scalars(select(Lease))
     ) == [("fg_dhcp", T0), ("mt_arp", opening)]
     assert (answers(), cited()) == (stale, refs)
+
+
+def test_the_arp_interval_after_a_late_mapped_release_is_read_once(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The ARP interval after a RELEASE mapped later is read once per lease and moment: asking
+    an attributor twice for the leases covering one moment sends one ``mt_arp`` query, and both
+    answers are the same interval."""
+    set_setting(db_session, "dhcp.fortigate_logids", {"0100026001": "assigned"}, updated_by="tolga")
+    evidence.fortigate_dhcp(T0, PC, PC_MAC, hostname=HOST)
+    evidence.fortigate_dhcp(
+        tr(DAY, 12), PC, PC_MAC, logid="0100026002", dhcp_msg="Release", lease=None
+    )
+    for hour in (12, 13, 14):
+        evidence.arp(tr(DAY, hour, 30), PC, PC_MAC, interface="vlan42")
+    build(db_session, DAY, DAY)
+    mapped = {"0100026001": "assigned", "0100026002": "deassigned"}
+    set_setting(db_session, "dhcp.fortigate_logids", mapped, updated_by="tolga")
+    db_session.commit()
+    attributor = Attributor(db_session, settings_for(db_session), lookup=True)
+    statements: list[str] = []
+
+    def executed(*args: Any) -> None:
+        statements.append(str(args[2]))
+
+    bind = db_session.get_bind()
+    event.listen(bind, "before_cursor_execute", executed)
+    try:
+        first = attributor.leases_at(PC, tr(DAY, 14, 45))
+        second = attributor.leases_at(PC, tr(DAY, 14, 45))
+    finally:
+        event.remove(bind, "before_cursor_execute", executed)
+    db_session.rollback()
+    assert [lease.source_table for lease in first] == ["mt_arp"]
+    assert first == second
+    assert len([sql for sql in statements if "FROM mt_arp" in sql]) == 1
 
 
 def test_a_release_and_a_renewal_in_one_second_keep_the_new_lease(
@@ -2115,7 +2293,8 @@ def exact_request(session: Session, **request: Any) -> LookupOutcome:
         pytest.param(-timedelta(seconds=30), 20, None, id="30-seconds"),
         pytest.param(BEHIND, 8, None, id="9-rows"),
         pytest.param(BEHIND, 9, -480, id="10-rows"),
-        pytest.param(-timedelta(seconds=120.4), 20, None, id="120.4-seconds"),
+        pytest.param(-timedelta(seconds=120), 20, None, id="120-seconds"),
+        pytest.param(-timedelta(seconds=120.4), 20, -121, id="120.4-seconds"),
         pytest.param(-timedelta(seconds=120.5), 20, -121, id="120.5-seconds"),
         pytest.param(timedelta(seconds=120.5), 20, 121, id="120.5-seconds-ahead"),
         pytest.param(-timedelta(seconds=120.6), 20, -121, id="120.6-seconds"),
@@ -2127,10 +2306,10 @@ def test_a_cited_source_whose_clock_was_off_lowers_every_chain(
     """3.4 "source clock": the FortiGate's rows around T are 8 minutes behind their receive
     time; an exact request at T names the FortiGate with about -480 s, every chain is ``low``
     (its lease step too) and the match stays ``exact``. 30 s, or fewer than 10 rows of the source
-    around T (the session row and the lines without a typed row), add nothing. The offset
-    compared with the limit is the whole number printed, so a printed offset always exceeds
-    the limit (120.4 s prints 120: nothing); a half second rounds away from zero (120.5 s is
-    beyond the limit and prints 121)."""
+    around T (the session row and the lines without a typed row), add nothing. The unrounded
+    median is compared with the limit (120 s is not beyond it, 120.4 s is) and the offset
+    printed is rounded up, away from zero, so a printed offset always exceeds the limit
+    (120.4 s, 120.5 s and 120.6 s print 121)."""
     evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
     evidence.traffic(AT, PC, 51001, transip=WAN)
     clock_lines(evidence, offset, lines)
@@ -2607,7 +2786,10 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
         "test_lookup_egress.py",
         "test_e_e_an_unclaimed_address_goes_to_the_exits_of_unknown_public_address",
     ),
-    "public_ip_not_transip": ("test_lookup_egress.py", "test_e_q_an_internal_nat_address"),
+    "public_ip_not_transip": (
+        "test_lookup_egress.py",
+        "test_e_j_d2_a_quiet_public_address_falls_back_to_w",
+    ),
     "randomized_mac": ("test_lookup_engine.py", "test_double_nat_candidates_without_destination"),
     "session_changed_exit": ("test_lookup_egress.py", "test_e_k3_a_session_that_changes_exit"),
     "session_from_unknown_source": (
@@ -2682,6 +2864,16 @@ def read_module(name: str) -> tuple[dict[str, Any], dict[str, ast.FunctionDef]]:
     return constants, functions
 
 
+def asserted(node: ast.AST) -> list[ast.AST]:
+    """``node`` and the nodes below it, without those under a ``not`` or a ``not in``: a test
+    that asserts a key absent does not emit it."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return []
+    if isinstance(node, ast.Compare) and any(isinstance(op, ast.NotIn) for op in node.ops):
+        return []
+    return [node, *(below for child in ast.iter_child_nodes(node) for below in asserted(child))]
+
+
 def names_key(module: str, test: str, key: str) -> bool:
     constants, functions = read_module(module)
     if test not in functions:
@@ -2689,7 +2881,7 @@ def names_key(module: str, test: str, key: str) -> bool:
     function = functions[test]
     helpers = [
         functions[node.func.id]
-        for node in ast.walk(function)
+        for node in asserted(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id in functions
@@ -2698,7 +2890,21 @@ def names_key(module: str, test: str, key: str) -> bool:
         (isinstance(node, ast.Constant) and node.value == key)
         or (isinstance(node, ast.Name) and constants.get(node.id) == key)
         for body in (function, *helpers)
-        for node in ast.walk(body)
+        for node in asserted(body)
+    )
+
+
+def test_a_key_asserted_absent_is_not_named() -> None:
+    """``names_key`` skips a mention under ``not`` or ``not in``: the internal NAT address test
+    names ``public_ip_not_transip`` only in ``assert not {…} & keys``, so it emits nothing of
+    it; the quiet-W test asserts it present."""
+    assert not names_key(
+        "test_lookup_egress.py", "test_e_q_an_internal_nat_address", "public_ip_not_transip"
+    )
+    assert names_key(
+        "test_lookup_egress.py",
+        "test_e_j_d2_a_quiet_public_address_falls_back_to_w",
+        "public_ip_not_transip",
     )
 
 
