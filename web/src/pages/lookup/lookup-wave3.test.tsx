@@ -475,9 +475,9 @@ const LOW_REASONS: Partial<Record<string, Explanation>> = {
   fortigate_dhcp_not_converted_since_lease: {
     key: 'fortigate_dhcp_not_converted_since_lease',
     text_tr:
-      'Bu kiranın 03.09.2026 08:00:00 anındaki son DHCP kaydından sonra, istenen andan önce, 172.20.42.61 adresi ya da bu kiranın MAC adresi için kira zaman çizelgesinin bu kiraya uygulamadığı FortiGate DHCP kayıtları var. Zincir bu nedenle düşük güvenle gösterildi.',
+      'Bu kiranın 03.09.2026 08:00:00 anındaki son DHCP kaydından sonra, istenen andan önce, 172.20.42.61 adresi ya da bu kiranın MAC adresi için kira zaman çizelgesinin bu kiraya uygulamadığı FortiGate DHCP kayıtları var',
     text_en:
-      "After this lease's last DHCP record at 03.09.2026 08:00:00 and before the requested moment there are FortiGate DHCP records for 172.20.42.61 or for this lease's MAC address that the lease timeline did not apply to this lease. The chain is shown with low confidence.",
+      "After this lease's last DHCP record at 03.09.2026 08:00:00 and before the requested moment there are FortiGate DHCP records for 172.20.42.61 or for this lease's MAC address that the lease timeline did not apply to this lease",
     params: { last: '2026-09-03T05:00:00+00:00', ip: '172.20.42.61' },
   },
 };
