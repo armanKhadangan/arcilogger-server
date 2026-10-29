@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import i18n from '@/lib/i18n';
 
 import {
@@ -17,6 +14,8 @@ import {
   type EgressRow,
 } from './egress-model';
 
+import sharedCases from '../../../../tests/fixtures/egress-cases.json';
+
 interface EgressCase {
   name: string;
   value: unknown;
@@ -24,16 +23,18 @@ interface EgressCase {
   normalised?: unknown;
 }
 
-/**
- * The exit validation cases (contract 2.8.1). A HAND MOCK of `tests/fixtures/egress-cases.json`,
- * which `db/tests/test_egress.py` reads too once WP-C1 has written it; the second step of WP-E
- * reads that file here instead.
- */
-const CASES = (
-  JSON.parse(
-    readFileSync(join(process.cwd(), 'src', 'test', 'egress-cases.hand.json'), 'utf8'),
-  ) as { cases: EgressCase[] }
-).cases;
+/** An upgrade's conversion of the legacy NAT keys (contract 2.8.2): the exits it gives. */
+interface LegacyCase {
+  name: string;
+  exits: Record<string, unknown>;
+  valid: boolean;
+}
+
+// The exit validation cases (contract 2.8.1), shared with the server (db/tests/test_egress.py).
+const { cases: CASES, legacy: LEGACY } = sharedCases as unknown as {
+  cases: EgressCase[];
+  legacy: LegacyCase[];
+};
 
 /** The server's codes of the exit rules (`arcilogger_db.egress.ERROR_CODES` and the shared two). */
 const SERVER_CODES = [
@@ -318,6 +319,21 @@ describe('the editor warnings (contract 2.13)', () => {
     // Alone (legacy (c)), a converted wan has no partner to be one line with.
     expect(egressWarnings([wan]).rows.wan).not.toContain('converted');
   });
+
+  it.each(LEGACY.map((item) => [item.name, item] as const))(
+    'the upgrade of %s: the server rules and the converted warning',
+    (_name, item) => {
+      expect(validateEgresses(item.exits).refusal === undefined).toBe(item.valid);
+      // Every exit the converter gives is recognised by its shape: the warning shows on each
+      // while exits of both kinds (a public address and the NAT or catch-all line) are there.
+      const names = Object.keys(item.exits);
+      const both =
+        names.some((name) => name.startsWith('genel-')) &&
+        names.some((name) => name === 'wan' || name === 'tanimsiz');
+      const found = egressWarnings(rowsFromValue(item.exits)).rows;
+      for (const name of names) expect(found[name]?.includes('converted'), name).toBe(both);
+    },
+  );
 });
 
 describe('the observed panel prefill (contract 2.13)', () => {

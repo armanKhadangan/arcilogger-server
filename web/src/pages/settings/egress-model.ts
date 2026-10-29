@@ -241,7 +241,7 @@ function exitOf(name: string, value: unknown): Exit {
   if (!(EGRESS_MODES as readonly unknown[]).includes(fields.mode))
     refuse('setting_egress_mode', { exit: name, field: 'mode' });
   const mode = fields.mode as EgressMode;
-  const label = fields.label ?? '';
+  const label = fields.label === undefined ? '' : fields.label;
   if (typeof label !== 'string' || codePointLength(label) > MAX_LABEL || CONTROL.test(label))
     refuse('setting_egress_label', { exit: name, field: 'label' });
   const exit: Exit = {
@@ -253,11 +253,12 @@ function exitOf(name: string, value: unknown): Exit {
     interfaces: interfaces(fields.interfaces, name),
     port_preservation: 'unknown',
   };
-  const preservation = fields.port_preservation ?? 'unknown';
+  const preservation =
+    fields.port_preservation === undefined ? 'unknown' : fields.port_preservation;
   if (!(PORT_PRESERVATION as readonly unknown[]).includes(preservation))
     refuse('setting_egress_port_preservation', { exit: name, field: 'port_preservation' });
   exit.port_preservation = preservation as PortPreservation;
-  const dynamic = fields.public_dynamic ?? false;
+  const dynamic = fields.public_dynamic === undefined ? false : fields.public_dynamic;
   if (typeof dynamic !== 'boolean')
     refuse('setting_egress_field', { exit: name, field: 'public_dynamic' });
   exit.public_dynamic = dynamic;
