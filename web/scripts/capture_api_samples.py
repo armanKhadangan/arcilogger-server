@@ -67,12 +67,14 @@ The search, live tail and sources pages' samples (``search.json``, ``live.json``
 come from modules of their own next to this script, each kept with its API
 (``samples_search.py``, ``samples_live_sources.py``, ``samples_network.py``): their ``capture``
 runs on the main site after step 7's pages, in that order, and returns ``{file name: data}``; a
-file whose data is empty is not written. The Uyum Durumu samples (``compliance.json``, Wave 4
-contract 2.3) come from ``samples_compliance.py``, run on the main site after the others (the
-cards read the whole site). The Wave 3 lookups (FortiGate DHCP alone, srcmac, the
-internet exits' cases, a source clock, an unconverted DHCP line, an unconfigured sender;
-``samples_lookups.py``) run last, on a second lookup site with a database and data directory of
-its own, and are merged into ``lookups.json`` and ``raw.json``.
+file whose data is empty is not written. The Uyum Durumu and Sistem samples (``compliance.json``;
+``system.json``, ``system-disk.json``, ``system-health.json``; Wave 4 contract 2.3, 2.5, 2.6)
+come from ``samples_compliance.py`` and ``samples_system.py``, run on the main site after the
+others (the cards read the whole site; the Sistem samples fix what the host would say). The
+Wave 3 lookups (FortiGate DHCP alone, srcmac, the internet exits' cases, a source clock, an
+unconverted DHCP line, an unconfigured sender; ``samples_lookups.py``) run last, on a second
+lookup site with a database and data directory of its own, and are merged into ``lookups.json``
+and ``raw.json``.
 
 Steps 1-7 run with every licence module on, as the tests do by default
 (``override_status(all_modules_status())``): those samples describe their own pages, not the
@@ -208,12 +210,19 @@ import samples_live_sources  # noqa: E402
 import samples_lookups  # noqa: E402
 import samples_network  # noqa: E402
 import samples_search  # noqa: E402
+import samples_system  # noqa: E402
 
 #: The pages whose samples a module of their own captures (module text), in this order:
 #: ``samples_network`` writes sessions of the day before "now", after the pages before it
-#: captured; the Wave 4 pages (``samples_compliance``) read the whole site as every other page
-#: left it, so they come last and change no earlier sample.
-SAMPLE_MODULES = (samples_search, samples_live_sources, samples_network, samples_compliance)
+#: captured; the Wave 4 pages (``samples_compliance``, ``samples_system``) read the whole site as
+#: every other page left it, so they come last and change no earlier sample.
+SAMPLE_MODULES = (
+    samples_search,
+    samples_live_sources,
+    samples_network,
+    samples_compliance,
+    samples_system,
+)
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "e2e" / "samples"
 API = "/api/v1"
