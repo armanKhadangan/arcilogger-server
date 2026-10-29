@@ -47,6 +47,7 @@ import type {
   VerifyResult,
   VlanOut,
 } from '../src/lib/api-types';
+import type { ComplianceStatus, ConfigBackupOut } from '../src/lib/compliance-types';
 import type { LiveStatus, LiveStreamOut } from '../src/lib/live-types';
 import type {
   FieldCatalogue,
@@ -496,6 +497,22 @@ export const SOURCES = load('sources') as {
   detail: Record<string, SourceDetail>;
   tail: { 'core-r1': SourceTail; no_file_today: SourceTail };
   dashboard: DashboardSummary;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Uyum Durumu (captured, Wave 4 contract 2.3, `samples_compliance.py`): the ten cards for the
+ * administrator and the auditor (card 7 with its `R20-filter` alert, card 10 waiting for the
+ * configuration copy), the report download (headers, size and hash), the backup confirmation and
+ * the cards after it (card 10 ok), and the refusals (`forbidden`, `config_backup_unreadable`).
+ */
+export const COMPLIANCE = load('compliance') as {
+  meta: SampleMeta;
+  admin: ComplianceStatus;
+  auditor: ComplianceStatus;
+  report_pdf: FileSample;
+  config_backup: ConfigBackupOut;
+  after_backup: ComplianceStatus;
   errors: Record<string, ErrorSample>;
 };
 
