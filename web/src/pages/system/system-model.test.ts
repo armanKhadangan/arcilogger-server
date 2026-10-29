@@ -111,14 +111,36 @@ describe('disk forecast', () => {
     );
   });
 
-  it('gives only the day it is full once the drive is past the warning mark', () => {
+  it('gives only the day it is full once the drive has reached the warning mark', () => {
     const drive = driveInfo('system', { forecast: 'estimated', usedPercent: 84 });
     drive.forecast.warning_on = null;
     expect(forecastText(drive, W4_NOW, tr, 'tr')).toBe(
-      '%80 eşiği aşıldı; bu hızla dolmaya 02.03.2027 (~140 gün).',
+      '%80 eşiğine ulaşıldı; bu hızla dolmaya 02.03.2027 (~140 gün).',
     );
     expect(forecastText(drive, W4_NOW, en, 'en')).toBe(
-      'The 80% mark is passed; at this rate the drive is full on 02.03.2027 (~140 days).',
+      'The 80% mark is reached; at this rate the drive is full on 02.03.2027 (~140 days).',
+    );
+  });
+
+  it('agrees with the badge on a drive exactly at the warning mark', () => {
+    // W4-B: at or above the mark, `warning_on` is null; the badge warns only above it.
+    const drive = driveInfo('data', { usedPercent: 80 });
+    drive.forecast.warning_on = null;
+    expect(tr(DRIVE_STYLE[driveLevel(drive)].label)).toBe('Olağan');
+    expect(forecastText(drive, W4_NOW, tr, 'tr')).toBe(
+      '%80 eşiğine ulaşıldı; bu hızla dolmaya 02.03.2027 (~140 gün).',
+    );
+  });
+
+  it('gives no day for a drive that grows too slowly to forecast', () => {
+    // W4-B deviation `forecast.HORIZON_DAYS`: `estimated` with no days and a growth of 0 bytes.
+    const drive = driveInfo('data', { forecast: 'undated' });
+    expect(drive.forecast).toMatchObject({ state: 'estimated', full_on: null });
+    expect(forecastText(drive, W4_NOW, tr, 'tr')).toBe(
+      'Disk kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor.',
+    );
+    expect(forecastText(drive, W4_NOW, en, 'en')).toBe(
+      'Disk use grows very slowly; no date can be given.',
     );
   });
 
@@ -154,6 +176,11 @@ describe('state badges', () => {
     expect(driveLevel(driveInfo('data', { usedPercent: 80 }))).toBe('ok');
     expect(driveLevel(driveInfo('data', { usedPercent: 81 }))).toBe('warning');
     expect(driveLevel(driveInfo('data', { usedPercent: 95 }))).toBe('critical');
+    // A warning mark above the critical one (`alerts.disk_used_percent` up to 99): below it the
+    // alert raises nothing, above it the alert is critical.
+    const high = { ...driveInfo('data', { usedPercent: 96 }), warning_percent: 97 };
+    expect(driveLevel(high)).toBe('ok');
+    expect(driveLevel({ ...high, used_percent: 98 })).toBe('critical');
     expect(DRIVE_STYLE.critical.tone).toBe('danger');
     expectWorded(DRIVE_STYLE);
   });

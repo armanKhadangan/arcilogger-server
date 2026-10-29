@@ -38,9 +38,9 @@
     "forecast": {
       "estimated_one": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{count}} day).",
       "estimated_other": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{count}} days).",
-      "estimatedFull_one": "The {{warning}}% mark is passed; at this rate the drive is full on {{fullOn}} (~{{count}} day).",
-      "estimatedFull_other": "The {{warning}}% mark is passed; at this rate the drive is full on {{fullOn}} (~{{count}} days).",
-      "growth": "Disk use grows by about {{size}} a day.",
+      "estimatedFull_one": "The {{warning}}% mark is reached; at this rate the drive is full on {{fullOn}} (~{{count}} day).",
+      "estimatedFull_other": "The {{warning}}% mark is reached; at this rate the drive is full on {{fullOn}} (~{{count}} days).",
+      "noDate": "Disk use grows very slowly; no date can be given.",
       "insufficient": "A forecast needs at least 7 days of samples ({{samples}}/7).",
       "notGrowing": "Disk use did not grow in the last 30 days."
     },

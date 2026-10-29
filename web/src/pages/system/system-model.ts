@@ -87,13 +87,13 @@ export type DriveLevel = 'ok' | 'warning' | 'critical';
 
 /**
  * A drive's level by the server's marks, as the disk alert judges it
- * (`worker/src/arcilogger_worker/alerts/system.py` `check_disk`): above `warning_percent` it warns,
- * from `critical_percent` on it is critical.
+ * (`worker/src/arcilogger_worker/alerts/system.py` `check_disk`): nothing up to `warning_percent`;
+ * above it a warning, critical from `critical_percent` on. A warning mark set above the critical
+ * one (`alerts.disk_used_percent` takes up to 99) raises nothing below it, critical or not.
  */
 export function driveLevel(drive: DriveInfo): DriveLevel {
-  if (drive.used_percent >= drive.critical_percent) return 'critical';
-  if (drive.used_percent > drive.warning_percent) return 'warning';
-  return 'ok';
+  if (drive.used_percent <= drive.warning_percent) return 'ok';
+  return drive.used_percent >= drive.critical_percent ? 'critical' : 'warning';
 }
 
 export const DRIVE_STYLE: Record<DriveLevel, StateStyle> = {
@@ -133,18 +133,17 @@ export function forecastText(
     case 'not_growing':
       return t('system.forecast.notGrowing');
     case 'estimated': {
-      if (forecast.full_on === null) {
-        // Not expected (a growing line reaches the total), but the type allows it.
-        return t('system.forecast.growth', {
-          size: formatBytes(forecast.growth_bytes_per_day ?? 0, lang),
-        });
-      }
+      // A drive that grows so slowly that its full day lies beyond the server's horizon (about
+      // 100 years, W4-B deviation `forecast.HORIZON_DAYS`) has no day; its growth may round to 0.
+      if (forecast.full_on === null) return t('system.forecast.noDate');
       const values = {
         count: daysBetween(siteToday(new Date(checkedAt)), forecast.full_on),
         warning: formatNumber(drive.warning_percent, 0, lang),
         fullOn: formatDay(forecast.full_on),
       };
-      // `warning_on` is null when the drive is already past the mark: only the day it is full.
+      // With a full day, `warning_on` is null only when a measurement has reached the mark (at or
+      // above it, W4-B): only the day it is full. "Reached", not "passed": at exactly the mark
+      // the badge still says "Olağan" (`driveLevel`).
       return forecast.warning_on === null
         ? t('system.forecast.estimatedFull', values)
         : t('system.forecast.estimated', { ...values, warningOn: formatDay(forecast.warning_on) });

@@ -666,9 +666,23 @@ export function hostInfo(kind: 'measured' | 'first_reading' | 'unreadable' = 'me
   };
 }
 
-/** A forecast in each state; `estimated` for the data drive below (54 %, 6 GiB a day). */
-export function diskForecast(state: DiskForecast['state']): DiskForecast {
+/**
+ * A forecast of each kind; `estimated` for the data drive below (54 %, 6 GiB a day), `undated` an
+ * `estimated` drive that grows by less than half a byte a day, so both days lie beyond the
+ * server's 100-year horizon (W4-B deviation `forecast.HORIZON_DAYS`).
+ */
+export type ForecastCase = DiskForecast['state'] | 'undated';
+
+export function diskForecast(state: ForecastCase): DiskForecast {
   switch (state) {
+    case 'undated':
+      return {
+        state: 'estimated',
+        samples: 30,
+        growth_bytes_per_day: 0,
+        warning_on: null,
+        full_on: null,
+      };
     case 'estimated':
       return {
         state,
@@ -702,7 +716,7 @@ export function diskForecast(state: DiskForecast['state']): DiskForecast {
  */
 export function driveInfo(
   role: DriveInfo['role'],
-  { forecast, usedPercent }: { forecast?: DiskForecast['state']; usedPercent?: number } = {},
+  { forecast, usedPercent }: { forecast?: ForecastCase; usedPercent?: number } = {},
 ): DriveInfo {
   const total = role === 'data' ? 2_000_398_934_016 : 255_383_244_800;
   const used =

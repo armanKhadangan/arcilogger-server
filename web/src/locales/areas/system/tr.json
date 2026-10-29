@@ -38,9 +38,9 @@
     "forecast": {
       "estimated_one": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{count}} gün).",
       "estimated_other": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{count}} gün).",
-      "estimatedFull_one": "%{{warning}} eşiği aşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
-      "estimatedFull_other": "%{{warning}} eşiği aşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
-      "growth": "Disk kullanımı günde yaklaşık {{size}} artıyor.",
+      "estimatedFull_one": "%{{warning}} eşiğine ulaşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
+      "estimatedFull_other": "%{{warning}} eşiğine ulaşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
+      "noDate": "Disk kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor.",
       "insufficient": "Tahmin için en az 7 günlük ölçüm gerekiyor ({{samples}}/7).",
       "notGrowing": "Son 30 günde disk kullanımı artmadı."
     },
