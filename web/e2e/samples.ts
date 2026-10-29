@@ -73,6 +73,8 @@ import type {
   UploadPreview,
 } from '../src/lib/settings-types';
 import type { SourceDetail, SourcesOverview, SourceTail } from '../src/lib/sources-types';
+import type { SystemHealth } from '../src/lib/system-health-types';
+import type { SystemDisk, SystemSummary } from '../src/lib/system-types';
 import type { LicenseSamples } from '../src/test/license-samples';
 
 function load(name: string): unknown {
@@ -513,6 +515,42 @@ export const COMPLIANCE = load('compliance') as {
   report_pdf: FileSample;
   config_backup: ConfigBackupOut;
   after_backup: ComplianceStatus;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Sistem (captured, Wave 4 contract 2.5, `samples_system.py`, a Windows host: data drive `D:`,
+ * system drive `C:`): the summary with the processor measured and the first reading of a process
+ * (`cpu_percent` null), and the auditor's refusal (`system.read` is the administrators' only).
+ */
+export const SYSTEM = load('system') as {
+  meta: SampleMeta;
+  summary: SystemSummary;
+  summary_first_reading: SystemSummary;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * The drives alone (`GET /system/disk`, the Panel's disk card): `disk` with the data drive's
+ * forecast `estimated` and the system drive's `insufficient` (three samples), `disk_not_growing`
+ * with the data drive `not_growing`, and the auditor's refusal.
+ */
+export const SYSTEM_DISK = load('system-disk') as {
+  meta: SampleMeta;
+  disk: SystemDisk;
+  disk_not_growing: SystemDisk;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Services, scheduled tasks, worker jobs and the clock (captured, Wave 4 contract 2.6): the
+ * tasks `ok`, `late`, `missing`, `not_used` and `not_observable`, the jobs `ok`, `failing`,
+ * `skipped`, `running` and `never`, the clock samples of today (one probe no server answered),
+ * and the auditor's refusal.
+ */
+export const SYSTEM_HEALTH = load('system-health') as {
+  meta: SampleMeta;
+  health: SystemHealth;
   errors: Record<string, ErrorSample>;
 };
 
