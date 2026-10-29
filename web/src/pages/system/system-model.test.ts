@@ -225,6 +225,10 @@ describe('state badges', () => {
     const sample = { ...need(CLOCK_SAMPLES[0], 'clock sample'), offset_ms: -1000 };
     expect(sampleState(sample, 1000)).toBe('over');
     expect(sampleState({ ...sample, offset_ms: 999.9 }, 1000)).toBe('ok');
+    expect(tr(SAMPLE_STYLE.over.label)).toBe('Sınırda ya da üstünde');
+    // As the Uyum Durumu clock card, which says "Sorun" for both.
+    expect(SAMPLE_STYLE.over.tone).toBe('danger');
+    expect(SAMPLE_STYLE.noAnswer.tone).toBe('danger');
     expectWorded(SAMPLE_STYLE);
   });
 

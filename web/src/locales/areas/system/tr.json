@@ -199,7 +199,7 @@
       },
       "sample": {
         "ok": "Sınır içinde",
-        "over": "Sınırın üstünde",
+        "over": "Sınırda ya da üstünde",
         "noAnswer": "Yanıt yok"
       },
       "database": {

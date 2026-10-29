@@ -15,6 +15,7 @@ import {
   EyeOff,
   FileQuestion,
   Hourglass,
+  SignalZero,
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
@@ -202,10 +203,11 @@ export function sampleState(sample: ClockSampleOut, limitMs: number): SampleStat
   return Math.abs(sample.offset_ms) < limitMs ? 'ok' : 'over';
 }
 
+/** Both are "Sorun" on the Uyum Durumu clock card (contract 2.3.3, card 6). */
 export const SAMPLE_STYLE: Record<SampleState, StateStyle> = {
   ok: { tone: 'success', icon: CircleCheck, label: 'system.state.sample.ok' },
-  over: { tone: 'danger', icon: TriangleAlert, label: 'system.state.sample.over' },
-  noAnswer: { tone: 'warning', icon: CircleX, label: 'system.state.sample.noAnswer' },
+  over: { tone: 'danger', icon: CircleX, label: 'system.state.sample.over' },
+  noAnswer: { tone: 'danger', icon: SignalZero, label: 'system.state.sample.noAnswer' },
 };
 
 /** The ingest's database connection: `null` when its status file does not say. */
