@@ -5,7 +5,9 @@ interface's ``PATCH /settings`` and ``POST /settings/{key}/reset`` (ADR-0014, co
 :func:`change_setting`:
 
 * the key must be a known setting and the value valid for it
-  (:func:`arcilogger_db.settings.validate_setting`, normalised);
+  (:func:`arcilogger_db.settings.validate_setting`, normalised), also together with the other
+  settings (:func:`arcilogger_db.settings.check_settings_together`: the ARP grace is at most the
+  ARP interval);
 * the row is written with ``updated_by = NAME`` — never ``:seed``, so ``arcilogger-db upgrade``
   never puts the shipped default back over it (:mod:`arcilogger_db.seed`);
 * the same transaction appends ``settings.change`` with ``{"old": …, "new": …}`` to the
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import copy
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -41,6 +44,7 @@ from arcilogger_db.models import Setting
 from arcilogger_db.settings import (
     DEFAULT_SETTINGS,
     SYSTEM_AUTHOR,
+    check_settings_together,
     get_setting,
     set_setting,
     validate_setting,
@@ -83,14 +87,20 @@ def change_setting(
     actor_id: int | None = None,
     ip: str | None = None,
     details: dict[str, Any] | None = None,
+    together: Mapping[str, Any] | None = None,
 ) -> SettingChange:
     """Validate, write and audit one change in the caller's (READ COMMITTED) transaction; the
     caller commits. ``actor_id`` and ``ip``: the signed-in user and the request's address (the
-    web interface; ``None`` on the console). ``ValueError`` for an invalid actor,
+    web interface; ``None`` on the console). ``together``: the validated values of the other
+    changes of the same write (``PATCH /settings``), which the rules between keys read instead
+    of the stored ones. ``ValueError`` for an invalid actor,
     :class:`~arcilogger_db.settings.SettingValueError` (a ``ValueError``) for an unknown key or
     an invalid value."""
     name = check_actor(actor)
     new = validate_setting(key, value)
+    problems = check_settings_together(session, {**(together or {}), key: new})
+    if problems:
+        raise problems[0]
     old = get_setting(session, key)
     set_setting(session, key, new, updated_by=name)
     entry = append_entry(

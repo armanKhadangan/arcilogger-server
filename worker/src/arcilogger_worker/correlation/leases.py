@@ -44,6 +44,7 @@ of the DHCP intervals. The job report counts the FortiGate rows read and refused
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter, defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -118,6 +119,8 @@ LOOKAHEAD_CHUNK: Final = timedelta(days=1)
 CATCH_UP_AFTER: Final = timedelta(days=1)
 #: Setting: ARP sightings this soon after a release of the pair are stale entries (seconds).
 RELEASE_GRACE_KEY: Final = "arp.ignore_after_release_seconds"
+
+log = logging.getLogger("arcilogger_worker.leases")
 
 
 # -- report ---------------------------------------------------------------------------------------
@@ -217,7 +220,10 @@ class Context:
         ``nat.egresses`` is kept as stored and never parsed here (``LookupSettings``), so an
         exit value that cannot be read never stops the lease timeline."""
         settings = LookupSettings.from_settings(get_settings(session))
-        release_grace = int(get_setting(session, RELEASE_GRACE_KEY, DEFAULT_RELEASE_GRACE))
+        release_grace = _release_grace(
+            get_setting(session, RELEASE_GRACE_KEY, DEFAULT_RELEASE_GRACE),
+            settings.arp_interval_seconds,
+        )
         rules = TimelineRules.from_settings(settings, release_grace=release_grace)
         if rules.shortest_timeout < TRAFFIC_BUCKET_SECONDS:
             raise ValueError("lease timeouts must be longer than the traffic bucket (300 s)")
@@ -261,6 +267,22 @@ class Context:
             row = find_vlan(self.session, ip)
             self._networks[ip] = (None, None) if row is None else (row.vlan_id, str(row.subnet))
         return self._networks[ip]
+
+
+def _release_grace(value: object, interval: int) -> int:
+    """``arp.ignore_after_release_seconds`` as the timeline can use it, read as the lookup reads
+    it: a value written around the validator that is no integer, negative or longer than the ARP
+    interval gives the shipped default, at most the interval, and a warning (the key and the
+    rule only), so the lease job never stops on it."""
+    if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= interval:
+        return value
+    default = min(DEFAULT_RELEASE_GRACE, interval)
+    log.warning(
+        "%s is not an integer between 0 and arp.interval_seconds; the default %d s applies",
+        RELEASE_GRACE_KEY,
+        default,
+    )
+    return default
 
 
 # -- evidence from the database -------------------------------------------------------------------

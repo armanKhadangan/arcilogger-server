@@ -4,24 +4,28 @@ re-authentication and console-only keys, ``change_setting`` with the user and th
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_db.audit import verify_audit_chain
 from arcilogger_db.egress import CHANGES_KEY, fingerprint
 from arcilogger_db.egress import ERROR_CODES as EGRESS_ERROR_CODES
 from arcilogger_db.models import ROLES, AuditLog, Setting, User
 from arcilogger_db.settings import (
+    AT_MOST_SETTINGS,
     DEFAULT_SETTINGS,
     LOCKED_KEYS,
     REAUTH_KEYS,
     SETTING_ERRORS,
     SettingValueError,
+    check_settings_together,
     email_addresses,
     get_setting,
+    set_setting,
     validate_setting,
 )
 from arcilogger_db.settings_admin import change_setting, reset_setting
@@ -266,8 +270,12 @@ def test_every_refusal_has_a_code_and_both_texts(
 def test_every_code_of_the_catalogue_is_a_refusal() -> None:
     # The codes of the exit rules of nat.egresses (arcilogger_db.egress) are refusals of
     # validate_egresses, which the settings module wraps; they are produced by its own tests.
+    # The codes of the rules between keys are refusals of check_settings_together (below).
     assert set(SETTING_ERRORS) >= EGRESS_ERROR_CODES
-    assert {code for _, _, code, _ in REFUSALS} | EGRESS_ERROR_CODES == set(SETTING_ERRORS)
+    together = {code for _, *codes in AT_MOST_SETTINGS.values() for code in codes}
+    assert {code for _, _, code, _ in REFUSALS} | EGRESS_ERROR_CODES | together == set(
+        SETTING_ERRORS
+    )
     for message_tr, message_en in SETTING_ERRORS.values():
         assert message_tr.endswith(".")
         assert message_en.endswith(".")
@@ -375,6 +383,119 @@ def test_reset_puts_the_shipped_default_back_and_is_audited(db_session: Session)
     with pytest.raises(SettingValueError) as caught:
         reset_setting(db_session, "no.such.key", actor="ayse")
     assert caught.value.code == "setting_unknown"
+
+
+# -- rules between keys: the ARP grace is at most the ARP interval (#40 item 6) --------------------
+
+GRACE = "arp.ignore_after_release_seconds"
+INTERVAL = "arp.interval_seconds"
+
+
+def test_the_arp_interval_is_never_shorter_than_the_grace(db_session: Session) -> None:
+    """With the shipped grace (300 s) an interval under 300 s would stop the lease job on every
+    run (``TimelineRules``): refused, either way round, and nothing is written or audited."""
+    with pytest.raises(SettingValueError) as caught:
+        change_setting(db_session, INTERVAL, 120, actor="Tolga Yılmaz")
+    refusal = caught.value
+    assert (refusal.key, refusal.code) == (INTERVAL, "setting_arp_interval_below_grace")
+    assert str(refusal) == f"{INTERVAL}: en az {GRACE} kadar olmalı"
+    assert refusal.message_tr == (
+        "Bırakmadan sonra ARP'yi yok sayma süresinden (arp.ignore_after_release_seconds) kısa "
+        "olamaz; o süreyi de kısaltın."
+    )
+    assert refusal.message_en == (
+        "Cannot be shorter than the time ARP is ignored after a release "
+        "(arp.ignore_after_release_seconds); shorten that one too."
+    )
+    with pytest.raises(SettingValueError) as caught:
+        change_setting(db_session, GRACE, 3601, actor="Tolga Yılmaz")
+    refusal = caught.value
+    assert (refusal.key, refusal.code) == (GRACE, "setting_arp_grace_above_interval")
+    assert str(refusal) == f"{GRACE}: en çok {INTERVAL} kadar olabilir"
+    assert refusal.message_tr == "ARP kaydı aralığından (arp.interval_seconds) uzun olamaz."
+    assert refusal.message_en == (
+        "Cannot be longer than the ARP log interval (arp.interval_seconds)."
+    )
+    assert (get_setting(db_session, INTERVAL), get_setting(db_session, GRACE)) == (3600, 300)
+    assert not _entries(db_session)
+
+    # A grace as long as the interval is allowed; shortened first, the interval can follow.
+    change_setting(db_session, GRACE, 3600, actor="Tolga Yılmaz")
+    change_setting(db_session, GRACE, 120, actor="Tolga Yılmaz")
+    change_setting(db_session, INTERVAL, 120, actor="Tolga Yılmaz")
+    assert (get_setting(db_session, GRACE), get_setting(db_session, INTERVAL)) == (120, 120)
+    with pytest.raises(SettingValueError) as caught:
+        change_setting(db_session, GRACE, 121, actor="Tolga Yılmaz")
+    assert caught.value.code == "setting_arp_grace_above_interval"
+    # The shipped grace (300 s) no longer fits: its reset is refused too.
+    with pytest.raises(SettingValueError) as caught:
+        reset_setting(db_session, GRACE, actor="Tolga Yılmaz")
+    assert caught.value.code == "setting_arp_grace_above_interval"
+    assert get_setting(db_session, GRACE) == 120
+    assert len(_entries(db_session)) == 3
+
+
+@pytest.mark.parametrize("order", [(INTERVAL, GRACE), (GRACE, INTERVAL)])
+def test_changes_of_one_write_are_checked_together(
+    db_session: Session, order: tuple[str, str]
+) -> None:
+    """``PATCH /settings`` writes its changes one by one with the others as ``together``, so a
+    shorter interval and a shorter grace in one write pass in either order."""
+    values = {INTERVAL: 120, GRACE: 60}
+    for key in order:
+        change_setting(db_session, key, values[key], actor="ayse", together=values)
+    assert (get_setting(db_session, INTERVAL), get_setting(db_session, GRACE)) == (120, 60)
+    errors = check_settings_together(db_session, {INTERVAL: 100, GRACE: 200})
+    assert [(error.key, error.code) for error in errors] == [
+        (GRACE, "setting_arp_grace_above_interval"),
+        (INTERVAL, "setting_arp_interval_below_grace"),
+    ]
+    assert check_settings_together(db_session, {"lookup.tolerance_seconds": 90}) == []
+
+
+def test_two_writes_of_the_two_keys_at_once_are_checked_one_after_the_other(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Each change alone would pass against the other's old value (interval 600 >= grace 300,
+    grace 900 <= interval 3600); the second is checked once the first has committed."""
+    first, second = db_session_factory(), db_session_factory()
+    refused: list[SettingValueError] = []
+
+    def lengthen_the_grace() -> None:
+        try:
+            change_setting(second, GRACE, 900, actor="tolga")
+            second.commit()
+        except SettingValueError as exc:
+            refused.append(exc)
+            second.rollback()
+
+    try:
+        change_setting(first, INTERVAL, 600, actor="ayse")  # holds the lock until it commits
+        other = threading.Thread(target=lengthen_the_grace)
+        other.start()
+        other.join(1.0)
+        assert other.is_alive()  # waiting for the first write
+        first.commit()
+        other.join(10)
+        assert not other.is_alive()
+        assert [(exc.key, exc.code) for exc in refused] == [
+            (GRACE, "setting_arp_grace_above_interval")
+        ]
+        with db_session_factory() as session:
+            assert (get_setting(session, INTERVAL), get_setting(session, GRACE)) == (600, 300)
+    finally:
+        first.close()
+        second.close()
+
+
+def test_a_grace_written_around_the_validator_never_blocks_the_interval(
+    db_session: Session,
+) -> None:
+    """A value no rule can compare (not an integer) is the lease job's to read as its default;
+    it does not hold back a change of the other key."""
+    set_setting(db_session, GRACE, "300", updated_by="ayse")
+    change_setting(db_session, INTERVAL, 120, actor="ayse")
+    assert get_setting(db_session, INTERVAL) == 120
 
 
 # -- the change record of the internet exits (ADR-0016 D32) ---------------------------------------
