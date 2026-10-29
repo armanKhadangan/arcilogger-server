@@ -199,7 +199,8 @@
       "fortigateLease": "lease time (FortiGate record): {{lease}} s · last DHCP evidence: {{last}}",
       "fortigateLeaseConfigured": "lease time: configured time · last DHCP evidence: {{last}}",
       "unconvertedTitle": "FortiGate DHCP record not in the lease timeline",
-      "unconvertedNote": "not in the lease timeline; no chain built; no confidence given"
+      "unconvertedNote": "not in the lease timeline; no chain built; no confidence given",
+      "unconvertedSummary": "FortiGate DHCP record (not in the lease timeline; no chain built; no confidence given)"
     }
   },
   "evidenceTables": {

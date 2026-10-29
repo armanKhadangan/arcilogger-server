@@ -1222,7 +1222,7 @@
     "endReason": {
       "dhcp": "DHCP ile bitti",
       "timeout": "zaman aşımı",
-      "superseded": "başka cihaza verildi",
+      "superseded": "sonraki bir DHCP atamasıyla kapandı",
       "arp": "ARP kaydına göre",
       "open": "hâlâ açık"
     },

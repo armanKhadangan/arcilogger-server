@@ -254,6 +254,12 @@ export function LookupResults({ lookup, onOpen }: { lookup: LookupOut; onOpen: O
   const { t } = useTranslation();
   const lang = currentLang();
   const outcome = outcomeOf(lookup);
+  // The stored summary of an unconverted row is Turkish only: the fixed label in both languages
+  // (as the report prints it), in the list and in the raw-line sheet it opens.
+  const unconverted = (outcome?.unconverted_dhcp ?? []).map((ref) => ({
+    ...ref,
+    summary: t('network.lookup.unconvertedSummary'),
+  }));
   return (
     <div className="flex flex-col gap-4">
       <Card className="flex flex-col gap-3 p-4">
@@ -309,14 +315,14 @@ export function LookupResults({ lookup, onOpen }: { lookup: LookupOut; onOpen: O
               <ChainView chain={outcome.attribution} traffic={null} onOpen={onOpen} />
             </Card>
           ) : null}
-          {(outcome.unconverted_dhcp ?? []).length > 0 ? (
+          {unconverted.length > 0 ? (
             <Card className="flex flex-col gap-2 p-4" data-testid="unconverted-dhcp">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <FileWarning aria-hidden="true" className="size-4 text-warning-ink" />
                 {t('network.lookup.unconvertedTitle')}
               </h3>
               <p className="text-13 text-muted-strong">{t('network.lookup.unconvertedNote')}</p>
-              <EvidenceLinks refs={outcome.unconverted_dhcp ?? []} onOpen={onOpen} />
+              <EvidenceLinks refs={unconverted} onOpen={onOpen} />
             </Card>
           ) : null}
           {outcome.matches.length === 0 && !outcome.attribution ? (

@@ -1222,7 +1222,7 @@
     "endReason": {
       "dhcp": "ended by DHCP",
       "timeout": "timed out",
-      "superseded": "given to another device",
+      "superseded": "closed by a later DHCP assignment",
       "arp": "from ARP records",
       "open": "still open"
     },

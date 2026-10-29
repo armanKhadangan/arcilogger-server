@@ -199,7 +199,8 @@
       "fortigateLease": "kira süresi (FortiGate kaydı): {{lease}} sn · son DHCP kanıtı: {{last}}",
       "fortigateLeaseConfigured": "kira süresi: ayarlardaki süre · son DHCP kanıtı: {{last}}",
       "unconvertedTitle": "Kira zaman çizelgesine girmemiş FortiGate DHCP kaydı",
-      "unconvertedNote": "kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez"
+      "unconvertedNote": "kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez",
+      "unconvertedSummary": "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
     }
   },
   "evidenceTables": {
