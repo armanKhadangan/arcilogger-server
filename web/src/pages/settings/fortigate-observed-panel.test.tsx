@@ -198,7 +198,11 @@ describe('the observed NAT addresses', () => {
   });
 
   it('srcmac: a used interface, and none behind a router (limit 1)', async () => {
-    const { found } = await panel();
+    // The captured answer says vlan42 is configured; the settings it was computed from list it.
+    const { found } = await panel(
+      OBSERVED.observed,
+      lookupGroup({ 'lookup.srcmac_interfaces': ['vlan42'] }),
+    );
     const table = within(found).getByRole('table', {
       name: 'Oturum kayıtlarında srcmac taşıyan FortiGate arayüzleri',
     });
