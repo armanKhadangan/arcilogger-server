@@ -38,6 +38,7 @@ const MENUS: [string, string, string[]][] = [
       'Kullanım',
       'Mühürleme',
       'Kanıt Paketleri',
+      'Uyum Durumu',
       'Denetim Kaydı',
     ],
   ],
@@ -136,6 +137,31 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
     ),
   ).toEqual([]);
 });
+
+// Uyum Durumu: administrator and auditor; Sistem: administrator only (Wave 4 contract D15).
+for (const [username, paths] of [
+  ['ayse.yilmaz', ['/system']],
+  ['mehmet.kaya', ['/compliance', '/system']],
+  ['zeynep', ['/compliance', '/system']],
+] as const) {
+  test(`Uyum Durumu and Sistem stay closed by URL outside the role — ${username}`, async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: username });
+    for (const path of paths) {
+      await page.goto(path);
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
+      ).toBeVisible();
+    }
+    // Nothing was even asked of the API for those pages.
+    expect(
+      api.calls.filter((call) =>
+        ['/compliance', '/system'].some((prefix) => call.path.startsWith(prefix)),
+      ),
+    ).toEqual([]);
+  });
+}
 
 test('the report viewer cannot open the 5651, evidence, sealing or log pages either', async ({
   page,

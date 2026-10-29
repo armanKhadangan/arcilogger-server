@@ -116,6 +116,7 @@ ROLE_PERMISSIONS: Final[Mapping[str, frozenset[str]]] = {
             "evidence.read",
             "evidence.download",
             "audit.read",
+            "compliance.read",  # Uyum Durumu and its report (owner decision 2026-10-28, Q1)
         }
     ),
     "hr": frozenset(
