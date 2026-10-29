@@ -11,7 +11,7 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
     expect(menuFor('admin')).toEqual(NAV_ITEMS.map((item) => item.key));
   });
 
-  it('auditor: panel, live tail, search, lookup, usage (anonymous), sealing, evidence, audit', () => {
+  it('auditor: panel, live tail, search, lookup, usage (anonymous), sealing, evidence, compliance status, audit', () => {
     expect(menuFor('auditor')).toEqual([
       'dashboard',
       'live',
@@ -20,6 +20,7 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
       'usage',
       'sealing',
       'evidence',
+      'compliance',
       'audit',
     ]);
   });
@@ -77,6 +78,18 @@ describe('generated role contract', () => {
     expect(roleHas('viewer', 'usage.person')).toBe(false);
     expect(roleHas('admin', 'users.manage')).toBe(true);
     expect(roleHas('nobody', 'audit.read')).toBe(false);
+  });
+
+  it('gives Uyum Durumu to the auditor, Sistem and the settings to the administrator only', () => {
+    // Owner decision 2026-10-28 (Wave 4 contract D15, Q1, Q2).
+    expect(roleHas('auditor', 'compliance.read')).toBe(true);
+    expect(roleHas('auditor', 'system.read')).toBe(false);
+    expect(roleHas('auditor', 'settings.manage')).toBe(false);
+    for (const role of ['hr', 'viewer']) {
+      for (const permission of ['compliance.read', 'system.read', 'settings.manage']) {
+        expect(roleHas(role, permission), `${role} ${permission}`).toBe(false);
+      }
+    }
   });
 
   it('labels roles in both languages and knows the role ids', () => {
