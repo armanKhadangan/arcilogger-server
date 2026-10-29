@@ -738,6 +738,14 @@ def test_the_lookup_only_settings_never_stop_the_lease_timeline(values: dict[str
     assert (settings.srcmac_interfaces, settings.srcmac_max_ips) == ((), 1)
 
 
+@pytest.mark.parametrize("value", [["x"], "abc", 5, True])
+def test_lease_server_seconds_of_another_shape_names_the_setting(value: Any) -> None:
+    """``lease.server_seconds`` written around the validator as anything but an object is a
+    ``ValueError`` that names the key, as the callers expect (not an ``AttributeError``)."""
+    with pytest.raises(ValueError, match=r"lease\.server_seconds must be an object"):
+        LookupSettings.from_settings({**DEFAULT_SETTINGS, "lease.server_seconds": value})
+
+
 @pytest.mark.parametrize("value", [-1, "60"])
 def test_the_lookup_reads_an_arp_grace_of_another_shape_as_its_default(value: Any) -> None:
     """``arp.ignore_after_release_seconds`` written around the validator (CORRELATION §5) as a
