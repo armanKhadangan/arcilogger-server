@@ -1,0 +1,28 @@
+{
+  "compliance": {
+    "description": "Kayıt toplama, mühürleme ve yedeklemenin teknik denetimleri.",
+    "summary": "{{total}} denetimden {{ok}} tanesi tamam",
+    "tone": {
+      "ok": "Tamam",
+      "warning": "Dikkat",
+      "error": "Sorun",
+      "neutral": "Bilgi yok"
+    },
+    "export": "Uyum Durumu Raporu (PDF)",
+    "document": "Belge: {{doc}}",
+    "verifyOnSite": "Sahada doğrulayın",
+    "openAlerts": "Açık uyarı: {{count}}",
+    "confirmBackup": "Yapılandırma yedeğini aldım",
+    "confirmBackupBody": "arcilogger.toml, secret.key ve Caddy CA klasörünün (özel anahtarıyla) şifreli, çevrim dışı ve yedeklerden ayrı saklanan bir ortama kopyalandığını onaylıyorsunuz (secrets.json isteğe bağlı; YEDEKLEME.md bölüm 3). Onay, yapılandırmanın şimdiki SHA-256 değeriyle denetim kaydına yazılır.",
+    "openWizard": "İlk kurulum sihirbazını aç",
+    "updated": "Güncellendi {{time}}",
+    "refresh": "Yenile",
+    "loadFailed": "Denetim sonuçları okunamadı",
+    "cardsLabel": "Denetimler",
+    "toneCount": "{{tone}}: {{count}}",
+    "checkedAt": "Denetlendi {{time}}",
+    "openPage": "{{page}} sayfasını aç",
+    "confirmBackupAction": "Onaylıyorum",
+    "backupConfirmed": "Yapılandırma kopyasının onayı denetim kaydına yazıldı."
+  }
+}

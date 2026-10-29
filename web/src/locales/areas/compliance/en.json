@@ -1,0 +1,28 @@
+{
+  "compliance": {
+    "description": "Technical checks of log collection, sealing and backups.",
+    "summary": "{{ok}} of {{total}} checks OK",
+    "tone": {
+      "ok": "OK",
+      "warning": "Attention",
+      "error": "Problem",
+      "neutral": "No data"
+    },
+    "export": "Compliance status report (PDF)",
+    "document": "Document: {{doc}}",
+    "verifyOnSite": "Verify on site",
+    "openAlerts": "Open alerts: {{count}}",
+    "confirmBackup": "I have copied the configuration",
+    "confirmBackupBody": "You confirm that arcilogger.toml, secret.key and the Caddy CA folder (with its private key) were copied to encrypted offline media kept apart from the backups (secrets.json optional; BACKUP.md section 3). The confirmation is written to the audit log with the configuration's current SHA-256.",
+    "openWizard": "Open the first-run wizard",
+    "updated": "Updated {{time}}",
+    "refresh": "Refresh",
+    "loadFailed": "The check results could not be read",
+    "cardsLabel": "Checks",
+    "toneCount": "{{tone}}: {{count}}",
+    "checkedAt": "Checked {{time}}",
+    "openPage": "Open {{page}}",
+    "confirmBackupAction": "Confirm",
+    "backupConfirmed": "The confirmation of the configuration copy was written to the audit log."
+  }
+}
