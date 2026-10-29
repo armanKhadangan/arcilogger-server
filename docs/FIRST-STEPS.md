@@ -310,6 +310,8 @@ section 8):
 
 Every day:
 
+- Every morning look at the **Uyum Durumu** page (compliance status); each card says what it
+  checks and what to do ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)).
 - **Panel**: log intake, today's parse failures, yesterday's seal, credit, clock offset and open
   alerts at a glance. **Güvenlik** page: look into the new alerts, set the ones you work on to
   İnceleniyor.
@@ -371,6 +373,7 @@ Every day:
   | `R20-config-change` | Significant configuration change (a guarded setting): retention switched on or its days lowered, the replica switched off or retargeted, a log source switched off or removed, production → test, the Kamu SM credentials changed, a root or a legal fingerprint added, a Zamane client uploaded or promoted (high); SMTP or the backup switched off (medium). If no known administrator made it, **Cancel** a held change or **Revert** an applied one on the **Change history** page and look at the audit log |
   | `R20-lease` | Lease evidence problem: lease evidence (FortiGate DHCP, MikroTik DHCP or ARP-LOG) stopped, FortiGate DHCP records are not used or could not be converted, renewals do not appear, two DHCP sources on one network, a source's clock is off or a setting is not verified on site; the cause and what to do are in the alert's details (Sources → Lease evidence; [ALERTS.md](ALERTS.md) section 2) |
   | `R20-nat` | Internet exit definition problem: the old NAT settings could not be converted, the exits setting cannot be read, an old NAT setting changed during a rollback, or a NAT address no exit defines is in use (Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT)) |
+  | `R20-filter` | No web or DNS filter record for 24 hours on an expected day (`alerts.filter_quiet_hours`, `alerts.filter_days`; Uyum Durumu card 7) |
   | `new-log-source` | A sender that is not in the configuration (if the firewall let it through) |
   | `wrong-transport` | A message arrived over a transport its source does not allow (`[[sources]] transport`): a forged UDP message or a wrong device setting; the message was not recorded |
 

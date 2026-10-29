@@ -38,6 +38,7 @@ const MENUS: [string, string, string[]][] = [
       'Kullanım',
       'Mühürleme',
       'Kanıt Paketleri',
+      'Uyum Durumu',
       'Denetim Kaydı',
     ],
   ],
@@ -102,6 +103,7 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
     '/settings/retention',
     '/settings/backup',
     '/settings/history',
+    '/settings/setup',
     '/lookup',
     '/evidence',
     '/sealing',
@@ -136,6 +138,35 @@ test('pages outside the role stay closed when opened by URL', async ({ page }) =
     ),
   ).toEqual([]);
 });
+
+// Uyum Durumu: administrator and auditor; Sistem and the first-run wizard (`settings.manage`):
+// administrator only (Wave 4 contract D15).
+for (const [username, paths] of [
+  ['ayse.yilmaz', ['/system', '/settings/setup']],
+  ['mehmet.kaya', ['/compliance', '/system', '/settings/setup']],
+  ['zeynep', ['/compliance', '/system', '/settings/setup']],
+] as const) {
+  test(`Uyum Durumu, Sistem and the first-run wizard stay closed by URL outside the role — ${username}`, async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: username });
+    for (const path of paths) {
+      await page.goto(path);
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
+      ).toBeVisible();
+    }
+    // Nothing was even asked of the API for those pages (the wizard reads the configuration, the
+    // administration service's requests and the sources).
+    expect(
+      api.calls.filter((call) =>
+        ['/compliance', '/system', '/admin', '/settings', '/sources'].some((prefix) =>
+          call.path.startsWith(prefix),
+        ),
+      ),
+    ).toEqual([]);
+  });
+}
 
 test('the report viewer cannot open the 5651, evidence, sealing or log pages either', async ({
   page,
@@ -205,6 +236,7 @@ test('browser administration is for administrators: the API refuses everyone els
     '/settings/retention',
     '/settings/backup',
     '/settings/history',
+    '/settings/setup',
   ]) {
     await page.goto(path);
     await expect(

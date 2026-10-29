@@ -1,0 +1,339 @@
+{
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:21.707320+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "summary": {
+    "checked_at": "2026-10-13T07:01:06.833292+03:00",
+    "collector": {
+      "dropped_transport": 0,
+      "dropped_unknown": 0,
+      "sources": [
+        {
+          "bytes": 1102092770,
+          "last_received": "2026-10-13T07:01:02.754362+03:00",
+          "messages": 1652310,
+          "name": "fortigate"
+        },
+        {
+          "bytes": 31219480,
+          "last_received": "2026-10-13T07:00:16.754362+03:00",
+          "messages": 183644,
+          "name": "core-r1"
+        }
+      ],
+      "started_at": "2026-10-11T02:01:06+03:00",
+      "state": "running",
+      "tcp_connections": 0,
+      "tcp_framing_errors": 0,
+      "torn_lines": 0,
+      "unknown_senders": {
+        "bytes": 2114,
+        "count": 1,
+        "messages": 14
+      },
+      "updated_at": "2026-10-13T07:00:46+03:00",
+      "write_error_since": null,
+      "write_failures": 0
+    },
+    "database": {
+      "measured_at": "2026-10-13T07:01:06.789160+03:00",
+      "storage": "postgresql",
+      "tables": [
+        {
+          "bytes": 196534018048,
+          "name": "messages"
+        },
+        {
+          "bytes": 52018347008,
+          "name": "fg_traffic"
+        },
+        {
+          "bytes": 21473632256,
+          "name": "fg_web"
+        },
+        {
+          "bytes": 13902413824,
+          "name": "fg_dns"
+        },
+        {
+          "bytes": 6871646208,
+          "name": "search_counts"
+        },
+        {
+          "bytes": 3221225472,
+          "name": "mt_dhcp"
+        },
+        {
+          "bytes": 2147483648,
+          "name": "leases"
+        },
+        {
+          "bytes": 1610612736,
+          "name": "mt_arp"
+        },
+        {
+          "bytes": 912261120,
+          "name": "job_runs"
+        },
+        {
+          "bytes": 402653184,
+          "name": "audit_log"
+        }
+      ],
+      "total_bytes": 318472110080
+    },
+    "drives": [
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": "2027-01-01",
+          "growth_bytes_per_day": 10318018648,
+          "samples": 30,
+          "state": "estimated",
+          "warning_on": "2026-11-23"
+        },
+        "free_bytes": 817847894016,
+        "path": "D:",
+        "role": "data",
+        "total_bytes": 2000381014016,
+        "used_bytes": 1182533120000,
+        "used_percent": 59,
+        "warning_percent": 80
+      },
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": null,
+          "growth_bytes_per_day": null,
+          "samples": 3,
+          "state": "insufficient",
+          "warning_on": null
+        },
+        "free_bytes": 154654416896,
+        "path": "C:",
+        "role": "system",
+        "total_bytes": 255953203200,
+        "used_bytes": 101298786304,
+        "used_percent": 39,
+        "warning_percent": 80
+      }
+    ],
+    "host": {
+      "cpu_percent": 23,
+      "memory_total_bytes": 34359738368,
+      "memory_used_bytes": 20401094656,
+      "platform": "windows",
+      "uptime_seconds": 1209843
+    },
+    "ingest": {
+      "database_ok": true,
+      "lines_per_second": 21.4,
+      "service_state": "running",
+      "sources": [
+        {
+          "has_error": false,
+          "lag_bytes": 0,
+          "lag_seconds": 0.0,
+          "lines_per_second": 19.1,
+          "name": "fortigate",
+          "unfinished_days": 1
+        },
+        {
+          "has_error": false,
+          "lag_bytes": 18342,
+          "lag_seconds": 2.6,
+          "lines_per_second": 2.3,
+          "name": "core-r1",
+          "unfinished_days": 1
+        }
+      ],
+      "state": "running",
+      "unknown_sources": 1,
+      "updated_at": "2026-10-13T07:01:03+03:00",
+      "workers_active": 2,
+      "workers_configured": 2
+    },
+    "version": {
+      "core_version": "0.1.0",
+      "product": "ARCILOGGER",
+      "release_date": "2026-10-20",
+      "version": "0.1.0"
+    }
+  },
+  "summary_first_reading": {
+    "checked_at": "2026-10-13T07:01:06.789160+03:00",
+    "collector": {
+      "dropped_transport": 0,
+      "dropped_unknown": 0,
+      "sources": [
+        {
+          "bytes": 1102092770,
+          "last_received": "2026-10-13T07:01:02.754362+03:00",
+          "messages": 1652310,
+          "name": "fortigate"
+        },
+        {
+          "bytes": 31219480,
+          "last_received": "2026-10-13T07:00:16.754362+03:00",
+          "messages": 183644,
+          "name": "core-r1"
+        }
+      ],
+      "started_at": "2026-10-11T02:01:06+03:00",
+      "state": "running",
+      "tcp_connections": 0,
+      "tcp_framing_errors": 0,
+      "torn_lines": 0,
+      "unknown_senders": {
+        "bytes": 2114,
+        "count": 1,
+        "messages": 14
+      },
+      "updated_at": "2026-10-13T07:00:46+03:00",
+      "write_error_since": null,
+      "write_failures": 0
+    },
+    "database": {
+      "measured_at": "2026-10-13T07:01:06.789160+03:00",
+      "storage": "postgresql",
+      "tables": [
+        {
+          "bytes": 196534018048,
+          "name": "messages"
+        },
+        {
+          "bytes": 52018347008,
+          "name": "fg_traffic"
+        },
+        {
+          "bytes": 21473632256,
+          "name": "fg_web"
+        },
+        {
+          "bytes": 13902413824,
+          "name": "fg_dns"
+        },
+        {
+          "bytes": 6871646208,
+          "name": "search_counts"
+        },
+        {
+          "bytes": 3221225472,
+          "name": "mt_dhcp"
+        },
+        {
+          "bytes": 2147483648,
+          "name": "leases"
+        },
+        {
+          "bytes": 1610612736,
+          "name": "mt_arp"
+        },
+        {
+          "bytes": 912261120,
+          "name": "job_runs"
+        },
+        {
+          "bytes": 402653184,
+          "name": "audit_log"
+        }
+      ],
+      "total_bytes": 318472110080
+    },
+    "drives": [
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": "2027-01-01",
+          "growth_bytes_per_day": 10318018648,
+          "samples": 30,
+          "state": "estimated",
+          "warning_on": "2026-11-23"
+        },
+        "free_bytes": 817847894016,
+        "path": "D:",
+        "role": "data",
+        "total_bytes": 2000381014016,
+        "used_bytes": 1182533120000,
+        "used_percent": 59,
+        "warning_percent": 80
+      },
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": null,
+          "growth_bytes_per_day": null,
+          "samples": 3,
+          "state": "insufficient",
+          "warning_on": null
+        },
+        "free_bytes": 154654416896,
+        "path": "C:",
+        "role": "system",
+        "total_bytes": 255953203200,
+        "used_bytes": 101298786304,
+        "used_percent": 39,
+        "warning_percent": 80
+      }
+    ],
+    "host": {
+      "cpu_percent": null,
+      "memory_total_bytes": 34359738368,
+      "memory_used_bytes": 20401094656,
+      "platform": "windows",
+      "uptime_seconds": 1209843
+    },
+    "ingest": {
+      "database_ok": true,
+      "lines_per_second": 21.4,
+      "service_state": "running",
+      "sources": [
+        {
+          "has_error": false,
+          "lag_bytes": 0,
+          "lag_seconds": 0.0,
+          "lines_per_second": 19.1,
+          "name": "fortigate",
+          "unfinished_days": 1
+        },
+        {
+          "has_error": false,
+          "lag_bytes": 18342,
+          "lag_seconds": 2.6,
+          "lines_per_second": 2.3,
+          "name": "core-r1",
+          "unfinished_days": 1
+        }
+      ],
+      "state": "running",
+      "unknown_sources": 1,
+      "updated_at": "2026-10-13T07:01:03+03:00",
+      "workers_active": 2,
+      "workers_configured": 2
+    },
+    "version": {
+      "core_version": "0.1.0",
+      "product": "ARCILOGGER",
+      "release_date": "2026-10-20",
+      "version": "0.1.0"
+    }
+  }
+}

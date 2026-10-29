@@ -1,5 +1,5 @@
 /** Mirror of api/src/arcilogger_api/system/models.py (Wave 4 contract 2.5.1). */
-import type { DateString, DateTimeString } from './api-types';
+import type { DateString, DateTimeString, Float } from './api-types';
 
 export type DriveRole = 'data' | 'system';
 export type StatusFileState = 'running' | 'stale' | 'missing';
@@ -76,8 +76,8 @@ export interface CollectorInfo {
 export interface IngestSource {
   name: string;
   lag_bytes: number;
-  lag_seconds: number | null;
-  lines_per_second: number | null;
+  lag_seconds: Float | null;
+  lines_per_second: Float | null;
   unfinished_days: number;
   has_error: boolean;
 }
@@ -89,7 +89,7 @@ export interface IngestInfo {
   database_ok: boolean | null;
   workers_configured: number | null;
   workers_active: number | null;
-  lines_per_second: number | null;
+  lines_per_second: Float | null;
   sources: IngestSource[];
   unknown_sources: number;
 }

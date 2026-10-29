@@ -64,8 +64,11 @@ NOT_IN_SPEC_TABLE_ADMIN_ONLY = {
     "alerts.read",
     "alerts.manage",
     "reports.manage",
-    "compliance.read",
     "system.read",
+}
+#: Owner decisions outside the spec 13 table: permission → holders.
+OWNER_DECIDED: dict[str, set[str]] = {
+    "compliance.read": {"admin", "auditor"},  # Uyum Durumu, 2026-10-28 (Wave 4 D15, Q1)
 }
 
 
@@ -76,13 +79,20 @@ def _expected_matrix() -> dict[str, set[str]]:
             for role in roles:
                 expected[role].add(permission)
     expected["admin"] |= NOT_IN_SPEC_TABLE_ADMIN_ONLY
+    for permission, roles in OWNER_DECIDED.items():
+        for role in roles:
+            expected[role].add(permission)
     return expected
 
 
 def test_permission_matrix_matches_the_spec_table() -> None:
     expected = _expected_matrix()
     assert {role: set(perms) for role, perms in ROLE_PERMISSIONS.items()} == expected
-    listed = {p for column in SPEC_TABLE.values() for p in column} | NOT_IN_SPEC_TABLE_ADMIN_ONLY
+    listed = (
+        {p for column in SPEC_TABLE.values() for p in column}
+        | NOT_IN_SPEC_TABLE_ADMIN_ONLY
+        | set(OWNER_DECIDED)
+    )
     assert listed == ALL_PERMISSIONS == set(PERMISSIONS)
     assert ROLE_PERMISSIONS["admin"] == ALL_PERMISSIONS
     assert set(ROLE_LABELS) == set(ROLES) == set(ROLE_PERMISSIONS)
@@ -95,6 +105,19 @@ def test_person_level_data_only_for_admin_and_hr() -> None:
     assert {r for r in ROLES if "usage.person" in ROLE_PERMISSIONS[r]} == {"admin", "hr"}
     assert "evidence.create" not in ROLE_PERMISSIONS["auditor"]
     assert "search.export" not in ROLE_PERMISSIONS["auditor"]
+
+
+def test_auditor_reads_compliance_but_not_system_or_settings() -> None:
+    """Owner decision 2026-10-28 (Wave 4 D15, Q1, Q2): the auditor opens Uyum Durumu and downloads
+    its report; Sistem, the Panel disk card, the backup confirmation and every setting stay with
+    the administrator."""
+    assert "compliance.read" in ROLE_PERMISSIONS["auditor"]
+    assert not {"system.read", "settings.manage"} & ROLE_PERMISSIONS["auditor"]
+    for role in ("hr", "viewer"):
+        assert not {"compliance.read", "system.read", "settings.manage"} & ROLE_PERMISSIONS[role]
+    assert {r for r in ROLES if "compliance.read" in ROLE_PERMISSIONS[r]} == {"admin", "auditor"}
+    assert {r for r in ROLES if "system.read" in ROLE_PERMISSIONS[r]} == {"admin"}
+    assert {r for r in ROLES if "settings.manage" in ROLE_PERMISSIONS[r]} == {"admin"}
 
 
 def test_require_rejects_unknown_permissions() -> None:

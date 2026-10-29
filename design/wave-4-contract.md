@@ -1562,6 +1562,18 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   with a server and a sender", `e2e/setup-wizard.spec.ts` (the fresh installation's e-mail step).
   W4-G: AYARLAR/SETTINGS (the wizard entry) and UYUM-DURUMU/COMPLIANCE-STATUS §5.
 
+## Deviations — W4-F (2026-10-29)
+
+- **W4F-1: five fractional fields are `Float`, not `number` (manager decision on #27).**
+  `IngestSource.lag_seconds`, `IngestSource.lines_per_second`, `IngestInfo.lines_per_second`
+  (`web/src/lib/system-types.ts`) and `ClockSampleOut.offset_ms`, `ClockSampleOut.delay_ms`
+  (`web/src/lib/system-health-types.ts`) are `Float` (`api-types.ts`). §2.5.1 and §2.6.1 mirror
+  these as `number`; they carry fractional values, and `api-samples.test.ts` takes only `Float`
+  for those (the Pydantic models are `float`; a `number` there is an integer). Test:
+  `web/src/lib/api-samples.test.ts` "system.json" and "system-health.json" (the captured
+  samples carry a 3.2 ms clock offset, a fractional ingest lag and fractional lines per second).
+  Fold into §2.5.1 and §2.6.1.
+
 ---
 
 ## Owner questions

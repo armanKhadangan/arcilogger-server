@@ -1,0 +1,101 @@
+{
+  "disk": {
+    "checked_at": "2026-10-13T07:01:06.875981+03:00",
+    "drives": [
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": "2027-01-01",
+          "growth_bytes_per_day": 10318018648,
+          "samples": 30,
+          "state": "estimated",
+          "warning_on": "2026-11-23"
+        },
+        "free_bytes": 817847894016,
+        "path": "D:",
+        "role": "data",
+        "total_bytes": 2000381014016,
+        "used_bytes": 1182533120000,
+        "used_percent": 59,
+        "warning_percent": 80
+      },
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": null,
+          "growth_bytes_per_day": null,
+          "samples": 3,
+          "state": "insufficient",
+          "warning_on": null
+        },
+        "free_bytes": 154654416896,
+        "path": "C:",
+        "role": "system",
+        "total_bytes": 255953203200,
+        "used_bytes": 101298786304,
+        "used_percent": 39,
+        "warning_percent": 80
+      }
+    ]
+  },
+  "disk_not_growing": {
+    "checked_at": "2026-10-13T07:01:06.902208+03:00",
+    "drives": [
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": null,
+          "growth_bytes_per_day": null,
+          "samples": 30,
+          "state": "not_growing",
+          "warning_on": null
+        },
+        "free_bytes": 898984456192,
+        "path": "D:",
+        "role": "data",
+        "total_bytes": 2000381014016,
+        "used_bytes": 1101396557824,
+        "used_percent": 55,
+        "warning_percent": 80
+      },
+      {
+        "critical_percent": 95,
+        "forecast": {
+          "full_on": null,
+          "growth_bytes_per_day": null,
+          "samples": 3,
+          "state": "insufficient",
+          "warning_on": null
+        },
+        "free_bytes": 154654416896,
+        "path": "C:",
+        "role": "system",
+        "total_bytes": 255953203200,
+        "used_bytes": 101298786304,
+        "used_percent": 39,
+        "warning_percent": 80
+      }
+    ]
+  },
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:21.707320+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  }
+}
