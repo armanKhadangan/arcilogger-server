@@ -2,6 +2,7 @@ import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
+import { Toaster } from '@/components/ui/toast';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ApiError } from '@/lib/api';
 import { AuthProvider } from '@/lib/auth';
@@ -211,6 +212,7 @@ describe('Uyum Durumu', () => {
 
   it('confirms the configuration copy in a dialog and closes it once recorded', async () => {
     const user = userEvent.setup();
+    render(<Toaster />);
     const { onConfirmBackup } = renderView();
     await user.click(screen.getByRole('button', { name: 'Yapılandırma yedeğini aldım' }));
     const dialog = screen.getByRole('dialog', { name: 'Yapılandırma yedeğini aldım' });
@@ -225,6 +227,11 @@ describe('Uyum Durumu', () => {
     );
     expect(onConfirmBackup).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('dialog')).toBeNull();
+    // The focus goes back to the button, and a message says the entry was written.
+    expect(screen.getByRole('button', { name: 'Yapılandırma yedeğini aldım' })).toHaveFocus();
+    expect(
+      screen.getByText('Yapılandırma kopyasının onayı denetim kaydına yazıldı.'),
+    ).toBeInTheDocument();
   });
 
   it('keeps the dialog open with the error of a refused confirmation', async () => {
