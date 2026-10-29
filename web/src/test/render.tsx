@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom';
 
 import { Toaster } from '@/components/ui/toast';
@@ -32,8 +33,11 @@ export function testQueryClient(): QueryClient {
   });
 }
 
-/** The whole app (real routes) at `path`, with a fresh query cache. */
-export function renderApp(path: string) {
+/**
+ * The whole app (real routes) at `path`, with a fresh query cache; `strict` wraps it in
+ * StrictMode as `main.tsx` does (effects run twice when a page mounts).
+ */
+export function renderApp(path: string, { strict = false }: { strict?: boolean } = {}) {
   const client = testQueryClient();
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const view = render(
@@ -45,6 +49,7 @@ export function renderApp(path: string) {
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>,
+    { wrapper: strict ? StrictMode : undefined },
   );
   return { ...view, router, client };
 }

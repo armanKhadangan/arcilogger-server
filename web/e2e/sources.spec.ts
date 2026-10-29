@@ -288,7 +288,8 @@ test.describe('Kaynaklar', () => {
     await sheet.getByRole('tab', { name: 'Ayrıştırma hataları' }).click();
     await expect(sheet).toContainText('value was not key=value');
     await sheet.getByRole('button', { name: 'Aramada göster' }).click();
-    await expect(page).toHaveURL(/\/search$/);
+    // The address holds the failure's day as the range (issue #13, item 4), never the query.
+    await expect(page).toHaveURL(/\/search\?from=[^&]+&to=[^&]+$/);
     // The query is in neither the address nor the history entry nor the browser's storage.
     expect(await page.evaluate(() => JSON.stringify(window.history.state))).not.toContain('error:');
     const stored = await page.evaluate(() =>
@@ -350,7 +351,8 @@ test.describe('Kaynaklar', () => {
     await sheet.getByRole('tab', { name: 'Son satırlar' }).click();
     await expect(sheet.getByTestId('tail-no-file')).toContainText('Bugün kayıt yok');
     await sheet.getByRole('button', { name: "Bu kaynağı Arama'da aç" }).click();
-    await expect(page).toHaveURL(/\/search$/);
+    // The address holds the handed-over range (issue #13, item 4), never the query.
+    await expect(page).toHaveURL(/\/search\?range=7d$/);
   });
 
   test("a network: its lines are in its members' folders, one click opens a member", async ({

@@ -48,6 +48,20 @@ async function start(page: Page, live: LiveMock): Promise<void> {
   await expect.poll(() => live.connections()).toBe(1);
 }
 
+/**
+ * Arama took a hand-over with a range: its address holds that range and nothing else (never the
+ * query), and once its answer is shown it has searched `q` on that range alone (not on its default
+ * range besides).
+ */
+async function searchedInArama(page: Page, api: MockApi, q: string): Promise<void> {
+  await expect(page).toHaveURL(/\/search\?from=[^&]+&to=[^&]+$/);
+  await expect(page.getByText(/^Aralık: /)).toBeVisible();
+  const address = new URL(page.url()).searchParams;
+  expect(api.callsTo('POST', '/search').map((call) => call.body)).toEqual([
+    { q, from: address.get('from'), to: address.get('to') },
+  ]);
+}
+
 test.describe('Canlı Akış', () => {
   test.beforeEach(async ({ page }) => {
     await useSampleClock(page, SAMPLE_TODAY);
@@ -310,7 +324,7 @@ test.describe('Canlı Akış', () => {
     live.send(1);
     await expect(list(page).getByRole('listitem')).toHaveCount(3);
     await gap.getByRole('button', { name: "Bu aralığı Arama'da aç" }).click();
-    await expect(page).toHaveURL(/\/search$/);
+    await searchedInArama(page, api, '');
   });
 
   test('keeps the newest 2,000 lines; scrolled up it stays and counts the new ones', async ({
@@ -340,7 +354,7 @@ test.describe('Canlı Akış', () => {
   });
 
   test('dropped and gap banners; the gap opens its interval in Arama', async ({ page }) => {
-    const { live } = await open(page);
+    const { api, live } = await open(page);
     await page.goto('/live');
     await start(page, live);
     live.send(1);
@@ -363,7 +377,7 @@ test.describe('Canlı Akış', () => {
     const gap = page.getByTestId('live-gap');
     await expect(gap).toContainText(GAP_TEXTS[0]);
     await gap.getByRole('button', { name: "Bu aralığı Arama'da aç" }).click();
-    await expect(page).toHaveURL(/\/search$/);
+    await searchedInArama(page, api, '');
     // Handed over in memory: the history entry carries no state of its own.
     expect(
       await page.evaluate(() => (window.history.state as { usr?: unknown } | null)?.usr ?? null),
@@ -421,7 +435,7 @@ test.describe('Canlı Akış', () => {
   test('the line drawer: preview fields, the raw line and Arama five minutes around it', async ({
     page,
   }) => {
-    const { live } = await open(page);
+    const { api, live } = await open(page);
     await page.goto('/live');
     await start(page, live);
     live.send(2);
@@ -435,7 +449,11 @@ test.describe('Canlı Akış', () => {
     await expect(raw).toContainText(RAW.lines['core-r1|2026-10-09|1']?.sha256 ?? '-');
     await raw.getByRole('button', { name: 'Kapat' }).click();
     await sheet.getByRole('button', { name: "Arama'da aç (±5 dk)" }).click();
-    await expect(page).toHaveURL(/\/search$/);
+    await searchedInArama(page, api, 'source:core-r1');
+    const address = new URL(page.url()).searchParams;
+    expect(Date.parse(address.get('to') ?? '') - Date.parse(address.get('from') ?? '')).toBe(
+      10 * 60_000,
+    );
   });
 
   test('highlight rules: kept for the tab (a reload keeps them, a new tab has none)', async ({
