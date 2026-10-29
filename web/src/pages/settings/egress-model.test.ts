@@ -31,7 +31,7 @@ interface LegacyCase {
 }
 
 // The exit validation cases (contract 2.8.1), shared with the server (db/tests/test_egress.py).
-const { cases: CASES, legacy: LEGACY } = sharedCases as unknown as {
+const { cases: CASES, legacy: LEGACY } = sharedCases as {
   cases: EgressCase[];
   legacy: LegacyCase[];
 };
