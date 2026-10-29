@@ -16,6 +16,13 @@
 - Ham loglar önce değiştirilmeden diske yazılır (delil), her gece sıkıştırılır, SHA-256 ile
   özetlenir, önceki güne zincirlenir ve **Kamu SM zaman damgası** ile mühürlenir.
 - Mühürleme; veritabanı veya web arayüzü çalışmasa bile Windows Görev Zamanlayıcı ile çalışır.
+- 5651 sorgusunda iç IP adresinden MAC adresine, cihaza ve kişiye giden adım DHCP sunucusunun
+  kira kayıtlarına dayanır: MikroTik yönlendiricinin ya da FortiGate'in DHCP sunucusunun
+  kayıtları (ikisi farklı ağlara hizmet ediyorsa ikisi birlikte); MikroTik'teki isteğe bağlı
+  saatlik `ARP-LOG` betiği statik IP'li cihazları ekler. FortiGate oturum kaydının srcmac alanı
+  hiçbir zaman kira kanıtı değildir. Genel IP sorguları tanımlı internet çıkışlarına göre
+  çözülür (birden çok hat desteklenir; [CORRELATION.md](CORRELATION.md) bölüm 1 ve 3,
+  [ADR-0016](adr/0016-fortigate-dhcp-and-internet-exits.md)).
 - Sunucu ayarları **tarayıcıdan** değişir ([AYARLAR.md](AYARLAR.md)): API yalnızca imzalı bir istek
   bırakır; yapılandırmayı ayrı bir hizmet (ArciAdmin) yazar, güvenlik duvarını ve saati SYSTEM
   görevi ApplySystem kendi türettiği değerlerle günceller. Bir ayar değişikliği mühürlemeyi
@@ -27,6 +34,11 @@ ARCILOGGER is a **single Windows server**. People use it **only through a web br
 installed on user PCs and no agent runs on employee computers — all data arrives as syslog from the
 network devices. Raw logs are written unchanged first, then sealed nightly (gzip, SHA-256 chain,
 Kamu SM qualified time stamp). The evidence path does not depend on the database or the web stack.
+The 5651 lookup ties an internal IP to a MAC, a device and a person through the DHCP server's
+lease records — MikroTik or FortiGate DHCP (both, when they serve different networks) — plus the
+optional MikroTik `ARP-LOG` script for static devices; the srcmac field of FortiGate session
+records is never lease evidence, and public addresses are resolved through the configured
+internet exits (several lines supported; ADR-0016).
 The server's settings change from the browser through a separate administration service and a
 SYSTEM task that derives the firewall and time settings itself (ADR-0014); a settings change never
 stops collection or sealing.
@@ -38,7 +50,7 @@ stops collection or sealing.
 | Server OS | Windows Server 2022 or 2025 Standard (recommended); Windows 11 Pro on a dedicated machine also works |
 | Placement | A dedicated server (recommended; not on the device that holds the replica) in the network the devices send syslog to (untagged switch port), on a UPS |
 | Address | A static address of the site (`-ServerAddress`); time from the site's local time source (`-NtpServer`, `[clock] ntp_server`), else `time.ume.tubitak.gov.tr` |
-| Organisation | Name, time source and admin PC entered at installation, no defaults ([KURULUM.md](KURULUM.md) §7.1); log sources in `arcilogger.toml`; departments and VLANs entered by the administrator on the Cihazlar ve Kişiler page; no VLAN plan shipped |
+| Organisation | Name, time source and admin PC entered at installation, no defaults ([KURULUM.md](KURULUM.md) §7.1); log sources in `arcilogger.toml`; departments and VLANs entered by the administrator on the Cihazlar ve Kişiler page (with FortiGate DHCP, every network it serves); internet exits in Ayarlar → Uygulama ayarları; no VLAN plan shipped |
 | Sizing | Recommended at least 4 cores, 16 GB RAM; `C:` ≥ 100 GB system, `D:` ≥ 1 TB NTFS data disk, RAID 1 recommended |
 | Users | Any current browser (Edge, Chrome, Firefox) on the admin PC (`-AdminAddress`) |
 | Client software | **None** |
@@ -53,7 +65,7 @@ Windows services (automatic start, restart on failure, each under its own virtua
 | `ArciCollector` | `arcilogger_collector` (Python) | Receives syslog, writes the raw spool **first** | UDP/TCP 514 (and TLS 6514, optional) on the server address (`[collector] bind`) | M1 |
 | `ArciIngest` | `arcilogger_ingest` | Tails the spool (or the sealed vault copy), parses, loads PostgreSQL | — | MVP (M2) |
 | `ArciApi` | `arcilogger_api` (FastAPI, Uvicorn) | HTTP API for the web interface: auth/TOTP, users, audit log, 5651 lookup + PDF report, evidence packages, seals, devices and persons, alerts (state workflow, notes), the dashboard summary, Arama (search), Canlı Akış (the live tail of the spool) and Kaynaklar (source health) | 127.0.0.1:8000 | MVP; Wave 2; more pages M4–M6 |
-| `ArciWorker` | `arcilogger_worker` | Today: lease timeline, devices and IP conflicts, partitions, evidence purge, audit import, alerts (import of `alerts.jsonl`, R15/R20 checks, alert e-mail; ADR-0010), usage rollups (`usage.*` jobs, estimated time per person/site/category; ADR-0011, docs/USAGE.md), the licence check (`license.check`, ADR-0013). Later: NAT index, the rule engine and its detections (M5) | — | MVP (M3); M4–M5 |
+| `ArciWorker` | `arcilogger_worker` | Today: lease timeline (from MikroTik or FortiGate DHCP records and MikroTik `ARP-LOG`; [CORRELATION.md](CORRELATION.md) section 1, [ADR-0016](adr/0016-fortigate-dhcp-and-internet-exits.md)), devices and IP conflicts, partitions, evidence purge, audit import, alerts (import of `alerts.jsonl`, R15/R20 checks including the lease-evidence and internet-exit checks `R20-lease` and `R20-nat`, alert e-mail; ADR-0010), usage rollups (`usage.*` jobs, estimated time per person/site/category; ADR-0011, docs/USAGE.md), the licence check (`license.check`, ADR-0013). Later: NAT index, the rule engine and its detections (M5) | — | MVP (M3); M4–M5 |
 | `ArciWeb` | Caddy | HTTPS (internal CA), serves the web interface, proxies `/api` | server address:443 | MVP (installer) |
 | `ArciAdmin` | `arcilogger_core.admin` (Python) | The administration agent of the browser administration ([ADR-0014](adr/0014-browser-administration.md)): checks the API's signed requests in `admin\inbox` again and applies them (the only writer of `arcilogger.toml` and `secrets.json`), keeps the versions, follows the services reloading, writes signed task requests (Seal now, credit query, tests) | — (no listener, no database) | Wave 1 |
 | `postgresql-x64-16` | PostgreSQL 16 (operator-installed); TimescaleDB optional, otherwise native monthly partitions ([ADR-0005](adr/0005-database-and-mvp-contracts.md)) | Derived, rebuildable data, plus users, lookups and the audit log | 127.0.0.1:5432 | MVP (M2) |

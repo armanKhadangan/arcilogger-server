@@ -78,32 +78,49 @@ mühürlenir; aşağıdakiler, bir 5651 sorgusunun kişiye ve cihaza kadar ilerl
 kullanım analizinin neyi gösterdiğini belirler.
 
 - **Tek yerleşke:** bir kurulum tek bir yerleşkeyi (site) kapsar: internete bir FortiGate üzerinden
-  çıkan, adresleri bir ana MikroTik yönlendiricinin (DHCP sunucusu) dağıttığı IPv4 ağı. Aynı özel
-  adres aralığını kullanan birden çok şube tek kurulumda desteklenmez: aynı ağ VLAN listesine iki
-  kez girilemez ve iki şubedeki aynı adres tek bir adres sayılır (IP çakışması gibi görünür).
+  çıkan, adresleri bir MikroTik yönlendiricinin ya da FortiGate'in DHCP sunucusunun dağıttığı
+  IPv4 ağı. Aynı özel adres aralığını kullanan birden çok şube tek kurulumda desteklenmez: aynı ağ
+  VLAN listesine iki kez girilemez ve iki şubedeki aynı adres tek bir adres sayılır (IP çakışması
+  gibi görünür).
   İnternete başka bir hattan ya da bir VPN tünelinden çıkan bir ağ kesiminin (ör. misafir Wi-Fi)
   FortiGate kaydı yoktur: o kesimden yalnızca kira kayıtları (DHCP, `ARP-LOG`) gelir; genel IP ve
   port ile 5651 sorgusu oradaki bir cihazı bulamaz, kullanım analizi de o trafiği görmez
   ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 5).
-- **Kişi ve cihaz eşleştirmesi:** iç IP adresinden MAC adresine, cihaza ve kişiye giden adım
-  MikroTik DHCP sunucusunun kira kayıtlarına (`assigned`/`deassigned`) dayanır; ana
-  yönlendiricideki saatlik `ARP-LOG` betiği (isteğe bağlı; [DEVICE-SETUP.md](DEVICE-SETUP.md)
-  bölüm 3) statik IP'li cihazları ve kira kayıtları arasındaki boşlukları **orta güvenle** ekler.
-  FortiGate'in kendi DHCP sunucusunun kayıtları saklanır ve mühürlenir, ama bu sürümde kira zaman
-  çizelgesine girmez. DHCP'yi yalnızca FortiGate (ya da MikroTik olmayan başka bir sunucu)
-  dağıtıyorsa ve `ARP-LOG` gönderen bir MikroTik yoksa kira kaydı oluşmaz: 5651 sorgusu FortiGate
-  oturumunda ve iç IP adresinde biter (MAC, cihaz ve kişi yok), kullanım analizi de IP adresine
-  göre sayar.
-- **NAT:** FortiGate'in kaynak NAT'ı desteklenir. Genel adres FortiGate'in kendisindeyse (ISS modemi
-  köprü kipinde; birden çok adres `nat.public_ips` listesine girilir) genel IP + port oturumu
-  **kesin** belirler. FortiGate bir ISS modeminin arkasındaysa (çift NAT) modemin NAT kaydı
-  olmadığından sorgu **aday** oturumları sıralar ([CORRELATION.md](CORRELATION.md) bölüm 3).
-  FortiGate'in WAN adresi için tek bir eşleme vardır (`nat.wan_transip`): her biri kendi modeminin
-  arkasındaki birden çok ISS hattı bu sürümde modellenmez. Böyle bir ağda `nat.wan_transip` boş
-  bırakılmalıdır: girilirse her aday araması o hatla sınırlanır ve diğer hattın adresiyle gelen bir
-  talepte doğru oturum aday olamaz; boş kalırsa bütün hatların kaynak NAT oturumları aday olur. IPv6
-  adresleriyle 5651 sorgusu desteklenmez: kira kayıtları (DHCP, `ARP-LOG`) yalnızca IPv4 adreslerini
-  kapsar.
+- **Kişi ve cihaz eşleştirmesi (kira kanıtı):** iç IP adresinden MAC adresine, cihaza ve
+  kişiye giden adım DHCP sunucusunun kira kayıtlarına dayanır:
+  - **DHCP sunucusu MikroTik:** ana MikroTik yönlendiricinin kira kayıtları (`assigned` /
+    `deassigned`) kullanılır; ana yönlendiricideki saatlik `ARP-LOG` betiği (isteğe bağlı,
+    sahada yazılır; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 3) statik IP'li cihazları ve kira
+    kayıtları arasındaki boşlukları **orta güvenle** ekler.
+  - **DHCP sunucusu FortiGate (yalnız-FortiGate ağlar):** FortiGate DHCP sunucusunun olay
+    kayıtları (DHCP Ack / Release) kira zaman çizelgesine girer. Kayıt biçimi FortiOS
+    belgelerinden ve tek bir topluluk örneğinden alınmıştır; ilk kurulumda sahada doğrulanır
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) ve doğrulanana kadar raporlar bunu
+    belirtir. Yalnızca yapılandırmada FortiGate olarak tanımlı kaynakların kayıtları
+    kullanılır. FortiGate'in DHCP verdiği her ağ, VLAN numarası olmasa da, Cihazlar ve Kişiler
+    sayfasında tanımlanır: tanımlı bir ağda olmayan adreslerin zincirleri düşük güvenle
+    gösterilir. Sonradan eklenen ya da değiştirilen bir ağ geçmiş kiralara ancak kiralar
+    yeniden oluşturulunca uygulanır ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 5). Statik IP'li
+    cihazların kira kaydı yoktur: zincir iç IP adresinde biter; ağ geçidi FortiGate olan
+    arayüzlerde, iki istemciyle sahada denetlendikten sonra, isteğe bağlı olarak FortiGate
+    oturum kaydının srcmac alanı MAC adresini **kısmi kanıt** olarak, düşük güvenle verir
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5).
+  - **İkisi birlikte:** iki DHCP sunucusu farklı ağlara hizmet ediyorsa ikisinin kayıtları da
+    kullanılır.
+  - **Başka bir DHCP sunucusu (ör. Windows):** bu sürüm onun kayıtlarını okumaz; kira kaydı
+    yalnızca MikroTik `ARP-LOG` ile, orta güvenle oluşur. `ARP-LOG` yoksa 5651 sorgusu
+    FortiGate oturumunda ve iç IP adresinde biter (MAC, cihaz ve kişi yok), kullanım analizi de
+    IP adresine göre sayar.
+- **İnternet çıkışları (NAT):** FortiGate'in kaynak NAT'ı desteklenir. Her internet hattı
+  Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)
+  bölümünde tanımlanır: genel IP (ve değişip değişemeyeceği), FortiGate'in o hattaki NAT
+  adresi, arayüzleri, NAT türü ve port koruma. Genel adres FortiGate'in kendisindeyse
+  (doğrudan) genel IP + port oturumu **kesin** belirler. Servis sağlayıcının yönlendiricisi
+  ikinci bir NAT yapıyorsa o hattın sorguları **aday** oturumları sıralar
+  ([CORRELATION.md](CORRELATION.md) bölüm 3); genel IP başka müşterilerle paylaşılıyorsa
+  (CGNAT) aday listesi doğru oturumu içermeyebilir, kesin yanıt için servis sağlayıcının NAT
+  kaydı gerekir. IPv6 adresleriyle 5651 sorgusu desteklenmez: kira kayıtları (DHCP, `ARP-LOG`)
+  yalnızca IPv4 adreslerini kapsar.
 - **Kullanım analizi** (ücretli modül, [LISANS.md](LISANS.md)) yalnızca FortiGate kayıtlarından
   hesaplanır: süreler ve baytlar trafik kayıtlarından (`logtraffic all`; uzun oturumlar için ara
   kayıtlarla), site adları web filtresi, DNS filtresi, uygulama kontrolü ve SSL denetimi
@@ -116,6 +133,15 @@ kullanım analizinin neyi gösterdiğini belirler.
   değiştirilmeden saklanır, mühürlenir ve tam gün kanıt paketlerine girer; veritabanına düz log
   satırı olarak (zaman, ana bilgisayar adı, program, ileti metni) yüklenir ama alanlarına
   ayrılmaz, 5651 sorgusunda ve kullanım analizinde kullanılmaz.
+
+**Desteklenmeyenler:** IPv6 sorguları; aynı ağa iki DHCP sunucusu (ARCILOGGER fark ederse
+uyarır ve o anlardaki zincirleri düşük güvenle verir); FortiGate'in DHCP aktarıcı (relay)
+olarak çalıştığı ağlarda FortiGate kira kaydı (kira kanıtı asıl DHCP sunucusundan gelmelidir);
+aynı özel adres aralığını kullanan birden çok şube; FortiGate'ten geçmeyen hatlarda sorgu (hat
+yalnızca "FortiGate'ten geçmiyor" olarak işaretlenir, sorgu kimseyi listelemez); bir
+yönlendiricinin ya da L3 anahtarın arkasındaki ağlarda srcmac (orada o cihazın MAC adresidir;
+arada yalnızca katman 2 anahtarlar varsa arayüz ancak iki istemciyle sahada denetlenince
+kullanılır).
 
 ## 1. Sunucuyu hazırlama
 
@@ -1044,6 +1070,115 @@ Arama'yı aynı anda birkaç kişinin kullandığı bir kurumda `arcilogger.toml
 Ayarlar → Arama ve canlı akış, [AYARLAR.md](AYARLAR.md)), ardından hizmetler yeniden başlatılır
 (bölüm 12).
 
+**İnternet çıkışlı sürüme yükseltme (şema revizyonları `0017_fortigate_dhcp`,
+`0018_nat_egresses`).** Şema yükseltmesi FortiGate DHCP kayıtları için yeni bir tablo ve
+`fg_traffic` tablosuna bir sütun ekler (büyük tablolarda bile hızlıdır: sütun boş eklenir).
+Eski NAT ayarları tek bir yeni ayara, **İnternet çıkışları**na çevrilir: `nat.public_ips`
+adresleri "Genel IP (yükseltmede aktarıldı)" adlı doğrudan bir çıkış, `nat.wan_transip`
+"FortiGate WAN adresi (yükseltmede aktarıldı)" adlı bir servis sağlayıcı NAT'ı çıkışı olur
+(adres genel IP'lerden biriyse ayrı çıkış yapılmaz; `nat.public_ips` içinde özel ya da
+paylaşılan bir adres, ör. 100.64.x.x, varsa o da bu çıkışın NAT adresi olur), genel adresi
+olmayan hatlar için "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir,
+`lookup.port_hint` o çıkışın port koruma değerine geçer. Dönüşüm denetim kaydına
+`settings.change` olarak yazılır (`details.migration = "0018_nat_egresses"`; atılan geçersiz,
+IPv6 ya da ayrılmış değerler `details.dropped` içinde). Dönüşüm geçerli bir tanım veremezse
+çıkışlar boş kalır ve `R20-nat:conversion-failed` uyarısı açılır.
+
+**Yükseltmeden sonra:**
+
+- Her hattın genel adresini ve arayüzlerini (dstintf) Ayarlar → Uygulama ayarları → 5651
+  sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde girin. Aktarılan
+  "FortiGate WAN adresi" ya da "Genel adresi tanımlanmamış hatlar" çıkışı olan her kurulumda,
+  bu girilene kadar hiçbir çıkışa tanımlı olmayan bir adres için yapılan her sorgu ve rapor
+  `egress_public_unknown` uyarısını taşır; aktarılan çıkışlar arayüz girilene ya da
+  değiştirilene kadar eski NAT davranışını korur, ancak sonradan eklenen bir çıkışın NAT
+  adresleri bunun dışındadır. Hat hâlâ servis sağlayıcı yönlendiricisinin arkasındaysa ve
+  FortiGate'in o hattaki NAT adresini (ör. 100.64.x.x) yeni bir çıkış olarak eklerseniz,
+  hattın genel adresini doğrudan çıkıştan bu çıkışa taşıyın ve arayüzlerini girin; aksi hâlde
+  doğrudan çıkışın sorguları "Doğrudan hat doğrulanamadı" uyarısıyla yanıtlanabilir.
+- Aktarılan "FortiGate WAN adresi" çıkışının NAT adresi hattın genel adresiyse (FortiGate genel
+  adresi kendisi tutuyorsa) çıkışın türünü **Doğrudan** yapın; editör bunu uyarır.
+- Bütün hatlar tanımlandıktan sonra "Genel adresi tanımlanmamış hatlar" çıkışını silin: o
+  kaldıkça hiçbir hatta ait olmayan bir genel IP sorulduğunda ilgisiz oturumlar aday olarak
+  listelenir.
+- Bir değişiklik: hiçbir çıkışa tanımlı olmayan bir adres o anda FortiGate kayıtlarında kaynak
+  NAT adresi olarak görünüyorsa sorgu artık aday listesi yerine o adresle kesin eşleşme yapar
+  ve bunu uyarıyla belirtir (`egress_observed_not_configured`).
+- FortiGate DHCP kullanılıyorsa [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4'teki doğrulamayı
+  yapın ve sonucu bölüm 16'ya yazın; her FortiOS yükseltmesinden sonra doğrulamayı yineleyin.
+  Yükseltmeden önceki anlar için 5651 sorguları iç IP adresinde durur: o zamana ait FortiGate
+  DHCP kayıtları kira zaman çizelgesine dönüştürülmez, sorgu bunu belirtir ve iç IP sorgusunda
+  ya da kesin eşleşmede kaydı kanıt olarak gösterir (`fortigate_dhcp_not_converted`). Daha eski
+  bir kiraya (MikroTik ya da FortiGate) dayanan bir zincirde, kiranın son DHCP kaydından sonra o
+  adres ya da o kiranın MAC adresi için böyle bir kayıt varsa (ör. yükseltmeden önce
+  MikroTik'ten FortiGate DHCP'ye geçen bir istemci başka bir adres aldıysa) zincir düşük güvenle
+  ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`). **Yükseltmeden sonra
+  da** her istemci için yeni sürümde ilk DHCP Ack kaydı gelene kadar zincir kurulmaz: bu, kira
+  süresinin yarısına kadar sürebilir (FortiOS varsayılanı 7 günlük kirada 3,5 gün; istemci
+  yenilemeyi kirasının yarısında yapar). Yükseltmeyi bu boşluğu bilerek planlayın; FortiGate
+  DHCP kullanmayan kurulumlar bundan etkilenmez.
+- Yükseltmeden önce (ya da bir geri alma sırasında önceki sürümce) yüklenen FortiGate oturum
+  kayıtlarının srcmac alanı 5651 sorgusunda kullanılmaz; o anlar için srcmac ile kısmi zincir
+  kurulmaz.
+- Genel bir NAT adresi hiçbir çıkışa tanımlı değilse (ör. bir IP havuzu) artık çift NAT
+  belirtisi sayılmaz ve aday aramasına alınmaz: FortiGate'in kendi adresidir, sorulursa
+  kayıtlarda görülen adres olarak yanıtlanır. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da
+  şubeye yaptığı NAT'ın adreslerini "İnternet çıkışı değil" türüyle girin.
+
+**Geri alma:** eski NAT satırları bu sürümde okunmadan saklanır; `-Rollback` şema geri dönüşü
+yapmaz, önceki sürüm bu satırları, yani **yükseltme öncesi** NAT değerlerini okur. Yükseltmeden
+sonra İnternet çıkışlarında bir değişiklik yaptıysanız, geri döndükten sonra önceki sürümün
+Ayarlar → Uygulama ayarları bölümündeki `nat.public_ips` ve `nat.wan_transip` değerlerini bu
+sürümde yaptığınız değişiklikle karşılaştırıp elle girin (değişiklikler denetim kaydında
+`settings.change` olarak durur); bunun için veritabanını geri yüklemeyin: `-RestoreDatabase`
+yükseltmeden sonraki bütün kayıtları (denetim, sorgu, rapor, uyarı, cihaz ve kişi atamaları)
+siler. `-Rollback` çalıştırmadan önce bu sürümde yapılan sorguların resmi raporlarını (PDF)
+indirin: bir rapor ilk indirildiğinde bir kez oluşturulur ve önceki sürüm, bu sürümün eklediği
+satırları (tanımsız gönderici uyarısı, "Kısmi kanıt" etiketi, çıkış ve FortiGate kira satırları)
+yazmaz. FortiGate DHCP kullanan bir kurulumda önceki sürüm FortiGate DHCP kayıtlarını okuyamaz:
+bir FortiGate kirasını, adres bırakıldıktan ya da başka bir istemciye verildikten sonra da açık
+tutabilir. Bu yüzden `-Rollback`, program değiştirilmeden önce, bütün FortiGate kiralarını
+**düşük güvene** indirir; kaç kira olduğunu yazar ve kurulum günlüğüne kaydeder (yalnızca
+türetilmiş kira satırları değişir; ham kayıtlara ve mühürlere dokunulmaz; `-RestoreDatabase`
+ile bu adım yapılmaz). Önceki sürümde FortiGate DHCP'ye dayanan bütün zincirler bu nedenle
+düşük güvenle görünür. Önceki sürüm mevcut FortiGate kiralarını kendi ayarlardaki sürelerine
+göre (kayıttaki kira süresine bakmadan, varsayılanlarla kiranın son DHCP kaydından yaklaşık 26
+saat sonra; bu an geçmişte de olabilir) kapatır, geri dönüş günü ya da önceki gün başlayanları
+(ve geç gelen kayıtlar için yeniden oluşturduğu günlerde başlayanları) kendi yeniden
+oluşturmasında siler ve yenisini oluşturmaz; MikroTik kiraları önceki sürümün kendi
+kurallarıyla, yükseltmeden önceki gibi sürer. Geri dönüşten sonraki anlar için FortiGate DHCP
+adreslerinin 5651 sorgularını yeniden yükseltmeden sonra yapın. Yeniden yükseltildiğinde
+aradaki günlerin FortiGate DHCP kayıtları kira zaman çizelgesine girmez ve sorgular bunu
+belirtir: zincir kurulamayan bir anda, o anı kapsayan en yeni DHCP kaydı böyle bir kayıtsa
+`fortigate_dhcp_not_converted` ile; bir DHCP kirasına dayanan zincirde, kiranın son DHCP
+kaydından sonra o adres ya da o kiranın MAC adresi için böyle bir kayıt varsa zincir düşük
+güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`).
+
+`-Rollback` FortiGate kiralarını, geri dönülen sürüm FortiGate DHCP kayıtlarını okusa da
+düşük güvene indirir: FortiGate DHCP okuyan iki sürüm arasındaki bir geri almadan sonra da
+FortiGate DHCP zincirleri bir sonraki `arcilogger-db upgrade` çalışmasına kadar düşük güvenle
+görünür. O yükseltme (ör. yeniden yükseltme) onları geri getirir (aşağıda). Bu düşük güven
+hiçbir zaman yanlış bir kişiyi göstermez; zinciri yalnızca gereğinden düşük gösterir.
+
+**Yeniden yükseltme:** veritabanı şeması geri alınmadığı için dönüşüm yeniden çalışmaz ve eski
+NAT ayarları yeniden çevrilmez. Geri dönüş sırasında önceki sürümde `nat.public_ips`,
+`nat.wan_transip` ya da `lookup.port_hint` değiştirildiyse `R20-nat:legacy-changed` uyarısı
+değişen ayarları adlarıyla gösterir: değişikliği İnternet çıkışları bölümüne elle işleyin;
+uyarı çıkışlar kaydedilince kapanır. Yeniden yükseltme, önceki sürümün değiştirmediği FortiGate
+kiralarının güven düzeyini geri getirir ve kaç kiranın geri geldiğini, kaçının düşük kaldığını
+ve kiraların yeniden oluşturulacağı günleri yazar; düşük kalanlar önceki sürümün kapattığı ya
+da yeniden hesapladığı kiralardır. FortiGate DHCP kullanan bir kurulumda yeniden yükseltmeden
+sonra, geri dönüş gününden en uzun kira süresi kadar önceki günden (7 günlük kirada 7 gün
+önce) yeniden yükseltme gününe kadar kiraları Ayarlar → Uygulama ayarları → 5651 sorgu ve kira
+zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31
+gün): önceki sürümün erken kapattığı, sildiği ya da düşük güvende bıraktığı FortiGate kiraları
+ancak böyle FortiGate'in kendi bitişine ve güven düzeyine göre yeniden kurulur; yapılmazsa o
+aralıktaki anlar için sorgu nedensiz bir "kira yok" verebilir ya da zinciri düşük güvenle
+gösterir. Yeniden kurulan bu kiralar geri dönüş aralığında, kiranın son DHCP kaydından sonra
+önceki sürümün o adres ya da MAC adresi için yüklediği bir FortiGate DHCP kaydı varsa düşük
+güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`): adres o arada
+bırakılmış, başka bir cihaza verilmiş ya da MAC adresi başka bir adres almış olabilir.
+
 ## 14. Kaldırma
 
 ```powershell
@@ -1146,6 +1281,30 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
 - Masaüstü Windows 11 Pro'da: yukarıdakilerin hepsi ve güç ayarları, Akıllı Uygulama Denetimi,
   zorunlu bir güncelleme yeniden başlatması — adım adım:
   [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
+
+**FortiGate DHCP, srcmac ve internet çıkışları.** Aşağıdaki varsayımlar FortiOS belgelerine
+dayanır ya da kurumun ağına bağlıdır; sahada doğrulanır (numaralar
+[CORRELATION.md](CORRELATION.md) bölüm 8'deki listeninkilerdir). Her satırın sonucunu ve
+denetimin tarihini yazın. Denetimleri **her FortiOS yükseltmesinden sonra** yineleyin (kayıt
+alanları sürümler arasında değişebilir) ve yeni sonucu tarihiyle ekleyin; eskisini silmeyin.
+Bir sonuç beklenenden farklıysa [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4'teki dallara göre
+ayarı düzeltin. FortiGate DHCP kullanılmıyorsa V1–V6, V14 ve V17 satırlarına "kullanılmıyor"
+yazın.
+
+| # | Doğrulanacak | Nasıl | Yazılacak sonuç | Sonuç | Tarih |
+|---|---|---|---|---|---|
+| V1 | FortiGate DHCP Ack kaydının (logid `0100026001`) syslog'daki gerçek biçimi: `ip`, `mac`, `dhcp_msg`, `lease`, `interface`, `hostname` alanları, tırnaklar, MAC adresinin yazımı; `hostname` alanının olmaması ya da boş olması | [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4 adım 5: Kaynaklar → Kira kanıtı kartı ve deneme 5651 Sorgu; geçince `dhcp.fortigate_format_verified` açılır (adım 6) | geçti / geçmedi; düzeltilen ayar | | |
+| V2 | İstemcinin adresi bırakması (RELEASE) kaydediliyor mu; logid'i (beklenen `0100026002`) ve `dhcp_msg` değeri | DEVICE-SETUP.md bölüm 2.4 adım 5 (`ipconfig /release`, sonra `ipconfig /renew`) ve dalları; başka bir logid `R20-lease:fortigate-refused` uyarısında "tanınmayan logid" olarak görünür | RELEASE kaydediliyor: evet / hayır; logid; `dhcp_msg` | | |
+| V3 | Yenilemeler (istemci bağlı kalırken kira süresinin yarısında) ikinci bir DHCP Ack kaydı veriyor mu | DEVICE-SETUP.md bölüm 2.4 adım 5, yenileme denetimi | yenilemeler kaydediliyor: evet / hayır; hayırsa kurumun DEVICE-SETUP.md bölüm 2.4 adım 5'teki seçimi (olduğu gibi bırakmak ya da `dhcp.fortigate_traffic_extends` ayarını açmak) ve seçimin tarihi | | |
+| V4 | `lease` alanı saniye cinsinden mi; süresiz kira (`lease-time` `0`) nasıl yazılıyor | Arama'da (`logid:0100026001`) ham satırdaki `lease` değeri FortiGate'teki `lease-time` ile karşılaştırılır (DEVICE-SETUP.md bölüm 2.4 adım 7); `R20-lease:fortigate-lease` ve `R20-lease:fortigate-lease-unlimited` uyarıları | `lease` = `lease-time`: evet / hayır | | |
+| V5 | DHCP olay kayıtları DEVICE-SETUP.md'deki ayarlarla (önem düzeyi `information`, olayları dışlayan süzgeç yok) syslog'a ulaşıyor mu | DEVICE-SETUP.md bölüm 2.4 adım 3–4; Kaynaklar → Kira kanıtı kartının durumu (`ok`, `none`, `refused`) | kartın durumu; `none` ya da `refused` ise yapılan düzeltme | | |
+| V6 | FortiGate'in DHCP aktarıcı (relay) olduğu arayüzlerden FortiGate DHCP kaydı gelmediği; `server-type ipsec` sunucularının (DHCP over IPsec, VPN havuzları) arayüzlerinin hariç tutulduğu; bir DHCPINFORM yanıtının DHCP Ack olarak yazılıp yazılmadığı (`dhcp_msg` değeri: V14); FortiGate bir arayüzde aktarılan (relay) birden çok ağa hizmet veriyorsa aktarılan bir istemcinin DHCP Ack kaydının hangi `interface` ve adresi taşıdığı | DEVICE-SETUP.md bölüm 2.4 adım 1, 2 ve 9; `dhcp.fortigate_interfaces_excluded`; `R20-lease:fortigate-dhcp-subnet` uyarısı | aktarılan ağlara tek bir arayüzde hizmet veriliyor: evet / hayır; evetse kayıttaki `interface` ve adresin istemcinin kendi ağından olup olmadığı; hariç tutulan arayüzler | | |
+| V8 | srcmac yalnızca aygıt tanıma açık arayüzlerde gelir ve doğrudan bağlı istemcilerin kendi MAC adresidir; arada katman 2 anahtar varsa ancak iki istemci denetimi bunu gösterirse; birimin hangi aygıt tanıma alanlarını doldurduğu | DEVICE-SETUP.md bölüm 2.5: arayüzde iki bilinen istemciyle, "Kayıtlarda görülen NAT adresleri" panelinin (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi) srcmac arayüzleri tablosunda `max_ips_per_mac` 1 (IPv4 kaynaklar) ve Arama'da (`srcmac:`) iki MAC adresi istemcilerin kendisi (bir anahtarın ya da yönlendiricinin değil) | arayüz başına: denetim geçti / geçmedi, `lookup.srcmac_interfaces` listesine alındı mı; birimin doldurduğu alanlar | | |
+| V11 | Her hattın servis sağlayıcı yönlendiricisi kaynak portu koruyor mu | DEVICE-SETUP.md bölüm 2.6: port koruma ölçümü | hat başına `preserved` (ölçüldü) ya da `unknown` | | |
+| V14 | Her eşlenmiş logid altında FortiOS'un yazdığı `dhcp_msg` değerleri | Arama'da ham satırlar (`logid:<logid>`); `R20-lease:fortigate-refused` uyarısı "beklenmeyen dhcp_msg" nedeniyle görülen değerleri yazar; `dhcp.fortigate_dhcp_msgs` | logid başına görülen `dhcp_msg` değerleri | | |
+| V15 | Her hattın genel IP adresi sabit mi | DEVICE-SETUP.md bölüm 2.6: servis sağlayıcıya sorulur; değişebilecek adresli hat `public_dynamic` olarak işaretlenir | hat başına sabit / değişebilir; servis sağlayıcının yanıtı | | |
+| V16 | FortiGate DHCP kayıtları kullanılabilir bir cihaz zamanı taşıyor ve FortiGate'in saati dakikalar içinde doğru: FortiGate NTP ile eşitleniyor | DEVICE-SETUP.md bölüm 2.1 (NTP adımı); FortiGate'te `diagnose sys ntp status` NTP sunucularının bilgisini listeler; `R20-lease:source-clock` uyarısı açık olmamalı | FortiGate NTP ile eşitleniyor: evet / hayır; `diagnose sys ntp status` çıktısındaki NTP sunucusu | | |
+| V17 | FortiOS bir DHCPDECLINE kaydı yazıyor mu ya da bir adresi vermeden önce denetliyor mu; bir istemci bir sunucu arayüzü ve ağı için tek bir kira tutar | Ayrı bir deneme yoktur: statik cihazlar DHCP aralığının dışında tutulur (DEVICE-SETUP.md bölüm 2.4 adım 8); `R20-lease:fortigate-decline:<ağ>` uyarısı | uyarı açıldı mı; açıldıysa ağ ve yapılan düzeltme (adres ayrıldı ya da cihaz taşındı) | | |
 
 ## 17. Masaüstü Windows 11 Pro
 

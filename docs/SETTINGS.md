@@ -23,7 +23,7 @@ endpoints the pages use are in section 10.
 | Page (address) | Changed from the browser | Deliberately console only |
 |---|---|---|
 | **General** (`/settings/general`) | organisation name (`site_name`), local and fallback time source (`[clock] ntp_server`, `[clock] fallback_server`), clock offset alert threshold (`[clock] alert_offset_ms`); the last measured offset is shown, a new time server is tried before it is saved | `[clock] ntp_port` |
-| **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, search and live tail, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
+| **Application settings** (`/settings/application`) | the database settings by group (alerts and e-mail, 5651 lookup and lease timeline, search and live tail, usage analytics with the work hours and holidays, usage reports, evidence packages, sessions, passwords and privacy, database); in the 5651 lookup group the **Internet exits (NAT)** editor, under it the "Kayıtlarda görülen NAT adresleri" (NAT addresses seen in the logs) panel, and **Rebuild the leases** (at most 31 days) | `devices.oui_file`, `usage.psl_file`, which name files |
 | **Kamu SM** (`/settings/kamusm`) | a wizard: Java (one of those the administration service found on the server), Zamane client (upload), root certificates (add) and legal root fingerprints (installed roots only), customer number and password (tried with a credit query when saved), **Stamp test (uses 1 credit)**, **Switch to production** (and back to test), credit alert threshold and timeout; `[seal]` read-only | the mock or another provider, a free URL or port, the digest, removing a root or a fingerprint, a free `java` path, approving an unknown Zamane release (`approve-jar`, section 4) |
 | **Sources** (`/settings/sources`) | add a log source, edit it (the name is fixed), switch it on or off (`[[sources]] enabled`), remove it (typing its name); the table shows the last message and the firewall state | the whole `[collector]` section (bind address, ports, TLS, `unknown_senders`) |
 | **E-mail** (`/settings/email`) | `[smtp]` (on/off, server, port, security, user, sender, timeout), the SMTP password, a CA file for the server's certificate (upload, or back to the Windows certificate store), the alert e-mail settings (`alerts.email_*`: recipients, lowest severity, hourly limit …); a trial e-mail before saving; **Send a test e-mail** (with the saved settings, at most 5 an hour) | — |
@@ -79,6 +79,76 @@ reads them again (a live tail when it opens):
 | `live.buffer_lines` | 5000 | 500–50000 | newest lines the server keeps for a resume |
 | `live.max_minutes` | 60 | 5–480 | duration of one tail (unattended screen); Resume starts it again |
 | `live.backfill_lines` | 50 | 0–200 | recent lines shown at once when a tail opens |
+
+The **5651 lookup and lease timeline** group also holds, in this version
+([adr/0016-fortigate-dhcp-and-internet-exits.md](adr/0016-fortigate-dhcp-and-internet-exits.md)),
+the settings for the internet exits, srcmac and the FortiGate DHCP records. The values are
+entered on site or verified there, never assumed; what to enter when is in
+[FIRST-STEPS.md](FIRST-STEPS.md) section 6 and [DEVICE-SETUP.md](DEVICE-SETUP.md) sections
+2.4–2.6. The old settings `nat.public_ips`, `nat.wan_transip` and `lookup.port_hint` are gone: the
+upgrade converts them into the internet exits ([INSTALL.md](INSTALL.md) section 13).
+
+| Setting | Default | Bounds | Meaning |
+|---|---|---|---|
+| `nat.egresses` | `{}` | at most 8 exits; an exit name of lower-case letters, digits and hyphens (at most 32 characters, e.g. `hat-1`) | Internet exits (NAT): each line's public IP addresses and whether they may change, the FortiGate's NAT address on that line (transip), its interfaces (dstintf), the NAT type and port preservation; entered with the editor below. Empty: one double-NAT exit is assumed |
+| `nat.snat_trandisp` | `["snat"]` | 1–8 values, each starting with a lower-case letter (at most 16 characters) | the FortiGate `trandisp` values a candidate search takes for addresses no exit claims; only `snat` was seen in logs, verify on site (the panel flags other values) |
+| `lookup.srcmac_interfaces` | `[]` | an interface name of 1–35 characters | the FortiGate interfaces (`srcintf`) whose srcmac is used: for a session without a lease, the MAC address, the device and the person are shown from this field with low confidence, as partial evidence; no lease is ever created. Only interfaces checked on site with two clients ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5). Empty: srcmac is not used |
+| `lookup.srcmac_max_ips` | 1 | 1–16 | a srcmac seen with more distinct IPv4 addresses within ±1 hour of the requested moment counts as a router's or switch's address and is not used (IPv6 addresses are not counted) |
+| `dhcp.fortigate_logids` | `{"0100026001": "assigned", "0100026002": "deassigned"}` | at most 16 entries; a logid of 10 digits, meaning `assigned` or `deassigned` | the FortiGate DHCP events that become lease evidence; the defaults come from the FortiOS log reference (the Release logid derived from its numbering rule), verify them on site. Empty: FortiGate DHCP records are not used |
+| `dhcp.fortigate_dhcp_msgs` | `{"0100026001": ["Ack"]}` | 1–8 values per logid, each of 1–32 characters | per logid, the `dhcp_msg` values that count as lease evidence (case-insensitive); a record with another value is not used and raises an alert; a logid without an entry is not restricted |
+| `dhcp.fortigate_use_logged_lease` | on | — | the lease time in the DHCP Ack record is the lease's time; values below 300 seconds, above 100 days or 0 (unlimited) use `lease.server_seconds` / `lease.default_seconds` (with the `lease.timeout_percent` margin) |
+| `dhcp.fortigate_traffic_extends` | off | — | when on, traffic extends a FortiGate lease; switch it on only when it is verified on site that renewals are not logged and the organisation accepts the wrong-person risk (while on, the help text shows as a warning) |
+| `dhcp.fortigate_interfaces_excluded` | `[]` | an interface name of 1–35 characters | FortiGate interfaces whose DHCP records are no lease evidence: the interfaces of DHCP-over-IPsec servers (`server-type ipsec`) |
+| `dhcp.fortigate_format_verified` | off | — | switched on once the record format has been verified on site as [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4 says; reports name who marked it and when; after every FortiOS upgrade switched off and the check repeated |
+
+In the `lease.server_seconds` editor the server's name is the DHCP server's name on a MikroTik
+(e.g. `dhcp61`) and the DHCP interface's name on a FortiGate.
+
+**Rebuild the leases after a settings change.** After changing any `dhcp.fortigate_*` setting
+(except `dhcp.fortigate_format_verified`, which only changes the lookup and report texts) or a
+FortiGate source (**Sources**), rebuild the leases from the first affected day to today with
+**Rebuild the leases** in the same group (at most 31 days per request; several requests for a
+longer range): the change applies to past days only after the rebuild. Until then a 5651 lookup
+for moments of those days may answer without a chain (the safe side: no wrong person is named).
+For a network added or changed later: [FIRST-STEPS.md](FIRST-STEPS.md) section 5.
+
+**The Internet exits (NAT) editor** (`nat.egresses`). Each exit is a row: name, label, type,
+public addresses, NAT addresses, interfaces (dstintf) and port preservation. The types are
+"Direct (public IP on the FortiGate)", "ISP NAT (double NAT)", "Does not pass the FortiGate" and
+"Not an internet exit (NAT towards a DMZ, VLAN, VPN or branch)"; public addresses are not entered
+for the last, NAT addresses only for ISP NAT and the last, and port preservation ("Unknown",
+"Kept (verified on site)", "Not kept") and the check box "Public IP may change (dynamic)" only for
+ISP NAT. A public address cannot be a private (RFC 1918) or shared (RFC 6598, e.g. 100.64.x.x)
+address: the FortiGate's address behind the ISP router is the NAT address of an ISP NAT exit. The
+editor shows the server's rules next to the field before saving and warns about: an ISP NAT exit
+without a public address or marked as changing (it is also searched for public IPs no exit
+claims), a line without interfaces when there are two or more lines (without them a lookup cannot
+tell by which line a session left), an ISP NAT exit whose NAT address is a public address (if the
+FortiGate holds it itself, the line is direct), and exits converted at the upgrade without
+interfaces ([INSTALL.md](INSTALL.md) section 13). The server has the last word: when it refuses a
+value, its code and text show above the editor. The change is written to the audit log as
+`settings.change` and applies to the next lookups at once. The console equivalent:
+[FIRST-STEPS.md](FIRST-STEPS.md) section 6.
+
+**The "Kayıtlarda görülen NAT adresleri (son 24 saat)" (NAT addresses seen in the logs, last 24
+hours) panel** is under the editor, so that the values are read from the records instead of
+guessed (counts and the FortiGate's own addresses only; not audited; the counts are kept 5
+minutes, which exit claims an address is computed from the current settings every time):
+
+- **NAT addresses:** the FortiGate's source-NAT address (`transip`), the outgoing interface
+  (`dstintf`), the NAT type (`trandisp`), the number of sessions, first and last seen, and the
+  exit that claims the address. For an address no exit claims, **Add as exit** prefills a row: a
+  public address becomes a Direct exit, a private or shared address an ISP NAT exit with an empty
+  public address (you enter the ISP's public address); beside it, **Add as not an internet exit**
+  is for the address of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch (no
+  session is searched on such addresses). An unknown `trandisp` value is flagged. When the stored
+  exit definition cannot be read, the panel says so and the exit column stays empty (`R20-nat`).
+- **srcmac interfaces (last hour):** per interface (`srcintf`) the number of records with a
+  srcmac, the number of MACs and the most IP addresses seen with one MAC (`max_ips_per_mac`); all
+  three count IPv4 sources only (IPv4 sources; a dual-stack client's IPv6 addresses are not
+  counted), and whether the interface is in `lookup.srcmac_interfaces`. **Use for srcmac** is
+  disabled on interfaces whose `max_ips_per_mac` is above `lookup.srcmac_max_ips`. Do the
+  two-client check before you add an interface ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
 
 ## 2. How it works
 
@@ -320,7 +390,7 @@ carries `code`, `message_tr` and `message_en`.
 |---|---|
 | Status chip, every page | `GET /admin/status`, `GET /admin/config` (values, `etag`s, locked fields) |
 | General | `POST /admin/config/general/check`, `PUT /admin/config/general` |
-| Application settings | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `POST /admin/actions/lease-rebuild` |
+| Application settings | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `GET /settings/fortigate/observed` (NAT addresses seen in the logs); `POST /admin/actions/lease-rebuild` |
 | Kamu SM | `POST /admin/config/tsa/check`, `PUT /admin/config/tsa`; `POST /admin/uploads?kind=…` then `POST /admin/config/tsa/zamane`, `POST /admin/config/tsa/roots`, `POST /admin/config/tsa/legal-roots`; `POST /admin/actions/tsa-test` |
 | Sources | `POST /admin/config/sources/check`, `POST /admin/config/sources`, `PUT /admin/config/sources/{name}`, `DELETE /admin/config/sources/{name}` |
 | E-mail | `POST /admin/config/smtp/check`, `PUT /admin/config/smtp`, `POST /admin/config/smtp/ca`, `DELETE /admin/config/smtp/ca`; `POST /admin/actions/test-email`; the alert e-mail settings `PATCH /settings` |
