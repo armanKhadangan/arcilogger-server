@@ -62,7 +62,25 @@ requested time; IP conflicts appear as chain alternatives (low confidence). A ch
 the device-person assignment **valid at that moment** (assignment history, ADR-0008) and the
 person's current department (``person_department_current``); only a device without any
 assignment history falls back to its owner at lookup time, and the outcome then says so
-(``person_link_at_lookup_time``). Both functions
+(``person_link_at_lookup_time``). A match without a chain ends at the session and the internal IP
+(``chain_missing``). When no lease chain could be built (an internal lookup without a lease, a
+match without a chain or with a srcmac chain only), the newest FortiGate DHCP row of a trusted
+sender before the moment is looked up for the address (at most 20; the MAC of a MAC-only
+request): a covering ACK that stayed an ``fg_event`` row (loaded before the upgrade, unreadable
+fields, loaded by the previous version after a rollback) is named
+(``fortigate_dhcp_not_converted``) and, in internal mode and for an exact match, cited in
+``unconverted_dhcp``, never as an attribution (ADR-0016 D8). A match with rows of an
+unconfigured sender is marked (``NatMatch.untrusted_sources``,
+``session_from_unknown_source``; D24). **srcmac** (D10, contract 2.9; off while
+``lookup.srcmac_interfaces`` is empty): the srcmac of a session record on a listed interface and
+from a trusted sender, whose MAC passes the router guard (no infrastructure MAC, at most
+``lookup.srcmac_max_ips`` IPv4 addresses within an hour of the moment, no lease of another
+address there), gives a match without a lease, and an internal lookup without one, a ``low``
+chain by that MAC (``srcmac_only``); beside a lease it agrees or makes the ``low`` conflict of
+D10. It is never lease evidence and is never written anywhere. The clocks of the sources whose
+rows the outcome cites (and, when a search found nothing, of the sources whose rows it read) are
+measured at the moment from the stored device and receive times; an offset beyond the limit
+gives ``source_clock_offset`` and every chain ``low`` (D28). Both functions
 only read (JIT compilation is switched off for the caller's transaction, ``SET LOCAL``); the API
 stores the lookup and writes the audit entry.
 """
@@ -70,9 +88,11 @@ stores the lookup and writes the audit entry.
 from __future__ import annotations
 
 import ipaddress
+import math
 import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from ipaddress import IPv4Network
 from typing import Any
@@ -81,6 +101,7 @@ from sqlalchemy import (
     ColumnElement,
     and_,
     any_,
+    case,
     cast,
     exists,
     func,
@@ -89,13 +110,14 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    union_all,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, distinct_on
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
 
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import utc_now
+from arcilogger_core.timeutil import site_day, utc_now
 from arcilogger_db.egress import (
     CHANGES_KEY,
     IMPLICIT_CATCH_ALL,
@@ -103,10 +125,26 @@ from arcilogger_db.egress import (
     NOT_PUBLIC,
     Egress,
 )
-from arcilogger_db.models import FgTraffic, Setting
+from arcilogger_db.models import (
+    FgDhcp,
+    FgEvent,
+    FgTraffic,
+    Message,
+    SearchCount,
+    Setting,
+    Source,
+)
 from arcilogger_db.settings import get_setting, get_settings
 from arcilogger_worker.correlation.watermark import get_watermark
-from arcilogger_worker.lookup.attribution import Attributor
+from arcilogger_worker.lookup.attribution import (
+    UNCONVERTED_WINDOW,
+    Attributor,
+    Srcmac,
+    StoredLease,
+    event_kept,
+    usable_lease,
+)
+from arcilogger_worker.lookup.refs import ARP_TABLE, DHCP_TABLES, traffic_ref
 from arcilogger_worker.lookup.sessions import (
     CANDIDATE_MAX_SCORE,
     PORT_HINT_POINTS,
@@ -118,11 +156,19 @@ from arcilogger_worker.lookup.sessions import (
     fetch_rows,
     find_domain,
     group_sessions,
+    srcmac_addresses_within,
+    srcmac_rows_of_mac,
+    srcmac_sightings,
     time_points,
     within,
 )
 from arcilogger_worker.lookup.texts import exit_changes, explain
-from arcilogger_worker.lookup.trust import untrusted_sources
+from arcilogger_worker.lookup.trust import (
+    UNKNOWN_PREFIX,
+    kept,
+    srcmac_ip_counts,
+    untrusted_sources,
+)
 from arcilogger_worker.lookup.types import (
     AttributionChain,
     DataWindow,
@@ -131,6 +177,7 @@ from arcilogger_worker.lookup.types import (
     EgressEntry,
     EgressResolution,
     EgressSearched,
+    EvidenceRef,
     Explanation,
     LookupEgress,
     LookupMode,
@@ -139,6 +186,7 @@ from arcilogger_worker.lookup.types import (
     LookupSettings,
     MatchKind,
     NatMatch,
+    RawRef,
 )
 from arcilogger_worker.lookup.window import data_window
 
@@ -167,6 +215,37 @@ _DESTINATION_ORDER = {
 #: Resolutions whose address no exit claims now (D32: every exit changed after the moment is
 #: named; ``observed`` rests on the FortiGate's own record and is left out).
 _UNCLAIMED_RESOLUTIONS = frozenset({"public_unknown", "no_egress", "unconfigured"})
+#: The D8 probe (2.8.3) looks at the IPs of this many matches without a lease chain of one
+#: lookup at most.
+PROBE_IPS = 20
+#: The router guard of srcmac counts the addresses of a MAC this far around the moment (and
+#: the address of a row it uses outside that) and looks for its leases on other addresses
+#: there (2.9, D10).
+SRCMAC_GUARD = timedelta(hours=1)
+#: Rows an internal lookup without a lease reads for the srcmac of an address or a MAC (2.9).
+SRCMAC_ROWS = 50
+#: srcmac values ``srcmac_ambiguous`` names.
+SRCMAC_NAMED = 3
+#: The source clock at the requested moment (2.7, D28): a source's ``messages`` rows within this
+#: span of the moment by device time, at most :data:`CLOCK_SIDE_ROWS` on each side of it (the
+#: rows the search and the lease timeline used, on both sides of a clock step; round 5), of which
+#: :data:`CLOCK_MIN_ROWS` make a measurement; a median offset beyond :data:`CLOCK_LIMIT_SECONDS`
+#: (a session search: or beyond the tolerance) lowers the chains. The minimum and the limit are
+#: those of ``R20-lease:source-clock`` (a test pins them equal). At most :data:`CLOCK_SOURCES`
+#: sources are measured, the cited ones first.
+CLOCK_SPAN = timedelta(hours=1)
+CLOCK_SIDE_ROWS = 2500
+CLOCK_MIN_ROWS = 10
+CLOCK_LIMIT_SECONDS = 120
+CLOCK_SOURCES = 5
+#: The tables of the lease timeline: a source measured for one of them has the fixed limit, as
+#: every source of an internal lookup has (the lease search uses the moment, not the tolerance;
+#: round 6).
+LEASE_TABLES = frozenset((*DHCP_TABLES, ARP_TABLE))
+#: How the D8 probe cites a FortiGate DHCP record that never entered the lease timeline.
+UNCONVERTED_SUMMARY = (
+    "FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)"
+)
 
 
 def _ip_order(ip: str) -> tuple[int, int]:
@@ -182,8 +261,35 @@ def _texts(networks: Sequence[IPv4Network]) -> list[str]:
     return [str(n.network_address) if n.prefixlen == n.max_prefixlen else str(n) for n in networks]
 
 
+def _text_order(value: str) -> tuple[int, int, str]:
+    """IP addresses in address order, anything else (a MAC) after them."""
+    try:
+        return (*_ip_order(value), "")
+    except ValueError:
+        return 9, 0, value
+
+
 def _joined(items: Sequence[str]) -> str:
     return ", ".join(items) if items else "-"
+
+
+def _whole_seconds(seconds: float) -> int:
+    """``seconds`` rounded up to the next whole second, away from zero (120.4 s prints 121): a
+    clock offset beyond its limit prints beyond it."""
+    whole = math.ceil(abs(seconds))
+    return -whole if seconds < 0 else whole
+
+
+def _lowered(chain: AttributionChain) -> AttributionChain:
+    """``chain`` and its alternatives at ``low``, the lease step too (a source's clock was off
+    at the moment, D28)."""
+    lease = None if chain.lease is None else replace(chain.lease, confidence="low")
+    return replace(
+        chain,
+        confidence="low",
+        lease=lease,
+        alternatives=tuple(_lowered(other) for other in chain.alternatives),
+    )
 
 
 def attribute(session: Session, ip: str, at: datetime) -> AttributionChain | None:
@@ -194,7 +300,9 @@ def attribute(session: Session, ip: str, at: datetime) -> AttributionChain | Non
     """
     settings = LookupSettings.from_settings(get_settings(session))
     request = LookupRequest(at=at, internal_ip=ip)
-    return Attributor(session, settings).chain(str(request.internal_ip), request.at)
+    attributor = StatusRows.load(session).attributor(session, settings, untrusted_sources(session))
+    chain = attributor.chain(str(request.internal_ip), request.at)
+    return None if chain is None else attributor.checked([chain])[0]
 
 
 def run_lookup(
@@ -256,6 +364,19 @@ class StatusRows:
             egresses_by=None if egresses is None else egresses.updated_by,
             format_verified_at=None if verified is None else verified.updated_at,
             format_verified_by=None if verified is None else verified.updated_by,
+        )
+
+    def attributor(
+        self, session: Session, settings: LookupSettings, untrusted: frozenset[str]
+    ) -> Attributor:
+        """The attributor of a lookup: lease facts read for the moment (2.7), the format note
+        with this row's time and author (D29)."""
+        return Attributor(
+            session,
+            settings,
+            untrusted,
+            lookup=True,
+            format_verified=(self.format_verified_at, self.format_verified_by),
         )
 
     def last_change(self, name: str) -> tuple[datetime, str, bool] | None:
@@ -477,6 +598,100 @@ def own_networks(egress: Egress, exits: Sequence[Egress]) -> tuple[IPv4Network, 
     return tuple(dict.fromkeys(found))
 
 
+# -- srcmac (2.9, D10) ----------------------------------------------------------------------------
+
+
+def _nearest_first(at: datetime) -> Any:
+    return lambda row: (abs((row.time - at).total_seconds()), row.time, row.id)
+
+
+class _SrcmacGuard:
+    """When a session record's srcmac may name a MAC in a lookup (2.9, D10), the rows being of a
+    listed interface and a trusted sender already: the MAC is no infrastructure MAC
+    (``srcmac_infrastructure``), shows at most ``lookup.srcmac_max_ips`` IPv4 addresses on that
+    interface within an hour of the moment (``srcmac_shared``; one
+    :func:`.trust.srcmac_ip_counts` query per lookup, the one the alert and the observed
+    endpoint count with), and holds no lease of another address there
+    (``srcmac_other_lease``). A considered row outside that hour (a session overlapping the
+    lookup window, logged at its end) adds its own address to its MAC's count unless the hour
+    shows it already, so a row used is always counted; no row widens the hour of another MAC.
+    A refusal adds its explanation to ``notes``."""
+
+    def __init__(
+        self,
+        session: Session,
+        settings: LookupSettings,
+        attributor: Attributor,
+        at: datetime,
+        untrusted: frozenset[str],
+        notes: list[Explanation],
+    ) -> None:
+        self.session = session
+        self.settings = settings
+        self.attributor = attributor
+        self.at = at
+        self.low, self.high = at - SRCMAC_GUARD, at + SRCMAC_GUARD
+        self.untrusted = untrusted
+        self.notes = notes
+        self._counts: dict[tuple[str, str], int] = {}
+        self._leases: dict[str, list[StoredLease]] = {}
+        self._decided: dict[tuple[str, str, str], bool] = {}
+
+    def load(self, rows: Sequence[TrafficRow]) -> None:
+        """Read what the guard needs for every row the lookup considers, once."""
+        if not rows:
+            return
+        macs = {str(row.srcmac) for row in rows}
+        interfaces = self.settings.srcmac_interfaces
+        self._counts = srcmac_ip_counts(
+            self.session, self.low, self.high, interfaces, self.untrusted, macs
+        )
+        outside = {
+            (str(row.srcintf), str(row.srcmac), row.srcip)
+            for row in rows
+            if not self.low <= row.time <= self.high
+        }
+        within = srcmac_addresses_within(
+            self.session, keys=outside, low=self.low, high=self.high, untrusted=self.untrusted
+        )
+        for interface, mac, _ip in outside - within:
+            self._counts[interface, mac] = self._counts.get((interface, mac), 0) + 1
+        self._leases = self.attributor.leases_of_macs(macs, self.low, self.high)
+        self.attributor.prefetch_devices(macs)
+
+    def usable(self, row: TrafficRow) -> Srcmac | None:
+        """The srcmac of ``row`` (a listed interface, a trusted sender) when it may be used."""
+        mac, interface = str(row.srcmac), str(row.srcintf)
+        key = (mac, interface, row.srcip)
+        if key not in self._decided:
+            self._decided[key] = self._allowed(mac, interface, row.srcip)
+        return (mac, traffic_ref(row), interface) if self._decided[key] else None
+
+    def _allowed(self, mac: str, interface: str, ip: str) -> bool:
+        at = self.at.isoformat()
+        if self.attributor.is_infrastructure(mac):
+            self.notes.append(explain("srcmac_infrastructure", mac=mac))
+            return False
+        count = self._counts.get((interface, mac), 0)
+        if count > self.settings.srcmac_max_ips:
+            self.notes.append(explain("srcmac_shared", mac=mac, at=at, count=count))
+            return False
+        other = next(
+            (
+                lease
+                for lease in self._leases.get(mac, ())
+                if lease.ip != ip
+                and lease.start <= self.high
+                and self.attributor.covered_until(lease) >= self.low
+            ),
+            None,
+        )
+        if other is not None:
+            self.notes.append(explain("srcmac_other_lease", mac=mac, at=at, other_ip=other.ip))
+            return False
+        return True
+
+
 # -- the resolution and its search ----------------------------------------------------------------
 
 
@@ -490,6 +705,29 @@ class _Part:
     transips: tuple[IPv4Network, ...] = ()
     unclaimed: bool = False
     dstintfs: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
+class _DhcpLine:
+    """A FortiGate DHCP line that stayed an ``fg_event`` row (D8): the probe's key (the IP, or
+    the MAC of a MAC-only request), the row and the DHCP fields it needs (log-supplied text)."""
+
+    key: str
+    id: int
+    time: datetime
+    logid: str | None
+    ip: str | None
+    lease: str | None
+    interface: str | None
+    source: str
+    raw_day: Any
+    raw_line: int
+    raw_offset: int
+
+    def ref(self) -> EvidenceRef:
+        """The row as the outcome cites it: never an attribution (2.8.3)."""
+        raw = RawRef(self.source, self.raw_day, self.raw_line, self.raw_offset)
+        return EvidenceRef("fg_event", self.id, self.time, raw, UNCONVERTED_SUMMARY)
 
 
 @dataclass
@@ -534,13 +772,20 @@ class _Lookup:
             else settings.tolerance_seconds
         )
         self.window = Window(request.at, self.tolerance, settings.max_session_seconds)
-        self.attributor = Attributor(session, settings)
+        #: Made in :meth:`run` from the status rows (the format note needs one of them).
+        self.attributor: Attributor
         self.explanations: list[Explanation] = []
         self.truncated = False
         self.status = StatusRows()
         self._exits: tuple[Egress, ...] | None = None
         self._probe: _Probe | None = None
+        self._srcmac: _SrcmacGuard | None = None
         self._untrusted: frozenset[str] | None = None
+        #: What an internal lookup could not build a chain for: ``("ip", address, at)``, or
+        #: ``("mac", mac, at)`` for a MAC-only request (the D8 probe, 2.8.3).
+        self._unbuilt: tuple[str, str, datetime] | None = None
+        #: The clock measurement per source (2.7): (median offset in seconds, rows) or ``None``.
+        self._clocks: dict[str, tuple[float, int] | None] = {}
 
     # -- entry ------------------------------------------------------------------------------------
 
@@ -550,6 +795,7 @@ class _Lookup:
         # takes longer (~0.8 s) than the query itself. Off for this transaction only.
         self.session.execute(text("SET LOCAL jit = off"))
         self.status = StatusRows.load(self.session)
+        self.attributor = self.status.attributor(self.session, self.settings, self.untrusted)
         window, notes = data_window(self.session, self.request.at, layout=self.layout, now=self.now)
         self.explanations.extend(notes)
         self._watermark_note()
@@ -567,7 +813,25 @@ class _Lookup:
         else:
             plan = self._resolve_egress()
             mode, matches, plan = self._answer(plan)
-        return self._outcome(mode, matches, attribution, window, plan)
+        attribution, matches = self._across_chains(attribution, matches)
+        missing = sum(1 for match in matches if match.chain is None)
+        if missing:
+            self.explanations.append(explain("chain_missing", count=missing))
+        unconverted = self._unconverted(matches)
+        attribution, matches = self._source_clocks(attribution, matches, plan)
+        return self._outcome(mode, matches, attribution, window, plan, unconverted)
+
+    def _across_chains(
+        self, attribution: AttributionChain | None, matches: list[NatMatch]
+    ) -> tuple[AttributionChain | None, list[NatMatch]]:
+        """Every chain of the outcome after the checks of 2.7 that read across them (D27, the
+        post-lease check): one pass, one query per check for the whole lookup."""
+        chains = [m.chain for m in matches if m.chain is not None]
+        if attribution is not None:
+            chains.append(attribution)
+        checked = iter(self.attributor.checked(chains))
+        matches = [m if m.chain is None else replace(m, chain=next(checked)) for m in matches]
+        return (None if attribution is None else next(checked)), matches
 
     def _outcome(
         self,
@@ -576,6 +840,7 @@ class _Lookup:
         attribution: AttributionChain | None,
         window: DataWindow,
         plan: _Plan | None,
+        unconverted: tuple[EvidenceRef, ...] = (),
     ) -> LookupOutcome:
         chains = [m.chain for m in matches if m.chain is not None]
         if attribution is not None:
@@ -604,6 +869,7 @@ class _Lookup:
             generated_at=self.now,
             truncated=self.truncated,
             egress=egress,
+            unconverted_dhcp=unconverted,
         )
 
     def _watermark_note(self) -> None:
@@ -639,6 +905,19 @@ class _Lookup:
                 self.untrusted,
             )
         return self._probe
+
+    @property
+    def srcmac(self) -> _SrcmacGuard:
+        if self._srcmac is None:
+            self._srcmac = _SrcmacGuard(
+                self.session,
+                self.settings,
+                self.attributor,
+                self.request.at,
+                self.untrusted,
+                self.explanations,
+            )
+        return self._srcmac
 
     def _no_direct_exit(self) -> bool:
         """``double_nat`` of a request without a public IP: no line on which the FortiGate holds
@@ -1034,7 +1313,8 @@ class _Lookup:
             ]
             if not leases:
                 self.explanations.append(explain("no_lease_for_mac", mac=mac, at=at.isoformat()))
-                return None
+                self._unbuilt = ("mac", mac, at)
+                return self._srcmac_of_mac(mac)
             ips = sorted({lease.ip for lease in leases})
             if len(ips) > 1:
                 self.explanations.append(explain("mac_multiple_ips", mac=mac, ips=", ".join(ips)))
@@ -1054,14 +1334,418 @@ class _Lookup:
                     after=None if after is None else after.isoformat(),
                 )
             )
-            return None
+            self._unbuilt = ("ip", ip, at)
+            chain = self._srcmac_of_ip(ip)
+            if chain is None:
+                return None
         if mac is not None and request.internal_ip is not None:
-            macs = {chain.lease.mac if chain.lease else None} | {
-                a.lease.mac for a in chain.alternatives if a.lease is not None
-            }
+            macs = {c.device.mac for c in (chain, *chain.alternatives) if c.device is not None}
             if mac not in macs:
                 self.explanations.append(explain("mac_not_at_ip", mac=mac, ip=ip))
         return chain
+
+    def _srcmac_of_ip(self, ip: str) -> AttributionChain | None:
+        """An internal lookup of ``ip`` without a lease (2.9): the srcmac of the address's
+        sessions overlapping the window on listed interfaces. One usable MAC gives the srcmac
+        chain (the outcome keeps ``no_lease``); several give ``srcmac_ambiguous`` and no
+        chain."""
+        interfaces = self.settings.srcmac_interfaces
+        if not interfaces:
+            return None
+        rows = srcmac_sightings(
+            self.session,
+            srcips={ip},
+            window=self.window,
+            interfaces=interfaces,
+            untrusted=self.untrusted,
+            limit=SRCMAC_ROWS,
+        )
+        self.srcmac.load(rows)
+        usable = self._usable_rows(rows, key=lambda row: str(row.srcmac))
+        if len(usable) > 1:
+            self.explanations.append(
+                explain(
+                    "srcmac_ambiguous",
+                    ip=ip,
+                    seconds=self.tolerance,
+                    count=len(usable),
+                    macs=", ".join(list(usable)[:SRCMAC_NAMED]),
+                )
+            )
+            return None
+        if not usable:
+            return None
+        ((srcmac, _row),) = usable.values()
+        return self.attributor.srcmac_chain(ip, self.request.at, *srcmac)
+
+    def _srcmac_of_mac(self, mac: str) -> AttributionChain | None:
+        """A MAC-only internal lookup without a lease (2.9): the rows whose srcmac is ``mac``
+        within the tolerance of the moment on listed interfaces. One address gives the srcmac
+        chain (the outcome keeps ``no_lease_for_mac``); several give ``mac_multiple_ips`` and
+        no chain."""
+        interfaces = self.settings.srcmac_interfaces
+        if not interfaces:
+            return None
+        rows = srcmac_rows_of_mac(
+            self.session,
+            mac=mac,
+            at=self.request.at,
+            low=self.window.low,
+            high=self.window.high,
+            interfaces=interfaces,
+            untrusted=self.untrusted,
+            limit=SRCMAC_ROWS,
+        )
+        self.srcmac.load(rows)
+        usable = self._usable_rows(rows, key=lambda row: row.srcip)
+        if len(usable) > 1:
+            ips = ", ".join(sorted(usable, key=_ip_order))
+            self.explanations.append(explain("mac_multiple_ips", mac=mac, ips=ips))
+            return None
+        if not usable:
+            return None
+        ((ip, (srcmac, _row)),) = usable.items()
+        return self.attributor.srcmac_chain(ip, self.request.at, *srcmac)
+
+    def _usable_rows(
+        self, rows: Sequence[TrafficRow], *, key: Any
+    ) -> dict[str, tuple[Srcmac, TrafficRow]]:
+        """Per ``key`` (the MAC or the address), in the order first seen, the usable srcmac of
+        its row nearest to the moment."""
+        nearest = _nearest_first(self.request.at)
+        found: dict[str, tuple[Srcmac, TrafficRow]] = {}
+        for row in rows:
+            usable = self.srcmac.usable(row)
+            if usable is None:
+                continue
+            known = found.get(key(row))
+            if known is None or nearest(row) < nearest(known[1]):
+                found[key(row)] = (usable, row)
+        return found
+
+    # -- FortiGate DHCP rows that did not become lease evidence (D8 probe) -------------------------
+
+    def _unconverted(self, matches: Sequence[NatMatch]) -> tuple[EvidenceRef, ...]:
+        """The D8 probe (2.8.3) for what no lease chain could be built for: the internal
+        lookup's address (its MAC for a MAC-only request), else the IPs of the first
+        :data:`PROBE_IPS` matches without one (no chain, or a srcmac chain: one rule for both
+        paths), each at its chain's moment. Per IP the newest DHCP-shaped row before
+        the moment from a trusted sender decides, in ``fg_event`` or ``fg_dhcp``: only an
+        ``fg_event`` row of a logid mapped to ``assigned`` that would have covered the moment
+        counts (``fortigate_dhcp_not_converted``). In internal mode and for an exact match the
+        row is cited (never as an attribution); for a candidate nothing is (KVKK). No row after
+        the requested moment is read, also for a session that began after it: another client's
+        later ACK says nothing about it."""
+        targets: dict[str, datetime] = {}
+        cited: set[str] = set()
+        by_mac = False
+        if self._unbuilt is not None:
+            kind, value, at = self._unbuilt
+            by_mac = kind == "mac"
+            targets[value] = at
+            cited.add(value)
+        for match in matches:
+            ip = match.traffic.srcip
+            if (match.chain is not None and match.chain.lease is not None) or ip in targets:
+                continue
+            if len(targets) == PROBE_IPS:
+                break
+            targets[ip] = min(max(self.request.at, match.traffic.start), match.traffic.end)
+            if match.kind == "exact":
+                cited.add(ip)
+        if not targets or not self.settings.fortigate_logids:
+            return ()
+        newest = self._newest_dhcp(targets, by_mac=by_mac)
+        counted = [
+            newest[key]
+            for key, moment in targets.items()
+            if key in newest
+            and self._would_cover(newest[key], moment)
+            and (not by_mac or self._newest_of_its_address(newest[key], moment))
+        ]
+        if not counted:
+            return ()
+        ips = [self._named(line) if by_mac else line.key for line in counted]
+        self.explanations.append(
+            explain("fortigate_dhcp_not_converted", ips=", ".join(sorted(ips, key=_text_order)))
+        )
+        return tuple(
+            line.ref()
+            for line in sorted(counted, key=lambda line: _text_order(line.key))
+            if line.key in cited
+        )
+
+    def _newest_dhcp(
+        self, targets: Mapping[str, datetime], *, by_mac: bool
+    ) -> dict[str, _DhcpLine]:
+        """Per target key the ``fg_event`` DHCP line of the probe when it is the newest
+        DHCP-shaped row of trusted senders in ``[moment - window, min(moment, T)]``: one
+        ``DISTINCT ON`` query per table (``ix_fg_event_subtype_time``, ``ix_fg_dhcp_ip_time``;
+        round 5's cost note), each key bounded by its own moment, and never past the requested
+        moment T (2.8.3: a session that began after T is probed up to T). A line D25 or D28
+        refuses (:func:`.attribution.event_kept`) is no such row, as a refused ``fg_dhcp`` row
+        is none; a converted row (``trust.kept``) as new or newer means the timeline saw that
+        event: nothing is said."""
+        # The lease timeline imports this package (its refs), so its rules are imported here.
+        from arcilogger_worker.correlation.timeline import TimelineRules
+
+        # The configured ARP grace, at most the ARP interval (the rules refuse a longer one), as
+        # the lease job builds them; the window does not depend on it.
+        settings = self.settings
+        grace = min(settings.arp_release_grace_seconds, settings.arp_interval_seconds)
+        rules = TimelineRules.from_settings(settings, release_grace=grace)
+        longest = timedelta(seconds=rules.longest_window)
+        width = max(longest, UNCONVERTED_WINDOW)
+        until = {key: min(at, self.request.at) for key, at in targets.items()}
+        low, high = min(targets.values()) - width, max(until.values())
+        logids = self.settings.fortigate_logids
+        released = sorted(logid for logid, meaning in logids.items() if meaning == "deassigned")
+        event_key = (
+            func.lower(func.replace(FgEvent.extra["mac"].astext, "-", ":"))
+            if by_mac
+            else FgEvent.extra["ip"].astext
+        )
+        events = (
+            select(
+                event_key,
+                FgEvent.id,
+                FgEvent.time,
+                FgEvent.logid,
+                FgEvent.extra["ip"].astext,
+                FgEvent.extra["lease"].astext,
+                FgEvent.extra["interface"].astext,
+                FgEvent.source,
+                FgEvent.raw_day,
+                FgEvent.raw_line,
+                FgEvent.raw_offset,
+            )
+            .where(
+                FgEvent.subtype == "system",
+                FgEvent.time >= low,
+                FgEvent.time <= high,
+                FgEvent.logid.in_(sorted(logids)),
+                event_kept(self.settings),
+                # Every row of the window is read (no index holds the key); the key is read once
+                # per row here, before the per-key bounds (3.8).
+                event_key.in_(sorted(targets)),
+                or_(
+                    *(
+                        and_(
+                            event_key == key,
+                            FgEvent.time >= at - width,
+                            FgEvent.time <= until[key],
+                        )
+                        for key, at in targets.items()
+                    )
+                ),
+            )
+            .ext(distinct_on(event_key))
+            # At equal times an assignment is the newer row, as in the timeline's feed order.
+            .order_by(
+                event_key,
+                FgEvent.time.desc(),
+                case((FgEvent.logid.in_(released), 1), else_=0),
+                FgEvent.id.desc(),
+            )
+        )
+        if self.untrusted:
+            events = events.where(_not_in(FgEvent.source, self.untrusted))
+        lines = [_DhcpLine(*row) for row in self.session.execute(events)]
+        if not lines:
+            return {}
+        dhcp_key = FgDhcp.mac if by_mac else FgDhcp.ip
+        converted = (
+            select(dhcp_key, FgDhcp.time)
+            .where(
+                FgDhcp.time >= low,
+                FgDhcp.time <= high,
+                or_(
+                    *(
+                        and_(
+                            dhcp_key == line.key,
+                            FgDhcp.time >= targets[line.key] - width,
+                            FgDhcp.time <= until[line.key],
+                        )
+                        for line in lines
+                    )
+                ),
+                kept(self.settings, self.untrusted),
+            )
+            .ext(distinct_on(dhcp_key))
+            .order_by(dhcp_key, FgDhcp.time.desc())
+        )
+        seen = {str(key): time for key, time in self.session.execute(converted)}
+        return {
+            line.key: line for line in lines if line.key not in seen or seen[line.key] < line.time
+        }
+
+    def _newest_of_its_address(self, line: _DhcpLine, moment: datetime) -> bool:
+        """The address rule for a MAC's line (the c2 deviation): it counts only while it is
+        also the newest DHCP-shaped row of the address it names, by the IP probe at the same
+        moment; a newer row of that address, converted or not, says the address went on (to
+        another client, or to the MAC again in a row the timeline saw). A line whose ``ip`` is
+        no plain IPv4 address has no address to read (it never reaches PostgreSQL's ``inet``)
+        and counts as found."""
+        address = line.ip or ""
+        try:
+            ipaddress.IPv4Address(address)
+        except ValueError:
+            return True
+        same = self._newest_dhcp({address: moment}, by_mac=False).get(address)
+        return same is not None and same.id == line.id
+
+    def _would_cover(self, line: _DhcpLine, moment: datetime) -> bool:
+        """An ACK (a logid mapped to ``assigned``) whose lease would have covered ``moment``: its
+        logged lease when usable, else its interface's configured time x
+        ``lease.timeout_percent`` (the lease formula, D6)."""
+        if self.settings.fortigate_logids.get(line.logid or "") != "assigned":
+            return False
+        try:
+            logged = None if line.lease is None else int(line.lease)
+        except ValueError:
+            logged = None
+        lease = usable_lease(self.settings, logged)
+        timeout = self.settings.lease_timeout_seconds(line.interface, lease)
+        return moment <= line.time + timedelta(seconds=timeout)
+
+    @staticmethod
+    def _named(line: _DhcpLine) -> str:
+        """The address a MAC's line names in the text (the requested MAC's own record), the MAC
+        when its ``ip`` cannot be read."""
+        try:
+            return str(ipaddress.ip_address(line.ip or ""))
+        except ValueError:
+            return line.key
+
+    # -- the source clock at the requested moment (D28) ------------------------------------------
+
+    def _source_clocks(
+        self, attribution: AttributionChain | None, matches: list[NatMatch], plan: _Plan | None
+    ) -> tuple[AttributionChain | None, list[NatMatch]]:
+        """2.7 "Source clock at the requested moment": the sources of :meth:`_clock_sources`
+        whose median offset at the moment is beyond their limit are named
+        (``source_clock_offset``) and every chain of the outcome, alternatives included, is
+        ``low``, its lease step too; a match keeps its kind. The search and the lease timeline
+        used the device's times, so a session or lease found may not be the one the moment
+        means, and an empty search may have missed it."""
+        sources = self._clock_sources(attribution, matches, plan)
+        tolerance = max(CLOCK_LIMIT_SECONDS, self.tolerance)
+        offsets: dict[str, int] = {}
+        limits: list[int] = []
+        for name, lease in sources.items():
+            limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
+            measured = self._clock(name)
+            # The unrounded median is compared, as R20-lease:source-clock compares it; the
+            # offset printed is rounded up, so a named offset still exceeds its limit.
+            if measured is not None and abs(measured[0]) > limit:
+                offsets[name] = _whole_seconds(measured[0])
+                limits.append(limit)
+        if not offsets:
+            return attribution, matches
+        self.explanations.append(
+            explain(
+                "source_clock_offset",
+                at=self.request.at.isoformat(),
+                offsets=", ".join(f"{name}: {offset:+d}" for name, offset in offsets.items()),
+                limit=min(limits),
+            )
+        )
+        matches = [m if m.chain is None else replace(m, chain=_lowered(m.chain)) for m in matches]
+        return (None if attribution is None else _lowered(attribution)), matches
+
+    def _clock_sources(
+        self, attribution: AttributionChain | None, matches: Sequence[NatMatch], plan: _Plan | None
+    ) -> dict[str, bool]:
+        """The sources to measure, at most :data:`CLOCK_SOURCES`, each with whether it was
+        measured for a lease table (the fixed limit): the sources of the cited rows (the
+        matches' session rows, the chains' lease and device evidence), most cited first; then,
+        for a search whose outcome cites no row of the tables it read (round 5), the sources
+        ``R20-lease:source-clock`` would check for those tables, by their rows in the files of
+        the receive days around the moment (``search_counts``; a device clock cannot move the
+        receive day). A search that ran and found no match read ``fg_traffic``; an internal
+        lookup without a lease and a match without a lease chain read the lease tables. An
+        answer that searched nothing (``no_egress``, ``not_logged``, ``internal``) adds
+        none."""
+        cited: Counter[str] = Counter()
+        lease_cited: set[str] = set()
+        chains = [m.chain for m in matches if m.chain is not None]
+        if attribution is not None:
+            chains.append(attribution)
+        refs = [ref for m in matches for ref in m.traffic.evidence]
+        for chain in (c for top in chains for c in (top, *top.alternatives)):
+            refs += chain.lease.evidence if chain.lease is not None else ()
+            refs += chain.device.evidence if chain.device is not None else ()
+        for ref in refs:
+            if ref.raw is not None:
+                cited[ref.raw.source] += 1
+                if ref.table in LEASE_TABLES:
+                    lease_cited.add(ref.raw.source)
+        tables: set[str] = set()
+        searched = not self.request.is_internal and (plan is None or not plan.nobody)
+        if searched and not matches:
+            tables.add("fg_traffic")
+        if self._unbuilt is not None or any(
+            m.chain is None or m.chain.lease is None for m in matches
+        ):
+            tables |= LEASE_TABLES
+        ranked = sorted(cited, key=lambda name: (-cited[name], name))
+        sources = {name: name in lease_cited for name in ranked}
+        if tables:
+            lease = bool(tables & LEASE_TABLES)
+            for name in self._searched_sources(tables):
+                sources[name] = sources.get(name, False) or lease
+        return dict(list(sources.items())[:CLOCK_SOURCES])
+
+    def _searched_sources(self, tables: set[str]) -> list[str]:
+        """The enabled, configured sources whose spool files of the receive days of the clock
+        span hold rows of ``tables``, most rows first (``ix_search_counts_raw_day_source``)."""
+        at = self.request.at
+        days = sorted({site_day(at - CLOCK_SPAN), site_day(at + CLOCK_SPAN)})
+        configured = select(Source.name).where(Source.enabled.is_(True), Source.unknown.is_(False))
+        rows = func.sum(SearchCount.n)
+        query = (
+            select(SearchCount.source)
+            .where(
+                SearchCount.raw_day.in_(days),
+                SearchCount.tbl.in_(sorted(tables)),
+                SearchCount.source.in_(configured),
+            )
+            .group_by(SearchCount.source)
+            .order_by(rows.desc(), SearchCount.source)
+        )
+        return list(self.session.scalars(query))
+
+    def _clock(self, source: str) -> tuple[float, int] | None:
+        """The median of ``time - time_received`` (seconds) over ``source``'s ``messages`` rows
+        nearest the moment on each side within :data:`CLOCK_SPAN` whose device time is not the
+        receive time (ingest's stand-in for a clock beyond ``max_clock_skew`` says nothing),
+        and their number; ``None`` with fewer than :data:`CLOCK_MIN_ROWS`. One query on
+        ``ix_messages_source_time``, cached per lookup."""
+        if source not in self._clocks:
+            at = self.request.at
+
+            def side(*clauses: ColumnElement[bool], order: Any) -> Any:
+                return (
+                    select(Message.time, Message.time_received)
+                    .where(
+                        Message.source == source, Message.time != Message.time_received, *clauses
+                    )
+                    .order_by(order)
+                    .limit(CLOCK_SIDE_ROWS)
+                )
+
+            before = side(
+                Message.time >= at - CLOCK_SPAN, Message.time < at, order=Message.time.desc()
+            )
+            after = side(Message.time >= at, Message.time <= at + CLOCK_SPAN, order=Message.time)
+            rows = union_all(before, after).subquery("clock")
+            seconds = func.extract("epoch", rows.c.time - rows.c.time_received)
+            count, median = self.session.execute(
+                select(func.count(), func.percentile_cont(0.5).within_group(seconds))
+            ).one()
+            found = count >= CLOCK_MIN_ROWS and median is not None
+            self._clocks[source] = (float(median), int(count)) if found else None
+        return self._clocks[source]
 
     # -- exact ------------------------------------------------------------------------------------
 
@@ -1422,28 +2106,67 @@ class _Lookup:
             self.explanations.append(explain("truncated", total=total, shown=min(total, limit)))
         shown = scored[:limit]
         self.attributor.prefetch((g.first.srcip, g.moment(at)) for g, _, _ in shown)
+        srcmacs = self._session_srcmacs([group for group, _, _ in shown])
+        interfaces = self.settings.srcmac_interfaces
         matches = []
         changed: list[str] = []
         changed_count = 0
-        for group, match, score in shown:
+        later: set[str] = set()
+        for (group, match, score), srcmac in zip(shown, srcmacs, strict=True):
             egress = self._exit_of(group.nearest(at))
             exits = list(dict.fromkeys(self._exit_of(row) for row in group.rows))
             if len(exits) > 1:
                 changed_count += 1
                 changed += [name or "-" for name in exits if (name or "-") not in changed]
+            sources = {row.source for row in group.rows}
+            later |= {name for name in sources - self.untrusted if name.startswith(UNKNOWN_PREFIX)}
             matches.append(
                 NatMatch(
                     kind=kind,
                     score=score,
                     time_distance_ms=group.distance_ms(at),
                     destination_match=match,
-                    traffic=group.traffic(at),
-                    chain=self.attributor.chain(group.first.srcip, group.moment(at)),
+                    traffic=group.traffic(at, interfaces, self.untrusted),
+                    chain=self.attributor.chain(group.first.srcip, group.moment(at), srcmac=srcmac),
                     egress=egress,
+                    untrusted_sources=tuple(sorted(sources & self.untrusted)),
                 )
             )
         if changed_count:
             self.explanations.append(
                 explain("session_changed_exit", count=changed_count, egresses=_joined(changed))
             )
+        self._sender_notes(matches, later)
         return matches
+
+    def _session_srcmacs(self, groups: Sequence[SessionGroup]) -> list[Srcmac | None]:
+        """Per session, the srcmac of its row nearest to the moment that carries a usable one
+        (2.9): a listed interface, a trusted sender and the guard; ``None`` while
+        ``lookup.srcmac_interfaces`` is empty (off)."""
+        interfaces = self.settings.srcmac_interfaces
+        if not interfaces:
+            return [None] * len(groups)
+        at = self.request.at
+        rows = [group.srcmac_rows(at, interfaces, self.untrusted) for group in groups]
+        self.srcmac.load([row for found in rows for row in found])
+        used: list[Srcmac | None] = []
+        for found in rows:
+            usable = (self.srcmac.usable(row) for row in found)
+            used.append(next((srcmac for srcmac in usable if srcmac is not None), None))
+        return used
+
+    def _sender_notes(self, matches: Sequence[NatMatch], later: set[str]) -> None:
+        """D24: the session search keeps every sender, so a match with rows of an unconfigured
+        one is marked on the match and named here (``session_from_unknown_source``); rows of an
+        ``unknown-<ip>`` sender that a source configured later vouches for are named as such
+        (``source_configured_later``, information)."""
+        marked = [match for match in matches if match.untrusted_sources]
+        if marked:
+            names = sorted({name for match in marked for name in match.untrusted_sources})
+            self.explanations.append(
+                explain("session_from_unknown_source", count=len(marked), sources=_joined(names))
+            )
+        if later:
+            self.explanations.append(
+                explain("source_configured_later", sources=", ".join(sorted(later)))
+            )

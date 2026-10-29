@@ -2,8 +2,9 @@
 engine parts of the E-cases — which exit answers a public IP, the log check of an exit's address
 and its fallback, the observed and dynamic addresses, the interface rule, the not-seen widening,
 the port hint, the per-exit change warning, the internal NAT addresses, untrusted senders in the
-probe — and E-j, the legacy equivalence against the answers recorded on the Wave 2 engine
-(``goldens/legacy_nat.json``). The PDF assertions of the E-cases are the report tests'.
+probe and on a match — and E-j, the legacy equivalence against the answers recorded on the
+Wave 2 engine (``goldens/legacy_nat.json``). The PDF assertions of the E-cases are the report
+tests'.
 
 Values: T1 ``100.64.12.9`` and T2 ``100.64.13.9`` (the FortiGate's addresses behind the two ISP
 routers), P1 ``203.0.113.200`` and P2 ``198.51.100.77`` (the lines' public addresses), the
@@ -13,7 +14,9 @@ clients ``172.20.42.57`` (line 1) and ``172.20.60.142`` (line 2), the destinatio
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1324,6 +1327,51 @@ def test_e_p1_a_forged_line_never_decides_the_probe(
     assert "public_ip_not_transip" in keys(outcome)
 
 
+# -- E-p2: an untrusted sender on a match ---------------------------------------------------------
+
+
+def _twenty(session: Session, evidence: Evidence) -> int:
+    """Twenty sessions through T1 near the moment, the forged line among them (its row id)."""
+    for n in range(19):
+        evidence.traffic(AT + timedelta(seconds=n), f"172.20.42.{100 + n}", 52000 + n, transip=T1)
+    row = evidence.traffic(AT, PC, 51001, DEST, 443, transip=T1)
+    forged(session, row)
+    return row
+
+
+def test_e_p2_a_forged_session_is_marked_on_its_match(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """The session search keeps every sender (D24), so the forged line matching the request is
+    listed, marked on its own match, and named by the outcome; among 20 candidates only that
+    match is marked."""
+    settings = exits(db_session, {"hat-1": isp_nat([T1], public=[P1])})
+    _twenty(db_session, evidence)
+    outcome = lookup(db_session, settings, public_ip=P1, public_port=51001)
+    assert (outcome.mode, len(outcome.matches)) == ("candidates", 20)
+    marked = [m for m in outcome.matches if m.untrusted_sources]
+    assert [(m.traffic.srcip, m.traffic.srcport) for m in marked] == [(PC, 51001)]
+    assert marked[0].untrusted_sources == (FORGED,)
+    assert note(outcome, "session_from_unknown_source") == {"count": 1, "sources": FORGED}
+    assert "source_configured_later" not in keys(outcome)
+
+
+def test_e_p2_a_sender_configured_later_is_named_instead(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """Once a FortiGate source covers the sender's address (D24's exception), its rows are
+    trusted: no match is marked, and the outcome says that the sender was configured later."""
+    settings = exits(db_session, {"hat-1": isp_nat([T1], public=[P1])})
+    _twenty(db_session, evidence)
+    db_session.add(Source(name="fortigate-2", type="fortigate", address="192.0.2.248/29"))
+    db_session.commit()
+    outcome = lookup(db_session, settings, public_ip=P1, public_port=51001)
+    assert len(outcome.matches) == 20
+    assert not any(m.untrusted_sources for m in outcome.matches)
+    assert "session_from_unknown_source" not in keys(outcome)
+    assert note(outcome, "source_configured_later") == {"sources": FORGED}
+
+
 # -- the keys -----------------------------------------------------------------------------------
 
 
@@ -1362,3 +1410,125 @@ def test_every_exit_key_is_emitted_and_the_retired_ones_never_are() -> None:
     assert {key for key in EXIT_KEYS if f'"{key}"' not in source} == set()
     assert RETIRED - catalogue == set()  # stored lookups still render
     assert {key for key in RETIRED if key in source} == set()
+
+
+#: The tone of every key of the 2.11 table (the web interface shows it, ``chain-text.ts``).
+TONES_2_11 = {
+    "no_lease": "info",
+    "no_lease_for_mac": "info",
+    "chain_missing": "warning",
+    "fortigate_dhcp_not_converted": "warning",
+    "srcmac_only": "warning",
+    "srcmac_agrees": "info",
+    "srcmac_mismatch": "warning",
+    "srcmac_ambiguous": "warning",
+    "srcmac_shared": "warning",
+    "srcmac_other_lease": "warning",
+    "srcmac_infrastructure": "info",
+    "egress_search": "info",
+    "egress_public_unknown": "warning",
+    "public_ip_no_egress": "warning",
+    "egress_not_logged": "warning",
+    "egress_transip_not_seen": "warning",
+    "egress_interface_not_seen": "warning",
+    "egress_interface_not_seen_kept": "warning",
+    "egress_unmapped_seen": "warning",
+    "egress_unconfigured": "info",
+    "port_hint": "warning",
+    "nat_unknown_trandisp": "warning",
+    "public_ip_not_transip": "warning",
+    "fortigate_format_unverified": "info",
+    "lease_renewal_not_seen": "warning",
+    "fortigate_dhcp_not_converted_since_lease": "warning",
+    "fortigate_dhcp_no_network": "warning",
+    "egress_observed_not_configured": "warning",
+    "egress_changed_after_event": "warning",
+    "session_changed_exit": "warning",
+    "egress_not_logged_but_seen": "warning",
+    "dhcp_sources_overlap": "warning",
+    "fortigate_format_verified": "info",
+    "session_from_unknown_source": "warning",
+    "source_configured_later": "info",
+    "egress_public_dynamic": "warning",
+    "egress_internal": "warning",
+    "source_clock_offset": "warning",
+}
+#: The keys of earlier waves and the retired ones, with the tone the web interface gives them
+#: today; ``info`` is information by design.
+TONES_BEFORE = {
+    "double_nat": "warning",
+    "double_nat_no_candidates": "warning",
+    "ip_conflict": "danger",
+    "truncated": "warning",
+    "only_in_vault": "warning",
+    "not_in_database": "warning",
+    "older_than_db_retention": "warning",
+    "no_data_for_day": "warning",
+    "lease_timeline_behind": "warning",
+    "future_time": "warning",
+    "exact_domain_unverified": "warning",
+    "exact_nat": "success",
+    "wan_transip_not_seen": "warning",
+    "public_ip_not_configured": "info",
+    **dict.fromkeys(
+        (
+            "arp_only",
+            "candidates_without_destination",
+            "destination_not_found",
+            "destination_search",
+            "exact_only_other_destinations",
+            "exact_other_destinations",
+            "exact_unverified_destinations",
+            "guest_vlan",
+            "infrastructure_device",
+            "mac_multiple_ips",
+            "mac_not_at_ip",
+            "multiple_exact",
+            "no_match",
+            "no_match_candidates",
+            "no_match_exact",
+            "no_person",
+            "person_department_current",
+            "person_link_at_lookup_time",
+            "person_link_backfilled",
+            "person_unassigned_at_time",
+            "port_missing",
+            "randomized_mac",
+        ),
+        "info",
+    ),
+}
+WEB_TONES = (
+    Path(__file__).resolve().parents[2] / "web" / "src" / "pages" / "lookup" / "chain-text.ts"
+)
+
+
+def _emitted_keys() -> set[str]:
+    """Every catalogue key written in a module of the lookup engine (the catalogue itself, in
+    ``texts.py`` and ``types.py``, aside)."""
+    catalogue = set(EXPLANATIONS) | set(texts_module.ENGINE_EXPLANATIONS)
+    found: set[str] = set()
+    for module in Path(engine_module.__file__).parent.glob("*.py"):
+        if module.name in ("texts.py", "types.py"):
+            continue
+        for node in ast.walk(ast.parse(module.read_text("utf-8"))):
+            if isinstance(node, ast.Constant) and node.value in catalogue:
+                found.add(node.value)
+    return found
+
+
+def test_every_key_the_engine_can_emit_has_a_tone_or_is_info_by_design() -> None:
+    """2.11: a new key without a tone fails here; the web map only names the keys that are not
+    information, so every tone the test and the web both give must agree."""
+    tones = TONES_BEFORE | TONES_2_11
+    assert len(tones) == len(TONES_BEFORE) + len(TONES_2_11)  # one tone per key
+    catalogue = set(EXPLANATIONS) | set(texts_module.ENGINE_EXPLANATIONS)
+    assert catalogue == set(tones)
+    emitted = _emitted_keys()
+    assert emitted - set(tones) == set()
+    assert emitted & RETIRED == set()  # in no module of the engine
+    block = WEB_TONES.read_text("utf-8").split("EXPLANATION_TONE")[1].split("};")[0]
+    web = dict(re.findall(r"^\s+(\w+): '(\w+)',$", block, re.MULTILINE))
+    assert "exact_nat" in web  # the map was read
+    assert {key: tone for key, tone in web.items() if tones.get(key) != tone} == {}
+    assert {key for key, tone in tones.items() if tone == "info"} & set(web) == set()
