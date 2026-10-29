@@ -4,7 +4,6 @@
     "updated": "Updated {{time}}",
     "refresh": "Refresh",
     "loadFailed": "The system status could not be read.",
-    "none": "—",
     "blocks": {
       "resources": "Resource use",
       "disks": "Disks",
@@ -107,9 +106,7 @@
       "state": "State",
       "updatedAt": "Last sign",
       "agent": "Administration service",
-      "heartbeat": "Last answer",
       "applySystem": "Applying the system settings (ApplySystem)",
-      "appliedAt": "Last run",
       "code": "Result code"
     },
     "tasks": {
@@ -155,7 +152,6 @@
       "core": "Core version",
       "releaseDate": "Release date",
       "maintenance": "Maintenance",
-      "maintenanceUntil": "Until {{until}}",
       "coversVersion": "The installed version was released within the maintenance period.",
       "notCoversVersion": "The installed version was released after the maintenance period ended.",
       "upgrade": "To upgrade, copy the new offline bundle to the server and follow INSTALL.md section 13. ARCILOGGER downloads no updates."

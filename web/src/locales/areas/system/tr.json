@@ -4,7 +4,6 @@
     "updated": "Güncellendi {{time}}",
     "refresh": "Yenile",
     "loadFailed": "Sistem durumu alınamadı.",
-    "none": "—",
     "blocks": {
       "resources": "Kaynak kullanımı",
       "disks": "Diskler",
@@ -107,9 +106,7 @@
       "state": "Durum",
       "updatedAt": "Son işaret",
       "agent": "Yönetim hizmeti",
-      "heartbeat": "Son yanıt",
       "applySystem": "Sistem ayarlarının uygulanması (ApplySystem)",
-      "appliedAt": "Son çalışma",
       "code": "Sonuç kodu"
     },
     "tasks": {
@@ -155,7 +152,6 @@
       "core": "Çekirdek sürümü",
       "releaseDate": "Yayın tarihi",
       "maintenance": "Bakım",
-      "maintenanceUntil": "{{until}} tarihine kadar",
       "coversVersion": "Kurulu sürüm bakım süresi içinde yayımlandı.",
       "notCoversVersion": "Kurulu sürüm bakım süresi bittikten sonra yayımlandı.",
       "upgrade": "Yükseltme için yeni çevrimdışı paketi sunucuya kopyalayıp KURULUM.md bölüm 13'teki adımları izleyin. ARCILOGGER güncelleme indirmez."

@@ -356,6 +356,8 @@ describe('SystemView', () => {
       'SealEvery 5 minutes from 00:10On time',
     );
     expect(within(block('jobs')).getAllByRole('row')[1]).toHaveTextContent('Daily after 00:15');
+    // The release day is written as the maintenance day beside it, as on the licence page.
+    expect(block('version')).toHaveTextContent('Release date2026-10-01');
     expect(screen.getByTestId('system-upgrade')).toHaveTextContent(UPGRADE_EN);
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
   });

@@ -1,4 +1,4 @@
-import { Info, RefreshCw, TrendingUp } from 'lucide-react';
+import { CircleX, Info, RefreshCw, TrendingUp } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/lib/api';
 import type { LicenseOut } from '@/lib/api-types';
-import { formatDay, formatDistance } from '@/lib/display';
+import { formatDistance } from '@/lib/display';
 import {
   formatBytes,
   formatDateTime,
@@ -58,16 +58,6 @@ import {
 
 /** The blocks `GET /system/health` feeds; the others come from `GET /system` (and `/license`). */
 const HEALTH_BLOCKS: ReadonlySet<SystemBlock> = new Set(['services', 'tasks', 'jobs', 'clock']);
-/** Blocks with a table: the whole width on a wide screen. */
-const WIDE_BLOCKS: ReadonlySet<SystemBlock> = new Set([
-  'disks',
-  'collector',
-  'ingest',
-  'services',
-  'tasks',
-  'jobs',
-  'clock',
-]);
 
 const NONE = '—';
 
@@ -97,11 +87,7 @@ function Block({
   const { t } = useTranslation();
   const headingId = `system-block-${id}`;
   return (
-    <section
-      aria-labelledby={headingId}
-      data-testid={headingId}
-      className={cn('min-w-0', WIDE_BLOCKS.has(id) && 'lg:col-span-2')}
-    >
+    <section aria-labelledby={headingId} data-testid={headingId} className="min-w-0">
       <Card className="flex h-full flex-col">
         <CardHeader className="flex-wrap items-center">
           <h2 id={headingId} className="text-sm font-semibold text-foreground">
@@ -450,7 +436,7 @@ function IngestBlock({ ingest }: { ingest: IngestInfo }) {
               rate(source.lines_per_second),
               formatNumber(source.unfinished_days, 0, lang),
               source.has_error ? (
-                <Badge key="error" tone="danger" icon={STATUS_FILE_STYLE.missing.icon}>
+                <Badge key="error" tone="danger" icon={CircleX}>
                   {t('system.ingest.hasError')}
                 </Badge>
               ) : (
@@ -700,7 +686,7 @@ function VersionBlock({
           [t('system.version.product'), version.product],
           [t('system.version.version'), version.version],
           [t('system.version.core'), version.core_version],
-          [t('system.version.releaseDate'), formatDay(version.release_date)],
+          [t('system.version.releaseDate'), licenseDayText(version.release_date, lang)],
           ...(license
             ? [
                 [
@@ -783,9 +769,7 @@ export function SystemView({
 
   const block = (id: SystemBlock): ReactNode => {
     if (HEALTH_BLOCKS.has(id) ? !health : !summary) {
-      return loading ? (
-        <Skeleton key={id} className={cn('h-40', WIDE_BLOCKS.has(id) && 'lg:col-span-2')} />
-      ) : null;
+      return loading ? <Skeleton key={id} className="h-40" /> : null;
     }
     switch (id) {
       case 'resources':
@@ -854,7 +838,9 @@ export function SystemView({
           <Skeleton className="h-96" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2" data-testid="system-blocks">
+        // One column: the blocks keep the contract's order, and the wide blocks with tables
+        // between the narrow ones would leave each narrow one beside an empty half.
+        <div className="flex flex-col gap-4" data-testid="system-blocks">
           {SYSTEM_BLOCKS.map(block)}
         </div>
       )}
