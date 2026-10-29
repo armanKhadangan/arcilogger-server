@@ -1,5 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { Plus, RefreshCw } from 'lucide-react';
+import {
+  CircleCheck,
+  CircleDashed,
+  CircleHelp,
+  Plus,
+  RefreshCw,
+  TriangleAlert,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Alert } from '@/components/ui/alert';
@@ -203,7 +210,9 @@ export function FortiGateObservedPanel({
                           <span className="flex flex-wrap items-center gap-1.5">
                             <span className="font-mono text-xs">{row.trandisp ?? '—'}</span>
                             {row.trandisp_known ? null : (
-                              <Badge tone="warning">{t('network.observed.unknownTrandisp')}</Badge>
+                              <Badge tone="warning" icon={TriangleAlert}>
+                                {t('network.observed.unknownTrandisp')}
+                              </Badge>
                             )}
                           </span>
                         </td>
@@ -223,7 +232,9 @@ export function FortiGateObservedPanel({
                               {t('network.observed.inDraft', { name: claim.name.trim() })}
                             </span>
                           ) : (
-                            <Badge tone="neutral">{t('network.observed.unmapped')}</Badge>
+                            <Badge tone="neutral" icon={CircleHelp}>
+                              {t('network.observed.unmapped')}
+                            </Badge>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -325,7 +336,7 @@ function SrcmacTable({
                     </td>
                     <td className="px-3 py-2">
                       {listed ? (
-                        <Badge tone="success">
+                        <Badge tone="success" icon={item.configured ? CircleCheck : CircleDashed}>
                           {item.configured
                             ? t('network.observed.srcmacUsed')
                             : t('network.observed.inDraftShort')}
