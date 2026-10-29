@@ -61,6 +61,9 @@ PORT_TAKEN = (
 )
 #: Ports tried, each free when it is picked, before a test gives up starting Caddy.
 CADDY_PORT_TRIES = 5
+#: Ports :func:`free_port` picks for TCP before giving up on one that UDP can bind too: enough to
+#: step past an excluded range of several hundred ports (a pick costs microseconds).
+PORT_PICKS = 1000
 
 
 def _site_block(text: str) -> str:
@@ -118,10 +121,26 @@ def upstream() -> Iterator[int]:
 
 
 def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port: int = sock.getsockname()[1]
-        return port
+    """A port free for TCP **and** UDP: Caddy serves HTTP/3 (QUIC, UDP) on the HTTPS port too.
+    Windows can exclude whole UDP ranges (Hyper-V/WinNAT ``excludedportrange``), where only the
+    UDP bind is refused (WSAEACCES), and it hands out TCP ports one after another: a port picked
+    for TCP alone, and each retry's next one, then fall into the same excluded range."""
+    for _ in range(PORT_PICKS):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port: int = sock.getsockname()[1]
+        if udp_bindable(port):
+            return port
+    raise AssertionError(f"no port free for TCP and UDP in {PORT_PICKS} picks")
+
+
+def udp_bindable(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
 
 
 def caddy_env(tmp_path: Path, extra: dict[str, str]) -> dict[str, str]:
@@ -246,6 +265,29 @@ def stop_caddy(process: subprocess.Popen[bytes]) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=10)
+
+
+def test_a_port_udp_cannot_bind_is_not_given_to_caddy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Caddy's HTTP/3 listener binds the HTTPS port on UDP too: a port whose UDP bind is refused
+    (a Windows excluded range) is passed over for the next one."""
+    asked: list[int] = []
+
+    def refuse_the_first(port: int) -> bool:
+        asked.append(port)
+        return len(asked) > 1
+
+    monkeypatch.setitem(globals(), "udp_bindable", refuse_the_first)
+    port = free_port()
+    assert len(asked) == 2
+    assert port == asked[1]
+
+
+def test_a_port_a_udp_socket_holds_is_not_udp_bindable() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as held:
+        held.bind(("127.0.0.1", 0))
+        port: int = held.getsockname()[1]
+        assert not udp_bindable(port)
+    assert udp_bindable(free_port())
 
 
 @needs_caddy
