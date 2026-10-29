@@ -22,6 +22,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import type { Calendar, CreditCheck, Credits } from '../src/lib/api-types';
 import type { SealDayDetail } from '../src/lib/seal-types';
@@ -76,6 +77,7 @@ import type {
   UploadPreview,
   ZamaneBody,
 } from '../src/lib/settings-types';
+import { validateEgresses } from '../src/pages/settings/egress-model';
 
 import type { MockUser, RecordedCall } from './mock-api';
 import type { Answer, MockHost } from './mock-records';
@@ -3100,20 +3102,38 @@ const LOCAL_ADDRESSES = ['172.20.10.5'];
 // -- the database settings of the mock (contract 2.13) --------------------------------------------
 
 /**
+ * The texts of the exit rules (`arcilogger_db.egress`, every code `validateEgresses` gives): the
+ * server's texts as the web shows a refusal found in the browser (`network.egress.codes`, the
+ * network area's locales), `{{limit}}` written as `{limit}`.
+ */
+function egressErrors(): Record<string, [string, string]> {
+  const codes = (lang: 'tr' | 'en') =>
+    (
+      JSON.parse(
+        readFileSync(new URL(`../src/locales/areas/network/${lang}.json`, import.meta.url), 'utf8'),
+      ) as { network: { egress: { codes: Record<string, string> } } }
+    ).network.egress.codes;
+  const [tr, en] = [codes('tr'), codes('en')];
+  const placeholders = (text: string) => text.replace(/\{\{(\w+)\}\}/g, '{$1}');
+  return Object.fromEntries(
+    Object.keys(tr)
+      .filter((code) => code.startsWith('setting_'))
+      .map((code) => [code, [placeholders(tr[code] ?? ''), placeholders(en[code] ?? '')]]),
+  );
+}
+
+/**
  * The refusals `validate_setting` gives the values the specs send (`arcilogger_db.settings`
  * `SETTING_ERRORS`, Turkish first); `{low}`-style placeholders take the facts.
  */
 const SETTING_ERRORS: Record<string, [string, string]> = {
+  ...egressErrors(),
   setting_type: [
     'Değer türü yanlış: {expected_tr} bekleniyor.',
     'Wrong type of value: {expected_en} expected.',
   ],
   setting_below_minimum: ['En az {low} olmalı.', 'Must be at least {low}.'],
   setting_out_of_range: ['{low} ile {high} arasında olmalı.', 'Must be between {low} and {high}.'],
-  setting_egress_public_private: [
-    "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı NAT'ı çıkışının NAT adresi olarak girin.",
-    "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT exit.",
-  ],
   setting_email_invalid: ['Geçersiz e-posta adresi.', 'Invalid e-mail address.'],
   setting_totp_required: [
     '{roles} rolleri için iki adımlı doğrulama (TOTP) zorunludur (şartname 13): listeye rol eklenebilir, bu roller çıkarılamaz.',
@@ -3129,8 +3149,12 @@ const SETTING_ERRORS: Record<string, [string, string]> = {
   ],
 };
 {
-  // The captured refusal holds one of these texts: it must still be the API's.
-  const captured = SETTINGS.errors.setting_invalid?.body.error.details as SettingProblem[];
+  // The captured refusals hold some of these texts (a number's range, an exit's public address):
+  // they must still be the API's.
+  const captured = [SETTINGS.errors.setting_invalid, SETTINGS.errors.setting_invalid_egress]
+    .flatMap((sample) => sample?.body.error.details as SettingProblem[] | undefined)
+    .filter((item): item is SettingProblem => item !== undefined);
+  if (captured.length < 2) throw new Error('mock-admin: the captured setting refusals are missing');
   for (const item of captured) {
     const [tr, en] = SETTING_ERRORS[item.code] ?? ['', ''];
     const facts = { low: 1, high: 10_000 };
@@ -3140,9 +3164,6 @@ const SETTING_ERRORS: Record<string, [string, string]> = {
 }
 
 const HOLIDAY = /^(?:\d{4}-)?\d{2}-\d{2}$/;
-/** RFC 1918, RFC 6598 and the reserved ranges (`arcilogger_db.egress.NOT_PUBLIC`). */
-const NOT_PUBLIC =
-  /^(?:10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|(?:22[4-9]|2[3-5]\d)\.)/;
 const TYPE_NAMES: Record<string, [string, string]> = {
   boolean: ['true/false', 'true/false'],
   number: ['tam sayı', 'an integer'],
@@ -3177,14 +3198,10 @@ function settingProblem(
         : { code: 'setting_out_of_range', facts: { low, high: setting.max } };
   }
   if (setting.key === 'nat.egresses') {
-    // Of the exit rules (`arcilogger_db.egress`), the one the specs send: a public address in
-    // private, shared or reserved space.
-    const exits = Object.values(value as Record<string, { public?: unknown }>);
-    const addresses = exits.flatMap((exit): unknown[] =>
-      Array.isArray(exit.public) ? (exit.public as unknown[]) : [],
-    );
-    if (addresses.some((address) => typeof address === 'string' && NOT_PUBLIC.test(address)))
-      return { code: 'setting_egress_public_private', facts: {} };
+    // The exit rules (`arcilogger_db.egress`), through the browser's mirror of them: the shared
+    // case list (`tests/fixtures/egress-cases.json`) keeps the two in line.
+    const refused = validateEgresses(value).refusal;
+    if (refused) return { code: refused.code, facts: refused.facts };
   }
   if (
     setting.key === 'alerts.email_recipients' &&

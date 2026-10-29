@@ -1207,6 +1207,42 @@
       "code": "setting_ipv6_not_supported"
     },
     {
+      "name": "an IPv6 address with a zone",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": [
+            "fe80::1%wan1"
+          ]
+        }
+      },
+      "code": "setting_ipv6_not_supported"
+    },
+    {
+      "name": "an IPv6 address with a prefix that is no number",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": [
+            "2001:db8::/abc"
+          ]
+        }
+      },
+      "code": "setting_ipv6_not_supported"
+    },
+    {
+      "name": "two '::' in an address",
+      "value": {
+        "hat-1": {
+          "mode": "direct",
+          "public": [
+            "1::2::3"
+          ]
+        }
+      },
+      "code": "setting_egress_address"
+    },
+    {
       "name": "a public network overlapping 100.64/10",
       "value": {
         "hat-1": {
