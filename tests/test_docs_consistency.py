@@ -2018,3 +2018,40 @@ def test_alert_documents_list_every_lease_and_nat_cause(name: str) -> None:
     for rule in ("R20-lease", "R20-nat"):
         assert f"`{rule}`" in intro
         assert (RULES[rule].name_tr, RULES[rule].name_en)[language] in intro, rule
+
+
+#: The header of the reading table (Wave 3 contract 2.15, deviation d-23): one bilingual table, in
+#: the report guide and in the auditor guide.
+READING_TABLE_HEADER: Final = (
+    "| PDF'te görülen / What the PDF shows | Kesin olan (kayıtta) / Exact (in the records) "
+    "| Ayarlara dayanan / Configured | Varsayılan / Assumed |"
+)
+
+
+def _reading_table(name: str) -> list[list[str]]:
+    """The cells of every row of ``name``'s reading table (the header and its rule left out)."""
+    lines = _doc(name).splitlines()
+    assert lines.count(READING_TABLE_HEADER) == 1, name
+    start = lines.index(READING_TABLE_HEADER) + 2
+    rows = list(itertools.takewhile(lambda line: line.startswith("| "), lines[start:]))
+    return [_cells(line) for line in rows]
+
+
+@pytest.mark.parametrize("name", ["RAPOR.md", "DENETCI-KILAVUZU.md"])
+def test_reading_tables_cover_every_key_and_exit_label(name: str) -> None:
+    """Wave 3 contract 3.9: the reading table of RAPOR.md and DENETCI-KILAVUZU.md names every
+    explanation key the PDF prints (``READING_TABLE_KEYS``) in backticks in a row's first column,
+    and no other key; and every Turkish exit label of the 2.12 label table is in a first
+    column."""
+    from arcilogger_api.reports.texts import EXIT_LABELS, READING_TABLE_KEYS
+
+    rows = _reading_table(name)
+    assert rows, name
+    assert [row for row in rows if len(row) != 4] == [], name
+    firsts = [row[0] for row in rows]
+    named = [key for first in firsts for key in re.findall(r"`([a-z0-9_]+)`", first)]
+    assert sorted(set(READING_TABLE_KEYS) - set(named)) == [], name
+    assert sorted(set(named) - set(READING_TABLE_KEYS)) == [], name
+    assert len(named) == len(set(named)), name
+    labels = [tr for tr, _en in EXIT_LABELS.values()]
+    assert [label for label in labels if not any(label in first for first in firsts)] == [], name
