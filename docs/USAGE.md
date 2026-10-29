@@ -43,11 +43,14 @@ counsel about the rules for processing personal data
 ### 2.1 Who? (the subject)
 
 Traffic belongs to the person the device was assigned to **at that moment** (assignment history,
-[adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md)); to the device
-(the MAC of the DHCP/ARP lease) when it was assigned to nobody; to the bare IP address without a
-lease. It is **the same code** as the 5651 lookup: IP + moment → lease → device → person then. A
-device reassigned at noon gives the morning to the old and the afternoon to the new person (per
-minute, by its first instant).
+[adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md)); to the device (the
+MAC of the DHCP/ARP lease) when it was assigned to nobody; to the bare IP address without a lease.
+It is **the same code** as the 5651 lookup: IP + moment → lease → device → person then. Leases come
+from the lease records of the DHCP server (MikroTik or FortiGate) and from `ARP-LOG` records. One
+difference from the 5651 lookup: the srcmac field of the FortiGate session record (device
+identification) is not used for usage; traffic without a lease is counted per IP address even when
+its interface is listed for srcmac. A device reassigned at noon gives the morning to the old and the
+afternoon to the new person (per minute, by its first instant).
 
 **Department:** the person's (current) department; for a person without one, or a device / IP
 subject, the department of the VLAN with the most online minutes (the department linked to the

@@ -42,11 +42,15 @@ desteklemek için tasarlanmıştır; kişisel veri işleme kuralları için huku
 
 ### 2.1 Kim? (konu)
 
-Trafik, **o anda** cihazın atandığı kişiye aittir (atama geçmişi, [adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md));
-cihaz kimseye atanmamışsa cihaza (DHCP/ARP kira kaydındaki MAC), kira kaydı yoksa yalnızca IP
-adresine. Kural 5651 sorgusunun kuralıyla **aynı koddur**: IP + an → kira → cihaz → o anki kişi.
-Öğlen başka bir kişiye atanan cihazın öğleden önceki trafiği eski, sonraki trafiği yeni kişinindir
-(dakika dilimi, ilk anına göre).
+Trafik, **o anda** cihazın atandığı kişiye aittir (atama geçmişi,
+[adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md)); cihaz kimseye
+atanmamışsa cihaza (DHCP/ARP kira kaydındaki MAC), kira kaydı yoksa yalnızca IP adresine. Kural 5651
+sorgusunun kuralıyla **aynı koddur**: IP + an → kira → cihaz → o anki kişi. Kiralar DHCP sunucusunun
+(MikroTik ya da FortiGate) kira kayıtlarından ve `ARP-LOG` kayıtlarından gelir. 5651 sorgusundan bir
+farkı: FortiGate oturum kaydının srcmac alanı (aygıt tanıma) kullanım analizinde kullanılmaz; kira
+kaydı olmayan trafik, arayüzü srcmac için listelenmiş olsa da, IP adresine göre sayılır. Öğlen başka
+bir kişiye atanan cihazın öğleden önceki trafiği eski, sonraki trafiği yeni kişinindir (dakika
+dilimi, ilk anına göre).
 
 **Departman:** kişinin (bugünkü) departmanı; kişinin departmanı yoksa ya da konu bir cihaz/IP ise
 en çok çevrimiçi dakikanın geçtiği VLAN'ın departmanı (VLAN'a bağlı departman, yoksa VLAN'ın adı;
