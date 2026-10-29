@@ -177,7 +177,7 @@ export function ComplianceCardView({
           <Link
             to={links.page}
             className="inline-flex items-center gap-1 rounded-sm text-13 font-medium text-accent-ink hover:underline"
-            aria-label={t('compliance.openPage', { page })}
+            aria-label={t('dashboard.openPage', { page })}
           >
             {page}
             <ArrowRight aria-hidden="true" className="size-3.5" />

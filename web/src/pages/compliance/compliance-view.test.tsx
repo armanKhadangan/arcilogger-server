@@ -298,6 +298,10 @@ describe('Uyum Durumu', () => {
     expect(card('tsa')).toHaveTextContent('Document: COMPLIANCE-STATUS.md section 2.5');
     expect(card('tsa')).toHaveTextContent('Verify on site:');
     expect(card('sources')).toHaveTextContent('Open alerts: 1');
+    // Named as the Panel cards' links (`dashboard.openPage`).
+    expect(
+      within(card('sources')).getByRole('link', { name: 'Open the Sources page' }),
+    ).toHaveAttribute('href', '/sources');
     expect(
       screen.getByRole('button', { name: 'Compliance status report (PDF)' }),
     ).toBeInTheDocument();

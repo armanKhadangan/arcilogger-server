@@ -21,7 +21,6 @@
     "cardsLabel": "Denetimler",
     "toneCount": "{{tone}}: {{count}}",
     "checkedAt": "Denetlendi {{time}}",
-    "openPage": "{{page}} sayfasını aç",
     "confirmBackupAction": "Onaylıyorum",
     "backupConfirmed": "Yapılandırma kopyasının onayı denetim kaydına yazıldı."
   }
