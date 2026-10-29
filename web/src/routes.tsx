@@ -279,6 +279,13 @@ export const routes: RouteObject[] = [
                   Component: (await import('@/pages/settings/history-page')).HistoryPage,
                 }),
               },
+              // The first-run wizard: a checklist that opens the pages above (Wave 4 2.8.4).
+              {
+                path: 'settings/setup',
+                lazy: async () => ({
+                  Component: (await import('@/pages/setup-wizard/wizard-page')).WizardPage,
+                }),
+              },
               // The sources need `sources.manage` too (the configuration is read with
               // `settings.manage`).
               {

@@ -948,7 +948,7 @@ class LookupSettings:
             max_session_seconds=int(values.get("lookup.max_session_seconds", 86400)),
             lease_default_seconds=int(values.get("lease.default_seconds", 86400)),
             lease_server_seconds={
-                str(k): int(v) for k, v in (values.get("lease.server_seconds") or {}).items()
+                str(k): int(v) for k, v in _object(values, "lease.server_seconds", {})
             },
             lease_timeout_percent=int(values.get("lease.timeout_percent", 110)),
             arp_interval_seconds=int(values.get("arp.interval_seconds", 3600)),
