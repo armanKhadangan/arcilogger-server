@@ -480,29 +480,34 @@ class _Probe:
         partition sequentially, reading its rows before the window too (3.8 guard; 0.9 s on a
         partition of 10 days at 1 M rows a day). In time order it read every address's rows of
         the range when none of the address's own overlaps (0.29 s at 1 M a day for an address
-        with 1 % of them). In the index's order the scan reads the address's own rows of the
-        range only and stops at the first overlapping session; an address with no overlapping
-        session has all its rows of the range read (``duration`` is in no index)."""
+        with 1 % of them). In the index's order the scan reads the address's own rows only.
 
-        def compute() -> bool:
+        Asked in two steps, the probe window first, then the tail after it: over daily chunks
+        the ordered scan merges the chunks and reads each one to its first overlapping row or
+        to its end, so a busy address had its whole next day read (0.18 s, 471,352 rows
+        removed). An address with no overlapping session has all its rows of the tail read
+        (``duration`` is in no index)."""
+
+        def first(*clauses: ColumnElement[bool]) -> bool:
             started = FgTraffic.time - func.make_interval(
                 0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
             )
-            clauses = [
-                FgTraffic.transip == address,
-                FgTraffic.time >= self.low,
-                FgTraffic.time <= self.high + timedelta(seconds=max_session),
-                started <= self.high,
-            ]
+            where = [FgTraffic.transip == address, *clauses, started <= self.high]
             if self.untrusted:
-                clauses.append(_not_in(FgTraffic.source, self.untrusted))
-            first = (
+                where.append(_not_in(FgTraffic.source, self.untrusted))
+            query = (
                 select(FgTraffic.time)
-                .where(*clauses)
+                .where(*where)
                 .order_by(FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
                 .limit(1)
             )
-            return self.session.scalar(first) is not None
+            return self.session.scalar(query) is not None
+
+        def compute() -> bool:
+            end = self.high + timedelta(seconds=max_session)
+            return first(FgTraffic.time >= self.low, FgTraffic.time <= self.high) or first(
+                FgTraffic.time > self.high, FgTraffic.time <= end
+            )
 
         return bool(self._cached(("overlap", address), compute))
 

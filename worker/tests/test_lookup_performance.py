@@ -1287,7 +1287,9 @@ def test_a_direct_exit_with_a_29_public_network_is_fast(
 #: hours later, when the partition holds 22 hours of the address's rows before the probe's range;
 #: the busy address 5 hours before the guards' moment, before its first row (its rows fill the
 #: range's 24-hour tail, none of them overlaps the window); and the second line
-#: (:data:`LATER_LINE`, about 1 % of the rows of the range, none overlapping the moment).
+#: (:data:`LATER_LINE`, about 1 % of the rows of the range, none overlapping the moment). The busy
+#: address at the moment and later is answered by the probe window's own rows, the others ask the
+#: tail too.
 OVERLAP = {
     "no_rows": (PUBLIC, GUARD_AT),
     "busy": (WAN, GUARD_AT),
@@ -1302,11 +1304,28 @@ OVERLAP = {
 OVERLAP_SECONDS = {"busy_before": 1.0}
 
 
-def _plan_reads(plan: Sequence[str]) -> tuple[list[str], int]:
-    """The indexes an ``EXPLAIN (ANALYZE)`` plan scans and the rows its filters removed."""
-    indexes = re.findall(r"Index (?:Only )?Scan(?: Backward)? using (\S+)", "\n".join(plan))
-    removed = sum(int(n) for n in re.findall(r"Rows Removed by Filter: (\d+)", "\n".join(plan)))
-    return indexes, removed
+def _plan_reads(plan: Sequence[str]) -> tuple[list[tuple[str, int]], int]:
+    """The index scans of an ``EXPLAIN (ANALYZE)`` plan, each with the rows it fetched (those it
+    returned and those its filter removed), and the rows its filters removed, summed over the
+    partitions or chunks it appends or merges."""
+    scans: list[tuple[str, int]] = []
+    removed, current = 0, False
+    for line in plan:
+        if scan := re.search(
+            r"(?:Index (?:Only )?Scan(?: Backward)? using|Bitmap Index Scan on) (\S+) .*"
+            r"actual time=\S+ rows=(\d+) loops=(\d+)",
+            line,
+        ):
+            scans.append((scan[1], int(scan[2]) * int(scan[3])))
+            current = True
+        elif "->" in line:
+            current = False  # another node: the filter lines after it are not the scan's
+        elif filtered := re.search(r"Rows Removed by Filter: (\d+)", line):
+            removed += int(filtered[1])
+            if current:
+                index, fetched = scans[-1]
+                scans[-1] = (index, fetched + int(filtered[1]))
+    return scans, removed
 
 
 @pytest.mark.perf
@@ -1316,9 +1335,10 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
 ) -> None:
     """3.8: the overlap-aware ``seen_overlap(P)`` probe (D31 (a), 2.8.3) for an unclaimed P with
     no rows and for a busy unclaimed P (:data:`OVERLAP`), under 0.2 s (:data:`OVERLAP_SECONDS`);
-    through the lookup's own probe (``_Probe.seen_overlap``), whose plan reads the address's own
-    rows of its range only (``ix_fg_traffic_transip_transport_time``) and stops at the first
-    overlapping session."""
+    through the lookup's own probe (``_Probe.seen_overlap``), which asks the probe window first
+    and the tail after it only when the window has no overlapping session. Each statement's plan
+    reads the address's own rows of its range only (``ix_fg_traffic_transip_transport_time``)
+    and stops at the first overlapping session, over partitions and over chunks."""
     address, at = OVERLAP[case]
     probes: list[_Timed] = []
 
@@ -1333,7 +1353,7 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     (timed,) = probes
     (call,) = timed.calls
     assert call[1:] == (address, max_session)
-    ((sql, parameters),) = [
+    statements = [
         (sql, parameters)
         for sql, parameters in executed.statements
         if "make_interval" in sql and SEARCH not in sql and address in parameters.values()
@@ -1341,14 +1361,16 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     probe = timedelta(seconds=lookup_engine.TRANSIP_PROBE_SECONDS)
     low, high = at - probe, at + probe
     end = high + timedelta(seconds=max_session)
-    assert sorted(_moments(parameters)) == [low, high, end]
-    # The address's rows in the probe's range, and those overlapping the probe window.
+    # The address's rows in the probe window and in the range's tail after it, and those
+    # overlapping the probe window.
     condition = "transip = CAST(:address AS inet)"
     read, kept = _rows_of(traffic_site, low, end, high, condition, address=address)
+    in_window, kept_in_window = _rows_of(traffic_site, low, high, high, condition, address=address)
     if case == "no_rows":
         assert (read, kept) == (0, 0)
     elif case in ("busy", "busy_late"):
-        assert kept > 0
+        assert kept_in_window > 0
+        assert in_window >= WINDOW_ROWS // 50  # 30 min of the site's rows
         assert read >= (WINDOW_ROWS if case == "busy" else 5 * WINDOW_ROWS // 24)
     elif case == "busy_before":
         assert kept == 0
@@ -1358,25 +1380,41 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
         assert read >= 8_000  # 20 h 15 min of the second line's
         total, _ = _rows_of(traffic_site, low, end, high, "true")
         assert read < total // 100
+    # The probe window first ([T - probe, T + probe], sessions that started by its end), then,
+    # only when none of its rows overlaps, the tail ((T + probe, its end]).
+    ranges = [(low, high, in_window)]
+    if not kept_in_window:
+        ranges.append((high, end, read - in_window))
+    assert [sorted(_moments(parameters)) for _sql, parameters in statements] == [
+        sorted([first, last, high]) for first, last, _rows in ranges
+    ], case
+    assert len(statements) == (1 if case in ("busy", "busy_late") else 2), case
     # Answered from the rows: observed when one of the address's sessions overlaps the window.
     assert outcome.egress is not None
     assert outcome.egress.resolution == ("observed" if kept else "unconfigured")
-    # It reads its range only: a sequential scan of the partition also read its rows before the
+    # Each reads its range only: a sequential scan of the partition also read its rows before the
     # range (``EXISTS`` did for a busy address; 0.9 s on a partition of 10 days at 1 M a day).
-    with traffic_site.connect() as connection:
-        plan = connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
-    print("\n".join(plan))
-    assert not any("Seq Scan" in line for line in plan), case
-    # And the address's own rows of it only, along its index entries: an address with no
-    # overlapping session has each of them read and filtered out, one with an overlapping
-    # session stops at it (in time order, the second line's probe read every address's rows).
-    indexes, removed = _plan_reads(plan)
-    assert indexes, case
-    assert all("transip_transport_time" in index for index in indexes), indexes
-    if kept:
-        assert removed < read // 10, (case, removed, read)
-    else:
-        assert removed == read, (case, removed, read)
+    for (sql, parameters), (_first, _last, rows) in zip(statements, ranges, strict=True):
+        with traffic_site.connect() as connection:
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
+            )
+        print("\n".join(plan))
+        assert not any("Seq Scan" in line for line in plan), case
+        # And the address's own rows of it only, along its index entries: a range with no
+        # overlapping session has each of them read and filtered out, the probe window of a
+        # busy address stops at its first overlapping session (in time order, the second line's
+        # probe read every address's rows; as one statement over daily chunks, the busy
+        # address's whole next day was read before the merge returned its first row).
+        # Another index may only be the planner's choice for a window with no row at all
+        # (``busy_before``'s, before the site's first row), a scan that fetched nothing.
+        scans, removed = _plan_reads(plan)
+        assert scans, case
+        assert all("transip_transport_time" in index or not n for index, n in scans), scans
+        if kept_in_window:
+            assert removed < in_window // 10, (case, removed, in_window)
+        else:
+            assert removed == rows, (case, removed, rows)
     bound = OVERLAP_SECONDS.get(case, 0.2)
     assert timed.seconds < bound, f"{case}: the overlap probe took {timed.seconds:.3f} s"
 
