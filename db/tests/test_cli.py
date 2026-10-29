@@ -392,6 +392,29 @@ def test_settings_set_refuses_bad_input_and_changes_nothing(
     assert before[2] == []  # no audit entry was written
 
 
+def test_settings_set_keeps_the_arp_grace_within_the_arp_interval(
+    setup: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An interval under the stored grace would stop the lease job on every run: the console
+    refuses it, and a grace longer than the interval, without writing or auditing anything."""
+    config = str(setup)
+    assert main(["upgrade", "--config", config]) == 0
+    capsys.readouterr()
+    interval, grace = "arp.interval_seconds", "arp.ignore_after_release_seconds"
+    assert main(["settings", "set", interval, "120", "--by", "tolga", "--config", config]) == 2
+    err = capsys.readouterr().err
+    assert "Ayar değiştirilmedi" in err
+    assert f"{interval}: en az {grace} kadar olmalı" in err
+    assert _settings_state(setup, interval) == (3600, ":seed", [])
+    assert main(["settings", "set", grace, "3601", "--by", "tolga", "--config", config]) == 2
+    assert f"{grace}: en çok {interval} kadar olabilir" in capsys.readouterr().err
+    assert _settings_state(setup, grace) == (300, ":seed", [])
+
+    assert main(["settings", "set", grace, "60", "--by", "tolga", "--config", config]) == 0
+    assert main(["settings", "set", interval, "120", "--by", "tolga", "--config", config]) == 0
+    assert _settings_state(setup, interval)[:2] == (120, "tolga")
+
+
 def test_settings_commands_need_a_reachable_database_and_a_known_key(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

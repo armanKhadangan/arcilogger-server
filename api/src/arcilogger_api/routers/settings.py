@@ -12,13 +12,16 @@ and the worker read them whenever they use them, so a change needs no reload.
 * ``PATCH /settings`` ``{"changes": [{"key", "old", "value"}]}`` — **all or nothing** in one
   transaction: every key must be known (422 ``setting_unknown``) and not locked (422
   ``setting_locked``), every value valid (422 ``setting_invalid`` with
-  ``details[{key, code, message_tr, message_en}]``, never the submitted value), ``old`` must still
+  ``details[{key, code, message_tr, message_en}]``, never the submitted value), also together with
+  the stored settings (:func:`arcilogger_db.settings.check_settings_together`: the ARP grace may
+  not be longer than the ARP interval, whichever of the two changes), ``old`` must still
   be the value in force (409 ``setting_conflict``, ``details[{key, current}]``) and a key of
   ``REAUTH_KEYS`` needs a recent re-authentication (403 ``reauth_required``). Each change is
   written by :func:`arcilogger_db.settings_admin.change_setting` with the user's id and address
   (audit ``settings.change {old, new}``); a value equal to the one in force is left alone
   (``unchanged``);
-* ``POST /settings/{key}/reset`` — the shipped default back (audited with ``reset: true``);
+* ``POST /settings/{key}/reset`` — the shipped default back (audited with ``reset: true``; 422
+  ``setting_invalid`` when the default breaks a rule between keys with the stored settings);
 * ``GET /settings/fortigate/observed?hours=24`` (``hours`` 1 to 72; contract 2.12) — what the
   FortiGate's session records show, for the exit editor's observed panel: the NAT addresses
   (``transip``, ``dstintf``, ``trandisp``) of the trusted ``fg_traffic`` rows of the last
@@ -58,6 +61,7 @@ from arcilogger_db.models import FgTraffic
 from arcilogger_db.settings import (
     SETTING_ERRORS,
     SettingValueError,
+    check_settings_together,
     get_setting,
     validate_setting,
 )
@@ -284,7 +288,13 @@ def _write(
             )
         else:
             done = change_setting(
-                db, key, value, actor=user.username, actor_id=user.id, ip=client_ip(request)
+                db,
+                key,
+                value,
+                actor=user.username,
+                actor_id=user.id,
+                ip=client_ip(request),
+                together=dict(values),
             )
         changed.append(ChangedSetting(key=key, old=done.old, new=done.new))
     return SettingsPatchResult(changed=changed, unchanged=unchanged)
@@ -310,14 +320,9 @@ def patch_settings(
         try:
             values.append((change.key, validate_setting(change.key, change.value)))
         except SettingValueError as exc:
-            problems.append(
-                {
-                    "key": change.key,
-                    "code": exc.code,
-                    "message_tr": exc.message_tr,
-                    "message_en": exc.message_en,
-                }
-            )
+            problems.append(_problem(exc))
+    if not problems:
+        problems = [_problem(exc) for exc in check_settings_together(db, dict(values))]
     if problems:
         raise _error(422, "setting_invalid", details=problems)
     conflicts = [
@@ -338,9 +343,22 @@ def reset_to_default(
 ) -> SettingsPatchResult:
     """Put the shipped default of one setting back (audited ``settings.change``, ``reset``)."""
     _known(key)
+    problems = check_settings_together(db, {key: SETTINGS[key].default})
+    if problems:
+        raise _error(422, "setting_invalid", details=[_problem(exc) for exc in problems])
     if SETTINGS[key].reauth:
         ensure_recent_auth(user)
     return _write(db, request, user, [(key, SETTINGS[key].default)], reset=True)
+
+
+def _problem(exc: SettingValueError) -> dict[str, Any]:
+    """One refused value of 422 ``setting_invalid``."""
+    return {
+        "key": exc.key,
+        "code": exc.code,
+        "message_tr": exc.message_tr,
+        "message_en": exc.message_en,
+    }
 
 
 # -- what the FortiGate's records show (the exit editor's observed panel) -------------------------

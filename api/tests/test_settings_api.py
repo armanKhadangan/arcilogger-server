@@ -27,6 +27,7 @@ from arcilogger_db.egress import ERROR_CODES
 from arcilogger_db.models import AuditLog, UserSession
 from arcilogger_db.settings import (
     DEFAULT_SETTINGS,
+    SETTING_ERRORS,
     SettingValueError,
     get_setting,
     validate_setting,
@@ -186,6 +187,71 @@ def test_reset_puts_the_shipped_default_back(
     assert client.post(f"{URL}/auth.idle_minutes/reset").status_code == 200
     unknown = client.post(f"{URL}/no.such/reset")
     assert (unknown.status_code, unknown.json()["error"]["code"]) == (422, "setting_unknown")
+
+
+def test_the_arp_grace_is_never_longer_than_the_arp_interval(
+    client: TestClient, login_as: Login, app_session_factory: sessionmaker[Session]
+) -> None:
+    """An ARP interval under the grace would stop the lease job on every run (#40 item 6): a
+    change of either key that breaks the rule is refused with its own code, a write that changes
+    both is checked as a whole, in either order, and so is a reset."""
+    login_as(client, "admin")
+    interval, grace = "arp.interval_seconds", "arp.ignore_after_release_seconds"
+    shorter = client.patch(URL, json={"changes": [{"key": interval, "old": 3600, "value": 120}]})
+    assert shorter.status_code == 422
+    error = shorter.json()["error"]
+    assert error["code"] == "setting_invalid"
+    assert error["details"] == [
+        {
+            "key": interval,
+            "code": "setting_arp_interval_below_grace",
+            "message_tr": SETTING_ERRORS["setting_arp_interval_below_grace"][0],
+            "message_en": SETTING_ERRORS["setting_arp_interval_below_grace"][1],
+        }
+    ]
+    longer = client.patch(URL, json={"changes": [{"key": grace, "old": 300, "value": 3601}]})
+    assert longer.status_code == 422
+    assert [(item["key"], item["code"]) for item in longer.json()["error"]["details"]] == [
+        (grace, "setting_arp_grace_above_interval")
+    ]
+    both = client.patch(
+        URL,
+        json={
+            "changes": [
+                {"key": interval, "old": 3600, "value": 100},
+                {"key": grace, "old": 300, "value": 200},
+            ]
+        },
+    )
+    assert both.status_code == 422
+    assert [(item["key"], item["code"]) for item in both.json()["error"]["details"]] == [
+        (grace, "setting_arp_grace_above_interval"),
+        (interval, "setting_arp_interval_below_grace"),
+    ]
+    assert (value(app_session_factory, interval), value(app_session_factory, grace)) == (3600, 300)
+    assert not changes(app_session_factory)
+
+    # The interval first, then the grace: checked as one write, so the order does not matter.
+    done = client.patch(
+        URL,
+        json={
+            "changes": [
+                {"key": interval, "old": 3600, "value": 120},
+                {"key": grace, "old": 300, "value": 60},
+            ]
+        },
+    )
+    assert done.status_code == 200, done.text
+    assert (value(app_session_factory, interval), value(app_session_factory, grace)) == (120, 60)
+    reset = client.post(f"{URL}/{grace}/reset")  # the shipped 300 s no longer fits
+    assert reset.status_code == 422
+    assert [(item["key"], item["code"]) for item in reset.json()["error"]["details"]] == [
+        (grace, "setting_arp_grace_above_interval")
+    ]
+    assert value(app_session_factory, grace) == 60
+    assert client.post(f"{URL}/{interval}/reset").status_code == 200
+    assert client.post(f"{URL}/{grace}/reset").status_code == 200
+    assert (value(app_session_factory, interval), value(app_session_factory, grace)) == (3600, 300)
 
 
 def test_only_administrators_change_settings(client: TestClient, login_as: Login) -> None:
