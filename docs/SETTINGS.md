@@ -174,10 +174,11 @@ minutes, which exit claims an address is computed from the current settings ever
   is for the address of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch (no
   session is searched on such addresses). An unknown `trandisp` value is flagged. When the stored
   exit definition cannot be read, the panel says so and the exit column stays empty (`R20-nat`).
-- **srcmac interfaces (last hour):** per interface (`srcintf`) the number of records with a
-  srcmac, the number of MACs and the most IP addresses seen with one MAC (`max_ips_per_mac`); all
-  three count IPv4 sources only (IPv4 sources; a dual-stack client's IPv6 addresses are not
-  counted), and whether the interface is in `lookup.srcmac_interfaces`. **Use for srcmac** is
+- **Interfaces with srcmac (last hour):** per interface (`srcintf`) the number of records with a
+  srcmac ("Records"), the number of distinct MACs ("Distinct MACs") and the most IP addresses seen
+  with one MAC ("Most IPs per MAC", `max_ips_per_mac`); all three count only records with an IPv4
+  source address (a dual-stack client's IPv6 addresses are not counted), and whether the interface
+  is in `lookup.srcmac_interfaces` ("srcmac in use"). **Use for srcmac** is
   disabled on interfaces whose `max_ips_per_mac` is above `lookup.srcmac_max_ips`. Do the
   two-client check before you add an interface ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
 

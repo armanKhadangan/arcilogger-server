@@ -173,10 +173,11 @@ açılışta güncel ayarlardan hesaplanır):
   ekle**, FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı NAT'ın adresi içindir
   (bu adreslerde oturum aranmaz). Bilinmeyen bir `trandisp` değeri işaretlenir. Kayıtlı çıkış
   tanımı okunamıyorsa panel bunu söyler ve çıkış sütunu boş kalır (`R20-nat`).
-- **srcmac arayüzleri (son bir saat):** arayüz başına (`srcintf`) srcmac taşıyan kayıt sayısı,
-  MAC sayısı ve bir MAC'in görüldüğü en çok IP adresi (`max_ips_per_mac`); üçü de yalnızca IPv4
-  kaynakları sayar (IPv4 kaynaklar; çift yığınlı bir istemcinin IPv6 adresleri sayılmaz) ve
-  arayüzün `lookup.srcmac_interfaces` listesinde olup olmadığını gösterir. **srcmac için ekle**,
+- **srcmac görülen arayüzler (son 1 saat):** arayüz başına (`srcintf`) srcmac taşıyan kayıt
+  sayısı ("Kayıt"), farklı MAC sayısı ("Farklı MAC") ve bir MAC'in görüldüğü en çok IP adresi
+  ("Bir MAC için en çok IP", `max_ips_per_mac`); üçü de yalnızca IPv4 kaynak adresli kayıtları
+  sayar (çift yığınlı bir istemcinin IPv6 adresleri sayılmaz) ve arayüzün
+  `lookup.srcmac_interfaces` listesinde olup olmadığını ("srcmac kullanılıyor") gösterir. **srcmac için ekle**,
   `max_ips_per_mac` `lookup.srcmac_max_ips` değerini aşan arayüzlerde kapalıdır. Bir arayüzü
   eklemeden önce iki istemci denetimini yapın ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5).
 
