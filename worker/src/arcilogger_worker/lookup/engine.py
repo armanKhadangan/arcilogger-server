@@ -1740,8 +1740,9 @@ class _Lookup:
 
     def _clock(self, source: str) -> tuple[float, int] | None:
         """``source``'s clock at the moment: the median of ``time - time_received`` (seconds),
-        and its number of rows, of two samples, the one of larger size; ``None`` when neither has
-        :data:`CLOCK_MIN_ROWS` rows. Cached per lookup.
+        and its number of rows, of two samples, the one whose median is further from 0 (a
+        session search must not trust the clock if either says it was off); ``None`` when neither
+        has :data:`CLOCK_MIN_ROWS` rows. Cached per lookup.
 
         * By device time: its ``messages`` rows nearest the moment on each side within
           :data:`CLOCK_SPAN` whose device time is not the receive time (ingest's stand-in for a

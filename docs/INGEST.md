@@ -67,7 +67,8 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
     once the sealer deleted the spool file)             ▼
                                          one transaction: offsets (compare-and-set) → COPY rows
                                          → parse_failures upsert → sources (+ new_source alert)
-                                         → search_counts upsert → COMMIT → in-memory offsets move
+                                         → search_counts and source_clock_samples upserts → COMMIT
+                                         → in-memory offsets move
 ```
 
 | Module | Role |
@@ -75,7 +76,7 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
 | `service.py` | the loop: discover streams, read, batch, load, finish, back off, status |
 | `files.py` | `read_complete` (spool, opened and closed per read), `VaultReader` (sealed `.log.gz`), `open_shared` (Windows delete sharing) |
 | `prepare.py` | one raw line → rows (pure function; runs in a worker process unchanged) |
-| `loader.py` | the load transaction (rows, failures, sources, search counts), compare-and-set offsets, bisecting a batch `COPY` refuses |
+| `loader.py` | the load transaction (rows, failures, sources, search counts, clock samples), compare-and-set offsets, bisecting a batch `COPY` refuses |
 | `instance.py` | single-instance lock (PostgreSQL session-level advisory lock) |
 | `sealed.py` | which days the sealer finished (`state/seal/<day>.json` + manifest) |
 | `sources.py` | spool folder → configured type (`fortigate`, `ap-<ip>` → network entry, `unknown-<ip>` → content detection) |
@@ -147,7 +148,8 @@ racing on the same files (lock switched off), the real process killed three time
 finds the offsets already moved and continues from the database) — every time each line is in
 `messages` exactly once and rows and offsets agree; after the interruptions, the second instance,
 the race and the kills the search counts agree with them too (`searchcounts.verify` in the
-same snapshot).
+same snapshot), and so do the clock samples (their sum equals the rows with a device time of
+their own).
 
 ## Search counts
 
@@ -187,6 +189,24 @@ transaction, from exactly the lines whose rows loaded in it:
 Tests: `ingest/tests/test_loader_counts.py` (shared batches over three sources and two days, a
 damaged line, a dropped typed row, the `COPY` salvage, vault continuation, a file half loaded
 before the upgrade, a device clock almost a day behind) and the exactly-once matrix above.
+
+## Clock samples
+
+The same step `counts` writes `source_clock_samples` (`arcilogger_db.clocksamples`, ADR-0016 D28,
+issue #73) from the same lines: per source, received minute (`time_received`, UTC) and device
+clock offset `time - time_received` in whole seconds (`0` under a minute either way), the number
+of lines whose `messages` row loaded with a device time of its own (a line stamped with its
+receive time is not counted). `clock_key` is the one definition, also used by
+`clocksamples.rebuild`; the loader groups a batch's lines by source, minute and offset and makes
+each key once per group. A source on time has one key a minute, so a batch adds a few keys per
+source, written with one fixed `INSERT … SELECT FROM unnest(…) ON CONFLICT … DO UPDATE SET n =
+source_clock_samples.n + EXCLUDED.n` per 500 keys. `R20-lease:source-clock` and a lookup's clock
+check read it by receive time: a device clock set hours back writes rows whose device times lie
+hours before their arrival, which a sample of `messages` by device time does not reach (contract,
+"Deviations — clock (2026-11)"). Lines loaded before revision `0019_source_clock_samples` have no
+samples; the retention job deletes the minutes before the first kept month. Tests:
+`ingest/tests/test_loader_clocks.py`, `db/tests/test_clocksamples.py` and the exactly-once
+matrix above.
 
 ## One instance per database
 

@@ -421,8 +421,10 @@ a person resolved or dismissed are never changed. The incremental job only raise
     the MAC taking another address. Nothing of it is cited or shown (it may be another client's);
     its windows are in section 7;
   - `source_clock_offset`: a cited source's clock was off at the moment (the median of `time −
-    time_received` over its rows nearest the moment, at least 10 rows, beyond 120 s, or beyond
-    max(120 s, the lookup tolerance) for a source measured only for the session search; D28);
+    time_received` over its rows nearest the moment by device time, or over its rows received
+    within an hour of the moment (`source_clock_samples`), whichever is further from 0, each with
+    at least 10 rows; beyond 120 s, or beyond max(120 s, the lookup tolerance) for a source
+    measured only for the session search; D28);
   - `srcmac_mismatch`: below.
 - **FortiGate notes on a chain** whose lease is `fg_dhcp` (info): `fortigate_format_unverified`
   while `dhcp.fortigate_format_verified` is off, `fortigate_format_verified` (who marked it and
@@ -942,7 +944,13 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   with the default ±60 s tolerance a drift of one to two minutes can still move a session out of the
   window. A source with fewer than 10 rows around T is not measured. An empty result states the
   searched sources' offset (`source_clock_offset`) but is not corrected: run the lookup again as its
-  text says.
+  text says. The alert measures by **receive time** and the lookup by receive time too (the
+  per-minute samples of `source_clock_samples`, which ingest writes with the rows): a clock set
+  hours back after logging on time is alerted at the next check and named by a lookup at the real
+  moment, although its rows' device times lie hours away. A burst of a device's buffered late
+  lines can make its minutes look behind; the lookup then errs on the safe side (a `low` chain
+  with the offset stated). Lines loaded before revision `0019_source_clock_samples` have no
+  samples: a lookup of such a moment is measured by device time alone.
 - **srcmac is only as good as the interface setting.** The shared-MAC guard, the other-lease
   refusal and `R20-lease:srcmac-shared` catch a routed segment or a switch listed as directly
   connected; a layer-2 segment with a single client behind a NAT device is not caught (not
