@@ -434,10 +434,29 @@ class IngestService:
         A row whose source is no longer configured (removed in the browser or by hand; neither
         an ``unknown-<ip>`` sender nor a member of a configured network) is kept for its
         history with ``enabled = false, expected = false``, in the same transaction: R15, the
-        dashboard and the lease watermark stop waiting for it."""
+        dashboard and the lease watermark stop waiting for it.
+
+        The rows are written one after the other in name order, the order of the loader's step
+        ``sources``: a second instance starting beside a running load (lock switched off, or
+        the moment the lock cannot cover) waits for it instead of deadlocking with it."""
+        configured = {
+            source.name: source for source in self.config.sources if not source.is_network
+        }
         with self.engine.begin() as connection:
-            for source in self.config.sources:
-                if source.is_network:
+            watched = connection.scalars(
+                select(Source.name).where(
+                    Source.unknown.is_(False), Source.enabled.is_(True) | Source.expected.is_(True)
+                )
+            ).all()
+            removed = [name for name in watched if not self._configured(name)]
+            for name in sorted(configured.keys() | set(removed)):  # fixed lock order
+                source = configured.get(name)
+                if source is None:
+                    connection.execute(
+                        update(Source)
+                        .where(Source.name == name)
+                        .values(enabled=False, expected=False)
+                    )
                     continue
                 values = {
                     "type": source.type,
@@ -447,22 +466,11 @@ class IngestService:
                     "heartbeat_minutes": source.heartbeat_minutes,
                     "unknown": False,
                 }
-                statement = insert(Source).values(name=source.name, **values)
+                statement = insert(Source).values(name=name, **values)
                 connection.execute(
                     statement.on_conflict_do_update(index_elements=["name"], set_=values)
                 )
-            watched = connection.scalars(
-                select(Source.name).where(
-                    Source.unknown.is_(False), Source.enabled.is_(True) | Source.expected.is_(True)
-                )
-            ).all()
-            removed = [name for name in watched if not self._configured(name)]
             if removed:
-                connection.execute(
-                    update(Source)
-                    .where(Source.name.in_(removed))
-                    .values(enabled=False, expected=False)
-                )
                 log.info("sources no longer configured: %s", ", ".join(sorted(removed)))
 
     def _configured(self, name: str) -> bool:
