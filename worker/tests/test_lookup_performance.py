@@ -1542,13 +1542,30 @@ def test_the_seen_but_not_alone_check_is_fast(
     # address's first step stops at its first row there, the ranges of the others hold none of
     # its rows. A sequential scan of the partition also read the rows of every other address and
     # time (``EXISTS`` did for the busy address). Another index may only be the planner's choice
-    # for a range with no row at all, a scan that fetched nothing.
+    # for a range with no row at all, a scan that fetched nothing. Over daily chunks the ordered
+    # step is a Merge Append that needs a first row from every chunk of its range, so a busy
+    # address also has its rows of the next day's chunk read until one passes (7 rows of the
+    # requested port on CI's TimescaleDB job): under a tenth of its rows of the window.
+    window = Window(at, LookupSettings().tolerance_seconds, LookupSettings().max_session_seconds)
+    condition = "transip = CAST(:address AS inet)"
+    in_window, _kept = _rows_of(
+        traffic_site, window.low, window.high, window.high, condition, address=address
+    )
     for plan in plans:
-        assert not any("Seq Scan" in line for line in plan), case
+        shown = "\n".join(plan)
+        assert not any("Seq Scan" in line for line in plan), (case, shown)
         scans, removed = _plan_reads(plan)
-        assert scans, case
-        assert all("transip_transport_time" in index or not n for index, n in scans), scans
-        assert removed == 0, (case, removed)
+        assert scans, (case, shown)
+        assert all("transip_transport_time" in index or not n for index, n in scans), (
+            case,
+            scans,
+            shown,
+        )
+        if case.startswith("busy") and not case.endswith("no_row"):
+            assert in_window >= WINDOW_ROWS // 1000  # 2 minutes of the site's rows
+            assert removed < in_window // 10, (case, removed, in_window, shown)
+        else:
+            assert removed == 0, (case, removed, shown)
     assert timed.seconds < CARRIED_SECONDS, f"{case}: the check took {timed.seconds:.3f} s"
     assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
 
