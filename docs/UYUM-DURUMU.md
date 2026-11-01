@@ -217,7 +217,7 @@ Okunamayan ya da çözümlenemeyen bir `last-full.json` (bozuk ya da okuma izni 
 bir tam denetim sayılmaz: kart **Bilgi yok** durumunda "Bu denetim şu anda yapılamadı: {hata kodu}"
 gösterir (bölüm 1). Dosya yoksa tam denetim hiç çalışmamış sayılır (satır 5). Geç damgalanmış, verisi olmayan,
 silinmiş ve süren günler durumu değiştirmez; yalnızca sayılır (geç damgalanmış ama son 35 günde
-doğrulanmış bir gün "doğrulanmış" sayılır). Bilgiler: doğrulanmış, doğrulanmamış, başarısız ve "veri
+doğrulanmış bir gün "doğrulanmış" sayılır). Bilgiler: doğrulanmış, doğrulanmamış, başarısız ve "Veri
 yok ya da silinmiş" gün sayıları, son tam zincir denetimi ("{zaman}, başarılı|başarısız"),
 doğrulama görevleri ("günlük son 2 gün, haftalık son 90 gün, aylık tüm zincir").
 
@@ -580,6 +580,10 @@ olarak indirir. Yönetici ve denetçi indirebilir (`compliance.read`).
 - **Kişisel veri:** kartlar gibi raporda da log öznelerine ait veri yoktur. Tek istisna raporu
   indiren hesabın görünen adı ve kullanıcı adıdır.
 - **İndirme başarısız olursa** sunucunun hata metni, kodu ile birlikte düğmenin yanında görünür.
+- **Özet denetimi:** tarayıcı kaydettiği dosyanın SHA-256 değerini `X-Arci-Sha256` başlığıyla
+  karşılaştırır. Değerler farklıysa düğmenin yanında "İndirilen dosyanın özeti eşleşmiyor:
+  dosyayı kullanmayın ve yeniden indirin (download_mismatch)" görünür; o dosyayı kullanmayın,
+  raporu yeniden indirin. Eşleşen bir dosya için ayrıca bir şey yazılmaz.
 
 Rapor teknik denetimlerin bir dökümüdür; hukuki bir değerlendirme değildir. Raporu bir denetime
 sunmadan önce metinlerini hukuk müşavirinizle gözden geçirin.
@@ -595,7 +599,8 @@ dosyalarından, kanıt dosyalarından ve veritabanından çıkarılır.
 Hizmetler, Zamanlanmış görevler, Worker işleri ve Saat blokları ayrı bir istekle okunur. Bu istek
 başarısız olursa hata (kodu ve **Tekrar dene** düğmesiyle) yalnızca Saat bloğunda görünür, diğer üç
 blok "Durum alınamadı; hata Saat bölümünde." yazar; daha önce gösterilen değerler yerinde kalır.
-Henüz yanıt gelmemişse bu bloklar "Durum henüz alınmadı." yazar. Bloklar bu sıradadır:
+İlk yanıt beklenirken bu bloklar yer tutucu gösterir; yanıt da hata da yoksa (özet gösterilirken)
+"Durum henüz alınmadı." yazar. Bloklar bu sıradadır:
 
 ### 4.1 Kaynak kullanımı
 
@@ -647,8 +652,8 @@ boş kalır.
 ### 4.4 Toplayıcı ve İçe aktarma
 
 İki blok, toplayıcının ve içe aktarmanın (ingest) durum dosyalarından (`state\collector-status.json`,
-`state\ingest-status.json`): dosya 2 dakikadan yeniyse "çalışıyor", eskiyse "güncel değil", yoksa
-"yok".
+`state\ingest-status.json`): dosya 2 dakikadan yeniyse "Çalışıyor", eskiyse "Güncel değil", yoksa
+"Durum dosyası yok".
 
 - **Toplayıcı:** yapılandırılmış her kaynak için mesaj ve bayt sayısı ve son alım zamanı; yapılandırmada
   olmayan göndericiler yalnızca sayılır (gönderici sayısı, mesaj, bayt), adresleri gösterilmez
@@ -666,19 +671,21 @@ sayfası her yapılandırılmış kaynağı listeler).
 
 ### 4.5 Hizmetler
 
-- **ArciCollector, ArciIngest, ArciWorker:** durum dosyaları 2 dakikadan yeniyse "çalışıyor", eskiyse
-  "güncel değil", dosya yoksa "yok". **ArciApi** her zaman "çalışıyor"dur (sayfayı o yanıtlar).
-- **Yönetim hizmeti (ArciAdmin):** kalp atışına göre "tamam", "güncel değil", "yok" ya da tarayıcıdan
-  yönetim kapalıysa "kapalı".
-- **ApplySystem:** son sonucu (`admin\system\status.json`): "tamam", "başarısız" (kodu ile), "hiç
-  çalışmadı" ya da tarayıcıdan yönetim kapalıysa "kapalı".
+- **ArciCollector, ArciIngest, ArciWorker:** durum dosyaları 2 dakikadan yeniyse "Çalışıyor", eskiyse
+  "Güncel değil", dosya yoksa "Durum dosyası yok". **ArciApi** her zaman "Çalışıyor"dur (sayfayı o
+  yanıtlar).
+- **Yönetim hizmeti (ArciAdmin):** kalp atışına göre "Çalışıyor", "Yanıtı gecikiyor",
+  "Çalışmıyor" ya da tarayıcıdan yönetim kapalıysa "Kapalı".
+- **ApplySystem:** son sonucu (`admin\system\status.json`): "Uygulandı", "Başarısız" (sonuç
+  koduyla), "Henüz çalışmadı" ya da tarayıcıdan yönetim kapalıysa "Tarayıcıdan yönetim kapalı".
 
 ### 4.6 Zamanlanmış görevler
 
 `deploy\windows\tasks\` içindeki her görev için bir satır. Durum görevin **kanıt dosyasından**
-çıkarılır (yollar veri klasörüne göredir): "tamam"; "gecikti" (kanıt, sınırdan eski); "yok" (henüz
-kanıt yok); "kullanılmıyor" (görev bu yapılandırmada iş yapmaz); "izlenemiyor" (ArciApi'nin
-okuyabileceği bir kanıt yok). Sınırlar görevin çalışma sıklığı artı bir paydır; ayar değildir.
+çıkarılır (yollar veri klasörüne göredir): "Zamanında"; "Gecikti" (kanıt, sınırdan eski); "Kanıt
+yok" (henüz kanıt yok); "Kullanılmıyor" (görev bu yapılandırmada iş yapmaz); "İzlenemiyor"
+(ArciApi'nin okuyabileceği bir kanıt yok). Sınırlar görevin çalışma sıklığı artı bir paydır; ayar
+değildir.
 
 | Görev | Çalışma | Kanıt | Gecikti | Kullanılmıyor |
 |---|---|---|---|---|
@@ -687,11 +694,11 @@ okuyabileceği bir kanıt yok). Sınırlar görevin çalışma sıklığı artı
 | VerifyWeekly | Pazar 03:00 | `state\verify\last-last-<N>.json` (N ≥ 3) dosyalarının en yeni `at` değeri | 8 gün | — |
 | VerifyMonthly | Ayın 1'i 04:00 | `state\verify\last-full.json` içindeki `at` | 32 gün | — |
 | Replica | Saatte bir, 00:40'tan | son 3 günün `state\replica\<gün>.json` dosyalarındaki en yeni `verified_at` | 26 saat | `[replica] enabled = false` |
-| Retention | Her gün 02:00 | okunabilir kanıt yok → "izlenemiyor" | — | `[retention] enabled = false` |
+| Retention | Her gün 02:00 | okunabilir kanıt yok → "İzlenemiyor" | — | `[retention] enabled = false` |
 | Credit | Her gün 06:00 | `state\credit.jsonl` içindeki en yeni `time` | 26 saat | `[tsa] provider` `zamane` değil |
 | ClockCheck | Saatte bir, 00:05'ten | bugünün ve dünün `state\clock\<gün>.jsonl` dosyalarındaki en yeni `time` | 2 saat | — |
 | Backup | Her gün 01:40 | `state\backup\last.json` içindeki `finished` | 26 saat | `[backup] enabled = false` |
-| Requests | Olayla ve 5 dakikada bir | ArciApi `state\requests` klasörünü okuyamaz → "izlenemiyor" | — | — |
+| Requests | Olayla ve 5 dakikada bir | ArciApi `state\requests` klasörünü okuyamaz → "İzlenemiyor" | — | — |
 | ApplySystem | Olayla ve 5 dakikada bir | `admin\system\status.json` içindeki `at` | 15 dakika | tarayıcıdan yönetim kapalı |
 
 Doğrulama görevlerinin dosya adları komutun kendisinden gelir: `verify --last 2` `last-last-2.json`,
@@ -707,9 +714,10 @@ Get-ScheduledTask -TaskPath \ARCILOGGER\ | Get-ScheduledTaskInfo | Format-Table 
 ### 4.7 Worker işleri
 
 Worker'ın her işi için: çalışma sıklığı ("Her {n} saniyede/dakikada/saatte bir" ya da "Her gün
-{SS:DD}'den sonra"), durum ("hiç çalışmadı", "çalışıyor" (`job_runs` tablosunda bitmemiş bir çalışması var),
-"başarısız" (art arda en az bir hata ya da son çalışması başarısız; veritabanına ulaşılamadığında
-hata sayılmadan da), "atlandı", "tamam"), son durum, son başlangıç ve bitiş, süre (son 7 günün en yeni bitmiş
+{SS:DD}'den sonra"; ek, saatin okunuşuna uyar: "00:15'ten", "00:30'dan", "01:00'den"), durum ("Hiç
+çalışmadı", "Çalışıyor" (`job_runs` tablosunda bitmemiş bir çalışması var), "Hata veriyor" (art arda
+en az bir hata ya da son çalışması başarısız; veritabanına ulaşılamadığında hata sayılmadan da),
+"Atlandı", "Tamam"), lisans modülü (varsa), son başlangıç, süre (son 7 günün en yeni bitmiş
 çalışmasından), art arda hata sayısı ve bir sonraki çalışma. Kaynak `state\worker-status.json` ve
 veritabanındaki `job_runs` tablosudur. Hatanın metni gösterilmez: `D:\ARCILOGGER\logs\worker.log`
 dosyasına bakın; art arda 3 hata `R20-job` uyarısını açar.
@@ -720,8 +728,8 @@ Yerel saat kaynağı (`[clock] ntp_server`), yedek sunucu (`[clock] fallback_ser
 (`[clock] alert_offset_ms`), ApplySystem'in Windows Saati'ne uyguladığı sunucular ve zamanı
 (ApplySystem boş bir liste uyguladıysa "Uygulanan zaman sunucusu yok", henüz rapor vermediyse
 "ApplySystem henüz rapor vermedi") ve son 24 saatin saat ölçümleri, en yeniden başlayarak: zaman,
-sunucu, yanıt alınıp alınmadığı, sapma ve gecikme (ms), stratum. Kart 6 bu ölçümlerin en yenisini
-değerlendirir.
+sunucu, durum ("Sınır içinde", "Sınırda ya da üstünde" ya da "Yanıt yok"), sapma ve gecikme (ms),
+katman (stratum). Kart 6 bu ölçümlerin en yenisini değerlendirir.
 
 ### 4.9 Sürüm ve güncelleme
 
@@ -733,8 +741,8 @@ bölüm 13.)
 ### 4.10 Panel'deki Disk kartı
 
 Panel'de, yalnızca yöneticiye (`system.read`), bir **Disk** kartı her sürücünün kullanım yüzdesini
-simge ve metinle ve tahmini tek satırda gösterir; **Sistem sayfasını aç** bağlantısı bu sayfaya
-götürür.
+simge ve metinle ve tahmini tek satırda gösterir; kartın altındaki **Sistem** bağlantısı (ekran
+okuyucunun okuduğu adı "Sistem sayfasını aç") bu sayfaya götürür.
 
 ## 5. İlk kurulum sihirbazı
 
@@ -793,5 +801,5 @@ yeniden) yerinde doğrulanması gereken konular:
 | Güvenlik duvarının filtre kaydı | Kart 7 yalnızca gelen kayıtları görür. Web ve DNS filtresi kullanan her politikanın bu olayları kaydettiğini ve ARCILOGGER'a gönderdiğini cihazda doğrulayın; kurum belirli günlerde hiç trafik üretmiyorsa beklenen günleri buna göre ayarlayın (bölüm 2.7). | Kart 7; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2 (komutları sahada doğrulayın) |
 | Kontör biçimi | Kontör, Zamane istemcisinin çıktısından `[tsa] credit_regex` ile okunur; çıktının biçimi Kamu SM'de doğrulanmadı (K4). Test sunucusunda **Kontör sorgula** ile okunan değeri Kamu SM'nin gösterdiğiyle karşılaştırın. | Kart 5; [kamusm.md](kamusm.md) bölüm 3 ve 4 |
 | WORM (replika hedefi) | ARCILOGGER kopyayı alır ve denetler, ama hedefin değiştirilemez (WORM) olup olmadığını göremez. Hedef cihazın WORM ayarını ve saklama süresini yerinde doğrulayın. | Kart 9; [KURULUM.md](KURULUM.md) bölüm 10, "Replika" |
-| Windows hakları | Sayfalar durum dosyalarını kurulumun `NT SERVICE\ArciApi` hesabına verdiği okuma hakkıyla okur; işlemci, bellek ve çalışma süresi aynı hesapla Windows API'sinden okunur. Requests görevinin kanıtı bilerek okunamaz ("izlenemiyor"). Okuma hakkı olmayan bir `last.json` ya da `last-full.json` kart 10'u ya da kart 3'ü **Bilgi yok** yapar ("Bu denetim şu anda yapılamadı"). İlk geceden sonra Sistem sayfasında değerlerin göründüğünü ("bu platformda okunamıyor" yazmadığını) ve görevlerin kanıtının "yok" olmadığını denetleyin; haklar bozulduysa yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` çalıştırın. | Bölüm 4; [YEDEKLEME.md](YEDEKLEME.md) bölüm 7 |
+| Windows hakları | Sayfalar durum dosyalarını kurulumun `NT SERVICE\ArciApi` hesabına verdiği okuma hakkıyla okur; işlemci, bellek ve çalışma süresi aynı hesapla Windows API'sinden okunur. Requests görevinin kanıtı bilerek okunamaz ("İzlenemiyor"). Okuma hakkı olmayan bir `last.json` ya da `last-full.json` kart 10'u ya da kart 3'ü **Bilgi yok** yapar ("Bu denetim şu anda yapılamadı"). İlk geceden sonra Sistem sayfasında değerlerin göründüğünü ("bu platformda okunamıyor" yazmadığını) ve hiçbir görevin "Kanıt yok" göstermediğini denetleyin; haklar bozulduysa yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` çalıştırın. | Bölüm 4; [YEDEKLEME.md](YEDEKLEME.md) bölüm 7 |
 | Hukuki değerlendirme | Kartların seçimi, eşikleri ve raporun metinleri teknik varsayımlardır. 5651 yükümlülüklerini nasıl karşıladığınızı ve raporu nasıl kullanacağınızı hukuk müşavirinizle teyit edin. | Bölüm 1 ve 3 |
