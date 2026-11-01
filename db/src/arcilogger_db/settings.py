@@ -351,6 +351,16 @@ SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
         "Her DHCP sunucusu için en az 60 saniye gerekir.",
         "Each DHCP server needs at least 60 seconds.",
     ),
+    "setting_arp_grace_above_interval": (
+        "ARP kaydı aralığından (arp.interval_seconds) uzun olamaz.",
+        "Cannot be longer than the ARP log interval (arp.interval_seconds).",
+    ),
+    "setting_arp_interval_below_grace": (
+        "Bırakmadan sonra ARP'yi yok sayma süresinden (arp.ignore_after_release_seconds) kısa "
+        "olamaz; o süreyi de kısaltın.",
+        "Cannot be shorter than the time ARP is ignored after a release "
+        "(arp.ignore_after_release_seconds); shorten that one too.",
+    ),
     "setting_empty": ("Boş olamaz.", "Cannot be empty."),
     "setting_email_invalid": ("Geçersiz e-posta adresi.", "Invalid e-mail address."),
     "setting_too_many": ("En çok {limit} öğe girilebilir.", "At most {limit} items are allowed."),
@@ -656,6 +666,57 @@ _TYPE_NAMES_EN: Final[Mapping[type, str]] = {
     list: "a list",
     dict: "an object",
 }
+
+
+#: Integer settings that may not be longer than another one -> the key that bounds them, with the
+#: codes of :data:`SETTING_ERRORS` for a change of either key: the lease timeline ignores ARP
+#: sightings after a release for at most one ARP interval (CORRELATION §1), so a longer grace would
+#: stop the lease job on every run.
+AT_MOST_SETTINGS: Final[Mapping[str, tuple[str, str, str]]] = {
+    "arp.ignore_after_release_seconds": (
+        "arp.interval_seconds",
+        "setting_arp_grace_above_interval",
+        "setting_arp_interval_below_grace",
+    ),
+}
+_RULE_KEYS: Final = frozenset(
+    set(AT_MOST_SETTINGS) | {bound for bound, *_ in AT_MOST_SETTINGS.values()}
+)
+#: pg_advisory_xact_lock key ("ARCISETR" as a signed 64-bit integer) of the rules between keys.
+RULES_LOCK_KEY: Final = int.from_bytes(b"ARCISETR", "big") - 2**63
+
+
+def check_settings_together(session: Session, values: Mapping[str, Any]) -> list[SettingValueError]:
+    """The rules between keys (:data:`AT_MOST_SETTINGS`) that the validated ``values`` of one
+    write break together with the stored settings: one :class:`SettingValueError` for each key of
+    a broken rule that ``values`` changes, an empty list when none. A key ``values`` does not
+    change counts with its stored value (or the shipped default); one that is not an integer
+    (written around the validator) breaks no rule here.
+
+    A write that changes a key of a rule first takes :data:`RULES_LOCK_KEY` for the rest of the
+    caller's transaction, so two writes of the two keys at once (each would pass against the
+    other's old value) are checked one after the other."""
+    errors: list[SettingValueError] = []
+    if any(key in values for key in _RULE_KEYS):
+        session.execute(select(func.pg_advisory_xact_lock(RULES_LOCK_KEY)))
+    for key, (bound, key_code, bound_code) in AT_MOST_SETTINGS.items():
+        if key not in values and bound not in values:
+            continue
+        value = values[key] if key in values else get_setting(session, key)
+        limit = values[bound] if bound in values else get_setting(session, bound)
+        if not (_integer(value) and _integer(limit)) or value <= limit:
+            continue
+        if key in values:
+            errors.append(SettingValueError(key, key_code, f"{key}: en çok {bound} kadar olabilir"))
+        if bound in values:
+            errors.append(
+                SettingValueError(bound, bound_code, f"{bound}: en az {key} kadar olmalı")
+            )
+    return errors
+
+
+def _integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _mac(key: str, value: Any) -> str:

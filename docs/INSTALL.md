@@ -75,32 +75,48 @@ every night; the points below decide whether a 5651 lookup reaches the device an
 what the usage analytics show.
 
 - **One site:** an installation covers one site: an IPv4 network that reaches the internet through
-  one FortiGate and gets its addresses from one core MikroTik router (the DHCP server). Several
-  branches that use the same private address range are not supported in one installation: the same
-  network cannot be entered twice in the VLAN list, and the same address in two branches counts as
-  one address (it looks like an IP conflict). A network segment that reaches the internet through
-  another line or a VPN tunnel (e.g. guest Wi-Fi) has no FortiGate records: only its leases (DHCP,
-  `ARP-LOG`) arrive; a 5651 lookup by public IP and port cannot find a device in it, and the usage
-  analytics do not see that traffic ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 5).
-- **Device and person attribution:** the step from an internal IP address to the MAC address,
-  the device and the person rests on the leases of the MikroTik DHCP server
-  (`assigned`/`deassigned`); the hourly `ARP-LOG` script on the core router (optional;
-  [DEVICE-SETUP.md](DEVICE-SETUP.md) section 3) adds static-IP devices and the gaps between
-  leases with **medium confidence**. The logs of the FortiGate's own DHCP server are stored and
-  sealed, but this version does not build leases from them. When only the FortiGate (or another
-  server that is not a MikroTik) hands out addresses and no MikroTik sends `ARP-LOG`, there are
-  no leases: a 5651 lookup ends at the FortiGate session and the internal IP address (no MAC,
-  device or person), and the usage analytics count per IP address.
-- **NAT:** the FortiGate's source NAT is supported. When the public address is on the FortiGate
-  itself (ISP router in bridge mode; several addresses go into the `nat.public_ips` list), public
-  IP + port identify the session **exactly**. When the FortiGate sits behind an ISP router (double
-  NAT), the router's NAT record is missing and the lookup ranks **candidate** sessions
-  ([CORRELATION.md](CORRELATION.md) section 3). There is one mapping for the FortiGate's WAN address
-  (`nat.wan_transip`): several ISP lines, each behind its own router, are not modelled in this
-  version. On such a network leave `nat.wan_transip` empty: if it is set, every candidate search is
-  limited to that line, and a request for the other line's address cannot find its session; left
-  empty, the source-NAT sessions of every line are candidates. 5651 lookups by IPv6 address are not
-  supported: the leases (DHCP, `ARP-LOG`) cover IPv4 addresses only.
+  one FortiGate and gets its addresses from the DHCP server of a MikroTik router or of the
+  FortiGate. Several branches that use the same private address range are not supported in one
+  installation: the same network cannot be entered twice in the VLAN list, and the same address in
+  two branches counts as one address (it looks like an IP conflict). A network segment that
+  reaches the internet through another line or a VPN tunnel (e.g. guest Wi-Fi) has no FortiGate
+  records: only its leases (DHCP, `ARP-LOG`) arrive; a 5651 lookup by public IP and port cannot
+  find a device in it, and the usage analytics do not see that traffic
+  ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 5).
+- **Person and device matching (lease evidence):** the step from the internal IP address to
+  the MAC address, the device and the person rests on the DHCP server's lease records:
+  - **MikroTik as DHCP server:** the main MikroTik router's lease records (`assigned` /
+    `deassigned`) are used; the hourly `ARP-LOG` script on the main router (optional, written
+    on site; [DEVICE-SETUP.md](DEVICE-SETUP.md) section 3) adds static-IP devices and the gaps
+    between lease records with **medium confidence**.
+  - **FortiGate as DHCP server (FortiGate-only networks):** the FortiGate DHCP server's event
+    records (DHCP Ack / Release) feed the lease timeline. Their format comes from the FortiOS
+    documentation and one community sample; it is verified on site at the first installation
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4), and until then reports say so. Only
+    records of sources configured as a FortiGate are used. Every network the FortiGate serves
+    by DHCP is entered on the Cihazlar ve Kişiler page, even without a VLAN number: chains of
+    addresses outside the entered networks are shown with low confidence. A network added or
+    changed later applies to past leases only once the leases are rebuilt
+    ([FIRST-STEPS.md](FIRST-STEPS.md) section 5). Static-IP devices have no lease: the chain
+    ends at the internal IP; on interfaces whose gateway is the FortiGate, after a site check
+    with two clients, the srcmac field of the FortiGate session record can optionally give the
+    MAC address as **partial evidence**, with low confidence
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
+  - **Both together:** when the two DHCP servers serve different networks, both are used.
+  - **Another DHCP server (e.g. Windows):** this version does not read its records; leases come
+    only from MikroTik `ARP-LOG`, with medium confidence. Without `ARP-LOG` a 5651 lookup ends
+    at the FortiGate session and the internal IP address (no MAC, device or person), and usage
+    analysis counts by IP address.
+- **Internet exits (NAT):** the FortiGate's source NAT is supported. Each internet line is
+  defined in Settings → Application settings → 5651 lookup and lease timeline → Internet exits
+  (NAT): the public IP (and whether it may change), the FortiGate's NAT address on that line,
+  its interfaces, the NAT type and port preservation. When the public address is on the
+  FortiGate itself (direct), public IP + port identify the session **exactly**. When the ISP
+  router does a second NAT, lookups for that line rank **candidate** sessions
+  ([CORRELATION.md](CORRELATION.md) section 3); when the public IP is shared with other
+  customers (CGNAT), the candidate list may not contain the right session, and an exact answer
+  needs the ISP's NAT record. 5651 lookups by IPv6 address are not supported: lease records
+  (DHCP, `ARP-LOG`) cover IPv4 addresses only.
 - **Usage analytics** (paid module, [LICENSING.md](LICENSING.md)) are computed from FortiGate logs
   only: time and bytes from the traffic logs (`logtraffic all`; with interim logs for long
   sessions), site names from the web filter, DNS filter, application control and SSL inspection
@@ -112,6 +128,14 @@ what the usage analytics show.
   kept unchanged, sealed and included in full-day evidence packages; they are loaded into the
   database as plain log lines (time, host name, program, message text) but not parsed into
   fields, and neither the 5651 lookup nor the usage analytics use them.
+
+**Not supported:** IPv6 lookups; two DHCP servers on one network (ARCILOGGER warns when it
+notices and gives the chains of those moments with low confidence); FortiGate leases where the
+FortiGate is a DHCP relay (lease evidence must come from the actual DHCP server); several
+branches using the same private address range; lookups for lines that do not pass the
+FortiGate (they are only marked "does not pass the FortiGate", and a lookup lists nobody);
+srcmac behind a router or an L3 switch (there it is that device's MAC address; with only
+layer-2 switches in between an interface is used only after a site check with two clients).
 
 ## 1. Prepare the server (elevated PowerShell)
 
@@ -903,6 +927,122 @@ several people use Arama at the same time raises `pool_size` to 10 in `arcilogge
 setting `search.max_concurrent` with it (at most `pool_size` minus 2; Ayarlar → Arama ve canlı
 akış, [SETTINGS.md](SETTINGS.md)), then restarts the services (section 12).
 
+**Upgrading to the version with internet exits (schema revisions `0017_fortigate_dhcp`,
+`0018_nat_egresses`).** The migration adds a new table for the FortiGate DHCP records and one
+column to the `fg_traffic` table (fast even on large tables: the column is added empty). The old
+NAT settings are converted into one new setting, the **internet exits**: the `nat.public_ips`
+addresses become a direct exit named "Genel IP (yükseltmede aktarıldı) [public IP, carried over
+at the upgrade]", `nat.wan_transip` becomes an ISP NAT exit named "FortiGate WAN adresi
+(yükseltmede aktarıldı) [FortiGate WAN address, carried over at the upgrade]" (no separate exit
+when the address is one of the public IPs; a private or shared address in `nat.public_ips`, e.g.
+100.64.x.x, becomes a NAT address of this exit too), an exit named "Genel adresi tanımlanmamış
+hatlar [lines without a defined public address]" is added for the lines without a public
+address when no "FortiGate WAN adresi" exit is made and a public IP or `lookup.port_hint` is
+carried over, and `lookup.port_hint` becomes the port preservation value of the "FortiGate WAN
+adresi" exit, or of this exit when there is none. The conversion is written to the audit log
+as `settings.change` (`details.migration = "0018_nat_egresses"`; the dropped invalid, IPv6 or
+reserved values in `details.dropped`). When the conversion cannot give a valid definition, the
+exits stay empty and the alert `R20-nat:conversion-failed` opens.
+
+**After the upgrade:**
+
+- Enter each line's public address and interfaces (dstintf) in Settings → Application
+  settings → 5651 lookup and lease timeline → Internet exits (NAT). On every installation with
+  a carried-over "FortiGate WAN adresi" or "Genel adresi tanımlanmamış hatlar" exit, until they
+  are entered every lookup and report for an address that no exit defines carries the warning
+  `egress_public_unknown`; the carried-over exits keep the old NAT behaviour until interfaces are
+  entered or changed, but the NAT addresses of an exit added later are outside that. If the line
+  is still behind the ISP router and you add the FortiGate's NAT address on that line (e.g.
+  100.64.x.x) as a new exit, move the line's public address from the direct exit to this exit
+  and enter its interfaces; otherwise lookups of the direct exit may be answered with the
+  warning "Doğrudan hat doğrulanamadı [direct line not confirmed]".
+- When the NAT address of the carried-over "FortiGate WAN adresi" exit is the line's public
+  address (the FortiGate holds the public address itself), set the exit's type to **Direct**;
+  the editor warns about it.
+- Once every line is defined, delete the "Genel adresi tanımlanmamış hatlar" exit: while it
+  stays, a question about a public IP that belongs to no line lists unrelated sessions as
+  candidates.
+- One change: when an address that no exit defines appears at that moment in the FortiGate
+  records as a source NAT address, the lookup now makes an exact match on that address instead
+  of a candidate list, and says so with a warning (`egress_observed_not_configured`).
+- With FortiGate DHCP, do the check of [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4 and write
+  the outcome into section 16; repeat the check after every FortiOS upgrade. For moments before
+  the upgrade 5651 lookups stop at the internal IP address: the FortiGate DHCP records of that
+  time are not converted into the lease timeline; the lookup says so and, in an internal-IP
+  lookup or an exact match, shows the record as evidence (`fortigate_dhcp_not_converted`). In a
+  chain that rests on an older lease (MikroTik or FortiGate), when such a record exists for that
+  address or for the lease's MAC address after the lease's last DHCP record (e.g. a client that
+  moved from MikroTik to FortiGate DHCP before the upgrade got another address), the chain is
+  shown with low confidence and the reason (`fortigate_dhcp_not_converted_since_lease`). **After
+  the upgrade too**, no chain is built for a client until its first DHCP Ack record arrives in
+  the new version: this can take up to half the lease time (3.5 days with the FortiOS default
+  lease of 7 days; a client renews at half its lease). Plan the upgrade knowing this gap;
+  installations that do not use FortiGate DHCP are not affected.
+- The srcmac of FortiGate session records loaded before the upgrade (or by the previous version
+  during a rollback) is not used by the 5651 lookup; no partial srcmac chain is built for those
+  moments.
+- A public NAT address that no exit defines (e.g. an IP pool) no longer counts as a sign of
+  double NAT and is not taken into the candidate search: it is the FortiGate's own address and,
+  when asked for, is answered as the address seen in the records. Enter the addresses of the
+  FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch with the type "Not an internet
+  exit".
+
+**Rollback:** the old NAT rows are kept, unread, in this version; `-Rollback` runs no schema
+downgrade, and the previous version reads these rows, that is the NAT values from **before the
+upgrade**. If you changed the internet exits after the upgrade, then after the rollback compare
+the previous version's `nat.public_ips` and `nat.wan_transip` values in Settings → Application
+settings with the change you made in this version and enter them by hand (the changes are in the
+audit log as `settings.change`); do not restore the database for this: `-RestoreDatabase`
+deletes every record made after the upgrade (audit, lookups, reports, alerts, device and person
+assignments). Before running `-Rollback`, download the official reports (PDF) of the lookups
+made in this version: a report is rendered once, on its first download, and the previous
+version does not print the rows this version adds (the unconfigured-sender warning, the "Kısmi
+kanıt [partial evidence]" label, the exit and FortiGate lease rows). On an installation that
+uses FortiGate DHCP the previous version cannot read the FortiGate DHCP records: it may keep a
+FortiGate lease open after the address was released or given to another client. So, before the
+program is swapped, `-Rollback` sets every FortiGate lease to **low confidence**; it prints how
+many and writes the count to the installation log (only derived lease rows change; raw records
+and seals are not touched; with `-RestoreDatabase` this step is skipped). Every chain that rests
+on FortiGate DHCP is therefore shown with low confidence in the previous version. The previous
+version closes the existing FortiGate leases by the times of its own settings (without looking
+at the logged lease time, with the defaults about 26 hours after the lease's last DHCP record;
+this moment may already be in the past), deletes in its own rebuilds those that started on the
+rollback day or the day before (and those that started on the days it rebuilds for late
+records) and creates no new one; MikroTik leases follow the previous version's own rules, as
+before the upgrade. Make the 5651 lookups of FortiGate DHCP addresses for moments after the
+rollback after the re-upgrade. After the re-upgrade the FortiGate DHCP records of the days in
+between do not enter the lease timeline, and lookups say so: at a moment where no chain can be
+built, with `fortigate_dhcp_not_converted` when the newest DHCP record covering the moment is
+such a record; in a chain that rests on a DHCP lease, when such a record exists for that
+address or for the lease's MAC address after the lease's last DHCP record, the chain is shown
+with low confidence and the reason (`fortigate_dhcp_not_converted_since_lease`).
+
+`-Rollback` sets the FortiGate leases to low confidence even when the version it returns to
+reads FortiGate DHCP records: after a rollback between two versions that both read FortiGate
+DHCP, FortiGate DHCP chains are also shown with low confidence until the next
+`arcilogger-db upgrade`. That upgrade (e.g. the re-upgrade) restores them (below). This low
+confidence never names a wrong person; it only shows the chain lower than needed.
+
+**Re-upgrade:** since the database schema is not rolled back, the conversion does not run again
+and the old NAT settings are not converted again. When `nat.public_ips`, `nat.wan_transip` or
+`lookup.port_hint` was changed in the previous version during the rollback, the alert
+`R20-nat:legacy-changed` names the changed settings: enter the change in the internet exits by
+hand; the alert closes when the exits are saved. The re-upgrade restores the confidence of the
+FortiGate leases the previous version did not change and prints how many came back, how many
+stay low and the days whose leases to rebuild; those that stay low are the leases the previous
+version closed or recomputed. On an installation that uses FortiGate DHCP, after the re-upgrade
+rebuild the leases from the day one longest lease time before the rollback day (7 days before
+with a 7-day lease) to the re-upgrade day in Settings → Application settings → 5651 lookup and
+lease timeline → Rebuild the leases (at most 31 days per request): only so are the FortiGate
+leases that the previous version closed early, deleted or left at low confidence rebuilt to the
+FortiGate's own end and confidence; without it a lookup for moments in that range may give an
+unexplained "no lease" or show the chain with low confidence. In the rollback range these
+rebuilt leases are shown with low confidence and the reason
+(`fortigate_dhcp_not_converted_since_lease`) when, after the lease's last DHCP record, the
+previous version loaded a FortiGate DHCP record for that address or MAC address: the address may
+have been released in between, given to another device, or the MAC address may have taken
+another address.
+
 ## 14. Removal
 
 `Install-Arcilogger.ps1 -Uninstall` first pauses the scheduled tasks and waits for a running one
@@ -991,6 +1131,31 @@ firewall rule is updated in place.
 On desktop Windows 11 Pro all of the above plus the power settings, Smart App Control and a
 forced update restart, step by step:
 [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
+
+**FortiGate DHCP, srcmac and internet exits.** The assumptions below rest on the FortiOS
+documentation or depend on the organisation's network; they are verified on site (the V numbers
+are this list's own; [CORRELATION.md](CORRELATION.md) section 8 describes the same assumptions by
+topic). Write down each row's
+outcome and the date of the check. Repeat the checks **after every FortiOS upgrade** (the record
+fields may change between releases) and add the new outcome with its date; do not delete the old
+one. When an outcome differs from what is expected, correct the setting by the branches of
+[DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4. Without FortiGate DHCP, write "not used" in the
+rows V1–V6, V14 and V17.
+
+| # | To verify | How | Outcome to record | Outcome | Date |
+|---|---|---|---|---|---|
+| V1 | The real format of the FortiGate DHCP Ack record (logid `0100026001`) on syslog: the fields `ip`, `mac`, `dhcp_msg`, `lease`, `interface`, `hostname`, the quoting, how the MAC address is written; a missing or empty `hostname` | [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4 step 5: the Sources → Lease evidence card and a trial 5651 lookup; when it passes, `dhcp.fortigate_format_verified` is switched on (step 6) | passed / failed; the setting corrected | | |
+| V2 | Whether a client's release (RELEASE) is logged; its logid (expected `0100026002`) and `dhcp_msg` value | DEVICE-SETUP.md section 2.4 step 5 (`ipconfig /release`, then `ipconfig /renew`) and its branches; another logid shows in the alert `R20-lease:fortigate-refused` as "unknown logid" | RELEASE logged: yes / no; logid; `dhcp_msg` | | |
+| V3 | Whether renewals (at half the lease, the client staying connected) give a second DHCP Ack record | DEVICE-SETUP.md section 2.4 step 5, the renewal check | renewals logged: yes / no; if not, the organisation's choice of DEVICE-SETUP.md section 2.4 step 5 (keep it as it is, or switch on `dhcp.fortigate_traffic_extends`) and the date of the choice | | |
+| V4 | Whether `lease` is in seconds; how an unlimited lease (`lease-time` `0`) is written | the `lease` value of the raw line in Arama (`logid:0100026001`) compared with the FortiGate's `lease-time` (DEVICE-SETUP.md section 2.4 step 7); the alerts `R20-lease:fortigate-lease` and `R20-lease:fortigate-lease-unlimited` | `lease` = `lease-time`: yes / no | | |
+| V5 | Whether the DHCP event records reach syslog with the settings of DEVICE-SETUP.md (severity `information`, no filter that excludes events) | DEVICE-SETUP.md section 2.4 steps 3–4; the state of the Sources → Lease evidence card (`ok`, `none`, `refused`) | the card's state; with `none` or `refused`, the correction made | | |
+| V6 | That interfaces where the FortiGate is a DHCP relay give no FortiGate DHCP record; that the interfaces of `server-type ipsec` servers (DHCP over IPsec, VPN pools) are excluded; whether a reply to a DHCPINFORM is logged as a DHCP Ack (its `dhcp_msg` value: V14); when the FortiGate serves several relayed networks on one interface, which `interface` and address the DHCP Ack record of a relayed client carries | DEVICE-SETUP.md section 2.4 steps 1, 2 and 9; `dhcp.fortigate_interfaces_excluded`; the alert `R20-lease:fortigate-dhcp-subnet` | relayed networks served on one interface: yes / no; if yes, whether the record's `interface` and address are of the client's own network; the excluded interfaces | | |
+| V8 | That srcmac comes only on interfaces with device identification and is the own MAC address of directly connected clients; behind a layer-2 switch only if the two-client check shows it; which device-identification fields the unit fills | DEVICE-SETUP.md section 2.5: with two known clients on the interface, `max_ips_per_mac` 1 (IPv4 sources) in the srcmac interfaces table of the "Kayıtlarda görülen NAT adresleri [NAT addresses seen in the logs]" panel (Settings → Application settings → 5651 lookup and lease timeline), and the two MAC addresses in Arama (`srcmac:`) are the clients' own (not a switch's or router's) | per interface: check passed / failed, listed in `lookup.srcmac_interfaces` or not; the fields the unit fills | | |
+| V11 | Whether each line's ISP router keeps source ports | DEVICE-SETUP.md section 2.6: the port preservation measurement | per line `preserved` (measured) or `unknown` | | |
+| V14 | The `dhcp_msg` values FortiOS writes under each mapped logid | the raw lines in Arama (`logid:<logid>`); the alert `R20-lease:fortigate-refused` names the values seen with the reason "unexpected dhcp_msg"; `dhcp.fortigate_dhcp_msgs` | the `dhcp_msg` values seen per logid | | |
+| V15 | Whether each line's public IP address is static | DEVICE-SETUP.md section 2.6: ask the ISP; a line whose address may change is marked `public_dynamic` (on an ISP NAT exit; a direct line's changing address is found from the logs, DEVICE-SETUP.md section 2.6) | per line static / may change; the ISP's answer | | |
+| V16 | That FortiGate DHCP records carry a usable device time and the FortiGate's clock is right to within minutes: the FortiGate syncs with NTP | DEVICE-SETUP.md section 2.1 (the NTP step); on the FortiGate `diagnose sys ntp status` lists the NTP servers' information; the alert `R20-lease:source-clock` must not be open | FortiGate syncs with NTP: yes / no; the NTP server in the output of `diagnose sys ntp status` | | |
+| V17 | Whether FortiOS logs a DHCPDECLINE or checks an address before it offers it; that a client holds one lease per server interface and network | there is no separate trial: static devices are kept out of the DHCP range (DEVICE-SETUP.md section 2.4 step 8); the alert `R20-lease:fortigate-decline:<net>` | whether the alert opened; if so, the network and the correction made (address reserved or device moved) | | |
 
 ## 17. Desktop Windows 11 Pro
 

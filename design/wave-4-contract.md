@@ -1561,6 +1561,56 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   missing server or sender. Tests: `wizard-model.test.ts` "e-mail: switched off is not done, even
   with a server and a sender", `e2e/setup-wizard.spec.ts` (the fresh installation's e-mail step).
   W4-G: AYARLAR/SETTINGS (the wizard entry) and UYUM-DURUMU/COMPLIANCE-STATUS §5.
+- **The Sistem forecast sentence has three variants beside the fixed `estimated` text (2.8.2).**
+  (a) English says "(~1 day)" in the singular (the Turkish text needs none). (b) With a full day
+  but `warning_on` null (the drive has reached the mark, W4-B's second deviation): "%{warning}
+  eşiğine ulaşıldı; bu hızla dolmaya {full_on} (~{days} gün)." / "The {warning}% mark is reached;
+  at this rate the drive is full on {full_on} (~{days} days)." — "reached", not "passed", because
+  at exactly the mark the drive's badge still reads "Olağan". (c) With `full_on` null (W4-B's first
+  deviation, `forecast.HORIZON_DAYS`): "Disk kullanımı çok yavaş artıyor; dolma tarihi
+  öngörülemiyor." / "Disk use grows very slowly; no date can be given." Tests:
+  `system-model.test.ts` "says one day in the singular", "gives only the day it is full once the
+  drive has reached the warning mark", "agrees with the badge on a drive exactly at the warning
+  mark", "gives no day for a drive that grows too slowly to forecast". W4-G: MVP-CONTRACTS and
+  UYUM-DURUMU/COMPLIANCE-STATUS §4.
+- **A null CPU reads "bu platformda okunamıyor" on platform `other`** (reading of 2.8.2, which gives
+  "ölçülüyor" for a null CPU and "bu platformda okunamıyor" for null host values): on Windows and
+  Linux a null CPU is the first reading ("ölçülüyor"); on any other platform nothing is read.
+  Test: `system-model.test.ts` (`cpuPending`). Nothing to fold.
+- **The views' interface additions agreed with W4-F on #24 (2.8.1-2.8.3), all optional and
+  additive; the contract's prop names stay.**
+  - `ComplianceView({ …, exportError?: ApiError | null, confirmError?: ApiError | null })`:
+    `exportError` shows beside "Uyum Durumu Raporu (PDF)"; `confirmError` (the 409
+    `config_backup_unreadable` of 2.7) shows in the confirm dialog of "Yapılandırma yedeğini
+    aldım", also when it arrives while the dialog is open. The promise-returning
+    `onConfirmBackup` stays; the dialog shows `confirmError`, else the error the promise rejected
+    with.
+  - `SystemView({ …, healthError?: ApiError | null })`: `error` stays the `GET /system` error, the
+    page's; a `healthError` shows in the Saat block only, with "Tekrar dene". A health block
+    (Hizmetler, Zamanlanmış görevler, Worker işleri, Saat) without data never vanishes: with a
+    `healthError` the Saat block shows it and the other three say "Durum alınamadı; hata Saat
+    bölümünde." / "The status could not be read; the error is under Clock."; while loading, a
+    skeleton; beside the summary's blocks with no answer and no failure, "Durum henüz alınmadı." /
+    "No status received yet.". Data already shown stays under a later `healthError`.
+  - `DiskCard({ disk, to? })`: `to?: string | null`; left out, the Panel's link rule (`/system`
+    with `system.read`); a string is used as given; `null` gives no link. `data-testid="card-disk"`.
+  - The page `h1` is rendered in the loading and error states too, as Kaynaklar does.
+  - Both new error places show the server's text in the interface language with its code,
+    "… (config_backup_unreadable)".
+  Tests: `compliance-view.test.tsx` "shows the export’s error with its code beside the PDF
+  button", "shows the caller’s confirmError in the dialog, also when it arrives while open",
+  "shows a confirmError passed before the dialog opens once it is opened", "shows a loading state
+  before the first answer, and the error alone when it failed"; `system-view.test.tsx` "shows a
+  failed health request in the Saat block and keeps every health block", "shows the health error
+  beside the page error when nothing has arrived", "shows a failed health request while the first
+  summary is still on its way", "says so in the health blocks when the health has not answered and
+  nothing failed", "shows the error alone when nothing has arrived"; `disk-card.test.tsx` "links
+  where the caller says, or nowhere when it passes null". Fold into 2.8.1-2.8.3.
+- **`time.applied_peers` empty and null read differently (2.8.2; manager's note on #24).** `""`
+  (ApplySystem applied an empty peer list): "Uygulanan zaman sunucusu yok" / "No time server
+  applied"; `null` (no ApplySystem report yet): "ApplySystem henüz rapor vermedi" / "No ApplySystem
+  report yet". Test: `system-view.test.tsx` "tells an empty applied peer list from no ApplySystem
+  report". Fold into 2.8.2.
 
 ## Deviations — W4-F (2026-10-29)
 

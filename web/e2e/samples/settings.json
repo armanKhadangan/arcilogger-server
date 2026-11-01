@@ -538,7 +538,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T01:01:24.149840Z",
+            "updated_at": "2026-10-29T16:32:18.080223Z",
             "updated_by": "capture",
             "value": 100
           },
@@ -572,7 +572,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T01:01:26.370042Z",
+            "updated_at": "2026-10-29T16:32:20.839664Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -606,7 +606,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-29T01:01:24.827025Z",
+            "updated_at": "2026-10-29T16:32:19.096144Z",
             "updated_by": "capture",
             "value": false
           },
@@ -674,7 +674,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-29T01:01:22.162518Z",
+            "updated_at": "2026-10-29T16:32:15.053629Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -832,8 +832,8 @@
           },
           {
             "default": 3600,
-            "help_en": "The ARP-LOG interval of the MikroTik scheduler script.",
-            "help_tr": "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı.",
+            "help_en": "The ARP-LOG interval of the MikroTik scheduler script (at least as long as 'Ignore ARP after a release').",
+            "help_tr": "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı (en az 'Bırakmadan sonra ARP'yi yok say' süresi kadar).",
             "is_default": true,
             "key": "arp.interval_seconds",
             "label_en": "ARP log interval (seconds)",
@@ -1729,7 +1729,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T01:01:31.219616Z",
+            "updated_at": "2026-10-29T16:32:26.613766Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -2411,7 +2411,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T01:01:39.262491Z",
+            "updated_at": "2026-10-29T16:32:38.547351Z",
             "updated_by": "tolga",
             "value": 150
           },
@@ -2445,7 +2445,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T01:01:26.370042Z",
+            "updated_at": "2026-10-29T16:32:20.839664Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -2479,7 +2479,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-29T01:01:24.827025Z",
+            "updated_at": "2026-10-29T16:32:19.096144Z",
             "updated_by": "capture",
             "value": false
           },
@@ -2547,7 +2547,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-29T01:01:22.162518Z",
+            "updated_at": "2026-10-29T16:32:15.053629Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -2705,8 +2705,8 @@
           },
           {
             "default": 3600,
-            "help_en": "The ARP-LOG interval of the MikroTik scheduler script.",
-            "help_tr": "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı.",
+            "help_en": "The ARP-LOG interval of the MikroTik scheduler script (at least as long as 'Ignore ARP after a release').",
+            "help_tr": "MikroTik zamanlayıcı betiğinin ARP-LOG aralığı (en az 'Bırakmadan sonra ARP'yi yok say' süresi kadar).",
             "is_default": true,
             "key": "arp.interval_seconds",
             "label_en": "ARP log interval (seconds)",
@@ -3602,7 +3602,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T01:01:31.219616Z",
+            "updated_at": "2026-10-29T16:32:26.613766Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -3852,7 +3852,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:17.864635+00:00",
+    "captured_at": "2026-10-13T04:01:38.680163+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",

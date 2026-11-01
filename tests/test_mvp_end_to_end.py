@@ -22,6 +22,17 @@ TSA, never legally valid) and the clocks where the code takes one:
    and a tampered copy must fail;
 6. the audit chain, in the database and in the sealed audit file of the day, holds every step.
 
+Two shorter runs cover the sites of ADR-0016 (Wave 3 contract 3.7), each one spool day of the
+load generator, the real ingest and the worker's jobs (``leases.nightly``, ``alerts.system``)
+under a simulated clock, then the lookup engine as the API runs it:
+
+* ``test_fortigate_only_site`` — the FortiGate is the DHCP server and logs ``srcmac``: DHCP
+  clients are found through FortiGate DHCP leases; a static device has no chain until its
+  interface is listed for srcmac (``lookup.srcmac_interfaces``); the only lease evidence alert is
+  the unverified format, resolved by ``dhcp.fortigate_format_verified``;
+* ``test_dual_wan_site`` — two ISP lines (``nat.egresses``): a line's public address lists only
+  that line's sessions; an address no exit claims and no session used gives nothing.
+
 Runs in CI on Linux and Windows whenever the test database is available
 (``ARCILOGGER_REQUIRE_DB=1``); target well under 90 s.
 """
@@ -33,6 +44,7 @@ import gzip
 import hashlib
 import importlib.util
 import json
+import random
 import shutil
 import socket
 import subprocess
@@ -68,6 +80,7 @@ from arcilogger_core.tsa.mock import MockTsa, MockTsaProvider
 from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import (
+    Alert,
     AuditLog,
     Department,
     Device,
@@ -76,9 +89,12 @@ from arcilogger_db.models import (
     ParseFailure,
     Person,
 )
-from arcilogger_db.settings import set_setting
+from arcilogger_db.settings import get_settings, set_setting
+from arcilogger_db.settings_admin import change_setting
 from arcilogger_ingest.service import IngestService
 from arcilogger_worker.correlation.leases import rebuild_days
+from arcilogger_worker.lookup import LookupOutcome, LookupRequest, LookupSettings, run_lookup
+from arcilogger_worker.service import Worker, default_jobs
 
 ROOT = Path(__file__).resolve().parents[1]
 LOADGEN = ROOT / "tools" / "loadgen" / "arcilogger_loadgen.py"
@@ -551,3 +567,304 @@ def test_mvp_end_to_end(tmp_path: Path, db_engine: Engine) -> None:
     with Session(db_engine) as session:
         assert session.scalar(select(func.max(AuditLog.id))) == json.loads(sealed_lines[-1])["id"]
         assert session.scalar(select(func.count()).select_from(AuditLog)) == len(sealed_lines)
+
+
+# -- Wave 3: a FortiGate-only site and a dual-WAN site (contract 3.7) ----------------------------
+
+#: The FortiGate-only day and the dual-WAN day: workdays (staff and the admin PC browse), fixed so
+#: the generated traffic is the same on every run.
+FORTIGATE_DAY = date(2026, 10, 13)
+DUAL_WAN_DAY = date(2026, 10, 14)
+#: The two lines: the FortiGate's address behind each ISP router (as ``--egress`` gives it) and
+#: the line's public address (documentation range, RFC 5737), as in test_lookup_egress.py.
+LINES = {
+    "hat-1": ("100.64.12.9", "wan1", "203.0.113.200"),
+    "hat-2": ("100.64.13.9", "wan2", "198.51.100.77"),
+}
+#: A public address no exit claims and no session used.
+UNCLAIMED = "192.0.2.44"
+
+
+def load_day(config: Config, engine: Engine, output: Any) -> None:
+    """One generated day as spool files, then the ingest service until it has caught up."""
+    addresses = {source.name: source.address for source in config.sources}
+    written = loadgen().write_spool(config.data_dir, [output], addresses=addresses)
+    assert sum(written.values()) == len(output.messages)
+    assert IngestService(config, engine).run(once=True) == 0
+    with session_factory(engine)() as session:
+        assert session.scalar(select(func.count()).select_from(Message)) == len(output.messages)
+        assert session.scalars(select(ParseFailure)).all() == []
+
+
+def worker_job(worker: Worker, name: str, at: datetime) -> None:
+    """Run one of the worker's jobs as its loop does at ``at``."""
+    (job,) = [job for job in worker.jobs if job.name == name]
+    worker.clock = lambda: at
+    assert worker.run_job(job, at) == "ok", worker.states[name].last_error
+
+
+def unambiguous(truth: Any) -> bool:
+    """A session in work hours, long enough to be the only one on its NAT port at its middle."""
+    return (
+        not truth.blocked
+        and truth.end - truth.start >= timedelta(seconds=20)
+        and 9 <= truth.start.astimezone(SITE_TZ).hour < 17
+    )
+
+
+def middle(truth: Any) -> datetime:
+    start: datetime = truth.start
+    end: datetime = truth.end
+    return start + (end - start) / 2
+
+
+def sample(sessions: list[Any], count: int) -> list[Any]:
+    """``count`` of ``sessions``, the same ones on every run."""
+    assert len(sessions) >= count, len(sessions)
+    return random.Random(5651).sample(sessions, count)  # noqa: S311 - a sample, not security
+
+
+def assign_people(session: Session, settings: Any, output: Any) -> dict[int, int]:
+    """Everyone of the generated organisation as a person, each device of the day's leases
+    assigned to its owner (the truth); user index → person id."""
+    people = {}
+    for user in loadgen().build_users(settings):
+        department = session.scalars(
+            select(Department).where(Department.name == user.department)
+        ).one()
+        person = Person(name=user.name, department_id=department.id, title="Uzman")
+        session.add(person)
+        session.flush()
+        people[user.index] = person.id
+    for lease in output.leases:
+        if lease.user is not None:
+            device = session.get(Device, lease.mac)
+            assert device is not None, lease
+            device.person_id = people[lease.user]
+    session.commit()
+    return people
+
+
+def lookup_now(session: Session, layout: Layout, now: datetime, **query: Any) -> LookupOutcome:
+    """A 5651 lookup as the API runs it (today's settings, the data directory), at ``now``."""
+    settings = LookupSettings.from_settings(get_settings(session))
+    outcome = run_lookup(session, LookupRequest(**query), settings, layout=layout, now=now)
+    session.rollback()
+    return outcome
+
+
+def r20_lease_alerts(session: Session) -> list[Alert]:
+    return list(session.scalars(select(Alert).where(Alert.rule == "R20-lease").order_by(Alert.id)))
+
+
+def test_fortigate_only_site(tmp_path: Path, db_engine: Engine) -> None:
+    lg = loadgen()
+    day = FORTIGATE_DAY
+    config = make_config(tmp_path, day, aliases=False)  # the FortiGate is the only source
+    layout = Layout(config.data_dir)
+    settings = lg.Settings(
+        seed=5651,
+        users=20,
+        intensity=10.0,
+        guests_per_day=1,
+        dhcp_server="fortigate",
+        srcmac=True,
+    )
+    (output,) = lg.Simulation(settings).run(day)
+    assert {m.source for m in output.messages} == {"fortigate"}
+    load_day(config, db_engine, output)
+
+    # -- the worker: the lease timeline, the R20 checks while the day runs and after it ---------
+    worker = Worker(db_engine, layout, default_jobs(60), config=config)
+    afternoon = datetime.combine(day, time(15), tzinfo=SITE_TZ).astimezone(UTC)
+    night = site_midnight(day + timedelta(days=1)) + timedelta(minutes=30)
+    worker_job(worker, "leases.recheck_today", afternoon)
+    worker_job(worker, "alerts.system", afternoon)
+    worker_job(worker, "leases.nightly", night)
+    worker_job(worker, "alerts.system", night)
+    sessions = session_factory(db_engine)
+    with sessions() as session:
+        (unverified,) = r20_lease_alerts(session)
+        assert unverified.dedup_key == "R20-lease:fortigate-unverified"
+        assert (unverified.severity, unverified.state) == ("info", "open")
+
+    # -- DHCP clients: the chain of FortiGate DHCP leases names the truth's MAC and person ------
+    dhcp_macs = {lease.mac for lease in output.leases if lease.evidence == "fg_dhcp"}
+    statics = {lease.ip: lease for lease in output.leases if lease.evidence == "none"}
+    assert dhcp_macs
+    assert statics
+    with sessions() as session:
+        people = assign_people(session, settings, output)
+        change_setting(
+            session,
+            "nat.egresses",
+            legacy_egresses([], lg.DEFAULT_TRANSIP, False)[0],
+            actor=USERNAME,
+        )
+        session.commit()
+    clients = [s for s in output.sessions if s.mac in dhcp_macs and unambiguous(s)]
+    after = night + timedelta(hours=8)
+    with sessions() as session:
+        for truth in sample(clients, 20):
+            outcome = lookup_now(
+                session,
+                layout,
+                after,
+                at=middle(truth),
+                public_ip=truth.transip,
+                public_port=truth.transport,
+                protocol=6,
+            )
+            assert outcome.mode == "exact", [e.key for e in outcome.explanations]
+            (match,) = outcome.matches
+            assert match.traffic.sessionid == truth.sessionid
+            chain = match.chain
+            assert chain is not None
+            assert chain.lease is not None
+            assert (chain.lease.mac, chain.lease.source_table) == (truth.mac, "fg_dhcp")
+            if truth.user is None:  # a guest: a MAC and a lease, nobody's device
+                assert chain.person is None
+            else:
+                assert chain.person is not None
+                assert (chain.person.person_id, chain.person.name) == (
+                    people[truth.user],
+                    truth.person,
+                )
+
+    # -- statics (no DHCP, no ARP-LOG): no chain, until their interfaces are listed for srcmac --
+    static_sessions = sample(
+        [s for s in output.sessions if s.srcip in statics and unambiguous(s)], 3
+    )
+    interfaces = sorted({f"vlan{statics[s.srcip].vlan}" for s in static_sessions})
+
+    def static_lookups() -> list[tuple[Any, LookupOutcome]]:
+        with sessions() as session:
+            return [
+                (
+                    truth,
+                    lookup_now(
+                        session,
+                        layout,
+                        after,
+                        at=middle(truth),
+                        public_ip=truth.transip,
+                        public_port=truth.transport,
+                        protocol=6,
+                    ),
+                )
+                for truth in static_sessions
+            ]
+
+    for truth, outcome in static_lookups():
+        assert outcome.mode == "exact"
+        (match,) = outcome.matches
+        assert match.traffic.sessionid == truth.sessionid
+        assert match.chain is None
+        assert "chain_missing" in {e.key for e in outcome.explanations}
+    with sessions() as session:
+        change_setting(session, "lookup.srcmac_interfaces", interfaces, actor=USERNAME)
+        session.commit()
+    for truth, outcome in static_lookups():
+        assert outcome.mode == "exact"
+        (match,) = outcome.matches
+        chain = match.chain
+        assert chain is not None
+        assert (chain.mac_source, chain.lease, chain.confidence) == ("srcmac", None, "low")
+        assert chain.device is not None
+        assert chain.device.mac == statics[truth.srcip].mac == truth.mac
+        (only,) = [e for e in chain.explanations if e.key == "srcmac_only"]
+        assert only.params["interface"] == f"vlan{statics[truth.srcip].vlan}"
+        assert "chain_missing" not in {e.key for e in outcome.explanations}
+
+    # -- the site check of the format is done: the alert closes at the next run -----------------
+    with sessions() as session:
+        change_setting(session, "dhcp.fortigate_format_verified", True, actor=USERNAME)
+        session.commit()
+    worker_job(worker, "alerts.system", night + timedelta(minutes=5))
+    with sessions() as session:
+        (closed,) = r20_lease_alerts(session)
+        assert closed.id == unverified.id
+        assert closed.state == "resolved"
+        assert closed.resolved_at is not None
+
+
+def test_dual_wan_site(tmp_path: Path, db_engine: Engine) -> None:
+    lg = loadgen()
+    day = DUAL_WAN_DAY
+    config = make_config(tmp_path, day, aliases=True)  # spool only: no address is bound
+    layout = Layout(config.data_dir)
+    egresses = tuple(
+        lg.Egress(name, transip, interface, share)
+        for (name, (transip, interface, _public)), share in zip(
+            LINES.items(), (60, 40), strict=True
+        )
+    )
+    settings = lg.Settings(seed=5651, users=12, intensity=10.0, guests_per_day=1, egresses=egresses)
+    (output,) = lg.Simulation(settings).run(day)
+    load_day(config, db_engine, output)
+    worker = Worker(db_engine, layout, default_jobs(60), config=config)
+    night = site_midnight(day + timedelta(days=1)) + timedelta(minutes=30)
+    worker_job(worker, "leases.nightly", night)
+    sessions = session_factory(db_engine)
+    with sessions() as session:
+        change_setting(
+            session,
+            "nat.egresses",
+            {
+                name: {
+                    "label": f"Hat {name[-1]}",
+                    "mode": "isp_nat",
+                    "public": [public],
+                    "transips": [transip],
+                    "interfaces": [interface],
+                }
+                for name, (transip, interface, public) in LINES.items()
+            },
+            actor=USERNAME,
+        )
+        session.commit()
+
+    after = night + timedelta(hours=8)
+    with sessions() as session:
+        for name, (transip, _interface, public) in LINES.items():
+            own = [s for s in output.sessions if s.egress == name and unambiguous(s)]
+            assert all(s.transip == transip for s in own)
+            for truth in sample(own, 10):
+                outcome = lookup_now(
+                    session,
+                    layout,
+                    after,
+                    at=middle(truth),
+                    public_ip=public,
+                    public_port=40000 + truth.transport % 20000,  # the ISP router's port
+                    protocol=6,
+                    dest_ip=truth.dstip,
+                    dest_port=truth.dstport,
+                )
+                assert outcome.mode == "candidates", [e.key for e in outcome.explanations]
+                assert outcome.egress is not None
+                assert outcome.egress.resolution == "public"
+                assert [e.name for e in outcome.egress.egresses] == [name]
+                assert {(m.egress, m.traffic.transip) for m in outcome.matches} == {(name, transip)}
+                found = [m for m in outcome.matches if m.traffic.sessionid == truth.sessionid]
+                assert found, [m.traffic.sessionid for m in outcome.matches]
+                chain = found[0].chain
+                assert chain is not None
+                assert chain.lease is not None
+                assert chain.device is not None
+                assert chain.lease.mac == chain.device.mac == truth.mac
+
+        truth = sample([s for s in output.sessions if unambiguous(s)], 1)[0]
+        assert UNCLAIMED not in {s.transip for s in output.sessions}
+        outcome = lookup_now(
+            session,
+            layout,
+            after,
+            at=middle(truth),
+            public_ip=UNCLAIMED,
+            public_port=40000,
+            protocol=6,
+            dest_ip=truth.dstip,
+            dest_port=truth.dstport,
+        )
+        assert (outcome.mode, outcome.matches) == ("none", ())
