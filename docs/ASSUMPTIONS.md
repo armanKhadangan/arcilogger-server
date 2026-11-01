@@ -377,9 +377,30 @@ Each is implemented as written; changing one is a small follow-up.
 | Q16 | Processor, memory and uptime through the **standard library** (`arcilogger_core.hostinfo`: `ctypes` on Windows, `/proc` on Linux); the CPU percentage is measured between two readings of the API process, so the first answer shows "ölçülüyor" (on a platform other than Windows and Linux nothing is read and the page shows "bu platformda okunamıyor", W4-C); no new third-party dependency | `psutil` (per-process figures, a new third-party notice) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.1 |
 | Q17 | Disk forecast: a straight line (least squares) over the newest **30 daily samples** of `state\system-history.json` (worker job `system.sample`, daily after 00:30, the newest 120 days kept), shown from **7 samples**; a date more than 100 years away is not given (the state stays "estimated", and the page says "Disk kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor."); whether a drive has already reached the warning mark is read from its measured use (the page then gives only the full date: "%{warning} eşiğine ulaşıldı; …", W4-C) | another model or sample count | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.2 |
 | Q18 | The first-run wizard (Ayarlar → **İlk kurulum sihirbazı**, `/settings/setup`) **stores nothing**: each step's state is derived from the configuration and the request history, a skipped step stays "Eksik"; it opens from the Ayarlar overview and from Uyum Durumu, never by itself after the first sign-in. The e-mail step is done only when sending is switched on (`[smtp] enabled`) besides a server and a sender | remember skipped steps; redirect the first administrator after the first sign-in | [UYUM-DURUMU.md](UYUM-DURUMU.md) §5, [AYARLAR.md](AYARLAR.md) |
-| Q19 | No Windows service-manager or Task Scheduler query: the services are judged by their status files and the scheduled tasks by their **evidence files** (Seal's ignores the states Retention rewrote for deleted days); Retention and Requests are "İzlenemiyor" (Not observable), and a task disabled in the Task Scheduler shows only once its evidence is late | read the Windows states (needs a status file written by SYSTEM) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.5–4.6 |
+| Q19 | No Windows service-manager or Task Scheduler query: the services are judged by their status files and the scheduled tasks by their **evidence files** (Seal's ignores the states Retention rewrote for deleted days); Requests, and Retention while retention is switched on, are "İzlenemiyor" (Not observable); with retention off (the default) Retention is "Kullanılmıyor" (Not used), and a task disabled in the Task Scheduler shows only once its evidence is late | read the Windows states (needs a status file written by SYSTEM) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.5–4.6 |
 | Q20 | The **Uyum Durumu Raporu texts are on the lawyer review list**, like the 5651 lookup report's ([RAPOR.md](RAPOR.md)); see the note below | no review | [UYUM-DURUMU.md](UYUM-DURUMU.md) §3 |
 | Q21 | **No purge of `job_runs`** in Wave 4 (about 17,000 rows a day); the Sistem page reads it with bounded probes per job (the newest finished run of the last 7 days, and a run in progress after it) | a purge after N days | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.7 |
+
+### Decided while building (Wave 4)
+
+The manager's decisions taken in the Wave 4 reviews, implemented as written. Every deviation of
+the packages, with its tests, is in the contract's "Deviations" sections and in
+[MVP-CONTRACTS.md](MVP-CONTRACTS.md) §19.8; those an operator sees are folded into the rows above
+(Q7 card 4 reads its alerts by rule, Q8 a credit of 0 or below, Q13 a damaged `last.json`, Q16 a
+platform other than Windows and Linux, Q17 the forecast without a date or after the mark, Q18 the
+e-mail step, Q19 Seal's evidence, Q21 a job in progress) and into [UYUM-DURUMU.md](UYUM-DURUMU.md).
+
+| Decision | Date | Where |
+|---|---|---|
+| **Card 10: a damaged `state\backup\last.json` is a failed backup.** A file that does not parse or is not an object takes the card's **Sorun** row, as the worker's backup check opens `R20-backup` for it ("Yedek durum dosyası okunamıyor"); a file that cannot be read at all (access denied, a sharing violation) leaves the card **Bilgi yok** ("Bu denetim şu anda yapılamadı"), like every unreadable file of every card (card 3's `last-full.json` included: an unreadable result is never a failed chain check). An answer with such a card is not kept in the 30-second cache | 2026-10-28 (manager, review of the W4-A pull request #41) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §2.3, §2.10 |
+| **The wizard's e-mail step needs sending switched on** (`[smtp] enabled`) besides a server and a sender: while sending is off (the default) no alert or report e-mail goes out, so the step stays "Eksik" and lists "E-posta gönderimi kapalı." / "Sending e-mail is switched off." | 2026-10-28 (manager, review of the W4-C pull request #37) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §5, [AYARLAR.md](AYARLAR.md) |
+| **An empty applied peer list is not a missing report.** On the Sistem page's Saat block, ApplySystem's empty peer list reads "Uygulanan zaman sunucusu yok" / "No time server applied", no ApplySystem report yet "ApplySystem henüz rapor vermedi" / "No ApplySystem report yet" | 2026-10-28 (manager, note on issue #24 from the W4-D review) | [UYUM-DURUMU.md](UYUM-DURUMU.md) §4.8 |
+| **The Sistem answers' fractional values stay fractional in the web app** (the ingest lag and rates, the clock offset and delay: `Float` in the TypeScript mirrors, W4F-1); the answers themselves are unchanged | 2026-10-29 (manager, answer on issue #27) | [MVP-CONTRACTS.md](MVP-CONTRACTS.md) §19.4, §19.5 |
+
+The web app compares each saved Uyum Durumu Raporu with the SHA-256 the server sends with it
+(`X-Arci-Sha256`), as every hashed download; when they differ, "İndirilen dosyanın özeti
+eşleşmiyor: dosyayı kullanmayın ve yeniden indirin" shows beside the button with the code
+`download_mismatch` (W4F-2; [UYUM-DURUMU.md](UYUM-DURUMU.md) §3).
 
 ### Lawyer review (Q20)
 

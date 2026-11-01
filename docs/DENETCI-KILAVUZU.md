@@ -568,11 +568,11 @@ sonuçlarını **hukuk müşavirinizle gözden geçirin**.
 Raporu (PDF)** düğmesine basın. Uyum Durumu sayfası ve raporu yönetici ile denetçiye açıktır
 (`compliance.read`; sahibin kararı, 2026-10-28, [roles.md](roles.md)). Denetçi bütün kartları,
 kartların açık uyarı sayısını ve PDF düğmesini görür (her uyarının kuralı, önemi ve açılış zamanı
-PDF'te yazar); yapılandırma
-yedeğinin onayı ("Yapılandırma yedeğini aldım") ve ilk kurulum sihirbazı yalnızca yöneticiye
-açıktır. Bir kartın ayrıntı sayfasına giden bağlantı, kullanıcı o sayfayı açamıyorsa gizlenir
-(denetçi için Kaynaklar, Güvenlik, Ayarlar ve Sistem; Mühürleme ve Arama bağlantıları kalır); kartın
-kendisi her zaman gösterilir. Sayfayı açmak denetim kaydına yazılmaz, raporu indirmek yazılır.
+PDF'te yazar); yapılandırma yedeğinin onayı ("Yapılandırma yedeğini aldım") ve ilk kurulum sihirbazı
+yalnızca yöneticiye açıktır. Bir kartın ayrıntı sayfasına giden bağlantı, kullanıcı o sayfayı
+açamıyorsa gizlenir (denetçi için Kaynaklar, Güvenlik, Ayarlar ve Sistem; Mühürleme ve Arama
+bağlantıları kalır); kartın kendisi her zaman gösterilir. Sayfayı açmak denetim kaydına yazılmaz,
+raporu indirmek yazılır.
 
 **Raporun yapısı.** Başta başlık ("Uyum Durumu Raporu / Compliance status report"), kurum adı,
 "Oluşturulma / Generated" zamanı (Europe/Istanbul), "Oluşturan / Exported by" satırında raporu
@@ -609,7 +609,11 @@ SHA256 <dosya>` çıktısını Denetim Kaydı sayfasındaki girdinin `sha256` de
 (büyük ya da küçük harf fark etmez); girdi raporu indiren kullanıcıyı ve zamanı da gösterir.
 Özetler aynıysa dosya indirildiğinden beri değişmemiştir. Bu, kartların doğru olduğunu değil,
 ARCILOGGER'ın o anda bu dosyayı ürettiğini gösterir. İki indirme, oluşturulma zamanı farklı olduğu
-için farklı özet verir.
+için farklı özet verir. Tarayıcı da indirilen dosyanın özetini hesaplayıp `X-Arci-Sha256` ile
+karşılaştırır: eşleşmezse düğmenin yanında "İndirilen dosyanın özeti eşleşmiyor: dosyayı
+kullanmayın ve yeniden indirin" yazar, kodu `download_mismatch` ile; o dosyayı kullanmayın, raporu
+yeniden indirin. Eşleşen bir dosya için sayfa ayrıca bir şey yazmaz; tarayıcı özeti hesaplayamazsa
+(güvenli bağlantı yoksa) da yazmaz, o zaman karşılaştırmayı yukarıdaki gibi elle yapın.
 
 **Kişisel veri.** Kartlarda ve raporda log öznelerine ait veri yoktur: istemci IP ya da MAC adresi,
 kişi adı, cihaz ana bilgisayar adı, gönderici adresi ve replika hedefinin yolu yer almaz. Tek
@@ -802,16 +806,15 @@ Getting it: sign in with the auditor account, open **Uyum Durumu** in the menu a
 Durumu Raporu (PDF)**. The page and the report are open to administrators and auditors
 (`compliance.read`; owner decision of 2026-10-28, [roles.md](roles.md)). The auditor sees every
 card, the number of its open alerts and the PDF button (each alert's rule, severity and opening
-time are in the PDF); the configuration backup
-confirmation and the first-run wizard stay administrator-only, and links to pages the user may not
-open (for the auditor Kaynaklar, Güvenlik, Ayarlar and Sistem) are hidden while the card itself is
-always shown. Opening the page is not audited; exporting the report is. The report holds the
-title, the site name, "Oluşturulma / Generated" (Europe/Istanbul), "Oluşturan / Exported by" (the
-display name and username of the exporting ARCILOGGER account), the summary line ("{ok} of {total}
-checks OK") and the notice; then per card its number and titles, the state as text in brackets,
-the reasons in Turkish and English, the facts (Turkish label and value), the "Sahada doğrulayın /
-Verify on site" note and the "Açık uyarılar / Active alerts" when present, and the "Denetlendi /
-Checked" time.
+time are in the PDF); the configuration backup confirmation and the first-run wizard stay
+administrator-only, and links to pages the user may not open (for the auditor Kaynaklar, Güvenlik,
+Ayarlar and Sistem) are hidden while the card itself is always shown. Opening the page is not
+audited; exporting the report is. The report holds the title, the site name, "Oluşturulma /
+Generated" (Europe/Istanbul), "Oluşturan / Exported by" (the display name and username of the
+exporting ARCILOGGER account), the summary line ("{ok} of {total} checks OK") and the notice; then
+per card its number and titles, the state as text in brackets, the reasons in Turkish and English,
+the facts (Turkish label and value), the "Sahada doğrulayın / Verify on site" note and the "Açık
+uyarılar / Active alerts" when present, and the "Denetlendi / Checked" time.
 
 States (always written as text; colour only repeats it): **[TAMAM] / [OK]** the check found no
 problem — based only on what ARCILOGGER recorded, and a verify-on-site note still has to be checked
@@ -834,11 +837,15 @@ same hash, and the file is named `ARCILOGGER-uyum-durumu-YYYYMMDD-HHMM.pdf` (Tur
 `Get-FileHash -Algorithm SHA256 <file>` with the entry's `sha256` on the Denetim Kaydı page (case
 does not matter); the entry also names the user and the time. Equal hashes show that the file is
 unchanged since ARCILOGGER produced it then, not that the cards are right; two exports give
-different hashes (their generation times differ). The cards and the report hold no data about log
-subjects (no client IP or MAC address, no person's name, no device host name, no sender address, no
-replica target path); the only exception is the exporting account's display name and username, so
-the page needs no KVKK notice. The "Sahada doğrulayın" notes name what ARCILOGGER cannot check
-itself — the format the credit is read in (card 5), that the firewall logs and sends its web and DNS
-filter events (card 7; no profile name is read from DNS filter records) and that the replica target
-is write-once (WORM, card 9); they are verified on site, not by the report
-([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 6).
+different hashes (their generation times differ). The browser also computes the downloaded file's
+hash and compares it with `X-Arci-Sha256`: when they differ, the page shows "The downloaded file's
+hash does not match: do not use the file, download it again" beside the button, with the code
+`download_mismatch`; do not use that file, export the report again. A matching file gets no note,
+nor does one the browser cannot hash (without a secure connection); then compare by hand as above.
+The cards and the report hold no data about log subjects (no client IP or MAC address, no person's
+name, no device host name, no sender address, no replica target path); the only exception is the
+exporting account's display name and username, so the page needs no KVKK notice. The "Sahada
+doğrulayın" notes name what ARCILOGGER cannot check itself — the format the credit is read in
+(card 5), that the firewall logs and sends its web and DNS filter events (card 7; no profile name is
+read from DNS filter records) and that the replica target is write-once (WORM, card 9); they are
+verified on site, not by the report ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 6).

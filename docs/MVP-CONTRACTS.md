@@ -1412,9 +1412,10 @@ needs a signed-in user (401 first), then answers **403 `module_not_licensed`** w
 the module is enabled — before parameter and model validation, for any well-formed request. The
 status is cached on `AppState.license_cache` for `LICENSE_CACHE_SECONDS` = 30 s and read through
 `arcilogger_db.license_guard.safe_status` (a failure: `core_5651` only, never cached). Every other
-route (5651 Temel: 103 routes, incl. the three of the licence and the 38 of the browser
-administration, section 16) is never gated, in any state; the
-dashboard summary never changes with the licence.
+route (5651 Temel: 129 routes at Wave 4, as `api/tests/test_license_routes.py` counts them, among
+them the three of the licence, those of the browser administration, section 16, and the six of
+Uyum Durumu and Sistem, section 19) is never gated, in any state; the dashboard summary never
+changes with the licence.
 
 **Users limit** (`routers/users.py`): after `lock_user_management`, `POST /users` and a `PATCH
 /users/{id}` that changes `active` from false to true take `max` from the cached status
@@ -2573,10 +2574,11 @@ Panel): neither page nor the PDF carries data about log subjects (no client IP o
 no device host name, no sender address, no replica target path), so there is no KVKK notice
 gate; the PDF names only the signed-in account that exported it. `POST` is CSRF-checked as every
 change. An error answer is shown with the server's text in the interface language and its code
-("… (config_backup_unreadable)"): a failed export beside "Uyum Durumu Raporu (PDF)", a failed
-confirmation in the confirm dialog of "Yapılandırma yedeğini aldım", a failed `GET /system/health`
-in the Sistem page's Saat block only, while a failed `GET /system` is the page's error (W4-C
-deviation, 19.8).
+("… (config_backup_unreadable)"): a failed export beside "Uyum Durumu Raporu (PDF)" (also a
+report whose bytes differ from its `X-Arci-Sha256`, the client-side `download_mismatch`, 19.3), a
+failed confirmation in the confirm dialog of "Yapılandırma yedeğini aldım", a failed
+`GET /system/health` in the Sistem page's Saat block only, while a failed `GET /system` is the
+page's error (W4-C and W4-F deviations, 19.8).
 
 ### 19.2 Uyum Durumu: `ComplianceStatus`
 
@@ -2643,7 +2645,13 @@ checked_at}`; `ConfigBackupOut {confirmed_at, config_sha256}`.
   "Sayfa n / N". Headers: `Content-Disposition: attachment;
   filename="ARCILOGGER-uyum-durumu-<YYYYMMDD-HHMM>.pdf"` (site time), `X-Arci-Sha256: <hex>`. The
   PDF is not stored and not time-stamped (owner question Q14; no schedule, no `compliance` kind
-  in Raporlar). Audited before the response (19.7).
+  in Raporlar). Audited before the response (19.7). The web app (`useComplianceReport()`) saves
+  the file, then compares its bytes with `X-Arci-Sha256`, as every hashed download of the app; a
+  difference fails the export with the client-side error `download_mismatch` (the texts of
+  `download.mismatch`: "İndirilen dosyanın özeti eşleşmiyor: dosyayı kullanmayın ve yeniden
+  indirin" / "The downloaded file's hash does not match: do not use the file, download it
+  again"), shown with its code beside "Uyum Durumu Raporu (PDF)"; a match shows nothing (W4-F
+  deviation W4F-2, 19.8).
 - **`POST /compliance/config-backup`** (no body): the administrator confirms that
   `arcilogger.toml`, `secret.key` and the Caddy CA folder (with its private key) were copied to
   encrypted offline media kept apart from the backups (`secrets.json` optional; YEDEKLEME.md /
@@ -2656,7 +2664,8 @@ checked_at}`; `ConfigBackupOut {confirmed_at, config_sha256}`.
 ### 19.4 Sistem: `SystemSummary`, `SystemDisk`
 
 Models `system/models.py`, mirrored by `web/src/lib/system-types.ts`; every field required; byte
-counts and percents are integers, `lag_seconds` and `lines_per_second` fractional (`float`):
+counts and percents are integers, `lag_seconds` and `lines_per_second` fractional (`float`, `Float`
+in the mirror, W4-F deviation W4F-1, 19.8):
 
 `SystemSummary {checked_at, host: HostInfo, drives: DriveInfo[], database: DatabaseInfo,
 collector: CollectorInfo, ingest: IngestInfo, version: VersionInfo}`; `SystemDisk {checked_at,
@@ -2709,13 +2718,18 @@ has_error}], unknown_sources}`; `VersionInfo {product, version, core_version, re
 - **Version:** the product name, the API `__version__`, `arcilogger_core.__version__`,
   `RELEASE_DATE`; maintenance comes from the existing `GET /license` (section 15). Upgrades stay
   manual (offline bundle, KURULUM / INSTALL section 13); ARCILOGGER downloads no updates.
-- `GET /system/disk` is `drives` alone (the Panel's "Disk" card, requested only with
-  `system.read`).
+- `GET /system/disk` is `drives` alone, for the Panel's "Disk" card (`DiskCard`,
+  `data-testid="card-disk"`): requested only with `system.read` (block `disk`,
+  `dashboard-model.ts`), shown last in the Panel's first row, after the clock card, with each
+  drive's meter, its forecast sentence and the link "Sistem sayfasını aç"; while the request
+  fails the Panel shows no Disk card (the last answer is not kept). The clock card links to
+  `/system` with `system.read`.
 
 ### 19.5 Sistem: `SystemHealth`
 
 Models `system_health/models.py`, mirrored by `web/src/lib/system-health-types.ts`; every field
-required; `offset_ms` and `delay_ms` fractional (`float`):
+required; `offset_ms` and `delay_ms` fractional (`float`, `Float` in the mirror, W4-F deviation
+W4F-1, 19.8):
 
 `SystemHealth {checked_at, services: [ServiceHealth {name: ServiceName, state: "running" |
 "stale" | "missing", updated_at | null}], agent: AgentHealth {state: "ok" | "stale" | "missing" |
@@ -2842,16 +2856,18 @@ stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly`, `Ve
 
   Not audited: `GET /compliance`, `GET /system`, `GET /system/disk`, `GET /system/health`.
 - **Permissions** (contract D15, section 6 table, [roles.md](roles.md)): `compliance.read` is
-  held by `admin` and `auditor` (owner question Q1, answered 2026-10-28): the auditor opens Uyum
+  held by `admin` and `auditor` (`ROLE_PERMISSIONS["auditor"]` in `security.py`, pinned by
+  `api/tests/test_security.py`; owner question Q1, answered 2026-10-28): the auditor opens Uyum
   Durumu with its cards and downloads the Uyum Durumu Raporu, and the auditor's export is audited
   like the administrator's. Everything that changes state stays admin-only: the backup
   confirmation (`settings.manage`), every setting and the first-run wizard (`/settings/setup`,
   `settings.manage`). `system.read` (Sistem, the Panel's disk card) stays admin-only (owner
   question Q2, default). hr and viewer hold none of the three permissions.
 - **Captured answers and mirrors:** `web/scripts/samples_compliance.py` and `samples_system.py`
-  (in `SAMPLE_MODULES`) capture the answers into `web/e2e/samples/`; the mirrors
-  `compliance-types.ts`, `system-types.ts`, `system-health-types.ts` are in the type tests'
-  `TYPES_FILES`.
+  (in `SAMPLE_MODULES` of `capture_api_samples.py`) capture `web/e2e/samples/compliance.json`,
+  `system.json`, `system-disk.json` and `system-health.json`; the mirrors `compliance-types.ts`,
+  `system-types.ts`, `system-health-types.ts` are in the type tests' `TYPES_FILES`, and
+  `web/src/lib/api-samples.test.ts` checks the captured answers against them.
 
 ### 19.8 Decided while building (where the plan of ADR-0017 was refined)
 
@@ -2903,5 +2919,14 @@ alert:
   database refused); `running` comes from a second bounded `job_runs` probe per job, because the
   status file never shows a job in progress; Seal's evidence skips the day states Retention wrote
   (`status = "deleted"`); the 1-s guard of `GET /system/health` loads only the tables it reads.
+- **W4-F:** the five fractional fields `IngestSource.lag_seconds`, `IngestSource.lines_per_second`,
+  `IngestInfo.lines_per_second` (`system-types.ts`) and `ClockSampleOut.offset_ms`,
+  `ClockSampleOut.delay_ms` (`system-health-types.ts`) are `Float` in the mirrors, not `number`
+  (W4F-1, manager decision on #27): the models are `float`, and the captured samples carry
+  fractional values (a 3.2 ms clock offset) that `api-samples.test.ts` takes only as `Float`; the
+  answers are unchanged. A Uyum Durumu Raporu whose bytes differ from its `X-Arci-Sha256` fails
+  the export with the client-side `ApiError` `download_mismatch` (W4F-2), shown through
+  `exportError` beside "Uyum Durumu Raporu (PDF)" with its code, because `ComplianceView` has no
+  place for a hash-check badge; a match or an unchecked file shows nothing.
 
 Contract "Deviations — W4-x" has each with its tests.

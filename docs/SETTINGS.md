@@ -52,14 +52,14 @@ on the Uyum Durumu page; it does not open by itself after the first sign-in. The
 of its own and stores nothing: each step's state ("OK" / "Missing") is derived again on every
 visit from the server's configuration and the stamp tests in the request history; the Log sources
 step also shows whether data arrived from each configured source (this does not change the step's
-state). **Open in Settings** opens the page concerned, where the change is
-saved and checked as always; **Skip this step for now** goes on to the next step, and the skipped
-step stays "Missing". The e-mail step is "OK" only while sending e-mail is switched on and an
-SMTP server and a sender are set. On a page opened from the wizard the way back reads **Back to the
-first-run wizard** ("Kurulum sihirbazına dön") instead of **Settings** and leads to
-`/settings/setup` (also between the steps of the Kamu SM wizard); this is remembered in that
-browser tab only and ends back in the wizard or on the Settings overview. The steps and when each
-counts as "OK": [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 5.
+state). **Open in Settings** opens the page concerned, where the change is saved and checked as
+always; **Skip this step for now** goes on to the next step, and the skipped step stays "Missing".
+The e-mail step is "OK" only while sending e-mail is switched on and an SMTP server and a sender are
+set. On a page opened from the wizard the way back reads **Back to the first-run wizard** ("Kurulum
+sihirbazına dön") instead of **Settings** and leads to `/settings/setup` (also between the steps of
+the Kamu SM wizard); this is remembered in that browser tab only and ends back in the wizard or on
+the Settings overview. The steps and when each counts as "OK":
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 5.
 
 **Switching a source off** (`enabled = false`): the firewall removes the sender's 514 opening;
 the silent-source alert (R15) and the sealer's gap check no longer expect it. A message that
@@ -178,9 +178,9 @@ minutes, which exit claims an address is computed from the current settings ever
   srcmac ("Records"), the number of distinct MACs ("Distinct MACs") and the most IP addresses seen
   with one MAC ("Most IPs per MAC", `max_ips_per_mac`); all three count only records with an IPv4
   source address (a dual-stack client's IPv6 addresses are not counted), and whether the interface
-  is in `lookup.srcmac_interfaces` ("srcmac in use"). **Use for srcmac** is
-  disabled on interfaces whose `max_ips_per_mac` is above `lookup.srcmac_max_ips`. Do the
-  two-client check before you add an interface ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
+  is in `lookup.srcmac_interfaces` ("srcmac in use"). **Use for srcmac** is disabled on interfaces
+  whose `max_ips_per_mac` is above `lookup.srcmac_max_ips`. Do the two-client check before you add
+  an interface ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
 
 The three `alerts.filter_*` settings of the **Alerts and e-mail** group say when content filter
 records are expected; they are the thresholds of card 7 of the Uyum Durumu page and of the
@@ -188,14 +188,14 @@ records are expected; they are the thresholds of card 7 of the Uyum Durumu page 
 exists, if neither a web nor a DNS filter record has arrived for the last
 `alerts.filter_quiet_hours` hours and every day the window touches is an expected day, card 7 shows
 **Problem** and the alert opens; if the window touches a day that is not expected, card 7 shows
-**Attention** without an alert. Either kind of record is enough, and the alert closes by itself
-when a new record arrives. A day is expected
-when its ISO weekday is in `alerts.filter_days` and (while `alerts.filter_skip_holidays` is on) it
-is not in the holiday list of the **Usage analytics** group (`usage.holidays`). The defaults are
-the owner's decision (2026-10-28): every day of the week except the listed holidays, 24 hours.
-`usage.holidays` ships only the fixed-date national holidays; the administrator enters the dates
-of the religious holidays every year. Details: [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)
-section 2.7, [ALERTS.md](ALERTS.md) section 2.
+**Attention** without an alert. Either kind of record is enough: when only one of them falls silent
+for that time, card 7 shows **Attention** too. The alert closes by itself when a new record arrives.
+A day is expected when its ISO weekday is in `alerts.filter_days` and (while
+`alerts.filter_skip_holidays` is on) it is not in the holiday list of the **Usage analytics** group
+(`usage.holidays`). The defaults are the owner's decision (2026-10-28): every day of the week except
+the listed holidays, 24 hours. `usage.holidays` ships only the fixed-date national holidays; the
+administrator enters the dates of the religious holidays every year. Details:
+[COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 2.7, [ALERTS.md](ALERTS.md) section 2.
 
 | Setting | Default | Bounds | Meaning |
 |---|---|---|---|

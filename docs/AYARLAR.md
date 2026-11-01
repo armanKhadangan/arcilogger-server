@@ -176,8 +176,8 @@ açılışta güncel ayarlardan hesaplanır):
 - **srcmac görülen arayüzler (son 1 saat):** arayüz başına (`srcintf`) srcmac taşıyan kayıt
   sayısı ("Kayıt"), farklı MAC sayısı ("Farklı MAC") ve bir MAC'in görüldüğü en çok IP adresi
   ("Bir MAC için en çok IP", `max_ips_per_mac`); üçü de yalnızca IPv4 kaynak adresli kayıtları
-  sayar (çift yığınlı bir istemcinin IPv6 adresleri sayılmaz) ve arayüzün
-  `lookup.srcmac_interfaces` listesinde olup olmadığını ("srcmac kullanılıyor") gösterir. **srcmac için ekle**,
+  sayar (çift yığınlı bir istemcinin IPv6 adresleri sayılmaz) ve arayüzün `lookup.srcmac_interfaces`
+  listesinde olup olmadığını ("srcmac kullanılıyor") gösterir. **srcmac için ekle**,
   `max_ips_per_mac` `lookup.srcmac_max_ips` değerini aşan arayüzlerde kapalıdır. Bir arayüzü
   eklemeden önce iki istemci denetimini yapın ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5).
 
@@ -186,13 +186,14 @@ beklendiği zamanı söyler; Uyum Durumu sayfasının 7. kartının ve `R20-filt
 filtresi kaydı gelmiyor", önem yüksek) eşikleridir. Etkin bir FortiGate kaynağı varken son
 `alerts.filter_quiet_hours` saattir ne web ne de DNS filtresi kaydı gelmediyse ve bu sürenin değdiği
 her gün beklenen bir günse kart 7 **Sorun** gösterir ve uyarı açılır; süre beklenmeyen bir güne
-değiyorsa kart **Dikkat** gösterir, uyarı açılmaz. İki türden biri yeter, yeni bir kayıt gelince
-uyarı kendiliğinden kapanır. Bir gün, ISO hafta günü `alerts.filter_days` içindeyse ve
-(`alerts.filter_skip_holidays` açıkken) **Kullanım analizi** grubundaki tatil listesinde
-(`usage.holidays`) değilse beklenir. Varsayılanlar sahibin kararıdır (2026-10-28): haftanın her
-günü, listedeki tatiller hariç, 24 saat. `usage.holidays` yalnızca sabit tarihli resmî tatillerle
-gelir; dinî bayramların tarihlerini her yıl yönetici girer. Ayrıntılar:
-[UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.7, [UYARILAR.md](UYARILAR.md) bölüm 2.
+değiyorsa kart **Dikkat** gösterir, uyarı açılmaz. İki türden biri yeter: yalnızca biri bu sürede
+susarsa kart da **Dikkat** gösterir. Yeni bir kayıt gelince uyarı kendiliğinden kapanır. Bir gün,
+ISO hafta günü `alerts.filter_days` içindeyse ve (`alerts.filter_skip_holidays` açıkken)
+**Kullanım analizi** grubundaki tatil listesinde (`usage.holidays`) değilse beklenir. Varsayılanlar
+sahibin kararıdır (2026-10-28): haftanın her günü, listedeki tatiller hariç, 24 saat.
+`usage.holidays` yalnızca sabit tarihli resmî tatillerle gelir; dinî bayramların tarihlerini her
+yıl yönetici girer. Ayrıntılar: [UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 2.7,
+[UYARILAR.md](UYARILAR.md) bölüm 2.
 
 | Ayar | Varsayılan | Sınırlar | Anlamı |
 |---|---|---|---|

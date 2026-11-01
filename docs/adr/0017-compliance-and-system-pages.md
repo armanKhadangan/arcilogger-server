@@ -78,8 +78,9 @@ The constraints:
 - **D2 Unmounted API packages until the switch-on.** The API code of Uyum Durumu and Sistem lives
   in new packages that `arcilogger_api.routers` does not discover (`arcilogger_api.compliance`,
   `arcilogger_api.system`, `arcilogger_api.system_health`); W4-F mounts them with three two-line
-  modules under `routers/`. Until then their tests mount the router themselves. `routers/` mounts
-  every module it finds, and a mounted area needs its row in LISANS/LICENSING (a Wave 3 file).
+  modules under `routers/`. Before the switch-on their tests mounted the router themselves.
+  `routers/` mounts every module it finds, and a mounted area needs its row in LISANS/LICENSING (a
+  Wave 3 file).
 
 ### Part B — Uyum Durumu and its report
 
@@ -106,8 +107,8 @@ The constraints:
   card and the alert. *Alternative:* a settings group of its own.
 - **D7 A new alert `R20-filter`** (dedup key `R20-filter:none`, severity high: owner question
   Q10) opens when no web or DNS filter record arrived within `alerts.filter_quiet_hours` on
-  expected days, and closes by itself when one arrives. It is added only by W4-F, in the existing
-  system alert job; before that no Python string constant has the whole value `R20-filter`, because
+  expected days, and closes by itself when one arrives. It was added only by W4-F, in the existing
+  system alert job; before that no Python string constant had the whole value `R20-filter`, because
   the documentation test turns every such constant into a required row of ILK-ADIMLAR section 9
   (a Wave 3 file).
 - **D8 The Uyum Durumu Raporu is a PDF made on request** (`GET /compliance/report.pdf`): computed
@@ -215,12 +216,21 @@ complete list, with texts, is in MVP-CONTRACTS.md and ASSUMPTIONS.md):
 - **D11 (W4-C):** the e-mail step is done only when sending is switched on (`[smtp] enabled`),
   not merely when a server and a sender are set; switched off, it lists "E-posta gönderimi
   kapalı." / "Sending e-mail is switched off."
-- **Disk forecast (Q17, W4-B):** a date more than 100 years away is `null` while the state stays
-  `estimated`; whether a drive is already above the warning mark is read from its measured use,
-  never from a `null` date.
+- **Disk forecast (Q17, W4-B, W4-C):** a date more than 100 years away is `null` while the state
+  stays `estimated`; whether a drive is already above the warning mark is read from its measured
+  use, never from a `null` date; the Sistem page words both cases ("Disk kullanımı çok yavaş
+  artıyor; dolma tarihi öngörülemiyor.", "%{warning} eşiğine ulaşıldı; …").
+- **D8 (W4-F):** the web app compares the saved Uyum Durumu Raporu with its `X-Arci-Sha256`; when
+  they differ, the export's error `download_mismatch` shows beside the report's button with its
+  code, as a failed export does (W4F-2).
+- **The pages' errors (W4-C, W4-F):** each error shows where it was asked, with its code: a failed
+  export beside the report's button, a failed backup confirmation in its dialog, a failed
+  `GET /system/health` in Sistem's Saat block only, while the other health blocks keep their
+  place; an empty peer list applied by ApplySystem reads differently from no ApplySystem report.
 
-Text-only deviations (the English singular of "Every 1 minute", the Turkish suffix of a time read
-aloud) change no decision.
+Text-only and type-only deviations (the English singular of "Every 1 minute", the Turkish suffix
+of a time read aloud, `Float` for the five fractional fields in the web's mirrors, W4F-1) change no
+decision.
 
 ## Consequences
 
@@ -233,8 +243,16 @@ aloud) change no decision.
   `compliance.read`. `GET /settings` shows three more settings in "Uyarılar ve e-posta"; the
   worker has one more job (`system.sample`) and the system alert job one more check
   (`R20-filter`); the data folder one more state file (`state\system-history.json`).
-- **The menu has no placeholder page any more** (D14); the Panel gains the disk card (admin only)
-  and its clock card's link to Sistem starts to work.
+- **The menu has no placeholder page any more** (D14); the Panel gains the disk card (admin only,
+  after the clock card) and its clock card's link to Sistem works.
+- **Switch-on (W4-F):** `routers/compliance.py`, `routers/system.py` and
+  `routers/system_health.py` mount the three packages (D2), and the route classification test
+  (`api/tests/test_license_routes.py`) lists the six routes among the 129 that are never gated;
+  `ROLE_PERMISSIONS["auditor"]` holds `compliance.read` (`security.py`, D15); `system.sample` runs
+  after `reports.purge` in the worker's `default_jobs`; `R20-filter` is a check of the system alert
+  job (`CHECKS`) with its catalogue texts and steps (D7); the captured answers
+  `web/e2e/samples/compliance.json`, `system.json`, `system-disk.json` and `system-health.json`
+  are checked against the web's mirrors.
 - **Lawyer review:** the Uyum Durumu Raporu texts are on the lawyer review list, like the lookup
   report's (owner question Q20). The report is not time-stamped: its integrity after export rests
   on the SHA-256 in the audit log.

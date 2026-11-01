@@ -265,11 +265,16 @@ Uyarıları bugün yalnızca **Yönetici** görür ve durumlarını değiştirir
 `alerts.manage`; şartname 13 tablosunda sütunu yok). Panel (`dashboard.view`) her kutu için ayrıca
 kendi iznini ister; izni olmayanın kutusu boş gelir: Denetçi log alımı, dünkü mühür, kontör ve saat
 kutularını görür, uyarı kutusunu görmez; Rapor İzleyici yalnızca log alımını görür; İK
-Raporları'nın Panel'i yalnızca kullanım kutularıdır (`/usage`).
+Raporları'nın Panel'i yalnızca kullanım kutularıdır (`/usage`). Panel'deki **Disk** kartını
+(`GET /system/disk`) yalnızca Yönetici görür (`system.read`; başka bir rol için istek hiç
+yapılmaz); kart ancak bir yanıt gelince gösterilir, yüklenirken ve hata olunca gösterilmez (hatayı
+Sistem sayfası gösterir).
 
 Alerts are administrator-only today (`alerts.read`, `alerts.manage`; not in the spec 13
 table). The dashboard (`dashboard.view`) needs each box's own permission as well; a box the user
-may not see is `null`:
+may not see is `null`. The dashboard's **Disk** card (`GET /system/disk`) is administrator-only
+(`system.read`; for any other role the request is never made); it shows only with an answer, not
+while it loads nor on an error (the Sistem page shows the error):
 
 | Endpoint / box | Access | admin | auditor | hr | viewer |
 |---|---|---|---|---|---|
@@ -387,7 +392,7 @@ state.
 
 Uyum Durumu (`/compliance`) ve Sistem (`/system`) şartname 13 tablosunda yoktur. Sahibin
 2026-10-28 kararıyla (aşağıda "Kararlar") **Uyum Durumu** **Yönetici** ve **Denetçi**ye açıktır
-(`compliance.read`): ikisi de on denetim kartını görür ve **Uyum Durumu Raporu (PDF)**'yi indirir.
+(`compliance.read`): ikisi de on denetim kartını görür ve **Uyum Durumu Raporu**'nu (PDF) indirir.
 Durum değiştiren her şey yalnızca Yöneticidedir: kart 10'daki "Yapılandırma yedeğini aldım" onayı
 (`POST /compliance/config-backup`, `settings.manage`), ilk kurulum sihirbazı (Ayarlar → İlk kurulum
 sihirbazı, `/settings/setup`, `settings.manage`) ve bütün ayarlar. Denetçiye yedek onayı düğmesi ve
