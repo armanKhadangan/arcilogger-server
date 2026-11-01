@@ -1215,8 +1215,19 @@ class _Lookup:
         the search would find a session through it in the window (with the requested port when
         one is given), before any destination filter. A session that ended before the moment
         or began after it shows neither: within the tolerance of a change of the line's mode it
-        belongs to the other mode."""
+        belongs to the other mode.
+
+        The first such row in the order of ``ix_fg_traffic_transip_transport_time``, asked in
+        steps as :meth:`_Probe.seen_overlap` asks: the rows logged in the window first, where a
+        busy address answers at once, then the scan's tail after it, then (with a port only)
+        the sessions spanning the moment on any port. As one ``EXISTS`` the planner expected an
+        early match for a busy address and scanned the partition sequentially, reading every
+        address's rows before the moment, and one after its last row read every address's rows
+        of the range in time order (3.8 guard). Without a port the spanning sessions are among
+        the tail's: they were logged in ``[T, T + max session]`` and started by ``T``, inside the
+        scan, which starts ``tolerance`` before ``T`` and ends ``max session`` after its end."""
         request = self.request
+        window = self.window
         started = FgTraffic.time - func.make_interval(
             0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
         )
@@ -1225,20 +1236,31 @@ class _Lookup:
             common.append(FgTraffic.proto == request.protocol)
         if self.untrusted:
             common.append(_not_in(FgTraffic.source, self.untrusted))
+        port = [] if request.public_port is None else [FgTraffic.transport == request.public_port]
+
+        def first(*clauses: ColumnElement[bool]) -> bool:
+            query = (
+                select(FgTraffic.time)
+                .where(*common, *clauses)
+                .order_by(FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+                .limit(1)
+            )
+            return self.session.scalar(query) is not None
+
+        in_window = [FgTraffic.time >= window.low, FgTraffic.time <= window.high]
+        tail = [FgTraffic.time > window.high, FgTraffic.time <= window.scan_end]
+        if first(*in_window, started <= window.high, *port):
+            return True
+        if first(*tail, started <= window.high, *port):
+            return True
+        if request.public_port is None:
+            return False
         spans = [
             FgTraffic.time >= request.at,
             FgTraffic.time <= request.at + timedelta(seconds=self.settings.max_session_seconds),
             started <= request.at,
         ]
-        found = [
-            FgTraffic.time >= self.window.low,
-            FgTraffic.time <= self.window.scan_end,
-            started <= self.window.high,
-        ]
-        if request.public_port is not None:
-            found.append(FgTraffic.transport == request.public_port)
-        query = select(or_(exists().where(*common, *spans), exists().where(*common, *found)))
-        return bool(self.session.scalar(query))
+        return first(*spans)
 
     def _unmapped_note(self, plan: _Plan) -> None:
         """``egress_unmapped_seen``: NAT addresses no exit claims near the moment (public ones
