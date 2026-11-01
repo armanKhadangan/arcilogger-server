@@ -12,6 +12,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ from arcilogger_api.lookup_testing import (
     build_site,
     enter_exits,
     iso,
+    unconverted_dhcp_line,
 )
 from arcilogger_api.routers import lookup as lookup_router
 from arcilogger_api.routers.lookup import LookupTimeoutError, parse_moment, statement_deadline
@@ -49,8 +51,14 @@ from arcilogger_core.layout import Layout
 from arcilogger_db.egress import legacy_egresses
 from arcilogger_db.models import AuditLog, Department, Lease, Lookup
 from arcilogger_db.settings import set_setting
-from arcilogger_worker.lookup import EXPLANATIONS, run_lookup
-from arcilogger_worker.testing import tr
+from arcilogger_worker.lookup import (
+    EXPLANATIONS,
+    EvidenceRef,
+    LookupOutcome,
+    LookupRequest,
+    run_lookup,
+)
+from arcilogger_worker.testing import Evidence, tr
 
 #: The FortiGate's WAN address behind the ISP router as revision 0018 converts Wave 2's
 #: nat.public_ips = [WAN] or nat.wan_transip = WAN: the NAT address of the isp_nat exit wan
@@ -288,6 +296,89 @@ def test_internal_lookup_returns_the_chain(
         {"kind": "internal", "lease": lease_id(app_session_factory, PHONE_MAC), "person": None}
     ]
     assert entry.details["egress"] is None  # no public IP, no exit
+    assert {"srcmac_traffic", "unconverted"}.isdisjoint(entry.details["results"][0])
+    assert "unconverted" not in entry.details
+
+
+def test_a_srcmac_chain_names_its_session_record_in_the_audit(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+) -> None:
+    """A chain whose MAC came from a session record's srcmac (no lease, ADR-0016 D10) names
+    that record's id in the audit entry, so the entry still shows which session gave the MAC
+    after retention has deleted the lookup's outcome; ids only (KVKK)."""
+    static, static_mac = "172.20.42.88", "00:00:5e:00:53:88"
+    build_site(app_session_factory, layout, dhcp="fortigate")
+    with app_session_factory() as session:
+        row = Evidence(session, layout).traffic(
+            AT, static, 51060, srcintf="vlan42", dstintf="wan1", srcmac=static_mac
+        )
+        session.commit()
+    setting(app_session_factory, "lookup.srcmac_interfaces", ["vlan42"])
+    signed_in(client, login_as, app_session_factory)
+    response = client.post("/api/v1/lookup/5651", json=body(internal_ip=static))
+    assert response.status_code == 201, response.text
+    assert response.json()["outcome"]["attribution"]["mac_source"] == "srcmac"
+    (entry,) = audits(app_session_factory, "lookup.run")
+    assert entry.details["results"] == [
+        {"kind": "internal", "lease": None, "person": None, "srcmac_traffic": [row]}
+    ]
+    assert static_mac not in canonical_json(entry.details).decode()
+
+
+def test_unconverted_fortigate_dhcp_lines_are_named_in_the_audit(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    layout: Layout,
+) -> None:
+    """The fg_event row a lookup cites as an unconverted FortiGate DHCP line (D8) is listed by
+    id with the number listed; no MAC, address or line."""
+    stranger, stranger_mac = "172.20.42.58", "00:00:5e:00:53:58"
+    build_site(app_session_factory, layout, dhcp="fortigate")
+    with app_session_factory() as session:
+        row = unconverted_dhcp_line(
+            Evidence(session, layout), tr(DAY, 10), stranger, stranger_mac, hostname="PLN-PC15"
+        )
+        session.commit()
+    signed_in(client, login_as, app_session_factory)
+    response = client.post("/api/v1/lookup/5651", json=body(internal_ip=stranger))
+    assert response.status_code == 201, response.text
+    assert [ref["row_id"] for ref in response.json()["outcome"]["unconverted_dhcp"]] == [row]
+    (entry,) = audits(app_session_factory, "lookup.run")
+    assert (entry.details["unconverted"], entry.details["unconverted_listed"]) == ([row], 1)
+    stored = canonical_json(entry.details).decode().lower()
+    for personal in (stranger_mac, "pln-pc15", "dhcp ack"):
+        assert personal not in stored
+
+
+def test_the_audits_unconverted_lines_are_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At most AUDIT_RESULTS unconverted rows are listed, sorted, with the number listed (the
+    outcome keeps all of them); an outcome citing none adds no keys."""
+    request = LookupRequest(at=AT, internal_ip="172.20.42.58")
+    lines = tuple(
+        EvidenceRef(table="fg_event", row_id=row_id, time=AT, raw=None) for row_id in (12, 7, 9)
+    )
+    outcome = LookupOutcome(
+        request=request,
+        mode="none",
+        matches=(),
+        double_nat=False,
+        attribution=None,
+        explanations=(),
+        data_window=None,
+        tolerance_seconds=0,
+        generated_at=AT,
+        unconverted_dhcp=lines,
+    )
+    monkeypatch.setattr(lookup_router, "AUDIT_RESULTS", 2)
+    assert lookup_router.unconverted_ids(outcome) == {
+        "unconverted": [7, 9],
+        "unconverted_listed": 2,
+    }
+    assert lookup_router.unconverted_ids(replace(outcome, unconverted_dhcp=())) == {}
 
 
 def test_vlan_changes_reach_the_next_lookup_and_keep_stored_ones(
