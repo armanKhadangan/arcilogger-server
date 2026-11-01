@@ -31,6 +31,7 @@ from arcilogger_core.timeutil import day_window
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.searchcounts import verify
 from arcilogger_ingest import prepare
+from arcilogger_ingest.instance import InstanceLock
 from arcilogger_ingest.loader import STEPS
 from arcilogger_ingest.parsers import LinePosition, ParsedRow, ParseOutcome, get_parser
 from arcilogger_ingest.service import IngestService
@@ -386,6 +387,14 @@ def _messages(engine: Engine) -> int:
         return int(connection.execute(text("SELECT count(*) FROM messages")).scalar_one())
 
 
+def wait_for(condition: Callable[[], bool], timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not reached in time")
+        time.sleep(0.02)
+
+
 def test_killing_the_service_process_repeatedly(
     world: World, db_engine: Engine, pg_dsn: str
 ) -> None:
@@ -406,6 +415,11 @@ def test_killing_the_service_process_repeatedly(
         finally:
             process.kill()
             process.wait(30)
+        # The killed process's session, which holds the ingest lock, can outlive wait() on a
+        # loaded Windows runner (so can a launcher's interpreter child); --once would exit 4.
+        probe = InstanceLock(db_engine)
+        wait_for(probe.acquire, timeout=60)
+        probe.release()
         kills += 1
         consistent(db_engine, world)
     total = _messages(db_engine)
