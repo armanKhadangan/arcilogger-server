@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { ReactNode } from 'react';
 
 import { BACKGROUND_HEADER } from '@/lib/api';
-import type { ApiErrorBody, Role } from '@/lib/api-types';
+import type { ApiErrorBody, LicenseOut, Role } from '@/lib/api-types';
 import { COMPLIANCE_POLL_MS, useCompliance } from '@/lib/compliance-hooks';
 import type { ComplianceStatus, ConfigBackupOut } from '@/lib/compliance-types';
 import {
@@ -18,6 +18,7 @@ import {
   type RecordedRequest,
 } from '@/test/api-mock';
 import { renderApp, testQueryClient } from '@/test/render';
+import { licenseSample } from '@/test/samples';
 
 /*
  * Uyum Durumu as the app opens it (`/compliance`, Wave 4 contract 2.8.1, tests of §3 W4-F): the
@@ -60,12 +61,14 @@ interface Serve {
   reportFails?: Response;
   /** The report announces this `X-Arci-Sha256` instead of its bytes' own. */
   reportSha256?: string;
+  /** `GET /license` answers this (default: not served). */
+  license?: LicenseOut;
 }
 
 /** The API as the captured samples have it, for `role`; returns the recorded requests. */
 function serve(
   role: Role,
-  { unreadable = false, reportFails, reportSha256 = PDF_SHA256 }: Serve = {},
+  { unreadable = false, reportFails, reportSha256 = PDF_SHA256, license }: Serve = {},
 ): RecordedRequest[] {
   let confirmed = false;
   const me = makeMe(role);
@@ -74,6 +77,8 @@ function serve(
     switch (request.path) {
       case '/api/v1/auth/me':
         return jsonResponse(200, me);
+      case '/api/v1/license':
+        return license ? jsonResponse(200, license) : errorResponse(404, 'not_found');
       case '/api/v1/compliance':
         if (!may('compliance.read')) return sampleError('forbidden');
         if (confirmed) return jsonResponse(200, SAMPLE.after_backup);
@@ -285,6 +290,15 @@ describe('Uyum Durumu page', () => {
       null,
       null,
     ]);
+  });
+
+  it('opens under an expired trial: no licence module locks it (5651 Temel)', async () => {
+    // Wave 4 contract 0.1 item 2: the route sits in no `ModuleGate`.
+    serve('admin', { license: licenseSample('trial_expired') });
+    renderApp('/compliance');
+    await screen.findByTestId('compliance-card-sources');
+    expect(cards()).toHaveLength(10);
+    expect(screen.queryByTestId('module-locked')).toBeNull();
   });
 
   it.each(['hr', 'viewer'] as const)(

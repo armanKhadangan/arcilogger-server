@@ -68,8 +68,9 @@ describe('pages with content', () => {
     ]);
   });
 
-  it('keeps Uyum Durumu and Sistem in 5651 Temel: no licence module locks them', () => {
-    // Wave 4 contract 0.1 item 2: no `require_module`, no `ModuleGate`.
+  it('keeps Uyum Durumu and Sistem in 5651 Temel: their menu entries name no licence module', () => {
+    // Wave 4 contract 0.1 item 2: no `require_module`, no `ModuleGate`. The routes are opened
+    // under an expired trial in `compliance-page.test.tsx` and `system-page.test.tsx`.
     const pages = NAV_ITEMS.filter((item) => ['compliance', 'system'].includes(item.key));
     expect(pages.map((item) => [item.key, item.path, item.module])).toEqual([
       ['compliance', '/compliance', undefined],

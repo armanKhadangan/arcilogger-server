@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { ReactNode } from 'react';
 
 import { BACKGROUND_HEADER } from '@/lib/api';
-import type { ApiErrorBody, Role } from '@/lib/api-types';
+import type { ApiErrorBody, LicenseOut, Role } from '@/lib/api-types';
 import { SYSTEM_POLL_MS, useSystemHealth, useSystemSummary } from '@/lib/system-hooks';
 import type { SystemHealth } from '@/lib/system-health-types';
 import type { SystemSummary } from '@/lib/system-types';
@@ -62,6 +62,8 @@ interface Serve {
   summary?: () => Response;
   /** `GET /system/health` answers this instead of the health (a pending answer too). */
   health?: () => Response | Promise<Response>;
+  /** `GET /license` answers this (default: the captured `maintenance_expired`). */
+  license?: LicenseOut;
 }
 
 /** The API as the captured samples have it, for `role`; returns the recorded requests. */
@@ -76,7 +78,7 @@ function serve(role: Role, answers: Serve = {}): RecordedRequest[] {
       case '/api/v1/auth/me':
         return jsonResponse(200, me);
       case '/api/v1/license':
-        return jsonResponse(200, licenseSample('maintenance_expired'));
+        return jsonResponse(200, answers.license ?? licenseSample('maintenance_expired'));
       case '/api/v1/system':
         if (!me.permissions.includes('system.read')) return refused();
         return answers.summary?.() ?? jsonResponse(200, SYSTEM.summary);
@@ -199,6 +201,15 @@ describe('Sistem page', () => {
       null,
       null,
     ]);
+  });
+
+  it('opens under an expired trial: no licence module locks it (5651 Temel)', async () => {
+    // Wave 4 contract 0.1 item 2: the route sits in no `ModuleGate`.
+    serve('admin', { license: licenseSample('trial_expired') });
+    renderApp('/system');
+    await screen.findByTestId('system-block-clock');
+    expect(block('disks')).toBeInTheDocument();
+    expect(screen.queryByTestId('module-locked')).toBeNull();
   });
 
   it.each(['auditor', 'hr', 'viewer'] as const)(
