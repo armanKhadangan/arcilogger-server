@@ -2,6 +2,8 @@ import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FileWarning } from 'lucide-react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -12,7 +14,7 @@ import {
   useDashboardSummary,
   useTodayCompanyUsage,
 } from '@/lib/api-hooks';
-import type { DashboardSummary, LicenseOut, Role } from '@/lib/api-types';
+import type { ApiErrorBody, DashboardSummary, LicenseOut, Role } from '@/lib/api-types';
 import {
   errorResponse,
   installFetch,
@@ -33,6 +35,17 @@ import { diskRequested } from './dashboard-model';
 import { DashCard } from './dashboard-parts';
 import { PARSE_FAILURES, withParseFailures } from './test-data';
 
+/** `GET /system/disk` as the real API answered it (`e2e/samples/system-disk.json`, a Windows host). */
+const SYSTEM_DISK = JSON.parse(
+  readFileSync(join(process.cwd(), 'e2e', 'samples', 'system-disk.json'), 'utf8'),
+) as {
+  disk: SystemDisk;
+  errors: Record<
+    'forbidden',
+    { status: number; headers: Record<string, string>; body: ApiErrorBody }
+  >;
+};
+
 /**
  * The summary the API sent to `role` (captured per role; `hr` is refused), with a known
  * parse-failure box beside the ingest box.
@@ -47,6 +60,7 @@ function serve(
   role: Role,
   change?: (summary: DashboardSummary) => void,
   license: LicenseOut | Response = licenseSample('trial'),
+  disk: () => Response | Promise<Response> = () => jsonResponse(200, SYSTEM_DISK.disk),
 ): RecordedRequest[] {
   return installFetch((request) => {
     switch (request.path) {
@@ -63,6 +77,12 @@ function serve(
       }
       case '/api/v1/usage/company':
         return jsonResponse(200, USAGE.company);
+      // `system.read`: administrators only.
+      case '/api/v1/system/disk': {
+        if (role === 'admin') return disk();
+        const refused = SYSTEM_DISK.errors.forbidden;
+        return jsonResponse(refused.status, refused.body, refused.headers);
+      }
       case '/api/v1/raw': {
         const line =
           RAW.lines[
@@ -82,6 +102,7 @@ const CARDS = [
   'card-seal',
   'card-credit',
   'card-clock',
+  'card-disk',
   'card-usage',
   'card-alerts',
   'card-sites',
@@ -94,6 +115,13 @@ async function shownCards(): Promise<string[]> {
   return CARDS.filter((id) => screen.queryByTestId(id) !== null);
 }
 
+/** Lets the requests still in flight answer (a request that should not be made, is not). */
+async function settle() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -104,6 +132,7 @@ describe('Panel — blocks by permission', () => {
     renderApp('/');
     expect(await screen.findByRole('heading', { level: 1, name: 'Panel' })).toBeInTheDocument();
     await screen.findByTestId('card-ingest');
+    await screen.findByTestId('card-disk');
     expect(await shownCards()).toEqual(CARDS);
     const ingest = screen.getByTestId('card-ingest');
     expect(within(ingest).getByText('2/3 kaynak aktif')).toBeInTheDocument();
@@ -206,7 +235,10 @@ describe('Panel — blocks by permission', () => {
     serve('auditor');
     renderApp('/');
     await screen.findByTestId('card-seal');
-    expect(await shownCards()).toEqual(CARDS.filter((id) => id !== 'card-alerts'));
+    // Nor the disk card (no system.read).
+    expect(await shownCards()).toEqual(
+      CARDS.filter((id) => id !== 'card-alerts' && id !== 'card-disk'),
+    );
     // The auditor may not open "Kaynaklar" or "Sistem": no links there.
     expect(within(screen.getByTestId('card-ingest')).queryByRole('link')).not.toBeInTheDocument();
     expect(within(screen.getByTestId('card-clock')).queryByRole('link')).not.toBeInTheDocument();
@@ -258,6 +290,124 @@ describe('Panel — blocks by permission', () => {
     expect(screen.getByText('Sunucu hatası.')).toBeInTheDocument();
     expect(await screen.findByTestId('card-usage')).toBeInTheDocument();
     expect(screen.queryByTestId('card-ingest')).not.toBeInTheDocument();
+  });
+});
+
+describe('Panel — disk card (Wave 4 contract 2.8.3)', () => {
+  const diskCalls = (calls: RecordedRequest[]) =>
+    calls.filter((call) => call.path === '/api/v1/system/disk');
+
+  /** The Panel's cards in page order. */
+  function pageOrder(): string[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="card-"]'))
+      .map((card) => card.dataset.testid ?? '')
+      .filter((id) => CARDS.includes(id));
+  }
+
+  it('administrator: right after the clock card, the captured drives, linking to Sistem', async () => {
+    const calls = serve('admin');
+    renderApp('/');
+    const card = await screen.findByTestId('card-disk');
+    expect(pageOrder().slice(4, 6)).toEqual(['card-clock', 'card-disk']);
+    expect(within(card).getByRole('heading', { name: 'Disk' })).toBeInTheDocument();
+    const drives = within(card).getAllByTestId('drive-meter');
+    expect(drives[0]).toHaveTextContent('D:Veri sürücüsü%59 dolu');
+    expect(drives[1]).toHaveTextContent('C:Sistem sürücüsü%39 dolu');
+    expect(within(card).getAllByTestId('disk-card-forecast')[1]).toHaveTextContent(
+      'Tahmin için en az 7 günlük ölçüm gerekiyor (3/7).',
+    );
+    expect(within(card).getByRole('link', { name: 'Sistem sayfasını aç' })).toHaveAttribute(
+      'href',
+      '/system',
+    );
+    // Six health cards: three a row, then all six in one row.
+    expect(card.parentElement?.className).toMatch(/\blg:grid-cols-3 2xl:grid-cols-6\b/);
+    expect(card.parentElement).toBe(screen.getByTestId('card-clock').parentElement);
+    // The first load is the user's.
+    expect(diskCalls(calls).map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([null]);
+  });
+
+  it('only with system.read: the others neither ask for the disks nor see the card', async () => {
+    for (const role of ['auditor', 'viewer', 'hr'] satisfies Role[]) {
+      const calls = serve(role);
+      const view = renderApp('/');
+      await screen.findByTestId('card-usage');
+      await settle();
+      expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+      expect(diskCalls(calls)).toEqual([]);
+      if (role === 'auditor') {
+        // Five health cards keep their five columns.
+        expect(screen.getByTestId('card-clock').parentElement?.className).toMatch(
+          /\b2xl:grid-cols-5\b/,
+        );
+      }
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('no card while the disks load: it appears with the answer', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    serve('admin', undefined, undefined, () => pending);
+    renderApp('/');
+    await screen.findByTestId('card-clock');
+    await settle();
+    expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+    // Only the summary's skeleton is a loading state; the five cards are on screen.
+    expect(screen.queryByRole('status', { name: 'Yükleniyor' })).not.toBeInTheDocument();
+    answer(jsonResponse(200, SYSTEM_DISK.disk));
+    expect(await screen.findByTestId('card-disk')).toHaveTextContent('%59 dolu');
+  });
+
+  it('no card and no message when the disks are refused or fail (the Sistem page shows it)', async () => {
+    const answers = [
+      () => {
+        const refused = SYSTEM_DISK.errors.forbidden;
+        return jsonResponse(refused.status, refused.body, refused.headers);
+      },
+      () => errorResponse(500, 'internal_error', { tr: 'Sunucu hatası.' }),
+    ];
+    for (const disk of answers) {
+      const calls = serve('admin', undefined, undefined, disk);
+      const view = renderApp('/');
+      await screen.findByTestId('card-clock');
+      await waitFor(() => {
+        expect(diskCalls(calls)).toHaveLength(1);
+      });
+      await settle();
+      expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+      expect(screen.queryByText('Sunucu hatası.')).not.toBeInTheDocument();
+      expect(screen.queryByText('Bu işlem için yetkiniz yok.')).not.toBeInTheDocument();
+      expect(screen.queryByText('Panel bilgileri alınamadı.')).not.toBeInTheDocument();
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('"Yenile" asks for the disks again as the user\'s request; a failed answer hides the card', async () => {
+    let failing = false;
+    const calls = serve('admin', undefined, undefined, () =>
+      failing
+        ? errorResponse(500, 'internal_error', { tr: 'Sunucu hatası.' })
+        : jsonResponse(200, SYSTEM_DISK.disk),
+    );
+    renderApp('/');
+    await screen.findByTestId('card-disk');
+    failing = true;
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Yenile' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('card-disk')).not.toBeInTheDocument();
+    });
+    expect(diskCalls(calls).map((call) => call.headers.get(BACKGROUND_HEADER))).toEqual([
+      null,
+      null,
+    ]);
+    expect(screen.getByTestId('card-clock')).toBeInTheDocument();
+    expect(screen.queryByText('Sunucu hatası.')).not.toBeInTheDocument();
   });
 });
 
@@ -376,12 +526,6 @@ describe('Panel — licence (contract 8.4)', () => {
   const usageCalls = (calls: RecordedRequest[]) =>
     calls.filter((call) => call.path.startsWith('/api/v1/usage'));
 
-  async function settle() {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-  }
-
   it('usage analytics off: a locked card, no /usage/company request, the health boxes unchanged', async () => {
     const calls = serve('admin', undefined, licenseSample('trial_expired'));
     renderApp('/');
@@ -392,6 +536,8 @@ describe('Panel — licence (contract 8.4)', () => {
       '/settings/license',
     );
     expect(await screen.findByTestId('card-ingest')).toHaveTextContent('2/3 kaynak aktif');
+    // The disk card is 5651 Temel: the same in every licence state.
+    expect(await screen.findByTestId('card-disk')).toBeInTheDocument();
     for (const id of ['card-seal', 'card-credit', 'card-clock', 'card-alerts', 'card-calendar'])
       expect(screen.getByTestId(id)).toBeInTheDocument();
     for (const id of ['card-usage', 'card-sites', 'card-categories'])
