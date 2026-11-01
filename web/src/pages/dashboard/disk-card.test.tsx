@@ -15,11 +15,15 @@ import { DiskCard } from './disk-card';
  * forecast in one line, and the link to Sistem by the Panel's link rule (W4-F puts it on the Panel).
  */
 
-function renderCard(disk: SystemDisk = systemDisk(), me = makeMe('admin')) {
+function renderCard(
+  disk: SystemDisk = systemDisk(),
+  me = makeMe('admin'),
+  props: { to?: string | null } = {},
+) {
   return render(
     <MemoryRouter>
       <AuthProvider me={me}>
-        <DiskCard disk={disk} />
+        <DiskCard disk={disk} {...props} />
       </AuthProvider>
     </MemoryRouter>,
   );
@@ -96,6 +100,19 @@ describe('DiskCard', () => {
       expect(within(card).getAllByRole('meter')).toHaveLength(2);
       view.unmount();
     }
+  });
+
+  it('links where the caller says, or nowhere when it passes null', () => {
+    const { unmount } = renderCard(systemDisk(), makeMe('admin'), { to: '/system#disks' });
+    expect(
+      within(screen.getByTestId('card-disk')).getByRole('link', { name: 'Sistem sayfasını aç' }),
+    ).toHaveAttribute('href', '/system#disks');
+    unmount();
+
+    renderCard(systemDisk(), makeMe('admin'), { to: null });
+    const card = screen.getByTestId('card-disk');
+    expect(within(card).queryByRole('link')).toBeNull();
+    expect(within(card).getAllByRole('meter')).toHaveLength(2);
   });
 
   it('says so when no drive could be read', () => {

@@ -13,9 +13,10 @@ import { DashCard } from './dashboard-parts';
 /**
  * "Disk" on the Panel (`GET /system/disk`, `system.read`; Wave 4 contract 2.8.3): each drive's
  * used share with the level as icon and text, its forecast in one line, and "Sistem sayfasını
- * aç" when the user may open Sistem (the Panel's link rule, `linkTarget`).
+ * aç" when the user may open Sistem (the Panel's link rule, `linkTarget`). A `to` the caller
+ * passes replaces that link (agreed on #24); `null` leaves the card without one.
  */
-export function DiskCard({ disk }: { disk: SystemDisk }) {
+export function DiskCard({ disk, to }: { disk: SystemDisk; to?: string | null }) {
   const { t } = useTranslation();
   const lang = currentLang();
   const { permissions } = useAuth();
@@ -23,7 +24,7 @@ export function DiskCard({ disk }: { disk: SystemDisk }) {
     <DashCard
       title={t('system.diskCard.title')}
       icon={HardDrive}
-      to={linkTarget('system', permissions)}
+      to={to === undefined ? linkTarget('system', permissions) : to}
       page={t('nav.system')}
       testId="card-disk"
     >
