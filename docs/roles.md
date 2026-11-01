@@ -416,7 +416,7 @@ aldım" (I have copied the configuration) confirmation of card 10 (`POST /compli
 `settings.manage`) and every setting. The auditor is not shown the confirmation button nor the
 "İlk kurulum sihirbazını aç" (open the first-run wizard) link; the cards' links to Kaynaklar,
 Güvenlik, Ayarlar and Sistem are hidden too (the links to Mühürleme and Arama stay), while the card
-itself is always shown. The number of a card's active alerts is shown to the auditor too, without a
+itself is always shown. The number of a card's open alerts is shown to the auditor too, without a
 link to the Güvenlik page (their rule, severity and opening time are in the PDF report); the
 Güvenlik page and the alerts' details (`alerts.read`) stay administrator-only. The **Sistem** page
 and the Panel's **Disk** card are administrator-only (`system.read`; open question 5). hr and viewer

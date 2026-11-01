@@ -660,7 +660,7 @@ sign-in: the first-run setup page shows it as its third step ("Kurulum sihirbaz�
 Ayarlar'da", First-run wizard — After sign-in, in Settings), and the link **İlk kurulum sihirbazını
 aç** (Open the first-run wizard) on the Uyum Durumu page opens it too (while a card is not
 **Tamam**, OK). The wizard has no forms of its own and stores nothing: each step's state ("Tamam" /
-"Eksik", done / missing) is read again from the server's configuration and request history every
+"Eksik", OK / Missing) is read again from the server's configuration and request history every
 time it opens. The wizard opens on the first step that is not done; **Ayarlar'da aç** (Open in
 Settings) opens the matching Settings page (whose way-back link then reads **Kurulum sihirbazına
 dön**, Back to the first-run wizard), **Bu adımı şimdilik atla** (Skip this step for now) goes on to
@@ -814,11 +814,11 @@ scheduled tasks and for the firewall rules.
   tasarlanmıştır"): the page and the report are technical checks, not a legal assessment; confirm
   the results and how you use the report with your legal counsel
   ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) sections 1 and 3).
-- **Sistem** (System, `/system`, administrator only): resource use, drives and the disk forecast,
-  database size, collector and ingest, services (ArciCollector, ArciIngest and ArciWorker from their
-  status files, the administration service from its heartbeat, ApplySystem from its last result),
-  scheduled tasks (each task's state is derived from its evidence file, not asked of the Task
-  Scheduler), worker jobs, clock, version and maintenance (section 13;
+- **Sistem** (System, `/system`, administrator only): resource use, disks and the disk forecast,
+  database size, collector and import (ingest), services (ArciCollector, ArciIngest and ArciWorker
+  from their status files, the administration service from its heartbeat, ApplySystem from its last
+  result), scheduled tasks (each task's state is derived from its evidence file, not asked of the
+  Task Scheduler), worker jobs, clock, version and maintenance (section 13;
   [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 4). For the disk forecast the worker job
   `system.sample` writes one sample a day after 00:30 to `state\system-history.json`; the forecast
   shows after at least 7 days of samples. After the first night check on the Sistem page that the

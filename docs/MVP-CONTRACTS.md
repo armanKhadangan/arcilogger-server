@@ -2491,7 +2491,11 @@ The web app polls `GET /compliance`, `GET /system`, `GET /system/health` and (Pa
 Panel): neither page nor the PDF carries data about log subjects (no client IP or MAC, no person,
 no device host name, no sender address, no replica target path), so there is no KVKK notice
 gate; the PDF names only the signed-in account that exported it. `POST` is CSRF-checked as every
-change.
+change. An error answer is shown with the server's text in the interface language and its code
+("… (config_backup_unreadable)"): a failed export beside "Uyum Durumu Raporu (PDF)", a failed
+confirmation in the confirm dialog of "Yapılandırma yedeğini aldım", a failed `GET /system/health`
+in the Sistem page's Saat block only, while a failed `GET /system` is the page's error (W4-C
+deviation, 19.8).
 
 ### 19.2 Uyum Durumu: `ComplianceStatus`
 
@@ -2593,7 +2597,8 @@ has_error}], unknown_sources}`; `VersionInfo {product, version, core_version, re
 - **Host** (`arcilogger_core.hostinfo`, standard library only: `ctypes` on Windows, `/proc` on
   Linux, owner question Q16): CPU % is computed between two readings kept in the API process
   (at least 1 s apart), so the first request answers `cpu_percent: null`; any other platform or
-  error gives `null`.
+  error gives `null`. The Sistem page reads a null CPU as "ölçülüyor" on `windows` and `linux` and
+  as "bu platformda okunamıyor" on `other`, like the null host values (W4-C deviation, 19.8).
 - **Drives:** those of the R20-disk check (`alerts.system.drives(config.data_dir)`): the data
   drive, then the system drive when it is another device; `path` is the drive label (`D:`; on
   Linux the data directory's path and `/`); `used_percent` = `used * 100 // total`;
@@ -2605,7 +2610,9 @@ has_error}], unknown_sources}`; `VersionInfo {product, version, core_version, re
   day it reaches the total, never before today. `warning_on` is `null` when a measurement (the
   drive's use now, else its newest sample) is already at or above the mark; either date is
   `null` beyond `forecast.HORIZON_DAYS` = 36,500 days while `state` stays `estimated` (W4-B
-  deviations, 19.8). Days without a sample are gaps, not zeros.
+  deviations, 19.8). Days without a sample are gaps, not zeros. The Sistem page words each case
+  (`insufficient`, `not_growing`, `estimated` with both dates, with `warning_on` null, with
+  `full_on` null): W4-C deviation, 19.8; UYUM-DURUMU / COMPLIANCE-STATUS section 4.2.
 - **Database:** `pg_database_size(current_database())` and the 10 largest top-level tables of
   `Base.metadata` with every descendant in `pg_inherits` (with TimescaleDB `hypertable_size()`);
   measured at most every 5 minutes (`measured_at`); a query error gives `total_bytes: null`,
@@ -2684,7 +2691,10 @@ stratum | null}]}}`. `task` is one of `Seal`, `VerifyDaily`, `VerifyWeekly`, `Ve
   suffix as the time is read ("00:15'ten", "00:30'dan", "01:00'den"). W4-D deviations, 19.8.
 - **Time:** `[clock] ntp_server`, `fallback_server` (`null` when empty), `alert_offset_ms`;
   `applied_peers` / `applied_at` from ApplySystem's report (`time.peers`, `time.changed_at`;
-  `null` without it); `samples` = the clock samples of the last 24 h, newest first (today's and
+  `null` without it). `applied_peers` `""` (ApplySystem applied an empty peer list) and `null` (no
+  ApplySystem report yet) read differently on the Sistem page: "Uygulanan zaman sunucusu yok" / "No
+  time server applied" and "ApplySystem henüz rapor vermedi" / "No ApplySystem report yet" (W4-C
+  deviation, 19.8). `samples` = the clock samples of the last 24 h, newest first (today's and
   yesterday's `state\clock\<day>.jsonl`), `offset_ms` = `offset_us` / 1000 and `delay_ms` =
   `delay_us` / 1000 when `ok`, else `null`.
 - **`setup_problems` in TR and EN:** `routers/admin_config.py` `_BILINGUAL` also accepts
@@ -2792,7 +2802,20 @@ alert:
   {full_on} (~{days} days)." with `warning_on` null, and "Disk kullanımı çok yavaş artıyor; dolma
   tarihi öngörülemiyor." / "Disk use grows very slowly; no date can be given." with `full_on`
   null; a null CPU reads "bu platformda okunamıyor" on platform `other`, "ölçülüyor" on Windows
-  and Linux.
+  and Linux; `time.applied_peers` `""` reads "Uygulanan zaman sunucusu yok" / "No time server
+  applied", `null` "ApplySystem henüz rapor vermedi" / "No ApplySystem report yet" (manager's note
+  on #24). The views take optional, additive props agreed with W4-F on #24 (the contract's prop
+  names stay): `ComplianceView` `exportError` (shown beside the PDF button) and `confirmError` (the
+  409 `config_backup_unreadable`, shown in the confirm dialog, also when it arrives while the
+  dialog is open; else the error `onConfirmBackup`'s promise rejected with); `SystemView`
+  `healthError` (`error` stays the `GET /system` error, the page's; a `healthError` shows in the
+  Saat block only, with "Tekrar dene", the other health blocks (Hizmetler, Zamanlanmış görevler,
+  Worker işleri) say "Durum alınamadı; hata Saat bölümünde." / "The status could not be read; the
+  error is under Clock.", and data already shown stays; with no answer and no failure they say
+  "Durum henüz alınmadı." / "No status received yet.", while loading a skeleton); `DiskCard`
+  `to?: string | null` (left out, the Panel's link rule, `/system` with `system.read`; a string is
+  used as given; `null` gives no link). Both new error places show the server's text with its
+  code; the page `h1` is rendered in the loading and error states too.
 - **W4-D:** English interval texts in the singular for one ("Every 1 minute"); the Turkish
   "from" suffix by how the time is read ("00:15'ten", "03:30'dan", "01:00'den"); a job is
   `failing` also when `last_status` is `failed` with `failures` 0 (a run whose `job_runs` row the

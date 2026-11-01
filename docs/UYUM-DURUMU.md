@@ -56,8 +56,9 @@ belirtir (bölüm 6).
 2026-10-28; [SECURITY.md](SECURITY.md)). Denetçi bütün kartları ve PDF düğmesini görür; yedek onayı
 düğmesi ve sihirbaz bağlantısı ona gösterilmez. Kartın ayrıntı sayfasına giden bağlantı, kullanıcı
 o sayfayı açamıyorsa gizlenir (denetçi için Kaynaklar, Güvenlik, Ayarlar ve Sistem; Mühürleme ve
-Arama bağlantıları kalır); kartın kendisi her zaman gösterilir. Kartın açık uyarıları (kural, önem,
-açılış zamanı) denetçiye de gösterilir, Güvenlik sayfasına bağlantısı olmadan.
+Arama bağlantıları kalır); kartın kendisi her zaman gösterilir. Kartın açık uyarılarının sayısı
+("Açık uyarı: {n}") denetçiye de gösterilir, Güvenlik sayfasına bağlantısı olmadan; uyarıların
+kuralı, önemi ve açılış zamanı Uyum Durumu Raporu'ndadır (PDF).
 
 **Kişisel veri yok, görüntüleme denetim kaydına yazılmaz.** Kartlarda ve raporda log öznelerine ait
 hiçbir veri yoktur: istemci IP ya da MAC adresi, bir cihaza atanmış kişinin adı, cihaz ana bilgisayar
@@ -83,7 +84,8 @@ Hesaplanamayan bir kart içeren yanıt saklanmaz; sonraki istek kartları yenide
 **Değerlendirme kuralı.** Her kartın bölüm 2'deki tablosu yukarıdan aşağıya okunur: **ilk tutan
 satır** durumu ve gerekçeyi belirler. Hiçbir satır tutmazsa kart **Tamam**'dır. Her kart ayrıca
 konusuyla ilgili etkin uyarıları (durumu `open` ya da `acknowledged`) en yeniden başlayarak en
-çok beş tane listeler.
+çok beş tane listeler: sayfa bunların sayısını, rapor (PDF) kuralını, önemini ve açılış zamanını
+gösterir.
 
 **Kartlar:**
 
@@ -527,8 +529,8 @@ görünür. Onay penceresi şunu söyler:
 Onaylayınca sunucu `arcilogger.toml` dosyasının şimdiki SHA-256 değerini okur ve denetim kaydına
 `compliance.config_backup_confirm` girdisini bu değerle yazar ("Yapılandırma yedeği onaylandı");
 kart hemen güncellenir. Onay tekrarlanabilir (her seferinde yeni bir girdi). Dosya okunamazsa onay
-kaydedilmez: "Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi." (409
-`config_backup_unreadable`).
+kaydedilmez ve onay penceresi hatayı koduyla gösterir: "Yapılandırma dosyası okunamadı; yedek onayı
+kaydedilmedi. (config_backup_unreadable)" (409).
 
 Kart yalnızca `arcilogger.toml` dosyasının değiştiğini görür: Ayarlar'dan yapılan ve bu dosyaya
 yazılan her değişiklik (ör. Genel, Kaynaklar, Kamu SM, Replika, Yedekleme) kartı **Dikkat**'e
@@ -577,6 +579,7 @@ olarak indirir. Yönetici ve denetçi indirebilir (`compliance.read`).
   tasarlanmıştır; bu rapor hukuki uygunluk beyanı değildir."
 - **Kişisel veri:** kartlar gibi raporda da log öznelerine ait veri yoktur. Tek istisna raporu
   indiren hesabın görünen adı ve kullanıcı adıdır.
+- **İndirme başarısız olursa** sunucunun hata metni, kodu ile birlikte düğmenin yanında görünür.
 
 Rapor teknik denetimlerin bir dökümüdür; hukuki bir değerlendirme değildir. Raporu bir denetime
 sunmadan önce metinlerini hukuk müşavirinizle gözden geçirin.
@@ -587,14 +590,20 @@ sunmadan önce metinlerini hukuk müşavirinizle gözden geçirin.
 gösterir; yalnızca yöneticiye açıktır (`system.read`) ve yalnızca okur. Görüntüleme denetim kaydına
 yazılmaz. Sayfa 30 saniyede bir arka planda yenilenir. Hizmet ve görev durumları Windows Hizmet
 Denetim Yöneticisi'ne ya da Görev Zamanlayıcı'ya sorulmaz: ARCILOGGER'ın zaten okuyabildiği durum
-dosyalarından, kanıt dosyalarından ve veritabanından çıkarılır. Bloklar bu sıradadır:
+dosyalarından, kanıt dosyalarından ve veritabanından çıkarılır.
+
+Hizmetler, Zamanlanmış görevler, Worker işleri ve Saat blokları ayrı bir istekle okunur. Bu istek
+başarısız olursa hata (kodu ve **Tekrar dene** düğmesiyle) yalnızca Saat bloğunda görünür, diğer üç
+blok "Durum alınamadı; hata Saat bölümünde." yazar; daha önce gösterilen değerler yerinde kalır.
+Henüz yanıt gelmemişse bu bloklar "Durum henüz alınmadı." yazar. Bloklar bu sıradadır:
 
 ### 4.1 Kaynak kullanımı
 
 İşlemci (%), bellek (kullanılan ve toplam) ve çalışma süresi, Windows API'siyle okunur (ek program
 yok). İşlemci kullanımı iki okuma arasındaki farktır: ilk istekte "ölçülüyor" yazar, sonraki
 isteklerde son okumadan bu yana geçen sürenin kullanımı görünür. Bir değer okunamazsa "bu platformda
-okunamıyor" yazar.
+okunamıyor" yazar; sunucu Windows ya da Linux değilse işlemci için de "ölçülüyor" yerine bu
+yazar.
 
 ### 4.2 Diskler ve disk tahmini
 
@@ -615,12 +624,15 @@ yeni örnek bekler.
 | Yetersiz | 7'den az örnek | "Tahmin için en az 7 günlük ölçüm gerekiyor ({örnek}/7)." |
 | Artmıyor | Eğim sıfır ya da eksi | "Son 30 günde disk kullanımı artmadı." |
 | Tahmin | Eğim artı | "Bu hızla %{uyarı} eşiğine {uyarı tarihi}, dolmaya {dolma tarihi} (~{gün} gün)." |
+| Tahmin, eşiğe ulaşılmış | Eğim artı, disk uyarı eşiğinde ya da üstünde | "%{uyarı} eşiğine ulaşıldı; bu hızla dolmaya {dolma tarihi} (~{gün} gün)." |
+| Tahmin, tarihsiz | Eğim artı, dolma tarihi 100 yıldan uzak | "Disk kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor." |
 
-- Disk **şu anda** uyarı eşiğinin üstündeyse uyarı tarihi verilmez; bunu çizgi değil o anki ölçüm
-  (yoksa en yeni örnek) belirler. Ölçüm eşiğe henüz varmamışken çizgi geçmişte eşiği geçmişse uyarı
-  tarihi "bugün" olur.
+- Disk **şu anda** uyarı eşiğindeyse ya da üstündeyse uyarı tarihi verilmez ("eşiğine ulaşıldı");
+  bunu çizgi değil o anki ölçüm (yoksa en yeni örnek) belirler. Tam eşikteki bir disk "ulaşıldı"
+  der, "geçildi" demez: sürücünün durumu orada hâlâ "Olağan"dır. Ölçüm eşiğe henüz varmamışken çizgi
+  geçmişte eşiği geçmişse uyarı tarihi "bugün" olur.
 - 100 yıldan (36.500 gün) uzaktaki bir tarih verilmez: günde birkaç bayt büyüyen bir disk "tahmin"
-  durumunda kalır, ama tarihsiz.
+  durumunda kalır, ama tarihsiz ("dolma tarihi öngörülemiyor").
 - Düz bir çizgi bilerek basit bir modeldir: haftalar sonrası için kaba bir yol göstericidir.
 
 Disk dolarsa ham loglar yazılamaz (`R20-spool`): yer açmak için ham kayıtları ve kasayı **silmeyin**;
@@ -706,8 +718,9 @@ dosyasına bakın; art arda 3 hata `R20-job` uyarısını açar.
 
 Yerel saat kaynağı (`[clock] ntp_server`), yedek sunucu (`[clock] fallback_server`), uyarı sınırı
 (`[clock] alert_offset_ms`), ApplySystem'in Windows Saati'ne uyguladığı sunucular ve zamanı
-(ApplySystem yoksa boş) ve son 24 saatin saat ölçümleri, en yeniden başlayarak: zaman, sunucu,
-yanıt alınıp alınmadığı, sapma ve gecikme (ms), stratum. Kart 6 bu ölçümlerin en yenisini
+(ApplySystem boş bir liste uyguladıysa "Uygulanan zaman sunucusu yok", henüz rapor vermediyse
+"ApplySystem henüz rapor vermedi") ve son 24 saatin saat ölçümleri, en yeniden başlayarak: zaman,
+sunucu, yanıt alınıp alınmadığı, sapma ve gecikme (ms), stratum. Kart 6 bu ölçümlerin en yenisini
 değerlendirir.
 
 ### 4.9 Sürüm ve güncelleme
@@ -744,12 +757,15 @@ sihirbazı — Girişten sonra, Ayarlar'da" gösterir.
 | Kamu SM: test sunucusu | istek geçmişinde başarılı bir "Damga testi" var ya da üretim sunucusu seçili | Ayarlar → Kamu SM (test adımı) |
 | Kamu SM: üretim | üretim sunucusu seçili ve mühürleme hazır | Ayarlar → Kamu SM (üretim adımı) |
 | Replika | replika açık | Ayarlar → Replika |
-| E-posta | SMTP sunucusu ve gönderen ayarlı | Ayarlar → E-posta |
+| E-posta | e-posta gönderimi açık, SMTP sunucusu ve gönderen ayarlı | Ayarlar → E-posta |
 | Özet | — | — |
 
 - Sihirbaz açılınca **Tamam** olmayan ilk adım seçilir. Her adım ne için olduğunu, durumunu
   ("Tamam" / "Eksik") ve neyin eksik olduğunu yazar; **Ayarlar'da aç** ilgili sayfayı açar,
   **Bu adımı şimdilik atla** sonraki adıma geçer (adım "Eksik" kalır).
+- **E-posta** adımı, e-posta gönderimi kapalıyken (varsayılan) sunucu ve gönderen ayarlı olsa da
+  "Eksik" kalır ve "E-posta gönderimi kapalı." yazar: gönderim kapalıyken hiçbir uyarı ya da rapor
+  e-postası gönderilmez. Eksik sunucu ya da gönderen de ayrıca yazılır.
 - Sihirbazdan açılan Ayarlar sayfasındaki geri dönüş bağlantısı **Kurulum sihirbazına dön** olur.
   Bu durum yalnızca o tarayıcı sekmesinde hatırlanır; sihirbaz sayfası ya da Ayarlar ana sayfası onu
   sonlandırır.
