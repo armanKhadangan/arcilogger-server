@@ -274,6 +274,7 @@ def _check_downgraded(engine: Engine, before: dict[str, tuple[Any, str]], traffi
     assert upgrade(engine, revision=REVISION).after == (REVISION,)  # and up again
     status = _scalar(engine, "SELECT value FROM settings WHERE key = 'db.timescale'")
     assert TABLE in status["hypertables"] + status["partitioned"]
+    upgrade(engine)  # the models are the head's (later revisions add their own tables)
     with engine.connect() as connection:
         context = MigrationContext.configure(
             connection, opts={"compare_type": True, "include_name": include_name}
