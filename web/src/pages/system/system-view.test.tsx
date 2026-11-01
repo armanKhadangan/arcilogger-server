@@ -47,6 +47,13 @@ const UPGRADE_EN =
 
 const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 
+const HEALTH_FAILED = new ApiError({
+  status: 503,
+  code: 'database_unavailable',
+  messageTr: 'Veritabanına ulaşılamıyor.',
+  messageEn: 'The database cannot be reached.',
+});
+
 function renderView(props: Partial<SystemViewProps> = {}) {
   const onRefresh = vi.fn();
   const view = render(
@@ -297,6 +304,29 @@ describe('SystemView', () => {
     ]);
   });
 
+  it('tells an empty applied peer list from no ApplySystem report', () => {
+    const { unmount } = renderView({ health: systemHealth('none_applied') });
+    const peers = () => screen.getByTestId('system-applied-peers-none');
+    expect(peers()).toHaveTextContent('Uygulanan zaman sunucusu yok');
+    expect(block('clock')).toHaveTextContent('Uygulanma zamanı05.10.2026 03:20:41');
+    act(() => {
+      setLanguage('en');
+    });
+    expect(peers()).toHaveTextContent('No time server applied');
+    unmount();
+
+    act(() => {
+      setLanguage('tr');
+    });
+    renderView({ health: systemHealth('not_reported') });
+    expect(peers()).toHaveTextContent('ApplySystem henüz rapor vermedi');
+    expect(block('clock')).toHaveTextContent('Uygulanma zamanı—');
+    act(() => {
+      setLanguage('en');
+    });
+    expect(peers()).toHaveTextContent('No ApplySystem report yet');
+  });
+
   it('shows the versions, the licence maintenance and the upgrade text; it links and downloads nothing', () => {
     const { unmount } = renderView();
     const version = block('version');
@@ -379,6 +409,106 @@ describe('SystemView', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
+  it('shows a failed health request in the Saat block and keeps every health block', async () => {
+    // A first answer is still on its way: the health's failure shows anyway, not a skeleton.
+    const { onRefresh, rerender } = renderView({
+      health: undefined,
+      healthError: HEALTH_FAILED,
+      loading: true,
+    });
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(BLOCKS_TR);
+    const failure = within(block('clock')).getByRole('alert');
+    expect(failure).toHaveTextContent(
+      'Hizmetlerin, görevlerin, işlerin ve saatin durumu alınamadı.',
+    );
+    expect(failure).toHaveTextContent('Veritabanına ulaşılamıyor. (database_unavailable)');
+    // Only the Saat block has it: no page error, and the other three point to it.
+    expect(screen.getAllByRole('alert')).toEqual([failure]);
+    expect(screen.queryByText('Sistem durumu alınamadı.')).toBeNull();
+    for (const id of ['services', 'tasks', 'jobs'])
+      expect(within(block(id)).getByTestId('system-health-missing'), id).toHaveTextContent(
+        'Durum alınamadı; hata Saat bölümünde.',
+      );
+    await userEvent.click(within(failure).getByRole('button', { name: 'Tekrar dene' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    act(() => {
+      setLanguage('en');
+    });
+    expect(within(block('clock')).getByRole('alert')).toHaveTextContent(
+      'The database cannot be reached. (database_unavailable)',
+    );
+    expect(within(block('jobs')).getByTestId('system-health-missing')).toHaveTextContent(
+      'The status could not be read; the error is under Clock.',
+    );
+    act(() => {
+      setLanguage('tr');
+    });
+
+    // A failed refresh keeps the health data shown, the error above the clock's figures.
+    rerender(
+      <SystemView
+        summary={systemSummary()}
+        health={systemHealth()}
+        license={systemLicense()}
+        error={null}
+        healthError={HEALTH_FAILED}
+        loading={false}
+        updatedAt={Date.parse(W4_NOW)}
+        onRefresh={onRefresh}
+      />,
+    );
+    expect(within(block('clock')).getByRole('alert')).toHaveTextContent('(database_unavailable)');
+    expect(within(block('clock')).getByTestId('system-clock-samples')).toBeInTheDocument();
+    expect(within(block('services')).getAllByRole('row')).toHaveLength(7);
+    expect(screen.queryByTestId('system-health-missing')).toBeNull();
+  });
+
+  it('shows the health error beside the page error when nothing has arrived', () => {
+    renderView({
+      summary: undefined,
+      health: undefined,
+      error: new Error('offline'),
+      healthError: HEALTH_FAILED,
+    });
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sistem');
+    const [page, clock] = screen.getAllByRole('alert');
+    expect(page).toHaveTextContent('Sistem durumu alınamadı.');
+    expect(clock).toHaveTextContent('Veritabanına ulaşılamıyor. (database_unavailable)');
+    expect(block('clock')).toContainElement(clock ?? null);
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(['Hizmetler', 'Zamanlanmış görevler', 'Worker işleri', 'Saat']);
+  });
+
+  it('shows a failed health request while the first summary is still on its way', () => {
+    renderView({
+      summary: undefined,
+      health: undefined,
+      healthError: HEALTH_FAILED,
+      loading: true,
+    });
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sistem');
+    expect(within(block('clock')).getByRole('alert')).toHaveTextContent(
+      'Veritabanına ulaşılamıyor. (database_unavailable)',
+    );
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(['Hizmetler', 'Zamanlanmış görevler', 'Worker işleri', 'Saat']);
+  });
+
+  it('says so in the health blocks when the health has not answered and nothing failed', () => {
+    renderView({ health: undefined });
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(BLOCKS_TR);
+    expect(screen.getAllByTestId('system-health-missing').map((line) => line.textContent)).toEqual(
+      Array(4).fill('Durum henüz alınmadı.'),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('shows a loading state first, then each block as its answer arrives', () => {
     const { rerender } = renderView({
       summary: undefined,
@@ -386,6 +516,7 @@ describe('SystemView', () => {
       loading: true,
       updatedAt: 0,
     });
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sistem');
     expect(screen.getByRole('status', { name: 'Yükleniyor…' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
     expect(screen.queryByText(/Güncellendi/)).toBeNull();
@@ -418,6 +549,7 @@ describe('SystemView', () => {
       health: undefined,
       error: new Error('offline'),
     });
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sistem');
     expect(screen.getByRole('alert')).toHaveTextContent('Sistem durumu alınamadı.');
     expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();

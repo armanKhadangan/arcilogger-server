@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, type ApiError } from '@/lib/api';
 import type { LicenseOut } from '@/lib/api-types';
 import { formatDistance } from '@/lib/display';
 import {
@@ -589,8 +589,85 @@ function JobsBlock({ health }: { health: SystemHealth }) {
   );
 }
 
-/** Saat: the configured time servers, what ApplySystem gave Windows, the samples of 24 hours. */
-function ClockBlock({ health }: { health: SystemHealth }) {
+/**
+ * The failure of `GET /system/health`, shown in the Saat block only (agreed on #24): `error` stays
+ * the summary's, the page's error. The server's message in the interface language and its code.
+ */
+function HealthError({ error, onRetry }: { error: ApiError; onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <Alert tone="danger" title={t('system.health.loadFailed')} data-testid="system-health-error">
+      <span className="flex flex-wrap items-center gap-2">
+        <span>
+          {errorMessage(error)} (<span className="font-mono">{error.code}</span>)
+        </span>
+        <Button size="sm" variant="secondary" onClick={onRetry}>
+          <RefreshCw aria-hidden="true" />
+          {t('common.retry')}
+        </Button>
+      </span>
+    </Alert>
+  );
+}
+
+/**
+ * A block of `GET /system/health` without its data, which never just vanishes: after a failure
+ * the Saat block shows the error and the other three point to it; with no answer and no failure
+ * (the summary is shown, the health is not asked for or not answered) each says so.
+ */
+function HealthPending({
+  id,
+  error,
+  onRetry,
+}: {
+  id: SystemBlock;
+  error: ApiError | null;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  if (error && id === 'clock') {
+    return (
+      <Block id={id}>
+        <HealthError error={error} onRetry={onRetry} />
+      </Block>
+    );
+  }
+  return (
+    <Block id={id}>
+      <p className="text-13 text-muted" data-testid="system-health-missing">
+        {t(error ? 'system.health.seeClock' : 'system.health.notReceived')}
+      </p>
+    </Block>
+  );
+}
+
+/**
+ * What ApplySystem gave Windows: the peer list, an empty list it applied ("" — no time server),
+ * or no report yet (null: ApplySystem has not run); the two are never one blank (#24).
+ */
+function AppliedPeers({ peers }: { peers: string | null }) {
+  const { t } = useTranslation();
+  if (peers) return <span className="font-mono text-xs break-all">{peers}</span>;
+  return (
+    <span className="text-muted" data-testid="system-applied-peers-none">
+      {t(peers === null ? 'system.clock.notReported' : 'system.clock.noPeersApplied')}
+    </span>
+  );
+}
+
+/**
+ * Saat: the configured time servers, what ApplySystem gave Windows, the samples of 24 hours; a
+ * failed refresh of `GET /system/health` above the data it keeps.
+ */
+function ClockBlock({
+  health,
+  error,
+  onRetry,
+}: {
+  health: SystemHealth;
+  error: ApiError | null;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   const lang = currentLang();
   const time = health.time;
@@ -599,6 +676,7 @@ function ClockBlock({ health }: { health: SystemHealth }) {
   const notSet = <span className="text-muted">{t('system.clock.notSet')}</span>;
   return (
     <Block id="clock">
+      {error ? <HealthError error={error} onRetry={onRetry} /> : null}
       <Facts
         items={[
           [
@@ -614,14 +692,7 @@ function ClockBlock({ health }: { health: SystemHealth }) {
             ),
           ],
           [t('system.clock.alertOffset'), ms(time.alert_offset_ms, 0)],
-          [
-            t('system.clock.appliedPeers'),
-            time.applied_peers ? (
-              <span className="font-mono text-xs break-all">{time.applied_peers}</span>
-            ) : (
-              <span className="text-muted">{t('system.clock.notApplied')}</span>
-            ),
-          ],
+          [t('system.clock.appliedPeers'), <AppliedPeers key="peers" peers={time.applied_peers} />],
           [t('system.clock.appliedAt'), dateTime(time.applied_at)],
         ]}
       />
@@ -739,8 +810,13 @@ export interface SystemViewProps {
   health: SystemHealth | undefined;
   /** `GET /license` for the maintenance line; without it the line is left out. */
   license: LicenseOut | undefined;
-  /** The last request's failure (`null` when none); the data already shown stays. */
+  /** The last `GET /system` failure (`null` when none); the data already shown stays. */
   error: unknown;
+  /**
+   * The last `GET /system/health` failure (`null`/absent when none): shown in the Saat block
+   * only, never as the page's error; the health data already shown stays.
+   */
+  healthError?: ApiError | null;
   /** A first answer is still on its way. */
   loading: boolean;
   /** When the shown data arrived (ms since the epoch; 0: not yet). */
@@ -761,6 +837,7 @@ export function SystemView({
   health,
   license,
   error,
+  healthError = null,
   loading,
   updatedAt,
   onRefresh,
@@ -768,7 +845,16 @@ export function SystemView({
   const { t } = useTranslation();
 
   const block = (id: SystemBlock): ReactNode => {
-    if (HEALTH_BLOCKS.has(id) ? !health : !summary) {
+    if (HEALTH_BLOCKS.has(id) && !health) {
+      // Never gone once there is something to say (#24): the failure first (the health has
+      // answered while the summary may still load), then the skeleton, then "not received"
+      // beside the summary's blocks. With no answer and no health failure, only the page's error.
+      if (healthError)
+        return <HealthPending key={id} id={id} error={healthError} onRetry={onRefresh} />;
+      if (loading) return <Skeleton key={id} className="h-40" />;
+      return summary ? <HealthPending key={id} id={id} error={null} onRetry={onRefresh} /> : null;
+    }
+    if (!HEALTH_BLOCKS.has(id) && !summary) {
       return loading ? <Skeleton key={id} className="h-40" /> : null;
     }
     switch (id) {
@@ -791,7 +877,9 @@ export function SystemView({
       case 'jobs':
         return health ? <JobsBlock key={id} health={health} /> : null;
       case 'clock':
-        return health ? <ClockBlock key={id} health={health} /> : null;
+        return health ? (
+          <ClockBlock key={id} health={health} error={healthError} onRetry={onRefresh} />
+        ) : null;
       case 'version':
         return summary ? (
           <VersionBlock key={id} version={summary.version} license={license} />
@@ -832,7 +920,7 @@ export function SystemView({
         </Alert>
       ) : null}
 
-      {loading && !summary && !health ? (
+      {loading && !summary && !health && !healthError ? (
         <div role="status" aria-label={t('common.loading')} className="flex flex-col gap-3">
           <Skeleton className="h-6 w-64" />
           <Skeleton className="h-96" />

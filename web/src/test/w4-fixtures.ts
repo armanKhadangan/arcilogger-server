@@ -1155,21 +1155,31 @@ export const CLOCK_SAMPLES: readonly ClockSampleOut[] = [
   },
 ];
 
+/**
+ * What ApplySystem gave Windows: both time servers (`applied`), an empty peer list it applied
+ * (`none_applied`, `""`), or no report of it yet (`not_reported`, null: it never ran).
+ */
+export type AppliedPeersCase = 'applied' | 'none_applied' | 'not_reported';
+
 /** `GET /system/health`: every service, task and job state; agent and ApplySystem `ok`. */
-export function systemHealth(): SystemHealth {
+export function systemHealth(peers: AppliedPeersCase = 'applied'): SystemHealth {
   return {
     checked_at: W4_NOW,
     services: structuredClone([...SERVICES]),
     agent: agentHealth(),
-    apply_system: applySystemHealth(),
+    apply_system: applySystemHealth(peers === 'not_reported' ? 'never' : 'ok'),
     tasks: structuredClone([...TASKS]),
     jobs: structuredClone([...JOBS]),
     time: {
       ntp_server: '172.20.0.1',
       fallback_server: 'time.ume.tubitak.gov.tr',
       alert_offset_ms: 1000,
-      applied_peers: '172.20.0.1,0x8 time.ume.tubitak.gov.tr,0xA',
-      applied_at: '2026-10-05T03:20:41+03:00',
+      applied_peers: {
+        applied: '172.20.0.1,0x8 time.ume.tubitak.gov.tr,0xA',
+        none_applied: '',
+        not_reported: null,
+      }[peers],
+      applied_at: peers === 'not_reported' ? null : '2026-10-05T03:20:41+03:00',
       samples: structuredClone([...CLOCK_SAMPLES]),
     },
   };

@@ -117,7 +117,8 @@ export function daysBetween(from: string, day: string): number {
 /**
  * The forecast's sentence (contract 2.8.2) in the language of `t`. The "~N gün" counts from the
  * site day of `checkedAt` — the moment the server measured the drives — to `full_on`, so the text
- * matches the figures beside it and does not move with the browser's clock or time zone.
+ * matches the figures beside it and does not move with the browser's clock or time zone. `count`
+ * picks the plural, `days` is the same number as written in `lang` ("~1.400 gün").
  */
 export function forecastText(
   drive: DriveInfo,
@@ -137,8 +138,10 @@ export function forecastText(
       // A drive that grows so slowly that its full day lies beyond the server's horizon (about
       // 100 years, W4-B deviation `forecast.HORIZON_DAYS`) has no day; its growth may round to 0.
       if (forecast.full_on === null) return t('system.forecast.noDate');
+      const days = daysBetween(siteToday(new Date(checkedAt)), forecast.full_on);
       const values = {
-        count: daysBetween(siteToday(new Date(checkedAt)), forecast.full_on),
+        count: days,
+        days: formatNumber(days, 0, lang),
         warning: formatNumber(drive.warning_percent, 0, lang),
         fullOn: formatDay(forecast.full_on),
       };

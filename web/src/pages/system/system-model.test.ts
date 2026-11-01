@@ -111,6 +111,22 @@ describe('disk forecast', () => {
     );
   });
 
+  it('writes a long count of days as a number of the interface language', () => {
+    const drive = driveInfo('data');
+    drive.forecast.warning_on = '2029-12-01';
+    drive.forecast.full_on = '2030-08-13';
+    expect(forecastText(drive, W4_NOW, tr, 'tr')).toBe(
+      'Bu hızla %80 eşiğine 01.12.2029, dolmaya 13.08.2030 (~1.400 gün).',
+    );
+    expect(forecastText(drive, W4_NOW, en, 'en')).toBe(
+      'At this rate the 80% mark is reached on 01.12.2029, full on 13.08.2030 (~1,400 days).',
+    );
+    drive.forecast.warning_on = null;
+    expect(forecastText(drive, W4_NOW, tr, 'tr')).toBe(
+      '%80 eşiğine ulaşıldı; bu hızla dolmaya 13.08.2030 (~1.400 gün).',
+    );
+  });
+
   it('gives only the day it is full once the drive has reached the warning mark', () => {
     const drive = driveInfo('system', { forecast: 'estimated', usedPercent: 84 });
     drive.forecast.warning_on = null;

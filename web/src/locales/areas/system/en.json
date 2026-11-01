@@ -35,10 +35,10 @@
       "noDrives": "No drive could be read."
     },
     "forecast": {
-      "estimated_one": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{count}} day).",
-      "estimated_other": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{count}} days).",
-      "estimatedFull_one": "The {{warning}}% mark is reached; at this rate the drive is full on {{fullOn}} (~{{count}} day).",
-      "estimatedFull_other": "The {{warning}}% mark is reached; at this rate the drive is full on {{fullOn}} (~{{count}} days).",
+      "estimated_one": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{days}} day).",
+      "estimated_other": "At this rate the {{warning}}% mark is reached on {{warningOn}}, full on {{fullOn}} (~{{days}} days).",
+      "estimatedFull_one": "The {{warning}}% mark is reached; at this rate the drive is full on {{fullOn}} (~{{days}} day).",
+      "estimatedFull_other": "The {{warning}}% mark is reached; at this rate the drive is full on {{fullOn}} (~{{days}} days).",
       "noDate": "Disk use grows very slowly; no date can be given.",
       "insufficient": "A forecast needs at least 7 days of samples ({{samples}}/7).",
       "notGrowing": "Disk use did not grow in the last 30 days."
@@ -109,6 +109,11 @@
       "applySystem": "Applying the system settings (ApplySystem)",
       "code": "Result code"
     },
+    "health": {
+      "loadFailed": "The status of the services, tasks, jobs and clock could not be read.",
+      "seeClock": "The status could not be read; the error is under Clock.",
+      "notReceived": "No status received yet."
+    },
     "tasks": {
       "caption": "Latest evidence of the scheduled tasks",
       "task": "Task",
@@ -134,7 +139,8 @@
       "alertOffset": "Alert limit",
       "appliedPeers": "Time servers applied to Windows",
       "appliedAt": "Applied at",
-      "notApplied": "Not applied",
+      "noPeersApplied": "No time server applied",
+      "notReported": "No ApplySystem report yet",
       "notSet": "Not set",
       "samplesCaption": "Clock samples of the last 24 hours",
       "time": "Time",

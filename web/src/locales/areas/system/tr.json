@@ -35,10 +35,10 @@
       "noDrives": "Okunabilen sürücü yok."
     },
     "forecast": {
-      "estimated_one": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{count}} gün).",
-      "estimated_other": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{count}} gün).",
-      "estimatedFull_one": "%{{warning}} eşiğine ulaşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
-      "estimatedFull_other": "%{{warning}} eşiğine ulaşıldı; bu hızla dolmaya {{fullOn}} (~{{count}} gün).",
+      "estimated_one": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{days}} gün).",
+      "estimated_other": "Bu hızla %{{warning}} eşiğine {{warningOn}}, dolmaya {{fullOn}} (~{{days}} gün).",
+      "estimatedFull_one": "%{{warning}} eşiğine ulaşıldı; bu hızla dolmaya {{fullOn}} (~{{days}} gün).",
+      "estimatedFull_other": "%{{warning}} eşiğine ulaşıldı; bu hızla dolmaya {{fullOn}} (~{{days}} gün).",
       "noDate": "Disk kullanımı çok yavaş artıyor; dolma tarihi öngörülemiyor.",
       "insufficient": "Tahmin için en az 7 günlük ölçüm gerekiyor ({{samples}}/7).",
       "notGrowing": "Son 30 günde disk kullanımı artmadı."
@@ -109,6 +109,11 @@
       "applySystem": "Sistem ayarlarının uygulanması (ApplySystem)",
       "code": "Sonuç kodu"
     },
+    "health": {
+      "loadFailed": "Hizmetlerin, görevlerin, işlerin ve saatin durumu alınamadı.",
+      "seeClock": "Durum alınamadı; hata Saat bölümünde.",
+      "notReceived": "Durum henüz alınmadı."
+    },
     "tasks": {
       "caption": "Zamanlanmış görevlerin son kanıtı",
       "task": "Görev",
@@ -134,7 +139,8 @@
       "alertOffset": "Uyarı sınırı",
       "appliedPeers": "Windows'a uygulanan saat sunucuları",
       "appliedAt": "Uygulanma zamanı",
-      "notApplied": "Uygulanmadı",
+      "noPeersApplied": "Uygulanan zaman sunucusu yok",
+      "notReported": "ApplySystem henüz rapor vermedi",
       "notSet": "Ayarlanmamış",
       "samplesCaption": "Son 24 saatin saat ölçümleri",
       "time": "Zaman",
