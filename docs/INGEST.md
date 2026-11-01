@@ -27,6 +27,9 @@
   süreçte +%0,8, 2 worker ile +%0,7'dir (yeni kod yolu çalışmaz). Yalnızca FortiGate'ten gelen
   karışımda (%70 `srcmac`'li oturum, %30 DHCP) değişikliğin bir maliyeti vardır: tek süreçte
   −%3,5 (işlemci süresi +%3,9), 2 worker ile +%1,7 (aşağıda "Measured throughput").
+  Gerçekçi yük üreteci günlerinde (varsayılan seçenekler ve `--dhcp-server fortigate --srcmac`;
+  her gün bir kez yazılıp iki sürüme de yüklendi, sırayla 16'şar çalıştırma) fark tek süreçte
+  −%3,1 / −%2,4, 2 worker ile −%2,8 / −%3,2'dir: %5 sınırının içinde, ama sıfır değil.
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -410,6 +413,50 @@ machine got slower during gate 2's second campaign (both trees, about 3.5–5 % 
 handed-over branch gave −5.5 % once under another job's load, and −2.2 % to −3.1 % (gate 1) and
 −0.5 % to −3.1 % (gate 2) in quiet runs, in line with these. Gate 3 (the load-generator days,
 `--dhcp-server fortigate --srcmac`) is measured by the integrator after WP-F1 and recorded below.
+
+**Wave 3, gate 3: the load-generator days (2026-10-29).** Gate 3 of the Wave 3 contract (3.8): the
+load-generator day with the default options and a `--dhcp-server fortigate --srcmac` day, each
+written once and loaded by both trees through the same harness, at least 16 runs per tree
+alternating, at most 5 % slower than Wave 2. Both days were written **once** with the Wave 3
+`tools/loadgen`: `--day 2026-09-23 spool --data-dir DIR` (the day of the Wave 2 rows above: 217,875
+lines, 138.7 MB, in `fortigate`, `core-r1` and `switch-1`) and `--day 2026-09-23 --dhcp-server
+fortigate --srcmac spool --data-dir DIR` (214,553 lines, 140.2 MB, all from the FortiGate: as many
+DNS, web filter, application control and traffic lines (58,973), the traffic lines now with
+`srcmac`, and 242 DHCP ACK and 2 RELEASE lines, no MikroTik line). Both trees loaded them with
+`bench_throughput.py --spool DIR/spool --batch-rows 5000 --workers 0 2`, one run per worker count
+and invocation. The Wave 2 tree is `c5f14a4` with the method of gates 1–2 (the same
+`bench_throughput.py` copied unchanged into its worktree, `PYTHONPATH` set to its `core/src`,
+`db/src` and `ingest/src`, the same Python environment); the Wave 3 tree is `wave-3` at `fcd2c1d`
+(with the branches then in review merged in, which change nothing under `core/src`, `db/src` or
+`ingest/src`). `switch-1` is not a source of the harness's configuration: both trees parse its lines
+by content. Both trees load exactly the same bytes and write the same number of rows (435,368 and
+429,106 a run). Order: Wave 2, Wave 3, Wave 3, Wave 2, eight times per day (ABBA ×8, run by run: 16
+runs per tree, day and worker count; two campaigns of ABBA ×4), the default day first. This
+4-vCPU VM (Xeon 2.10 GHz, 16 GB, PostgreSQL 16 without TimescaleDB) was shared at times with other
+work, including this integration's own browser tests and live smoke (about 16:44–16:48 UTC): load
+average at the start of an invocation 1.8–2.6, except 2.7–5.9 for 7 invocations (14 runs) in the
+middle of the default day (16:44–16:53 UTC, the end of its first campaign and the start of its
+second), among them each tree's lowest run with 2 workers (5,503 and 6,234 lines/s). Min–max
+(median) lines/s, the difference of the medians to Wave 2:
+
+| `bench_throughput.py --spool`, 16 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Gate 3, the load-generator day (default options): Wave 2 | 4,178–5,280 (4,997) | 5,503–9,551 (8,603) |
+| Gate 3, the load-generator day (default options): **Wave 3** | **4,471–5,055 (4,843), −3.1 %** | **6,234–9,031 (8,361), −2.8 %** |
+| Gate 3, `--dhcp-server fortigate --srcmac`: Wave 2 | 4,739–5,372 (5,053) | 7,787–10,118 (8,953) |
+| Gate 3, `--dhcp-server fortigate --srcmac`: **Wave 3** | **4,644–5,265 (4,932), −2.4 %** | **7,720–9,726 (8,664), −3.2 %** |
+
+The gate holds on both days: Wave 3 is 2.4–3.2 % slower in all four medians (ingest process CPU,
+median, in-process: 39.2 / 40.4 s on the default day, +3.2 %; 38.3 / 39.4 s on the FortiGate day,
++2.8 %). On the default day no line takes the new paths: each traffic line only looks for `srcmac`
+(`parsers/fortigate.py:133`, `:480`) and each event line for `dhcp_msg` (`:586`); this measurement
+does not show where the extra CPU goes. The per-campaign medians (ABBA ×4, 8 runs per tree):
+default day −3.0 % / −2.8 % in-process and −0.8 % / −3.9 % with 2 workers; FortiGate day −0.5 % /
++0.5 % in-process and −2.8 % / −6.8 % with 2 workers (in that last campaign both trees ran faster
+than in the first, Wave 2 by 12 %, Wave 3 by 7 %). As on the Wave 2 day, one 8-run campaign cannot
+tell 5 % apart on this VM; the 16-run medians are the measurement. The lowest runs with 2 workers on
+the default day (5,503 and 6,234 lines/s, one per tree) fell into that loaded time (machine CPU
+91–93 %). Re-measure on site with the site's own day (below).
 
 Default `[ingest] workers = 2`: about 1.7× the in-process speed; a third worker adds 10–13 %
 on 4 vCPU but competes with PostgreSQL, the API and the collector on the same cores. **Spec 14

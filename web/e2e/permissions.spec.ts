@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import { usePreferences } from './fixtures';
 import { mockApi } from './mock-api';
+import { mockNetwork } from './mock-network';
 
 /** Menu per role (docs/MVP-CONTRACTS.md section 6, spec 13). */
 const MENUS: [string, string, string[]][] = [
@@ -214,3 +215,52 @@ test('browser administration is for administrators: the API refuses everyone els
   expect(api.calls.filter((call) => call.path.startsWith('/admin'))).toEqual([]);
   expect(api.calls.filter((call) => call.path.startsWith('/settings'))).toEqual([]);
 });
+
+for (const [username, allowed] of [
+  ['tolga', true],
+  ['ayse.yilmaz', false],
+  ['mehmet.kaya', false],
+  ['zeynep', false],
+] as const) {
+  test(`what the FortiGate's records show is for administrators only — ${username}`, async ({
+    page,
+  }) => {
+    // `GET /settings/fortigate/observed` (the exit editor's "Kayıtlarda görülen NAT adresleri")
+    // needs settings.manage, as the whole settings router does (docs/roles.md). User management
+    // opens Ayarlar, not this: every other role is given it here, and still finds the page closed
+    // and the API refusing.
+    const api = await mockApi(page, {
+      signedInAs: username,
+      grant: { auditor: ['users.manage'], hr: ['users.manage'], viewer: ['users.manage'] },
+    });
+    await mockNetwork(page, api);
+    await page.goto('/settings/application?group=lookup');
+    if (allowed) {
+      await expect(page.getByTestId('fortigate-observed')).toBeVisible();
+      await expect(
+        page.getByRole('table', {
+          name: 'FortiGate oturum kayıtlarında görülen kaynak NAT adresleri',
+        }),
+      ).toBeVisible();
+      expect(api.callsTo('GET', '/settings/fortigate/observed')[0]?.query.get('hours')).toBe('24');
+    } else {
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
+      ).toBeVisible();
+      await expect(page.getByTestId('fortigate-observed')).toHaveCount(0);
+      // Nothing was even asked of the API for that page.
+      expect(api.callsTo('GET', '/settings/fortigate/observed')).toEqual([]);
+    }
+    // Asked directly, the API answers the administrator and refuses everyone else.
+    const answer = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/settings/fortigate/observed?hours=24');
+      const body = (await response.json()) as { error?: { code: string }; nat?: unknown };
+      return { status: response.status, code: body.error?.code ?? null, nat: 'nat' in body };
+    });
+    expect(answer).toEqual(
+      allowed
+        ? { status: 200, code: null, nat: true }
+        : { status: 403, code: 'forbidden', nat: false },
+    );
+  });
+}
