@@ -32,17 +32,17 @@ toplanmaz. Web sayfalarının içeriği kaydedilmez; ziyaret edilen **adres** ka
 
 | Kategori | Veriler | Kaynak |
 |---|---|---|
-| Ağ erişim kayıtları (5651 "erişim kayıtları") | Cihaza verilen iç IP adresi, cihazın MAC adresi, IP kullanımının başlangıç ve bitiş zamanı (DHCP kira kayıtları, saatlik ARP kayıtları), cihazın ağa bildirdiği ad (ör. `DESKTOP-…`), VLAN | MikroTik yönlendirici (DHCP sunucusu) |
-| İnternet trafiği kayıtları | Oturum başına kaynak ve hedef IP/port, adres dönüşümü (NAT) adresi/portu, servis ve uygulama adı, süre, gönderilen/alınan bayt, hedef ülke | FortiGate |
+| Ağ erişim kayıtları (5651 "erişim kayıtları") | Cihaza verilen iç IP adresi, cihazın MAC adresi, IP kullanımının başlangıç ve bitiş zamanı (DHCP kira kayıtları, saatlik ARP kayıtları), cihazın ağa bildirdiği ad (ör. `DESKTOP-…`), FortiGate DHCP kayıtlarındaki ana bilgisayar adı, VLAN | MikroTik yönlendirici ya da FortiGate güvenlik duvarı (DHCP sunucusu) |
+| İnternet trafiği kayıtları | Oturum başına kaynak ve hedef IP/port, adres dönüşümü (NAT) adresi/portu, servis ve uygulama adı, süre, gönderilen/alınan bayt, hedef ülke; aygıt tanıma açık arayüzlerde ayrıca kaynak MAC adresi, cihaz adı, işletim sistemi, donanım üreticisi ve sürümü, cihaz türü ve FortiGate'in pasif olarak öğrendiği kullanıcı adı. Aygıt tanıma açık arayüzlerde bu alanlar, böyle bir arayüzün oturumunu alıntılayan her 5651 raporunun ve kanıt paketinin ham satır kanıtında, başka kişilerin aday oturumları dahil, görünür | FortiGate |
 | Web ve DNS kayıtları | Ziyaret edilen alan adı ve tam adres (URL, en fazla 2.000 karakter), kategori, izin/engel kararı; DNS sorgusunda sorulan ad ve dönen adresler | FortiGate web ve DNS filtresi |
 | Güvenlik olayları | Saldırı tespit (IPS) ve virüs olayları, ağ cihazlarına giriş denemeleri (kullanıcı adı, IP), cihaz yapılandırma değişiklikleri | FortiGate, MikroTik |
 | Cihaz ve kişi eşleştirmesi | Cihazın MAC adresi, gözlenen adları, türü; eşleştirildiği kişi (ad, departman, unvan, e-posta, sicil no) ve eşleştirmenin geçmişi (cihazın hangi tarihten hangi tarihe kime atandığı, atamayı yapan ARCILOGGER kullanıcısı) | Yönetici tarafından elle ya da CSV ile girilir; kişiye bağlanmamış cihazın departmanı VLAN'dan türetilir |
 | ARCILOGGER kullanıcıları | Kullanıcı adı, görünen ad, e-posta, rol, giriş zamanları, oturumların IP adresi ve tarayıcı bilgisi, iki adımlı doğrulama kaydı, KVKK bilgilendirmesi onayı | ARCILOGGER |
 | Denetim kaydı | Hangi ARCILOGGER kullanıcısının ne zaman hangi kişisel veriyi görüntülediği, sorguladığı, dışa aktardığı ya da hangi ayarı değiştirdiği | ARCILOGGER |
-| 5651 talepleri | Talep eden makam, dosya/evrak no, talep tarihi, gerekçe, sorgulanan adres ve zaman, bulunan cihaz/kişi, resmi rapor (PDF) | ARCILOGGER kullanıcısının girdisi |
+| 5651 talepleri | Talep eden makam, dosya/evrak no, talep tarihi, gerekçe, sorgulanan adres ve zaman, bulunan cihaz/kişi, resmi rapor (PDF). Kira kaydı olmayan bir adreste FortiGate oturum kaydındaki kaynak MAC adresi (srcmac) 5651 sorgu sonucunda kısmi kanıt olarak gösterilebilir. Aygıt tanıma açık arayüzlerde yukarıdaki aygıt tanıma alanları, böyle bir arayüzün oturumunu alıntılayan her 5651 raporunun ve kanıt paketinin ham satır kanıtında, başka kişilerin aday oturumları dahil, görünür | ARCILOGGER kullanıcısının girdisi |
 | İnternet kullanım özetleri (kişi, cihaz ve departman bazında, kişi adlarıyla) | Gün ve saat başına çevrimiçi süre ve **tahmini** aktif süre (mesai içi / dışı), ilk ve son etkinlik; ziyaret edilen siteler ve ana bilgisayar adları ile her birinde geçen tahmini süre, kategoriler, uygulamalar; indirilen/yüklenen veri, oturum sayısı; FortiGate'in kaydettiği URL'ler (kişi ya da cihaz ve gün başına en çok 1.000); engellenen denemeler (web, DNS, uygulama denetimi; kişi ya da cihaz ve gün başına en çok 5.000 satır); saatlik tablolar, günlük etkinlik zaman çizelgesi, 30 günlük ısı haritası, cihaz bazında döküm. Süreler bağlantı kayıtlarından hesaplanan tahminlerdir, kesin ekran süresi değildir | ARCILOGGER yukarıdaki trafik, web, DNS ve uygulama kayıtlarından türetir; kişi, cihazın o andaki atamasıyla bulunur (cihaz ve kişi eşleştirmesi) |
 | Zamanlanmış kullanım raporları | Yukarıdaki özetlerden: şirket ve departman toplamları, etkinliği olan her kişi adıyla (siteler, kategoriler, engellenen denemeler, saatlik tablo), cihazlar, dikkat çeken değişiklikler; HTML e-posta, PDF ve Excel | ARCILOGGER; zamanlamaları ve alıcıları yönetici belirler |
-| Sistem ve güvenlik uyarıları | Uyarı kodu, zaman, kaynak (cihaz) adı ya da gönderen IP adresi; IP çakışmasında IP ve MAC adresleri; uyarıya eklenen notlar | ARCILOGGER denetimleri (log kaynağı sessiz, mühürleme, saat, disk, yedek, IP çakışması …) |
+| Sistem ve güvenlik uyarıları | Uyarı kodu, zaman, kaynak (cihaz) adı ya da gönderen IP adresi; IP çakışmasında IP ve MAC adresleri; FortiGate DHCP'de istemcilerin geri çevirdiği havuz adresleri (en çok beş, MAC adresi ve cihaz adı olmadan; e-postaya yazılmaz); uyarıya eklenen notlar | ARCILOGGER denetimleri (log kaynağı sessiz, mühürleme, saat, disk, yedek, IP çakışması …) |
 
 Kural motoruyla tanımlanacak güvenlik kuralları sonraki bir sürümde planlanmaktadır; devreye
 alınmadan önce metin güncellenmelidir.
@@ -175,3 +175,8 @@ ilişkisi hukuk müşavirince değerlendirilmelidir.
    ve kişi düzeyinin kapatılması bölüm 5'tedir.
 7. Zamanlanmış raporların alıcıları ve e-posta sağlayıcısı (şirket dışında ya da yurt dışında bir
    hizmet olup olmadığı).
+8. FortiGate aygıt tanımasının hangi arayüzlerde açılacağı: açıldığı arayüzlerin her oturum
+   kaydına kaynak MAC adresi, cihaz adı, işletim sistemi, donanım bilgisi, cihaz türü ve pasif
+   olarak öğrenilen kullanıcı adı eklenir; bu alanlar ham kayıtlarla birlikte saklanır ve 5651
+   raporlarında ve kanıt paketlerinde başka kişilerin aday oturumlarıyla birlikte görünür
+   (ARCILOGGER ham kayıtları değiştirmez). Açma kararı şirketin ve hukuk müşavirinindir.
