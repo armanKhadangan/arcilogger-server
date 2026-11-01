@@ -51,13 +51,16 @@ LINES_PER_SECOND = 10_000
 SECONDS = 10
 #: The test process's CPU a wall second on a core like CI's runners (0.18 to 0.36 s/s there).
 CPU_PER_SECOND = 0.4
-#: The event loop's CPU a delivered line on such a core, outside the hub's read cycles.
-#: PROVISIONAL: 4-CPU cloud container, gauge 15.2 to 16.0 us: 95 to 99 us a line; set it from
-#: the figures CI prints (``event loop:``) before review.
+#: The event loop's CPU a delivered line on such a core, outside the hub's read cycles. Between
+#: ``TOLERANCE`` times the costliest run there (a core just inside the tolerance passes) and 1.4
+#: times the cheapest (a write path 40 % costlier fails). PROVISIONAL: a 4-CPU cloud container,
+#: gauge 15.2 to 16.0 us: 94 to 101 us a line, 133 to 145 with every line 39 us costlier; set it
+#: from the figures CI prints (``event loop:``) before review.
 LOOP_CPU_PER_LINE = 125e-6
-#: The gauge (seconds a gauge line, the fastest round) on CI's runners. PROVISIONAL: the same
-#: container, whose live tail took 0.30 to 0.33 s/s like CI's; set it from the figures CI prints
-#: (``gauge:``) before review.
+#: The gauge (seconds a gauge line, the fastest round) on CI's runners: the slowest one seen, so
+#: that every runner keeps the bounds as they are. PROVISIONAL: the same container, whose live
+#: tail took 0.30 to 0.33 s/s like CI's; set it from the figures CI prints (``gauge:``) before
+#: review.
 REFERENCE_GAUGE = 15e-6
 #: A gauge up to this many times the reference leaves both bounds as they are (the gauge's
 #: noise, runners of one class); beyond it they grow with the excess only, so a gauge that reads
