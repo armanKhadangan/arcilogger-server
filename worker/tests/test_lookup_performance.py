@@ -1580,7 +1580,9 @@ def test_the_d15_carried_check_is_fast(
         # minutes of the site's rows), whichever index the planner takes.
         assert not any("Seq Scan" in line for line in plan), case
         scans, removed = _plan_reads(plan)
-        assert scans, case
+        # A day no chunk holds (TimescaleDB creates chunks for written rows only) is answered
+        # without reading anything.
+        assert scans or any("One-Time Filter: false" in line for line in plan), case
         if index == 0:
             every, _kept = _rows_of(traffic_site, window.low, window.high, window.high, "true")
             assert sum(n for _name, n in scans) <= every, (case, scans, every)
