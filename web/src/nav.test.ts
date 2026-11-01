@@ -51,11 +51,10 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
 });
 
 describe('pages with content', () => {
-  it('leaves only Uyum Durumu and Sistem as placeholders', () => {
-    expect(NAV_ITEMS.filter((item) => !BUILT_PAGES.has(item.key)).map((item) => item.key)).toEqual([
-      'compliance',
-      'system',
-    ]);
+  it('no menu entry is a placeholder', () => {
+    expect(NAV_ITEMS.filter((item) => !BUILT_PAGES.has(item.key)).map((item) => item.key)).toEqual(
+      [],
+    );
     const keys = new Set(NAV_ITEMS.map((item) => item.key));
     expect([...BUILT_PAGES].filter((key) => !keys.has(key))).toEqual([]);
   });
@@ -66,6 +65,15 @@ describe('pages with content', () => {
       ['sources', '/sources', undefined],
       ['live', '/live', undefined],
       ['search', '/search', undefined],
+    ]);
+  });
+
+  it('keeps Uyum Durumu and Sistem in 5651 Temel: no licence module locks them', () => {
+    // Wave 4 contract 0.1 item 2: no `require_module`, no `ModuleGate`.
+    const pages = NAV_ITEMS.filter((item) => ['compliance', 'system'].includes(item.key));
+    expect(pages.map((item) => [item.key, item.path, item.module])).toEqual([
+      ['compliance', '/compliance', undefined],
+      ['system', '/system', undefined],
     ]);
   });
 });

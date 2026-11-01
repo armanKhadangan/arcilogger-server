@@ -2,10 +2,6 @@
   "nav": {
     "uiKit": "UI kit"
   },
-  "placeholder": {
-    "hint": "All building blocks are on the UI kit page.",
-    "openUiKit": "Open the UI kit"
-  },
   "uiKit": {
     "title": "UI kit",
     "intro": "Every building block of the ARCILOGGER interface, in the light and dark theme. Pages are composed from these components.",

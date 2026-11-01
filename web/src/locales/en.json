@@ -43,9 +43,6 @@
     "sessionNote": "The session closes after {{minutes}} min of inactivity.",
     "userMenuFor": "User menu: {{name}}"
   },
-  "placeholder": {
-    "body": "This page arrives in a later version."
-  },
   "notFound": {
     "title": "Page not found",
     "body": "The page does not exist or has moved.",

@@ -87,8 +87,7 @@ departmanlar ve sunucu ayarları kurulumdan sonra web arayüzünde tanımlanır
 
 Bu sürüm (0.1.0, **MVP**): M2/M3'ün temel parçaları, kimlik doğrulama ve denetim kaydı (M6'dan)
 ve Windows kurulum programı (M7'den). Tablo, 0.1.0'dan sonra eklenenleri de gösterir
-([CHANGELOG.md](CHANGELOG.md), "Unreleased"). Menüde henüz içeriği olmayan sayfalar
-**yer tutuculardır** ("Bu sayfa sonraki bir sürümde eklenecek.").
+([CHANGELOG.md](CHANGELOG.md), "Unreleased").
 
 | Aşama | Kapsam | Durum |
 |---|---|---|
@@ -98,15 +97,16 @@ ve Windows kurulum programı (M7'den). Tablo, 0.1.0'dan sonra eklenenleri de gö
 | M3 | Kira zaman çizelgesi, NAT dizini, 5651 sorgu, PDF rapor, kanıt paketi | kısmen — ✅ kira zaman çizelgesi, 5651 Sorgu + resmi PDF rapor, Kanıt Paketleri, Mühürleme sayfası, Cihazlar ve Kişiler sayfası, bağımsız doğrulayıcı |
 | M4 | Kullanım analitiği, zamanlanmış raporlar, e-posta | kısmen — ✅ kullanım analizi motoru ve API'si ([docs/KULLANIM.md](docs/KULLANIM.md)), zamanlanmış kullanım raporları (HTML e-posta, PDF, Excel; [docs/KULLANIM-RAPORLARI.md](docs/KULLANIM-RAPORLARI.md)), Raporlar sayfası (zamanlamalar, şimdi çalıştır, önizleme, gönderim geçmişi), Kullanım sayfası |
 | M5 | Güvenlik kuralları (20 kural), uyarılar | kısmen — ✅ R15 (log kaynağı sessiz) ve R20 sistem denetimleri, uyarı e-postası, Güvenlik sayfası (uyarı listesi, durum akışı, notlar; [docs/UYARILAR.md](docs/UYARILAR.md)); kural motoru, kural düzenleyici ve webhook'lar yok |
-| M6 | Yetkilendirme, 2FA, denetim kaydı, uyum sayfası, ayarlar, ilk kurulum sihirbazı | kısmen — ✅ kullanıcılar ve roller, TOTP, zincirli denetim kaydı (Denetim Kaydı sayfası), ilk yönetici kurulumu, tarayıcıdan yönetim (Ayarlar sayfaları, Kamu SM sihirbazı, Şimdi mühürle, Kontör sorgula; [docs/AYARLAR.md](docs/AYARLAR.md)); yer tutucu: Uyum Durumu, Sistem; ilk kurulum sihirbazı yok |
+| M6 | Yetkilendirme, 2FA, denetim kaydı, uyum sayfası, ayarlar, ilk kurulum sihirbazı | ✅ kullanıcılar ve roller, TOTP, zincirli denetim kaydı (Denetim Kaydı sayfası), ilk yönetici kurulumu, tarayıcıdan yönetim (Ayarlar sayfaları, Kamu SM sihirbazı, Şimdi mühürle, Kontör sorgula; [docs/AYARLAR.md](docs/AYARLAR.md)), uyum sayfası (Uyum Durumu, Uyum Durumu Raporu; [docs/UYUM-DURUMU.md](docs/UYUM-DURUMU.md)), Sistem sayfası, ilk kurulum sihirbazı (Ayarlar → İlk kurulum sihirbazı) |
 | M7 | Sağlamlaştırma, Windows kurulum programı, yedekleme/geri yükleme, belgeler | kısmen — ✅ Windows kurulum programı (çevrimdışı paket, yükseltme, geri alma), yük üreteci, gece veritabanı yedeği ve geri yükleme ([docs/YEDEKLEME.md](docs/YEDEKLEME.md)); `ISLETIM.md` yok |
 
-Yer tutucu sayfalar: **Uyum Durumu, Sistem**. Çalışan sayfalar: Panel, Arama, Canlı Akış,
-Kaynaklar, 5651 Sorgu, Kullanım, Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler,
-Raporlar, Denetim Kaydı, Ayarlar (Genel, Uygulama ayarları, Kamu SM, Kaynaklar, E-posta, Replika,
-Saklama, Yedekleme, Değişiklik geçmişi, Kullanıcılar ve Roller, Lisans). Ana menüdeki Kaynaklar
-sayfası kaynakların durumunu yalnızca gösterir; kaynaklar Ayarlar → Kaynaklar'da düzenlenir
-(bilinmeyen bir göndericide "Kaynak olarak tanımla" bu sayfayı doldurarak açar).
+Yer tutucu sayfalar: **yok**. Çalışan sayfalar: Panel, Arama, Canlı Akış, Kaynaklar, 5651
+Sorgu, Kullanım, Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler, Raporlar, Uyum
+Durumu, Denetim Kaydı, Ayarlar (Genel, Uygulama ayarları, Kamu SM, Kaynaklar, E-posta, Replika,
+Saklama, Yedekleme, Değişiklik geçmişi, Kullanıcılar ve Roller, Lisans, İlk kurulum sihirbazı),
+Sistem. Ana menüdeki Kaynaklar sayfası kaynakların durumunu yalnızca gösterir; kaynaklar Ayarlar →
+Kaynaklar'da düzenlenir (bilinmeyen bir göndericide "Kaynak olarak tanımla" bu sayfayı doldurarak
+açar).
 
 ## Geliştirme / Development
 

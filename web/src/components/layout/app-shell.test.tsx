@@ -78,11 +78,13 @@ describe('AppShell', () => {
     ['/sources', 'Kaynaklar'],
     ['/live', 'Canlı Akış'],
     ['/search', 'Arama'],
-  ])('opens %s as a page of its own, not a placeholder', async (path, heading) => {
+    // Wave 4: every data request answers 404 here, so the pages show their heading and the error.
+    ['/compliance', 'Uyum Durumu'],
+    ['/system', 'Sistem'],
+  ])('opens %s as a page of its own', async (path, heading) => {
     signedInAs('admin');
     renderApp(path);
     expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
-    expect(screen.queryByText('Bu sayfa sonraki bir sürümde eklenecek.')).not.toBeInTheDocument();
   });
 
   it.each(['/', '/sources', '/live', '/audit', '/lookup', '/evidence', '/sealing'])(
@@ -110,16 +112,6 @@ describe('AppShell', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Bu sayfa için yetkiniz yok' }),
     ).toBeInTheDocument();
-  });
-
-  it('renders a placeholder without a milestone code for future pages', async () => {
-    signedInAs('admin');
-    renderApp('/compliance');
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Uyum Durumu' }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Bu sayfa sonraki bir sürümde eklenecek.')).toBeInTheDocument();
-    expect(screen.queryByText(/\bM\d\b/)).not.toBeInTheDocument();
   });
 
   it('switches the interface to English', async () => {

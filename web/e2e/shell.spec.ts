@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import { expectNoA11yViolations, usePreferences, useSampleClock } from './fixtures';
 import { mockApi } from './mock-api';
 import { mockSearch } from './mock-search';
+import { mockW4 } from './mock-w4';
 import { SAMPLE_TODAY } from './samples';
 
 const PAGES: [string, string][] = [
@@ -25,7 +26,8 @@ const PAGES: [string, string][] = [
 
 test.describe('application shell', () => {
   test.beforeEach(async ({ page }) => {
-    await mockApi(page, { signedInAs: 'tolga' });
+    // Uyum Durumu and Sistem read their captured answers (Wave 4).
+    await mockW4(page, await mockApi(page, { signedInAs: 'tolga' }));
   });
 
   test('every menu entry opens its page', async ({ page }) => {
@@ -122,7 +124,17 @@ test.describe('application shell', () => {
 
   test('the global search box is on every page; the time range only on Arama', async ({ page }) => {
     // Admin (has search.read): the box leads to Arama, the only page with a time range.
-    for (const path of ['/', '/sources', '/live', '/audit', '/lookup', '/evidence', '/sealing']) {
+    for (const path of [
+      '/',
+      '/sources',
+      '/live',
+      '/audit',
+      '/lookup',
+      '/evidence',
+      '/sealing',
+      '/compliance',
+      '/system',
+    ]) {
       await page.goto(path);
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       await expect(page.locator('header').getByRole('search')).toHaveCount(1);
@@ -141,10 +153,15 @@ test.describe('application shell', () => {
     ).toBeVisible();
   });
 
-  test('placeholder page has no accessibility violations (dark)', async ({ page }) => {
+  test('Uyum Durumu and Sistem have no accessibility violations (dark)', async ({ page }) => {
     await usePreferences(page, { theme: 'dark' });
     await page.goto('/compliance');
     await expect(page.getByRole('heading', { level: 1, name: 'Uyum Durumu' })).toBeVisible();
+    await expect(page.getByTestId('compliance-card-sources')).toBeVisible();
+    await expectNoA11yViolations(page);
+    await page.goto('/system');
+    await expect(page.getByRole('heading', { level: 1, name: 'Sistem' })).toBeVisible();
+    await expect(page.getByTestId('system-block-clock')).toBeVisible();
     await expectNoA11yViolations(page);
   });
 });
