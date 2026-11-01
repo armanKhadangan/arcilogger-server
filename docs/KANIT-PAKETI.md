@@ -204,9 +204,9 @@ ARCILOGGER is *designed to support* Law 5651 obligations; it does not claim lega
   result cites — FortiGate sessions, other people's candidate sessions of a double-NAT answer
   included; the leases of the DHCP server (MikroTik or FortiGate) and `ARP-LOG` records, the other
   devices of an IP conflict and the FortiGate DHCP lines outside the lease timeline that its report
-  shows in section 6 included — and the lookup day; with `full_days`, the default, the
-  package holds the complete sealed files of **all** sources of those days — not only the cited ones
-  — unless `sources` narrows them, plus the cited lines under `extract/`) or explicit (`from`/`to`,
+  shows in section 6 included — and the lookup day; with `full_days`, the default, the package
+  holds the complete sealed files of **all** sources of those days — not only the cited ones —
+  unless `sources` narrows them, plus the cited lines under `extract/`) or explicit (`from`/`to`,
   at most 31 days, optional `sources` and `extract` lines). **Device identification:** the session
   lines of an interface with FortiGate device identification on carry the source MAC address
   (`srcmac`), the device name, the operating system, the hardware vendor and version, the device
