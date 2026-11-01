@@ -484,18 +484,21 @@ class _Probe:
         """``address`` is the ``transip`` of a session overlapping the probe window, also one
         logged once, at its end, after it (bounded like the session search).
 
-        The first such row in the order of ``ix_fg_traffic_transip_transport_time``, not
-        ``EXISTS``: for a busy address the planner expects an early match and scanned the
-        partition sequentially, reading its rows before the window too (3.8 guard; 0.9 s on a
-        partition of 10 days at 1 M rows a day). In time order it read every address's rows of
-        the range when none of the address's own overlaps (0.29 s at 1 M a day for an address
-        with 1 % of them). In the index's order the scan reads the address's own rows only.
+        The first such row in the order of ``ix_fg_traffic_transip_time``, not ``EXISTS``: for a
+        busy address the planner expects an early match and scanned the partition sequentially,
+        reading its rows before the window too (3.8 guard; 0.9 s on a partition of 10 days at
+        1 M rows a day). In time order it read every address's rows of the range when none of
+        the address's own overlaps (0.29 s at 1 M a day for an address with 1 % of them). In the
+        order of ``ix_fg_traffic_transip_transport_time`` it walked every index entry of the
+        address in the partition, ``time`` being its third column (1.1 s per step for a busy
+        address after its last row, day 28 of a monthly partition at 1 M a day; #71). In the
+        index's order the scan reads the address's own rows of the range only.
 
         Asked in two steps, the probe window first, then the tail after it: over daily chunks
         the ordered scan merges the chunks and reads each one to its first overlapping row or
         to its end, so a busy address had its whole next day read (0.18 s, 471,352 rows
         removed). An address with no overlapping session has all its rows of the tail read
-        (``duration`` is in no index)."""
+        (``duration`` is in no index; 0.25 s for a day of 800,000 rows)."""
 
         def first(*clauses: ColumnElement[bool]) -> bool:
             started = FgTraffic.time - func.make_interval(
@@ -507,7 +510,7 @@ class _Probe:
             query = (
                 select(FgTraffic.time)
                 .where(*where)
-                .order_by(FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+                .order_by(FgTraffic.transip, FgTraffic.time)
                 .limit(1)
             )
             return self.session.scalar(query) is not None
@@ -1247,8 +1250,11 @@ class _Lookup:
         Asked in steps, each for its first row: the rows logged in the window, in time order
         (the window's rows of every address at most, a busy address answers at once), then the
         scan's tail after it, then (with a port only) the sessions spanning the moment on any
-        port, these two in the order of ``ix_fg_traffic_transip_transport_time`` (the address's
-        own rows) and one day of TimescaleDB chunks at a time (:data:`CHUNK`): a statement over
+        port, these two in the order of an index on the address (its own rows: with a port
+        ``ix_fg_traffic_transip_transport_time``, without one ``ix_fg_traffic_transip_time``, as
+        the first walked every index entry of the address in the partition, 1.1 s per step for
+        a busy address after its last row on day 28 of a monthly partition; #71) and one day of
+        TimescaleDB chunks at a time (:data:`CHUNK`): a statement over
         two chunks merges their ordered scans and reads the second to its end even when the first
         answers (0.22 s for a busy address on CI's chunks). As one ``EXISTS`` the planner
         expected an early match for a busy address and scanned the partition sequentially,
@@ -1273,18 +1279,19 @@ class _Lookup:
             query = select(FgTraffic.time).where(*common, *clauses).order_by(*order).limit(1)
             return self.session.scalar(query) is not None
 
-        by_address = (FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+        by_port = (FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+        by_time = (FgTraffic.transip, FgTraffic.time)
         in_window = [FgTraffic.time >= window.low, FgTraffic.time <= window.high]
         if first(*in_window, started <= window.high, *port, order=[FgTraffic.time]):
             return True
         for piece in _by_chunk(window.high, window.scan_end, open_start=True):
-            if first(*piece, started <= window.high, *port, order=by_address):
+            if first(*piece, started <= window.high, *port, order=by_port if port else by_time):
                 return True
         if request.public_port is None:
             return False
         spans_end = request.at + timedelta(seconds=self.settings.max_session_seconds)
         return any(
-            first(*piece, started <= request.at, order=by_address)
+            first(*piece, started <= request.at, order=by_time)
             for piece in _by_chunk(request.at, spans_end, open_start=False)
         )
 

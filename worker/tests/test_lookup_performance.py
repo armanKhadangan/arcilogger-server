@@ -1322,7 +1322,9 @@ def test_a_direct_exit_with_a_29_public_network_is_fast(
 
 #: The overlap probe's cases (D31 (a), no exit configured): an unclaimed address with no row at
 #: all; the site's busy NAT address (its sessions overlap the moment) at the guards' moment and 20
-#: hours later, when the partition holds 22 hours of the address's rows before the probe's range;
+#: hours later, when the partition holds 22 hours of the address's rows before the probe's range,
+#: and 30 minutes after its last row (a line switched away: no row of it in the probe's range, the
+#: partition full of its rows before it; #71);
 #: the busy address 5 hours before the guards' moment, before its first row (its rows fill the
 #: range's 24-hour tail, none of them overlaps the window); and the second line
 #: (:data:`LATER_LINE`, about 1 % of the rows of the range, none overlapping the moment). The busy
@@ -1332,6 +1334,7 @@ OVERLAP = {
     "no_rows": (PUBLIC, GUARD_AT),
     "busy": (WAN, GUARD_AT),
     "busy_late": (WAN, GUARD_AT + timedelta(hours=20)),
+    "busy_after": (WAN, GUARD_AT + timedelta(hours=25, minutes=30)),
     "busy_before": (WAN, GUARD_AT - timedelta(hours=5)),
     "later_line": (LATER_LINE, GUARD_AT),
 }
@@ -1366,6 +1369,23 @@ def _plan_reads(plan: Sequence[str]) -> tuple[list[tuple[str, int]], int]:
     return scans, removed
 
 
+def _buffers(plan: Sequence[str]) -> int:
+    """The shared buffers an ``EXPLAIN (ANALYZE, BUFFERS)`` plan touched (its top node's, hit
+    and read): index entries a scan walks and filters by its index condition show here, not as
+    rows."""
+    for line in plan:
+        if line.strip().startswith("Buffers:"):
+            return sum(int(n) for n in re.findall(r"(?:hit|read)=(\d+)", line))
+    return 0
+
+
+#: The buffers a probe step may touch beyond one per row of its range: the index's upper pages
+#: and the pages of the range's first and last entries. Walking every index entry of a busy
+#: address in the partition, as a port-less step on ``ix_fg_traffic_transip_transport_time`` did,
+#: touches thousands (#71).
+STEP_BUFFERS = 100
+
+
 @pytest.mark.perf
 @pytest.mark.parametrize("case", sorted(OVERLAP))
 def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
@@ -1375,8 +1395,9 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     no rows and for a busy unclaimed P (:data:`OVERLAP`), under 0.2 s (:data:`OVERLAP_SECONDS`);
     through the lookup's own probe (``_Probe.seen_overlap``), which asks the probe window first
     and the tail after it only when the window has no overlapping session. Each statement's plan
-    reads the address's own rows of its range only (``ix_fg_traffic_transip_transport_time``)
-    and stops at the first overlapping session, over partitions and over chunks."""
+    reads the address's own rows of its range only (``ix_fg_traffic_transip_time``, no other
+    index entry of the address: :data:`STEP_BUFFERS`) and stops at the first overlapping
+    session, over partitions and over chunks."""
     address, at = OVERLAP[case]
     probes: list[_Timed] = []
 
@@ -1404,7 +1425,7 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     condition = "transip = CAST(:address AS inet)"
     read, kept = _rows_of(traffic_site, low, end, high, condition, address=address)
     in_window, kept_in_window = _rows_of(traffic_site, low, high, high, condition, address=address)
-    if case == "no_rows":
+    if case in ("no_rows", "busy_after"):
         assert (read, kept) == (0, 0)
     elif case in ("busy", "busy_late"):
         assert kept_in_window > 0
@@ -1435,7 +1456,9 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     for (sql, parameters), (_first, _last, rows) in zip(statements, ranges, strict=True):
         with traffic_site.connect() as connection:
             plan = (
-                connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
             )
         print("\n".join(plan))
         assert not any("Seq Scan" in line for line in plan), case
@@ -1448,7 +1471,8 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
         # (``busy_before``'s, before the site's first row), a scan that fetched nothing.
         scans, removed = _plan_reads(plan)
         assert scans, case
-        assert all("transip_transport_time" in index or not n for index, n in scans), scans
+        assert all("transip_time" in index or not n for index, n in scans), scans
+        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, _buffers(plan), rows)
         if kept_in_window:
             assert removed < in_window // 10, (case, removed, in_window)
         else:
@@ -1478,9 +1502,16 @@ CARRIED_EXITS: dict[str, dict[str, Any]] = {
     WAN: {"hat-1": {"mode": "isp_nat", "transips": [WAN]}},
     LATER_LINE: {"hat-1": {"mode": "direct", "public": [LATER_LINE]}},
 }
-#: The order of ``ix_fg_traffic_transip_transport_time`` in which ``_carried`` asks its steps after
-#: the window.
-CARRIED_ORDER = "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time"
+#: The orders in which ``_carried`` asks its steps after the window: with a port, that of
+#: ``ix_fg_traffic_transip_transport_time``; without one, that of ``ix_fg_traffic_transip_time``
+#: (#71), with the index each one reads.
+CARRIED_ORDER = {
+    True: (
+        "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time",
+        "transip_transport_time",
+    ),
+    False: ("ORDER BY fg_traffic.transip, fg_traffic.time", "transip_time"),
+}
 
 
 def _utc_days(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
@@ -1505,12 +1536,15 @@ def test_the_d15_carried_check_is_fast(
     :data:`CARRIED`) under 0.2 s, the probe's bound, through the real lookup: the exit's check
     sees the address and :data:`BESIDE` beside it, so the search on the address keeps its answer
     only when a session through it spans the moment or would be found in the window. Asked in
-    steps (the window's rows in time order, then on ``ix_fg_traffic_transip_transport_time`` and
+    steps (the window's rows in time order, then on an index on the address, with a port
+    ``ix_fg_traffic_transip_transport_time``, without one ``ix_fg_traffic_transip_time``, and
     one UTC day, a TimescaleDB chunk, at a time the scan's tail and, with a port, the sessions
     spanning the moment on any port), the window's plan reads at most its rows of every address,
-    every other plan the address's own rows of its day only, stopping at the first that
-    answers. As one ``EXISTS`` the busy address was a sequential scan of the partition and the
-    address after its last row a time-ordered scan of every address's rows of the range."""
+    every other plan the address's own rows of its day only (no other index entry of the
+    address: :data:`STEP_BUFFERS`), stopping at the first that answers. As one ``EXISTS`` the
+    busy address was a sequential scan of the partition and the address after its last row a
+    time-ordered scan of every address's rows of the range; on the first index a port-less step
+    walked every index entry of the address in the partition (#71)."""
     address, at, port, carried = CARRIED[case]
     checks: list[_Timed] = []
 
@@ -1584,7 +1618,9 @@ def test_the_d15_carried_check_is_fast(
         with traffic_site.connect() as connection:
             found = connection.exec_driver_sql(sql, parameters).scalar() is not None
             plan = (
-                connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
             )
         print("\n".join(plan))
         # The plans first (the one ``EXISTS`` fails here): no step scans a partition, and the
@@ -1604,12 +1640,16 @@ def test_the_d15_carried_check_is_fast(
             continue
         # The address's own rows of the step's day only, along its index entries: a step that
         # finds nothing reads and filters out every one of them, a step that answers stops early.
-        assert CARRIED_ORDER in sql, case
-        assert all("transip_transport_time" in name or not n for name, n in scans), scans
+        order, index_name = CARRIED_ORDER[step_port is not None]
+        assert order in sql, case
+        assert all(index_name in name or not n for name, n in scans), scans
         own = condition if step_port is None else f"{condition} AND transport = :port"
         rows, _kept = _rows_of(
             traffic_site, first, last, start_bound, own, address=address, port=step_port
         )
+        # No other index entry of the address than its rows of the step's range: on
+        # ``ix_fg_traffic_transip_transport_time`` a port-less step walked them all (#71).
+        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, index, _buffers(plan), rows)
         if found:
             assert removed <= max(rows // 10, 100), (case, index, removed, rows)
         else:

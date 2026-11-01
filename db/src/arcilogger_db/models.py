@@ -246,6 +246,7 @@ class FgTraffic(TimeSeries, Base):
         "fg_traffic",
         Index("ix_fg_traffic_srcip_time", "srcip", "time"),
         Index("ix_fg_traffic_transip_transport_time", "transip", "transport", "time"),
+        Index("ix_fg_traffic_transip_time", "transip", "time"),
         Index("ix_fg_traffic_sessionid", "sessionid"),
         Index("ix_fg_traffic_dstip_dstport_time", "dstip", "dstport", "time"),
         comment="FortiGate traffic logs (forward/local), incl. interim updates and source NAT.",
