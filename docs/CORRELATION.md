@@ -946,11 +946,15 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   searched sources' offset (`source_clock_offset`) but is not corrected: run the lookup again as its
   text says. The alert measures by **receive time** and the lookup by receive time too (the
   per-minute samples of `source_clock_samples`, which ingest writes with the rows): a clock set
-  hours back after logging on time is alerted at the next check and named by a lookup at the real
-  moment, although its rows' device times lie hours away. A burst of a device's buffered late
-  lines can make its minutes look behind; the lookup then errs on the safe side (a `low` chain
-  with the offset stated). Lines loaded before revision `0019_source_clock_samples` have no
-  samples: a lookup of such a moment is measured by device time alone.
+  back or ahead by up to a day after logging on time is alerted once most of the source's newest
+  rows carry it (a busy source at the next check, a line a minute within about two checks) and
+  named by a lookup at the real moment, although its rows' device times lie hours away. A clock
+  more than a day off is stamped with the receive time and gives no sample (`<parser>.time` parse
+  failures, `R20-lease:fortigate-refused`). A burst of lines a device delivers late can make its
+  minutes look behind: the alert can open for them, and a lookup errs on the safe side (a `low`
+  chain with the offset stated). The upgrade to revision `0019_source_clock_samples` counts the
+  rows received in its last two hours; older lines have no samples, and a lookup of such a moment
+  is measured by device time alone.
 - **srcmac is only as good as the interface setting.** The shared-MAC guard, the other-lease
   refusal and `R20-lease:srcmac-shared` catch a routed segment or a switch listed as directly
   connected; a layer-2 segment with a single client behind a NAT device is not caught (not

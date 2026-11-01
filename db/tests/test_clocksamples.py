@@ -33,16 +33,18 @@ SECOND = timedelta(seconds=1)
     [
         (timedelta(0), 0),
         (-0.4 * SECOND, 0),
-        (59.4 * SECOND, 0),  # under a minute: no limit is that small
-        (-59.6 * SECOND, -60),
-        (120.4 * SECOND, 120),
-        (120.5 * SECOND, 121),  # half a second rounds up
-        (-120.5 * SECOND, -120),
+        (59.6 * SECOND, 0),  # under a minute: no limit is that small
+        (-59.9 * SECOND, 0),
+        (60 * SECOND, 60),
+        (-60.2 * SECOND, -61),  # away from zero, as a lookup prints an offset
+        (120 * SECOND, 120),  # not beyond a limit of 120 s ...
+        (120.0001 * SECOND, 121),  # ... and beyond it, as the unrounded offset is
+        (-120.4 * SECOND, -121),
         (-timedelta(hours=3), -10800),
-        (timedelta(hours=3, seconds=1), 10801),
+        (timedelta(hours=3, seconds=0.5), 10801),
     ],
 )
-def test_the_offset_is_whole_seconds_and_zero_under_a_minute(
+def test_the_offset_is_whole_seconds_away_from_zero_and_zero_under_a_minute(
     offset: timedelta, expected: int
 ) -> None:
     assert offset_of(AT + offset, AT) == expected

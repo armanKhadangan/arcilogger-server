@@ -6729,65 +6729,82 @@ hours away from their arrival, so neither sample held them. The offset is now me
 - **`source_clock_samples`** (new table; revision `0019_source_clock_samples`; D28, 1.2;
   `db/clocksamples.py`). Key `(source, minute, seconds)`, column `n > 0`: per source, received
   minute (UTC, `time_received` truncated) and device clock offset `time − time_received` in
-  whole seconds (half a second rounds up; **0 under 60 s either way**, no limit is that small,
-  so a source on time has one row a minute), the number of `messages` rows. A row whose time is
-  the receive time (no usable device time) is not counted, as before. A plain table on both
-  storage modes (no partition, no hypertable: about 1,440 rows a day per source on time); the
-  retention job deletes its minutes before the first kept month with the oldest partition
-  (`PartitionReport.clock_samples_deleted`). The ingest loader adds a batch's samples in the
-  `counts` step, the transaction of the rows, as it adds `search_counts`; the crash matrix of
-  `test_exactly_once.py` covers it. `clocksamples.rebuild` counts a source's received range again
-  from `messages`. It starts empty: lines loaded before the upgrade have no samples, so a lookup
-  of such a moment is measured by device time alone, as before. Alternatives considered: an
-  index on `messages (source, time_received)` costs every row of the largest table (and is not
-  used on compressed TimescaleDB chunks, where lookups weeks later read); a BRIN index on
-  `time_received` does not order by source. Tests: `db/tests/test_clocksamples.py`,
+  whole seconds **rounded away from zero**, as 2.7 prints an offset (120.4 s is 121, so a row
+  beyond the 120-s limit is stored beyond it), **0 under 60 s either way** (no limit is that
+  small, so a source on time has one row a minute), the number of `messages` rows. A row whose
+  time is the receive time (no usable device time, or one beyond `max_clock_skew`) is not
+  counted, as before. A plain table on both storage modes (no partition, no hypertable: about
+  1,440 rows a day per source on time). Like `search_counts` it follows the log tables once
+  database retention runs: `partitions.drop_before` deletes its minutes before the first kept
+  month (`PartitionReport.clock_samples_deleted`; no job calls `drop_before` yet, DATA-MODEL).
+  The ingest loader adds a batch's samples in the `counts` step, the transaction of the rows, as
+  it adds `search_counts`; the exactly-once matrix of `test_exactly_once.py` checks them after
+  every interruption. `clocksamples.rebuild` counts a source's received range again from
+  `messages`. The upgrade counts the rows received in its last two hours (the same rule in SQL;
+  the services are stopped during an upgrade), so the first alert check after it reads the last
+  hour as before and an open `source-clock` is not resolved for want of samples; older lines
+  have no samples, and a lookup of such a moment is measured by device time alone, as before.
+  Alternatives considered: an index on `messages (source, time_received)` costs every row of the
+  largest table (and does not serve lookups weeks later on compressed TimescaleDB chunks); a BRIN
+  index on `time_received` does not order by source. Tests: `db/tests/test_clocksamples.py`,
   `db/tests/test_migration_0019.py`, `db/tests/test_partitions.py`,
-  `ingest/tests/test_loader_clocks.py`. Fold into 1.2 and DATA-MODEL (done).
+  `ingest/tests/test_loader_clocks.py`, `ingest/tests/test_exactly_once.py`. Fold into 1.2 and
+  DATA-MODEL (done).
 - **`R20-lease:source-clock` reads the newest received minutes** (supersedes D28's "its newest
   200 `messages` rows by device time within [now − 1 h − `max_clock_skew`, now + 1 h +
   `max_clock_skew`] (`ix_messages_source_time`), of which those received in the last hour count"
-  (lines 545-548), the same clause of the 2.6.3 table row and of 1995-1996, line 303's and
-  V16's (1.3) "latest records whatever their device time", and Deviations b's `source-clock`
-  bullet (the worker's `MAX_CLOCK_SKEW` and its pin are gone). Per checked source the alert
-  takes its `source_clock_samples` minutes received in [now − 1 h, now], newest first and whole,
-  until they hold 200 rows (all of them when fewer); with at least 10 rows, their median beyond
-  ±120 s raises the cause, as before. The source choice, the threshold, the texts and the
-  resolution are unchanged. A clock that jumps back or forward by any amount opens the cause at
-  the first check after a few minutes of jumped rows, while the source keeps sending; the rows
-  sent on time before the jump no longer outrank them. Perf (3.8): the read is one query on the
+  (lines 545-548) and the same clause of the 2.6.3 table row (line 2010), the "latest records
+  whatever their device time" of line 303 and of V16 (1.3, line 1314), the 3.8 entry "the newest
+  200 `messages` rows per source in its skew-bounded range" (4977-4979), and Deviations b's
+  `source-clock` bullet (5867-5869: the worker's `MAX_CLOCK_SKEW` and its pin test are gone; the
+  same pin now holds `clocksamples.MAX_CLOCK_SKEW`, which bounds `rebuild`). Per checked source
+  the alert takes its `source_clock_samples` minutes received in [now − 1 h, now], newest first
+  and whole, until they hold 200 rows, or until they hold 10 rows once they reach back 10 minutes
+  (`CLOCK_RECENT`: a quieter source is judged on its recent minutes, not on its whole hour); all
+  of them when they hold fewer. With at least 10 rows, their median beyond ±120 s raises the
+  cause, as before. The source choice, the threshold, the texts and the resolution are unchanged.
+  A clock that jumps back or forward by up to a day (ingest's `max_clock_skew`) opens the cause
+  once most of those rows carry the new time, as long as the source keeps sending: a busy source
+  (200 rows within a few minutes) at the next check, a source that logs a line a minute about two
+  checks after the jump (it took half an hour over the whole hour, and up to the jump itself by
+  device time). A clock more than a day off is stamped with the receive time by ingest and gives
+  no sample; that stays with the `<parser>.time` parse failures and, for FortiGate DHCP lines,
+  `R20-lease:fortigate-refused` (V16). **Known side effect** (the safe side): lines a device
+  delivers late in a burst (after a link outage, from a buffer) arrive in the newest minutes and
+  can open the cause for those minutes until on-time rows outnumber them again; the old
+  device-time ranking put them behind the on-time rows. Perf (3.8): the read is one query on the
   table's primary key, guarded under 0.2 s with 30 days of samples (the alert's 0.5 s bound
   stays). Tests: `worker/tests/test_alerts_lease.py`
-  (`test_a_clock_that_jumps_after_logging_on_time_opens_at_the_next_check[−3 h, +3 h]`,
-  `test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hours`; both fail on
-  the device-time sample), `worker/tests/test_alerts_lease_performance.py`. Fold into D28,
-  2.6.3 and 1.3 V16.
+  (`test_a_clock_that_jumps_after_logging_on_time_opens_at_the_next_check[−3 h]`,
+  `test_a_quiet_source_whose_clock_jumps_is_judged_on_its_recent_minutes` and
+  `test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hours` fail on the
+  device-time sample; the `[+3 h]` case passed there too and guards the symmetry),
+  `worker/tests/test_alerts_lease_performance.py`. Fold into D28, 2.6.3, 1.1 (line 303), 1.3
+  V16 and 3.8.
 - **A lookup measures the clock by receive time too** (2.7 "Source clock at the requested
   moment"; amends Deviations c2's per-lookup clock bullet). Each measured source has two
   samples: the device-time sample of c2 (its rows nearest T on each side, unchanged: the rows
   the search and the lease timeline used) and its `source_clock_samples` minutes received in
   [T − 1 h, T + 1 h]. Each counts with at least 10 rows; the median further from 0 is the
   source's offset. The limits (120 s; max(120 s, tolerance) for a source measured only for the
-  session search), the rounding, the source choice (cited sources, or the searched sources of an
-  empty search through `search_counts`) and the texts are unchanged. With a clock set hours back
-  half an hour before T, the rows with a device time around T were sent on time (median 0) while
-  the rows received around T are hours behind: an exact request at T now gives `none` with
-  `source_clock_offset`, an internal lookup's chain is `low` with it; a lookup at the device
-  moment of the jumped rows behaves as before. A burst of a device's buffered late lines can
-  make the receive-time sample look behind for its minutes; that errs on the safe side (a `low`
-  chain with the offset stated, never a silent `high`). Perf (3.8): one more primary-key query
-  per measured source, inside the lookup clock guard (0.2 s for two sources). Tests:
-  `worker/tests/test_lookup_fortigate_only.py`
+  session search), the printed rounding, the source choice (cited sources, or the searched
+  sources of an empty search through `search_counts`) and the texts are unchanged. With a clock
+  set hours back half an hour before T, the rows with a device time around T were sent on time
+  (median 0) while the rows received around T are hours behind: an exact request at T now gives
+  `none` with `source_clock_offset` (it cites no row, so no chain), an internal lookup's chain
+  is `low` with it; a lookup at the device moment of the jumped rows behaves as before. A burst
+  of a device's buffered late lines can make the receive-time sample look behind for its
+  minutes; that errs on the safe side (a `low` chain with the offset stated, never a silent
+  `high`). Perf (3.8): one more primary-key query per measured source, inside the lookup clock
+  guard (0.2 s for two sources). Tests: `worker/tests/test_lookup_fortigate_only.py`
   (`test_a_clock_set_hours_back_is_named_at_the_real_moment`, fails on the device-time sample;
   `test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before`),
   `worker/tests/test_lookup_performance.py`
   (`test_the_source_clock_of_an_empty_search_is_fast`). Fold into 2.7, D28's "measures the
-  offset at the requested moment" paragraph, CORRELATION §2 and §7 (done), and the 3 test plan
-  entries (alerts and lookup "source clock").
+  offset at the requested moment" paragraph, CORRELATION §2 and §7 (done), and the two test
+  plan entries "source clock" (alerts 4394-4400, lookup 4555-4565).
 - **Ingest throughput** (3.8 gates; docs/INGEST.md "Measured throughput"): the loader's extra
-  work is one grouped upsert per batch; measured with `bench_throughput.py --repeat 3`, both
-  mixes, against `wave-3`, within 5 % (the numbers are in INGEST.md). Nothing to fold.
-
+  work is one grouped upsert per batch. THROUGHPUT_PLACEHOLDER Nothing to fold.
 
 ---
 

@@ -137,14 +137,16 @@ SITE = (
     """,
     """
     INSERT INTO search_counts (hour, source, raw_day, kind, tbl, n)
-    SELECT :now - g * interval '1 hour', s.name, :day, 'traffic', 'fg_traffic', :rows / 24
+    SELECT :now - g * interval '1 hour', s.name, :day, 'traffic', 'fg_traffic',
+           greatest(:rows / 24, 1)
     FROM generate_series(1, 24) AS g, (VALUES ('fortigate'), ('fortigate-2')) AS s(name)
     """,
     # The clock samples: the FortiGate on time for 30 days (a second behind: offset 0), the
     # second one 3 hours ahead in the last hour.
     """
     INSERT INTO source_clock_samples (source, minute, seconds, n)
-    SELECT 'fortigate', date_trunc('minute', :now) - g * interval '1 minute', 0, :rows / 1440
+    SELECT 'fortigate', date_trunc('minute', :now) - g * interval '1 minute', 0,
+           greatest(:rows / 1440, 1)
     FROM generate_series(0, 30 * 1440) AS g
     UNION ALL
     SELECT 'fortigate-2', date_trunc('minute', :now) - g * interval '1 minute', 10800, 40

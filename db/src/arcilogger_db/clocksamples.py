@@ -2,12 +2,15 @@
 
 Every ``messages`` row with a device time (``time <> time_received``) counts once under the key
 :class:`ClockKey`: its source, the minute it was **received** (UTC) and its device clock offset
-``time - time_received`` in whole seconds, ``0`` under a minute either way (:data:`NEAR_SECONDS`;
-no clock limit is that small, so a source on time has one key a minute).
+``time - time_received`` in whole seconds rounded away from zero, as a lookup prints an offset (so
+a row beyond a limit of whole seconds is stored beyond it), ``0`` under a minute either way
+(:data:`NEAR_SECONDS`; no clock limit is that small, so a source on time has one key a minute).
 
-* :func:`clock_key` is the one definition of a key, pure, shared by the ingest loader (which adds
-  a batch's samples in the transaction that loads its rows, as it adds ``search_counts``) and by
-  :func:`rebuild` (which counts a source's received range again from its rows).
+* :func:`offset_of` and :func:`minute_of` define a key; :func:`clock_key` applies them to a row
+  and :func:`rebuild` (which counts a source's received range again from its rows) uses it. The
+  ingest loader adds a batch's samples in the transaction that loads its rows, as it adds
+  ``search_counts``; it groups its lines by the same two functions (a test pins it to
+  :func:`clock_key` line by line).
 * :func:`upsert_samples` adds a :class:`collections.Counter` of keys (``INSERT … ON CONFLICT …
   DO UPDATE SET n = n + EXCLUDED.n``, keys in sorted order so two writers never deadlock).
 * :func:`received_between` and :func:`newest` read one source's offsets of a received range as
@@ -58,10 +61,14 @@ class ClockKey(NamedTuple):
 
 
 def offset_of(time: datetime, received: datetime) -> int:
-    """``time - received`` in whole seconds (half a second rounds up), ``0`` under
+    """``time - received`` in whole seconds, rounded up away from zero (120.4 s is 121, -120.4 s
+    is -121: an offset beyond a limit of whole seconds stays beyond it), ``0`` under
     :data:`NEAR_SECONDS` either way."""
-    seconds = math.floor((time - received).total_seconds() + 0.5)
-    return 0 if abs(seconds) < NEAR_SECONDS else seconds
+    seconds = (time - received).total_seconds()
+    if abs(seconds) < NEAR_SECONDS:
+        return 0
+    whole = math.ceil(abs(seconds))
+    return -whole if seconds < 0 else whole
 
 
 def minute_of(received: datetime) -> datetime:
@@ -120,8 +127,9 @@ def rebuild(connection: Connection, source: str, start: datetime, end: datetime)
     )
     samples: dict[ClockKey, int] = {}
     for time, received in rows:
-        key = ClockKey(source, minute_of(received), offset_of(time, received))
-        samples[key] = samples.get(key, 0) + 1
+        key = clock_key({"source": source, "time": time, "time_received": received})
+        if key is not None:
+            samples[key] = samples.get(key, 0) + 1
     return upsert_samples(connection, samples)
 
 
@@ -142,11 +150,19 @@ def received_between(
 
 
 def newest(
-    session: Session | Connection, source: str, since: datetime, until: datetime, rows: int
+    session: Session | Connection,
+    source: str,
+    since: datetime,
+    until: datetime,
+    rows: int,
+    *,
+    least: int = 0,
+    recent: datetime | None = None,
 ) -> list[tuple[int, int]]:
     """``source``'s ``(offset, rows)`` of its newest minutes received in ``[since, until]``,
     taken whole, newest first, until they hold ``rows`` rows (all of them when they hold
-    fewer)."""
+    fewer), or until they hold ``least`` rows and the next minute was received before
+    ``recent`` (a quiet source is judged on its recent minutes, not on its whole range)."""
     t = SourceClockSample
     query = (
         select(t.minute, t.seconds, t.n)
@@ -156,7 +172,9 @@ def newest(
     taken: dict[int, int] = {}
     total, last = 0, None
     for minute, offset, n in session.execute(query):
-        if total >= rows and minute != last:
+        if minute != last and (
+            total >= rows or (recent is not None and total >= least and minute < recent)
+        ):
             break
         taken[int(offset)] = taken.get(int(offset), 0) + int(n)
         total += int(n)

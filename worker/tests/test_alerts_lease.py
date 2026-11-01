@@ -558,10 +558,17 @@ def _clock(
 
 
 def _sent(
-    session: Session, name: str, start: datetime, end: datetime, offset: timedelta, line: int
+    session: Session,
+    name: str,
+    start: datetime,
+    end: datetime,
+    offset: timedelta,
+    line: int,
+    every: timedelta = SECOND,
 ) -> int:
-    """A busy source's lines, one a second received in ``[start, end)`` with the device clock
-    ``offset`` from the receive time, and their clock samples; the next raw line number."""
+    """A source's lines, one ``every`` (a busy source: a second) received in ``[start, end)``
+    with the device clock ``offset`` from the receive time, and their clock samples; the next raw
+    line number."""
     received = start
     while received < end:
         session.add(
@@ -569,7 +576,7 @@ def _sent(
                     sender="172.31.255.1", raw_day=DAY, raw_line=line, raw_offset=100 * line,
                     type="traffic", text="")
         )  # fmt: skip
-        received += timedelta(seconds=1)
+        received += every
         line += 1
     session.flush()
     clocksamples.rebuild(session.connection(), name, start, end)
@@ -590,6 +597,21 @@ def test_a_clock_that_jumps_after_logging_on_time_opens_at_the_next_check(
     alert = check()["R20-lease:source-clock"]
     assert alert.details["seconds"] == int(jump.total_seconds())
     assert alert.details["sources"] == ["fortigate"]
+
+
+def test_a_quiet_source_whose_clock_jumps_is_judged_on_its_recent_minutes(
+    check: Any, db_session: Session
+) -> None:
+    """One line a minute, on time for an hour, then 3 hours behind: its newest minutes are taken
+    back to 10 minutes ago (at least 10 rows), not its whole hour. Five jumped lines among the
+    eleven rows of those minutes say nothing yet; six of ten open the alert, about two checks
+    after the jump. Over the whole hour they opened it only after half an hour (#73)."""
+    _clock(db_session, "fortigate", timedelta(milliseconds=-300), rows=0)
+    jumped = NOW - 6 * MINUTE
+    line = _sent(db_session, "fortigate", NOW - HOUR, jumped, -0.3 * SECOND, 1, every=MINUTE)
+    _sent(db_session, "fortigate", jumped, NOW, -timedelta(hours=3), line, every=MINUTE)
+    assert "R20-lease:source-clock" not in check(NOW - 2 * MINUTE)
+    assert check()["R20-lease:source-clock"].details["seconds"] == -10800
 
 
 def test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hours(

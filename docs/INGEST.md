@@ -194,17 +194,21 @@ before the upgrade, a device clock almost a day behind) and the exactly-once mat
 
 The same step `counts` writes `source_clock_samples` (`arcilogger_db.clocksamples`, ADR-0016 D28,
 issue #73) from the same lines: per source, received minute (`time_received`, UTC) and device
-clock offset `time - time_received` in whole seconds (`0` under a minute either way), the number
-of lines whose `messages` row loaded with a device time of its own (a line stamped with its
-receive time is not counted). `clock_key` is the one definition, also used by
-`clocksamples.rebuild`; the loader groups a batch's lines by source, minute and offset and makes
-each key once per group. A source on time has one key a minute, so a batch adds a few keys per
+clock offset `time - time_received` in whole seconds rounded away from zero (`0` under a minute
+either way), the number of lines whose `messages` row loaded with a device time of its own (a line
+stamped with its receive time, also one whose device time was beyond `max_clock_skew`, is not
+counted). `offset_of` and `minute_of` define a key; `clock_key` applies them to a row and
+`clocksamples.rebuild` uses it; the loader groups a batch's lines by source, minute and offset
+with the same two functions and makes each key once per group (a test pins it to `clock_key`
+line by line). A source on time has one key a minute, so a batch adds a few keys per
 source, written with one fixed `INSERT … SELECT FROM unnest(…) ON CONFLICT … DO UPDATE SET n =
 source_clock_samples.n + EXCLUDED.n` per 500 keys. `R20-lease:source-clock` and a lookup's clock
 check read it by receive time: a device clock set hours back writes rows whose device times lie
 hours before their arrival, which a sample of `messages` by device time does not reach (contract,
-"Deviations — clock (2026-11)"). Lines loaded before revision `0019_source_clock_samples` have no
-samples; the retention job deletes the minutes before the first kept month. Tests:
+"Deviations — clock (2026-11)"). The upgrade to revision `0019_source_clock_samples` counts the
+rows received in its last two hours; older lines have no samples. Like `search_counts`, the
+samples follow the log tables once database retention runs (`partitions.drop_before` deletes the
+minutes before the first kept month; no job calls it yet, [DATA-MODEL.md](DATA-MODEL.md)). Tests:
 `ingest/tests/test_loader_clocks.py`, `db/tests/test_clocksamples.py` and the exactly-once
 matrix above.
 

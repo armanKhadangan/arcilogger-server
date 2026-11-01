@@ -86,9 +86,9 @@ def _line(number: int, time: datetime, received: datetime, source: str) -> Prepa
 
 def test_grouping_lines_gives_the_keys_of_clock_key_line_by_line() -> None:
     """``_clock_keys`` makes one key per group of lines; the result must be ``clock_key`` of every
-    line: minutes split to the microsecond, offsets on both sides of a minute and of half a
-    second, two sources, a line stamped with its receive time, salvaged lines, lines without a
-    ``messages`` row."""
+    line: minutes split to the microsecond, offsets on both sides of a minute and parts of a
+    second rounded away from zero, two sources, a line stamped with its receive time, salvaged
+    lines, lines without a ``messages`` row."""
     end = datetime(2026, 9, 23, 6, 59, 59, 999999, tzinfo=UTC)  # the last instant of a minute
     lines = [
         _line(1, end - timedelta(seconds=0.3), end, "fortigate"),
@@ -96,7 +96,7 @@ def test_grouping_lines_gives_the_keys_of_clock_key_line_by_line() -> None:
         _line(3, end - timedelta(seconds=0.3), end + timedelta(microseconds=1), "fortigate"),
         _line(4, end - timedelta(hours=3), end, "fortigate"),
         _line(5, end - timedelta(hours=3, seconds=0.6), end, "fortigate"),
-        _line(6, end + timedelta(seconds=59.6), end, "fortigate"),
+        _line(6, end + timedelta(seconds=60.4), end, "fortigate"),
         _line(7, end + timedelta(seconds=59.4), end, "fortigate"),
         _line(8, end - timedelta(minutes=8), end, "core-r1"),
     ]
@@ -117,10 +117,10 @@ def test_grouping_lines_gives_the_keys_of_clock_key_line_by_line() -> None:
     assert sum(expected.values()) == 3 * 7 + 1  # line 2 has no device time of its own
     minute = end.replace(second=0, microsecond=0)
     assert sorted((key.minute - minute, key.seconds, n) for key, n in expected.items()) == [
-        (timedelta(0), -10801, 3),  # line 5: half a second more rounds away
+        (timedelta(0), -10801, 3),  # line 5: part of a second more rounds away from zero
         (timedelta(0), -10800, 4),  # line 4, and the salvaged line 9
         (timedelta(0), -480, 3),  # line 8, its own source
         (timedelta(0), 0, 6),  # lines 1 and 7: under a minute
-        (timedelta(0), 60, 3),  # line 6: 59.6 s rounds to a minute
+        (timedelta(0), 61, 3),  # line 6: 60.4 s rounds away from zero
         (timedelta(minutes=1), 0, 3),  # line 3: received a microsecond into the next minute
     ]

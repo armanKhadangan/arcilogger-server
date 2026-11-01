@@ -1,6 +1,7 @@
 """Revision ``0019_source_clock_samples`` (issue #73, ADR-0016 D28): up and down on native
-partitions and on TimescaleDB, the table's key and check, empty after the upgrade (lines loaded
-before it have no samples), the rows of ``messages`` kept by the downgrade."""
+partitions and on TimescaleDB, the table's key and check, the rows received in the last two hours
+counted by the upgrade as ``clocksamples.rebuild`` counts them (older lines have no samples), the
+rows of ``messages`` kept by the downgrade."""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool
 
-from arcilogger_db.clocksamples import ClockKey, received_between, upsert_samples
+from arcilogger_db.clocksamples import ClockKey, rebuild, received_between, upsert_samples
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import alembic_config, upgrade
 from arcilogger_db.testing import TestServer
@@ -47,20 +48,41 @@ def _timescale(engine: Engine) -> bool:
     return available is not None
 
 
+#: Lines loaded before the upgrade: (received this long ago, device clock offset).
+OLD_LINES = (
+    (timedelta(days=1), timedelta(0)),  # the receive time: never counted
+    (timedelta(days=1), -timedelta(hours=3)),  # received before the range counted
+    (timedelta(minutes=90), timedelta(milliseconds=-300)),
+    (timedelta(minutes=30), -timedelta(hours=3, milliseconds=400)),
+    (timedelta(minutes=30), timedelta(seconds=120.2)),
+    (timedelta(minutes=30), timedelta(0)),
+)
+
+
 def _old_messages(engine: Engine) -> datetime:
-    """Two lines loaded before the upgrade, one with a device time 3 hours behind."""
-    at = (datetime.now(UTC) - timedelta(days=1)).replace(microsecond=0)
+    """Lines loaded before the upgrade, from a day ago to half an hour ago; the moment the
+    newest were received."""
+    now = datetime.now(UTC).replace(second=30, microsecond=0)
     with engine.begin() as connection:
-        for line, offset in enumerate((timedelta(0), -timedelta(hours=3)), 1):
+        for line, (ago, offset) in enumerate(OLD_LINES, 1):
+            received = now - ago
             connection.execute(
                 text(
                     "INSERT INTO messages (time, time_received, source, sender, raw_day, "
                     "raw_line, raw_offset, type, text) VALUES (:time, :received, 'fortigate', "
                     "'172.31.255.1', :day, :line, 0, 'traffic', '')"
                 ),
-                {"time": at + offset, "received": at, "day": at.date(), "line": line},
-            )
-    return at
+                {"time": received + offset, "received": received, "day": received.date(),
+                 "line": line},
+            )  # fmt: skip
+    return now - timedelta(minutes=30)
+
+
+def _samples(engine: Engine) -> dict[ClockKey, int]:
+    with engine.connect() as connection:
+        sql = f"SELECT source, minute, seconds, n FROM {TABLE}"  # noqa: S608 - fixed name
+        rows = connection.execute(text(sql)).all()
+    return {ClockKey(source, minute, seconds): n for source, minute, seconds, n in rows}
 
 
 def _check_upgraded(engine: Engine, at: datetime) -> None:
@@ -71,13 +93,23 @@ def _check_upgraded(engine: Engine, at: datetime) -> None:
         "minute",
         "seconds",
     ]
-    assert _scalar(engine, f"SELECT count(*) FROM {TABLE}") == 0  # noqa: S608 - fixed name
     minute = at.replace(second=0)
+    backfilled = _samples(engine)
+    assert backfilled == {
+        ClockKey("fortigate", minute - timedelta(hours=1), 0): 1,
+        ClockKey("fortigate", minute, -10801): 1,  # rounded away from zero
+        ClockKey("fortigate", minute, 121): 1,
+    }
+    with engine.begin() as connection:  # what a rebuild of the range counts from the rows
+        rebuild(connection, "fortigate", at - timedelta(minutes=90), at + timedelta(minutes=1))
+    assert _samples(engine) == backfilled
     with engine.begin() as connection:
         key = ClockKey("fortigate", minute, -10800)
         upsert_samples(connection, {key: 2})
         upsert_samples(connection, {key: 3})  # adds to the row
-        assert received_between(connection, "fortigate", minute, minute) == [(-10800, 5)]
+        assert sorted(received_between(connection, "fortigate", minute, minute)) == [
+            (-10801, 1), (-10800, 5), (121, 1),
+        ]  # fmt: skip
     with pytest.raises(IntegrityError), engine.begin() as connection:
         connection.execute(
             text(
@@ -98,7 +130,7 @@ def _check_downgraded(engine: Engine) -> None:
     with engine.begin() as connection:
         command.downgrade(alembic_config(connection), BEFORE)
     assert TABLE not in inspect(engine).get_table_names()
-    assert _scalar(engine, "SELECT count(*) FROM messages") == 2  # the rows stay
+    assert _scalar(engine, "SELECT count(*) FROM messages") == len(OLD_LINES)  # the rows stay
     assert upgrade(engine, revision=REVISION).after == (REVISION,)  # and up again
 
 

@@ -947,9 +947,13 @@ DECLINE_SECONDS: Final = 300
 DHCP_MAC_IPS: Final = 3
 #: ``source-clock`` (D28, #73): the newest rows per source by receive time, of which this many
 #: must have been received in the last hour, and the median offset beyond which the clock is off.
+#: A source with fewer rows in its recent minutes than :data:`CLOCK_ROWS` is judged on those
+#: minutes once they hold :data:`CLOCK_MIN_ROWS` (a quiet source's jump opens the cause within
+#: about two checks, not after half an hour of jumped rows).
 CLOCK_ROWS: Final = 200
 CLOCK_MIN_ROWS: Final = 10
 CLOCK_LIMIT_SECONDS: Final = 120
+CLOCK_RECENT: Final = timedelta(minutes=10)
 #: Tables lookups read: a source whose files hold none of them has its clock left alone.
 LOOKUP_TABLES: Final = ("fg_traffic", "fg_dhcp", "mt_dhcp", "mt_arp")
 #: ``R20-nat:unmapped-transip``: sessions an unclaimed NAT address carried in the last hour.
@@ -1557,9 +1561,11 @@ def _source_clocks(check: _LeaseCheck) -> None:
     median beyond :data:`CLOCK_LIMIT_SECONDS`.
 
     The latest records are the newest received in the last hour, from ``source_clock_samples``
-    (whole received minutes, newest first, until :data:`CLOCK_ROWS` rows; #73): ranked by device
-    time, the records a source sent on time before its clock jumped back outranked every record
-    after it, and the alert opened only about as long after the jump as the jump itself."""
+    (whole received minutes, newest first, until :data:`CLOCK_ROWS` rows, or until
+    :data:`CLOCK_MIN_ROWS` rows once the minutes reach :data:`CLOCK_RECENT` back; #73): ranked
+    by device time, the records a source sent on time before its clock jumped back outranked
+    every record after it, and the alert opened only about as long after the jump as the jump
+    itself."""
     now, session = check.now, check.session
     today = site_day(now)
     checked = session.scalars(
@@ -1576,7 +1582,15 @@ def _source_clocks(check: _LeaseCheck) -> None:
     ).all()
     offsets: dict[str, int] = {}
     for source in checked:
-        latest = clocksamples.newest(session, source, now - TRAFFIC_WINDOW, now, CLOCK_ROWS)
+        latest = clocksamples.newest(
+            session,
+            source,
+            now - TRAFFIC_WINDOW,
+            now,
+            CLOCK_ROWS,
+            least=CLOCK_MIN_ROWS,
+            recent=now - CLOCK_RECENT,
+        )
         offset, counted = clocksamples.median(latest)
         if offset is None or counted < CLOCK_MIN_ROWS:
             continue
