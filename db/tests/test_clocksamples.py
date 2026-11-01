@@ -160,3 +160,11 @@ def test_the_readers(db_session: Session) -> None:
     total = db_session.scalar(select(func.sum(SourceClockSample.n)))
     assert total == 390
     assert db_session.execute(text("SELECT count(*) FROM source_clock_samples")).scalar() == 6
+
+
+def test_the_rebuild_bound_is_ingests_clock_skew() -> None:
+    """A row is used only within ingest's skew of its receive time (the rebuild reads that far)."""
+    from arcilogger_db.clocksamples import MAX_CLOCK_SKEW
+    from arcilogger_ingest.parsers.syslog import DEFAULT_MAX_CLOCK_SKEW
+
+    assert MAX_CLOCK_SKEW == DEFAULT_MAX_CLOCK_SKEW

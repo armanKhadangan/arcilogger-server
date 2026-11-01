@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
+from arcilogger_db import clocksamples
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import (
     Alert,
@@ -48,6 +49,8 @@ from arcilogger_worker.testing import Evidence, tr
 DAY = date(2026, 10, 20)
 NOW = tr(DAY, 12)
 HOUR = timedelta(hours=1)
+MINUTE = timedelta(minutes=1)
+SECOND = timedelta(seconds=1)
 GIB = 1024**3
 
 
@@ -532,13 +535,14 @@ def _clock(
     start: datetime = NOW - timedelta(minutes=50),
 ) -> None:
     """``rows`` lines of ``name`` received in the last hour whose device time is ``offset``
-    from the receive time (``late`` more lines received with a 10-minute delay), and the
-    search counts that say its files hold rows of ``table``."""
+    from the receive time (``late`` more lines received with a 10-minute delay), their clock
+    samples as ingest writes them, and the search counts that say its files hold rows of
+    ``table``."""
     if session.get(Source, name) is None:
         session.add(Source(name=name, type=kind, address="172.31.255.1"))
     session.add(
         SearchCount(hour=start.replace(minute=0), source=name, raw_day=DAY, kind="traffic",
-                    tbl=table, n=rows + late)
+                    tbl=table, n=max(rows + late, 1))
     )  # fmt: skip
     for k in range(rows + late):
         received = start + timedelta(minutes=2 * k)
@@ -548,6 +552,57 @@ def _clock(
                     sender="172.31.255.1", raw_day=DAY, raw_line=k + 1, raw_offset=100 * k,
                     type="traffic", text="")
         )  # fmt: skip
+    session.flush()
+    end = start + timedelta(minutes=2 * (rows + late))
+    clocksamples.rebuild(session.connection(), name, start, end + timedelta(minutes=1))
+
+
+def _sent(
+    session: Session, name: str, start: datetime, end: datetime, offset: timedelta, line: int
+) -> int:
+    """A busy source's lines, one a second received in ``[start, end)`` with the device clock
+    ``offset`` from the receive time, and their clock samples; the next raw line number."""
+    received = start
+    while received < end:
+        session.add(
+            Message(time=received + offset, time_received=received, source=name,
+                    sender="172.31.255.1", raw_day=DAY, raw_line=line, raw_offset=100 * line,
+                    type="traffic", text="")
+        )  # fmt: skip
+        received += timedelta(seconds=1)
+        line += 1
+    session.flush()
+    clocksamples.rebuild(session.connection(), name, start, end)
+    return line
+
+
+@pytest.mark.parametrize("jump", [-timedelta(hours=3), timedelta(hours=3)])
+def test_a_clock_that_jumps_after_logging_on_time_opens_at_the_next_check(
+    check: Any, db_session: Session, jump: timedelta
+) -> None:
+    """A FortiGate logs on time for two hours, then its clock jumps 3 hours back (or ahead): a
+    few minutes of its records after the jump open the alert at the next check. Ranked by device
+    time, the two hours on time outranked every record after a jump back, for 3 hours (#73)."""
+    _clock(db_session, "fortigate", timedelta(milliseconds=-300), rows=0)  # source and counts
+    jumped = NOW - timedelta(minutes=4)
+    line = _sent(db_session, "fortigate", NOW - timedelta(hours=2), jumped, -0.3 * SECOND, 1)
+    _sent(db_session, "fortigate", jumped, NOW, jump, line)
+    alert = check()["R20-lease:source-clock"]
+    assert alert.details["seconds"] == int(jump.total_seconds())
+    assert alert.details["sources"] == ["fortigate"]
+
+
+def test_a_clock_eight_minutes_behind_then_three_hours_is_measured_at_three_hours(
+    check: Any, db_session: Session
+) -> None:
+    """The walk of step 4 (#61): 8 minutes behind for an hour, then 3 hours behind; the alert
+    opened at 8 minutes now says 3 hours at the next check, not 8 minutes for another hour."""
+    _clock(db_session, "fortigate", timedelta(milliseconds=-300), rows=0)
+    jumped = NOW - timedelta(minutes=5)
+    line = _sent(db_session, "fortigate", NOW - timedelta(hours=1), jumped, -8 * MINUTE, 1)
+    assert check(jumped)["R20-lease:source-clock"].details["seconds"] == -480
+    _sent(db_session, "fortigate", jumped, NOW, -timedelta(hours=3), line)
+    assert check()["R20-lease:source-clock"].details["seconds"] == -10800
 
 
 @pytest.mark.parametrize(
@@ -597,12 +652,6 @@ def test_clocks_that_are_not_judged(check: Any, db_session: Session) -> None:
     # A source with too few recent rows.
     _clock(db_session, "fortigate-3", -timedelta(minutes=8), rows=9)
     assert "R20-lease:source-clock" not in check()
-
-
-def test_the_worker_pins_the_ingest_clock_skew() -> None:
-    from arcilogger_ingest.parsers.syslog import DEFAULT_MAX_CLOCK_SKEW
-
-    assert system.MAX_CLOCK_SKEW == DEFAULT_MAX_CLOCK_SKEW
 
 
 # -- renewals -------------------------------------------------------------------------------------
