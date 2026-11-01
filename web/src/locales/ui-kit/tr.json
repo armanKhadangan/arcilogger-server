@@ -2,10 +2,6 @@
   "nav": {
     "uiKit": "Bileşen Kiti"
   },
-  "placeholder": {
-    "hint": "Tüm bileşenleri Bileşen Kiti sayfasında görebilirsiniz.",
-    "openUiKit": "Bileşen Kitini aç"
-  },
   "uiKit": {
     "title": "Bileşen Kiti",
     "intro": "ARCILOGGER arayüzünün bütün yapı taşları, açık ve koyu temada. Sayfalar bu bileşenlerden oluşturulur.",

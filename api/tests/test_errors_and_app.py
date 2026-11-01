@@ -52,6 +52,10 @@ EXPECTED_ROUTERS = {
     "/settings": "settings",
     # Arama (ADR-0015, docs/MVP-CONTRACTS.md section 17).
     "/search": "search",
+    # Uyum Durumu and Sistem (Wave 4 contract 2.2; mounted by W4-F, D2).
+    "/compliance": "compliance",
+    "/system": "system",
+    "/system/health": "system",
 }
 
 

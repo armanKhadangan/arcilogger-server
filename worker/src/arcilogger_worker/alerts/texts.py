@@ -229,6 +229,14 @@ RULES: Final[Mapping[str, RuleText]] = {
         "Check Settings → Application settings → 5651 lookup and lease timeline → Internet exits "
         "(NAT).",
     ),
+    # Content-filter evidence (Wave 4 contract 2.4): the check check_filter of alerts.system.
+    "R20-filter": RuleText(
+        "İçerik filtresi kaydı gelmiyor",
+        "No content filter records",
+        "Güvenlik duvarının web ve DNS filtresi kayıtlarını gönderdiğini denetleyin (Uyum Durumu, "
+        "kart 7).",
+        "Check that the firewall sends its web and DNS filter records (Uyum Durumu, card 7).",
+    ),
     "new-log-source": RuleText(
         "Yeni log kaynağı",
         "New log source",
@@ -596,6 +604,21 @@ _STEPS: Final[dict[str, tuple[str, str]]] = {
         "audit log (settings.change).\n"
         "4. Raw logs are not affected and are sealed. The alert closes by itself once the exits "
         "are saved or 24 hours after the problem ends.",
+    ),
+    "R20-filter": (
+        "1. Uyum Durumu sayfasında 7. kartı açın: son kaydı ve beklenen günleri görün.\n"
+        "2. Güvenlik duvarında web ve DNS filtresi kullanan politikalarda kayıt tutmanın açık "
+        "olduğunu ve kayıtların ARCILOGGER'a gönderildiğini denetleyin (DEVICE-SETUP.md; sahada "
+        "doğrulayın).\n"
+        "3. Kurum bu günlerde çalışmıyorsa beklenen günleri ve tatil ayarını Ayarlar → Uygulama "
+        "ayarları → Uyarılar ve e-posta'da düzeltin.\n"
+        "4. Yeni bir içerik filtresi kaydı gelince uyarı kendiliğinden kapanır.",
+        "1. Open card 7 on the Uyum Durumu page: see the last record and the expected days.\n"
+        "2. Check on the firewall that the policies using web and DNS filtering log, and that the "
+        "records are sent to ARCILOGGER (DEVICE-SETUP.md; verify on site).\n"
+        "3. If the organisation does not work on these days, correct the expected days and the "
+        "holiday setting in Settings → Application settings → Alerts and e-mail.\n"
+        "4. The alert closes by itself when a new content filter record arrives.",
     ),
     "new-log-source": (
         "1. Göndericinin adresini ayrıntılarda görün ve hangi cihaz olduğunu belirleyin.\n"
@@ -1560,6 +1583,17 @@ def _nat(d: Mapping[str, Any]) -> Facts | None:
     return _cause_line(NAT_CAUSES, d)
 
 
+def _filter(d: Mapping[str, Any]) -> Facts | None:
+    """``R20-filter``: the hours without a content filter record, nothing else (contract 2.4)."""
+    hours = _int(d, "hours")
+    if hours is None:
+        return None
+    return (
+        f"Son {hours} saatte içerik filtresi kaydı yok.",
+        f"No content filter record in the last {hours} hours.",
+    )
+
+
 DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R15": _r15,
     "R20-seal": _seal,
@@ -1580,6 +1614,7 @@ DESCRIBERS: Final[Mapping[str, Callable[[Mapping[str, Any]], Facts | None]]] = {
     "R20-config-change": _config_change,
     "R20-lease": _lease,
     "R20-nat": _nat,
+    "R20-filter": _filter,
     "new-log-source": _sender,
     "new_source": _sender,
     "wrong-transport": _sender,

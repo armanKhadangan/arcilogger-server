@@ -112,9 +112,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
 ];
 
 /**
- * Menu entries whose page already has content; the others say it comes in a later version.
- * Features that lead to one of those pages (e.g. the top bar's global search → "Arama") stay
- * hidden until the page is in this set.
+ * Menu entries whose page has content: since Wave 4 every entry (no page is a placeholder any
+ * more; `nav.test.ts` keeps it so). Features that lead to a page (e.g. the top bar's global
+ * search → "Arama") check this set, and README's "Yer tutucu sayfalar" is tied to it.
  */
 export const BUILT_PAGES: ReadonlySet<string> = new Set([
   'dashboard',
@@ -130,6 +130,8 @@ export const BUILT_PAGES: ReadonlySet<string> = new Set([
   'evidence',
   'devices',
   'usage',
+  'compliance',
+  'system',
 ]);
 
 /**

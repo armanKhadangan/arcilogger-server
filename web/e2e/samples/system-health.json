@@ -1,0 +1,492 @@
+{
+  "errors": {
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    }
+  },
+  "health": {
+    "agent": {
+      "heartbeat_at": "2026-10-13T07:01:06.754969+03:00",
+      "state": "ok"
+    },
+    "apply_system": {
+      "at": "2026-10-13T06:57:06.754362+03:00",
+      "code": null,
+      "state": "ok"
+    },
+    "checked_at": "2026-10-13T07:01:06.943236+03:00",
+    "jobs": [
+      {
+        "duration_ms": 180,
+        "failures": 0,
+        "job": "partitions.ensure",
+        "last_finished": "2026-10-13T00:15:07.180000+03:00",
+        "last_started": "2026-10-13T00:15:07+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-14T00:15:00+03:00",
+        "schedule_en": "Daily after 00:15",
+        "schedule_tr": "Her gün 00:15'ten sonra",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 217,
+        "failures": 0,
+        "job": "license.check",
+        "last_finished": "2026-10-13T06:58:36.971362+03:00",
+        "last_started": "2026-10-13T06:58:36.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:03:36.754362+03:00",
+        "schedule_en": "Every 5 minutes",
+        "schedule_tr": "Her 5 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 254,
+        "failures": 0,
+        "job": "leases.incremental",
+        "last_finished": "2026-10-13T07:00:37.008362+03:00",
+        "last_started": "2026-10-13T07:01:01.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "schedule_en": "Every 1 minute",
+        "schedule_tr": "Her 1 dakikada bir",
+        "state": "running"
+      },
+      {
+        "duration_ms": 291,
+        "failures": 0,
+        "job": "leases.nightly",
+        "last_finished": "2026-10-13T00:05:07.291000+03:00",
+        "last_started": "2026-10-13T00:05:07+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-14T00:05:00+03:00",
+        "schedule_en": "Daily after 00:05",
+        "schedule_tr": "Her gün 00:05'ten sonra",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 328,
+        "failures": 0,
+        "job": "leases.recheck_today",
+        "last_finished": "2026-10-13T06:31:07.082362+03:00",
+        "last_started": "2026-10-13T06:31:06.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:31:06.754362+03:00",
+        "schedule_en": "Every 1 hour",
+        "schedule_tr": "Her 1 saatte bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 365,
+        "failures": 0,
+        "job": "leases.late_evidence",
+        "last_finished": "2026-10-13T06:56:07.119362+03:00",
+        "last_started": "2026-10-13T06:56:06.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:06:06.754362+03:00",
+        "schedule_en": "Every 10 minutes",
+        "schedule_tr": "Her 10 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 402,
+        "failures": 0,
+        "job": "evidence.purge",
+        "last_finished": "2026-10-13T03:00:07.402000+03:00",
+        "last_started": "2026-10-13T03:00:07+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-14T03:00:00+03:00",
+        "schedule_en": "Daily after 03:00",
+        "schedule_tr": "Her gün 03:00'ten sonra",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 439,
+        "failures": 0,
+        "job": "audit.import",
+        "last_finished": "2026-10-13T06:53:37.193362+03:00",
+        "last_started": "2026-10-13T06:53:36.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:08:36.754362+03:00",
+        "schedule_en": "Every 15 minutes",
+        "schedule_tr": "Her 15 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 476,
+        "failures": 0,
+        "job": "admin.requests",
+        "last_finished": "2026-10-13T07:00:59.730362+03:00",
+        "last_started": "2026-10-13T07:00:59.254362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:01:14.254362+03:00",
+        "schedule_en": "Every 15 seconds",
+        "schedule_tr": "Her 15 saniyede bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 513,
+        "failures": 0,
+        "job": "alerts.import",
+        "last_finished": "2026-10-13T07:00:37.267362+03:00",
+        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "schedule_en": "Every 1 minute",
+        "schedule_tr": "Her 1 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 550,
+        "failures": 0,
+        "job": "alerts.r15",
+        "last_finished": "2026-10-13T07:00:37.304362+03:00",
+        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "schedule_en": "Every 1 minute",
+        "schedule_tr": "Her 1 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 587,
+        "failures": 2,
+        "job": "alerts.system",
+        "last_finished": "2026-10-13T06:58:37.341362+03:00",
+        "last_started": "2026-10-13T06:58:36.754362+03:00",
+        "last_status": "failed",
+        "module": null,
+        "next_due": "2026-10-13T07:03:36.754362+03:00",
+        "schedule_en": "Every 5 minutes",
+        "schedule_tr": "Her 5 dakikada bir",
+        "state": "failing"
+      },
+      {
+        "duration_ms": 624,
+        "failures": 0,
+        "job": "alerts.notify",
+        "last_finished": "2026-10-13T07:00:37.378362+03:00",
+        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_status": "skipped",
+        "module": null,
+        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "schedule_en": "Every 1 minute",
+        "schedule_tr": "Her 1 dakikada bir",
+        "state": "skipped"
+      },
+      {
+        "duration_ms": 661,
+        "failures": 0,
+        "job": "usage.requests",
+        "last_finished": "2026-10-13T07:00:52.415362+03:00",
+        "last_started": "2026-10-13T07:00:51.754362+03:00",
+        "last_status": "ok",
+        "module": "usage_analytics",
+        "next_due": "2026-10-13T07:01:21.754362+03:00",
+        "schedule_en": "Every 30 seconds",
+        "schedule_tr": "Her 30 saniyede bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 698,
+        "failures": 0,
+        "job": "usage.daily",
+        "last_finished": "2026-10-13T00:45:07.698000+03:00",
+        "last_started": "2026-10-13T00:45:07+03:00",
+        "last_status": "ok",
+        "module": "usage_analytics",
+        "next_due": "2026-10-14T00:45:00+03:00",
+        "schedule_en": "Daily after 00:45",
+        "schedule_tr": "Her gün 00:45'ten sonra",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 735,
+        "failures": 0,
+        "job": "usage.today",
+        "last_finished": "2026-10-13T06:58:37.489362+03:00",
+        "last_started": "2026-10-13T06:58:36.754362+03:00",
+        "last_status": "ok",
+        "module": "usage_analytics",
+        "next_due": "2026-10-13T07:03:36.754362+03:00",
+        "schedule_en": "Every 5 minutes",
+        "schedule_tr": "Her 5 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 772,
+        "failures": 0,
+        "job": "usage.reattribute",
+        "last_finished": "2026-10-13T06:56:07.526362+03:00",
+        "last_started": "2026-10-13T06:56:06.754362+03:00",
+        "last_status": "ok",
+        "module": "usage_analytics",
+        "next_due": "2026-10-13T07:06:06.754362+03:00",
+        "schedule_en": "Every 10 minutes",
+        "schedule_tr": "Her 10 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 809,
+        "failures": 0,
+        "job": "usage.retention",
+        "last_finished": "2026-10-13T03:30:07.809000+03:00",
+        "last_started": "2026-10-13T03:30:07+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-14T03:30:00+03:00",
+        "schedule_en": "Daily after 03:30",
+        "schedule_tr": "Her gün 03:30'dan sonra",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 846,
+        "failures": 0,
+        "job": "reports.run_due",
+        "last_finished": "2026-10-13T07:00:37.600362+03:00",
+        "last_started": "2026-10-13T07:00:36.754362+03:00",
+        "last_status": "ok",
+        "module": "usage_reports",
+        "next_due": "2026-10-13T07:01:36.754362+03:00",
+        "schedule_en": "Every 1 minute",
+        "schedule_tr": "Her 1 dakikada bir",
+        "state": "ok"
+      },
+      {
+        "duration_ms": null,
+        "failures": 0,
+        "job": "reports.purge",
+        "last_finished": null,
+        "last_started": null,
+        "last_status": null,
+        "module": null,
+        "next_due": null,
+        "schedule_en": "Daily after 03:20",
+        "schedule_tr": "Her gün 03:20'den sonra",
+        "state": "never"
+      },
+      {
+        "duration_ms": 920,
+        "failures": 0,
+        "job": "system.sample",
+        "last_finished": "2026-10-13T00:30:07.920000+03:00",
+        "last_started": "2026-10-13T00:30:07+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-14T00:30:00+03:00",
+        "schedule_en": "Daily after 00:30",
+        "schedule_tr": "Her gün 00:30'dan sonra",
+        "state": "ok"
+      },
+      {
+        "duration_ms": 957,
+        "failures": 0,
+        "job": "search.counts_backfill",
+        "last_finished": "2026-10-13T06:56:07.711362+03:00",
+        "last_started": "2026-10-13T06:56:06.754362+03:00",
+        "last_status": "ok",
+        "module": null,
+        "next_due": "2026-10-13T07:06:06.754362+03:00",
+        "schedule_en": "Every 10 minutes",
+        "schedule_tr": "Her 10 dakikada bir",
+        "state": "ok"
+      }
+    ],
+    "services": [
+      {
+        "name": "ArciCollector",
+        "state": "running",
+        "updated_at": "2026-10-13T07:00:46+03:00"
+      },
+      {
+        "name": "ArciIngest",
+        "state": "running",
+        "updated_at": "2026-10-13T07:01:03+03:00"
+      },
+      {
+        "name": "ArciWorker",
+        "state": "running",
+        "updated_at": "2026-10-13T07:00:56.754362+03:00"
+      },
+      {
+        "name": "ArciApi",
+        "state": "running",
+        "updated_at": "2026-10-13T07:01:06.943236+03:00"
+      }
+    ],
+    "tasks": [
+      {
+        "evidence": "state\\seal\\<YYYY-MM-DD>.json",
+        "last_evidence_at": "2026-10-13T06:58:06.754362+03:00",
+        "schedule_en": "Every 5 minutes from 00:10",
+        "schedule_tr": "Her gün 00:10'dan sonra 5 dakikada bir",
+        "state": "ok",
+        "task": "Seal"
+      },
+      {
+        "evidence": "state\\verify\\last-last-1.json, last-last-2.json",
+        "last_evidence_at": "2026-10-13T01:00:41+03:00",
+        "schedule_en": "Daily at 01:00",
+        "schedule_tr": "Her gün 01:00",
+        "state": "ok",
+        "task": "VerifyDaily"
+      },
+      {
+        "evidence": "state\\verify\\last-last-<N>.json (N ≥ 3)",
+        "last_evidence_at": "2026-10-11T03:00:52+03:00",
+        "schedule_en": "Sundays at 03:00",
+        "schedule_tr": "Pazar 03:00",
+        "state": "ok",
+        "task": "VerifyWeekly"
+      },
+      {
+        "evidence": "state\\verify\\last-full.json",
+        "last_evidence_at": null,
+        "schedule_en": "1st of the month at 04:00",
+        "schedule_tr": "Ayın 1'i 04:00",
+        "state": "missing",
+        "task": "VerifyMonthly"
+      },
+      {
+        "evidence": "state\\replica\\<YYYY-MM-DD>.json",
+        "last_evidence_at": null,
+        "schedule_en": "Hourly from 00:40",
+        "schedule_tr": "Saatte bir, 00:40'tan",
+        "state": "missing",
+        "task": "Replica"
+      },
+      {
+        "evidence": "",
+        "last_evidence_at": null,
+        "schedule_en": "Daily at 02:00",
+        "schedule_tr": "Her gün 02:00",
+        "state": "not_observable",
+        "task": "Retention"
+      },
+      {
+        "evidence": "state\\credit.jsonl",
+        "last_evidence_at": "2026-10-11T06:30:00+03:00",
+        "schedule_en": "Daily at 06:00",
+        "schedule_tr": "Her gün 06:00",
+        "state": "not_used",
+        "task": "Credit"
+      },
+      {
+        "evidence": "state\\clock\\<YYYY-MM-DD>.jsonl",
+        "last_evidence_at": "2026-10-13T06:06:06+03:00",
+        "schedule_en": "Hourly from 00:05",
+        "schedule_tr": "Saatte bir, 00:05'ten",
+        "state": "ok",
+        "task": "ClockCheck"
+      },
+      {
+        "evidence": "state\\backup\\last.json",
+        "last_evidence_at": "2026-10-12T01:52:10+03:00",
+        "schedule_en": "Daily at 01:40",
+        "schedule_tr": "Her gün 01:40",
+        "state": "late",
+        "task": "Backup"
+      },
+      {
+        "evidence": "state\\requests",
+        "last_evidence_at": null,
+        "schedule_en": "On event and every 5 minutes",
+        "schedule_tr": "Olayla ve 5 dakikada bir",
+        "state": "not_observable",
+        "task": "Requests"
+      },
+      {
+        "evidence": "admin\\system\\status.json",
+        "last_evidence_at": "2026-10-13T06:57:06.754362+03:00",
+        "schedule_en": "On event and every 5 minutes",
+        "schedule_tr": "Olayla ve 5 dakikada bir",
+        "state": "ok",
+        "task": "ApplySystem"
+      }
+    ],
+    "time": {
+      "alert_offset_ms": 1000,
+      "applied_at": null,
+      "applied_peers": "time.ume.tubitak.gov.tr,0x8",
+      "fallback_server": "time.ume.tubitak.gov.tr",
+      "ntp_server": null,
+      "samples": [
+        {
+          "delay_ms": 0.912,
+          "offset_ms": 3.2,
+          "ok": true,
+          "server": "time.ume.tubitak.gov.tr",
+          "stratum": 2,
+          "time": "2026-10-13T06:06:06+03:00"
+        },
+        {
+          "delay_ms": 1.046,
+          "offset_ms": 2.8,
+          "ok": true,
+          "server": "time.ume.tubitak.gov.tr",
+          "stratum": 2,
+          "time": "2026-10-13T05:06:06+03:00"
+        },
+        {
+          "delay_ms": null,
+          "offset_ms": null,
+          "ok": false,
+          "server": null,
+          "stratum": null,
+          "time": "2026-10-13T04:06:06+03:00"
+        },
+        {
+          "delay_ms": 0.887,
+          "offset_ms": -1.45,
+          "ok": true,
+          "server": "time.ume.tubitak.gov.tr",
+          "stratum": 2,
+          "time": "2026-10-13T03:06:06+03:00"
+        },
+        {
+          "delay_ms": 0.903,
+          "offset_ms": 2.15,
+          "ok": true,
+          "server": "time.ume.tubitak.gov.tr",
+          "stratum": 2,
+          "time": "2026-10-13T02:06:06+03:00"
+        },
+        {
+          "delay_ms": 0.921,
+          "offset_ms": 1.975,
+          "ok": true,
+          "server": "time.ume.tubitak.gov.tr",
+          "stratum": 2,
+          "time": "2026-10-13T01:06:06+03:00"
+        }
+      ]
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:21.707320+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  }
+}

@@ -1,5 +1,5 @@
 /** Mirror of api/src/arcilogger_api/system_health/models.py (Wave 4 contract 2.6.1). */
-import type { DateTimeString } from './api-types';
+import type { DateTimeString, Float } from './api-types';
 import type { ServiceName } from './settings-types';
 
 export type TaskName =
@@ -59,8 +59,8 @@ export interface ClockSampleOut {
   time: DateTimeString;
   server: string | null;
   ok: boolean;
-  offset_ms: number | null;
-  delay_ms: number | null;
+  offset_ms: Float | null;
+  delay_ms: Float | null;
   stratum: number | null;
 }
 

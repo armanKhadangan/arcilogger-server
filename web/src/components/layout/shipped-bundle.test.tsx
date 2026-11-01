@@ -43,14 +43,4 @@ describe('without the UI kit (the shipped bundle)', () => {
     renderApp('/ui-kit');
     expect(await screen.findByText('Sayfa bulunamadı')).toBeInTheDocument();
   });
-
-  it('placeholder pages name no milestone and do not point to the UI kit', async () => {
-    renderApp('/compliance');
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Uyum Durumu' }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Bu sayfa sonraki bir sürümde eklenecek.')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Bileşen Kitini aç' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Bileşen Kiti/)).not.toBeInTheDocument();
-  });
 });

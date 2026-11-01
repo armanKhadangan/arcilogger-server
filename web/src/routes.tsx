@@ -4,10 +4,9 @@ import { AppShell } from '@/components/layout/app-shell';
 import { ModuleGate, PermissionGate, RootLayout } from '@/components/layout/route-frames';
 import { RequireAuth } from '@/lib/auth';
 import { LICENSE_ADMIN_PERMISSION, LICENSE_PAGE } from '@/lib/license';
-import { BUILT_PAGES, NAV_ITEMS, UI_KIT_ITEM, type NavItem } from '@/nav';
+import { NAV_ITEMS, UI_KIT_ITEM, type NavItem } from '@/nav';
 import { LoginPage } from '@/pages/login/login-page';
 import { NotFoundPage } from '@/pages/not-found-page';
-import { PlaceholderPage } from '@/pages/placeholder-page';
 import { SetupPage } from '@/pages/setup/setup-page';
 
 /*
@@ -16,16 +15,6 @@ import { SetupPage } from '@/pages/setup/setup-page';
  * of a licence module (Kullanım, Raporlar) also sit in a ModuleGate: while the module is off the
  * locked page is shown and the page's requests are never made.
  */
-
-function placeholder(item: NavItem): RouteObject {
-  const page = { element: <PlaceholderPage item={item} /> };
-  return {
-    element: <PermissionGate anyOf={item.permissions} />,
-    children: [
-      item.path === '/' ? { index: true, ...page } : { path: item.path.slice(1), ...page },
-    ],
-  };
-}
 
 const navItem = (key: string): NavItem => {
   const found = NAV_ITEMS.find((item) => item.key === key);
@@ -47,7 +36,6 @@ export const routes: RouteObject[] = [
           </RequireAuth>
         ),
         children: [
-          ...NAV_ITEMS.filter((item) => !BUILT_PAGES.has(item.key)).map(placeholder),
           {
             element: <PermissionGate anyOf={navItem('dashboard').permissions} />,
             children: [
@@ -59,7 +47,8 @@ export const routes: RouteObject[] = [
               },
             ],
           },
-          // Kaynaklar, Canlı Akış and Arama belong to 5651 Temel: no licence module gates them.
+          // Kaynaklar, Canlı Akış, Arama, Uyum Durumu and Sistem belong to 5651 Temel: no
+          // licence module gates them.
           {
             element: <PermissionGate anyOf={navItem('sources').permissions} />,
             children: [
@@ -120,6 +109,17 @@ export const routes: RouteObject[] = [
                     }),
                   },
                 ],
+              },
+            ],
+          },
+          {
+            element: <PermissionGate anyOf={navItem('compliance').permissions} />,
+            children: [
+              {
+                path: 'compliance',
+                lazy: async () => ({
+                  Component: (await import('@/pages/compliance/compliance-page')).CompliancePage,
+                }),
               },
             ],
           },
@@ -222,6 +222,17 @@ export const routes: RouteObject[] = [
                 path: LICENSE_PAGE.slice(1),
                 lazy: async () => ({
                   Component: (await import('@/pages/settings/license-page')).LicensePage,
+                }),
+              },
+            ],
+          },
+          {
+            element: <PermissionGate anyOf={navItem('system').permissions} />,
+            children: [
+              {
+                path: 'system',
+                lazy: async () => ({
+                  Component: (await import('@/pages/system/system-page')).SystemPage,
                 }),
               },
             ],
