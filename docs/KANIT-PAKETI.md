@@ -32,7 +32,8 @@ paket (`include_audit_log`) girdileri gerçek kullanım hedefleri ve özetleriyl
 Kapsam iki yoldan biriyle seçilir:
 
 - **5651 sorgusundan** (`lookup_id`): sorgu sonucunun dayandığı ham satırlar (FortiGate oturumu,
-  DHCP/ARP kayıtları, IP çakışmasındaki diğer cihazlar dahil) ve sorgu günü pakete girer.
+  DHCP/ARP kayıtları, IP çakışmasındaki diğer cihazlar ve raporun bölüm 6'da gösterdiği, kira
+  zaman çizelgesine girmemiş FortiGate DHCP satırları dahil) ve sorgu günü pakete girer.
   Makam ve dosya no paketin referansı olur. `full_days` ile (varsayılan) paket, bu günlerin
   **tüm kaynaklarının** mühürlü dosyalarını tam olarak içerir (yalnızca sorgunun dayandığı
   kaynakları değil; `sources` verilirse yalnızca onlar ve alıntılanan satırların kaynakları);
@@ -190,7 +191,8 @@ ARCILOGGER is *designed to support* Law 5651 obligations; it does not claim lega
   hidden in the same way from a reader who sees pseudonyms on the Kullanım pages (the auditor
   while `usage.pseudonymize_anonymous_role` is on; [USAGE.md](USAGE.md) section 6).
 - **Create** (`POST /api/v1/evidence`): scope from a 5651 lookup (`lookup_id`: the raw lines its
-  result cites and the lookup day; with `full_days`, the default, the package holds the complete
+  result cites, the FortiGate DHCP lines outside the lease timeline that its report shows in
+  section 6 included, and the lookup day; with `full_days`, the default, the package holds the complete
   sealed files of **all** sources of those days — not only the cited ones — unless `sources`
   narrows them, plus the cited lines under `extract/`) or explicit (`from`/`to`, at most 31 days, optional `sources`
   and `extract` lines). `content`: `full_days` (all sealed files of the chosen sources) or

@@ -14,6 +14,7 @@ import logging
 import threading
 import zipfile
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -485,6 +486,25 @@ def lookup_outcome() -> LookupOutcome:
     )
 
 
+def unconverted_outcome() -> LookupOutcome:
+    """An exact match whose result also cites a FortiGate DHCP line of 11.09 that never became a
+    lease (``unconverted_dhcp``, D8): shown in the report's section 6, so in its package too."""
+    outcome = lookup_outcome()
+    unconverted = EvidenceRef(
+        table="fg_event",
+        row_id=9,
+        time=at_site(DAYS[1], 9, 58),
+        raw=LookupRawRef(source="fortigate", day=DAYS[1], line=22, offset=None),
+        summary="FortiGate DHCP Ack 172.20.42.170",
+    )
+    return replace(
+        outcome,
+        mode="exact",
+        matches=tuple(replace(match, kind="exact") for match in outcome.matches),
+        unconverted_dhcp=(unconverted,),
+    )
+
+
 def add_lookup(factory: sessionmaker[Session], user_id: int, outcome: LookupOutcome | None) -> int:
     with factory() as session:
         row = Lookup(
@@ -508,6 +528,34 @@ def test_lookup_refs_cover_matches_chains_and_alternatives() -> None:
         RawRef(day=DAYS[1], source="fortigate", line=21),
         RawRef(day=DAYS[0], source="core-r1", line=23),
     }
+
+
+def test_lookup_refs_include_the_unconverted_dhcp_lines() -> None:
+    assert lookup_refs(unconverted_outcome()) == {
+        RawRef(day=DAYS[1], source="fortigate", line=21),
+        RawRef(day=DAYS[0], source="core-r1", line=23),
+        RawRef(day=DAYS[1], source="fortigate", line=22),
+    }
+
+
+def test_extract_package_from_a_lookup_holds_its_unconverted_dhcp_lines(
+    client: TestClient,
+    app: FastAPI,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    vault: SealedVault,
+    layout: Layout,
+) -> None:
+    """The PDF of a lookup cites the unconverted lines in section 6; its package extracts them."""
+    who = signed_in(client, login_as, app_session_factory)
+    lookup_id = add_lookup(app_session_factory, who.user_id, unconverted_outcome())
+    detail = built(client, app, lookup_id=lookup_id, content="extract")
+    assert {"day": "2026-09-11", "source": "fortigate", "line": 22} in detail["extract"]
+    with zipfile.ZipFile(layout.exports / detail["file"]) as archive:
+        fortigate = archive.read("extract/2026-09-11/fortigate.txt").splitlines()
+    numbers = [row.split(b"\t", 1)[0] for row in fortigate]
+    assert numbers == [b"21", b"22"]
+    assert vault.sent[(DAYS[1], "fortigate")][21] in fortigate[1]
 
 
 def test_extract_package_from_a_lookup(

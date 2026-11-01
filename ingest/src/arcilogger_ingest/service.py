@@ -21,7 +21,8 @@ One loop in one thread (plus optional parse worker processes, :mod:`arcilogger_i
 If the database is unavailable the same batch is retried with capped exponential backoff
 (0.5 s … 30 s); nothing more is read meanwhile, offsets do not move, and the spool files keep
 everything (they are the durable queue). ``state/ingest-status.json`` is rewritten every few
-seconds for the dashboard.
+seconds for the dashboard; a write that fails (on Windows the replace is refused while another
+process reads the file) is tried again at the next round until it succeeds.
 
 A changed ``[[sources]]`` in ``arcilogger.toml`` is taken without a restart (ADR-0014): between
 two batches the service drops what it read but did not load (it is read again), re-resolves
@@ -984,11 +985,11 @@ class IngestService:
             self._write_status()
 
     def _write_status(self) -> None:
-        self._next_status = time.monotonic() + self._status_interval
+        now = time.monotonic()
+        self._next_status = now + self._status_interval
         if self._locked_out:  # the file belongs to the instance holding the lock
             return
         counters = self.counters
-        now = time.monotonic()
         elapsed = now - counters.window_started
         if elapsed >= 1.0:
             counters.rate = counters.window_lines / elapsed
@@ -998,3 +999,8 @@ class IngestService:
             counters.window_lines = 0
             counters.window_started = now
         self.status.write(self)
+        if self.status._failing:
+            # Refused (on Windows a reader holding the file refuses the replace; logged once
+            # per streak): still due, so the next round tries again, not a status interval
+            # later — a new configuration report must not wait for it.
+            self._next_status = now

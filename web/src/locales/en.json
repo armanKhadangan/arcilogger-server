@@ -476,7 +476,7 @@
       "holidayHint": "MM-DD for the same day every year (e.g. 10-29), YYYY-MM-DD for once (e.g. 2026-03-20). Religious holidays move every year: enter that year's dates.",
       "add": "Add",
       "noServers": "No DHCP server with its own lease time; all use the default.",
-      "serverName": "DHCP server",
+      "serverName": "DHCP server or FortiGate interface name",
       "serverSeconds": "Lease time (seconds)",
       "removeServer": "Remove: {{server}}",
       "addServer": "Add a server",
@@ -1105,7 +1105,8 @@
     "fg_dns": "FortiGate DNS record",
     "fg_app": "FortiGate application record",
     "mt_dhcp": "DHCP record (MikroTik)",
-    "mt_arp": "ARP record (MikroTik)"
+    "mt_arp": "ARP record (MikroTik)",
+    "fg_dhcp": "DHCP record (FortiGate)"
   },
   "deviceTypes": {
     "pc": "PC",
@@ -1221,7 +1222,7 @@
     "endReason": {
       "dhcp": "ended by DHCP",
       "timeout": "timed out",
-      "superseded": "given to another device",
+      "superseded": "closed by a later DHCP assignment",
       "arp": "from ARP records",
       "open": "still open"
     },
@@ -1278,7 +1279,7 @@
       "session": "FortiGate session",
       "span": "{{start}} – {{end}}",
       "sessionId": "session id {{id}}",
-      "noChain": "No attribution chain could be built for this session's source address."
+      "noChain": "No chain: no lease for this internal IP at that moment"
     },
     "destinationMatch": {
       "ip_port": "Destination IP and port matched",
@@ -2004,7 +2005,7 @@
       "subnetHint": "Network address and prefix length, e.g. 10.0.20.0/24",
       "subnetEditHint": "Correcting the network keeps the VLAN's name, department and flag; devices are matched against the new network.",
       "dhcpServer": "DHCP server",
-      "dhcpServerHint": "Its name on the router, e.g. dhcp20; empty for a static network",
+      "dhcpServerHint": "Name of the DHCP server (MikroTik: e.g. dhcp20; FortiGate: interface name)",
       "departmentHint": "The department of devices without a person",
       "guestLabel": "Guest network",
       "guestHint": "A guest network that leaves through another exit than the FortiGate (e.g. a separate line, a VPN tunnel): 5651 results say there are no FortiGate records, only DHCP/ARP.",
