@@ -11,7 +11,7 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
     expect(menuFor('admin')).toEqual(NAV_ITEMS.map((item) => item.key));
   });
 
-  it('auditor: panel, live tail, search, lookup, usage (anonymous), sealing, evidence, audit', () => {
+  it('auditor: panel, live tail, search, lookup, usage (anonymous), sealing, evidence, compliance status, audit', () => {
     expect(menuFor('auditor')).toEqual([
       'dashboard',
       'live',
@@ -20,6 +20,7 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
       'usage',
       'sealing',
       'evidence',
+      'compliance',
       'audit',
     ]);
   });
@@ -50,11 +51,10 @@ describe('permission-filtered menu (docs/MVP-CONTRACTS.md section 6)', () => {
 });
 
 describe('pages with content', () => {
-  it('leaves only Uyum Durumu and Sistem as placeholders', () => {
-    expect(NAV_ITEMS.filter((item) => !BUILT_PAGES.has(item.key)).map((item) => item.key)).toEqual([
-      'compliance',
-      'system',
-    ]);
+  it('no menu entry is a placeholder', () => {
+    expect(NAV_ITEMS.filter((item) => !BUILT_PAGES.has(item.key)).map((item) => item.key)).toEqual(
+      [],
+    );
     const keys = new Set(NAV_ITEMS.map((item) => item.key));
     expect([...BUILT_PAGES].filter((key) => !keys.has(key))).toEqual([]);
   });
@@ -67,6 +67,16 @@ describe('pages with content', () => {
       ['search', '/search', undefined],
     ]);
   });
+
+  it('keeps Uyum Durumu and Sistem in 5651 Temel: their menu entries name no licence module', () => {
+    // Wave 4 contract 0.1 item 2: no `require_module`, no `ModuleGate`. The routes are opened
+    // under an expired trial in `compliance-page.test.tsx` and `system-page.test.tsx`.
+    const pages = NAV_ITEMS.filter((item) => ['compliance', 'system'].includes(item.key));
+    expect(pages.map((item) => [item.key, item.path, item.module])).toEqual([
+      ['compliance', '/compliance', undefined],
+      ['system', '/system', undefined],
+    ]);
+  });
 });
 
 describe('generated role contract', () => {
@@ -77,6 +87,18 @@ describe('generated role contract', () => {
     expect(roleHas('viewer', 'usage.person')).toBe(false);
     expect(roleHas('admin', 'users.manage')).toBe(true);
     expect(roleHas('nobody', 'audit.read')).toBe(false);
+  });
+
+  it('gives Uyum Durumu to the auditor, Sistem and the settings to the administrator only', () => {
+    // Owner decision 2026-10-28 (Wave 4 contract D15, Q1, Q2).
+    expect(roleHas('auditor', 'compliance.read')).toBe(true);
+    expect(roleHas('auditor', 'system.read')).toBe(false);
+    expect(roleHas('auditor', 'settings.manage')).toBe(false);
+    for (const role of ['hr', 'viewer']) {
+      for (const permission of ['compliance.read', 'system.read', 'settings.manage']) {
+        expect(roleHas(role, permission), `${role} ${permission}`).toBe(false);
+      }
+    }
   });
 
   it('labels roles in both languages and knows the role ids', () => {

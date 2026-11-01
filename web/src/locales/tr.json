@@ -43,9 +43,6 @@
     "sessionNote": "Oturum {{minutes}} dk hareketsizlikte kapanır.",
     "userMenuFor": "Kullanıcı menüsü: {{name}}"
   },
-  "placeholder": {
-    "body": "Bu sayfa sonraki bir sürümde eklenecek."
-  },
   "notFound": {
     "title": "Sayfa bulunamadı",
     "body": "Aradığınız sayfa yok ya da taşınmış olabilir.",

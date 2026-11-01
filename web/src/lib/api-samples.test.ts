@@ -3,11 +3,11 @@
  * real API sends. `web/e2e/samples/*.json` are answers captured from the real API
  * (`web/scripts/capture_api_samples.py`, whose `--check` compares them with the API again); here
  * every sample is checked field by field against the interfaces of `api-types.ts`,
- * `lookup-types.ts`, `seal-types.ts`, `settings-types.ts`, `search-types.ts`, `live-types.ts` and
- * `sources-types.ts` — required fields present, no unknown fields, value types and string literal
- * unions as declared. The untyped parts of the OpenAPI document (`outcome`, `query`, the seal day
- * detail, the `result` of an administration request, the events of a live stream) are covered
- * only here.
+ * `lookup-types.ts`, `seal-types.ts`, `settings-types.ts`, `search-types.ts`, `live-types.ts`,
+ * `sources-types.ts`, `compliance-types.ts`, `system-types.ts` and `system-health-types.ts` —
+ * required fields present, no unknown fields, value types and string literal unions as declared.
+ * The untyped parts of the OpenAPI document (`outcome`, `query`, the seal day detail, the
+ * `result` of an administration request, the events of a live stream) are covered only here.
  */
 
 import { readFileSync } from 'node:fs';
@@ -35,6 +35,9 @@ for (const file of [
   'search-types.ts',
   'live-types.ts',
   'sources-types.ts',
+  'compliance-types.ts',
+  'system-types.ts',
+  'system-health-types.ts',
 ]) {
   const path = join(LIB, file);
   const source = ts.createSourceFile(
@@ -662,6 +665,33 @@ const RULES: Record<string, Record<string, Rule>> = {
     detail: each('SourceDetail'),
     tail: each('SourceTail'),
     dashboard: 'DashboardSummary',
+    errors,
+  },
+  // Uyum Durumu (Wave 4 contract 2.3): the cards for both holders of `compliance.read`, the
+  // report (a download), the configuration backup confirmation and the cards after it.
+  compliance: {
+    admin: 'ComplianceStatus',
+    auditor: 'ComplianceStatus',
+    report_pdf: FILE_SAMPLE,
+    config_backup: 'ConfigBackupOut',
+    after_backup: 'ComplianceStatus',
+    errors,
+  },
+  // Sistem (Wave 4 contract 2.5, 2.6): the summary (the processor measured, and the first
+  // reading of a process), the drives with each forecast state, and the health of the services,
+  // tasks, jobs and clock; the fractional lags, rates and clock offsets are `Float` (W4F-1).
+  system: {
+    summary: 'SystemSummary',
+    summary_first_reading: 'SystemSummary',
+    errors,
+  },
+  'system-disk': {
+    disk: 'SystemDisk',
+    disk_not_growing: 'SystemDisk',
+    errors,
+  },
+  'system-health': {
+    health: 'SystemHealth',
     errors,
   },
   // Every licence document is `GET /license` (also the answer of `POST /license`), every other

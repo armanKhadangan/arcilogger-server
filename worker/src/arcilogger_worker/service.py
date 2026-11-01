@@ -44,6 +44,10 @@ Jobs (``DEFAULT_JOBS``):
                             Excel) and e-mailed per recipient (:mod:`.reports.runner`)
 ``reports.purge``           daily after 03:20: files of report runs older than
                             ``reports.keep_days`` deleted from ``exports/usage-reports``
+``system.sample``           daily after 00:30: one sample of the data and the system drive
+                            (total and used bytes) into ``state/system-history.json``
+                            (the newest 120 days) for the disk forecast of the Sistem page
+                            and the Panel (:mod:`.system_jobs`)
 ``search.counts_backfill``  every 10 minutes, no new file after 60 s: the finished files
                             loaded before the search summary table
                             (``ingest_offsets.counts_from_line``) counted into
@@ -120,6 +124,7 @@ from arcilogger_worker.evidence_jobs import import_job_events, purge_evidence
 from arcilogger_worker.licensing import StatusCache, job_license_check, module_gate
 from arcilogger_worker.reports.runner import purge_reports, resolve_while_unlicensed, run_due
 from arcilogger_worker.search_jobs import backfill_counts
+from arcilogger_worker.system_jobs import job_system_sample
 from arcilogger_worker.usage import jobs as usage_jobs
 
 log = logging.getLogger("arcilogger_worker")
@@ -409,6 +414,9 @@ def default_jobs(interval_seconds: int) -> tuple[Job, ...]:
         # Reports after the alerts: a report lists the alerts imported just before it.
         Job("reports.run_due", job_reports_run_due, every=REPORTS_EVERY, module=REPORTS_MODULE),
         Job("reports.purge", job_reports_purge, daily_after=time(3, 20)),
+        # The disk forecast of Sistem and the Panel: one sample of the drives a day (Wave 4
+        # contract 2.5.2).
+        Job("system.sample", job_system_sample, daily_after=time(0, 30)),
         # Last: it may take a minute, and nothing waits for it (statistics count directly until
         # a file is counted).
         Job("search.counts_backfill", job_search_counts_backfill, every=SEARCH_COUNTS_EVERY),

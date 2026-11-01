@@ -3,7 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { mockApi, type MockOptions } from './mock-api';
 import { mockSources } from './mock-sources';
-import { DASHBOARD, RAW, SAMPLE_TODAY, SOURCES } from './samples';
+import { mockW4 } from './mock-w4';
+import { DASHBOARD, RAW, SAMPLE_TODAY, SOURCES, SYSTEM_DISK } from './samples';
 
 /** The Panel's blocks (spec 12.3 item 2) by their test ids, in page order. */
 const ALL = [
@@ -12,6 +13,7 @@ const ALL = [
   'card-seal',
   'card-credit',
   'card-clock',
+  'card-disk',
   'card-usage',
   'card-alerts',
   'card-sites',
@@ -19,11 +21,23 @@ const ALL = [
   'card-calendar',
 ];
 
-/** The main mock with the parse-failure box of `mock-sources.ts` in the summary. */
+/**
+ * The main mock with the parse-failure box of `mock-sources.ts` in the summary and the captured
+ * drives of `GET /system/disk` (`mock-w4.ts`, `system.read`).
+ */
 async function panel(page: Page, options: MockOptions) {
   const api = await mockApi(page, options);
   await mockSources(page, api);
+  await mockW4(page, api);
   return api;
+}
+
+/** The Panel's cards in page order. */
+async function pageOrder(page: Page): Promise<string[]> {
+  const ids = await page
+    .locator('[data-testid^="card-"]')
+    .evaluateAll((cards) => cards.map((card) => card.getAttribute('data-testid') ?? ''));
+  return ids.filter((id) => ALL.includes(id));
 }
 
 async function shown(page: Page): Promise<string[]> {
@@ -45,6 +59,7 @@ test.describe('Panel', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1, name: 'Panel' })).toBeVisible();
     await expect(page.getByTestId('card-ingest')).toContainText('2/3 kaynak aktif');
+    await expect(page.getByTestId('card-disk')).toBeVisible();
     expect(await shown(page)).toEqual(ALL);
 
     // The captured summary: times in site time (last_seen is sent with +03:00). The capture's
@@ -99,13 +114,46 @@ test.describe('Panel', () => {
     expect(api.callsTo('GET', '/dashboard/summary')[0]?.background).toBe(false);
   });
 
+  test('administrator: the disk card after the clock card; both open Sistem', async ({ page }) => {
+    const api = await panel(page, { signedInAs: 'tolga' });
+    await page.goto('/');
+    const disk = page.getByTestId('card-disk');
+    await expect(disk.getByRole('heading', { name: 'Disk' })).toBeVisible();
+    expect((await pageOrder(page)).slice(4, 6)).toEqual(['card-clock', 'card-disk']);
+    // The captured drives of a Windows host: data drive D:, system drive C:.
+    const drives = disk.getByTestId('drive-meter');
+    await expect(drives).toHaveCount(SYSTEM_DISK.disk.drives.length);
+    for (const [index, drive] of SYSTEM_DISK.disk.drives.entries()) {
+      await expect(drives.nth(index)).toContainText(drive.path);
+      await expect(drives.nth(index)).toContainText(`%${String(drive.used_percent)} dolu`);
+    }
+    await expect(disk.getByTestId('disk-card-forecast')).toHaveCount(2);
+    await expect(disk.getByRole('link', { name: 'Sistem sayfasını aç' })).toHaveAttribute(
+      'href',
+      '/system',
+    );
+    expect(api.callsTo('GET', '/system/disk')[0]?.background).toBe(false);
+
+    await page.getByTestId('card-clock').getByRole('link', { name: 'Sistem sayfasını aç' }).click();
+    await expect(page).toHaveURL(/\/system$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Sistem' })).toBeVisible();
+    await page.goBack();
+    await page.getByTestId('card-disk').getByRole('link', { name: 'Sistem sayfasını aç' }).click();
+    await expect(page).toHaveURL(/\/system$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Sistem' })).toBeVisible();
+  });
+
   test('auditor: no alert block (no alerts.read), sealing and clock without system links', async ({
     page,
   }) => {
-    await panel(page, { signedInAs: 'ayse.yilmaz' });
+    const api = await panel(page, { signedInAs: 'ayse.yilmaz' });
     await page.goto('/');
     await expect(page.getByTestId('card-seal')).toBeVisible();
-    expect(await shown(page)).toEqual(ALL.filter((id) => id !== 'card-alerts'));
+    // Nor the disk card: no system.read, and `/system/disk` is never asked.
+    expect(await shown(page)).toEqual(
+      ALL.filter((id) => id !== 'card-alerts' && id !== 'card-disk'),
+    );
+    expect(api.callsTo('GET', '/system/disk')).toHaveLength(0);
     await expect(page.getByTestId('card-ingest').getByRole('link')).toHaveCount(0);
     await expect(page.getByTestId('card-clock').getByRole('link')).toHaveCount(0);
     await expect(
@@ -116,7 +164,7 @@ test.describe('Panel', () => {
   test('report viewer: log intake and company usage only, nothing else is an error', async ({
     page,
   }) => {
-    await panel(page, { signedInAs: 'zeynep' });
+    const api = await panel(page, { signedInAs: 'zeynep' });
     await page.goto('/');
     await expect(page.getByTestId('card-ingest')).toBeVisible();
     expect(await shown(page)).toEqual([
@@ -127,6 +175,7 @@ test.describe('Panel', () => {
       'card-categories',
     ]);
     await expect(page.getByRole('alert')).toHaveCount(0);
+    expect(api.callsTo('GET', '/system/disk')).toHaveLength(0);
     // Counts only for a role without raw lines and search: no example, no Arama, no Kaynaklar.
     const failures = page.getByTestId('card-parse-failures');
     await expect(failures).toContainText('fortigate.kv');
@@ -139,6 +188,7 @@ test.describe('Panel', () => {
     await page.goto('/');
     expect(await shown(page)).toEqual(['card-usage', 'card-sites', 'card-categories']);
     expect(api.callsTo('GET', '/dashboard/summary')).toHaveLength(0);
+    expect(api.callsTo('GET', '/system/disk')).toHaveLength(0);
   });
 
   test('an acknowledged alert leaves the open counts at the next refresh', async ({ page }) => {
@@ -159,12 +209,17 @@ test('the live blocks refresh every 30 s in the background', async ({ page }) =>
   const api = await panel(page, { signedInAs: 'tolga' });
   await page.goto('/');
   await expect(page.getByTestId('card-ingest')).toBeVisible();
+  await expect(page.getByTestId('card-disk')).toBeVisible();
   const before = api.callsTo('GET', '/dashboard/summary').length;
+  const beforeDisk = api.callsTo('GET', '/system/disk').length;
   await page.clock.fastForward('00:31');
   await expect.poll(() => api.callsTo('GET', '/dashboard/summary').length).toBeGreaterThan(before);
-  const calls = api.callsTo('GET', '/dashboard/summary');
-  expect(calls[0]?.background).toBe(false);
-  expect(calls.at(-1)?.background).toBe(true);
+  await expect.poll(() => api.callsTo('GET', '/system/disk').length).toBeGreaterThan(beforeDisk);
+  for (const path of ['/dashboard/summary', '/system/disk']) {
+    const calls = api.callsTo('GET', path);
+    expect(calls[0]?.background).toBe(false);
+    expect(calls.at(-1)?.background).toBe(true);
+  }
   // The usage figures wait for their 5 minutes.
   expect(api.callsTo('GET', '/usage/company')).toHaveLength(1);
 });
@@ -277,8 +332,9 @@ for (const lang of ['tr', 'en'] as const) {
       await page.goto('/');
       await expect(page.getByTestId('card-usage')).toBeVisible();
       await expect(page.getByTestId('card-parse-failures')).toBeVisible();
+      await expect(page.getByTestId('card-disk')).toBeVisible();
       const titles = await page.locator('[data-testid^="card-"] h3').count();
-      expect(titles).toBeGreaterThanOrEqual(10);
+      expect(titles).toBeGreaterThanOrEqual(11);
       expect(await titlesFit(page)).toEqual([]);
       // The page links sit in the card footers, not beside the titles.
       const link = page.getByTestId('card-ingest').getByRole('link', {
@@ -302,6 +358,7 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await page.goto('/');
     await expect(page.getByTestId('card-parse-failures')).toContainText('fortigate.kv');
     await expect(page.getByTestId('card-usage')).toContainText('Aktif kullanıcı');
+    await expect(page.getByTestId('card-disk')).toBeVisible();
     await expectNoA11yViolations(page);
   });
 }

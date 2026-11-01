@@ -1,0 +1,1779 @@
+{
+  "admin": {
+    "cards": [
+      {
+        "alerts": [
+          {
+            "id": 4,
+            "opened_at": "2026-10-13T07:00:15.331968+03:00",
+            "rule": "R15",
+            "severity": "high"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.1",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.1",
+        "facts": [
+          {
+            "key": "watched",
+            "label_en": "Watched sources",
+            "label_tr": "İzlenen kaynak",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "active",
+            "label_en": "Sending",
+            "label_tr": "Veri gönderen",
+            "value_en": "2",
+            "value_tr": "2"
+          },
+          {
+            "key": "silent",
+            "label_en": "Silent",
+            "label_tr": "Sessiz",
+            "value_en": "switch-3",
+            "value_tr": "switch-3"
+          },
+          {
+            "key": "heartbeat",
+            "label_en": "Heartbeat",
+            "label_tr": "Kalp atışı süresi",
+            "value_en": "per source, default 15 min",
+            "value_tr": "kaynağa göre, varsayılan 15 dk"
+          }
+        ],
+        "id": "sources",
+        "number": 1,
+        "page": "sources",
+        "reason_en": "1 source(s) have sent nothing for longer than their heartbeat: switch-3.",
+        "reason_tr": "1 kaynak kalp atışı süresinden uzun süredir veri göndermiyor: switch-3.",
+        "title_en": "Log sources are sending",
+        "title_tr": "Log kaynakları veri gönderiyor",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.2",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.2",
+        "facts": [
+          {
+            "key": "day",
+            "label_en": "Day",
+            "label_tr": "Gün",
+            "value_en": "12.10.2026",
+            "value_tr": "12.10.2026"
+          },
+          {
+            "key": "state",
+            "label_en": "State",
+            "label_tr": "Durum",
+            "value_en": "Waiting to be sealed",
+            "value_tr": "Mühürlenmeyi bekliyor"
+          },
+          {
+            "key": "sealed_at",
+            "label_en": "Sealed",
+            "label_tr": "Mühürlendi",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "verification",
+            "label_en": "Verification",
+            "label_tr": "Doğrulama",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "server",
+            "label_en": "Time-stamp server",
+            "label_tr": "Damga sunucusu",
+            "value_en": "Trial (mock)",
+            "value_tr": "Deneme (mock)"
+          }
+        ],
+        "id": "seal_yesterday",
+        "number": 2,
+        "page": "sealing",
+        "reason_en": "Yesterday (12.10.2026) is waiting to be sealed (the Seal task runs after 00:10).",
+        "reason_tr": "Dünün (12.10.2026) mühürlenmesi bekleniyor (Seal görevi 00:10'dan sonra çalışır).",
+        "title_en": "Yesterday's records sealed and verified",
+        "title_tr": "Dünün kayıtları mühürlendi ve doğrulandı",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.3",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.3",
+        "facts": [
+          {
+            "key": "verified",
+            "label_en": "Verified",
+            "label_tr": "Doğrulanmış",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "not_verified",
+            "label_en": "Not verified",
+            "label_tr": "Doğrulanmamış",
+            "value_en": "4",
+            "value_tr": "4"
+          },
+          {
+            "key": "failed",
+            "label_en": "Failed",
+            "label_tr": "Başarısız",
+            "value_en": "1",
+            "value_tr": "1"
+          },
+          {
+            "key": "no_data",
+            "label_en": "No data or deleted",
+            "label_tr": "Veri yok ya da silinmiş",
+            "value_en": "21",
+            "value_tr": "21"
+          },
+          {
+            "key": "full_check",
+            "label_en": "Last full chain check",
+            "label_tr": "Son tam zincir denetimi",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "tasks",
+            "label_en": "Verification tasks",
+            "label_tr": "Doğrulama görevleri",
+            "value_en": "daily the last 2 days, weekly the last 90 days, monthly the whole chain",
+            "value_tr": "günlük son 2 gün, haftalık son 90 gün, aylık tüm zincir"
+          }
+        ],
+        "id": "chain",
+        "number": 3,
+        "page": "sealing",
+        "reason_en": "1 day(s) of the last 30 failed: 11.10.2026.",
+        "reason_tr": "Son 30 günde 1 gün başarısız: 11.10.2026.",
+        "title_en": "Seal chain intact",
+        "title_tr": "Mühür zinciri bütün",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.4",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.4",
+        "facts": [
+          {
+            "key": "oldest",
+            "label_en": "Oldest sealed day",
+            "label_tr": "En eski mühürlü gün",
+            "value_en": "04.10.2026",
+            "value_tr": "04.10.2026"
+          },
+          {
+            "key": "retention",
+            "label_en": "Retention",
+            "label_tr": "Saklama",
+            "value_en": "on, 760 days",
+            "value_tr": "açık, 760 gün"
+          },
+          {
+            "key": "deleted",
+            "label_en": "Days deleted by retention",
+            "label_tr": "Saklama ile silinen gün",
+            "value_en": "0",
+            "value_tr": "0"
+          }
+        ],
+        "id": "retention",
+        "number": 4,
+        "page": "sealing",
+        "reason_en": "The oldest sealed day is 04.10.2026 (9 days ago); the installation is younger than 730 days.",
+        "reason_tr": "En eski mühürlü gün 04.10.2026 (9 gün önce); kurulum 730 günden genç.",
+        "title_en": "Retention period",
+        "title_tr": "Saklama süresi",
+        "tone": "ok",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.5",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.5",
+        "facts": [
+          {
+            "key": "server",
+            "label_en": "Time-stamp server",
+            "label_tr": "Damga sunucusu",
+            "value_en": "Trial (mock)",
+            "value_tr": "Deneme (mock)"
+          },
+          {
+            "key": "credits",
+            "label_en": "Credits left",
+            "label_tr": "Kalan kontör",
+            "value_en": "9,612",
+            "value_tr": "9.612"
+          },
+          {
+            "key": "estimated_days",
+            "label_en": "Estimated days",
+            "label_tr": "Tahmini gün",
+            "value_en": "2,276",
+            "value_tr": "2.276"
+          },
+          {
+            "key": "threshold",
+            "label_en": "Threshold",
+            "label_tr": "Eşik",
+            "value_en": "500",
+            "value_tr": "500"
+          },
+          {
+            "key": "credit_at",
+            "label_en": "Last reading",
+            "label_tr": "Son okuma",
+            "value_en": "11.10.2026 06:30:00",
+            "value_tr": "11.10.2026 06:30:00"
+          },
+          {
+            "key": "cert_until",
+            "label_en": "TSA certificate expires",
+            "label_tr": "TSA sertifikası bitişi",
+            "value_en": "31.08.2031",
+            "value_tr": "31.08.2031"
+          },
+          {
+            "key": "cert_days",
+            "label_en": "Days left",
+            "label_tr": "Kalan gün",
+            "value_en": "1782",
+            "value_tr": "1782"
+          }
+        ],
+        "id": "tsa",
+        "number": 5,
+        "page": "sealing",
+        "reason_en": "Time stamps are not taken from the Kamu SM production server (provider: Trial (mock)). Complete the Kamu SM connection in Settings → Kamu SM.",
+        "reason_tr": "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: Deneme (mock)). Kamu SM bağlantısını Ayarlar → Kamu SM'de tamamlayın.",
+        "title_en": "Kamu SM credit and time-stamp certificate",
+        "title_tr": "Kamu SM kontörü ve zaman damgası sertifikası",
+        "tone": "error",
+        "verify_on_site_en": "The credit is read from the Kamu SM client's output; verify the format on site.",
+        "verify_on_site_tr": "Kontör değeri Kamu SM istemcisinin çıktısından okunur; okuma biçimi sahada doğrulanmalıdır."
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.6",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.6",
+        "facts": [
+          {
+            "key": "checked_at",
+            "label_en": "Last measurement",
+            "label_tr": "Son ölçüm",
+            "value_en": "13.10.2026 06:10:14",
+            "value_tr": "13.10.2026 06:10:14"
+          },
+          {
+            "key": "server",
+            "label_en": "Server",
+            "label_tr": "Sunucu",
+            "value_en": "172.20.10.1",
+            "value_tr": "172.20.10.1"
+          },
+          {
+            "key": "offset",
+            "label_en": "Offset",
+            "label_tr": "Fark",
+            "value_en": "3.2 ms",
+            "value_tr": "3,2 ms"
+          },
+          {
+            "key": "limit",
+            "label_en": "Limit",
+            "label_tr": "Sınır",
+            "value_en": "1,000 ms",
+            "value_tr": "1.000 ms"
+          },
+          {
+            "key": "local_source",
+            "label_en": "Local time source",
+            "label_tr": "Yerel saat kaynağı",
+            "value_en": "none",
+            "value_tr": "yok"
+          }
+        ],
+        "id": "clock",
+        "number": 6,
+        "page": "system",
+        "reason_en": "No local time source is set; the clock follows only the fallback server (time.ume.tubitak.gov.tr).",
+        "reason_tr": "Yerel saat kaynağı ayarlanmamış; saat yalnızca yedek sunucuyla (time.ume.tubitak.gov.tr) eşitleniyor.",
+        "title_en": "Server clock",
+        "title_tr": "Sunucu saati",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [
+          {
+            "id": 12,
+            "opened_at": "2026-10-13T07:01:09.874858+03:00",
+            "rule": "R20-filter",
+            "severity": "high"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.7",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.7",
+        "facts": [
+          {
+            "key": "last",
+            "label_en": "Last record",
+            "label_tr": "Son kayıt",
+            "value_en": "09.10.2026 11:24:32",
+            "value_tr": "09.10.2026 11:24:32"
+          },
+          {
+            "key": "today_web",
+            "label_en": "Web filter today",
+            "label_tr": "Bugün web filtresi",
+            "value_en": "0",
+            "value_tr": "0"
+          },
+          {
+            "key": "today_dns",
+            "label_en": "DNS filter today",
+            "label_tr": "Bugün DNS filtresi",
+            "value_en": "0",
+            "value_tr": "0"
+          },
+          {
+            "key": "days",
+            "label_en": "Last 7 days",
+            "label_tr": "Son 7 gün",
+            "value_en": "13.10: 0 · 12.10: 0 · 11.10: 0 · 10.10: 0 · 09.10: 0 · 08.10: 0 · 07.10: 0",
+            "value_tr": "13.10: 0 · 12.10: 0 · 11.10: 0 · 10.10: 0 · 09.10: 0 · 08.10: 0 · 07.10: 0"
+          },
+          {
+            "key": "profiles",
+            "label_en": "Web filter profiles",
+            "label_tr": "Web filtresi profilleri",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "dns_profile",
+            "label_en": "DNS filter profile",
+            "label_tr": "DNS filtresi profili",
+            "value_en": "No profile name is read from FortiGate DNS filter records (verify on site).",
+            "value_tr": "FortiGate DNS filtresi kayıtlarından profil adı okunmuyor (sahada doğrula)."
+          },
+          {
+            "key": "expected_days",
+            "label_en": "Expected days",
+            "label_tr": "Beklenen günler",
+            "value_en": "Mon, Tue, Wed, Thu, Fri, Sat, Sun",
+            "value_tr": "Pzt, Sal, Çar, Per, Cum, Cmt, Paz"
+          },
+          {
+            "key": "holidays",
+            "label_en": "Public holidays",
+            "label_tr": "Resmî tatiller",
+            "value_en": "not expected",
+            "value_tr": "beklenmez"
+          }
+        ],
+        "id": "content_filter",
+        "number": 7,
+        "page": "search",
+        "reason_en": "No web or DNS filter record in the last 24 hours of expected days (last record: 09.10.2026 11:24:32).",
+        "reason_tr": "Beklenen günlerde son 24 saattir web ya da DNS filtresi kaydı gelmedi (son kayıt: 09.10.2026 11:24:32).",
+        "title_en": "Content filter records",
+        "title_tr": "İçerik filtresi kayıtları",
+        "tone": "error",
+        "verify_on_site_en": "Verify on site that the firewall policies log web and DNS filter events and send them to ARCILOGGER.",
+        "verify_on_site_tr": "Güvenlik duvarı politikalarının web ve DNS filtresi olaylarını kaydettiği ve ARCILOGGER'a gönderdiği sahada doğrulanmalıdır."
+      },
+      {
+        "alerts": [
+          {
+            "id": 11,
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
+            "rule": "R20-lease",
+            "severity": "medium"
+          },
+          {
+            "id": 10,
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
+            "rule": "R20-lease",
+            "severity": "high"
+          },
+          {
+            "id": 9,
+            "opened_at": "2026-10-13T07:01:03.900091+03:00",
+            "rule": "R20-lease",
+            "severity": "info"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.8",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.8",
+        "facts": [
+          {
+            "key": "mt_dhcp",
+            "label_en": "MikroTik DHCP",
+            "label_tr": "MikroTik DHCP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "mt_arp",
+            "label_en": "MikroTik ARP",
+            "label_tr": "MikroTik ARP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "fg_dhcp",
+            "label_en": "FortiGate DHCP",
+            "label_tr": "FortiGate DHCP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "problems",
+            "label_en": "Open lease evidence problems",
+            "label_tr": "Açık kira kanıtı sorunları",
+            "value_en": "Lease evidence stopped: no MikroTik DHCP records; Lease evidence stopped: no MikroTik ARP-LOG records; FortiGate DHCP record format not verified on site",
+            "value_tr": "Kira kanıtı kesildi: MikroTik DHCP kayıtları gelmiyor; Kira kanıtı kesildi: MikroTik ARP-LOG kayıtları gelmiyor; FortiGate DHCP kayıt biçimi sahada doğrulanmadı"
+          }
+        ],
+        "id": "lease_evidence",
+        "number": 8,
+        "page": "sources",
+        "reason_en": "3 lease evidence problem(s) open.",
+        "reason_tr": "3 kira kanıtı sorunu açık.",
+        "title_en": "DHCP and ARP records (access records)",
+        "title_tr": "DHCP ve ARP kayıtları (erişim kayıtları)",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.9",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.9",
+        "facts": [
+          {
+            "key": "enabled",
+            "label_en": "Replica",
+            "label_tr": "Replika",
+            "value_en": "on",
+            "value_tr": "açık"
+          },
+          {
+            "key": "last_copy",
+            "label_en": "Last copy",
+            "label_tr": "Son kopya",
+            "value_en": "13.10.2026 07:00:01",
+            "value_tr": "13.10.2026 07:00:01"
+          },
+          {
+            "key": "pending",
+            "label_en": "Days waiting",
+            "label_tr": "Bekleyen gün",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "stale_hours",
+            "label_en": "Delay threshold (hours)",
+            "label_tr": "Gecikme eşiği (saat)",
+            "value_en": "48",
+            "value_tr": "48"
+          }
+        ],
+        "id": "replica",
+        "number": 9,
+        "page": "sealing",
+        "reason_en": "3 sealed day(s) not copied yet (the oldest 08.10.2026).",
+        "reason_tr": "3 mühürlü gün henüz kopyalanmadı (en eskisi 08.10.2026).",
+        "title_en": "Second copy (replica)",
+        "title_tr": "İkinci kopya (replika)",
+        "tone": "warning",
+        "verify_on_site_en": "Whether the replica target is write-once (WORM) cannot be checked from ARCILOGGER; verify it on site.",
+        "verify_on_site_tr": "Replika hedefinin değiştirilemez (WORM) olduğu ARCILOGGER'dan denetlenemez; sahada doğrulayın."
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.10",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.10",
+        "facts": [
+          {
+            "key": "last_backup",
+            "label_en": "Last database backup",
+            "label_tr": "Son veritabanı yedeği",
+            "value_en": "13.10.2026 01:52:10",
+            "value_tr": "13.10.2026 01:52:10"
+          },
+          {
+            "key": "size",
+            "label_en": "Size",
+            "label_tr": "Boyut",
+            "value_en": "1.2 GB",
+            "value_tr": "1,2 GB"
+          },
+          {
+            "key": "enabled",
+            "label_en": "Nightly backup",
+            "label_tr": "Gece yedeği",
+            "value_en": "on",
+            "value_tr": "açık"
+          },
+          {
+            "key": "config_copy",
+            "label_en": "Configuration copy confirmed",
+            "label_tr": "Yapılandırma kopyası onayı",
+            "value_en": "never",
+            "value_tr": "hiç"
+          }
+        ],
+        "id": "backup",
+        "number": 10,
+        "page": "settings",
+        "reason_en": "The offline copy of the configuration files was never confirmed (BACKUP.md section 3).",
+        "reason_tr": "Yapılandırma dosyalarının çevrimdışı kopyası hiç onaylanmadı (YEDEKLEME.md bölüm 3).",
+        "title_en": "Configuration and database backups",
+        "title_tr": "Yapılandırma ve veritabanı yedekleri",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      }
+    ],
+    "counts": {
+      "error": 5,
+      "neutral": 0,
+      "ok": 1,
+      "warning": 4
+    },
+    "generated_at": "2026-10-13T07:01:09.937323+03:00",
+    "notice_en": "ARCILOGGER is designed to support 5651 obligations. These cards are the results of technical checks of log collection, sealing and backups; they are neither a legal assessment nor a statement of conformity. Confirm the results with your legal counsel.",
+    "notice_tr": "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır. Bu kartlar kayıt toplama, mühürleme ve yedeklemenin teknik denetimlerinin sonucudur; hukuki bir değerlendirme ya da uygunluk beyanı değildir. Sonuçları hukuk müşavirinizle teyit edin.",
+    "site_name": "Örnek Lojistik A.Ş."
+  },
+  "after_backup": {
+    "cards": [
+      {
+        "alerts": [
+          {
+            "id": 4,
+            "opened_at": "2026-10-13T07:00:15.331968+03:00",
+            "rule": "R15",
+            "severity": "high"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.1",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.1",
+        "facts": [
+          {
+            "key": "watched",
+            "label_en": "Watched sources",
+            "label_tr": "İzlenen kaynak",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "active",
+            "label_en": "Sending",
+            "label_tr": "Veri gönderen",
+            "value_en": "2",
+            "value_tr": "2"
+          },
+          {
+            "key": "silent",
+            "label_en": "Silent",
+            "label_tr": "Sessiz",
+            "value_en": "switch-3",
+            "value_tr": "switch-3"
+          },
+          {
+            "key": "heartbeat",
+            "label_en": "Heartbeat",
+            "label_tr": "Kalp atışı süresi",
+            "value_en": "per source, default 15 min",
+            "value_tr": "kaynağa göre, varsayılan 15 dk"
+          }
+        ],
+        "id": "sources",
+        "number": 1,
+        "page": "sources",
+        "reason_en": "1 source(s) have sent nothing for longer than their heartbeat: switch-3.",
+        "reason_tr": "1 kaynak kalp atışı süresinden uzun süredir veri göndermiyor: switch-3.",
+        "title_en": "Log sources are sending",
+        "title_tr": "Log kaynakları veri gönderiyor",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.2",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.2",
+        "facts": [
+          {
+            "key": "day",
+            "label_en": "Day",
+            "label_tr": "Gün",
+            "value_en": "12.10.2026",
+            "value_tr": "12.10.2026"
+          },
+          {
+            "key": "state",
+            "label_en": "State",
+            "label_tr": "Durum",
+            "value_en": "Waiting to be sealed",
+            "value_tr": "Mühürlenmeyi bekliyor"
+          },
+          {
+            "key": "sealed_at",
+            "label_en": "Sealed",
+            "label_tr": "Mühürlendi",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "verification",
+            "label_en": "Verification",
+            "label_tr": "Doğrulama",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "server",
+            "label_en": "Time-stamp server",
+            "label_tr": "Damga sunucusu",
+            "value_en": "Trial (mock)",
+            "value_tr": "Deneme (mock)"
+          }
+        ],
+        "id": "seal_yesterday",
+        "number": 2,
+        "page": "sealing",
+        "reason_en": "Yesterday (12.10.2026) is waiting to be sealed (the Seal task runs after 00:10).",
+        "reason_tr": "Dünün (12.10.2026) mühürlenmesi bekleniyor (Seal görevi 00:10'dan sonra çalışır).",
+        "title_en": "Yesterday's records sealed and verified",
+        "title_tr": "Dünün kayıtları mühürlendi ve doğrulandı",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.3",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.3",
+        "facts": [
+          {
+            "key": "verified",
+            "label_en": "Verified",
+            "label_tr": "Doğrulanmış",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "not_verified",
+            "label_en": "Not verified",
+            "label_tr": "Doğrulanmamış",
+            "value_en": "4",
+            "value_tr": "4"
+          },
+          {
+            "key": "failed",
+            "label_en": "Failed",
+            "label_tr": "Başarısız",
+            "value_en": "1",
+            "value_tr": "1"
+          },
+          {
+            "key": "no_data",
+            "label_en": "No data or deleted",
+            "label_tr": "Veri yok ya da silinmiş",
+            "value_en": "21",
+            "value_tr": "21"
+          },
+          {
+            "key": "full_check",
+            "label_en": "Last full chain check",
+            "label_tr": "Son tam zincir denetimi",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "tasks",
+            "label_en": "Verification tasks",
+            "label_tr": "Doğrulama görevleri",
+            "value_en": "daily the last 2 days, weekly the last 90 days, monthly the whole chain",
+            "value_tr": "günlük son 2 gün, haftalık son 90 gün, aylık tüm zincir"
+          }
+        ],
+        "id": "chain",
+        "number": 3,
+        "page": "sealing",
+        "reason_en": "1 day(s) of the last 30 failed: 11.10.2026.",
+        "reason_tr": "Son 30 günde 1 gün başarısız: 11.10.2026.",
+        "title_en": "Seal chain intact",
+        "title_tr": "Mühür zinciri bütün",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.4",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.4",
+        "facts": [
+          {
+            "key": "oldest",
+            "label_en": "Oldest sealed day",
+            "label_tr": "En eski mühürlü gün",
+            "value_en": "04.10.2026",
+            "value_tr": "04.10.2026"
+          },
+          {
+            "key": "retention",
+            "label_en": "Retention",
+            "label_tr": "Saklama",
+            "value_en": "on, 760 days",
+            "value_tr": "açık, 760 gün"
+          },
+          {
+            "key": "deleted",
+            "label_en": "Days deleted by retention",
+            "label_tr": "Saklama ile silinen gün",
+            "value_en": "0",
+            "value_tr": "0"
+          }
+        ],
+        "id": "retention",
+        "number": 4,
+        "page": "sealing",
+        "reason_en": "The oldest sealed day is 04.10.2026 (9 days ago); the installation is younger than 730 days.",
+        "reason_tr": "En eski mühürlü gün 04.10.2026 (9 gün önce); kurulum 730 günden genç.",
+        "title_en": "Retention period",
+        "title_tr": "Saklama süresi",
+        "tone": "ok",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.5",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.5",
+        "facts": [
+          {
+            "key": "server",
+            "label_en": "Time-stamp server",
+            "label_tr": "Damga sunucusu",
+            "value_en": "Trial (mock)",
+            "value_tr": "Deneme (mock)"
+          },
+          {
+            "key": "credits",
+            "label_en": "Credits left",
+            "label_tr": "Kalan kontör",
+            "value_en": "9,612",
+            "value_tr": "9.612"
+          },
+          {
+            "key": "estimated_days",
+            "label_en": "Estimated days",
+            "label_tr": "Tahmini gün",
+            "value_en": "2,276",
+            "value_tr": "2.276"
+          },
+          {
+            "key": "threshold",
+            "label_en": "Threshold",
+            "label_tr": "Eşik",
+            "value_en": "500",
+            "value_tr": "500"
+          },
+          {
+            "key": "credit_at",
+            "label_en": "Last reading",
+            "label_tr": "Son okuma",
+            "value_en": "11.10.2026 06:30:00",
+            "value_tr": "11.10.2026 06:30:00"
+          },
+          {
+            "key": "cert_until",
+            "label_en": "TSA certificate expires",
+            "label_tr": "TSA sertifikası bitişi",
+            "value_en": "31.08.2031",
+            "value_tr": "31.08.2031"
+          },
+          {
+            "key": "cert_days",
+            "label_en": "Days left",
+            "label_tr": "Kalan gün",
+            "value_en": "1782",
+            "value_tr": "1782"
+          }
+        ],
+        "id": "tsa",
+        "number": 5,
+        "page": "sealing",
+        "reason_en": "Time stamps are not taken from the Kamu SM production server (provider: Trial (mock)). Complete the Kamu SM connection in Settings → Kamu SM.",
+        "reason_tr": "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: Deneme (mock)). Kamu SM bağlantısını Ayarlar → Kamu SM'de tamamlayın.",
+        "title_en": "Kamu SM credit and time-stamp certificate",
+        "title_tr": "Kamu SM kontörü ve zaman damgası sertifikası",
+        "tone": "error",
+        "verify_on_site_en": "The credit is read from the Kamu SM client's output; verify the format on site.",
+        "verify_on_site_tr": "Kontör değeri Kamu SM istemcisinin çıktısından okunur; okuma biçimi sahada doğrulanmalıdır."
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.6",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.6",
+        "facts": [
+          {
+            "key": "checked_at",
+            "label_en": "Last measurement",
+            "label_tr": "Son ölçüm",
+            "value_en": "13.10.2026 06:10:14",
+            "value_tr": "13.10.2026 06:10:14"
+          },
+          {
+            "key": "server",
+            "label_en": "Server",
+            "label_tr": "Sunucu",
+            "value_en": "172.20.10.1",
+            "value_tr": "172.20.10.1"
+          },
+          {
+            "key": "offset",
+            "label_en": "Offset",
+            "label_tr": "Fark",
+            "value_en": "3.2 ms",
+            "value_tr": "3,2 ms"
+          },
+          {
+            "key": "limit",
+            "label_en": "Limit",
+            "label_tr": "Sınır",
+            "value_en": "1,000 ms",
+            "value_tr": "1.000 ms"
+          },
+          {
+            "key": "local_source",
+            "label_en": "Local time source",
+            "label_tr": "Yerel saat kaynağı",
+            "value_en": "none",
+            "value_tr": "yok"
+          }
+        ],
+        "id": "clock",
+        "number": 6,
+        "page": "system",
+        "reason_en": "No local time source is set; the clock follows only the fallback server (time.ume.tubitak.gov.tr).",
+        "reason_tr": "Yerel saat kaynağı ayarlanmamış; saat yalnızca yedek sunucuyla (time.ume.tubitak.gov.tr) eşitleniyor.",
+        "title_en": "Server clock",
+        "title_tr": "Sunucu saati",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [
+          {
+            "id": 12,
+            "opened_at": "2026-10-13T07:01:09.874858+03:00",
+            "rule": "R20-filter",
+            "severity": "high"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.7",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.7",
+        "facts": [
+          {
+            "key": "last",
+            "label_en": "Last record",
+            "label_tr": "Son kayıt",
+            "value_en": "09.10.2026 11:24:32",
+            "value_tr": "09.10.2026 11:24:32"
+          },
+          {
+            "key": "today_web",
+            "label_en": "Web filter today",
+            "label_tr": "Bugün web filtresi",
+            "value_en": "0",
+            "value_tr": "0"
+          },
+          {
+            "key": "today_dns",
+            "label_en": "DNS filter today",
+            "label_tr": "Bugün DNS filtresi",
+            "value_en": "0",
+            "value_tr": "0"
+          },
+          {
+            "key": "days",
+            "label_en": "Last 7 days",
+            "label_tr": "Son 7 gün",
+            "value_en": "13.10: 0 · 12.10: 0 · 11.10: 0 · 10.10: 0 · 09.10: 0 · 08.10: 0 · 07.10: 0",
+            "value_tr": "13.10: 0 · 12.10: 0 · 11.10: 0 · 10.10: 0 · 09.10: 0 · 08.10: 0 · 07.10: 0"
+          },
+          {
+            "key": "profiles",
+            "label_en": "Web filter profiles",
+            "label_tr": "Web filtresi profilleri",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "dns_profile",
+            "label_en": "DNS filter profile",
+            "label_tr": "DNS filtresi profili",
+            "value_en": "No profile name is read from FortiGate DNS filter records (verify on site).",
+            "value_tr": "FortiGate DNS filtresi kayıtlarından profil adı okunmuyor (sahada doğrula)."
+          },
+          {
+            "key": "expected_days",
+            "label_en": "Expected days",
+            "label_tr": "Beklenen günler",
+            "value_en": "Mon, Tue, Wed, Thu, Fri, Sat, Sun",
+            "value_tr": "Pzt, Sal, Çar, Per, Cum, Cmt, Paz"
+          },
+          {
+            "key": "holidays",
+            "label_en": "Public holidays",
+            "label_tr": "Resmî tatiller",
+            "value_en": "not expected",
+            "value_tr": "beklenmez"
+          }
+        ],
+        "id": "content_filter",
+        "number": 7,
+        "page": "search",
+        "reason_en": "No web or DNS filter record in the last 24 hours of expected days (last record: 09.10.2026 11:24:32).",
+        "reason_tr": "Beklenen günlerde son 24 saattir web ya da DNS filtresi kaydı gelmedi (son kayıt: 09.10.2026 11:24:32).",
+        "title_en": "Content filter records",
+        "title_tr": "İçerik filtresi kayıtları",
+        "tone": "error",
+        "verify_on_site_en": "Verify on site that the firewall policies log web and DNS filter events and send them to ARCILOGGER.",
+        "verify_on_site_tr": "Güvenlik duvarı politikalarının web ve DNS filtresi olaylarını kaydettiği ve ARCILOGGER'a gönderdiği sahada doğrulanmalıdır."
+      },
+      {
+        "alerts": [
+          {
+            "id": 11,
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
+            "rule": "R20-lease",
+            "severity": "medium"
+          },
+          {
+            "id": 10,
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
+            "rule": "R20-lease",
+            "severity": "high"
+          },
+          {
+            "id": 9,
+            "opened_at": "2026-10-13T07:01:03.900091+03:00",
+            "rule": "R20-lease",
+            "severity": "info"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.8",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.8",
+        "facts": [
+          {
+            "key": "mt_dhcp",
+            "label_en": "MikroTik DHCP",
+            "label_tr": "MikroTik DHCP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "mt_arp",
+            "label_en": "MikroTik ARP",
+            "label_tr": "MikroTik ARP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "fg_dhcp",
+            "label_en": "FortiGate DHCP",
+            "label_tr": "FortiGate DHCP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "problems",
+            "label_en": "Open lease evidence problems",
+            "label_tr": "Açık kira kanıtı sorunları",
+            "value_en": "Lease evidence stopped: no MikroTik DHCP records; Lease evidence stopped: no MikroTik ARP-LOG records; FortiGate DHCP record format not verified on site",
+            "value_tr": "Kira kanıtı kesildi: MikroTik DHCP kayıtları gelmiyor; Kira kanıtı kesildi: MikroTik ARP-LOG kayıtları gelmiyor; FortiGate DHCP kayıt biçimi sahada doğrulanmadı"
+          }
+        ],
+        "id": "lease_evidence",
+        "number": 8,
+        "page": "sources",
+        "reason_en": "3 lease evidence problem(s) open.",
+        "reason_tr": "3 kira kanıtı sorunu açık.",
+        "title_en": "DHCP and ARP records (access records)",
+        "title_tr": "DHCP ve ARP kayıtları (erişim kayıtları)",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.9",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.9",
+        "facts": [
+          {
+            "key": "enabled",
+            "label_en": "Replica",
+            "label_tr": "Replika",
+            "value_en": "on",
+            "value_tr": "açık"
+          },
+          {
+            "key": "last_copy",
+            "label_en": "Last copy",
+            "label_tr": "Son kopya",
+            "value_en": "13.10.2026 07:00:01",
+            "value_tr": "13.10.2026 07:00:01"
+          },
+          {
+            "key": "pending",
+            "label_en": "Days waiting",
+            "label_tr": "Bekleyen gün",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "stale_hours",
+            "label_en": "Delay threshold (hours)",
+            "label_tr": "Gecikme eşiği (saat)",
+            "value_en": "48",
+            "value_tr": "48"
+          }
+        ],
+        "id": "replica",
+        "number": 9,
+        "page": "sealing",
+        "reason_en": "3 sealed day(s) not copied yet (the oldest 08.10.2026).",
+        "reason_tr": "3 mühürlü gün henüz kopyalanmadı (en eskisi 08.10.2026).",
+        "title_en": "Second copy (replica)",
+        "title_tr": "İkinci kopya (replika)",
+        "tone": "warning",
+        "verify_on_site_en": "Whether the replica target is write-once (WORM) cannot be checked from ARCILOGGER; verify it on site.",
+        "verify_on_site_tr": "Replika hedefinin değiştirilemez (WORM) olduğu ARCILOGGER'dan denetlenemez; sahada doğrulayın."
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:10.443431+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.10",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.10",
+        "facts": [
+          {
+            "key": "last_backup",
+            "label_en": "Last database backup",
+            "label_tr": "Son veritabanı yedeği",
+            "value_en": "13.10.2026 01:52:10",
+            "value_tr": "13.10.2026 01:52:10"
+          },
+          {
+            "key": "size",
+            "label_en": "Size",
+            "label_tr": "Boyut",
+            "value_en": "1.2 GB",
+            "value_tr": "1,2 GB"
+          },
+          {
+            "key": "enabled",
+            "label_en": "Nightly backup",
+            "label_tr": "Gece yedeği",
+            "value_en": "on",
+            "value_tr": "açık"
+          },
+          {
+            "key": "config_copy",
+            "label_en": "Configuration copy confirmed",
+            "label_tr": "Yapılandırma kopyası onayı",
+            "value_en": "13.10.2026 07:01:10",
+            "value_tr": "13.10.2026 07:01:10"
+          }
+        ],
+        "id": "backup",
+        "number": 10,
+        "page": "settings",
+        "reason_en": "Last database backup 13.10.2026 01:52:10 (1.2 GB); configuration copy confirmed on 13.10.2026 07:01:10.",
+        "reason_tr": "Son veritabanı yedeği 13.10.2026 01:52:10 (1,2 GB); yapılandırma kopyası 13.10.2026 07:01:10 tarihinde onaylandı.",
+        "title_en": "Configuration and database backups",
+        "title_tr": "Yapılandırma ve veritabanı yedekleri",
+        "tone": "ok",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      }
+    ],
+    "counts": {
+      "error": 5,
+      "neutral": 0,
+      "ok": 2,
+      "warning": 3
+    },
+    "generated_at": "2026-10-13T07:01:10.443431+03:00",
+    "notice_en": "ARCILOGGER is designed to support 5651 obligations. These cards are the results of technical checks of log collection, sealing and backups; they are neither a legal assessment nor a statement of conformity. Confirm the results with your legal counsel.",
+    "notice_tr": "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır. Bu kartlar kayıt toplama, mühürleme ve yedeklemenin teknik denetimlerinin sonucudur; hukuki bir değerlendirme ya da uygunluk beyanı değildir. Sonuçları hukuk müşavirinizle teyit edin.",
+    "site_name": "Örnek Lojistik A.Ş."
+  },
+  "auditor": {
+    "cards": [
+      {
+        "alerts": [
+          {
+            "id": 4,
+            "opened_at": "2026-10-13T07:00:15.331968+03:00",
+            "rule": "R15",
+            "severity": "high"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.1",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.1",
+        "facts": [
+          {
+            "key": "watched",
+            "label_en": "Watched sources",
+            "label_tr": "İzlenen kaynak",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "active",
+            "label_en": "Sending",
+            "label_tr": "Veri gönderen",
+            "value_en": "2",
+            "value_tr": "2"
+          },
+          {
+            "key": "silent",
+            "label_en": "Silent",
+            "label_tr": "Sessiz",
+            "value_en": "switch-3",
+            "value_tr": "switch-3"
+          },
+          {
+            "key": "heartbeat",
+            "label_en": "Heartbeat",
+            "label_tr": "Kalp atışı süresi",
+            "value_en": "per source, default 15 min",
+            "value_tr": "kaynağa göre, varsayılan 15 dk"
+          }
+        ],
+        "id": "sources",
+        "number": 1,
+        "page": "sources",
+        "reason_en": "1 source(s) have sent nothing for longer than their heartbeat: switch-3.",
+        "reason_tr": "1 kaynak kalp atışı süresinden uzun süredir veri göndermiyor: switch-3.",
+        "title_en": "Log sources are sending",
+        "title_tr": "Log kaynakları veri gönderiyor",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.2",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.2",
+        "facts": [
+          {
+            "key": "day",
+            "label_en": "Day",
+            "label_tr": "Gün",
+            "value_en": "12.10.2026",
+            "value_tr": "12.10.2026"
+          },
+          {
+            "key": "state",
+            "label_en": "State",
+            "label_tr": "Durum",
+            "value_en": "Waiting to be sealed",
+            "value_tr": "Mühürlenmeyi bekliyor"
+          },
+          {
+            "key": "sealed_at",
+            "label_en": "Sealed",
+            "label_tr": "Mühürlendi",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "verification",
+            "label_en": "Verification",
+            "label_tr": "Doğrulama",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "server",
+            "label_en": "Time-stamp server",
+            "label_tr": "Damga sunucusu",
+            "value_en": "Trial (mock)",
+            "value_tr": "Deneme (mock)"
+          }
+        ],
+        "id": "seal_yesterday",
+        "number": 2,
+        "page": "sealing",
+        "reason_en": "Yesterday (12.10.2026) is waiting to be sealed (the Seal task runs after 00:10).",
+        "reason_tr": "Dünün (12.10.2026) mühürlenmesi bekleniyor (Seal görevi 00:10'dan sonra çalışır).",
+        "title_en": "Yesterday's records sealed and verified",
+        "title_tr": "Dünün kayıtları mühürlendi ve doğrulandı",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.3",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.3",
+        "facts": [
+          {
+            "key": "verified",
+            "label_en": "Verified",
+            "label_tr": "Doğrulanmış",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "not_verified",
+            "label_en": "Not verified",
+            "label_tr": "Doğrulanmamış",
+            "value_en": "4",
+            "value_tr": "4"
+          },
+          {
+            "key": "failed",
+            "label_en": "Failed",
+            "label_tr": "Başarısız",
+            "value_en": "1",
+            "value_tr": "1"
+          },
+          {
+            "key": "no_data",
+            "label_en": "No data or deleted",
+            "label_tr": "Veri yok ya da silinmiş",
+            "value_en": "21",
+            "value_tr": "21"
+          },
+          {
+            "key": "full_check",
+            "label_en": "Last full chain check",
+            "label_tr": "Son tam zincir denetimi",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "tasks",
+            "label_en": "Verification tasks",
+            "label_tr": "Doğrulama görevleri",
+            "value_en": "daily the last 2 days, weekly the last 90 days, monthly the whole chain",
+            "value_tr": "günlük son 2 gün, haftalık son 90 gün, aylık tüm zincir"
+          }
+        ],
+        "id": "chain",
+        "number": 3,
+        "page": "sealing",
+        "reason_en": "1 day(s) of the last 30 failed: 11.10.2026.",
+        "reason_tr": "Son 30 günde 1 gün başarısız: 11.10.2026.",
+        "title_en": "Seal chain intact",
+        "title_tr": "Mühür zinciri bütün",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.4",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.4",
+        "facts": [
+          {
+            "key": "oldest",
+            "label_en": "Oldest sealed day",
+            "label_tr": "En eski mühürlü gün",
+            "value_en": "04.10.2026",
+            "value_tr": "04.10.2026"
+          },
+          {
+            "key": "retention",
+            "label_en": "Retention",
+            "label_tr": "Saklama",
+            "value_en": "on, 760 days",
+            "value_tr": "açık, 760 gün"
+          },
+          {
+            "key": "deleted",
+            "label_en": "Days deleted by retention",
+            "label_tr": "Saklama ile silinen gün",
+            "value_en": "0",
+            "value_tr": "0"
+          }
+        ],
+        "id": "retention",
+        "number": 4,
+        "page": "sealing",
+        "reason_en": "The oldest sealed day is 04.10.2026 (9 days ago); the installation is younger than 730 days.",
+        "reason_tr": "En eski mühürlü gün 04.10.2026 (9 gün önce); kurulum 730 günden genç.",
+        "title_en": "Retention period",
+        "title_tr": "Saklama süresi",
+        "tone": "ok",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.5",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.5",
+        "facts": [
+          {
+            "key": "server",
+            "label_en": "Time-stamp server",
+            "label_tr": "Damga sunucusu",
+            "value_en": "Trial (mock)",
+            "value_tr": "Deneme (mock)"
+          },
+          {
+            "key": "credits",
+            "label_en": "Credits left",
+            "label_tr": "Kalan kontör",
+            "value_en": "9,612",
+            "value_tr": "9.612"
+          },
+          {
+            "key": "estimated_days",
+            "label_en": "Estimated days",
+            "label_tr": "Tahmini gün",
+            "value_en": "2,276",
+            "value_tr": "2.276"
+          },
+          {
+            "key": "threshold",
+            "label_en": "Threshold",
+            "label_tr": "Eşik",
+            "value_en": "500",
+            "value_tr": "500"
+          },
+          {
+            "key": "credit_at",
+            "label_en": "Last reading",
+            "label_tr": "Son okuma",
+            "value_en": "11.10.2026 06:30:00",
+            "value_tr": "11.10.2026 06:30:00"
+          },
+          {
+            "key": "cert_until",
+            "label_en": "TSA certificate expires",
+            "label_tr": "TSA sertifikası bitişi",
+            "value_en": "31.08.2031",
+            "value_tr": "31.08.2031"
+          },
+          {
+            "key": "cert_days",
+            "label_en": "Days left",
+            "label_tr": "Kalan gün",
+            "value_en": "1782",
+            "value_tr": "1782"
+          }
+        ],
+        "id": "tsa",
+        "number": 5,
+        "page": "sealing",
+        "reason_en": "Time stamps are not taken from the Kamu SM production server (provider: Trial (mock)). Complete the Kamu SM connection in Settings → Kamu SM.",
+        "reason_tr": "Damgalar Kamu SM üretim sunucusundan alınmıyor (sağlayıcı: Deneme (mock)). Kamu SM bağlantısını Ayarlar → Kamu SM'de tamamlayın.",
+        "title_en": "Kamu SM credit and time-stamp certificate",
+        "title_tr": "Kamu SM kontörü ve zaman damgası sertifikası",
+        "tone": "error",
+        "verify_on_site_en": "The credit is read from the Kamu SM client's output; verify the format on site.",
+        "verify_on_site_tr": "Kontör değeri Kamu SM istemcisinin çıktısından okunur; okuma biçimi sahada doğrulanmalıdır."
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.6",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.6",
+        "facts": [
+          {
+            "key": "checked_at",
+            "label_en": "Last measurement",
+            "label_tr": "Son ölçüm",
+            "value_en": "13.10.2026 06:10:14",
+            "value_tr": "13.10.2026 06:10:14"
+          },
+          {
+            "key": "server",
+            "label_en": "Server",
+            "label_tr": "Sunucu",
+            "value_en": "172.20.10.1",
+            "value_tr": "172.20.10.1"
+          },
+          {
+            "key": "offset",
+            "label_en": "Offset",
+            "label_tr": "Fark",
+            "value_en": "3.2 ms",
+            "value_tr": "3,2 ms"
+          },
+          {
+            "key": "limit",
+            "label_en": "Limit",
+            "label_tr": "Sınır",
+            "value_en": "1,000 ms",
+            "value_tr": "1.000 ms"
+          },
+          {
+            "key": "local_source",
+            "label_en": "Local time source",
+            "label_tr": "Yerel saat kaynağı",
+            "value_en": "none",
+            "value_tr": "yok"
+          }
+        ],
+        "id": "clock",
+        "number": 6,
+        "page": "system",
+        "reason_en": "No local time source is set; the clock follows only the fallback server (time.ume.tubitak.gov.tr).",
+        "reason_tr": "Yerel saat kaynağı ayarlanmamış; saat yalnızca yedek sunucuyla (time.ume.tubitak.gov.tr) eşitleniyor.",
+        "title_en": "Server clock",
+        "title_tr": "Sunucu saati",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [
+          {
+            "id": 12,
+            "opened_at": "2026-10-13T07:01:09.874858+03:00",
+            "rule": "R20-filter",
+            "severity": "high"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.7",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.7",
+        "facts": [
+          {
+            "key": "last",
+            "label_en": "Last record",
+            "label_tr": "Son kayıt",
+            "value_en": "09.10.2026 11:24:32",
+            "value_tr": "09.10.2026 11:24:32"
+          },
+          {
+            "key": "today_web",
+            "label_en": "Web filter today",
+            "label_tr": "Bugün web filtresi",
+            "value_en": "0",
+            "value_tr": "0"
+          },
+          {
+            "key": "today_dns",
+            "label_en": "DNS filter today",
+            "label_tr": "Bugün DNS filtresi",
+            "value_en": "0",
+            "value_tr": "0"
+          },
+          {
+            "key": "days",
+            "label_en": "Last 7 days",
+            "label_tr": "Son 7 gün",
+            "value_en": "13.10: 0 · 12.10: 0 · 11.10: 0 · 10.10: 0 · 09.10: 0 · 08.10: 0 · 07.10: 0",
+            "value_tr": "13.10: 0 · 12.10: 0 · 11.10: 0 · 10.10: 0 · 09.10: 0 · 08.10: 0 · 07.10: 0"
+          },
+          {
+            "key": "profiles",
+            "label_en": "Web filter profiles",
+            "label_tr": "Web filtresi profilleri",
+            "value_en": "—",
+            "value_tr": "—"
+          },
+          {
+            "key": "dns_profile",
+            "label_en": "DNS filter profile",
+            "label_tr": "DNS filtresi profili",
+            "value_en": "No profile name is read from FortiGate DNS filter records (verify on site).",
+            "value_tr": "FortiGate DNS filtresi kayıtlarından profil adı okunmuyor (sahada doğrula)."
+          },
+          {
+            "key": "expected_days",
+            "label_en": "Expected days",
+            "label_tr": "Beklenen günler",
+            "value_en": "Mon, Tue, Wed, Thu, Fri, Sat, Sun",
+            "value_tr": "Pzt, Sal, Çar, Per, Cum, Cmt, Paz"
+          },
+          {
+            "key": "holidays",
+            "label_en": "Public holidays",
+            "label_tr": "Resmî tatiller",
+            "value_en": "not expected",
+            "value_tr": "beklenmez"
+          }
+        ],
+        "id": "content_filter",
+        "number": 7,
+        "page": "search",
+        "reason_en": "No web or DNS filter record in the last 24 hours of expected days (last record: 09.10.2026 11:24:32).",
+        "reason_tr": "Beklenen günlerde son 24 saattir web ya da DNS filtresi kaydı gelmedi (son kayıt: 09.10.2026 11:24:32).",
+        "title_en": "Content filter records",
+        "title_tr": "İçerik filtresi kayıtları",
+        "tone": "error",
+        "verify_on_site_en": "Verify on site that the firewall policies log web and DNS filter events and send them to ARCILOGGER.",
+        "verify_on_site_tr": "Güvenlik duvarı politikalarının web ve DNS filtresi olaylarını kaydettiği ve ARCILOGGER'a gönderdiği sahada doğrulanmalıdır."
+      },
+      {
+        "alerts": [
+          {
+            "id": 11,
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
+            "rule": "R20-lease",
+            "severity": "medium"
+          },
+          {
+            "id": 10,
+            "opened_at": "2026-10-13T07:01:04.108327+03:00",
+            "rule": "R20-lease",
+            "severity": "high"
+          },
+          {
+            "id": 9,
+            "opened_at": "2026-10-13T07:01:03.900091+03:00",
+            "rule": "R20-lease",
+            "severity": "info"
+          }
+        ],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.8",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.8",
+        "facts": [
+          {
+            "key": "mt_dhcp",
+            "label_en": "MikroTik DHCP",
+            "label_tr": "MikroTik DHCP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "mt_arp",
+            "label_en": "MikroTik ARP",
+            "label_tr": "MikroTik ARP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "fg_dhcp",
+            "label_en": "FortiGate DHCP",
+            "label_tr": "FortiGate DHCP",
+            "value_en": "0 rows (24 h)",
+            "value_tr": "0 satır (24 saat)"
+          },
+          {
+            "key": "problems",
+            "label_en": "Open lease evidence problems",
+            "label_tr": "Açık kira kanıtı sorunları",
+            "value_en": "Lease evidence stopped: no MikroTik DHCP records; Lease evidence stopped: no MikroTik ARP-LOG records; FortiGate DHCP record format not verified on site",
+            "value_tr": "Kira kanıtı kesildi: MikroTik DHCP kayıtları gelmiyor; Kira kanıtı kesildi: MikroTik ARP-LOG kayıtları gelmiyor; FortiGate DHCP kayıt biçimi sahada doğrulanmadı"
+          }
+        ],
+        "id": "lease_evidence",
+        "number": 8,
+        "page": "sources",
+        "reason_en": "3 lease evidence problem(s) open.",
+        "reason_tr": "3 kira kanıtı sorunu açık.",
+        "title_en": "DHCP and ARP records (access records)",
+        "title_tr": "DHCP ve ARP kayıtları (erişim kayıtları)",
+        "tone": "error",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.9",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.9",
+        "facts": [
+          {
+            "key": "enabled",
+            "label_en": "Replica",
+            "label_tr": "Replika",
+            "value_en": "on",
+            "value_tr": "açık"
+          },
+          {
+            "key": "last_copy",
+            "label_en": "Last copy",
+            "label_tr": "Son kopya",
+            "value_en": "13.10.2026 07:00:01",
+            "value_tr": "13.10.2026 07:00:01"
+          },
+          {
+            "key": "pending",
+            "label_en": "Days waiting",
+            "label_tr": "Bekleyen gün",
+            "value_en": "3",
+            "value_tr": "3"
+          },
+          {
+            "key": "stale_hours",
+            "label_en": "Delay threshold (hours)",
+            "label_tr": "Gecikme eşiği (saat)",
+            "value_en": "48",
+            "value_tr": "48"
+          }
+        ],
+        "id": "replica",
+        "number": 9,
+        "page": "sealing",
+        "reason_en": "3 sealed day(s) not copied yet (the oldest 08.10.2026).",
+        "reason_tr": "3 mühürlü gün henüz kopyalanmadı (en eskisi 08.10.2026).",
+        "title_en": "Second copy (replica)",
+        "title_tr": "İkinci kopya (replika)",
+        "tone": "warning",
+        "verify_on_site_en": "Whether the replica target is write-once (WORM) cannot be checked from ARCILOGGER; verify it on site.",
+        "verify_on_site_tr": "Replika hedefinin değiştirilemez (WORM) olduğu ARCILOGGER'dan denetlenemez; sahada doğrulayın."
+      },
+      {
+        "alerts": [],
+        "checked_at": "2026-10-13T07:01:09.937323+03:00",
+        "doc_en": "COMPLIANCE-STATUS.md section 2.10",
+        "doc_tr": "UYUM-DURUMU.md bölüm 2.10",
+        "facts": [
+          {
+            "key": "last_backup",
+            "label_en": "Last database backup",
+            "label_tr": "Son veritabanı yedeği",
+            "value_en": "13.10.2026 01:52:10",
+            "value_tr": "13.10.2026 01:52:10"
+          },
+          {
+            "key": "size",
+            "label_en": "Size",
+            "label_tr": "Boyut",
+            "value_en": "1.2 GB",
+            "value_tr": "1,2 GB"
+          },
+          {
+            "key": "enabled",
+            "label_en": "Nightly backup",
+            "label_tr": "Gece yedeği",
+            "value_en": "on",
+            "value_tr": "açık"
+          },
+          {
+            "key": "config_copy",
+            "label_en": "Configuration copy confirmed",
+            "label_tr": "Yapılandırma kopyası onayı",
+            "value_en": "never",
+            "value_tr": "hiç"
+          }
+        ],
+        "id": "backup",
+        "number": 10,
+        "page": "settings",
+        "reason_en": "The offline copy of the configuration files was never confirmed (BACKUP.md section 3).",
+        "reason_tr": "Yapılandırma dosyalarının çevrimdışı kopyası hiç onaylanmadı (YEDEKLEME.md bölüm 3).",
+        "title_en": "Configuration and database backups",
+        "title_tr": "Yapılandırma ve veritabanı yedekleri",
+        "tone": "warning",
+        "verify_on_site_en": null,
+        "verify_on_site_tr": null
+      }
+    ],
+    "counts": {
+      "error": 5,
+      "neutral": 0,
+      "ok": 1,
+      "warning": 4
+    },
+    "generated_at": "2026-10-13T07:01:09.937323+03:00",
+    "notice_en": "ARCILOGGER is designed to support 5651 obligations. These cards are the results of technical checks of log collection, sealing and backups; they are neither a legal assessment nor a statement of conformity. Confirm the results with your legal counsel.",
+    "notice_tr": "ARCILOGGER, 5651 yükümlülüklerini desteklemek için tasarlanmıştır. Bu kartlar kayıt toplama, mühürleme ve yedeklemenin teknik denetimlerinin sonucudur; hukuki bir değerlendirme ya da uygunluk beyanı değildir. Sonuçları hukuk müşavirinizle teyit edin.",
+    "site_name": "Örnek Lojistik A.Ş."
+  },
+  "config_backup": {
+    "config_sha256": "21a0f63dcc1a1342cb0e7dc11c4c64c55a1a6ccf8511ee584edad80573e0c1ee",
+    "confirmed_at": "2026-10-13T07:01:10.394136+03:00"
+  },
+  "errors": {
+    "config_backup_unreadable": {
+      "body": {
+        "error": {
+          "code": "config_backup_unreadable",
+          "message_en": "The configuration file could not be read; the backup confirmation was not recorded.",
+          "message_tr": "Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi."
+        }
+      },
+      "headers": {},
+      "status": 409
+    },
+    "forbidden": {
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message_en": "You do not have permission for this action.",
+          "message_tr": "Bu işlem için yetkiniz yok."
+        }
+      },
+      "headers": {},
+      "status": 403
+    }
+  },
+  "meta": {
+    "captured_at": "2026-10-13T04:01:29.280516+00:00",
+    "clock": "2026-10-13T07:00:00+03:00",
+    "info": "captured by web/scripts/capture_api_samples.py; do not edit",
+    "site_day": "2026-10-09",
+    "site_today": "2026-10-13",
+    "tsa": "mock (never legally valid)"
+  },
+  "report_pdf": {
+    "headers": {
+      "cache-control": "no-store",
+      "content-disposition": "attachment; filename=\"ARCILOGGER-uyum-durumu-20261013-0701.pdf\"",
+      "content-type": "application/pdf",
+      "x-arci-sha256": "06d958a20758a7027fc5d5027f9b30436dbe77bff23cb802b703f3aa2140ad2d"
+    },
+    "sha256": "06d958a20758a7027fc5d5027f9b30436dbe77bff23cb802b703f3aa2140ad2d",
+    "size": 55132
+  }
+}

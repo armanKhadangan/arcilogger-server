@@ -303,10 +303,11 @@ kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 - **Departman geçmişi tutulmaz:** 5651 sonucundaki kişi olay anındaki atamadır, departmanı ise
   kişinin bugünkü departmanıdır (rapor bunu belirtir). Geçmişteki bir atama arayüzden
   düzeltilemez (bölüm 5).
-- Menüde yalnızca **Uyum Durumu ve Sistem** henüz yer tutucudur. Çalışan sayfalar: Panel,
-  Kaynaklar ve Canlı Akış (bölüm 9), Arama, 5651 Sorgu, Kullanım (bölüm 16), Güvenlik, Mühürleme,
-  Kanıt Paketleri, Cihazlar ve Kişiler (bölüm 12), Raporlar (Panel, Güvenlik ve Raporlar: bölüm
-  15), Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans: bölüm 17).
+- Menüdeki bütün sayfalar çalışır: Panel, Kaynaklar ve Canlı Akış (bölüm 9), Arama, 5651 Sorgu,
+  Kullanım (bölüm 16), Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler (bölüm 12),
+  Raporlar (Panel, Güvenlik ve Raporlar: bölüm 15), Uyum Durumu (bölüm 9,
+  [UYUM-DURUMU.md](UYUM-DURUMU.md)), Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans:
+  bölüm 17), Sistem ([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 4).
 - **Ücretli modüller** (lisans, [LISANS.md](LISANS.md)): Kullanım analizi (Kullanım sayfası,
   paneldeki kullanım bölümleri), Zamanlanmış kullanım raporları (Raporlar sayfası) ve Toplu içe
   aktarma (CSV). Deneme süresince hepsi açıktır; bir modül kapalıyken sayfası kilitli görünür.
@@ -353,6 +354,8 @@ kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 
 Her gün:
 
+- Her sabah **Uyum Durumu** sayfasına bakın; her kart neyi denetlediğini ve ne yapılacağını söyler
+  ([UYUM-DURUMU.md](UYUM-DURUMU.md)).
 - **Panel**: log alımı, bugünkü ayrıştırma hataları, dünkü mühür, kontör, saat sapması ve açık
   uyarılar bir bakışta. **Güvenlik** sayfası: Yeni uyarıları inceleyin, ilgilendiklerinizi
   İnceleniyor yapın.
@@ -413,6 +416,7 @@ Her gün:
   | `R20-config-change` | Önemli yapılandırma değişikliği (korumalı bir ayar): saklama açıldı ya da gün sayısı düştü, replika kapandı ya da hedefi değişti, bir log kaynağı kapatıldı ya da silindi, üretimden teste dönüldü, Kamu SM kimlik bilgileri değişti, bir kök ya da yasal parmak izi eklendi, bir Zamane istemcisi yüklendi ya da onaylandı (yüksek); SMTP ya da yedekleme kapatıldı (orta). Değişikliği bilinen bir yönetici yapmadıysa **Değişiklik geçmişi** sayfasında bekleyeni **İptal et**, uygulanmışı **Geri al** ile geri alın ve denetim kaydına bakın |
   | `R20-lease` | Kira kanıtı sorunu: kira kanıtı (FortiGate DHCP, MikroTik DHCP ya da ARP-LOG) kesildi, FortiGate DHCP kayıtları kullanılmıyor ya da çevrilemedi, yenilemeler görünmüyor, aynı ağda iki DHCP kaynağı, bir kaynağın saati kayık ya da bir ayar sahada doğrulanmadı; neden ve ne yapılacağı uyarının ayrıntısındadır (Kaynaklar → Kira kanıtı; [UYARILAR.md](UYARILAR.md) bölüm 2) |
   | `R20-nat` | İnternet çıkışı tanımı sorunu: eski NAT ayarları aktarılamadı, çıkışlar ayarı okunamıyor, geri almada eski bir NAT ayarı değişti ya da hiçbir çıkışa tanımlı olmayan bir NAT adresi kullanılıyor (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)) |
+  | `R20-filter` | Beklenen bir günde 24 saattir web ya da DNS filtresi kaydı gelmiyor (`alerts.filter_quiet_hours`, `alerts.filter_days`; Uyum Durumu kart 7) |
   | `new-log-source` | Yapılandırmada olmayan bir gönderici (güvenlik duvarı izin verdiyse) |
   | `wrong-transport` | Bir kaynaktan izin verilmeyen taşıma yoluyla mesaj geldi (`[[sources]] transport`); taklit edilmiş bir UDP gönderimi ya da yanlış cihaz ayarı olabilir, mesaj kaydedilmedi |
 
