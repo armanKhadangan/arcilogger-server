@@ -6,7 +6,6 @@ from __future__ import annotations
 import email
 import email.policy
 import smtplib
-import socket
 from datetime import datetime
 from email.message import EmailMessage
 from typing import Any
@@ -16,6 +15,7 @@ import pytest
 from arcilogger_core.admin.testing import SmtpState, SmtpTestServer
 from arcilogger_core.config import SmtpConfig
 from arcilogger_core.smtp import ERROR_MAX, SmtpSender, SmtpSendError, error_text, trial_message
+from arcilogger_core.testing import refused_port
 from arcilogger_core.timeutil import SITE_TZ
 
 NOW = datetime(2026, 10, 25, 10, 15, tzinfo=SITE_TZ)
@@ -155,15 +155,13 @@ def test_a_silent_server_times_out(smtp: SmtpState) -> None:
 
 
 def test_nobody_listening_is_temporary() -> None:
-    with socket.socket() as unused:
-        unused.bind(("127.0.0.1", 0))
-        port = unused.getsockname()[1]
-    config = SmtpConfig.model_validate(
-        {"host": "127.0.0.1", "port": port, "security": "none",
-         "from_address": "arcilogger@ornek.example", "timeout_seconds": 2}
-    )  # fmt: skip
-    with pytest.raises(SmtpSendError) as caught:
-        SmtpSender(config).send(message(), TO)
+    with refused_port() as port:
+        config = SmtpConfig.model_validate(
+            {"host": "127.0.0.1", "port": port, "security": "none",
+             "from_address": "arcilogger@ornek.example", "timeout_seconds": 2}
+        )  # fmt: skip
+        with pytest.raises(SmtpSendError) as caught:
+            SmtpSender(config).send(message(), TO)
     assert (caught.value.permanent, caught.value.smtp_code) == (False, None)
 
 

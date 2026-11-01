@@ -256,7 +256,7 @@ describe('Panel — blocks by permission', () => {
 
 describe('Panel — parse failures (contract 2.17)', () => {
   it("today's rate, counts and patterns; the example line and Arama by permission", async () => {
-    serve('admin');
+    const requests = serve('admin');
     const put = vi.spyOn(handoff, 'put');
     const { router } = renderApp('/');
     const card = await screen.findByTestId('card-parse-failures');
@@ -293,11 +293,20 @@ describe('Panel — parse failures (contract 2.17)', () => {
       q: 'source:fortigate error:fortigate.kv',
       range: { preset: 'today' },
     });
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe('/search');
-    });
-    // In memory only: neither the address nor the history entry holds the query.
-    expect(router.state.location.search).toBe('');
+    // Arama took the hand-over once it has answered its search (this mock refuses it).
+    expect(await screen.findByText('TR not_found')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/search');
+    // One search, on today's range (the address's default range does not run it again).
+    const searches = requests.filter((r) => r.method === 'POST' && r.path === '/api/v1/search');
+    expect(searches.map((r) => r.body)).toEqual([
+      {
+        q: 'source:fortigate error:fortigate.kv',
+        from: expect.stringMatching(/T00:00:00\+03:00$/) as string,
+        to: expect.any(String) as string,
+      },
+    ]);
+    // In memory only: the address holds the range, neither it nor the history entry the query.
+    expect(router.state.location.search).toBe('?range=today');
     expect(router.state.location.state).toBeNull();
     put.mockRestore();
   });

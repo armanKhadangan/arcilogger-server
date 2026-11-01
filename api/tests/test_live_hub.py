@@ -72,15 +72,17 @@ def api_config(tmp_path: Path) -> Config:
 
 
 class Clock:
-    """Wall time the test moves; monotonic time runs on (plus what the test adds)."""
+    """Wall time stands still until the test moves it; monotonic time runs on (plus what the
+    test adds)."""
 
     def __init__(self, at: datetime) -> None:
         self.at = at
-        self.started = time.monotonic()
         self.extra = 0.0
 
     def now(self) -> datetime:
-        return self.at + timedelta(seconds=time.monotonic() - self.started)
+        # Not on real time: the midnight tests open their stream at 23:59:59 and a first read
+        # cycle that took a second on a slow runner already followed the next day's file.
+        return self.at
 
     def monotonic(self) -> float:
         return time.monotonic() + self.extra

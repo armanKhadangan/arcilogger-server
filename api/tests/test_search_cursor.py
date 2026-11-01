@@ -20,6 +20,7 @@ import base64
 import gc
 import json
 import os
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -202,6 +203,31 @@ class FakeClock:
     def __call__(self) -> float:
         self.now += self.step
         return self.now
+
+
+class LeftAfterTheFirstWindow:
+    """The real clock, moved forward once so that only ``left`` seconds of a ``budget`` remain:
+    at its first reading after :meth:`first_window_started` (the first window's hook), which
+    ``run_page`` makes after that window's statement. Its first reading starts the budget."""
+
+    def __init__(self, budget: float, left: float) -> None:
+        self.budget = budget
+        self.left = left
+        self.began: float | None = None
+        self.pending = False
+        self.offset = 0.0
+
+    def first_window_started(self) -> None:
+        self.pending = True
+
+    def __call__(self) -> float:
+        now = time.monotonic()
+        if self.began is None:
+            self.began = now
+        elif self.pending:
+            self.pending = False
+            self.offset = self.began + self.budget - self.left - now
+        return now + self.offset
 
 
 def test_frontier_cursors_continue_where_the_budget_stopped(
@@ -559,15 +585,22 @@ def test_a_later_window_that_times_out_ends_the_page_with_a_frontier(
     app_session_factory: sessionmaker[Session],
 ) -> None:
     calls: list[datetime] = []
+    # The first window gets half of the largest budget (15 s, however slow the runner); after it
+    # the clock leaves 2 s, which the second window's 5 s statement cannot keep to.
+    clock = LeftAfterTheFirstWindow(budget=30.0, left=2.0)
 
     def slow_after_the_first(session: Session, lower: datetime, upper: datetime) -> None:
         calls.append(lower)
-        if len(calls) > 1:
+        if len(calls) == 1:
+            clock.first_window_started()
+        else:
             session.execute(text("SELECT pg_sleep(5)"))
 
-    _setting(app_session_factory, "search.request_budget_ms", 600)
+    _setting(app_session_factory, "search.request_budget_ms", 30_000)
+    state_of(app).clock = clock
     state_of(app).hook = slow_after_the_first
     page = search(client, f"srcip:{CLIENT}", 500)
+    assert len(calls) == 2  # the second window ran, and timed out
     assert page["scan"]["complete"] is False
     assert page["scan"]["windows"] == 1
     cursor = json.loads(base64.urlsafe_b64decode(page["next_cursor"] + "=="))

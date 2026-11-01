@@ -186,9 +186,15 @@ export function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields.isPending]);
 
-  // The picker or a zoom changed the range: the same query, a new search.
+  // The picker or a zoom changed the range: the same query, a new search. Only a change of the
+  // address's range counts: a hand-over taken when the page opens sets `ranWith` to its range in
+  // the same commit, before the address holds it (and StrictMode runs these effects twice), and
+  // the old range must not run again then (nor be written back).
   const key = rangeKey(range);
+  const seenKey = useRef(key);
   useEffect(() => {
+    if (seenKey.current === key) return;
+    seenKey.current = key;
     if (ranWith.current === null || ranWith.current === key) return;
     dropSaved();
     search(committed.current, range);

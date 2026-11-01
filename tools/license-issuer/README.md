@@ -261,8 +261,9 @@ uv run python tools/license-issuer/arcilogger_license_issuer.py keygen --key-id 
   verilebilir (dosyanın ilk satırı); parola hiçbir zaman komut satırına ya da bir ortam
   değişkenine yazılmaz.
 - Çıktı: `arci-2026a.private.pem` (PKCS#8, parolayla şifreli; POSIX'te izin 0600) ve
-  `arci-2026a.public.txt` (tek satır: `"arci-2026a": "<43 karakter>",`). Ekranda açık anahtar ve
-  SHA-256 özeti görünür; özeti not edin.
+  `arci-2026a.public.txt` (tek satır: `"arci-2026a": "<43 karakter>",`). Ekranda açık anahtar,
+  SHA-256 özeti ve `verify` için yapıştırmaya hazır `verify: --public-key=<43 karakter>` satırı
+  görünür; özeti not edin.
 - Var olan bir dosyanın üzerine yazılmaz.
 
 **Yedekleme:** şifreli özel anahtarı **iki ayrı çevrimdışı ortama** (örneğin iki USB bellek, ayrı
@@ -352,7 +353,8 @@ uv run python tools/license-issuer/arcilogger_license_issuer.py verify ornek.lic
 ```
 
 - `inspect`: içeriği gösterir, imzayı denetlemez (istek kodunda denetim toplamı denetlenir).
-- `verify`: `--public-key=B64` (43 karakter; anahtar `-` ile başlayabildiği için `=` ile yazın),
+- `verify`: `--public-key=B64` (43 karakter; anahtar `-` ile başlayabildiği için `=` ile yazın,
+  `keygen`'in yazdığı gibi),
   `--key PEM` (özel anahtardan) ya da
   `--committed-keys` (bu çalışma kopyasındaki `keys.py`) ile imzayı ve bu çalışma kopyasındaki
   iptal listesini denetler; `--server-id` ile sunucuyu; `--at YYYY-AA-GG` ile o güne göre
@@ -638,8 +640,9 @@ uv run python tools/license-issuer/arcilogger_license_issuer.py keygen --key-id 
   `--passphrase-file FILE` (its first line); a passphrase is never an argument or an environment
   variable.
 - Output: `arci-2026a.private.pem` (PKCS#8, encrypted with the passphrase; mode 0600 on POSIX) and
-  `arci-2026a.public.txt` (one line: `"arci-2026a": "<43 characters>",`). The public key and its
-  SHA-256 are printed; note the hash.
+  `arci-2026a.public.txt` (one line: `"arci-2026a": "<43 characters>",`). The public key, its
+  SHA-256 and the line `verify: --public-key=<43 characters>`, ready to paste for `verify`, are
+  printed; note the hash.
 - An existing file is never overwritten.
 
 **Back-up:** keep the encrypted private key on **two separate offline media** (e.g. two USB
@@ -728,7 +731,7 @@ uv run python tools/license-issuer/arcilogger_license_issuer.py verify example.l
 - `inspect`: shows the content without checking the signature (a request code's checksum is
   checked).
 - `verify`: checks the signature with `--public-key=B64` (43 characters; write it with `=`, since
-  a key can start with `-`), `--key PEM` (from the
+  a key can start with `-`, as `keygen` prints it), `--key PEM` (from the
   private key) or `--committed-keys` (`keys.py` of this checkout), and the revocation list of this
   checkout; `--server-id` checks the server; `--at YYYY-MM-DD` checks `valid_until` and maintenance
   for that day (is a version released that day covered). Exit 0 when valid, else 1 with the error

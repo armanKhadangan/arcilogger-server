@@ -85,7 +85,9 @@ def backfill_counts(engine: Engine, *, budget: timedelta = BACKFILL_BUDGET) -> B
             or 0
         )
     for index, (source, day) in enumerate(todo):
-        if report.files and time.monotonic() - started > budget.total_seconds():
+        # Used up when reached: a zero budget ends the run after the first file even when the
+        # clock has not moved since (Windows' monotonic() counts in 15.6 ms ticks).
+        if report.files and time.monotonic() - started >= budget.total_seconds():
             report.left = len(todo) - index
             break
         with engine.begin() as connection:

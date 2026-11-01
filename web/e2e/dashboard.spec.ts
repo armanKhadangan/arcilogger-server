@@ -222,7 +222,17 @@ test.describe('Panel — parse failures', () => {
     await raw.getByRole('button', { name: 'Kapat' }).click();
 
     await card.getByRole('button', { name: 'Aramada göster: fortigate.kv kalıbı' }).click();
-    await expect(page).toHaveURL(/\/search$/);
+    // The address holds today's range, never the query; once Arama has answered (this mock has no
+    // search), it has searched that range alone (not its default range besides).
+    await expect(page).toHaveURL(/\/search\?range=today$/);
+    await expect(page.getByRole('alert').filter({ hasText: 'Kayıt bulunamadı.' })).toBeVisible();
+    expect(api.callsTo('POST', '/search').map((call) => call.body)).toEqual([
+      {
+        q: 'source:fortigate error:fortigate.kv',
+        from: `${SAMPLE_TODAY}T00:00:00+03:00`,
+        to: `${SAMPLE_TODAY}T15:00:00+03:00`,
+      },
+    ]);
     expect(await page.evaluate(() => JSON.stringify(window.history.state))).not.toContain(
       'fortigate.kv',
     );
@@ -235,9 +245,13 @@ test.describe('Panel — parse failures', () => {
   });
 });
 
-/** Every card title on screen fits its box: it wraps instead of being cut ("Log..."). */
+/**
+ * Every card title on screen fits its box: it wraps instead of being cut ("Log..."). Measured in
+ * the shipped fonts: they load with `font-display: swap`, and the fallback has other widths.
+ */
 async function titlesFit(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
+    await document.fonts.ready;
     const titles = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="card-"] h3'));
     return titles.flatMap((title) => {
       const parts = [title, ...Array.from(title.querySelectorAll<HTMLElement>('*'))];

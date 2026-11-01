@@ -7,6 +7,7 @@ import threading
 import time
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 from arcilogger_core.layout import Layout
 from arcilogger_db.models import Base, IngestOffset, JobRun
 from arcilogger_db.searchcounts import CountKey, count_key, rebuild_stream, upsert_counts
+from arcilogger_worker import search_jobs
 from arcilogger_worker.search_jobs import BACKFILL_BUDGET, backfill_counts
 from arcilogger_worker.service import (
     SEARCH_COUNTS_EVERY,
@@ -175,6 +177,20 @@ def test_the_budget_ends_a_run_after_the_file_in_hand(db_engine: Engine) -> None
     assert set(marks(db_engine).values()) == {None}
     assert sum(stored(db_engine).values()) == 15
     assert BACKFILL_BUDGET.total_seconds() == 60
+
+
+def test_a_used_up_budget_ends_the_run_on_a_clock_that_has_not_moved(
+    db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows' ``monotonic()`` moves in 15.6 ms ticks: a first file done within one tick reads
+    no time used. A zero budget is used up all the same, so the run ends after that file."""
+    with db_engine.begin() as connection:
+        for day in (NEWER, TODAY):
+            load_file(connection, "fortigate", day, 5, finished=True, counts_from=6)
+    monkeypatch.setattr(search_jobs, "time", SimpleNamespace(monotonic=lambda: 1000.0))
+    report = backfill_counts(db_engine, budget=timedelta(0))
+    assert [item["day"] for item in report.files] == [TODAY.isoformat()]
+    assert (report.left, report.more) == (1, True)
 
 
 def test_a_file_counted_meanwhile_is_not_counted_twice(db_engine: Engine) -> None:

@@ -211,6 +211,7 @@ test.describe('Kanıt Paketleri', () => {
     // The new package opens and refreshes itself until it is ready.
     const sheet = page.getByRole('dialog', { name: /Paket #6|KP-E2E-0006/ });
     await expect(sheet.getByText(/Sırada|Hazırlanıyor/).first()).toBeVisible();
+    // Ready on the third read of the package: two of the drawer's 3 s polls (EVIDENCE_POLL_MS).
     await expect(sheet.getByText('Hazır', { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(sheet.getByRole('heading', { name: 'KP-E2E-0006' })).toBeVisible();
     // The one-time password is nowhere in browser storage.

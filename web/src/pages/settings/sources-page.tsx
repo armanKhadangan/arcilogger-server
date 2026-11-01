@@ -11,6 +11,7 @@ import { RequestProgress } from '@/components/admin/request-progress';
 import { SettingsCard, SettingsFrame } from '@/components/admin/settings-frame';
 import { useSectionFlow } from '@/components/admin/use-section-flow';
 import { PageSkeleton } from '@/components/layout/route-frames';
+import { SupportedTopologies } from '@/components/network/supported-topologies';
 import { Alert } from '@/components/ui/alert';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -221,6 +222,11 @@ function SourceDialog({
               </Select>
             </Field>
           </div>
+          {values.type === 'fortigate' ? (
+            <Alert tone="info" assertive={false} data-testid="source-fortigate-hint">
+              {t('network.sources.fortigateHint')}
+            </Alert>
+          ) : null}
           <TextField
             id={`${id}-address`}
             label={t('settings.sources.columns.address')}
@@ -474,6 +480,7 @@ export function SourcesPage() {
             <Alert tone="danger">{errorMessage(change.failure)}</Alert>
           ) : null}
           {removal.failure ? <Alert tone="danger">{errorMessage(removal.failure)}</Alert> : null}
+          <SupportedTopologies />
           <SettingsCard
             title={t('settings.sources.tableTitle')}
             description={t('settings.sources.tableDescription', {
@@ -616,6 +623,11 @@ export function SourcesPage() {
                 </table>
               </div>
             )}
+            {sources.some((source) => source.type === 'fortigate') ? (
+              <p className="text-13 text-muted" data-testid="sources-fortigate-hint">
+                {t('network.sources.fortigateHint')}
+              </p>
+            ) : null}
             {!canEdit ? <p className="text-13 text-muted">{t('admin.section.readOnly')}</p> : null}
             {last === 'change' && change.requestId ? (
               <RequestProgress
