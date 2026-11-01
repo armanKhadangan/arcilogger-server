@@ -31,6 +31,7 @@ from sqlalchemy import delete, event, select, update
 from sqlalchemy.orm import Session
 
 from arcilogger_core.timeutil import to_site
+from arcilogger_db import clocksamples
 from arcilogger_db.egress import validate_egresses
 from arcilogger_db.models import (
     Department,
@@ -2613,6 +2614,70 @@ def test_the_clock_is_measured_on_the_rows_nearest_the_moment(
     build(db_session, DAY, DAY)
     wan_exit(db_session)
     assert offsets(exact_request(db_session)) == {"fortigate": -480}
+
+
+#: The walk of step 4 (#61, #73): the FortiGate logged on time, then its clock was set 3 hours
+#: back half an hour before T; the PC's real session, received at T, is stamped T - 3 h.
+JUMP = -timedelta(hours=3)
+JUMPED = AT - timedelta(minutes=30)
+
+
+@pytest.fixture
+def clock_jumped(db_session: Session, evidence: Evidence) -> None:
+    """The PC's morning ACK on time and its lease built from it; heartbeat lines every two
+    minutes, on time from T - 2 h to the jump, 3 hours behind from it to T + 1 h; the session of
+    T (received at T); their clock samples as ingest writes them."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.traffic(AT + JUMP, PC, 51001, transip=WAN)
+    received = AT - timedelta(hours=2)
+    while received < AT + timedelta(hours=1):
+        offset = timedelta(milliseconds=-300) if received < JUMPED else JUMP
+        evidence.heartbeat(received + offset, source="fortigate", received=received)
+        received += timedelta(minutes=2)
+    as_loaded(db_session, timedelta(milliseconds=-300))  # the typed rows on time ...
+    for model in (FgTraffic, Message):  # ... but the session of T, sent after the jump
+        db_session.execute(
+            update(model)
+            .where(model.source == "fortigate", model.time == AT + JUMP)
+            .values(time_received=AT)
+        )
+    clocksamples.rebuild(
+        db_session.connection(), "fortigate", tr(DAY, 0), tr(DAY + timedelta(days=1), 0)
+    )
+    db_session.commit()
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+
+
+def test_a_clock_set_hours_back_is_named_at_the_real_moment(
+    db_session: Session, clock_jumped: None
+) -> None:
+    """The rows with a device time around T were sent on time before the jump (median 0); the
+    rows received around T are 3 hours behind. The exact request at T finds nothing in its
+    device-time window and names the clock; the internal lookup's chain, from the ACK of the
+    morning, is ``low`` with it. Measured by device time alone, both said nothing (#61 step 4,
+    "Fail 2")."""
+    outcome = exact_request(db_session)
+    assert (outcome.mode, outcome.matches) == ("none", ())
+    assert offsets(outcome) == {"fortigate": -10800}
+    assert outcome_note(outcome, CLOCK)["limit"] == 120
+    inside = internal(db_session, PC, AT)
+    assert inside.attribution is not None
+    assert inside.attribution.confidence == "low"
+    assert offsets(inside) == {"fortigate": -10800}
+
+
+def test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before(
+    db_session: Session, clock_jumped: None
+) -> None:
+    """At the session's device time (T - 3 h) the rows with a device time around it are the
+    rows sent after the jump, 3 hours behind, as today; the rows received around it are older
+    and fewer (the site starts at T - 2 h): the session is found and the clock named."""
+    outcome = exact_request(db_session, at=AT + JUMP)
+    assert outcome.mode == "exact"
+    (match,) = outcome.matches
+    assert match.traffic.srcip == PC
+    assert offsets(outcome) == {"fortigate": -10800}
 
 
 def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
