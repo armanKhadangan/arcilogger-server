@@ -433,8 +433,9 @@ doğrulayın" / "Verify on site" ([UYUM-DURUMU.md](UYUM-DURUMU.md) §6):
   verify the target's WORM setting and retention on site (see also the list below).
 - **Windows rights** (Sistem, cards 3 and 10): the pages read the status files and the Windows API
   with the rights the installer gives `NT SERVICE\ArciApi`. After the first night, check on the
-  Sistem page that processor, memory and uptime show (not "bu platformda okunamıyor") and that no
-  task's evidence is missing; broken rights are repaired with `Set-ArciVaultAcl.ps1`.
+  Sistem page that processor, memory and uptime show (not "bu platformda okunamıyor") and that none
+  of the daily tasks shows "Kanıt yok" (the weekly and monthly verification tasks do until the first
+  Sunday and the first day of the month); broken rights are repaired with `Set-ArciVaultAcl.ps1`.
 - **Kamu SM root fingerprints** (wizard, Kamu SM steps): stamps of the test server have no legal
   validity; before switching to production compare the root fingerprints with the values Kamu SM
   publishes ([kamusm.md](kamusm.md)).

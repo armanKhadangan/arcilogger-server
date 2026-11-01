@@ -612,9 +612,9 @@ evidence files and the database ARCILOGGER can already read.
 The Services, Scheduled tasks, Worker jobs and Clock blocks are read by a separate request. When it
 fails, the error (with its code and the **Tekrar dene** (Try again) button) shows in the Clock block
 only, and the other three say "The status could not be read; the error is under Clock."; values
-shown before stay in place. While the first answer is loading these blocks show a placeholder; with
-no answer and no failure (beside the summary's blocks) they say "No status received yet.". The
-blocks are in this order:
+shown before stay in place. While the first answer is loading these blocks show a loading
+skeleton; with no answer and no failure (beside the summary's blocks) they say "No status received
+yet.". The blocks are in this order:
 
 ### 4.1 Resource use
 
@@ -820,5 +820,5 @@ again when devices or the server change):
 | Firewall filter logging | Card 7 sees only the records that arrive. Verify on the device that every policy using web and DNS filtering logs these events and sends them to ARCILOGGER; if the organisation produces no traffic at all on some days, set the expected days accordingly (section 2.7). | Card 7; [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2 (verify the commands on site) |
 | Credit format | The credit is read from the Zamane client's output with `[tsa] credit_regex`; the output format is not confirmed with Kamu SM (K4). Compare the value read with **Kontör sorgula** on the test server with the one Kamu SM shows. | Card 5; [kamusm.md](kamusm.md) sections 3 and 4 |
 | WORM (replica target) | ARCILOGGER makes and checks the copy, but cannot see whether the target is write-once (WORM). Verify the target device's WORM setting and retention on site. | Card 9; [INSTALL.md](INSTALL.md) section 10, "Replica" |
-| Windows rights | The pages read the status files with the read right the installer gives `NT SERVICE\ArciApi`; processor, memory and uptime are read from the Windows API with the same account. The Requests task's evidence cannot be read on purpose ("Not observable"). A `last.json` or `last-full.json` without the read right makes card 10 or card 3 **No data** ("This check could not be run now"). After the first night, check on the Sistem page that the values show (not "bu platformda okunamıyor") and that no task shows "No evidence"; if the rights are broken, run `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an elevated PowerShell. | Section 4; [BACKUP.md](BACKUP.md) section 7 |
+| Windows rights | The pages read the status files with the read right the installer gives `NT SERVICE\ArciApi`; processor, memory and uptime are read from the Windows API with the same account. The Requests task's evidence cannot be read on purpose ("Not observable"). A `last.json` or `last-full.json` without the read right makes card 10 or card 3 **No data** ("This check could not be run now"). After the first night, check on the Sistem page that the values show (not "bu platformda okunamıyor") and that none of the daily tasks shows "No evidence" (the weekly and monthly verification tasks show "No evidence" until the first Sunday and the first day of the month); if the rights are broken, run `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an elevated PowerShell. | Section 4; [BACKUP.md](BACKUP.md) section 7 |
 | Legal assessment | The choice of the cards, their thresholds and the report's texts are technical assumptions. Confirm with your legal counsel how you meet the 5651 obligations and how you use the report. | Sections 1 and 3 |

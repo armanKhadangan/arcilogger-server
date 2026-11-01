@@ -1648,8 +1648,9 @@ each entry. Every `## Deviations — <package>` section above is folded as §4.4
   kurulum sihirbazı, `/settings/setup`, its steps and states, no redirect, Q18) is a new part of
   that section, and the overview rows 9 and 12 name it. §12 and §13 keep their headings and add
   Uyum Durumu and Sistem beside the console commands, and version and maintenance on Sistem. The
-  docs tests cut these sections by number (`_section(…, "## 9.", "## 10.")`) and other documents
-  link them by number ("KURULUM.md bölüm 9" in ILK-ADIMLAR and SECURITY). Nothing to fold.
+  docs tests cut these sections by number (`_section(text, "## 13.", "## 14.")` in
+  `test_install_guides_describe_the_licence`) and other documents link them by number
+  ("KURULUM.md bölüm 9" in ILK-ADIMLAR and SECURITY). Nothing to fold.
 - **The wizard's e-mail step is written as W4-C's deviation, not as 2.8.4.** AYARLAR/SETTINGS (the
   wizard entry), ASSUMPTIONS Q18 and UYUM-DURUMU/COMPLIANCE-STATUS §5 say the step is done only
   while sending is switched on (`[smtp] enabled`) and a server and a sender are set; switched off,
@@ -1660,7 +1661,7 @@ each entry. Every `## Deviations — <package>` section above is folded as §4.4
   one of D1-D15, by package; the full list with texts points to MVP-CONTRACTS §19.8 and
   ASSUMPTIONS). The open questions with their defaults are under "Open points (owner decision)",
   as in ADR-0016. Its status keeps the date of this contract and of the owner decisions,
-  "accepted (2026-10-28)" (question 3 on #62).
+  "accepted (2026-10-28)" (the ADR-date question on #62).
 - **DENETCI-KILAVUZU's Uyum Durumu section is §11** ("## 11. Uyum Durumu Raporu'nu okumak"), after
   WP-F2's reading table (§10, Wave 3), with the paragraph "Reading the Uyum Durumu Raporu (section
   11)" in the file's English part (one file, no pair). It says technical checks, not a legal
@@ -1680,7 +1681,7 @@ each entry. Every `## Deviations — <package>` section above is folded as §4.4
   permissions, §19.8 the deviations. Besides §19 and the §6 `compliance.read` row, the router
   map names the three Wave 4 routers, the alerts section names `check_filter` (`R20-filter:none`,
   high), and §15's stale route count is corrected: "5651 Temel: 103 routes" now reads 129 routes
-  at Wave 4, as `api/tests/test_license_routes.py` counts them (question 1 on #62).
+  at Wave 4, as `api/tests/test_license_routes.py` counts them (the route-count question on #62).
 - **UYUM-DURUMU/COMPLIANCE-STATUS §1: the auditor sees the count of open alerts, not the alerts.**
   The sentence written by W4-E said the auditor sees each alert's rule, severity and opening time
   on the card; the merged view shows only "Açık uyarı: {n}" / "Open alerts: {n}" (2.8.1), and the

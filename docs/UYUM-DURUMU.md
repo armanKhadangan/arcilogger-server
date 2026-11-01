@@ -599,8 +599,8 @@ dosyalarından, kanıt dosyalarından ve veritabanından çıkarılır.
 Hizmetler, Zamanlanmış görevler, Worker işleri ve Saat blokları ayrı bir istekle okunur. Bu istek
 başarısız olursa hata (kodu ve **Tekrar dene** düğmesiyle) yalnızca Saat bloğunda görünür, diğer üç
 blok "Durum alınamadı; hata Saat bölümünde." yazar; daha önce gösterilen değerler yerinde kalır.
-İlk yanıt beklenirken bu bloklar yer tutucu gösterir; yanıt da hata da yoksa (özet gösterilirken)
-"Durum henüz alınmadı." yazar. Bloklar bu sıradadır:
+İlk yanıt beklenirken bu bloklar bir iskelet (yükleniyor) gösterir; yanıt da hata da yoksa (özet
+gösterilirken) "Durum henüz alınmadı." yazar. Bloklar bu sıradadır:
 
 ### 4.1 Kaynak kullanımı
 
@@ -801,5 +801,5 @@ yeniden) yerinde doğrulanması gereken konular:
 | Güvenlik duvarının filtre kaydı | Kart 7 yalnızca gelen kayıtları görür. Web ve DNS filtresi kullanan her politikanın bu olayları kaydettiğini ve ARCILOGGER'a gönderdiğini cihazda doğrulayın; kurum belirli günlerde hiç trafik üretmiyorsa beklenen günleri buna göre ayarlayın (bölüm 2.7). | Kart 7; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2 (komutları sahada doğrulayın) |
 | Kontör biçimi | Kontör, Zamane istemcisinin çıktısından `[tsa] credit_regex` ile okunur; çıktının biçimi Kamu SM'de doğrulanmadı (K4). Test sunucusunda **Kontör sorgula** ile okunan değeri Kamu SM'nin gösterdiğiyle karşılaştırın. | Kart 5; [kamusm.md](kamusm.md) bölüm 3 ve 4 |
 | WORM (replika hedefi) | ARCILOGGER kopyayı alır ve denetler, ama hedefin değiştirilemez (WORM) olup olmadığını göremez. Hedef cihazın WORM ayarını ve saklama süresini yerinde doğrulayın. | Kart 9; [KURULUM.md](KURULUM.md) bölüm 10, "Replika" |
-| Windows hakları | Sayfalar durum dosyalarını kurulumun `NT SERVICE\ArciApi` hesabına verdiği okuma hakkıyla okur; işlemci, bellek ve çalışma süresi aynı hesapla Windows API'sinden okunur. Requests görevinin kanıtı bilerek okunamaz ("İzlenemiyor"). Okuma hakkı olmayan bir `last.json` ya da `last-full.json` kart 10'u ya da kart 3'ü **Bilgi yok** yapar ("Bu denetim şu anda yapılamadı"). İlk geceden sonra Sistem sayfasında değerlerin göründüğünü ("bu platformda okunamıyor" yazmadığını) ve hiçbir görevin "Kanıt yok" göstermediğini denetleyin; haklar bozulduysa yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` çalıştırın. | Bölüm 4; [YEDEKLEME.md](YEDEKLEME.md) bölüm 7 |
+| Windows hakları | Sayfalar durum dosyalarını kurulumun `NT SERVICE\ArciApi` hesabına verdiği okuma hakkıyla okur; işlemci, bellek ve çalışma süresi aynı hesapla Windows API'sinden okunur. Requests görevinin kanıtı bilerek okunamaz ("İzlenemiyor"). Okuma hakkı olmayan bir `last.json` ya da `last-full.json` kart 10'u ya da kart 3'ü **Bilgi yok** yapar ("Bu denetim şu anda yapılamadı"). İlk geceden sonra Sistem sayfasında değerlerin göründüğünü ("bu platformda okunamıyor" yazmadığını) ve her gün çalışan görevlerin hiçbirinin "Kanıt yok" göstermediğini denetleyin (haftalık ve aylık doğrulama görevleri ilk pazar ve ayın ilk gününe kadar "Kanıt yok" gösterir); haklar bozulduysa yönetici PowerShell'inde `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` çalıştırın. | Bölüm 4; [YEDEKLEME.md](YEDEKLEME.md) bölüm 7 |
 | Hukuki değerlendirme | Kartların seçimi, eşikleri ve raporun metinleri teknik varsayımlardır. 5651 yükümlülüklerini nasıl karşıladığınızı ve raporu nasıl kullanacağınızı hukuk müşavirinizle teyit edin. | Bölüm 1 ve 3 |

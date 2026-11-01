@@ -237,8 +237,8 @@ decision.
 - **API:** six endpoints (`GET /compliance`, `GET /compliance/report.pdf`,
   `POST /compliance/config-backup`, `GET /system`, `GET /system/disk`, `GET /system/health`), one
   error code (`config_backup_unreadable`, 409), two audit actions (`compliance.report_export`,
-  `compliance.config_backup_confirm`). `GET /system` and `GET /system/health` answer within 1 s on
-  the performance data; `GET /system` caches the database sizes for 5 minutes.
+  `compliance.config_backup_confirm`). `GET /compliance`, `GET /system` and `GET /system/health`
+  answer within 1 s on the performance data; `GET /system` caches the database sizes for 5 minutes.
 - **No new permission, table, migration or third-party dependency**; the auditor gains
   `compliance.read`. `GET /settings` shows three more settings in "Uyarılar ve e-posta"; the
   worker has one more job (`system.sample`) and the system alert job one more check
