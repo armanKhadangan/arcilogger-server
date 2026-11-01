@@ -254,11 +254,23 @@ describe('Uyum Durumu page', () => {
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Onaylıyorum' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Yapılandırma yedeğini aldım' });
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi. (config_backup_unreadable)',
-    );
+    const refused =
+      'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi. (config_backup_unreadable)';
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(refused);
     // Nothing was recorded: the cards are not read again.
     expect(compliance(calls)).toHaveLength(1);
+    // The page passes the refusal as `confirmError`: it is shown again when the dialog reopens
+    // (the dialog's own copy of the rejection is cleared on opening).
+    await user.click(within(dialog).getByRole('button', { name: 'İptal' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    await user.click(screen.getByRole('button', { name: 'Yapılandırma yedeğini aldım' }));
+    expect(
+      within(screen.getByRole('dialog', { name: 'Yapılandırma yedeğini aldım' })).getByRole(
+        'alert',
+      ),
+    ).toHaveTextContent(refused);
   });
 
   it('"Yenile" asks again as the user, not in the background', async () => {
