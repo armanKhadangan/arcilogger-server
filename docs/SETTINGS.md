@@ -36,6 +36,13 @@ No page changes `data_dir`, `secrets_dir`, `[database]`, `[api]`, `[ingest]`, `[
 `[seal]`, the database password or the usage pseudonym key. They belong to the installer and the
 administrator.
 
+**ARP times** (Application settings, 5651 lookup and lease timeline): "Ignore ARP after a release"
+(`arp.ignore_after_release_seconds`, 300 seconds) cannot be longer than the "ARP log interval"
+(`arp.interval_seconds`); the browser and the console (`arcilogger-db settings set`) both refuse a
+change that breaks this. When you lower the interval below 300 seconds, change both settings in
+one save. A time written outside this rule (by hand in SQL) is read by the lease job as the
+default (300 seconds, at most the interval), with a warning in the worker log.
+
 **Switching a source off** (`enabled = false`): the firewall removes the sender's 514 opening;
 the silent-source alert (R15) and the sealer's gap check no longer expect it. A message that
 still arrives from it is **recorded** (raw logs are never dropped). A switched-off source still

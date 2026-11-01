@@ -36,6 +36,13 @@ Hiçbir sayfa şunları değiştirmez: `data_dir`, `secrets_dir`, `[database]`, 
 `[worker]`, `[seal]`, veritabanı parolası, kullanım takma ad anahtarı. Bunlar kurulumun ve
 yöneticinin işidir.
 
+**ARP süreleri** (Uygulama ayarları, 5651 sorgu ve kira zaman çizelgesi): "Bırakmadan sonra ARP'yi
+yok say" (`arp.ignore_after_release_seconds`, 300 saniye) "ARP kaydı aralığı"ndan
+(`arp.interval_seconds`) uzun olamaz; tarayıcı da konsol da (`arcilogger-db settings set`) bunu
+bozan değişikliği reddeder. Aralığı 300 saniyenin altına indirirken iki ayarı aynı kayıtta
+değiştirin. Bu kuralın dışında (elle SQL ile) yazılmış bir süreyi kira işi varsayılan olarak
+(300 saniye, en çok aralık kadar) okur ve worker günlüğüne bir uyarı yazar.
+
 **Bir kaynağı kapatmak** (`enabled = false`): güvenlik duvarı o göndericinin 514 iznini kaldırır,
 sessiz kaynak uyarısı (R15) ve mühürlemenin boşluk denetimi onu artık beklemez. Kapalı kaynaktan
 yine de gelen bir ileti **kaydedilir** (ham kayıt hiçbir zaman atılmaz). Kapalı kaynak lisansın
