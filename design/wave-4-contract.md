@@ -1577,6 +1577,40 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   "ölçülüyor" for a null CPU and "bu platformda okunamıyor" for null host values): on Windows and
   Linux a null CPU is the first reading ("ölçülüyor"); on any other platform nothing is read.
   Test: `system-model.test.ts` (`cpuPending`). Nothing to fold.
+- **The views' interface additions agreed with W4-F on #24 (2.8.1-2.8.3), all optional and
+  additive; the contract's prop names stay.**
+  - `ComplianceView({ …, exportError?: ApiError | null, confirmError?: ApiError | null })`:
+    `exportError` shows beside "Uyum Durumu Raporu (PDF)"; `confirmError` (the 409
+    `config_backup_unreadable` of 2.7) shows in the confirm dialog of "Yapılandırma yedeğini
+    aldım", also when it arrives while the dialog is open. The promise-returning
+    `onConfirmBackup` stays; the dialog shows `confirmError`, else the error the promise rejected
+    with.
+  - `SystemView({ …, healthError?: ApiError | null })`: `error` stays the `GET /system` error, the
+    page's; a `healthError` shows in the Saat block only, with "Tekrar dene". A health block
+    (Hizmetler, Zamanlanmış görevler, Worker işleri, Saat) without data never vanishes: with a
+    `healthError` the Saat block shows it and the other three say "Durum alınamadı; hata Saat
+    bölümünde." / "The status could not be read; the error is under Clock."; while loading, a
+    skeleton; beside the summary's blocks with no answer and no failure, "Durum henüz alınmadı." /
+    "No status received yet.". Data already shown stays under a later `healthError`.
+  - `DiskCard({ disk, to? })`: `to?: string | null`; left out, the Panel's link rule (`/system`
+    with `system.read`); a string is used as given; `null` gives no link. `data-testid="card-disk"`.
+  - The page `h1` is rendered in the loading and error states too, as Kaynaklar does.
+  - Both new error places show the server's text in the interface language with its code,
+    "… (config_backup_unreadable)".
+  Tests: `compliance-view.test.tsx` "shows the export’s error with its code beside the PDF
+  button", "shows the caller’s confirmError in the dialog, also when it arrives while open",
+  "shows a confirmError passed before the dialog opens once it is opened", "shows a loading state
+  before the first answer, and the error alone when it failed"; `system-view.test.tsx` "shows a
+  failed health request in the Saat block and keeps every health block", "shows the health error
+  beside the page error when nothing has arrived", "shows a failed health request while the first
+  summary is still on its way", "says so in the health blocks when the health has not answered and
+  nothing failed", "shows the error alone when nothing has arrived"; `disk-card.test.tsx` "links
+  where the caller says, or nowhere when it passes null". Fold into 2.8.1-2.8.3.
+- **`time.applied_peers` empty and null read differently (2.8.2; manager's note on #24).** `""`
+  (ApplySystem applied an empty peer list): "Uygulanan zaman sunucusu yok" / "No time server
+  applied"; `null` (no ApplySystem report yet): "ApplySystem henüz rapor vermedi" / "No ApplySystem
+  report yet". Test: `system-view.test.tsx` "tells an empty applied peer list from no ApplySystem
+  report". Fold into 2.8.2.
 
 ---
 
