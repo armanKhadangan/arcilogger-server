@@ -6804,7 +6804,10 @@ hours away from their arrival, so neither sample held them. The offset is now me
   offset at the requested moment" paragraph, CORRELATION §2 and §7 (done), and the two test
   plan entries "source clock" (alerts 4394-4400, lookup 4555-4565).
 - **Ingest throughput** (3.8 gates; docs/INGEST.md "Measured throughput"): the loader's extra
-  work is one grouped upsert per batch. THROUGHPUT_PLACEHOLDER Nothing to fold.
+  work is one grouped upsert per batch. `bench_throughput.py --repeat 3` against `wave-3`, both
+  mixes, ABBA ×2 (12 runs per tree and worker count): default +2.4 % in-process and +0.4 % with 2
+  workers, FortiGate-only −0.9 % and −3.6 %, within the 5 % (docs/INGEST.md "Measured
+  throughput"). Nothing to fold.
 
 ---
 

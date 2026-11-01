@@ -30,6 +30,10 @@
   Gerçekçi yük üreteci günlerinde (varsayılan seçenekler ve `--dhcp-server fortigate --srcmac`;
   her gün bir kez yazılıp iki sürüme de yüklendi, sırayla 16'şar çalıştırma) fark tek süreçte
   −%3,1 / −%2,4, 2 worker ile −%2,8 / −%3,2'dir: %5 sınırının içinde, ama sıfır değil.
+- Kaynak saati örnekleri (`source_clock_samples`, #73) satırlarla aynı işlemde yazılır: aynı
+  satırlar iki sürüme de yüklendi (`bench_throughput.py --repeat 3`, sırayla 12'şer çalıştırma);
+  fark varsayılan karışımda tek süreçte +%2,4, 2 worker ile +%0,4, yalnızca FortiGate'ten gelen
+  karışımda −%0,9 / −%3,6'dır: %5 sınırının içinde (aşağıda "Measured throughput").
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -481,6 +485,36 @@ than in the first, Wave 2 by 12 %, Wave 3 by 7 %). As on the Wave 2 day, one 8-r
 tell 5 % apart on this VM; the 16-run medians are the measurement. The lowest runs with 2 workers on
 the default day (5,503 and 6,234 lines/s, one per tree) fell into that loaded time (machine CPU
 91–93 %). Re-measure on site with the site's own day (below).
+
+**Wave 3: the clock samples (2026-11-01, issue #73).** The gate of issue #73: the ingest
+throughput with `source_clock_samples` (the `counts` step's second upsert, above) at most 5 %
+slower than `wave-3` without it. Method of gates 1–2: each mix written **once**
+(`bench_throughput.py --write-spool DIR --lines 200000 --mix default`, and `--mix
+fortigate-only`), loaded by both trees with `--spool DIR --batch-rows 5000 --workers 0 2 --repeat
+3`; the `wave-3` tree (`1cd3588`) in a worktree with `PYTHONPATH` set to its `core/src`,
+`db/src` and `ingest/src`, each tree migrating its own throwaway database. Order: `wave-3`,
+branch, branch, `wave-3`, twice per mix (ABBA ×2, 12 runs per tree and worker count), the
+default mix first, nothing else running (load average 2.1–2.7, the benchmark itself; 4-vCPU Xeon
+2.10 GHz, 16 GB, PostgreSQL 16 without TimescaleDB). In both mixes every line has a device time
+of its own, fixed per sample line, while the receive times advance 7 ms a line, so the offset
+changes every second: tens of keys per batch and source, more than a source on time writes (one
+a minute). The first two branch invocations of the default mix ran the previous rounding of
+`offset_of` (half a second up instead of away from zero; the same cost). Min–max (median)
+lines/s, the difference of the medians to `wave-3`:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Default mix: `wave-3` | 4,184–5,388 (4,989) | 7,687–9,134 (8,404) |
+| Default mix: **the clock samples** | **4,690–5,345 (5,110), +2.4 %** | **7,339–8,746 (8,438), +0.4 %** |
+| FortiGate-only spool: `wave-3` | 4,656–4,911 (4,754) | 7,843–8,660 (8,389) |
+| FortiGate-only spool: **the clock samples** | **4,559–4,777 (4,712), −0.9 %** | **7,221–8,604 (8,088), −3.6 %** |
+
+The gate holds. Ingest process CPU, median: 36.3 / 35.7 s (default) and 38.6 / 39.1 s
+(FortiGate-only, +1.3 %) in-process; with 2 workers, where the service process does little more
+than load, 12.6 / 12.9 s and 12.5 / 13.2 s (+5.6 % of that process). The per-campaign medians
+(one ABBA round each, 6 runs per tree): default +5.1 % / +1.6 % in-process and −1.1 % / −0.1 %
+with 2 workers; FortiGate-only −0.4 % / −1.5 % in-process and −1.6 % / −3.0 % with 2 workers. As
+before, this VM cannot tell a few per cent apart; the 12-run medians are the measurement.
 
 Default `[ingest] workers = 2`: about 1.7× the in-process speed; a third worker adds 10–13 %
 on 4 vCPU but competes with PostgreSQL, the API and the collector on the same cores. **Spec 14
