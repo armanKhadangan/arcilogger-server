@@ -46,11 +46,12 @@ Fiyatlar üründe yer almaz.
 **Kullanım modüllerinin veri ön koşulu:** Kullanım analizi ve Zamanlanmış kullanım raporları
 yalnızca FortiGate kayıtlarından hesaplanır: trafik kayıtları (uzun oturumlar için ara kayıtlarla),
 web filtresi, DNS filtresi, uygulama kontrolü ve SSL denetimi kayıtları. Yalnızca özel kaynak
-adreslerinden (RFC 1918 blokları ve IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar
-(ör. 100.64.0.0/10 ya da içeride kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez.
-Trafik cihaza ve kişiye MikroTik DHCP sunucusunun kira kayıtlarıyla (ve `ARP-LOG` ile) bağlanır;
-kira kaydı olmayan trafik IP adresine göre sayılır. Başka üreticilerin kayıtları saklanır ve
-mühürlenir ama analiz edilmez. Lisans almadan önce ağınızın bu yapıya uyduğunu
+adreslerinden (RFC 1918 blokları ve IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar (ör.
+100.64.0.0/10 ya da içeride kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez.
+Trafik cihaza ve kişiye DHCP sunucusunun (MikroTik ya da FortiGate) kira kayıtlarıyla (ve `ARP-LOG`
+ile) bağlanır; kira kaydı olmayan trafik IP adresine göre sayılır. FortiGate oturum kayıtlarının
+srcmac alanı (aygıt tanıma) kullanım analizinde kullanılmaz. Başka üreticilerin kayıtları saklanır
+ve mühürlenir ama analiz edilmez. Lisans almadan önce ağınızın bu yapıya uyduğunu
 [KURULUM.md](KURULUM.md) bölüm 0.1 ile denetleyin; deneme süresi (bölüm 3) sonucu kendi ağınızda
 görmek için de kullanılabilir.
 
