@@ -54,6 +54,7 @@ import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from datetime import time as time_of_day
 from ipaddress import IPv4Network
 from typing import Any
 
@@ -484,8 +485,9 @@ PUBLIC = "198.51.100.20"
 LATER_LINE = "198.51.100.30"
 #: Another shared NAT address, on ``wan3``, a session every 10 s over the whole traffic site, with
 #: a ``trandisp`` value only the ``_carried`` guard lists in ``nat.snat_trandisp``: the D15
-#: evidence beside :data:`WAN` that makes its check pass "seen, but not alone".
-BESIDE = "100.64.13.9"
+#: evidence beside :data:`WAN` that makes its check pass "seen, but not alone". Outside every
+#: network another guard claims (:data:`EXCLUDED`).
+BESIDE = "100.64.14.9"
 BESIDE_TRANDISP = "perfnat"
 #: The site's FortiGate and a second one (an HA pair's other member; the clock guard measures
 #: two sources), and the core router.
@@ -527,7 +529,8 @@ TRAFFIC_SITE = (
     "+ g * interval '8.64 seconds' AS t) AS x",
     # The D15 evidence beside the site's NAT address for the ``_carried`` guard: a session every
     # 10 s through BESIDE, another shared NAT address, on wan3, over the whole site, with a
-    # trandisp only that guard lists (no other guard's lookup counts these rows).
+    # trandisp only that guard lists: no other guard's search or D15 check takes these rows (a
+    # lookup that searches the unclaimed addresses names them in its nat_unknown_trandisp note).
     "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
     "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, srcmac, dstip, dstport, "
     "dstintf, transip, transport, trandisp, duration, is_interim) "
@@ -1466,6 +1469,31 @@ CARRIED_EXITS: dict[str, dict[str, Any]] = {
 CARRIED_ORDER = "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time"
 
 
+def _later_chunk_rows(
+    site: Engine,
+    first: datetime,
+    last: datetime,
+    start_bound: datetime,
+    condition: str,
+    address: str,
+    port: int | None,
+) -> int:
+    """On TimescaleDB, the rows of ``condition`` in ``[first, last]`` from the first daily chunk
+    boundary (UTC midnight) after ``first`` on: those of the chunks after the first one. None on
+    plain PostgreSQL, whose partitions are months."""
+    with site.connect() as connection:
+        hypertable = connection.scalar(
+            text("SELECT count(*) FROM pg_extension WHERE extname = 'timescaledb'")
+        )
+    midnight = datetime.combine(
+        first.astimezone(UTC).date() + timedelta(days=1), time_of_day.min, UTC
+    )
+    if not hypertable or midnight > last:
+        return 0
+    rows, _kept = _rows_of(site, midnight, last, start_bound, condition, address=address, port=port)
+    return rows
+
+
 @pytest.mark.perf
 @pytest.mark.parametrize("case", sorted(CARRIED))
 def test_the_d15_carried_check_is_fast(
@@ -1579,7 +1607,13 @@ def test_the_d15_carried_check_is_fast(
         # nothing reads and filters out every one of them, a step that answers stops early.
         _scans, removed = _plan_reads(plans[index])
         if found:
-            assert removed <= max(rows // 10, 100), (case, index, removed, rows)
+            # Over TimescaleDB's daily chunks the ordered scans of the step's chunks are merged:
+            # each chunk after the one that answers is read to its first row that would answer,
+            # or to its end (as the overlap probe's tail, see ``_Probe.seen_overlap``).
+            later = _later_chunk_rows(
+                traffic_site, first, last, start_bound, own, address, step_port
+            )
+            assert removed <= max((rows - later) // 10, 100) + later, (case, index, removed, rows)
         else:
             assert removed == rows, (case, index, removed, rows)
     assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
