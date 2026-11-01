@@ -2515,3 +2515,16 @@ document (ADR-0016, CORRELATION, ASSUMPTIONS, the documents of contract 2.15) is
   has a bound of its own, 1 s (`OVERLAP_SECONDS` in `worker/tests/test_lookup_performance.py`;
   the manager's answer (a) to Q-C3-1 on #47; an index the probe can answer from is a follow-up
   in #40).
+- **e2 (WP-E, second part):** the web shows a match of a lookup without a public IP as the report
+  prints it (d-27): "çıkış belirlenmedi (talepte genel IP yok) / exit not determined (no public IP
+  in the request) · {dstintf}", and "-" only when a public IP was requested and no exit claims
+  the NAT address; a `superseded` lease reads "sonraki bir DHCP atamasıyla kapandı" / "closed by
+  a later DHCP assignment" (d-26); a srcmac chain that carries a lease lists the lease step's
+  notes (e.g. `lease_renewal_not_seen`) on its srcmac step, so every `low` reason is shown; the
+  card's excluded line has an English singular and plural; after a save the server reports as
+  changing something, the settings group takes the next answer of the server whatever its drafts
+  hold, so a later reset or another administrator's change is never dropped. The exit rules
+  refuse an IPv6 address with a `%zone` or a prefix that is no number with
+  `setting_ipv6_not_supported`, and an address with two `::` with `setting_egress_address`; the
+  web mirror decides IPv6 on the part before the first `/` (`db/tests/test_egress.py`,
+  `web/src/pages/settings/egress-model.test.ts`).
