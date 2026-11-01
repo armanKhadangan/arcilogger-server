@@ -23,7 +23,7 @@ değiştirilebilir", bölüm 5). Sayfaların kullandığı API uçları bölüm 
 | Sayfa (adres) | Tarayıcıdan değişen | Bilerek konsolda kalan |
 |---|---|---|
 | **Genel** (`/settings/general`) | kuruluş adı (`site_name`), yerel ve yedek saat kaynağı (`[clock] ntp_server`, `[clock] fallback_server`), saat sapması uyarı eşiği (`[clock] alert_offset_ms`); son ölçülen sapma gösterilir, yeni saat sunucusu kaydetmeden önce denenir | `[clock] ntp_port` |
-| **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, arama ve canlı akış, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
+| **Uygulama ayarları** (`/settings/application`) | veritabanındaki ayarlar, gruplarıyla (uyarılar ve e-posta, 5651 sorgu ve kira zaman çizelgesi, arama ve canlı akış, kullanım analizi ile mesai saatleri ve tatiller, kullanım raporları, kanıt paketleri, oturum, parola ve gizlilik, veritabanı); 5651 sorgu grubunda **İnternet çıkışları (NAT)** düzenleyicisi, altında "Kayıtlarda görülen NAT adresleri" paneli ve **Kiraları yeniden oluştur** (en çok 31 gün) | dosya yolu veren `devices.oui_file`, `usage.psl_file` |
 | **Kamu SM** (`/settings/kamusm`) | sihirbaz: Java (yönetim hizmetinin sunucuda bulduklarından biri), Zamane istemcisi (yükleme), kök sertifikalar (ekleme) ve yasal kök parmak izleri (yalnızca kurulu kökler için), müşteri numarası ve parola (kaydederken kontör sorgusuyla denenir), **Damga testi (1 kontör harcar)**, **Üretime geç** (ve teste dönüş), kontör uyarı eşiği ve zaman aşımı; `[seal]` yalnızca okunur | deneme (`mock`) ya da başka bir sağlayıcı, serbest adres veya port, özet algoritması, bir kökü ya da parmak izini kaldırmak, serbest bir `java` yolu, bilinmeyen bir Zamane sürümünün onayı (`approve-jar`, bölüm 4) |
 | **Kaynaklar** (`/settings/sources`) | log kaynağı ekleme, düzenleme (ad değişmez), açma/kapama (`[[sources]] enabled`), silme (adı yazılarak); tabloda son kayıt ve güvenlik duvarı durumu | `[collector]` bölümünün tamamı (dinleme adresi, portlar, TLS, `unknown_senders`) |
 | **E-posta** (`/settings/email`) | `[smtp]` (açık/kapalı, sunucu, port, güvenlik, kullanıcı, gönderen, zaman aşımı), SMTP parolası, sunucu sertifikası için CA dosyası (yükleme ya da Windows sertifika deposuna dönüş), uyarı e-postası ayarları (`alerts.email_*`: alıcılar, en düşük önem, saatlik sınır …); kaydetmeden önce deneme e-postası; **Test e-postası gönder** (kayıtlı ayarlarla, saatte en çok 5) | — |
@@ -78,6 +78,83 @@ istek ayarları yeniden okur (canlı akış, açıldığında):
 | `live.buffer_lines` | 5000 | 500–50000 | sürdürme için sunucuda tutulan en yeni satırlar |
 | `live.max_minutes` | 60 | 5–480 | bir akışın süresi (gözetimsiz ekran); Sürdür ile yeniden başlar |
 | `live.backfill_lines` | 50 | 0–200 | akış açılırken hemen gösterilen son satırlar |
+
+**5651 sorgu ve kira zaman çizelgesi** grubu, bu sürümde ([adr/0016-fortigate-dhcp-and-internet-exits.md](adr/0016-fortigate-dhcp-and-internet-exits.md))
+internet çıkışlarını, srcmac'i ve FortiGate DHCP kayıtlarını yöneten ayarları da taşır. Değerler
+kurulum yerinde girilir ya da sahada doğrulanır, tahmin edilmez; ne zaman neyin girileceği
+[ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 6 ve [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4–2.6'dadır.
+Eski `nat.public_ips`, `nat.wan_transip` ve `lookup.port_hint` ayarları yoktur: yükseltme onları
+İnternet çıkışlarına çevirir ([KURULUM.md](KURULUM.md) bölüm 13).
+
+| Ayar | Varsayılan | Sınırlar | Anlamı |
+|---|---|---|---|
+| `nat.egresses` | `{}` | en çok 8 çıkış; çıkış adı küçük harf, rakam ve tire (en çok 32 karakter, ör. `hat-1`) | İnternet çıkışları (NAT): her hattın genel IP adresleri ve değişip değişemeyeceği, FortiGate'in o hattaki NAT adresi (transip), arayüzleri (dstintf), NAT türü ve port koruma; aşağıdaki düzenleyiciyle girilir. Boş: tek bir çift NAT çıkışı varsayılır |
+| `nat.snat_trandisp` | `["snat"]` | 1–8 değer, her biri küçük harfle başlar (en çok 16 karakter) | hiçbir çıkışa tanımlı olmayan adreslerde aday aramasına alınan FortiGate `trandisp` değerleri; kayıtlarda yalnızca `snat` görüldü, sahada doğrulayın (panel başka değerleri işaretler) |
+| `lookup.srcmac_interfaces` | `[]` | arayüz adı 1–35 karakter | srcmac kullanılan FortiGate arayüzleri (`srcintf`): kira kaydı olmayan bir oturumda MAC adresi, cihaz ve kişi bu alandan düşük güvenle, kısmi kanıt olarak gösterilir; kira kaydı hiç oluşturulmaz. Yalnızca iki istemciyle sahada denetlenmiş arayüzler ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5). Boş: srcmac kullanılmaz |
+| `lookup.srcmac_max_ips` | 1 | 1–16 | bir srcmac istenen anın ±1 saat içinde bundan çok farklı IPv4 adresiyle görülürse bir yönlendiricinin ya da anahtarın adresi sayılır ve kullanılmaz (IPv6 adresleri sayılmaz) |
+| `dhcp.fortigate_logids` | `{"0100026001": "assigned", "0100026002": "deassigned"}` | en çok 16 kayıt; logid 10 rakam, anlamı `assigned` ya da `deassigned` | kira kanıtına çevrilen FortiGate DHCP olayları; varsayılanlar FortiOS günlük başvuru belgesinden (Release logid'i belgedeki numaralama kuralından türetildi), sahada doğrulayın. Boş: FortiGate DHCP kayıtları kullanılmaz |
+| `dhcp.fortigate_dhcp_msgs` | `{"0100026001": ["Ack"]}` | logid başına 1–8 değer, her biri 1–32 karakter | her logid için kira kanıtı sayılan `dhcp_msg` değerleri (büyük/küçük harf ayrımı yok); başka bir değerle gelen kayıt kullanılmaz ve uyarı verir; listede olmayan logid sınırlanmaz |
+| `dhcp.fortigate_use_logged_lease` | açık | — | DHCP Ack kaydındaki kira süresi kiranın süresidir; 300 saniyeden kısa, 100 günden uzun ya da 0 (süresiz) değerlerde `lease.server_seconds` / `lease.default_seconds` (`lease.timeout_percent` payıyla) |
+| `dhcp.fortigate_traffic_extends` | kapalı | — | açıkken trafik FortiGate kirasını uzatır; yalnızca yenilemelerin kaydedilmediği sahada doğrulanırsa ve kurum yanlış kişi riskini kabul ederse açın (açıkken yardım metni uyarı olarak görünür) |
+| `dhcp.fortigate_interfaces_excluded` | `[]` | arayüz adı 1–35 karakter | DHCP kayıtları kira kanıtı sayılmayan FortiGate arayüzleri: IPsec üzerinden DHCP veren sunucuların (`server-type ipsec`) arayüzleri |
+| `dhcp.fortigate_format_verified` | kapalı | — | kayıt biçimi [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4'e göre sahada doğrulanınca açılır; raporlar kimin ve ne zaman işaretlediğini yazar; her FortiOS yükseltmesinden sonra kapatılır, doğrulama yinelenir |
+
+`lease.server_seconds` düzenleyicisinde sunucunun adı, MikroTik'te DHCP sunucusunun adı (ör.
+`dhcp61`), FortiGate'te DHCP arayüzünün adıdır.
+
+**Ayar değişikliğinden sonra kiraları yeniden oluşturun.** `dhcp.fortigate_*` ayarlarından birini
+(`dhcp.fortigate_format_verified` dışında: o yalnızca sorgu ve rapor metnini değiştirir) ya da bir
+FortiGate kaynağını (**Kaynaklar**) değiştirdikten sonra kiraları etkilenen ilk günden bugüne aynı
+gruptaki **Kiraları yeniden oluştur** ile yeniden oluşturun (bir istekte en çok 31 gün; daha uzun
+bir aralık için birkaç istek): değişiklik geçmiş günlere ancak yeniden oluşturmadan sonra uygulanır.
+**Kanıt ekleyen bir değişiklikten** sonra (bir logid ya da `dhcp_msg` değeri eşlendi, bir FortiGate
+kaynağı eklendi) o zamana kadar o günlerin anları için 5651 sorgusu zincir kurmadan yanıt verebilir
+(güvenli taraf). **Kanıtı kaldıran ya da daraltan bir değişiklikten** sonra (bir arayüz
+`dhcp.fortigate_interfaces_excluded` listesine eklendi, `dhcp.fortigate_traffic_extends` ya da
+`dhcp.fortigate_use_logged_lease` kapatıldı, bir logid ya da `dhcp_msg` değeri çıkarıldı, bir
+FortiGate kaynağı kaldırıldı ya da türü değiştirildi) eski ayarlarla oluşturulan kiralar yeniden
+oluşturmaya kadar eski güven düzeyleriyle kalır; bir an hâlâ önceki cihazı gösterebilir. Bu durumda
+kiraları **hemen**, etkilenen ilk günden yeniden oluşturun. Sonradan eklenen ya da değiştirilen bir
+ağ için: [ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 5.
+
+**İnternet çıkışları (NAT) düzenleyicisi** (`nat.egresses`). Her çıkış bir satırdır: ad,
+açıklama, tür, genel adresler, NAT adresleri, arayüzler (dstintf) ve port koruma. Türler:
+"Doğrudan (genel IP FortiGate'te)", "Servis sağlayıcı NAT'ı (çift NAT)", "FortiGate'ten
+geçmiyor" ve "İnternet çıkışı değil (DMZ, VLAN, VPN ya da şubeye NAT)"; genel adresler sonuncu
+dışında, NAT adresleri yalnızca servis sağlayıcı NAT'ında ve sonuncuda, port koruma
+("Bilinmiyor", "Korunuyor (sahada doğrulandı)", "Korunmuyor") ve "Genel IP değişebilir (dinamik)"
+kutusu yalnızca servis sağlayıcı NAT'ında girilir. Genel adres özel (RFC 1918) ya da paylaşılan (RFC
+6598, ör. 100.64.x.x) bir adres olamaz: FortiGate'in servis sağlayıcı yönlendiricisinin
+arkasındaki adresi servis sağlayıcı NAT'ı çıkışının NAT adresidir. Düzenleyici sunucunun
+kurallarını kaydetmeden önce alanın yanında gösterir ve şu durumlarda uyarır: genel adresi
+girilmemiş ya da değişebilir işaretli bir servis sağlayıcı NAT'ı çıkışı (hiçbir çıkışa tanımlı
+olmayan genel IP'ler için de aranır), iki ya da daha çok hatta arayüzü girilmemiş bir hat
+(arayüzler olmadan sorgu bir oturumun hangi hattan çıktığını ayıramaz), NAT adresi genel bir
+adres olan servis sağlayıcı NAT'ı çıkışı (FortiGate adresi kendisi tutuyorsa hat doğrudandır) ve
+yükseltmede aktarılmış, arayüzsüz çıkışlar ([KURULUM.md](KURULUM.md) bölüm 13). Son karar
+sunucunundur: sunucu bir değeri reddederse kodu ve metni düzenleyicinin üstünde görünür.
+Değişiklik denetim kaydına `settings.change` olarak yazılır ve sonraki sorgularda hemen
+geçerlidir. Konsoldaki karşılığı: [ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 6.
+
+**"Kayıtlarda görülen NAT adresleri (son 24 saat)" paneli** düzenleyicinin altındadır ve değerleri
+tahmin etmek yerine kayıtlardan okumak içindir (yalnızca sayılar ve FortiGate'in kendi adresleri;
+denetim kaydına yazılmaz, sayılar 5 dakika saklanır, hangi çıkışın bir adresi kapsadığı her
+açılışta güncel ayarlardan hesaplanır):
+
+- **NAT adresleri:** FortiGate'in kaynak NAT adresi (`transip`), çıkış arayüzü (`dstintf`), NAT
+  türü (`trandisp`), oturum sayısı, ilk ve son görülme ve adresi kapsayan çıkış. Hiçbir çıkışın
+  kapsamadığı bir adreste **Çıkış olarak ekle** bir satırı doldurur: genel bir adres Doğrudan
+  çıkış, özel ya da paylaşılan bir adres genel adresi boş bir servis sağlayıcı NAT'ı çıkışı olur
+  (servis sağlayıcının genel adresini siz girersiniz); yanında **İnternet çıkışı değil olarak
+  ekle**, FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da şubeye yaptığı NAT'ın adresi içindir
+  (bu adreslerde oturum aranmaz). Bilinmeyen bir `trandisp` değeri işaretlenir. Kayıtlı çıkış
+  tanımı okunamıyorsa panel bunu söyler ve çıkış sütunu boş kalır (`R20-nat`).
+- **srcmac arayüzleri (son bir saat):** arayüz başına (`srcintf`) srcmac taşıyan kayıt sayısı,
+  MAC sayısı ve bir MAC'in görüldüğü en çok IP adresi (`max_ips_per_mac`); üçü de yalnızca IPv4
+  kaynakları sayar (IPv4 kaynaklar; çift yığınlı bir istemcinin IPv6 adresleri sayılmaz) ve
+  arayüzün `lookup.srcmac_interfaces` listesinde olup olmadığını gösterir. **srcmac için ekle**,
+  `max_ips_per_mac` `lookup.srcmac_max_ips` değerini aşan arayüzlerde kapalıdır. Bir arayüzü
+  eklemeden önce iki istemci denetimini yapın ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5).
 
 ## 2. Nasıl çalışır?
 
@@ -320,7 +397,7 @@ değiştiren ya da bir işlem başlatan her uç `202` ile isteğin numarasını 
 |---|---|
 | Durum göstergesi, bütün sayfalar | `GET /admin/status`, `GET /admin/config` (değerler, `etag`'ler, kilitli alanlar) |
 | Genel | `POST /admin/config/general/check`, `PUT /admin/config/general` |
-| Uygulama ayarları | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `POST /admin/actions/lease-rebuild` |
+| Uygulama ayarları | `GET /settings`, `PATCH /settings`, `POST /settings/{key}/reset`; `GET /settings/fortigate/observed` ("Kayıtlarda görülen NAT adresleri"); `POST /admin/actions/lease-rebuild` |
 | Kamu SM | `POST /admin/config/tsa/check`, `PUT /admin/config/tsa`; `POST /admin/uploads?kind=…` ardından `POST /admin/config/tsa/zamane`, `POST /admin/config/tsa/roots`, `POST /admin/config/tsa/legal-roots`; `POST /admin/actions/tsa-test` |
 | Kaynaklar | `POST /admin/config/sources/check`, `POST /admin/config/sources`, `PUT /admin/config/sources/{name}`, `DELETE /admin/config/sources/{name}` |
 | E-posta | `POST /admin/config/smtp/check`, `PUT /admin/config/smtp`, `POST /admin/config/smtp/ca`, `DELETE /admin/config/smtp/ca`; `POST /admin/actions/test-email`; uyarı e-postası ayarları `PATCH /settings` |
