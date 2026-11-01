@@ -88,12 +88,14 @@ stores the lookup and writes the audit entry.
 from __future__ import annotations
 
 import ipaddress
+import itertools
 import math
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from datetime import time as dt_time
 from ipaddress import IPv4Network
 from typing import Any
 
@@ -198,6 +200,10 @@ DEFAULT_DNS_LOOKBACK_SECONDS = 3600
 TRANSIP_PROBE_SECONDS = 900
 #: Addresses the probe names (texts, ``outcome.egress.searched``).
 PROBE_NAMES = 5
+#: The chunk interval of TimescaleDB's ``fg_traffic`` (``CHUNK_INTERVAL`` of the baseline
+#: revision; chunks start at UTC midnight): a probe asks a range of a day or more one chunk at a
+#: time (:func:`_by_chunk`). Plain PostgreSQL's monthly partitions are not cut.
+CHUNK = timedelta(days=1)
 #: A ``trandisp`` value printed as logged only in the setting's own form (log-supplied text).
 _TRANDISP = re.compile(r"^[a-z][a-z0-9+_-]{0,15}$")
 _DESTINATION_ORDER = {
@@ -605,6 +611,24 @@ def leaves_own_set(egress: Egress, other: Egress) -> bool:
         and other.interfaces
         and not set(egress.interfaces) & set(other.interfaces)
     )
+
+
+def _by_chunk(
+    start: datetime, end: datetime, *, open_start: bool
+) -> list[list[ColumnElement[bool]]]:
+    """``fg_traffic.time`` from ``start`` (exclusive when ``open_start``) to ``end``, cut at the
+    UTC midnights in between (:data:`CHUNK`): one range per TimescaleDB chunk, in time order."""
+    bounds = [start]
+    midnight = datetime.combine(start.astimezone(UTC).date(), dt_time.min, UTC) + CHUNK
+    while midnight < end:
+        bounds.append(midnight)
+        midnight += CHUNK
+    bounds.append(end)
+    pieces = []
+    for index, (low, high) in enumerate(itertools.pairwise(bounds)):
+        lower = FgTraffic.time > low if index or open_start else FgTraffic.time >= low
+        pieces.append([lower, FgTraffic.time <= high])
+    return pieces
 
 
 def own_networks(egress: Egress, exits: Sequence[Egress]) -> tuple[IPv4Network, ...]:
@@ -1217,15 +1241,19 @@ class _Lookup:
         or began after it shows neither: within the tolerance of a change of the line's mode it
         belongs to the other mode.
 
-        The first such row in the order of ``ix_fg_traffic_transip_transport_time``, asked in
-        steps as :meth:`_Probe.seen_overlap` asks: the rows logged in the window first, where a
-        busy address answers at once, then the scan's tail after it, then (with a port only)
-        the sessions spanning the moment on any port. As one ``EXISTS`` the planner expected an
-        early match for a busy address and scanned the partition sequentially, reading every
-        address's rows before the moment, and one after its last row read every address's rows
-        of the range in time order (3.8 guard). Without a port the spanning sessions are among
-        the tail's: they were logged in ``[T, T + max session]`` and started by ``T``, inside the
-        scan, which starts ``tolerance`` before ``T`` and ends ``max session`` after its end."""
+        Asked in steps, each for its first row: the rows logged in the window, in time order
+        (the window's rows of every address at most, a busy address answers at once), then the
+        scan's tail after it, then (with a port only) the sessions spanning the moment on any
+        port, these two in the order of ``ix_fg_traffic_transip_transport_time`` (the address's
+        own rows) and one day of TimescaleDB chunks at a time (:data:`CHUNK`): a statement over
+        two chunks merges their ordered scans and reads the second to its end even when the first
+        answers (0.22 s for a busy address on CI's chunks). As one ``EXISTS`` the planner
+        expected an early match for a busy address and scanned the partition sequentially,
+        reading every address's rows before the moment, and one after its last row read every
+        address's rows of the range in time order (3.8 guard). Without a port the spanning
+        sessions are among the tail's: they were logged in ``[T, T + max session]`` and started
+        by ``T``, inside the scan, which starts ``tolerance`` before ``T`` and ends ``max
+        session`` after its end."""
         request = self.request
         window = self.window
         started = FgTraffic.time - func.make_interval(
@@ -1238,29 +1266,24 @@ class _Lookup:
             common.append(_not_in(FgTraffic.source, self.untrusted))
         port = [] if request.public_port is None else [FgTraffic.transport == request.public_port]
 
-        def first(*clauses: ColumnElement[bool]) -> bool:
-            query = (
-                select(FgTraffic.time)
-                .where(*common, *clauses)
-                .order_by(FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
-                .limit(1)
-            )
+        def first(*clauses: ColumnElement[bool], order: Sequence[Any]) -> bool:
+            query = select(FgTraffic.time).where(*common, *clauses).order_by(*order).limit(1)
             return self.session.scalar(query) is not None
 
+        by_address = (FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
         in_window = [FgTraffic.time >= window.low, FgTraffic.time <= window.high]
-        tail = [FgTraffic.time > window.high, FgTraffic.time <= window.scan_end]
-        if first(*in_window, started <= window.high, *port):
+        if first(*in_window, started <= window.high, *port, order=[FgTraffic.time]):
             return True
-        if first(*tail, started <= window.high, *port):
-            return True
+        for piece in _by_chunk(window.high, window.scan_end, open_start=True):
+            if first(*piece, started <= window.high, *port, order=by_address):
+                return True
         if request.public_port is None:
             return False
-        spans = [
-            FgTraffic.time >= request.at,
-            FgTraffic.time <= request.at + timedelta(seconds=self.settings.max_session_seconds),
-            started <= request.at,
-        ]
-        return first(*spans)
+        spans_end = request.at + timedelta(seconds=self.settings.max_session_seconds)
+        return any(
+            first(*piece, started <= request.at, order=by_address)
+            for piece in _by_chunk(request.at, spans_end, open_start=False)
+        )
 
     def _unmapped_note(self, plan: _Plan) -> None:
         """``egress_unmapped_seen``: NAT addresses no exit claims near the moment (public ones

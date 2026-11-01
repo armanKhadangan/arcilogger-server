@@ -48,6 +48,7 @@ of the same kind on the traffic site.
 from __future__ import annotations
 
 import functools
+import itertools
 import os
 import re
 import time
@@ -1465,33 +1466,18 @@ CARRIED_EXITS: dict[str, dict[str, Any]] = {
     WAN: {"hat-1": {"mode": "isp_nat", "transips": [WAN]}},
     LATER_LINE: {"hat-1": {"mode": "direct", "public": [LATER_LINE]}},
 }
-#: The order of ``ix_fg_traffic_transip_transport_time`` in which ``_carried`` asks its steps.
+#: The order of ``ix_fg_traffic_transip_transport_time`` in which ``_carried`` asks its steps after
+#: the window.
 CARRIED_ORDER = "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time"
 
 
-def _later_chunk_rows(
-    site: Engine,
-    first: datetime,
-    last: datetime,
-    start_bound: datetime,
-    condition: str,
-    address: str,
-    port: int | None,
-) -> int:
-    """On TimescaleDB, the rows of ``condition`` in ``[first, last]`` from the first daily chunk
-    boundary (UTC midnight) after ``first`` on: those of the chunks after the first one. None on
-    plain PostgreSQL, whose partitions are months."""
-    with site.connect() as connection:
-        hypertable = connection.scalar(
-            text("SELECT count(*) FROM pg_extension WHERE extname = 'timescaledb'")
-        )
-    midnight = datetime.combine(
-        first.astimezone(UTC).date() + timedelta(days=1), time_of_day.min, UTC
-    )
-    if not hypertable or midnight > last:
-        return 0
-    rows, _kept = _rows_of(site, midnight, last, start_bound, condition, address=address, port=port)
-    return rows
+def _utc_days(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
+    """``[start, end]`` cut at the UTC midnights in between: TimescaleDB's daily chunks."""
+    bounds = [start]
+    midnight = datetime.combine(start.astimezone(UTC).date(), time_of_day.min, UTC)
+    while (midnight := midnight + timedelta(days=1)) < end:
+        bounds.append(midnight)
+    return [*itertools.pairwise([*bounds, end])]
 
 
 @pytest.mark.perf
@@ -1507,11 +1493,12 @@ def test_the_d15_carried_check_is_fast(
     :data:`CARRIED`) under 0.2 s, the probe's bound, through the real lookup: the exit's check
     sees the address and :data:`BESIDE` beside it, so the search on the address keeps its answer
     only when a session through it spans the moment or would be found in the window. Asked in
-    steps on ``ix_fg_traffic_transip_transport_time`` (the window's rows, the scan's tail, with a
-    port the sessions spanning the moment on any port), each statement's plan reads the
-    address's own rows of its range only and stops at the first one that answers. As one
-    ``EXISTS`` the busy address was a sequential scan of the partition and the address after its
-    last row a time-ordered scan of every address's rows of the range."""
+    steps (the window's rows in time order, then on ``ix_fg_traffic_transip_transport_time`` and
+    one UTC day, a TimescaleDB chunk, at a time the scan's tail and, with a port, the sessions
+    spanning the moment on any port), the window's plan reads at most its rows of every address,
+    every other plan the address's own rows of its day only, stopping at the first that
+    answers. As one ``EXISTS`` the busy address was a sequential scan of the partition and the
+    address after its last row a time-ordered scan of every address's rows of the range."""
     address, at, port, carried = CARRIED[case]
     checks: list[_Timed] = []
 
@@ -1561,59 +1548,56 @@ def test_the_d15_carried_check_is_fast(
     assert call[1:] == (address,)
     defaults = LookupSettings()
     window = Window(at, defaults.tolerance_seconds, defaults.max_session_seconds)
-    # The steps: (the bound moments, the range of the address's rows the step reads, its port):
-    # the window, the scan's tail after it (its lower bound exclusive), and with a port the
-    # sessions spanning the moment on any port.
-    after = window.high + timedelta(microseconds=1)
-    spans_end = at + timedelta(seconds=window.max_session)
-    steps = [
-        ([window.low, window.high, window.high], (window.low, window.high, window.high), port),
-        ([window.high, window.high, window.scan_end], (after, window.scan_end, window.high), port),
-    ]
+    # The steps, each (its bound moments, the range of rows it reads, its port): the window in
+    # time order, then the scan's tail after it (its lower bound exclusive) and, with a port, the
+    # sessions spanning the moment on any port, these two one UTC day (a chunk) at a time.
+    tiny = timedelta(microseconds=1)
+    steps = [([window.low, window.high, window.high], (window.low, window.high, window.high), port)]
+    for first, last in _utc_days(window.high, window.scan_end):
+        steps.append(([first, last, window.high], (first + tiny, last, window.high), port))
     if port is not None:
-        steps.append(([at, at, spans_end], (at, spans_end, at), None))
-    # The statements the check sent, its plans first: whatever their shape, none may scan the
-    # partition or read another address's rows (the one ``EXISTS`` did both).
+        spans_end = at + timedelta(seconds=window.max_session)
+        for index, (first, last) in enumerate(_utc_days(at, spans_end)):
+            steps.append(([first, last, at], (first + tiny if index else first, last, at), None))
+    # The statements the check sent, whatever their shape: in order, each of them a step, the
+    # last one the first that finds a row (a carried address) or the last step (the fallback).
     ((start, end),) = sent
     statements = executed.statements[start:end]
-    plans = []
-    for sql, parameters in statements:
+    assert 0 < len(statements) <= len(steps), case
+    if not carried:
+        assert len(statements) == len(steps), case
+    condition = "transip = CAST(:address AS inet)"
+    for index, (sql, parameters) in enumerate(statements):
+        moments, (first, last, start_bound), step_port = steps[index]
         with traffic_site.connect() as connection:
+            found = connection.exec_driver_sql(sql, parameters).scalar() is not None
             plan = (
                 connection.exec_driver_sql(f"EXPLAIN (ANALYZE) {sql}", parameters).scalars().all()
             )
         print("\n".join(plan))
+        # The plans first (the one ``EXISTS`` fails here): no step scans a partition, and the
+        # first one, the window in time order, reads its rows of every address at most (two
+        # minutes of the site's rows), whichever index the planner takes.
         assert not any("Seq Scan" in line for line in plan), case
-        scans, _removed = _plan_reads(plan)
+        scans, removed = _plan_reads(plan)
         assert scans, case
-        assert all("transip_transport_time" in name or not n for name, n in scans), scans
-        plans.append(plan)
-    # A carried address is answered by its first step that finds a row; the fallback asks all.
-    answered = {"busy": 1, "later_line": 1, "busy_before": 2}.get(case, len(steps))
-    assert len(statements) == answered, case
-    condition = "transip = CAST(:address AS inet)"
-    for index, (sql, parameters) in enumerate(statements):
-        moments, (first, last, start_bound), step_port = steps[index]
+        if index == 0:
+            every, _kept = _rows_of(traffic_site, window.low, window.high, window.high, "true")
+            assert sum(n for _name, n in scans) <= every, (case, scans, every)
+        assert sorted(_moments(parameters)) == sorted(moments), (case, index)
+        assert found == (carried and index == len(statements) - 1), (case, index)
+        if index == 0:
+            continue
+        # The address's own rows of the step's day only, along its index entries: a step that
+        # finds nothing reads and filters out every one of them, a step that answers stops early.
         assert CARRIED_ORDER in sql, case
-        assert sorted(_moments(parameters)) == moments, case
+        assert all("transip_transport_time" in name or not n for name, n in scans), scans
         own = condition if step_port is None else f"{condition} AND transport = :port"
         rows, _kept = _rows_of(
             traffic_site, first, last, start_bound, own, address=address, port=step_port
         )
-        with traffic_site.connect() as connection:
-            found = connection.exec_driver_sql(sql, parameters).scalar() is not None
-        assert found == (carried and index == answered - 1), case
-        # The address's own rows of the range only, along its index entries: a step that finds
-        # nothing reads and filters out every one of them, a step that answers stops early.
-        _scans, removed = _plan_reads(plans[index])
         if found:
-            # Over TimescaleDB's daily chunks the ordered scans of the step's chunks are merged:
-            # each chunk after the one that answers is read to its first row that would answer,
-            # or to its end (as the overlap probe's tail, see ``_Probe.seen_overlap``).
-            later = _later_chunk_rows(
-                traffic_site, first, last, start_bound, own, address, step_port
-            )
-            assert removed <= max((rows - later) // 10, 100) + later, (case, index, removed, rows)
+            assert removed <= max(rows // 10, 100), (case, index, removed, rows)
         else:
             assert removed == rows, (case, index, removed, rows)
     assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
