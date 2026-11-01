@@ -120,6 +120,7 @@ from sqlalchemy.types import Text
 
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import site_day, utc_now
+from arcilogger_db import clocksamples
 from arcilogger_db.egress import (
     CHANGES_KEY,
     IMPLICIT_CATCH_ALL,
@@ -234,11 +235,13 @@ SRCMAC_ROWS = 50
 SRCMAC_NAMED = 3
 #: The source clock at the requested moment (2.7, D28): a source's ``messages`` rows within this
 #: span of the moment by device time, at most :data:`CLOCK_SIDE_ROWS` on each side of it (the
-#: rows the search and the lease timeline used, on both sides of a clock step; round 5), of which
-#: :data:`CLOCK_MIN_ROWS` make a measurement; a median offset beyond :data:`CLOCK_LIMIT_SECONDS`
-#: (a session search: or beyond the tolerance) lowers the chains. The minimum and the limit are
-#: those of ``R20-lease:source-clock`` (a test pins them equal). At most :data:`CLOCK_SOURCES`
-#: sources are measured, the cited ones first.
+#: rows the search and the lease timeline used, on both sides of a clock step; round 5), and its
+#: rows received within it (``source_clock_samples``; a clock hours off sent the rows of the
+#: moment with device times outside the span, #73); :data:`CLOCK_MIN_ROWS` rows make a
+#: measurement; a median offset beyond :data:`CLOCK_LIMIT_SECONDS` (a session search: or beyond
+#: the tolerance) lowers the chains. The minimum and the limit are those of
+#: ``R20-lease:source-clock`` (a test pins them equal). At most :data:`CLOCK_SOURCES` sources are
+#: measured, the cited ones first.
 CLOCK_SPAN = timedelta(hours=1)
 CLOCK_SIDE_ROWS = 2500
 CLOCK_MIN_ROWS = 10
@@ -1781,11 +1784,20 @@ class _Lookup:
         return list(self.session.scalars(query))
 
     def _clock(self, source: str) -> tuple[float, int] | None:
-        """The median of ``time - time_received`` (seconds) over ``source``'s ``messages`` rows
-        nearest the moment on each side within :data:`CLOCK_SPAN` whose device time is not the
-        receive time (ingest's stand-in for a clock beyond ``max_clock_skew`` says nothing),
-        and their number; ``None`` with fewer than :data:`CLOCK_MIN_ROWS`. One query on
-        ``ix_messages_source_time``, cached per lookup."""
+        """``source``'s clock at the moment: the median of ``time - time_received`` (seconds),
+        and its number of rows, of two samples, the one whose median is further from 0 (a
+        session search must not trust the clock if either says it was off); ``None`` when neither
+        has :data:`CLOCK_MIN_ROWS` rows. Cached per lookup.
+
+        * By device time: its ``messages`` rows nearest the moment on each side within
+          :data:`CLOCK_SPAN` whose device time is not the receive time (ingest's stand-in for a
+          clock beyond ``max_clock_skew`` says nothing); one query on ``ix_messages_source_time``.
+          These are the rows the search and the lease timeline used.
+        * By receive time: its rows received within :data:`CLOCK_SPAN` of the moment, from
+          ``source_clock_samples`` (whole minutes, offsets in whole seconds, under a minute as
+          0). A clock set hours back sent the rows of the real moment with device times hours
+          earlier, outside the first sample, which then held rows sent on time before the
+          change, or none (#73)."""
         if source not in self._clocks:
             at = self.request.at
 
@@ -1808,8 +1820,14 @@ class _Lookup:
             count, median = self.session.execute(
                 select(func.count(), func.percentile_cont(0.5).within_group(seconds))
             ).one()
-            found = count >= CLOCK_MIN_ROWS and median is not None
-            self._clocks[source] = (float(median), int(count)) if found else None
+            samples = [(float(median), int(count))] if median is not None else []
+            received = clocksamples.received_between(
+                self.session, source, at - CLOCK_SPAN, at + CLOCK_SPAN
+            )
+            if (sampled := clocksamples.median(received))[0] is not None:
+                samples.append((float(sampled[0]), sampled[1]))
+            measured = [sample for sample in samples if sample[1] >= CLOCK_MIN_ROWS]
+            self._clocks[source] = max(measured, key=lambda m: abs(m[0])) if measured else None
         return self._clocks[source]
 
     # -- exact ------------------------------------------------------------------------------------

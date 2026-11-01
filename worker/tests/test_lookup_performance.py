@@ -584,6 +584,11 @@ TRAFFIC_SITE = (
     "generate_series(1, :rows_4h) AS g, "
     "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 hours' "
     "+ g * CAST(:step AS interval) AS t) AS x",
+    # The clock samples of both FortiGates' messages, as ingest writes them: one key a received
+    # minute (a second behind: offset 0) from T - 2 h for 4 hours.
+    "INSERT INTO source_clock_samples (source, minute, seconds, n) "
+    "SELECT s.name, CAST(:at AS timestamptz) - interval '2 hours' + g * interval '1 minute', 0, "
+    "694 FROM (VALUES ('fortigate'), ('fortigate-2')) AS s(name), generate_series(0, 239) AS g",
     # The search counts of 400 days (the clock check picks the sources of an empty search
     # from them).
     "INSERT INTO search_counts (hour, source, raw_day, kind, tbl, action, net, n) "
@@ -972,7 +977,9 @@ def test_internal_srcmac_sightings_are_fast(traffic_site: Engine, timer: _Timer,
 
 
 @pytest.mark.perf
-def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer: _Timer) -> None:
+def test_the_source_clock_of_an_empty_search_is_fast(
+    traffic_site: Engine, timer: _Timer, executed: _Executed
+) -> None:
     """3.8: the per-lookup clock measurement (2.7) for two sources over [T - 1 h, T + 1 h] of
     ``messages`` at 1 M lines a day each, under 0.2 s, with the ``search_counts`` choice of the
     searched sources of an empty result (a destination no session went to)."""
@@ -981,9 +988,11 @@ def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer
     def measure() -> None:
         parts.append(timer.time(lookup_engine._Lookup, "_searched_sources"))
         parts.append(timer.time(lookup_engine._Lookup, "_clock"))
+        executed.record(traffic_site)
 
     request = LookupRequest(at=GUARD_AT, public_ip=PUBLIC, dest_ip="203.0.113.250", dest_port=443)
     outcome = _guard_lookup(traffic_site, request, measure)
+    executed.stop()
     timer.report("source clock, empty search")
     assert (outcome.mode, outcome.matches) == ("none", ())
     assert "destination_not_found" in _keys(outcome)
@@ -991,6 +1000,9 @@ def test_the_source_clock_of_an_empty_search_is_fast(traffic_site: Engine, timer
     assert len(searched.calls) == 1
     assert sorted(call[1] for call in clock.calls) == ["fortigate", "fortigate-2"]
     assert "source_clock_offset" not in _keys(outcome)  # 1 s behind: measured, within the limit
+    # Each source by device time (messages) and by receive time (its samples of two hours).
+    sampled = [sql for sql, _parameters in executed.statements if "source_clock_samples" in sql]
+    assert len(sampled) == 2
     seconds = searched.seconds + clock.seconds
     assert seconds < 0.2, f"the clock measurement took {seconds:.3f} s"
 
