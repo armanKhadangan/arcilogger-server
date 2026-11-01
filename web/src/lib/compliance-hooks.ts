@@ -6,17 +6,19 @@
  *   `X-Arci-Background`, so an unattended page does not keep the session alive; the server caches
  *   them for 30 s). Viewing is not audited.
  * - "Uyum Durumu Raporu (PDF)" is computed fresh on every download and audited
- *   (`compliance.report_export`); the received bytes are checked against `X-Arci-Sha256`.
+ *   (`compliance.report_export`); the received bytes are checked against `X-Arci-Sha256`, and a
+ *   mismatch is the download's error (`download_mismatch`), shown beside the button.
  * - "Yapılandırma yedeğini aldım" (`settings.manage`) is audited
  *   (`compliance.config_backup_confirm`) and clears the server's cache: the cards are read again.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { api, apiDownload } from './api';
+import { api, apiDownload, ApiError } from './api';
 import { usePollingQuery } from './api-hooks';
 import type { ComplianceStatus, ConfigBackupOut } from './compliance-types';
 import { checkDownload, saveBlob, type HashCheck } from './download';
+import i18n from './i18n';
 
 export const COMPLIANCE_POLL_MS = 30_000;
 
@@ -43,7 +45,10 @@ export interface ComplianceReportFile {
 
 /**
  * `GET /compliance/report.pdf` (`compliance.read`), offered as a file
- * (`ARCILOGGER-uyum-durumu-<YYYYMMDD-HHMM>.pdf`); refusals come back as the mutation's error.
+ * (`ARCILOGGER-uyum-durumu-<YYYYMMDD-HHMM>.pdf`); refusals come back as the mutation's error. So
+ * does a file whose bytes differ from the `X-Arci-Sha256` the server recorded in the audit log
+ * (`download_mismatch`, with the texts of `HashCheckBadge`: do not use it, download it again), so
+ * the page shows it beside the button with its code and a wrong file never passes silently.
  */
 export function useComplianceReport() {
   return useMutation({
@@ -53,7 +58,15 @@ export function useComplianceReport() {
       });
       saveBlob(file.blob, file.filename);
       const sha256 = file.headers.get('X-Arci-Sha256');
-      return { filename: file.filename, sha256, check: await checkDownload(file.blob, sha256) };
+      const check = await checkDownload(file.blob, sha256);
+      if (check.state === 'mismatch')
+        throw new ApiError({
+          status: 200,
+          code: 'download_mismatch',
+          messageTr: i18n.getFixedT('tr')('download.mismatch'),
+          messageEn: i18n.getFixedT('en')('download.mismatch'),
+        });
+      return { filename: file.filename, sha256, check };
     },
   });
 }

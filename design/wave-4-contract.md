@@ -1623,6 +1623,16 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   `web/src/lib/api-samples.test.ts` "system.json" and "system-health.json" (the captured
   samples carry a 3.2 ms clock offset, a fractional ingest lag and fractional lines per second).
   Fold into §2.5.1 and §2.6.1.
+- **W4F-2: a report whose bytes differ from its `X-Arci-Sha256` is the export's error
+  `download_mismatch`.** 2.8.1 gives `useComplianceReport()` the download only; the hook checks
+  the received bytes against `X-Arci-Sha256` like every hashed download of the app, and
+  `ComplianceView` has no place for the check's outcome (`HashCheckBadge`). So a mismatch fails
+  the mutation with a client-side `ApiError` (`code: "download_mismatch"`, the texts of
+  `download.mismatch`, TR and EN), shown through `exportError` beside "Uyum Durumu Raporu (PDF)"
+  with its code; a match or an unchecked file shows nothing. Tests:
+  `web/src/pages/compliance/compliance-page.test.tsx` "shows a report whose bytes differ from its
+  X-Arci-Sha256 beside its button", `web/e2e/compliance.spec.ts` "a report whose bytes differ
+  from its X-Arci-Sha256: the mismatch beside the button". Fold into 2.8.1.
 
 ---
 

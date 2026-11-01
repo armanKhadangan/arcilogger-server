@@ -58,10 +58,15 @@ interface Serve {
   unreadable?: boolean;
   /** The report answers this instead of the file. */
   reportFails?: Response;
+  /** The report announces this `X-Arci-Sha256` instead of its bytes' own. */
+  reportSha256?: string;
 }
 
 /** The API as the captured samples have it, for `role`; returns the recorded requests. */
-function serve(role: Role, { unreadable = false, reportFails }: Serve = {}): RecordedRequest[] {
+function serve(
+  role: Role,
+  { unreadable = false, reportFails, reportSha256 = PDF_SHA256 }: Serve = {},
+): RecordedRequest[] {
   let confirmed = false;
   const me = makeMe(role);
   const may = (permission: string) => me.permissions.includes(permission);
@@ -81,7 +86,7 @@ function serve(role: Role, { unreadable = false, reportFails }: Serve = {}): Rec
           headers: {
             'Content-Type': 'application/pdf',
             'Content-Disposition': SAMPLE.report_pdf.headers['content-disposition'] ?? '',
-            'X-Arci-Sha256': PDF_SHA256,
+            'X-Arci-Sha256': reportSha256,
           },
         });
       case '/api/v1/compliance/config-backup':
@@ -176,7 +181,26 @@ describe('Uyum Durumu page', () => {
       '/api/v1/compliance/report.pdf',
     ]);
     expect(compliance(calls, 'POST')).toEqual([]);
+    // The browser's SHA-256 of the bytes matched `X-Arci-Sha256`: no error beside the button.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' })).not.toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+    });
     expect(screen.queryByTestId('compliance-export-error')).toBeNull();
+  });
+
+  it('shows a report whose bytes differ from its X-Arci-Sha256 beside its button', async () => {
+    serve('auditor', { reportSha256: 'ab'.repeat(32) });
+    captureSaves();
+    renderApp('/compliance');
+    await screen.findByTestId('compliance-card-sources');
+    await userEvent.click(screen.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' }));
+    expect(await screen.findByTestId('compliance-export-error')).toHaveTextContent(
+      'İndirilen dosyanın özeti eşleşmiyor: dosyayı kullanmayın ve yeniden indirin ' +
+        '(download_mismatch)',
+    );
   });
 
   it('shows a refused report beside its button, with the code', async () => {

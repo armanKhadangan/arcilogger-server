@@ -14,7 +14,8 @@
  *   for the configuration copy); after a confirmation the captured cards after it (card 10 ok);
  * - `GET /compliance/report.pdf`: a small fixed PDF named as the capture's `Content-Disposition`,
  *   whose `X-Arci-Sha256` is computed here from its bytes (the capture keeps headers, size and
- *   hash of the real report, not the file), so the page's check of the download passes;
+ *   hash of the real report, not the file), so the page's check of the download passes, or
+ *   another hash with {@link W4Options.reportSha256};
  * - `POST /compliance/config-backup`: the captured confirmation, or the captured 409
  *   `config_backup_unreadable` while {@link W4Mock.configUnreadable} is set;
  * - `GET /system`: the captured summary of a Windows host (drives `D:` and `C:`), or the first
@@ -54,6 +55,8 @@ export interface W4Options {
   afterBackup?: ComplianceStatus;
   /** The configuration file cannot be read: the confirmation is refused (409). */
   configUnreadable?: boolean;
+  /** The report announces this `X-Arci-Sha256` instead of its bytes' own (a corrupted download). */
+  reportSha256?: string;
   /** The Sistem summary (default: the capture's `summary`, or `summary_first_reading`). */
   system?: SystemSummary;
   /** The first processor reading of the API process: `cpu_percent` null. */
@@ -70,6 +73,7 @@ export class W4Mock {
   compliance: ComplianceStatus;
   afterBackup: ComplianceStatus;
   configUnreadable: boolean;
+  reportSha256: string;
   system: SystemSummary;
   disk: SystemDisk;
   health: SystemHealth;
@@ -85,6 +89,7 @@ export class W4Mock {
     this.compliance = options.compliance ?? copy(COMPLIANCE.admin);
     this.afterBackup = options.afterBackup ?? copy(COMPLIANCE.after_backup);
     this.configUnreadable = options.configUnreadable ?? false;
+    this.reportSha256 = options.reportSha256 ?? COMPLIANCE_PDF_SHA256;
     this.disk =
       options.disk ??
       copy(options.diskNotGrowing ? SYSTEM_DISK.disk_not_growing : SYSTEM_DISK.disk);
@@ -197,7 +202,7 @@ export class W4Mock {
         contentType: 'application/pdf',
         headers: {
           'Content-Disposition': disposition,
-          'X-Arci-Sha256': COMPLIANCE_PDF_SHA256,
+          'X-Arci-Sha256': this.reportSha256,
           'Cache-Control': 'no-store',
         },
       },

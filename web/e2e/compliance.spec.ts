@@ -164,12 +164,28 @@ test.describe('Uyum Durumu', () => {
     await page.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' }).click();
     const file = await download;
     expect(file.suggestedFilename()).toBe(reportName());
-    // The bytes the mock served; their `X-Arci-Sha256` matched, so no error is shown.
+    // The bytes the mock served. Once the download has settled (the button is free again), no
+    // error is shown: the browser's SHA-256 of them matched `X-Arci-Sha256`.
     expect(readFileSync(await file.path()).equals(COMPLIANCE_PDF)).toBe(true);
     expect(w4.reports).toBe(1);
+    await expect(page.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' })).toBeEnabled();
     await expect(page.getByTestId('compliance-export-error')).toHaveCount(0);
     expect(api.callsTo('GET', '/compliance/report.pdf')).toHaveLength(1);
     expect(api.callsTo('GET', '/compliance/report.pdf')[0]?.background).toBe(false);
+  });
+
+  test('a report whose bytes differ from its X-Arci-Sha256: the mismatch beside the button', async ({
+    page,
+  }) => {
+    const { w4 } = await open(page, 'tolga', { reportSha256: 'ab'.repeat(32) });
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' }).click();
+    await download;
+    expect(w4.reports).toBe(1);
+    await expect(page.getByTestId('compliance-export-error')).toHaveText(
+      'İndirilen dosyanın özeti eşleşmiyor: dosyayı kullanmayın ve yeniden indirin ' +
+        '(download_mismatch)',
+    );
   });
 
   test('"Yapılandırma yedeğini aldım": confirmed once, card 10 turns ok', async ({ page }) => {
