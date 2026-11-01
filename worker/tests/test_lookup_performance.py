@@ -38,9 +38,10 @@ and the DHCP-origin query, each under its own bound, on two sites written once f
 (see the comment above :data:`GUARD_AT`).
 
 **The exit guards** (contract 3.8, WP-C3): the two-exit ``= ANY`` candidate search, the unclaimed
-search with a ``<<= ANY`` exclusion, a direct exit with a /29 public network and the overlap probe
-of an unclaimed address, on the traffic site; on TimescaleDB, the event site's FortiGate DHCP
-checks once more on compressed chunks (their seconds in the ``C3-compressed:`` line of the log).
+search with a ``<<= ANY`` exclusion, a direct exit with a /29 public network, the overlap probe
+of an unclaimed address and the D15 "seen, but not alone" check, on the traffic site; on
+TimescaleDB, the event site's FortiGate DHCP checks once more on compressed chunks (their seconds
+in the ``C3-compressed:`` line of the log).
 """
 
 from __future__ import annotations
@@ -1417,6 +1418,139 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
             assert removed == rows, (case, removed, rows)
     bound = OVERLAP_SECONDS.get(case, 0.2)
     assert timed.seconds < bound, f"{case}: the overlap probe took {timed.seconds:.3f} s"
+
+
+#: The "seen, but not alone" check's second line (D15, ``_Lookup._carried``): the shared address
+#: ``hat-2``'s modem hands the FortiGate on ``wan1`` when that line is in router mode. Its 20
+#: sessions, logged 10 minutes before the guard's moment (a short burst, inside the probe's
+#: ±15 minutes and before the search window), are written in the measured lookup's own
+#: transaction only and rolled back with it, so the site the other guards read never holds them.
+SECOND_LINE = "100.64.14.9"
+#: The two exits of the check: the site's line (:data:`WAN`) and the second line, both
+#: ``isp_nat`` without a public address on ``wan1``, so each is in the other's G(E) and either
+#: address, asked for, is a ``transip`` resolution whose check sees the other one beside it.
+CARRIED_EXITS = {
+    "hat-1": {"mode": "isp_nat", "transips": [WAN], "interfaces": ["wan1"]},
+    "hat-2": {"mode": "isp_nat", "transips": [SECOND_LINE], "interfaces": ["wan1"]},
+}
+SECOND_LINE_ROWS = (
+    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
+    "transip, transport, trandisp, duration, is_interim) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', :day, 4000000 + g, (4000000 + g)::bigint * 900, "
+    "'0000000013', 'forward', 'accept', 5000000 + g, 6, '172.20.42.110', 40000 + g, 'vlan42', "
+    "'203.0.113.80', 443, 'wan1', CAST(:line AS inet), 50000 + g, 'snat', 5, false "
+    "FROM generate_series(1, 20) AS g, "
+    "LATERAL (SELECT CAST(:at AS timestamptz) - interval '10 minutes' "
+    "- g * interval '1 second' AS t) AS x"
+)
+#: The port of the busy address's session logged at the guards' moment (``g`` = 83,334 of the
+#: site's sessions, 11 s long), so its exact search has an answer.
+BUSY_PORT = 24358
+#: The check's cases (D15 "seen, but not alone", round 7): the address, the moment, the port and
+#: the statements the check asks (:meth:`~arcilogger_worker.lookup.engine._Lookup._carried`). The
+#: site's busy NAT address at the guards' moment, with the port of its session there and without
+#: a port (the first step answers); the second line, whose only rows are those before the window
+#: (seen, but no row in any of the check's ranges); and the busy address 10 minutes after its
+#: last row (the line went quiet: seen, its 27 hours of rows all before the check's ranges).
+CARRIED = {
+    "busy": (WAN, GUARD_AT, BUSY_PORT, 1),
+    "busy_without_port": (WAN, GUARD_AT, None, 1),
+    "no_rows": (SECOND_LINE, GUARD_AT, BUSY_PORT, 3),
+    "no_rows_without_port": (SECOND_LINE, GUARD_AT, None, 2),
+    "busy_no_row": (WAN, GUARD_AT + timedelta(hours=25, minutes=10), BUSY_PORT, 3),
+}
+#: 3.8's bound of a lookup probe (the overlap probe's 0.2 s).
+CARRIED_SECONDS = 0.2
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("case", sorted(CARRIED))
+def test_the_seen_but_not_alone_check_is_fast(
+    traffic_site: Engine,
+    timer: _Timer,
+    executed: _Executed,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """3.8: the D15 "seen, but not alone" check (``_Lookup._carried``, deviation c1) of a busy
+    address, of an address with no row in its ranges and of a busy address with no row there
+    (:data:`CARRIED`), under 0.2 s, through the real ``run_lookup``, warm. Each statement's plan
+    reads the address's own rows of its range only (``ix_fg_traffic_transip_transport_time``),
+    never a sequential scan of the partition, and the answer is the check's: the search on the
+    address, or the fallback over both lines."""
+    address, at, port, steps = CARRIED[case]
+    request = LookupRequest(at=at, public_ip=address, public_port=port)
+    ranges: list[tuple[int, int]] = []
+    original = lookup_engine._Lookup._carried
+
+    def carried(self: Any, checked: str) -> bool:
+        first = len(executed.statements)
+        try:
+            return bool(original(self, checked))
+        finally:
+            ranges.append((first, len(executed.statements)))
+
+    monkeypatch.setattr(lookup_engine._Lookup, "_carried", carried)
+    checks: list[_Timed] = []
+    plans: list[list[str]] = []
+    outcome, seconds = None, 0.0
+    for warm in (True, False):
+        if not warm:
+            ranges.clear()
+            checks.append(timer.time(lookup_engine._Lookup, "_carried"))
+            executed.record(traffic_site)
+        with Session(traffic_site) as session:
+            session.execute(text(SECOND_LINE_ROWS), {"at": at, "day": DAY, "line": SECOND_LINE})
+            values = {**get_settings(session), "nat.egresses": CARRIED_EXITS}
+            settings = LookupSettings.from_settings(values)
+            began = time.perf_counter()
+            outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
+            seconds = time.perf_counter() - began
+            if not warm:
+                executed.stop()
+                (span,) = ranges
+                for sql, parameters in executed.statements[span[0] : span[1]]:
+                    explained = session.connection().exec_driver_sql(
+                        f"EXPLAIN (ANALYZE) {sql}", parameters
+                    )
+                    plans.append([str(line) for line in explained.scalars()])
+            session.rollback()
+    assert outcome is not None
+    timer.report(f"seen, but not alone, {case}, lookup {seconds:.3f} s")
+    (timed,) = checks
+    (call,) = timed.calls
+    assert call[1:] == (address,)
+    assert outcome.egress is not None
+    assert [e.name for e in outcome.egress.egresses][:1] == (
+        ["hat-2"] if address == SECOND_LINE else ["hat-1"]
+    )
+    for plan in plans:
+        print("\n".join(plan))
+    assert len(plans) == steps, case
+    if case.startswith("busy") and not case.endswith("no_row"):
+        # A session through the address spans the moment: the search on it runs.
+        assert outcome.egress.resolution == "transip"
+        assert outcome.mode == ("exact" if port else "candidates")
+    else:
+        # Nothing went through the address in the check's ranges: the fallback over both lines.
+        assert outcome.egress.resolution == "fallback"
+        other = WAN if address == SECOND_LINE else SECOND_LINE
+        assert outcome.egress.searched.outside_seen == (other,)
+        assert "public_ip_not_transip" in _keys(outcome)
+    # Each step reads the address's own rows of its range only, along its index entries: a busy
+    # address's first step stops at its first row there, the ranges of the others hold none of
+    # its rows. A sequential scan of the partition also read the rows of every other address and
+    # time (``EXISTS`` did for the busy address). Another index may only be the planner's choice
+    # for a range with no row at all, a scan that fetched nothing.
+    for plan in plans:
+        assert not any("Seq Scan" in line for line in plan), case
+        scans, removed = _plan_reads(plan)
+        assert scans, case
+        assert all("transip_transport_time" in index or not n for index, n in scans), scans
+        assert removed == 0, (case, removed)
+    assert timed.seconds < CARRIED_SECONDS, f"{case}: the check took {timed.seconds:.3f} s"
+    assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
 
 
 # -- the event site -----------------------------------------------------------------------------
