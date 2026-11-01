@@ -1,5 +1,7 @@
 import { CircleCheck, CircleDashed, CircleX, TriangleAlert } from 'lucide-react';
 
+import { ApiError } from '@/lib/api';
+import i18n, { setLanguage } from '@/lib/i18n';
 import { makeMe } from '@/test/api-mock';
 import {
   allOkCompliance,
@@ -13,6 +15,7 @@ import {
   canConfirmBackup,
   cardLinks,
   cardTexts,
+  errorWithCode,
   showWizardLink,
   summaryFigures,
   toneCounts,
@@ -154,5 +157,35 @@ describe('administrator actions', () => {
       card.tone = tone;
       expect(showWizardLink(status, ADMIN), tone).toBe(true);
     }
+  });
+});
+
+describe('errorWithCode', () => {
+  afterEach(() => {
+    setLanguage('tr');
+  });
+
+  it('gives an API error’s text in the interface language with its code', () => {
+    const refused = new ApiError({
+      status: 409,
+      code: 'config_backup_unreadable',
+      messageTr: 'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi.',
+      messageEn:
+        'The configuration file could not be read; the backup confirmation was not recorded.',
+    });
+    expect(errorWithCode(refused)).toBe(
+      'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi. (config_backup_unreadable)',
+    );
+    setLanguage('en');
+    expect(errorWithCode(refused)).toBe(
+      'The configuration file could not be read; the backup confirmation was not recorded. ' +
+        '(config_backup_unreadable)',
+    );
+  });
+
+  it('gives any other error the generic text without a code', () => {
+    expect(errorWithCode(new TypeError('Failed to fetch'))).toBe(
+      i18n.getFixedT('tr')('errors.unexpected'),
+    );
   });
 });

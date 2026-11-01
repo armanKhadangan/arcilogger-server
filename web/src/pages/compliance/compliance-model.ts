@@ -11,6 +11,7 @@
 import { CircleCheck, CircleDashed, CircleX, TriangleAlert, type LucideIcon } from 'lucide-react';
 
 import type { BadgeProps } from '@/components/ui/badge';
+import { errorMessage, isApiError } from '@/lib/api';
 import type {
   ComplianceCard,
   ComplianceCounts,
@@ -99,4 +100,13 @@ export function canConfirmBackup(card: ComplianceCard, granted: ReadonlySet<stri
 /** "İlk kurulum sihirbazını aç": while a card is not `ok`, for administrators only. */
 export function showWizardLink(status: ComplianceStatus, granted: ReadonlySet<string>): boolean {
   return granted.has(MANAGE_PERMISSION) && status.cards.some((card) => card.tone !== 'ok');
+}
+
+/**
+ * An error the page shows as the server sent it: its text in the interface language and its code,
+ * "Yapılandırma dosyası okunamadı; … (config_backup_unreadable)". Any other error gets the generic
+ * text without a code.
+ */
+export function errorWithCode(error: unknown): string {
+  return isApiError(error) ? `${errorMessage(error)} (${error.code})` : errorMessage(error);
 }

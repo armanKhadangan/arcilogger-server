@@ -1,4 +1,5 @@
 import { FileDown, ListChecks, RefreshCw } from 'lucide-react';
+import { useId } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -7,7 +8,7 @@ import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, type ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import type { ComplianceStatus } from '@/lib/compliance-types';
 import { formatNumber, formatTime } from '@/lib/format';
@@ -17,6 +18,7 @@ import { ComplianceCardView } from './compliance-card';
 import {
   canConfirmBackup,
   cardLinks,
+  errorWithCode,
   showWizardLink,
   summaryFigures,
   toneCounts,
@@ -37,9 +39,13 @@ export interface ComplianceViewProps {
   /** "Uyum Durumu Raporu (PDF)" (`GET /compliance/report.pdf`). */
   onExport: () => void;
   exporting: boolean;
+  /** The export's error, shown beside "Uyum Durumu Raporu (PDF)" with its code (#24). */
+  exportError?: ApiError | null;
   /** `POST /compliance/config-backup`; resolves once it is recorded, rejects with its error. */
   onConfirmBackup: () => Promise<unknown>;
   confirming: boolean;
+  /** The confirmation's error (409 `config_backup_unreadable`), shown in its dialog (#24). */
+  confirmError?: ApiError | null;
 }
 
 /**
@@ -57,10 +63,13 @@ export function ComplianceView({
   onRefresh,
   onExport,
   exporting,
+  exportError = null,
   onConfirmBackup,
   confirming,
+  confirmError = null,
 }: ComplianceViewProps) {
   const { t } = useTranslation();
+  const exportErrorId = useId();
   const lang = currentLang();
   const { permissions } = useAuth();
   const figures = status ? summaryFigures(status.counts) : null;
@@ -80,10 +89,28 @@ export function ComplianceView({
               <RefreshCw aria-hidden="true" />
               {t('compliance.refresh')}
             </Button>
-            <Button variant="secondary" size="sm" busy={exporting} onClick={onExport}>
-              <FileDown aria-hidden="true" />
-              {t('compliance.export')}
-            </Button>
+            <span className="flex flex-col items-end gap-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                busy={exporting}
+                onClick={onExport}
+                aria-describedby={exportError ? exportErrorId : undefined}
+              >
+                <FileDown aria-hidden="true" />
+                {t('compliance.export')}
+              </Button>
+              {exportError ? (
+                <span
+                  id={exportErrorId}
+                  role="alert"
+                  className="max-w-xs text-right text-xs break-words text-danger-ink"
+                  data-testid="compliance-export-error"
+                >
+                  {errorWithCode(exportError)}
+                </span>
+              ) : null}
+            </span>
           </>
         }
       />
@@ -142,7 +169,9 @@ export function ComplianceView({
                 <ComplianceCardView
                   card={card}
                   links={cardLinks(card, permissions)}
-                  {...(canConfirmBackup(card, permissions) ? { onConfirmBackup, confirming } : {})}
+                  {...(canConfirmBackup(card, permissions)
+                    ? { onConfirmBackup, confirming, confirmError }
+                    : {})}
                 />
               </li>
             ))}

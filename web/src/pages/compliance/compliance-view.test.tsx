@@ -35,6 +35,27 @@ const AUDITOR: Me = {
 /** `compliance.read` alone: no page a card links to may be opened. */
 const READER: Me = { ...makeMe('viewer'), permissions: ['compliance.read'] };
 
+/** 409 `config_backup_unreadable`, worded as contract 2.7 words it. */
+function backupUnreadable(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: 'config_backup_unreadable',
+    messageTr: 'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi.',
+    messageEn:
+      'The configuration file could not be read; the backup confirmation was not recorded.',
+  });
+}
+
+/** A failed `GET /compliance/report.pdf`, worded as the API's `internal_error`. */
+function exportFailed(): ApiError {
+  return new ApiError({
+    status: 500,
+    code: 'internal_error',
+    messageTr: 'Beklenmeyen bir hata oluştu; ayrıntılar sistem kaydında.',
+    messageEn: 'An unexpected error occurred; details are in the system log.',
+  });
+}
+
 const TITLES_TR = [
   'Log kaynakları veri gönderiyor',
   'Dünün kayıtları mühürlendi ve doğrulandı',
@@ -90,16 +111,21 @@ function renderView(props: Partial<ComplianceViewProps> = {}, me: Me = ADMIN) {
     ...handlers,
     ...props,
   };
-  const view = render(
+  const tree = (shown: ComplianceViewProps) => (
     <MemoryRouter>
       <AuthProvider me={me}>
         <TooltipProvider>
-          <ComplianceView {...all} />
+          <ComplianceView {...shown} />
         </TooltipProvider>
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
-  return { ...view, ...handlers, props: all };
+  const view = render(tree(all));
+  /** The same view with new props, as the page gives them while it stays mounted. */
+  const update = (next: Partial<ComplianceViewProps>) => {
+    view.rerender(tree({ ...all, ...next }));
+  };
+  return { ...view, ...handlers, props: all, update };
 }
 
 function cards() {
@@ -236,19 +262,77 @@ describe('Uyum Durumu', () => {
 
   it('keeps the dialog open with the error of a refused confirmation', async () => {
     const user = userEvent.setup();
-    const refused = new ApiError({
-      status: 409,
-      code: 'config_backup_unreadable',
-      messageTr: 'Yapılandırma dosyası okunamadı.',
-      messageEn: 'The configuration file could not be read.',
-    });
-    renderView({ onConfirmBackup: vi.fn(() => Promise.reject(refused)) });
+    renderView({ onConfirmBackup: vi.fn(() => Promise.reject(backupUnreadable())) });
     await user.click(screen.getByRole('button', { name: 'Yapılandırma yedeğini aldım' }));
     await user.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Onaylıyorum' }),
     );
     expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(
-      'Yapılandırma dosyası okunamadı.',
+      'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi. (config_backup_unreadable)',
+    );
+    act(() => {
+      setLanguage('en');
+    });
+    expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(
+      'The configuration file could not be read; the backup confirmation was not recorded. ' +
+        '(config_backup_unreadable)',
+    );
+  });
+
+  it('shows the caller’s confirmError in the dialog, also when it arrives while open', async () => {
+    const user = userEvent.setup();
+    // The caller's promise stays pending; the error comes through the prop alone.
+    const { update } = renderView({ onConfirmBackup: vi.fn(() => new Promise(() => {})) });
+    await user.click(screen.getByRole('button', { name: 'Yapılandırma yedeğini aldım' }));
+    const dialog = screen.getByRole('dialog', { name: 'Yapılandırma yedeğini aldım' });
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+    update({ confirmError: backupUnreadable() });
+    expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(
+      'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi. (config_backup_unreadable)',
+    );
+    act(() => {
+      setLanguage('en');
+    });
+    expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(
+      'The configuration file could not be read; the backup confirmation was not recorded. ' +
+        '(config_backup_unreadable)',
+    );
+    // Only in the dialog: the page itself shows no error.
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('shows a confirmError passed before the dialog opens once it is opened', async () => {
+    const user = userEvent.setup();
+    renderView({ confirmError: backupUnreadable() });
+    expect(screen.queryByRole('alert')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Yapılandırma yedeğini aldım' }));
+    expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(
+      'Yapılandırma dosyası okunamadı; yedek onayı kaydedilmedi. (config_backup_unreadable)',
+    );
+  });
+
+  it('shows the export’s error with its code beside the PDF button', () => {
+    const { update } = renderView();
+    expect(screen.queryByTestId('compliance-export-error')).toBeNull();
+    update({ exportError: exportFailed() });
+    const shown = screen.getByTestId('compliance-export-error');
+    expect(shown).toHaveAttribute('role', 'alert');
+    expect(shown).toHaveTextContent(
+      'Beklenmeyen bir hata oluştu; ayrıntılar sistem kaydında. (internal_error)',
+    );
+    const button = screen.getByRole('button', { name: 'Uyum Durumu Raporu (PDF)' });
+    expect(button).toHaveAccessibleDescription(
+      'Beklenmeyen bir hata oluştu; ayrıntılar sistem kaydında. (internal_error)',
+    );
+    // Beside the button: both in the header's actions, not a page error under it.
+    expect(button.parentElement).toBe(shown.parentElement);
+    expect(screen.queryByText('Denetim sonuçları okunamadı')).toBeNull();
+    expect(cards()).toHaveLength(10);
+    act(() => {
+      setLanguage('en');
+    });
+    expect(screen.getByTestId('compliance-export-error')).toHaveTextContent(
+      'An unexpected error occurred; details are in the system log. (internal_error)',
     );
   });
 
@@ -332,12 +416,18 @@ describe('Uyum Durumu', () => {
 
   it('shows a loading state before the first answer, and the error alone when it failed', () => {
     const { unmount } = renderView({ status: undefined, loading: true, updatedAt: 0 });
+    // The page's h1 and description come before any answer (#24), as on Kaynaklar.
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Uyum Durumu');
+    expect(
+      screen.getByText('Kayıt toplama, mühürleme ve yedeklemenin teknik denetimleri.'),
+    ).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Yükleniyor…' })).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Denetimler' })).toBeNull();
     expect(screen.queryByText(/Güncellendi/)).toBeNull();
     unmount();
 
     renderView({ status: undefined, error: new TypeError('Failed to fetch'), updatedAt: 0 });
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Uyum Durumu');
     expect(screen.getByRole('alert')).toHaveTextContent('Denetim sonuçları okunamadı');
     expect(screen.queryByRole('list', { name: 'Denetimler' })).toBeNull();
     expect(screen.queryByRole('status', { name: 'Yükleniyor…' })).toBeNull();

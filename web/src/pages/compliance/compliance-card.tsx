@@ -8,14 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { toast } from '@/components/ui/toast';
-import { errorMessage } from '@/lib/api';
+import type { ApiError } from '@/lib/api';
 import type { ComplianceCard } from '@/lib/compliance-types';
 import { visibleText } from '@/lib/display';
 import { formatDateTime, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 import { isReauthCancelled } from '@/lib/reauth';
 
-import { cardTexts, TONE_STYLE, type CardLinks } from './compliance-model';
+import { cardTexts, errorWithCode, TONE_STYLE, type CardLinks } from './compliance-model';
 
 /** A card's state: the tone's icon and text ("Tamam", "Dikkat", "Sorun", "Bilgi yok"). */
 export function ComplianceBadge({ tone }: { tone: ComplianceCard['tone'] }) {
@@ -31,26 +31,35 @@ export function ComplianceBadge({ tone }: { tone: ComplianceCard['tone'] }) {
 /**
  * "Yapılandırma yedeğini aldım" with its confirmation (contract 2.3.5): the dialog closes once the
  * server has written the audit entry and shows the error of a refused attempt.
+ *
+ * The error shown is the caller's `confirmError` when it passes one (W4-F's mutation error, e.g.
+ * 409 `config_backup_unreadable`), else the rejection of `onConfirm`; both are usually the same
+ * error, so it is shown once. The rejection is cleared on the next attempt or opening; the
+ * caller's error stays until the caller clears it.
  */
 function ConfirmBackup({
   onConfirm,
   confirming,
+  confirmError,
 }: {
   onConfirm: () => Promise<unknown>;
   confirming: boolean;
+  confirmError: ApiError | null;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its text: the text follows a switch of the interface language.
+  const [refusal, setRefusal] = useState<unknown>(null);
+  const shown = confirmError ?? refusal;
 
   async function confirm() {
-    setError(null);
+    setRefusal(null);
     try {
       await onConfirm();
       setOpen(false);
       toast({ title: t('compliance.backupConfirmed'), variant: 'success' });
     } catch (caught) {
-      if (!isReauthCancelled(caught)) setError(errorMessage(caught));
+      if (!isReauthCancelled(caught)) setRefusal(caught);
     }
   }
 
@@ -60,7 +69,7 @@ function ConfirmBackup({
         variant="secondary"
         size="sm"
         onClick={() => {
-          setError(null);
+          setRefusal(null);
           setOpen(true);
         }}
       >
@@ -74,7 +83,7 @@ function ConfirmBackup({
         description={t('compliance.confirmBackupBody')}
         confirmLabel={t('compliance.confirmBackupAction')}
         busy={confirming}
-        error={error}
+        error={shown ? errorWithCode(shown) : null}
         onConfirm={() => void confirm()}
       />
     </>
@@ -91,12 +100,15 @@ export function ComplianceCardView({
   links,
   onConfirmBackup,
   confirming = false,
+  confirmError = null,
 }: {
   card: ComplianceCard;
   links: CardLinks;
   /** Card 10 for an administrator: the backup confirmation. */
   onConfirmBackup?: () => Promise<unknown>;
   confirming?: boolean;
+  /** The confirmation's error as the caller has it, shown in the dialog. */
+  confirmError?: ApiError | null;
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
@@ -159,7 +171,11 @@ export function ComplianceCardView({
         ) : null}
         {onConfirmBackup ? (
           <div>
-            <ConfirmBackup onConfirm={onConfirmBackup} confirming={confirming} />
+            <ConfirmBackup
+              onConfirm={onConfirmBackup}
+              confirming={confirming}
+              confirmError={confirmError}
+            />
           </div>
         ) : null}
       </CardContent>
