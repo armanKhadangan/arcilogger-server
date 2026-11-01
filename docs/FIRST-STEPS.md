@@ -303,10 +303,11 @@ first affected day.
 - **No department history:** the person in a 5651 result is the assignment at the moment of the
   event, the department is the person's current one (the report says so). A past assignment
   cannot be corrected in the interface (section 5).
-- Only **Uyum Durumu and Sistem** are still placeholders. Working pages: Panel, Kaynaklar and
-  Canlı Akış (section 9), Arama, 5651 Sorgu, Kullanım (section 16), Güvenlik, Mühürleme, Kanıt
-  Paketleri, Cihazlar ve Kişiler (section 12), Raporlar (Panel, Güvenlik and Raporlar: section
-  15), Denetim Kaydı, Ayarlar (users and roles, licence: section 17).
+- Every page of the menu works: Panel, Kaynaklar and Canlı Akış (section 9), Arama, 5651 Sorgu,
+  Kullanım (section 16), Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler (section 12),
+  Raporlar (Panel, Güvenlik and Raporlar: section 15), Uyum Durumu (section 9,
+  [COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md)), Denetim Kaydı, Ayarlar (users and roles,
+  licence: section 17), Sistem ([COMPLIANCE-STATUS.md](COMPLIANCE-STATUS.md) section 4).
 - **Paid modules** (licence, [LICENSING.md](LICENSING.md)): Usage analytics (the Kullanım page,
   the dashboard's usage sections), Scheduled usage reports (the Raporlar page) and Bulk import
   (CSV). All are on during the trial; a module that is off shows its page locked. Everything else

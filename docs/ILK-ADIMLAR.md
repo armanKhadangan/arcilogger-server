@@ -303,10 +303,11 @@ kiraları **hemen**, etkilenen ilk günden yeniden oluşturun.
 - **Departman geçmişi tutulmaz:** 5651 sonucundaki kişi olay anındaki atamadır, departmanı ise
   kişinin bugünkü departmanıdır (rapor bunu belirtir). Geçmişteki bir atama arayüzden
   düzeltilemez (bölüm 5).
-- Menüde yalnızca **Uyum Durumu ve Sistem** henüz yer tutucudur. Çalışan sayfalar: Panel,
-  Kaynaklar ve Canlı Akış (bölüm 9), Arama, 5651 Sorgu, Kullanım (bölüm 16), Güvenlik, Mühürleme,
-  Kanıt Paketleri, Cihazlar ve Kişiler (bölüm 12), Raporlar (Panel, Güvenlik ve Raporlar: bölüm
-  15), Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans: bölüm 17).
+- Menüdeki bütün sayfalar çalışır: Panel, Kaynaklar ve Canlı Akış (bölüm 9), Arama, 5651 Sorgu,
+  Kullanım (bölüm 16), Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve Kişiler (bölüm 12),
+  Raporlar (Panel, Güvenlik ve Raporlar: bölüm 15), Uyum Durumu (bölüm 9,
+  [UYUM-DURUMU.md](UYUM-DURUMU.md)), Denetim Kaydı, Ayarlar (Kullanıcılar ve Roller, Lisans:
+  bölüm 17), Sistem ([UYUM-DURUMU.md](UYUM-DURUMU.md) bölüm 4).
 - **Ücretli modüller** (lisans, [LISANS.md](LISANS.md)): Kullanım analizi (Kullanım sayfası,
   paneldeki kullanım bölümleri), Zamanlanmış kullanım raporları (Raporlar sayfası) ve Toplu içe
   aktarma (CSV). Deneme süresince hepsi açıktır; bir modül kapalıyken sayfası kilitli görünür.
