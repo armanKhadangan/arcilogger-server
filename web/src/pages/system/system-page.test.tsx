@@ -60,8 +60,8 @@ const BLOCKS_TR = [
 interface Serve {
   /** `GET /system` answers this instead of the summary. */
   summary?: () => Response;
-  /** `GET /system/health` answers this instead of the health. */
-  health?: () => Response;
+  /** `GET /system/health` answers this instead of the health (a pending answer too). */
+  health?: () => Response | Promise<Response>;
 }
 
 /** The API as the captured samples have it, for `role`; returns the recorded requests. */
@@ -151,6 +151,27 @@ describe('Sistem page', () => {
     });
     expect(system(calls, '/system')).toHaveLength(2);
     expect(system(calls).every((call) => call.headers.get(BACKGROUND_HEADER) === null)).toBe(true);
+  });
+
+  it('shows skeletons, not "Durum henüz alınmadı.", while the health is still loading', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    serve('admin', { health: () => pending });
+    renderApp('/system');
+    await screen.findByTestId('system-block-disks');
+    expect(within(block('disks')).getAllByRole('meter')).toHaveLength(2);
+    // The health has not answered yet: its four blocks are skeletons, not "not received".
+    expect(screen.queryByTestId('system-health-missing')).toBeNull();
+    for (const id of ['services', 'tasks', 'jobs', 'clock'])
+      expect(screen.queryByTestId(`system-block-${id}`)).toBeNull();
+    answer(jsonResponse(200, HEALTH.health));
+    expect(await screen.findByTestId('system-block-clock')).toHaveTextContent(
+      'time.ume.tubitak.gov.tr',
+    );
+    expect(block('services')).toHaveTextContent('ArciCollector');
+    expect(screen.queryByTestId('system-health-missing')).toBeNull();
   });
 
   it("shows a failed summary as the page's error and keeps the health's blocks", async () => {
