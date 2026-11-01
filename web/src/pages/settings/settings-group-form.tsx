@@ -66,31 +66,42 @@ export function SettingsGroupForm({
   const reset = useResetSetting();
   const [values, setValues] = useState<Record<string, Draft>>(() => drafts(settings));
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** The codes of the server's refusals, by key (the exits' editor shows its code). */
+  const [codes, setCodes] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<unknown>(null);
   const [conflict, setConflict] = useState(false);
   const [resetting, setResetting] = useState<string | null>(null);
   const shown = useRef(JSON.stringify(drafts(settings)));
+  /**
+   * A save went through: the server's next answer replaces the drafts that were saved, even when
+   * they read differently from it (an exit added in the editor has a row key of its own).
+   */
+  const resync = useRef(false);
   const serverText = JSON.stringify(drafts(settings));
 
-  /** Keys whose draft is not the stored value (a draft that does not parse counts as changed). */
+  /**
+   * Keys the administrator edited to another value: the draft is not the one the stored value
+   * opens with, and it stands for another value (a draft that does not parse counts as changed).
+   * A stored value its editor reads back differently is never a change of its own.
+   */
   const changed = useMemo(
     () =>
       settings.filter((setting) => {
         const draft = values[setting.key];
-        if (draft === undefined) return false;
+        if (draft === undefined || JSON.stringify(draft) === JSON.stringify(toDraft(setting)))
+          return false;
         const parsed = fromDraft(setting, draft);
-        return parsed.error !== undefined
-          ? JSON.stringify(draft) !== JSON.stringify(toDraft(setting))
-          : !sameValue(parsed.value, setting.value);
+        return parsed.error !== undefined || !sameValue(parsed.value, setting.value);
       }),
     [settings, values],
   );
   const dirty = changed.length > 0;
 
   // A new answer of the server (after a save, a reset, someone else's change) is taken when
-  // nothing is being edited.
+  // nothing is being edited, and always right after a save.
   useEffect(() => {
-    if (JSON.stringify(values) === shown.current) setValues(drafts(settings));
+    if (resync.current || JSON.stringify(values) === shown.current) setValues(drafts(settings));
+    resync.current = false;
     shown.current = serverText;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverText]);
@@ -104,6 +115,9 @@ export function SettingsGroupForm({
     setErrors((current) =>
       Object.fromEntries(Object.entries(current).filter(([name]) => name !== key)),
     );
+    setCodes((current) =>
+      Object.fromEntries(Object.entries(current).filter(([name]) => name !== key)),
+    );
   }
 
   async function save() {
@@ -114,16 +128,24 @@ export function SettingsGroupForm({
     for (const setting of changed) {
       const parsed = fromDraft(setting, values[setting.key] ?? toDraft(setting));
       if (parsed.error !== undefined)
-        found[setting.key] = t(parsed.error, { min: setting.min, max: setting.max });
+        found[setting.key] = t(parsed.error, {
+          min: setting.min,
+          max: setting.max,
+          ...parsed.params,
+        });
       else changes.push({ key: setting.key, old: setting.value, value: parsed.value });
     }
     setErrors(found);
+    setCodes({});
     if (Object.keys(found).length > 0) {
       focusFirstError(found, settingControlId);
       return;
     }
     try {
       const result = await withReauth(() => patch.mutateAsync({ changes }));
+      // The settings were fetched again before the request settled; the group renders them next
+      // (a save the server found unchanged brings no new answer to wait for).
+      if (result.changed.length > 0) resync.current = true;
       toast({
         title: t('settings.application.saved', { count: result.changed.length }),
         variant: 'success',
@@ -140,6 +162,7 @@ export function SettingsGroupForm({
           ]),
         );
         setErrors(byKey);
+        setCodes(Object.fromEntries(problems.map((problem) => [problem.key, problem.code])));
         focusFirstError(byKey, settingControlId);
       } else if (isApiError(error, 'setting_conflict')) setConflict(true);
       setFailure(error);
@@ -160,6 +183,7 @@ export function SettingsGroupForm({
   }
 
   const busy = patch.isPending;
+  const group = { draft: (key: string) => values[key], edit };
   return (
     <SettingsCard title={title} description={description} testId={testId}>
       <div className="flex flex-col gap-5">
@@ -172,6 +196,8 @@ export function SettingsGroupForm({
               edit(setting.key, draft);
             }}
             error={errors[setting.key]}
+            errorCode={codes[setting.key]}
+            group={group}
             disabled={!canEdit || busy}
             onReset={() => void resetKey(setting)}
             resetting={resetting === setting.key}
@@ -211,6 +237,7 @@ export function SettingsGroupForm({
               onClick={() => {
                 setValues(drafts(settings));
                 setErrors({});
+                setCodes({});
                 setFailure(null);
               }}
             >

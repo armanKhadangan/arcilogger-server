@@ -1,8 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { useSampleClock } from './fixtures';
-import { mockApi } from './mock-api';
-import { LOOKUPS, RAW, SAMPLE_TODAY } from './samples';
+import type { LookupOut } from '../src/lib/api-types';
+import { outcomeOf } from '../src/lib/lookup-types';
+
+import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
+import { mockApi, type MockApi } from './mock-api';
+import { copy, LOOKUPS, RAW, SAMPLE_TODAY } from './samples';
 
 /** Explanation texts exactly as the API sent them (captured samples). */
 function explanation(lookup: keyof typeof LOOKUPS, key: string): string {
@@ -410,3 +413,210 @@ test.describe('5651 Sorgu', () => {
     await expect(page.getByRole('heading', { name: 'Sorgu #8' })).toBeVisible();
   });
 });
+
+/**
+ * The result view of ADR-0016 (Wave 3 contract 2.13): FortiGate DHCP leases, srcmac steps and
+ * the internet exits, on the captured Wave 3 lookups (`samples/lookups.json`); each is stored in
+ * the mocked API and opened by its id.
+ */
+type Wave3Lookup =
+  | 'fortigate_internal'
+  | 'hat2_candidates'
+  | 'fortigate_renewal_low'
+  | 'srcmac_only'
+  | 'srcmac_conflict'
+  | 'direct_quiet_none'
+  | 'no_egress'
+  | 'internal_exit'
+  | 'unconverted_dhcp'
+  | 'untrusted_match';
+
+/** The Wave 3 captures; `samples.ts` types the Wave 2 keys only. */
+const W3 = LOOKUPS as typeof LOOKUPS & Record<Wave3Lookup, LookupOut>;
+
+async function openStored(page: Page, lookup: LookupOut, title = 'Sorgu'): Promise<MockApi> {
+  const api = await mockApi(page, { signedInAs: 'tolga' });
+  api.records.lookups.set(lookup.id, copy(lookup));
+  await page.goto(`/lookup/${String(lookup.id)}`);
+  await expect(page.getByRole('heading', { name: `${title} #${String(lookup.id)}` })).toBeVisible();
+  return api;
+}
+
+/** The lease step (or the srcmac step in its place) of the first chain on the page. */
+function leaseStep(page: Page) {
+  return page
+    .getByRole('listitem')
+    .filter({ has: page.getByText(/^MAC \((DHCP\/ARP|srcmac)\)$/) })
+    .first();
+}
+
+const UNCONVERTED_TR =
+  'FortiGate DHCP kaydı (kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez)';
+const UNCONVERTED_EN =
+  'FortiGate DHCP record (not in the lease timeline; no chain built; no confidence given)';
+
+test.describe('5651 Sorgu — FortiGate DHCP, srcmac and internet exits', () => {
+  test.beforeEach(async ({ page }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+  });
+
+  test('FortiGate-only: the lease time and last DHCP evidence; a low chain says why', async ({
+    page,
+  }) => {
+    await openStored(page, W3.fortigate_internal);
+    const step = leaseStep(page);
+    await expect(step.getByTestId('lease-fortigate')).toHaveText(
+      'kira süresi (FortiGate kaydı): 86400 sn · son DHCP kanıtı: 01.09.2026 10:42:18',
+    );
+    await expect(step.getByTestId('lease-source')).toHaveText('Kaynak: DHCP kaydı (FortiGate)');
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.fortigate_renewal_low);
+    const low = leaseStep(page);
+    await expect(low.getByText('Düşük güven', { exact: true })).toBeVisible();
+    await expect(low.locator('[data-explanation="lease_renewal_not_seen"]')).toContainText(
+      'Bu kiranın istenen andan önceki son DHCP kaydı 03.09.2026 08:00:00 anında',
+    );
+  });
+
+  test('srcmac: partial evidence in place of the lease; a conflict shows both chains', async ({
+    page,
+  }) => {
+    await openStored(page, W3.srcmac_only);
+    const step = leaseStep(page);
+    await expect(step.getByText('Kısmi kanıt: srcmac')).toBeVisible();
+    await expect(step).toContainText('FortiGate oturum kaydının srcmac alanı (vlan42 arayüzü)');
+    await expect(page.getByText('Bu anda geçerli kira kaydı yok')).toHaveCount(0);
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.srcmac_conflict);
+    const conflict = page.getByTestId('ip-conflict');
+    await expect(conflict.getByText('srcmac farklı: 2 olası cihaz')).toBeVisible();
+    await expect(conflict.getByRole('region', { name: 'Olasılık 1' })).toContainText(
+      '00:00:5e:00:53:77',
+    );
+    const srcmac = conflict.getByRole('region', { name: 'Olasılık 2 (srcmac, kısmi kanıt)' });
+    await expect(srcmac).toContainText('00:00:5e:00:53:57');
+    await expect(srcmac.getByText('Kısmi kanıt: srcmac', { exact: true })).toBeVisible();
+    await expect(srcmac.getByText('MAC (DHCP/ARP)')).toHaveCount(0);
+  });
+
+  test('hat-2: the exit line and the match on hat-2; the unconfigured sender', async ({ page }) => {
+    await openStored(page, W3.hat2_candidates);
+    await expect(page.getByTestId('lookup-exit')).toHaveText(
+      "Genel IP — hat-2 (Yedek hat), Servis sağlayıcı NAT'ı",
+    );
+    const matches = page.getByTestId('match');
+    await expect(matches).toHaveCount(1);
+    await expect(matches.getByTestId('match-exit')).toHaveText(
+      'Çıkış: hat-2 (Yedek hat) · dstintf wan2',
+    );
+    await expect(matches.getByTestId('lease-fortigate')).toHaveText(
+      'kira süresi (FortiGate kaydı): 86400 sn · son DHCP kanıtı: 01.09.2026 09:37:52',
+    );
+    await expect(matches.getByTestId('untrusted-sender')).toHaveCount(0);
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.untrusted_match);
+    const listed = page.getByTestId('match');
+    await expect(listed).toHaveCount(4);
+    await expect(listed.getByTestId('untrusted-sender')).toHaveCount(1);
+    await expect(listed.nth(1).getByTestId('untrusted-sender')).toHaveText(
+      'Tanımsız gönderici: unknown-192.0.2.7',
+    );
+    await expect(
+      listed.nth(0).getByText('Zincir kurulamadı: o anda bu iç IP için kira kaydı yok'),
+    ).toBeVisible();
+  });
+
+  test('nobody listed: no exit, a quiet direct line, the DMZ NAT address', async ({ page }) => {
+    await openStored(page, W3.no_egress);
+    await expect(page.getByTestId('lookup-exit')).toHaveText('Çıkış yok');
+    await expect(
+      page.getByText(/^192\.0\.2\.44 hiçbir internet çıkışına tanımlı değil/),
+    ).toBeVisible();
+    await expect(page.getByTestId('match')).toHaveCount(0);
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.direct_quiet_none);
+    await expect(page.getByTestId('lookup-exit')).toHaveText('Genel IP — hat-1, Doğrudan');
+    await expect(
+      page.getByText(/^FortiGate bu zaman aralığında 203\.0\.113\.200:51001 için oturum/),
+    ).toBeVisible();
+    await expect(page.getByTestId('match')).toHaveCount(0);
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await openStored(page, W3.internal_exit);
+    await expect(page.getByTestId('lookup-exit')).toHaveText(
+      'NAT adresi — dmz, İnternet çıkışı değil',
+    );
+    await expect(page.getByText(/^172\.20\.99\.1, dmz tanımına göre/)).toBeVisible();
+  });
+
+  test('an unconverted FortiGate DHCP record: the fixed label, never the stored summary', async ({
+    page,
+  }) => {
+    await openStored(page, W3.unconverted_dhcp);
+    const card = page.getByTestId('unconverted-dhcp');
+    await expect(card).toContainText('Kira zaman çizelgesine girmemiş FortiGate DHCP kaydı');
+    await expect(card.getByRole('button', { name: /^FortiGate olay kaydı · / })).toContainText(
+      UNCONVERTED_TR,
+    );
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await usePreferences(page, { lang: 'en' });
+    await openStored(page, W3.unconverted_dhcp, 'Lookup');
+    await expect(page.getByTestId('unconverted-dhcp').getByRole('button')).toContainText(
+      UNCONVERTED_EN,
+    );
+    await expect(page.getByTestId('unconverted-dhcp')).not.toContainText(
+      'kira zaman çizelgesine girmedi',
+    );
+  });
+
+  test('a lookup stored before ADR-0016 shows no exit rows', async ({ page }) => {
+    // As stored before ADR-0016: the captured exact lookup without the members it added.
+    const stored = copy(LOOKUPS.exact);
+    const found = outcomeOf(stored);
+    if (!found) throw new Error('no outcome in the exact lookup');
+    delete found.egress;
+    delete found.unconverted_dhcp;
+    for (const match of found.matches) {
+      delete match.egress;
+      delete match.untrusted_sources;
+      delete match.traffic.srcintf;
+      delete match.traffic.dstintf;
+      delete match.traffic.srcmac;
+      if (match.chain) {
+        delete match.chain.mac_source;
+        if (match.chain.lease) {
+          delete match.chain.lease.source_table;
+          delete match.chain.lease.lease_seconds;
+          delete match.chain.lease.last_dhcp_evidence;
+        }
+      }
+    }
+    await openStored(page, stored);
+    await expect(page.getByTestId('chain-summary')).toContainText('00:00:5e:00:53:57');
+    await expect(page.getByTestId('lookup-exit')).toHaveCount(0);
+    await expect(page.getByTestId('match-exit')).toHaveCount(0);
+    await expect(page.getByTestId('lease-source')).toHaveCount(0);
+  });
+});
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  for (const name of [
+    'hat2_candidates',
+    'srcmac_conflict',
+    'fortigate_renewal_low',
+    'untrusted_match',
+    'unconverted_dhcp',
+  ] as const) {
+    test(`5651 Sorgu ADR-0016 result accessibility — ${name}, ${theme}`, async ({ page }) => {
+      await usePreferences(page, { theme });
+      await useSampleClock(page, SAMPLE_TODAY);
+      await openStored(page, W3[name]);
+      await expectNoA11yViolations(page);
+    });
+  }
+}
