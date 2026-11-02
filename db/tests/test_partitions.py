@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from arcilogger_core.timeutil import site_day
+from arcilogger_db.clocksamples import ClockKey, minute_of, upsert_samples
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.migrate import upgrade
 from arcilogger_db.models import TIME_SERIES_TABLES, Message, MtDhcp, SearchCount
@@ -251,9 +252,11 @@ def test_retention_deletes_the_search_counts_of_what_it_drops(plain_engine: Engi
         )
         upsert_counts(connection, _counts_of_the_rows(connection))
         assert sum(_stored_counts(connection).values()) == 6
+        upsert_samples(connection, {ClockKey("core-r1", minute_of(when), 0): 1 for when in times})
     with plain_engine.begin() as connection:
         report = drop_before(connection, date(2026, 9, 15))
         assert report.counts_deleted == 3
+        assert report.clock_samples_deleted == 3  # received before September, site time
         assert report.purged == 1
         assert sum(_counts_of_the_rows(connection).values()) == 3
         assert _stored_counts(connection) == _counts_of_the_rows(connection)

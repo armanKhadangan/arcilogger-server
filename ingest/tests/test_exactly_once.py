@@ -1,7 +1,7 @@
 """Exactly once: an interruption at any point never loads a line twice and never skips one.
 
-Rows, offsets and the search summary counts (``search_counts``, written in the same transaction)
-agree after every one of these:
+Rows, offsets, the search summary counts (``search_counts``) and the clock samples
+(``source_clock_samples``), both written in the same transaction, agree after every one of these:
 
 * every step of the load transaction is interrupted in turn (the hook raises, like a crash);
 * a second instance moves the offsets under a running one (compare-and-set refuses the batch);
@@ -64,11 +64,15 @@ def fill(world: World) -> None:
 
 
 def counts_agree(connection: Connection) -> None:
-    """``search_counts`` holds exactly the loaded rows: equal to their recount, nothing else."""
+    """``search_counts`` holds exactly the loaded rows: equal to their recount, nothing else;
+    ``source_clock_samples`` counts exactly the rows with a device time of their own."""
     report = verify(connection, VERIFY_HOURS, now=VERIFY_NOW)
     assert report.differences == []
     total = connection.execute(text("SELECT coalesce(sum(n), 0) FROM search_counts")).scalar()
     assert report.lines == total == len(loaded(connection))
+    sampled = "SELECT coalesce(sum(n), 0) FROM source_clock_samples"
+    timed = "SELECT count(*) FROM messages WHERE time <> time_received"
+    assert connection.execute(text(sampled)).scalar() == connection.execute(text(timed)).scalar()
 
 
 def counts_consistent(engine: Engine) -> None:

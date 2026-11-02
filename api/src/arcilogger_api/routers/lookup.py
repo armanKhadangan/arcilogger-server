@@ -48,7 +48,7 @@ import hashlib
 import ipaddress
 import logging
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from time import monotonic
@@ -81,6 +81,7 @@ from arcilogger_db.models import Lookup, LookupReport
 from arcilogger_db.settings import get_settings
 from arcilogger_worker.lookup import (
     AttributionChain,
+    EvidenceRef,
     LookupOutcome,
     LookupRequest,
     LookupSettings,
@@ -571,19 +572,27 @@ def _chain_ids(chain: AttributionChain) -> dict[str, Any]:
         "lease": chain.lease.lease_id if chain.lease else None,
         "person": chain.person.person_id if chain.person else None,
     }
+    if chain.mac_source == "srcmac" and chain.device is not None:
+        # the session record whose srcmac gave the MAC (ADR-0016 D10): no lease names it
+        ids["srcmac_traffic"] = _row_ids(chain.device.evidence)
     if chain.alternatives:
         ids["alternatives"] = [_chain_ids(other) for other in chain.alternatives]
     return ids
 
 
+def _row_ids(evidence: Iterable[EvidenceRef]) -> list[int]:
+    return sorted({e.row_id for e in evidence if e.row_id is not None})
+
+
 def result_ids(outcome: LookupOutcome) -> list[dict[str, Any]]:
-    """Ids behind each result (for the audit entry): traffic rows, lease and person ids."""
+    """Ids behind each result (for the audit entry): traffic rows, lease and person ids, and
+    the session record behind a srcmac chain (``srcmac_traffic``)."""
     results: list[dict[str, Any]] = []
     for match in outcome.matches:
         item: dict[str, Any] = {
             "kind": match.kind,
             "score": match.score,
-            "traffic": sorted({e.row_id for e in match.traffic.evidence if e.row_id is not None}),
+            "traffic": _row_ids(match.traffic.evidence),
         }
         if match.chain is not None:
             item.update(_chain_ids(match.chain))
@@ -591,6 +600,19 @@ def result_ids(outcome: LookupOutcome) -> list[dict[str, Any]]:
     if outcome.attribution is not None:
         results.append({"kind": "internal", **_chain_ids(outcome.attribution)})
     return results
+
+
+def unconverted_ids(outcome: LookupOutcome) -> dict[str, Any]:
+    """The ``fg_event`` rows the outcome cites as unconverted FortiGate DHCP lines (D8), for the
+    audit entry: ``unconverted`` (at most :data:`AUDIT_RESULTS` ids) and ``unconverted_listed``;
+    no keys when it cites none, so other entries keep their shape."""
+    unconverted = _row_ids(outcome.unconverted_dhcp)
+    if not unconverted:
+        return {}
+    return {
+        "unconverted": unconverted[:AUDIT_RESULTS],
+        "unconverted_listed": min(len(unconverted), AUDIT_RESULTS),
+    }
 
 
 def egress_details(outcome: LookupOutcome) -> dict[str, Any] | None:
@@ -729,22 +751,24 @@ def run_5651(
     db.add(row)
     db.flush()
     results = result_ids(outcome)
+    audit: dict[str, Any] = {
+        "lookup_id": row.id,
+        "request": _request_details(row),
+        "query": query,
+        "mode": outcome.mode,
+        "result_count": outcome.result_count,
+        "truncated": outcome.truncated,
+        "results": results[:AUDIT_RESULTS],
+        "results_listed": min(len(results), AUDIT_RESULTS),
+        "egress": egress_details(outcome),
+    }
+    audit.update(unconverted_ids(outcome))
     record_audit(
         db,
         actor=user,
         action="lookup.run",
         target=f"lookup:{row.id}",
-        details={
-            "lookup_id": row.id,
-            "request": _request_details(row),
-            "query": query,
-            "mode": outcome.mode,
-            "result_count": outcome.result_count,
-            "truncated": outcome.truncated,
-            "results": results[:AUDIT_RESULTS],
-            "results_listed": min(len(results), AUDIT_RESULTS),
-            "egress": egress_details(outcome),
-        },
+        details=audit,
         ip=client_ip(request),
     )
     return LookupOut.of(row, None, elapsed_ms=elapsed)
