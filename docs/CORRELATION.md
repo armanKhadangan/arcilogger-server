@@ -427,8 +427,10 @@ a person resolved or dismissed are never changed. The incremental job only raise
     whichever is further from 0, each with at least 10 rows; beyond 120 s, or beyond max(120 s, the lookup tolerance) for a source
     measured only for the session search; D28);
   - `source_clock_shared` (#82): the device times around the moment were also used by records a
-    cited or searched source sent at another real time, its clock changed later (the third sample
-    above decided); the sessions found may include ones made that much later or earlier;
+    cited or searched source sent at another real time, its clock changed later: named only when
+    the clock at the moment (the first two samples above) was within its limit and the third is
+    beyond it, otherwise `source_clock_offset`; the sessions found may include ones made that
+    much later or earlier;
   - `srcmac_mismatch`: below.
 - **FortiGate notes on a chain** whose lease is `fg_dhcp` (info): `fortigate_format_unverified`
   while `dhcp.fortigate_format_verified` is off, `fortigate_format_verified` (who marked it and

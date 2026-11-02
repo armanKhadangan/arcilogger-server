@@ -6790,37 +6790,44 @@ hours away from their arrival, so neither sample held them. The offset is now me
   counts when that offset and its neighbours within 5 s (`SHIFT_BAND_SECONDS`: one clock's rows
   spread over neighbouring whole seconds) hold more than half of the minute's rows, so a few late
   lines among rows on time do not; its offsets behind and ahead give one median each, so a small
-  shift of many rows cannot hide a large one of fewer. Each sample counts with at least 10 rows; the
-  median further from 0 is the source's offset. The limits (120 s; max(120 s, tolerance) for a
-  source measured only for the session search), the printed rounding and the source choice (cited
-  sources, or the searched sources of an empty search through `search_counts`) are unchanged. With a
-  clock set hours back half an hour before T, the rows with a device time around T were sent on time
-  (median 0) while the rows received around T are hours behind: an exact request at T now gives
-  `none` with `source_clock_offset` (it cites no row, so no chain), an internal lookup's chain is
-  `low` with it; a lookup at the device moment of the jumped rows behaves as before. **A new
-  explanation key, `source_clock_shared`** (#82; 2.11 row, TR/EN texts in `lookup/texts.py`, web
-  tone `warning`, the reading-table row of RAPOR and DENETCI-KILAVUZU, `READING_TABLE_KEYS`): with a
-  clock set 3 hours back two hours after T and lighter traffic after it, the rows with a device time
-  around T were mostly sent on time and the rows received around T all were (both medians 0), but
-  the rows sent after the change carry device times around T. The search at T finds the sessions of
-  T and of T + 3 h (another client on the same NAT port); the third sample names −10800 s and every
-  chain is `low` (before #82, both chains `high`). The offset is that of the rows sent at another
-  real time, so `source_clock_offset`'s text ("the record times around T differed…", and its remedy
-  to shift the moment by the offset) would mislead: `source_clock_shared` says that the moment's
-  device times were also used by records sent at another real time, that the sessions found may
-  include ones made that much later or earlier, and to check a session's real time against the
-  receive time in its raw record; it has no shift remedy. The same mirrored case (a clock set ahead
-  and corrected an hour later, looked up where its device times landed) gives +10800 s. A burst of a
-  device's buffered late lines can make the receive-time sample look behind for its minutes; that
-  errs on the safe side (a `low` chain with the offset stated, never a silent `high`). Perf (3.8):
-  two more primary-key queries per measured source, inside the lookup clock guard (0.2 s for two
-  sources; the third reads about 3,300 keys of 50 h, T ± 25 h, 2.5 ms on the guard site's 30 days of
-  samples). Tests: `worker/tests/test_lookup_fortigate_only.py`
+  shift of many rows cannot hide a large one of fewer. Each sample counts with at least 10 rows. The
+  clock at the moment is the median further from 0 of the first two; beyond its limit, the source is
+  named `source_clock_offset` with that median, whatever the third says (a clock steadily off shifts
+  its device times into the window from every minute around it too, and the stored offsets are
+  rounded away from zero; #95 review). Only when the clock at the moment is within its limit and the
+  third sample, its side further from 0, is beyond it, the source is named `source_clock_shared`.
+  The limits (120 s; max(120 s, tolerance) for a source measured only for the session search), the
+  printed rounding and the source choice (cited sources, or the searched sources of an empty search
+  through `search_counts`) are unchanged. With a clock set hours back half an hour before T, the
+  rows with a device time around T were sent on time (median 0) while the rows received around T are
+  hours behind: an exact request at T now gives `none` with `source_clock_offset` (it cites no row,
+  so no chain), an internal lookup's chain is `low` with it; a lookup at the device moment of the
+  jumped rows behaves as before. **A new explanation key, `source_clock_shared`** (#82; 2.11 row,
+  TR/EN texts in `lookup/texts.py`, web tone `warning`, the reading-table row of RAPOR and
+  DENETCI-KILAVUZU, `READING_TABLE_KEYS`): with a clock set 3 hours back two hours after T and
+  lighter traffic after it, the rows with a device time around T were mostly sent on time and the
+  rows received around T all were (both medians 0), but the rows sent after the change carry device
+  times around T. The search at T finds the sessions of T and of T + 3 h (another client on the same
+  NAT port); the third sample names −10800 s and every chain is `low` (before #82, both chains
+  `high`). The offset is that of the rows sent at another real time, so `source_clock_offset`'s text
+  ("the record times around T differed…", and its remedy to shift the moment by the offset) would
+  mislead: `source_clock_shared` says that the moment's device times were also used by records sent
+  at another real time, that the sessions found may include ones made that much later or earlier,
+  and to check a session's real time against the receive time in its raw record; it has no shift
+  remedy. The same mirrored case (a clock set ahead and corrected an hour later, looked up where its
+  device times landed) gives +10800 s. A burst of a device's buffered late lines can make the
+  receive-time sample look behind for its minutes; that errs on the safe side (a `low` chain with
+  the offset stated, never a silent `high`). Perf (3.8): two more primary-key queries per measured
+  source, inside the lookup clock guard (0.2 s for two sources; the third reads about 3,300 keys of
+  50 h, T ± 25 h, 2.5 ms on the guard site's 30 days of samples). Tests:
+  `worker/tests/test_lookup_fortigate_only.py`
   (`test_a_clock_set_hours_back_is_named_at_the_real_moment`, fails on the device-time sample;
   `test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before`;
   `test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times` and
   `test_a_clock_set_ahead_and_corrected_is_named_at_the_moments_whose_device_times_it_used`, both
-  fail without the third sample; `test_a_source_on_time_all_day_is_trusted_as_before`),
+  fail without the third sample; `test_a_source_on_time_all_day_is_trusted_as_before`;
+  `test_a_clock_steadily_behind_is_named_as_off_at_the_moment[steady, drifting]`, the drifting one
+  named `source_clock_shared` when the sample furthest from 0 decided),
   `db/tests/test_clocksamples.py` (`test_the_minutes_that_shifted_their_device_times_into_a_range`,
   `test_a_clock_spread_over_neighbouring_seconds_is_one_clock`,
   `test_the_range_of_device_times_a_minute_falls_into`), `worker/tests/test_lookup_texts.py`

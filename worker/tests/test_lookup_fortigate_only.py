@@ -45,6 +45,7 @@ from arcilogger_db.models import (
     SearchCount,
     Setting,
     Source,
+    SourceClockSample,
     Vlan,
 )
 from arcilogger_db.searchcounts import rebuild_stream
@@ -2758,6 +2759,46 @@ def test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times(
     assert inside.attribution is not None
     assert inside.attribution.confidence == "low"
     assert offsets(inside, CLOCK_SHARED) == {"fortigate": -10800}
+
+
+@pytest.mark.parametrize(
+    ("drift", "printed"), [(0.0, -301), (12.0, None)], ids=["steady", "drifting"]
+)
+def test_a_clock_steadily_behind_is_named_as_off_at_the_moment(
+    db_session: Session, evidence: Evidence, drift: float, printed: int | None
+) -> None:
+    """A clock about 5 minutes behind all day (no NTP; #82 review), steady or drifting 12 s an
+    hour further behind. Its device times are shifted into the window from the minutes around
+    it too, stored away from zero (-300.4 s as -301); drifting, the shared minutes (received
+    about 5 minutes after their device times) lie further behind than the minutes received
+    around T and, rounded, further than the device-time median too. The clock was off at the
+    moment itself, so the lookup names ``source_clock_offset`` with the moment's median and its
+    remedy, never ``source_clock_shared``; the chain is ``low``. Taking the sample furthest
+    from 0 named the drifting clock ``shared``."""
+    evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
+    evidence.traffic(AT, PC, 51001, transip=WAN)
+    received = AT - timedelta(hours=3)
+    while received < AT + timedelta(hours=3):
+        hours = (received - AT) / timedelta(hours=1)
+        behind = timedelta(seconds=300.4 + drift * hours)
+        evidence.heartbeat(received - behind, source="fortigate", received=received)
+        received += timedelta(minutes=2)
+    as_loaded(db_session, -timedelta(seconds=300.4))
+    clocksamples.rebuild(
+        db_session.connection(), "fortigate", tr(DAY, 0), tr(DAY + timedelta(days=1), 0)
+    )
+    db_session.commit()
+    build(db_session, DAY, DAY)
+    wan_exit(db_session)
+    if printed is not None:  # what the second and third samples read
+        assert db_session.scalars(select(SourceClockSample.seconds).distinct()).all() == [printed]
+    outcome = exact_request(db_session)
+    (match,) = outcome.matches
+    assert match.chain is not None
+    assert match.chain.confidence == "low"
+    named = offsets(outcome)["fortigate"]
+    assert named == printed if printed is not None else -304 <= named <= -299, named
+    assert CLOCK_SHARED not in {e.key for e in outcome.explanations}
 
 
 def test_a_source_on_time_all_day_is_trusted_as_before(
