@@ -59,8 +59,11 @@ def test_register_script_registers_the_desktop_folder() -> None:
     assert '$PythonW = Join-Path (Split-Path -Parent $Python) "pythonw.exe"' in script
     assert '.Replace("{{PYTHONW}}", $PythonW)' in script
     assert '-TaskPath "\\ARCILOGGER\\Desktop\\"' in script
-    # A program without the folder (an older version) registers no desktop task.
+    # A program without the folder (an older version) registers no desktop task, and a missing
+    # pythonw.exe only warns: a convenience window never fails the installation.
     assert "if (Test-Path -LiteralPath $DesktopDirectory) {" in script
+    assert 'Write-Warning "pythonw.exe bulunamadı' in script
+    assert 'throw "pythonw.exe' not in script
 
 
 def test_bundle_and_program_carry_the_desktop_folder() -> None:
@@ -84,6 +87,14 @@ def test_installer_closes_and_removes_the_window() -> None:
     assert disable.index("Stop-ArciStatusWindow") < disable.index("$deadline")
     assert "-TaskPath '\\ARCILOGGER\\' " in disable  # the wait never sees the desktop folder
     stop = _function(install, "Stop-ArciStatusWindow")
+    # The task is switched off first, so a logon during the upgrade starts no new window; a
+    # failed change switches it on again.
+    assert stop.index("Disable-ScheduledTask") < stop.index("Get-CimInstance")
+    assert "Stop-ScheduledTask" in stop
+    assert "$_.TaskPath -eq '\\ARCILOGGER\\Desktop\\'" in _function(
+        install, "Get-ArciStatusWindowTask"
+    )
+    assert "Get-ArciStatusWindowTask" in _function(install, "Enable-ArciTasks")
     assert "*arcilogger_core.desktop*" in stop
     assert "StartsWith($program, [System.StringComparison]::OrdinalIgnoreCase)" in stop
     assert "Stop-Process -Id $_.ProcessId -Force" in stop

@@ -6,7 +6,8 @@ decisions I1-I5).
 * The Start-menu shortcut "ARCILOGGER Durum" starts it by hand. Without administrator rights it
   starts itself again through UAC; when that is declined it goes on with what it may read
   (services, API, disk).
-* One window per session: a second start shows the first one.
+* One window per session: a second start shows the first one (through an elevated copy when
+  started without rights: Windows lets only an elevated process restore an elevated window).
 
 ``--print`` writes one look as text (``python.exe``, a console; no Tk needed), ``--self-test``
 builds the window off-screen (exit 0 or 1), ``--config`` reads another configuration file
@@ -53,15 +54,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
         print(status.render_text(status.collect(site, probe)))
         return 0
+    elevate = not args.no_elevate and not winapi.is_elevated()
+    again = ["-I", "-m", "arcilogger_core.desktop", "--no-elevate"]
+    if args.config is not None:
+        again += ["--config", str(args.config)]
     guard = winapi.single_instance(MUTEX)
     if guard is None:
-        winapi.bring_to_front(status.TITLE)
+        # The open window runs elevated (the logon task); Windows lets only an elevated process
+        # restore it, so a start without rights hands that to an elevated copy.
+        if not (elevate and winapi.relaunch_elevated(again)):
+            winapi.bring_to_front(status.TITLE)
         return 0
-    if not args.no_elevate and not winapi.is_elevated():
+    if elevate:
         winapi.release(guard)
-        again = ["-I", "-m", "arcilogger_core.desktop", "--no-elevate"]
-        if args.config is not None:
-            again += ["--config", str(args.config)]
         if winapi.relaunch_elevated(again):
             return 0
         guard = winapi.single_instance(MUTEX)  # declined: go on without the data folder

@@ -1011,11 +1011,14 @@ gösterir ve her 10 saniyede bir yenilenir.
   ArciWeb, ArciAdmin) ve API'nin yanıt verip vermediği.
 - **Log akışı:**
   - son kaydın saati;
-  - sessiz kaynaklar (`[seal] gap_minutes` süresinden uzun süredir kayıt göndermeyenler);
+  - sessiz kaynaklar: `[[sources]]` içindeki etkin ve beklenen kaynaklardan `[seal] gap_minutes`
+    süresinden uzun süredir kayıt göndermeyenler (toplayıcı yeniden başladıktan sonra hiç
+    göndermeyen de sayılır);
   - ham kayıtlar diske yazılamıyorsa kırmızı uyarı.
 - **Veritabanına aktarım:** veritabanına yazılabiliyor mu, aktarım ne kadar geride.
 - **Mühürleme:**
   - son mühürlenen gün ve sağlayıcı;
+  - başarısız bir deneme, hatasıyla birlikte turuncu;
   - dün saat 03:00'e kadar mühürlenmediyse turuncu;
   - mühür `[seal] late_after_hours` (48 saat) süresinden fazla geciktiyse kırmızı.
 - **Uyarılar:** son 24 saatin kanıt yolu uyarıları (`state\alerts.jsonl`). Bütün uyarılar web
@@ -1030,7 +1033,8 @@ Pencere **yalnızca okur**:
 
 - hiçbir servisi başlatmaz ya da durdurmaz, hiçbir ayarı değiştirmez;
 - veritabanına bağlanmaz;
-- ağa çıkmaz: API sağlık denetimi yalnızca bu makinenin kendi adresine (`127.0.0.1`) gider;
+- ağa çıkmaz: API sağlık denetimi yalnızca bu makinedeki API'ye (`[api] host`, varsayılan
+  `127.0.0.1`) gider;
 - telemetri göndermez.
 
 "Web arayüzünü aç" düğmesi `https://localhost/` adresini açar. Sunucuda kök sertifika kurulu
@@ -1042,9 +1046,11 @@ değilse tarayıcı bir sertifika uyarısı gösterir (bölüm 8).
     veri klasörünün `state\` bölümünü yalnızca yöneticiler okuyabilir.
   - Kapatılan pencere Başlat menüsünde **ARCILOGGER → ARCILOGGER Durum** ile yeniden açılır. Bu
     kısayol UAC onayı ister.
-  - Onay verilmezse pencere yalnızca servisleri, API'yi ve diski gösterir. Diğer satırlar
+  - Onay verilmezse pencere yalnızca servisleri ve API'yi (varsayılan 8000 portunda) gösterir.
+    Yapılandırma ve veri klasörü yalnızca yöneticilere açık olduğundan diğer satırlar
     "okunamadı" der.
-- Her oturumda tek pencere açılır. İkinci kez başlatmak açık olanı öne getirir.
+- Her oturumda tek pencere açılır. İkinci kez başlatmak açık olanı öne getirir (kısayol bunun
+  için de UAC onayı ister).
 - Yükseltme ve kaldırma pencereyi kapatır. Yükseltmeden sonra pencere bir sonraki oturum
   açılışında ya da kısayolla yeniden açılır.
 - Komut satırından tek bakış (yönetici PowerShell):

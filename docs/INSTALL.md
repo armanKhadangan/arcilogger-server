@@ -890,11 +890,13 @@ it looks again every 10 seconds.
   ArciWorker, ArciWeb, ArciAdmin), and whether the API answers.
 - **Log flow:**
   - the time of the last message;
-  - silent sources (no message for longer than `[seal] gap_minutes`);
+  - silent sources: the enabled, expected `[[sources]]` entries with no message for longer
+    than `[seal] gap_minutes` (one that sent nothing since the collector restarted counts too);
   - a red warning when raw logs cannot be written to disk.
 - **Database loading:** whether the database can be written, and how far loading is behind.
 - **Sealing:**
   - the last sealed day and its provider;
+  - orange for a failed attempt, with its error;
   - orange when yesterday is not sealed by 03:00;
   - red when the seal is later than `[seal] late_after_hours` (48 hours).
 - **Alerts:** the evidence-path alerts of the last 24 hours (`state\alerts.jsonl`). Every alert
@@ -910,8 +912,8 @@ The window is **read-only**:
 
 - it starts or stops no service and changes no setting;
 - it does not connect to the database;
-- it does not use the network: the API health check goes to this machine's own address
-  (`127.0.0.1`) only;
+- it does not use the network: the API health check goes only to the API on this machine
+  (`[api] host`, by default `127.0.0.1`);
 - it sends no telemetry.
 
 "Web arayüzünü aç" opens `https://localhost/`. Without the root certificate on the server, the
@@ -923,9 +925,11 @@ browser shows a certificate warning (section 8).
     needed because only administrators may read `state\` of the data folder.
   - A closed window opens again from the Start menu: **ARCILOGGER → ARCILOGGER Durum**. That
     shortcut asks for UAC consent.
-  - Without consent, the window shows only the services, the API and the disk. The other rows say
-    "cannot be read".
-- One window per session. A second start brings the open one to the front.
+  - Without consent, the window shows only the services and the API (on the default port 8000).
+    The configuration and the data folder are open to administrators only, so the other rows
+    say "cannot be read".
+- One window per session. A second start brings the open one to the front (the shortcut asks
+  for UAC consent for that too).
 - An upgrade and the removal close the window. After an upgrade it opens again at the next logon,
   or from the shortcut.
 - One look from the command line (elevated PowerShell):

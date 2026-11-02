@@ -72,12 +72,15 @@ Get-ChildItem -LiteralPath $TaskDirectory -Filter *.xml | ForEach-Object {
 if (Test-Path -LiteralPath $DesktopDirectory) {
     $PythonW = Join-Path (Split-Path -Parent $Python) "pythonw.exe"
     if (-not (Test-Path -LiteralPath $PythonW)) {
-        throw "pythonw.exe bulunamadı [not found]: $PythonW"
+        # A convenience window never fails the installation: the evidence jobs above are in place.
+        Write-Warning "pythonw.exe bulunamadı, durum penceresi kaydedilmedi [not found, status window not registered]: $PythonW"
     }
-    Get-ChildItem -LiteralPath $DesktopDirectory -Filter *.xml | ForEach-Object {
-        $xml = (Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8).Replace("{{PYTHONW}}", $PythonW)
-        Register-ScheduledTask -TaskName $_.BaseName -TaskPath "\ARCILOGGER\Desktop\" -Xml $xml -Force | Out-Null
-        Write-Host "kaydedildi [registered] \ARCILOGGER\Desktop\$($_.BaseName)"
+    else {
+        Get-ChildItem -LiteralPath $DesktopDirectory -Filter *.xml | ForEach-Object {
+            $xml = (Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8).Replace("{{PYTHONW}}", $PythonW)
+            Register-ScheduledTask -TaskName $_.BaseName -TaskPath "\ARCILOGGER\Desktop\" -Xml $xml -Force | Out-Null
+            Write-Host "kaydedildi [registered] \ARCILOGGER\Desktop\$($_.BaseName)"
+        }
     }
 }
 

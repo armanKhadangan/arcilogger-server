@@ -983,12 +983,24 @@ function Get-StatusWindowFolder {
     Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ARCILOGGER'
 }
 
+function Get-ArciStatusWindowTask {
+    <# The logon task of the status window (the TaskPath test keeps any other task out). #>
+    @(Get-ScheduledTask -TaskPath '\ARCILOGGER\Desktop\' -ErrorAction SilentlyContinue |
+            Where-Object { $_ -and $_.TaskPath -eq '\ARCILOGGER\Desktop\' })
+}
+
 function Stop-ArciStatusWindow {
     <#
-    End the status windows that run Python from the program folder: they stay open until someone
+    Close the status windows that run Python from the program folder: they stay open until someone
     closes them, so they are ended, never waited for. The window changes nothing, so nothing is
-    lost; its logon task starts it again at the next logon.
+    lost. Its logon task is switched off first, so an administrator who logs on meanwhile does
+    not start it again from the folder being replaced; registering the program again (or
+    Enable-ArciTasks after a failure) switches it on again.
     #>
+    foreach ($task in (Get-ArciStatusWindowTask)) {
+        [void]($task | Disable-ScheduledTask)
+        if ([string]$task.State -eq 'Running') { [void]($task | Stop-ScheduledTask) }
+    }
     if (-not (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) { return }
     $program = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\') + '\'
     Get-CimInstance -ClassName Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe'" -ErrorAction SilentlyContinue |
@@ -1067,6 +1079,7 @@ function Disable-ArciTasks {
 
 function Enable-ArciTasks {
     <# Enable again the tasks Disable-ArciTasks paused (those that still exist). #>
+    foreach ($task in (Get-ArciStatusWindowTask)) { [void]($task | Enable-ScheduledTask) }
     if ($null -eq $script:PausedTasks) { return }
     foreach ($name in @($script:PausedTasks)) {
         $task = Get-ScheduledTask -TaskPath '\ARCILOGGER\' -TaskName $name -ErrorAction SilentlyContinue
