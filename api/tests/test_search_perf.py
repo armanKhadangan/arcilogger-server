@@ -14,10 +14,12 @@ and one rare free-text token.
 ``search_counts`` is filled with ``searchcounts.rebuild_stream``; ``VACUUM ANALYZE``; on
 TimescaleDB the chunks older than 7 days are compressed before timing (the compression policies
 are paused before loading: run against today's date, they would compress whichever chunks
-existed when they started).
+existed when they started); last a ``CHECKPOINT`` writes the load back to disk, so its write-back
+does not run into the timing (#90; skipped, and said so, for a role without ``pg_checkpoint``).
 
 **Timing:** through the API (``TestClient``), best of three after one warm-up; the cold run is
-printed too. The numbers are recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
+printed too, past pytest's capture, so CI's log shows them for a passing run as well. The numbers
+are recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
 
 **Plans:** for Q2-Q7 the statement of a whole-range window, as the search sends it (on
 TimescaleDB one window on each side of a compression horizon, where ``windows.run_page`` ends a
@@ -389,6 +391,27 @@ def _compress_old_chunks(engine: Engine, before: datetime) -> int:
     return compressed
 
 
+def _checkpoint(engine: Engine) -> str:
+    """Write the load back to disk before timing (#90). The load, the recount and ``VACUUM
+    ANALYZE`` leave gigabytes of dirty pages; on the Windows runner their write-back ran into Q1
+    and every commit and the audit spool's fsync of a search waited behind it (about +500 ms a
+    request, the plan unchanged). ``CHECKPOINT`` writes and syncs every file written since the
+    last one, so the timing starts on a settled server. It needs a superuser or
+    ``pg_checkpoint`` (both CI jobs connect as one); without, it is skipped and said so."""
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        allowed = connection.scalar(
+            text(
+                "SELECT rolsuper OR pg_has_role(current_user, 'pg_checkpoint', 'MEMBER') "
+                "FROM pg_roles WHERE rolname = current_user"
+            )
+        )
+        if not allowed:
+            return "no checkpoint (the role has no pg_checkpoint)"
+        began = time.perf_counter()
+        connection.execute(text("CHECKPOINT"))
+    return f"checkpoint in {time.perf_counter() - began:.1f} s"
+
+
 @dataclass
 class Site:
     client: TestClient
@@ -399,10 +422,16 @@ class Site:
     start: datetime
     end: datetime
     newest: tuple[datetime, datetime]
+    #: Prints past pytest's capture, so CI's log shows the figures of a passing run too (#90).
+    show: Callable[[str], None]
 
 
 @pytest.fixture
-def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
+def site(tmp_path: Any, db_engine: Engine, capsys: pytest.CaptureFixture[str]) -> Iterator[Site]:
+    def show(line: str) -> None:
+        with capsys.disabled():
+            print(line)
+
     newest_rows, other_rows = LINES.get(TIER, LINES["1"])
     days = [NEWEST - timedelta(days=offset) for offset in range(DAYS)]
     began = time.perf_counter()
@@ -432,11 +461,13 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
         compressed = _compress_old_chunks(db_engine, day_window(NEWEST - timedelta(days=7))[0])
         with db_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             connection.execute(text("ANALYZE"))
+    checkpoint = _checkpoint(db_engine)
     with db_engine.connect() as connection:
         total = connection.scalar(select(Message.id).order_by(Message.id.desc()).limit(1))
-    print(
+    show(
         f"\nsearch perf data (tier {TIER}): {total} messages rows, loaded in {loaded:.0f} s, "
-        f"ready in {time.perf_counter() - began:.0f} s, {compressed} chunks compressed"
+        f"ready in {time.perf_counter() - began:.0f} s, {compressed} chunks compressed, "
+        f"{checkpoint}"
     )
     config = Config.model_validate(
         {
@@ -470,7 +501,7 @@ def site(tmp_path: Any, db_engine: Engine) -> Iterator[Site]:
             session.commit()
         start, _ = day_window(days[-1])
         _, end = day_window(NEWEST)
-        yield Site(client, app, db_engine, factory, config, start, end, day_window(NEWEST))
+        yield Site(client, app, db_engine, factory, config, start, end, day_window(NEWEST), show)
 
 
 # -- measuring ------------------------------------------------------------------------------------
@@ -583,8 +614,10 @@ def used(scans: list[Scan]) -> str:
     return ", ".join(names)
 
 
-def report(name: str, q: str, cold: float, best: float, budget: float, extra: str = "") -> None:
-    print(
+def report(
+    site: Site, name: str, q: str, cold: float, best: float, budget: float, extra: str = ""
+) -> None:
+    site.show(
         f"{name}: {q!r} cold {cold * 1000:.0f} ms, best {best * 1000:.0f} ms "
         f"(budget {budget * 1000:.0f} ms){extra}"
     )
@@ -600,7 +633,7 @@ def test_search_performance(site: Site) -> None:
     # Q1 browse, first page: a backward scan of the primary key of messages.
     for label, (start, end) in (("1 d", site.newest), ("30 d", month)):
         cold, best, page = measure(partial(search, site, "", start, end))
-        report(f"Q1 browse {label}", "", cold, best, BROWSE)
+        report(site, f"Q1 browse {label}", "", cold, best, BROWSE)
         assert len(page["items"]) == 100
         assert best < BROWSE
     q1 = explain(site, "", day_end - timedelta(hours=1), day_end)
@@ -612,20 +645,20 @@ def test_search_performance(site: Site) -> None:
         ("30 d", month, MONTH_ROWS),
     ):
         cold, best, page = measure(partial(search, site, f"srcip:{NEEDLE}", start, end))
-        report(f"Q2 srcip {label}", f"srcip:{NEEDLE}", cold, best, budget)
+        report(site, f"Q2 srcip {label}", f"srcip:{NEEDLE}", cold, best, budget)
         assert len(page["items"]) == 100
         assert best < budget
     check_plan(explain(site, f"srcip:{NEEDLE}", *month), r"srcip_time")
 
     # Q3 a /24 for a day.
     cold, best, page = measure(lambda: search(site, "srcip:172.20.41.0/24", day_start, day_end))
-    report("Q3 srcip /24 1 d", "srcip:172.20.41.0/24", cold, best, DAY_ROWS)
+    report(site, "Q3 srcip /24 1 d", "srcip:172.20.41.0/24", cold, best, DAY_ROWS)
     assert page["items"]
     assert best < DAY_ROWS
     # A /24 holds about a fifth of the clients: reading the primary key backwards until the page
     # is full is the cheapest plan, so only a sequential scan is refused here.
     q3 = explain(site, "srcip:172.20.41.0/24", day_start, day_end)
-    print(f"Q3 plan: {used(q3)}")
+    site.show(f"Q3 plan: {used(q3)}")
     check_plan(q3, primary=True)
 
     # Q4-Q7 over 30 days.
@@ -642,7 +675,7 @@ def test_search_performance(site: Site) -> None:
         ("Q7", f"qname:{RARE_DOMAIN}", (r"qname_time",)),
     ):
         cold, best, page = measure(partial(search, site, q, *month))
-        report(f"{name} 30 d", q, cold, best, MONTH_ROWS)
+        report(site, f"{name} 30 d", q, cold, best, MONTH_ROWS)
         assert page["items"], q
         assert page["scan"]["complete"] is True
         assert best < MONTH_ROWS
@@ -656,7 +689,7 @@ def test_search_performance(site: Site) -> None:
     cold, best, rolled = measure(
         lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
     )
-    report("Q8 stats 30 d", q8, cold, best, STATS_ROLLUP, f", mode {rolled['mode']}")
+    report(site, "Q8 stats 30 d", q8, cold, best, STATS_ROLLUP, f", mode {rolled['mode']}")
     assert rolled["mode"] in ("rollup", "hybrid")
     assert best < STATS_ROLLUP
     with site.factory() as session:
@@ -683,7 +716,7 @@ def test_search_performance(site: Site) -> None:
     cold, best, counted = measure(
         lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
     )
-    report("Q9 stats 1 d direct", f"srcip:{NEEDLE}", cold, best, STATS_DIRECT)
+    report(site, "Q9 stats 1 d direct", f"srcip:{NEEDLE}", cold, best, STATS_DIRECT)
     assert counted["mode"] == "direct"
     assert counted["total"]["value"] == NEEDLE_PER_DAY
     assert best < STATS_DIRECT
@@ -698,7 +731,7 @@ def test_search_performance(site: Site) -> None:
             f"{API}/export", json={"search_id": page["search_id"], "format": "csv"}
         )
     )
-    report("Q10 export 10,000 rows", f"srcip:{NEEDLE}", cold, best, EXPORT)
+    report(site, "Q10 export 10,000 rows", f"srcip:{NEEDLE}", cold, best, EXPORT)
     assert response.status_code == 200, response.text
     assert response.headers.get("X-Arci-Export-Truncated") == "rows"
     assert response.content.count(b"\r\n") == 10_001
@@ -721,6 +754,7 @@ def test_search_performance(site: Site) -> None:
         cold, best, page = measure(partial(search, site, q, start, end))
         complete = page["scan"]["complete"]
         report(
+            site,
             f"{name} scan",
             q,
             cold,
