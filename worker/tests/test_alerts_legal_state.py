@@ -50,7 +50,7 @@ def write(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def report(*tokens: dict[str, Any], **totals: int) -> dict[str, Any]:
+def report(*tokens: Any, **totals: int) -> dict[str, Any]:
     counts = {"not_due": 0, "due": 0, "covered": 0, "late": 0, "uncovered": 0, **totals}
     return {"tokens": list(tokens), "totals": counts}
 
@@ -80,7 +80,7 @@ def crl_list(issuer_sha: str, this_update: datetime, **extra: Any) -> dict[str, 
     return {**entry, **extra}
 
 
-def index(*lists: dict[str, Any], failures: tuple[dict[str, Any], ...] = ()) -> dict[str, Any]:
+def index(*lists: Any, failures: tuple[dict[str, Any], ...] = ()) -> dict[str, Any]:
     return {"schema": CRL_INDEX_SCHEMA, "lists": list(lists), "failures": list(failures)}
 
 
