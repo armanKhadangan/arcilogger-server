@@ -336,11 +336,12 @@ def check_revocation(
     The rules of the standalone verifier's ``check_revocation``: a list counts for a certificate
     when it names the certificate's issuer and the key of the issuer from the chain verifies its
     signature. Every such list is consulted (a CA may drop an expired certificate from later
-    lists) and the earliest entry decides (removeFromCRL entries do not count): certificateHold
-    is ``crl-hold``, a date at or before ``moment`` (the stamp time) ``crl-revoked``, a later one
-    ``crl-revoked-later``. Without an entry, ``crl-ok`` needs a list issued at or after the
-    stamp time (an older one cannot know about revocations in between: ``crl-stale``); no
-    usable list is ``crl-none``.
+    lists; removeFromCRL entries do not count). A revocation (any reason but certificateHold)
+    dated at or before ``moment`` (the stamp time) is ``crl-revoked``, also when an earlier hold
+    precedes it (C6). Otherwise the earliest entry decides: certificateHold is ``crl-hold``, a
+    revocation after ``moment`` ``crl-revoked-later``. Without an entry, ``crl-ok`` needs a list
+    issued at or after the stamp time (an older one cannot know about revocations in between:
+    ``crl-stale``); no usable list is ``crl-none``.
     """
     findings = []
     for position, certificate in enumerate(chain[:-1]):
@@ -360,13 +361,17 @@ def check_revocation(
                 for crl in usable
                 if serial in crl.revoked and crl.reasons.get(serial) != CRL_REASON_REMOVE
             ),
-            # Of two entries of the same date, one without a reason comes first: a revocation
-            # for good outranks a hold (the standalone verifier cannot order them yet).
+            # Of two entries of the same date, one without a reason comes first, then by reason
+            # code. Only entries after the stamp time still depend on this order (C6 decides
+            # those at or before it): a revocation without a reason, or with a code below 6, comes
+            # before a hold of its date.
             key=lambda entry: (entry[0], -1 if entry[1] is None else entry[1]),
         )
         latest = max(usable, key=lambda crl: crl.this_update)
+        # C6: a revocation at or before the stamp time outranks an earlier hold.
+        before = [entry for entry in entries if entry[1] != CRL_REASON_HOLD and entry[0] <= moment]
         if entries:
-            revoked_at, reason = entries[0]
+            revoked_at, reason = (before or entries)[0]
             if reason == CRL_REASON_HOLD:
                 findings.append(Revocation("crl-hold", subject, revoked_at))
             elif revoked_at <= moment:
@@ -378,6 +383,23 @@ def check_revocation(
         else:
             findings.append(Revocation("crl-stale", subject, latest.this_update))
     return findings
+
+
+def token_chain(data: bytes, roots: Sequence[x509.Certificate]) -> list[x509.Certificate]:
+    """The chain :func:`verify_token` checks a token's revocation along: its TSA certificate,
+    the intermediates from the token and the pinned root it reaches at genTime (empty when the
+    token cannot be read or reaches no root)."""
+    try:
+        token, container = parse_container(data)
+        signer_infos = token["content"]["signer_infos"]
+        signer = _find_signer(token, signer_infos[0]) if len(signer_infos) == 1 else None
+        if signer is None:
+            return []
+        moment = _info(token, container, signer).gen_time
+    except TsaError:
+        return []
+    pool = [cert for _, cert in _token_certificates(token)]
+    return _check_chain(signer, pool, roots, moment)[1]
 
 
 def _revocation_details(findings: Sequence[Revocation]) -> dict[str, str]:

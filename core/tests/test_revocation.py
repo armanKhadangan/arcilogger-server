@@ -25,7 +25,13 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.asn1 import build_request
 from arcilogger_core.tsa.mock import MockTsa
-from arcilogger_core.tsa.verify import CRL_LEVELS, check_revocation, fingerprint, verify_token
+from arcilogger_core.tsa.verify import (
+    CRL_LEVELS,
+    check_revocation,
+    fingerprint,
+    token_chain,
+    verify_token,
+)
 
 from .revocation_cases import (
     CASES,
@@ -80,8 +86,23 @@ def test_both_verifiers_give_the_code_and_level_of_the_case(
     )
     roots = [tsa.root_certificate]
     expected = (case.code, case.level)
-    assert standalone_verdict(token, DATA, roots, lists, NOW) == [expected]
     assert core_verdict(token, DATA, roots, lists, NOW) == expected
+    if case.standalone_before_c6 is None:
+        assert standalone_verdict(token, DATA, roots, lists, NOW) == [expected]
+        return
+    # Interim (C6, see revocation_cases): exactly what the standalone verifier gives today.
+    today: list[tuple[str, str]] | str
+    try:
+        today = standalone_verdict(token, DATA, roots, lists, NOW)
+    except TypeError as exc:
+        today = type(exc).__name__
+    before = case.standalone_before_c6
+    assert today == (before if isinstance(before, str) else [before]), (
+        f"The standalone verifier now gives {today!r} for {case.name!r}. Once W5-A applies C6 "
+        f"to the standalone verifier, this case must agree with the core ({expected!r}): "
+        "remove standalone_before_c6 from the case in core/tests/revocation_cases.py; when no "
+        "case has it, remove the field, the module-docstring paragraph and this branch (W5-B-9)."
+    )
 
 
 def test_the_table_covers_every_code_with_its_level() -> None:
@@ -306,6 +327,13 @@ def test_every_certificate_below_the_root_is_checked(
     assert f"CN={common_name}" in result.details["crl_subject"]
 
 
+def test_token_chain_is_the_chain_the_revocation_check_walks(three: ThreeLevels) -> None:
+    """The builder ships the lists with an entry for these certificates (C8)."""
+    assert token_chain(three.token, [three.root]) == [three.tsa, three.ca, three.root]
+    assert token_chain(three.token, []) == []  # no pinned root reached
+    assert token_chain(b"not a token", [three.root]) == []
+
+
 def test_a_list_without_its_file_hash_is_checked_too(three: ThreeLevels) -> None:
     lists = three.lists((CrlSpec(DAY, (Entry(-DAY),)),), ())
     crls = [replace(parse_crl(der), sha256="") for der in lists]
@@ -327,22 +355,18 @@ def test_the_remembered_signature_check_is_per_issuer_key(three: ThreeLevels) ->
     )
 
 
-def test_core_tie_a_revocation_without_reason_outranks_a_hold_of_the_same_date(
-    tsa: MockTsa,
+@pytest.mark.parametrize(
+    "case",
+    [case for case in CASES if "(C6)" in case.name],
+    ids=lambda case: case.name,
+)
+def test_c6_a_revocation_before_the_stamp_outranks_a_hold_in_any_order(
+    tsa: MockTsa, case: RevocationCase
 ) -> None:
-    """Two lists, the same revocation date: one entry without a reason, one certificateHold
-    (a CA that keeps the hold's date when it revokes for good). The core gives the safe
-    ``crl-revoked``. The standalone verifier (W5-A's file) raises TypeError on this today; the
-    case joins the shared table once W5-A has fixed that (see the W5-B pull request)."""
+    """C6, in the core: the order of the lists does not change the verdict (a hold kept on an
+    older list, the revocation for good on a newer one, or the other way round)."""
     lists = make_lists(
-        (
-            CrlSpec(-HOUR, (Entry(-DAY, x509.ReasonFlags.certificate_hold),)),
-            CrlSpec(DAY, (Entry(-DAY),)),
-        ),
-        tsa.root_certificate,
-        _key_of(tsa, "root.key"),
-        tsa.tsa_certificate,
-        MOMENT,
+        case.lists, tsa.root_certificate, _key_of(tsa, "root.key"), tsa.tsa_certificate, MOMENT
     )
     for order in (lists, lists[::-1]):
         findings = check_revocation(
