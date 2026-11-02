@@ -12,7 +12,8 @@ A package is one ZIP file that lets someone outside the company check sealed day
 * the trusted root certificates the package's tokens actually chain to, the TSA certificates
   taken from the tokens and, from the CRL folder (``state/crl``), the revocation lists the days
   need: for each issuer of their chains the newest list and the first one issued at or after
-  each day's stamp time (Wave 5 D9);
+  each day's stamp time (Wave 5 D9), and every list with an entry for a certificate of a day's
+  verified chain (C8);
 * optionally an *extract*: the raw lines a lookup is about, byte for byte, with their numbers;
 * the standalone verifier (``verify.py`` + ``verify.ps1`` + ``verify.sh``), the Turkish guide
   ``DOGRULAMA.txt`` (ASCII file name, Turkish content), the English ``VERIFY-EN.txt``, an
@@ -80,6 +81,7 @@ from arcilogger_core.tsa.verify import (
     fingerprint,
     inspect_token,
     is_test_stamp,
+    token_chain,
     verify_token,
 )
 
@@ -152,6 +154,8 @@ class _Day:
     token_bytes: bytes
     info: TokenInfo
     certificates: list[x509.Certificate]
+    #: The verified chain of the token, TSA certificate first, ending at its pinned root.
+    chain: list[x509.Certificate]
     included: list[dict[str, Any]]
     excluded: list[dict[str, Any]]
     #: SHA-256 fingerprint of the trusted root the day's token chains to.
@@ -250,6 +254,7 @@ def _collect_day(
         token_bytes=token_bytes,
         info=result.info,
         certificates=certificates,
+        chain=token_chain(token_bytes, roots),
         included=included,
         excluded=excluded,
         root_sha256=result.details.get("root_sha256") or "",
@@ -545,6 +550,9 @@ def _stored_crls(crl_dir: Path | None) -> list[tuple[Crl, bytes]]:
         except CrlError as exc:
             log.warning("CRL file %s is not put into the package: %s", path.name, exc)
             continue
+        if crl.delta:  # neither verifier applies a delta list (C7)
+            log.warning("CRL file %s is a delta list; it is not put into the package", path.name)
+            continue
         stored.setdefault(crl.der, (replace(crl, path=path), data))
     return list(stored.values())
 
@@ -557,8 +565,10 @@ def _crls(
 ) -> list[_Entry]:
     """The lists the package needs (D9): for each issuer — a root of the package or a CA
     certificate of a day's token that chains to one — the newest list it signed, plus the first
-    one with ``thisUpdate`` at or after each packaged day's stamp time. The files go in byte for
-    byte, under their stored names."""
+    one with ``thisUpdate`` at or after each packaged day's stamp time. Besides these, every
+    list with an entry for a certificate of a day's verified chain, signed by that
+    certificate's issuer (C8): the package then sees the revocations ``verify_day`` sees. The
+    files go in byte for byte, under their stored names."""
     stored = _stored_crls(crl_dir)
     if not stored:
         return []
@@ -571,10 +581,26 @@ def _crls(
         for issuer in trusted_issuers(roots, seen)
         for path in crls_for(layout, issuer, moments, stored=lists)
     }
+    paths |= {
+        crl.path
+        for crl in lists
+        if crl.path is not None and any(_has_chain_entry(crl, day) for day in days)
+    }
     return [
         _Entry(CRL_FOLDER + path.name, "crl", data=files[path])
         for path in sorted(paths, key=lambda path: path.name)
     ]
+
+
+def _has_chain_entry(crl: Crl, day: _Day) -> bool:
+    """Whether ``crl`` has an entry (of any reason, removeFromCRL too) for a certificate of
+    ``day``'s chain and that certificate's issuer signed it. :meth:`Crl.signed_by` also compares
+    the list's issuer name with the issuer's subject, which in a verified chain is the
+    certificate's issuer name."""
+    return any(
+        certificate.serial_number in crl.revoked and crl.signed_by(issuer)
+        for certificate, issuer in zip(day.chain, day.chain[1:], strict=False)
+    )
 
 
 def _extracts(

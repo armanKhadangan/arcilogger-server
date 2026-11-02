@@ -675,10 +675,15 @@ All Wave 5 questions are answered (2026-11-02).
 
 ## Deviations — W5-B (2026-11-02)
 
-- **W5-B-1: a sixth index error word, `name_taken`** (§2.2 lists five). A verified list whose D8
-  name (issuer and `thisUpdate`) is already taken by other bytes is not stored, the earlier file
-  stays, the failure is recorded with `name_taken`, and the run exits 1. A delta list or a
-  re-issue within the same second causes it. Tests: `core/tests/test_crl.py`.
+- **W5-B-1: superseded by C7.** `name_taken` is gone: the stored name carries the file's
+  SHA-256 (`<issuer-sha256-12>-<thisUpdate>-<sha256-8>.crl`), a delta list is recorded as
+  `delta_not_supported`. `load_stored` reads only names of this form (no site has a list stored
+  under the earlier one: W5-B was not released with it); a delta list found in `state/crl` is
+  neither used by `verify_day` nor shipped. A stored file whose bytes no longer match its name
+  (changed after it was stored) is never overwritten: `crl fetch` still fetches the other URLs
+  and writes the index with what they gave, then ends with an error (exit 1). The changed file
+  is not recorded in `failures` (no error word for it in §2.2; a question on the pull request).
+  Tests: `core/tests/test_crl.py`.
 - **W5-B-2: a lock file `state/crl/.fetch.lock`.** Two runs (the `CrlFetch` task and a manual
   `crl fetch`) can overlap; the lock keeps the index from losing entries. The file stays, empty,
   and is never deleted; the builder and `crl status` ignore it. A held lock exits 1 and is not
@@ -691,7 +696,8 @@ All Wave 5 questions are answered (2026-11-02).
 - **W5-B-4: `tsa.timeout_seconds` bounds each URL's whole download**, not only each network
   wait, so a server that trickles bytes cannot hold the task.
 - **W5-B-5: `crl fetch` exit codes beyond §2.2:** 2 also for an invalid `network.https_proxy`;
-  1 also for an unreadable index or a held lock. `crl status` prints JSON (`index`, `files`,
+  1 also for an unreadable index, a held lock or a changed stored file (W5-B-1). `crl status`
+  prints JSON (`index`, `files`,
   `bytes`, `size`) and has no `--json` flag.
 - **W5-B-6: day-check texts.** `crl-revoked` fails the day with the §2.6 `certificate_revoked`
   English text (without the revocation date); `crl-revoked-later`, `crl-hold` and an unreadable
@@ -703,3 +709,25 @@ All Wave 5 questions are answered (2026-11-02).
 - **W5-B-8: the config adapter.** `crl.crl_options` reads `tsa.crl_urls`,
   `tsa.crl_max_age_days` and `network.https_proxy` with `getattr` and the §2.5 defaults until
   W5-T's day-1 pull request lands; then it becomes plain attribute access.
+- **W5-B-9: an interim field of the shared revocation table (C6), for W5-A to clear.** The core
+  applies C6 now; the standalone verifier follows with W5-A (merge order W5-B, then W5-A). The
+  C6 cases are already in `core/tests/revocation_cases.py` (W5-A does not add them again). Five
+  cases expect `crl-revoked` and carry `standalone_before_c6`, what the standalone verifier
+  gives today:
+  - `crl-hold`: a hold, then a revocation before the stamp; the same at the stamp time; a hold
+    and a privilegeWithdrawn revocation of the same date;
+  - `TypeError`: a hold and a revocation without a reason of the same date; two revocations of
+    the same date, one without a reason and one for key compromise.
+
+  `test_revocation.py` asserts exactly that, so it fails once W5-A changes `check_revocation`.
+  W5-A then removes the value from each case and, with the last one, the dataclass field, the
+  module-docstring paragraph and the interim branch of `test_revocation.py`, and this entry:
+  both verifiers must agree on every case.
+- **W5-B-10: C8's "packaged chain certificate"** is a certificate of a packaged day token's
+  verified chain below its root (the TSA certificate and its intermediates; the chain
+  `verify_token` checks, `tsa.verify.token_chain`). "Has an entry" means any entry for its
+  serial, removeFromCRL too (which the revocation check then ignores), on a list signed by
+  that certificate's issuer. The builder reads the lists from the folder `state/crl`,
+  `verify_day` from its index (`load_stored`), so they see the same revocations as long as the
+  folder and the index agree, as `crl fetch` keeps them. Tests:
+  `core/tests/test_evidence_crl.py` (two- and three-level chains).

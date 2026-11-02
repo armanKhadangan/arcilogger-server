@@ -1,6 +1,7 @@
 """Revocation lists in evidence packages (Wave 5 W5-B): the builder ships the stored lists a
-package's days need (D9), the note when it has none, and the renewal of a packaged report's
-time stamp (D3). The vault helpers are those of ``test_evidence.py``."""
+package's days need (D9) and every list with an entry for a certificate of their chains (C8),
+the note when it has none, and the renewal of a packaged report's time stamp (D3). The vault
+helpers are those of ``test_evidence.py``."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import hashlib
 import json
 import shutil
 import zipfile
+from collections.abc import Sequence
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
@@ -17,13 +19,16 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from arcilogger_core.canonical import canonical_json
+from arcilogger_core.chain import verify_day
+from arcilogger_core.crl import INDEX_NAME, INDEX_SCHEMA, parse_crl
 from arcilogger_core.evidence import build_package
 from arcilogger_core.evidence.builder import NO_CRL_NOTE
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_core.tsa.mock import MockTsa, MockTsaProvider
-from arcilogger_core.tsa.verify import fingerprint, inspect_token
+from arcilogger_core.tsa.verify import fingerprint, inspect_token, token_chain
 
+from .revocation_cases import PrivateKey
 from .test_evidence import (
     DAYS,
     _stamped_report,
@@ -36,31 +41,81 @@ from .test_evidence import (
     unlock_tree,
     unpack,
 )
+from .test_revocation import _certificate, _key_of, _with_certificate
 
 
-def _crl(tsa: MockTsa, revoked: list[tuple[int, datetime]], this_update: datetime) -> bytes:
-    """A DER list of the mock TSA's root, issued at ``this_update``."""
-    key = serialization.load_pem_private_key((tsa.state_dir / "root.key").read_bytes(), None)
-    assert isinstance(key, ec.EllipticCurvePrivateKey)
+def _crl(
+    tsa: MockTsa,
+    revoked: list[tuple[int, datetime]],
+    this_update: datetime,
+    *,
+    reason: x509.ReasonFlags | None = None,
+    delta_of: int | None = None,
+    issuer: tuple[x509.Certificate, PrivateKey] | None = None,
+    key: PrivateKey | None = None,
+) -> bytes:
+    """A DER list of ``issuer`` (default: the mock TSA's root), issued at ``this_update`` and
+    signed with ``key`` (default: the issuer's own); ``reason`` for every entry, ``delta_of``:
+    a delta list of that base list."""
+    certificate, own_key = issuer or (tsa.root_certificate, _key_of(tsa, "root.key"))
     builder = (
         x509.CertificateRevocationListBuilder()
-        .issuer_name(tsa.root_certificate.subject)
+        .issuer_name(certificate.subject)
         .last_update(this_update)
         .next_update(this_update + timedelta(days=7))
     )
+    if delta_of is not None:
+        builder = builder.add_extension(x509.DeltaCRLIndicator(delta_of), critical=True)
     for serial, when in revoked:
-        builder = builder.add_revoked_certificate(
-            x509.RevokedCertificateBuilder().serial_number(serial).revocation_date(when).build()
-        )
-    return builder.sign(key, hashes.SHA256()).public_bytes(serialization.Encoding.DER)
+        entry = x509.RevokedCertificateBuilder().serial_number(serial).revocation_date(when)
+        if reason is not None:
+            entry = entry.add_extension(x509.CRLReason(reason), critical=False)
+        builder = builder.add_revoked_certificate(entry.build())
+    return builder.sign(key or own_key, hashes.SHA256()).public_bytes(serialization.Encoding.DER)
 
 
-def _store_crl(folder: Path, tsa: MockTsa, this_update: datetime) -> str:
-    """Store a list of ``tsa``'s root as the CRL job names it (D8); returns the file name."""
-    name = f"{fingerprint(tsa.root_certificate)[:12]}-{this_update:%Y%m%dT%H%M%SZ}.crl"
-    data = _crl(tsa, [(12345, this_update - timedelta(days=1))], this_update)
+def _store_crl(
+    folder: Path,
+    tsa: MockTsa,
+    this_update: datetime,
+    data: bytes = b"",
+    issuer: x509.Certificate | None = None,
+) -> str:
+    """Store a list (``data``, or one of ``tsa``'s root revoking another certificate) as the
+    CRL job names it (D8, C7), under ``issuer`` (default: ``tsa``'s root); returns the file
+    name."""
+    data = data or _crl(tsa, [(12345, this_update - timedelta(days=1))], this_update)
+    digest = hashlib.sha256(data).hexdigest()
+    issuer_sha256 = fingerprint(issuer or tsa.root_certificate)
+    name = f"{issuer_sha256[:12]}-{this_update:%Y%m%dT%H%M%SZ}-{digest[:8]}.crl"
     (folder / name).write_bytes(data)
     return name
+
+
+def _index(folder: Path, issuers: Sequence[x509.Certificate]) -> None:
+    """``index.json`` as ``crl fetch`` writes it (§2.2) for the lists of ``folder`` it would
+    have stored: those one of ``issuers`` signed, delta lists left out (C7)."""
+    entries = []
+    for path in sorted(folder.glob("*.crl")):
+        crl = parse_crl(path.read_bytes())
+        signer = next((issuer for issuer in issuers if crl.signed_by(issuer)), None)
+        if signer is None or crl.delta:
+            continue
+        assert path.name.startswith(fingerprint(signer)[:12])
+        entries.append(
+            {
+                "url": "http://crl.example.com/test.crl",
+                "file": path.name,
+                "issuer": crl.issuer,
+                "issuer_sha256": fingerprint(signer),
+                "this_update": crl.this_update.isoformat(),
+                "next_update": crl.next_update.isoformat() if crl.next_update else None,
+                "sha256": crl.sha256,
+                "fetched_at": crl.this_update.isoformat(),
+            }
+        )
+    index = {"schema": INDEX_SCHEMA, "lists": entries, "failures": []}
+    (folder / INDEX_NAME).write_text(json.dumps(index), encoding="utf-8")
 
 
 def test_a_package_ships_only_the_crls_its_days_need(tmp_path: Path) -> None:
@@ -157,6 +212,177 @@ def test_a_package_ships_only_the_crls_its_days_need(tmp_path: Path) -> None:
     assert index["crls"] == sorted(
         f"sil/{name}" for name in (second["first_after_day_3"], second["newest"])
     )
+    unlock_tree(tmp_path)
+
+
+def test_a_list_with_an_entry_for_a_chain_certificate_is_shipped_too(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """C8: besides the D9 subset, every stored list with an entry for a certificate of a
+    packaged day's chain goes in, so the package sees the hold ``verify_day`` sees. Any entry
+    counts, removeFromCRL too. An older list about other certificates stays out, and so do a
+    list under the root's name signed by another key and a delta list (C7)."""
+    vault = seal_vault(tmp_path, "ec", DAYS[:1])
+    tsa = vault.tsa
+    stamp = inspect_token(vault.layout.token(DAYS[0]).read_bytes()).gen_time.replace(microsecond=0)
+    serial = tsa.tsa_certificate.serial_number
+    crls = vault.layout.crl_dir
+    crls.mkdir(parents=True)
+    hold = _crl(
+        tsa,
+        [(serial, stamp + timedelta(days=1))],
+        stamp + timedelta(days=2),
+        reason=x509.ReasonFlags.certificate_hold,
+    )
+    # it would fail the day if it counted: revoked before the stamp
+    forged = _crl(
+        tsa,
+        [(serial, stamp - timedelta(days=1))],
+        stamp + timedelta(days=2, hours=12),
+        key=ec.generate_private_key(ec.SECP256R1()),
+    )
+    delta = _crl(
+        tsa,
+        [(serial, stamp + timedelta(days=3))],
+        stamp + timedelta(days=4),
+        reason=x509.ReasonFlags.certificate_hold,
+        delta_of=1,
+    )
+    lifted = _crl(
+        tsa,
+        [(serial, stamp + timedelta(days=9))],
+        stamp + timedelta(days=10),
+        reason=x509.ReasonFlags.remove_from_crl,
+    )
+    names = {
+        "older": _store_crl(crls, tsa, stamp - timedelta(days=5)),
+        "first_after_the_day": _store_crl(crls, tsa, stamp + timedelta(hours=1)),
+        "holds_the_tsa_certificate": _store_crl(crls, tsa, stamp + timedelta(days=2), hold),
+        "signed_by_another_key": _store_crl(crls, tsa, stamp + timedelta(days=2, hours=12), forged),
+        "other_certificates": _store_crl(crls, tsa, stamp + timedelta(days=3)),
+        "delta": _store_crl(crls, tsa, stamp + timedelta(days=4), delta),
+        "lifts_the_hold": _store_crl(crls, tsa, stamp + timedelta(days=10), lifted),
+        # the newest list has no entry for the TSA certificate
+        "newest": _store_crl(crls, tsa, stamp + timedelta(days=20)),
+    }
+
+    info = vault.build(crl_dir=crls, out_dir=tmp_path / "out")
+    folder = unpack(info, tmp_path / "pkg")
+    index = json.loads((folder / "paket.json").read_bytes())
+    shipped = ("first_after_the_day", "holds_the_tsa_certificate", "lifts_the_hold", "newest")
+    assert index["crls"] == sorted(f"sil/{names[key]}" for key in shipped)
+    assert f"CRL file {names['delta']} is a delta list" in caplog.text
+    code, report = isolated(folder)
+    assert code == 0, codes(report)
+    assert [(f["level"], f["where"]) for f in findings(report, "crl-hold")] == [
+        ("warn", DAYS[0].isoformat())
+    ]
+    # verify_day reads the indexed lists (load_stored) and sees the same hold.
+    _index(crls, [tsa.root_certificate])
+    check = verify_day(vault.layout, DAYS[0], vault.roots)
+    assert check.ok, check.errors
+    assert any("on hold" in warning for warning in check.warnings), check.warnings
+    unlock_tree(tmp_path)
+
+
+def test_a_list_with_an_entry_for_an_intermediate_is_shipped_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C8 along a three-level chain (root, intermediate CA, TSA certificate): the root's list
+    with an entry for the intermediate and the intermediate's list with an entry for the TSA
+    certificate go in. A list under the root's name signed by another key does not."""
+    vault = seal_vault(tmp_path, "ec", DAYS[:1])
+    # The mock root allows no intermediate (pathLenConstraint 0): the second day is stamped
+    # under a root of its own, which the vault's roots are then.
+    root_key = ec.generate_private_key(ec.SECP256R1())
+    root = (_certificate("Örnek Root (TEST)", root_key, None), root_key)
+    monkeypatch.setattr(vault.tsa, "root_certificate", root[0])
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca = _certificate("Örnek TSA CA (TEST)", ca_key, root)
+    tsa_key = ec.generate_private_key(ec.SECP256R1())
+    tsa_certificate = _certificate("Örnek TSA (TEST)", tsa_key, (ca, ca_key), ca=False)
+    vault.tsa.signer = (tsa_certificate, tsa_key)
+    respond = vault.tsa.respond
+    # test: the token carries the intermediate, as a provider's does
+    monkeypatch.setattr(
+        vault.tsa, "respond", lambda request: _with_certificate(respond(request), ca)
+    )
+    vault.write_day(DAYS[1])
+    sealer = vault.sealer(datetime.combine(DAYS[2], time(0, 30), tzinfo=SITE_TZ))
+    assert [outcome.status for outcome in sealer.seal_due()] == ["sealed"]
+    token = vault.layout.token(DAYS[1]).read_bytes()
+    assert token_chain(token, vault.roots) == [tsa_certificate, ca, root[0]]
+    stamp = inspect_token(token).gen_time.replace(microsecond=0)
+    crls = vault.layout.crl_dir
+    crls.mkdir(parents=True)
+
+    def of_ca(this_update: datetime, data: bytes = b"") -> str:
+        data = data or _crl(
+            vault.tsa, [(12345, this_update - timedelta(days=1))], this_update, issuer=(ca, ca_key)
+        )
+        return _store_crl(crls, vault.tsa, this_update, data, issuer=ca)
+
+    def of_root(this_update: datetime, data: bytes = b"") -> str:
+        data = data or _crl(
+            vault.tsa, [(12345, this_update - timedelta(days=1))], this_update, issuer=root
+        )
+        return _store_crl(crls, vault.tsa, this_update, data)
+
+    holds_ca = _crl(
+        vault.tsa,
+        [(ca.serial_number, stamp + timedelta(days=1))],
+        stamp + timedelta(days=2),
+        reason=x509.ReasonFlags.certificate_hold,
+        issuer=root,
+    )
+    forged = _crl(
+        vault.tsa,
+        [(ca.serial_number, stamp - timedelta(days=1))],
+        stamp + timedelta(days=2, hours=12),
+        issuer=root,
+        key=ec.generate_private_key(ec.SECP256R1()),
+    )
+    holds_tsa = _crl(
+        vault.tsa,
+        [(tsa_certificate.serial_number, stamp + timedelta(days=3))],
+        stamp + timedelta(days=4),
+        reason=x509.ReasonFlags.certificate_hold,
+        issuer=(ca, ca_key),
+    )
+    names = {
+        "root_first_after_the_day": of_root(stamp + timedelta(hours=1)),
+        "root_holds_the_intermediate": of_root(stamp + timedelta(days=2), holds_ca),
+        "root_signed_by_another_key": of_root(stamp + timedelta(days=2, hours=12), forged),
+        "root_other_certificates": of_root(stamp + timedelta(days=3)),
+        "root_newest": of_root(stamp + timedelta(days=20)),
+        "ca_first_after_the_day": of_ca(stamp + timedelta(hours=2)),
+        "ca_holds_the_tsa_certificate": of_ca(stamp + timedelta(days=4), holds_tsa),
+        "ca_other_certificates": of_ca(stamp + timedelta(days=5)),
+        "ca_newest": of_ca(stamp + timedelta(days=21)),
+    }
+
+    info = vault.build([DAYS[1]], crl_dir=crls, out_dir=tmp_path / "out")
+    folder = unpack(info, tmp_path / "pkg")
+    index = json.loads((folder / "paket.json").read_bytes())
+    shipped = (
+        "root_first_after_the_day",
+        "root_holds_the_intermediate",
+        "root_newest",
+        "ca_first_after_the_day",
+        "ca_holds_the_tsa_certificate",
+        "ca_newest",
+    )
+    assert index["crls"] == sorted(f"sil/{names[key]}" for key in shipped)
+    code, report = isolated(folder)
+    assert code == 0, codes(report)
+    holds = findings(report, "crl-hold")
+    assert [(f["level"], f["where"]) for f in holds] == [("warn", DAYS[1].isoformat())] * 2
+    # one for the TSA certificate, one for the intermediate
+    assert sorted("Örnek TSA CA (TEST)" in f["en"] for f in holds) == [False, True], holds
+    _index(crls, [root[0], ca])
+    check = verify_day(vault.layout, DAYS[1], vault.roots)
+    assert check.ok, check.errors
+    assert any("on hold" in warning for warning in check.warnings), check.warnings
     unlock_tree(tmp_path)
 
 
