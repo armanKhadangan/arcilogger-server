@@ -8,9 +8,9 @@ import { SEALS, need } from '@/test/samples';
 
 /*
  * The credit card for a provider without a credit query (Wave 5 contract 2.4, 2.6, C3): the
- * Credit task records `supported: false` (today for TÜRKTRUST), so the card says so in neutral
- * words under a plain "Kontör" title instead of numbers, offers no "Kontör sorgula" and never
- * warns about a threshold. Only the flag decides, never the provider name. Hand-built answers
+ * Credit task records `supported: false` (C21: today `rfc3161` and TÜRKTRUST), so the card says
+ * so in neutral words under a plain "Kontör" title instead of numbers, offers no "Kontör sorgula"
+ * and never warns about a threshold. Only the flag decides, never the provider name. Hand-built answers
  * until W5-C's samples carry one; `supported` is cast in until W5-C adds it to `Credits` (C2).
  */
 
@@ -81,6 +81,14 @@ describe('the credit card without a credit query', () => {
     renderApp('/sealing');
     expect(await screen.findByTestId('credits-no-query')).toBeInTheDocument();
     expect(screen.queryByText('9.612', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Kontör sorgula' })).not.toBeInTheDocument();
+  });
+
+  it('a plain RFC 3161 server, which has no credit query either (C21)', async () => {
+    serve('admin', { ...TURKTRUST, provider: 'rfc3161', legal_grade: false });
+    renderApp('/sealing');
+    expect(await screen.findByTestId('credits-no-query')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Kontör' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Kontör sorgula' })).not.toBeInTheDocument();
   });
 
