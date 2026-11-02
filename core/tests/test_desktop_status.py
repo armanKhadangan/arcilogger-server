@@ -10,7 +10,7 @@ import os
 import sys
 import threading
 from collections.abc import Iterator, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -21,7 +21,8 @@ from arcilogger_core.desktop import __main__ as entry
 from arcilogger_core.desktop import status, winapi
 from arcilogger_core.desktop.status import Level, Probe, ServiceState, Site, Snapshot
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import isoformat_site
+from arcilogger_core.timeutil import day_window, isoformat_site
+from arcilogger_core.tsa.mock import MockFailure
 
 #: 15:00 site time.
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
@@ -231,8 +232,58 @@ def test_a_spool_write_error_is_critical(layout: Layout) -> None:
 
 def test_no_source_configured_warns(layout: Layout) -> None:
     write(layout.collector_status, {"updated_at": iso(NOW), "sources": {}})
-    found = row(look(layout), "flow")
-    assert (found.level, found.text_en) == ("warn", "no log source is configured ([[sources]])")
+    found = row(look(layout, configured=True), "flow")
+    assert (found.level, found.text_en) == (
+        "warn",
+        "no expected log source is configured ([[sources]])",
+    )
+    # Without the configuration the window cannot tell "none configured" from "none sent".
+    assert row(look(layout), "flow").text_en == "no message yet; 0 sources"
+
+
+WATCHED = (status.Watched("fw-ornek"), status.Watched("ap-ornek", network=True))
+
+
+def test_a_configured_source_that_never_sent_is_silent(layout: Layout) -> None:
+    """The collector's file lists only what arrived since it started: after a restart, a source
+    that sends nothing is missing from it, not listed as silent."""
+    started = {"started_at": iso(NOW - timedelta(hours=2)), "updated_at": iso(NOW)}
+    write(
+        layout.collector_status,
+        {**started, "sources": {"fw-ornek": {"last_received": iso(NOW - timedelta(seconds=3))}}},
+    )
+    found = row(look(layout, configured=True, sources=WATCHED), "flow")
+    assert found.level == "warn"
+    assert found.text_tr.endswith("2 kaynak, 1 sessiz: ap-ornek")
+    # Shortly after a start nothing is silent yet.
+    write(
+        layout.collector_status,
+        {
+            "started_at": iso(NOW - timedelta(minutes=10)),
+            "updated_at": iso(NOW),
+            "sources": {"fw-ornek": {"last_received": iso(NOW - timedelta(seconds=3))}},
+        },
+    )
+    assert row(look(layout, configured=True, sources=WATCHED), "flow").level == "ok"
+
+
+def test_a_network_source_counts_by_its_senders(layout: Layout) -> None:
+    write(
+        layout.collector_status,
+        {
+            "started_at": iso(NOW - timedelta(hours=5)),
+            "updated_at": iso(NOW),
+            "sources": {
+                "fw-ornek": {"last_received": iso(NOW - timedelta(seconds=3))},
+                "ap-ornek-172.20.10.5": {"last_received": iso(NOW - timedelta(minutes=2))},
+                "ap-ornek-172.20.10.6": {"last_received": iso(NOW - timedelta(hours=3))},
+                "old-ornek": {"last_received": iso(NOW - timedelta(hours=4))},
+            },
+        },
+    )
+    # One sender of the network is enough; a source no longer watched is not judged.
+    found = row(look(layout, configured=True, sources=WATCHED), "flow")
+    assert (found.level, found.text_en) == ("ok", "last message 14:59:57 (3 s ago); 2 sources")
 
 
 def test_a_silent_source_warns(layout: Layout) -> None:
@@ -273,6 +324,15 @@ def test_the_database_down_is_critical(layout: Layout) -> None:
     )
 
 
+def test_old_loader_information_says_so(layout: Layout) -> None:
+    """A stopped loader leaves its last file behind: the row says how old its numbers are."""
+    write(
+        layout.ingest_status,
+        {"updated_at": iso(NOW - timedelta(minutes=20)), "database": {"ok": True}, "sources": {}},
+    )
+    assert row(look(layout), "database").text_tr == "güncel (gecikme 0 sn) (bilgi 20 dk eski)"
+
+
 def test_a_loader_far_behind_warns(layout: Layout) -> None:
     write(layout.ingest_status, {"database": {"ok": True}, "sources": {"a": {"lag_seconds": 900}}})
     found = row(look(layout), "database")
@@ -295,13 +355,42 @@ def seal_state(layout: Layout, day: str, **data: Any) -> None:
     write(layout.state / "seal" / f"{day}.json", data)
 
 
-def test_no_sealed_day_yet_is_ok(layout: Layout) -> None:
+def failed_attempt(error: str) -> dict[str, Any]:
+    """What ``Sealer._failed`` writes for a failed attempt: still ``pending``, with the error
+    (pinned against the real sealer in ``test_the_real_sealer_s_states``)."""
+    return {
+        "status": "pending",
+        "attempts": 1,
+        "last_error": error,
+        "last_error_code": "tsa_unavailable",
+        "next_attempt_at": "2026-11-02T15:05:00+03:00",
+    }
+
+
+def test_nothing_to_seal_yet_is_ok(layout: Layout) -> None:
     (layout.state / "seal" / f"{YESTERDAY}.json").unlink()
     found = row(look(layout), "seal")
-    assert found.level == "ok"
-    assert found.text_tr.startswith("henüz mühürlenmiş gün yok")
+    assert (found.level, found.text_en) == ("ok", "no closed day to seal yet")
     (layout.state / "seal").rmdir()
     assert row(look(layout), "seal").level == "ok"
+
+
+def test_a_seal_task_that_never_ran_is_late(layout: Layout) -> None:
+    """No state at all, but the collector wrote closed days: Seal never ran."""
+    (layout.state / "seal" / f"{YESTERDAY}.json").unlink()
+    for day in ("2026-10-30", "2026-11-02"):
+        path = layout.spool / "fw-ornek" / f"{day}.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"")
+    (layout.spool / "_audit").mkdir()
+    (layout.spool / "_audit" / "2026-10-29.jsonl").write_bytes(b"")
+    found = row(look(layout), "seal")
+    assert (found.level, found.text_en) == (
+        "critical",
+        "3 closed day(s) not sealed (last seal: none)",
+    )
+    # Spool days before [seal] first_day are never sealed.
+    assert row(look(layout, first_day=date(2026, 11, 2)), "seal").level == "ok"
 
 
 def test_a_trial_stamp_warns(layout: Layout) -> None:
@@ -312,7 +401,7 @@ def test_a_trial_stamp_warns(layout: Layout) -> None:
 
 
 def test_yesterday_not_sealed_before_and_after_three(layout: Layout) -> None:
-    seal_state(layout, YESTERDAY, status="pending")
+    seal_state(layout, YESTERDAY, status="pending", attempts=0)
     seal_state(layout, "2026-10-31", status="sealed", provider="zamane", legal_grade=True)
     early = probe(now=datetime(2026, 11, 1, 23, 30, tzinfo=UTC))  # 02:30 site time
     found = row(look(layout, early), "seal")
@@ -322,23 +411,36 @@ def test_yesterday_not_sealed_before_and_after_three(layout: Layout) -> None:
     )
     found = row(look(layout), "seal")
     assert found.level == "warn"
-    assert found.text_tr == "dün (2026-11-01) henüz mühürlenmedi (son mühür: 2026-10-31)"
+    assert found.text_tr == "dün henüz mühürlenmedi (son mühür: 2026-10-31)"
 
 
-def test_a_failed_seal_warns_with_its_message(layout: Layout) -> None:
-    seal_state(layout, YESTERDAY, status="failed", message="Zaman damgası sunucusuna ulaşılamadı")
-    seal_state(layout, "2026-10-31", status="sealed", provider="zamane", legal_grade=True)
-    found = row(look(layout), "seal")
-    assert found.level == "warn"
-    assert found.text_tr == (
-        "2026-11-01 mühürlenemedi, yeniden denenecek: Zaman damgası sunucusuna ulaşılamadı"
+def test_two_days_behind_warns_at_any_hour(layout: Layout) -> None:
+    (layout.state / "seal" / f"{YESTERDAY}.json").unlink()
+    seal_state(layout, "2026-10-30", status="sealed", provider="zamane", legal_grade=True)
+    early = probe(now=datetime(2026, 11, 1, 23, 30, tzinfo=UTC))  # 02:30 site time, 26.5 h
+    found = row(look(layout, early), "seal")
+    assert (found.level, found.text_en) == (
+        "warn",
+        "2 closed days not sealed yet (last seal: 2026-10-30)",
     )
+
+
+def test_a_failed_attempt_warns_with_its_error(layout: Layout) -> None:
+    seal_state(layout, YESTERDAY, **failed_attempt("Zaman damgası sunucusuna ulaşılamadı"))
+    seal_state(layout, "2026-10-31", status="sealed", provider="zamane", legal_grade=True)
+    early = probe(now=datetime(2026, 11, 1, 22, 0, tzinfo=UTC))  # 01:00: before 03:00 too
+    for when in (early, probe()):
+        found = row(look(layout, when), "seal")
+        assert found.level == "warn"
+        assert found.text_tr == (
+            "2026-11-01 mühürlenemedi, yeniden denenecek: Zaman damgası sunucusuna ulaşılamadı"
+        )
 
 
 def test_sealing_later_than_the_limit_is_critical(layout: Layout) -> None:
     (layout.state / "seal" / f"{YESTERDAY}.json").unlink()
     seal_state(layout, "2026-10-29", status="sealed", provider="zamane", legal_grade=True)
-    seal_state(layout, "2026-10-30", status="failed", message="no credit")
+    seal_state(layout, "2026-10-30", **failed_attempt("no credit"))
     found = row(look(layout), "seal")
     # 2026-10-30 ended at 2026-10-31 00:00 site time, 63 hours before 15:00 on 11-02.
     assert found.level == "critical"
@@ -346,15 +448,47 @@ def test_sealing_later_than_the_limit_is_critical(layout: Layout) -> None:
     assert row(look(layout, late_after_hours=72), "seal").level == "warn"
 
 
-def test_only_a_failed_first_day(layout: Layout) -> None:
+def test_a_first_day_failing_for_days_is_critical(layout: Layout) -> None:
+    """No day sealed yet: the oldest open day decides, not "nothing sealed yet"."""
     (layout.state / "seal" / f"{YESTERDAY}.json").unlink()
-    seal_state(layout, YESTERDAY, status="failed", error="TSA unreachable")
+    for day in ("2026-10-29", "2026-10-30", "2026-10-31", YESTERDAY):
+        seal_state(layout, day, **failed_attempt("TSA unreachable"))
+    found = row(look(layout), "seal")
+    assert (found.level, found.text_en) == (
+        "critical",
+        "4 closed day(s) not sealed (last seal: none)",
+    )
+    seal_state(layout, "2026-10-29", status="skipped")
+    seal_state(layout, "2026-10-30", status="skipped")
+    seal_state(layout, "2026-10-31", status="skipped")
     found = row(look(layout), "seal")
     assert (found.level, found.text_en) == (
         "warn",
         "2026-11-01 could not be sealed and will be retried",
     )
-    assert row(look(layout), "seal").text_en.endswith("retried")
+
+
+def test_the_real_sealer_s_states(world: Any, days: list[date]) -> None:
+    """The row reads what ``Sealer`` really writes: a failed attempt, then the seal."""
+    world.busy_day(days[0])
+    world.set_now(days[0] + timedelta(days=1), 1, 0)
+    site = status.Site(data_root=world.config.data_dir, health_url="http://127.0.0.1:9/")
+    world.tsa.failure = MockFailure.UNREACHABLE
+    world.sealer().seal_day(days[0])
+    state = json.loads(world.layout.seal_state(days[0]).read_text("utf-8"))
+    assert state["status"] == "pending"
+    assert state["last_error"]
+    found = status.seal_row(world.layout, site, world.now)
+    assert found.level == "warn"
+    assert found.text_en == f"{days[0].isoformat()} could not be sealed and will be retried"
+    world.now = day_window(days[0])[1] + timedelta(hours=49)
+    assert status.seal_row(world.layout, site, world.now).level == "critical"
+    world.tsa.failure = MockFailure.NONE
+    world.set_now(days[0] + timedelta(days=1), 2, 0)
+    world.sealer().seal_day(days[0])
+    found = status.seal_row(world.layout, site, world.now)
+    assert found.level in ("ok", "warn")  # warn only for the mock's trial stamp
+    assert found.text_en.startswith(f"last sealed day {days[0].isoformat()} (mock)")
 
 
 def test_only_the_newest_seal_states_are_read(layout: Layout) -> None:
@@ -550,6 +684,37 @@ def test_load_site(tmp_path: Path) -> None:
     assert (found.gap_minutes, found.late_after_hours, found.problem) == (30, 48, None)
 
 
+def test_load_site_watches_the_enabled_expected_sources(tmp_path: Path) -> None:
+    config = tmp_path / "arcilogger.toml"
+    config.write_text(
+        f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+        "[seal]\nfirst_day = 2026-10-01\n"
+        '[[sources]]\nname = "fw-ornek"\ntype = "fortigate"\naddress = "172.20.0.1"\n'
+        '[[sources]]\nname = "ap-ornek"\ntype = "generic"\naddress = "172.20.10.0/24"\n'
+        '[[sources]]\nname = "off-ornek"\ntype = "generic"\naddress = "172.20.0.9"\n'
+        "enabled = false\n"
+        '[[sources]]\nname = "lab-ornek"\ntype = "generic"\naddress = "172.20.0.8"\n'
+        "expected = false\n",
+        encoding="utf-8",
+    )
+    found = status.load_site(config)
+    assert found.configured
+    assert found.first_day == date(2026, 10, 1)
+    assert found.sources == (status.Watched("fw-ornek"), status.Watched("ap-ornek", True))
+    assert status.Watched("ap-ornek", True).matches("ap-ornek-172.20.10.5")
+    assert not status.Watched("fw-ornek").matches("fw-ornek-172.20.0.1")
+
+
+def test_load_site_without_rights_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def denied(path: Path | None = None) -> Any:
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(status, "load_config", denied)
+    found = status.load_site(tmp_path / "arcilogger.toml")
+    assert found.problem == status.NO_ACCESS_TR
+    assert not found.configured
+
+
 def test_load_site_without_a_usable_configuration(tmp_path: Path) -> None:
     config = tmp_path / "arcilogger.toml"
     config.write_text("data_dir = [", encoding="utf-8")
@@ -698,6 +863,18 @@ def test_a_second_start_shows_the_first_window(
     assert entry.main(["--config", str(tmp_path / "none.toml")]) == 0
     assert calls.front == [status.TITLE]
     assert calls.run == []
+
+
+def test_a_second_start_without_rights_shows_the_window_through_an_elevated_copy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = _entry_patch(monkeypatch, elevated=False, instances=(None,))
+    assert entry.main(["--config", str(tmp_path / "none.toml")]) == 0
+    assert len(calls.relaunch) == 1
+    assert calls.front == []
+    calls = _entry_patch(monkeypatch, elevated=False, relaunched=False, instances=(None,))
+    assert entry.main(["--config", str(tmp_path / "none.toml")]) == 0
+    assert calls.front == [status.TITLE]  # UAC declined: try anyway
 
 
 def test_without_rights_it_starts_again_elevated(

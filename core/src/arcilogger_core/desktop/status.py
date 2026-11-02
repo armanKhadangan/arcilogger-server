@@ -13,10 +13,13 @@ services       the Service Control Manager (query only, :mod:`arcilogger_core.de
                age of their status file (the Sistem page's rule, ``SERVICE_FRESH``); for
                ArciApi ``GET /api/v1/health`` on the loopback address (no sign-in, no
                database)
-log flow       ``state/collector-status.json``: the newest message, the sources silent for
-               longer than ``[seal] gap_minutes``, a spool write error
+log flow       ``state/collector-status.json``: the newest message, a spool write error, and
+               every enabled, expected ``[[sources]]`` entry silent for longer than
+               ``[seal] gap_minutes`` (also one that sent nothing since the collector started)
 database       ``state/ingest-status.json``: the database connection and the largest lag
-sealing        the newest :data:`SEAL_STATES` files ``state/seal/<day>.json``
+sealing        the newest :data:`SEAL_STATES` files ``state/seal/<day>.json`` (a failed attempt
+               is ``pending`` with ``last_error``); without a sealed day, the oldest open day
+               or the oldest spool day from ``[seal] first_day`` on
 alerts         ``state/alerts.jsonl``, only its last :data:`ALERT_TAIL` bytes: the evidence-path
                alerts of the last 24 hours (the web interface's Uyarılar page has all alerts)
 disk           the free space of the data folder's drive
@@ -24,9 +27,11 @@ disk           the free space of the data folder's drive
 
 Nothing is written and nothing leaves the machine: the health request goes to the loopback
 address and ignores any proxy, and there is no telemetry. A file that cannot be read gives the
-level ``unknown`` and the text "bilinmiyor", never an exception. The data folder is readable
-only by administrators, so a window started without administrator rights (UAC declined) still
-shows the services, the API and the disk.
+level ``unknown`` and the text "bilinmiyor", never an exception. The configuration and the data
+folder are readable only by administrators, so a window started without administrator rights
+(UAC declined) shows the services and asks the API on its default port; every other row says
+why it is unknown. Files the services replace are read with delete sharing on Windows
+(:func:`read_shared`), so a look never makes a service's replace fail.
 
 Levels, worst first:
 
@@ -48,6 +53,7 @@ import ipaddress
 import json
 import os
 import shutil
+import sys
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -137,6 +143,18 @@ def overall(levels: Iterable[Level]) -> Level:
 
 
 @dataclass(frozen=True)
+class Watched:
+    """An enabled ``[[sources]]`` entry that is expected to send every day. A network source
+    (``172.20.10.0/24``) is recorded per sender as ``<name>-<ip>``."""
+
+    name: str
+    network: bool = False
+
+    def matches(self, recorded: str) -> bool:
+        return recorded == self.name or (self.network and recorded.startswith(f"{self.name}-"))
+
+
+@dataclass(frozen=True)
 class Site:
     """What the window needs from the configuration."""
 
@@ -146,6 +164,13 @@ class Site:
     health_url: str
     gap_minutes: int = 60
     late_after_hours: int = 48
+    #: ``[seal] first_day``: spool days before it are never sealed.
+    first_day: date | None = None
+    #: The sources that must send; meaningful only when ``configured``.
+    sources: tuple[Watched, ...] = ()
+    #: The configuration was read, so ``sources`` is the site's list (else the status file's
+    #: names are all the window knows).
+    configured: bool = False
     #: Why the configuration could not be used (None: it was).
     problem: str | None = None
 
@@ -178,14 +203,20 @@ def load_site(config_path: Path | None = None) -> Site:
         root = None
         with contextlib.suppress(OSError, ValueError):
             root = recorded_data_root(path)
-        return Site(
-            data_root=root, health_url=health_url("127.0.0.1", 8000), problem=_first_line(exc)
-        )
+        problem = NO_ACCESS_TR if isinstance(exc, PermissionError) else _first_line(exc)
+        return Site(data_root=root, health_url=health_url("127.0.0.1", 8000), problem=problem)
     return Site(
         data_root=config.data_dir,
         health_url=health_url(config.api.host, config.api.port),
         gap_minutes=config.seal.gap_minutes,
         late_after_hours=config.seal.late_after_hours,
+        first_day=config.seal.first_day,
+        sources=tuple(
+            Watched(source.name, source.is_network)
+            for source in config.sources
+            if source.enabled and source.expected
+        ),
+        configured=True,
     )
 
 
@@ -282,11 +313,62 @@ class UnreadableError(Exception):
         self.denied = denied
 
 
+if sys.platform == "win32":
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _create_file = _kernel32.CreateFileW
+    _create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    _create_file.restype = wintypes.HANDLE
+    _close_handle = _kernel32.CloseHandle
+    _close_handle.argtypes = [wintypes.HANDLE]
+    _close_handle.restype = wintypes.BOOL
+    _GENERIC_READ: Final = 0x80000000
+    _SHARE_READ_WRITE_DELETE: Final = 0x1 | 0x2 | 0x4
+    _OPEN_EXISTING: Final = 3
+    _INVALID_HANDLE_VALUE: Final = wintypes.HANDLE(-1).value
+
+    def read_shared(path: Path) -> bytes:
+        """The file's bytes, opened with read, write **and delete** sharing: the services
+        replace their status files atomically, and Python's ``open()`` would make that replace
+        fail while the window reads (the pattern of ``arcilogger_ingest.files.open_shared``)."""
+        handle = _create_file(
+            str(path), _GENERIC_READ, _SHARE_READ_WRITE_DELETE, None, _OPEN_EXISTING, 0x80, None
+        )
+        if handle is None or handle == _INVALID_HANDLE_VALUE:
+            code = ctypes.get_last_error()
+            # OSError maps the Windows code to FileNotFoundError, PermissionError, …
+            raise OSError(None, ctypes.FormatError(code).strip(), str(path), code)
+        try:
+            descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        except OSError:
+            _close_handle(handle)
+            raise
+        with os.fdopen(descriptor, "rb") as handle_file:
+            return handle_file.read()
+
+else:
+
+    def read_shared(path: Path) -> bytes:
+        """The file's bytes (POSIX: an open file never blocks a rename over it)."""
+        return path.read_bytes()
+
+
 def read_json(path: Path) -> tuple[dict[str, Any], datetime] | None:
     """A status file and its modification time; None when it does not exist."""
     try:
         modified = datetime.fromtimestamp(path.stat().st_mtime, UTC)
-        data = json.loads(path.read_bytes())
+        data = json.loads(read_shared(path))
     except FileNotFoundError:
         return None
     except PermissionError as exc:
@@ -406,7 +488,14 @@ def service_rows(
 # -- checks ---------------------------------------------------------------------------------------
 
 
+def _received(entry: Any) -> datetime | None:
+    return _time(entry.get("last_received")) if isinstance(entry, dict) else None
+
+
 def flow_row(layout: Layout, site: Site, now: datetime) -> Row:
+    """The newest message and the silent sources. ``sources`` of the collector's file lists only
+    what arrived since it started, so with the configuration known every watched source is
+    judged: one missing from the file is silent once the collector has run for the gap."""
     key, title_tr, title_en = "flow", "Log akışı", "Log flow"
     try:
         found = read_json(layout.collector_status)
@@ -426,46 +515,65 @@ def flow_row(layout: Layout, site: Site, now: datetime) -> Row:
             f"ham kayıtlar diske yazılamıyor ({failing}): {_short(error.get('error'), 80)}",
             f"raw logs cannot be written to disk ({failing})",
         )
-    sources = data.get("sources")
-    if not isinstance(sources, dict) or not sources:
-        return Row(
-            key,
-            "warn",
-            title_tr,
-            title_en,
-            "log kaynağı tanımlı değil ([[sources]])",
-            "no log source is configured ([[sources]])",
-        )
+    recorded = data.get("sources")
+    last = (
+        {str(name): _received(entry) for name, entry in recorded.items()}
+        if isinstance(recorded, dict)
+        else {}
+    )
     gap = timedelta(minutes=site.gap_minutes)
-    last: dict[str, datetime | None] = {
-        str(name): _time(entry.get("last_received")) if isinstance(entry, dict) else None
-        for name, entry in sources.items()
-    }
-    silent = sorted(name for name, at in last.items() if at is None or now - at > gap)
+    if site.configured:
+        if not site.sources:
+            return Row(
+                key,
+                "warn",
+                title_tr,
+                title_en,
+                "beklenen log kaynağı tanımlı değil ([[sources]])",
+                "no expected log source is configured ([[sources]])",
+            )
+        running_since = _time(data.get("started_at")) or _updated(data, modified)
+        silent = []
+        for watched in site.sources:
+            times = [at for name, at in last.items() if watched.matches(name) and at is not None]
+            newest = max(times, default=None)
+            quiet_since = newest if newest is not None else running_since
+            if now - quiet_since > gap:
+                silent.append(watched.name)
+        count = len(site.sources)
+    else:
+        silent = [name for name, at in last.items() if at is None or now - at > gap]
+        count = len(last)
     received = [at for at in last.values() if at is not None]
     if received:
-        newest = max(received)
-        tr, en = ago(now - newest)
-        text_tr = f"son kayıt {clock(newest)} ({tr} önce); {len(sources)} kaynak"
-        text_en = f"last message {clock(newest)} ({en} ago); {len(sources)} sources"
+        newest_any = max(received)
+        tr, en = ago(now - newest_any)
+        text_tr = f"son kayıt {clock(newest_any)} ({tr} önce); {count} kaynak"
+        text_en = f"last message {clock(newest_any)} ({en} ago); {count} sources"
     else:
-        text_tr = f"henüz kayıt gelmedi; {len(sources)} kaynak"
-        text_en = f"no message yet; {len(sources)} sources"
+        text_tr = f"henüz kayıt gelmedi; {count} kaynak"
+        text_en = f"no message yet; {count} sources"
     level: Level = "ok"
     if silent:
         level = "warn"
-        names = _short(", ".join(silent), 80)
+        names = _short(", ".join(sorted(silent)), 80)
         text_tr += f", {len(silent)} sessiz: {names}"
         text_en += f", {len(silent)} silent: {names}"
+    tr_old, en_old = _stale(data, modified, now)
+    return Row(key, level, title_tr, title_en, text_tr + tr_old, text_en + en_old)
+
+
+def _stale(data: dict[str, Any], modified: datetime, now: datetime) -> tuple[str, str]:
+    """The suffix of a row read from a status file older than ``SERVICE_FRESH``: its numbers
+    are what the service last said, not what it does now."""
     age = now - _updated(data, modified)
-    if age > SERVICE_FRESH:
-        tr, en = ago(age)
-        text_tr += f" (bilgi {tr} eski)"
-        text_en += f" (information {en} old)"
-    return Row(key, level, title_tr, title_en, text_tr, text_en)
+    if age <= SERVICE_FRESH:
+        return "", ""
+    tr, en = ago(age)
+    return f" (bilgi {tr} eski)", f" (information {en} old)"
 
 
-def load_row(layout: Layout) -> Row:
+def load_row(layout: Layout, now: datetime) -> Row:
     key, title_tr, title_en = "database", "Veritabanına aktarım", "Database loading"
     try:
         found = read_json(layout.ingest_status)
@@ -473,7 +581,8 @@ def load_row(layout: Layout) -> Row:
         return _unreadable_row(key, title_tr, title_en, exc)
     if found is None:
         return Row(key, "unknown", title_tr, title_en, "henüz bilgi yok", "no information yet")
-    data, _ = found
+    data, modified = found
+    old_tr, old_en = _stale(data, modified, now)
     database = data.get("database")
     if isinstance(database, dict) and database.get("ok") is False:
         reason = _short(database.get("last_error") or "?", 80)
@@ -482,8 +591,8 @@ def load_row(layout: Layout) -> Row:
             "critical",
             title_tr,
             title_en,
-            f"veritabanına yazılamıyor: {reason}",
-            "the database cannot be written",
+            f"veritabanına yazılamıyor: {reason}{old_tr}",
+            f"the database cannot be written{old_en}",
         )
     lags = [
         float(entry["lag_seconds"])
@@ -498,15 +607,20 @@ def load_row(layout: Layout) -> Row:
     tr, en = ago(timedelta(seconds=lag))
     if lag > LAG_WARN_SECONDS:
         return Row(
-            key, "warn", title_tr, title_en, f"{tr} geride{speed_tr}", f"{en} behind{speed_en}"
+            key,
+            "warn",
+            title_tr,
+            title_en,
+            f"{tr} geride{speed_tr}{old_tr}",
+            f"{en} behind{speed_en}{old_en}",
         )
     return Row(
         key,
         "ok",
         title_tr,
         title_en,
-        f"güncel (gecikme {tr}){speed_tr}",
-        f"up to date (lag {en}){speed_en}",
+        f"güncel (gecikme {tr}){speed_tr}{old_tr}",
+        f"up to date (lag {en}){speed_en}{old_en}",
     )
 
 
@@ -537,32 +651,66 @@ def _seal_states(layout: Layout) -> list[tuple[date, dict[str, Any]]]:
     return states
 
 
+def _oldest_spool_day(layout: Layout, first_day: date | None) -> date | None:
+    """The oldest ``spool/<source>/<day>.log`` from ``first_day`` on: a day the collector wrote
+    that Seal has not recorded anything about (it never ran)."""
+    days = []
+    try:
+        folders = [entry.path for entry in os.scandir(layout.spool) if entry.is_dir()]
+        for folder in folders:
+            for entry in os.scandir(folder):
+                if entry.name.endswith(".log"):
+                    with contextlib.suppress(ValueError):
+                        days.append(date.fromisoformat(entry.name.removesuffix(".log")))
+    except FileNotFoundError:
+        return None
+    except PermissionError as exc:
+        raise UnreadableError(denied=True) from exc
+    except OSError as exc:
+        raise UnreadableError(denied=False) from exc
+    days = [day for day in days if first_day is None or day >= first_day]
+    return min(days, default=None)
+
+
 def seal_row(layout: Layout, site: Site, now: datetime) -> Row:
+    """The newest sealed day, or how late sealing is. The sealer records a failed attempt as
+    ``pending`` with ``last_error`` (``Sealer._failed``); ``skipped`` and ``deleted`` days need
+    no seal."""
     key, title_tr, title_en = "seal", "Mühürleme", "Sealing"
     try:
         states = _seal_states(layout)
+        sealed = next(((day, data) for day, data in states if data.get("status") == "sealed"), None)
+        yesterday = site_day(now) - timedelta(days=1)
+        first_open: date | None
+        if sealed is not None:
+            first_open = sealed[0] + timedelta(days=1)
+        else:
+            pending = [day for day, data in states if data.get("status") == "pending"]
+            first_open = min(pending, default=None)
+            if first_open is None and not states:
+                first_open = _oldest_spool_day(layout, site.first_day)
     except UnreadableError as exc:
         return _unreadable_row(key, title_tr, title_en, exc)
-    sealed = next(((day, data) for day, data in states if data.get("status") == "sealed"), None)
-    failed = next(
+    failing = next(
         (
             (day, data)
             for day, data in states
-            if data.get("status") == "failed" and (sealed is None or day > sealed[0])
+            if data.get("status") == "pending"
+            and data.get("last_error")
+            and (sealed is None or day > sealed[0])
         ),
         None,
     )
-    yesterday = site_day(now) - timedelta(days=1)
-    if sealed is None and failed is None:
-        return Row(
-            key,
-            "ok",
-            title_tr,
-            title_en,
-            "henüz mühürlenmiş gün yok (ilk mühür ilk tam günün gecesi)",
-            "no day sealed yet (the first seal follows the first whole day)",
-        )
-    if sealed is not None and sealed[0] >= yesterday:
+    if first_open is None or first_open > yesterday:
+        if sealed is None:
+            return Row(
+                key,
+                "ok",
+                title_tr,
+                title_en,
+                "henüz mühürlenecek kapanmış gün yok",
+                "no closed day to seal yet",
+            )
         day, data = sealed
         at = _time(data.get("sealed_at"))
         provider = str(data.get("provider") or "?")
@@ -580,12 +728,11 @@ def seal_row(layout: Layout, site: Site, now: datetime) -> Row:
             )
         return Row(key, "ok", title_tr, title_en, text_tr, text_en)
     # The first closed day without a seal ended at the midnight after it.
-    first_open = sealed[0] + timedelta(days=1) if sealed else (failed[0] if failed else yesterday)
     overdue = now - day_window(first_open)[1]
+    days = (yesterday - first_open).days + 1
     last_tr = sealed[0].isoformat() if sealed else "yok"
     last_en = sealed[0].isoformat() if sealed else "none"
     if overdue > timedelta(hours=site.late_after_hours):
-        days = (yesterday - first_open).days + 1
         return Row(
             key,
             "critical",
@@ -594,24 +741,26 @@ def seal_row(layout: Layout, site: Site, now: datetime) -> Row:
             f"{days} kapanmış gün mühürlenmedi (son mühür: {last_tr})",
             f"{days} closed day(s) not sealed (last seal: {last_en})",
         )
-    if failed is not None:
-        message = _short(failed[1].get("message") or failed[1].get("error") or "?", 100)
+    if failing is not None:
+        message = _short(failing[1].get("last_error"), 100)
         return Row(
             key,
             "warn",
             title_tr,
             title_en,
-            f"{failed[0].isoformat()} mühürlenemedi, yeniden denenecek: {message}",
-            f"{failed[0].isoformat()} could not be sealed and will be retried",
+            f"{failing[0].isoformat()} mühürlenemedi, yeniden denenecek: {message}",
+            f"{failing[0].isoformat()} could not be sealed and will be retried",
         )
-    if to_site(now).hour >= SEAL_EXPECTED_HOUR:
+    if days > 1 or to_site(now).hour >= SEAL_EXPECTED_HOUR:
+        what_tr = "dün" if days == 1 else f"{days} kapanmış gün"
+        what_en = "yesterday" if days == 1 else f"{days} closed days"
         return Row(
             key,
             "warn",
             title_tr,
             title_en,
-            f"dün ({yesterday.isoformat()}) henüz mühürlenmedi (son mühür: {last_tr})",
-            f"yesterday ({yesterday.isoformat()}) is not sealed yet (last seal: {last_en})",
+            f"{what_tr} henüz mühürlenmedi (son mühür: {last_tr})",
+            f"{what_en} not sealed yet (last seal: {last_en})",
         )
     return Row(
         key,
@@ -763,7 +912,7 @@ def collect(site: Site, probe: Probe) -> Snapshot:
         checks.extend(
             (
                 flow_row(layout, site, now),
-                load_row(layout),
+                load_row(layout, now),
                 seal_row(layout, site, now),
                 alert_row(layout, now),
                 disk_row(layout.root, probe),
