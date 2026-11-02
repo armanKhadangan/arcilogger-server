@@ -5,8 +5,8 @@ a typed filter.
 * The hub's CPU — the whole test process's ``process_time``, which also holds the server and the
   three readers — stays at or below 0.4 s per wall second on a core as fast as CI's runners.
 * The event loop's CPU a delivered line (the SSE side: each stream's events, Starlette's and
-  Uvicorn's writes), counted in lines of the gauge, stays at or below its bound: a costlier write
-  path fails on a fast core and on a slow one alike.
+  Uvicorn's writes), counted in lines of the gauge, stays at or below its bound, tighter on a
+  faster core: a costlier write path fails on a fast core and on a slow one alike.
 * A gauge — a fixed piece of the hub's per-line work, run outside the hub, the fastest of
   several rounds by this thread's CPU — tells how fast this core is. Up to ``TOLERANCE`` times
   the reference the CPU a second stays at 0.4 s; on a slower core it grows with the excess beyond
@@ -53,23 +53,30 @@ LINES_PER_SECOND = 10_000
 SECONDS = 10
 #: The test process's CPU a wall second on a core like CI's runners (0.18 to 0.36 s/s there).
 CPU_PER_SECOND = 0.4
-#: The gauge (seconds a gauge line, the fastest round) on CI's runners: the slowest one seen, so
-#: that every runner keeps 0.4 s/s. PROVISIONAL, from a 4-CPU cloud container whose live tail
-#: took 0.30 to 0.33 s/s like CI's slower runners (gauge 15.1 to 16.0 us). CI's runners come in
-#: two speed classes (0.18-0.24 and 0.29-0.36 s/s, at times for the same commit): set it, before
-#: review, to the slowest ``gauge:`` figure of at least ten runs of the throughput guards on each
-#: of ubuntu-latest and windows-latest, runs of both classes among them.
-REFERENCE_GAUGE = 15e-6
+#: The gauge (seconds a gauge line, the fastest round) on CI's runners: the slowest one seen on
+#: each system, so that every runner keeps 0.4 s/s. From the throughput guards of CI runs
+#: 41368179019, 41407611313, 41414800703, 41422165382, 41430160072, 41438160162, 41446215228 and
+#: 41455124190, eight on each system: windows-latest 9.13 to 17.76 us, ubuntu-latest 7.88 to
+#: 15.90 us. Other systems take Linux's figures.
+REFERENCE_GAUGE = 17.76e-6 if sys.platform == "win32" else 15.90e-6
 #: A gauge up to this many times the reference leaves the CPU a second at 0.4 s (the gauge's
 #: noise); beyond it the bound grows with the excess only, so a gauge that reads high never
 #: loosens it by more than its excess over the tolerance.
 TOLERANCE = 1.2
-#: The event loop's CPU a delivered line, in gauge lines (the gauge's fastest round, on the same
-#: clock), so the bound follows the core's speed: a write path 40 % costlier fails on a fast
-#: runner as on a slow one. Above the costliest run, below 1.4 times the cheapest. PROVISIONAL,
-#: from the same container: 6.05 to 6.83 (17 runs), 8.83 to 9.41 with every delivered line
-#: 39 us costlier; set it from CI's ``event loop:`` figures (both systems) before review.
-LOOP_GAUGE_LINES = 7.8
+#: The event loop's CPU a delivered line on a core as fast as the reference, in gauge lines (the
+#: gauge's fastest round, on the same clock), so the bound follows the core's speed: a write path
+#: 40 % costlier fails on a fast runner as on a slow one. From the same runs, each brought to the
+#: reference by ``LOOP_EXPONENT``: at least 1.10 times the costliest and below 1.4 times the
+#: cheapest / 1.05. ubuntu-latest read 5.26 to 6.15 there (6.76 to 7.02 allowed), windows-latest
+#: 4.54 to 4.92 (5.41 to 6.05).
+LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 7.0
+#: A faster core gets a proportionally tighter limit, in gauge lines: the limit goes with the
+#: gauge to this power. On those runs the loop's CPU a line went with the gauge to the power 1.39
+#: on ubuntu-latest and 1.24 on windows-latest (log-log slopes); their mean less 1, to 0.05.
+LOOP_EXPONENT = 0.3
+#: Below this fraction of the reference the limit stays where it is there, in gauge lines. CI's
+#: gauges ran from 0.5 to 1 times the reference; the bound is shown to hold over that range.
+LOOP_FLOOR = 0.5
 #: A cycle counts in the event loop's figure when at least this many of its lines reached the
 #: streams (about 150 in a busy one).
 CYCLE_LINES = 50
@@ -202,9 +209,13 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         used, elapsed = time.process_time() - cpu, time.monotonic() - wall
         spent, delivered = loop.now()
         cycles = loop.per_line(served)
-        gauge = Gauge.of(rounds + _gauge(GAUGE_ROUNDS))
+        later = _gauge(GAUGE_ROUNDS)
+        gauge = Gauge.of(rounds + later)
         # a core slower than the tolerance allows raises the bound by its excess only
         scale = max(1.0, gauge.seconds / (TOLERANCE * REFERENCE_GAUGE))
+        # a core faster than the reference gets a tighter limit a line, in gauge lines
+        speed = min(max(gauge.seconds / REFERENCE_GAUGE, LOOP_FLOOR), 1.0)
+        limit = LOOP_GAUGE_LINES * speed**LOOP_EXPONENT
         # In gauge lines, the median of the busy cycles: a pause in one of them (a garbage
         # collection, a neighbour) does not move it. A run that delivered nothing fails below,
         # after the first assertions.
@@ -223,13 +234,15 @@ def test_three_streams_under_ten_thousand_lines_a_second(
                 )
             print(
                 f"  gauge: {gauge.seconds * 1e6:.2f} us a line (fastest of {len(gauge.rounds)} "
-                f"rounds, wall {gauge.wall * 1e6:.2f}; reference {REFERENCE_GAUGE * 1e6:.2f}), "
+                f"rounds: {Gauge.of(rounds).seconds * 1e6:.2f} before the burst, "
+                f"{Gauge.of(later).seconds * 1e6:.2f} after it; wall {gauge.wall * 1e6:.2f}; "
+                f"reference {REFERENCE_GAUGE * 1e6:.2f}), "
                 f"scale {scale:.2f}, budget {CPU_PER_SECOND * scale:.2f} s/s"
             )
             print(
                 f"  event loop: {line:.2f} gauge lines a delivered line (median of {len(cycles)} "
                 f"cycles; {whole:.2f} over the whole span), about {line * gauge.seconds * 1e6:.1f} "
-                f"us (limit {LOOP_GAUGE_LINES:.2f})"
+                f"us (limit {limit:.2f}, speed {speed:.2f} of the reference)"
             )
         for stream_id in streams:
             stream = hub.streams[stream_id]
@@ -239,7 +252,7 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         assert typed.dropped.get("parse_budget", 0) > 0  # most lines were beyond the parse budget
         assert len(hub.buffer) <= hub.settings.buffer_lines
         assert used / elapsed <= CPU_PER_SECOND * scale
-        assert line <= LOOP_GAUGE_LINES
+        assert line <= limit
         # once the burst is over, a single line arrives at once
         time.sleep(1.5)
         before = len(readers[0].lines())
