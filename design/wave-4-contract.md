@@ -1634,6 +1634,34 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   X-Arci-Sha256 beside its button", `web/e2e/compliance.spec.ts` "a report whose bytes differ
   from its X-Arci-Sha256: the mismatch beside the button". Fold into 2.8.1.
 
+## Deviations — #81 (2026-11-02)
+
+- **#81-1: the rollback's lease step runs only when the restored program may not read FortiGate
+  DHCP** (manager's issue #81, item 4 of #40). `design/wave-3-contract.md` 2.2.1 ("A site
+  rollback runs no downgrade, and one lease step") runs `arcilogger-db leases prepare-rollback`
+  on every `-Rollback` without `-RestoreDatabase`. `Invoke-LeaseRollbackStep` now first looks
+  for `<InstallDir>.previous\venv\Lib\site-packages\arcilogger_db\lease_rollback.py`: with it,
+  the plan item `leases.prepare-rollback` is `skipped` with its reason (also with
+  `-SkipDatabase`, then without that warning); without it, or when the check cannot decide (no
+  readable `__init__.py` in that package folder, any error), the step runs as in 2.2.1. The
+  item's detail gains `previous_module`, `previous_has_module` (`true`, `false`, or `null` when
+  undecided) and `previous_check` (why it could not decide, else `null`). This test replaces the
+  one the round-7 implementation note (a) proposed (no `leases` command, or a `VERSION.json`
+  older than the first Wave 3 version), as the issue asks: the module came after the
+  `fg_dhcp` table, so no build has it without reading FortiGate DHCP. Points (b) and (c) are
+  unchanged. Tests (`tests/test_installer_scripts.py`):
+  `test_dry_run_rollback_skips_the_lease_step_for_a_version_that_reads_fortigate_dhcp`,
+  `test_rollback_to_a_version_that_reads_fortigate_dhcp_keeps_the_leases`,
+  `test_rollback_to_a_version_before_fortigate_dhcp_lowers_the_leases`,
+  `test_rollback_lowers_the_leases_when_the_previous_program_cannot_be_checked`,
+  `test_rollback_that_skipped_the_lease_step_and_cannot_swap_restores_no_leases`, and step 3 of
+  `test_real_install_upgrade_rollback_and_uninstall`. Already updated in the same pull request:
+  ASSUMPTIONS RB1 and the rollback paragraph of KURULUM/INSTALL §13. Fold into `CHANGELOG.md`
+  (W4-G): the Wave 3 entry "The step runs on every such rollback, so a rollback between two
+  versions that both read FortiGate DHCP shows FortiGate-DHCP chains `low` …" holds for Wave 3
+  only; Wave 4 skips the step for such a rollback. `docs/CORRELATION.md` ("The step is
+  unconditional: …", owner W4-F) says the same and is listed in the pull request.
+
 ---
 
 ## Owner questions
