@@ -365,10 +365,12 @@ public-IP request carries:
   capped at 604,800 s for `mt_dhcp` chains, and converted rows of a MAC move the build missed,
   8,640,000 s); `fortigate_dhcp_no_network` (an `fg_dhcp` chain outside every configured
   network); `dhcp_sources_overlap` (two DHCP origins in one network, D27; outside configured
-  networks the address itself is `{network}`); `source_clock_offset` (the median offset of the
-  rows nearest T on each side, at most 2,500 each, rounded to whole seconds; limit 120 s for
-  internal lookups and lease tables, max(120 s, tolerance) for a source measured for the session
-  search alone).
+  networks the address itself is `{network}`); `source_clock_offset` (of a source's two
+  samples, each counted from 10 rows, the median further from 0: its rows within 1 h of T by
+  device time nearest T, at most 2,500 on each side, and its `source_clock_samples` minutes
+  received in [T − 1 h, T + 1 h] (#73); rounded to whole seconds; limit 120 s for internal
+  lookups and lease tables, max(120 s, tolerance) for a source measured for the session search
+  alone).
 - **A RELEASE mapped after the build** (the newest kept `fg_dhcp` row of the pair in
   `[lease.start, at]` is `deassigned`) ends the lease in the lookup: no chain, no new key.
 - **srcmac** (`lookup.srcmac_interfaces`): a session without a lease on a listed interface gives a
@@ -392,9 +394,10 @@ log line (session end or interim update). A row's session interval is `[time −
 time]` (no `duration` → the instant `time`); it matches when that interval overlaps `[at −
 tolerance, at + tolerance]`; `time_distance_ms` = 0 inside, else the distance to the nearer end.
 Every query must bound the scan: `time BETWEEN at − tolerance AND at + tolerance +
-lookup.max_session_seconds` (default 86400), so the `(transip, transport, time)` index range
-stays small (an unbounded upper end scans every later chunk/partition). Interim rows count like
-final rows. *Verify on site that FortiGate interim logs carry the cumulative `duration`.*
+lookup.max_session_seconds` (default 86400), so the range on the `transip` indexes
+(`(transip, transport, time)`, and `(transip, time)` for a step without a port) stays small (an
+unbounded upper end scans every later chunk/partition). Interim rows count like final rows.
+*Verify on site that FortiGate interim logs carry the cumulative `duration`.*
 
 ## 6. API (B5 and later packages)
 
@@ -2512,15 +2515,31 @@ document (ADR-0016, CORRELATION, ASSUMPTIONS, the documents of contract 2.15) is
   load the load generator's lines through the shipped ingest and answer with `run_lookup` at a
   chosen `now`, not over HTTP (f2-7); the reading-table docs test counts an exit label only
   quoted or in parentheses (f2-8).
-- **c3 (WP-C3):** the overlap probe of an unclaimed address (`_Probe.seen_overlap`, D31 (a))
-  asks for the first row in the order of `ix_fg_traffic_transip_transport_time` (`ORDER BY
-  transip, transport, time LIMIT 1`, not `EXISTS`) in two steps: the rows logged in the probe
-  window, then, only when none of them overlaps, the tail up to `lookup.max_session_seconds`
-  after it; the answer is the same. Its guard keeps 0.2 s, except for a busy unclaimed address
-  with no session overlapping the window (`busy_before`, about 0.5 s at 1 M rows a day), which
-  has a bound of its own, 1 s (`OVERLAP_SECONDS` in `worker/tests/test_lookup_performance.py`;
-  the manager's answer (a) to Q-C3-1 on #47; an index the probe can answer from is a follow-up
-  in #40).
+- **c3 (WP-C3; the index from #71):** the overlap probe of an unclaimed address
+  (`_Probe.seen_overlap`, D31 (a)) asks for the first row in the order of
+  `ix_fg_traffic_transip_time` (`ORDER BY transip, time LIMIT 1`, not `EXISTS`) in two steps:
+  the rows logged in the probe window, then, only when none of them overlaps, the tail up to
+  `lookup.max_session_seconds` after it; the answer is the same. The index is revision
+  `0020_fg_traffic_transip_time` (#71). On `ix_fg_traffic_transip_transport_time`, the order
+  before it, `time` is the third column, so a step walked every index entry of the address in
+  the partition (about 1.1 s per step for a busy address after its last row, day 28 of a
+  monthly partition at 1 M rows a day; now under 1 ms). The address is written `transip =
+  ANY(inet[])` with one element (`_address_is`): with `transip = :address` PostgreSQL drops the
+  constant from the sort, and with two lines taking turns the planner took the primary key
+  `(time, id)` instead. The D15 check (`_Lookup._carried`) names the address the same way in
+  every step and asks its steps without a port (the tail of a search without a port, the
+  sessions spanning T on any port) in the same order; its steps with a port keep the order of
+  `ix_fg_traffic_transip_transport_time` (`ORDER BY transip, transport, time`), as does the
+  exact search. With the address and the port fixed, either index of the address gives that
+  order, and on a TimescaleDB chunk holding only the step's last instant the planner took
+  `(transip, time)`. The guards keep 0.2 s, except for a busy unclaimed address with no session
+  overlapping the window (`busy_before`, 1.4 s before the index and 0.25 s with it on that
+  partition, 0.30 s in the guard), which keeps a bound of its own, 1 s (`OVERLAP_SECONDS` in
+  `worker/tests/test_lookup_performance.py`; the manager's answer (a) to Q-C3-1 on #47;
+  `INCLUDE (duration)` was measured in #71 and not taken, ASSUMPTIONS Q-C3-1). They bound the
+  shared buffers of each probe step, and of each D15 step after the window, to the rows of its
+  range plus 100 (`STEP_BUFFERS`); the D15 window step, in time order, reads at most the
+  window's rows of every address.
 - **e2 (WP-E, second part):** the web shows a match of a lookup without a public IP as the report
   prints it (d-27): "çıkış belirlenmedi (talepte genel IP yok) / exit not determined (no public IP
   in the request) · {dstintf}", and "-" only when a public IP was requested and no exit claims
@@ -2534,6 +2553,14 @@ document (ADR-0016, CORRELATION, ASSUMPTIONS, the documents of contract 2.15) is
   `setting_ipv6_not_supported`, and an address with two `::` with `setting_egress_address`; the
   web mirror decides IPv6 on the part before the first `/` (`db/tests/test_egress.py`,
   `web/src/pages/settings/egress-model.test.ts`).
+- **clock (#73):** a source's clock is measured by receive time as well, from
+  `source_clock_samples` (revision `0019_source_clock_samples`; DATA-MODEL). A lookup takes,
+  beside c2's rows nearest T by device time, the source's minutes received in [T − 1 h, T + 1 h];
+  each sample counts from 10 rows, and the median further from 0 is the source's offset, with
+  c2's limits, rounding and texts. `R20-lease:source-clock` reads a source's newest minutes
+  received in the last hour, whole, until they hold 200 rows, or 10 once they reach back 10
+  minutes; the threshold, the texts and the resolution are unchanged. A clock set hours back
+  after logging on time is so named at the real moment (contract, "Deviations — clock").
 
 ## 19. Uyum Durumu, Sistem and the first-run wizard (Wave 4, ADR-0017)
 

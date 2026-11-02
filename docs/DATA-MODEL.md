@@ -2,8 +2,8 @@
 
 > Durum: MVP (sürüm 0.1.0). Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
-> `v0017_fortigate_dhcp`). Bir test, modellerle migrasyonların birebir aynı olduğunu her
-> çalıştırmada doğrular.
+> `v0020_fg_traffic_transip_time`). Bir test, modellerle migrasyonların birebir aynı olduğunu
+> her çalıştırmada doğrular.
 
 ## Özet (TR)
 
@@ -55,6 +55,13 @@
   (sıfırdan uzağa yuvarlanmış tam saniye; bir dakikanın altındaki fark 0) ve satır sayısını
   tutar. Ingest bunu satırlarla aynı işlemde yazar; `R20-lease:source-clock` uyarısı ve 5651
   sorgusunun saat denetimi saatleri geri ya da ileri atlayan bir cihaz saatini buradan ölçer.
+- NAT adresi indeksi (revizyon `0020_fg_traffic_transip_time`): `fg_traffic` tablosunun yeni
+  indeksi `ix_fg_traffic_transip_time (transip, time)`, 5651 sorgusunun bir NAT adresi için port
+  olmadan sorduğu adımlara (kayıtlarda görülen adres denetimi; D15 denetiminin pencereden sonraki
+  kuyruk adımları ve T'yi kapsayan oturum adımları) yalnızca o adresin aralıktaki satırlarını
+  okutur; `(transip, transport, time)` indeksinde `time` üçüncü sütun olduğundan böyle bir adım
+  adresin bölümdeki bütün indeks girdilerini yürüyordu. Milyon satır başına yaklaşık 31,5 MB yer
+  tutar.
 
 ## Summary (EN)
 
@@ -90,7 +97,12 @@ exit) and add three status rows that are never edited: `nat.egresses_migration`,
 **received** minute, the device clock's offset from the receive time (whole seconds rounded away
 from zero, 0 under a minute) and its rows, written by ingest in the transaction of the rows; the
 `R20-lease:source-clock` alert and a lookup's clock check measure a clock that jumped by hours
-there.
+there. The NAT address index (revision `0020_fg_traffic_transip_time`) is `fg_traffic`'s new
+index `ix_fg_traffic_transip_time (transip, time)`: a lookup's steps without a port on one NAT
+address (the overlap probe, and the D15 check's tail after its window and its steps for sessions
+spanning the moment; its window step stays in time order) read that address's rows of their range
+only, where on `(transip, transport, time)` they walked every index entry of the address in the
+partition; it takes about 31.5 MB per million rows.
 
 ## Conventions
 
@@ -132,7 +144,7 @@ through the table itself (never into a partition), so the identity column is use
 | Table | Content | Indexes besides the primary key |
 |---|---|---|
 | `messages` | Every received message (lightweight): severity, facility, program/topics, host, type, subtype, short text, `parse_error` | (source, time), (type, time) |
-| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
+| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (transip, time) (`ix_fg_traffic_transip_time`, revision `0020_fg_traffic_transip_time`: the lookup's steps without a port on one NAT address, in the overlap probe `_Probe.seen_overlap` and the tail and spanning-sessions steps of the D15 check `_Lookup._carried`; about 31.5 MB per million rows), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
 | `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time), `ix_fg_web_rhost_time` (reverse(lower(hostname)), time) — the search field `domain:` (revision `0016_search`) |
 | `fg_dns` | DNS: qname, qtype, answers `INET[]`, catdesc, action | (srcip, time), (qname, time) |
 | `fg_app` | Application control: app, appid, appcat, hostname, url | (sessionid), (srcip, time) |
@@ -212,9 +224,9 @@ rollback without a database restore then runs the previous version with its own 
 new code never reads, lists or writes them, and the first revision after Wave 3 deletes them.
 
 Not created yet (later milestones):
-`nat_index` (the `fg_traffic` index `(transip, transport, time)` serves spec 9.3 for now; the
-matching rule and the bounded time scan, setting `lookup.max_session_seconds`, are in
-`docs/MVP-CONTRACTS.md` section 5).
+`nat_index` (the `fg_traffic` indexes `(transip, transport, time)` and `(transip, time)` serve
+spec 9.3 for now; the matching rule and the bounded time scan, setting
+`lookup.max_session_seconds`, are in `docs/MVP-CONTRACTS.md` section 5).
 
 ## Audit log (`audit_log`)
 
