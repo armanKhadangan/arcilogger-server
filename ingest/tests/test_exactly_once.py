@@ -7,7 +7,9 @@ Rows, offsets, the search summary counts (``search_counts``) and the clock sampl
 * a second instance moves the offsets under a running one (compare-and-set refuses the batch);
 * two instances race on the same files (both with the single-instance lock switched off: the
   compare-and-set is the safety net for the moments the lock cannot cover, e.g. while the lock
-  connection is being re-established after a database restart);
+  connection is being re-established after a database restart), and one starts, or disables a
+  source removed from its configuration, while the other is in the middle of a load (no
+  deadlock between them);
 * the real service process is killed (``SIGKILL`` / ``TerminateProcess``) several times.
 """
 
@@ -17,18 +19,22 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import date, timedelta
+from typing import Any
 
 import pytest
-from sqlalchemy import Connection, Engine, text
+from sqlalchemy import Connection, Engine, event, text
 
 from arcilogger_core.rawlog import RawRecord
 from arcilogger_core.timeutil import day_window
 from arcilogger_db.engine import engine_from_url
 from arcilogger_db.searchcounts import verify
 from arcilogger_ingest import prepare
+from arcilogger_ingest.instance import InstanceLock
 from arcilogger_ingest.loader import STEPS
 from arcilogger_ingest.parsers import LinePosition, ParsedRow, ParseOutcome, get_parser
+from arcilogger_ingest.service import IngestService
 from arcilogger_ingest.status import read_status
 from arcilogger_ingest.testing import (
     DAY,
@@ -205,9 +211,192 @@ def test_two_instances_racing_on_the_same_files(
     counts_consistent(db_engine)
 
 
+def _writes_source(statement: str, conflict: str) -> bool:
+    return (
+        statement.startswith("INSERT INTO sources")
+        and f"ON CONFLICT (name) {conflict}" in statement
+    )
+
+
+class _LoadAtFortigate:
+    """Picks the load's ``INSERT … DO NOTHING`` of fortigate's ``sources`` row in a batch that
+    has already written core-r1's, so the load holds core-r1's row when it gets there (the race
+    needs both rows in one batch). ``step`` is the load's step hook: each step ``sources``
+    starts a new batch's rows."""
+
+    def __init__(self) -> None:
+        self.written: list[str] = []
+
+    def step(self, name: str) -> None:
+        if name == "sources":
+            self.written.clear()
+
+    def __call__(self, statement: str, parameters: Any) -> bool:
+        if not _writes_source(statement, "DO NOTHING"):
+            return False
+        self.written.append(parameters.get("name"))
+        return self.written[-1] == "fortigate" and "core-r1" in self.written
+
+
+def _meet_before(
+    at_point: Callable[[str, Any], bool],
+    arrived: threading.Event,
+    partner: threading.Event,
+    met: list[bool],
+) -> Callable[..., None]:
+    """A ``before_cursor_execute`` listener: before the first statement ``at_point`` picks,
+    set ``arrived`` and wait for ``partner`` (the other instance at its own statement); ``met``
+    records whether the partner came, so a test cannot lose the overlap it exists to create."""
+
+    def listener(_connection: Any, _cursor: Any, statement: str, parameters: Any, *_: Any) -> None:
+        if not arrived.is_set() and at_point(statement, parameters):
+            arrived.set()
+            met.append(partner.wait(30))
+
+    return listener
+
+
+def test_a_second_instance_starting_during_a_load_waits_for_it(
+    world: World, db_engine: Engine, pg_dsn: str
+) -> None:
+    """The moment of the race above that ended one ``--once`` run with 3, every time.
+
+    The first instance's load has written core-r1's ``sources`` row and is about to write
+    fortigate's; the second instance's start-up sync is about to write core-r1's. Both write the
+    rows in name order, so the sync waits for the load. (Written in the configuration's order,
+    fortigate first, the sync held the row the load wanted and PostgreSQL reported a deadlock:
+    "database unavailable".)
+    """
+    world.reconfigure(ingest={"batch_rows": 40})
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(200)))
+    world.append("fortigate", DAY, (fortigate_message(i) for i in range(200)))
+    other_engine = engine_from_url(pg_dsn)
+    load_at_fortigate, sync_at_core_r1 = threading.Event(), threading.Event()
+    met: list[bool] = []
+    load_point = _LoadAtFortigate()
+    load_gate = _meet_before(load_point, load_at_fortigate, sync_at_core_r1, met)
+    sync_gate = _meet_before(
+        lambda statement, parameters: (
+            _writes_source(statement, "DO UPDATE") and parameters.get("name") == "core-r1"
+        ),
+        sync_at_core_r1,
+        load_at_fortigate,
+        met,
+    )
+    second_result: list[int] = []
+    second = threading.Thread(
+        target=lambda: second_result.append(
+            world.service(other_engine, single_instance=False).run(once=True)
+        )
+    )
+
+    def start_second_in_first_load(name: str) -> None:
+        load_point.step(name)
+        if name == "sources" and second.ident is None:
+            second.start()
+
+    event.listen(db_engine, "before_cursor_execute", load_gate)
+    event.listen(other_engine, "before_cursor_execute", sync_gate)
+    try:
+        first = world.service(
+            db_engine, step_hook=start_second_in_first_load, single_instance=False
+        )
+        first_result = first.run(once=True)
+        second.join(300)
+        assert not second.is_alive(), "the second instance did not finish"
+    finally:
+        event.remove(db_engine, "before_cursor_execute", load_gate)
+        event.remove(other_engine, "before_cursor_execute", sync_gate)
+        other_engine.dispose()
+    assert load_at_fortigate.is_set(), "the load did not get to fortigate's row after core-r1's"
+    assert sync_at_core_r1.is_set(), "the sync did not get to core-r1's row"
+    assert met == [True, True], "the load and the sync did not meet"
+    assert [first_result, *second_result] == [0, 0]
+    assert check_exactly_once(db_engine, world) == []
+    counts_consistent(db_engine)
+
+
+def test_a_source_removed_in_another_instance_during_a_load_is_disabled_after_it(
+    world: World, db_engine: Engine, pg_dsn: str
+) -> None:
+    """The same moment for a source no longer configured: the second instance's sync (start-up
+    or a ``[[sources]]`` reload) disables core-r1's row while the first instance's load holds it
+    and is about to write fortigate's. The disable comes in name order too, so it waits for the
+    load and is not rolled back by a deadlock."""
+    world.reconfigure(ingest={"batch_rows": 40})
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(20)))
+    world.append("fortigate", DAY, (fortigate_message(i) for i in range(20)))
+    assert world.service(db_engine, single_instance=False).run(once=True) == 0
+    world.append("core-r1", DAY, (dhcp_message(i) for i in range(200)))
+    world.append("fortigate", DAY, (fortigate_message(i) for i in range(200)))
+    other_engine = engine_from_url(pg_dsn)
+    without_core_r1 = [s for s in world.config.sources if s.name != "core-r1"]
+    second = IngestService(
+        world.config.model_copy(update={"sources": without_core_r1}), other_engine
+    )
+    load_at_fortigate, sync_at_core_r1 = threading.Event(), threading.Event()
+    met: list[bool] = []
+    load_point = _LoadAtFortigate()
+    load_gate = _meet_before(load_point, load_at_fortigate, sync_at_core_r1, met)
+    sync_gate = _meet_before(
+        lambda statement, parameters: (
+            statement.startswith("UPDATE sources") and "core-r1" in parameters.values()
+        ),
+        sync_at_core_r1,
+        load_at_fortigate,
+        met,
+    )
+    sync_errors: list[Exception] = []
+
+    def sync() -> None:
+        try:
+            second._sync_configured_sources()
+        except Exception as exc:  # reported by the assert below
+            sync_errors.append(exc)
+
+    syncing = threading.Thread(target=sync)
+
+    def sync_in_first_load(name: str) -> None:
+        load_point.step(name)
+        if name == "sources" and syncing.ident is None:
+            syncing.start()
+
+    event.listen(db_engine, "before_cursor_execute", load_gate)
+    event.listen(other_engine, "before_cursor_execute", sync_gate)
+    try:
+        first = world.service(db_engine, step_hook=sync_in_first_load, single_instance=False)
+        first_result = first.run(once=True)
+        syncing.join(300)
+        assert not syncing.is_alive(), "the sync did not finish"
+    finally:
+        event.remove(db_engine, "before_cursor_execute", load_gate)
+        event.remove(other_engine, "before_cursor_execute", sync_gate)
+        other_engine.dispose()
+    assert load_at_fortigate.is_set(), "the load did not get to fortigate's row after core-r1's"
+    assert sync_at_core_r1.is_set(), "the sync did not get to core-r1's row"
+    assert met == [True, True], "the load and the sync did not meet"
+    assert first_result == 0
+    assert sync_errors == []
+    with db_engine.connect() as connection:
+        enabled = connection.execute(
+            text("SELECT enabled FROM sources WHERE name = 'core-r1'")
+        ).scalar_one()
+    assert enabled is False  # the first instance's later batches do not touch ``enabled``
+    assert check_exactly_once(db_engine, world) == []
+    counts_consistent(db_engine)
+
+
 def _messages(engine: Engine) -> int:
     with engine.connect() as connection:
         return int(connection.execute(text("SELECT count(*) FROM messages")).scalar_one())
+
+
+def wait_for(condition: Callable[[], bool], timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not reached in time")
+        time.sleep(0.02)
 
 
 def test_killing_the_service_process_repeatedly(
@@ -230,6 +419,11 @@ def test_killing_the_service_process_repeatedly(
         finally:
             process.kill()
             process.wait(30)
+        # The killed process's session, which holds the ingest lock, can outlive wait() on a
+        # loaded Windows runner (so can a launcher's interpreter child); --once would exit 4.
+        probe = InstanceLock(db_engine)
+        wait_for(probe.acquire, timeout=60)
+        probe.release()
         kills += 1
         consistent(db_engine, world)
     total = _messages(db_engine)

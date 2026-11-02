@@ -137,7 +137,10 @@ parse_failures.count + EXCLUDED.count`, first example kept).
 `unknown-<ip>` sender gets `unknown = true`, the detected type, and **one** `new_source` alert
 (`dedup_key = "new_source:<name>"`) when its row is first created — resolving the alert does not
 make it come back. (The collector also writes `new-log-source` to `state/alerts.jsonl`; the
-worker that imports that file should use the same key.)
+worker that imports that file should use the same key.) At start-up, after every `[[sources]]`
+reload and in every batch, the `sources` rows are written in name order, so an instance that
+starts (or disables a removed source) while another one is loading waits for that load instead
+of deadlocking with it.
 
 ## Exactly once
 
@@ -150,13 +153,14 @@ worker that imports that file should use the same key.)
 
 Tests: an interruption at every step of the transaction (`offsets`, `copy`, `failures`,
 `sources`, `counts`, `commit`), a second instance moving the offsets mid-batch, two instances
-racing on the same files (lock switched off), the real process killed three times with
+racing on the same files (lock switched off), one starting, or disabling a removed source, in
+the middle of the other's load, the real process killed three times with
 `SIGKILL`/`TerminateProcess` during loading, re-runs over the same files, and database outages
 (a TCP proxy that drops every connection): before the `COPY`, **while `COPY` is streaming rows**,
 **as `COMMIT` is sent**, and a `COMMIT` that **succeeded but whose answer was lost** (the retry
 finds the offsets already moved and continues from the database) — every time each line is in
 `messages` exactly once and rows and offsets agree; after the interruptions, the second instance,
-the race and the kills the search counts agree with them too (`searchcounts.verify` in the
+the races and the kills the search counts agree with them too (`searchcounts.verify` in the
 same snapshot), and so do the clock samples (their sum equals the rows with a device time of
 their own).
 

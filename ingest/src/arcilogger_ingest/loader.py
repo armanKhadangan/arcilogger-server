@@ -382,6 +382,7 @@ class Loader:
         self, connection: Connection, seen: Iterable[SourceSeen]
     ) -> tuple[str, ...]:
         created: list[str] = []
+        # fixed lock order, the same as IngestService._sync_configured_sources
         for source in sorted(seen, key=lambda s: s.name):
             inserted = connection.execute(
                 insert(Source)
