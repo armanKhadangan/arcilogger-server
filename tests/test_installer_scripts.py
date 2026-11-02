@@ -6106,7 +6106,10 @@ def test_rollback_to_a_version_that_reads_fortigate_dhcp_keeps_the_leases(
     assert not [c for c in report["calls"] if "prepare-rollback" in c]
     assert _unwrapped(LEASES_NOT_NEEDED) in _unwrapped(report["stdout"])
     assert _unwrapped(LEASES_LOWERED) not in _unwrapped(report["stdout"])
-    assert _unwrapped("arcilogger_db\\lease_rollback.py)") in _unwrapped(report["stdout"])
+    # PowerShell 7 on Linux joins the path with "/"
+    stdout = _windows_path(_unwrapped(report["stdout"]))
+    assert stdout is not None
+    assert "arcilogger_db\\lease_rollback.py)" in stdout
     assert not [w for w in report["health"]["warnings"] if "FortiGate" in w]
     assert _folders(report)["ARCILOGGER"] == "0.9.0"
     assert _running(report) == ALL_SERVICES
