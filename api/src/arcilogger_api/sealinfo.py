@@ -769,12 +769,15 @@ def credit_history(layout: Layout, limit: int = CREDIT_HISTORY) -> tuple[list[di
             bad += 1
             continue
         credits = data.get("credits")
+        supported = data.get("supported")
         entries.append(
             {
                 "time": at,
                 "provider": data.get("provider"),
                 "credits": credits if isinstance(credits, int) else None,
                 "error": data.get("error"),
+                # false: the Credit task found no credit query for the provider (2.4)
+                "supported": supported if isinstance(supported, bool) else None,
             }
         )
     return entries, bad
