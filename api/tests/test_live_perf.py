@@ -70,12 +70,14 @@ TOLERANCE = 1.2
 #: cheapest / 1.05. ubuntu-latest read 5.26 to 6.15 there (6.76 to 7.02 allowed), windows-latest
 #: 4.54 to 4.92 (5.41 to 6.05).
 LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 7.0
-#: A faster core gets a proportionally tighter limit, in gauge lines: the limit goes with the
-#: gauge to this power. On those runs the loop's CPU a line went with the gauge to the power 1.39
-#: on ubuntu-latest and 1.24 on windows-latest (log-log slopes); their mean less 1, to 0.05.
+#: A faster core gets a tighter limit, in gauge lines: the limit goes with the gauge, relative to
+#: the reference, to this power. On those runs the loop's CPU a line went with the gauge to the
+#: power 1.39 on ubuntu-latest and 1.24 on windows-latest (log-log slopes); their mean less 1, to
+#: 0.05.
 LOOP_EXPONENT = 0.3
-#: Below this fraction of the reference the limit stays where it is there, in gauge lines. CI's
-#: gauges ran from 0.5 to 1 times the reference; the bound is shown to hold over that range.
+#: Below this fraction of the reference the limit no longer falls, in gauge lines. CI's gauges ran
+#: from about 0.5 to 1 times the reference (the fastest at the floor); the bound is shown to hold
+#: over that range.
 LOOP_FLOOR = 0.5
 #: A cycle counts in the event loop's figure when at least this many of its lines reached the
 #: streams (about 150 in a busy one).
@@ -242,7 +244,7 @@ def test_three_streams_under_ten_thousand_lines_a_second(
             print(
                 f"  event loop: {line:.2f} gauge lines a delivered line (median of {len(cycles)} "
                 f"cycles; {whole:.2f} over the whole span), about {line * gauge.seconds * 1e6:.1f} "
-                f"us (limit {limit:.2f}, speed {speed:.2f} of the reference)"
+                f"us (limit {limit:.2f}, speed factor {speed:.2f})"
             )
         for stream_id in streams:
             stream = hub.streams[stream_id]
