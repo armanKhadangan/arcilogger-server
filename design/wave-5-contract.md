@@ -685,3 +685,63 @@ All Wave 5 questions are answered (2026-11-02).
   (`zd.turktrust.com.tr`) is a second legal-grade provider (D12).
   - The banner rule stays for mock, rfc3161 and test servers.
   - No site setting can add another legal provider.
+
+## Deviations — W5-C (2026-11-02)
+
+- **W5-C-1: the reader of `state/renewal.json`.** §2.1.2 fixes the per-token fields, not the
+  top level. The reader (`alerts.system.read_stamp_renewals`, shared by `/legal-status`, the
+  day page and the alerts) takes `tokens` of an object or a plain list, ignores unknown keys,
+  leaves out an entry with an unknown `status` or an unreadable `cert_not_after`, and counts
+  from each token's `status`, never from a totals object. A missing file is "no report yet"; an
+  unreadable one is unknown and decides nothing (no reason, no alert raised or resolved,
+  `renewal: null` and a page problem on the day page). An entry's `renewed_at` is taken when
+  the writer gives one; otherwise the day page reads the genTime of the renewal token beside
+  the `covered_by` record. `path` is vault-relative; a leading `vault/` and a `.zd` suffix of
+  `covered_by` are tolerated.
+- **W5-C-2: the day page's `revocation` texts** for the codes that §2.6 does not word
+  (`crl-revoked-later`, `crl-hold`, `crl-none`, `crl-stale`, `crl-ok`) are W5-C's, after the
+  standalone verifier's (`legalstatus/texts.py` `REVOCATION`); `crl-revoked` uses
+  `certificate_revoked`. `level` is the verifier's own `crl_level`, else the D10 level of the
+  code. Until W5-B's lists are in this branch `revocation` is `null` (not checked).
+- **W5-C-3: `crl_stale`** is measured on each list's `this_update` ("newer than": a list exactly
+  `tsa.crl_max_age_days` old is stale) for each issuer in use, an issuer without any stored list
+  included. "Issuer in use" becomes the issuer certificates of the newest sealed day's chain
+  once W5-B is in this branch; until then it is every `issuer_sha256` of the index, so a site
+  without an index has no `crl_stale`. An index that cannot be read is never a server error;
+  it raises `crl_stale` only while an issuer is in use. `since` is the earliest
+  `this_update + max_age` of the stale issuers that have a list, else `null`; `link` is
+  `settings-tsa` (C5).
+- **W5-C-4: `credentials_in_clear`** holds for `turktrust` when the `tsa.url` scheme is `http`
+  or `tsa.allow_plain_http` is true (D12 names the flag). Until W5-T's configuration lands,
+  `turktrust` is never a legal-grade claim, so it also gives `provider_not_legal` and the label
+  "Test sunucusu".
+- **W5-C-5: `DashboardSeal.blocking`** names the oldest closed day without a token more than
+  `seal.late_after_hours` after its end; `hours_late` is the whole hours since that day's end
+  (49 at 49 h 30 min). It uses the same rule as `unstamped_days` (D11); a spool that cannot be
+  listed gives `null`, and a stamped day whose Seal task has not finished does not block.
+- **W5-C-6: the API texts carry no ZAMAN-DAMGASI reference.** C13 has the web append "ZAMAN-
+  DAMGASI.md bölüm N"; the `message_tr`/`message_en` of `/legal-status` are the §2.6 texts
+  alone. `certificate_revoked`'s `{name}` is the certificate subject's CN, else its whole
+  RFC 4514 text.
+- **W5-C-7: the three alerts are prepared, not switched on.** `check_stamp_renewal`,
+  `check_stamp_cert` and `check_stamp_crl` are in `alerts.system.LEGAL_CHECKS`, not in
+  `CHECKS`: W5-E appends them with their texts and first-steps guide rows (§2.3.1). Each code
+  is written only inside its dedup key (`R20-renewal:none` and so on) and the rule is taken from
+  the key (D14); `worker/tests/test_alerts_legal.py::test_no_whole_string_constant_for_the_wave5_alert_codes`
+  fails on a whole-string constant, and W5-E deletes or inverts it. The findings carry counts
+  only. R20-cert's "expires within 30 days and is uncovered" is read as a `due` token whose
+  certificate expires within 30 days. "The `Renew` task failed twice in a row" is left to W5-E:
+  no state file records Renew runs yet (C12). `R20-crl` is judged from `state/crl/index.json`
+  only; its details give the stale issuers, the failures and the newest `fetched_at`.
+- **W5-C-8: `Exclude<A, B>` in the web type tests.** `LegalReason.level` is
+  `Exclude<LegalLevel, 'ok'>` (§2.3.1, verbatim), so `tsType()` of `api-types.test.ts` and
+  `check()` of `api-samples.test.ts` learned that form.
+- **W5-C-9: `SealDayDetail.renewal` and `revocation` are optional** in `seal-types.ts`, as
+  W5-D asked and like `tsa_cert_not_after?`; the API always sends both keys (`null` when there
+  is nothing). `Credits.supported` is required in `api-types.ts`, because the schema requires
+  it and `api-types.test.ts` compares requiredness. It is false for a provider without a credit
+  query and also when the newest `state/credit.jsonl` line of the configured provider says
+  `"supported": false`.
+- **W5-C-10: day-check Turkish texts beyond #106's four** in `issues.py`: C14's "revocation
+  list {file} does not match its index entry" and the builder's "CRL file {file} changed while
+  the package was built". `{when}` is shown in site time (`format_datetime`).
