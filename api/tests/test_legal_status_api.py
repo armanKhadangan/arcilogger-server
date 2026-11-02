@@ -659,6 +659,7 @@ def test_legal_texts_never_claim_compliance() -> None:
     every = [
         *texts.REASONS.values(),
         *texts.RENEWAL_DAY.values(),
+        *texts.REVOCATION.values(),
         texts.NO_CREDIT_QUERY,
         (*texts.LEGAL_PROVIDER_LABELS.values(), texts.MOCK_LABEL, texts.TEST_LABEL),
     ]

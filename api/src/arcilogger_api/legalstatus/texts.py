@@ -1,7 +1,9 @@
-"""The fixed texts of the legal-validity status (Wave 5 contract 2.6), Turkish first.
+"""The fixed texts of the legal-validity status (Wave 5 contract 2.6), Turkish first, and the
+revocation texts of the day page.
 
-Every text is a ``(Turkish, English)`` pair, character for character as the contract gives it;
-``{…}`` are filled by :mod:`arcilogger_api.legalstatus.compute`. The web app appends the
+Every text is a ``(Turkish, English)`` pair; those of 2.6 are character for character as the
+contract gives them. ``{…}`` are filled by :mod:`arcilogger_api.legalstatus.compute` and
+:mod:`arcilogger_api.sealinfo`. The web app appends the
 "ZAMAN-DAMGASI.md bölüm N" reference to a banner text (C13), so these texts carry none. No text
 claims legal conformity: a reason says what is missing, never that something is in order.
 """
@@ -92,6 +94,45 @@ RENEWAL_DAY: Final[Mapping[str, Text]] = {
         "Yeniden damgalama henüz gerekmiyor (sertifika {date} tarihine kadar geçerli).",
         "Re-stamping is not due yet (certificate valid until {date}).",
     ),
+}
+
+#: The revocation result of a day's time stamp on the sealing page (``revocation``), by the
+#: verifiers' code (D10). ``crl-revoked`` is the reason's text; the others are not fixed by the
+#: contract (they follow the standalone verifier's wording). ``{date}`` is a site-time date.
+REVOCATION: Final[Mapping[str, Text]] = {
+    "crl-revoked": REASONS["certificate_revoked"],
+    "crl-revoked-later": (
+        "Sertifika zaman damgasından sonra iptal edilmiş ({date}): {name}; iptal nedeninin "
+        "incelenmesi gerekir.",
+        "The certificate was revoked after the stamp ({date}): {name}; the reason for the "
+        "revocation should be reviewed.",
+    ),
+    "crl-hold": (
+        "Sertifika SİL'de askıya alınmış görünüyor ({date}): {name}; askının damga anını "
+        "kapsayıp kapsamadığı incelenmeli.",
+        "The certificate is on hold on a revocation list ({date}): {name}; check whether the "
+        "hold covers the stamp time.",
+    ),
+    "crl-none": (
+        "Bu sertifikayı kapsayan saklı SİL yok; iptal durumu bilinmiyor.",
+        "No stored revocation list covers this certificate; the revocation status is unknown.",
+    ),
+    "crl-stale": (
+        "Saklı en yeni SİL zaman damgasından önce yayımlanmış; damga anındaki iptal durumu "
+        "bilinmiyor.",
+        "The newest stored revocation list predates the stamp; the revocation status at the "
+        "stamp time is unknown.",
+    ),
+    "crl-ok": ("SİL'de iptal kaydı yok.", "No revocation entry on the revocation lists."),
+}
+#: The verifiers' level of each revocation code (D10), when a result does not carry it.
+REVOCATION_LEVELS: Final[Mapping[str, str]] = {
+    "crl-revoked": "fail",
+    "crl-revoked-later": "warn",
+    "crl-hold": "warn",
+    "crl-none": "info",
+    "crl-stale": "info",
+    "crl-ok": "ok",
 }
 
 #: ``provider_label`` of a provider whose stamps the site claims as legal grade.

@@ -10,8 +10,9 @@ Permission ``seal.read`` (administrators, auditors) unless noted:
 * ``GET /seals/{day}`` — the day: files, sizes, lines and hashes exactly as in the manifest,
   the manifest's own hash, the link to the previous day (and whether it still matches the
   vault), gaps, clock data, time-stamp token (genTime, serial, TSA, policy, certificate
-  validity, provider, ``legal_grade``, a fresh token check), the newest verification and the
-  replica status.
+  validity, provider, ``legal_grade``, a fresh token check), the newest verification, the
+  replica status, the token's re-stamping state (``renewal``, from ``state/renewal.json``) and
+  its revocation result (``revocation``; Wave 5 contract 2.3.1), each ``null`` when unknown.
 * ``GET /seals/{day}/manifest`` and ``/token`` — the sealed files (audited ``seal.download``).
 * ``POST /seals/{day}/verify?deep=true`` (``seal.verify``) — the core day check in a child
   process with a time limit (:mod:`arcilogger_api.sealcheck`); the result is stored in
