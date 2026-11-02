@@ -18,8 +18,9 @@ existed when they started); last a ``CHECKPOINT`` writes the load back to disk, 
 does not run into the timing (#90; skipped, and said so, for a role without ``pg_checkpoint``).
 
 **Timing:** through the API (``TestClient``), best of three after one warm-up; the cold run is
-printed too, past pytest's capture, so CI's log shows them for a passing run as well. The numbers
-are recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
+printed too, past pytest's capture, so CI's log shows them for a passing run as well, with where
+the best call's time went (SQL, commits, fsyncs, other; :class:`Timer`, #90). The numbers are
+recorded in docs/ARAMA.md / docs/SEARCH.md ("Performans").
 
 **Plans:** for Q2-Q7 the statement of a whole-range window, as the search sends it (on
 TimescaleDB one window on each side of a compression horizon, where ``windows.run_page`` ends a
@@ -50,7 +51,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_api.app import create_app
@@ -413,6 +414,75 @@ def _checkpoint(engine: Engine) -> str:
 
 
 @dataclass
+class Split:
+    """Where one request's time went (#90): its SQL statements, its commits and its fsyncs, timed
+    in this test only (product code has no timing hooks); the rest is "other" (Python, the ASGI
+    app, the client)."""
+
+    sql: float = 0.0
+    commits: float = 0.0
+    commit_count: int = 0
+    fsyncs: float = 0.0
+    fsync_count: int = 0
+
+    def text(self, total: float) -> str:
+        other = total - self.sql - self.commits - self.fsyncs
+        return (
+            f"sql {self.sql * 1000:.0f} ms, commit {self.commits * 1000:.0f} ms "
+            f"({self.commit_count}), fsync {self.fsyncs * 1000:.0f} ms ({self.fsync_count}), "
+            f"other {other * 1000:.0f} ms"
+        )
+
+
+class Timer:
+    """Times the statements and commits of ``engine`` and every ``os.fsync`` (the audit spool's)
+    into :attr:`current`, from :func:`install` until the monkeypatch and the listeners are undone.
+    One request runs at a time, so the counters need no lock."""
+
+    def __init__(self) -> None:
+        self.current = Split()
+        #: The split of the best call of the last :func:`measure`.
+        self.best = Split()
+
+    def install(self, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
+        def before(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            conn.info.setdefault("arci_perf_began", []).append(time.perf_counter())
+
+        def after(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            self.current.sql += time.perf_counter() - conn.info["arci_perf_began"].pop()
+
+        commit = engine.dialect.do_commit
+        fsync = os.fsync
+
+        def do_commit(dbapi_connection: Any) -> None:
+            began = time.perf_counter()
+            try:
+                commit(dbapi_connection)
+            finally:
+                self.current.commits += time.perf_counter() - began
+                self.current.commit_count += 1
+
+        def timed_fsync(fd: int) -> None:
+            began = time.perf_counter()
+            try:
+                fsync(fd)
+            finally:
+                self.current.fsyncs += time.perf_counter() - began
+                self.current.fsync_count += 1
+
+        event.listen(engine, "before_cursor_execute", before)
+        event.listen(engine, "after_cursor_execute", after)
+        monkeypatch.setattr(engine.dialect, "do_commit", do_commit)
+        monkeypatch.setattr(os, "fsync", timed_fsync)
+
+        def remove() -> None:
+            event.remove(engine, "before_cursor_execute", before)
+            event.remove(engine, "after_cursor_execute", after)
+
+        return remove
+
+
+@dataclass
 class Site:
     client: TestClient
     app: FastAPI
@@ -424,10 +494,16 @@ class Site:
     newest: tuple[datetime, datetime]
     #: Prints past pytest's capture, so CI's log shows the figures of a passing run too (#90).
     show: Callable[[str], None]
+    timer: Timer
 
 
 @pytest.fixture
-def site(tmp_path: Any, db_engine: Engine, capsys: pytest.CaptureFixture[str]) -> Iterator[Site]:
+def site(
+    tmp_path: Any,
+    db_engine: Engine,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Site]:
     def show(line: str) -> None:
         with capsys.disabled():
             print(line)
@@ -481,6 +557,8 @@ def site(tmp_path: Any, db_engine: Engine, capsys: pytest.CaptureFixture[str]) -
             ],
         }
     )
+    timer = Timer()
+    remove_timer = timer.install(db_engine, monkeypatch)
     app = create_app(config, db_engine, audit_flush_seconds=None)
     state: AppState = app.state.arci
     factory = state.session_factory()
@@ -501,22 +579,33 @@ def site(tmp_path: Any, db_engine: Engine, capsys: pytest.CaptureFixture[str]) -
             session.commit()
         start, _ = day_window(days[-1])
         _, end = day_window(NEWEST)
-        yield Site(client, app, db_engine, factory, config, start, end, day_window(NEWEST), show)
+        try:
+            yield Site(
+                client, app, db_engine, factory, config, start, end, day_window(NEWEST), show, timer
+            )
+        finally:
+            remove_timer()
 
 
 # -- measuring ------------------------------------------------------------------------------------
 
 
-def measure(call: Callable[[], Any]) -> tuple[float, float, Any]:
-    """Cold run, then the best of three after it (the cold run is the warm-up)."""
+def measure(site: Site, call: Callable[[], Any]) -> tuple[float, float, Any]:
+    """Cold run, then the best of three after it (the cold run is the warm-up). The split of the
+    best call is kept in ``site.timer.best`` for :func:`report`."""
+    timer = site.timer
+    timer.current = Split()
     began = time.perf_counter()
     result = call()
     cold = time.perf_counter() - began
     best = float("inf")
     for _ in range(3):
+        timer.current = Split()
         began = time.perf_counter()
         result = call()
-        best = min(best, time.perf_counter() - began)
+        elapsed = time.perf_counter() - began
+        if elapsed < best:
+            best, timer.best = elapsed, timer.current
     return cold, best, result
 
 
@@ -619,7 +708,7 @@ def report(
 ) -> None:
     site.show(
         f"{name}: {q!r} cold {cold * 1000:.0f} ms, best {best * 1000:.0f} ms "
-        f"(budget {budget * 1000:.0f} ms){extra}"
+        f"(budget {budget * 1000:.0f} ms){extra}; best: {site.timer.best.text(best)}"
     )
 
 
@@ -632,7 +721,7 @@ def test_search_performance(site: Site) -> None:
 
     # Q1 browse, first page: a backward scan of the primary key of messages.
     for label, (start, end) in (("1 d", site.newest), ("30 d", month)):
-        cold, best, page = measure(partial(search, site, "", start, end))
+        cold, best, page = measure(site, partial(search, site, "", start, end))
         report(site, f"Q1 browse {label}", "", cold, best, BROWSE)
         assert len(page["items"]) == 100
         assert best < BROWSE
@@ -644,14 +733,16 @@ def test_search_performance(site: Site) -> None:
         ("1 d", site.newest, DAY_ROWS),
         ("30 d", month, MONTH_ROWS),
     ):
-        cold, best, page = measure(partial(search, site, f"srcip:{NEEDLE}", start, end))
+        cold, best, page = measure(site, partial(search, site, f"srcip:{NEEDLE}", start, end))
         report(site, f"Q2 srcip {label}", f"srcip:{NEEDLE}", cold, best, budget)
         assert len(page["items"]) == 100
         assert best < budget
     check_plan(explain(site, f"srcip:{NEEDLE}", *month), r"srcip_time")
 
     # Q3 a /24 for a day.
-    cold, best, page = measure(lambda: search(site, "srcip:172.20.41.0/24", day_start, day_end))
+    cold, best, page = measure(
+        site, lambda: search(site, "srcip:172.20.41.0/24", day_start, day_end)
+    )
     report(site, "Q3 srcip /24 1 d", "srcip:172.20.41.0/24", cold, best, DAY_ROWS)
     assert page["items"]
     assert best < DAY_ROWS
@@ -674,7 +765,7 @@ def test_search_performance(site: Site) -> None:
         ("Q6", f"type:dhcp mac:{RARE_MAC}", (r"mac_time", r"mt_event\w*_event_time")),
         ("Q7", f"qname:{RARE_DOMAIN}", (r"qname_time",)),
     ):
-        cold, best, page = measure(partial(search, site, q, *month))
+        cold, best, page = measure(site, partial(search, site, q, *month))
         report(site, f"{name} 30 d", q, cold, best, MONTH_ROWS)
         assert page["items"], q
         assert page["scan"]["complete"] is True
@@ -687,7 +778,7 @@ def test_search_performance(site: Site) -> None:
     q8 = "type:web action:blocked department:Finans"
     page = search(site, q8, *month)
     cold, best, rolled = measure(
-        lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
+        site, lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
     )
     report(site, "Q8 stats 30 d", q8, cold, best, STATS_ROLLUP, f", mode {rolled['mode']}")
     assert rolled["mode"] in ("rollup", "hybrid")
@@ -714,7 +805,7 @@ def test_search_performance(site: Site) -> None:
     # Q9 statistics of the needle, counted directly, for a day.
     page = search(site, f"srcip:{NEEDLE}", day_start, day_end)
     cold, best, counted = measure(
-        lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
+        site, lambda: site.client.post(f"{API}/stats", json={"search_id": page["search_id"]}).json()
     )
     report(site, "Q9 stats 1 d direct", f"srcip:{NEEDLE}", cold, best, STATS_DIRECT)
     assert counted["mode"] == "direct"
@@ -727,9 +818,10 @@ def test_search_performance(site: Site) -> None:
         session.commit()
     page = search(site, f"srcip:{NEEDLE}", *month)
     cold, best, response = measure(
+        site,
         lambda: site.client.post(
             f"{API}/export", json={"search_id": page["search_id"], "format": "csv"}
-        )
+        ),
     )
     report(site, "Q10 export 10,000 rows", f"srcip:{NEEDLE}", cold, best, EXPORT)
     assert response.status_code == 200, response.text
@@ -751,7 +843,7 @@ def test_search_performance(site: Site) -> None:
         ("S2", "dstport:3389 action:deny", site.newest, None),
         ("S3", f"ip:{NEEDLE}", month, None),
     ):
-        cold, best, page = measure(partial(search, site, q, start, end))
+        cold, best, page = measure(site, partial(search, site, q, start, end))
         complete = page["scan"]["complete"]
         report(
             site,
