@@ -51,14 +51,14 @@ pytestmark = pytest.mark.perf
 
 LINES_PER_SECOND = 10_000
 SECONDS = 10
-#: The test process's CPU a wall second on a core like CI's runners (0.18 to 0.36 s/s there).
+#: The test process's CPU a wall second on a core like CI's runners (0.18 to 0.37 s/s there).
 CPU_PER_SECOND = 0.4
 #: The gauge (seconds a gauge line, the fastest round) on CI's runners: the slowest one seen on
 #: each system, so that every runner keeps 0.4 s/s. From the throughput guards of CI runs
-#: 41368179019, 41407611313, 41414800703, 41422165382, 41430160072, 41438160162, 41446215228 and
-#: 41455124190, eight on each system: windows-latest 9.13 to 17.76 us, ubuntu-latest 7.88 to
-#: 15.90 us. Other systems take Linux's figures.
-REFERENCE_GAUGE = 17.76e-6 if sys.platform == "win32" else 15.90e-6
+#: 41368179019, 41407611313, 41414800703, 41422165382, 41430160072, 41438160162, 41446215228,
+#: 41455124190, 41465153350 and 41478486887, ten on each system: windows-latest 9.13 to 17.76 us,
+#: ubuntu-latest 7.88 to 16.04 us. Other systems take Linux's figures.
+REFERENCE_GAUGE = 17.76e-6 if sys.platform == "win32" else 16.04e-6
 #: A gauge up to this many times the reference leaves the CPU a second at 0.4 s (the gauge's
 #: noise); beyond it the bound grows with the excess only, so a gauge that reads high never
 #: loosens it by more than its excess over the tolerance.
@@ -67,12 +67,12 @@ TOLERANCE = 1.2
 #: gauge's fastest round, on the same clock), so the bound follows the core's speed: a write path
 #: 40 % costlier fails on a fast runner as on a slow one. From the same runs, each brought to the
 #: reference by ``LOOP_EXPONENT``: at least 1.10 times the costliest and below 1.4 times the
-#: cheapest / 1.05. ubuntu-latest read 5.26 to 6.15 there (6.76 to 7.02 allowed), windows-latest
-#: 4.54 to 4.92 (5.41 to 6.05).
-LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 7.0
+#: cheapest / 1.05. ubuntu-latest read 5.28 to 6.16 there (6.78 to 7.03 allowed), windows-latest
+#: 4.54 to 5.02 (5.53 to 6.05).
+LOOP_GAUGE_LINES = 5.7 if sys.platform == "win32" else 7.0
 #: A faster core gets a tighter limit, in gauge lines: the limit goes with the gauge, relative to
 #: the reference, to this power. On those runs the loop's CPU a line went with the gauge to the
-#: power 1.39 on ubuntu-latest and 1.24 on windows-latest (log-log slopes); their mean less 1, to
+#: power 1.31 on ubuntu-latest and 1.26 on windows-latest (log-log slopes); their mean less 1, to
 #: 0.05.
 LOOP_EXPONENT = 0.3
 #: Below this fraction of the reference the limit no longer falls, in gauge lines. CI's gauges ran
