@@ -1634,6 +1634,67 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   X-Arci-Sha256 beside its button", `web/e2e/compliance.spec.ts` "a report whose bytes differ
   from its X-Arci-Sha256: the mismatch beside the button". Fold into 2.8.1.
 
+## Deviations — W4-G (2026-11-01)
+
+Docs only; the docs tests (`tests/test_docs_consistency.py`, `tests/test_search_docs.py`) show
+each entry. Every `## Deviations — <package>` section above is folded as §4.4 W4-G asks: into
+`docs/MVP-CONTRACTS.md` §19.8 (each package by name, with the API facts), `docs/ASSUMPTIONS.md`
+(the Wave 4 rows and "Decided while building (Wave 4)") and, where an operator sees it,
+`docs/UYUM-DURUMU.md` / `docs/COMPLIANCE-STATUS.md` (§2.10, §3, §4 intro, §4.1, §4.2, §4.7,
+§4.8, §5) and ADR-0017.
+
+- **Section headings stay as they are** (2.9 "§9 first sign-in → the wizard"). `docs/KURULUM.md`
+  keeps "## 9. İlk giriş" and `docs/INSTALL.md` "## 9. First login"; the wizard (Ayarlar → İlk
+  kurulum sihirbazı, `/settings/setup`, its steps and states, no redirect, Q18) is a new part of
+  that section, and the overview rows 9 and 12 name it. §12 and §13 keep their headings and add
+  Uyum Durumu and Sistem beside the console commands, and version and maintenance on Sistem. The
+  docs tests cut these sections by number (`_section(text, "## 13.", "## 14.")` in
+  `test_install_guides_describe_the_licence`) and other documents link them by number
+  ("KURULUM.md bölüm 9" in ILK-ADIMLAR and SECURITY). Nothing to fold.
+- **The wizard's e-mail step is written as W4-C's deviation, not as 2.8.4.** AYARLAR/SETTINGS (the
+  wizard entry), ASSUMPTIONS Q18 and UYUM-DURUMU/COMPLIANCE-STATUS §5 say the step is done only
+  while sending is switched on (`[smtp] enabled`) and a server and a sender are set; switched off,
+  it lists "E-posta gönderimi kapalı." / "Sending e-mail is switched off.". This is the merged
+  view (manager decision on #37).
+- **ADR-0017 adds two sections to ADR-0016's format:** "Owner decisions (2026-10-28)" (Q1 and Q10
+  with their answers) and "Deviations recorded during implementation" (the deviations that refine
+  one of D1-D15, by package; the full list with texts points to MVP-CONTRACTS §19.8 and
+  ASSUMPTIONS). The open questions with their defaults are under "Open points (owner decision)",
+  as in ADR-0016. Its status keeps the date of this contract and of the owner decisions,
+  "accepted (2026-10-28)" (the ADR-date question on #62).
+- **DENETCI-KILAVUZU's Uyum Durumu section is §11** ("## 11. Uyum Durumu Raporu'nu okumak"), after
+  WP-F2's reading table (§10, Wave 3), with the paragraph "Reading the Uyum Durumu Raporu (section
+  11)" in the file's English part (one file, no pair). It says technical checks, not a legal
+  assessment, recommends the lawyer review, and has the auditor open the page and download the
+  report (D15).
+- **ASSUMPTIONS keeps the Wave 4 part under one heading** ("## Uyum Durumu, Sistem, ilk kurulum
+  sihirbazı: Wave 4 (2026-10-28)"), after the integrator's Wave 3 part, with `###` subsections:
+  the owner decisions (Q1, Q10), the defaults of the open questions, "Decided while building
+  (Wave 4)", the lawyer review (Q20), "Verify on site (Wave 4)" and "Deviations from the
+  specification (Wave 4)". Its rows keep this contract's numbers Q1-Q21 (no other row of the file
+  uses a `Q` prefix) instead of a new letter series, and the verify-on-site list and the
+  specification deviations stay in that part rather than in the file's general sections, so the
+  Wave 4 part reads and merges as one (manager's note on #28).
+- **MVP-CONTRACTS §19 uses the file's compact notation** (`Name {field, field: type, …}`), not
+  2.3.1/2.5.1/2.6.1 verbatim: §19.1 endpoints, §19.2-§19.5 the JSON, §19.6 the settings,
+  `R20-filter` and the job `system.sample`, §19.7 the error code, the audit actions and the
+  permissions, §19.8 the deviations. Besides §19 and the §6 `compliance.read` row, the router
+  map names the three Wave 4 routers, the alerts section names `check_filter` (`R20-filter:none`,
+  high), and §15's stale route count is corrected: "5651 Temel: 103 routes" now reads 129 routes
+  at Wave 4, as `api/tests/test_license_routes.py` counts them (the route-count question on #62).
+- **UYUM-DURUMU/COMPLIANCE-STATUS §1: the auditor sees the count of open alerts, not the alerts.**
+  The sentence written by W4-E said the auditor sees each alert's rule, severity and opening time
+  on the card; the merged view shows only "Açık uyarı: {n}" / "Open alerts: {n}" (2.8.1), and the
+  rule, severity and opening time are in the Uyum Durumu Raporu (PDF). §1 and its evaluation rule
+  now say so. A correction of W4-E's text to the code rather than a fold (listed on #62 under
+  "Files outside my ownership").
+- **Beyond the literal 2.9 text:** `docs/roles.md` gets its own section "Uyum Durumu ve Sistem /
+  Compliance status and system pages" besides the table rows and "Kararlar / Decisions";
+  `docs/ARCHITECTURE.md` a section "Uyum Durumu and Sistem"; AYARLAR/SETTINGS the wizard's
+  read-only requests in the table of pages and their endpoints and, on the manager's note on #28,
+  the srcmac interface list's labels as the web names them ("srcmac görülen arayüzler (son 1 saat)" /
+  "Interfaces with srcmac (last hour)", the IPv4 rule without quotes).
+
 ## Deviations — transip index (#71, 2026-11-02)
 
 Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 1.2, 2.8.3, D15,

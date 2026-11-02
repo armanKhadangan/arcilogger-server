@@ -50,6 +50,7 @@ NEW_KEYS = (
     "egress_public_dynamic",
     "egress_internal",
     "source_clock_offset",
+    "source_clock_shared",
 )
 #: Retired keys: never emitted again, kept so that stored lookups still render.
 RETIRED_KEYS = ("public_ip_not_configured", "wan_transip_not_seen")
@@ -71,7 +72,7 @@ def _labels(language: str) -> dict[str, Any]:
 
 
 def test_every_new_key_is_in_the_catalogue() -> None:
-    assert len(NEW_KEYS) == len(set(NEW_KEYS)) == 34
+    assert len(NEW_KEYS) == len(set(NEW_KEYS)) == 35
     assert set(NEW_KEYS) <= set(ENGINE_EXPLANATIONS)
     assert set(RETIRED_KEYS) <= set(ENGINE_EXPLANATIONS)
 
@@ -166,3 +167,31 @@ def test_the_clock_remedy_fits_every_lookup() -> None:
     assert "for a public IP with the tolerance widened by the offset" in text_en
     assert "for an internal IP or a MAC address at the requested moment shifted" in text_en
     assert "(later for a positive offset, earlier for a negative one)" in text_en
+
+
+def test_the_shared_device_times_text() -> None:
+    """``source_clock_shared`` (#82): the moment's device times were also used by rows sent at
+    another real time, so the offset is not that of the moment's own rows and shifting the
+    moment would not help; the text names the direction of the other rows and the check."""
+    text_tr, text_en = ENGINE_EXPLANATIONS["source_clock_shared"]
+    values: dict[str, str | int] = {
+        "at": "2026-10-12T11:23:41+03:00",
+        "offsets": "fortigate: -10800",
+        "limit": 120,
+    }
+    note = explain("source_clock_shared", **values)
+    assert note.text_tr.startswith(
+        "12.10.2026 11:23:41 çevresindeki cihaz zamanları şu kaynakların başka bir gerçek "
+        "zamanda gönderdiği kayıtlarda da kullanıldı (cihazın saati sonradan değiştirilmiş)"
+    )
+    assert "fortigate: -10800 (sınır 120 saniye)" in note.text_tr
+    assert "bu fark kadar sonra (fark eksiyse) ya da önce (fark artıysa)" in note.text_tr
+    assert "ham kayıttaki alma zamanından doğrulayın" in note.text_tr
+    assert note.text_en.startswith(
+        "The device times around 12.10.2026 11:23:41 were also used by records these "
+        "sources sent at another real time (the device's clock was changed later)"
+    )
+    assert "fortigate: -10800 (limit 120 seconds)" in note.text_en
+    assert "that much later (for a negative offset) or earlier (for a positive one)" in note.text_en
+    assert "kaydırarak" not in text_tr
+    assert "shifted by the offset" not in text_en

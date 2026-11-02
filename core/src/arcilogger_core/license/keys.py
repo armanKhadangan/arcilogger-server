@@ -23,5 +23,11 @@ from types import MappingProxyType
 from typing import Final
 
 #: key id -> raw Ed25519 public key (32 bytes) as base64url without padding (43 characters).
-#: Production: only keys the owner committed. Empty until the owner sends the first public key.
-TRUSTED_KEYS: Final[Mapping[str, str]] = MappingProxyType({})
+#: Production: only keys the owner committed. ``arci-2026-01``: the owner's first key, committed
+#: 2026-11-02 (SHA-256 of the raw key, as the issuer tool prints it:
+#: 21a1889122f627855f81b0c5a622bbc470c7e76c7c1387e78d0cd746eacbb341).
+TRUSTED_KEYS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "arci-2026-01": "UsIirhz0go9rf8QZVn0H0ZJvBrUf7Z6VxSj2V5MPu0A",
+    }
+)
