@@ -57,9 +57,9 @@ counts lines per source and kind. Python API: :class:`Settings`, :class:`Simulat
 **Never on the production server.** ``spool`` refuses a data folder that is in use (sealed
 days, a ``state`` folder, spool files it did not write) unless ``--i-know-this-is-not-production``
 is given, and leaves the marker file ``LOADGEN-DEMO.txt`` in every data folder it writes to.
-Every simulated DHCP pool has 160 addresses (``.64`` to ``.223``): about 160 users fill the
-staff Wi-Fi (everyone's phone is on it), about 140 when the FortiGate serves it (an address stays
-held until its lease ends); more stop with a clear error.
+Every simulated DHCP pool has 160 addresses (``.64`` to ``.223``), and an address stays held
+until its lease ends: about 125 users fill the staff Wi-Fi (everyone's phone is on it), about 140
+when the FortiGate serves it; more stop with a clear error.
 
 Run from the repository root: ``uv run python tools/loadgen/arcilogger_loadgen.py --help``.
 """
@@ -107,10 +107,10 @@ HEARTBEAT_MINUTES: Final = 5
 EPHEMERAL: Final = (49152, 65535)
 #: The simulated DHCP pools are ``.64`` to ``.223`` in every VLAN.
 POOL_FIRST, POOL_SIZE = 64, 160
-#: About how many users fill the staff Wi-Fi pool, by who serves it (14 simulated days: 162 users
-#: with MikroTik DHCP; 144-149, by seed, with FortiGate DHCP, whose addresses stay held until the
-#: lease ends).
-WIFI_USERS: Final = {"mikrotik": 160, "fortigate": 140}
+#: About how many users fill the staff Wi-Fi pool, by who serves it (14 simulated days, by seed:
+#: 126-134 users with MikroTik DHCP, whose leases run 24 h past the last activity; 144-149 with
+#: FortiGate DHCP). An address stays held until its lease ends with either server (#89).
+WIFI_USERS: Final = {"mikrotik": 125, "fortigate": 140}
 #: A NAT port stays taken this long after its session ended.
 NAT_GRACE: Final = timedelta(seconds=120)
 #: Left in every data folder ``spool`` writes to: these lines are synthetic, never evidence.
@@ -756,11 +756,11 @@ class Simulation:
         return LEASE_SECONDS_BY_SERVER.get(server or "", LEASE_SECONDS)
 
     def _free_ip(self, device: Device, at: datetime) -> str:
+        # A DHCP server never hands out an address before its lease has ended. Devices are
+        # simulated one after the other, so a lease that ends later than ``at`` may already have
+        # left ``_leases``: its end still holds the address (#89; the default output changed).
         held = {lease.ip for lease in self._leases.values()}
-        if self._fortigate_gateway(device.vlan):
-            # A DHCP server never hands out an address before its lease has ended. (The MikroTik
-            # VLANs keep the earlier allocation, so the default output keeps its bytes.)
-            held |= {ip for ip, ended in self._ended.items() if ended > at}
+        held |= {ip for ip, ended in self._ended.items() if ended > at}
         sticky = self._sticky.get(device.key)
         if sticky is not None and sticky not in held:
             return sticky
