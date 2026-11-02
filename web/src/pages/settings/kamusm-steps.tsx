@@ -23,7 +23,8 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Field, Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { errorMessage, isApiError } from '@/lib/api';
 import { useTsaTest } from '@/lib/api-hooks';
 import { formatDateTime } from '@/lib/format';
@@ -37,14 +38,20 @@ import type {
 import { cn } from '@/lib/utils';
 
 import {
+  CRL_MAX_AGE_DAYS,
+  CRL_URLS_MAX,
+  PLAIN_HTTP_PHRASE,
+  RENEW_BEFORE_DAYS,
   SERVER_CHOICES,
   causeKey,
   choiceProvider,
   currentChoice,
+  plainHttpConfirmed,
   providerText,
   secretMeta,
   TURKTRUST_KEPT,
   type Credentials,
+  type EvidenceForm,
   type ServerChoice,
   type StepStatus,
   type TsaForm,
@@ -524,7 +531,7 @@ export function ProductionStep({
     : READINESS.map((item) => ({ key: item, ok: !missing.has(item) }));
   const ready = target !== 'production' || tsa.readiness.production;
   const stopsProduction = current === 'production' || tsa.provider === 'turktrust';
-  const phrase = t('settings.kamusm.production.httpPhrase');
+  const phrase = PLAIN_HTTP_PHRASE;
   const switchLabel =
     target === 'production'
       ? t('settings.kamusm.production.toProduction')
@@ -695,7 +702,7 @@ export function ProductionStep({
         description={t('settings.kamusm.turktrust.plainHttp')}
         confirmLabel={switchLabel}
         danger
-        confirmDisabled={typed.trim() !== phrase}
+        confirmDisabled={!plainHttpConfirmed(typed)}
         onConfirm={confirmed}
       >
         <div className="flex flex-col gap-1.5">
@@ -761,6 +768,112 @@ export function CreditStep({
         }}
       />
     </div>
+  );
+}
+
+/**
+ * Step 7, below the credit threshold: the re-stamping window and the revocation lists (Wave 5
+ * contract 2.5, D4, D7; `tsa.renew_before_days`, `tsa.crl_urls`, `tsa.crl_max_age_days`), saved
+ * with "Kaydet" and a password confirmation. They apply to both providers. The revocation-list
+ * addresses of Kamu SM and TÜRKTRUST are not confirmed (T4, K10), so the field says "sahada
+ * doğrula" and the code builds none in: left empty, the certificates' own distribution points
+ * are used.
+ */
+export function EvidenceFields({
+  id,
+  form,
+  onChange,
+  disabled,
+  changed,
+  errors,
+}: {
+  /** The page's id: the controls are `<id>-<field>`, so the page can focus the first error. */
+  id: string;
+  form: EvidenceForm;
+  onChange: (form: Partial<EvidenceForm>) => void;
+  disabled: boolean;
+  /** A key differs from the server's: the change asks for the password. */
+  changed: boolean;
+  errors: {
+    renewBeforeDays?: string | undefined;
+    crlUrls?: string | undefined;
+    crlMaxAgeDays?: string | undefined;
+  };
+}) {
+  const { t } = useTranslation();
+  const urlsHint = `${id}-crlUrls-hint`;
+  return (
+    <section
+      className="flex flex-col gap-4 border-t border-border pt-4"
+      aria-labelledby={`${id}-evidence-title`}
+      data-testid="tsa-evidence"
+    >
+      <div className="flex flex-col gap-1">
+        <h3 id={`${id}-evidence-title`} className="text-sm font-semibold text-foreground">
+          {t('settings.kamusm.evidence.title')}
+        </h3>
+        <p className="text-13 text-muted-strong">{t('settings.kamusm.evidence.description')}</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextField
+          id={`${id}-renewBeforeDays`}
+          label={t('settings.kamusm.evidence.renewBeforeDays')}
+          hint={t('settings.kamusm.evidence.renewBeforeDaysHint', RENEW_BEFORE_DAYS)}
+          value={form.renewBeforeDays}
+          inputMode="numeric"
+          inputClassName="w-40"
+          disabled={disabled}
+          error={errors.renewBeforeDays}
+          onChange={(renewBeforeDays) => {
+            onChange({ renewBeforeDays });
+          }}
+        />
+        <TextField
+          id={`${id}-crlMaxAgeDays`}
+          label={t('settings.kamusm.evidence.crlMaxAgeDays')}
+          hint={t('settings.kamusm.evidence.crlMaxAgeDaysHint', CRL_MAX_AGE_DAYS)}
+          value={form.crlMaxAgeDays}
+          inputMode="numeric"
+          inputClassName="w-40"
+          disabled={disabled}
+          error={errors.crlMaxAgeDays}
+          onChange={(crlMaxAgeDays) => {
+            onChange({ crlMaxAgeDays });
+          }}
+        />
+      </div>
+      <Field
+        id={`${id}-crlUrls`}
+        label={t('settings.kamusm.evidence.crlUrls')}
+        hint={t('settings.kamusm.evidence.crlUrlsHint', { max: CRL_URLS_MAX })}
+        error={errors.crlUrls}
+      >
+        <Textarea
+          id={`${id}-crlUrls`}
+          rows={4}
+          className="font-mono text-13"
+          value={form.crlUrls}
+          disabled={disabled}
+          spellCheck={false}
+          aria-invalid={errors.crlUrls ? true : undefined}
+          aria-describedby={errors.crlUrls ? `${id}-crlUrls-error` : urlsHint}
+          onChange={(event) => {
+            onChange({ crlUrls: event.target.value });
+          }}
+        />
+      </Field>
+      <Alert
+        tone="info"
+        assertive={false}
+        title={t('settings.kamusm.evidence.crlNoteTitle')}
+        data-testid="tsa-crl-note"
+      >
+        {t('settings.kamusm.evidence.crlNote')}
+      </Alert>
+      {changed ? (
+        <p className="text-xs text-muted-strong">{t('settings.kamusm.evidence.reauth')}</p>
+      ) : null}
+    </section>
   );
 }
 

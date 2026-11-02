@@ -7,8 +7,13 @@ import { ApiError } from '@/lib/api';
 import { setLanguage } from '@/lib/i18n';
 import type { TsaSection } from '@/lib/settings-types';
 
-import { TURKTRUST_KEPT, type Credentials, type ServerChoice } from './kamusm-model';
-import { CredentialsStep, ProductionStep, TsaRefusal } from './kamusm-steps';
+import {
+  TURKTRUST_KEPT,
+  type Credentials,
+  type EvidenceForm,
+  type ServerChoice,
+} from './kamusm-model';
+import { CredentialsStep, EvidenceFields, ProductionStep, TsaRefusal } from './kamusm-steps';
 
 /*
  * Ayarlar → Zaman damgası, the server choice (Wave 5 contract 2.3.2, 2.4): Kamu SM's test and
@@ -204,8 +209,12 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
       name: 'TÜRKTRUST sunucusuna düz HTTP ile geç',
     });
     expect(confirm).toBeDisabled();
-    const phrase = within(ask).getByLabelText('Onaylamak için DÜZ HTTP yazın');
-    await userEvent.type(phrase, 'düz http');
+    // The phrase is exactly HTTP (Wave 5 contract C5): another case or word does not do.
+    const phrase = within(ask).getByLabelText('Onaylamak için HTTP yazın');
+    await userEvent.type(phrase, 'http');
+    expect(confirm).toBeDisabled();
+    await userEvent.clear(phrase);
+    await userEvent.type(phrase, 'DÜZ HTTP');
     expect(confirm).toBeDisabled();
     // "İptal" asks nothing and forgets what was typed.
     await userEvent.click(within(ask).getByRole('button', { name: 'İptal' }));
@@ -214,8 +223,8 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
       screen.getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' }),
     );
     ask = screen.getByRole('dialog', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geçilsin mi?' });
-    expect(within(ask).getByLabelText('Onaylamak için DÜZ HTTP yazın')).toHaveValue('');
-    await userEvent.type(within(ask).getByLabelText('Onaylamak için DÜZ HTTP yazın'), ' DÜZ HTTP ');
+    expect(within(ask).getByLabelText('Onaylamak için HTTP yazın')).toHaveValue('');
+    await userEvent.type(within(ask).getByLabelText('Onaylamak için HTTP yazın'), ' HTTP ');
     await userEvent.click(
       within(ask).getByRole('button', { name: 'TÜRKTRUST sunucusuna düz HTTP ile geç' }),
     );
@@ -296,7 +305,7 @@ describe('Ayarlar → Zaman damgası: the server to switch to', () => {
     );
     expect(
       screen.getByRole('dialog', { name: 'Switch to the TÜRKTRUST server over plain HTTP?' }),
-    ).toHaveTextContent('Type PLAIN HTTP to confirm');
+    ).toHaveTextContent('Type HTTP to confirm');
   });
 });
 
@@ -350,5 +359,65 @@ describe('Ayarlar → Zaman damgası: the credentials of the provider in use', (
     const refusal = screen.getByTestId('tsa-refusal');
     expect(refusal).toHaveTextContent('TÜRKTRUST kullanıcı adı kayıtlı');
     expect(refusal).toHaveTextContent('TÜRKTRUST parolası kayıtlı');
+  });
+});
+
+describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 contract 2.5)', () => {
+  const FORM: EvidenceForm = { renewBeforeDays: '180', crlUrls: '', crlMaxAgeDays: '7' };
+
+  function Fields({
+    changed = false,
+    error,
+    seen,
+  }: {
+    changed?: boolean;
+    error?: string;
+    seen: Partial<EvidenceForm>[];
+  }) {
+    return (
+      <EvidenceFields
+        id="evidence"
+        form={FORM}
+        disabled={false}
+        changed={changed}
+        errors={{ crlUrls: error }}
+        onChange={(next) => {
+          seen.push(next);
+        }}
+      />
+    );
+  }
+
+  it('the window, the age and the addresses with their bounds and the "sahada doğrula" note', async () => {
+    const seen: Partial<EvidenceForm>[] = [];
+    const { rerender } = render(<Fields error="Her satır bir adres olmalı." seen={seen} />);
+    const group = screen.getByRole('region', { name: 'Yeniden damgalama ve iptal listeleri' });
+    expect(within(group).getByLabelText('Yeniden damgalama süresi (gün)')).toHaveValue('180');
+    expect(group).toHaveTextContent('30–730 gün, varsayılan 180.');
+    expect(within(group).getByLabelText('İptal listesinin en büyük yaşı (gün)')).toHaveValue('7');
+    expect(group).toHaveTextContent('1–60 gün, varsayılan 7.');
+    const urls = within(group).getByLabelText('İptal listesi adresleri');
+    expect(urls).toHaveAccessibleDescription('Her satır bir adres olmalı.');
+    expect(urls).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('tsa-crl-note')).toHaveTextContent('Sahada doğrula');
+    expect(screen.getByTestId('tsa-crl-note')).toHaveTextContent('hiçbir adres eklemez');
+    expect(group).not.toHaveTextContent('parolanız yeniden sorulur');
+    await userEvent.type(urls, 'x');
+    expect(seen).toEqual([{ crlUrls: 'x' }]);
+    rerender(<Fields changed seen={seen} />);
+    expect(urls).toHaveAccessibleDescription(
+      /^Her satıra bir adres, http:\/\/ ya da https:\/\/ ile/,
+    );
+    expect(group).toHaveTextContent('Bu ayarların değişikliği için parolanız yeniden sorulur.');
+  });
+
+  it('in English', () => {
+    act(() => {
+      setLanguage('en');
+    });
+    render(<Fields seen={[]} />);
+    expect(screen.getByLabelText('Re-stamping window (days)')).toHaveValue('180');
+    expect(screen.getByTestId('tsa-crl-note')).toHaveTextContent('Verify on site');
+    expect(screen.getByText(/at most 20 addresses/)).toBeInTheDocument();
   });
 });

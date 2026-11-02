@@ -47,8 +47,7 @@
         "turktrustTitle": "TÜRKTRUST sunucusuna geçilsin mi?",
         "turktrustBody": "Mühürleme bundan sonra TÜRKTRUST sunucusunun damgalarını kullanır; bağlantı HTTPS ile yapılır. Bir gün, damgası TÜRKTRUST'ın yasal kök olarak işaretlenmiş kök sertifikasına bağlandığında yasal nitelikli gösterilir.",
         "httpTitle": "TÜRKTRUST sunucusuna düz HTTP ile geçilsin mi?",
-        "httpType": "Onaylamak için {{phrase}} yazın",
-        "httpPhrase": "DÜZ HTTP"
+        "httpType": "Onaylamak için {{phrase}} yazın"
       },
       "turktrust": {
         "unusedStep": "Bu adım yalnızca Kamu SM Zamane için gerekir; TÜRKTRUST kullanılırken mühürlemeyi etkilemez.",
@@ -92,7 +91,37 @@
       },
       "errors": {
         "turktrustUsername": "Kullanıcı adı 1–128 karakter olmalı ve denetim karakteri içermemeli.",
-        "turktrustPassword": "Parola 1–256 karakter olmalı ve denetim karakteri içermemeli."
+        "turktrustPassword": "Parola 1–256 karakter olmalı ve denetim karakteri içermemeli.",
+        "crlUrl": "Her satır http:// ya da https:// ile başlayan ve bir sunucu adı içeren bir adres olmalı; kullanıcı adı ya da parola içeremez.",
+        "crlUrlsCount": "En çok {{max}} adres girilebilir."
+      },
+      "evidence": {
+        "title": "Yeniden damgalama ve iptal listeleri",
+        "description": "Uzun süreli kanıt için: damgalar, sertifikaları sona ermeden yeniden damgalanır; damga sertifikalarının iptal listeleri (SİL) her gün indirilir. İki sağlayıcı için de geçerlidir.",
+        "renewBeforeDays": "Yeniden damgalama süresi (gün)",
+        "renewBeforeDaysHint": "{{min}}–{{max}} gün, varsayılan 180. Sertifikasının sona ermesine bundan az gün kalan damgalar yeniden damgalanır; günde en çok bir damga kullanılır.",
+        "crlMaxAgeDays": "İptal listesinin en büyük yaşı (gün)",
+        "crlMaxAgeDaysHint": "{{min}}–{{max}} gün, varsayılan 7. Bu süreden yeni doğrulanmış bir iptal listesi yoksa uyarı oluşur.",
+        "crlUrls": "İptal listesi adresleri",
+        "crlUrlsHint": "Her satıra bir adres, http:// ya da https:// ile; en çok {{max}} adres. Boş bırakılırsa kök sertifikaların ve en yeni damgaların sertifikalarındaki iptal listesi dağıtım noktaları kullanılır.",
+        "crlNoteTitle": "Sahada doğrula",
+        "crlNote": "Kamu SM'nin ve TÜRKTRUST'ın iptal listesi adresleri bu kurulumda doğrulanmadı; ARCILOGGER kendiliğinden hiçbir adres eklemez. Sağlayıcının yayımladığı adresleri buraya yazın ve ilk indirmeden sonra sonucu denetleyin.",
+        "reauth": "Bu ayarların değişikliği için parolanız yeniden sorulur."
+      }
+    },
+    "general": {
+      "network": {
+        "title": "Ağ",
+        "description": "Sunucunun dışarıya bağlantıları için vekil sunucu (proxy).",
+        "proxy": "HTTPS vekil sunucusu",
+        "proxyHint": "http://sunucu:bağlantı-noktası biçiminde; boş bırakılırsa vekil sunucu kullanılmaz. Kullanıcı adı ve parola alınmaz. İptal listesi indirme ile RFC 3161 ve TÜRKTRUST zaman damgası istekleri bunu kullanır.",
+        "proxyPlaceholder": "http://172.20.0.10:3128",
+        "zamaneNoteTitle": "Sahada doğrula",
+        "zamaneNote": "Kamu SM Zamane istemcisi bu vekil sunucuyu kullanmaz, çünkü istemcinin vekil sunucuyu nasıl aldığı doğrulanmadı. Kamu SM kullanılıyorsa sunucunun Kamu SM'ye doğrudan çıkışı olmalı.",
+        "reauth": "Vekil sunucu değişikliği için parolanız yeniden sorulur.",
+        "errors": {
+          "proxy": "http://sunucu:bağlantı-noktası biçiminde bir adres girin (sunucu adı ya da IPv4 adresi, 1–65535 arası bağlantı noktası) ya da alanı boş bırakın."
+        }
       }
     }
   },
@@ -103,7 +132,13 @@
         "password": "TÜRKTRUST parolası"
       },
       "tsa": {
-        "allow_plain_http": "Düz HTTP'ye izin"
+        "allow_plain_http": "Düz HTTP'ye izin",
+        "renew_before_days": "Yeniden damgalama süresi (gün)",
+        "crl_urls": "İptal listesi adresleri",
+        "crl_max_age_days": "İptal listesinin en büyük yaşı (gün)"
+      },
+      "network": {
+        "https_proxy": "HTTPS vekil sunucusu"
       }
     }
   }

@@ -27,11 +27,15 @@ import { focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 import { CreditQuery } from '../sealing/credits-card';
 
 import {
+  CRL_MAX_AGE_DAYS,
+  CRL_URLS_MAX,
+  RENEW_BEFORE_DAYS,
   STEPS,
   TURKTRUST_KEPT,
   TURKTRUST_TEXTS,
   causeKey,
   choiceProvider,
+  evidenceChanges,
   firstOpen,
   isStep,
   providerText,
@@ -41,6 +45,7 @@ import {
   turktrustChanged,
   unplacedCauses,
   validateCustomer,
+  validateEvidence,
   validateNumbers,
   validatePassword,
   validateTurktrustPassword,
@@ -54,6 +59,7 @@ import {
 import {
   CredentialsStep,
   CreditStep,
+  EvidenceFields,
   JavaStep,
   ProductionStep,
   SealView,
@@ -78,11 +84,15 @@ type TsaField =
   | 'customer'
   | 'password'
   | 'turktrustUsername'
-  | 'turktrustPassword';
+  | 'turktrustPassword'
+  | 'renewBeforeDays'
+  | 'crlUrls'
+  | 'crlMaxAgeDays';
 
 /**
- * The body paths the API may name for a field (422 `details`). TÜRKTRUST's body fields are
- * interim until W5-T names them (`kamusm-model.ts` `TurktrustFields`).
+ * The body paths the API may name for a field (422 `details`). TÜRKTRUST's body fields and the
+ * re-stamping and revocation-list keys are interim until W5-T names them (`kamusm-model.ts`
+ * `TurktrustFields`, `EvidenceKeys`).
  */
 const PATHS: Record<TsaField, string[]> = {
   java: ['java', 'tsa.java'],
@@ -92,6 +102,9 @@ const PATHS: Record<TsaField, string[]> = {
   password: ['password', 'kamusm.password'],
   turktrustUsername: ['turktrust_username', 'turktrust.username'],
   turktrustPassword: ['turktrust_password', 'turktrust.password'],
+  renewBeforeDays: ['renew_before_days', 'tsa.renew_before_days'],
+  crlUrls: ['crl_urls', 'tsa.crl_urls'],
+  crlMaxAgeDays: ['crl_max_age_days', 'tsa.crl_max_age_days'],
 };
 const SHOWN = Object.values(PATHS).flat();
 const BOUNDS: Record<TsaField, Record<string, number>> = {
@@ -102,6 +115,9 @@ const BOUNDS: Record<TsaField, Record<string, number>> = {
   password: {},
   turktrustUsername: {},
   turktrustPassword: {},
+  renewBeforeDays: RENEW_BEFORE_DAYS,
+  crlUrls: { max: CRL_URLS_MAX },
+  crlMaxAgeDays: CRL_MAX_AGE_DAYS,
 };
 
 /** The steps whose values are saved with "Kaydet" (the others act on their own). */
@@ -161,9 +177,10 @@ function stepDescription(provider: string, step: StepId): string {
  * the wizard of the time-stamp service, step by step with the state of each from the
  * configuration's `readiness` and `seal_ready`: Java, the Zamane client, the root certificates,
  * the credentials, a test stamp, the server (Kamu SM test or production, TÜRKTRUST; Wave 5
- * contract 2.4) and the credit alert threshold. Java and the Zamane client are Kamu SM's only and
- * read "Gerekmez" while TÜRKTRUST is in use. The `[seal]`
- * section is shown read-only. A change that would stop a sealer that works now is refused by
+ * contract 2.4) and the credit alert threshold, with the re-stamping window and the revocation
+ * lists (Wave 5 contract 2.5) once the server reports them. Java and the Zamane client are
+ * Kamu SM's only and read "Gerekmez" while TÜRKTRUST is in use. The `[seal]` section is shown
+ * read-only. A change that would stop a sealer that works now is refused by
  * the server (`tsa_would_break`) with its causes. A cause no step shows (a moved secret store,
  * contract D0-2) is named above the steps, and so is a held change of the section (an unknown
  * Zamane client waiting for the console) with its countdown and "İptal et".
@@ -233,6 +250,7 @@ export function KamusmPage() {
     setSentTo(options.server ? choiceProvider(options.server) : tsa.provider);
     const found: FieldErrors<TsaField> = {
       ...validateNumbers(values),
+      ...(values.evidence ? validateEvidence(values.evidence) : {}),
       ...credentialErrors(credentials),
     };
     setErrors(found);
@@ -363,6 +381,23 @@ export function KamusmPage() {
               errors={{ threshold: message('threshold'), timeout: message('timeout') }}
               onChange={change}
             />
+            {values.evidence ? (
+              <EvidenceFields
+                id={id}
+                form={values.evidence}
+                disabled={locked}
+                changed={Object.keys(evidenceChanges(tsaSection, values)).length > 0}
+                errors={{
+                  renewBeforeDays: message('renewBeforeDays'),
+                  crlUrls: message('crlUrls'),
+                  crlMaxAgeDays: message('crlMaxAgeDays'),
+                }}
+                onChange={(next) => {
+                  const evidence = values.evidence;
+                  if (evidence) change({ evidence: { ...evidence, ...next } });
+                }}
+              />
+            ) : null}
             {can('seal.manage') ? <CreditQuery /> : null}
           </div>
         );

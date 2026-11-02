@@ -47,6 +47,16 @@ export function isServerChoice(value: string | null | undefined): value is Serve
   return typeof value === 'string' && (SERVER_CHOICES as readonly string[]).includes(value);
 }
 
+/**
+ * What the administrator types before a switch to plain HTTP (Wave 5 contract C5): exactly
+ * `HTTP`, the same in Turkish and English. Spaces around it are ignored, its case is not.
+ */
+export const PLAIN_HTTP_PHRASE = 'HTTP';
+
+export function plainHttpConfirmed(typed: string): boolean {
+  return typed.trim() === PLAIN_HTTP_PHRASE;
+}
+
 /** The provider of a server: Kamu SM's Zamane servers, or TÜRKTRUST's. */
 export function choiceProvider(choice: ServerChoice): 'zamane' | 'turktrust' {
   return choice === 'turktrust' || choice === 'turktrust-http' ? 'turktrust' : 'zamane';
@@ -124,19 +134,145 @@ export function firstOpen(tsa: TsaSection, tested: boolean): StepId {
   );
 }
 
+/**
+ * The re-stamping window and the revocation-list keys of the section (Wave 5 contract 2.5,
+ * browser-editable with re-authentication, C5): `tsa.renew_before_days` (30–730),
+ * `tsa.crl_urls` (http and https only, at most 20) and `tsa.crl_max_age_days` (1–60).
+ *
+ * Interim until W5-T adds them to `TsaSection` and `TsaBody` (`settings-types.ts`, checked
+ * against the API's schema), which replace this: the names are the section's keys without
+ * `tsa.`, as `credit_alert_threshold` is.
+ */
+export interface EvidenceKeys {
+  renew_before_days: number;
+  crl_urls: string[];
+  crl_max_age_days: number;
+}
+
+export const RENEW_BEFORE_DAYS = { min: 30, max: 730 } as const;
+export const CRL_MAX_AGE_DAYS = { min: 1, max: 60 } as const;
+export const CRL_URLS_MAX = 20;
+
+/**
+ * The keys as the server reports them, `undefined` while it does not (an API before W5-T): the
+ * form then shows no field for them, so it never shows a value the server did not give, and
+ * never sends a field the API refuses.
+ */
+export function evidenceKeys(tsa: TsaSection): EvidenceKeys | undefined {
+  const section = tsa as TsaSection & Partial<Record<keyof EvidenceKeys, unknown>>;
+  const { renew_before_days: renew, crl_urls: urls, crl_max_age_days: age } = section;
+  if (typeof renew !== 'number' || typeof age !== 'number' || !Array.isArray(urls))
+    return undefined;
+  return {
+    renew_before_days: renew,
+    crl_urls: urls.filter((url): url is string => typeof url === 'string'),
+    crl_max_age_days: age,
+  };
+}
+
+/** The keys as typed: the numbers as text, the revocation-list addresses one per line. */
+export interface EvidenceForm {
+  renewBeforeDays: string;
+  crlUrls: string;
+  crlMaxAgeDays: string;
+}
+
 /** The values the wizard edits for `PUT /admin/config/tsa` (numbers as typed). */
 export interface TsaForm {
   java: string | null;
   threshold: string;
   timeout: string;
+  /** Left out while the server does not report the keys (`evidenceKeys`). */
+  evidence?: EvidenceForm;
 }
 
 export function tsaForm(tsa: TsaSection | undefined): TsaForm | undefined {
   if (!tsa) return undefined;
+  const keys = evidenceKeys(tsa);
   return {
     java: tsa.java,
     threshold: String(tsa.credit_alert_threshold),
     timeout: String(tsa.timeout_seconds),
+    ...(keys
+      ? {
+          evidence: {
+            renewBeforeDays: String(keys.renew_before_days),
+            crlUrls: keys.crl_urls.join('\n'),
+            crlMaxAgeDays: String(keys.crl_max_age_days),
+          },
+        }
+      : {}),
+  };
+}
+
+/** The revocation-list addresses typed, one per line: blank lines and spaces around are dropped. */
+export function crlUrlList(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/** The scheme and the authority (`user@host:port`) of an http or https address. */
+const HTTP_URL = /^https?:\/\/([^/?#]*)/i;
+
+/**
+ * A revocation-list address: `http://` or `https://` with a host, no user information (contract
+ * C10, the server refuses it too), no white space.
+ */
+export function isCrlUrl(text: string): boolean {
+  const authority = HTTP_URL.exec(text)?.[1];
+  if (!authority || authority.includes('@') || /\s/u.test(text) || CONTROL.test(text)) return false;
+  try {
+    return new URL(text).hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
+/** The browser's checks of the keys (contract 2.5 bounds); the server decides again. */
+export function validateEvidence(form: EvidenceForm): {
+  renewBeforeDays?: string;
+  crlUrls?: string;
+  crlMaxAgeDays?: string;
+} {
+  const renew = integerError(form.renewBeforeDays, RENEW_BEFORE_DAYS.min, RENEW_BEFORE_DAYS.max);
+  const age = integerError(form.crlMaxAgeDays, CRL_MAX_AGE_DAYS.min, CRL_MAX_AGE_DAYS.max);
+  const urls = crlUrlList(form.crlUrls);
+  const list = urls.some((url) => !isCrlUrl(url))
+    ? 'settings.kamusm.errors.crlUrl'
+    : urls.length > CRL_URLS_MAX
+      ? 'settings.kamusm.errors.crlUrlsCount'
+      : undefined;
+  return {
+    ...(renew ? { renewBeforeDays: renew } : {}),
+    ...(list ? { crlUrls: list } : {}),
+    ...(age ? { crlMaxAgeDays: age } : {}),
+  };
+}
+
+/** Interim until W5-T names them in `TsaBody` (`settings-types.ts`): see `EvidenceKeys`. */
+export type EvidenceFields = Partial<EvidenceKeys>;
+
+/**
+ * The keys a change sends: only those whose value differs from the server's. A form that does
+ * not touch them sends none, so a "Kaydet" of the other steps is accepted by an API before W5-T
+ * as well (its `TsaBody` refuses an unknown field).
+ */
+export function evidenceChanges(tsa: TsaSection, form: TsaForm): EvidenceFields {
+  const keys = evidenceKeys(tsa);
+  const edited = form.evidence;
+  if (!keys || !edited) return {};
+  const renew = parseInteger(edited.renewBeforeDays);
+  const age = parseInteger(edited.crlMaxAgeDays);
+  const urls = crlUrlList(edited.crlUrls);
+  const sameUrls =
+    urls.length === keys.crl_urls.length &&
+    urls.every((url, index) => url === keys.crl_urls[index]);
+  return {
+    ...(renew !== null && renew !== keys.renew_before_days ? { renew_before_days: renew } : {}),
+    ...(sameUrls ? {} : { crl_urls: urls }),
+    ...(age !== null && age !== keys.crl_max_age_days ? { crl_max_age_days: age } : {}),
   };
 }
 
@@ -179,7 +315,7 @@ export interface TurktrustFields {
   allow_plain_http?: boolean;
 }
 
-export type TsaRequest = TsaBody & TurktrustFields;
+export type TsaRequest = TsaBody & TurktrustFields & EvidenceFields;
 
 /**
  * The server a change sends: the one chosen, else the one in use. A site on another provider
@@ -197,8 +333,9 @@ function bodyServer(tsa: TsaSection, chosen: ServerChoice | undefined): string |
  * The body of `PUT /admin/config/tsa`: everything the wizard edits at once (the Java chosen in
  * the first step is saved with the credentials, so a first setup from the mock provider can
  * switch to Zamane in one change that leaves sealing working). Typed credentials are sent with
- * any change, as Kamu SM's are (TÜRKTRUST's can be stored before the switch to it), and a switch to
- * TÜRKTRUST says whether plain HTTP is allowed.
+ * any change, as Kamu SM's are (TÜRKTRUST's can be stored before the switch to it), a switch to
+ * TÜRKTRUST says whether plain HTTP is allowed, and the re-stamping and revocation-list keys are
+ * sent when they were changed (`evidenceChanges`).
  */
 export function tsaBody(
   tsa: TsaSection,
@@ -226,6 +363,7 @@ export function tsaBody(
     ...(options.server && choiceProvider(options.server) === 'turktrust'
       ? { allow_plain_http: options.server === 'turktrust-http' }
       : {}),
+    ...evidenceChanges(tsa, form),
     ...(options.confirm ? { confirm: true } : {}),
     probe: options.probe,
   };

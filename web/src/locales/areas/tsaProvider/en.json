@@ -47,8 +47,7 @@
         "turktrustTitle": "Switch to the TÜRKTRUST server?",
         "turktrustBody": "From now on sealing uses stamps of the TÜRKTRUST server, over HTTPS. A day is shown as legal grade when its stamp chains to a TÜRKTRUST root certificate marked as a legal root.",
         "httpTitle": "Switch to the TÜRKTRUST server over plain HTTP?",
-        "httpType": "Type {{phrase}} to confirm",
-        "httpPhrase": "PLAIN HTTP"
+        "httpType": "Type {{phrase}} to confirm"
       },
       "turktrust": {
         "unusedStep": "This step is needed for Kamu SM Zamane only; it does not affect sealing while TÜRKTRUST is in use.",
@@ -92,7 +91,37 @@
       },
       "errors": {
         "turktrustUsername": "The username must be 1–128 characters with no control characters.",
-        "turktrustPassword": "The password must be 1–256 characters with no control characters."
+        "turktrustPassword": "The password must be 1–256 characters with no control characters.",
+        "crlUrl": "Each line must be an address that starts with http:// or https:// and names a host; it cannot contain a user name or password.",
+        "crlUrlsCount": "At most {{max}} addresses can be entered."
+      },
+      "evidence": {
+        "title": "Re-stamping and revocation lists",
+        "description": "For long-term evidence: stamps are re-stamped before their certificates expire, and the revocation lists (CRLs) of the stamp certificates are fetched every day. Applies to both providers.",
+        "renewBeforeDays": "Re-stamping window (days)",
+        "renewBeforeDaysHint": "{{min}}–{{max}} days, default 180. Stamps whose certificate expires in fewer days are re-stamped; at most one stamp a day is used.",
+        "crlMaxAgeDays": "Maximum revocation list age (days)",
+        "crlMaxAgeDaysHint": "{{min}}–{{max}} days, default 7. Without a verified revocation list newer than this, an alert is raised.",
+        "crlUrls": "Revocation list addresses",
+        "crlUrlsHint": "One address per line, with http:// or https://; at most {{max}} addresses. Left empty, the CRL distribution points in the certificates of the root certificates and of the newest stamps are used.",
+        "crlNoteTitle": "Verify on site",
+        "crlNote": "The revocation list addresses of Kamu SM and TÜRKTRUST are not confirmed for this installation; ARCILOGGER adds no address of its own. Enter the addresses the provider publishes here and check the result after the first fetch.",
+        "reauth": "Changing these settings asks for your password again."
+      }
+    },
+    "general": {
+      "network": {
+        "title": "Network",
+        "description": "The proxy for the server's outbound connections.",
+        "proxy": "HTTPS proxy",
+        "proxyHint": "As http://host:port; left empty, no proxy is used. No user name or password is taken. The revocation list fetch and the RFC 3161 and TÜRKTRUST time-stamp requests use it.",
+        "proxyPlaceholder": "http://172.20.0.10:3128",
+        "zamaneNoteTitle": "Verify on site",
+        "zamaneNote": "The Kamu SM Zamane client does not use this proxy, because how the client takes a proxy is not confirmed. With Kamu SM in use, the server needs a direct outbound connection to Kamu SM.",
+        "reauth": "Changing the proxy asks for your password again.",
+        "errors": {
+          "proxy": "Enter an address as http://host:port (a host name or IPv4 address, a port from 1 to 65535), or leave the field empty."
+        }
       }
     }
   },
@@ -103,7 +132,13 @@
         "password": "TÜRKTRUST password"
       },
       "tsa": {
-        "allow_plain_http": "Allow plain HTTP"
+        "allow_plain_http": "Allow plain HTTP",
+        "renew_before_days": "Re-stamping window (days)",
+        "crl_urls": "Revocation list addresses",
+        "crl_max_age_days": "Maximum revocation list age (days)"
+      },
+      "network": {
+        "https_proxy": "HTTPS proxy"
       }
     }
   }

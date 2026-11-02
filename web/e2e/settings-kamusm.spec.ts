@@ -10,8 +10,9 @@ import { mockApi } from './mock-api';
  * step, the write-only credentials (never pre-filled) with the re-authentication, the Zamane
  * client (a known release and one held for the console's approval), the root certificates and
  * the legal roots, the stamp test, the switch to production and back, the credit threshold, the
- * server's refusal of a change that would stop a working sealer, a held client on a later visit,
- * and a sealing cause that no step shows. The API is `mock-admin.ts`.
+ * re-stamping and revocation-list keys (Wave 5 contract 2.5), the server's refusal of a change
+ * that would stop a working sealer, a held client on a later visit, and a sealing cause that no
+ * step shows. The API is `mock-admin.ts`.
  */
 
 const PEM = [
@@ -463,6 +464,69 @@ test.describe('Ayarlar → Kamu SM', () => {
     expect(api.callsTo('POST', '/auth/reauth')).toHaveLength(0);
     expect(api.admin.sections.tsa.credit_alert_threshold).toBe(300);
     await expect(page.getByRole('button', { name: 'Kontör sorgula' })).toBeVisible();
+    // The API does not report the re-stamping and revocation-list keys yet (before W5-T): no
+    // field for them.
+    await expect(page.getByTestId('tsa-evidence')).toHaveCount(0);
+  });
+
+  test('re-stamping and revocation lists (Wave 5 contract 2.5): checked, sent only when changed', async ({
+    page,
+  }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    // The section as W5-T's API reports it. Interim: `mock-admin.ts` (W5-T's) has no such keys
+    // and its `TsaBody` refuses them, so this spec sends none; the body of a change of them is
+    // `kamusm-model.test.ts`'s.
+    Object.assign(api.admin.sections.tsa, {
+      renew_before_days: 180,
+      crl_urls: [],
+      crl_max_age_days: 7,
+    });
+    await page.goto('/settings/kamusm?step=credit');
+    const group = page.getByRole('region', { name: 'Yeniden damgalama ve iptal listeleri' });
+    const renew = group.getByLabel('Yeniden damgalama süresi (gün)');
+    const age = group.getByLabel('İptal listesinin en büyük yaşı (gün)');
+    const urls = group.getByLabel('İptal listesi adresleri');
+    await expect(renew).toHaveValue('180');
+    await expect(age).toHaveValue('7');
+    await expect(urls).toHaveValue('');
+    await expect(page.getByTestId('tsa-crl-note')).toContainText('Sahada doğrula');
+    await expect(group).not.toContainText('parolanız yeniden sorulur');
+
+    await renew.fill('20');
+    await age.fill('61');
+    await urls.fill('http://192.0.2.10/kok.crl\nftp://192.0.2.11/ara.crl');
+    await expect(group).toContainText('Bu ayarların değişikliği için parolanız yeniden sorulur.');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await expect(group.getByText('En az 30 olmalı.')).toBeVisible();
+    await expect(group.getByText('En çok 60 olmalı.')).toBeVisible();
+    await expect(urls).toHaveAccessibleDescription(
+      'Her satır http:// ya da https:// ile başlayan ve bir sunucu adı içeren bir adres olmalı; kullanıcı adı ya da parola içeremez.',
+    );
+    await expect(renew).toBeFocused();
+    await expectNoA11yViolations(page);
+    await urls.fill(
+      Array.from({ length: 21 }, (_, index) => `https://192.0.2.${String(index + 1)}/kok.crl`).join(
+        '\n',
+      ),
+    );
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    await expect(urls).toHaveAccessibleDescription('En çok 20 adres girilebilir.');
+    expect(api.callsTo('POST', '/admin/config/tsa/check')).toHaveLength(0);
+
+    // Back to the stored values (reformatted): a change of the threshold sends none of the keys.
+    await renew.fill(' 180 ');
+    await age.fill('7');
+    await urls.fill('\n  \n');
+    await expect(group).not.toContainText('parolanız yeniden sorulur');
+    await page.getByLabel('Kontör uyarı eşiği', { exact: true }).fill('300');
+    await page.getByRole('button', { name: 'Kaydet' }).click();
+    const review = page.getByRole('dialog', { name: 'Değişiklikleri onaylayın' });
+    await review.getByRole('button', { name: 'Onayla ve kaydet' }).click();
+    await applied(page);
+    const put = api.callsTo('PUT', '/admin/config/tsa').at(-1)?.body;
+    expect(put).toMatchObject({ credit_alert_threshold: 300 });
+    for (const key of ['renew_before_days', 'crl_urls', 'crl_max_age_days'])
+      expect(put).not.toHaveProperty(key);
   });
 
   test('first setup: a change that would stop the working sealer is refused with its causes', async ({

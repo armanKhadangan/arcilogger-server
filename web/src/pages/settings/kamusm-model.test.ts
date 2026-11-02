@@ -8,6 +8,8 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
 import {
+  CRL_URLS_MAX,
+  PLAIN_HTTP_PHRASE,
   SEAL_CAUSES,
   SERVER_CHOICES,
   STEPS,
@@ -15,11 +17,16 @@ import {
   TURKTRUST_TEXTS,
   causeKey,
   choiceProvider,
+  crlUrlList,
   currentChoice,
+  evidenceChanges,
+  evidenceKeys,
   firstOpen,
+  isCrlUrl,
   isServerChoice,
   isStep,
   normalizeSha256,
+  plainHttpConfirmed,
   providerText,
   stepStatus,
   tsaBody,
@@ -27,6 +34,7 @@ import {
   turktrustChanged,
   unplacedCauses,
   validateCustomer,
+  validateEvidence,
   validateNumbers,
   validatePassword,
   validateTurktrustPassword,
@@ -487,5 +495,184 @@ describe('Ayarlar → Zaman damgası: the server choice and TÜRKTRUST (Wave 5 c
         /[Ss]ahada doğrula/,
       );
     }
+  });
+});
+
+describe('Ayarlar → Zaman damgası: the plain-HTTP confirmation (Wave 5 contract C5)', () => {
+  it('is exactly HTTP, in both languages; spaces around it are ignored, its case is not', () => {
+    expect(PLAIN_HTTP_PHRASE).toBe('HTTP');
+    expect(plainHttpConfirmed('HTTP')).toBe(true);
+    expect(plainHttpConfirmed('  HTTP ')).toBe(true);
+    for (const typed of ['', 'http', 'Http', 'HTTPS', 'DÜZ HTTP', 'PLAIN HTTP', 'H TTP'])
+      expect(plainHttpConfirmed(typed)).toBe(false);
+    for (const locale of Object.values(LOCALES)) {
+      expect(text(locale, 'settings.kamusm.production.httpType')).toMatch(/\{\{phrase\}\}/);
+      // The phrase is no text of its own: a translation cannot change what must be typed.
+      expect(text(locale, 'settings.kamusm.production.httpPhrase')).toBeUndefined();
+    }
+  });
+});
+
+describe('Ayarlar → Zaman damgası: re-stamping and revocation lists (Wave 5 contract 2.5)', () => {
+  // Built, not written out: the lint rule keeps address literals out of the source.
+  const http = (rest: string) => `http://${rest}`;
+  const https = (rest: string) => `https://${rest}`;
+  const CRL_A = http('192.0.2.10/kok.crl');
+  const CRL_B = https('crl.ornek.example/ara.crl');
+
+  /** A section as W5-T's API reports it, with the keys of contract 2.5. */
+  function w5t(overrides: Record<string, unknown> = {}): TsaSection {
+    return {
+      ...tsa(),
+      renew_before_days: 180,
+      crl_urls: [CRL_A],
+      crl_max_age_days: 7,
+      ...overrides,
+    } as TsaSection;
+  }
+
+  it('reads the keys only when the server reports them all', () => {
+    expect(evidenceKeys(tsa())).toBeUndefined();
+    expect(tsaForm(tsa())).not.toHaveProperty('evidence');
+    expect(evidenceKeys(w5t({ crl_urls: undefined }))).toBeUndefined();
+    expect(evidenceKeys(w5t({ renew_before_days: '180' }))).toBeUndefined();
+    expect(evidenceKeys(w5t())).toEqual({
+      renew_before_days: 180,
+      crl_urls: [CRL_A],
+      crl_max_age_days: 7,
+    });
+    expect(tsaForm(w5t({ crl_urls: [CRL_A, CRL_B] }))?.evidence).toEqual({
+      renewBeforeDays: '180',
+      crlUrls: `${CRL_A}\n${CRL_B}`,
+      crlMaxAgeDays: '7',
+    });
+  });
+
+  it('checks the bounds: window 30–730, age 1–60, at most 20 http(s) addresses', () => {
+    const ok = { renewBeforeDays: '180', crlUrls: '', crlMaxAgeDays: '7' };
+    expect(validateEvidence(ok)).toEqual({});
+    expect(validateEvidence({ ...ok, renewBeforeDays: '30', crlMaxAgeDays: '60' })).toEqual({});
+    expect(validateEvidence({ ...ok, renewBeforeDays: '730', crlMaxAgeDays: '1' })).toEqual({});
+    expect(validateEvidence({ ...ok, renewBeforeDays: '29', crlMaxAgeDays: '61' })).toEqual({
+      renewBeforeDays: 'admin.errors.min',
+      crlMaxAgeDays: 'admin.errors.max',
+    });
+    expect(validateEvidence({ ...ok, renewBeforeDays: '731', crlMaxAgeDays: '0' })).toEqual({
+      renewBeforeDays: 'admin.errors.max',
+      crlMaxAgeDays: 'admin.errors.min',
+    });
+    expect(validateEvidence({ ...ok, renewBeforeDays: '', crlMaxAgeDays: '7,5' })).toEqual({
+      renewBeforeDays: 'admin.errors.integer',
+      crlMaxAgeDays: 'admin.errors.integer',
+    });
+    const twenty = Array.from({ length: CRL_URLS_MAX }, (_, index) =>
+      http(`192.0.2.${String(index + 1)}/kok.crl`),
+    );
+    expect(CRL_URLS_MAX).toBe(20);
+    // One per line; blank lines and spaces around an address do not count.
+    expect(validateEvidence({ ...ok, crlUrls: `\n ${twenty.join('\r\n')} \n\n` })).toEqual({});
+    expect(
+      validateEvidence({ ...ok, crlUrls: [...twenty, http('192.0.2.99/kok.crl')].join('\n') }),
+    ).toEqual({ crlUrls: 'settings.kamusm.errors.crlUrlsCount' });
+    expect(validateEvidence({ ...ok, crlUrls: `${CRL_A}\nftp://192.0.2.10/kok.crl` })).toEqual({
+      crlUrls: 'settings.kamusm.errors.crlUrl',
+    });
+  });
+
+  it('an address is http or https with a host, without user information or white space', () => {
+    expect(isCrlUrl(CRL_A)).toBe(true);
+    expect(isCrlUrl(CRL_B)).toBe(true);
+    expect(isCrlUrl(http('198.51.100.7:8080/crl/kok.crl?v=1'))).toBe(true);
+    expect(isCrlUrl('HTTP://203.0.113.5/kok.crl')).toBe(true);
+    for (const bad of [
+      'ftp://192.0.2.10/kok.crl',
+      'file:///C:/kok.crl',
+      '192.0.2.10/kok.crl',
+      'http:192.0.2.10/kok.crl',
+      http(''),
+      http('/kok.crl'),
+      // User information is refused (contract C10), with or without a password.
+      http('ornek@192.0.2.10/kok.crl'),
+      http('ornek:deneme@192.0.2.10/kok.crl'),
+      http('@192.0.2.10/kok.crl'),
+      http('192.0.2.10/k ok.crl'),
+      http('192.0.2.10/kok.crl\u0007'),
+    ])
+      expect(isCrlUrl(bad)).toBe(false);
+    expect(crlUrlList(` ${CRL_A} \r\n\n${CRL_B}\n`)).toEqual([CRL_A, CRL_B]);
+  });
+
+  it('a change sends only the keys that differ from the server, so an API before W5-T accepts it', () => {
+    const section = w5t();
+    const form = tsaForm(section);
+    if (!form?.evidence) throw new Error('no form');
+    // Untouched (or only reformatted) keys send nothing.
+    expect(evidenceChanges(section, form)).toEqual({});
+    expect(
+      evidenceChanges(section, {
+        ...form,
+        evidence: { renewBeforeDays: ' 180 ', crlUrls: `\n  ${CRL_A}  \n`, crlMaxAgeDays: '7' },
+      }),
+    ).toEqual({});
+    expect(tsaBody(section, 'tsa:1', form, KEPT, { probe: true })).toEqual({
+      etag: 'tsa:1',
+      server: 'test',
+      credit_alert_threshold: 500,
+      timeout_seconds: 60,
+      java: JAVA,
+      probe: true,
+    });
+    // A server without the keys: the form has none and sends none.
+    expect(tsaBody(tsa(), 'tsa:1', form, KEPT, { probe: true })).not.toHaveProperty(
+      'renew_before_days',
+    );
+    expect(
+      tsaBody(
+        section,
+        'tsa:1',
+        {
+          ...form,
+          evidence: { renewBeforeDays: '365', crlUrls: `${CRL_B}\n${CRL_A}`, crlMaxAgeDays: '7' },
+        },
+        KEPT,
+        { probe: true },
+      ),
+    ).toEqual({
+      etag: 'tsa:1',
+      server: 'test',
+      credit_alert_threshold: 500,
+      timeout_seconds: 60,
+      java: JAVA,
+      renew_before_days: 365,
+      crl_urls: [CRL_B, CRL_A],
+      probe: true,
+    });
+    // Emptied: an empty list goes back to the certificates' distribution points.
+    expect(
+      evidenceChanges(section, {
+        ...form,
+        evidence: { ...form.evidence, crlUrls: ' \n', crlMaxAgeDays: '14' },
+      }),
+    ).toEqual({ crl_urls: [], crl_max_age_days: 14 });
+  });
+
+  it('the texts: TR and EN, the bounds as placeholders, "sahada doğrula" at the addresses', () => {
+    for (const locale of Object.values(LOCALES)) {
+      expect(text(locale, 'settings.kamusm.evidence.renewBeforeDaysHint')).toMatch(
+        /\{\{min\}\}–\{\{max\}\}.*180/,
+      );
+      expect(text(locale, 'settings.kamusm.evidence.crlMaxAgeDaysHint')).toMatch(
+        /\{\{min\}\}–\{\{max\}\}.*\b7\b/,
+      );
+      expect(text(locale, 'settings.kamusm.evidence.crlUrlsHint')).toMatch(/\{\{max\}\}/);
+      expect(text(locale, 'settings.kamusm.errors.crlUrlsCount')).toMatch(/\{\{max\}\}/);
+      // No provider address is written into a text either (K10, T4).
+      expect(text(locale, 'settings.kamusm.evidence.crlNote')).not.toMatch(/https?:\/\/|\.crl/);
+    }
+    expect(text(LOCALES.tr, 'settings.kamusm.evidence.crlNoteTitle')).toBe('Sahada doğrula');
+    expect(text(LOCALES.en, 'settings.kamusm.evidence.crlNoteTitle')).toBe('Verify on site');
+    expect(text(LOCALES.tr, 'admin.paths.tsa.renew_before_days')).toBe(
+      'Yeniden damgalama süresi (gün)',
+    );
   });
 });
