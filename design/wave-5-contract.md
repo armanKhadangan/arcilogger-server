@@ -654,7 +654,15 @@ These change the contract text above. Where a section says otherwise, the clarif
 - **C15 – `crl-revoked` makes the day not legal grade.** A day whose chain is revoked at or before the stamp gets `legal_grade = false` everywhere: the day check, the API, reports and packages. The rule-4 test is "claim ∧ verified ∧ root listed ∧ not revoked".
 - **C16 – Retention and a revoked day.** Retention keeps stopping at a day that fails verification, now including `crl-revoked`. That is the safe side for evidence, and `R20-retention` names the day. Whether such a day is deleted is a decision for people (legal and KVKK review), never the job's.
 - **C17 – Scoped and indirect lists.** Neither verifier honours an issuing distribution point's scope or indirect-list (`certificateIssuer`) extensions in Wave 5. This is a known limit, listed in ASSUMPTIONS ("sahada doğrula") and kept as a follow-up in #40.
-
+- **C18 – An evidence package never ships a `crl-revoked` day.** This is the rule that already refuses a stamp that does not verify.
+  - The builder refuses such a day **early**, in `_collect_day`, before writing any part of the ZIP. Its TR/EN message names the day and the revoked certificate, and says that the decision belongs to people (legal review).
+  - The 5651 lookup itself keeps working on the database.
+  - Days with `crl-revoked-later` or `crl-hold` are packaged as usual, with their warnings.
+- **C19 – Callers that verify a token without lists:**
+  - `arcilogger-core verify-token` passes the stored lists (W5-B).
+  - `api/src/arcilogger_api/sealinfo.py` passes them too (W5-C).
+  - The legal grade written at seal time (`seal.py`) stays without lists: no list issued after a fresh stamp exists yet, and the day check later re-judges it with lists.
+- **C20 – A stored list whose file is gone** counts like a changed one (C14). The run records `stored_file_changed` for that URL and exits 1, even when it stores the same bytes again. A deletion is something a person must see.
 
 ## Owner questions
 
