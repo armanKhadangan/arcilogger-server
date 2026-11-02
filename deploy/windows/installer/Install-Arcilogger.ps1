@@ -973,12 +973,76 @@ function Start-ArciServices([string[]]$Only = $ServiceNames) {
     }
 }
 
+# The read-only desktop status window "ARCILOGGER Durum" (Wave 5 contract section 5, I3-I4): a logon
+# task in \ARCILOGGER\Desktop\, registered by Register-ArciTasks.ps1 from the program's desktop\
+# folder, and a Start-menu shortcut for every user.
+
+function Get-StatusWindowShortcut {
+    $base = if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }
+    Join-Path $base 'Microsoft\Windows\Start Menu\Programs\ARCILOGGER\ARCILOGGER Durum.lnk'
+}
+
+function Stop-ArciStatusWindow {
+    <#
+    End the status windows that run Python from the program folder: they stay open until someone
+    closes them, so they are ended, never waited for. The window changes nothing, so nothing is
+    lost; its logon task starts it again at the next logon.
+    #>
+    if (-not (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) { return }
+    $program = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\') + '\'
+    Get-CimInstance -ClassName Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandLine -like '*arcilogger_core.desktop*' -and $_.ExecutablePath -and
+            $_.ExecutablePath.StartsWith($program, [System.StringComparison]::OrdinalIgnoreCase)
+        } |
+        ForEach-Object {
+            Write-ArciInfo ("durum penceresi kapatılıyor [closing the status window] (PID {0})" -f $_.ProcessId)
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+}
+
+function Set-ArciStatusWindowShortcut([string]$Root) {
+    <# The Start-menu shortcut when the program in $Root has the status window; otherwise none. #>
+    $shortcut = Get-StatusWindowShortcut
+    $pythonw = Join-Path $Root 'venv\Scripts\pythonw.exe'
+    if (-not (Test-Path -LiteralPath (Join-Path $Root 'desktop')) -or -not (Test-Path -LiteralPath $pythonw)) {
+        Remove-ArciStatusWindowShortcut
+        return
+    }
+    # A convenience only: without it the window still opens at logon (Windows Script Host may be
+    # switched off by policy), so a failure is a warning, never a failed installation.
+    try {
+        [void](New-Item -ItemType Directory -Path (Split-Path -Parent $shortcut) -Force)
+        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+        $link.TargetPath = $pythonw
+        $link.Arguments = '-I -m arcilogger_core.desktop'
+        $link.WorkingDirectory = $Root
+        $link.Description = 'ARCILOGGER Durum: salt okunur durum penceresi [read-only status window]'
+        $link.Save()
+    }
+    catch {
+        Write-ArciWarn ("Başlat menüsü kısayolu oluşturulamadı [Start-menu shortcut not created]: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Remove-ArciStatusWindowShortcut {
+    $shortcut = Get-StatusWindowShortcut
+    if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut -Force }
+    $folder = Split-Path -Parent $shortcut
+    if ((Test-Path -LiteralPath $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) {
+        Remove-Item -LiteralPath $folder -Force
+    }
+}
+
 function Disable-ArciTasks {
     <#
     Pause the evidence jobs and wait until none is running (they run python.exe from the program
     folder, which is about to be moved). The names of the tasks that were enabled are kept, so a
-    recovery enables exactly those again.
+    recovery enables exactly those again. The status window is closed first: it runs Python from
+    the same folder and never ends by itself (its task lives in \ARCILOGGER\Desktop\, so it is
+    not waited for here).
     #>
+    Stop-ArciStatusWindow
     $tasks = @(Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyContinue | Where-Object { $_ })
     Save-TaskChoices
     if ($null -eq $script:PausedTasks) {
@@ -1017,8 +1081,11 @@ function Register-ArciTaskSet([string]$Root, [switch]$Replace) {
     <# With -Replace, tasks that the program in $Root does not define are removed first. #>
     if ($Replace) {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
+        # A program without the status window (a rollback to an older version) keeps no task for it.
+        Get-ScheduledTask -TaskPath '\ARCILOGGER\Desktop\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
     }
     & (Join-Path $Root 'scripts\Register-ArciTasks.ps1') -Python (Join-Path $Root 'venv\Scripts\python.exe') -TaskDirectory (Join-Path $Root 'tasks')
+    Set-ArciStatusWindowShortcut -Root $Root
 }
 
 function Register-ArciTasksKeepingChoices([string]$Root) {
@@ -1115,7 +1182,7 @@ function Install-ProgramFiles {
         }
     } ([pscustomobject]$values)
     Invoke-Step 'support.copy' 'Betikler, görevler, belgeler, lisanslar [scripts, tasks, docs, licences]' {
-        foreach ($folder in @('installer', 'scripts', 'tasks', 'config', 'docs', 'licenses')) {
+        foreach ($folder in @('installer', 'scripts', 'tasks', 'desktop', 'config', 'docs', 'licenses')) {
             $source = Get-BundleFile $folder
             if (Test-Path -LiteralPath $source) {
                 Copy-Item -LiteralPath $source -Destination $InstallDir -Recurse -Force
@@ -3314,6 +3381,9 @@ function Invoke-UninstallMode {
     Invoke-Step 'services.remove' 'Hizmetler kaldırılıyor [removing services]' { Remove-ArciServices } ($ServiceNames -join ', ')
     Invoke-Step 'tasks.unregister' 'Zamanlanmış görevler kaldırılıyor [removing scheduled tasks] \ARCILOGGER\' {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
+        Get-ScheduledTask -TaskPath '\ARCILOGGER\Desktop\' -ErrorAction SilentlyContinue |
+            Where-Object { $_.TaskPath -eq '\ARCILOGGER\Desktop\' } | Unregister-ScheduledTask -Confirm:$false
+        Remove-ArciStatusWindowShortcut
     }
     # The events already written stay in the Application log.
     Invoke-Step 'eventlog.remove' 'Olay günlüğü kaynağı kaldırılıyor [removing the Event Log source] ARCILOGGER-Admin' {

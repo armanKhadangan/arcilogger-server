@@ -19,6 +19,12 @@
     Run again after an upgrade (existing tasks are replaced, new definitions such as Backup added).
     Install-Arcilogger.ps1 runs this script itself.
 
+    The definitions of ..\desktop (-DesktopDirectory) go to \ARCILOGGER\Desktop\: StatusWindow,
+    the read-only status window "ARCILOGGER Durum" that starts at the logon of a member of
+    Administrators (Wave 5 contract section 5, I3). {{PYTHONW}} is the venv's pythonw.exe (no
+    console window). They live in their own folder: the installer pauses and waits for the
+    evidence jobs of \ARCILOGGER\ before an upgrade, and a window never ends by itself.
+
     The server time zone must be "Turkey Standard Time" (UTC+03:00): the trigger times
     (00:10 sealing, ...) are local times. Set-ArciTime.ps1 sets it.
 
@@ -31,12 +37,15 @@ param(
     # empty while it evaluates parameter defaults of a script started with "powershell -File").
     [string]$TaskDirectory,
     # Default: ..\scripts next to this script, which is its own folder (set below as well).
-    [string]$ScriptDirectory
+    [string]$ScriptDirectory,
+    # Default: ..\desktop next to this script (set below); a program without it registers none.
+    [string]$DesktopDirectory
 )
 
 $ErrorActionPreference = "Stop"
 if (-not $TaskDirectory) { $TaskDirectory = Join-Path $PSScriptRoot "..\tasks" }
 if (-not $ScriptDirectory) { $ScriptDirectory = Join-Path $PSScriptRoot "..\scripts" }
+if (-not $DesktopDirectory) { $DesktopDirectory = Join-Path $PSScriptRoot "..\desktop" }
 # A full path without "..": it is written into the task definition SYSTEM runs.
 $ScriptDirectory = [System.IO.Path]::GetFullPath($ScriptDirectory).TrimEnd([char[]]@([char]92, [char]47))
 
@@ -57,6 +66,19 @@ Get-ChildItem -LiteralPath $TaskDirectory -Filter *.xml | ForEach-Object {
     $xml = $raw.Replace("{{PYTHON}}", $Python).Replace("{{SCRIPTS}}", $ScriptDirectory)
     Register-ScheduledTask -TaskName $_.BaseName -TaskPath "\ARCILOGGER\" -Xml $xml -Force | Out-Null
     Write-Host "kaydedildi [registered] \ARCILOGGER\$($_.BaseName)"
+}
+
+# The desktop status window: pythonw.exe next to python.exe (a venv has both).
+if (Test-Path -LiteralPath $DesktopDirectory) {
+    $PythonW = Join-Path (Split-Path -Parent $Python) "pythonw.exe"
+    if (-not (Test-Path -LiteralPath $PythonW)) {
+        throw "pythonw.exe bulunamadı [not found]: $PythonW"
+    }
+    Get-ChildItem -LiteralPath $DesktopDirectory -Filter *.xml | ForEach-Object {
+        $xml = (Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8).Replace("{{PYTHONW}}", $PythonW)
+        Register-ScheduledTask -TaskName $_.BaseName -TaskPath "\ARCILOGGER\Desktop\" -Xml $xml -Force | Out-Null
+        Write-Host "kaydedildi [registered] \ARCILOGGER\Desktop\$($_.BaseName)"
+    }
 }
 
 Get-ScheduledTask -TaskPath "\ARCILOGGER\" | Format-Table TaskName, State

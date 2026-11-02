@@ -221,8 +221,8 @@ def test_offline_bundle_ships_the_whole_docs_tree() -> None:
     # The installer copies the bundle's docs folder with its subfolders.
     install = _read(INSTALLER / "Install-Arcilogger.ps1")
     assert (
-        "foreach ($folder in @('installer', 'scripts', 'tasks', 'config', 'docs', 'licenses'))"
-        in install
+        "foreach ($folder in @('installer', 'scripts', 'tasks', 'desktop', 'config', 'docs', "
+        "'licenses'))" in install
     )
     assert "Copy-Item -LiteralPath $source -Destination $InstallDir -Recurse -Force" in install
 
