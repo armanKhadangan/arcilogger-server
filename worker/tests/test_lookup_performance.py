@@ -585,10 +585,14 @@ TRAFFIC_SITE = (
     "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 hours' "
     "+ g * CAST(:step AS interval) AS t) AS x",
     # The clock samples of both FortiGates' messages, as ingest writes them: one key a received
-    # minute (a second behind: offset 0) from T - 2 h for 4 hours.
+    # minute (a second behind: offset 0) for 30 days around T, and in every tenth minute a few
+    # lines 10 minutes late (a minority of their minute, which no clock sample takes as shifted).
     "INSERT INTO source_clock_samples (source, minute, seconds, n) "
-    "SELECT s.name, CAST(:at AS timestamptz) - interval '2 hours' + g * interval '1 minute', 0, "
-    "694 FROM (VALUES ('fortigate'), ('fortigate-2')) AS s(name), generate_series(0, 239) AS g",
+    "SELECT s.name, CAST(:at AS timestamptz) - interval '15 days' + g * interval '1 minute', "
+    "o.seconds, o.n FROM (VALUES ('fortigate'), ('fortigate-2')) AS s(name), "
+    "generate_series(0, 30 * 1440 - 1) AS g, "
+    "LATERAL (VALUES (0, 694), (-600, CASE WHEN g % 10 = 0 THEN 5 END)) AS o(seconds, n) "
+    "WHERE o.n IS NOT NULL",
     # The search counts of 400 days (the clock check picks the sources of an empty search
     # from them).
     "INSERT INTO search_counts (hour, source, raw_day, kind, tbl, action, net, n) "
@@ -1000,9 +1004,26 @@ def test_the_source_clock_of_an_empty_search_is_fast(
     assert len(searched.calls) == 1
     assert sorted(call[1] for call in clock.calls) == ["fortigate", "fortigate-2"]
     assert "source_clock_offset" not in _keys(outcome)  # 1 s behind: measured, within the limit
-    # Each source by device time (messages) and by receive time (its samples of two hours).
-    sampled = [sql for sql, _parameters in executed.statements if "source_clock_samples" in sql]
-    assert len(sampled) == 2
+    # Each source by device time (messages), by receive time (its samples of two hours) and by
+    # the minutes that put their device times around T (#82): each of the last on the table's
+    # key, its minutes within a day and an hour of T, not the 30 days of samples.
+    sampled = [(sql, p) for sql, p in executed.statements if "source_clock_samples" in sql]
+    assert len(sampled) == 4
+    shifted = [(sql, p) for sql, p in sampled if "OVER (PARTITION BY" in sql]
+    assert len(shifted) == 2
+    span = 2 * (lookup_engine.CLOCK_SPAN + timedelta(days=1)) // timedelta(minutes=1)
+    for sql, parameters in shifted:
+        with traffic_site.connect() as connection:
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
+            )
+        print("\n".join(plan))
+        assert not any("Seq Scan" in line for line in plan)
+        scans, _removed = _plan_reads(plan)
+        assert [name for name, _n in scans] == ["pk_source_clock_samples"], scans
+        assert scans[0][1] <= span * 11 // 10 + 10, (scans, span)  # 1.1 keys a minute
     seconds = searched.seconds + clock.seconds
     assert seconds < 0.2, f"the clock measurement took {seconds:.3f} s"
 

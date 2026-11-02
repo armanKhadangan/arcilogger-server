@@ -23,7 +23,9 @@ The upgrade counts the rows received in the last :data:`BACKFILL` (``arcilogger_
 rebuild`` in SQL; the services are stopped during an upgrade), so the alert's first check after it
 reads the last hour as before and does not resolve an open ``source-clock`` for want of samples.
 Older lines have no samples: a lookup of such a moment measures its sources by device time only,
-as before (``clocksamples.rebuild`` fills a range on demand).
+as before (``clocksamples.rebuild`` counts a range again from its rows, but no command calls it
+yet: only the tests do). The backfill takes about 0.2 s on 26 hours of ``messages`` at
+1 M lines a day (docs/DATA-MODEL.md).
 
 The downgrade drops the table.
 """
