@@ -34,7 +34,9 @@ def test_status_window_task() -> None:
     root = ET.parse(TASK).getroot()  # noqa: S314 - our own repository file
     assert _text(root, "t:RegistrationInfo/t:URI") == "\\ARCILOGGER\\Desktop\\StatusWindow"
     assert root.find("t:Triggers/t:LogonTrigger", NS) is not None
-    assert len(root.find("t:Triggers", NS) or []) == 1
+    triggers = root.find("t:Triggers", NS)
+    assert triggers is not None
+    assert len(triggers) == 1
     assert root.find("t:Triggers/t:LogonTrigger/t:UserId", NS) is None  # anyone, see GroupId
     assert _text(root, "t:Principals/t:Principal/t:GroupId") == ADMINISTRATORS
     assert root.find("t:Principals/t:Principal/t:UserId", NS) is None

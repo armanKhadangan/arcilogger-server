@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 import tkinter as tk
 import traceback
 import webbrowser
@@ -36,6 +37,10 @@ from arcilogger_core.desktop.status import (
 )
 
 INTERVAL_MS: Final = 10_000
+#: Tk start-up attempts. On a busy Windows CI runner Tk's start-up script now and then cannot read
+#: one of its own library files ("couldn't read file …/tk8.6/icons.tcl", another file each time);
+#: the next interpreter reads them all. Any other start-up error (no display) is raised at once.
+TK_ATTEMPTS: Final = 3
 POLL_MS: Final = 250
 WEB_URL: Final = "https://localhost/"
 PAD: Final = 8
@@ -247,8 +252,20 @@ class StatusWindow:
             text_en.configure(text=row.text_en)
 
 
+def new_root() -> tk.Tk:
+    """A Tk root, tried again when Tk could not read a library file (:data:`TK_ATTEMPTS`)."""
+    for attempt in range(1, TK_ATTEMPTS + 1):
+        try:
+            return tk.Tk()
+        except tk.TclError as exc:
+            if attempt == TK_ATTEMPTS or "couldn't read file" not in str(exc):
+                raise
+            time.sleep(0.2 * attempt)
+    raise RuntimeError("no Tk attempt was made")
+
+
 def run(refresh: Callable[[], Snapshot]) -> int:
-    root = tk.Tk()
+    root = new_root()
     _Scale.factor = max(1.0, round(float(root.winfo_fpixels("1i")) / 96.0 * 4) / 4)
     try:
         StatusWindow(root, refresh)
@@ -297,7 +314,7 @@ def sample(level: Level) -> Snapshot:
 def self_test() -> int:
     """Build the window off-screen and show every level; 0 when it behaves, 1 otherwise."""
     try:
-        root = tk.Tk()
+        root = new_root()
         root.withdraw()
         flashed: list[int] = []
         opened: list[str] = []

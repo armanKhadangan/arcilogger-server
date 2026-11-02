@@ -37,7 +37,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def root() -> Iterator[tk.Tk]:
-    root = tk.Tk()
+    root = window.new_root()
     root.withdraw()
     yield root
     with contextlib.suppress(tk.TclError):  # the test closed it

@@ -746,3 +746,49 @@ def test_self_test_flag_runs_the_window_check(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setitem(sys.modules, "arcilogger_core.desktop.window", fake_window)
     monkeypatch.setattr(package, "window", fake_window, raising=False)
     assert entry.main(["--self-test"]) == 0
+
+
+def test_tk_start_is_tried_again_only_for_unreadable_library_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A busy Windows runner sometimes fails Tk's start-up on one of its own files (another file
+    each time); a missing display or any other start-up error is never tried again."""
+    tkinter = pytest.importorskip("tkinter", reason="this Python has no tkinter")
+    from arcilogger_core.desktop import window
+
+    unreadable = 'couldn\'t read file "C:/Python/tcl/tk8.6/icons.tcl": no such file or directory'
+    calls: list[int] = []
+    ROOT = object()  # noqa: N806 - stands for the Tk root
+
+    def flaky() -> object:
+        calls.append(1)
+        if len(calls) < 3:
+            raise tkinter.TclError(unreadable)
+        return ROOT
+
+    monkeypatch.setattr(tkinter, "Tk", flaky)
+    monkeypatch.setattr("arcilogger_core.desktop.window.time.sleep", lambda seconds: None)
+    assert window.new_root() is ROOT
+    assert len(calls) == 3
+
+    calls.clear()
+
+    def never() -> object:
+        calls.append(1)
+        raise tkinter.TclError(unreadable)
+
+    monkeypatch.setattr(tkinter, "Tk", never)
+    with pytest.raises(tkinter.TclError):
+        window.new_root()
+    assert len(calls) == window.TK_ATTEMPTS
+
+    calls.clear()
+
+    def no_display() -> object:
+        calls.append(1)
+        raise tkinter.TclError("no display name and no $DISPLAY environment variable")
+
+    monkeypatch.setattr(tkinter, "Tk", no_display)
+    with pytest.raises(tkinter.TclError):
+        window.new_root()
+    assert len(calls) == 1
