@@ -62,6 +62,7 @@ from arcilogger_api.issues import (
 )
 from arcilogger_api.legalstatus.texts import REVOCATION, REVOCATION_LEVELS, certificate_name
 from arcilogger_core.config import Config
+from arcilogger_core.crl import StoredLists
 from arcilogger_core.fmt import format_date, format_datetime
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import sha256_file
@@ -75,7 +76,12 @@ from arcilogger_core.tsa.verify import (
     verify_token,
 )
 from arcilogger_db.models import SealVerification
-from arcilogger_worker.alerts.system import StampRenewal, read_stamp_renewals, stamp_renewal_path
+from arcilogger_worker.alerts.system import (
+    StampRenewal,
+    read_stamp_renewals,
+    stamp_renewal_path,
+    stored_lists,
+)
 
 log = logging.getLogger("arcilogger.api.seals")
 
@@ -113,7 +119,7 @@ def _read_json(path: Path) -> tuple[Any, str | None]:
         return json.loads(path.read_bytes()), None
     except FileNotFoundError:
         return None, None
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         log.warning("cannot read %s: %s", path, exc)
         return None, f"{path.name}: {type(exc).__name__}"
 
@@ -287,22 +293,23 @@ class VaultView:
                 self.problems.append(problem)
             if not isinstance(data, dict):
                 continue
-            at = _parse_time(data.get("at"))
-            if at is None:
+            at, checks = _parse_time(data.get("at")), data.get("checks")
+            if at is None or not isinstance(checks, list):
                 continue
-            for check in data.get("checks") or []:
+            for check in checks:
                 try:
                     day = date.fromisoformat(str(check["day"]))
                 except (KeyError, TypeError, ValueError):
                     continue
+                errors, warnings = check.get("errors"), check.get("warnings")
                 current = Verification(
                     at=at,
                     ok=bool(check.get("ok")),
                     deep=bool(data.get("deep")),
                     source="scheduled",
                     by=path.stem,
-                    errors=tuple(str(e) for e in check.get("errors") or []),
-                    warnings=tuple(str(w) for w in check.get("warnings") or []),
+                    errors=tuple(str(e) for e in errors) if isinstance(errors, list) else (),
+                    warnings=tuple(str(w) for w in warnings) if isinstance(warnings, list) else (),
                 )
                 if day not in found or found[day].at < at:
                     found[day] = current
@@ -639,6 +646,21 @@ class VaultView:
         return result
 
     @cached_property
+    def stored_lists(self) -> StoredLists | None:
+        """The stored revocation lists that count (W5-B's :func:`~arcilogger_core.crl.
+        load_stored`), read once per request (each file is parsed once per process). ``None``:
+        ``state/crl`` cannot be read; the day's revocation is then not checked, and the page says
+        so (C19). A list whose file no longer matches its index entry is named too (C14)."""
+        lists = stored_lists(self.layout)
+        if lists is None:
+            self.problems.append("revocation not checked: state/crl cannot be read")
+            return None
+        self.problems += [
+            f"revocation list {name} does not match its index entry" for name in lists.mismatched
+        ]
+        return lists
+
+    @cached_property
     def stamp_renewals(self) -> dict[str, StampRenewal] | None:
         """The re-stamping report by vault-relative token path; ``None`` when it is unreadable
         (reported as a problem), empty before the Renew task first wrote it."""
@@ -755,6 +777,9 @@ class VaultView:
             roots=roots,
             file_path=self.layout.manifest(day),
             require_critical_eku=tsa.get("require_critical_eku") is not False,
+            # C19: with the stored lists, a day revoked at or before its stamp is not legal
+            # grade (C15) and ``revocation`` says why
+            crls=self.stored_lists,
         )
         root = check.details.get("root") or None
         result["check"] = _token_check(check.ok, list(check.errors), root)
