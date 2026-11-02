@@ -638,17 +638,26 @@ def _by_chunk(
     start: datetime, end: datetime, *, open_start: bool
 ) -> list[list[ColumnElement[bool]]]:
     """``fg_traffic.time`` from ``start`` (exclusive when ``open_start``) to ``end``, cut at the
-    UTC midnights in between (:data:`CHUNK`): one range per TimescaleDB chunk, in time order."""
+    UTC midnights in between (:data:`CHUNK`): one range per TimescaleDB chunk, in time order.
+    The pieces are half-open at the midnights, as the chunks are (``time < midnight``, then
+    ``time >= midnight``): a piece closed at a midnight also covered that instant, which lies in
+    the next day's chunk, and the planner chose an index for that one-instant chunk alone (#71
+    review). Every row of the range lies in exactly one piece."""
     bounds = [start]
     midnight = datetime.combine(start.astimezone(UTC).date(), dt_time.min, UTC) + CHUNK
     while midnight < end:
         bounds.append(midnight)
         midnight += CHUNK
     bounds.append(end)
+    pairs = list(itertools.pairwise(bounds))
     pieces = []
-    for index, (low, high) in enumerate(itertools.pairwise(bounds)):
-        lower = FgTraffic.time > low if index or open_start else FgTraffic.time >= low
-        pieces.append([lower, FgTraffic.time <= high])
+    for index, (low, high) in enumerate(pairs):
+        if index:
+            lower = FgTraffic.time >= low
+        else:
+            lower = FgTraffic.time > low if open_start else FgTraffic.time >= low
+        upper = FgTraffic.time <= high if index == len(pairs) - 1 else FgTraffic.time < high
+        pieces.append([lower, upper])
     return pieces
 
 

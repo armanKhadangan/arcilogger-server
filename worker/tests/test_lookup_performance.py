@@ -1542,15 +1542,13 @@ CARRIED_EXITS: dict[str, dict[str, Any]] = {
 }
 #: The orders in which ``_carried`` asks its steps after the window: with a port, that of
 #: ``ix_fg_traffic_transip_transport_time``; without one, that of ``ix_fg_traffic_transip_time``
-#: (#71); with the indexes each one may read. With a port and the address fixed either index of
-#: the address gives the order, and over a TimescaleDB chunk holding only the step's last
-#: instant (its range ends at a UTC midnight) the planner took ``(transip, time)``.
+#: (#71), with the index each one reads.
 CARRIED_ORDER = {
     True: (
         "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time",
-        ("transip_transport_time", "transip_time"),
+        "transip_transport_time",
     ),
-    False: ("ORDER BY fg_traffic.transip, fg_traffic.time", ("transip_time",)),
+    False: ("ORDER BY fg_traffic.transip, fg_traffic.time", "transip_time"),
 }
 
 
@@ -1637,14 +1635,23 @@ def test_the_d15_carried_check_is_fast(
     # The steps, each (its bound moments, the range of rows it reads, its port): the window in
     # time order, then the scan's tail after it (its lower bound exclusive) and, with a port, the
     # sessions spanning the moment on any port, these two one UTC day (a chunk) at a time.
+    # The day pieces are half-open at the midnights between them (``time < midnight``, then
+    # ``time >= midnight``), as TimescaleDB's chunks are.
     tiny = timedelta(microseconds=1)
     steps = [([window.low, window.high, window.high], (window.low, window.high, window.high), port)]
-    for first, last in _utc_days(window.high, window.scan_end):
-        steps.append(([first, last, window.high], (first + tiny, last, window.high), port))
+    days = _utc_days(window.high, window.scan_end)
+    for index, (first, last) in enumerate(days):
+        low, high = (
+            first + tiny if index == 0 else first,
+            last if index == len(days) - 1 else last - tiny,
+        )
+        steps.append(([first, last, window.high], (low, high, window.high), port))
     if port is not None:
         spans_end = at + timedelta(seconds=window.max_session)
-        for index, (first, last) in enumerate(_utc_days(at, spans_end)):
-            steps.append(([first, last, at], (first + tiny if index else first, last, at), None))
+        days = _utc_days(at, spans_end)
+        for index, (first, last) in enumerate(days):
+            high = last if index == len(days) - 1 else last - tiny
+            steps.append(([first, last, at], (first, high, at), None))
     # The statements the check sent, whatever their shape: in order, each of them a step, the
     # last one the first that finds a row (a carried address) or the last step (the fallback).
     ((start, end),) = sent
@@ -1680,23 +1687,20 @@ def test_the_d15_carried_check_is_fast(
             continue
         # The address's own rows of the step's day only, along its index entries: a step that
         # finds nothing reads and filters out every one of them, a step that answers stops early.
-        order, index_names = CARRIED_ORDER[step_port is not None]
+        order, index_name = CARRIED_ORDER[step_port is not None]
         assert order in sql, case
-        assert all(any(i in name for i in index_names) or not n for name, n in scans), scans
+        assert all(index_name in name or not n for name, n in scans), scans
         own = condition if step_port is None else f"{condition} AND transport = :port"
         rows, _kept = _rows_of(
             traffic_site, first, last, start_bound, own, address=address, port=step_port
         )
-        # On ``(transip, time)`` a step with a port filters the port: the address's rows of the
-        # range on other ports are read too (a chunk holding only the range's last instant).
-        read, _kept = _rows_of(traffic_site, first, last, start_bound, condition, address=address)
         # No other index entry of the address than its rows of the step's range: on
         # ``ix_fg_traffic_transip_transport_time`` a port-less step walked them all (#71).
-        assert _buffers(plan) <= read + STEP_BUFFERS, (case, index, _buffers(plan), read)
+        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, index, _buffers(plan), rows)
         if found:
-            assert removed <= max(read // 10, 100), (case, index, removed, read)
+            assert removed <= max(rows // 10, 100), (case, index, removed, rows)
         else:
-            assert rows <= removed <= read, (case, index, removed, rows, read)
+            assert removed == rows, (case, index, removed, rows)
     assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
     assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
 
