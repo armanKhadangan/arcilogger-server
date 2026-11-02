@@ -57,8 +57,9 @@ The İK Raporları (`hr`) and Rapor İzleyici (`viewer`) roles hold none of thes
 2026-10-28; [SECURITY.md](SECURITY.md)). The auditor sees every card and the PDF button; the backup
 confirmation button and the wizard link are not shown to them. A card's link to its detail page is
 hidden when the user cannot open that page (for the auditor: Kaynaklar, Güvenlik, Ayarlar and Sistem;
-the links to Mühürleme and Arama stay); the card itself is always shown. The card's active alerts
-(rule, severity, time opened) are shown to the auditor too, without a link to the Güvenlik page.
+the links to Mühürleme and Arama stay); the card itself is always shown. The number of the card's
+open alerts ("Açık uyarı: {n}", "Open alerts: {n}") is shown to the auditor too, without a link to
+the Güvenlik page; their rule, severity and time opened are in the Uyum Durumu Raporu (PDF).
 
 **No personal data, viewing is not audited.** The cards and the report carry no data about log
 subjects: no client IP or MAC address, no name of a person assigned to a device, no device host
@@ -74,7 +75,7 @@ does not keep the session alive (the idle timeout keeps running). The **Yenile**
 counts as user activity. The server keeps the computed cards for 30 seconds for every user, so a
 change shows within about a minute at most. The configuration backup confirmation drops the kept
 result at once: card 10 changes right after the confirmation. The page shows "Güncellendi {time}"
-(Updated).
+("Updated {time}").
 
 **A card that cannot be computed** shows **No data** with "This check could not be run now: {error
 code}" (the error code is the error's class name; the details go to the log of the ArciApi service).
@@ -85,7 +86,8 @@ request computes the cards again.
 
 **How a card is evaluated.** Each card's table in section 2 is read from top to bottom: the **first
 row that holds** gives the state and the reason. If no row holds, the card is **OK**. Each card also
-lists the active alerts of its subject (state `open` or `acknowledged`), newest first, at most five.
+lists the active alerts of its subject (state `open` or `acknowledged`), newest first, at most five:
+the page shows their number, the report (PDF) their rule, severity and time opened.
 
 **The cards:**
 
@@ -220,7 +222,7 @@ failed full check: the card shows **No data** with "This check could not be run 
 (section 1). Without the file the full check never ran (row 5). Days time-stamped late,
 days without data, deleted days and the running day do not change the state; they are only counted
 (a day time-stamped late but verified within 35 days counts as "verified"). Facts: the numbers of
-verified, not verified, failed and "no data or deleted" days, the last full chain check ("{time},
+verified, not verified, failed and "No data or deleted" days, the last full chain check ("{time},
 passed|failed"), the verification tasks ("daily the last 2 days, weekly the last 90 days, monthly
 the whole chain").
 
@@ -539,8 +541,8 @@ administrators only (`settings.manage`). The confirmation dialog says:
 On confirmation the server reads the current SHA-256 of `arcilogger.toml` and writes the audit entry
 `compliance.config_backup_confirm` with it ("Configuration backup confirmed"); the card changes at
 once. The confirmation may be repeated (each one is a new entry). If the file cannot be read, nothing
-is recorded: "The configuration file could not be read; the backup confirmation was not recorded."
-(409 `config_backup_unreadable`).
+is recorded and the confirm dialog shows the error with its code: "The configuration file could not
+be read; the backup confirmation was not recorded. (config_backup_unreadable)" (409).
 
 The card sees only changes of `arcilogger.toml`: every change made in Settings that is written to
 this file (for example General, Sources, Kamu SM, Replica, Backup) turns the card to **Attention**;
@@ -589,6 +591,12 @@ as an A4 PDF. Administrators and auditors may download it (`compliance.read`).
   support 5651 obligations; this report is not a statement of legal compliance."
 - **Personal data:** like the cards, the report carries no data about log subjects. The one
   exception is the display name and the username of the account that downloaded it.
+- **When the download fails,** the server's error text shows beside the button, with its code.
+- **Hash check:** the browser compares the SHA-256 of the file it saved with the `X-Arci-Sha256`
+  header. When they differ, "İndirilen dosyanın özeti eşleşmiyor: dosyayı kullanmayın ve yeniden
+  indirin" (The downloaded file's hash does not match: do not use the file, download it again)
+  shows beside the button with the code `download_mismatch`; do not use that file, download the
+  report again. A file that matches shows nothing more.
 
 The report is a listing of technical checks; it is not a legal assessment. Before you present it in
 an audit, review its texts with your legal counsel.
@@ -599,14 +607,22 @@ an audit, review its texts with your legal counsel.
 to administrators only (`system.read`) and only reads. Viewing it is not written to the audit log.
 The page refreshes in the background every 30 seconds. Service and task states are not asked of the
 Windows Service Control Manager or the Task Scheduler: they are derived from the status files,
-evidence files and the database ARCILOGGER can already read. The blocks are in this order:
+evidence files and the database ARCILOGGER can already read.
+
+The Services, Scheduled tasks, Worker jobs and Clock blocks are read by a separate request. When it
+fails, the error (with its code and the **Tekrar dene** (Try again) button) shows in the Clock block
+only, and the other three say "The status could not be read; the error is under Clock."; values
+shown before stay in place. While the first answer is loading these blocks show a loading
+skeleton; with no answer and no failure (beside the summary's blocks) they say "No status received
+yet.". The blocks are in this order:
 
 ### 4.1 Resource use
 
 Processor (%), memory (used and total) and uptime, read through the Windows API (no extra program).
 Processor use is the difference between two readings: the first request shows "ölçülüyor"
-(measuring), later requests the use since the previous reading. A value that cannot be read shows
-"bu platformda okunamıyor" (cannot be read on this platform).
+(being measured), later requests the use since the previous reading. A value that cannot be read
+shows "bu platformda okunamıyor" (cannot be read on this platform); on a server that is neither
+Windows nor Linux the processor shows this too, instead of "ölçülüyor".
 
 ### 4.2 Drives and the disk forecast
 
@@ -627,12 +643,17 @@ damaged file is started again from the new sample; the forecast then waits for s
 | Insufficient | Fewer than 7 samples | "A forecast needs at least 7 days of samples ({samples}/7)." |
 | Not growing | Slope zero or negative | "Disk use did not grow in the last 30 days." |
 | Estimated | Slope positive | "At this rate the {warning}% mark is reached on {warning_on}, full on {full_on} (~{days} days)." |
+| Estimated, mark reached | Slope positive, the drive at or above the warning mark | "The {warning}% mark is reached; at this rate the drive is full on {full_on} (~{days} days)." |
+| Estimated, no date | Slope positive, the full date more than 100 years away | "Disk use grows very slowly; no date can be given." |
 
-- When the drive is **already** above the warning mark, no warning date is given; the measurement
-  of that moment (else the newest sample) decides this, not the line. When the line has passed the
-  mark in the past while no measurement has, the warning date is "today".
+- For one day the English text says "(~1 day)".
+- When the drive is **already** at or above the warning mark, no warning date is given ("mark is
+  reached"); the measurement of that moment (else the newest sample) decides this, not the line. A
+  drive exactly at the mark says "reached", not "passed": its state there still reads "Normal".
+  When the line has passed the mark in the past while no measurement has, the warning date is
+  "today".
 - A date more than 100 years (36,500 days) away is not given: a drive that grows by a few bytes a
-  day stays "estimated", but without a date.
+  day stays "estimated", but without a date ("no date can be given").
 - A straight line is a simple model on purpose: weeks ahead it is a rough guide.
 
 When the drive is full, raw logs cannot be written (`R20-spool`): **never delete** raw logs or the
@@ -648,8 +669,8 @@ measured; if they cannot be measured, the block stays empty.
 ### 4.4 Collector and ingest
 
 Two blocks, from the status files of the collector and of ingest (`state\collector-status.json`,
-`state\ingest-status.json`): "running" when the file is younger than 2 minutes, "stale" when older,
-"missing" when there is none.
+`state\ingest-status.json`): "Running" when the file is younger than 2 minutes, "Not current" when
+older, "No status file" when there is none.
 
 - **Collector:** for every configured source the number of messages and bytes and the time last
   received; senders not in the configuration are only counted (senders, messages, bytes), their
@@ -667,20 +688,22 @@ page lists every configured source).
 
 ### 4.5 Services
 
-- **ArciCollector, ArciIngest, ArciWorker:** "running" when their status file is younger than
-  2 minutes, "stale" when older, "missing" when there is none. **ArciApi** is always "running" (it
-  answers the page).
-- **Administration service (ArciAdmin):** by its heartbeat "ok", "stale", "missing", or "disabled"
-  when the browser administration is switched off.
-- **ApplySystem:** its last result (`admin\system\status.json`): "ok", "failed" (with its code),
-  "never" or "disabled" when the browser administration is switched off.
+- **ArciCollector, ArciIngest, ArciWorker:** "Running" when their status file is younger than
+  2 minutes, "Not current" when older, "No status file" when there is none. **ArciApi** is always
+  "Running" (it answers the page).
+- **Administration service (ArciAdmin):** by its heartbeat "Running", "Answers late", "Not running",
+  or "Switched off" when the browser administration is switched off.
+- **ApplySystem:** its last result (`admin\system\status.json`): "Applied", "Failed" (with its
+  result code), "Not run yet", or "Browser administration off" when the browser administration is
+  switched off.
 
 ### 4.6 Scheduled tasks
 
 One row per task of `deploy\windows\tasks\`. The state is derived from the task's **evidence file**
-(paths relative to the data folder): "ok"; "late" (the evidence is older than the limit); "missing"
-(no evidence yet); "not used" (the task does nothing in this configuration); "not observable" (no
-evidence ArciApi can read). The limits are the task's cadence plus a margin; they are not settings.
+(paths relative to the data folder): "On time"; "Late" (the evidence is older than the limit); "No
+evidence" (no evidence yet); "Not used" (the task does nothing in this configuration); "Not
+observable" (no evidence ArciApi can read). The limits are the task's cadence plus a margin; they
+are not settings.
 
 | Task | Schedule | Evidence | Late after | Not used when |
 |---|---|---|---|---|
@@ -689,11 +712,11 @@ evidence ArciApi can read). The limits are the task's cadence plus a margin; the
 | VerifyWeekly | Sundays at 03:00 | newest `at` of `state\verify\last-last-<N>.json`, N ≥ 3 | 8 days | — |
 | VerifyMonthly | 1st of the month at 04:00 | `at` of `state\verify\last-full.json` | 32 days | — |
 | Replica | Hourly from 00:40 | newest `verified_at` of `state\replica\<day>.json` (last 3 days) | 26 h | `[replica] enabled = false` |
-| Retention | Daily at 02:00 | no readable evidence → "not observable" | — | `[retention] enabled = false` |
+| Retention | Daily at 02:00 | no readable evidence → "Not observable" | — | `[retention] enabled = false` |
 | Credit | Daily at 06:00 | newest `time` of `state\credit.jsonl` | 26 h | `[tsa] provider` is not `zamane` |
 | ClockCheck | Hourly from 00:05 | newest `time` of `state\clock\<day>.jsonl` (today, yesterday) | 2 h | — |
 | Backup | Daily at 01:40 | `finished` of `state\backup\last.json` | 26 h | `[backup] enabled = false` |
-| Requests | On event and every 5 minutes | ArciApi cannot read `state\requests` → "not observable" | — | — |
+| Requests | On event and every 5 minutes | ArciApi cannot read `state\requests` → "Not observable" | — | — |
 | ApplySystem | On event and every 5 minutes | `at` of `admin\system\status.json` | 15 min | browser administration off |
 
 The file names of the verification tasks come from the command itself: `verify --last 2` writes
@@ -707,20 +730,23 @@ Get-ScheduledTask -TaskPath \ARCILOGGER\ | Get-ScheduledTaskInfo | Format-Table 
 
 ### 4.7 Worker jobs
 
-For each job of the worker: its schedule ("Every {n} seconds/minutes/hours" or "Daily after
-{HH:MM}"), its state ("never", "running" (a run in progress in `job_runs`), "failing" (at least one
-failure in a row, or a failed last run, also one the worker could not count because the database
-was unreachable), "skipped", "ok"), the last status, the last start and finish, the duration (from the newest finished run of the
-last 7 days), the number of failures in a row and the next run. Sources: `state\worker-status.json`
-and the `job_runs` table of the database. The error text is not shown: see
-`D:\ARCILOGGER\logs\worker.log`; 3 failures in a row open the `R20-job` alert.
+For each job of the worker: its schedule ("Every {n} seconds/minutes/hours", singular for one:
+"Every 1 minute"; or "Daily after {HH:MM}"), its state ("Never run", "Running" (a run in progress
+in `job_runs`), "Failing" (at least one failure in a row, or a failed last run, also one the worker
+could not count because the database was unreachable), "Skipped", "OK"), the licence module (if
+any), the last start, the duration (from the newest finished run of the last 7 days), the number of
+failures in a row and the next run. Sources: `state\worker-status.json` and the `job_runs` table of
+the database. The error text is not shown: see `D:\ARCILOGGER\logs\worker.log`; 3 failures in a row
+open the `R20-job` alert.
 
 ### 4.8 Clock
 
 The local time source (`[clock] ntp_server`), the fallback server (`[clock] fallback_server`), the
-alert limit (`[clock] alert_offset_ms`), the servers ApplySystem set in Windows Time and when (empty
-without ApplySystem), and the clock samples of the last 24 hours, newest first: time, server, whether
-it answered, offset and delay (ms), stratum. Card 6 judges the newest of these samples.
+alert limit (`[clock] alert_offset_ms`), the servers ApplySystem set in Windows Time and when ("No
+time server applied" when ApplySystem applied an empty list, "No ApplySystem report yet" before its
+first report), and the clock samples of the last 24 hours, newest first: time, server, state
+("Within the limit", "At or over the limit" or "No answer"), offset and delay (ms), stratum. Card 6
+judges the newest of these samples.
 
 ### 4.9 Version and upgrade
 
@@ -732,8 +758,9 @@ section 13.)
 ### 4.10 The Disk card of the Panel
 
 On the Panel, for administrators only (`system.read`), a **Disk** card shows each drive's used
-percentage with an icon and a text and the forecast in one line; the link **Sistem sayfasını aç**
-(Open the System page) leads here.
+percentage with an icon and a text and the forecast in one line; the link **Sistem** (System) at
+the bottom of the card, named "Sistem sayfasını aç" ("Open the System page") for screen readers,
+leads here.
 
 ## 5. The first-run wizard
 
@@ -754,16 +781,19 @@ in Settings).
 | Administrator and two-step verification | always (the user is signed in) | — |
 | Site settings | no configuration problem of level error about `site_name` or `clock.*` | Settings → General |
 | Log sources | at least one enabled, configured source | Settings → Sources |
-| Kamu SM: test server | a successful "Damga testi" (stamp test) in the request history, or the production server is selected | Settings → Kamu SM (test step) |
+| Kamu SM: test server | a successful "Damga testi" (Stamp test) in the request history, or the production server is selected | Settings → Kamu SM (test step) |
 | Kamu SM: production | the production server is selected and sealing is ready | Settings → Kamu SM (production step) |
 | Replica | the replica is on | Settings → Replica |
-| E-mail | SMTP server and sender are set | Settings → E-mail |
+| E-mail | sending e-mail is switched on, SMTP server and sender are set | Settings → E-mail |
 | Summary | — | — |
 
 - Opening the wizard selects the first step that is not done. Each step says what it is for, its
-  state ("Tamam" / "Eksik", done / missing) and what is still missing; **Ayarlar'da aç** (Open in
+  state ("Tamam" / "Eksik", OK / Missing) and what is still missing; **Ayarlar'da aç** (Open in
   Settings) opens the matching page, **Bu adımı şimdilik atla** (Skip this step for now) goes on to
   the next step (the step stays "Eksik").
+- The **E-mail** step stays "Eksik" while sending e-mail is switched off (the default), even with a
+  server and a sender, and says "Sending e-mail is switched off.": while it is off, no alert or
+  report e-mail is sent. A missing server or sender is listed as well.
 - On a Settings page opened from the wizard, the way-back link reads **Kurulum sihirbazına dön**
   (Back to the first-run wizard). This is remembered in that browser tab only; the wizard page or
   the Settings overview ends it.
@@ -790,5 +820,5 @@ again when devices or the server change):
 | Firewall filter logging | Card 7 sees only the records that arrive. Verify on the device that every policy using web and DNS filtering logs these events and sends them to ARCILOGGER; if the organisation produces no traffic at all on some days, set the expected days accordingly (section 2.7). | Card 7; [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2 (verify the commands on site) |
 | Credit format | The credit is read from the Zamane client's output with `[tsa] credit_regex`; the output format is not confirmed with Kamu SM (K4). Compare the value read with **Kontör sorgula** on the test server with the one Kamu SM shows. | Card 5; [kamusm.md](kamusm.md) sections 3 and 4 |
 | WORM (replica target) | ARCILOGGER makes and checks the copy, but cannot see whether the target is write-once (WORM). Verify the target device's WORM setting and retention on site. | Card 9; [INSTALL.md](INSTALL.md) section 10, "Replica" |
-| Windows rights | The pages read the status files with the read right the installer gives `NT SERVICE\ArciApi`; processor, memory and uptime are read from the Windows API with the same account. The Requests task's evidence cannot be read on purpose ("not observable"). A `last.json` or `last-full.json` without the read right makes card 10 or card 3 **No data** ("This check could not be run now"). After the first night, check on the Sistem page that the values show (not "bu platformda okunamıyor") and that no task's evidence is "missing"; if the rights are broken, run `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an elevated PowerShell. | Section 4; [BACKUP.md](BACKUP.md) section 7 |
+| Windows rights | The pages read the status files with the read right the installer gives `NT SERVICE\ArciApi`; processor, memory and uptime are read from the Windows API with the same account. The Requests task's evidence cannot be read on purpose ("Not observable"). A `last.json` or `last-full.json` without the read right makes card 10 or card 3 **No data** ("This check could not be run now"). After the first night, check on the Sistem page that the values show (not "bu platformda okunamıyor") and that none of the daily tasks shows "No evidence" (the weekly and monthly verification tasks show "No evidence" until the first Sunday and the first day of the month); if the rights are broken, run `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"` in an elevated PowerShell. | Section 4; [BACKUP.md](BACKUP.md) section 7 |
 | Legal assessment | The choice of the cards, their thresholds and the report's texts are technical assumptions. Confirm with your legal counsel how you meet the 5651 obligations and how you use the report. | Sections 1 and 3 |
