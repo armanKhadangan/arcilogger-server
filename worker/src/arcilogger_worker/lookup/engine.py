@@ -114,7 +114,7 @@ from sqlalchemy import (
     text,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, distinct_on
+from sqlalchemy.dialects.postgresql import ARRAY, INET, distinct_on
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
 
@@ -499,30 +499,34 @@ class _Probe:
         """``address`` is the ``transip`` of a session overlapping the probe window, also one
         logged once, at its end, after it (bounded like the session search).
 
-        The first such row in the order of ``ix_fg_traffic_transip_transport_time``, not
-        ``EXISTS``: for a busy address the planner expects an early match and scanned the
-        partition sequentially, reading its rows before the window too (3.8 guard; 0.9 s on a
-        partition of 10 days at 1 M rows a day). In time order it read every address's rows of
-        the range when none of the address's own overlaps (0.29 s at 1 M a day for an address
-        with 1 % of them). In the index's order the scan reads the address's own rows only.
+        The first such row in the order of ``ix_fg_traffic_transip_time``, not ``EXISTS``: for a
+        busy address the planner expects an early match and scanned the partition sequentially,
+        reading its rows before the window too (3.8 guard; 0.9 s on a partition of 10 days at
+        1 M rows a day). In time order it read every address's rows of the range when none of
+        the address's own overlaps (0.29 s at 1 M a day for an address with 1 % of them). In the
+        order of ``ix_fg_traffic_transip_transport_time`` it walked every index entry of the
+        address in the partition, ``time`` being its third column (1.1 s per step for a busy
+        address after its last row, day 28 of a monthly partition at 1 M a day; #71). In the
+        index's order the scan reads the address's own rows of the range only (the address
+        named by :func:`_address_is`, so the primary key cannot give that order).
 
         Asked in two steps, the probe window first, then the tail after it: over daily chunks
         the ordered scan merges the chunks and reads each one to its first overlapping row or
         to its end, so a busy address had its whole next day read (0.18 s, 471,352 rows
         removed). An address with no overlapping session has all its rows of the tail read
-        (``duration`` is in no index)."""
+        (``duration`` is in no index; 0.25 s for a day of 800,000 rows)."""
 
         def first(*clauses: ColumnElement[bool]) -> bool:
             started = FgTraffic.time - func.make_interval(
                 0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
             )
-            where = [FgTraffic.transip == address, *clauses, started <= self.high]
+            where = [_address_is(address), *clauses, started <= self.high]
             if self.untrusted:
                 where.append(_not_in(FgTraffic.source, self.untrusted))
             query = (
                 select(FgTraffic.time)
                 .where(*where)
-                .order_by(FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+                .order_by(FgTraffic.transip, FgTraffic.time)
                 .limit(1)
             )
             return self.session.scalar(query) is not None
@@ -602,6 +606,20 @@ def _any_text(values: Sequence[str]) -> Any:
     return any_(cast(literal(list(values), ARRAY(Text)), ARRAY(Text)))
 
 
+def _address_is(address: str) -> ColumnElement[bool]:
+    """``transip`` is ``address``, written ``= ANY(inet[])`` with one element: the probe steps
+    order by ``transip, time``, and with ``transip = :address`` PostgreSQL drops the constant
+    column from the sort, leaving ``time``, which the primary key ``(time, id)`` also gives. With
+    two NAT addresses taking turns (load-balanced lines) the planner then chose the primary key
+    and read every address's rows of the range for one that had none (45 ms for a day at 1 M rows
+    a day, 0.3 s for a day of a 10-day partition; #71). ``= ANY`` keeps ``transip`` in the sort,
+    which only the address's index gives in order."""
+    clause: ColumnElement[bool] = FgTraffic.transip == any_(
+        cast(literal([address], ARRAY(INET)), ARRAY(INET))
+    )
+    return clause
+
+
 def _not_in(column: Any, values: frozenset[str]) -> ColumnElement[bool]:
     clause: ColumnElement[bool] = not_(column == _any_text(sorted(values)))
     return clause
@@ -635,17 +653,26 @@ def _by_chunk(
     start: datetime, end: datetime, *, open_start: bool
 ) -> list[list[ColumnElement[bool]]]:
     """``fg_traffic.time`` from ``start`` (exclusive when ``open_start``) to ``end``, cut at the
-    UTC midnights in between (:data:`CHUNK`): one range per TimescaleDB chunk, in time order."""
+    UTC midnights in between (:data:`CHUNK`): one range per TimescaleDB chunk, in time order.
+    The pieces are half-open at the midnights, as the chunks are (``time < midnight``, then
+    ``time >= midnight``): a piece closed at a midnight also covered that instant, which lies in
+    the next day's chunk, and the planner chose an index for that one-instant chunk alone (#71
+    review). Every row of the range lies in exactly one piece."""
     bounds = [start]
     midnight = datetime.combine(start.astimezone(UTC).date(), dt_time.min, UTC) + CHUNK
     while midnight < end:
         bounds.append(midnight)
         midnight += CHUNK
     bounds.append(end)
+    pairs = list(itertools.pairwise(bounds))
     pieces = []
-    for index, (low, high) in enumerate(itertools.pairwise(bounds)):
-        lower = FgTraffic.time > low if index or open_start else FgTraffic.time >= low
-        pieces.append([lower, FgTraffic.time <= high])
+    for index, (low, high) in enumerate(pairs):
+        if index:
+            lower = FgTraffic.time >= low
+        else:
+            lower = FgTraffic.time > low if open_start else FgTraffic.time >= low
+        upper = FgTraffic.time <= high if index == len(pairs) - 1 else FgTraffic.time < high
+        pieces.append([lower, upper])
     return pieces
 
 
@@ -1262,8 +1289,11 @@ class _Lookup:
         Asked in steps, each for its first row: the rows logged in the window, in time order
         (the window's rows of every address at most, a busy address answers at once), then the
         scan's tail after it, then (with a port only) the sessions spanning the moment on any
-        port, these two in the order of ``ix_fg_traffic_transip_transport_time`` (the address's
-        own rows) and one day of TimescaleDB chunks at a time (:data:`CHUNK`): a statement over
+        port, these two in the order of an index on the address (its own rows: with a port
+        ``ix_fg_traffic_transip_transport_time``, without one ``ix_fg_traffic_transip_time``, as
+        the first walked every index entry of the address in the partition, 1.1 s per step for
+        a busy address after its last row on day 28 of a monthly partition; #71) and one day of
+        TimescaleDB chunks at a time (:data:`CHUNK`): a statement over
         two chunks merges their ordered scans and reads the second to its end even when the first
         answers (0.22 s for a busy address on CI's chunks). As one ``EXISTS`` the planner
         expected an early match for a busy address and scanned the partition sequentially,
@@ -1277,7 +1307,7 @@ class _Lookup:
         started = FgTraffic.time - func.make_interval(
             0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
         )
-        common = [FgTraffic.transip == address]
+        common = [_address_is(address)]
         if request.protocol is not None:
             common.append(FgTraffic.proto == request.protocol)
         if self.untrusted:
@@ -1288,18 +1318,19 @@ class _Lookup:
             query = select(FgTraffic.time).where(*common, *clauses).order_by(*order).limit(1)
             return self.session.scalar(query) is not None
 
-        by_address = (FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+        by_port = (FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+        by_time = (FgTraffic.transip, FgTraffic.time)
         in_window = [FgTraffic.time >= window.low, FgTraffic.time <= window.high]
         if first(*in_window, started <= window.high, *port, order=[FgTraffic.time]):
             return True
         for piece in _by_chunk(window.high, window.scan_end, open_start=True):
-            if first(*piece, started <= window.high, *port, order=by_address):
+            if first(*piece, started <= window.high, *port, order=by_port if port else by_time):
                 return True
         if request.public_port is None:
             return False
         spans_end = request.at + timedelta(seconds=self.settings.max_session_seconds)
         return any(
-            first(*piece, started <= request.at, order=by_address)
+            first(*piece, started <= request.at, order=by_time)
             for piece in _by_chunk(request.at, spans_end, open_start=False)
         )
 
