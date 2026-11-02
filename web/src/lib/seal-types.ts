@@ -174,6 +174,32 @@ export interface TokenInfo {
   check: TokenCheck;
 }
 
+/** The re-stamping status of a token (`arcilogger_core.renewal`, Wave 5 contract 2.1.2). */
+export type RenewalStatus = 'not_due' | 'due' | 'covered' | 'late' | 'uncovered';
+
+/** The day token's re-stamping state (Wave 5 contract 2.3.1, decision 6). */
+export interface SealRenewal {
+  status: RenewalStatus;
+  /** The token's TSA certificate `notAfter` (UTC). */
+  cert_not_after: string | null;
+  /** The vault-relative path of the counting renewal record (`renewals/2031-05-04-1.json`). */
+  covered_by: string | null;
+  /** The counting renewal token's genTime (ISO), or `null` when nothing counts (C4). */
+  renewed_at: string | null;
+}
+
+/** The verifiers' own revocation levels (decision 10, C4). */
+export type RevocationLevel = 'fail' | 'warn' | 'info' | 'ok';
+
+/** Whether a revocation list names the day token's TSA certificate (decision 10). */
+export interface SealRevocation {
+  /** The verifier's code (`crl-revoked`, `crl-revoked-later`, `crl-hold`, …). */
+  code: string;
+  level: RevocationLevel;
+  message_tr: string;
+  message_en: string;
+}
+
 export interface SealDayDetail {
   day: DateString;
   state: string;
@@ -208,6 +234,10 @@ export interface SealDayDetail {
   deletions: Record<string, unknown>[];
   chain_check: Record<string, unknown> | null;
   token: TokenInfo | null;
+  /** `null`: the re-stamping report does not list the day (or cannot be read); absent in older answers. */
+  renewal?: SealRenewal | null;
+  /** `null`: revocation not checked; absent in older answers. */
+  revocation?: SealRevocation | null;
   /** State files that could not be read. */
   problems: string[];
 }

@@ -3675,6 +3675,10 @@
           ],
           "title": "Remaining"
         },
+        "supported": {
+          "title": "Supported",
+          "type": "boolean"
+        },
         "threshold": {
           "title": "Threshold",
           "type": "integer"
@@ -3687,6 +3691,7 @@
       "required": [
         "provider",
         "legal_grade",
+        "supported",
         "threshold",
         "latest",
         "remaining",
@@ -3920,6 +3925,16 @@
     },
     "DashboardSeal": {
       "properties": {
+        "blocking": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/SealBlocking"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "calendar": {
           "items": {
             "$ref": "#/components/schemas/SealCalendarDay"
@@ -3933,7 +3948,8 @@
       },
       "required": [
         "yesterday",
-        "calendar"
+        "calendar",
+        "blocking"
       ],
       "title": "DashboardSeal",
       "type": "object"
@@ -11227,6 +11243,26 @@
         "reference"
       ],
       "title": "Scope",
+      "type": "object"
+    },
+    "SealBlocking": {
+      "description": "A closed day without a time stamp longer than ``seal.late_after_hours`` after its end\n(D11): the Panel's blocking card.",
+      "properties": {
+        "hours_late": {
+          "title": "Hours Late",
+          "type": "integer"
+        },
+        "oldest_unstamped_day": {
+          "format": "date",
+          "title": "Oldest Unstamped Day",
+          "type": "string"
+        }
+      },
+      "required": [
+        "oldest_unstamped_day",
+        "hours_late"
+      ],
+      "title": "SealBlocking",
       "type": "object"
     },
     "SealCalendarDay": {
