@@ -13,6 +13,7 @@ import pytest
 from arcilogger_core import __version__
 from arcilogger_core.alerts import read_alerts
 from arcilogger_core.cli import main
+from arcilogger_core.crl import CrlError, load_stored
 from arcilogger_core.immutability import unlock
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
@@ -20,6 +21,7 @@ from arcilogger_core.seal import config_alert
 from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_core.tsa.base import TsaConfigurationError
 from arcilogger_core.tsa.mock import MockTsa
+from arcilogger_core.tsa.verify import verify_token
 
 CONFIG = """
 data_dir = "{data}"
@@ -167,6 +169,32 @@ def test_credit_tsa_test_and_retention(
     assert capsys.readouterr().out.startswith("Zaman damgası alınamadı: ")
     assert run(setup, "retention", "--dry-run") == 0
     assert "kapalı" in capsys.readouterr().out
+
+
+def test_tsa_test_checks_the_stamp_against_the_stored_lists(
+    setup: dict[str, Any], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C19: the test stamp is verified with the stored revocation lists, so a TSA certificate
+    already on one shows as revoked; an unreadable CRL folder leaves it unchecked."""
+    seen: list[object] = []
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("crls"))
+        return verify_token(*args, **kwargs)
+
+    stored = load_stored(setup["layout"])
+    monkeypatch.setattr("arcilogger_core.cli.verify_token", spy)
+    monkeypatch.setattr("arcilogger_core.cli.load_stored", lambda layout: stored)
+    assert run(setup, "tsa-test") == 0
+    capsys.readouterr()
+    assert seen == [stored]
+
+    def unreadable(layout: Any) -> Any:
+        raise CrlError("state/crl: permission denied")
+
+    monkeypatch.setattr("arcilogger_core.cli.load_stored", unreadable)
+    assert run(setup, "tsa-test") == 0
+    assert seen[-1] is None
 
 
 def test_the_requests_task_command(
