@@ -63,6 +63,7 @@ export function PeriodPicker({
     range.from === range.to
       ? formatDay(range.from)
       : `${formatDay(range.from)} – ${formatDay(range.to)}`;
+  const daysText = days > 1 ? t('usage.range.days', { count: days }) : null;
 
   return (
     <div className="flex items-center gap-1" role="group" aria-label={t('usage.range.label')}>
@@ -89,14 +90,19 @@ export function PeriodPicker({
           <button
             type="button"
             className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm whitespace-nowrap"
-            aria-label={`${t('usage.range.label')}: ${label}, ${rangeText}`}
+            aria-label={`${t('usage.range.label')}: ${label}, ${rangeText}${daysText ? `, ${daysText}` : ''}`}
             data-testid="period"
           >
             <CalendarDays aria-hidden="true" className="size-4 text-muted" />
-            <span className="font-medium">{label}</span>
+            {/* Spaces between the parts: the name must contain the text on screen word by word
+                (WCAG 2.5.3), and the parts would otherwise run together ("Bugün13.10.2026"). */}
+            <span className="font-medium">{label}</span>{' '}
             <span className="text-muted-strong tabular">{rangeText}</span>
-            {days > 1 ? (
-              <span className="text-xs text-muted">{t('usage.range.days', { count: days })}</span>
+            {daysText ? (
+              <>
+                {' '}
+                <span className="text-xs text-muted">{daysText}</span>
+              </>
             ) : null}
           </button>
         </PopoverTrigger>

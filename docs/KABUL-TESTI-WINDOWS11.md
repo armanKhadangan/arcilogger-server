@@ -163,14 +163,15 @@ reddedildi" türünden bir hata ise bulgudur (NTFS hakları).
 Yeni kurulumda `C:\ProgramData\ARCILOGGER\arcilogger.toml` hiçbir `[[sources]]` içermez ve
 güvenlik duvarı 514'ü hiçbir göndericiye açmaz. Mesajı göndereceğiniz test bilgisayarının adresini
 bir kaynak olarak ekleyin (`name = "kabul"`, `type = "generic"`, `address = "<test bilgisayarının
-adresi>"`; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 4), güvenlik duvarını yeniden uygulayın ve
-dört hizmeti yeniden başlatın (KURULUM bölüm 12). Hizmetler yapılandırmayı yalnızca başlarken
-okur: yalnızca toplayıcı yeniden başlatılırsa alım (ArciIngest) yeni kaynağı tanımaz, sessiz kaynak
-uyarısı (R15) onu izlemez.
+adresi>"`): tarayıcıda **Ayarlar → Kaynaklar** sayfasından ya da konsolda `arcilogger.toml`
+dosyasına bir `[[sources]]` tablosu olarak ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 4). Toplayıcı
+ve alım (ArciIngest) yeni kaynağı yeniden başlatmadan birkaç saniyede yükler, sessiz kaynak uyarısı
+(R15) onu izler; `ApplySystem` görevi 514'ü toplayıcı kaynağı tanıyınca açar (elle değişiklikte en
+geç 5 dakika). Hizmetleri yeniden başlatmak gerekmez. Tarayıcıdan yönetim kapalıysa güvenlik
+duvarını kendiniz uygulayın (KURULUM bölüm 12):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
-Restart-Service ArciCollector, ArciIngest, ArciApi, ArciWorker
 ```
 
 `config-check` artık kaynak uyarısı vermez. Sonra o bilgisayardan bir UDP mesajı gönderin:
@@ -297,8 +298,9 @@ next steps, the request code of the 14-day trial, [LICENSING.md](LICENSING.md));
 command lines `python.exe -I -X utf8 -u -m arcilogger_<package> …` (step 2); Core Networking, inbound rules, `auditpol` (step 3); scheduled tasks as
 LOCAL SERVICE (step 4); Smart App Control unchanged and the interface on the PC itself with the
 root certificate (step 5); a syslog message reaching the spool once the test PC is added as a
-`[[sources]]` entry, the firewall applied again and all four services restarted, since they read
-the configuration only at start (step 6; before, 514 is closed); the power settings after the
+`[[sources]]` entry (on Ayarlar → Kaynaklar or by hand), with no service restart: the collector
+and ingest load it live and ApplySystem opens 514 once the collector knows it (step 6; before, 514
+is closed; with the browser administration off, run `Set-ArciFirewall.ps1` yourself); the power settings after the
 installation and the recorded previous values (step 7); an upgrade that uses the remembered
 address and asks no question, then a rollback (step 8); a forced update restart — services back,
 messages sent during the restart missing and not reported (step 9); removal, with the power

@@ -21,20 +21,46 @@
                                                into a NEW database; the superuser password is
                                                read from stdin (a prompt on a console);
                                                --sha256: the hash recorded off the server
+    arcilogger-db search-counts status [--config PATH]
+                                               the search summary table (ADR-0015): hours held,
+                                               files still to count
+    arcilogger-db search-counts rebuild --source S --day YYYY-MM-DD
+                                               count one spool file again from its rows
+    arcilogger-db search-counts verify [--hours 2]
+                                               recount the recent hours from the rows and
+                                               compare (1 on a difference)
     arcilogger-db license status       [--json]    the licence state (``GET /license`` document)
     arcilogger-db license request-code [--json]    this installation's request code (one line)
     arcilogger-db license verify FILE  [--json]    the checks of install, no write, no audit
     arcilogger-db license install FILE [--json]    install a licence file (audited)
     arcilogger-db license remove       [--yes]     remove the installed licence (audited)
+    arcilogger-db leases prepare-rollback [--config PATH]
+                                               before a rollback (the installer): FortiGate
+                                               leases to low confidence, prints the count
     arcilogger-db version
 
 ``settings set`` is the supported way to change a database setting until the settings page
 (M6): it validates the key and the value, writes ``updated_by = NAME`` (so ``upgrade`` never
 puts the default back) and appends ``settings.change`` with the old and new value to the
 hash-chained audit log (:mod:`arcilogger_db.settings_admin`). A string value may be given
-without JSON quotes (``100.64.12.9``); Windows PowerShell 5.1 drops the inner double quotes of
-native-command arguments, so pipe lists in: ``'["203.0.113.200"]' | arcilogger-db settings
-set nat.public_ips - --by tolga``.
+without JSON quotes (``settings set privacy.notice_version v2``); Windows PowerShell 5.1 drops
+the inner double quotes of native-command arguments, so pipe lists and objects in:
+``'{"hat-1": {"mode": "direct", "public": ["203.0.113.200"]}}' | arcilogger-db settings set
+nat.egresses - --by tolga``.
+
+``search-counts …`` looks after ``search_counts``, which the ingest loader writes with the rows
+and the worker job ``search.counts_backfill`` fills in for files loaded before revision
+``0016_search``: ``rebuild`` locks the file's ``ingest_offsets`` row first (ingest waits with that
+file until the recount commits, so a file still being loaded can be recounted too) and clears its
+``counts_from_line``; ``verify`` reads rows and counts in one read-only snapshot and also prints
+how many names are not stored in lower case (``fg_dns.qname``, ``fg_web.hostname``: ``domain:``
+assumes lower case).
+
+``leases prepare-rollback`` is the lease step of ``Install-Arcilogger.ps1 -Rollback`` without
+``-RestoreDatabase`` (ADR-0016, round 6; :mod:`arcilogger_db.lease_rollback`): the previous
+version cannot read FortiGate DHCP lines, so every ``fg_dhcp`` lease is set to ``low`` in one
+transaction before the program is swapped; ``upgrade`` (its seed) restores the ones the previous
+version left as they were and prints both counts with the lease rebuild range.
 
 ``license …`` (offline licensing, licensing contract 6.8) is the only command that loads the
 licence code (:mod:`arcilogger_db.licensing`, imported inside its handler): ``upgrade``,
@@ -56,17 +82,25 @@ import json
 import logging
 import sys
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, func, select, text, update
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from arcilogger_core.canonical import CanonicalJsonError, canonical_json
-from arcilogger_core.config import Config, default_config_path, load_config
-from arcilogger_core.fmt import format_bytes, format_datetime
+from arcilogger_core.config import (
+    Config,
+    ConfigLocationError,
+    check_fixed_location,
+    default_config_path,
+    load_config,
+)
+from arcilogger_core.execpolicy import TrustAnchors
+from arcilogger_core.fmt import format_bytes, format_datetime, format_number
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStoreError
 from arcilogger_core.timeutil import site_day, utc_now
@@ -88,13 +122,17 @@ from arcilogger_db.backup import (
     verify_backup,
 )
 from arcilogger_db.engine import make_engine
+from arcilogger_db.lease_rollback import prepare_rollback
 from arcilogger_db.migrate import current_revisions, head_revisions, upgrade
+from arcilogger_db.models import IngestOffset, SearchCount
 from arcilogger_db.partitions import (
     add_months,
     ensure_partitions,
     month_of,
     partition_status,
 )
+from arcilogger_db.searchcounts import rebuild_stream, verify
+from arcilogger_db.seed import SeedReport
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_db.settings_admin import change_setting, check_actor, list_settings
 
@@ -156,7 +194,24 @@ def cmd_upgrade(config: Config) -> int:
             f"Aylık bölümler: {len(result.partitions.tables)} tablo, "
             f"{len(result.partitions.created)} yeni bölüm"
         )
+    if seed.rollback_restored is not None:
+        _print_lease_restore(seed)
     return EXIT_OK
+
+
+def _print_lease_restore(seed: SeedReport) -> None:
+    """The re-upgrade after a rollback's lease step (:mod:`arcilogger_db.lease_rollback`)."""
+    print(
+        "Geri almadan sonra FortiGate kiraları [FortiGate leases after a rollback]: "
+        f"{_n(seed.rollback_restored or 0)} yüksek güvene döndü [restored to high], "
+        f"{_n(seed.rollback_still_low or 0)} hâlâ düşük güvende [still low]"
+    )
+    print(
+        f"  Kiraları {seed.rebuild_from} - {seed.rebuild_to} arasında yeniden oluşturun [rebuild "
+        "the leases of these days]: Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman "
+        "çizelgesi → Kiraları yeniden oluştur (bir istekte en çok 31 gün [at most 31 days per "
+        "request])"
+    )
 
 
 def cmd_partitions(config: Config) -> int:
@@ -403,7 +458,7 @@ def _backup_run(config: Config, args: argparse.Namespace) -> int:
             "[scheduled database backup is disabled]."
         )
         return EXIT_OK
-    outcome = run_backup(config)
+    outcome = run_backup(config, anchors=TrustAnchors.of(args.config or default_config_path()))
     if not outcome.ok or outcome.file is None or outcome.size is None:
         print(
             f"Veritabanı yedeği alınamadı [database backup failed]: {outcome.error}",
@@ -498,7 +553,8 @@ def _backup_verify(config: Config, args: argparse.Namespace) -> int:
     if not files:
         print("Doğrulanacak yedek yok [no backup to verify].", file=sys.stderr)
         return EXIT_ATTENTION
-    tool = find_tool("pg_restore", config.backup.pg_restore)
+    anchors = TrustAnchors.of(args.config or default_config_path())
+    tool = find_tool("pg_restore", config.backup.pg_restore, anchors=anchors)
     checks = [verify_backup(path, tool, deep=args.deep) for path in files]
     for check in checks:
         _print_verification(check)
@@ -548,7 +604,13 @@ def _backup_restore(config: Config, args: argparse.Namespace) -> int:
     password = _read_password(args.superuser)
     try:
         outcome = restore_backup(
-            config, args.file, name, superuser=args.superuser, password=password, sha256=sha256
+            config,
+            args.file,
+            name,
+            superuser=args.superuser,
+            password=password,
+            sha256=sha256,
+            anchors=TrustAnchors.of(args.config or default_config_path()),
         )
     except RestoreRefusedError as exc:
         print(
@@ -608,6 +670,12 @@ BACKUP_ACTIONS = {
 
 
 def cmd_backup(config: Config, args: argparse.Namespace) -> int:
+    if args.backup_command == "run":  # the Backup task: before anything is written to data_dir
+        try:  # secrets_dir chooses the database password the dump runs with (Day 0 note D0-2)
+            check_fixed_location(config, args.config or default_config_path())
+        except ConfigLocationError as exc:
+            print(exc, file=sys.stderr)  # both languages
+            return EXIT_USAGE
     handler = _backup_log(config) if args.backup_command != "list" else None
     try:
         return BACKUP_ACTIONS[args.backup_command](config, args)
@@ -620,6 +688,218 @@ def cmd_backup(config: Config, args: argparse.Namespace) -> int:
             logger.removeHandler(handler)
             logger.propagate = True
             handler.close()
+
+
+# -- search counts (ADR-0015, Wave 2 contract 2.9) ------------------------------------------------
+
+#: ``search-counts verify --hours``: at most 31 days (it recounts every row of the window).
+VERIFY_HOURS_MAX = 31 * 24
+#: Files and differences listed one per line (the totals count all of them).
+SEARCH_COUNTS_LIST_MAX = 20
+
+
+def _n(value: int) -> str:
+    return format_number(value)
+
+
+def _search_counts_status(config: Config, args: argparse.Namespace) -> int:
+    engine = _engine(config)
+    try:
+        with engine.connect() as connection:
+            keys, lines, first, last = connection.execute(
+                select(
+                    func.count(),
+                    func.coalesce(func.sum(SearchCount.n), 0),
+                    func.min(SearchCount.hour),
+                    func.max(SearchCount.hour),
+                )
+            ).one()
+            pending = connection.execute(
+                select(
+                    IngestOffset.source,
+                    IngestOffset.day,
+                    IngestOffset.counts_from_line,
+                    IngestOffset.finished_at.is_not(None),
+                )
+                .where(IngestOffset.counts_from_line.is_not(None))
+                .order_by(IngestOffset.day.desc(), IngestOffset.source)
+            ).all()
+    except OperationalError as exc:
+        raise _UnreachableError(_describe(exc)) from exc
+    finally:
+        engine.dispose()
+    print(
+        f"Arama özet tablosu [search summary table]: {_n(keys)} anahtar [keys], "
+        f"{_n(int(lines))} satır [lines]"
+    )
+    if first is not None:
+        print(f"  Saatler [hours]: {format_datetime(first)} - {format_datetime(last)}")
+    if not pending:
+        print("Sayılmayı bekleyen dosya yok [no file waits to be counted].")
+        return EXIT_OK
+    finished = sum(1 for row in pending if row[3])
+    print(
+        f"Sayılmayı bekleyen dosyalar [files waiting to be counted]: {_n(len(pending))} "
+        f"({_n(finished)} bitmiş, worker işi search.counts_backfill sayar [finished, counted by "
+        f"the worker job]; {_n(len(pending) - finished)} hâlâ yükleniyor [still loading]). Bu "
+        "günlerin istatistikleri doğrudan sayılır [statistics of these days are counted "
+        "directly]."
+    )
+    for source, day, from_line, done in pending[:SEARCH_COUNTS_LIST_MAX]:
+        state = "bitti [finished]" if done else "yükleniyor [loading]"
+        before = (from_line or 1) - 1  # the lines loaded before the upgrade
+        print(f"  {source} {day}: ilk {_n(before)} satır sayılmadı [lines not counted], {state}")
+    if len(pending) > SEARCH_COUNTS_LIST_MAX:
+        print(f"  … {_n(len(pending) - SEARCH_COUNTS_LIST_MAX)} dosya daha [more files]")
+    return EXIT_OK
+
+
+def _lock_file(connection: Connection, source: str, day: date) -> bool:
+    """Lock the file's ``ingest_offsets`` row (ingest's next batch of that file waits); whether its
+    ``counts_from_line`` is set."""
+    row = connection.execute(
+        select(IngestOffset.counts_from_line)
+        .where(IngestOffset.source == source, IngestOffset.day == day)
+        .with_for_update()
+    ).one_or_none()
+    return row is not None and row[0] is not None
+
+
+def _search_counts_rebuild(config: Config, args: argparse.Namespace) -> int:
+    try:
+        day = date.fromisoformat(args.day)
+    except ValueError:
+        print(f"Geçersiz gün [invalid day]: {args.day} (YYYY-AA-GG)", file=sys.stderr)
+        return EXIT_USAGE
+    source = args.source
+    engine = _engine(config)
+    try:
+        with engine.begin() as connection:
+            marked = _lock_file(connection, source, day)
+            result = rebuild_stream(connection, source, day)
+            if marked:
+                connection.execute(
+                    update(IngestOffset)
+                    .where(IngestOffset.source == source, IngestOffset.day == day)
+                    .values(counts_from_line=None)
+                )
+    except OperationalError as exc:
+        raise _UnreachableError(_describe(exc)) from exc
+    finally:
+        engine.dispose()
+    print(
+        f"{source} {day}: {_n(result.lines)} satır yeniden sayıldı [lines recounted], "
+        f"{_n(result.keys)} anahtar [keys]"
+    )
+    if marked:
+        print(
+            "  Yükseltmeden önce yüklenen satırlar da sayıldı [lines loaded before the upgrade "
+            "counted too]."
+        )
+    return EXIT_OK
+
+
+def _search_counts_verify(config: Config, args: argparse.Namespace) -> int:
+    hours = args.hours
+    if not 0 <= hours <= VERIFY_HOURS_MAX:
+        print(
+            f"--hours 0 ile {VERIFY_HOURS_MAX} arasında olmalı [must be between 0 and "
+            f"{VERIFY_HOURS_MAX}]: {hours}",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    engine = _engine(config)
+    try:
+        # Rows and counts commit together: one snapshot sees them agree while ingest goes on.
+        with (
+            engine.connect().execution_options(
+                isolation_level="REPEATABLE READ", postgresql_readonly=True
+            ) as connection,
+            connection.begin(),
+        ):
+            report = verify(connection, hours)
+    except OperationalError as exc:
+        raise _UnreachableError(_describe(exc)) from exc
+    finally:
+        engine.dispose()
+    print(
+        f"Saatler [hours]: {format_datetime(report.start)} - {format_datetime(report.end)}: "
+        f"{_n(report.keys)} anahtar [keys], {_n(report.lines)} satır [lines]"
+    )
+    if report.pending:
+        print(
+            f"  Henüz sayılmamış {_n(len(report.pending))} dosya karşılaştırılmadı [files not "
+            "counted yet were left out]: "
+            + ", ".join(f"{source} {day}" for source, day in report.pending)
+        )
+    print(
+        "  Küçük harfle saklanmayan adlar [names not stored in lower case]: "
+        + ", ".join(f"{name} {_n(count)}" for name, count in report.mixed_case.items())
+    )
+    if report.ok:
+        print("Özet tablosu satırlarla aynı [the summary table matches the rows].")
+        return EXIT_OK
+    print(
+        f"FARK [difference]: {_n(len(report.differences))} anahtar satırlardan farklı [keys "
+        "differ from the rows]:",
+        file=sys.stderr,
+    )
+    for key, counted, held in report.differences[:SEARCH_COUNTS_LIST_MAX]:
+        print(
+            f"  {key.source} {key.raw_day} {format_datetime(key.hour)} {key.kind} "
+            f"{key.tbl or '-'} {key.action or '-'} {key.net or '-'}: satırlar [rows] "
+            f"{_n(counted)}, tablo [table] {_n(held)}",
+            file=sys.stderr,
+        )
+    files = sorted({(key.source, key.raw_day) for key, _, _ in report.differences})
+    print("Düzeltmek için [to repair]:", file=sys.stderr)
+    for source, day in files[:SEARCH_COUNTS_LIST_MAX]:
+        print(
+            f"  arcilogger-db search-counts rebuild --source {source} --day {day}", file=sys.stderr
+        )
+    return EXIT_ATTENTION
+
+
+SEARCH_COUNTS_ACTIONS = {
+    "status": _search_counts_status,
+    "rebuild": _search_counts_rebuild,
+    "verify": _search_counts_verify,
+}
+
+
+def cmd_search_counts(config: Config, args: argparse.Namespace) -> int:
+    return SEARCH_COUNTS_ACTIONS[args.search_counts_command](config, args)
+
+
+# -- leases (ADR-0016, round 6) -------------------------------------------------------------------
+
+
+def _leases_prepare_rollback(config: Config, args: argparse.Namespace) -> int:
+    engine = _engine(config)
+    try:
+        try:
+            connection = engine.connect()
+        except OperationalError as exc:
+            raise _UnreachableError(_describe(exc)) from exc
+        # One transaction on derived rows: the leases and the status row commit together; a lock
+        # or statement timeout is a database error (1), not an unreachable database.
+        with connection, connection.begin(), Session(bind=connection) as session:
+            report = prepare_rollback(session)
+            session.flush()
+    finally:
+        engine.dispose()
+    print(
+        "FortiGate kiraları düşük güvene indirildi [FortiGate leases lowered to low "
+        f"confidence]: {_n(report.count)}"
+    )
+    return EXIT_OK
+
+
+LEASES_ACTIONS = {"prepare-rollback": _leases_prepare_rollback}
+
+
+def cmd_leases(config: Config, args: argparse.Namespace) -> int:
+    return LEASES_ACTIONS[args.leases_command](config, args)
 
 
 # -- license (offline licensing, contract 6.8) ---------------------------------------------------
@@ -995,6 +1275,37 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     for sub in (backup, run, backups, verify, prune, restore):
         sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+    counts = commands.add_parser(
+        "search-counts", help="the search summary table: status, rebuild a file, verify"
+    )
+    counts_actions = counts.add_subparsers(dest="search_counts_command", metavar="<action>")
+    counts_status = counts_actions.add_parser(
+        "status", help="the hours it holds and the files still to count"
+    )
+    counts_rebuild = counts_actions.add_parser(
+        "rebuild", help="count one spool file (source and day) again from its rows"
+    )
+    counts_rebuild.add_argument("--source", required=True, help="spool folder, e.g. fortigate")
+    counts_rebuild.add_argument("--day", required=True, metavar="YYYY-MM-DD", help="its day")
+    counts_verify = counts_actions.add_parser(
+        "verify", help="recount the recent hours from the rows and compare (exit 1 on a difference)"
+    )
+    counts_verify.add_argument(
+        "--hours",
+        type=int,
+        default=2,
+        help=f"full hours before the current one (default 2, at most {VERIFY_HOURS_MAX})",
+    )
+    for sub in (counts, counts_status, counts_rebuild, counts_verify):
+        sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+    leases = commands.add_parser("leases", help="the lease timeline: the step before a rollback")
+    leases_actions = leases.add_subparsers(dest="leases_command", metavar="<action>")
+    prepare = leases_actions.add_parser(
+        "prepare-rollback",
+        help="before a rollback: every FortiGate DHCP lease to low confidence (prints the count)",
+    )
+    for sub in (leases, prepare):
+        sub.add_argument("--config", type=Path, default=argparse.SUPPRESS)
     licence = commands.add_parser(
         "license", help="offline licence: state, request code, verify, install, remove"
     )
@@ -1034,6 +1345,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _backup_handler(args)
     if args.command == "license" and getattr(args, "license_command", None) is not None:
         handler = _license_handler(args)
+    if args.command == "search-counts" and getattr(args, "search_counts_command", None):
+        handler = _search_counts_handler(args)
+    if args.command == "leases" and getattr(args, "leases_command", None):
+        handler = _leases_handler(args)
     if handler is None:
         parser.print_help()
         return EXIT_USAGE
@@ -1069,6 +1384,14 @@ def _backup_handler(args: argparse.Namespace) -> Any:
 
 def _license_handler(args: argparse.Namespace) -> Any:
     return lambda config: cmd_license(config, args)
+
+
+def _search_counts_handler(args: argparse.Namespace) -> Any:
+    return lambda config: cmd_search_counts(config, args)
+
+
+def _leases_handler(args: argparse.Namespace) -> Any:
+    return lambda config: cmd_leases(config, args)
 
 
 if __name__ == "__main__":

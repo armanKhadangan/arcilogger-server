@@ -3,7 +3,7 @@
 > English: [USAGE-REPORTS.md](USAGE-REPORTS.md). Karar:
 > [adr/0012-scheduled-usage-reports.md](adr/0012-scheduled-usage-reports.md).
 >
-> **Lisans:** zamanlanmış raporlar **Zamanlanmış kullanım raporları** modülünü (o da Kullanım analizi modülünü) gerektirir ([LISANS.md](LISANS.md)); modül kapalıyken Raporlar sayfası kilitlidir, raporlar üretilmez ve gönderilmez, `R20-report` açılmaz.
+> **Lisans:** zamanlanmış raporlar **Zamanlanmış kullanım raporları** modülünü (o da Kullanım analizi modülünü) gerektirir ([LISANS.md](LISANS.md)); modül kapalıyken Raporlar sayfası kilitlidir, raporlar üretilmez ve gönderilmez, `R20-report` açılmaz; modül kapanmadan önce ve kapandığında lisans uyarısı `R20-license` yöneticilere haber verir ([UYARILAR.md](UYARILAR.md)).
 >
 > ARCILOGGER, **5651 yükümlülüklerini desteklemek için tasarlanmıştır**; hukuki uygunluk iddiasında
 > bulunmaz. Kişi düzeyindeki raporların kullanımı için hukuk müşavirinin görüşünü alın.
@@ -36,8 +36,9 @@ Kurulumla dört zamanlama gelir. Hepsi **kapalıdır** (alıcı yok); alıcılar
   (`person_level`, varsayılan açık: adlarla) ve **takma ad** (`pseudonymize`, varsayılan kapalı)
   seçeneği vardır. Varsayılan olarak (sahibin 2026-10-20 kararı) raporlar adlarla ve ayrıntılıdır;
   bunun çalışanların onayına uyup uymadığına kuruluş, hukuk müşaviriyle karar verir. Kişi
-  düzeyindeki raporlardan çıkarılması istenen kişi `persons.usage_excluded`
-  ile çıkarılır (kullanım motoru).
+  düzeyindeki raporlardan çıkarılması istenen kişi, Cihazlar ve Kişiler'de kişinin
+  **Kullanım raporlarından hariç tut** kutusuyla çıkarılır (`persons.usage_excluded`,
+  [KULLANIM.md](KULLANIM.md) bölüm 6).
 - **Sunucu kapalıyken kaçan raporlar:** worker yeniden başlayınca her zamanlama **bir kez**
   çalışır, kaçan en son zaman için (örneğin beş gün kapalı kalınca yalnızca dünün tam gün raporu
   gider, beş rapor gitmez). `reports.catch_up` `false` yapılırsa 30 dakikadan fazla geciken

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from pathlib import Path
-from typing import Any
+from time import monotonic
+from typing import Any, Self
 
 import pytest
 
@@ -15,7 +16,7 @@ from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.seal import Sealer
-from arcilogger_core.timeutil import SITE_TZ
+from arcilogger_core.timeutil import SITE_TZ, day_window, site_day, utc_now
 from arcilogger_core.tsa.mock import MockTsa, MockTsaProvider
 
 FORMAT = Path(__file__).parents[2] / "tests" / "fixtures" / "format"
@@ -111,6 +112,32 @@ def _unlock_after_test(tmp_path: Path) -> Iterator[None]:
     for path in tmp_path.rglob("*"):
         if path.is_file() and is_locked(path):
             unlock(path)
+
+
+@pytest.fixture
+def one_site_day(monkeypatch: pytest.MonkeyPatch) -> date:
+    """Keep every default clock of the test on one site day, and return that day.
+
+    The CLI, the sealer, the mock TSA and ``status`` read :func:`utc_now`. A test that takes
+    its "today" from the real clock and then runs the CLI made that day a closed day without
+    data when a site midnight (21:00 UTC) passed in between: ``seal`` sealed it as one more,
+    empty day, or ``status`` found yesterday unsealed. This clock starts at the real moment,
+    moved back to an hour before the next site midnight at the latest (a test takes seconds,
+    also on Windows), and runs at the real rate. It is never ahead of the system clock, which
+    the TSA verifier checks a token's genTime against.
+    """
+    real = utc_now()
+    today = site_day(real)
+    start = min(real, day_window(today)[1] - timedelta(hours=1)).timestamp()
+    started = monotonic()
+
+    class SiteDayClock(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> Self:
+            return cls.fromtimestamp(start + (monotonic() - started), tz)
+
+    monkeypatch.setattr("arcilogger_core.timeutil.datetime", SiteDayClock)
+    return today
 
 
 @pytest.fixture

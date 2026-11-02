@@ -46,6 +46,8 @@ declare module '@tanstack/react-table' {
      * (truncated, full text in its `title`) that must not push other columns out of view.
      */
     grow?: boolean;
+    /** The header text wraps onto a second line instead of being cut with an ellipsis. */
+    wrapHeader?: boolean;
   }
 }
 
@@ -73,6 +75,8 @@ interface DataTableProps<T> {
   /** Height of the scroll area in px (rows are virtualised inside it). */
   height?: number;
   initialDensity?: Density;
+  /** Row heights in px per density, for cells of two lines (default 32 / 40). */
+  rowHeights?: Record<Density, number>;
   /** Extra controls on the left of the toolbar (filters). */
   toolbar?: ReactNode;
   emptyMessage?: ReactNode;
@@ -102,6 +106,7 @@ export function DataTable<T>({
   exportFileName,
   height = 480,
   initialDensity = 'compact',
+  rowHeights = ROW_HEIGHT,
   toolbar,
   emptyMessage,
   className,
@@ -135,7 +140,7 @@ export function DataTable<T>({
   });
 
   const rows = table.getRowModel().rows;
-  const rowHeight = ROW_HEIGHT[density];
+  const rowHeight = rowHeights[density];
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -290,6 +295,7 @@ export function DataTable<T>({
                       className={cn(
                         'sticky top-0 z-10 h-9 border-b border-border bg-subtle px-3 text-left text-xs font-medium text-muted-strong',
                         meta?.numeric && 'text-right',
+                        meta?.wrapHeader && 'py-1 leading-4',
                       )}
                     >
                       {header.isPlaceholder ? null : header.column.getCanSort() ? (
@@ -301,7 +307,7 @@ export function DataTable<T>({
                             meta?.numeric && 'flex-row-reverse',
                           )}
                         >
-                          <span className="truncate">
+                          <span className={meta?.wrapHeader ? 'break-words' : 'truncate'}>
                             {flexRender(header.column.columnDef.header, header.getContext())}
                           </span>
                           <SortIcon

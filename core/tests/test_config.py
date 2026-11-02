@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from pydantic import ValidationError
 
-from arcilogger_core.config import Config, default_config_path, load_config, setup_problems
+from arcilogger_core.config import (
+    Config,
+    ReplicaConfig,
+    default_config_path,
+    load_config,
+    parse_config,
+    replica_target_text,
+    setup_problems,
+)
 
 MINIMAL = """
 data_dir = "D:/ARCILOGGER"
@@ -50,6 +58,38 @@ def test_retention_below_two_years_is_refused(tmp_path: Path) -> None:
 def test_replica_needs_a_target(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match=r"replica\.target"):
         load_config(_write(tmp_path, MINIMAL + "\n[replica]\nenabled = true\n"))
+
+
+@pytest.mark.parametrize(
+    ("saved", "shown"),
+    [
+        ("\\\\NAS-01\\arcilogger-worm", "\\\\NAS-01\\arcilogger-worm"),
+        ("\\\\NAS-01\\arcilogger-worm\\", "\\\\NAS-01\\arcilogger-worm"),
+        ("//NAS-01/arcilogger-worm", "\\\\NAS-01\\arcilogger-worm"),
+        ("//NAS-01/arcilogger-worm/", "\\\\NAS-01\\arcilogger-worm"),
+        ("\\\\nas.ornek.example\\arci$\\gunluk", "\\\\nas.ornek.example\\arci$\\gunluk"),
+        ("\\\\172.20.10.40\\worm\\a\\b\\", "\\\\172.20.10.40\\worm\\a\\b"),
+    ],
+)
+def test_a_replica_share_reads_back_as_one_text_on_every_platform(saved: str, shown: str) -> None:
+    """On Windows ``str(Path("\\\\NAS-01\\worm"))`` keeps the share root's separator
+    (``\\\\NAS-01\\worm\\``, what ``PureWindowsPath`` gives here), a POSIX path keeps the text as
+    saved: the target the settings page shows and an op expects is the same text either way."""
+    windows = str(PureWindowsPath(saved))  # str(Path(saved)) on Windows
+    assert replica_target_text(saved) == replica_target_text(windows) == shown
+    for parsed in (Path(saved), Path(windows)):
+        replica = ReplicaConfig(enabled=True, target=parsed)
+        assert replica.model_dump(mode="json")["target"] == shown
+        assert replica.target_text == shown
+        assert replica.target == parsed  # the path the Replica task copies to is untouched
+
+
+def test_a_replica_target_that_is_no_share_reads_back_as_its_path(tmp_path: Path) -> None:
+    for target in (tmp_path / "nas", Path("\\\\NAS-01"), Path("\\\\?\\UNC\\NAS-01\\worm")):
+        replica = ReplicaConfig(target=target)
+        assert replica.model_dump(mode="json")["target"] == str(target)
+    assert ReplicaConfig().model_dump(mode="json")["target"] is None
+    assert ReplicaConfig().target_text is None
 
 
 @pytest.mark.parametrize(
@@ -262,3 +302,34 @@ def test_invalid_organisation_name_or_time_server_is_refused(
 ) -> None:
     with pytest.raises(ValidationError, match=message):
         load_config(_write(tmp_path, top + "\n" + MINIMAL + "\n" + section + "\n"))
+
+
+def test_a_source_is_enabled_unless_switched_off(tmp_path: Path) -> None:
+    """``enabled`` is new (ADR-0014): every existing file stays valid and its sources on."""
+    config = load_config(_write(tmp_path, MINIMAL))
+    assert all(source.enabled for source in config.sources)
+    text = MINIMAL.replace(
+        'address = "172.20.10.1"\n', 'address = "172.20.10.1"\nenabled = false\n'
+    )
+    off = load_config(_write(tmp_path, text))
+    core = off.source_for("172.20.10.1")
+    assert core is not None
+    assert core.enabled is False
+    assert off.source_name_for("172.20.10.1") == "core-r1", "still recorded under its name"
+    assert type(core).model_validate(core.model_dump()) == core
+    with pytest.raises(ValidationError, match="enabled"):
+        load_config(_write(tmp_path, text.replace("enabled = false", 'enabled = "maybe"')))
+
+
+def test_the_admin_folder_lies_next_to_the_secret_store(tmp_path: Path) -> None:
+    config = load_config(_write(tmp_path, MINIMAL))
+    assert config.admin_dir == tmp_path / "admin"
+    with pytest.raises(ValidationError, match="admin_dir"):
+        load_config(_write(tmp_path, 'admin_dir = "D:/elsewhere"\n' + MINIMAL))
+
+
+def test_parse_config_reads_bytes_as_load_config_reads_the_file(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL)
+    assert parse_config(path.read_bytes(), path) == load_config(path)
+    with pytest.raises(ValueError, match="utf-8"):
+        parse_config(MINIMAL.encode("utf-16"), path)

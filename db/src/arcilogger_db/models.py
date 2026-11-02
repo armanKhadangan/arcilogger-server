@@ -56,6 +56,8 @@ from sqlalchemy.dialects.postgresql import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from arcilogger_core.admin.contract import ADMIN_REQUEST_KINDS, SECTIONS, STATES, TERMINAL_STATES
+
 TZ = TIMESTAMP(timezone=True)
 
 #: Deterministic constraint and index names: migrations stay stable across machines.
@@ -70,6 +72,11 @@ NAMING_CONVENTION: Final = {
 ROLES: Final = ("admin", "auditor", "hr", "viewer")
 SOURCE_TYPES: Final = ("fortigate", "mikrotik", "generic")
 LEASE_END_REASONS: Final = ("dhcp", "timeout", "superseded", "arp", "open")
+#: The tables a lease interval is built from (``fg_dhcp`` since revision ``0017_fortigate_dhcp``).
+LEASE_SOURCE_TABLES: Final = ("mt_dhcp", "mt_arp", "fg_dhcp")
+#: The FortiOS DHCP ``lease-time`` range in seconds (ADR-0016, D6): a logged lease outside it
+#: (``0`` = unlimited included) is not stored in ``leases.lease_seconds``.
+LEASE_SECONDS_RANGE: Final = (300, 8_640_000)
 CONFIDENCE_LEVELS: Final = ("high", "medium", "low")
 DEVICE_TYPES: Final = ("pc", "phone", "printer", "ip_phone", "ap", "server", "camera", "other")
 ALERT_SEVERITIES: Final = ("info", "low", "medium", "high", "critical")
@@ -122,6 +129,22 @@ LICENSE_EVENT_KINDS: Final = ("install", "remove", "refuse", "limit", "state")
 LICENSE_SOURCES: Final = ("web", "cli", "worker", "seed")
 #: Largest licence file (bytes) ``license_files.content`` holds (``license_too_large`` above).
 LICENSE_MAX_BYTES: Final = 65536
+
+#: Browser administration (ADR-0014, contract 2.15): who carries a request out — the agent
+#: ``ArciAdmin`` (a signed request file) or the worker (the non-secret actions it takes from
+#: ``admin_requests`` itself: test e-mail, lease rebuild).
+ADMIN_REQUEST_CHANNELS: Final = ("agent", "worker")
+#: A key of ``admin_requests.params`` / ``result`` named like this (case-insensitive) holds a
+#: masked secret (``{"secret": true, "old": "set", …}``), never a value: no secret ever enters
+#: the database (ADR-0009 §6), checked by the database itself (``ck_admin_requests_*_masked``).
+SECRET_KEY_PATTERN: Final = "password|customer|token"  # noqa: S105 - key names, no secret
+
+#: Search (ADR-0015, revision ``0016_search``): the time ranges a saved search may keep instead
+#: of a fixed ``range_from``/``range_to`` (resolved against the current time when it runs).
+SAVED_SEARCH_PRESETS: Final = ("15m", "1h", "24h", "today", "yesterday", "7d", "30d")
+SAVED_SEARCH_NAME_MAX: Final = 80
+#: The longest query text (the search request's ``q`` has the same limit).
+SAVED_SEARCH_QUERY_MAX: Final = 1000
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -238,6 +261,10 @@ class FgTraffic(TimeSeries, Base):
     srcip: Mapped[str | None] = mapped_column(INET)
     srcport: Mapped[int | None] = mapped_column(Integer)
     srcintf: Mapped[str | None] = mapped_column(Text)
+    #: "MAC address associated with the Source IP" (FortiOS ``srcmac``; filled only where device
+    #: identification is on). Revision ``0017_fortigate_dhcp``; no index (search field
+    #: ``srcmac:``, scanned). Never lease evidence (ADR-0016, D10).
+    srcmac: Mapped[str | None] = mapped_column(MACADDR)
     dstip: Mapped[str | None] = mapped_column(INET)
     dstport: Mapped[int | None] = mapped_column(Integer)
     dstintf: Mapped[str | None] = mapped_column(Text)
@@ -266,13 +293,18 @@ class FgTraffic(TimeSeries, Base):
 
 
 class FgWeb(TimeSeries, Base):
-    """FortiGate web filter logs (``type="utm" subtype="webfilter"``)."""
+    """FortiGate web filter logs (``type="utm" subtype="webfilter"``).
+
+    ``ix_fg_web_rhost_time`` (revision ``0016_search``) serves the search field ``domain:``: "this
+    name and its subdomains" is a prefix range on the reversed, lower-cased host name.
+    """
 
     __tablename__ = "fg_web"
     __table_args__ = _ts_args(
         "fg_web",
         Index("ix_fg_web_sessionid", "sessionid"),
         Index("ix_fg_web_srcip_time", "srcip", "time"),
+        Index("ix_fg_web_rhost_time", text("reverse(lower(hostname))"), "time"),
         comment="FortiGate web filter logs (host name, URL, category).",
     )
 
@@ -428,6 +460,43 @@ class FgEvent(TimeSeries, Base):
     cfgobj: Mapped[str | None] = mapped_column(Text)
     cfgattr: Mapped[str | None] = mapped_column(Text)
     msg: Mapped[str | None] = mapped_column(Text)
+
+
+class FgDhcp(TimeSeries, Base):
+    """FortiGate DHCP server events (ADR-0016, revision ``0017_fortigate_dhcp``).
+
+    A ``type="event"`` line with ``ip``, ``mac`` and ``dhcp_msg`` that convert becomes a row here
+    instead of in ``fg_event`` (the parser decides by the shape of the line, D3). What a row
+    means (an ACK that assigns, a RELEASE) is decided by the worker from its ``logid`` and the
+    settings ``dhcp.fortigate_*`` (D4, D25), so old rows are re-read after a settings change.
+    """
+
+    __tablename__ = "fg_dhcp"
+    __table_args__ = _ts_args(
+        "fg_dhcp",
+        Index("ix_fg_dhcp_ip_time", "ip", "time"),
+        Index("ix_fg_dhcp_mac_time", "mac", "time"),
+        comment=(
+            "FortiGate DHCP server events (ACK/RELEASE by logid): which MAC got which IP when."
+        ),
+    )
+
+    logid: Mapped[str | None] = mapped_column(Text)
+    subtype: Mapped[str | None] = mapped_column(Text)
+    level: Mapped[str | None] = mapped_column(Text)
+    logdesc: Mapped[str | None] = mapped_column(Text)
+    dhcp_msg: Mapped[str | None] = mapped_column(Text)
+    #: The FortiGate interface of the DHCP server (``leases.server`` of its leases, D7).
+    interface: Mapped[str | None] = mapped_column(Text)
+    ip: Mapped[str] = mapped_column(INET, nullable=False)
+    mac: Mapped[str] = mapped_column(MACADDR, nullable=False)
+    hostname: Mapped[str | None] = mapped_column(Text)
+    #: ``lease`` as logged (seconds, uint32; ``0`` = unlimited; verify on site); NULL when absent.
+    lease: Mapped[int | None] = mapped_column(BigInteger)
+    msg: Mapped[str | None] = mapped_column(Text)
+    #: ``True``: ``time`` is the FortiGate's event time; ``False``: the receive time (no usable
+    #: device time, ``fortigate.time``), never lease evidence (D28).
+    device_time: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 # -- MikroTik -------------------------------------------------------------------------------------
@@ -642,6 +711,10 @@ class IngestOffset(Base):
     updated_at: Mapped[datetime] = _updated()
     #: Set when the day is closed and every line was loaded.
     finished_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: ``NULL``: every loaded line of the file is in ``search_counts``. A number: the lines before
+    #: it were loaded before revision ``0016_search`` and are not counted yet (the worker job
+    #: ``search.counts_backfill`` recounts the file once it is finished, then clears this).
+    counts_from_line: Mapped[int | None] = mapped_column(Integer)
 
 
 # =================================================================================================
@@ -806,8 +879,17 @@ class Lease(Base):
         CheckConstraint(_in("confidence", CONFIDENCE_LEVELS), name="confidence"),
         CheckConstraint('"end" IS NULL OR "end" >= start', name="end_after_start"),
         CheckConstraint("(end_reason = 'open') = (\"end\" IS NULL)", name="open_iff_no_end"),
+        CheckConstraint(_in("source_table", LEASE_SOURCE_TABLES), name="source_table"),
+        CheckConstraint(
+            "lease_seconds IS NULL OR lease_seconds BETWEEN "
+            f"{LEASE_SECONDS_RANGE[0]} AND {LEASE_SECONDS_RANGE[1]}",
+            name="lease_seconds",
+        ),
         Index("ix_leases_ip_start", "ip", "start"),
         Index("ix_leases_mac_start", "mac", "start"),
+        # open and recently ended leases per table (the FortiGate lease alerts, the Kira kanıtı
+        # card; revision 0017_fortigate_dhcp)
+        Index("ix_leases_source_table_end", "source_table", "end"),
         {"comment": "Lease timeline: which MAC held which IP when (derived, rebuildable)."},
     )
 
@@ -823,10 +905,15 @@ class Lease(Base):
     end: Mapped[datetime | None] = mapped_column(TZ)
     end_reason: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
     confidence: Mapped[str] = mapped_column(Text, nullable=False)
-    #: Table the interval was built from: ``mt_dhcp`` or ``mt_arp``.
+    #: Table the interval was built from: ``mt_dhcp``, ``mt_arp`` or ``fg_dhcp``
+    #: (:data:`LEASE_SOURCE_TABLES`).
     source_table: Mapped[str] = mapped_column(Text, nullable=False)
     #: Time of the latest evidence that kept the interval alive (timeout is computed from it).
     last_evidence: Mapped[datetime | None] = mapped_column(TZ)
+    #: The lease time a FortiGate ACK logged, when usable (:data:`LEASE_SECONDS_RANGE`): the
+    #: interval then ends that long after its last DHCP evidence (ADR-0016, D6). NULL for every
+    #: other lease (configured or fallback time). Revision ``0017_fortigate_dhcp``.
+    lease_seconds: Mapped[int | None] = mapped_column(Integer)
     #: Evidence references: a list of ``arcilogger_worker.lookup.EvidenceRef.to_dict()`` objects,
     #: ``{"table", "row_id", "time", "raw": {source, day, line, offset} | null, "summary"}``.
     evidence: Mapped[list[Any]] = mapped_column(
@@ -1761,6 +1848,220 @@ class ReportRun(Base):
 
 
 # =================================================================================================
+# Browser administration (ADR-0014; contract 2.15, revision 0015_admin_requests)
+# =================================================================================================
+
+
+def _masked(column: str) -> str:
+    """``column`` holds no key named like a secret (:data:`SECRET_KEY_PATTERN`) at any depth,
+    unless its value is a masked secret ``{"secret": true, …}``."""
+    path = (
+        '$.** ? (@.type() == "object").keyvalue() '
+        f'? (@.key like_regex "{SECRET_KEY_PATTERN}" flag "i" && !(@.value.secret == true))'
+    )
+    return f"NOT jsonb_path_exists({column}, '{path}')"
+
+
+class AdminRequest(Base):
+    """One request of the browser administration, from the API's ``202`` to its outcome.
+
+    The API inserts the row in the transaction that writes ``admin.request`` to the audit log
+    (``audit_id``) and, for ``channel = 'agent'``, renames the signed request file into the
+    agent's inbox after the commit; it mirrors every terminal state of the agent's status here,
+    so the history outlives the agent's 30-day cleanup. ``channel = 'worker'`` rows
+    (``worker.test_email``, ``worker.lease_rebuild``) never become a file: the worker job
+    ``admin.requests`` takes them with ``FOR UPDATE SKIP LOCKED`` and writes their ``result``
+    and the audit entry in one transaction (:mod:`arcilogger_worker.admin_jobs`).
+
+    ``params`` and ``result`` are never secret: masked changes, the day, the range, the test
+    recipient; a key named like a secret must hold a masked secret (checked by the database).
+    ``state`` is one of ``arcilogger_core.admin.contract.STATES`` and ``terminal`` says whether
+    it is one of ``TERMINAL_STATES`` (also checked).
+    """
+
+    __tablename__ = "admin_requests"
+    __table_args__ = (
+        CheckConstraint("id ~ '^[0-9a-f]{32}$'", name="id"),
+        CheckConstraint(_in("kind", ADMIN_REQUEST_KINDS), name="kind"),
+        CheckConstraint(_in("channel", ADMIN_REQUEST_CHANNELS), name="channel"),
+        CheckConstraint("(channel = 'worker') = (kind LIKE 'worker.%')", name="channel_kind"),
+        CheckConstraint(f"section IS NULL OR {_in('section', SECTIONS)}", name="section"),
+        CheckConstraint(_in("state", STATES), name="state"),
+        CheckConstraint(
+            f"terminal = ({_in('state', tuple(s for s in STATES if s in TERMINAL_STATES))})",
+            name="terminal",
+        ),
+        CheckConstraint("btrim(requested_by) <> ''", name="requested_by"),
+        CheckConstraint(_masked("params"), name="params_masked"),
+        CheckConstraint(_masked("result"), name="result_masked"),
+        Index("ix_admin_requests_channel_state_created_at", "channel", "state", "created_at"),
+        Index("ix_admin_requests_kind_created_at", "kind", text("created_at DESC")),
+        Index("ix_admin_requests_section", "section", postgresql_where=text("NOT terminal")),
+        {
+            "comment": (
+                "Requests of the browser administration (ADR-0014): state, requester, "
+                "non-secret parameters and result."
+            )
+        },
+    )
+
+    #: 32 lower-case hex digits: the request id of the signed file, the status and the journal.
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The configuration section of a ``config.*`` request (``None`` for an action).
+    section: Mapped[str | None] = mapped_column(Text)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    terminal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: The user (NULL once the user row is gone; ``requested_by`` keeps the name).
+    requested_by_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    #: User name of the requester.
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+    #: An agent request expires unclaimed (the signed file's ``expires_at``); a worker request
+    #: is not started after it.
+    expires_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: When a held change takes effect.
+    effective_at: Mapped[datetime | None] = mapped_column(TZ)
+    #: Non-secret parameters: masked changes, ``day``, ``from``/``to``, ``to`` (test e-mail).
+    params: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    #: The outcome (an action's result, a worker job's progress and result).
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    #: A code of ``arcilogger_core.admin.messages`` (texts added by the API).
+    error_code: Mapped[str | None] = mapped_column(Text)
+    rolled_back: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: The ``admin.request`` entry of the audit log (no foreign key, as ``audit_imports``).
+    audit_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+# =================================================================================================
+# Search (ADR-0015; revision 0016_search)
+# =================================================================================================
+
+
+class SearchCount(Base):
+    """Exact hourly line counts for the search statistics (``arcilogger_db.searchcounts``).
+
+    One row per key ``(hour, source, raw_day, kind, tbl, action, net)`` with its number of
+    ``messages`` rows ``n``. The ingest loader adds a batch's counts in the transaction that
+    loads its rows (exactly once, like the rows); the worker job ``search.counts_backfill``
+    recounts the files loaded before this table existed (``ingest_offsets.counts_from_line``).
+    Derived data, like every table: ``searchcounts.rebuild_stream`` recounts one file from its
+    rows. ``action`` and ``net`` are ``NULL`` for a line without them; the unique key treats two
+    ``NULL``\\ s as equal (``NULLS NOT DISTINCT``), so the upsert finds the row.
+    """
+
+    __tablename__ = "search_counts"
+    __table_args__ = (
+        CheckConstraint("n > 0", name="n"),
+        UniqueConstraint(
+            "hour",
+            "source",
+            "raw_day",
+            "kind",
+            "tbl",
+            "action",
+            "net",
+            name="uq_search_counts_key",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("ix_search_counts_source_hour", "source", "hour"),
+        Index("ix_search_counts_raw_day_source", "raw_day", "source"),
+        {"comment": "Exact hourly line counts per source file, kind, table, action and /24."},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    #: ``date_trunc('hour', messages.time)`` (device time, UTC).
+    hour: Mapped[datetime] = mapped_column(TZ, nullable=False)
+    #: The spool file ``(source, raw_day)`` the lines are in.
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_day: Mapped[date] = mapped_column(Date, nullable=False)
+    #: ``arcilogger_db.kinds.kind_of(type, subtype)`` of the ``messages`` row.
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The line's typed table (``fg_web``, ``mt_dhcp`` …), ``''`` when it has none.
+    tbl: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    #: The typed row's ``action``, lower-cased.
+    action: Mapped[str | None] = mapped_column(Text)
+    #: The /24 of the typed row's client address when it is a private IPv4 address.
+    net: Mapped[str | None] = mapped_column(CIDR)
+    n: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class SourceClockSample(Base):
+    """How far each source's device clock was from the receive time, per received minute
+    (``arcilogger_db.clocksamples``; revision 0019_source_clock_samples, ADR-0016 D28).
+
+    One row per ``(source, minute, seconds)`` with its number of ``messages`` rows ``n``: the
+    minute the lines were received (UTC) and ``time - time_received`` in whole seconds, ``0`` for
+    an offset under a minute (no clock limit is that small, so a source on time has one row a
+    minute). Rows whose ``time`` is the receive time are not counted. The ingest loader adds a
+    batch's samples in the transaction that loads its rows, like ``search_counts``; the
+    ``source-clock`` alert reads the newest received minutes and a lookup the minutes received
+    around its moment (and, #82, the minutes received within a day of it whose clock put their
+    device times around it), so a clock that jumps by hours is measured where its rows arrived, not
+    where their device times put them. Derived data: ``clocksamples.rebuild`` counts a source's
+    received range again from its rows.
+    """
+
+    __tablename__ = "source_clock_samples"
+    __table_args__ = (
+        CheckConstraint("n > 0", name="n"),
+        {"comment": "Device clock offsets per source and received minute (whole seconds)."},
+    )
+
+    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    #: ``date_trunc('minute', messages.time_received)`` (UTC).
+    minute: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    #: The offset ``time - time_received`` rounded to whole seconds; ``0`` when under a minute
+    #: either way.
+    seconds: Mapped[int] = mapped_column(Integer, primary_key=True)
+    n: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class SavedSearch(Base):
+    """A personal saved search (ADR-0015): a name, the query text and a time range.
+
+    The range is a preset (:data:`SAVED_SEARCH_PRESETS`, resolved when the search runs) or a
+    fixed ``[range_from, range_to)``, never both (``ck_saved_searches_range``). Names are unique
+    per owner ignoring case; the owner's rows go with the user.
+    """
+
+    __tablename__ = "saved_searches"
+    __table_args__ = (
+        CheckConstraint(f"length(name) BETWEEN 1 AND {SAVED_SEARCH_NAME_MAX}", name="name"),
+        CheckConstraint(f"length(query) <= {SAVED_SEARCH_QUERY_MAX}", name="query"),
+        CheckConstraint(_in("range_preset", SAVED_SEARCH_PRESETS), name="range_preset"),
+        CheckConstraint(
+            "(range_preset IS NOT NULL AND range_from IS NULL AND range_to IS NULL) "
+            "OR (range_preset IS NULL AND range_from IS NOT NULL AND range_to > range_from)",
+            name="range",
+        ),
+        Index("uq_saved_searches_owner_name", "owner_id", text("lower(name)"), unique=True),
+        {"comment": "Personal saved searches: name, query text, preset or fixed time range."},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The query as the user saved it (parsed again on every run).
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    range_preset: Mapped[str | None] = mapped_column(Text)
+    range_from: Mapped[datetime | None] = mapped_column(TZ)
+    #: End of a fixed range (exclusive).
+    range_to: Mapped[datetime | None] = mapped_column(TZ)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+    last_run_at: Mapped[datetime | None] = mapped_column(TZ, sort_order=902)
+
+
+# =================================================================================================
 # Offline licensing (licensing contract 4.1; append-only: UPDATE, DELETE and TRUNCATE are
 # rejected by triggers of migration 0014_license)
 # =================================================================================================
@@ -1875,6 +2176,9 @@ TIME_SERIES_MODELS: Final = (
     MtInterface,
     MtConfig,
     MtEvent,
+    # appended (revision 0017_fortigate_dhcp): search branch ranks and saved cursors are
+    # positions in this tuple, so nothing existing moves
+    FgDhcp,
 )
 TIME_SERIES_TABLES: Final = tuple(model.__tablename__ for model in TIME_SERIES_MODELS)
 

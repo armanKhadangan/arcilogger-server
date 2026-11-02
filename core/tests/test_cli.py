@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +17,9 @@ from arcilogger_core.immutability import unlock
 from arcilogger_core.layout import Layout
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.seal import config_alert
-from arcilogger_core.timeutil import SITE_TZ, site_day, utc_now
+from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_core.tsa.base import TsaConfigurationError
+from arcilogger_core.tsa.mock import MockTsa
 
 CONFIG = """
 data_dir = "{data}"
@@ -42,15 +43,15 @@ target = "{target}"
 
 
 @pytest.fixture
-def setup(tmp_path: Path) -> dict[str, Any]:
+def setup(tmp_path: Path, one_site_day: date) -> dict[str, Any]:
     data = tmp_path / "data"
     config = tmp_path / "arcilogger.toml"
     config.write_text(
         CONFIG.format(data=data.as_posix(), replica="false", target=(tmp_path / "nas").as_posix()),
         encoding="utf-8",
     )
-    today = site_day(utc_now())
-    days = [today - timedelta(days=n) for n in (3, 2, 1)]
+    # The three days before today, which stays today for the CLI the whole test long.
+    days = [one_site_day - timedelta(days=n) for n in (3, 2, 1)]
     layout = Layout(data)
     for day in days:
         path = layout.spool_file("fortigate", day)
@@ -144,8 +145,41 @@ def test_credit_tsa_test_and_retention(
     result = json.loads(capsys.readouterr().out)
     assert result["verified"] is True
     assert result["legal_grade"] is False
+    assert list(result) == [  # the console output the Requests task shares (run_tsa_test)
+        "provider",
+        "legal_grade_claimed",
+        "legal_grade",
+        "root_sha256",
+        "root",
+        "verified",
+        "errors",
+        "warnings",
+        "gen_time",
+        "serial",
+        "tsa",
+        "tsa_cert_not_after",
+        "container",
+        "token",
+    ]
+    assert Path(result["token"]).is_file()
+    MockTsa(setup["layout"].state / "mock-tsa").credits = 0
+    assert run(setup, "tsa-test") == 1
+    assert capsys.readouterr().out.startswith("Zaman damgası alınamadı: ")
     assert run(setup, "retention", "--dry-run") == 0
     assert "kapalı" in capsys.readouterr().out
+
+
+def test_the_requests_task_command(
+    setup: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``python -I -m arcilogger_core requests run`` (task ``\\ARCILOGGER\\Requests``, every 5
+    minutes and on Event 4111): nothing to do is success, and it does nothing."""
+    assert run(setup, "requests", "run") == 0
+    assert capsys.readouterr().out == ""
+    assert not setup["layout"].requests.exists()
+    with pytest.raises(SystemExit) as caught:
+        main(["--config", setup["config"], "requests"])  # the action is required
+    assert caught.value.code == 2
 
 
 def test_replica_command(setup: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:

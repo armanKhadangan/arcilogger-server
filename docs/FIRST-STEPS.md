@@ -7,7 +7,11 @@
 > of personal data reviewed by a lawyer.
 
 For this release (MVP): what to do, in order, from the first administrator to the first 5651
-lookup and the daily checks once the installer has finished. Database backup and restore:
+lookup and the daily checks once the installer has finished. Most of the server's settings
+(organisation name, time, Kamu SM, log sources, e-mail, replica, retention, backup) can also be
+changed on the **Ayarlar** (Settings) pages of the web interface: [SETTINGS.md](SETTINGS.md). The
+commands in this document are the console path, valid also while the browser administration is
+switched off (`-DisableBrowserAdministration`). Database backup and restore:
 [BACKUP.md](BACKUP.md). Day-to-day operations, the meaning of every alert and replacing the
 server will be collected in `ISLETIM.md` / `OPERATIONS.md` (M7).
 
@@ -64,6 +68,9 @@ the last 5 minutes):
 - Create users by role ([roles.md](roles.md)), e.g. an **auditor** for 5651 requests. Hand the
   temporary password (shown **once**) over **in person**: it must be changed at the first
   sign-in, and whoever signs in first enrols the second factor.
+- Every user can change their own password later: user menu at the top right → **Parolayı
+  değiştir** (it asks for the current password; the user's sessions in other browsers and on
+  other devices end, and wrong current passwords lock the account like at sign-in).
 - TOTP is mandatory for administrators and auditors. Roles that see personal data — in this
   release all four roles, the report viewer too (it sees names in Kullanım) — accept the KVKK
   notice at the first sign-in (audited).
@@ -123,16 +130,23 @@ section 4) is for development and trial servers only: its root is trusted only w
 verify** (`R20-verify`, the monthly whole-chain check fails); there is no supported way to make
 them verifiable again.
 
-**Test account and switching to production:** [INSTALL.md](INSTALL.md) section 10 — roots
-(fingerprint comparison), `secret set`, `credit`, `tsa-test` in that order; for production: buy
-kontör, the production credentials, `url = "http://zd.kamusm.gov.tr"`, `[tsa]
-legal_root_fingerprints`, then `Restart-Service ArciApi` (the API reads the configuration only at
-start; without the restart the red "test stamp" banner and the report stamps keep the old
-setting).
+**Test account and switching to production:** the **Ayarlar → Kamu SM** wizard of the web
+interface ([SETTINGS.md](SETTINGS.md)) or, on the console, [INSTALL.md](INSTALL.md) section 10 —
+roots (fingerprint comparison), `secret set`, `credit`, `tsa-test` in that order; for production:
+buy kontör, the production credentials, `url = "http://zd.kamusm.gov.tr"`, `[tsa]
+legal_root_fingerprints`. The API loads the new setting by itself within 2 seconds; when the
+Settings page shows "A change waits for a restart", or on a version before this one,
+`Restart-Service ArciApi` (until it is loaded the red "test stamp" banner and the report stamps
+keep the old setting).
 
 ## 4. After editing `arcilogger.toml`
 
-The services read the configuration **only at start**; scheduled tasks read it on every run.
+The services take changes made on the Settings pages without a restart ([SETTINGS.md](SETTINGS.md)
+section 2). After a hand edit too, the collector and ingest load the log sources, and the API
+and the worker the sections they read, within seconds; scheduled tasks read the file on every run; the `ApplySystem` task brings the firewall in step within 5
+minutes. **Use one way at a time** (the browser or a hand edit). For the sections that are not
+reloaded live (`[collector]`, `[api]`, `[ingest]`, `[worker]`, `[database]`) and while the browser
+administration is off:
 
 ```powershell
 # [[sources]] or the [tsa] URL/port changed: the firewall first
@@ -149,9 +163,11 @@ That is a valid state, but until sources are added the installer's firewall open
 sender and nothing is recorded (with `-SkipFirewall` every sender is recorded as `unknown-<ip>`,
 its parser chosen by content); the silent-source alert (R15) watches no source and the Panel's
 "Log alımı" box says "İzlenen kaynak yok". Add one `[[sources]]` entry for every device that sends
-syslog, at least your firewall and your core router (the DHCP server): remove the `#` in front of
-the example lines in the file and use your device's name and address
-([DEVICE-SETUP.md](DEVICE-SETUP.md) section 4). Then run the installer again or the commands of
+syslog, at least your firewall and your core router (when the DHCP server is the MikroTik or
+ARP-LOG is used): remove the `#` in front of the example lines in the file and use your device's
+name and address ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 4). The FortiGate's DHCP records
+count as lease evidence only when they come from a source entered with `type = "fortigate"`
+([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4). Then run the installer again or the commands of
 section 4; `& $core config-check` no longer warns about sources.
 
 Device setup: [DEVICE-SETUP.md](DEVICE-SETUP.md). After a test message from every device, **every
@@ -164,9 +180,11 @@ Get-Content D:\ARCILOGGER\state\collector-status.json
 ```
 
 The firewall admits 514 only from the `[[sources]]` addresses. A source without a file sends from
-another address than the configured one: [DEVICE-SETUP.md](DEVICE-SETUP.md) section 4. Check
-the core router in particular (MikroTik; DHCP and ARP-LOG, the core of the 5651 access
-records).
+another address than the configured one: [DEVICE-SETUP.md](DEVICE-SETUP.md) section 4. The
+source that sends the lease evidence (the core MikroTik router: DHCP and ARP-LOG records; on
+FortiGate-only networks the FortiGate: DHCP event records) is the core of the 5651 access records;
+check it in particular: the **Kira kanıtı** (lease evidence) card of the **Kaynaklar** page shows
+whether usable records arrive from it.
 
 ### Persons and device assignments
 
@@ -179,23 +197,38 @@ administrator, on the **Cihazlar ve Kişiler** page:
    both are empty on a new installation. On the **Departmanlar ve VLAN'lar** tab add the
    departments first (persons and the person CSV refer to them), then every VLAN or subnet of
    the organisation with **VLAN ekle** (add a VLAN): the network address with its prefix length
-   (e.g. `10.0.20.0/24`, host bits zero), the VLAN id (1–4094, its number on the network: the
-   VLAN number of a lease comes from the DHCP server's name, `dhcp.server_vlan_regex`, e.g.
-   `dhcp20` → 20; empty for a network without one such as a transit network), a name and,
-   optionally, the purpose, the DHCP server's name on the router (e.g. `dhcp20`), a department,
-   the **Misafir ağı** (guest network) flag (a guest network that leaves through another exit
-   than the FortiGate, [DEVICE-SETUP.md](DEVICE-SETUP.md) section 5) and notes. A device is in
-   the VLAN of its VLAN number or of the network its IP address is in: it takes that VLAN's
-   name and, without a person, its department; a smaller network inside another one (e.g. a
-   `/25` inside a `/24`) comes first.
+   (e.g. `10.0.20.0/24`, host bits zero), the VLAN id (1–4094, its number on the network: the VLAN
+   number of a MikroTik lease comes from the DHCP server's name, `dhcp.server_vlan_regex`, e.g.
+   `dhcp20` → 20, that of a FortiGate lease from the network holding the address; empty for a
+   network without one such as a transit network), a name and, optionally, the purpose, the DHCP
+   server's name (MikroTik: its name on the router, e.g. `dhcp20`; FortiGate: the DHCP server's
+   interface name; when one interface carries several DHCP servers, e.g. for relayed networks, the
+   name can be given to one network only and stays empty on the others), a department, the **Misafir
+   ağı** (guest network) flag (a guest network that leaves through another exit than the FortiGate,
+   [DEVICE-SETUP.md](DEVICE-SETUP.md) section 5) and notes. A device is in the VLAN of its VLAN
+   number or of the network its IP address is in: it takes that VLAN's name and, without a person,
+   its department; a smaller network inside another one (e.g. a `/25` inside a `/24`) comes first.
    The network, the VLAN id and the DHCP server are unique. Collection, sealing, 5651 lookups
    and usage work without VLANs; devices then get no VLAN name and no VLAN department.
+
+   With FortiGate DHCP, add every network the FortiGate serves by DHCP, even without a VLAN
+   number: FortiGate chains of addresses outside the entered networks are shown with low
+   confidence (`fortigate_dhcp_no_network`). If you add or change a network later, rebuild the
+   leases from the day of that network's first FortiGate DHCP record (the first day in the
+   details of the `R20-lease:fortigate-dhcp-subnet` alert) to today in Settings → Application
+   settings → 5651 lookup and lease timeline → Rebuild the leases (at most 31 days per request):
+   a network applies to past leases only after a rebuild; until then the chains concerned are
+   shown with low confidence. Enter each DHCP scope as exactly one network: do not enter a
+   smaller network inside a scope or one wide network that spans several scopes (ARCILOGGER
+   follows a client's change of address network by network; [DEVICE-SETUP.md](DEVICE-SETUP.md)
+   section 2.4).
 2. Add persons, or import them from CSV: download the template
-   (`name;department;title;email;employee_no;active;notes`), save it in Excel as **"CSV UTF-8"**,
-   **preview** first (nothing is written, errors are shown per line), then **apply** (all lines
-   or none). CSV import needs the Bulk import module; manual entry always works (the assignment
-   CSV belongs to that module too; the CSV exports of the person and device lists always work,
-   [LICENSING.md](LICENSING.md)).
+   (`name;department;title;email;employee_no;active;notes;usage_excluded`; only `name` is required,
+   `usage_excluded` evet/hayır leaves the person out of the usage reports), save it in Excel as
+   **"CSV UTF-8"**, **preview** first (nothing is written, errors are shown per line), then
+   **apply** (all lines or none). CSV import needs the Bulk import module; manual entry always works
+   (the assignment CSV belongs to that module too; the CSV exports of the person and device lists
+   always work, [LICENSING.md](LICENSING.md)).
 3. Assign devices: search by MAC, host name, IP or VLAN (filter "Bilinmeyen cihazlar"), select one
    or many devices and assign them to a person — or import an assignment CSV
    (`mac;employee_no;person_name;valid_from;note`). If the person has had the device for some time,
@@ -211,44 +244,69 @@ not names).
 
 ## 6. Settings in the database
 
-Until the settings page (M6) exists, database settings are read and changed with
-`arcilogger-db settings`. Every change is written to the **hash-chained audit log**
+Database settings are read and changed on **Ayarlar → Uygulama ayarları** (Settings →
+Application settings) in the web interface or, on the console, with `arcilogger-db settings`. Every change is written to the **hash-chained audit log**
 (`settings.change`) with the old and the new value; `--by` is the ARCILOGGER user name of whoever
 made the change (`tolga` in the examples below). Upgrades and the seed never reset a changed
-value.
+value. An upgrade may convert an old setting into a new one; that is written to the audit log too
+([INSTALL.md](INSTALL.md) section 13).
+
+The internet exits (`nat.egresses`) are normally entered with the exit editor in Settings →
+Application settings → 5651 lookup and lease timeline → Internet exits (NAT): the editor checks
+every field before it saves, and the "Kayıtlarda görülen NAT adresleri" (NAT addresses seen in
+the logs) table under it shows the NAT addresses and interfaces of the FortiGate records
+([SETTINGS.md](SETTINGS.md) section 1). The example below is the console equivalent (`<public IP>`
+is the line's public address):
 
 ```powershell
 & $db settings list
-& $db settings get nat.wan_transip
+& $db settings get nat.egresses
 & $db settings set lookup.tolerance_seconds 60 --by tolga
-& $db settings set nat.wan_transip '<FortiGate WAN address>' --by tolga
+'{"hat-1": {"mode": "direct", "public": ["<public IP>"]}}' | & $db settings set nat.egresses - --by tolga
 '["<MAC 1>", "<MAC 2>"]' | & $db settings set devices.infrastructure_macs - --by tolga
 ```
 
-Values are JSON (no floats). A text value may be written without JSON quotes (like the WAN address
-above). A list or an object — any value with double quotes — is **piped in**, with `-` in place of
-the value: Windows PowerShell 5.1 drops the double quotes of command-line arguments it passes to
-programs. Always check the result with `settings get`. Settings are read from the database when
-they are used; no service restart is needed. To be set on site ([CORRELATION.md](CORRELATION.md)
-section 8):
+Values are JSON (no floats). A text value may be written without JSON quotes. A list or an object —
+any value with double quotes — is **piped in**, with `-` in place of the value: Windows PowerShell
+5.1 drops the double quotes of command-line arguments it passes to programs. Always check the result
+with `settings get`. Settings are read from the database when they are used; no service restart is
+needed. To be set on site ([CORRELATION.md](CORRELATION.md) section 8):
 
 | Setting | When |
 |---|---|
-| `nat.public_ips`, `nat.wan_transip` | once the FortiGate's public / WAN address is confirmed (double NAT, [ASSUMPTIONS.md](ASSUMPTIONS.md) A9) |
+| `nat.egresses` (internet exits) | for each internet line: the public IP (and whether it may change), the FortiGate's NAT address on that line, its interfaces (dstintf; required with two or more lines), the NAT type and port preservation ("Kept" only after a measurement); the addresses of the FortiGate's NAT towards a DMZ, another VLAN, a VPN or a branch with the type "Not an internet exit". Read the values from the "Kayıtlarda görülen NAT adresleri" table ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.6); exits converted from the old NAT settings at the upgrade: [INSTALL.md](INSTALL.md) section 13 |
 | `devices.infrastructure_macs` | MAC addresses of the core router, the FortiGate and the switches (no IP-conflict alarms for them) |
-| `lease.server_seconds` | DHCP servers whose lease time differs from one day (`lease.default_seconds`), e.g. the guest network's: `{"<server name>": <seconds>}` (piped in) |
+| `lease.server_seconds` | DHCP servers whose lease time differs from one day (`lease.default_seconds`), e.g. the guest network's: `{"<server name>": <seconds>}` (piped in); the name is the DHCP server's name on a MikroTik, the DHCP interface's name on a FortiGate. FortiGate leases use these times only when the lease time in the record cannot be used (`dhcp.fortigate_use_logged_lease`) |
 | `devices.oui_file` | optional vendor names: put the file at `C:\ProgramData\ARCILOGGER\oui.csv` ([CORRELATION.md](CORRELATION.md) section 1, "Vendor") |
-| `lookup.port_hint` | only after the ISP router is confirmed to keep source ports |
+| `lookup.srcmac_interfaces` | optional: only interfaces with device identification on, whose gateway is the FortiGate and that were checked on site with two known clients ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5); never an interface that faces a routed (L3) network |
+| `dhcp.fortigate_interfaces_excluded` | with FortiGate DHCP: the interfaces of DHCP-over-IPsec servers (`server-type ipsec`) ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `dhcp.fortigate_logids`, `dhcp.fortigate_dhcp_msgs` | only when the site check shows another logid or `dhcp_msg` value (e.g. release records come under another logid; [DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `dhcp.fortigate_use_logged_lease` | stays on (the default): the lease time in the FortiGate DHCP Ack record is that lease's time |
+| `dhcp.fortigate_traffic_extends` | stays off (recommended); switched on only when it is verified on site that renewals are not logged and the organisation, with its legal counsel, accepts the wrong-person risk its help text describes ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+| `dhcp.fortigate_format_verified` | switched on once the site check of the FortiGate DHCP record format passes; after every FortiOS upgrade switched off, checked again and switched on again ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.4) |
+
+After changing any `dhcp.fortigate_*` setting (except `dhcp.fortigate_format_verified`, which only
+changes the lookup and report texts) or a FortiGate source (Settings → Sources), rebuild the leases
+from the first affected day to today in Settings → Application settings → 5651 lookup and lease
+timeline → Rebuild the leases (at most 31 days per request): the change applies to past days only
+after the rebuild. After a **change that adds evidence** (a logid or `dhcp_msg` value mapped, a
+FortiGate source added), a 5651 lookup for moments of those days may answer without a chain until
+then (the safe side). After a **change that removes or narrows evidence** (an interface added to
+`dhcp.fortigate_interfaces_excluded`, `dhcp.fortigate_traffic_extends` or
+`dhcp.fortigate_use_logged_lease` switched off, a logid or `dhcp_msg` value removed, a FortiGate
+source removed or retyped), the leases built under the old settings stay, at their old confidence,
+until the rebuild, so a moment can still name the earlier device. **Rebuild at once**, from the
+first affected day.
 
 ## 7. Limits of this release
 
 - **No department history:** the person in a 5651 result is the assignment at the moment of the
   event, the department is the person's current one (the report says so). A past assignment
   cannot be corrected in the interface (section 5).
-- **Kaynaklar, Canlı Akış, Arama, Uyum Durumu and Sistem** are still placeholders. Working pages:
-  Panel, 5651 Sorgu, Kullanım (section 16), Güvenlik, Mühürleme, Kanıt Paketleri, Cihazlar ve
-  Kişiler (section 12), Raporlar (Panel, Güvenlik and Raporlar: section 15), Denetim Kaydı,
-  Ayarlar (users and roles, licence: section 17).
+- Only **Uyum Durumu and Sistem** are still placeholders. Working pages: Panel, Kaynaklar and
+  Canlı Akış (section 9), Arama, 5651 Sorgu, Kullanım (section 16), Güvenlik, Mühürleme, Kanıt
+  Paketleri, Cihazlar ve Kişiler (section 12), Raporlar (Panel, Güvenlik and Raporlar: section
+  15), Denetim Kaydı, Ayarlar (users and roles, licence: section 17).
 - **Paid modules** (licence, [LICENSING.md](LICENSING.md)): Usage analytics (the Kullanım page,
   the dashboard's usage sections), Scheduled usage reports (the Raporlar page) and Bulk import
   (CSV). All are on during the trial; a module that is off shows its page locked. Everything else
@@ -263,10 +321,17 @@ section 8):
   rule editor or webhook; `arcilogger-worker alerts list --open` still works on the server and
   e-mail is sent once `[smtp]` is set up.
 - **Sealing configuration errors** (no Kamu SM credentials, no root in the `kamusm-roots` folder,
-  `[tsa] zamane_jar` not set) stop the Seal task before sealing starts: the task's last run result
-  is `0x1`, the error goes to `D:\ARCILOGGER\logs\core.log` on every run and an
+  `[tsa] zamane_jar` not set, or Java or the Zamane client not trusted: cause `executable`, e.g. a
+  jar copied into `zamane\` by hand after the installation, which runs only once the installer
+  recorded it with `-ZamaneJar` or it was uploaded in Ayarlar → Kamu SM and approved,
+  [INSTALL.md](INSTALL.md) section 7) stop the Seal task before sealing starts: the task's last run
+  result is `0x1`, the error goes to `D:\ARCILOGGER\logs\core.log` on every run and an
   `R20-seal-config` alert is written once per day and cause.
-- "Seal now" is not available on the web; run the `\ARCILOGGER\Seal` task in Task Scheduler.
+- **Seal now** and **Query credit** are on the Sealing page (`seal.manage`): "Seal now" has the
+  `\ARCILOGGER\Seal` task seal the oldest due day once, "Query credit" has the
+  `\ARCILOGGER\Requests` task query Kamu SM once. Both go through the administration service
+  ArciAdmin; while browser administration is off or ArciAdmin does not answer, run the
+  `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler instead.
 - The database dumps lie on the server's own `D:` disk; copying them off the server (external
   disk, a NAS) is done by hand (section 10).
 
@@ -288,8 +353,24 @@ section 8):
 
 Every day:
 
-- **Panel**: log intake, yesterday's seal, credit, clock offset and open alerts at a glance.
-  **Güvenlik** page: look into the new alerts, set the ones you work on to İnceleniyor.
+- **Panel**: log intake, today's parse failures, yesterday's seal, credit, clock offset and open
+  alerts at a glance. **Güvenlik** page: look into the new alerts, set the ones you work on to
+  İnceleniyor.
+- **Kaynaklar** page (administrators): is every expected source "Etkin" (active)? For a source
+  shown "Sessiz" (silent) or "Hiç mesaj gelmedi" (never sent), check the device and its network
+  path ("Sessiz (izlenmiyor)", not watched: the source may stay silent, R15 does not watch it). Today's line
+  count, the messages-per-minute curve of the last hour and the parse-failure rate are here too;
+  a row opens the source's last 48 hours, last 14 days, gaps and parse failures. The
+  **Bilinmeyen** (unknown) filter shows senders that are not in the configuration: if you know the
+  device, **Kaynak olarak tanımla** (add as a source) fills in the add dialog of Ayarlar →
+  Kaynaklar with its address (review the name and save; the old `unknown-<ip>` folder and its
+  records stay where they are). The Kaynaklar page only reads, and it shows the licence's log
+  source count; the lines of sources above the limit are collected and sealed too.
+- **Canlı Akış** (live tail; administrators and auditors): to see that a device's lines really
+  arrive, without waiting for ingest. Choose the source or the "Bilinmeyen göndericiler" (unknown
+  senders) chip and press **Başlat** (start); a new device's first test is in
+  [DEVICE-SETUP.md](DEVICE-SETUP.md) section 4. Every stream is written to the audit log with its
+  filter; an idle screen is signed out as on every page.
 - **Mühürleme** page: was yesterday verified? Is there a red "test stamp" banner?
 - On the server:
 
@@ -326,6 +407,13 @@ Every day:
   | `R20-backup` | Database backup failed, older than 36 hours, or still none 48 hours after the installation |
   | `R20-email` | An alert e-mail could not be sent (`[smtp]`, `smtp.password`, firewall); never e-mailed itself |
   | `R20-report` | A scheduled usage report could not be made or not sent to a recipient (the run history on the Raporlar page, `[smtp]`; sections 14 and 15). Not raised while the Scheduled usage reports module is off in the licence; resolved by itself when the module goes off |
+  | `R20-license` | Paid modules ending or off: the trial ends within 3 days, a time-limited licence within 14 days, or the paid modules are off because of the licence state (trial over, licence invalid or for another server, expired, version not covered); the 5651 functions keep working. Settings → Licence ([LICENSING.md](LICENSING.md)) |
+  | `R20-license-limit` | Users (no new user can be added) or log sources (still collected and sealed) above the licence's limit |
+  | `R20-license-maintenance` | Maintenance ends within 30 days or has ended (`info`: upgrades and support only, the licence stays valid) |
+  | `R20-admin` | Browser administration problem: the administration service (ArciAdmin) has not answered for more than 2 minutes, a request whose signature or installation does not match was refused (possible tampering), a change was rolled back, manual action is needed, the file rights changed (after a console `secret set`: `Set-ArciVaultAcl.ps1`), `ApplySystem` could not bring the firewall, the time or the Zamane client in step, or it found a log source outside the policy networks. The 5651 functions go on; [SETTINGS.md](SETTINGS.md) section 8 |
+  | `R20-config-change` | Significant configuration change (a guarded setting): retention switched on or its days lowered, the replica switched off or retargeted, a log source switched off or removed, production → test, the Kamu SM credentials changed, a root or a legal fingerprint added, a Zamane client uploaded or promoted (high); SMTP or the backup switched off (medium). If no known administrator made it, **Cancel** a held change or **Revert** an applied one on the **Change history** page and look at the audit log |
+  | `R20-lease` | Lease evidence problem: lease evidence (FortiGate DHCP, MikroTik DHCP or ARP-LOG) stopped, FortiGate DHCP records are not used or could not be converted, renewals do not appear, two DHCP sources on one network, a source's clock is off or a setting is not verified on site; the cause and what to do are in the alert's details (Sources → Lease evidence; [ALERTS.md](ALERTS.md) section 2) |
+  | `R20-nat` | Internet exit definition problem: the old NAT settings could not be converted, the exits setting cannot be read, an old NAT setting changed during a rollback, or a NAT address no exit defines is in use (Settings → Application settings → 5651 lookup and lease timeline → Internet exits (NAT)) |
   | `new-log-source` | A sender that is not in the configuration (if the firewall let it through) |
   | `wrong-transport` | A message arrived over a transport its source does not allow (`[[sources]] transport`): a forged UDP message or a wrong device setting; the message was not recorded |
 
@@ -413,14 +501,15 @@ Every change, import and export is written to the audit log.
   network keeps the VLAN's name, department and flag. Deleting asks for a confirmation: the
   devices of that network lose the VLAN name and the VLAN's department, also on the usage pages;
   raw logs, leases and stored 5651 results do not change. A change takes effect like a
-  department change, at once: the device list and the next 5651 lookups use the new table, the
-  usage pages take the VLAN's department by its VLAN number when they are read. The VLAN number
-  of the usage is that of the VLAN holding the address; when no VLAN holds it, the lease's (from
-  the DHCP server's name, else the network, when the lease was built). When this number changes
-  (a renumbered VLAN, a new one or one with a new network; for the addresses that leave a VLAN's
-  network — a deleted or moved VLAN — only the hours without a lease), the usage of the recent
-  days is recomputed by itself (`usage.reattribute`, `usage.auto_rebuild_days`); older days need
-  `usage rebuild` (section 13).
+  department change, at once: the device list and the next 5651 lookups use the new table, the usage
+  pages take the VLAN's department by its VLAN number when they are read. To FortiGate DHCP leases,
+  however, a network added or changed applies only once the leases are rebuilt (section 5). The VLAN
+  number of the usage is that of the VLAN holding the address; when no VLAN holds it, the lease's
+  (from the DHCP server's name, else the network, when the lease was built). When this number
+  changes (a renumbered VLAN, a new one or one with a new network; for the addresses that leave a
+  VLAN's network — a deleted or moved VLAN — only the hours without a lease), the usage of the
+  recent days is recomputed by itself (`usage.reattribute`, `usage.auto_rebuild_days`); older days
+  need `usage rebuild` (section 13).
 - **İçe/Dışa aktar** (import/export): the whole lists as CSV (`;`-separated for Excel, times in
   local time, evet/hayır for yes/no); the files hold personal data, keep them only as long as
   needed. An exported person list imports back as updates: its `id` column names each person,
@@ -445,7 +534,8 @@ refused too.
 - Usage is written to the person the device was assigned to **at that moment** (the same rule as
   the 5651 lookup). Devices assigned to nobody show as "device", addresses without a lease as "IP".
 - Names are shown by default (the owner's decision of 2026-10-20); a person can be left out of the
-  person-level reports with `usage_excluded`. Viewing a detail and exporting are audited.
+  person-level reports with the person's **Kullanım raporlarından hariç tut** box on the Kişiler
+  tab (`usage_excluded`); 5651 lookups are not affected. Viewing a detail and exporting are audited.
 - Enter the religious holiday dates every year in the setting `usage.holidays` (only the fixed-date
   national holidays are shipped; [USAGE.md](USAGE.md) section 2.5).
 
@@ -491,7 +581,11 @@ permission again on every request. Usage figures are **estimates** computed from
   severity and the newest five), the sites with the most time, categories (the six largest with
   their share of the active time, the rest "Diğer"; the day's active time in the middle) and the
   last 30 days of sealing. A block the role may not see is not shown at all (HR sees only the
-  usage blocks). The link in a block's title opens its page, a calendar day opens that day's
+  usage blocks). The **Ayrıştırma hataları** (parse failures) block shows today's failures per
+  1,000 lines, their counts and the most frequent patterns; a pattern's example line opens as
+  stored, "Aramada göster" (show in Search) opens that source's lines of the pattern in Arama
+  (lines not in the collector's format are not loaded into the database, so they have only their
+  example line). The link at the bottom of a block opens its page, a calendar day opens that day's
   sealing detail, an alert opens it on the Güvenlik page. The live blocks refresh every 30
   seconds and the usage every 5 minutes by themselves; nothing is refreshed while the tab is in
   the background, and these refreshes do not keep the session alive.

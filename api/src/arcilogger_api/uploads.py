@@ -9,8 +9,9 @@ sent.
 
 The refusal code of an oversized body is ``csv_too_large`` unless the caller names another one
 (``too_large_code="license_too_large"`` for licence uploads, licensing contract 6.2, with the
-licence error texts); the raised :class:`BodyTooLargeError` tells how many bytes were declared
-or read, so the refusal can be recorded.
+licence error texts; ``upload_too_large`` for the files of the browser administration, ADR-0014);
+the raised :class:`BodyTooLargeError` tells how many bytes were declared or read, so the refusal
+can be recorded.
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ MESSAGES: Final = {
         "No file was sent: the request must be multipart/form-data with the file in the "
         'field "file".',
     ),
+    # Root certificates, the SMTP CA file and the Zamane client (contract 2.4.4, 2.12).
+    "upload_too_large": ("Dosya izin verilen boyuttan büyük.", "The file is larger than allowed."),
 }
 
 

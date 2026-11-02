@@ -1,4 +1,5 @@
-"""Load one batch in **one transaction**: rows, failures, sources, alerts and the offsets.
+"""Load one batch in **one transaction**: rows, failures, sources, alerts, the search counts, the
+clock samples and the offsets.
 
 Exactly-once rests on two things done here:
 
@@ -9,6 +10,16 @@ Exactly-once rests on two things done here:
    batch was read from> AND line_number = … AND finished_at IS NULL``. It runs first (and takes
    the row locks), so if anything else moved the offset — a second ingest instance by mistake,
    an operator — the batch is refused (:class:`OffsetConflictError`) instead of loading lines twice.
+
+The search summary table ``search_counts`` (:mod:`arcilogger_db.searchcounts`, ADR-0015) is
+written in the same transaction (step ``counts``), from exactly the lines whose rows loaded, so the
+counts are exactly-once like the rows: a line whose typed row ``COPY`` refused counts with
+``tbl = ''`` (the search over typed tables does not find it either), a line without a ``messages``
+row (``rawlog.invalid``, or a ``messages`` row ``COPY`` refused) does not count. One ingest writes
+a file, and a finished file is never written again, so the counts need no lock of their own.
+The clock samples ``source_clock_samples`` (:mod:`arcilogger_db.clocksamples`, ADR-0016 D28) are
+written in the same step from the same lines: per source, received minute and device clock
+offset, the lines whose ``messages`` row loaded with a device time of its own.
 
 A row that passed :func:`~arcilogger_db.rowcheck.check_row` should always load. If ``COPY``
 still rejects something (``DataError``/``IntegrityError``, or a value the driver cannot encode),
@@ -22,9 +33,10 @@ and the caller retries the same batch later.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
 from sqlalchemy import Connection, Engine, func, text, update
@@ -33,8 +45,11 @@ from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 
 from arcilogger_core.timeutil import isoformat_site, utc_now
 from arcilogger_db.bulk import copy_rows
+from arcilogger_db.clocksamples import ClockKey, offset_of, upsert_samples
+from arcilogger_db.kinds import CLIENT_IP
 from arcilogger_db.models import Alert, IngestOffset, ParseFailure, Source
 from arcilogger_db.rowcheck import check_row
+from arcilogger_db.searchcounts import CountKey, count_key, net_of, upsert_counts
 from arcilogger_ingest.prepare import DETAIL_MAX, Failure, PreparedLine
 
 log = logging.getLogger("arcilogger.ingest")
@@ -46,7 +61,7 @@ DATA_ERRORS: Final = (DataError, IntegrityError, UnicodeError, ValueError, TypeE
 
 #: Called with the step name before each step (tests interrupt the transaction there).
 StepHook = Callable[[str], None]
-STEPS: Final = ("offsets", "copy", "failures", "sources", "commit")
+STEPS: Final = ("offsets", "copy", "failures", "sources", "counts", "commit")
 
 
 class OffsetConflictError(RuntimeError):
@@ -58,6 +73,16 @@ class _CopyFailedError(Exception):
         super().__init__(f"{table}: {error}")
         self.table = table
         self.error = error
+
+
+#: Lines whose rows loaded, as ``COPY`` loaded them: a run of lines with all their rows (``True``),
+#: or one line whose ``messages`` row was salvaged alone (``False``). Runs, not a tuple per line:
+#: 5,000 tuples a batch kept until the ``counts`` step made the garbage collector run measurably
+#: more often.
+_Loaded = tuple[Sequence[PreparedLine], bool]
+_EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
+_HOUR: Final = timedelta(hours=1)
+_MINUTE: Final = timedelta(minutes=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +187,8 @@ class Loader:
             self._update_offsets(connection, batch.offsets.values())
             self._step("copy")
             counts: dict[str, int] = {}
-            refused = self._copy_bisect(connection, batch.lines, counts, batch)
+            loaded: list[_Loaded] = []
+            refused = self._copy_bisect(connection, batch.lines, counts, batch, loaded)
             if refused and not batch.load_failures:
                 # Not one bad line but something about the batch as a whole: every line loaded
                 # on its own, after up to 2 x lines extra COPYs. Silent, that would only show
@@ -177,6 +203,9 @@ class Loader:
             failures = self._record_failures(connection, batch)
             self._step("sources")
             new_sources = self._update_sources(connection, batch.sources.values())
+            self._step("counts")
+            upsert_counts(connection, _count_keys(loaded))
+            upsert_samples(connection, _clock_keys(loaded))
             self._step("commit")
         return LoadResult(rows=counts, failures=failures, new_sources=new_sources)
 
@@ -221,8 +250,11 @@ class Loader:
         lines: Sequence[PreparedLine],
         counts: dict[str, int],
         batch: Batch,
+        loaded: list[_Loaded],
     ) -> int:
-        """Load ``lines``; returns how many ``COPY`` attempts were refused on the way."""
+        """Load ``lines``; returns how many ``COPY`` attempts were refused on the way.
+
+        Every line whose rows loaded goes into ``loaded``, for the ``counts`` step."""
         if not lines:
             return 0
         attempt: dict[str, int] = {}
@@ -231,18 +263,19 @@ class Loader:
                 _copy_lines(connection, lines, attempt)
         except _CopyFailedError as failed:
             if len(lines) == 1:
-                self._salvage(connection, lines[0], failed, counts, batch)
+                self._salvage(connection, lines[0], failed, counts, batch, loaded)
                 return 1
             middle = len(lines) // 2
             # the line responsible is logged by _salvage; this only traces the bisection
             log.debug("COPY rejected %d lines, narrowing it down", len(lines))
             return (
                 1
-                + self._copy_bisect(connection, lines[:middle], counts, batch)
-                + self._copy_bisect(connection, lines[middle:], counts, batch)
+                + self._copy_bisect(connection, lines[:middle], counts, batch, loaded)
+                + self._copy_bisect(connection, lines[middle:], counts, batch, loaded)
             )
         for table, count in attempt.items():
             counts[table] = counts.get(table, 0) + count
+        loaded.append((lines, True))
         return 0
 
     def _salvage(
@@ -252,6 +285,7 @@ class Loader:
         failed: _CopyFailedError,
         counts: dict[str, int],
         batch: Batch,
+        loaded: list[_Loaded],
     ) -> None:
         """The line that ``COPY`` refuses: count it; keep its ``messages`` row if that loads."""
         pattern = PATTERN_COPY + failed.table
@@ -281,6 +315,7 @@ class Loader:
         except _CopyFailedError:
             return
         counts["messages"] = counts.get("messages", 0) + attempt.get("messages", 0)
+        loaded.append(((line,), False))  # without its typed row: counted with tbl = ''
 
     # -- parse failures ---------------------------------------------------------------------------
 
@@ -408,6 +443,74 @@ class Loader:
                 index_where=text("state = 'open' AND dedup_key IS NOT NULL"),
             )
         )
+
+
+def _count_keys(loaded: Iterable[_Loaded]) -> Counter[CountKey]:
+    """The ``search_counts`` keys of the loaded lines: ``count_key`` of the ``messages`` row and,
+    when it loaded, of the typed row (``prepare`` puts the ``messages`` row first; a line has at
+    most one typed row).
+
+    ``count_key`` costs a few microseconds a line, a measurable share of a line's whole load, so
+    the lines are first grouped by everything it reads — the UTC hour of the device time, the
+    file, type and subtype, the typed table, its action as written and the /24 of its client
+    address — and the key is made once per group. Lines of one group have one key; two groups
+    may share one (``Blocked`` and ``blocked``), the counter adds them.
+    """
+    groups: dict[tuple[Any, ...], list[Any]] = {}
+    for lines, typed_loaded in loaded:
+        for line in lines:
+            rows = line.rows
+            if not rows or rows[0][0] != "messages":
+                continue  # no messages row (rawlog.invalid, copy.messages): in no search, no count
+            message = rows[0][1]
+            table, typed = rows[1] if typed_loaded and len(rows) > 1 else (None, None)
+            action = client = None
+            if typed is not None:
+                action = typed.get("action")
+                column = CLIENT_IP.get(table or "")
+                client = None if column is None else net_of(typed.get(column))
+            group = (
+                (message["time"] - _EPOCH) // _HOUR,  # exact: no float rounding at an hour's end
+                message["source"],
+                message["raw_day"],
+                message["type"],
+                message.get("subtype"),
+                table,
+                action,
+                client,
+            )
+            found = groups.get(group)
+            if found is None:
+                groups[group] = [message, table, typed, 1]
+            else:
+                found[3] += 1
+    keys: Counter[CountKey] = Counter()
+    for message, table, typed, lines in groups.values():
+        keys[count_key(message, table, typed)] += lines
+    return keys
+
+
+def _clock_keys(loaded: Iterable[_Loaded]) -> dict[ClockKey, int]:
+    """The ``source_clock_samples`` keys of the loaded lines: those of
+    :func:`~arcilogger_db.clocksamples.clock_key` of the ``messages`` row, grouped first by the
+    source, the received minute (an integer, exact at a minute's end) and the offset, so a key is
+    made once per group; a line whose time is its receive time has none."""
+    groups: dict[tuple[str, int, int], int] = {}
+    for lines, _typed_loaded in loaded:
+        for line in lines:
+            rows = line.rows
+            if not rows or rows[0][0] != "messages":
+                continue
+            message = rows[0][1]
+            time, received = message["time"], message["time_received"]
+            if time == received:
+                continue
+            group = (message["source"], (received - _EPOCH) // _MINUTE, offset_of(time, received))
+            groups[group] = groups.get(group, 0) + 1
+    return {
+        ClockKey(source, _EPOCH + minute * _MINUTE, seconds): lines
+        for (source, minute, seconds), lines in groups.items()
+    }
 
 
 def _copy_lines(

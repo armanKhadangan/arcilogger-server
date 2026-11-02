@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -77,14 +77,19 @@ export function VlanDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const busy = create.isPending || update.isPending;
 
-  useEffect(() => {
+  // The form begins while rendering when the dialog opens (or for another VLAN), so its first
+  // frame already shows that VLAN's values: an effect would run only after that frame.
+  const openFor = open ? vlan : undefined;
+  const [begunFor, setBegunFor] = useState<VlanOut | null | undefined>(undefined);
+  if (openFor !== begunFor) {
+    setBegunFor(openFor);
     if (open) {
       setValues(vlanFormValues(vlan));
       setErrors({});
       setNetwork(null);
       setFailure(null);
     }
-  }, [open, vlan]);
+  }
 
   function set<K extends keyof VlanFormValues>(field: K, value: VlanFormValues[K]) {
     setValues((current) => ({ ...current, [field]: value }));

@@ -6,7 +6,9 @@
 * :class:`TcpProxy` — a TCP forwarder in front of PostgreSQL that can go "down" (drops every
   connection and refuses new ones) and come back: a database outage without stopping the server.
 * Line generators for realistic traffic (FortiGate traffic lines from the format samples,
-  synthetic MikroTik DHCP lines) and checks that every spool line was loaded exactly once.
+  synthetic MikroTik DHCP lines; for the ``fortigate-only`` benchmark mix, forward traffic with
+  ``srcmac`` and synthetic FortiGate DHCP server lines) and checks that every spool line was
+  loaded exactly once.
 """
 
 from __future__ import annotations
@@ -66,6 +68,51 @@ def dhcp_message(index: int) -> bytes:
         f"<30>2026-09-23T09:38:26.380+03:00 CORE-R1 dhcp,info dhcp60 {action} "
         f"172.20.60.{host} for 02:00:5E:00:{index % 256:02X}:{host % 256:02X} NB-{host}"
     ).encode()
+
+
+#: Forward traffic lines of the format samples (interim update, failed connection, session end).
+_FORWARD: Final = (2, 3, 6)
+
+
+def fortigate_srcmac_message(index: int) -> bytes:
+    """A forward traffic line of the format samples with ``srcmac``/``mastersrcmac``, as an
+    interface with device identification writes them (ADR-0016; 250 clients in rotation)."""
+    mac = f"00:00:5E:00:53:{index % 250:02X}"
+    sample = fortigate_samples()[_FORWARD[index % len(_FORWARD)]]
+    return sample.replace(
+        b' srcintfrole="undefined"',
+        f' srcintfrole="undefined" srcmac="{mac}" mastersrcmac="{mac}"'.encode(),
+        1,
+    )
+
+
+def fortigate_dhcp_message(index: int) -> bytes:
+    """Synthetic FortiGate DHCP server line: an ACK, every tenth a RELEASE (the shape of the
+    synthetic fixture lines, ADR-0016; verify on site, like the parser tests)."""
+    host = 100 + index % 150
+    second = index % 60
+    release = index % 10 == 9
+    logid, logdesc, dhcp_msg = (
+        ("0100026002", "DHCP Release log", "Release")
+        if release
+        else ("0100026001", "DHCP Ack log", "Ack")
+    )
+    lease = "" if release else " lease=86400"
+    message = "sentetik: DHCP release" if release else "DHCP server sends a DHCPACK"
+    return (
+        f'<190>date=2026-09-23 time=09:46:{second:02d} devname="FIREWALL-01" '
+        f'devid="FGT0000000000000" eventtime={1790145960 + second}000000000 tz="+0300" '
+        f'logid="{logid}" type="event" subtype="system" level="information" vd="root" '
+        f'logdesc="{logdesc}" interface="vlan42" dhcp_msg="{dhcp_msg}" '
+        f'mac="00:00:5E:00:53:{host % 256:02X}" ip=172.20.42.{host}{lease} '
+        f'hostname="PLN-PC{host}" msg="{message}"'
+    ).encode()
+
+
+#: Benchmark mixes (``ingest/tests/bench_throughput.py --mix``). ``default``: FortiGate traffic
+#: lines of the format samples and synthetic MikroTik DHCP lines; ``fortigate-only``: forward
+#: traffic with ``srcmac`` and FortiGate DHCP server lines, all from the FortiGate (ADR-0016).
+MIXES: Final = ("default", "fortigate-only")
 
 
 def make_config(root: Path, **overrides: Any) -> Config:
@@ -397,27 +444,42 @@ class Throughput:
 
 
 def write_realistic_spool(
-    world: World, day: date, lines: int, *, fortigate_percent: int = 70, first: int = 0
+    world: World,
+    day: date,
+    lines: int,
+    *,
+    fortigate_percent: int = 70,
+    first: int = 0,
+    mix: str = "default",
 ) -> int:
-    """``lines`` spool lines: ``fortigate_percent`` % FortiGate traffic, the rest MikroTik DHCP.
+    """``lines`` spool lines: ``fortigate_percent`` % traffic, the rest DHCP (:data:`MIXES`).
 
-    Returns the bytes written. Uses :func:`~arcilogger_core.rawlog.format_line` like the
-    collector; receive times advance by 1 ms per line (line ``first`` continues a feed).
+    ``default``: FortiGate traffic and MikroTik DHCP lines; ``fortigate-only``: forward traffic
+    with ``srcmac`` and FortiGate DHCP server lines, all in the FortiGate's file. Returns the
+    bytes written. Uses :func:`~arcilogger_core.rawlog.format_line` like the collector; receive
+    times advance by 1 ms per line (line ``first`` continues a feed).
     """
-    paths = {source: world.layout.spool_file(source, day) for source in ("fortigate", "core-r1")}
+    if mix not in MIXES:
+        raise ValueError(f"unknown mix {mix!r}; known: {', '.join(MIXES)}")
+    only = mix == "fortigate-only"
+    traffic_of = fortigate_srcmac_message if only else fortigate_message
+    dhcp_of = fortigate_dhcp_message if only else dhcp_message
+    dhcp_source = "fortigate" if only else "core-r1"
+    paths = {source: world.layout.spool_file(source, day) for source in ("fortigate", dhcp_source)}
     for path in paths.values():
         path.parent.mkdir(parents=True, exist_ok=True)
     total = 0
     start = datetime.combine(day, time(0, 0), tzinfo=SITE_TZ)
-    with paths["fortigate"].open("ab") as fortigate, paths["core-r1"].open("ab") as mikrotik:
+    with contextlib.ExitStack() as stack:
+        files = {source: stack.enter_context(path.open("ab")) for source, path in paths.items()}
         for index in range(first, first + lines):
             received = start + timedelta(milliseconds=index)
             if index % 100 < fortigate_percent:
-                line = format_line(received, SENDERS["fortigate"], fortigate_message(index))
-                fortigate.write(line)
+                line = format_line(received, SENDERS["fortigate"], traffic_of(index))
+                files["fortigate"].write(line)
             else:
-                line = format_line(received, SENDERS["core-r1"], dhcp_message(index))
-                mikrotik.write(line)
+                line = format_line(received, SENDERS[dhcp_source], dhcp_of(index))
+                files[dhcp_source].write(line)
             total += len(line)
     return total
 
@@ -433,12 +495,15 @@ def _machine_cpu() -> tuple[int, int] | None:
     return sum(values) - idle, sum(values)
 
 
-def measure_throughput(world: World, engine: Engine, *, lines: int, workers: int = 0) -> Throughput:
-    """Write ``lines`` realistic lines, then time ``run(once=True)`` until all are loaded.
+def measure_throughput(
+    world: World, engine: Engine, *, lines: int, workers: int = 0, mix: str = "default"
+) -> Throughput:
+    """Write ``lines`` realistic lines of ``mix``, then time ``run(once=True)`` until all are
+    loaded.
 
     With ``workers`` the time includes starting the worker processes.
     """
-    size = write_realistic_spool(world, DAY, lines)
+    size = write_realistic_spool(world, DAY, lines, mix=mix)
     service = world.service(engine, status_interval=5.0, workers=workers)
     cpu_before, machine_before = process_time(), _machine_cpu()
     started = perf_counter()

@@ -13,6 +13,13 @@ percentages instead of fractions).
 ``updated_by`` is the administrator's user name, or one of the internal authors ``:seed``,
 ``:system`` and ``:migration``. A ``:`` can never appear in a user name (``users.username`` check),
 so a user can never be mistaken for the seed.
+
+An administrator's value goes through :func:`validate_setting`, from the console and from the
+web interface alike (``GET/PATCH /settings``, ADR-0014). A refusal is a
+:class:`SettingValueError`: the console prints its Turkish text, the web interface shows its
+``code`` with ``message_tr`` and ``message_en``. :data:`REAUTH_KEYS` need a recent
+re-authentication in the web interface, :data:`LOCKED_KEYS` are changed on the console only;
+labels and help texts are in :mod:`arcilogger_db.settings_meta`.
 """
 
 from __future__ import annotations
@@ -29,7 +36,12 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.canonical import CanonicalJsonError, canonical_json
 from arcilogger_core.config import EMAIL_ADDRESS
-from arcilogger_core.iputil import canonical_ip
+from arcilogger_db.egress import (
+    EgressValueError,
+    has_control_characters,
+    interface_name_ok,
+    validate_egresses,
+)
 from arcilogger_db.models import ALERT_SEVERITIES, ROLES, Setting
 
 #: Internal authors of ``settings.updated_by`` (never a valid user name).
@@ -39,12 +51,15 @@ MIGRATION_AUTHOR: Final = ":migration"
 
 #: Every known setting with its shipped default (build specification sections in comments).
 DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
-    # 2.3 NAT. The FortiGate's public/WAN address(es). Empty = the ISP router does a second NAT
-    # ("double NAT"): 5651 lookups by public IP + port can only return ranked candidates.
-    "nat.public_ips": [],
-    # The FortiGate's own WAN address as seen in ``transip`` (e.g. a private address behind the
-    # ISP router). Unknown until configured on site; never assumed.
-    "nat.wan_transip": "",
+    # 2.3 NAT, ADR-0016 internet exits: one entry per line (direct, ISP NAT, not through the
+    # FortiGate, or an internal NAT address that is no internet exit); arcilogger_db.egress.
+    # Empty = one implicit double-NAT exit ("double NAT": 5651 lookups by public IP + port can
+    # only return ranked candidates). Entered on site, never assumed. It replaces the Wave 2 keys
+    # nat.public_ips, nat.wan_transip and lookup.port_hint (revision 0018_nat_egresses).
+    "nat.egresses": {},
+    # The FortiGate trandisp values a candidate search takes for addresses no exit claims (only
+    # "snat" was seen in logs; verify on site).
+    "nat.snat_trandisp": ["snat"],
     # 9.5 lookup tolerance (± seconds) and the maximum number of candidates returned.
     "lookup.tolerance_seconds": 60,
     "lookup.max_candidates": 100,
@@ -54,14 +69,16 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     # 14 "5651 lookup < 5 s for a ±60 s window": the API stops a lookup after this many seconds
     # (PostgreSQL statement timeout of the remaining time) and answers 504 lookup_timeout.
     "lookup.timeout_seconds": 5,
-    # 9.5 ranking hint: favour candidates whose FortiGate port equals the requested public port.
-    # Assumes the ISP router keeps source ports — verify on site before switching it on.
-    "lookup.port_hint": False,
     # 9.5 a DNS answer this old (seconds) still links a requested domain to an address.
     "lookup.dns_lookback_seconds": 3600,
     # 9.5 time-stamp the SHA-256 of every official PDF report with the configured [tsa]
     # provider (1 kontör per report with Kamu SM).
     "lookup.report_timestamp": False,
+    # ADR-0016 srcmac: the srcintf names whose FortiGate srcmac may name a chain's MAC (low
+    # confidence, partial evidence, never a lease; [] = off), and the most IPv4 addresses one
+    # srcmac may show within an hour of the moment before it counts as a router's or switch's.
+    "lookup.srcmac_interfaces": [],
+    "lookup.srcmac_max_ips": 1,
     # 9.1 lease timeline: lease time per DHCP server (default 1 day; a server with shorter
     # leases, e.g. a guest network's, is entered on site: {"<server name>": seconds}) and the
     # factor (x 1.1, as an integer percentage) applied after the last evidence before an open
@@ -71,6 +88,21 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     "lease.timeout_percent": 110,
     # 2.2 "the DHCP server name contains the VLAN": dhcp60 -> 60 (first group = VLAN id).
     "dhcp.server_vlan_regex": r"^dhcp(\d+)$",
+    # ADR-0016 FortiGate DHCP as lease evidence. The logid of each DHCP server event that counts
+    # and its meaning (the ACK logid is documented, the RELEASE logid derived from the numbering
+    # rule; verify on site); {} = FortiGate DHCP records are not used.
+    "dhcp.fortigate_logids": {"0100026001": "assigned", "0100026002": "deassigned"},
+    # Per logid, the dhcp_msg values its records may carry (case-insensitive); a logid without
+    # an entry is not restricted.
+    "dhcp.fortigate_dhcp_msgs": {"0100026001": ["Ack"]},
+    # The lease time logged in the ACK ends the lease (300-8640000 s; else the times above).
+    "dhcp.fortigate_use_logged_lease": True,
+    # Traffic does not keep a FortiGate lease open (FortiOS most likely logs renewals).
+    "dhcp.fortigate_traffic_extends": False,
+    # FortiGate DHCP interfaces whose records are no lease evidence (DHCP over IPsec).
+    "dhcp.fortigate_interfaces_excluded": [],
+    # Set by the administrator once the record format is verified on site (DEVICE-SETUP 2.4).
+    "dhcp.fortigate_format_verified": False,
     # 9.1 ARP-LOG interval of the MikroTik router's scheduler script.
     "arp.interval_seconds": 3600,
     # 9.1 ARP sightings this many seconds after a DHCP release of the same IP+MAC are stale ARP
@@ -206,6 +238,39 @@ DEFAULT_SETTINGS: Final[Mapping[str, Any]] = {
     # After the worker was stopped: run a missed schedule once, for its newest occurrence
     # (false: skip occurrences more than 30 minutes late).
     "reports.catch_up": True,
+    # --- Search (Arama) and live tail (Canlı Akış) (ADR-0015, docs/ARAMA.md) -----------------
+    # Starting values, not measured facts: they keep one search or stream from competing with
+    # ingest on the one server. Read per request (the live hub when a stream opens).
+    # Longest time range of one search (days, device time).
+    "search.max_days": 31,
+    # Largest page a search request may ask for (the web interface asks for 100).
+    "search.page_size_max": 500,
+    # Time budget of one request for rows, and for its statistics (milliseconds): the scan then
+    # stops and answers what it found so far (``complete: false``).
+    "search.request_budget_ms": 4000,
+    "search.stats_budget_ms": 8000,
+    # Facets counted directly look at the newest this many matches at most.
+    "search.facet_sample_rows": 100000,
+    # Search, page, statistics, evidence and export requests running at once in the API (keep
+    # it at the database pool size minus 2), and new searches per user and minute.
+    "search.max_concurrent": 3,
+    "search.runs_per_minute": 30,
+    # Export: most rows of one file, most files per user and hour, longest build (seconds).
+    "search.export_max_rows": 100000,
+    "search.export_max_per_hour": 10,
+    "search.export_budget_seconds": 120,
+    # Saved searches per user (personal only).
+    "search.saved_max_per_user": 100,
+    # Live tail: open streams on the server and per user, lines a second shown per stream,
+    # lines a second the server parses for all streams, lines kept for a resume, minutes before
+    # an unattended stream stops, and lines shown at once when a stream opens.
+    "live.max_streams_total": 4,
+    "live.max_streams_per_user": 2,
+    "live.max_lines_per_second": 100,
+    "live.parse_lines_per_second": 1000,
+    "live.buffer_lines": 5000,
+    "live.max_minutes": 60,
+    "live.backfill_lines": 50,
 }
 
 
@@ -241,12 +306,240 @@ def get_settings(
     return result
 
 
+#: Why a value is refused (``SettingValueError.code``) -> (Turkish, English) for the web
+#: interface, Turkish first; ``{…}`` are filled from the setting's rules (bounds, limits, names),
+#: never from the value given, so a text never repeats what was submitted.
+SETTING_ERRORS: Final[Mapping[str, tuple[str, str]]] = {
+    "setting_unknown": ("Bilinmeyen ayar.", "Unknown setting."),
+    "setting_type": (
+        "Değer türü yanlış: {expected_tr} bekleniyor.",
+        "Wrong type of value: {expected_en} expected.",
+    ),
+    "setting_not_canonical": (
+        "Değer denetim kaydına tam olarak yazılamaz (ondalıklı sayı kullanmayın).",
+        "The value cannot be recorded exactly in the audit log (do not use decimal numbers).",
+    ),
+    "setting_below_minimum": ("En az {low} olmalı.", "Must be at least {low}."),
+    "setting_out_of_range": (
+        "{low} ile {high} arasında olmalı.",
+        "Must be between {low} and {high}.",
+    ),
+    "setting_mac_invalid": ("Geçersiz MAC adresi.", "Invalid MAC address."),
+    "setting_role_unknown": (
+        "Bilinmeyen rol; geçerli roller: {roles}.",
+        "Unknown role; the valid roles are {roles}.",
+    ),
+    "setting_totp_required": (
+        "{roles} rolleri için iki adımlı doğrulama (TOTP) zorunludur (şartname 13): listeye rol "
+        "eklenebilir, bu roller çıkarılamaz.",
+        "Two-step verification (TOTP) is mandatory for the {roles} roles (specification 13): "
+        "roles may be added, these cannot be removed.",
+    ),
+    "setting_regex_invalid": ("Geçersiz düzenli ifade.", "Invalid regular expression."),
+    "setting_regex_group": (
+        "İlk grup VLAN numarasını yakalamalı, ör. ^dhcp(\\d+)$.",
+        "The first group must capture the VLAN number, e.g. ^dhcp(\\d+)$.",
+    ),
+    "setting_lease_seconds": (
+        "Her DHCP sunucusu için en az 60 saniye gerekir.",
+        "Each DHCP server needs at least 60 seconds.",
+    ),
+    "setting_empty": ("Boş olamaz.", "Cannot be empty."),
+    "setting_email_invalid": ("Geçersiz e-posta adresi.", "Invalid e-mail address."),
+    "setting_too_many": ("En çok {limit} öğe girilebilir.", "At most {limit} items are allowed."),
+    "setting_severity_invalid": (
+        "Önem derecesi {severities} değerlerinden biri olmalı.",
+        "The severity must be one of {severities}.",
+    ),
+    "setting_url_invalid": (
+        "https:// ile başlayan bir sunucu adresi girin, ör. https://172.20.10.5 (boş: "
+        "yapılandırmadan).",
+        "Enter a server address starting with https://, e.g. https://172.20.10.5 (empty: from "
+        "the configuration).",
+    ),
+    "setting_domain_pattern_invalid": (
+        "Geçersiz alan adı kalıbı (ör. *.example.com).",
+        "Invalid host name pattern (e.g. *.example.com).",
+    ),
+    "setting_appcat_invalid": (
+        "Geçersiz uygulama kategorisi (boş ya da 100 karakterden uzun).",
+        "Invalid application category (empty or longer than 100 characters).",
+    ),
+    "setting_ports_invalid": (
+        "1-65535 arası port numaraları bekleniyor.",
+        "Port numbers from 1 to 65535 expected.",
+    ),
+    "setting_work_hours_fields": (
+        "days, start ve end alanları bekleniyor.",
+        "The fields days, start and end are expected.",
+    ),
+    "setting_work_hours_days": (
+        "Günler 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı.",
+        "The days must be day numbers from 1 (Monday) to 7 (Sunday).",
+    ),
+    "setting_work_hours_time": (
+        "Başlangıç ve bitiş SS:DD biçiminde olmalı (ör. 08:00).",
+        "Start and end must be given as HH:MM (e.g. 08:00).",
+    ),
+    "setting_work_hours_order": (
+        "Mesai başlangıcı bitişten önce olmalı (gece vardiyası yok).",
+        "Work hours must start before they end (no night shift).",
+    ),
+    "setting_holiday_invalid": (
+        "Geçersiz tarih (AA-GG ya da YYYY-AA-GG).",
+        "Invalid date (MM-DD or YYYY-MM-DD).",
+    ),
+    # ADR-0016: FortiGate DHCP evidence, srcmac and the internet exits (arcilogger_db.egress).
+    "setting_logid_invalid": (
+        "logid 10 rakamdan oluşmalı ve anlamı assigned ya da deassigned olmalı (en çok 16 kayıt).",
+        "A logid has 10 digits and its meaning is assigned or deassigned (at most 16 entries).",
+    ),
+    "setting_dhcp_msg_invalid": (
+        "Her logid 10 rakamdan oluşmalı; değeri 1-8 ileti türünden (her biri 1-32 karakter, "
+        "kontrol karakteri yok) oluşan bir liste olmalı.",
+        "Each logid has 10 digits; its value is a list of 1-8 message types (each 1-32 "
+        "characters, no control characters).",
+    ),
+    "setting_interface_invalid": (
+        "Arayüz adı 1-35 karakter olmalı; kontrol karakteri ve baş/son boşluk içeremez.",
+        "An interface name has 1-35 characters, without control characters or leading/trailing "
+        "spaces.",
+    ),
+    "setting_trandisp_invalid": (
+        "trandisp değerleri küçük harfle başlamalı (en çok 16 karakter); liste boş olamaz, en "
+        "çok 8 değer.",
+        "trandisp values start with a lower-case letter (at most 16 characters); the list cannot "
+        "be empty, at most 8 values.",
+    ),
+    "setting_egress_name": (
+        "Çıkış adı küçük harf, rakam ve tire içermeli (en çok 32 karakter), ör. hat-1.",
+        "An exit name has lower-case letters, digits and hyphens (at most 32 characters), e.g. "
+        "hat-1.",
+    ),
+    "setting_egress_field": (
+        "Çıkışta bilinmeyen ya da eksik bir alan var; alanlar: label, mode (zorunlu), public, "
+        "public_dynamic, transips, interfaces, port_preservation.",
+        "An exit has an unknown or missing field; the fields are label, mode (required), public, "
+        "public_dynamic, transips, interfaces, port_preservation.",
+    ),
+    "setting_egress_dynamic": (
+        '"Genel IP değişebilir" yalnızca servis sağlayıcı NAT\'ı olan çıkışlarda seçilebilir.',
+        '"Public IP may change" can only be chosen for an ISP NAT exit.',
+    ),
+    "setting_egress_mode": (
+        "NAT türü direct, isp_nat, not_logged ya da internal olmalı.",
+        "The NAT type must be direct, isp_nat, not_logged or internal.",
+    ),
+    "setting_egress_label": (
+        "Açıklama en çok 64 karakter olabilir ve kontrol karakteri içeremez.",
+        "A label has at most 64 characters and no control characters.",
+    ),
+    "setting_egress_address": (
+        "Geçersiz adres: IPv4 adresi ya da en az /24 bir IPv4 ağı bekleniyor (ağ adresi, ör. "
+        "203.0.113.208/29).",
+        "Invalid address: an IPv4 address or an IPv4 network of at least /24 is expected (the "
+        "network address, e.g. 203.0.113.208/29).",
+    ),
+    "setting_ipv6_not_supported": (
+        "IPv6 adresleri bu sürümde desteklenmiyor.",
+        "IPv6 addresses are not supported in this version.",
+    ),
+    "setting_egress_overlap": (
+        "Bir genel adres ya da NAT adresi iki çıkışta birden olamaz; aynı transip yalnızca iki "
+        "çıkışın arayüzleri ayrıysa kullanılabilir.",
+        "A public or NAT address cannot be in two exits; the same transip is allowed only when "
+        "the two exits have separate interfaces.",
+    ),
+    "setting_egress_direct": (
+        "Doğrudan çıkış en az bir genel adres ister; transip girilmez (FortiGate genel adresi "
+        "kendisi kullanır) ve port koruma 'unknown' kalır.",
+        "A direct exit needs at least one public address; it has no transip (the FortiGate uses "
+        "the public address itself) and port preservation stays 'unknown'.",
+    ),
+    "setting_egress_not_logged": (
+        "FortiGate'ten geçmeyen çıkışa yalnızca genel adres ve açıklama girilir.",
+        "An exit that does not pass the FortiGate has only public addresses and a label.",
+    ),
+    "setting_egress_internal": (
+        "İnternet çıkışı olmayan NAT tanımına yalnızca NAT adresleri (en az bir), arayüzler ve "
+        "açıklama girilir.",
+        "An exit that is not an internet exit has only NAT addresses (at least one), interfaces "
+        "and a label.",
+    ),
+    "setting_egress_port_preservation": (
+        "Port koruma unknown, preserved ya da not_preserved olmalı.",
+        "Port preservation must be unknown, preserved or not_preserved.",
+    ),
+    "setting_egress_catch_all": (
+        "NAT adresi boş (tanımsız adresleri kapsayan) en çok bir çıkış olabilir.",
+        "At most one exit may have no NAT address (the one that covers unclaimed addresses).",
+    ),
+    "setting_egress_public_private": (
+        "Genel adres özel (RFC 1918), paylaşılan (RFC 6598) ya da ayrılmış bir adres olamaz; "
+        "FortiGate'in servis sağlayıcı yönlendiricisinin arkasındaki adresini servis sağlayıcı "
+        "NAT'ı çıkışının NAT adresi olarak girin.",
+        "A public address cannot be a private (RFC 1918), shared (RFC 6598) or reserved address; "
+        "enter the FortiGate's address behind the ISP router as the NAT address of an ISP NAT "
+        "exit.",
+    ),
+    "setting_egress_isp_nat_direct": (
+        "NAT adresi genel adresiyle aynı olan hat doğrudandır: türünü Doğrudan yapın.",
+        "A line whose NAT address is its public address is direct: set its type to Direct.",
+    ),
+}
+
+
+class SettingValueError(ValueError):
+    """A value :func:`validate_setting` refuses for ``key``.
+
+    ``str(exc)`` is the console's Turkish text (``arcilogger-db settings set``): it names the key
+    and may repeat the value given. ``code``, ``message_tr`` and ``message_en`` are what the web
+    interface shows next to the field (``PATCH /settings``: 422 ``setting_invalid`` with
+    ``details[{key, code, message_tr, message_en}]``, contract 2.13); they never repeat a
+    submitted value (:data:`SETTING_ERRORS`).
+    """
+
+    def __init__(self, key: str, code: str, text: str, **facts: Any) -> None:
+        super().__init__(text)
+        message_tr, message_en = SETTING_ERRORS[code]
+        self.key = key
+        self.code = code
+        self.message_tr = message_tr.format(**facts)
+        self.message_en = message_en.format(**facts)
+
+
 def check_setting_value(key: str, value: Any) -> None:
-    """``ValueError`` unless ``value`` can be stored **and audited** (canonical JSON)."""
+    """:class:`SettingValueError` unless ``value`` can be stored **and audited** (canonical
+    JSON)."""
     try:
         canonical_json(value)
     except CanonicalJsonError as exc:
-        raise ValueError(f"setting {key}: value cannot be audited exactly: {exc}") from exc
+        raise SettingValueError(
+            key, "setting_not_canonical", f"setting {key}: value cannot be audited exactly: {exc}"
+        ) from exc
+
+
+# -- changes from the web interface (ADR-0014, contract 2.13) -------------------------------------
+
+#: Keys whose change needs a recent re-authentication in the web interface (``PATCH /settings``,
+#: ``POST /settings/{key}/reset``): sessions, passwords and privacy, how long personal data and
+#: evidence copies are kept, and who gets which alert e-mails (a stolen session cannot silence
+#: the alerts).
+REAUTH_KEYS: Final[frozenset[str]] = frozenset(
+    {key for key in DEFAULT_SETTINGS if key.startswith(("auth.", "privacy."))}
+    | {
+        "db.retention_days",
+        "usage.retention_days",
+        "reports.keep_days",
+        "evidence.keep_days",
+        "usage.pseudonymize_anonymous_role",
+        "alerts.email_recipients",
+        "alerts.email_min_severity",
+    }
+)
+#: Keys the web interface shows but never changes: paths of files on the server. The console
+#: (``arcilogger-db settings set``) still changes them.
+LOCKED_KEYS: Final[frozenset[str]] = frozenset({"devices.oui_file", "usage.psl_file"})
 
 
 # -- validation of administrator changes ----------------------------------------------------------
@@ -261,6 +554,7 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     "lookup.max_candidates": (1, 10_000),
     "lookup.max_session_seconds": (60, None),
     "lookup.timeout_seconds": (1, 300),
+    "lookup.srcmac_max_ips": (1, 16),
     "lease.default_seconds": (60, None),
     "lease.timeout_percent": (100, 1000),
     "arp.interval_seconds": (60, None),
@@ -303,6 +597,25 @@ INTEGER_RANGES: Final[Mapping[str, tuple[int, int | None]]] = {
     # Area R (usage reports).
     "reports.keep_days": (1, None),
     "reports.max_attachment_mb": (1, 100),
+    # Search and live tail (ADR-0015): no value switches a limit or a budget off.
+    "search.max_days": (1, 92),
+    "search.page_size_max": (50, 1000),
+    "search.request_budget_ms": (500, 30_000),
+    "search.stats_budget_ms": (1000, 60_000),
+    "search.facet_sample_rows": (1000, 1_000_000),
+    "search.max_concurrent": (1, 10),
+    "search.runs_per_minute": (1, 600),
+    "search.export_max_rows": (1, 1_000_000),
+    "search.export_max_per_hour": (1, 100),
+    "search.export_budget_seconds": (10, 900),
+    "search.saved_max_per_user": (1, 1000),
+    "live.max_streams_total": (1, 20),
+    "live.max_streams_per_user": (1, 10),
+    "live.max_lines_per_second": (10, 500),
+    "live.parse_lines_per_second": (50, 10_000),
+    "live.buffer_lines": (500, 50_000),
+    "live.max_minutes": (5, 480),
+    "live.backfill_lines": (0, 200),
 }
 #: Area E: most addresses ``alerts.email_recipients`` may list.
 MAX_EMAIL_RECIPIENTS: Final = 20
@@ -327,21 +640,20 @@ _TYPE_NAMES: Final[Mapping[type, str]] = {
     float: "ondalıklı sayı",
     type(None): "null",
 }
-
-
-def _ip(key: str, value: Any) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{key}: IP adresi bekleniyor, verilen {value!r}")
-    try:
-        return canonical_ip(value.strip())
-    except ValueError as exc:
-        raise ValueError(f"{key}: geçersiz IP adresi {value!r}") from exc
+#: The English names of :data:`_TYPE_NAMES` (``SettingValueError.message_en``).
+_TYPE_NAMES_EN: Final[Mapping[type, str]] = {
+    bool: "true/false",
+    int: "an integer",
+    str: "a text",
+    list: "a list",
+    dict: "an object",
+}
 
 
 def _mac(key: str, value: Any) -> str:
     digits = re.sub(r"[:.\-]", "", value.strip()).lower() if isinstance(value, str) else ""
     if not _MAC_DIGITS.match(digits):
-        raise ValueError(f"{key}: geçersiz MAC adresi {value!r}")
+        raise SettingValueError(key, "setting_mac_invalid", f"{key}: geçersiz MAC adresi {value!r}")
     return ":".join(digits[i : i + 2] for i in range(0, 12, 2))
 
 
@@ -350,58 +662,87 @@ def _unique(values: list[str]) -> list[str]:
 
 
 def validate_setting(key: str, value: Any) -> Any:
-    """The value an administrator may store for ``key``, normalised; ``ValueError`` otherwise.
+    """The value an administrator may store for ``key``, normalised; :class:`SettingValueError`
+    (a ``ValueError``) otherwise.
 
     Only known keys (:data:`DEFAULT_SETTINGS`) are accepted, with the JSON type of their
     default (a ``bool`` is not an integer), within :data:`INTEGER_RANGES`; addresses are checked
-    and written in canonical form (IP addresses as PostgreSQL prints them, MAC addresses
-    ``aa:bb:cc:dd:ee:ff``), so a typing error cannot stop the lookups that read them.
+    and written in canonical form (the internet exits' addresses as :mod:`arcilogger_db.egress`
+    writes them, MAC addresses ``aa:bb:cc:dd:ee:ff``), so a typing error cannot stop the lookups
+    that read them.
     """
     if key not in DEFAULT_SETTINGS:
-        raise ValueError(f"bilinmeyen ayar: {key}")
+        raise SettingValueError(key, "setting_unknown", f"bilinmeyen ayar: {key}")
     default = DEFAULT_SETTINGS[key]
     kind = type(default)
     if type(value) is not kind:
-        raise ValueError(
+        raise SettingValueError(
+            key,
+            "setting_type",
             f"{key}: {_TYPE_NAMES[kind]} bekleniyor (varsayılan "
-            f"{canonical_json(default).decode()}), verilen: {_TYPE_NAMES.get(type(value), 'başka')}"
+            f"{canonical_json(default).decode()}), verilen: "
+            f"{_TYPE_NAMES.get(type(value), 'başka')}",
+            expected_tr=_TYPE_NAMES[kind],
+            expected_en=_TYPE_NAMES_EN[kind],
         )
     check_setting_value(key, value)
     if isinstance(value, int) and not isinstance(value, bool):
         low, high = INTEGER_RANGES.get(key, (0, None))
         if value < low or (high is not None and value > high):
             upper = "" if high is None else f", en çok {high}"
-            raise ValueError(f"{key}: en az {low}{upper} olmalı")
-    if key == "nat.public_ips":
-        return _unique([_ip(key, item) for item in value])
-    if key == "nat.wan_transip":
-        return _ip(key, value) if value.strip() else ""
+            code = "setting_below_minimum" if high is None else "setting_out_of_range"
+            raise SettingValueError(
+                key, code, f"{key}: en az {low}{upper} olmalı", low=low, high=high
+            )
     if key == "devices.infrastructure_macs":
         return _unique([_mac(key, item) for item in value])
     if key == "auth.totp_required_roles":
         unknown = [item for item in value if item not in _ROLES]
         if unknown:
-            raise ValueError(f"{key}: bilinmeyen rol {unknown} (geçerli: {', '.join(_ROLES)})")
+            raise SettingValueError(
+                key,
+                "setting_role_unknown",
+                f"{key}: bilinmeyen rol {unknown} (geçerli: {', '.join(_ROLES)})",
+                roles=", ".join(_ROLES),
+            )
         missing = [role for role in TOTP_MANDATORY_ROLES if role not in value]
         if missing:
-            raise ValueError(
+            raise SettingValueError(
+                key,
+                "setting_totp_required",
                 f"{key}: {', '.join(missing)} rolü için iki adımlı doğrulama (TOTP) zorunludur "
-                "(şartname 13); listeye rol eklenebilir, bu roller çıkarılamaz"
+                "(şartname 13); listeye rol eklenebilir, bu roller çıkarılamaz",
+                roles=", ".join(TOTP_MANDATORY_ROLES),
             )
         return _unique(value)
     if key == "dhcp.server_vlan_regex":
         try:
             pattern = re.compile(value)
         except re.error as exc:
-            raise ValueError(f"{key}: geçersiz düzenli ifade: {exc}") from exc
+            raise SettingValueError(
+                key, "setting_regex_invalid", f"{key}: geçersiz düzenli ifade: {exc}"
+            ) from exc
         if pattern.groups < 1:
-            raise ValueError(f"{key}: ilk grup VLAN numarasını yakalamalı, örn. ^dhcp(\\d+)$")
+            raise SettingValueError(
+                key,
+                "setting_regex_group",
+                f"{key}: ilk grup VLAN numarasını yakalamalı, örn. ^dhcp(\\d+)$",
+            )
     if key == "lease.server_seconds":
         for server, seconds in value.items():
             if type(seconds) is not int or seconds < 60:
-                raise ValueError(f"{key}: {server!r} için en az 60 saniye gerekir")
+                raise SettingValueError(
+                    key, "setting_lease_seconds", f"{key}: {server!r} için en az 60 saniye gerekir"
+                )
     if key == "privacy.notice_version" and not value.strip():
-        raise ValueError(f"{key}: boş olamaz")
+        raise SettingValueError(key, "setting_empty", f"{key}: boş olamaz")
+    if key == "nat.egresses":
+        try:
+            return validate_egresses(value)
+        except EgressValueError as exc:
+            raise SettingValueError(key, exc.code, str(exc), **exc.facts) from exc
+    if key in _FORTIGATE_KEYS:
+        return _validate_fortigate_setting(key, value)
     if key.startswith("alerts."):
         return _validate_alert_setting(key, value)
     if key.startswith("usage."):
@@ -413,18 +754,23 @@ def email_addresses(
     key: str, value: Iterable[Any], *, limit: int = MAX_EMAIL_RECIPIENTS
 ) -> list[str]:
     """E-mail recipients as stored: trimmed, the domain lower-case, duplicates dropped, at most
-    ``limit``; ``ValueError`` naming ``key`` for anything that is not an address. Shared by
+    ``limit``; :class:`SettingValueError` naming ``key`` for anything that is not an address.
+    Shared by
     ``alerts.email_recipients`` and the recipients of a report schedule (area R)."""
     addresses = []
     for item in value:
         address = item.strip() if isinstance(item, str) else ""
         if not _EMAIL.match(address) or len(address) > 254:
-            raise ValueError(f"{key}: geçersiz e-posta adresi {item!r}")
+            raise SettingValueError(
+                key, "setting_email_invalid", f"{key}: geçersiz e-posta adresi {item!r}"
+            )
         local, _, domain = address.partition("@")
         addresses.append(f"{local}@{domain.lower()}")
     addresses = _unique(addresses)
     if len(addresses) > limit:
-        raise ValueError(f"{key}: en çok {limit} adres")
+        raise SettingValueError(
+            key, "setting_too_many", f"{key}: en çok {limit} adres", limit=limit
+        )
     return addresses
 
 
@@ -434,17 +780,123 @@ def _validate_alert_setting(key: str, value: Any) -> Any:
         return email_addresses(key, value)
     if key == "alerts.email_min_severity":
         if value not in ALERT_SEVERITY_ORDER:
-            raise ValueError(f"{key}: {', '.join(ALERT_SEVERITY_ORDER)} değerlerinden biri olmalı")
+            severities = ", ".join(ALERT_SEVERITY_ORDER)
+            raise SettingValueError(
+                key,
+                "setting_severity_invalid",
+                f"{key}: {severities} değerlerinden biri olmalı",
+                severities=severities,
+            )
         return value
     if key == "alerts.web_base_url":
         url = value.strip().rstrip("/")
         if url and not _WEB_URL.match(url):
-            raise ValueError(
+            raise SettingValueError(
+                key,
+                "setting_url_invalid",
                 f"{key}: https:// ile başlayan sunucu adresi bekleniyor, ör. "
-                "https://10.0.0.10 (boş: yapılandırmadan)"
+                "https://10.0.0.10 (boş: yapılandırmadan)",
             )
         return url
     return value
+
+
+#: ADR-0016: a FortiGate logid (10 ASCII digits) and the two meanings a mapped logid may have.
+_LOGID = re.compile(r"[0-9]{10}")
+LOGID_MEANINGS: Final = ("assigned", "deassigned")
+#: ADR-0016: a FortiGate ``trandisp`` value of ``nat.snat_trandisp``.
+_TRANDISP = re.compile(r"[a-z][a-z0-9+_-]{0,15}")
+#: ADR-0016: most entries of the logid maps, of a dhcp_msg list, of an interface list and of
+#: ``nat.snat_trandisp``; longest dhcp_msg value (FortiGate DHCP records, interface names).
+MAX_LOGIDS: Final = 16
+MAX_DHCP_MSGS: Final = 8
+MAX_DHCP_MSG_LENGTH: Final = 32
+MAX_INTERFACE_LIST: Final = 32
+MAX_TRANDISP: Final = 8
+_FORTIGATE_KEYS: Final = frozenset(
+    {
+        "dhcp.fortigate_logids",
+        "dhcp.fortigate_dhcp_msgs",
+        "dhcp.fortigate_interfaces_excluded",
+        "lookup.srcmac_interfaces",
+        "nat.snat_trandisp",
+    }
+)
+
+
+def _validate_fortigate_setting(key: str, value: Any) -> Any:
+    """ADR-0016: the FortiGate DHCP logid maps, the interface lists and the NAT types."""
+    if key == "dhcp.fortigate_logids":
+        if len(value) > MAX_LOGIDS or any(
+            not _LOGID.fullmatch(logid) or meaning not in LOGID_MEANINGS
+            for logid, meaning in value.items()
+        ):
+            raise SettingValueError(
+                key,
+                "setting_logid_invalid",
+                f"{key}: logid 10 rakam, anlamı assigned ya da deassigned olmalı (en çok "
+                f"{MAX_LOGIDS} kayıt)",
+            )
+        return dict(value)
+    if key == "dhcp.fortigate_dhcp_msgs":
+        messages = {logid: _dhcp_msgs(items) for logid, items in value.items()}
+        if (
+            len(messages) > MAX_LOGIDS
+            or any(not _LOGID.fullmatch(logid) for logid in messages)
+            or any(items is None for items in messages.values())
+        ):
+            raise SettingValueError(
+                key,
+                "setting_dhcp_msg_invalid",
+                f"{key}: her logid 10 rakam, değeri 1-{MAX_DHCP_MSGS} ileti türünden (her biri "
+                f"1-{MAX_DHCP_MSG_LENGTH} karakter) oluşan bir liste olmalı (en çok {MAX_LOGIDS} "
+                "kayıt)",
+            )
+        return messages
+    if key in ("dhcp.fortigate_interfaces_excluded", "lookup.srcmac_interfaces"):
+        for item in value:
+            if not interface_name_ok(item):
+                raise SettingValueError(
+                    key, "setting_interface_invalid", f"{key}: geçersiz arayüz adı {item!r}"
+                )
+        names = _unique(value)
+        if len(names) > MAX_INTERFACE_LIST:
+            raise SettingValueError(
+                key,
+                "setting_too_many",
+                f"{key}: en çok {MAX_INTERFACE_LIST} arayüz",
+                limit=MAX_INTERFACE_LIST,
+            )
+        return names
+    if key == "nat.snat_trandisp":
+        values = _unique(value) if all(isinstance(item, str) for item in value) else []
+        if not 1 <= len(values) <= MAX_TRANDISP or not all(
+            _TRANDISP.fullmatch(item) for item in values
+        ):
+            raise SettingValueError(
+                key,
+                "setting_trandisp_invalid",
+                f"{key}: 1-{MAX_TRANDISP} değer, her biri küçük harfle başlayan en çok 16 "
+                "karakter (ör. snat)",
+            )
+        return values
+    return value
+
+
+def _dhcp_msgs(items: Any) -> list[str] | None:
+    """A dhcp_msg list without its case-insensitive repeats (the first spelling kept); ``None``
+    when it is not 1-8 texts of 1-32 characters without control characters."""
+    if not isinstance(items, list) or not all(
+        isinstance(item, str)
+        and 1 <= len(item) <= MAX_DHCP_MSG_LENGTH
+        and not has_control_characters(item)
+        for item in items
+    ):
+        return None
+    kept: dict[str, str] = {}
+    for item in items:
+        kept.setdefault(item.lower(), item)  # as the lease job compares: lower(dhcp_msg)
+    return list(kept.values()) if 1 <= len(kept) <= MAX_DHCP_MSGS else None
 
 
 #: Area U: a host name pattern of ``usage.background_domains`` (``fnmatch`` wildcards ``*``
@@ -463,7 +915,11 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
         for item in value:
             pattern = item.strip().lower().rstrip(".") if isinstance(item, str) else ""
             if not _DOMAIN_PATTERN.match(pattern) or pattern.strip("*?.") == "":
-                raise ValueError(f"{key}: geçersiz alan adı kalıbı {item!r} (ör. *.example.com)")
+                raise SettingValueError(
+                    key,
+                    "setting_domain_pattern_invalid",
+                    f"{key}: geçersiz alan adı kalıbı {item!r} (ör. *.example.com)",
+                )
             patterns.append(pattern)
         return _limited(key, _unique(patterns))
     if key == "usage.background_appcats":
@@ -471,12 +927,16 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
         for item in value:
             name = item.strip() if isinstance(item, str) else ""
             if not name or len(name) > 100:
-                raise ValueError(f"{key}: geçersiz uygulama kategorisi {item!r}")
+                raise SettingValueError(
+                    key, "setting_appcat_invalid", f"{key}: geçersiz uygulama kategorisi {item!r}"
+                )
             names.append(name)
         return _limited(key, _unique(names))
     if key == "usage.background_ports":
         if any(type(item) is not int or not 1 <= item <= 65535 for item in value):
-            raise ValueError(f"{key}: 1-65535 arası port numaraları bekleniyor")
+            raise SettingValueError(
+                key, "setting_ports_invalid", f"{key}: 1-65535 arası port numaraları bekleniyor"
+            )
         return _limited(key, sorted(set(value)))
     if key == "usage.work_hours":
         return _work_hours(key, value)
@@ -485,7 +945,11 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
         for item in value:
             day = item.strip() if isinstance(item, str) else ""
             if not _valid_holiday(day):
-                raise ValueError(f"{key}: geçersiz tarih {item!r} (AA-GG ya da YYYY-AA-GG)")
+                raise SettingValueError(
+                    key,
+                    "setting_holiday_invalid",
+                    f"{key}: geçersiz tarih {item!r} (AA-GG ya da YYYY-AA-GG)",
+                )
             days.append(day)
         return _limited(key, sorted(set(days)))
     if key == "usage.psl_file":
@@ -495,7 +959,9 @@ def _validate_usage_setting(key: str, value: Any) -> Any:
 
 def _limited(key: str, items: list[Any]) -> list[Any]:
     if len(items) > MAX_USAGE_LIST:
-        raise ValueError(f"{key}: en çok {MAX_USAGE_LIST} öğe")
+        raise SettingValueError(
+            key, "setting_too_many", f"{key}: en çok {MAX_USAGE_LIST} öğe", limit=MAX_USAGE_LIST
+        )
     return items
 
 
@@ -513,16 +979,32 @@ def _valid_holiday(text: str) -> bool:
 
 def _work_hours(key: str, value: dict[str, Any]) -> dict[str, Any]:
     if set(value) != {"days", "start", "end"}:
-        raise ValueError(f"{key}: days, start ve end alanları bekleniyor")
+        raise SettingValueError(
+            key, "setting_work_hours_fields", f"{key}: days, start ve end alanları bekleniyor"
+        )
     days, start, end = value["days"], value["start"], value["end"]
     if not isinstance(days, list) or any(type(d) is not int or not 1 <= d <= 7 for d in days):
-        raise ValueError(f"{key}: days 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı")
+        raise SettingValueError(
+            key,
+            "setting_work_hours_days",
+            f"{key}: days 1 (Pazartesi) - 7 (Pazar) arası gün numaraları olmalı",
+        )
     if not isinstance(start, str) or not isinstance(end, str):
-        raise ValueError(f"{key}: start ve end SS:DD biçiminde olmalı")
+        raise SettingValueError(
+            key, "setting_work_hours_time", f"{key}: start ve end SS:DD biçiminde olmalı"
+        )
     if not _HHMM.match(start) or not _HHMM.match(end):
-        raise ValueError(f"{key}: start ve end SS:DD biçiminde olmalı (ör. 08:00)")
+        raise SettingValueError(
+            key,
+            "setting_work_hours_time",
+            f"{key}: start ve end SS:DD biçiminde olmalı (ör. 08:00)",
+        )
     if start >= end:
-        raise ValueError(f"{key}: mesai başlangıcı bitişten önce olmalı (gece vardiyası yok)")
+        raise SettingValueError(
+            key,
+            "setting_work_hours_order",
+            f"{key}: mesai başlangıcı bitişten önce olmalı (gece vardiyası yok)",
+        )
     return {"days": sorted(set(days)), "start": start, "end": end}
 
 

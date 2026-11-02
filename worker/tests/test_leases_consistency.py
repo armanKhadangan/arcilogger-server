@@ -145,6 +145,7 @@ def snapshot(session: Session) -> dict[int, tuple[Any, ...]]:
             r.confidence,
             r.source_table,
             r.last_evidence,
+            r.lease_seconds,
             tuple((e["table"], e["row_id"]) for e in r.evidence),
         )
         for r in session.scalars(select(Lease))
@@ -388,3 +389,142 @@ def test_seeds_that_no_longer_reach_midnight_are_closed(
             (Y, S, tr(D, 22), tr(D, 23, 30), "arp"),
         ]
     )
+
+
+# -- FortiGate DHCP (ADR-0016): a FortiGate-only site and a mixed site ----------------------------
+
+#: Run times of :func:`live` (07:03 on D0, then every 7 minutes): the horizon of the run at
+#: D1 10:23 is D1 10:21:00 (the 120-s lag), between the two ACKs of the DECLINE below.
+CUT = tr(D1, 10, 21)
+
+
+def fortigate_scenario(ev: Evidence) -> None:
+    fg = ev.fortigate_dhcp
+    # .57: ACK at 08:00 (lease 86400), no renewal; a printer set statically to the address
+    # keeps sending traffic for three days. Every build ends the lease at D1 08:00 (D26).
+    fg(tr(D, 8), "172.20.42.57", "00:00:5e:00:53:57", hostname="PLN-PC14")
+    moment = tr(D, 8, 5)
+    while moment < tr(D2, 8):
+        ev.traffic(moment, "172.20.42.57", 40000 + int((moment - tr(D, 8)).total_seconds()) // 300)
+        moment += timedelta(minutes=5)
+    # .60: the lease varies between ACKs (86400, then 43200); a renewal with lease=0 keeps the
+    # lease it had (a seed's lease at midnight is that of its latest usable ACK).
+    fg(tr(D, 9), "172.20.42.60", "00:00:5e:00:53:60")
+    fg(tr(D, 21), "172.20.42.60", "00:00:5e:00:53:60", lease=43200)
+    fg(tr(D1, 3), "172.20.42.60", "00:00:5e:00:53:60", lease=0)
+    fg(tr(D1, 8), "172.20.42.60", "00:00:5e:00:53:60", lease=43200)
+    fg(tr(D1, 15), "172.20.42.60", "00:00:5e:00:53:60", logid="0100026002",
+       dhcp_msg="Release", lease=None)  # fmt: skip
+    # D33 after the deadline: the move to .35 at 14:00 finds the lease of .20 ended at 10:00.
+    fg(tr(D, 9), "172.20.61.20", "00:00:5e:00:53:21", interface="vlan61", lease=3600)
+    fg(tr(D, 14), "172.20.61.35", "00:00:5e:00:53:21", interface="vlan61", lease=3600)
+    # D33, a DECLINE 4 s apart across a live run's cut (the seed's origin must be known).
+    fg(CUT - timedelta(seconds=2), "172.20.42.70", "00:00:5e:00:53:31")
+    fg(CUT + timedelta(seconds=2), "172.20.42.71", "00:00:5e:00:53:31")
+    # D33 across midnight: the MAC's ACK for .81 at 01:00 ends the lease of .80.
+    fg(tr(D, 22), "172.20.42.80", "00:00:5e:00:53:80")
+    fg(tr(D1, 1), "172.20.42.81", "00:00:5e:00:53:80")
+    # One address, three leases before midnight (round 6: a seed's lease comes from its own
+    # ACK before the event that ends it, never from a later lease of its pair).
+    fg(tr(D, 20), "172.20.42.90", "00:00:5e:00:53:90", lease=3600)
+    fg(tr(D, 22, 30), "172.20.42.90", "00:00:5e:00:53:91", lease=3600)
+    fg(tr(D, 23), "172.20.42.90", "00:00:5e:00:53:90")
+
+
+FORTIGATE_EXPECTED = sorted(
+    [
+        ("172.20.42.57", "00:00:5e:00:53:57", tr(D, 8), tr(D1, 8), "timeout"),
+        ("172.20.42.60", "00:00:5e:00:53:60", tr(D, 9), tr(D1, 15), "dhcp"),
+        ("172.20.61.20", "00:00:5e:00:53:21", tr(D, 9), tr(D, 10), "timeout"),
+        ("172.20.61.35", "00:00:5e:00:53:21", tr(D, 14), tr(D, 15), "timeout"),
+        ("172.20.42.70", "00:00:5e:00:53:31", CUT - timedelta(seconds=2),
+         CUT + timedelta(seconds=2), "superseded"),
+        ("172.20.42.71", "00:00:5e:00:53:31", CUT + timedelta(seconds=2),
+         CUT + timedelta(days=1, seconds=2), "timeout"),
+        ("172.20.42.80", "00:00:5e:00:53:80", tr(D, 22), tr(D1, 1), "superseded"),
+        ("172.20.42.81", "00:00:5e:00:53:80", tr(D1, 1), tr(D2, 1), "timeout"),
+        ("172.20.42.90", "00:00:5e:00:53:90", tr(D, 20), tr(D, 21), "timeout"),
+        ("172.20.42.90", "00:00:5e:00:53:91", tr(D, 22, 30), tr(D, 23), "superseded"),
+        ("172.20.42.90", "00:00:5e:00:53:90", tr(D, 23), tr(D1, 23), "timeout"),
+    ]
+)  # fmt: skip
+
+
+def mixed_scenario(ev: Evidence) -> None:
+    """MikroTik DHCP for VLAN 41, FortiGate DHCP for VLAN 60, and a migration of two VLAN 41
+    clients to the FortiGate."""
+    ev.dhcp(tr(D, 8), "assigned", "172.20.41.10", "00:00:5e:00:53:10", server="dhcp41")
+    for hour in range(9, 21):
+        ev.traffic(tr(D, hour), "172.20.41.10", 44000 + hour)
+    ev.fortigate_dhcp(tr(D, 9), "172.20.60.20", "02:00:5e:00:53:20", interface="vlan60")
+    ev.fortigate_dhcp(tr(D, 21), "172.20.60.20", "02:00:5e:00:53:20", interface="vlan60",
+                      lease=43200)  # fmt: skip
+    # D5: the FortiGate's ACK of a pair open as MikroTik starts a lease of its own; a printer
+    # on the address afterwards keeps nothing open.
+    ev.dhcp(tr(D0, 9, 20), "assigned", "172.20.41.57", "00:00:5e:00:53:57", server="dhcp41")
+    for hours in range(10, 24 * 3 + 9):
+        ev.traffic(tr(D0, 0) + timedelta(hours=hours), "172.20.41.57", 45000 + hours)
+    ev.fortigate_dhcp(tr(D, 9, 20), "172.20.41.57", "00:00:5e:00:53:57", interface="vlan41")
+    # D33, the MikroTik variant: the FortiGate's ACK of the MAC for .120 ends its MikroTik lease.
+    ev.dhcp(tr(D, 10), "assigned", "172.20.41.58", "00:00:5e:00:53:58", server="dhcp41")
+    ev.fortigate_dhcp(tr(D, 15), "172.20.41.120", "00:00:5e:00:53:58", interface="vlan41")
+
+
+MIXED_EXPECTED = sorted(
+    [
+        ("172.20.41.10", "00:00:5e:00:53:10", tr(D, 8), tr(D1, 22, 24), "timeout"),
+        ("172.20.60.20", "02:00:5e:00:53:20", tr(D, 9), tr(D1, 9), "timeout"),
+        ("172.20.41.57", "00:00:5e:00:53:57", tr(D0, 9, 20), tr(D, 9, 20), "superseded"),
+        ("172.20.41.57", "00:00:5e:00:53:57", tr(D, 9, 20), tr(D1, 9, 20), "timeout"),
+        ("172.20.41.58", "00:00:5e:00:53:58", tr(D, 10), tr(D, 15), "superseded"),
+        ("172.20.41.120", "00:00:5e:00:53:58", tr(D, 15), tr(D1, 15), "timeout"),
+    ]
+)
+
+
+def _agree(session: Session, expected: list[tuple[Any, ...]]) -> None:
+    """Live, a range rebuild and single days in any order give ``expected`` with the same ids."""
+    live(session)
+    assert summary(session) == expected
+    reference = snapshot(session)
+    report = rebuild_days(session, D0, D2)
+    assert (report.inserted, report.deleted) == (0, 0)
+    assert snapshot(session) == reference, "range"
+    for order in ([D2, D1, D, D0], [D1], [D], [D1, D0, D2, D]):
+        for day in order:
+            single = rebuild_day(session, day)
+            session.commit()
+            assert (single.inserted, single.updated, single.deleted) == (0, 0, 0), day
+        assert snapshot(session) == reference, f"single days {order}"
+    assert alerts(session) == []
+
+
+def test_a_fortigate_only_site_agrees_in_every_build(
+    db_session: Session, evidence: Evidence
+) -> None:
+    fortigate_scenario(evidence)
+    db_session.commit()
+    _agree(db_session, FORTIGATE_EXPECTED)
+    leases = {(r.ip, r.start): r for r in db_session.scalars(select(Lease))}
+    assert leases[("172.20.42.60", tr(D, 9))].lease_seconds == 43200
+    assert leases[("172.20.42.90", tr(D, 20))].lease_seconds == 3600
+    assert {r.source_table for r in leases.values()} == {"fg_dhcp"}
+
+
+def test_a_fortigate_only_site_rebuilt_from_scratch_in_order(
+    db_session: Session, evidence: Evidence
+) -> None:
+    fortigate_scenario(evidence)
+    set_watermark(db_session, END)
+    db_session.commit()
+    rebuild_days(db_session, D0, D2)
+    assert summary(db_session) == FORTIGATE_EXPECTED
+
+
+def test_a_mixed_site_agrees_in_every_build(db_session: Session, evidence: Evidence) -> None:
+    mixed_scenario(evidence)
+    db_session.commit()
+    _agree(db_session, MIXED_EXPECTED)
+    tables = {(r.ip, r.start): r.source_table for r in db_session.scalars(select(Lease))}
+    assert tables[("172.20.41.57", tr(D0, 9, 20))] == "mt_dhcp"
+    assert tables[("172.20.41.57", tr(D, 9, 20))] == "fg_dhcp"

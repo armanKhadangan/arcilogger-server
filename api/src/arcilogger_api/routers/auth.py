@@ -516,14 +516,21 @@ def change_password(
     user = _user(db, current)
     session_row = current_session(db, current)
     verified = verify_password(user.password_hash, body.current_password)
-    if not verified.ok:
-        locked_now = register_failure(user, settings, at)
+    # Like re-authentication: a locked account accepts nothing (another of its sessions must
+    # not go on guessing), and the refusal does not count.
+    reason = None
+    if is_locked(user, at):
+        reason = "locked"
+    elif not verified.ok:
+        reason = "bad_password"
+    if reason is not None:
+        locked_now = reason != "locked" and register_failure(user, settings, at)
         record_audit(
             db,
             actor=current,
             action="auth.password_change_failed",
             target=target_of(user),
-            details={"reason": "bad_password"},
+            details={"reason": reason},
             ip=ip,
         )
         if locked_now:

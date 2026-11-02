@@ -6,9 +6,12 @@
   comes from :func:`arcilogger_db.license_guard.safe_status` (a broken licence subsystem locks
   only the paid modules) and is kept :data:`STATUS_SECONDS` per worker process.
 * :func:`job_license_check` — every 5 minutes, always recomputed: state changes and limit
-  crossings become licence events and audit entries (each change once), and the installer's
-  status file ``state/license-status.json`` is rewritten. It imports the licence code inside the
-  function: when that fails the job fails like any job (retries, ``R20-job``), the others run on.
+  crossings become licence events and audit entries (each change once), the licence alerts
+  (``R20-license``, :mod:`.alerts.license`) are opened and resolved in their own transaction —
+  a failure there is logged and reported in the details, it never fails the job —, and the
+  installer's status file ``state/license-status.json`` is rewritten. It imports the licence code
+  inside the function: when that fails the job fails like any job (retries, ``R20-job``), the
+  others run on.
 
 Every job of 5651 Temel (leases, partitions, evidence, audit and alert imports, the checks and
 the alert e-mail) and the data-minimisation jobs (``usage.retention``, ``reports.purge``) never
@@ -17,6 +20,7 @@ ask: they run in every licence state. This module imports no licence code at mod
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -26,9 +30,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from arcilogger_db.audit import append_audit
 from arcilogger_db.license_guard import GuardedStatus, safe_status
+from arcilogger_worker.alerts.license import check_license
 
 if TYPE_CHECKING:
+    from arcilogger_core.license.state import LicenseStatus
     from arcilogger_worker.service import JobContext
+
+log = logging.getLogger("arcilogger_worker")
 
 __all__ = [
     "STATUS_SECONDS",
@@ -119,9 +127,24 @@ def job_license_check(ctx: JobContext) -> Mapping[str, Any]:
         session.commit()
     if ctx.license_cache is not None:
         ctx.license_cache.put(GuardedStatus(status=status))
+    alerts = _alerts(ctx, status)
     licensing.write_status_file(ctx.layout, status, clock=lambda: ctx.now)
     return {
         "status": status.state,
         "enabled": [key for key in module_keys() if status.module_enabled(key)],
         "recorded": recorded,
+        "alerts": alerts,
     }
+
+
+def _alerts(ctx: JobContext, status: LicenseStatus) -> Mapping[str, Any]:
+    """The licence alerts for ``status``; a failure is only logged and reported (the state is
+    recorded already, and an alert never makes the licence check fail)."""
+    try:
+        with ctx.sessions() as session:
+            report = check_license(session, status, now=ctx.now)
+            session.commit()
+    except Exception as exc:  # whatever went wrong: the job and the 5651 functions go on
+        log.exception("licence alerts failed")
+        return {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    return report

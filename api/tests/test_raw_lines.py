@@ -483,8 +483,8 @@ def test_the_sealer_can_delete_a_spool_file_while_it_is_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The spool file is deleted after the first chunk (the sealer finishing the day): the delete
-    succeeds (on Windows only thanks to delete sharing — CI job python-windows) and the reader
-    still returns the bytes it opened."""
+    succeeds (on Windows only thanks to delete sharing — CI job python-windows-tests) and the
+    reader still returns the bytes it opened."""
     monkeypatch.setattr(rawlines, "CHUNK", 8)
     layout = Layout(tmp_path)
     lines = [f"line {n}".encode() for n in range(1, 20)]

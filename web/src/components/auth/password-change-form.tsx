@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/label';
 import { errorMessage, isApiError, passwordProblemText, type ApiError } from '@/lib/api';
@@ -19,10 +20,24 @@ import {
 interface PasswordChangeFormProps {
   /** The session ended (401): the sign-in page starts again. */
   onSessionLost: (error: ApiError) => void;
+  /** The forced change after sign-in: the current password is the temporary one. */
+  forced?: boolean;
+  /** Changed; the server ended the user's other sessions and renewed this one. */
+  onChanged?: () => void;
+  /** In a dialog: "İptal" beside the submit button. */
+  onCancel?: () => void;
 }
 
-/** "Parolanızı değiştirin": current password, new password twice (`POST /auth/password`). */
-export function PasswordChangeForm({ onSessionLost }: PasswordChangeFormProps) {
+/**
+ * "Parolanızı değiştirin": current password, new password twice (`POST /auth/password`). The
+ * forced change of the sign-in steps, and the user menu's "Parolayı değiştir".
+ */
+export function PasswordChangeForm({
+  onSessionLost,
+  forced = false,
+  onChanged,
+  onCancel,
+}: PasswordChangeFormProps) {
   const { t } = useTranslation();
   const id = useId();
   const change = useChangePassword();
@@ -44,6 +59,9 @@ export function PasswordChangeForm({ onSessionLost }: PasswordChangeFormProps) {
     change.mutate(
       { current_password: current, new_password: password },
       {
+        onSuccess: () => {
+          onChanged?.();
+        },
         onError: (error) => {
           if (isApiError(error) && error.status === 401) {
             onSessionLost(error);
@@ -66,11 +84,21 @@ export function PasswordChangeForm({ onSessionLost }: PasswordChangeFormProps) {
     serverError && policyText === null && !isApiError(serverError, 'credentials_invalid')
       ? errorMessage(serverError)
       : null;
+  const submitButton = (
+    <Button type="submit" busy={change.isPending}>
+      {change.isPending ? t('common.working') : t('password.submit')}
+    </Button>
+  );
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
       {general ? <Alert tone="danger">{general}</Alert> : null}
-      <Field id={`${id}-current`} label={t('password.current')} error={currentError} required>
+      <Field
+        id={`${id}-current`}
+        label={forced ? t('password.currentTemporary') : t('password.current')}
+        error={currentError}
+        required
+      >
         <Input
           id={`${id}-current`}
           type="password"
@@ -121,9 +149,16 @@ export function PasswordChangeForm({ onSessionLost }: PasswordChangeFormProps) {
           }}
         />
       </Field>
-      <Button type="submit" busy={change.isPending}>
-        {change.isPending ? t('common.working') : t('password.submit')}
-      </Button>
+      {onCancel ? (
+        <DialogFooter>
+          <Button variant="secondary" onClick={onCancel}>
+            {t('common.cancel')}
+          </Button>
+          {submitButton}
+        </DialogFooter>
+      ) : (
+        submitButton
+      )}
     </form>
   );
 }

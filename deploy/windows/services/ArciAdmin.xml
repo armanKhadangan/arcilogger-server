@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows service ArciAdmin (WinSW 2.12 configuration, see doc/xmlConfigFile.md of v2.12.0).
+  Install-Arcilogger.ps1 fills in the {{...}} values and runs it as NT SERVICE\ArciAdmin.
+  The administration agent of ADR-0014: it applies the signed requests the API writes into
+  C:\ProgramData\ARCILOGGER\admin\inbox and is the only writer of arcilogger.toml and secrets.json.
+  It has no listener and no administrator rights; the installer grants it explicit rights only
+  (docs/adr/0014-browser-administration.md, contract 2.2). Stopped before the other services and
+  started after them, so no change is applied while they stop or start.
+-->
+<service>
+  <id>ArciAdmin</id>
+  <name>ARCILOGGER Yönetim (Admin)</name>
+  <description>Tarayıcıdan yapılan ayar değişikliklerini doğrular ve uygular; ağ dinlemez, yönetici hakkı yoktur. [Validates and applies the settings changed in the browser; no listener, no administrator rights.]</description>
+  <!-- Isolated Python (-I): no PYTHON* variable of the machine or of this service (registry
+       Services\ArciAdmin\Environment) can put a module on the path; -X utf8 -u replace
+       PYTHONUTF8 and PYTHONUNBUFFERED, which -I ignores. -->
+  <executable>{{INSTALL_DIR}}\venv\Scripts\python.exe</executable>
+  <arguments>-I -X utf8 -u -m arcilogger_core.admin serve --config "{{CONFIG}}"</arguments>
+  <env name="ARCILOGGER_CONFIG" value="{{CONFIG}}"/>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <!-- An apply in progress finishes or rolls back before the agent stops. -->
+  <stoptimeout>60 sec</stoptimeout>
+  <logpath>{{LOG_DIR}}</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

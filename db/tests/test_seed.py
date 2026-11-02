@@ -83,8 +83,9 @@ def test_default_settings_are_seeded(db_session: Session) -> None:
             continue
         assert rows[key].value == value, key
         assert rows[key].updated_by == ":seed"
-    assert rows["nat.public_ips"].value == []
-    assert rows["nat.wan_transip"].value == ""
+    assert rows["nat.egresses"].value == {}  # one implicit double-NAT exit
+    # The Wave 2 NAT keys are converted by revision 0018_nat_egresses, never seeded again.
+    assert not {"nat.public_ips", "nat.wan_transip", "lookup.port_hint"} & set(rows)
     assert rows["lookup.tolerance_seconds"].value == 60
     assert rows["lease.timeout_percent"].value == 110
     assert rows["lookup.max_session_seconds"].value == 86400

@@ -4,7 +4,6 @@ single ``R20-email`` alert, crash safety and the content rule (no log line, no p
 
 from __future__ import annotations
 
-import socket
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -415,16 +414,14 @@ def test_the_hourly_limit_and_its_summary(
 # -- failures and retries -------------------------------------------------------------------------
 
 
-def _closed_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
-
-
 def test_connection_refused_is_retried_with_backoff_then_one_r20_email(
-    sessions: sessionmaker[Session], layout: Layout, smtp_server: FakeSmtp, db_session: Session
+    sessions: sessionmaker[Session],
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    db_session: Session,
+    closed_port: int,
 ) -> None:
-    config = smtp_config(layout, smtp_server, port=_closed_port())
+    config = smtp_config(layout, smtp_server, port=closed_port)
     policy(db_session)
     raise_alert(db_session)
     raise_alert(db_session, key="R15:core-r1")
@@ -457,10 +454,14 @@ def test_connection_refused_is_retried_with_backoff_then_one_r20_email(
 
 
 def test_a_server_failure_stops_the_run_for_the_other_recipients(
-    sessions: sessionmaker[Session], layout: Layout, smtp_server: FakeSmtp, db_session: Session
+    sessions: sessionmaker[Session],
+    layout: Layout,
+    smtp_server: FakeSmtp,
+    db_session: Session,
+    closed_port: int,
 ) -> None:
     """One timeout per run, not one per recipient: the worker loop is not held up."""
-    config = smtp_config(layout, smtp_server, port=_closed_port())
+    config = smtp_config(layout, smtp_server, port=closed_port)
     policy(db_session, **{"alerts.email_recipients": [TO, OTHER]})
     raise_alert(db_session)
     report = notify_at(sessions, config)

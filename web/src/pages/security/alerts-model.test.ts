@@ -14,6 +14,7 @@ import {
   alertViewToSearch,
   alertViewWithSorting,
   canTransition,
+  closeHintKey,
   closesActive,
   DEFAULT_ALERT_VIEW,
   detailRows,
@@ -69,6 +70,15 @@ describe("alert workflow (spec 11, the API's rule)", () => {
     expect(closesActive('acknowledged', 'dismissed')).toBe(true);
     expect(closesActive('open', 'acknowledged')).toBe(false);
     expect(closesActive('resolved', 'dismissed')).toBe(false);
+  });
+
+  it('tells that a closed licence alert stays closed for the same situation', () => {
+    for (const rule of ['R20-license', 'R20-license-limit', 'R20-license-maintenance'])
+      expect(closeHintKey(rule), rule).toBe('security.actions.closeHintLicense');
+    for (const rule of ['R15', 'R20-report', 'R20-licensed', 'r20-license'])
+      expect(closeHintKey(rule), rule).toBe('security.actions.closeHint');
+    expect(tr.security.actions.closeHintLicense).toContain('yeniden açılmaz');
+    expect(en.security.actions.closeHintLicense).toContain('not raised or e-mailed again');
   });
 
   it('finds the active alert a refused re-open names', () => {

@@ -170,6 +170,7 @@ def test_default_jobs_run_against_the_database(
         ("leases.late_evidence", "ok"),
         ("evidence.purge", "ok"),
         ("audit.import", "ok"),
+        ("admin.requests", "skipped"),  # no test e-mail or lease rebuild requested
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
@@ -181,6 +182,7 @@ def test_default_jobs_run_against_the_database(
         ("usage.retention", "ok"),
         ("reports.run_due", "ok"),
         ("reports.purge", "ok"),
+        ("search.counts_backfill", "skipped"),  # no file loaded before the summary table
     ]
     clock.now = tr(DAY, 9)
     assert worker.tick() == [
@@ -189,6 +191,7 @@ def test_default_jobs_run_against_the_database(
         ("leases.recheck_today", "ok"),
         ("leases.late_evidence", "ok"),
         ("audit.import", "ok"),
+        ("admin.requests", "skipped"),
         ("alerts.import", "ok"),
         ("alerts.r15", "ok"),
         ("alerts.system", "ok"),
@@ -197,6 +200,7 @@ def test_default_jobs_run_against_the_database(
         ("usage.today", "ok"),
         ("usage.reattribute", "skipped"),
         ("reports.run_due", "ok"),
+        ("search.counts_backfill", "skipped"),
     ]
     lease = db_session.scalars(select(Lease)).one()
     assert lease.start == tr(DAY, 8)

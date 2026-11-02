@@ -1,0 +1,4487 @@
+{
+ "about": "Answers of the Wave 2 lookup engine for the legacy NAT keys (Wave 3 contract 3.4 E-j), recorded with worker/tests/test_record_legacy_nat.py before the breaking switch; each match is [srcip, srcport, transip, transport, kind, score]. Read by test_lookup_egress.py.",
+ "cases": {
+  "a": {
+   "public_ips": [],
+   "wan_transip": "",
+   "port_hint": false
+  },
+  "b": {
+   "public_ips": [
+    "203.0.113.200"
+   ],
+   "wan_transip": "",
+   "port_hint": false
+  },
+  "b2": {
+   "public_ips": [
+    "203.0.113.200",
+    "203.0.113.201",
+    "203.0.113.202",
+    "203.0.113.203",
+    "203.0.113.204",
+    "203.0.113.205",
+    "203.0.113.206",
+    "203.0.113.207",
+    "203.0.113.208",
+    "203.0.113.209",
+    "203.0.113.210",
+    "203.0.113.211"
+   ],
+   "wan_transip": "",
+   "port_hint": false
+  },
+  "b3": {
+   "public_ips": [
+    "203.0.113.200",
+    "203.0.113.201",
+    "203.0.113.202",
+    "203.0.113.203",
+    "203.0.113.204",
+    "203.0.113.205",
+    "203.0.113.206",
+    "203.0.113.207",
+    "203.0.113.208",
+    "203.0.113.209",
+    "203.0.113.210",
+    "203.0.113.211",
+    "203.0.113.212",
+    "203.0.113.213",
+    "203.0.113.214",
+    "203.0.113.215",
+    "203.0.113.216",
+    "203.0.113.217",
+    "203.0.113.218",
+    "203.0.113.219"
+   ],
+   "wan_transip": "",
+   "port_hint": false
+  },
+  "c": {
+   "public_ips": [],
+   "wan_transip": "100.64.12.9",
+   "port_hint": false
+  },
+  "d": {
+   "public_ips": [
+    "203.0.113.200"
+   ],
+   "wan_transip": "100.64.12.9",
+   "port_hint": false
+  },
+  "e": {
+   "public_ips": [],
+   "wan_transip": "",
+   "port_hint": true
+  },
+  "f": {
+   "public_ips": [
+    "203.0.113.200"
+   ],
+   "wan_transip": "203.0.113.200",
+   "port_hint": false
+  },
+  "g": {
+   "public_ips": [
+    "not an address"
+   ],
+   "wan_transip": "",
+   "port_hint": false
+  },
+  "g2": {
+   "public_ips": [
+    "2001:db8::44",
+    "203.0.113.200"
+   ],
+   "wan_transip": "",
+   "port_hint": false
+  },
+  "g3": {
+   "public_ips": [
+    "127.0.0.1",
+    "203.0.113.200"
+   ],
+   "wan_transip": "",
+   "port_hint": false
+  },
+  "h": {
+   "public_ips": [
+    "100.64.12.9"
+   ],
+   "wan_transip": "",
+   "port_hint": false
+  }
+ },
+ "requests": {
+  "A+port@router": {
+   "moment": "router",
+   "public_ip": "203.0.113.200",
+   "public_port": 52001
+  },
+  "A@router": {
+   "moment": "router",
+   "public_ip": "203.0.113.200"
+  },
+  "A+port@bridge": {
+   "moment": "bridge",
+   "public_ip": "203.0.113.200",
+   "public_port": 52001
+  },
+  "A@bridge": {
+   "moment": "bridge",
+   "public_ip": "203.0.113.200"
+  },
+  "A+port@pool": {
+   "moment": "pool",
+   "public_ip": "203.0.113.200",
+   "public_port": 52001
+  },
+  "A+port@quiet": {
+   "moment": "quiet",
+   "public_ip": "203.0.113.200",
+   "public_port": 52001
+  },
+  "A5+port@router": {
+   "moment": "router",
+   "public_ip": "203.0.113.204",
+   "public_port": 51001
+  },
+  "A5+port@bridge": {
+   "moment": "bridge",
+   "public_ip": "203.0.113.204",
+   "public_port": 52001
+  },
+  "W+port@router": {
+   "moment": "router",
+   "public_ip": "100.64.12.9",
+   "public_port": 51001
+  },
+  "W@router": {
+   "moment": "router",
+   "public_ip": "100.64.12.9"
+  },
+  "W+port@bridge": {
+   "moment": "bridge",
+   "public_ip": "100.64.12.9",
+   "public_port": 52001
+  },
+  "other+port@router": {
+   "moment": "router",
+   "public_ip": "192.0.2.44",
+   "public_port": 51001
+  },
+  "other@router": {
+   "moment": "router",
+   "public_ip": "192.0.2.44"
+  },
+  "other+dest@router": {
+   "moment": "router",
+   "public_ip": "192.0.2.44",
+   "dest_ip": "203.0.113.10",
+   "dest_port": 443
+  },
+  "other+port@bridge": {
+   "moment": "bridge",
+   "public_ip": "192.0.2.44",
+   "public_port": 52001
+  },
+  "other@bridge": {
+   "moment": "bridge",
+   "public_ip": "192.0.2.44"
+  },
+  "other+port@pool": {
+   "moment": "pool",
+   "public_ip": "192.0.2.44",
+   "public_port": 53001
+  },
+  "pool+port@pool": {
+   "moment": "pool",
+   "public_ip": "198.51.100.250",
+   "public_port": 53001
+  },
+  "dest-only@router": {
+   "moment": "router",
+   "dest_ip": "203.0.113.10",
+   "dest_port": 443
+  }
+ },
+ "answers": {
+  "a": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": true,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "b": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "b2": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "b3": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "c": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": true,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "W+port@router": {
+    "mode": "exact",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "d": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "W+port@router": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "e": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": true,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      70
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "f": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "g": {
+   "A+port@router": {
+    "error": "ValueError"
+   },
+   "A@router": {
+    "error": "ValueError"
+   },
+   "A+port@bridge": {
+    "error": "ValueError"
+   },
+   "A@bridge": {
+    "error": "ValueError"
+   },
+   "A+port@pool": {
+    "error": "ValueError"
+   },
+   "A+port@quiet": {
+    "error": "ValueError"
+   },
+   "A5+port@router": {
+    "error": "ValueError"
+   },
+   "A5+port@bridge": {
+    "error": "ValueError"
+   },
+   "W+port@router": {
+    "error": "ValueError"
+   },
+   "W@router": {
+    "error": "ValueError"
+   },
+   "W+port@bridge": {
+    "error": "ValueError"
+   },
+   "other+port@router": {
+    "error": "ValueError"
+   },
+   "other@router": {
+    "error": "ValueError"
+   },
+   "other+dest@router": {
+    "error": "ValueError"
+   },
+   "other+port@bridge": {
+    "error": "ValueError"
+   },
+   "other@bridge": {
+    "error": "ValueError"
+   },
+   "other+port@pool": {
+    "error": "ValueError"
+   },
+   "pool+port@pool": {
+    "error": "ValueError"
+   },
+   "dest-only@router": {
+    "error": "ValueError"
+   }
+  },
+  "g2": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "g3": {
+   "A+port@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A@router": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A+port@bridge": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "A5+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "W+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "other+dest@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   },
+   "other+port@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other@bridge": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      90
+     ]
+    ]
+   }
+  },
+  "h": {
+   "A+port@router": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A@router": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A+port@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "A+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "A+port@quiet": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@router": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "A5+port@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "W+port@router": {
+    "mode": "exact",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "exact",
+      100
+     ]
+    ]
+   },
+   "W@router": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      51001,
+      "100.64.12.9",
+      51001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.42.57",
+      51005,
+      "100.64.12.9",
+      51005,
+      "candidate",
+      58
+     ],
+     [
+      "172.20.60.142",
+      51002,
+      "100.64.12.9",
+      51002,
+      "candidate",
+      45
+     ]
+    ]
+   },
+   "W+port@bridge": {
+    "mode": "candidates",
+    "double_nat": true,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@router": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other@router": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+dest@router": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   },
+   "other+port@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other@bridge": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      52001,
+      "203.0.113.200",
+      52001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      52002,
+      "203.0.113.200",
+      52002,
+      "candidate",
+      61
+     ]
+    ]
+   },
+   "other+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "pool+port@pool": {
+    "mode": "candidates",
+    "double_nat": false,
+    "matches": [
+     [
+      "172.20.42.57",
+      53001,
+      "198.51.100.250",
+      53001,
+      "candidate",
+      65
+     ],
+     [
+      "172.20.60.142",
+      53002,
+      "198.51.100.250",
+      53002,
+      "candidate",
+      65
+     ]
+    ]
+   },
+   "dest-only@router": {
+    "mode": "none",
+    "double_nat": false,
+    "matches": []
+   }
+  }
+ }
+}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import re
 import shlex
 import subprocess
 import sys
@@ -10,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from arcilogger_core.admin.contract import EVENT_SOURCE, Event
 from arcilogger_core.cli import _build_parser as core_parser
 from arcilogger_db.backup import DUMP_TIMEOUT_SECONDS
 from arcilogger_db.cli import _build_parser as db_parser
@@ -26,10 +29,33 @@ EXPECTED = {
     "Retention": "retention",
     "Credit": "credit",
     "ClockCheck": "clock-check",
+    # What the web interface asks for (credit query, time-stamp and replica test; ADR-0014).
+    "Requests": "requests run",
 }
 #: Task → command of ``python -I -m arcilogger_db`` (the scheduled database backup, ADR-0009).
 EXPECTED_DB = {"Backup": "backup run"}
+#: The one task that is neither LOCAL SERVICE nor Python: ApplySystem (SYSTEM) runs
+#: Sync-ArciSystem.ps1 of the program folder with the system's Windows PowerShell (ADR-0014).
+SYSTEM_TASK = "ApplySystem"
+WINDOWS_POWERSHELL = r"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+SYNC_ARGUMENTS = (
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{{SCRIPTS}}\\Sync-ArciSystem.ps1"'
+)
+#: Tasks woken through the Application log (source ARCILOGGER-Admin): the event only wakes the
+#: task, the signed request file is the authority.
+WAKE_EVENTS = {
+    "Seal": Event.SEAL_REQUESTED,
+    "Requests": Event.TASK_REQUESTED,
+    "ApplySystem": Event.SYSTEM_SYNC_REQUESTED,
+}
+#: A wake-up during a run queues one more run instead of being dropped (IgnoreNew elsewhere).
+QUEUED = {"Requests", "ApplySystem"}
 PARSERS = {"arcilogger_core": core_parser, "arcilogger_db": db_parser}
+
+
+def _has_command(parser: argparse.ArgumentParser, name: str) -> bool:
+    actions = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+    return bool(actions) and name in actions[0].choices
 
 
 def _tasks() -> list[Path]:
@@ -37,19 +63,31 @@ def _tasks() -> list[Path]:
 
 
 def test_every_job_has_a_definition() -> None:
-    assert {p.stem for p in _tasks()} == set(EXPECTED) | set(EXPECTED_DB)
+    assert {p.stem for p in _tasks()} == set(EXPECTED) | set(EXPECTED_DB) | {SYSTEM_TASK}
 
 
 @pytest.mark.parametrize("path", _tasks(), ids=lambda p: p.stem)
 def test_definition(path: Path) -> None:
     root = ET.parse(path).getroot()  # noqa: S314 - our own repository file
-    assert root.find("t:Principals/t:Principal/t:UserId", NS).text == "S-1-5-19"  # type: ignore[union-attr]
+    principal = root.find("t:Principals/t:Principal", NS)
+    assert principal is not None
     settings = root.find("t:Settings", NS)
     assert settings is not None
     assert settings.findtext("t:StartWhenAvailable", namespaces=NS) == "true"
-    assert settings.findtext("t:MultipleInstancesPolicy", namespaces=NS) == "IgnoreNew"
-    assert root.findtext("t:Actions/t:Exec/t:Command", namespaces=NS) == "{{PYTHON}}"
+    policy = "Queue" if path.stem in QUEUED else "IgnoreNew"
+    assert settings.findtext("t:MultipleInstancesPolicy", namespaces=NS) == policy
+    assert root.findtext("t:RegistrationInfo/t:URI", namespaces=NS) == f"\\ARCILOGGER\\{path.stem}"
+    command = root.findtext("t:Actions/t:Exec/t:Command", namespaces=NS)
     arguments = root.findtext("t:Actions/t:Exec/t:Arguments", namespaces=NS) or ""
+    if path.stem == SYSTEM_TASK:
+        assert principal.findtext("t:UserId", namespaces=NS) == "S-1-5-18"
+        assert principal.findtext("t:RunLevel", namespaces=NS) == "HighestAvailable"
+        assert command == WINDOWS_POWERSHELL
+        assert arguments == SYNC_ARGUMENTS
+        return
+    assert principal.findtext("t:UserId", namespaces=NS) == "S-1-5-19"
+    assert principal.findtext("t:RunLevel", namespaces=NS) == "LeastPrivilege"
+    assert command == "{{PYTHON}}"
     # Python isolated (-I before -m, contract 9.6): no PYTHON* variable can put a module on the
     # path of an evidence job.
     isolated, flag, module, command = arguments.split(" ", 3)
@@ -59,8 +97,43 @@ def test_definition(path: Path) -> None:
         assert (module, command) == ("arcilogger_db", EXPECTED_DB[path.stem])
     else:
         assert (module, command) == ("arcilogger_core", EXPECTED[path.stem])
-    PARSERS[module]().parse_args(shlex.split(command))  # the CLI accepts it
-    assert root.findtext("t:RegistrationInfo/t:URI", namespaces=NS) == f"\\ARCILOGGER\\{path.stem}"
+    parser = PARSERS[module]()
+    if path.stem == "Requests" and not _has_command(parser, "requests"):
+        pytest.skip("arcilogger-core requests run arrives with WP2 (contract 4.3)")
+    parser.parse_args(shlex.split(command))  # the CLI accepts it
+
+
+@pytest.mark.parametrize("name", sorted(WAKE_EVENTS))
+def test_wake_up_through_the_application_log(name: str) -> None:
+    """Seal now, the task requests and the system sync wake their task with an Event Log entry
+    of ARCILOGGER-Admin (contract 2.14, 2.16); the schedule stays as the safety net."""
+    root = ET.parse(TASKS / f"{name}.xml").getroot()  # noqa: S314
+    triggers = root.find("t:Triggers", NS)
+    assert triggers is not None
+    events = triggers.findall("t:EventTrigger", NS)
+    assert len(events) == 1
+    assert events[0].findtext("t:Enabled", namespaces=NS) == "true"
+    query = ET.fromstring(events[0].findtext("t:Subscription", namespaces=NS) or "")  # noqa: S314
+    select = query.find("Query/Select")
+    assert query.tag == "QueryList"
+    assert select is not None
+    assert select.get("Path") == "Application"
+    expected = f"*[System[Provider[@Name='{EVENT_SOURCE}'] and EventID={int(WAKE_EVENTS[name])}]]"
+    assert select.text == expected
+    calendar = triggers.find("t:CalendarTrigger", NS)
+    assert calendar is not None
+    assert calendar.findtext("t:Repetition/t:Interval", namespaces=NS) == "PT5M"
+    assert calendar.findtext("t:ScheduleByDay/t:DaysInterval", namespaces=NS) == "1"
+
+
+def test_tasks_woken_by_requests_end_in_time() -> None:
+    """The agent reports a task request without a result after 15 minutes (contract 2.9);
+    ApplySystem has 10 minutes, the sealing run keeps its two hours."""
+    limits = {}
+    for name in WAKE_EVENTS:
+        root = ET.parse(TASKS / f"{name}.xml").getroot()  # noqa: S314
+        limits[name] = root.findtext("t:Settings/t:ExecutionTimeLimit", namespaces=NS)
+    assert limits == {"Seal": "PT2H", "Requests": "PT15M", "ApplySystem": "PT10M"}
 
 
 def test_seal_runs_after_midnight_and_retries_every_five_minutes() -> None:
@@ -87,10 +160,26 @@ def test_backup_runs_daily_after_sealing() -> None:
 
 
 def test_register_script_registers_every_definition() -> None:
-    """Register-ArciTasks.ps1 takes every XML file of the folder, so an upgrade adds Backup."""
+    """Register-ArciTasks.ps1 takes every XML file of the folder, so an upgrade adds Backup,
+    Requests and ApplySystem. It fills in the venv's Python and the program's script folder
+    (-ScriptDirectory, its default set in the body: ADR-0007 section 7) and refuses a definition
+    whose script is not in that folder."""
     script = (TASKS.parent / "scripts" / "Register-ArciTasks.ps1").read_text(encoding="utf-8-sig")
     assert "Get-ChildItem -LiteralPath $TaskDirectory -Filter *.xml" in script
     assert "Register-ScheduledTask -TaskName $_.BaseName" in script
+    assert '.Replace("{{PYTHON}}", $Python).Replace("{{SCRIPTS}}", $ScriptDirectory)' in script
+    default = (
+        'if (-not $ScriptDirectory) { $ScriptDirectory = Join-Path $PSScriptRoot "..\\scripts" }'
+    )
+    assert default in script
+    assert "Betik bulunamadı [script not found]" in script
+    used = {
+        name
+        for path in _tasks()
+        for name in re.findall(r"\{\{SCRIPTS\}\}\\([\w.-]+\.ps1)", path.read_text("utf-8"))
+    }
+    assert used == {"Sync-ArciSystem.ps1"}
+    assert all((TASKS.parent / "scripts" / name).is_file() for name in used)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Task Scheduler is Windows-only")
@@ -112,9 +201,9 @@ def test_task_scheduler_accepts_the_definitions(tmp_path: Path) -> None:
         pytest.skip("not running as administrator")
     for path in _tasks():
         xml_file = tmp_path / path.name
-        xml_file.write_text(
-            path.read_text(encoding="utf-8").replace("{{PYTHON}}", sys.executable), encoding="utf-8"
-        )
+        definition = path.read_text(encoding="utf-8").replace("{{PYTHON}}", sys.executable)
+        scripts = str(TASKS.parent / "scripts")
+        xml_file.write_text(definition.replace("{{SCRIPTS}}", scripts), encoding="utf-8")
         script = (
             f"$xml = Get-Content -LiteralPath '{xml_file}' -Raw -Encoding UTF8; "
             f"Register-ScheduledTask -TaskName '{path.stem}' -TaskPath '\\ARCILOGGER-CI\\' "

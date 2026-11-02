@@ -102,6 +102,8 @@ def test_rebuild_a_range(
 
 def test_run_starts_writes_status_and_stops(pg_dsn: str, tmp_path: Path, db_engine: Engine) -> None:
     config = write_config(tmp_path, pg_dsn)
+    # The installer's record of the data root (with the BOM Windows PowerShell 5.1 may write).
+    (tmp_path / "data-root.txt").write_text(f"\ufeff{tmp_path / 'data'}\n", encoding="utf-8")
     stop = threading.Event()
     result: list[int] = []
     thread = threading.Thread(target=lambda: result.append(run(config, stop=stop)))
@@ -120,6 +122,33 @@ def test_run_starts_writes_status_and_stops(pg_dsn: str, tmp_path: Path, db_engi
     assert status["state"] == "stopped"
     assert status["jobs"]["leases.incremental"]["last_status"] == "ok"
     assert (tmp_path / "data" / "logs" / "worker.log").exists()
+
+
+def test_run_refuses_a_configuration_that_moves_its_folders(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR-0014 (contract Day 0 notes D0-2, WP2-1): the administration agent may write
+    ``arcilogger.toml``. ``secrets_dir`` must stay the folder of the configuration file and
+    ``data_dir`` the data root the installer recorded, or the worker does not start (it would
+    read a password store, and import evidence and alert files, of the writer's choosing)."""
+    config = write_config(tmp_path, None)
+    text = config.read_text(encoding="utf-8")
+    config.write_text(f'secrets_dir = "{(tmp_path / "elsewhere").as_posix()}"\n' + text)
+    assert run(config) == EXIT_CONFIG
+    assert "secrets_dir" in capsys.readouterr().err
+    config.write_text(text, encoding="utf-8")
+    record = tmp_path / "data-root.txt"
+    record.write_text((tmp_path / "other").as_posix() + "\n", encoding="utf-8")
+    assert run(config) == EXIT_CONFIG
+    assert "data_dir" in capsys.readouterr().err
+    data = (tmp_path / "data").as_posix()
+    # A record that exists but cannot be used fails closed, even when it names the right folder
+    # (UTF-16, as Notepad may save it).
+    for unusable in (b"relative/data\n", f"{data}\n{data}\n".encode(), data.encode("utf-16")):
+        record.write_bytes(unusable)
+        assert run(config) == EXIT_CONFIG
+        assert "data-root.txt" in capsys.readouterr().err
+    assert not (tmp_path / "data").exists()  # no log, no status file below a refused data_dir
 
 
 def test_rebuild_with_unusable_settings_fails_cleanly(

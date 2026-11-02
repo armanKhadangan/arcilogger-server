@@ -301,6 +301,44 @@ def test_known_sources(app_session_factory: sessionmaker[Session], api_config: C
         assert not known_source(session, config, "core-r9")
 
 
+def test_a_new_senders_line_opens_before_ingest_has_seen_it(
+    client: TestClient,
+    login_as: Login,
+    app_session_factory: sessionmaker[Session],
+    api_config: Config,
+    layout: Layout,
+) -> None:
+    """Contract R26: Canlı Akış shows an unknown sender's line as soon as the collector wrote
+    it; its raw drawer opens although ingest has added no ``sources`` row yet. Only an existing
+    ``unknown-<address>`` folder counts: other names and missing folders stay refused."""
+    line = format_line(tr(DAY, 9), "198.51.100.23", b"<13>Oct 12 09:00:00 yeni-cihaz test")
+    for folder in ("unknown-198.51.100.23", "unknown-2001-db8--23", "unknown-banana"):
+        path = layout.spool_file(folder, DAY)
+        path.parent.mkdir(parents=True)
+        path.write_bytes(line)
+    reader(client, login_as, app_session_factory)
+    for folder in ("unknown-198.51.100.23", "unknown-2001-db8--23"):
+        response = get(client, source=folder, line=1)
+        assert response.status_code == 200, response.text
+        assert base64.b64decode(response.json()["raw_base64"]) == line.rstrip(b"\n")
+    for folder, status, code in (
+        ("unknown-banana", 404, "raw_source_unknown"),  # not an address
+        ("unknown-198.51.100.24", 404, "raw_source_unknown"),  # no such folder
+        ("unknown-198.51.100.23/../secrets", 422, "raw_source_invalid"),
+    ):
+        response = get(client, source=folder, line=1)
+        assert (response.status_code, response.json()["error"]["code"]) == (status, code)
+    with app_session_factory() as session:
+        assert session.scalars(select(Source)).all() == []  # nothing was added
+        views = session.scalars(select(AuditLog).where(AuditLog.action == "raw.view")).all()
+        assert [view.details["source"] for view in views] == [
+            "unknown-198.51.100.23",
+            "unknown-2001-db8--23",
+        ]
+        assert known_source(session, api_config, "unknown-198.51.100.23", layout)
+        assert not known_source(session, api_config, "unknown-198.51.100.23")  # no layout given
+
+
 def test_gzip_members_and_spool_tail(
     client: TestClient,
     login_as: Login,

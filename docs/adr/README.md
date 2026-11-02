@@ -5,7 +5,7 @@
 | [0001](0001-windows-server-browser-only.md) | Windows server, browser-only access |
 | [0002](0002-own-syslog-collector.md) | Own syslog collector; the raw spool is the queue |
 | [0003](0003-integrity-on-windows.md) | Evidence integrity and immutability on Windows |
-| [0004](0004-web-tooling.md) | Web interface tooling |
+| [0004](0004-web-tooling.md) | Web interface tooling; amendment 2026-10-25: the shipped bundle has no UI kit page and no source maps |
 | [0005](0005-database-and-mvp-contracts.md) | PostgreSQL 16 (+ optional TimescaleDB), SQLAlchemy 2, Alembic, psycopg 3, reportlab for PDF reports; MVP contracts |
 | [0006](0006-standalone-verifier.md) | Standalone evidence verifier: one file, Python standard library only |
 | [0007](0007-windows-installer.md) | Windows installer: offline bundle, WinSW services, operator-installed PostgreSQL; amendment 2026-10-20: the organisation's values (`-SiteName`, `-NtpServer`, `-AdminAddress`) have no default |
@@ -15,3 +15,6 @@
 | [0011](0011-usage-analytics.md) | Usage analytics: estimated time per person, site and category from connection logs (rollups, attribution at T, pseudonyms optional) |
 | [0012](0012-scheduled-usage-reports.md) | Scheduled usage reports: made and sent by the worker, shared PDF building blocks |
 | [0013](0013-offline-licensing.md) | Offline licensing: Ed25519-signed licence files, request codes, paid modules (usage analytics, scheduled reports, bulk CSV import), 5651 Temel never locked, trusted time, threat model |
+| [0014](0014-browser-administration.md) | Browser administration: an unprivileged administration agent (ArciAdmin) applies Ed25519-signed request files of the API, an input-free SYSTEM step (ApplySystem) syncs the firewall and the clock, executables checked at run time, live reload without a restart |
+| [0015](0015-search-live-sources.md) | Search, live tail and sources: one query language compiled to bound SQL and a Python predicate, typed tables drive typed queries, time-budgeted scans, an exact hourly summary table written by ingest, a spool-tail hub for the live tail |
+| [0016](0016-fortigate-dhcp-and-internet-exits.md) | FortiGate DHCP as lease evidence (logid map, logged lease time, only configured senders, loud checks), srcmac as labelled partial evidence, per-exit NAT for several internet lines (`nat.egresses`) |

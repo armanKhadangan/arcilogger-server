@@ -15,14 +15,14 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import day_window, site_day, utc_now
-from arcilogger_db.models import FgTraffic, Message, MtArp, MtDhcp
+from arcilogger_db.models import FgDhcp, FgTraffic, Message, MtArp, MtDhcp
 from arcilogger_db.settings import get_setting
 from arcilogger_worker.lookup.texts import explain
 from arcilogger_worker.lookup.types import DataWindow, Explanation
 
 #: Tables whose presence means "this day is in the database" (every ingested line has a
 #: ``messages`` row; the typed tables are what a lookup actually reads).
-_TABLES = (Message, FgTraffic, MtDhcp, MtArp)
+_TABLES = (Message, FgTraffic, MtDhcp, MtArp, FgDhcp)
 
 
 def data_window(

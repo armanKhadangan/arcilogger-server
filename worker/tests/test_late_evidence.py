@@ -167,3 +167,27 @@ def test_the_service_picks_up_a_weekend_backlog(
     )
     assert outcome.mode == "internal"
     assert SEEN_KEY in get_settings(db_session)
+
+
+def test_late_fortigate_dhcp_lines_rebuild_their_day(
+    db_session: Session, evidence: Evidence
+) -> None:
+    """ADR-0016: FortiGate DHCP lines that ingest loads late are counted per raw day like every
+    other line, so their day is rebuilt and they become leases."""
+    evidence.fortigate_dhcp(tr(FRIDAY, 7), "172.20.42.90", "00:00:5e:00:53:90")
+    set_watermark(db_session, tr(MONDAY, 8))
+    db_session.commit()
+    rebuild_days(db_session, FRIDAY, MONDAY)
+    assert run_late_evidence(db_session).late_days == []
+    evidence.fortigate_dhcp(tr(SATURDAY, 10), "172.20.42.57", "00:00:5e:00:53:57",
+                            hostname="PLN-PC14")  # fmt: skip
+    evidence.fortigate_dhcp(tr(SATURDAY, 18), "172.20.42.57", "00:00:5e:00:53:57",
+                            logid="0100026002", dhcp_msg="Release", lease=None)  # fmt: skip
+    db_session.commit()
+    report = run_late_evidence(db_session, now=tr(MONDAY, 8, 5))
+    db_session.commit()
+    assert report.late_days == [SATURDAY.isoformat()]
+    lease = db_session.scalars(select(Lease).where(Lease.ip == "172.20.42.57")).one()
+    assert (lease.start, lease.end, lease.end_reason, lease.source_table) == (
+        tr(SATURDAY, 10), tr(SATURDAY, 18), "dhcp", "fg_dhcp",
+    )  # fmt: skip

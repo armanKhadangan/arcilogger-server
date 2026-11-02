@@ -8,7 +8,9 @@
     vault/<YYYY>/<MM>/<DD>/manifest-<day>.json and manifest-<day>.json.zd
     vault/deletions/                           sealed deletion records and the chain anchor
     exports/                                   evidence packages
-    state/                                     job state, collector status, clock samples
+    state/                                     job state, service status files, clock samples
+    state/requests/                            signed task requests of the browser
+                                               administration and their results (ADR-0014)
     logs/                                      service logs
 """
 
@@ -17,9 +19,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 SPOOL_SUFFIX = ".log"
 AUDIT_SOURCE = "_audit"
+
+#: Queues of signed task requests (``state/requests/<queue>/<id>.json``): ``seal`` for the Seal
+#: task, ``tasks`` for the Requests task (credit query, TSA test, replica test).
+RequestQueue = Literal["seal", "tasks"]
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,34 @@ class Layout:
     @property
     def collector_status(self) -> Path:
         return self.state / "collector-status.json"
+
+    @property
+    def ingest_status(self) -> Path:
+        return self.state / "ingest-status.json"
+
+    @property
+    def worker_status(self) -> Path:
+        return self.state / "worker-status.json"
+
+    @property
+    def requests(self) -> Path:
+        """Signed task requests (``arcilogger_core.admin.contract.TaskRequest``): the
+        administration agent writes them, the LOCAL SERVICE tasks run and delete them."""
+        return self.state / "requests"
+
+    def request_dir(self, queue: RequestQueue) -> Path:
+        """``state/requests/seal`` (Seal task) or ``state/requests/tasks`` (Requests task)."""
+        return self.requests / queue
+
+    @property
+    def request_results(self) -> Path:
+        """``<task request id>.json`` results written by the tasks (kept 7 days)."""
+        return self.requests / "results"
+
+    @property
+    def request_seen(self) -> Path:
+        """The tasks' ledger: an empty file ``<task request id>`` per request taken (7 days)."""
+        return self.requests / "seen"
 
     @property
     def alerts(self) -> Path:

@@ -59,6 +59,43 @@ export const routes: RouteObject[] = [
               },
             ],
           },
+          // Kaynaklar, Canlı Akış and Arama belong to 5651 Temel: no licence module gates them.
+          {
+            element: <PermissionGate anyOf={navItem('sources').permissions} />,
+            children: [
+              {
+                path: 'sources',
+                // Reads the sources' state; they are edited in Ayarlar → Kaynaklar.
+                lazy: async () => ({
+                  Component: (await import('@/pages/sources/sources-page')).SourcesHealthPage,
+                }),
+              },
+            ],
+          },
+          {
+            element: <PermissionGate anyOf={navItem('live').permissions} />,
+            children: [
+              {
+                path: 'live',
+                lazy: async () => ({
+                  Component: (await import('@/pages/live/live-page')).LivePage,
+                }),
+              },
+            ],
+          },
+          {
+            element: <PermissionGate anyOf={navItem('search').permissions} />,
+            children: [
+              {
+                path: 'search',
+                // The top bar shows the global time range only on routes with this handle.
+                handle: { timeRange: true },
+                lazy: async () => ({
+                  Component: (await import('@/pages/search/search-page')).SearchPage,
+                }),
+              },
+            ],
+          },
           {
             element: <PermissionGate anyOf={navItem('security').permissions} />,
             children: [
@@ -189,18 +226,91 @@ export const routes: RouteObject[] = [
               },
             ],
           },
+          // The browser administration (ADR-0014): machine configuration, database settings,
+          // the change history. Each page loads when it is opened.
           {
-            element: <PermissionGate anyOf={UI_KIT_ITEM.permissions} />,
+            element: <PermissionGate anyOf={['settings.manage']} />,
             children: [
               {
-                path: 'ui-kit',
-                // Charts and demo data load only when the page is opened.
+                path: 'settings/general',
                 lazy: async () => ({
-                  Component: (await import('@/pages/ui-kit/ui-kit-page')).UiKitPage,
+                  Component: (await import('@/pages/settings/general-page')).GeneralPage,
                 }),
+              },
+              {
+                path: 'settings/application',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/application-page')).ApplicationPage,
+                }),
+              },
+              {
+                path: 'settings/kamusm',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/kamusm-page')).KamusmPage,
+                }),
+              },
+              {
+                path: 'settings/email',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/email-page')).EmailPage,
+                }),
+              },
+              {
+                path: 'settings/replica',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/replica-page')).ReplicaPage,
+                }),
+              },
+              {
+                path: 'settings/retention',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/retention-page')).RetentionPage,
+                }),
+              },
+              {
+                path: 'settings/backup',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/backup-page')).BackupPage,
+                }),
+              },
+              {
+                path: 'settings/history',
+                lazy: async () => ({
+                  Component: (await import('@/pages/settings/history-page')).HistoryPage,
+                }),
+              },
+              // The sources need `sources.manage` too (the configuration is read with
+              // `settings.manage`).
+              {
+                element: <PermissionGate anyOf={['sources.manage']} />,
+                children: [
+                  {
+                    path: 'settings/sources',
+                    lazy: async () => ({
+                      Component: (await import('@/pages/settings/sources-page')).SourcesPage,
+                    }),
+                  },
+                ],
               },
             ],
           },
+          // Developer page: not in the bundle the installer ships (`UI_KIT_ITEM` is null there).
+          ...(UI_KIT_ITEM
+            ? [
+                {
+                  element: <PermissionGate anyOf={UI_KIT_ITEM.permissions} />,
+                  children: [
+                    {
+                      path: 'ui-kit',
+                      // Charts and demo data load only when the page is opened.
+                      lazy: async () => ({
+                        Component: (await import('@/pages/ui-kit/ui-kit-page')).UiKitPage,
+                      }),
+                    },
+                  ],
+                },
+              ]
+            : []),
           { path: '*', element: <NotFoundPage /> },
         ],
       },

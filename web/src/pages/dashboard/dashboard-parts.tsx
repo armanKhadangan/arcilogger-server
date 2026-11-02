@@ -4,13 +4,15 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { SimpleTooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /**
  * A block of the Panel: icon and title, an optional status badge, and — when the user may open
- * it — a link to the page with the details (spec 12.3 item 2: "KPIs link to their pages").
+ * it — a link to the page with the details in the card's footer (spec 12.3 item 2: "KPIs link
+ * to their pages"). The title wraps instead of being cut ("Log...", contract 2.17): it takes the
+ * header's width, and the badge moves under it when both do not fit on one line.
  */
 export function DashCard({
   title,
@@ -39,27 +41,27 @@ export function DashCard({
   const { t } = useTranslation();
   return (
     <Card className={cn('flex min-w-0 flex-col', className)} data-testid={testId}>
-      <CardHeader className="items-center">
-        <CardTitle className="flex min-w-0 items-center gap-2">
+      <CardHeader className="flex-wrap items-center gap-x-2 gap-y-1">
+        <CardTitle className="flex min-w-0 flex-1 basis-[12rem] items-center gap-2 break-words">
           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-strong" />
-          <span className="truncate">{title}</span>
+          <span className="min-w-0 break-words">{title}</span>
           {estimate ? <EstimateHint text={estimate} /> : null}
         </CardTitle>
-        <div className="flex shrink-0 items-center gap-2">
-          {status}
-          {to && page ? (
-            <Link
-              to={to}
-              className="inline-flex items-center gap-1 rounded-sm text-13 font-medium whitespace-nowrap text-accent-ink hover:underline"
-              aria-label={t('dashboard.openPage', { page })}
-            >
-              {page}
-              <ArrowRight aria-hidden="true" className="size-3.5" />
-            </Link>
-          ) : null}
-        </div>
+        {status ? <div className="ml-auto flex items-center gap-2">{status}</div> : null}
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-3">{children}</CardContent>
+      {to && page ? (
+        <CardFooter className="py-2.5">
+          <Link
+            to={to}
+            className="inline-flex items-center gap-1 rounded-sm text-13 font-medium text-accent-ink hover:underline"
+            aria-label={t('dashboard.openPage', { page })}
+          >
+            {page}
+            <ArrowRight aria-hidden="true" className="size-3.5" />
+          </Link>
+        </CardFooter>
+      ) : null}
     </Card>
   );
 }

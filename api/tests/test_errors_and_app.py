@@ -34,6 +34,8 @@ EXPECTED_ROUTERS = {
     "/vlans": "devices",
     "/imports": "devices",
     "/sources": "sources",
+    # Canlı Akış, the live tail of the raw spool (contract 2.14).
+    "/live": "live",
     # Kullanım (spec 10, docs/MVP-CONTRACTS.md section 12).
     "/usage": "usage",
     # The "Güvenlik" page and the "Panel" (docs/MVP-CONTRACTS.md section 14).
@@ -43,6 +45,13 @@ EXPECTED_ROUTERS = {
     "/reports": "reports",
     # The licence page and upload (licensing contract 6.1-6.3).
     "/license": "license",
+    # Ayarlar: the browser administration (ADR-0014, docs/MVP-CONTRACTS.md section 16).
+    "/admin": "admin",
+    "/admin/requests": "admin",
+    "/admin/actions": "admin",
+    "/settings": "settings",
+    # Arama (ADR-0015, docs/MVP-CONTRACTS.md section 17).
+    "/search": "search",
 }
 
 
@@ -175,10 +184,20 @@ def test_serve_uses_configuration(
     assert seen["reload"] is False
     assert seen["proxy_headers"] is True
     assert seen["forwarded_allow_ips"] == "127.0.0.1"
+    assert seen["timeout_graceful_shutdown"] == 5  # an open live tail never holds a stop
     assert isinstance(seen["app"], FastAPI)
     assert cli.main(["--config", str(config), "serve", "--port", "9000"]) == 0
     assert seen["port"] == 9000
+    assert seen["app"].state.arci.config_path == config  # reloaded, the admin folder beside it
     assert cli.main(["serve", "--config", str(tmp_path / "missing.toml")]) == 2
+    # A configuration that moves the secret store away from its own folder is refused.
+    moved = tmp_path / "moved.toml"
+    moved.write_text(
+        f'data_dir = "{(tmp_path / "d").as_posix()}"\nsecrets_dir = "{tmp_path.as_posix()}/x"\n',
+        encoding="utf-8",
+    )
+    assert cli.main(["serve", "--config", str(moved)]) == 2
+    assert "secrets_dir" in capsys.readouterr().err
     assert cli.main(["version"]) == 0
     assert f"ARCILOGGER api {__version__}" in capsys.readouterr().out
     assert cli.main([]) == 2

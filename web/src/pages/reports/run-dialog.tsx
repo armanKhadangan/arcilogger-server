@@ -1,5 +1,5 @@
 import { Play } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -62,7 +62,13 @@ export function RunDialog({
   const open = schedule !== null;
   const noRecipients = (schedule?.recipients.length ?? 0) === 0;
 
-  useEffect(() => {
+  // The form begins anew while rendering when the dialog opens (and again when the schedule's
+  // recipients come or go), so its first frame never shows the previous period or choice to send:
+  // an effect would run only after that frame.
+  const openFor = open ? noRecipients : undefined;
+  const [begunFor, setBegunFor] = useState<boolean | undefined>(undefined);
+  if (openFor !== begunFor) {
+    setBegunFor(openFor);
     if (open) {
       setCustom(false);
       setPeriod(EMPTY_PERIOD);
@@ -70,7 +76,7 @@ export function RunDialog({
       setSend(!noRecipients);
       setFailure(null);
     }
-  }, [open, noRecipients]);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();

@@ -150,10 +150,28 @@ describe('Sidebar licence marks', () => {
       '/reports',
     );
     expect(within(nav).getAllByTestId('nav-lock')).toHaveLength(2);
-    expect(within(nav).getByRole('link', { name: '5651 Sorgu' })).not.toHaveAttribute(
-      'data-locked',
-    );
+    for (const name of ['5651 Sorgu', 'Kaynaklar', 'Canlı Akış', 'Arama'])
+      expect(within(nav).getByRole('link', { name })).not.toHaveAttribute('data-locked');
   });
+
+  it.each([
+    ['/sources', 'Kaynaklar'],
+    ['/live', 'Canlı Akış'],
+    ['/search', 'Arama'],
+  ])(
+    'opens %s and highlights its entry in every licence state (5651 Temel)',
+    async (path, label) => {
+      signedIn(licenseSample('expired'));
+      renderApp(path);
+      const nav = await screen.findByRole('navigation', { name: 'Ana menü' });
+      expect(await screen.findByRole('heading', { level: 1, name: label })).toBeInTheDocument();
+      await within(nav).findAllByTestId('nav-lock');
+      const link = within(nav).getByRole('link', { name: label });
+      expect(link).toHaveAttribute('aria-current', 'page');
+      expect(link).not.toHaveAttribute('data-locked');
+      expect(within(link).getByTestId('active-bar')).toBeInTheDocument();
+    },
+  );
 
   it('marks the collapsed rail too, in the link name', async () => {
     signedIn(licenseSample('expired'), true);

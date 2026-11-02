@@ -373,6 +373,7 @@ def test_license_check_records_state_changes_once(
         "status": "trial",
         "enabled": ["core_5651", "usage_analytics", "usage_reports", "bulk_import"],
         "recorded": ["state"],
+        "alerts": {"found": [], "opened": [], "resolved": []},  # 14 days of trial left
     }
     (state,) = events(db_session, "state")
     assert (state.details["from"], state.details["to"]) == (None, "trial")

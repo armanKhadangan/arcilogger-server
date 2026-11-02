@@ -43,6 +43,18 @@ Fiyatlar üründe yer almaz.
 | `usage_reports` | Zamanlanmış kullanım raporları | Scheduled usage reports | Kullanım raporlarının zamanlanmış olarak üretilip e-postayla gönderilmesi: **Raporlar** sayfası | Kullanım analizi |
 | `bulk_import` | Toplu içe aktarma (CSV) | Bulk import (CSV) | Kişilerin ve cihaz atamalarının CSV dosyasından toplu içe aktarılması (Cihazlar ve Kişiler → **Aktarım** sekmesinin içe aktarma bölümü); elle giriş ve CSV dışa aktarma her zaman açıktır | — |
 
+**Kullanım modüllerinin veri ön koşulu:** Kullanım analizi ve Zamanlanmış kullanım raporları
+yalnızca FortiGate kayıtlarından hesaplanır: trafik kayıtları (uzun oturumlar için ara kayıtlarla),
+web filtresi, DNS filtresi, uygulama kontrolü ve SSL denetimi kayıtları. Yalnızca özel kaynak
+adreslerinden (RFC 1918 blokları ve IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar (ör.
+100.64.0.0/10 ya da içeride kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez.
+Trafik cihaza ve kişiye DHCP sunucusunun (MikroTik ya da FortiGate) kira kayıtlarıyla (ve `ARP-LOG`
+ile) bağlanır; kira kaydı olmayan trafik IP adresine göre sayılır. FortiGate oturum kayıtlarının
+srcmac alanı (aygıt tanıma) kullanım analizinde kullanılmaz. Başka üreticilerin kayıtları saklanır
+ve mühürlenir ama analiz edilmez. Lisans almadan önce ağınızın bu yapıya uyduğunu
+[KURULUM.md](KURULUM.md) bölüm 0.1 ile denetleyin; deneme süresi (bölüm 3) sonucu kendi ağınızda
+görmek için de kullanılabilir.
+
 ### 2.1 5651 Temel neyi her zaman yapar?
 
 Lisans durumu ne olursa olsun şunlar çalışır ve hiçbir lisans durumu bunları kapatmaz: syslog
@@ -58,6 +70,12 @@ sayfası.
 Yalnızca bir uyarı kodu ücretli bir modüle aittir: `R20-report` (zamanlanmış bir rapor
 gönderilemedi) Zamanlanmış kullanım raporları modülüne aittir; modül kapalıyken açılmaz, modül
 kapanınca açık olanı kendiliğinden çözülür ([UYARILAR.md](UYARILAR.md)).
+
+Lisans uyarıları 5651 Temel'e aittir: `license.check` işi bunları her durumda açar ve yöneticilere
+ücretli modüller kapanmadan önce ve kapandığında (`R20-license`: deneme ya da süreli lisans 3 ya da
+14 gün içinde bitiyor, modüller kapalı), bir sınır aşıldığında (`R20-license-limit`) ve bakım
+süresi bittiğinde (`R20-license-maintenance`, bilgi) haber verir ([UYARILAR.md](UYARILAR.md)
+bölüm 2).
 
 Kişisel verilerin zamanında silinmesi de lisansa bağlı değildir: kullanım özetlerinin ve rapor
 dosyalarının saklama işleri (`usage.retention`, `reports.purge`) her durumda çalışır.
@@ -79,14 +97,19 @@ vermez.
 | `/lookup` | 5651 sorgusu, resmi PDF raporu ve zaman damgası | 5651 Temel |
 | `/lookups` | Kaydedilmiş 5651 sorguları | 5651 Temel |
 | `/raw` | Ham log satırları | 5651 Temel |
+| `/search` | Arama: log araması, istatistikler, kayıtlı aramalar, dışa aktarma | 5651 Temel |
 | `/evidence` | Kanıt paketleri | 5651 Temel |
-| `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama | 5651 Temel |
-| `/credits` | Kamu SM kontörü | 5651 Temel |
+| `/seals` | Mühürlü günler, manifest, zaman damgası, doğrulama, "Şimdi mühürle" | 5651 Temel |
+| `/credits` | Kamu SM kontörü, "Kontör sorgula" | 5651 Temel |
 | `/devices` | Cihazlar ve cihaz-kişi atamaları | 5651 Temel |
 | `/persons` | Kişiler | 5651 Temel |
 | `/departments` | Departmanlar | 5651 Temel |
 | `/vlans` | VLAN'lar ve alt ağlar | 5651 Temel |
+| `/live` | Canlı Akış: ham kayıt klasöründen anlık satırlar | 5651 Temel |
+| `/sources` | Kaynaklar: log kaynaklarının durumu, geçmişi ve son satırları | 5651 Temel |
 | `/license` | Lisans durumu, lisans dosyası yükleme ve kaldırma | 5651 Temel |
+| `/admin` | Ayarlar: sunucu yapılandırması, yönetim hizmetinin durumu, değişiklik istekleri ve geçmişi | 5651 Temel |
+| `/settings` | Uygulama ayarları (veritabanı ayarları) | 5651 Temel |
 | `/usage` | Kullanım sayfasının verileri, dışa aktarma, yeniden hesaplama | Kullanım analizi |
 | `/reports` | Zamanlanmış raporlar, çalıştırmalar, önizleme | Zamanlanmış kullanım raporları |
 | `/imports` | CSV içe aktarma ve şablonları | Toplu içe aktarma (CSV) |
@@ -99,7 +122,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 
 | İş | Modül | Lisans kapalıyken |
 |---|---|---|
-| `license.check` | — (lisans durumunu her 5 dakikada yeniden hesaplar) | her zaman çalışır |
+| `license.check` | — (lisans durumunu her 5 dakikada yeniden hesaplar, lisans uyarılarını açar) | her zaman çalışır |
 | `partitions.ensure` | 5651 Temel | her zaman çalışır |
 | `leases.incremental` | 5651 Temel | her zaman çalışır |
 | `leases.nightly` | 5651 Temel | her zaman çalışır |
@@ -107,6 +130,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `leases.late_evidence` | 5651 Temel | her zaman çalışır |
 | `evidence.purge` | 5651 Temel | her zaman çalışır |
 | `audit.import` | 5651 Temel | her zaman çalışır |
+| `admin.requests` | — (tarayıcıdan yönetim: deneme e-postası, kira zaman çizelgesinin yeniden oluşturulması) | her zaman çalışır |
 | `alerts.import` | 5651 Temel | her zaman çalışır |
 | `alerts.r15` | 5651 Temel | her zaman çalışır |
 | `alerts.system` | 5651 Temel | her zaman çalışır |
@@ -118,6 +142,7 @@ uyarısı açmaz. Kapalı modülün verileri silinmez.
 | `usage.retention` | — (kişisel verilerin silinmesi) | her zaman çalışır |
 | `reports.run_due` | Zamanlanmış kullanım raporları | atlanır |
 | `reports.purge` | — (rapor dosyalarının silinmesi) | her zaman çalışır |
+| `search.counts_backfill` | 5651 Temel | her zaman çalışır |
 
 Komut satırında yalnızca `arcilogger-worker usage rebuild` Kullanım analizi kapalıyken reddedilir
 (çıkış kodu 1, `module_not_licensed` iletisi). `arcilogger-worker run`, `rebuild` (kira zaman
@@ -253,6 +278,10 @@ Aynı anda en çok iki bant görünür. Yöneticiler banttan lisans sayfasına g
 "Yöneticinize başvurun." görür. Ücretli modül içermeyen bir lisansta (yalnızca 5651 Temel)
 `expired`, `version_not_covered` ve `wrong_server` kapanan modül olmadığı için kullanıcılara bant
 göstermez; yöneticiler bir bilgi bandı görür.
+
+Aynı durumlar Güvenlik sayfasında uyarı olarak da görünür ve uyarı ayarlarına göre e-postayla
+gider (`R20-license`, `R20-license-limit`, `R20-license-maintenance`; [UYARILAR.md](UYARILAR.md));
+deneme süresinin sonu (3 gün) ve süreli bir lisansın sonu (14 gün) gelmeden önce bildirilir.
 
 Sorunlu bir lisansta deneme süresine geri dönülmez ve sunucu değişikliğinden sonra bir ek süre
 yoktur: yeni lisans dosyası gerekir.

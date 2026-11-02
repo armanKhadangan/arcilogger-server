@@ -484,6 +484,21 @@ def test_valid_until_ends_at_midnight_site_time() -> None:
     ).state == ("expired")
 
 
+def test_valid_days_left_counts_site_days_from_the_trusted_time() -> None:
+    stored = licence(valid_until=date(2027, 1, 31))
+    early = state_of(stored=stored, trusted=trusted_at(site(date(2027, 1, 17), 12)))
+    assert (early.state, early.valid_days_left) == ("licensed", 14)
+    last = state_of(stored=stored, trusted=trusted_at(site(date(2027, 1, 31), 23, 59, 59)))
+    assert (last.state, last.valid_days_left) == ("licensed", 0)
+    after = state_of(stored=stored, trusted=trusted_at(site(date(2027, 2, 1))))
+    assert (after.state, after.valid_days_left) == ("expired", -1)
+    # A clock set back counts nothing back: the newest vault day is the floor.
+    behind = trusted_at(site(date(2027, 1, 1)), vault_day_end=site(date(2027, 1, 30)))
+    assert state_of(stored=stored, trusted=behind).valid_days_left == 1
+    assert state_of(stored=licence()).valid_days_left is None  # no time limit
+    assert state_of(stored=tamper(stored, "licensee", "X")).valid_days_left is None  # invalid
+
+
 def test_the_release_day_against_maintenance() -> None:
     assert state_of(stored=licence(maintenance_until=RELEASE)).state == "licensed"
     status = state_of(stored=licence(maintenance_until=RELEASE - timedelta(days=1)))

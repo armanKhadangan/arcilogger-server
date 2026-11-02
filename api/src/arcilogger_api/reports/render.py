@@ -8,26 +8,44 @@ font files (both are recorded in the inputs). Sections:
 1. report details (lookup number, organisation, operator, times, ARCILOGGER version);
 2. request details (makam, dosya/evrak no, talep tarihi, gerekçe);
 3. query (time as entered and as interpreted, addresses, ports, tolerance);
-4. method (incl. the double-NAT explanation and what would make the answer exact), the result
-   of the raw line check (:mod:`.consistency`) and the engine's explanations;
-5. results (exact matches or candidates, each with the full attribution chain; internal chains;
-   a result whose raw lines contradict it is shown as such, never as an exact match and without
-   a confidence);
-6. evidence (raw lines with file, line number, byte offset, SHA-256 and the check; raw files with
-   their hashes; sealed days with manifest/token hashes, time-stamp serial, genTime, TSA and the
-   verification result);
+4. method: the internet exit of a public-IP lookup (its label and exits, one paragraph per
+   resolution and mode), the FortiGate DHCP record format note taken from the stored chains,
+   the result of the raw line check (:mod:`.consistency`), the double-NAT explanation where it
+   applies (a configured or an assumed second NAT, the CGNAT caveat, what would make the answer
+   exact; never for a ``transip`` answer, only advice (a) for a ``fallback``) and the engine's
+   explanations; an answer that searched no session says so ("Oturum aranmadı") here and in 5;
+5. results (exact matches or candidates, each with its exit and ``dstintf``, a warning on a
+   match with rows of an unconfigured sender, and the full attribution chain: the lease row with
+   the FortiGate lease time and last DHCP evidence and the notes of a low lease beside it, or
+   the srcmac step; internal chains; a result whose raw lines contradict it is shown as such,
+   never as an exact match and without a confidence);
+6. evidence (raw lines with file, line number, byte offset, SHA-256 and the check; a FortiGate
+   DHCP row outside the lease timeline marked as no attribution; raw files with their hashes;
+   sealed days with manifest/token hashes, time-stamp serial, genTime, TSA and the verification
+   result);
 7. how to verify the report (its SHA-256 and the optional time stamp);
 8. legal note.
 
 Every page carries "Sayfa n / N", the lookup number, the version and the neutral wording rule
 (no claim of legal compliance).
+
+An outcome stored before the internet exits (``egress``, ``dstintf`` and the lease's
+``source_table`` all None; a report is rendered on its first download) prints none of the exit
+rows, paragraphs or FortiGate lease additions, and its double NAT as the assumed variant. An
+outcome explanation whose stored text a method paragraph quotes (``egress_observed_not_configured``,
+``egress_not_logged_but_seen``, ``egress_public_dynamic``) is not printed again as a bullet, nor
+are a fallback's ``double_nat`` notes (which name the ISP router as a fact); every other key
+stays a bullet. Chain notes on the record format go to the method section once, those of a low
+lease beside its lease row.
 """
 
 from __future__ import annotations
 
 import hashlib
 import io
-from collections.abc import Iterable, Mapping, Sequence
+import ipaddress
+import re
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Final
@@ -49,15 +67,18 @@ from reportlab.platypus import (  # type: ignore[import-untyped]
 from arcilogger_api.reports import texts
 from arcilogger_api.reports.inputs import evidence_key
 from arcilogger_core.fmt import format_date, format_datetime
+from arcilogger_db.egress import PRIVATE_OR_SHARED
 from arcilogger_worker.lookup import (
     AttributionChain,
     EvidenceRef,
     Explanation,
+    LeaseInfo,
     LookupOutcome,
     LookupRequest,
     NatMatch,
     PersonInfo,
 )
+from arcilogger_worker.lookup.types import EgressEntry, EgressSearched, LookupEgress
 from arcilogger_worker.pdf.fonts import SANS, register_fonts
 from arcilogger_worker.pdf.styles import (
     LINE,
@@ -188,6 +209,333 @@ def _check_text(check: Mapping[str, Any]) -> str:
     )
 
 
+# -- internet exits (contract 2.12) ---------------------------------------------------------------
+
+#: Outcome explanations a fallback's method paragraph stands in for: their stored text names the
+#: ISP router as a fact, which a fallback never does (deviation d).
+_FALLBACK_LEFT_OUT: Final = frozenset({"double_nat", "double_nat_no_candidates"})
+#: ``key="value"`` or ``key=value`` of a FortiGate raw line.
+_FIELD: Final = r'(?:^|\s){key}=(?:"([^"]*)"|(\S*))'
+
+
+def exit_label_key(egress: LookupEgress) -> str:
+    """The key of :data:`texts.EXIT_LABELS` of ``egress``: its resolution, a ``fallback`` by the
+    mode of the exit whose check failed (``direct``, or an ``isp_nat`` exit's NAT address)."""
+    if egress.resolution != "fallback":
+        return egress.resolution
+    failed = egress.egresses[0] if egress.egresses else None
+    return (
+        "fallback_direct" if failed is not None and failed.mode == "direct" else "fallback_transip"
+    )
+
+
+def _exit_name(entry: EgressEntry) -> str:
+    """``hat-1 (Hat 1)``; the name alone for an exit without a label."""
+    return f"{entry.name} ({entry.label})" if entry.label else entry.name
+
+
+def _exit_names(entries: Iterable[EgressEntry]) -> str:
+    return ", ".join(_exit_name(entry) for entry in entries) or "-"
+
+
+def _pair(text: tuple[str, str], **values: str) -> tuple[str, str]:
+    """A (Turkish, English) text with the same values in both."""
+    return text[0].format(**values), text[1].format(**values)
+
+
+def exit_row(egress: LookupEgress) -> str:
+    """Section 4 "Çıkış / Exit": the resolution's label, then each exit as "name (label), mode"
+    (none for ``unconfigured``, whose exit is the implicit one, and ``no_egress``, whose exits
+    the method paragraph lists)."""
+    label_tr, label_en = texts.EXIT_LABELS[exit_label_key(egress)]
+    row = f"{label_tr} / {label_en}"
+    if egress.resolution in ("unconfigured", "no_egress") or not egress.egresses:
+        return row
+    exits = "; ".join(
+        f"{_exit_name(entry)}, {' / '.join(texts.EXIT_MODES[entry.mode])}"
+        for entry in egress.egresses
+    )
+    return f"{row} — {exits}"
+
+
+def _private_or_shared(address: str) -> bool:
+    try:
+        found = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return any(found in network for network in PRIVATE_OR_SHARED)
+
+
+def _searched(searched: EgressSearched, at: datetime) -> tuple[str, str]:
+    """``{searched}``: the addresses searched, and, when the search covered the unclaimed ones,
+    those in words with the private or shared ones the logs showed near the moment ``at`` (the
+    predicate never covers a public address)."""
+    addresses = ", ".join(searched.transips)
+    if not searched.unclaimed:
+        return addresses or "-", addresses or "-"
+    seen = ", ".join(a for a in searched.unclaimed_seen if _private_or_shared(a)) or "-"
+    unclaimed_tr, unclaimed_en = _pair(texts.UNCLAIMED_SEARCHED, at=_time(at), seen=seen)
+    if not addresses:
+        return unclaimed_tr, unclaimed_en
+    return f"{addresses} ve {unclaimed_tr}", f"{addresses} and {unclaimed_en}"
+
+
+def _interfaces(searched: EgressSearched, clause: tuple[str, str]) -> tuple[str, str]:
+    """The interface clause of a paragraph, only when the search kept its interface condition."""
+    if not (searched.interface_filter and searched.interfaces):
+        return "", ""
+    return _pair(clause, interfaces=", ".join(searched.interfaces))
+
+
+def _interfaces_dropped(outcome: LookupOutcome, entry: EgressEntry) -> bool:
+    """The exit's part of the search had no interface condition: it declares no interfaces, or
+    the engine dropped them (``egress_interface_not_seen`` names it; not the ``_kept`` note)."""
+    if not entry.interfaces:
+        return True
+    return any(
+        item.key == "egress_interface_not_seen" and item.params.get("egress") == entry.name
+        for item in outcome.explanations
+    )
+
+
+def _exit_key(
+    exits: Sequence[EgressEntry], signature: tuple[str | None, str | None], *, unstored: bool
+) -> str | tuple[str, str | None]:
+    """The exit a session line left by, decided as the engine's ``_exit_of`` does but over the
+    stored exits: the one exit claiming its ``transip`` as a NAT address, several by its
+    ``dstintf``, else the exit whose public address it is; ``("?", transip)`` when none can be
+    told. ``unstored``: the ``session_changed_exit`` note names an exit the stored list lacks
+    (a ``transip`` answer stores only its own), which may share the address by interface, so the
+    one claiming exit counts only on a ``dstintf`` it declares (or while it declares none)."""
+    transip, dstintf = signature
+    unknown = ("?", transip)
+    try:
+        address = ipaddress.ip_address(transip or "")
+    except ValueError:
+        return unknown
+
+    def holds(networks: Iterable[str]) -> bool:
+        return any(address in ipaddress.ip_network(n, strict=False) for n in networks)
+
+    nat = [entry for entry in exits if holds(entry.transips)]
+    if len(nat) == 1:
+        (claimed,) = nat
+        if not (unstored and claimed.interfaces and dstintf not in claimed.interfaces):
+            return claimed.name
+    elif nat:
+        found = next((entry.name for entry in nat if dstintf in entry.interfaces), None)
+        if found is not None:
+            return found
+    return next((entry.name for entry in exits if holds(entry.public)), unknown)
+
+
+def _port_hinted(outcome: LookupOutcome, name: str) -> bool:
+    """The stored ``port_hint`` explanation names exit ``name`` (the hint ranked candidates)."""
+    for item in outcome.explanations:
+        if item.key == "port_hint":
+            return name in [n.strip() for n in str(item.params.get("egresses") or "").split(",")]
+    return False
+
+
+def _isp_nat_paragraph(
+    outcome: LookupOutcome,
+    egress: LookupEgress,
+    entry: EgressEntry,
+    stored: Mapping[str, Explanation],
+) -> tuple[str, str]:
+    searched = egress.searched
+    transips = ", ".join(entry.transips)
+    named = (transips, transips) if transips else texts.CATCH_ALL_TRANSIPS
+    text_tr = texts.METHOD_ISP_NAT_TR.format(exit=_exit_name(entry), transips=named[0])
+    text_en = texts.METHOD_ISP_NAT_EN.format(exit=_exit_name(entry), transips=named[1])
+    if searched.unclaimed:  # a catch-all, or widened by O5: the search went beyond its addresses
+        clause_tr, clause_en = _interfaces(searched, texts.METHOD_SEARCHED_INTERFACES)
+        found_tr, found_en = _searched(searched, outcome.request.at)
+        text_tr += " " + texts.METHOD_SEARCHED[0].format(searched=found_tr, interfaces=clause_tr)
+        text_en += " " + texts.METHOD_SEARCHED[1].format(searched=found_en, interfaces=clause_en)
+    else:
+        clause_tr, clause_en = _interfaces(searched, texts.METHOD_INTERFACES)
+        text_tr += " " + texts.METHOD_ISP_NAT_LIMITED[0].format(interfaces=clause_tr)
+        text_en += " " + texts.METHOD_ISP_NAT_LIMITED[1].format(interfaces=clause_en)
+    port = texts.PORT_USED if _port_hinted(outcome, entry.name) else texts.PORT_NOT_USED
+    text_tr += " " + texts.METHOD_PORT[0].format(port=port[0])
+    text_en += " " + texts.METHOD_PORT[1].format(port=port[1])
+    if egress.resolution == "transip":
+        text_tr += " " + texts.METHOD_TRANSIP_TR
+        text_en += " " + texts.METHOD_TRANSIP_EN
+    elif entry.public_dynamic and "egress_public_dynamic" in stored:
+        dynamic = stored["egress_public_dynamic"]
+        text_tr += " " + dynamic.text_tr
+        text_en += " " + dynamic.text_en
+    return text_tr, text_en
+
+
+def _fallback_paragraphs(egress: LookupEgress, address: str, at: datetime) -> list[tuple[str, str]]:
+    failed, others = egress.egresses[0], egress.egresses[1:]
+    seen = ", ".join(egress.searched.outside_seen) or "-"
+    found_tr, found_en = _searched(egress.searched, at)
+    values = {"exit": _exit_name(failed), "address": address, "seen": seen}
+    if failed.mode == "direct":
+        on_tr, on_en = texts.ON_LINE if failed.interfaces else ("", "")
+        text_tr = texts.METHOD_FALLBACK_DIRECT_TR.format(**values, searched=found_tr, on_line=on_tr)
+        text_en = texts.METHOD_FALLBACK_DIRECT_EN.format(**values, searched=found_en, on_line=on_en)
+    else:
+        text_tr = texts.METHOD_FALLBACK_TRANSIP_TR.format(**values, searched=found_tr)
+        text_en = texts.METHOD_FALLBACK_TRANSIP_EN.format(**values, searched=found_en)
+    paragraphs = [(text_tr, text_en)]
+    if others:
+        # F shares an interface with E when E declares any; otherwise both are as converted
+        other = _exit_names(others)
+        if failed.interfaces:
+            shared = [i for i in failed.interfaces if any(i in o.interfaces for o in others)]
+            text = (texts.METHOD_FALLBACK_SHARED_TR, texts.METHOD_FALLBACK_SHARED_EN)
+            paragraphs.append(
+                _pair(text, other=other, exit=_exit_name(failed), interfaces=", ".join(shared))
+            )
+        else:
+            text = (texts.METHOD_FALLBACK_OTHER_TR, texts.METHOD_FALLBACK_OTHER_EN)
+            paragraphs.append(_pair(text, other=other))
+    return paragraphs
+
+
+def method_paragraphs(outcome: LookupOutcome) -> tuple[list[tuple[str, str]], set[str]]:
+    """The method paragraph of the exit's (resolution, mode) (2.12) and the outcome explanation
+    keys whose stored text it quotes (those are not printed again as bullets); nothing for an
+    outcome stored before the exits existed (``egress`` None) or without a public IP."""
+    egress = outcome.egress
+    address = outcome.request.public_ip
+    if egress is None or address is None:
+        return [], set()
+    stored = {item.key: item for item in outcome.explanations}
+    resolution = egress.resolution
+    entry = egress.egresses[0] if egress.egresses else None
+    values = {"address": address, "exit": "" if entry is None else _exit_name(entry)}
+    paragraphs: list[tuple[str, str]] = []
+    quoted: set[str] = set()
+    if resolution in ("public", "transip") and entry is not None:
+        if entry.mode == "direct":
+            text = (texts.METHOD_PUBLIC_DIRECT_TR, texts.METHOD_PUBLIC_DIRECT_EN)
+            paragraphs.append(_pair(text, **values))
+        elif entry.mode == "isp_nat":
+            paragraphs.append(_isp_nat_paragraph(outcome, egress, entry, stored))
+            if entry.public_dynamic and "egress_public_dynamic" in stored:
+                quoted.add("egress_public_dynamic")
+        elif entry.mode == "not_logged":
+            text = (texts.METHOD_NOT_LOGGED_TR, texts.METHOD_NOT_LOGGED_EN)
+            paragraphs.append(_pair(text, **values))
+        else:
+            text = (texts.METHOD_INTERNAL_TR, texts.METHOD_INTERNAL_EN)
+            paragraphs.append(_pair(text, **values))
+    elif resolution == "fallback" and entry is not None:
+        paragraphs += _fallback_paragraphs(egress, address, outcome.request.at)
+        quoted |= _FALLBACK_LEFT_OUT
+    elif resolution == "observed":
+        key = "egress_not_logged_but_seen" if egress.egresses else "egress_observed_not_configured"
+        if key in stored:
+            paragraphs.append((stored[key].text_tr, stored[key].text_en))
+            quoted.add(key)
+    elif resolution == "public_unknown":
+        text = (texts.METHOD_PUBLIC_UNKNOWN_TR, texts.METHOD_PUBLIC_UNKNOWN_EN)
+        paragraph_tr, paragraph_en = _pair(
+            text, address=address, exits=_exit_names(egress.egresses)
+        )
+        if egress.searched.unclaimed:
+            # ``interface_filter`` holds when any exit's part kept one: the clause only when
+            # none of the exits searched lost it (a catch-all without interfaces searched all)
+            clause_tr, clause_en = (
+                ("", "")
+                if any(_interfaces_dropped(outcome, e) for e in egress.egresses)
+                else _interfaces(egress.searched, texts.METHOD_SEARCHED_INTERFACES)
+            )
+            found_tr, found_en = _searched(egress.searched, outcome.request.at)
+            paragraph_tr += " " + texts.METHOD_SEARCHED[0].format(
+                searched=found_tr, interfaces=clause_tr
+            )
+            paragraph_en += " " + texts.METHOD_SEARCHED[1].format(
+                searched=found_en, interfaces=clause_en
+            )
+        paragraphs.append((paragraph_tr, paragraph_en))
+    elif resolution == "unconfigured":
+        paragraphs.append((texts.METHOD_UNCONFIGURED_TR, texts.METHOD_UNCONFIGURED_EN))
+    elif resolution == "no_egress":
+        text = (texts.METHOD_NO_EGRESS_TR, texts.METHOD_NO_EGRESS_EN)
+        paragraphs.append(_pair(text, address=address))
+        configured_tr = "; ".join(
+            f"{_exit_name(e)}: {texts.EXIT_MODES[e.mode][0]}, {', '.join(e.public) or '-'}"
+            for e in egress.egresses
+        )
+        configured_en = "; ".join(
+            f"{_exit_name(e)}: {texts.EXIT_MODES[e.mode][1]}, {', '.join(e.public) or '-'}"
+            for e in egress.egresses
+        )
+        paragraphs.append(
+            (
+                texts.METHOD_CONFIGURED[0].format(configured=configured_tr or "-"),
+                texts.METHOD_CONFIGURED[1].format(configured=configured_en or "-"),
+            )
+        )
+    return paragraphs, quoted
+
+
+def not_searched(outcome: LookupOutcome) -> tuple[str, str] | None:
+    """The "Oturum aranmadı" text of sections 4 and 5 for an answer that searched no session
+    (``no_egress``, a ``not_logged`` exit, an ``internal`` exit's NAT address); ``None`` for
+    every other answer, which keeps the generic texts."""
+    egress = outcome.egress
+    address = outcome.request.public_ip
+    if outcome.mode != "none" or egress is None or address is None:
+        return None
+    if egress.resolution == "no_egress":
+        return _pair(texts.NOT_SEARCHED_NO_EGRESS, address=address)
+    entry = egress.egresses[0] if egress.egresses else None
+    if entry is None:
+        return None
+    if egress.resolution == "public" and entry.mode == "not_logged":
+        return _pair(texts.NOT_SEARCHED_NOT_LOGGED, address=address, exit=_exit_name(entry))
+    if egress.resolution == "transip" and entry.mode == "internal":
+        return _pair(texts.NOT_SEARCHED_INTERNAL, address=address, exit=_exit_name(entry))
+    return None
+
+
+def _chains(outcome: LookupOutcome) -> Iterator[AttributionChain]:
+    """Every chain of the outcome, alternatives included, in report order."""
+
+    def walk(chain: AttributionChain) -> Iterator[AttributionChain]:
+        yield chain
+        for other in chain.alternatives:
+            yield from walk(other)
+
+    for match in outcome.matches:
+        if match.chain is not None:
+            yield from walk(match.chain)
+    if outcome.attribution is not None:
+        yield from walk(outcome.attribution)
+
+
+def format_notes(outcome: LookupOutcome) -> list[tuple[str, str]]:
+    """The method note on the FortiGate DHCP record format, from the stored chains only (never
+    the setting at render time): the fixed "not verified" sentence when any chain says so (the
+    safe side, should both keys ever reach one outcome), else the stored "verified" text (who
+    marked it, and when); nothing without FortiGate leases."""
+    verified: list[tuple[str, str]] = []
+    unverified = False
+    for chain in _chains(outcome):
+        for item in chain.explanations:
+            if item.key == "fortigate_format_verified":
+                if (item.text_tr, item.text_en) not in verified:
+                    verified.append((item.text_tr, item.text_en))
+            elif item.key == "fortigate_format_unverified":
+                unverified = True
+    return [texts.FORMAT_UNVERIFIED] if unverified else verified
+
+
+def _raw_field(line: str, key: str) -> str | None:
+    found = re.search(_FIELD.format(key=re.escape(key)), line)
+    if found is None:
+        return None
+    return found.group(1) if found.group(1) is not None else found.group(2)
+
+
 # -- document -------------------------------------------------------------------------------------
 
 
@@ -202,6 +550,14 @@ class _Builder:
         #: no ``check``: nothing is marked).
         self.contradicted = {
             item["key"] for item in inputs.get("evidence") or [] if _contradicts(item.get("check"))
+        }
+        #: Cited FortiGate DHCP rows that are not in the lease timeline (D8): marked in section 6.
+        self.unconverted = {evidence_key(ref) for ref in self.outcome.unconverted_dhcp}
+        #: The raw text of each cited line that was read (the second exit of a session).
+        self.lines = {
+            item["key"]: str(item["line"]["text"])
+            for item in inputs.get("evidence") or []
+            if (item.get("line") or {}).get("status") in ("ok", "offset_mismatch")
         }
 
     # paragraphs and tables
@@ -286,8 +642,15 @@ class _Builder:
         else:
             self.add(self.p(_x(texts.CONSISTENCY_NONE_TR), "small"))
 
-    def explanations(self, items: Iterable[Explanation]) -> None:
+    def both(self, text_tr: str, text_en: str, style: str = "base") -> list[Any]:
+        """A table cell with the Turkish text and the English one beside it, smaller."""
+        return [self.p(_x(text_tr), style), self.p(_x(text_en), "small")]
+
+    def explanations(self, items: Iterable[Explanation], *, left_out: Iterable[str] = ()) -> None:
+        skipped = set(left_out)
         for item in items:
+            if item.key in skipped:
+                continue
             self.add(
                 self.p(_x(item.text_tr), "bullet"),
                 self.p(_x(item.text_en), "small"),
@@ -402,31 +765,31 @@ class _Builder:
         outcome = self.outcome
         mode_tr, mode_en = texts.MODES[outcome.mode]
         self.heading("4. Yöntem", "Method")
-        self.add(
-            self.kv(
-                [
-                    ("Sorgu türü / Mode", _x(f"{mode_tr} / {mode_en}")),
-                    ("Açıklama", _x(texts.MODE_DETAIL_TR[outcome.mode])),
-                ]
-            ),
-            Spacer(1, 5),
-        )
+        rows = [("Sorgu türü / Mode", _x(f"{mode_tr} / {mode_en}"))]
+        if outcome.egress is not None:
+            rows.append(("Çıkış / Exit", _x(exit_row(outcome.egress))))
+        skipped = not_searched(outcome)
+        detail = texts.MODE_DETAIL_TR[outcome.mode] if skipped is None else " / ".join(skipped)
+        egress = outcome.egress
+        if outcome.mode == "exact" and egress is not None and egress.resolution == "transip":
+            detail = texts.MODE_DETAIL_TRANSIP_TR  # an exit's NAT address need not be public
+        rows.append(("Açıklama", _x(detail)))
+        self.add(self.kv(rows), Spacer(1, 5))
         self.bilingual(texts.METHOD_TR, texts.METHOD_EN)
+        for text_tr, text_en in format_notes(outcome):
+            self.bilingual(text_tr, text_en)
+        paragraphs, quoted = method_paragraphs(outcome)
+        if paragraphs:
+            self.add(self.p("İnternet çıkışı / Internet exit", "h3"))
+            for text_tr, text_en in paragraphs:
+                self.bilingual(text_tr, text_en)
         self.consistency()
-        if outcome.double_nat and outcome.mode in ("candidates", "none"):
-            # the "candidate list" sentence only when candidates follow (spec 12.4)
-            self.add(self.p("Çift NAT / Double NAT", "h3"))
-            self.bilingual(
-                f"{texts.DOUBLE_NAT_TR} {texts.DOUBLE_NAT_RESULT_TR[outcome.mode]} "
-                f"{texts.DOUBLE_NAT_EXACT_TR}",
-                f"{texts.DOUBLE_NAT_EN} {texts.DOUBLE_NAT_RESULT_EN[outcome.mode]} "
-                f"{texts.DOUBLE_NAT_EXACT_EN}",
-            )
+        self.double_nat()
         if outcome.mode == "candidates":
             self.bilingual(texts.SCORE_TR, texts.SCORE_EN)
-        if outcome.explanations:
+        if any(item.key not in quoted for item in outcome.explanations):
             self.add(self.p("Sorgu motorunun açıklamaları / Explanations", "h3"))
-            self.explanations(outcome.explanations)
+            self.explanations(outcome.explanations, left_out=quoted)
         window = outcome.data_window
         if window is not None:
             covered = (
@@ -446,6 +809,46 @@ class _Builder:
                 ),
             )
 
+    def double_nat(self) -> None:
+        """Why a candidates/none answer cannot be exact and what would make it exact (2.12):
+        never for a ``transip`` answer (the request names the FortiGate's own NAT address); a
+        configured ``isp_nat`` exit or an assumed second NAT, the CGNAT caveat, the result and
+        the advice; for a ``fallback`` only the result and advice (a), the method paragraph
+        standing in for the rest. Without a public IP in the request (a destination search) the
+        variant and the CGNAT sentence, which speak of "this address", are left out."""
+        outcome = self.outcome
+        if not outcome.double_nat or outcome.mode not in ("candidates", "none"):
+            return
+        egress = outcome.egress
+        resolution = None if egress is None else egress.resolution
+        if resolution == "transip":
+            return
+        # the "candidate list" sentence only when candidates follow (spec 12.4)
+        parts_tr = [texts.DOUBLE_NAT_RESULT_TR[outcome.mode]]
+        parts_en = [texts.DOUBLE_NAT_RESULT_EN[outcome.mode]]
+        if egress is not None and resolution == "fallback":
+            failed = egress.egresses[0] if egress.egresses else None
+            direct = failed is not None and failed.mode == "direct"
+            bridge_tr, bridge_en = texts.DOUBLE_NAT_BRIDGE if direct else ("", "")
+            parts_tr.append(texts.DOUBLE_NAT_ADVICE_A_TR.format(bridge=bridge_tr))
+            parts_en.append(texts.DOUBLE_NAT_ADVICE_A_EN.format(bridge=bridge_en))
+            self.add(self.p("Kesin eşleşme için / For an exact answer", "h3"))
+            self.bilingual(" ".join(parts_tr), " ".join(parts_en))
+            return
+        if outcome.request.public_ip is not None:
+            entry = egress.egresses[0] if egress is not None and egress.egresses else None
+            if resolution == "public" and entry is not None and entry.mode == "isp_nat":
+                lead_tr = texts.DOUBLE_NAT_CONFIGURED_TR.format(exit=_exit_name(entry))
+                lead_en = texts.DOUBLE_NAT_CONFIGURED_EN.format(exit=_exit_name(entry))
+            else:  # unconfigured, public_unknown, or an outcome stored before the exits
+                lead_tr, lead_en = texts.DOUBLE_NAT_ASSUMED_TR, texts.DOUBLE_NAT_ASSUMED_EN
+            parts_tr[:0] = [lead_tr, texts.DOUBLE_NAT_CGNAT_TR]
+            parts_en[:0] = [lead_en, texts.DOUBLE_NAT_CGNAT_EN]
+        parts_tr.append(texts.DOUBLE_NAT_ADVICE_TR)
+        parts_en.append(texts.DOUBLE_NAT_ADVICE_EN)
+        self.add(self.p("Çift NAT / Double NAT", "h3"))
+        self.bilingual(" ".join(parts_tr), " ".join(parts_en))
+
     # results
 
     def results(self) -> None:
@@ -453,6 +856,10 @@ class _Builder:
         self.heading("5. Sonuçlar", "Results")
         count = len(outcome.matches)
         if outcome.mode == "none":
+            skipped = not_searched(outcome)
+            if skipped is not None:  # no session was searched: never a log-based "nobody"
+                self.add(self.p(_x(skipped[0]), "warn"), self.p(_x(skipped[1]), "small"))
+                return
             self.add(
                 self.p(
                     _x("Ölçütlere uyan kayıt bulunamadı. Nedenleri bölüm 4'teki açıklamalardadır."),
@@ -486,6 +893,68 @@ class _Builder:
         """Evidence numbers of ``match`` (session and chain) whose raw line contradicts it."""
         return self.contradicting(self.match_evidence(match))
 
+    def match_exit(self, match: NatMatch) -> str:
+        """``hat-2 (Hat 2) · dstintf wan2`` ("-" for an unclaimed row; no exit determined
+        without a public IP in the request), and for the session whose rows left by more than
+        one exit (``session_changed_exit``, each row's exit as :func:`_exit_key` tells it) the
+        other exit."""
+        if self.outcome.egress is None:  # a destination search: no exit was resolved
+            not_determined = " / ".join(texts.EXIT_NOT_DETERMINED)
+            return f"{not_determined} · dstintf {match.traffic.dstintf or '-'}"
+        exits = self.outcome.egress.egresses
+        labels = {entry.name: _exit_name(entry) for entry in exits}
+        name = "-" if match.egress is None else labels.get(match.egress, match.egress)
+        text = f"{name} · dstintf {match.traffic.dstintf or '-'}"
+        signatures = self.signatures(match)
+        changed = next(
+            (e for e in self.outcome.explanations if e.key == "session_changed_exit"), None
+        )
+        if changed is None or len(signatures) < 2:
+            return text
+        # The outcome keeps one exit per match (its row nearest the moment); the engine's note
+        # names the exits of the sessions that changed exit. A match varies when its cited rows
+        # map to more than one exit (another dstintf of the same exit is no change); with one
+        # such session, and only this match varying, those are this match's exits; otherwise
+        # the rows' own NAT address and dstintf are shown (deviation d).
+        named = [n.strip() for n in str(changed.params.get("egresses") or "").split(",")]
+        unstored = any(n and n not in labels for n in named)
+
+        def varies(other: NatMatch) -> bool:
+            keys = {_exit_key(exits, s, unstored=unstored) for s in self.signatures(other)}
+            return len(keys) > 1
+
+        if not varies(match):
+            return text
+        own = match.egress or "-"
+        others = [n for n in named if n and n != own]
+        varying = sum(1 for other in self.outcome.matches if varies(other))
+        if changed.params.get("count") == 1 and varying == 1 and own in named and others:
+            # the engine's "-" (a row no exit claims) in words, in each language
+            shown = [
+                ", ".join(
+                    unclaimed if other == "-" else labels.get(other, other) for other in others
+                )
+                for unclaimed in texts.UNCLAIMED_EXIT
+            ]
+            changed_tr = texts.CHANGED_EXIT[0].format(exits=shown[0])
+            changed_en = texts.CHANGED_EXIT[1].format(exits=shown[1])
+            return f"{text} · {changed_tr} / {changed_en}"
+        rows = "; ".join(f"NAT {_dash(t)} · dstintf {d or '-'}" for t, d in signatures)
+        return text + " · " + " / ".join(_pair(texts.CHANGED_ROWS, rows=rows))
+
+    def signatures(self, match: NatMatch) -> list[tuple[str | None, str | None]]:
+        """The distinct (``transip``, ``dstintf``) of the match's cited session lines, read
+        from the raw lines (the exit a row left by, as the line itself says)."""
+        found: list[tuple[str | None, str | None]] = []
+        for ref in match.traffic.evidence:
+            line = self.lines.get(evidence_key(ref)) if ref.table == "fg_traffic" else None
+            if line is None:
+                continue
+            signature = (_raw_field(line, "transip"), _raw_field(line, "dstintf"))
+            if signature not in found:
+                found.append(signature)
+        return found
+
     def match(self, index: int, match: NatMatch) -> None:
         traffic = match.traffic
         contradicted = self.match_contradicted(match)
@@ -511,6 +980,14 @@ class _Builder:
                 ),
             ),
             ("NAT (transip:transport)", _x(_endpoint(traffic.transip, traffic.transport))),
+        ]
+        if (
+            self.outcome.egress is not None
+            or match.egress is not None
+            or traffic.dstintf is not None
+        ):  # none of them in an outcome stored before the exits existed
+            rows.append(("Çıkış / Exit", _x(self.match_exit(match))))
+        rows += [
             (
                 "Oturum aralığı / Interval",
                 _x(f"{_time(traffic.start)} - {_time(traffic.end)}"),
@@ -537,6 +1014,10 @@ class _Builder:
                     ),
                 )
             )
+        if match.untrusted_sources:
+            sources = ", ".join(match.untrusted_sources)
+            warning_tr, warning_en = _pair(texts.UNTRUSTED_MATCH, sources=sources)
+            rows.append(("UYARI / Warning", self.p(_x(f"{warning_tr} / {warning_en}"), "warn")))
         self.add(
             CondPageBreak(40 * mm),
             KeepTogether([self.kv(rows, header=_x(title))]),
@@ -544,13 +1025,8 @@ class _Builder:
         )
         if match.chain is None:
             self.add(
-                self.p(
-                    _x(
-                        f"{traffic.srcip} adresi için bu anda geçerli bir IP-MAC kaydı (kira) yok; "
-                        "zincir kurulamadı."
-                    ),
-                    "note",
-                ),
+                self.p(_x(texts.NO_CHAIN[0]), "note"),
+                self.p(_x(texts.NO_CHAIN[1]), "small"),
                 Spacer(1, 6),
             )
             return
@@ -562,25 +1038,53 @@ class _Builder:
     ) -> None:
         """``contradicted``: the result the chain belongs to is contradicted by its raw lines
         (the chain's own lines are checked here as well)."""
-        lease_evidence = chain.lease.evidence if chain.lease is not None else ()
-        contradicted = contradicted or bool(self.contradicting(lease_evidence))
+        srcmac = chain.mac_source == "srcmac" and chain.device is not None
+        if chain.lease is not None:
+            mac_evidence = chain.lease.evidence
+        else:  # a srcmac chain rests on its session record (checked by srcip and srcmac)
+            mac_evidence = chain.device.evidence if srcmac and chain.device is not None else ()
+        contradicted = contradicted or bool(self.contradicting(mac_evidence))
+        notes = {item.key: item for item in chain.explanations}
         vlan = f" · VLAN {chain.vlan}" if chain.vlan is not None else ""
         vlan += f" ({chain.vlan_name})" if chain.vlan_name else ""
         rows: list[tuple[str, Any]] = [
             ("İç IP / Internal IP", _x(f"{chain.internal_ip}{vlan} · an: {_time(chain.at)}")),
         ]
         lease = chain.lease
+        left_out: set[str] = set(texts.FORMAT_KEYS)  # printed once in the method section
         if lease is not None:
             end = _time(lease.end) if lease.end is not None else "açık"
+            row = (
+                f"MAC {lease.mac} · ana bilgisayar adı {_dash(lease.hostname)} · "
+                f"{_time(lease.start)} - {end} · bitiş: "
+                f"{texts.END_REASONS.get(lease.end_reason, lease.end_reason)} · güven: "
+                f"{texts.CONFIDENCE.get(lease.confidence, lease.confidence)} · kayıt no "
+                f"{_dash(lease.lease_id)} · kanıt: {self.refs(lease.evidence)}"
+            )
+            if lease.source_table == "fg_dhcp":  # never for leases stored before the upgrade
+                rows.append(("IP-MAC kaydı / Lease", self.fortigate_lease(row, lease)))
+            else:
+                rows.append(("IP-MAC kaydı / Lease", _x(row)))
+            for key in texts.LEASE_NOTE_KEYS:  # the reason of a low lease, beside it
+                if key in notes:
+                    rows.append(
+                        (
+                            "Kira notu / Lease note",
+                            self.both(notes[key].text_tr, notes[key].text_en),
+                        )
+                    )
+                    left_out.add(key)
+        elif srcmac and chain.device is not None:
+            found = notes.get("srcmac_only")
+            interface = str(found.params.get("interface") or "-") if found is not None else "-"
+            step_tr, step_en = _pair(texts.SRCMAC_STEP, interface=interface)
+            refs = self.refs(chain.device.evidence)  # the session line the MAC comes from
             rows.append(
                 (
-                    "IP-MAC kaydı / Lease",
-                    _x(
-                        f"MAC {lease.mac} · ana bilgisayar adı {_dash(lease.hostname)} · "
-                        f"{_time(lease.start)} - {end} · bitiş: "
-                        f"{texts.END_REASONS.get(lease.end_reason, lease.end_reason)} · güven: "
-                        f"{texts.CONFIDENCE.get(lease.confidence, lease.confidence)} · kayıt no "
-                        f"{_dash(lease.lease_id)} · kanıt: {self.refs(lease.evidence)}"
+                    "MAC adresi / MAC address",
+                    self.both(
+                        f"MAC {chain.device.mac} · {step_tr} · kanıt: {refs}",
+                        f"{step_en} · evidence: {refs}",
                     ),
                 )
             )
@@ -638,14 +1142,34 @@ class _Builder:
                 else _x(texts.CONFIDENCE.get(chain.confidence, chain.confidence)),
             ),
         ]
-        header = "Olası diğer zincir (IP çakışması)" if alternative else "Atıf zinciri / Chain"
+        if not alternative:
+            header = "Atıf zinciri / Chain"
+        elif chain.mac_source == "srcmac":
+            header = texts.ALTERNATIVE_SRCMAC
+        else:
+            header = "Olası diğer zincir (IP çakışması)"
         self.add(self.kv(rows, header=_x(header)))
-        if chain.explanations:
+        if any(item.key not in left_out for item in chain.explanations):
             self.add(Spacer(1, 2))
-            self.explanations(chain.explanations)
+            self.explanations(chain.explanations, left_out=left_out)
         for other in chain.alternatives:
             self.add(Spacer(1, 3))
             self.chain(other, alternative=True)
+
+    def fortigate_lease(self, row: str, lease: LeaseInfo) -> list[Any]:
+        """The lease row of an ``fg_dhcp`` lease: its source, the lease time the FortiGate logged
+        and the lease's own last DHCP record at or before the chain's moment, as stored."""
+        table_tr, table_en = texts.TABLES["fg_dhcp"], texts.TABLES_EN["fg_dhcp"]
+        if lease.lease_seconds is None:
+            seconds_tr, seconds_en = texts.CONFIGURED_LEASE
+        else:
+            seconds_tr, seconds_en = f"{lease.lease_seconds} sn", f"{lease.lease_seconds} s"
+        last = _time(lease.last_dhcp_evidence)
+        added_tr = texts.FG_LEASE[0].format(lease=seconds_tr, last=last)
+        added_en = texts.FG_LEASE[1].format(lease=seconds_en, last=last)
+        return self.both(
+            f"{row} · kaynak: {table_tr} · {added_tr}", f"source: {table_en} · {added_en}"
+        )
 
     # evidence
 
@@ -674,11 +1198,20 @@ class _Builder:
         raw = item.get("raw")
         line = item.get("line") or {}
         table = texts.TABLES.get(item["table"], item["table"])
+        if item["table"] in texts.TABLES_EN:
+            table += f" / {texts.TABLES_EN[item['table']]}"
+        unconverted = item["key"] in self.unconverted  # never to be read as an attribution (D8)
+        summary = _dash(item.get("summary"))
+        if unconverted:  # its fixed label in both languages, not the stored Turkish summary
+            summary = " / ".join(texts.UNCONVERTED_SUMMARY)
         rows: list[tuple[str, Any]] = [
             ("Kayıt / Record", _x(f"{table} ({item['table']} #{_dash(item.get('row_id'))})")),
             ("Zaman / Time", _x(_time(item.get("time")))),
-            ("Özet / Summary", _x(_dash(item.get("summary")))),
+            ("Özet / Summary", _x(summary)),
         ]
+        if unconverted:
+            mark_tr, mark_en = texts.UNCONVERTED_MARK
+            rows.append(("Not / Note", self.p(_x(f"{mark_tr} / {mark_en}"), "warn")))
         if raw is not None:
             where = f"kaynak {raw['source']} · gün {_day(raw['day'])} · satır {raw['line']}"
             if line.get("offset") is not None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -496,34 +497,47 @@ def test_bulk_assignment_is_atomic(
 
 
 def test_backdating_and_future_assignments_are_refused(
-    client: TestClient, admin: LoggedIn, people: dict[str, int], factory: sessionmaker[Session]
+    client: TestClient,
+    admin: LoggedIn,
+    people: dict[str, int],
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The router decides "in the future" by its own clock, so the test hands it its moment, taken
+    # when the test runs and one second later at each read: the module's NOW is taken at
+    # collection and, on a run that reaches this test 58 minutes later, NOW + 1 h is no longer
+    # more than FUTURE_SLACK ahead of the server's clock (200 instead of 409).
+    now = datetime.now(UTC)
+    reads = itertools.count()
+    monkeypatch.setattr(
+        "arcilogger_api.routers.devices.utc_now", lambda: now + timedelta(seconds=next(reads))
+    )
     future = _assign(
-        client, [PC1], people["ayse"], valid_from=(NOW + timedelta(hours=1)).isoformat()
+        client, [PC1], people["ayse"], valid_from=(now + timedelta(hours=1)).isoformat()
     )
     assert future.status_code == 409
     assert future.json()["error"]["code"] == "assignment_in_future"
     # A browser clock a little ahead is accepted.
     assert (
         _assign(
-            client, [PC1], people["ayse"], valid_from=(NOW + timedelta(seconds=30)).isoformat()
+            client, [PC1], people["ayse"], valid_from=(now + timedelta(seconds=30)).isoformat()
         ).status_code
         == 200
     )
     # Before the current assignment's start: 409.
     before = _assign(
-        client, [PC1], people["mehmet"], valid_from=(NOW - timedelta(days=1)).isoformat()
+        client, [PC1], people["mehmet"], valid_from=(now - timedelta(days=1)).isoformat()
     )
     assert before.status_code == 409
     assert before.json()["error"]["code"] == "assignment_overlap"
     # Unassigned again: a new assignment may not start inside the closed one either.
     assert (
         _assign(
-            client, [PC1], None, valid_from=(NOW + timedelta(seconds=40)).isoformat()
+            client, [PC1], None, valid_from=(now + timedelta(seconds=40)).isoformat()
         ).status_code
         == 200
     )
-    inside = _assign(client, [PC1], people["mehmet"], valid_from=NOW.isoformat())
+    inside = _assign(client, [PC1], people["mehmet"], valid_from=now.isoformat())
     assert inside.status_code == 409
     assert len(_history(factory, PC1)) == 1
     naive = _assign(client, [PC1], people["mehmet"], valid_from="2026-10-01T09:00:00")

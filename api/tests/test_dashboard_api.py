@@ -29,7 +29,14 @@ from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ, isoformat_site, site_day, to_site
 from arcilogger_db.engine import session_factory
-from arcilogger_db.models import Alert, Message, SealVerification, Source
+from arcilogger_db.models import (
+    Alert,
+    IngestOffset,
+    Message,
+    ParseFailure,
+    SealVerification,
+    Source,
+)
 from arcilogger_db.partitions import ensure_partitions
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
@@ -38,7 +45,7 @@ API = "/api/v1/dashboard/summary"
 D10, D11, D12, D13, D14 = (date(2026, 9, day) for day in range(10, 15))
 #: The dashboard's "now": the morning after D14, 07:00:30 site time.
 NOW = datetime(2026, 9, 15, 7, 0, 30, tzinfo=SITE_TZ)
-BOXES = ("ingest", "seal", "credit", "clock", "alerts")
+BOXES = ("ingest", "seal", "credit", "clock", "alerts", "parse_failures")
 
 
 @pytest.fixture
@@ -67,9 +74,10 @@ def get(client: TestClient) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("role", "visible"),
     [
-        ("admin", {"ingest", "seal", "credit", "clock", "alerts"}),
-        ("auditor", {"ingest", "seal", "credit", "clock"}),  # seal.read: seal, credit, clock
-        ("viewer", {"ingest"}),
+        ("admin", {"ingest", "seal", "credit", "clock", "alerts", "parse_failures"}),
+        # seal.read: seal, credit, clock
+        ("auditor", {"ingest", "seal", "credit", "clock", "parse_failures"}),
+        ("viewer", {"ingest", "parse_failures"}),
     ],
 )
 def test_each_box_needs_its_own_permission(
@@ -107,6 +115,10 @@ def test_empty_installation(client: TestClient, login_as: Login) -> None:
         "ok": None,
     }
     assert body["alerts"]["latest"] == []
+    failures = body["parse_failures"]
+    assert (failures["lines"], failures["failures"], failures["permille"]) == (0, 0, None)
+    assert (failures["by_source"], failures["top_patterns"]) == ([], [])
+    assert [day["failures"] for day in failures["last7"]] == [0] * 7
 
 
 # -- the numbers ----------------------------------------------------------------------------------
@@ -483,3 +495,98 @@ def _count(engine: Engine, end: datetime) -> int:
             )
             or 0
         )
+
+
+def test_parse_failures_box(
+    client: TestClient,
+    login_as: Login,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Today's lines and failures by source and pattern, the example line of each pattern and
+    the last 7 days (contract 2.17): counts and references, never the error text."""
+    frozen(monkeypatch, NOW)
+    today = site_day(NOW)
+    seen = NOW.astimezone(UTC)
+    with factory() as session:
+        session.add_all(
+            [
+                IngestOffset(source="fortigate", day=today, byte_offset=1, line_number=8000),
+                IngestOffset(source="core-r1", day=today, byte_offset=1, line_number=2000),
+                IngestOffset(source="fortigate", day=today - timedelta(days=2), line_number=500),
+                IngestOffset(source="fortigate", day=today - timedelta(days=9), line_number=99),
+            ]
+        )
+        for source, pattern, count, day, line in (
+            ("fortigate", "fortigate.kv", 30, today, 17),
+            ("fortigate", "rowcheck.fg_traffic", 4, today, 21),
+            ("core-r1", "mikrotik.topics", 6, today, 3),
+            ("core-r1", "rawlog.invalid", 1, today, 9),
+            ("fortigate", "fortigate.kv", 2, today - timedelta(days=2), 5),
+            ("fortigate", "fortigate.kv", 50, today - timedelta(days=9), 5),  # too old
+        ):
+            session.add(
+                ParseFailure(
+                    source=source,
+                    day=day,
+                    pattern=pattern,
+                    count=count,
+                    first_seen=seen,
+                    last_seen=seen,
+                    example_line=line,
+                    example_offset=line * 100,
+                    error="value srcip=172.20.41.105",
+                )
+            )
+        session.commit()
+    login_as(client, "viewer")  # dashboard.view, like the ingest box
+    box = get(client)["parse_failures"]
+    assert (box["day"], box["lines"], box["failures"], box["permille"]) == (
+        today.isoformat(),
+        10_000,
+        41,
+        4.1,
+    )
+    assert box["by_source"] == [
+        {"source": "fortigate", "lines": 8000, "failures": 34, "permille": 4.2},
+        {"source": "core-r1", "lines": 2000, "failures": 7, "permille": 3.5},
+    ]
+    assert box["top_patterns"] == [
+        {
+            "source": "fortigate",
+            "pattern": "fortigate.kv",
+            "count": 30,
+            "example": {
+                "source": "fortigate",
+                "day": today.isoformat(),
+                "line": 17,
+                "offset": 1700,
+            },
+        },
+        {
+            "source": "core-r1",
+            "pattern": "mikrotik.topics",
+            "count": 6,
+            "example": {"source": "core-r1", "day": today.isoformat(), "line": 3, "offset": 300},
+        },
+        {
+            "source": "fortigate",
+            "pattern": "rowcheck.fg_traffic",
+            "count": 4,
+            "example": {
+                "source": "fortigate",
+                "day": today.isoformat(),
+                "line": 21,
+                "offset": 2100,
+            },
+        },
+    ]
+    assert [day["day"] for day in box["last7"]] == [
+        (today - timedelta(days=n)).isoformat() for n in range(6, -1, -1)
+    ]
+    assert [(day["lines"], day["failures"]) for day in box["last7"]][-3:] == [
+        (500, 2),
+        (0, 0),
+        (10_000, 41),
+    ]
+    assert "srcip" not in str(box)  # the parser's detail is not on the Panel

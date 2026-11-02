@@ -41,7 +41,9 @@ After any API change run it again; `--check` exits 1 when the files are out of d
 
 `/login` (password → TOTP or recovery code → first TOTP enrolment with recovery codes shown once
 → forced password change), `/setup` (first administrator with the console token), the KVKK
-notice (dialog until accepted), `/settings` → `/settings/users` (users and read-only role matrix),
+notice (dialog until accepted), the user menu (theme, language, "Parolayı değiştir" — the own
+password with the current one, `POST /auth/password`, which ends the other sessions —, new
+recovery codes, sign-out), `/settings` → `/settings/users` (users and read-only role matrix),
 `/audit` (audit log, chain badge, detail drawer), and these pages of the main menu:
 
 - `/` — **Panel** (`dashboard.view` or `dashboard.usage`) on `GET /dashboard/summary` and today's
@@ -90,18 +92,31 @@ notice (dialog until accepted), `/settings` → `/settings/users` (users and rea
   downloads return person data and sit behind the KVKK notice (`require_privacy_notice`)
   (`src/pages/reports/`).
 
+- `/search` — **Arama** (`search.read`): the query language of the search API (fields, commas
+  for OR, `-` to exclude, quotes) read by the server 250 ms after typing (`POST /search/parse`;
+  a problem is underlined at its characters), completions from the field catalogue and the
+  statistics, the syntax help; the histogram (drag to zoom: a new search), the facets (a value or
+  "Hariç tut" edits the query), the virtualised results with "Daha fazla" up to 2,000 rows, a scan
+  cut by its time budget going on five times by itself and then "Devam et"; the record drawer
+  (`GET /search/event`) and the raw line (`RawLineSheet`); personal saved searches; the export
+  (`search.export`, re-authentication, `Repr-Digest` checked) and "Kanıt paketine aktar"
+  (`evidence.create`: the search's raw lines go to the evidence wizard in memory). Nothing is
+  searched when the page opens; every run is a `POST`, so the query is in no address, history
+  entry or storage — the address holds only the time range and a saved search's id
+  (`src/pages/search/`, `src/lib/search-hooks.ts`).
+
 Device-provided text (host names, raw lines) goes through `visibleText` (`src/lib/display.ts`):
 bidi overrides and other invisible characters appear as `\uXXXX`. Other menu entries are
-placeholders until their milestone, already permission-filtered (`BUILT_PAGES` in `src/nav.ts`).
-Two top-bar controls of spec 12.2 come with the pages that use them: the global search box
-appears once "Arama" is built (M2; its term goes to the page as router state, so not into the URL,
-`?next=` or the web server's access log — but router state lives in the tab's session history
-(`history.state`), which the browser may keep for session restore: if the term must not reach the
-browser history at all, M2 hands it over in memory, e.g. a context or the query cache), and the
-global time range ("[Bugün ▾]")
-with the first page that reads it (Panel / Arama, M2) — until then a picker that filters nothing
-would make pages such as Denetim Kaydı look limited to "today". "Kullanım" keeps its own period in
-its address (`?from=&to=`).
+placeholders ("Bu sayfa sonraki bir sürümde eklenecek.", no milestone code), already
+permission-filtered (`BUILT_PAGES` in `src/nav.ts`).
+The top bar's two controls of spec 12.2: the global search box (with `search.read`) turns its
+term into a query (an IPv4 address → `ip:`, a MAC address → `mac:`, a host name → `domain:`,
+anything else quoted text) and hands it to Arama in memory (`src/lib/handoff.ts`), so not into
+the URL, `?next=`, the web server's access log or the tab's session history (`history.state`),
+which the browser may keep for session restore; the global time range ("[Son 24 saat ▾]",
+`src/lib/time-range.tsx`) appears only on routes whose handle asks for it (`handle.timeRange`:
+Arama) — a picker that filters nothing would make pages such as Denetim Kaydı look limited to a
+range. "Kullanım" keeps its own period in its address (`?from=&to=`).
 
 ## Licence (offline licensing)
 
@@ -149,8 +164,19 @@ with `api-schemas.json` like every other type.
 
 ```bash
 npm run check      # eslint, prettier, tsc, vitest, build
-npm run e2e        # Playwright against the production build, API mocked (e2e/mock-api.ts)
+npm run e2e        # Playwright against a production build (dist-e2e), API mocked (e2e/mock-api.ts)
 ```
+
+**What ships.** `npm run build` writes `dist`, the bundle `Build-ArciBundle.ps1` copies into the
+installer: no source maps and no developer UI kit. The UI kit (`/ui-kit`, every component in both
+themes, `src/pages/ui-kit`) and its menu entry exist only where `__UI_KIT__` is true
+(`vite.config.ts`): the dev server, the unit tests and `npm run build:e2e` (mode `e2e`, into
+`dist-e2e`), which Playwright builds and serves itself; its texts are in `src/locales/ui-kit/`,
+added by `src/lib/i18n.ts` only there. A build check in `vite.config.ts` (`shippedBundleCheck`)
+fails a build that would ship a source map, or, without the UI kit (always in the production
+build, whatever the flag says), any module of `src/pages/ui-kit` or `src/locales/ui-kit`, a
+`ui-kit` path or the kit's name; `src/components/layout/shipped-bundle.test.tsx` renders the app
+without it.
 
 `e2e/mock-api.ts` answers like the real endpoints (shapes from `api-types.ts`, texts from the
 API's message tables, audit entries from the golden vectors). Like the API (every request model

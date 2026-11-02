@@ -173,7 +173,7 @@ export function LoginPage() {
       step="password_change"
     >
       {noticeBox}
-      <PasswordChangeForm onSessionLost={sessionLost} />
+      <PasswordChangeForm forced onSessionLost={sessionLost} />
       <IdleNote minutes={idleMinutes} />
     </AuthLayout>
   );

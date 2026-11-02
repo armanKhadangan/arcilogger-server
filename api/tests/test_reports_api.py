@@ -131,7 +131,7 @@ def test_the_shipped_schedules_are_listed(client: TestClient) -> None:
 
 @pytest.mark.usefixtures("admin")
 def test_a_schedule_is_created_checked_changed_and_deleted(
-    client: TestClient, app_session_factory: sessionmaker[Session]
+    client: TestClient, app_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Validation: weekday per kind, e-mail addresses, HH:MM, formats, recipients to enable.
     error = error_of(client.post(f"{API}/schedules", json=body(weekday=None)), 422)
@@ -161,7 +161,10 @@ def test_a_schedule_is_created_checked_changed_and_deleted(
     error_of(client.post(f"{API}/schedules", json=body(name="  ")), 422)
     error_of(client.post(f"{API}/schedules", json=body(extra=1)), 422)
     # Created: addresses normalised (domain lower case, duplicates dropped), next run computed.
+    # The router reads the test's moment: a Friday 07:45 passing between the two clock reads
+    # would otherwise put the router's next run a week after the expected one.
     before = utc_now()
+    monkeypatch.setattr("arcilogger_api.routers.reports.utc_now", lambda: before)
     response = client.post(
         f"{API}/schedules",
         json=body(enabled=True, recipients=[" Yonetim@Example.COM ", "Yonetim@example.com"]),
@@ -249,7 +252,9 @@ def test_an_edit_keeps_an_occurrence_the_worker_has_not_run_yet(
 
 @pytest.mark.usefixtures("admin")
 def test_run_now_queues_a_run_for_the_worker(
-    client: TestClient, app_session_factory: sessionmaker[Session]
+    client: TestClient,
+    app_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sid = schedule_id(app_session_factory)
     url = f"{API}/schedules/{sid}/run"
@@ -257,6 +262,9 @@ def test_run_now_queues_a_run_for_the_worker(
     assert error_of(client.post(url), 422)["code"] == "report_recipients_required"
     client.patch(f"{API}/schedules/{sid}", json={"recipients": [TO]})
     before = utc_now()
+    # The router reads the test's moment: a site midnight (21:00 UTC) between the two clocks
+    # would move the full day the run covers by one day.
+    monkeypatch.setattr("arcilogger_api.routers.reports.utc_now", lambda: before)
     response = client.post(url)
     assert response.status_code == 202, response.text
     run = response.json()

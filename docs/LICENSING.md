@@ -43,6 +43,17 @@ in every state. Prices are not part of the product.
 | `usage_reports` | Scheduled usage reports | Zamanlanmış kullanım raporları | Scheduled usage reports made and e-mailed by the server: the **Raporlar** page | Usage analytics |
 | `bulk_import` | Bulk import (CSV) | Toplu içe aktarma (CSV) | Bulk import of persons and device assignments from CSV files (Cihazlar ve Kişiler → the import part of the **Aktarım** tab); manual entry and the CSV exports are always available | — |
 
+**Data the usage modules need:** Usage analytics and Scheduled usage reports are computed from
+FortiGate logs only: traffic logs (with interim logs for long sessions), web filter, DNS filter,
+application control and SSL inspection logs. Only traffic from private source addresses (the RFC
+1918 blocks and IPv6 ULA) is counted: internal networks on other ranges (e.g. 100.64.0.0/10 or
+public addresses used internally) are not analysed. Traffic is tied to the device and the person
+through the leases of the DHCP server (MikroTik or FortiGate) and `ARP-LOG`; traffic without a lease
+is counted per IP address. The srcmac field of FortiGate session records (device identification) is
+not used for usage. Logs of other vendors are stored and sealed but not analysed. Before you buy a
+licence, check that your network fits ([INSTALL.md](INSTALL.md) section 0.1); the trial (section 3)
+also shows the result on your own network.
+
 ### 2.1 What 5651 Temel always does
 
 Whatever the licence state, these work and no licence state switches them off: the syslog
@@ -58,6 +69,12 @@ dashboard's health boxes (log intake, seal, credit, clock, alerts) and the licen
 Only one alert code belongs to a paid module: `R20-report` (a scheduled report could not be sent)
 belongs to Scheduled usage reports; it is not raised while the module is off, and an open one is
 resolved when the module goes off ([ALERTS.md](ALERTS.md)).
+
+The licence alerts belong to 5651 Temel: the job `license.check` raises them in every state and
+tells the administrators before and when the paid modules go off (`R20-license`: the trial or a
+time-limited licence ends within 3 or 14 days, the modules are off), when a limit is crossed
+(`R20-license-limit`) and when maintenance ends (`R20-license-maintenance`, information)
+([ALERTS.md](ALERTS.md) section 2).
 
 Deleting personal data on time does not depend on the licence either: the retention jobs of the
 usage rollups and the report files (`usage.retention`, `reports.purge`) run in every state.
@@ -79,14 +96,19 @@ licence state.
 | `/lookup` | 5651 lookup, official PDF report and time stamp | 5651 Core |
 | `/lookups` | Saved 5651 lookups | 5651 Core |
 | `/raw` | Raw log lines | 5651 Core |
+| `/search` | Arama (log search): searches, statistics, saved searches, export | 5651 Core |
 | `/evidence` | Evidence packages | 5651 Core |
-| `/seals` | Sealed days, manifest, time stamp, verification | 5651 Core |
-| `/credits` | Kamu SM credit | 5651 Core |
+| `/seals` | Sealed days, manifest, time stamp, verification, "Şimdi mühürle" (seal now) | 5651 Core |
+| `/credits` | Kamu SM credit, "Kontör sorgula" (query now) | 5651 Core |
 | `/devices` | Devices and device-person assignments | 5651 Core |
 | `/persons` | Persons | 5651 Core |
 | `/departments` | Departments | 5651 Core |
 | `/vlans` | VLANs and subnets | 5651 Core |
+| `/live` | Canlı Akış (live tail): lines from the raw spool as they arrive | 5651 Core |
+| `/sources` | Kaynaklar (sources): the state, history and last lines of every log source | 5651 Core |
 | `/license` | Licence state, upload and removal of the licence file | 5651 Core |
+| `/admin` | Settings: the machine configuration, the administration service's state, change requests and their history | 5651 Core |
+| `/settings` | Application settings (the database settings) | 5651 Core |
 | `/usage` | The data of the Kullanım page, exports, rebuilds | Usage analytics |
 | `/reports` | Scheduled reports, runs, preview | Scheduled usage reports |
 | `/imports` | CSV import and its templates | Bulk import (CSV) |
@@ -99,7 +121,7 @@ data of a module that is off is not deleted.
 
 | Job | Module | While the licence is off |
 |---|---|---|
-| `license.check` | — (recomputes the licence state every 5 minutes) | always runs |
+| `license.check` | — (recomputes the licence state every 5 minutes, raises the licence alerts) | always runs |
 | `partitions.ensure` | 5651 Core | always runs |
 | `leases.incremental` | 5651 Core | always runs |
 | `leases.nightly` | 5651 Core | always runs |
@@ -107,6 +129,7 @@ data of a module that is off is not deleted.
 | `leases.late_evidence` | 5651 Core | always runs |
 | `evidence.purge` | 5651 Core | always runs |
 | `audit.import` | 5651 Core | always runs |
+| `admin.requests` | — (browser administration: the test e-mail, the lease timeline rebuild) | always runs |
 | `alerts.import` | 5651 Core | always runs |
 | `alerts.r15` | 5651 Core | always runs |
 | `alerts.system` | 5651 Core | always runs |
@@ -118,6 +141,7 @@ data of a module that is off is not deleted.
 | `usage.retention` | — (deletion of personal data) | always runs |
 | `reports.run_due` | Scheduled usage reports | skipped |
 | `reports.purge` | — (deletion of report files) | always runs |
+| `search.counts_backfill` | 5651 Core | always runs |
 
 On the command line only `arcilogger-worker usage rebuild` is refused while Usage analytics is off
 (exit code 1, the `module_not_licensed` message). `arcilogger-worker run`, `rebuild` (the lease
@@ -252,6 +276,10 @@ At most two banners show at once. Administrators follow the banner to the licenc
 users see "Contact your administrator." With a licence that holds no paid module (5651 Temel only),
 `expired`, `version_not_covered` and `wrong_server` show users no banner, as no module goes off;
 administrators get an information banner.
+
+The same situations are also alerts on the Güvenlik page, e-mailed by the alert settings
+(`R20-license`, `R20-license-limit`, `R20-license-maintenance`; [ALERTS.md](ALERTS.md)), and the
+trial's end (3 days) and a time-limited licence's end (14 days) are announced before they come.
 
 An unusable licence never falls back to the trial, and a server change has no grace period: a new
 licence file is needed.

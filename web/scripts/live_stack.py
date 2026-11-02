@@ -36,9 +36,10 @@ What it does, with the same commands the Windows installer runs:
   ARP lines of an IP conflict around 13:30;
 * ``arcilogger-ingest run --once`` loads them, ``arcilogger-worker rebuild --day`` builds the
   lease timeline and ``arcilogger-core seal --day`` seals the day with the mock TSA;
-* site settings as an administrator would make them: ``nat.wan_transip = 100.64.12.9`` (the
-  firewall's WAN address behind the ISP router; without it the same request correctly gives
-  double-NAT candidates), the PC's device linked to a person (the device/person pages are a
+* site settings as an administrator would make them: the internet exit ``wan`` with the NAT
+  address ``100.64.12.9`` (the firewall's WAN address behind the ISP router, as revision
+  ``0018_nat_egresses`` converts Wave 2's ``nat.wan_transip``; without it the same request is
+  answered from the logs alone), the PC's device linked to a person (the device/person pages are a
   later milestone, so this one row is written directly) and the evidence disk reserve lowered to
   1 % / 1 GiB so a small development disk does not refuse packages with
   ``507 disk_space_low``;
@@ -152,6 +153,7 @@ def _write_spool(config_path: Path) -> date:
 def _seed(config_path: Path, database_dsn: str, workdir: Path) -> None:
     from sqlalchemy.orm import Session
 
+    from arcilogger_db.egress import legacy_egresses
     from arcilogger_db.models import Department, Device, Person
     from arcilogger_db.settings import set_setting
     from arcilogger_db.testing import seed_example_network
@@ -181,9 +183,10 @@ def _seed(config_path: Path, database_dsn: str, workdir: Path) -> None:
             device.person_id = person.id
             device.name = DEVICE_NAME
             device.type = "pc"
-            # The FortiGate's WAN address behind the ISP router (Ayarlar → NAT), so the
-            # request for that address is an exact match instead of double-NAT candidates.
-            set_setting(session, "nat.wan_transip", WAN, updated_by="live_stack")
+            # The FortiGate's WAN address behind the ISP router (Ayarlar → Uygulama ayarları →
+            # İnternet çıkışları), so the request for that address stays an exact match.
+            exits, _dropped = legacy_egresses([], WAN, False)
+            set_setting(session, "nat.egresses", exits, updated_by="live_stack")
             for key in ("evidence.min_free_percent", "evidence.min_free_gb"):
                 set_setting(session, key, 1, updated_by="live_stack")
             session.commit()

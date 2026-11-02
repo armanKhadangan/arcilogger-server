@@ -1,20 +1,103 @@
-import { Coins, TriangleAlert } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Coins, RefreshCw, TriangleAlert } from 'lucide-react';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { RequestProgress } from '@/components/admin/request-progress';
 import { Sparkline } from '@/components/charts/sparkline';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, isApiError } from '@/lib/api';
+import { queryKeys, useCreditQuery } from '@/lib/api-hooks';
 import type { Credits } from '@/lib/api-types';
+import { useAuth } from '@/lib/auth';
 import { formatDate, formatDateTime, formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
+import type { AdminRequestOut, CreditActionResult } from '@/lib/settings-types';
+
+import { AGENT_CODES } from './seal-states';
+
+function CreditOutcome({ request }: { request: AdminRequestOut }) {
+  const { t } = useTranslation();
+  const lang = currentLang();
+  const result = request.result as CreditActionResult | null;
+  if (!result) return null;
+  return (
+    <p className="text-13 text-foreground" data-testid="credit-query-result">
+      {t(result.below_threshold ? 'sealing.credits.queryLow' : 'sealing.credits.queryResult', {
+        credits: formatNumber(result.credits, 0, lang),
+        threshold: formatNumber(result.threshold, 0, lang),
+      })}
+    </p>
+  );
+}
+
+/**
+ * "Kontör sorgula" (`seal.manage`; contract 2.9): the Requests task on the server asks Kamu SM
+ * once, as the daily Credit task does (and records the answer in the same history). At most one
+ * query a minute; the request is followed until the task reports.
+ */
+export function CreditQuery() {
+  const { t } = useTranslation();
+  const client = useQueryClient();
+  const query = useCreditQuery();
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  async function start() {
+    setProblem(null);
+    try {
+      const accepted = await query.mutateAsync();
+      setRequestId(accepted.request_id);
+    } catch (error) {
+      const seconds = isApiError(error) ? error.retryAfter : null;
+      setProblem(
+        seconds
+          ? `${errorMessage(error)} ${t('sealing.credits.retryAfter', { seconds })}`
+          : isApiError(error, ...AGENT_CODES)
+            ? `${errorMessage(error)} ${t('sealing.credits.console')}`
+            : errorMessage(error),
+      );
+    }
+  }
+
+  const settled = useCallback(() => {
+    void client.invalidateQueries({ queryKey: queryKeys.credits });
+  }, [client]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Button
+        variant="secondary"
+        size="sm"
+        className="self-start"
+        busy={query.isPending}
+        onClick={() => void start()}
+      >
+        <RefreshCw aria-hidden="true" />
+        {t('sealing.credits.query')}
+      </Button>
+      {problem ? <Alert tone="danger">{problem}</Alert> : null}
+      {requestId ? (
+        <RequestProgress
+          requestId={requestId}
+          quiet
+          onTerminal={settled}
+          renderResult={(request) => <CreditOutcome request={request} />}
+        />
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * "Kontör" (spec 6.1, 12.3 page 9): the Kamu SM credit history the scheduled Credit task records
- * once a day, the last known number, the alert threshold and a trend line. The web service never
- * asks Kamu SM itself (it has no access to the credentials, ADR-0007).
+ * once a day, the last known number, the alert threshold and a trend line, and "Kontör sorgula".
+ * The web service never asks Kamu SM itself (it has no access to the credentials, ADR-0007): a
+ * query runs as a task on the server.
  */
 export function CreditsCard({
   credits,
@@ -27,6 +110,7 @@ export function CreditsCard({
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
+  const { can } = useAuth();
   const values = (credits?.history ?? [])
     .map((check) => check.credits)
     .filter((value): value is number => value !== null);
@@ -137,6 +221,7 @@ export function CreditsCard({
             <p className="text-xs text-muted">{t('sealing.credits.note')}</p>
           </>
         ) : null}
+        {can('seal.manage') && !pending ? <CreditQuery /> : null}
       </CardContent>
     </Card>
   );

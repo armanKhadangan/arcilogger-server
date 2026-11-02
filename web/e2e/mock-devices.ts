@@ -61,15 +61,32 @@ const FUTURE_SLACK_MS = 2 * 60_000;
 
 const SORTS = ['last_seen', 'first_seen', 'mac', 'last_ip', 'name'] as const;
 const PREVIEW_ROWS = 50;
-const PERSON_COLUMNS = ['name', 'department', 'title', 'email', 'employee_no', 'active', 'notes'];
+const PERSON_COLUMNS = [
+  'name',
+  'department',
+  'title',
+  'email',
+  'employee_no',
+  'active',
+  'notes',
+  'usage_excluded',
+];
 /** Columns of the persons export an import accepts: `id` names the person, the rest is ignored. */
 const PERSON_EXPORT_ONLY = ['id', 'device_count', 'created_at', 'updated_at'];
 const ASSIGNMENT_COLUMNS = ['mac', 'employee_no', 'person_name', 'valid_from', 'note'];
 const BOM = String.fromCharCode(0xfeff);
+/** `arcilogger_api.csvfiles` booleans, folded (`HAYIR` → `hayir`). */
+const BOOLEAN_WORDS = new Map<string, boolean>([
+  ...['true', '1', 'evet', 'e', 'yes', 'y', 'aktif', 'active'].map((word) => [word, true] as const),
+  ...['false', '0', 'hayir', 'h', 'no', 'n', 'pasif', 'inactive'].map(
+    (word) => [word, false] as const,
+  ),
+]);
 
 /** `arcilogger_api.csvimport` line messages (TR, EN). */
 type LineKey =
   | 'required'
+  | 'boolean'
   | 'email'
   | 'department'
   | 'device_unknown'
@@ -84,6 +101,10 @@ type LineKey =
   | 'overlap';
 const LINE: Record<LineKey, [string, string]> = {
   required: ['{column} boş olamaz.', '{column} must not be empty.'],
+  boolean: [
+    '{column} değeri evet ya da hayır olmalıdır ({value}).',
+    '{column} must be evet or hayır, true or false ({value}).',
+  ],
   email: ['E-posta adresi geçersiz ({value}).', 'The e-mail address is invalid ({value}).'],
   department: [
     "'{value}' adlı departman yok; önce Departmanlar listesine ekleyin.",
@@ -750,6 +771,7 @@ export class DevicesMock {
       employee_no: body.employee_no ?? null,
       active: body.active ?? true,
       notes: body.notes ?? null,
+      usage_excluded: body.usage_excluded ?? false,
       created_at: now,
       updated_at: now,
     };
@@ -763,7 +785,8 @@ export class DevicesMock {
     const person = this.persons.get(id);
     if (!person) return host.error(404, 'not_found');
     const body = call.body as PersonUpdate;
-    if (body.name === null || body.active === null) return host.error(422, 'validation_error');
+    if (body.name === null || body.active === null || body.usage_excluded === null)
+      return host.error(422, 'validation_error');
     if (body.employee_no !== undefined) {
       const taken = this.employeeNoTaken(body.employee_no, id);
       if (taken) return taken;
@@ -777,6 +800,7 @@ export class DevicesMock {
     if (body.notes !== undefined) person.notes = body.notes;
     // Deactivating keeps the person's current devices assigned (a separate step).
     if (body.active !== undefined) person.active = body.active;
+    if (body.usage_excluded !== undefined) person.usage_excluded = body.usage_excluded;
     person.updated_at = isoNow();
     for (const item of this.assignments)
       if (item.person?.id === id) item.person = { id, name: person.name };
@@ -1117,6 +1141,15 @@ export class DevicesMock {
       if (active)
         values.active = !['hayir', 'false', '0', 'h', 'no', 'n', 'pasif'].includes(active);
       else if (!existing) values.active = true;
+      // `usage_excluded`: optional, evet/hayır; an empty cell keeps it (a new person: false).
+      const excludedCell = get(cells, 'usage_excluded');
+      const excluded = excludedCell ? BOOLEAN_WORDS.get(fold(excludedCell)) : undefined;
+      if (excludedCell && excluded === undefined) {
+        const params = { column: 'usage_excluded', value: excludedCell };
+        errors.push(lineError(line, 'boolean', params));
+        continue;
+      }
+      if (excluded !== undefined) values.usage_excluded = excluded;
       const current: Record<string, unknown> = existing
         ? { ...existing, department_id: existing.department?.id ?? null }
         : {};
@@ -1151,6 +1184,7 @@ export class DevicesMock {
           employee_no: null,
           active: true,
           notes: null,
+          usage_excluded: false,
           created_at: now,
           updated_at: now,
         };

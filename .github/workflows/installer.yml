@@ -9,9 +9,16 @@ name: Windows installer
 # The end-to-end job builds a real offline bundle with Build-ArciBundle.ps1 (Windows PowerShell
 # 5.1, as on the admin PC) and then installs, upgrades, rolls back, survives a broken upgrade and
 # uninstalls ARCILOGGER on the throw-away runner (as Administrator), with the PostgreSQL of the
-# runner image: ingest, API and worker run under their virtual accounts, the API is called through
-# Caddy (today's raw line from the spool, the sealing calendar) and the Seal task runs through
-# Task Scheduler as LOCAL SERVICE under the installed NTFS rights.
+# runner image: ingest, API, worker and the administration agent ArciAdmin run under their
+# virtual accounts, the API is called through Caddy (today's raw line from the spool, the sealing
+# calendar) and the Seal task runs through Task Scheduler as LOCAL SERVICE under the installed
+# NTFS rights. The browser administration (docs/adr/0014, contract test plan 3) is driven through
+# Caddy too: "Şimdi mühürle" wakes the Seal task, a site name change reaches "active" with the
+# rights of contract 2.2 read back, a log source added in the browser reaches the syslog firewall
+# rule (ApplySystem, SYSTEM) within 2 minutes, "Kontör sorgula" runs in the Requests task; the
+# rollback goes to a program without ArciAdmin and sealing goes on. Before the installation, the
+# live tail (Canlı Akış) is read through the pinned Caddy from the real API on the runner's
+# PostgreSQL: a spool line written after the stream opened arrives within 3 s, uncompressed.
 #
 # The end-to-end job checks what the Python services and tasks do under the installed rights, so
 # it also runs when their code or their locked dependencies change: a change in api/, core/,
@@ -29,6 +36,7 @@ on:
     paths:
       - 'deploy/windows/**'
       - 'tests/test_installer_scripts.py'
+      - 'tests/test_caddy_streaming.py'
       - 'tests/test_windows_tasks.py'
       - '.github/workflows/installer.yml'
       - 'api/**'
@@ -40,11 +48,28 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
     # The paths above filter branch pushes only (GitHub does not evaluate path filters for tag
-    # pushes): a pushed v* tag always runs, for the release job.
+    # pushes): a pushed v* tag always runs, for the release job. Work branches are tested through
+    # their pull request (below), not once more for every push.
     branches:
-      - '**'
+      - main
+      - 'wave-*'
     tags:
       - 'v*'
+  pull_request:
+    paths:
+      - 'deploy/windows/**'
+      - 'tests/test_installer_scripts.py'
+      - 'tests/test_caddy_streaming.py'
+      - 'tests/test_windows_tasks.py'
+      - '.github/workflows/installer.yml'
+      - 'api/**'
+      - 'collector/**'
+      - 'core/**'
+      - 'db/**'
+      - 'ingest/**'
+      - 'worker/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
   workflow_dispatch:
 
 permissions:
@@ -52,7 +77,8 @@ permissions:
 
 concurrency:
   group: installer-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push still cancels its pull request's run; runs on wave-*, main and tags finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Actions are pinned by commit SHA, the same versions as ci.yml. Only the release job uploads
 # artifacts, and only the release job may write to the repository (its draft release).
@@ -64,7 +90,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: '3.12'
           enable-cache: true
@@ -86,17 +112,18 @@ jobs:
         env:
           ARCILOGGER_REQUIRE_PWSH: '1'
           POWERSHELL_TELEMETRY_OPTOUT: '1'
-        run: uv run pytest tests/test_installer_scripts.py tests/test_windows_tasks.py -v
+        run: uv run pytest tests/test_installer_scripts.py tests/test_windows_tasks.py tests/test_caddy_streaming.py -v
 
   installer-e2e:
     name: Installer end to end (Windows, real bundle)
     runs-on: windows-latest
-    timeout-minutes: 60
+    # The browser administration steps wait for scheduled tasks (at most 15 minutes each).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: '3.12'
           enable-cache: true
@@ -148,6 +175,34 @@ jobs:
           "ARCILOGGER_E2E_PGUSER=$user" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ARCILOGGER_E2E_PGPASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ARCILOGGER_E2E_PGBIN=$env:PGBIN" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Download the pinned Caddy (SHA-256 from components.json)
+        shell: pwsh
+        run: |
+          $components = (Get-Content -Raw deploy/windows/installer/components.json | ConvertFrom-Json).components
+          $caddy = $components | Where-Object { $_.name -eq 'caddy' }
+          $zip = Join-Path $env:RUNNER_TEMP $caddy.file
+          Invoke-WebRequest -Uri $caddy.url -OutFile $zip
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $caddy.sha256) { throw "Caddy SHA-256 mismatch: $actual" }
+          $folder = Join-Path $env:RUNNER_TEMP 'caddy'
+          Expand-Archive -LiteralPath $zip -DestinationPath $folder
+          "ARCILOGGER_CADDY=$(Join-Path $folder 'caddy.exe')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # Canlı Akış through Caddy on Windows (contract 3.6): the real API behind the real
+      # Caddyfile on the runner's PostgreSQL; a spool line written after the stream opened must
+      # arrive within 3 s, uncompressed. The pg_trgm line is informational only (Wave 2 does not
+      # use the extension; contract 2.24).
+      - name: Live tail through Caddy, and pg_trgm on this PostgreSQL
+        shell: pwsh
+        env:
+          ARCILOGGER_REQUIRE_DB: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false  # exit codes are checked below
+          $env:PGPASSWORD = $env:ARCILOGGER_E2E_PGPASSWORD
+          & (Join-Path $env:ARCILOGGER_E2E_PGBIN 'psql.exe') -h 127.0.0.1 -U $env:ARCILOGGER_E2E_PGUSER -d postgres -w -c "SELECT name, default_version, installed_version FROM pg_available_extensions WHERE name = 'pg_trgm';"
+          $env:ARCILOGGER_TEST_PG = "postgresql://$($env:ARCILOGGER_E2E_PGUSER):$($env:ARCILOGGER_E2E_PGPASSWORD)@127.0.0.1:5432/postgres"
+          uv run pytest tests/test_caddy_streaming.py -v -rA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the offline bundle (Windows PowerShell 5.1)
         shell: powershell
         run: |
@@ -218,7 +273,7 @@ jobs:
           output-file: ${{ runner.temp }}/release/ARCILOGGER-${{ env.ARCILOGGER_VERSION }}.spdx.json
           upload-artifact: false
           upload-release-assets: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: '3.12'
           enable-cache: true

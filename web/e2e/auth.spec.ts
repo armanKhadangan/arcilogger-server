@@ -3,7 +3,14 @@ import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
 import { expectNoA11yViolations, submitCredentials, usePreferences, type Theme } from './fixtures';
-import { CSRF_TOKEN, mockApi, RECOVERY_CODES, TEMPORARY_PASSWORD, VALID_TOTP } from './mock-api';
+import {
+  CSRF_TOKEN,
+  LOCKOUT_ATTEMPTS,
+  mockApi,
+  RECOVERY_CODES,
+  TEMPORARY_PASSWORD,
+  VALID_TOTP,
+} from './mock-api';
 
 const PASSWORD = 'Uzun-ve-Gizli-Parola-2026'; // gitleaks:allow — fake test credential (mocked API)
 
@@ -267,6 +274,63 @@ test.describe('sign-in', () => {
     await expect(dialog).toBeHidden();
     await expect(page.getByRole('button', { name: /Kullanıcı menüsü/ })).toBeFocused();
   });
+
+  test('a signed-in user changes the own password from the user menu', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'ayse.yilmaz' });
+    const current = api.get('ayse.yilmaz').password;
+    await page.goto('/sealing');
+    await page.getByRole('button', { name: /Kullanıcı menüsü/ }).click();
+    await page.getByRole('menuitem', { name: 'Parolayı değiştir' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Parolayı değiştir' });
+    // The own password: not the temporary one of the forced change after sign-in.
+    await expect(dialog.getByLabel('Mevcut parola')).toBeFocused();
+    await expect(dialog.getByLabel(/geçici/)).toHaveCount(0);
+    await dialog.getByLabel('Mevcut parola').fill('yanlış parola bir iki üç');
+    await dialog.getByLabel('Yeni parola', { exact: true }).fill('yeşil tren yirmi üç portakal');
+    await dialog.getByLabel('Yeni parola (tekrar)').fill('yeşil tren yirmi üç portakal');
+    await dialog.getByRole('button', { name: 'Parolayı değiştir' }).click();
+    await expect(dialog.getByText('Parola veya doğrulama kodu hatalı.')).toBeVisible();
+    await expect(dialog.getByLabel('Mevcut parola')).toHaveValue('');
+
+    await dialog.getByLabel('Mevcut parola').fill(current);
+    await dialog.getByRole('button', { name: 'Parolayı değiştir' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.getByText('Parolanız değiştirildi. Diğer oturumlarınız kapatıldı.', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /Kullanıcı menüsü/ })).toBeFocused();
+    await expect(page.getByRole('heading', { level: 1, name: 'Mühürleme' })).toBeVisible();
+    const changes = api.callsTo('POST', '/auth/password');
+    expect(changes.map((call) => call.body)).toEqual([
+      {
+        current_password: 'yanlış parola bir iki üç',
+        new_password: 'yeşil tren yirmi üç portakal',
+      },
+      { current_password: current, new_password: 'yeşil tren yirmi üç portakal' },
+    ]);
+    expect(changes.every((call) => call.csrf === CSRF_TOKEN)).toBe(true);
+    expect(api.byName('ayse.yilmaz')?.password).toBe('yeşil tren yirmi üç portakal');
+  });
+
+  test('a wrong current password that locks the account ends the session', async ({ page }) => {
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    api.get('tolga').failed_attempts = LOCKOUT_ATTEMPTS - 1;
+    await page.goto('/sealing');
+    await page.getByRole('button', { name: /Kullanıcı menüsü/ }).click();
+    await page.getByRole('menuitem', { name: 'Parolayı değiştir' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Parolayı değiştir' });
+    await dialog.getByLabel('Mevcut parola').fill('yanlış parola bir iki üç');
+    await dialog.getByLabel('Yeni parola', { exact: true }).fill('yeşil tren yirmi üç portakal');
+    await dialog.getByLabel('Yeni parola (tekrar)').fill('yeşil tren yirmi üç portakal');
+    await dialog.getByRole('button', { name: 'Parolayı değiştir' }).click();
+    // Back to the same page (the day in its address too) after the next sign-in.
+    await expect(page).toHaveURL(/\/login\?next=%2Fsealing[^&]*&reason=account_locked$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Giriş yap' })).toBeVisible();
+    await expect(
+      page.getByText(/hesabınız geçici olarak kilitlendi ve oturum kapatıldı/),
+    ).toBeVisible();
+    expect(api.byName('tolga')?.password).toBe(PASSWORD);
+  });
 });
 
 for (const theme of ['light', 'dark'] as Theme[]) {
@@ -323,6 +387,19 @@ for (const theme of ['light', 'dark'] as Theme[]) {
       await page.getByRole('menuitem', { name: 'Kurtarma kodlarını yenile' }).click();
       await page.getByRole('button', { name: 'Yeni kodlar oluştur' }).click();
       await expect(page.getByRole('dialog', { name: 'Kimliğinizi doğrulayın' })).toBeVisible();
+      await expectNoA11yViolations(page);
+    });
+
+    test('password change dialog of the user menu', async ({ page }) => {
+      await mockApi(page, { signedInAs: 'tolga' });
+      await page.goto('/');
+      await page.getByRole('button', { name: /Kullanıcı menüsü/ }).click();
+      await page.getByRole('menuitem', { name: 'Parolayı değiştir' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Parolayı değiştir' });
+      await expect(dialog.getByLabel('Mevcut parola')).toBeVisible();
+      await expectNoA11yViolations(page);
+      await dialog.getByRole('button', { name: 'Parolayı değiştir' }).click(); // validation
+      await expect(dialog.getByText('Bu alan zorunludur.').first()).toBeVisible();
       await expectNoA11yViolations(page);
     });
   });

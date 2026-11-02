@@ -119,8 +119,15 @@ export function validateLookup(draft: LookupDraft, today: string): FieldErrors<L
   else if (requestDate === null) errors.requestDate = 'lookup.validation.date';
   else if (requestDate > today) errors.requestDate = 'lookup.validation.futureRequest';
 
+  // No IPv6 identity evidence (NDP, DHCPv6): a public or internal address must be IPv4, an IPv6
+  // one (the only kind with `:`, `::ffff:a.b.c.d` too) is refused by the API
+  // (`ipv6_not_supported`). The destination is only a filter and may be IPv6.
   for (const field of ['publicIp', 'destIp', 'internalIp'] as const) {
-    if (draft[field].trim() && !isIpAddress(draft[field])) errors[field] = 'lookup.validation.ip';
+    if (draft[field].trim() && !isIpAddress(draft[field]))
+      errors[field] = field === 'destIp' ? 'lookup.validation.ip' : 'lookup.validation.ipv4';
+  }
+  for (const field of ['publicIp', 'internalIp'] as const) {
+    if (!errors[field] && draft[field].includes(':')) errors[field] = 'lookup.validation.ipv6';
   }
   for (const field of ['publicPort', 'destPort'] as const) {
     if (draft[field].trim() && !isPort(draft[field])) errors[field] = 'lookup.validation.port';

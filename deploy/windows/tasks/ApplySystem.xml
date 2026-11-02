@@ -1,0 +1,66 @@
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>ARCILOGGER</Author>
+    <Description>Sistem eşitleme: güvenlik duvarının syslog göndericilerini, sıkı giden kip kurallarını ve Windows Saati kaynaklarını doğrulanmış arcilogger.toml ile yöneticilerin yazdığı policy.json'dan türetir, kuralları yerinde günceller; bilinen bir Zamane sürümünü onaylar. Hiçbir istekten girdi almaz. Olay 4101 (ARCILOGGER-Admin) ile uyanır, ayrıca 5 dakikada bir denetler.</Description>
+    <URI>\ARCILOGGER\ApplySystem</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <!-- ArciAdmin writes Event 4101 after a change that needs the system step; the event carries
+         no data and only wakes the task (ADR-0014). -->
+    <EventTrigger>
+      <Enabled>true</Enabled>
+      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="Application"&gt;&lt;Select Path="Application"&gt;*[System[Provider[@Name='ARCILOGGER-Admin'] and EventID=4101]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+    </EventTrigger>
+    <!-- Every 5 minutes, all day: retries a failed step and catches a hand edit of arcilogger.toml. -->
+    <CalendarTrigger>
+      <Repetition>
+        <Interval>PT5M</Interval>
+        <Duration>P1D</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <!-- SYSTEM: the only ARCILOGGER task that is not LOCAL SERVICE. It changes firewall rules and
+         the Windows Time peers, which need it, and takes no input from a request: it re-derives
+         everything from the validated configuration, the administrator-only policy.json and
+         files it only hashes (Sync-ArciSystem.ps1). -->
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <!-- The widening wake-up that arrives while the narrowing run is busy must not be lost. -->
+    <MultipleInstancesPolicy>Queue</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <!-- Run as soon as possible after a missed start (systemd Persistent=true). -->
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <!-- Windows PowerShell 5.1 of the system, by its full path; the script and the module it
+           imports are in the program folder, which only administrators write. -->
+      <Command>%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{{SCRIPTS}}\Sync-ArciSystem.ps1"</Arguments>
+    </Exec>
+  </Actions>
+</Task>

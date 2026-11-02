@@ -10,7 +10,6 @@ from __future__ import annotations
 import getpass
 import io
 import json
-import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -23,11 +22,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import arcilogger_db
+from arcilogger_core.admin.contract import AdminLayout, AdminPolicy, dump_document
 from arcilogger_core.config import load_config
 from arcilogger_core.license.request import parse_request_code
 from arcilogger_core.license.testing import fixed_identity, make_license, tamper, trusted_test_keys
 from arcilogger_core.license.trusted_time import clear_cache
 from arcilogger_core.secretstore import DATABASE_PASSWORD, SecretStore
+from arcilogger_core.timeutil import utc_now
+from arcilogger_db.backup import BackupError, find_tool
 from arcilogger_db.cli import main
 from arcilogger_db.engine import make_engine
 from arcilogger_db.models import AuditLog, LicenseEvent
@@ -293,11 +295,27 @@ def test_without_the_licence_code(
 
 def test_backup_and_upgrade_run_without_the_licence_code(setup: Path) -> None:
     """B-T31: the Backup task and ``upgrade`` (the same command line) never need it."""
-    pg_dump, pg_restore = shutil.which("pg_dump"), shutil.which("pg_restore")
-    if pg_dump is None or pg_restore is None:
+    try:  # the programs themselves (a configured link, e.g. to pg_wrapper, is refused)
+        pg_dump, pg_restore = (
+            find_tool(name, services={}).path for name in ("pg_dump", "pg_restore")
+        )
+    except BackupError:
         pytest.skip("pg_dump/pg_restore not installed")
     with setup.open("a", encoding="utf-8") as handle:
-        handle.write(f'\n[backup]\npg_dump = "{pg_dump}"\npg_restore = "{pg_restore}"\n')
+        handle.write(
+            f'\n[backup]\npg_dump = "{pg_dump.as_posix()}"\n'
+            f'pg_restore = "{pg_restore.as_posix()}"\n'
+        )
+    # A configured tool runs only from a folder the installation's policy trusts (execpolicy).
+    policy = AdminPolicy(
+        enabled=True,
+        executable_roots=tuple(sorted({str(pg_dump.parent), str(pg_restore.parent)})),
+        written_at=utc_now(),
+        written_by="installer",
+    )
+    target = AdminLayout(setup.parent / "admin").policy
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(dump_document(policy))
     script = (
         "import sys\n"
         "sys.modules['arcilogger_core.license'] = None\n"

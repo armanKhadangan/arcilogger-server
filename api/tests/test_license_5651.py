@@ -32,6 +32,7 @@ from arcilogger_api.evidence_jobs import EvidenceBuilder
 from arcilogger_api.lookup_testing import AT, DAY, PC, build_site, iso, seal_day
 from arcilogger_api.pdftext import pdf_text
 from arcilogger_api.testing import LoggedIn
+from arcilogger_core.admin.testing import FakeAgent, Installed
 from arcilogger_core.config import Config
 from arcilogger_core.immutability import is_locked, unlock
 from arcilogger_core.layout import Layout
@@ -89,7 +90,7 @@ def lookup_body() -> dict[str, Any]:
     }
 
 
-def lock(state: str, licence: Any, monkeypatch: pytest.MonkeyPatch) -> str:
+def lock(state: str, licence: Any) -> str:
     """Bring the installation into ``state`` (a licence limited to one log source); returns
     the state ``GET /license`` must report."""
     licence.trial_over()
@@ -103,13 +104,13 @@ def lock(state: str, licence: Any, monkeypatch: pytest.MonkeyPatch) -> str:
         options["maintenance_until"] = date(2026, 1, 1)
     licence.store(make_license(**options))
     if state == "invalid":
-        monkeypatch.setattr(keys, "TRUSTED_KEYS", {})
+        licence.patch.setattr(keys, "TRUSTED_KEYS", {})
     if state == "wrong_server_unreadable":
 
         def unreadable() -> Any:
             raise fingerprint.FingerprintError("GetSystemFirmwareTable failed")
 
-        monkeypatch.setattr(fingerprint, "IDENTITY_PROVIDER", unreadable)
+        licence.patch.setattr(fingerprint, "IDENTITY_PROVIDER", unreadable)
         fingerprint.clear_cache()
     licence.invalidate()
     return "wrong_server" if state == "wrong_server_unreadable" else state
@@ -179,7 +180,7 @@ def test_the_5651_path_works_in_every_locked_state(
         set_setting(session, "lookup.report_timestamp", True, updated_by="admin")
         session.commit()
     licence.admin(client, login_as, password=PASSWORD)
-    expected = lock(state, licence, monkeypatch)
+    expected = lock(state, licence)
     document = client.get(f"{V}/license").json()
     assert document["status"] == expected
     assert [m["key"] for m in document["modules"] if m["enabled"]] == ["core_5651"]
@@ -243,6 +244,41 @@ def test_the_5651_path_works_in_every_locked_state(
     assert client.get(f"{V}/devices").status_code == 200
     assert client.get(f"{V}/persons").status_code == 200
     same_dashboard(client, licence)
+
+
+@pytest.mark.parametrize("state", ["trial_expired", "invalid", "expired"])
+def test_browser_administration_works_in_every_locked_state(
+    client: TestClient,
+    login_as: Login,
+    licence: Any,
+    installed: Installed,
+    agent: FakeAgent,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+) -> None:
+    """No router of the browser administration uses ``require_module`` (ADR-0014): a change of
+    the machine configuration, "Kontör sorgula" and the database settings work whatever the
+    licence says."""
+    licence.admin(client, login_as, password=PASSWORD)
+    lock(state, licence)
+    assert client.get(f"{V}/admin/config").status_code == 200
+    assert client.get(f"{V}/admin/status").json()["agent"]["state"] == "ok"
+    tag = client.get(f"{V}/admin/config").json()["etags"]["general"]
+    changed = client.put(
+        f"{V}/admin/config/general", json={"etag": tag, "site_name": "Örnek Lojistik A.Ş."}
+    )
+    assert changed.status_code == 202, changed.text
+    credit = client.post(f"{V}/credits/query")
+    assert credit.status_code == 202, credit.text
+    agent.process()
+    assert client.get(changed.json()["status_url"]).json()["state"] == "active"
+    assert client.get(credit.json()["status_url"]).json()["state"] == "succeeded"
+    settings = client.patch(
+        f"{V}/settings",
+        json={"changes": [{"key": "lookup.tolerance_seconds", "old": 60, "value": 90}]},
+    )
+    assert settings.status_code == 200, settings.text
+    assert client.get(f"{V}/settings").status_code == 200
 
 
 # -- B-T30 never alter evidence -------------------------------------------------------------------

@@ -15,7 +15,7 @@ Paketin içeriği ve bağımsız doğrulama adımları: [DENETCI-KILAVUZU.md](DE
 | Paket oluşturmak | ✔ (son 5 dk içinde parola onayı) | — (sahip kararı, `docs/roles.md`) | — |
 | Paket indirmek | ✔ (parola onayı + KVKK metni) | ✔ (parola onayı + KVKK metni; aşağıdaki not) | — |
 | Bir günü şimdi doğrulamak ("Doğrula") | ✔ | ✔ | — |
-| "Şimdi mühürle" | bu sürümde web'den yok (bölüm 4) | — | — |
+| "Şimdi mühürle", "Kontör sorgula" | ✔ (`seal.manage`, bölüm 4) | — | — |
 
 **Sorgu paketlerinin görünürlüğü:** bir 5651 sorgusundan oluşturulan paket o sorgunun resmi
 raporunu (talep, gerekçe, sonuç, kişi zinciri) içerir. Bu yüzden sorguların görünürlük kuralı
@@ -31,14 +31,25 @@ paket (`include_audit_log`) girdileri gerçek kullanım hedefleri ve özetleriyl
 
 Kapsam iki yoldan biriyle seçilir:
 
-- **5651 sorgusundan** (`lookup_id`): sorgu sonucunun dayandığı ham satırlar (FortiGate oturumu,
-  DHCP/ARP kayıtları, IP çakışmasındaki diğer cihazlar dahil) ve sorgu günü pakete girer.
+- **5651 sorgusundan** (`lookup_id`): sorgu sonucunun dayandığı ham satırlar (FortiGate
+  oturumları, çift NAT yanıtında başka kişilerin aday oturumları dahil; DHCP sunucusunun
+  (MikroTik ya da FortiGate) kira kayıtları ve `ARP-LOG` kayıtları, IP çakışmasındaki diğer
+  cihazlar ve raporun bölüm 6'da gösterdiği, kira zaman çizelgesine girmemiş FortiGate DHCP
+  satırları dahil) ve sorgu günü pakete girer.
   Makam ve dosya no paketin referansı olur. `full_days` ile (varsayılan) paket, bu günlerin
   **tüm kaynaklarının** mühürlü dosyalarını tam olarak içerir (yalnızca sorgunun dayandığı
   kaynakları değil; `sources` verilirse yalnızca onlar ve alıntılanan satırların kaynakları);
   alıntılanan satırlar ayrıca `extract/` altındadır. Yalnızca dayanılan kaynakların tam
   dosyaları isteniyorsa `content: "extract"` seçilir.
 - **Elle** (`from` / `to`, en fazla 31 gün; isteğe bağlı `sources` ve satır listesi `extract`).
+
+**Aygıt tanıma alanları:** FortiGate'in aygıt tanıması açık olan bir arayüzün oturum satırları
+kaynak MAC adresini (`srcmac`), cihaz adını, işletim sistemini, donanım üreticisini ve sürümünü,
+cihaz türünü ve FortiGate'in pasif olarak öğrendiği kullanıcı adlarını taşır. Paket ham satırları
+değiştirmez: bu alanlar, Ayarlar'daki srcmac arayüz listesinden bağımsız olarak, alıntılanan her
+oturum satırında (`extract/`, başka kişilerin aday oturumları dahil), paketteki mühürlü dosyalarda
+ve paketteki resmi raporun ham satırlarında görünür ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5,
+[legal/aydinlatma-metni-taslak.md](legal/aydinlatma-metni-taslak.md)).
 
 İçerik (`content`): `full_days` — seçilen kaynakların o günlerdeki mühürlü dosyalarının tamamı
 (alıntılanan satırlar ayrıca `extract/` altında); `extract` — alıntılanan satırlar ve yalnızca bu
@@ -154,11 +165,17 @@ değiştirilmediğini bununla kontrol eder (DENETCI-KILAVUZU bölüm 5).
   (`seal.verify`); takvim zamanlanmış ve anlık doğrulamanın yenisini gösterir. Süre aşımı ya da
   doğrulama sürecinin hiç başlatılamaması (`error`) sonuçsuz sayılır, yine kaydedilir ve
   denetlenir, günü kırmızıya çevirmez.
-- **Şimdi mühürle:** bu sürümde web'den yapılamaz (`501`): web hizmetinin kasaya yazma izni yoktur
-  (ADR-0007). `\ARCILOGGER\Seal` görevi her gece 00:10'dan itibaren 5 dakikada bir çalışır ve
-  başarısız denemeleri tekrarlar; hemen mühürlemek için Görev Zamanlayıcı'dan çalıştırın.
-  *Sonraki sürüm:* imzalı bir istek dosyası, Seal görevi tarafından alınır.
-- **Kontör** (`GET /credits`): `\ARCILOGGER\Credit` görevinin günlük sorgu geçmişi ve uyarı eşiği.
+- **Şimdi mühürle** (`POST /seals/{gün}/seal`, `seal.manage`, `202`): web hizmetinin kasaya
+  yazma izni yoktur (ADR-0007); istek yönetim hizmeti ArciAdmin üzerinden imzalı bir görev isteği
+  olur ve `\ARCILOGGER\Seal` görevi sıradaki (en eski) mühürlenmemiş günü bir kez mühürlemeyi
+  dener (ADR-0014; gece yarısından sonraki bekleme, boş gün kuralı ve gün sırası atlanmaz). Görev
+  her gece 00:10'dan itibaren 5 dakikada bir de çalışır ve başarısız denemeleri tekrarlar.
+  Tarayıcıdan yönetim kapalıyken ya da ArciAdmin yanıt vermiyorken düğme kullanılamaz; o zaman
+  görevi Görev Zamanlayıcı'dan çalıştırın.
+- **Kontör** (`GET /credits`): `\ARCILOGGER\Credit` görevinin günlük sorgu geçmişi ve uyarı
+  eşiği. **Kontör sorgula** (`POST /credits/query`, `seal.manage`, dakikada en çok 1) sorguyu
+  ArciAdmin üzerinden `\ARCILOGGER\Requests` görevine bir kez yaptırır; yanıt aynı geçmişe
+  yazılır.
 - **Denetim kaydı:** zamanlanmış mühürleme ve imha veritabanı olmadan çalışır; worker her 15
   dakikada bir sonuçlarını denetim kaydına aktarır — her olay **bir kez**:
   `seal.run` mühürlenen her gün (`sealed`) ve her başarısız deneme (`failed`; `state\alerts.jsonl`
@@ -184,11 +201,21 @@ ARCILOGGER is *designed to support* Law 5651 obligations; it does not claim lega
   hidden in the same way from a reader who sees pseudonyms on the Kullanım pages (the auditor
   while `usage.pseudonymize_anonymous_role` is on; [USAGE.md](USAGE.md) section 6).
 - **Create** (`POST /api/v1/evidence`): scope from a 5651 lookup (`lookup_id`: the raw lines its
-  result cites and the lookup day; with `full_days`, the default, the package holds the complete
-  sealed files of **all** sources of those days — not only the cited ones — unless `sources`
-  narrows them, plus the cited lines under `extract/`) or explicit (`from`/`to`, at most 31 days, optional `sources`
-  and `extract` lines). `content`: `full_days` (all sealed files of the chosen sources) or
-  `extract` (the cited lines plus the complete sealed files of their sources on those days).
+  result cites — FortiGate sessions, other people's candidate sessions of a double-NAT answer
+  included; the leases of the DHCP server (MikroTik or FortiGate) and `ARP-LOG` records, the other
+  devices of an IP conflict and the FortiGate DHCP lines outside the lease timeline that its report
+  shows in section 6 included — and the lookup day; with `full_days`, the default, the package
+  holds the complete sealed files of **all** sources of those days — not only the cited ones —
+  unless `sources` narrows them, plus the cited lines under `extract/`) or explicit (`from`/`to`,
+  at most 31 days, optional `sources` and `extract` lines). **Device identification:** the session
+  lines of an interface with FortiGate device identification on carry the source MAC address
+  (`srcmac`), the device name, the operating system, the hardware vendor and version, the device
+  type and the user names the FortiGate learned passively. A package never changes raw lines:
+  whatever the srcmac interface list in the settings says, these fields appear in every cited
+  session line (`extract/`, other people's candidate sessions included), in the package's sealed
+  files and in the raw lines of its official report ([DEVICE-SETUP.md](DEVICE-SETUP.md) section
+  2.5). `content`: `full_days` (all sealed files of the chosen sources) or `extract` (the cited
+  lines plus the complete sealed files of their sources on those days).
   ARCILOGGER's own audit log (`audit.jsonl.gz`) is **left out by default** (KVKK data
   minimisation: it holds every other lookup of the day and staff data); `paket.json` lists it in
   the day's `excluded` with `kind: "audit_log"` and its sealed SHA-256, and `verify.py` reports it
@@ -232,9 +259,12 @@ ARCILOGGER is *designed to support* Law 5651 obligations; it does not claim lega
   production (root not configured)" badge and an info notice, never the red test/mock one; verification and token-check errors
   in Turkish as `errors_tr`/`warnings_tr`) and the replica; manifest/token downloads
   (audited); "Verify now" in a child process with a 300 s limit, stored in `seal_verifications`
-  (the API may not write `state\verify`); "Seal now" is not available through the API in this
-  version (`501`, run the `\ARCILOGGER\Seal` task; planned: a signed request file picked up by
-  the Seal task); `/credits` shows the Kamu SM credit history.
+  (the API may not write `state\verify`); "Seal now" (`POST /seals/{day}/seal`, `seal.manage`,
+  `202`) becomes a signed task request through the administration service ArciAdmin, and the
+  `\ARCILOGGER\Seal` task tries the oldest unsealed day once (ADR-0014); `/credits` shows the Kamu
+  SM credit history, and "Query credit" (`POST /credits/query`, at most once a minute) has the
+  `\ARCILOGGER\Requests` task query it once. While browser administration is off or ArciAdmin
+  does not answer, run the `\ARCILOGGER\Seal` or `\ARCILOGGER\Credit` task in Task Scheduler.
 - **Sealing states:** a day whose token is in the vault but which the Seal task did not finish
   (an error in its state file) is `failed` with that error; a deletion record without a time
   stamp, or whose days are still in the vault, does not make a day `deleted`. A verification

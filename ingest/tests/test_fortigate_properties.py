@@ -6,11 +6,14 @@
   ``messages`` row / ``time`` (see the module docstring of ``parsers.fortigate``).
 * Any device time, year 1 to 9999 with any offset: never raises; the event time is the device
   time when representable and within a day of the receive time, else the receive time.
+* FortiGate DHCP lines (ADR-0016): any order and quoting of their keys gives the same row, and
+  the bounded MAC cache (``_MACS``) never changes a result, whether it is empty, full or warm.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from pathlib import Path
@@ -22,15 +25,25 @@ from hypothesis import strategies as st
 
 from arcilogger_core.rawlog import RawRecord
 from arcilogger_db.rowcheck import check_row
-from arcilogger_ingest.parsers import LinePosition, ParseOutcome, decode_message
+from arcilogger_ingest.parsers import LinePosition, ParseOutcome, decode_message, fortigate
 from arcilogger_ingest.parsers.fortigate import SPECS, TABLES, FortiGateParser
-from arcilogger_ingest.parsers.kv import format_pairs, tokenize
+from arcilogger_ingest.parsers.kv import format_pairs, quote, tokenize
+from arcilogger_ingest.parsers.values import to_mac
 
 SAMPLES = (
     (Path(__file__).parents[2] / "tests" / "fixtures" / "format" / "fortigate-sample.log")
     .read_bytes()
     .splitlines()
 )
+_SYNTHETIC = (
+    (Path(__file__).parents[2] / "tests" / "fixtures" / "synthetic" / "fortigate-synthetic.log")
+    .read_bytes()
+    .splitlines()
+)
+#: The FortiGate DHCP server lines of the synthetic fixture (ADR-0016), each with its PRI.
+DHCP_LINES = tuple(line for line in _SYNTHETIC if b'logid="01000260' in line)
+#: A forward traffic line with ``srcmac`` (synthetic, ADR-0016).
+SRCMAC_LINE = next(line for line in _SYNTHETIC if b' srcmac="00:00:5e:00:53:57"' in line)
 RECEIVED = datetime(2026, 9, 23, 6, 44, 58, tzinfo=UTC)
 PARSER = FortiGateParser()
 KNOWN_KEYS = sorted(
@@ -70,9 +83,12 @@ def check_accounted(outcome: ParseOutcome, fields: dict[str, str]) -> None:
     (row,) = outcome.rows
     values = row.values
     mapped = {key: column for column, key, _ in SPECS[row.table]}
+    macs = {key for _, key, kind in SPECS[row.table] if kind == "mac"}
     for key, value in fields.items():
         if key in values["extra"]:
             assert values["extra"][key] == value, key
+        elif key in macs:  # normalised: lower case with colons
+            assert values[mapped[key]] == to_mac(value), key
         elif key in mapped:
             assert str(values[mapped[key]]) == value or values[mapped[key]] == value, key
         elif key == "ipaddr":
@@ -82,10 +98,21 @@ def check_accounted(outcome: ParseOutcome, fields: dict[str, str]) -> None:
 
 
 KEY = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789_-", min_size=1, max_size=10)
+#: MAC addresses as a FortiGate may print them, and near misses (mixed separators).
+MAC_TEXT = st.builds(
+    lambda octets, upper, separators: "".join(
+        (octet.upper() if upper else octet) + separator
+        for octet, separator in zip(octets, [*separators, ""], strict=True)
+    ),
+    st.lists(st.integers(0, 255).map("{:02x}".format), min_size=6, max_size=6),
+    st.booleans(),
+    st.sampled_from([[":"] * 5, ["-"] * 5, [":", ":", "-", ":", ":"], ["."] * 5]),
+)
 VALUE = st.one_of(
     st.text(max_size=30),
     st.integers(min_value=-(2**70), max_value=2**70).map(str),
     st.ip_addresses().map(str),
+    MAC_TEXT,
     st.sampled_from(["", "1790145897482913706", "1790145897", "+0300", "2026-09-23", "09:44:57"]),
 )
 
@@ -184,6 +211,70 @@ def test_any_bytes(data: bytes) -> None:
     check_outcome(parse(data))
     check_outcome(parse(b"<189>" + data))
     check_outcome(parse(SAMPLES[6][:200] + data))  # a traffic line cut short
+
+
+def _typed(outcome: ParseOutcome) -> tuple[str, Mapping[str, Any]] | None:
+    return (outcome.rows[0].table, outcome.rows[0].values) if outcome.rows else None
+
+
+def _requoted(fields: list[tuple[str, str]], quoted: list[bool]) -> bytes:
+    """``key=value`` pairs; a value is written unquoted only where the grammar allows it."""
+    parts = []
+    for (key, value), keep in zip(fields, quoted, strict=True):
+        bare = value and not keep and not any(c.isspace() or c in '"\\' for c in value)
+        parts.append(f"{key}={value}" if bare else f"{key}={quote(value)}")
+    return " ".join(parts).encode()
+
+
+@settings(max_examples=200, deadline=None)
+@given(data=st.data(), index=st.integers(min_value=0, max_value=len(DHCP_LINES) - 1))
+def test_any_order_and_quoting_of_a_dhcp_line_gives_the_same_row(
+    data: st.DataObject, index: int
+) -> None:
+    line = DHCP_LINES[index]
+    pri, body = line.split(b">", 1)
+    pairs = list(tokenize(body.decode()).fields.items())
+    order = data.draw(st.permutations(pairs))
+    quoted = data.draw(st.lists(st.booleans(), min_size=len(order), max_size=len(order)))
+    original, moved = parse(line), parse(pri + b">" + _requoted(order, quoted))
+    check_outcome(moved)
+    assert _typed(moved) == _typed(original)
+    assert (moved.error, moved.detail) == (original.error, original.detail)
+    assert moved.message["time"] == original.message["time"]
+
+
+#: As many entries as the MAC cache holds: the next new MAC clears it.
+_FULL_CACHE = {f"cache-filler-{i}": "00:00:5e:00:53:00" for i in range(fortigate._MACS_MAX)}
+
+
+def _with_cache(state: str, message: bytes) -> ParseOutcome:
+    fortigate._MACS.clear()
+    if state == "full":
+        fortigate._MACS.update(_FULL_CACHE)
+    elif state == "warm":
+        parse(message)  # the same MAC text parsed once before
+    try:
+        return parse(message)
+    finally:
+        fortigate._MACS.clear()
+
+
+@settings(max_examples=150, deadline=None)
+@given(mac=MAC_TEXT | st.text(max_size=20).filter(lambda t: '"' not in t and "\\" not in t))
+def test_the_mac_cache_never_changes_a_result(mac: str) -> None:
+    traffic = SRCMAC_LINE.replace(b' srcmac="00:00:5e:00:53:57"', f" srcmac={quote(mac)}".encode())
+    ack = DHCP_LINES[0].replace(b'mac="00:00:5E:00:53:57"', f"mac={quote(mac)}".encode())
+    for message in (traffic, ack):
+        outcomes = [_with_cache(state, message) for state in ("empty", "full", "warm")]
+        for outcome in outcomes:
+            check_outcome(outcome)
+        rows = {repr(_typed(outcome)) for outcome in outcomes}
+        assert len(rows) == 1, rows
+        assert len({(outcome.error, outcome.detail) for outcome in outcomes}) == 1
+    srcmac = _typed(_with_cache("full", traffic))
+    assert srcmac is not None
+    assert srcmac[1]["srcmac"] == to_mac(mac)
+    assert len(fortigate._MACS) <= fortigate._MACS_MAX
 
 
 def lines_per_second(message: bytes, seconds: float = 0.4) -> float:

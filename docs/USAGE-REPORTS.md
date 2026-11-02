@@ -3,7 +3,7 @@
 > Türkçe: [KULLANIM-RAPORLARI.md](KULLANIM-RAPORLARI.md). Decision:
 > [adr/0012-scheduled-usage-reports.md](adr/0012-scheduled-usage-reports.md).
 >
-> **Licence:** scheduled reports need the **Scheduled usage reports** module (Zamanlanmış kullanım raporları, which needs Usage analytics; [LICENSING.md](LICENSING.md)); while it is off the Raporlar page is locked, no report is made or sent and `R20-report` is not raised.
+> **Licence:** scheduled reports need the **Scheduled usage reports** module (Zamanlanmış kullanım raporları, which needs Usage analytics; [LICENSING.md](LICENSING.md)); while it is off the Raporlar page is locked, no report is made or sent and `R20-report` is not raised; the licence alert `R20-license` tells the administrators before and when it goes off ([ALERTS.md](ALERTS.md)).
 >
 > ARCILOGGER is **designed to support 5651 obligations** ("5651 yükümlülüklerini desteklemek için
 > tasarlanmıştır"); it makes no claim of legal compliance. Have the use of person-level reports
@@ -40,8 +40,8 @@ and enable them:
   (`person_level`, default on: with names) and **pseudonyms** (`pseudonymize`, default off).
   By default (owner decision 2026-10-20) reports are detailed and carry names; the organisation
   decides, with its legal counsel, whether that fits its employees' consent. A person to be left
-  out of person-level reports is excluded with `persons.usage_excluded` (usage
-  engine).
+  out of person-level reports is excluded with the person's **Kullanım raporlarından hariç tut**
+  box on Cihazlar ve Kişiler (`persons.usage_excluded`, [USAGE.md](USAGE.md) section 6).
 - **Reports missed while the server was down:** when the worker starts again each schedule runs
   **once**, for its most recent missed time (after five days down only yesterday's full-day
   report goes out, not five). With `reports.catch_up` set to `false` a report more than 30

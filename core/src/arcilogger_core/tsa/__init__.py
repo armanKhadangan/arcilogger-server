@@ -6,13 +6,22 @@
   console client; the provider for production stamps (``zd.kamusm.gov.tr``). Whether a day is
   shown as legal grade is decided by
   :func:`arcilogger_core.tsa.verify.confirmed_legal_grade` from the verified chain.
+
+The Zamane client is a program (``tsa.java -jar tsa.zamane_jar``): :func:`make_provider` runs
+only what :mod:`arcilogger_core.execpolicy` accepts (ADR-0014), every time it builds one.
 """
 
 from __future__ import annotations
 
 from cryptography import x509
 
-from arcilogger_core.config import Config
+from arcilogger_core.config import Config, default_config_path
+from arcilogger_core.execpolicy import (
+    ExecutableRefusedError,
+    TrustAnchors,
+    check_java,
+    check_zamane_jar,
+)
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import KAMUSM_CUSTOMER, KAMUSM_PASSWORD, SecretStore
 from arcilogger_core.tsa.base import TimestampProvider, TsaConfigurationError
@@ -22,11 +31,30 @@ from arcilogger_core.tsa.verify import load_roots_dir
 from arcilogger_core.tsa.zamane import ZamaneCliProvider
 
 
+class TsaExecutableError(TsaConfigurationError):
+    """The executable policy refused ``tsa.java`` or ``tsa.zamane_jar``: no Zamane client
+    runs (the sealing cause ``executable``, the task code ``executable_refused``).
+    ``refusal`` is the policy's own error."""
+
+    def __init__(self, refusal: ExecutableRefusedError) -> None:
+        super().__init__(str(refusal))
+        self.refusal = refusal
+
+
 def mock_tsa(layout: Layout) -> MockTsa:
     return MockTsa(layout.state / "mock-tsa")
 
 
-def make_provider(config: Config, layout: Layout, secrets: SecretStore) -> TimestampProvider:
+def make_provider(
+    config: Config, layout: Layout, secrets: SecretStore, *, anchors: TrustAnchors | None = None
+) -> TimestampProvider:
+    """The configured provider. ``anchors``: what the executable policy trusts, built from the
+    caller's fixed configuration path (``TrustAnchors.of(--config)``), never from a key of the
+    file; by default from :func:`~arcilogger_core.config.default_config_path` (the path every
+    service and task is given by ``ARCILOGGER_CONFIG`` or its default).
+
+    Raises :class:`~arcilogger_core.tsa.base.TsaConfigurationError` (also
+    :class:`TsaExecutableError`) or ``SecretStoreError``."""
     settings = config.tsa
     if settings.provider == "mock":
         return MockTsaProvider(mock_tsa(layout), digest=settings.digest)
@@ -41,9 +69,16 @@ def make_provider(config: Config, layout: Layout, secrets: SecretStore) -> Times
     password = secrets.get(KAMUSM_PASSWORD)
     if not customer or not password:
         raise TsaConfigurationError("Kamu SM customer number / password not stored")
+    if anchors is None:
+        anchors = TrustAnchors.of(default_config_path())
+    try:
+        java = check_java(settings.java, anchors)
+        jar = check_zamane_jar(settings.zamane_jar, anchors)
+    except ExecutableRefusedError as exc:
+        raise TsaExecutableError(exc) from exc
     return ZamaneCliProvider(
-        java=settings.java,
-        jar=settings.zamane_jar,
+        java=java,
+        jar=jar.path,
         url=settings.url,
         port=settings.port,
         customer=customer,

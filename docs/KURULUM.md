@@ -70,6 +70,79 @@ Toplam süre: yaklaşık 1–1,5 saat (Windows kurulumu hariç).
   penceresinde açılır; Kamu SM akışları (zaman damgası, sertifika sunucusu), NTP ve DNS ise
   **sürekli açık** kalır ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 1).
 
+### 0.1 Desteklenen ağ yapıları
+
+Kurmadan önce ağınızın bu sürümün desteklediği yapıya uyduğunu denetleyin. Ağ ne olursa olsun
+`[[sources]]` içindeki her cihazın logları toplanır, **değiştirilmeden** saklanır ve her gece
+mühürlenir; aşağıdakiler, bir 5651 sorgusunun kişiye ve cihaza kadar ilerleyip ilerlemediğini ve
+kullanım analizinin neyi gösterdiğini belirler.
+
+- **Tek yerleşke:** bir kurulum tek bir yerleşkeyi (site) kapsar: internete bir FortiGate üzerinden
+  çıkan, adresleri bir MikroTik yönlendiricinin ya da FortiGate'in DHCP sunucusunun dağıttığı
+  IPv4 ağı. Aynı özel adres aralığını kullanan birden çok şube tek kurulumda desteklenmez: aynı ağ
+  VLAN listesine iki kez girilemez ve iki şubedeki aynı adres tek bir adres sayılır (IP çakışması
+  gibi görünür).
+  İnternete başka bir hattan ya da bir VPN tünelinden çıkan bir ağ kesiminin (ör. misafir Wi-Fi)
+  FortiGate kaydı yoktur: o kesimden yalnızca kira kayıtları (DHCP, `ARP-LOG`) gelir; genel IP ve
+  port ile 5651 sorgusu oradaki bir cihazı bulamaz, kullanım analizi de o trafiği görmez
+  ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 5).
+- **Kişi ve cihaz eşleştirmesi (kira kanıtı):** iç IP adresinden MAC adresine, cihaza ve
+  kişiye giden adım DHCP sunucusunun kira kayıtlarına dayanır:
+  - **DHCP sunucusu MikroTik:** ana MikroTik yönlendiricinin kira kayıtları (`assigned` /
+    `deassigned`) kullanılır; ana yönlendiricideki saatlik `ARP-LOG` betiği (isteğe bağlı,
+    sahada yazılır; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 3) statik IP'li cihazları ve kira
+    kayıtları arasındaki boşlukları **orta güvenle** ekler.
+  - **DHCP sunucusu FortiGate (yalnız-FortiGate ağlar):** FortiGate DHCP sunucusunun olay
+    kayıtları (DHCP Ack / Release) kira zaman çizelgesine girer. Kayıt biçimi FortiOS
+    belgelerinden ve tek bir topluluk örneğinden alınmıştır; ilk kurulumda sahada doğrulanır
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) ve doğrulanana kadar raporlar bunu
+    belirtir. Yalnızca yapılandırmada FortiGate olarak tanımlı kaynakların kayıtları
+    kullanılır. FortiGate'in DHCP verdiği her ağ, VLAN numarası olmasa da, Cihazlar ve Kişiler
+    sayfasında tanımlanır: tanımlı bir ağda olmayan adreslerin zincirleri düşük güvenle
+    gösterilir. Sonradan eklenen ya da değiştirilen bir ağ geçmiş kiralara ancak kiralar
+    yeniden oluşturulunca uygulanır ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 5). Statik IP'li
+    cihazların kira kaydı yoktur: zincir iç IP adresinde biter; ağ geçidi FortiGate olan
+    arayüzlerde, iki istemciyle sahada denetlendikten sonra, isteğe bağlı olarak FortiGate
+    oturum kaydının srcmac alanı MAC adresini **kısmi kanıt** olarak, düşük güvenle verir
+    ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5).
+  - **İkisi birlikte:** iki DHCP sunucusu farklı ağlara hizmet ediyorsa ikisinin kayıtları da
+    kullanılır.
+  - **Başka bir DHCP sunucusu (ör. Windows):** bu sürüm onun kayıtlarını okumaz; kira kaydı
+    yalnızca MikroTik `ARP-LOG` ile, orta güvenle oluşur. `ARP-LOG` yoksa 5651 sorgusu
+    FortiGate oturumunda ve iç IP adresinde biter (MAC, cihaz ve kişi yok), kullanım analizi de
+    IP adresine göre sayar.
+- **İnternet çıkışları (NAT):** FortiGate'in kaynak NAT'ı desteklenir. Her internet hattı
+  Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT)
+  bölümünde tanımlanır: genel IP (ve değişip değişemeyeceği), FortiGate'in o hattaki NAT
+  adresi, arayüzleri, NAT türü ve port koruma. Genel adres FortiGate'in kendisindeyse
+  (doğrudan) genel IP + port oturumu **kesin** belirler. Servis sağlayıcının yönlendiricisi
+  ikinci bir NAT yapıyorsa o hattın sorguları **aday** oturumları sıralar
+  ([CORRELATION.md](CORRELATION.md) bölüm 3); genel IP başka müşterilerle paylaşılıyorsa
+  (CGNAT) aday listesi doğru oturumu içermeyebilir, kesin yanıt için servis sağlayıcının NAT
+  kaydı gerekir. IPv6 adresleriyle 5651 sorgusu desteklenmez: kira kayıtları (DHCP, `ARP-LOG`)
+  yalnızca IPv4 adreslerini kapsar.
+- **Kullanım analizi** (ücretli modül, [LISANS.md](LISANS.md)) yalnızca FortiGate kayıtlarından
+  hesaplanır: süreler ve baytlar trafik kayıtlarından (`logtraffic all`; uzun oturumlar için ara
+  kayıtlarla), site adları web filtresi, DNS filtresi, uygulama kontrolü ve SSL denetimi
+  kayıtlarından, engellenen denemeler bunların ilk üçünden ([DEVICE-SETUP.md](DEVICE-SETUP.md)
+  bölüm 2, [KULLANIM.md](KULLANIM.md)). Yalnızca özel kaynak adreslerinden (RFC 1918 blokları ve
+  IPv6 ULA) gelen trafik sayılır: iç ağda başka aralıklar (ör. 100.64.0.0/10 ya da içeride
+  kullanılan genel adresler) kullanılıyorsa o trafik analiz edilmez. Başka üreticilerin güvenlik
+  duvarlarının kayıtları analiz edilmez.
+- **Başka üreticilerin cihazları** (`[[sources]]` içinde `type = "generic"`): logları toplanır,
+  değiştirilmeden saklanır, mühürlenir ve tam gün kanıt paketlerine girer; veritabanına düz log
+  satırı olarak (zaman, ana bilgisayar adı, program, ileti metni) yüklenir ama alanlarına
+  ayrılmaz, 5651 sorgusunda ve kullanım analizinde kullanılmaz.
+
+**Desteklenmeyenler:** IPv6 sorguları; aynı ağa iki DHCP sunucusu (ARCILOGGER fark ederse
+uyarır ve o anlardaki zincirleri düşük güvenle verir); FortiGate'in DHCP aktarıcı (relay)
+olarak çalıştığı ağlarda FortiGate kira kaydı (kira kanıtı asıl DHCP sunucusundan gelmelidir);
+aynı özel adres aralığını kullanan birden çok şube; FortiGate'ten geçmeyen hatlarda sorgu (hat
+yalnızca "FortiGate'ten geçmiyor" olarak işaretlenir, sorgu kimseyi listelemez); bir
+yönlendiricinin ya da L3 anahtarın arkasındaki ağlarda srcmac (orada o cihazın MAC adresidir;
+arada yalnızca katman 2 anahtarlar varsa arayüz ancak iki istemciyle sahada denetlenince
+kullanılır).
+
 ## 1. Sunucuyu hazırlama
 
 Tüm komutlar **yönetici olarak açılmış PowerShell** penceresinde çalıştırılır.
@@ -358,9 +431,16 @@ powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 `
 
 `ARCILOGGER-Setup-<sürüm>.exe` kullanıyorsanız çift tıklayın: aynı betik `-Auto` ile bir PowerShell
 penceresinde çalışır (kurulu değilse kurar, başka bir sürüm kuruluysa yükseltir) ve pencere siz
-**Enter**'a basana kadar açık kalır. Bu yolda Zamane jar'ını elle ekleyin: `Get-FileHash <jar>
--Algorithm SHA256` değerini Kamu SM sayfasındakiyle karşılaştırın ve dosyayı
-`C:\ProgramData\ARCILOGGER\zamane\` içine kopyalayın.
+**Enter**'a basana kadar açık kalır. Kurulum dosyası Zamane istemcisini kurmaz; sonradan
+`C:\ProgramData\ARCILOGGER\zamane\` içine elle kopyalanan bir jar da çalışmaz: görevler yalnızca
+kurulumun kaydettiği, bilinen bir sürüm olan ya da konsolda onaylanan istemciyi çalıştırır, bu
+yüzden mühürleme `executable` nedeniyle durur. İstemciyi paketteki betikle ekleyin:
+`powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -ZamaneJar
+C:\Kurulum\tss-client-console-3.1.33.jar -ZamaneJarSha256 <Kamu SM sayfasındaki SHA-256>` (SHA-256
+değerini karşılaştırır, dosyayı kopyalar ve kaydeder; `[tsa] zamane_jar` bu dosyayı göstermeli)
+ya da **Ayarlar → Kamu SM** sayfasından yükleyin: bu sürüm hiçbir Zamane sürümünü tanımadığı için
+yüklenen istemci konsolda `approve-jar` bekler, en erken `jar_hold_hours` sonra (varsayılan 24,
+bölüm 7.2).
 
 Kurulum `.exe` dosyası iki lisans seçeneğini de betiğe iletir; yönetici komut isteminden ya da
 PowerShell'den verin (büyük/küçük harf fark etmez, `-` ile de yazılabilir):
@@ -408,7 +488,11 @@ olmaz; anahtar için bölüm 9'daki komut kullanılır.
 | `-LicenseFile` | — (yok) | Kurulacak lisans dosyası (`.lic`, [LISANS.md](LISANS.md) bölüm 4). Ön denetimde Python olmadan okunur (dosya var, en çok 65.536 bayt, JSON; lisans no, bakım ve geçerlilik tarihi); okunamazsa kurulum hiçbir şey değiştirmeden durur (`2`). Şema kurulduktan hemen sonra `arcilogger-db license install` ile yüklenir; ürün dosyayı reddederse ya da veritabanına ulaşılamazsa uyarı verilir, kurulum sürer ve `1` ile biter. `-SkipDatabase` ile yüklenmez, sonra çalıştırılacak komut yazılır |
 | `-AllowUncoveredUpgrade` | kapalı | Lisansın bakım süresinin kapsamadığı bir sürümü yine de kurar: sürüm yalnızca 5651 Temel ile çalışır, ücretli modüller sürümü kapsayan bir lisans yüklenene kadar kapalıdır (bölüm 13). `-LicenseFile` ve `-AllowUncoveredUpgrade` yalnızca kurulumda ve yükseltmede kullanılır (`-Uninstall` ve `-Rollback` ile `2`) |
 | `-StrictOutbound` | kapalı | Giden trafiği de kısıtlar (bölüm 12); seçim hatırlanır, kapatmak için `-StrictOutbound:$false` |
-| `-SkipFirewall`, `-SkipTimeSetup`, `-SkipDatabase` | — | İlgili adımı atlar |
+| `-SourceNetwork` | RFC 1918 özel ağları | Tarayıcıdan eklenen bir log kaynağının adresinin bulunması gereken ağlar (bölüm 7.2); virgülle birden çok; hatırlanır |
+| `-AdminChangeHoldHours` | `0` | Saklama ve replika değişikliklerinin tarayıcıda bekleme süresi, 0–168 saat (bölüm 7.2); hatırlanır |
+| `-ZamaneHoldHours` | `24` | Bilinmeyen bir Zamane istemcisinin en erken onaylanabileceği süre, 1–168 saat (bölüm 7.2); hatırlanır |
+| `-DisableBrowserAdministration` | kapalı | Sunucu ayarlarının tarayıcıdan değiştirilmesini kapatır (bölüm 7.2); 5651 işlevleri etkilenmez; hatırlanır, açmak için `-DisableBrowserAdministration:$false` |
+| `-SkipFirewall`, `-SkipTimeSetup`, `-SkipDatabase` | — | İlgili adımı atlar (`-SkipTimeSetup` yalnızca kurulumun saat adımını atlar: tarayıcı yönetimi açıkken `ApplySystem` Windows Saati'ni `[clock]` değerlerinden kurar; [AYARLAR.md](AYARLAR.md) bölüm 2) |
 | `-SkipPower` | — | Masaüstü Windows'ta güç ayarlarına dokunmaz (bölüm 17) |
 | `-AllowUnsupportedWindows` | — | Windows 10 ve Windows 11 Home'da durmak yerine uyarır (desteklenmez) |
 | `-DryRun` / `-WhatIf` | — | Yalnızca plan; `-PlanPath plan.json` ile JSON olarak yazar |
@@ -432,15 +516,21 @@ Betiğin yaptıkları (sırasıyla):
    tarihinden sonraysa kurulum **durur** (`2`; `-AllowUncoveredUpgrade` ile uyarır ve sürer;
    bölüm 13, [LISANS.md](LISANS.md) bölüm 7). Lisans yoksa bu yalnızca bilgidir.
 2. Klasörler: `C:\Program Files\ARCILOGGER` (program), `C:\ProgramData\ARCILOGGER`
-   (yapılandırma, gizli depo, Kamu SM kökleri, Zamane, Caddy CA), veri klasörü (`D:\ARCILOGGER`
-   ya da `C:\ARCILOGGER`: spool, vault, exports, state, logs, backups).
+   (yapılandırma, gizli depo, Kamu SM kökleri, SMTP CA'ları, Zamane, Caddy CA, tarayıcı yönetiminin
+   `admin\` klasörü), veri klasörü (`D:\ARCILOGGER` ya da `C:\ARCILOGGER`: spool, vault, exports,
+   state, logs, backups).
 3. Python 3.12 → sanal ortam → bağımlılıklar **çevrimdışı ve özet denetimli** (`pip --no-index
    --require-hashes`) → ARCILOGGER, web arayüzü, Caddy, WinSW.
 4. `arcilogger.toml` yoksa örnekten oluşturulur: `data_dir` veri klasörü, `[collector] bind`
    sunucu adresi, `site_name` kuruluş adı, `[clock] ntp_server` yerel saat kaynağı olur; örnek
    **hiçbir log kaynağı** tanımlamaz, kurgusal örnek ağın `[[sources]]` satırları yorum satırıdır
    (bölüm 7.1). Varsa **dokunulmaz**; yalnızca verilen `-SiteName` / `-NtpServer` satırı değişir.
-   Gizli depo anahtarı (`secret init`).
+   Veri klasörü `C:\ProgramData\ARCILOGGER\data-root.txt` dosyasına yazılır: hizmetler ve görevler
+   yapılandırmanın `data_dir` değerini bununla karşılaştırır, tarayıcıdan yapılan hiçbir değişiklik
+   veri klasörünü taşıyamaz. Görevlerin çalıştırdığı programlar kaydedilir (bölüm 7.2). Gizli depo
+   anahtarı (`secret init`) ve boş `secrets.json`; tarayıcı yönetiminin anahtarları (`keys init`,
+   var olan bir anahtar değişmez), `admin\policy.json` ve Windows olay günlüğü kaynağı
+   `ARCILOGGER-Admin`.
 5. NTFS izinleri: her ARCILOGGER hizmeti yalnızca ihtiyacı olan klasöre yazabilir (tablo:
    [ADR-0007](adr/0007-windows-installer.md) bölüm 4). Toplayıcı spool'a yazabilir ama ham log
    dosyalarını **silemez ve yeniden adlandıramaz** (açtığı dosyaya yazabilir; içeriği gece mührü
@@ -449,7 +539,11 @@ Betiğin yaptıkları (sırasıyla):
    yalnızca zamanlanmış görevler yazar. Kasaya (vault) ARCILOGGER'dan yalnızca zamanlanmış görevler
    (mühürleme, saklama) yazar ve kasadaki her yazma/silme girişimi Windows Güvenlik günlüğüne
    düşer. Gece veritabanı yedeklerinin klasörüne (`backups\scheduled`) yalnızca zamanlanmış
-   görevler yazar; hizmetler onu okuyamaz. **Sınır:** zamanlanmış görevler Windows'un paylaşılan
+   görevler yazar; hizmetler onu okuyamaz. Yönetim hizmeti ArciAdmin yalnızca
+   `arcilogger.toml` ve `secrets.json` dosyalarına (dosyaya özel izinle) ve kendi klasörlerine
+   yazar, `kamusm-roots` ve `smtp-ca` klasörlerine yalnızca dosya ekleyebilir; API yalnızca
+   `admin\inbox` klasörüne istek bırakır ([SECURITY.md](SECURITY.md) bölüm 14). **Sınır:**
+   zamanlanmış görevler Windows'un paylaşılan
    LOCAL SERVICE hesabıyla çalışır; aynı hesapla çalışan Windows hizmetleri de bu hakları (spool,
    kasa ve `state` yazma,
    `secret.key` okuma) taşır. Görevlere ayrı bir kimlik verilmesi sahip kararı ve sunucuda
@@ -459,8 +553,9 @@ Betiğin yaptıkları (sırasıyla):
    veritabanı (UTF8, yerel ayar `C`; yalnızca yoksa) oluşturulur.
 7. Windows hizmetleri (otomatik başlar, hata olursa yeniden başlar, günlükler veri klasörünün
    `logs` alt klasöründe döner): `ArciCollector`, `ArciIngest`, `ArciApi`, `ArciWorker`,
-   `ArciWeb`. Her biri kendi sanal hesabıyla (`NT SERVICE\<ad>`) çalışır. Veritabanı kullanmayan
-   `ArciCollector` ve `ArciWeb` hemen başlatılır; diğerleri şema kurulduktan sonra. Python
+   `ArciWeb` ve yönetim hizmeti `ArciAdmin` ("ARCILOGGER Yönetim (Admin)"). Her biri kendi sanal
+   hesabıyla (`NT SERVICE\<ad>`) çalışır. Veritabanı kullanmayan `ArciCollector` ve `ArciWeb` hemen
+   başlatılır; diğerleri şema kurulduktan sonra, `ArciAdmin` en son (durdurulurken ilk o durur). Python
    hizmetleri sanal ortamın Python'unu **yalıtılmış** çalıştırır
    (`venv\Scripts\python.exe -I -X utf8 -u -m arcilogger_<paket> …`): hiçbir ortam değişkeni
    (`PYTHONPATH`, `PYTHONSTARTUP` gibi; makinenin ya da hizmetin kendi değişkenleri) onlara başka
@@ -468,7 +563,9 @@ Betiğin yaptıkları (sırasıyla):
 8. Saat (`Set-ArciTime.ps1`), masaüstü Windows'ta güç ayarları (`Set-ArciPower.ps1`, bölüm 17),
    güvenlik duvarı (`Set-ArciFirewall.ps1`, bölüm 12), zamanlanmış görevler
    (`Register-ArciTasks.ps1`: mühürleme, doğrulama, replika, saklama, kontör, saat denetimi ve gece
-   01:40 veritabanı yedeği, [YEDEKLEME.md](YEDEKLEME.md); sizin kapattığınız bir görev kapalı kalır).
+   01:40 veritabanı yedeği, [YEDEKLEME.md](YEDEKLEME.md); tarayıcıdan gelen görev istekleri için
+   `Requests` (LOCAL SERVICE) ve güvenlik duvarı ile saati yapılandırmaya uyduran `ApplySystem`
+   (SYSTEM); sizin kapattığınız bir görev kapalı kalır).
    Görevler de Python'u yalıtılmış çalıştırır (`python.exe -I -m arcilogger_core …`,
    `-I -m arcilogger_db backup run`).
 9. Veritabanı şeması `arcilogger-db upgrade` ile kurulur — **son değişiklik** budur: kendi
@@ -495,7 +592,7 @@ alt klasörüne konur (`D:\ARCILOGGER\logs\` ya da `C:\ARCILOGGER\logs\`). Pence
 yolu yazılır.
 
 > Paketinde bulunmayan bir program için hizmet kurulmaz ve uyarı verilir; veritabanı paketi
-> (`arcilogger-db`) yoksa veritabanı adımları atlanır. Bu sürümün paketinde beş hizmetin de
+> (`arcilogger-db`) yoksa veritabanı adımları atlanır. Bu sürümün paketinde altı hizmetin de
 > programı vardır.
 
 ARCILOGGER programları `PATH` üzerinde **değildir**: komutları her zaman tam yoluyla çalıştırın
@@ -543,11 +640,61 @@ biter). Güvenlik duvarınızın, ana yönlendiricinizin (DHCP sunucusu) ve log 
 cihazlarınızın `[[sources]]` kayıtlarını ekleyin (dosyadaki örneklerin başındaki `#` işaretini
 silip adları ve adresleri değiştirerek; [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 4) ve kurulumu
 yeniden çalıştırın (ya da `Set-ArciFirewall.ps1`'i çalıştırıp hizmetleri yeniden başlatın, bölüm
-12); güvenlik duvarı 514'ü yalnızca onlara açar (bölüm 11). Yükseltme var olan `arcilogger.toml`
+12); güvenlik duvarı 514'ü yalnızca onlara açar (bölüm 11). Kurulumdan sonra kaynaklar web
+arayüzünde **Ayarlar → Kaynaklar** sayfasından da eklenir: güvenlik duvarı kendiliğinden izler,
+yeniden başlatma gerekmez ([AYARLAR.md](AYARLAR.md)). Yükseltme var olan `arcilogger.toml`
 dosyasını ve kaynaklarını korur (yalnızca verilen `-SiteName` / `-NtpServer` satırı değişir).
 Veritabanında VLAN listesi ve departmanlar yeni bir kurulumda boştur: ikisi de Cihazlar ve
 Kişiler sayfasının **Departmanlar ve VLAN'lar** sekmesinde girilir ([ILK-ADIMLAR.md](ILK-ADIMLAR.md)
 bölüm 5 ve 12).
+
+### 7.2 Tarayıcıdan yönetim
+
+Kurulumdan sonra sunucunun ayarları web arayüzünün **Ayarlar** sayfalarından değişir: kuruluş adı,
+saat kaynakları, Kamu SM (test → üretim sihirbazı), log kaynakları, e-posta, replika, saklama,
+yedekleme ([AYARLAR.md](AYARLAR.md)). API yapılandırmayı yazamaz; imzalı istekleri yönetim
+hizmeti `ArciAdmin` uygular, güvenlik duvarını ve Windows Saati'ni SYSTEM görevi `ApplySystem`
+yapılandırmadan kendisi türetir. Bu bölümdeki komutlar konsoldaki yol olarak geçerli kalır.
+
+Kurulum sınırları yalnızca yöneticilerin değiştirebildiği
+`C:\ProgramData\ARCILOGGER\admin\policy.json` dosyasına yazar ve sonraki çalıştırmalarda
+hatırlar:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade `
+    -SourceNetwork 172.16.0.0/12 -AdminChangeHoldHours 24 -ZamaneHoldHours 48
+# tarayıcı yönetimini kapatmak (5651 işlevleri etkilenmez):
+powershell -ExecutionPolicy Bypass -File .\installer\Install-Arcilogger.ps1 -Upgrade -DisableBrowserAdministration
+```
+
+Elle düzenlenmiş geçerli bir `policy.json` dosyasındaki değerler korunur; geçersiz bir dosya
+tarayıcı yönetimini kapatır ve kurulum onu uyararak yeniden yazar.
+
+Kurulum yapılandırmadaki açık her log kaynağının adresini bu ağlarla karşılaştırır. Dışında kalan
+bir kaynak varsa (ör. başka bir yerleşkenin genel ya da CGNAT adresi, /16'dan geniş bir ağ)
+hiçbir şey değiştirmeden durur ve verilecek `-SourceNetwork` değerini yazar: aksi hâlde
+`ApplySystem` ilk çalışmasında, tarayıcıda hiçbir değişiklik yokken, o göndericiyi 514
+kuralından çıkarırdı. Tarayıcı yönetimi kapalıyken ya da `-SkipFirewall` ile bu bir uyarıdır.
+
+**Veri klasörü kaydı:** kurulum veri klasörünü `C:\ProgramData\ARCILOGGER\data-root.txt`
+dosyasına yazar (yalnızca yöneticiler değiştirebilir; her çalıştırmada silinip yeniden
+oluşturulur). Hizmetler ve görevler `data_dir` değeri bu kayıttan farklı bir yapılandırmayı
+reddeder. Sonraki her çalıştırma veri klasörünü bu kayıttan alır: `arcilogger.toml` içindeki
+`data_dir` kayıttan farklıysa ya da kayıt okunamıyorsa kurulum hiçbir şey değiştirmeden durur ve
+iki değeri yazar. Veri klasörünü bilerek taşıdıysanız (veriler kopyalandıktan sonra) kurulumu
+`-DataRoot <yeni klasör>` ile çalıştırın; kayıt yalnızca o zaman değişir.
+
+**Görevlerin çalıştırdığı programlar:** görevler yalnızca güvenilen yerlerdeki programları
+çalıştırır (`C:\Program Files`, `C:\Program Files (x86)`, sistemin `PATH` üzerindeki `java`).
+Kurulum, Program Files dışındaki bir `java`, ek bağımsız değişkenli bir `[tsa] java` komutu ve
+`[backup] pg_dump` / `[backup] pg_restore` yollarını SHA-256 değerleriyle `policy.json` dosyasına
+kaydeder ve her biri için uyarır; program değişince kurulumu yeniden çalıştırın. Kaydedilecek
+programın klasörüne yöneticiler ve SYSTEM dışında yazabilen biri varsa kurulum hiçbir şey
+değiştirmeden durur ve programı Program Files altına taşımanızı ister. Zamane istemcisi yalnızca
+`C:\ProgramData\ARCILOGGER\zamane\` klasöründen çalışır: `[tsa] zamane_jar` başka bir yeri
+gösteriyorsa kurulum dosyayı oraya kopyalar, `zamane_jar` ayarını kopyaya çevirir (önceki
+yapılandırma `arcilogger.toml.before-<zaman>` olarak kalır) ve SHA-256 değerini
+`zamane\zamane-jar.sha256` dosyasına ekler.
 
 ## 8. Kök sertifikayı yönetici PC'sine kurma
 
@@ -620,6 +767,10 @@ Diğer kullanıcılar (denetçi vb.) ve sonraki adımlar: [ILK-ADIMLAR.md](ILK-A
 
 ## 10. Kamu SM bağlantısı (test → üretim)
 
+Web arayüzünde **Ayarlar → Kamu SM** sihirbazı aşağıdaki adımları aynı sırayla yapar (Java,
+Zamane istemcisi, kök sertifikalar ve parmak izleri, müşteri bilgileri ve kontör sorgusu, damga
+testi, üretime geçiş; [AYARLAR.md](AYARLAR.md)). Konsoldaki yol:
+
 Kamu SM'den test kullanıcısı geldiğinde ([kamusm.md](kamusm.md) bölüm 4) adımları **bu sırayla**
 yapın. `tsa-test` önce damgayı alır (1 kontör), sonra onu sabitlenmiş köklerle doğrular: kökler
 yoksa test kontör harcadıktan sonra "no pinned root certificates" hatasıyla biter. Gece
@@ -646,7 +797,16 @@ mühürlemesi (`\ARCILOGGER\Seal` görevi) de kökler olmadan hiçbir günü mü
    $core = "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe"
    & $core secret set kamusm.customer       # müşteri numarası
    & $core secret set kamusm.password       # parola
+   & "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"   # sonra: yönetim hizmetinin hakkı
    ```
+
+   Konsoldan her `secret set` / `secret delete`, `secrets.json` dosyasını yeni bir dosyayla
+   değiştirir; yeni dosyada yönetim hizmetinin (`ArciAdmin`) yazma hakkı yoktur. Ardından
+   `Set-ArciVaultAcl.ps1` betiğini (ya da kurulumu) yeniden çalıştırın; yoksa tarayıcıdan yapılan
+   bir sonraki değişiklik "yönetim hizmeti ayar dosyalarına artık yazamıyor" uyarısıyla uygulanır
+   (`acl_drift`, kritik `R20-admin` uyarısı) ve ondan sonraki değişiklik, betik çalıştırılana
+   kadar başarısız olur. İlk kurulumun sonunda girilen değerlerden sonra kurulum bunu kendisi
+   yapar.
 3. **Kontör:** `& $core credit` — kontör okunuyor mu? (çıktı biçimi açık konu K4)
 4. **Bağlantı testi:** `& $core tsa-test` — 1 KB rastgele dosyayı damgalar ve doğrular (1 kontör).
 
@@ -666,9 +826,9 @@ Test sırasında Seal görevinin günleri test damgasıyla mühürlemesini istey
    grade) göstermesi için damganın sertifika zinciri, aynı bölümde `legal_root_fingerprints`
    listesine yazdığınız bir Kamu SM kökünün SHA-256 parmak izine ulaşmalıdır (adım 1'de kayda
    geçirdiğiniz değer); liste boşsa hiçbir damga yasal nitelikli gösterilmez.
-4. Yapılandırmayı API hizmeti yalnızca başlarken okur: `Restart-Service ArciApi`. Yeniden
-   başlatmadan kırmızı "test damgası" uyarısı ve rapor damgaları eski ayarla kalır. (Zamanlanmış
-   görevler her çalıştırmada yapılandırmayı yeniden okur.)
+4. API değişen yapılandırmayı 2 saniye içinde kendisi yükler; kırmızı "test damgası" uyarısı ve
+   rapor damgaları yeni ayarı izler (zamanlanmış görevler her çalıştırmada yeniden okur). Bu
+   sürümden önceki bir sürümde ya da Ayarlar sayfası "Yeniden başlatma bekleyen değişiklik" gösteriyorsa: `Restart-Service ArciApi`.
 5. `& $core credit` ve `& $core status` (`legal_grade`) ile denetleyin; Mühürleme sayfasında kırmızı
    uyarı kalkmış olmalıdır.
 
@@ -694,6 +854,7 @@ kullanıcı oluşturun ve (`<NAS>` yerine cihazın adını yazın):
 # arcilogger.toml: [replica] enabled = true, target = '\\<NAS>\arcilogger-worm',
 #                  user = '<NAS>\arcireplica'
 & $core secret set replica.password      # parola (ekranda görünmez)
+& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"   # ArciAdmin'in secrets.json hakkı (bölüm 10)
 & $core replica --test                   # bağlan, deneme dosyası yaz/oku/sil
 ```
 
@@ -758,9 +919,14 @@ Güvenlik duvarı (`Set-ArciFirewall.ps1`):
 - Seçimler (`-StrictOutbound`, `-AdminAddress`, `-AllowWinRM`, `-KeepRule`, `-SmtpServer`)
   `C:\ProgramData\ARCILOGGER\install\firewall-state.json` dosyasında **hatırlanır**: yükseltme
   bunları sessizce değiştirmez. Değiştirmek için parametreyi yeniden verin.
-- `[[sources]]` (ya da `[tsa]` adresi/portu) değiştiğinde güvenlik duvarını yeniden uygulayın
-  ve hizmetleri yeniden başlatın — hizmetler `arcilogger.toml` dosyasını **yalnızca başlarken**
-  okur (toplayıcı dururken gelen UDP loglar birkaç saniye kaybolabilir):
+- `[[sources]]` değişiklikleri (Ayarlar → Kaynaklar ya da elle) toplayıcı ve ingest tarafından 5
+  saniye içinde yüklenir; `ApplySystem` görevi syslog kurallarını yerinde günceller (yalnızca
+  `ARCILOGGER Syslog UDP/TCP` ve sıkı giden kipte `ARCILOGGER Out …` kuralları; başka kural, profil,
+  443, 3389, 5985 değişmez), elle düzenlemeden sonra en geç 5 dakika içinde. Tarayıcı yönetimi
+  kapalıysa (`-DisableBrowserAdministration`), `[tsa]` adresi/portu ya da yönetici adresleri
+  değiştiyse betiği kendiniz çalıştırın. `[collector]`, `[api]`, `[ingest]`, `[worker]` ya da
+  `[database]` değiştiyse hizmetleri yeniden başlatın (toplayıcı dururken gelen UDP loglar birkaç
+  saniye kaybolabilir):
 
   ```powershell
   powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
@@ -816,8 +982,12 @@ Yükseltme önce veritabanını yedekler (`D:\ARCILOGGER\backups\db\*.dump`; yed
 hiçbir şey değiştirmeden durur), zamanlanmış görevleri duraklatır, hizmetleri durdurur, eski
 program klasörünü `C:\Program Files\ARCILOGGER.previous` olarak saklar, yeni sürümü kurar,
 veritabanı kullanmayan toplayıcıyı ve web sunucusunu hemen yeniden başlatır, **en son** şemayı
-yükseltir ve diğer hizmetleri ondan sonra başlatır. Yapılandırma, gizli depo ve veriler yerinde
-kalır. Yükseltme öncesi yedekler (`backups\db`) gece yedeklerinden (`backups\scheduled`,
+yükseltir ve diğer hizmetleri ondan sonra başlatır (yönetim hizmeti `ArciAdmin` ilk durur, en son
+başlar). Yapılandırma, gizli depo ve veriler yerinde kalır. Veritabanı yedeğinden hemen sonra
+`arcilogger.toml` dosyası `arcilogger.toml.before-upgrade-<UTC zamanı>` olarak kopyalanır ve adı
+`install\state.json` dosyasında hatırlanır (`config_before_upgrade`); görevlerin çalıştırdığı
+programlar kaydedilir (bölüm 7.2), bir program güvenilmeyen bir klasördeyse yükseltme hiçbir şey
+değiştirmeden durur. Yükseltme öncesi yedekler (`backups\db`) gece yedeklerinden (`backups\scheduled`,
 [YEDEKLEME.md](YEDEKLEME.md)) ayrıdır ve kendiliğinden silinmez; eskilerini elle silin. Yükseltme
 çalışan görevlerin bitmesini bekler: gece yedeği (01:40) sürerken başlatmayın.
 
@@ -852,6 +1022,165 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\
 (toplayıcı çalışmaya devam eder; geri yükleme tek işlemdir, başarısız olursa veritabanı olduğu gibi
 kalır).
 
+Geri alma (ve başarısız bir yükseltmenin kendiliğinden geri dönüşü), önceki sürümün hizmetlerini
+başlatmadan önce yapılandırmayı **o sürümün Python'uyla** yükler. Tarayıcıdan yapılmış bir
+değişikliği (ör. kapatılmış bir log kaynağı, `[[sources]] enabled = false`) önceki sürüm
+tanımıyorsa yükseltme öncesi kopya geri konur, reddedilen dosya
+`arcilogger.toml.refused-<zaman>` olarak yanında kalır ve betik "Tarayıcıdan yapılan sonraki
+değişiklikler geri alındı; denetim kaydında duruyorlar" uyarısını yazar. Kopya yoksa geri alma `3`
+ile durur ve dosyanın elle düzeltilmesini ister. Tarayıcı yönetiminden önceki bir sürüme dönüşte
+`ArciAdmin` hizmeti kaldırılır; mühürleme ve diğer görevler sürer.
+
+`ApplySystem` görevi yeni sürümle birlikte kalkar, ama güvenlik duvarının 514 kuralını ve Windows
+Saati'ni yeni yapılandırmaya göre bırakmıştır. Bu yüzden geri alma, hizmetleri başlatmadan önce
+geri gelen sürümün kendi `Set-ArciFirewall.ps1` (durum dosyasında hatırlanan seçimlerle) ve
+`Set-ArciTime.ps1` betiklerini çalıştırır (`system.restore` adımı; başarısız bir yükseltmenin
+geri dönüşünde, yapılandırma geri konduysa): yükseltme öncesi kopyada yeniden açık görünen ya da
+geri gelen bir kaynağın logları yine kabul edilir. Bu adım başarısız olursa geri alma yine
+tamamlanır, çıkış kodu `1` olur ve betik elle çalıştırılacak komutu yazar:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\scripts\Set-ArciFirewall.ps1"
+```
+
+**Arama'lı sürüme yükseltme (şema revizyonu `0016_search`).** Şema yükseltmesi web filtresi
+tablosu `fg_web` üzerinde yeni bir indeks oluşturur: `ix_fg_web_rhost_time` ("bu alan adı ve alt
+alan adları" araması). Geliştirme makinesinde (4 vCPU, varsayılan `maintenance_work_mem` değeri
+64 MB olan PostgreSQL 16, aylık bölümler) **10 milyon `fg_web` satırı başına yaklaşık 15 saniye**
+sürdü (13–15 sn, indeks 553 MiB; 2026-10-26 ölçümü, makinede başka işler de çalışırken ve 3,6 GiB
+tablo bellekteyken: diskten okunan bir tabloda ya da yavaş bir diskte daha uzun sürer). Günde 1
+milyon log satırında, bunların yaklaşık %18'i web filtresi satırıyken, 400 gün yaklaşık 72 milyon
+`fg_web` satırı eder: yaklaşık 2 dakika, belleğe sığmıyorsa daha uzun; günde 5 milyon satırda beş
+katı. Şema yükseltilirken ingest durur; toplayıcı spool'a yazmayı sürdürür, hiçbir şey kaybolmaz
+ve ingest ardından yetişir ([INGEST.md](INGEST.md)). Yükseltmeden sonra worker işi
+`search.counts_backfill`, yükseltmeden önce yüklenmiş günleri Arama'nın özet tablosuna 10
+dakikada bir, en yeni gün önce sayar: bir dakikadan sonra yeni dosyaya başlamaz; bir dosyanın
+yeniden sayımı milyon satır başına yaklaşık 9 sn sürer (geliştirme makinesi) ve worker'ın öteki
+işleri onu bekler. Bir gün sayılana kadar Arama o günün istatistiklerini doğrudan sayar (daha
+yavaş, sonuç aynı). Sayılmayı bekleyenler:
+
+```powershell
+& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-db.exe" search-counts status --config "C:\ProgramData\ARCILOGGER\arcilogger.toml"
+```
+
+**Aynı anda çok kişi arama yapıyorsa.** Aramalar, canlı akışlar, raporlar ve web arayüzünün bütün
+sayfaları API'nin veritabanı bağlantılarını paylaşır (`[database] pool_size`, varsayılan 5).
+Arama'yı aynı anda birkaç kişinin kullandığı bir kurumda `arcilogger.toml` içinde `pool_size`
+10'a, `search.max_concurrent` ayarı da onunla birlikte yükseltilir (en çok `pool_size` eksi 2;
+Ayarlar → Arama ve canlı akış, [AYARLAR.md](AYARLAR.md)), ardından hizmetler yeniden başlatılır
+(bölüm 12).
+
+**İnternet çıkışlı sürüme yükseltme (şema revizyonları `0017_fortigate_dhcp`,
+`0018_nat_egresses`).** Şema yükseltmesi FortiGate DHCP kayıtları için yeni bir tablo ve
+`fg_traffic` tablosuna bir sütun ekler (büyük tablolarda bile hızlıdır: sütun boş eklenir).
+Eski NAT ayarları tek bir yeni ayara, **İnternet çıkışları**na çevrilir: `nat.public_ips`
+adresleri "Genel IP (yükseltmede aktarıldı)" adlı doğrudan bir çıkış, `nat.wan_transip`
+"FortiGate WAN adresi (yükseltmede aktarıldı)" adlı bir servis sağlayıcı NAT'ı çıkışı olur
+(adres genel IP'lerden biriyse ayrı çıkış yapılmaz; `nat.public_ips` içinde özel ya da
+paylaşılan bir adres, ör. 100.64.x.x, varsa o da bu çıkışın NAT adresi olur), genel adresi
+olmayan hatlar için, "FortiGate WAN adresi" çıkışı yapılmadıysa ve bir genel IP ya da
+`lookup.port_hint` aktarıldıysa, "Genel adresi tanımlanmamış hatlar" adlı bir çıkış eklenir;
+`lookup.port_hint` "FortiGate WAN adresi" çıkışının, o yoksa bu çıkışın port koruma değerine
+geçer. Dönüşüm denetim kaydına `settings.change` olarak yazılır (`details.migration =
+"0018_nat_egresses"`; atılan geçersiz, IPv6 ya da ayrılmış değerler `details.dropped` içinde).
+Dönüşüm geçerli bir tanım veremezse çıkışlar boş kalır ve `R20-nat:conversion-failed` uyarısı
+açılır.
+
+**Yükseltmeden sonra:**
+
+- Her hattın genel adresini ve arayüzlerini (dstintf) Ayarlar → Uygulama ayarları → 5651
+  sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde girin. Aktarılan
+  "FortiGate WAN adresi" ya da "Genel adresi tanımlanmamış hatlar" çıkışı olan her kurulumda,
+  bu girilene kadar hiçbir çıkışa tanımlı olmayan bir adres için yapılan her sorgu ve rapor
+  `egress_public_unknown` uyarısını taşır; aktarılan çıkışlar arayüz girilene ya da
+  değiştirilene kadar eski NAT davranışını korur, ancak sonradan eklenen bir çıkışın NAT
+  adresleri bunun dışındadır. Hat hâlâ servis sağlayıcı yönlendiricisinin arkasındaysa ve
+  FortiGate'in o hattaki NAT adresini (ör. 100.64.x.x) yeni bir çıkış olarak eklerseniz,
+  hattın genel adresini doğrudan çıkıştan bu çıkışa taşıyın ve arayüzlerini girin; aksi hâlde
+  doğrudan çıkışın sorguları "Doğrudan hat doğrulanamadı" uyarısıyla yanıtlanabilir.
+- Aktarılan "FortiGate WAN adresi" çıkışının NAT adresi hattın genel adresiyse (FortiGate genel
+  adresi kendisi tutuyorsa) çıkışın türünü **Doğrudan** yapın; editör bunu uyarır.
+- Bütün hatlar tanımlandıktan sonra "Genel adresi tanımlanmamış hatlar" çıkışını silin: o
+  kaldıkça hiçbir hatta ait olmayan bir genel IP sorulduğunda ilgisiz oturumlar aday olarak
+  listelenir.
+- Bir değişiklik: hiçbir çıkışa tanımlı olmayan bir adres o anda FortiGate kayıtlarında kaynak
+  NAT adresi olarak görünüyorsa sorgu artık aday listesi yerine o adresle kesin eşleşme yapar
+  ve bunu uyarıyla belirtir (`egress_observed_not_configured`).
+- FortiGate DHCP kullanılıyorsa [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4'teki doğrulamayı
+  yapın ve sonucu bölüm 16'ya yazın; her FortiOS yükseltmesinden sonra doğrulamayı yineleyin.
+  Yükseltmeden önceki anlar için 5651 sorguları iç IP adresinde durur: o zamana ait FortiGate
+  DHCP kayıtları kira zaman çizelgesine dönüştürülmez, sorgu bunu belirtir ve iç IP sorgusunda
+  ya da kesin eşleşmede kaydı kanıt olarak gösterir (`fortigate_dhcp_not_converted`). Daha eski
+  bir kiraya (MikroTik ya da FortiGate) dayanan bir zincirde, kiranın son DHCP kaydından sonra o
+  adres ya da o kiranın MAC adresi için böyle bir kayıt varsa (ör. yükseltmeden önce
+  MikroTik'ten FortiGate DHCP'ye geçen bir istemci başka bir adres aldıysa) zincir düşük güvenle
+  ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`). **Yükseltmeden sonra
+  da** her istemci için yeni sürümde ilk DHCP Ack kaydı gelene kadar zincir kurulmaz: bu, kira
+  süresinin yarısına kadar sürebilir (FortiOS varsayılanı 7 günlük kirada 3,5 gün; istemci
+  yenilemeyi kirasının yarısında yapar). Yükseltmeyi bu boşluğu bilerek planlayın; FortiGate
+  DHCP kullanmayan kurulumlar bundan etkilenmez.
+- Yükseltmeden önce (ya da bir geri alma sırasında önceki sürümce) yüklenen FortiGate oturum
+  kayıtlarının srcmac alanı 5651 sorgusunda kullanılmaz; o anlar için srcmac ile kısmi zincir
+  kurulmaz.
+- Genel bir NAT adresi hiçbir çıkışa tanımlı değilse (ör. bir IP havuzu) artık çift NAT
+  belirtisi sayılmaz ve aday aramasına alınmaz: FortiGate'in kendi adresidir, sorulursa
+  kayıtlarda görülen adres olarak yanıtlanır. FortiGate'in DMZ'ye, başka bir VLAN'a, VPN'e ya da
+  şubeye yaptığı NAT'ın adreslerini "İnternet çıkışı değil" türüyle girin.
+
+**Geri alma:** eski NAT satırları bu sürümde okunmadan saklanır; `-Rollback` şema geri dönüşü
+yapmaz, önceki sürüm bu satırları, yani **yükseltme öncesi** NAT değerlerini okur. Yükseltmeden
+sonra İnternet çıkışlarında bir değişiklik yaptıysanız, geri döndükten sonra önceki sürümün
+Ayarlar → Uygulama ayarları bölümündeki `nat.public_ips` ve `nat.wan_transip` değerlerini bu
+sürümde yaptığınız değişiklikle karşılaştırıp elle girin (değişiklikler denetim kaydında
+`settings.change` olarak durur); bunun için veritabanını geri yüklemeyin: `-RestoreDatabase`
+yükseltmeden sonraki bütün kayıtları (denetim, sorgu, rapor, uyarı, cihaz ve kişi atamaları)
+siler. `-Rollback` çalıştırmadan önce bu sürümde yapılan sorguların resmi raporlarını (PDF)
+indirin: bir rapor ilk indirildiğinde bir kez oluşturulur ve önceki sürüm, bu sürümün eklediği
+satırları (tanımsız gönderici uyarısı, "Kısmi kanıt" etiketi, çıkış ve FortiGate kira satırları)
+yazmaz. FortiGate DHCP kullanan bir kurulumda önceki sürüm FortiGate DHCP kayıtlarını okuyamaz:
+bir FortiGate kirasını, adres bırakıldıktan ya da başka bir istemciye verildikten sonra da açık
+tutabilir. Bu yüzden `-Rollback`, program değiştirilmeden önce, bütün FortiGate kiralarını
+**düşük güvene** indirir; kaç kira olduğunu yazar ve kurulum günlüğüne kaydeder (yalnızca
+türetilmiş kira satırları değişir; ham kayıtlara ve mühürlere dokunulmaz; `-RestoreDatabase`
+ile bu adım yapılmaz). Önceki sürümde FortiGate DHCP'ye dayanan bütün zincirler bu nedenle
+düşük güvenle görünür. Önceki sürüm mevcut FortiGate kiralarını kendi ayarlardaki sürelerine
+göre (kayıttaki kira süresine bakmadan, varsayılanlarla kiranın son DHCP kaydından yaklaşık 26
+saat sonra; bu an geçmişte de olabilir) kapatır, geri dönüş günü ya da önceki gün başlayanları
+(ve geç gelen kayıtlar için yeniden oluşturduğu günlerde başlayanları) kendi yeniden
+oluşturmasında siler ve yenisini oluşturmaz; MikroTik kiraları önceki sürümün kendi
+kurallarıyla, yükseltmeden önceki gibi sürer. Geri dönüşten sonraki anlar için FortiGate DHCP
+adreslerinin 5651 sorgularını yeniden yükseltmeden sonra yapın. Yeniden yükseltildiğinde
+aradaki günlerin FortiGate DHCP kayıtları kira zaman çizelgesine girmez ve sorgular bunu
+belirtir: zincir kurulamayan bir anda, o anı kapsayan en yeni DHCP kaydı böyle bir kayıtsa
+`fortigate_dhcp_not_converted` ile; bir DHCP kirasına dayanan zincirde, kiranın son DHCP
+kaydından sonra o adres ya da o kiranın MAC adresi için böyle bir kayıt varsa zincir düşük
+güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`).
+
+`-Rollback` FortiGate kiralarını, geri dönülen sürüm FortiGate DHCP kayıtlarını okusa da
+düşük güvene indirir: FortiGate DHCP okuyan iki sürüm arasındaki bir geri almadan sonra da
+FortiGate DHCP zincirleri bir sonraki `arcilogger-db upgrade` çalışmasına kadar düşük güvenle
+görünür. O yükseltme (ör. yeniden yükseltme) onları geri getirir (aşağıda). Bu düşük güven
+hiçbir zaman yanlış bir kişiyi göstermez; zinciri yalnızca gereğinden düşük gösterir.
+
+**Yeniden yükseltme:** veritabanı şeması geri alınmadığı için dönüşüm yeniden çalışmaz ve eski
+NAT ayarları yeniden çevrilmez. Geri dönüş sırasında önceki sürümde `nat.public_ips`,
+`nat.wan_transip` ya da `lookup.port_hint` değiştirildiyse `R20-nat:legacy-changed` uyarısı
+değişen ayarları adlarıyla gösterir: değişikliği İnternet çıkışları bölümüne elle işleyin;
+uyarı çıkışlar kaydedilince kapanır. Yeniden yükseltme, önceki sürümün değiştirmediği FortiGate
+kiralarının güven düzeyini geri getirir ve kaç kiranın geri geldiğini, kaçının düşük kaldığını
+ve kiraların yeniden oluşturulacağı günleri yazar; düşük kalanlar önceki sürümün kapattığı ya
+da yeniden hesapladığı kiralardır. FortiGate DHCP kullanan bir kurulumda yeniden yükseltmeden
+sonra, geri dönüş gününden en uzun kira süresi kadar önceki günden (7 günlük kirada 7 gün
+önce) yeniden yükseltme gününe kadar kiraları Ayarlar → Uygulama ayarları → 5651 sorgu ve kira
+zaman çizelgesi → Kiraları yeniden oluştur bölümünde yeniden oluşturun (bir istekte en çok 31
+gün): önceki sürümün erken kapattığı, sildiği ya da düşük güvende bıraktığı FortiGate kiraları
+ancak böyle FortiGate'in kendi bitişine ve güven düzeyine göre yeniden kurulur; yapılmazsa o
+aralıktaki anlar için sorgu nedensiz bir "kira yok" verebilir ya da zinciri düşük güvenle
+gösterir. Yeniden kurulan bu kiralar geri dönüş aralığında, kiranın son DHCP kaydından sonra
+önceki sürümün o adres ya da MAC adresi için yüklediği bir FortiGate DHCP kaydı varsa düşük
+güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`): adres o arada
+bırakılmış, başka bir cihaza verilmiş ya da MAC adresi başka bir adres almış olabilir.
+
 ## 14. Kaldırma
 
 ```powershell
@@ -861,17 +1190,18 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files\ARCILOGGER\installer\
 Betik önce zamanlanmış görevleri duraklatır ve çalışan bir görevin (ör. mühürleme, aylık
 doğrulama) bitmesini bekler (`-TaskWaitMinutes`, varsayılan 30): görevler program klasöründeki
 Python'u kullanır. O sürede bitmeyen bir görev varsa **hiçbir şey kaldırmadan** durur (çıkış kodu
-`2`, görevler yeniden etkinleşir); daha sonra yeniden çalıştırın. Ardından hizmetler, zamanlanmış
-görevler ve güvenlik duvarı kuralları silinir (kapatılan Windows kuralları ve profil ayarları geri
-gelir); masaüstü Windows'ta güç ayarları kurulumdan önceki değerlerine döner
+`2`, görevler yeniden etkinleşir); daha sonra yeniden çalıştırın. Ardından hizmetler (`ArciAdmin` dahil), zamanlanmış
+görevler, olay günlüğü kaynağı `ARCILOGGER-Admin` ve güvenlik duvarı kuralları silinir (kapatılan
+Windows kuralları ve profil ayarları geri gelir; yazılmış olaylar günlükte kalır); masaüstü Windows'ta güç ayarları kurulumdan önceki değerlerine döner
 (`C:\ProgramData\ARCILOGGER\install\power-state.json`). Saat dilimi, zaman eşitleme ayarları ve
 "Dosya Sistemi" denetim ilkesi geri alınmaz. Program klasöründe `installer\` en son silinir: Windows bir dosyayı silmeyi reddederse
 betik yerinde kalır ve kaldırma yeniden çalıştırılarak tamamlanır. Yalnızca kurulumun oluşturduğu program klasörleri silinir:
 `C:\Program Files\ARCILOGGER`, `.previous`, `.failed-*`, `.rolled-back-*` — içinde kurulumun
 `VERSION.json` ya da `INSTALL-IN-PROGRESS.json` dosyası olanlar. Başka bir klasör (ör. yanlış
 yazılmış bir `-InstallDir`), sürücü kökü ya da Windows klasörü verilirse betik **hiçbir şey
-silmeden** durur. **Ham loglar, kasa, dışa aktarımlar, yedekler (`D:\ARCILOGGER`), yapılandırma ve
-gizli depo (`C:\ProgramData\ARCILOGGER`) ve veritabanı silinmez.** Saklanan kayıtlar yasal
+silmeden** durur. **Ham loglar, kasa, dışa aktarımlar, yedekler (`D:\ARCILOGGER`), yapılandırma,
+gizli depo ve tarayıcı yönetiminin `admin\` klasörü (`C:\ProgramData\ARCILOGGER`) ve veritabanı
+silinmez.** Saklanan kayıtlar yasal
 delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
 
 ## 15. Sorun giderme
@@ -941,9 +1271,43 @@ delildir; silinmeleri yalnızca saklama/imha işiyle ve imha tutanağıyla olur.
   tarama mı).
 - Gece veritabanı yedeği: ilk gecenin `D:\ARCILOGGER\state\backup\last.json` sonucu, yedeğin
   süresi ve boyutu, ilk geri yükleme tatbikatı ([YEDEKLEME.md](YEDEKLEME.md) bölüm 6 ve 8).
+- Arama'lı sürüme yükseltmede `ix_fg_web_rhost_time` indeksiyle şema yükseltmesinin gerçek
+  veritabanında ne kadar sürdüğü (bölüm 13) ve ilk günlerden sonra
+  `arcilogger-db search-counts verify` sonucu: özet tablosu satırlarla aynı olmalı; küçük harfle
+  saklanmayan ad sayıları (`fg_dns.qname`, `fg_web.hostname`) 0 olmalı.
+- Tarayıcı yönetimi ([AYARLAR.md](AYARLAR.md) bölüm 9): `arcilogger.toml` değiştirildikten sonra
+  ArciAdmin'in dosyaya özel izninin yerinde kalması (`Get-Acl`), ArciAdmin'in `kamusm-roots`
+  klasörüne yalnızca kendi dosyalarını ekleyip silebilmesi, `ARCILOGGER-Admin` olaylarının
+  `Requests`, `Seal` ve `ApplySystem` görevlerini uyandırması (`Get-WinEvent`, Görev Zamanlayıcı
+  geçmişi) ve güvenlik duvarı kuralı yerinde güncellenirken syslog iletisi kaybolmaması.
 - Masaüstü Windows 11 Pro'da: yukarıdakilerin hepsi ve güç ayarları, Akıllı Uygulama Denetimi,
   zorunlu bir güncelleme yeniden başlatması — adım adım:
   [KABUL-TESTI-WINDOWS11.md](KABUL-TESTI-WINDOWS11.md).
+
+**FortiGate DHCP, srcmac ve internet çıkışları.** Aşağıdaki varsayımlar FortiOS belgelerine
+dayanır ya da kurumun ağına bağlıdır; sahada doğrulanır (V numaraları bu listenin kendi
+numaralarıdır; aynı varsayımlar [CORRELATION.md](CORRELATION.md) bölüm 8'de konularına göre
+anlatılır). Her satırın sonucunu ve
+denetimin tarihini yazın. Denetimleri **her FortiOS yükseltmesinden sonra** yineleyin (kayıt
+alanları sürümler arasında değişebilir) ve yeni sonucu tarihiyle ekleyin; eskisini silmeyin.
+Bir sonuç beklenenden farklıysa [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4'teki dallara göre
+ayarı düzeltin. FortiGate DHCP kullanılmıyorsa V1–V6, V14 ve V17 satırlarına "kullanılmıyor"
+yazın.
+
+| # | Doğrulanacak | Nasıl | Yazılacak sonuç | Sonuç | Tarih |
+|---|---|---|---|---|---|
+| V1 | FortiGate DHCP Ack kaydının (logid `0100026001`) syslog'daki gerçek biçimi: `ip`, `mac`, `dhcp_msg`, `lease`, `interface`, `hostname` alanları, tırnaklar, MAC adresinin yazımı; `hostname` alanının olmaması ya da boş olması | [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4 adım 5: Kaynaklar → Kira kanıtı kartı ve deneme 5651 Sorgu; geçince `dhcp.fortigate_format_verified` açılır (adım 6) | geçti / geçmedi; düzeltilen ayar | | |
+| V2 | İstemcinin adresi bırakması (RELEASE) kaydediliyor mu; logid'i (beklenen `0100026002`) ve `dhcp_msg` değeri | DEVICE-SETUP.md bölüm 2.4 adım 5 (`ipconfig /release`, sonra `ipconfig /renew`) ve dalları; başka bir logid `R20-lease:fortigate-refused` uyarısında "tanınmayan logid" olarak görünür | RELEASE kaydediliyor: evet / hayır; logid; `dhcp_msg` | | |
+| V3 | Yenilemeler (istemci bağlı kalırken kira süresinin yarısında) ikinci bir DHCP Ack kaydı veriyor mu | DEVICE-SETUP.md bölüm 2.4 adım 5, yenileme denetimi | yenilemeler kaydediliyor: evet / hayır; hayırsa kurumun DEVICE-SETUP.md bölüm 2.4 adım 5'teki seçimi (olduğu gibi bırakmak ya da `dhcp.fortigate_traffic_extends` ayarını açmak) ve seçimin tarihi | | |
+| V4 | `lease` alanı saniye cinsinden mi; süresiz kira (`lease-time` `0`) nasıl yazılıyor | Arama'da (`logid:0100026001`) ham satırdaki `lease` değeri FortiGate'teki `lease-time` ile karşılaştırılır (DEVICE-SETUP.md bölüm 2.4 adım 7); `R20-lease:fortigate-lease` ve `R20-lease:fortigate-lease-unlimited` uyarıları | `lease` = `lease-time`: evet / hayır | | |
+| V5 | DHCP olay kayıtları DEVICE-SETUP.md'deki ayarlarla (önem düzeyi `information`, olayları dışlayan süzgeç yok) syslog'a ulaşıyor mu | DEVICE-SETUP.md bölüm 2.4 adım 3–4; Kaynaklar → Kira kanıtı kartının durumu (`ok`, `none`, `refused`) | kartın durumu; `none` ya da `refused` ise yapılan düzeltme | | |
+| V6 | FortiGate'in DHCP aktarıcı (relay) olduğu arayüzlerden FortiGate DHCP kaydı gelmediği; `server-type ipsec` sunucularının (DHCP over IPsec, VPN havuzları) arayüzlerinin hariç tutulduğu; bir DHCPINFORM yanıtının DHCP Ack olarak yazılıp yazılmadığı (`dhcp_msg` değeri: V14); FortiGate bir arayüzde aktarılan (relay) birden çok ağa hizmet veriyorsa aktarılan bir istemcinin DHCP Ack kaydının hangi `interface` ve adresi taşıdığı | DEVICE-SETUP.md bölüm 2.4 adım 1, 2 ve 9; `dhcp.fortigate_interfaces_excluded`; `R20-lease:fortigate-dhcp-subnet` uyarısı | aktarılan ağlara tek bir arayüzde hizmet veriliyor: evet / hayır; evetse kayıttaki `interface` ve adresin istemcinin kendi ağından olup olmadığı; hariç tutulan arayüzler | | |
+| V8 | srcmac yalnızca aygıt tanıma açık arayüzlerde gelir ve doğrudan bağlı istemcilerin kendi MAC adresidir; arada katman 2 anahtar varsa ancak iki istemci denetimi bunu gösterirse; birimin hangi aygıt tanıma alanlarını doldurduğu | DEVICE-SETUP.md bölüm 2.5: arayüzde iki bilinen istemciyle, "Kayıtlarda görülen NAT adresleri" panelinin (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi) srcmac arayüzleri tablosunda `max_ips_per_mac` 1 (IPv4 kaynaklar) ve Arama'da (`srcmac:`) iki MAC adresi istemcilerin kendisi (bir anahtarın ya da yönlendiricinin değil) | arayüz başına: denetim geçti / geçmedi, `lookup.srcmac_interfaces` listesine alındı mı; birimin doldurduğu alanlar | | |
+| V11 | Her hattın servis sağlayıcı yönlendiricisi kaynak portu koruyor mu | DEVICE-SETUP.md bölüm 2.6: port koruma ölçümü | hat başına `preserved` (ölçüldü) ya da `unknown` | | |
+| V14 | Her eşlenmiş logid altında FortiOS'un yazdığı `dhcp_msg` değerleri | Arama'da ham satırlar (`logid:<logid>`); `R20-lease:fortigate-refused` uyarısı "beklenmeyen dhcp_msg" nedeniyle görülen değerleri yazar; `dhcp.fortigate_dhcp_msgs` | logid başına görülen `dhcp_msg` değerleri | | |
+| V15 | Her hattın genel IP adresi sabit mi | DEVICE-SETUP.md bölüm 2.6: servis sağlayıcıya sorulur; değişebilecek adresli hat `public_dynamic` olarak işaretlenir (servis sağlayıcı NAT'ı çıkışında; değişen adresli doğrudan hattı ARCILOGGER kayıtlardan bulur, DEVICE-SETUP.md bölüm 2.6) | hat başına sabit / değişebilir; servis sağlayıcının yanıtı | | |
+| V16 | FortiGate DHCP kayıtları kullanılabilir bir cihaz zamanı taşıyor ve FortiGate'in saati dakikalar içinde doğru: FortiGate NTP ile eşitleniyor | DEVICE-SETUP.md bölüm 2.1 (NTP adımı); FortiGate'te `diagnose sys ntp status` NTP sunucularının bilgisini listeler; `R20-lease:source-clock` uyarısı açık olmamalı | FortiGate NTP ile eşitleniyor: evet / hayır; `diagnose sys ntp status` çıktısındaki NTP sunucusu | | |
+| V17 | FortiOS bir DHCPDECLINE kaydı yazıyor mu ya da bir adresi vermeden önce denetliyor mu; bir istemci bir sunucu arayüzü ve ağı için tek bir kira tutar | Ayrı bir deneme yoktur: statik cihazlar DHCP aralığının dışında tutulur (DEVICE-SETUP.md bölüm 2.4 adım 8); `R20-lease:fortigate-decline:<ağ>` uyarısı | uyarı açıldı mı; açıldıysa ağ ve yapılan düzeltme (adres ayrıldı ya da cihaz taşındı) | | |
 
 ## 17. Masaüstü Windows 11 Pro
 

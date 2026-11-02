@@ -1,5 +1,5 @@
 import { Building2, MoreHorizontal, Network, Pencil, Plus, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -78,14 +78,19 @@ function DepartmentDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const busy = create.isPending || update.isPending;
 
-  useEffect(() => {
+  // The form begins while rendering when the dialog opens (or for another department), so its
+  // first frame already shows that department's name: an effect would run only after that frame.
+  const openFor = open ? department : undefined;
+  const [begunFor, setBegunFor] = useState<DepartmentOut | null | undefined>(undefined);
+  if (openFor !== begunFor) {
+    setBegunFor(openFor);
     if (open) {
       setName(department?.name ?? '');
       setNotes(department?.notes ?? '');
       setError(null);
       setFailure(null);
     }
-  }, [open, department]);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();

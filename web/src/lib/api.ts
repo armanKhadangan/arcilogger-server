@@ -249,6 +249,15 @@ function react(error: ApiError, silent: boolean): void {
     handlers.moduleNotLicensed?.(error);
 }
 
+/**
+ * The global reaction to an error of a `silent` request, for a caller that handles only some
+ * errors itself: the password change of the user menu sends a 401 (account locked, session
+ * ended) to the sign-in page like any other request of the app would.
+ */
+export function reactGlobally(error: ApiError): void {
+  react(error, false);
+}
+
 /** Send one request; resolves with the parsed JSON (`undefined` for 204), rejects with ApiError. */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET';
@@ -410,6 +419,7 @@ export const api = {
     apiRequest<T>(path, { ...options, method: 'PATCH', body }),
   put: <T>(path: string, body?: unknown, options?: Options) =>
     apiRequest<T>(path, { ...options, method: 'PUT', body }),
-  delete: <T>(path: string, options?: Options) =>
+  /** A JSON `body` only where the API takes one (`DELETE /admin/config/smtp/ca`). */
+  delete: <T>(path: string, options?: Options & Pick<RequestOptions, 'body'>) =>
     apiRequest<T>(path, { ...options, method: 'DELETE' }),
 };

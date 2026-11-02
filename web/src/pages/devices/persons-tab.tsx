@@ -36,7 +36,7 @@ import { Pager, PrivacyWait } from './device-parts';
 import { rangeText, useDebounced } from './device-text';
 import { personQuery } from './devices-model';
 import { PersonDialog } from './person-dialog';
-import { PersonSheet, PersonStatus } from './person-sheet';
+import { PersonSheet, PersonStatus, UsageExcludedBadge } from './person-sheet';
 
 const ALL = 'all';
 
@@ -161,25 +161,29 @@ export function PersonsTab({
   const columns = useMemo<AnyColumnDef<PersonOut>[]>(() => {
     const list: AnyColumnDef<PersonOut>[] = [
       {
+        // The name and, for a person left out of the usage reports, a marker after it.
         id: 'name',
         accessorKey: 'name',
         header: t('devices.persons.name'),
-        size: 220,
+        size: 260,
         enableSorting: false,
         meta: { label: t('devices.persons.name') },
         cell: (info) => {
           const row = info.row.original;
           return (
-            <button
-              type="button"
-              id={`${tableId}-open-${row.id}`}
-              className="max-w-full truncate rounded-sm text-left font-medium text-accent-ink hover:underline"
-              onClick={() => {
-                setOpenId(row.id);
-              }}
-            >
-              {visibleText(row.name)}
-            </button>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <button
+                type="button"
+                id={`${tableId}-open-${row.id}`}
+                className="min-w-0 truncate rounded-sm text-left font-medium text-accent-ink hover:underline"
+                onClick={() => {
+                  setOpenId(row.id);
+                }}
+              >
+                {visibleText(row.name)}
+              </button>
+              {row.usage_excluded ? <UsageExcludedBadge /> : null}
+            </span>
           );
         },
       },

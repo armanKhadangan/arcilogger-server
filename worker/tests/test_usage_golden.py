@@ -78,6 +78,7 @@ from arcilogger_db.models import (
 )
 from arcilogger_worker.correlation.leases import rebuild_days
 from arcilogger_worker.testing import Evidence, tr
+from arcilogger_worker.usage.engine import source_ips
 from arcilogger_worker.usage.jobs import rebuild_day
 from arcilogger_worker.usage.query import Directory
 from arcilogger_worker.usage.testing import (
@@ -419,6 +420,18 @@ def test_a_persons_device_with_blocked_attempts_only_keeps_its_own_address(
         {"off_hours": False, "ip": PC1, "vlan": 43, "blocked": 4},
         {"off_hours": True, "ip": PC1, "vlan": 43, "blocked": 0},
     ]
+
+
+def test_only_private_source_addresses_are_usage(db_session: Session, layout: Layout) -> None:
+    """The usage of the LAN: sources from every RFC 1918 block and from IPv6 ULA count, whichever
+    block the site uses; inbound traffic from public addresses (and from 100.64.0.0/10) does not."""
+    e = Evidence(db_session, layout)
+    private = ["10.0.0.10", "172.16.0.10", "192.168.0.10", "fd00::10"]
+    for port, ip in enumerate([*private, "100.64.0.10", "198.51.100.7"], start=50001):
+        e.traffic(tr(DAY, 9), ip, port, sentbyte=100, rcvdbyte=1000)
+    db_session.commit()
+    lo, hi = tr(DAY, 0), tr(NEXT, 0)
+    assert source_ips(db_session, lo, hi, hi) == private
 
 
 def test_day_bookkeeping(db_session: Session, site: GoldenSite) -> None:

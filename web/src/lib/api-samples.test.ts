@@ -3,9 +3,11 @@
  * real API sends. `web/e2e/samples/*.json` are answers captured from the real API
  * (`web/scripts/capture_api_samples.py`, whose `--check` compares them with the API again); here
  * every sample is checked field by field against the interfaces of `api-types.ts`,
- * `lookup-types.ts` and `seal-types.ts` — required fields present, no unknown fields, value types
- * and string literal unions as declared. The untyped parts of the OpenAPI document (`outcome`,
- * `query`, the seal day detail) are covered only here.
+ * `lookup-types.ts`, `seal-types.ts`, `settings-types.ts`, `search-types.ts`, `live-types.ts` and
+ * `sources-types.ts` — required fields present, no unknown fields, value types and string literal
+ * unions as declared. The untyped parts of the OpenAPI document (`outcome`, `query`, the seal day
+ * detail, the `result` of an administration request, the events of a live stream) are covered
+ * only here.
  */
 
 import { readFileSync } from 'node:fs';
@@ -25,7 +27,15 @@ interface Named<T> {
 
 const interfaces = new Map<string, Named<ts.InterfaceDeclaration>>();
 const aliases = new Map<string, Named<ts.TypeNode>>();
-for (const file of ['api-types.ts', 'lookup-types.ts', 'seal-types.ts']) {
+for (const file of [
+  'api-types.ts',
+  'lookup-types.ts',
+  'seal-types.ts',
+  'settings-types.ts',
+  'search-types.ts',
+  'live-types.ts',
+  'sources-types.ts',
+]) {
   const path = join(LIB, file);
   const source = ts.createSourceFile(
     path,
@@ -109,6 +119,10 @@ function check(value: unknown, type: ts.TypeNode, source: ts.SourceFile, path: s
   if (ts.isLiteralTypeNode(type)) {
     if (type.literal.kind === ts.SyntaxKind.NullKeyword)
       return value === null ? [] : [`${path}: expected null`];
+    if (type.literal.kind === ts.SyntaxKind.FalseKeyword)
+      return value === false ? [] : [`${path}: expected false`];
+    if (type.literal.kind === ts.SyntaxKind.TrueKeyword)
+      return value === true ? [] : [`${path}: expected true`];
     if (ts.isStringLiteral(type.literal))
       return value === type.literal.text ? [] : [`${path}: expected "${type.literal.text}"`];
   }
@@ -138,13 +152,17 @@ function check(value: unknown, type: ts.TypeNode, source: ts.SourceFile, path: s
         : [`${path}: expected a number`];
     if (name === 'Record') {
       if (!isObject(value)) return [`${path}: expected an object`];
-      const valueType = type.typeArguments?.[1];
-      return valueType
-        ? Object.entries(value).flatMap(([key, item]) =>
-            check(item, valueType, source, `${path}.${key}`),
-          )
-        : [];
+      const [keyType, valueType] = type.typeArguments ?? [];
+      return Object.entries(value).flatMap(([key, item]) => [
+        // A map whose keys are a fixed list (`Record<ServiceName, …>`): every key is one of them.
+        ...(keyType ? check(key, keyType, source, `${path}{${key}}`) : []),
+        ...(valueType ? check(item, valueType, source, `${path}.${key}`) : []),
+      ]);
     }
+    // `Partial<Record<…>>`: the same map, not every key present.
+    const [argument] = type.typeArguments ?? [];
+    if (name === 'Partial' && argument && ts.isTypeReferenceNode(argument))
+      return check(value, argument, source, path);
     const alias = aliases.get(name);
     if (alias) return check(value, alias.node, alias.source, path);
     if (interfaces.has(name)) return checkMembers(value, interfaceMembers(name), path);
@@ -202,6 +220,103 @@ function lookupSample(value: unknown, path: string): string[] {
   return problems;
 }
 
+/** The type of an administration request's `result` by its kind (`null` until there is one). */
+const REQUEST_RESULTS: Record<string, string> = {
+  'action.seal': 'SealActionResult',
+  'action.credit': 'CreditActionResult',
+  'action.tsa_test': 'TsaTestResult',
+  'action.replica_test': 'ReplicaTestResult',
+  'worker.test_email': 'TestEmailResult',
+  'worker.lease_rebuild': 'LeaseRebuildResult',
+};
+
+/** An administration request with the result of its kind (a change has none). */
+function requestSample(value: unknown, path: string): string[] {
+  const problems = conforms(value, 'AdminRequestOut', path);
+  if (!isObject(value) || value.result === null) return problems;
+  const type = REQUEST_RESULTS[String(value.kind)];
+  if (!type) return [...problems, `${path}.result: a ${String(value.kind)} has no result`];
+  return [...problems, ...conforms(value.result, type, `${path}.result`)];
+}
+
+function requestPage(value: unknown, path: string): string[] {
+  const problems = conforms(value, 'AdminRequestPage', path);
+  if (isObject(value) && Array.isArray(value.items))
+    value.items.forEach((item, index) =>
+      problems.push(...requestSample(item, `${path}.items[${index}]`)),
+    );
+  return problems;
+}
+
+/** The `details` of a refusal by its code (the field problems of 2.11, the settings' lists). */
+const ERROR_DETAILS: Record<string, string> = {
+  host_invalid: 'FieldProblem',
+  legal_root_confirm_required: 'FieldProblem',
+  replica_target_invalid: 'FieldProblem',
+  retention_below_minimum: 'FieldProblem',
+  retention_confirm_mismatch: 'FieldProblem',
+  site_name_required: 'FieldProblem',
+  smtp_password_required: 'FieldProblem',
+  source_address_taken: 'FieldProblem',
+  source_confirm_mismatch: 'FieldProblem',
+  source_network_not_allowed: 'FieldProblem',
+  tsa_mock_refused: 'FieldProblem',
+  zamane_sha256_required: 'FieldProblem',
+  setting_invalid: 'SettingProblem',
+  setting_conflict: 'SettingConflict',
+};
+
+/** Refusals whose `details` list has the type of {@link ERROR_DETAILS}. */
+function adminErrors(value: unknown, path: string): string[] {
+  const problems = errors(value, path);
+  if (!isObject(value)) return problems;
+  for (const [key, sample] of Object.entries(value)) {
+    const error = (sample as { body?: { error?: { code?: string; details?: unknown } } }).body
+      ?.error;
+    const type = ERROR_DETAILS[error?.code ?? ''];
+    if (type) problems.push(...list(type)(error?.details, `${path}.${key}.body.error.details`));
+  }
+  return problems;
+}
+
+/** A group of samples, each key with its own rule (like the files of {@link RULES}). */
+const group =
+  (rules: Record<string, Rule>) =>
+  (value: unknown, path: string): string[] => {
+    if (!isObject(value)) return [`${path}: expected an object`];
+    const problems = Object.keys(value)
+      .filter((key) => !(key in rules))
+      .map((key) => `${path}.${key}: no type rule (add one here)`);
+    for (const [key, rule] of Object.entries(rules)) {
+      if (!(key in value)) problems.push(`${path}.${key}: missing in the sample`);
+      else if (typeof rule === 'string')
+        problems.push(...conforms(value[key], rule, `${path}.${key}`));
+      else if (rule) problems.push(...rule(value[key], `${path}.${key}`));
+    }
+    return problems;
+  };
+
+/**
+ * A captured live stream: its events in order (`{event, id, data}`), each `data` of the type
+ * `LiveEvents` gives its event; only a `line` has an `id` (`<epoch>:<seq>`).
+ */
+function liveEvents(value: unknown, path: string): string[] {
+  if (!Array.isArray(value)) return [`${path}: expected an array`];
+  const events = interfaceMembers('LiveEvents');
+  return value.flatMap((item, index) => {
+    const at = `${path}[${index}]`;
+    if (!isObject(item)) return [`${at}: expected an object`];
+    const problems = Object.keys(item)
+      .filter((key) => !['event', 'id', 'data'].includes(key))
+      .map((key) => `${at}.${key}: not part of an event`);
+    const event = events.get(String(item.event));
+    if (!event) return [...problems, `${at}.event: ${describe_(item.event)} is no live event`];
+    const id = item.event === 'line' ? typeof item.id === 'string' : item.id === null;
+    if (!id) problems.push(`${at}.id: ${describe_(item.id)} (only a line has an id)`);
+    return [...problems, ...check(item.data, event.type, event.source, `${at}.data`)];
+  });
+}
+
 const FILE_SAMPLE = null; // downloads: headers, size and hash only
 const RULES: Record<string, Record<string, Rule>> = {
   lookups: {
@@ -215,6 +330,32 @@ const RULES: Record<string, Record<string, Rule>> = {
     auditor_run: lookupSample,
     exact_with_report: lookupSample,
     candidates_with_report: lookupSample,
+    // The Wave 3 lookups of the second capture site (contract 2.12, `samples_lookups.py`).
+    ...Object.fromEntries(
+      [
+        'fortigate_internal',
+        'fortigate_candidates',
+        'hat2_candidates',
+        'fortigate_renewal_low',
+        'srcmac_only',
+        'srcmac_conflict',
+        'direct_quiet_none',
+        'fallback_direct',
+        'fallback_transip',
+        'observed',
+        'observed_no_exits',
+        'not_logged',
+        'not_logged_seen',
+        'public_unknown',
+        'public_dynamic',
+        'no_egress',
+        'internal_exit',
+        'clock_offset',
+        'unconverted_dhcp',
+        'untrusted_match',
+        'changed_after_event',
+      ].map((name) => [name, lookupSample]),
+    ),
     list_admin: 'LookupPage',
     list_admin_mine: 'LookupPage',
     list_auditor: 'LookupPage',
@@ -246,9 +387,109 @@ const RULES: Record<string, Record<string, Rule>> = {
     verify_quick: 'VerifyResult',
     manifest_file: FILE_SAMPLE,
     token_file: FILE_SAMPLE,
+    seal_now: 'AdminAccepted',
+    seal_now_queued: requestSample,
+    seal_now_done: requestSample,
     errors,
   },
-  credits: { mock: 'Credits', kamusm: 'Credits', kamusm_low: 'Credits' },
+  credits: {
+    mock: 'Credits',
+    kamusm: 'Credits',
+    kamusm_low: 'Credits',
+    query: 'AdminAccepted',
+    query_done: requestSample,
+    query_limited: 'ErrorSample',
+  },
+  // Browser administration (contract 2.11): the configuration in three stages of the capture
+  // (installed; Kamu SM set up; e-mail, replica, retention and backup changed), every answer of
+  // a change and the history.
+  admin: {
+    config: 'AdminConfig',
+    status: 'AdminStatus',
+    status_after: 'AdminStatus',
+    status_agent_missing: 'AdminStatus',
+    status_disabled: 'AdminStatus',
+    check_general: 'AdminCheck',
+    check_clock: 'AdminCheck',
+    accepted: 'AdminAccepted',
+    request_queued: requestSample,
+    request_active: requestSample,
+    requests: requestPage,
+    kamusm: group({
+      config: 'AdminConfig',
+      check_credentials: 'AdminCheck',
+      credentials_accepted: 'AdminAccepted',
+      credentials_active: requestSample,
+      upload_root: 'UploadPreview',
+      root_accepted: 'AdminAccepted',
+      root_active: requestSample,
+      upload_zamane: 'UploadPreview',
+      zamane_accepted: 'AdminAccepted',
+      zamane_pending: requestSample,
+      tsa_test_accepted: 'AdminAccepted',
+      tsa_test_done: requestSample,
+    }),
+    sources: group({
+      check_add: 'AdminCheck',
+      check_update: 'AdminCheck',
+      add_accepted: 'AdminAccepted',
+      add_applied: requestSample,
+      add_active: requestSample,
+      remove_accepted: 'AdminAccepted',
+      remove_active: requestSample,
+    }),
+    sections: group({
+      config: 'AdminConfig',
+      check_smtp: 'AdminCheck',
+      smtp_accepted: 'AdminAccepted',
+      smtp_done: requestSample,
+      upload_smtp_ca: 'UploadPreview',
+      smtp_ca_accepted: 'AdminAccepted',
+      smtp_ca_done: requestSample,
+      test_email_accepted: 'AdminAccepted',
+      test_email_done: requestSample,
+      check_replica: 'AdminCheck',
+      replica_accepted: 'AdminAccepted',
+      replica_done: requestSample,
+      replica_test_accepted: 'AdminAccepted',
+      replica_test_done: requestSample,
+      check_retention: 'AdminCheck',
+      retention_accepted: 'AdminAccepted',
+      retention_done: requestSample,
+      check_backup: 'AdminCheck',
+      backup_accepted: 'AdminAccepted',
+      backup_done: requestSample,
+      lease_rebuild_accepted: 'AdminAccepted',
+      lease_rebuild_done: requestSample,
+    }),
+    history: group({
+      held_accepted: 'AdminAccepted',
+      held_pending: requestSample,
+      cancel_held_accepted: 'AdminAccepted',
+      cancel_held_done: requestSample,
+      held_cancelled: requestSample,
+      cancel_queued: 'AdminAccepted',
+      cancelled_queued: requestSample,
+      revert_accepted: 'AdminAccepted',
+      revert_done: requestSample,
+      requests: requestPage,
+      versions: list('ConfigVersion'),
+    }),
+    errors: adminErrors,
+  },
+  settings: {
+    list: 'SettingsOut',
+    list_changed: 'SettingsOut',
+    patch: 'SettingsPatchResult',
+    reset: 'SettingsPatchResult',
+    errors: adminErrors,
+  },
+  // The observed panel of the internet exits editor (contract 2.12).
+  'settings-observed': {
+    observed: 'FortigateObserved',
+    observed_exits_invalid: 'FortigateObserved',
+    errors,
+  },
   devices: {
     list: 'DevicePage',
     list_unknown: 'DevicePage',
@@ -377,6 +618,52 @@ const RULES: Record<string, Record<string, Rule>> = {
     export_category_csv: FILE_SAMPLE,
     errors,
   },
+  // Arama (contract 2.10): runs and pages, statistics in every mode, the parser, the catalogue,
+  // records, references, saved searches; the exports are downloads.
+  search: {
+    search: each('SearchPage'),
+    stats: each('SearchStats'),
+    parse: each('ParseResult'),
+    fields: 'FieldCatalogue',
+    event: each('SearchEvent'),
+    refs: 'SearchRefs',
+    export: group({ csv: FILE_SAMPLE, xlsx: FILE_SAMPLE, truncated: FILE_SAMPLE }),
+    saved: group({
+      list: 'SavedSearchList',
+      auditor_list: 'SavedSearchList',
+      created: 'SavedSearch',
+      created_preset: 'SavedSearch',
+      updated: 'SavedSearch',
+      run: 'SearchPage',
+      deleted_status: null,
+      list_after_delete: 'SavedSearchList',
+    }),
+    errors,
+  },
+  // Canlı Akış (contract 2.14.4): opened streams, the hub's status and four captured streams.
+  live: {
+    open: each('LiveStreamOut'),
+    status: 'LiveStatus',
+    events: group({
+      stream: liveEvents,
+      dropped: liveEvents,
+      gap: liveEvents,
+      end: liveEvents,
+    }),
+    errors,
+  },
+  // Kaynaklar (contract 2.16) and the Panel with today's parse failures (2.17).
+  sources: {
+    overview: 'SourcesOverview',
+    // The "Kira kanıtı" card's states (contract 2.12; `overview` is `ok` without rows).
+    overview_lease_ok: 'SourcesOverview',
+    overview_lease_none: 'SourcesOverview',
+    overview_lease_refused: 'SourcesOverview',
+    detail: each('SourceDetail'),
+    tail: each('SourceTail'),
+    dashboard: 'DashboardSummary',
+    errors,
+  },
   // Every licence document is `GET /license` (also the answer of `POST /license`), every other
   // key an error answer (refusals, re-authentication, locked modules, users limit, 503).
   license: {
@@ -430,6 +717,38 @@ describe('captured API answers match the TypeScript types', () => {
     }
   });
 
+  it('describes a lookup stored before ADR-0016 (GET /lookup/{id} returns it as stored)', () => {
+    // A lookup stored before the upgrade has none of the fields ADR-0016 added (contract 2.10;
+    // only the PDF and the evidence package read the outcome through `from_dict` defaults), so
+    // the types declare them optional and the result page reads an absent one as its default.
+    const added = new Set([
+      'egress',
+      'unconverted_dhcp',
+      'untrusted_sources',
+      'mac_source',
+      'srcintf',
+      'dstintf',
+      'srcmac',
+      'source_table',
+      'lease_seconds',
+      'last_dhcp_evidence',
+    ]);
+    const removed = new Set<string>();
+    const stored = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(stored);
+      if (!isObject(value)) return value;
+      const kept = Object.entries(value).filter(([key]) => {
+        if (added.has(key)) removed.add(key);
+        return !added.has(key);
+      });
+      return Object.fromEntries(kept.map(([key, item]) => [key, stored(item)]));
+    };
+    const lookups = load('lookups');
+    for (const name of ['exact', 'internal'])
+      expect(lookupSample(stored(lookups[name]), name)).toEqual([]);
+    expect([...removed].sort()).toEqual([...added].sort()); // every field was there to remove
+  });
+
   it('notices a wrong field (the checker itself works)', () => {
     const lookups = load('lookups');
     const broken = structuredClone(lookups.exact) as Record<string, unknown>;
@@ -446,6 +765,26 @@ describe('captured API answers match the TypeScript types', () => {
     );
     expect(conforms({ score: 1.5 }, 'NatMatch', 'm')).toContain(
       'm.score: expected an integer (no floats)',
+    );
+    const live = load('live').events as Record<string, Record<string, unknown>[]>;
+    const line = structuredClone(live.stream?.find((event) => event.event === 'line'));
+    expect(line).toBeDefined();
+    const shown = line?.data as Record<string, unknown>;
+    delete shown.seq;
+    expect(
+      liveEvents(
+        [
+          { ...line, id: null },
+          { event: 'paused', id: null, data: {} },
+        ],
+        'e',
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        'e[0].id: null (only a line has an id)',
+        'e[0].data.seq: required, missing in the sample',
+        'e[1].event: "paused" is no live event',
+      ]),
     );
   });
 });

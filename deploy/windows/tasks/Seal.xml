@@ -1,10 +1,17 @@
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Author>ARCILOGGER</Author>
-    <Description>Mühürleme: kapanan günleri sıkıştırır, özetler, zincirler, Kamu SM zaman damgası alır ve doğrular. 00:10'dan itibaren 5 dakikada bir; bekleyen gün yoksa hemen biter.</Description>
+    <Description>Mühürleme: kapanan günleri sıkıştırır, özetler, zincirler, Kamu SM zaman damgası alır ve doğrular. 00:10'dan itibaren 5 dakikada bir; bekleyen gün yoksa hemen biter. Web arayüzündeki "Şimdi mühürle" de bu görevi uyandırır (olay 4110, ARCILOGGER-Admin).</Description>
     <URI>\ARCILOGGER\Seal</URI>
   </RegistrationInfo>
   <Triggers>
+    <!-- "Şimdi mühürle" (seal now): ArciAdmin writes a signed seal request and then Event 4110;
+         the event only wakes the task, the signed request is the authority (ADR-0014). A run
+         already in progress ignores the wake-up (IgnoreNew): the next 5-minute run takes it. -->
+    <EventTrigger>
+      <Enabled>true</Enabled>
+      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="Application"&gt;&lt;Select Path="Application"&gt;*[System[Provider[@Name='ARCILOGGER-Admin'] and EventID=4110]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+    </EventTrigger>
     <CalendarTrigger>
       <Repetition>
         <Interval>PT5M</Interval>

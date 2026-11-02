@@ -127,7 +127,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             />
           ))}
         </ul>
-        {canAny(UI_KIT_ITEM.permissions) ? (
+        {UI_KIT_ITEM && canAny(UI_KIT_ITEM.permissions) ? (
           <>
             <div className="my-3 h-px bg-sidebar-hover" />
             <ul>

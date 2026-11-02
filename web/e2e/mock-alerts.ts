@@ -332,6 +332,10 @@ export class AlertsMock {
       alerts: granted.has('alerts.read')
         ? { open_by_severity: this.openBySeverity(), latest: this.latest() }
         : null,
+      parse_failures:
+        granted.has('sources.read') || granted.has('dashboard.view')
+          ? (sample.parse_failures ?? null)
+          : null,
     };
     return [200, summary];
   }

@@ -9,9 +9,11 @@ blocks anyway, and an unauthenticated ``/api/openapi.json`` would describe every
 anyone on the LAN. The schema is still built in process — ``create_app().openapi()`` — for the
 web app's contract export (``web/scripts/export_api_contract.py``) and the tests.
 
-``create_app(config, engine)``: production passes the configuration (``arcilogger-api serve``);
-tests also inject an engine on a throwaway database. Without arguments the configuration is
-loaded on first use (development: ``uv run poe api-dev``).
+``create_app(config, engine, config_path=…)``: production passes the configuration and the file
+it came from (``arcilogger-api serve``), which the API then reloads without a restart and next to
+which it finds the browser administration's folder (:mod:`arcilogger_api.deps`); tests also
+inject an engine on a throwaway database. Without arguments the configuration is loaded on first
+use (development: ``uv run poe api-dev``).
 
 With a configuration, the lifespan runs the audit spool flush at start-up and every minute
 (``arcilogger_api.audit.run_periodic_flush``), so a committed audit entry reaches the day's spool
@@ -24,6 +26,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Final, Literal
 
 from fastapi import APIRouter, FastAPI
@@ -114,10 +117,12 @@ def create_app(
     config: Config | None = None,
     engine: Engine | None = None,
     *,
+    config_path: Path | None = None,
     audit_flush_seconds: float | None = FLUSH_INTERVAL_SECONDS,
 ) -> FastAPI:
-    """Build the ASGI application (``audit_flush_seconds=None``: no background flush)."""
-    state = AppState(config=config, engine=engine)
+    """Build the ASGI application (``audit_flush_seconds=None``: no background flush;
+    ``config_path``: the file ``config`` was loaded from)."""
+    state = AppState(config=config, engine=engine, config_path=config_path)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

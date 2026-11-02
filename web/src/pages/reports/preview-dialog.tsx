@@ -1,5 +1,5 @@
 import { Code2, ExternalLink } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import type { RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -50,7 +50,11 @@ export function PreviewDialog({
   const [failure, setFailure] = useState<ReportProblem | null>(null);
   const open = schedule !== null;
 
-  useEffect(() => {
+  // The form begins anew while rendering when the dialog opens, so its first frame never shows the
+  // previous period or preview: an effect would run only after that frame.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setCustom(false);
       setPeriod(EMPTY_PERIOD);
@@ -58,7 +62,7 @@ export function PreviewDialog({
       setHtml(null);
       setFailure(null);
     }
-  }, [open]);
+  }
 
   /** The query of the preview, `null` (with the errors shown) when the custom period is wrong. */
   function params(format: 'pdf' | 'html'): Record<string, QueryValue> | null {

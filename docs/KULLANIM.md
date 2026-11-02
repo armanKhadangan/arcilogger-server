@@ -42,11 +42,15 @@ desteklemek için tasarlanmıştır; kişisel veri işleme kuralları için huku
 
 ### 2.1 Kim? (konu)
 
-Trafik, **o anda** cihazın atandığı kişiye aittir (atama geçmişi, [adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md));
-cihaz kimseye atanmamışsa cihaza (DHCP/ARP kira kaydındaki MAC), kira kaydı yoksa yalnızca IP
-adresine. Kural 5651 sorgusunun kuralıyla **aynı koddur**: IP + an → kira → cihaz → o anki kişi.
-Öğlen başka bir kişiye atanan cihazın öğleden önceki trafiği eski, sonraki trafiği yeni kişinindir
-(dakika dilimi, ilk anına göre).
+Trafik, **o anda** cihazın atandığı kişiye aittir (atama geçmişi,
+[adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md)); cihaz kimseye
+atanmamışsa cihaza (DHCP/ARP kira kaydındaki MAC), kira kaydı yoksa yalnızca IP adresine. Kural 5651
+sorgusunun kuralıyla **aynı koddur**: IP + an → kira → cihaz → o anki kişi. Kiralar DHCP sunucusunun
+(MikroTik ya da FortiGate) kira kayıtlarından ve `ARP-LOG` kayıtlarından gelir. 5651 sorgusundan bir
+farkı: FortiGate oturum kaydının srcmac alanı (aygıt tanıma) kullanım analizinde kullanılmaz; kira
+kaydı olmayan trafik, arayüzü srcmac için listelenmiş olsa da, IP adresine göre sayılır. Öğlen başka
+bir kişiye atanan cihazın öğleden önceki trafiği eski, sonraki trafiği yeni kişinindir (dakika
+dilimi, ilk anına göre).
 
 **Departman:** kişinin (bugünkü) departmanı; kişinin departmanı yoksa ya da konu bir cihaz/IP ise
 en çok çevrimiçi dakikanın geçtiği VLAN'ın departmanı (VLAN'a bağlı departman, yoksa VLAN'ın adı;
@@ -250,10 +254,19 @@ gününden (hiç log yoksa bugünden) önce başlayan bir aralığı reddeder (4
   (yalnızca yönetici ekleyebilir) girdileri gerçek hedefleri ve özetleriyle içerir; ayar açıkken
   Kullanım sayfalarında takma ad gören bir okuyucunun listesinde görünmez, ayrıntısı ve indirmesi
   404 yanıtı verir.
-- **Kişiyi kişi düzeyindeki raporların dışında bırakmak:** `persons.usage_excluded` (Cihazlar ve
-  Kişiler'deki kişi kaydı). Bu kişi kişi listelerinde, ayrıntılarda, site/kategori kullanıcı
-  listelerinde ve raporların kişi tablolarında görünmez; trafiği şirket ve departman toplamlarında
-  sayılmaya devam eder.
+- **Kişiyi kişi düzeyindeki raporların dışında bırakmak:** Cihazlar ve Kişiler → Kişiler → kişinin
+  İşlemler menüsü → **Düzenle** → **Kullanım raporlarından hariç tut** (yeni kişide "Kişi ekle"
+  formunda da var; `persons.usage_excluded`). Bu kişi kişi listelerinde, ayrıntılarda, site/kategori
+  kullanıcı listelerinde ve raporların kişi tablolarında görünmez; trafiği şirket ve departman
+  toplamlarında sayılmaya devam eder. Ayar okunduğu anda geçerlidir (geçmiş günler de; yeniden
+  hesaplama gerekmez; önceden oluşturulmuş ve gönderilmiş rapor dosyaları değişmez) ve geri
+  alınabilir. Kişi listesinde adın yanında **Kullanım: hariç** işareti görünür. Değişiklik eski ve
+  yeni değeriyle denetim kaydına yazılır (`person.update`); toplu değişiklik için kişi CSV'sinin
+  isteğe bağlı `usage_excluded` sütunu (evet/hayır) kullanılır. CSV ile yapılan değişiklik kişi
+  başına değil, `import.persons` olarak (dosyanın SHA-256 değeri, boyutu ve sayılarla) kaydedilir.
+  Yalnızca `devices.manage` yetkisi olan kullanıcı (varsayılan rollerde Yönetici) değiştirebilir.
+  5651 sorguları, resmi raporları ve kanıt paketleri bu ayardan etkilenmez: kişi orada her zaman
+  görünür.
 - Dışa aktarılan dosyalar (CSV, Excel) kişisel veri içerir: yalnızca gerektiği kadar saklayın.
 
 ## 7. Web arayüzü ve API
@@ -271,6 +284,12 @@ kategorinin çevrimiçi dakikalarını, site başına engellenen denemeleri ve i
 tutmadığından bu sütunlar yoktur. Ayrıntı ekranı en çok süresi olan 200 kullanıcıyı, kategoride
 100 siteyi ve sitede 50 ana bilgisayar adını gösterir; kısaltılmış bir kullanıcı ya da site
 listesi toplam sayıyı söyler. Dışa aktarılan dosyada hepsi vardır.
+
+**Tek tek kayıtlar: Arama.** Kullanım sayfaları özet ve tahmindir; bireysel kayıtlar (bir IP'nin,
+MAC adresinin ya da alan adının satırları, her biri ham satırıyla) **Arama** sayfasındadır
+([ARAMA.md](ARAMA.md)). Departman iki sayfada farklı yerden gelir: Kullanım'da kişinin atamasından
+(kişinin departmanı yoksa VLAN'dan, bölüm 2.1), Arama'da ise istemci adresinin VLAN'ına tanımlı
+varsayılan departmandır ("Departman (VLAN'a göre)"; kişi ataması değildir).
 
 ## 8. Performans
 

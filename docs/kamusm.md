@@ -75,6 +75,17 @@ java -jar tss-client-console-3.1.33.jar -k  <sunucu> <port> <müşteri no> <paro
 
 ## 4. Bağlantı testi (kurulumda)
 
+Web arayüzünde **Ayarlar → Kamu SM** sihirbazı 2–7. adımları aynı sırayla yapar: Java seçimi,
+Zamane istemcisinin yüklenmesi (bilinen bir sürüm değilse SHA-256 karşılaştırması ve konsolda
+`approve-jar`), kök sertifikalar ve yasal parmak izleri, müşteri bilgileri (kaydederken kontör
+sorgusuyla denenir), test sunucusunda damga testi, üretime geçiş ([AYARLAR.md](AYARLAR.md)
+bölüm 4). Bu sürüm hiçbir Zamane sürümünü tanımaz: tarayıcıdan yüklenen istemci her zaman
+konsolda `approve-jar` bekler, en erken `jar_hold_hours` (varsayılan 24) sonra. Bu arada öteki
+adımlar (kökler, müşteri bilgileri, eşik) kaydedilebilir; müşteri bilgileri istemci
+etkinleşmeden kontör sorgusuyla denenemez ("Kontör sorgusu yapılmadı" uyarısı), bunu istemci
+onaylanınca "Kontör sorgula" ile yapın. Beklememek için istemciyi kurulumda `-ZamaneJar` ile
+kurun ([KURULUM.md](KURULUM.md) bölüm 7). Aşağıdaki adımlar konsoldaki yoldur.
+
 1. Test kullanıcısı isteyin (aşağıdaki e-posta). Kullanıcı gelene kadar ne olacağına ilk başarılı
    mühürden **önce** karar verin ([ILK-ADIMLAR.md](ILK-ADIMLAR.md) bölüm 3): zinciri canlıya geçiş
    gününde başlatmak (`[seal] first_day`) ya da test süresinde de mühürlemek; seçim sahibindir.
@@ -105,6 +116,10 @@ java -jar tss-client-console-3.1.33.jar -k  <sunucu> <port> <müşteri no> <paro
    oluşturur): `secret set kamusm.customer`, `secret set kamusm.password`. Komutlar yönetici
    PowerShell'inde tam yoluyla çalışır:
    `& "C:\Program Files\ARCILOGGER\venv\Scripts\arcilogger-core.exe" secret set kamusm.customer`.
+   Sonra `& "C:\Program Files\ARCILOGGER\scripts\Set-ArciVaultAcl.ps1"`: konsoldan her
+   `secret set` `secrets.json` dosyasını yeniler ve yönetim hizmetinin (ArciAdmin) yazma hakkını
+   düşürür ([AYARLAR.md](AYARLAR.md) bölüm 7). Web arayüzündeki Kamu SM sihirbazıyla kaydedilen
+   değerlerde bu gerekmez.
 5. `arcilogger-core.exe credit` → kontör okunuyor mu? (K4)
 6. `arcilogger-core.exe tsa-test` → 1 KB rastgele dosya damgalanır ve doğrulanır; çıktı genTime,
    seri no, TSA adı ve sertifika geçerliliğini gösterir. Oluşan `.zd` dosyası K1/K5/K6
@@ -114,8 +129,8 @@ java -jar tss-client-console-3.1.33.jar -k  <sunucu> <port> <müşteri no> <paro
    bilgilerinin üretimde geçerli olup olmadığı doğrulanmadı), `[tsa]` içinde
    `url = "http://zd.kamusm.gov.tr"` ve Kamu SM kökünün SHA-256 parmak izini
    `legal_root_fingerprints` listesine yazma (liste boşsa hiçbir damga yasal nitelikli
-   gösterilmez), ardından `Restart-Service ArciApi` — API yapılandırmayı yalnızca başlarken
-   okur. Kırmızı "test damgası" uyarısı ancak yeniden başlatmadan sonra kaybolur.
+   gösterilmez). API değişen yapılandırmayı birkaç saniye içinde kendisi yükler; kırmızı "test
+   damgası" uyarısı yeniden başlatma olmadan kalkar.
 
 ### Test kullanıcısı talep e-postası (taslak)
 

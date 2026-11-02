@@ -29,6 +29,8 @@ export interface PersonFormValues {
   employeeNo: string;
   notes: string;
   active: boolean;
+  /** "Kullanım raporlarından hariç tut" (`usage_excluded`). */
+  usageExcluded: boolean;
 }
 
 export function personFormValues(person: PersonOut | null): PersonFormValues {
@@ -40,6 +42,7 @@ export function personFormValues(person: PersonOut | null): PersonFormValues {
     employeeNo: person?.employee_no ?? '',
     notes: person?.notes ?? '',
     active: person?.active ?? true,
+    usageExcluded: person?.usage_excluded ?? false,
   };
 }
 
@@ -76,7 +79,10 @@ function departmentId(value: string): number | null {
 
 const orNull = (value: string): string | null => value.trim() || null;
 
-/** `POST /persons`: empty optional fields are left out (the person starts active). */
+/**
+ * `POST /persons`: empty optional fields are left out (the person starts active and in the
+ * usage reports).
+ */
 export function personCreateBody(values: PersonFormValues): PersonCreate {
   const body: PersonCreate = { name: values.name.trim() };
   const department = departmentId(values.department);
@@ -90,6 +96,7 @@ export function personCreateBody(values: PersonFormValues): PersonCreate {
     const text = orNull(value);
     if (text !== null) body[key] = text;
   }
+  if (values.usageExcluded) body.usage_excluded = true;
   return body;
 }
 
@@ -106,5 +113,6 @@ export function personChanges(person: PersonOut, values: PersonFormValues): Pers
     changes.employee_no = orNull(values.employeeNo);
   if (orNull(values.notes) !== person.notes) changes.notes = orNull(values.notes);
   if (values.active !== person.active) changes.active = values.active;
+  if (values.usageExcluded !== person.usage_excluded) changes.usage_excluded = values.usageExcluded;
   return changes;
 }

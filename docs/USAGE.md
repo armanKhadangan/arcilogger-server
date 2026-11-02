@@ -43,11 +43,14 @@ counsel about the rules for processing personal data
 ### 2.1 Who? (the subject)
 
 Traffic belongs to the person the device was assigned to **at that moment** (assignment history,
-[adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md)); to the device
-(the MAC of the DHCP/ARP lease) when it was assigned to nobody; to the bare IP address without a
-lease. It is **the same code** as the 5651 lookup: IP + moment → lease → device → person then. A
-device reassigned at noon gives the morning to the old and the afternoon to the new person (per
-minute, by its first instant).
+[adr/0008-device-assignment-history.md](adr/0008-device-assignment-history.md)); to the device (the
+MAC of the DHCP/ARP lease) when it was assigned to nobody; to the bare IP address without a lease.
+It is **the same code** as the 5651 lookup: IP + moment → lease → device → person then. Leases come
+from the lease records of the DHCP server (MikroTik or FortiGate) and from `ARP-LOG` records. One
+difference from the 5651 lookup: the srcmac field of the FortiGate session record (device
+identification) is not used for usage; traffic without a lease is counted per IP address even when
+its interface is listed for srcmac. A device reassigned at noon gives the morning to the old and the
+afternoon to the new person (per minute, by its first instant).
 
 **Department:** the person's (current) department; for a person without one, or a device / IP
 subject, the department of the VLAN with the most online minutes (the department linked to the
@@ -251,9 +254,18 @@ command `usage rebuild` does not check this). The database's log retention is th
   administrator can add it) hold the entries with their real targets and hashes; while the setting
   is on they are left out of the list of a reader who sees pseudonyms on the Kullanım pages, and
   their detail and download answer 404.
-- **Leaving a person out of person-level reports:** `persons.usage_excluded`. The person does not
-  appear in subject lists, details, site/category user lists or the person tables of the reports;
-  the traffic still counts in the company and department totals.
+- **Leaving a person out of person-level reports:** Cihazlar ve Kişiler → Kişiler → the person's
+  actions menu → **Düzenle** → **Kullanım raporlarından hariç tut** ("Exclude from usage reports";
+  also on the "Kişi ekle" form; `persons.usage_excluded`). The person does not appear in subject
+  lists, details, site/category user lists or the person tables of the reports; the traffic still
+  counts in the company and department totals. The setting applies as soon as it is read (past days
+  too; no rebuild; report files made and sent before stay as they are) and can be undone. The
+  persons list shows **Kullanım: hariç** ("Usage: excluded") next to the name. The change is written
+  to the audit log with its old and new value (`person.update`); for many persons use the optional
+  `usage_excluded` column (evet/hayır) of the persons CSV. A CSV import is recorded as
+  `import.persons` with the file's SHA-256, its size and the counts, not per person. Only
+  `devices.manage` (the administrator in the default roles) can change it. 5651 lookups, their
+  official reports and evidence packages are not affected: the person always appears there.
 - Exported files (CSV, Excel) contain personal data: keep them only as long as needed.
 
 ## 7. Web interface and API
@@ -272,6 +284,13 @@ minutes per category and no blocked attempts or first/last activity per site, so
 are left out. The detail view shows the 200 users with the most time, a category's 100 sites and
 a site's 50 host names; a shortened user or site list says how many there are. The exported file
 holds every one.
+
+**Individual records: Arama (Search).** The usage pages are summaries and estimates; the
+individual records (the lines of an IP, a MAC address or a domain, each with its raw line) are on
+the **Arama** page ([SEARCH.md](SEARCH.md)). The department comes from a different place on the
+two pages: in Kullanım from the person's assignment (the VLAN when the person has no department,
+section 2.1), in Arama it is the default department of the client address's VLAN ("Department
+(by VLAN)"; not the person's assignment).
 
 ## 8. Performance
 

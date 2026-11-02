@@ -126,6 +126,7 @@ def cited_evidence(outcome: LookupOutcome) -> list[EvidenceRef]:
             refs += _chain_refs(match.chain)
     if outcome.attribution is not None:
         refs += _chain_refs(outcome.attribution)
+    refs += outcome.unconverted_dhcp  # shown in section 6, marked as no attribution (D8)
     seen: set[str] = set()
     unique = []
     for ref in refs:

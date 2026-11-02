@@ -17,6 +17,16 @@
   edilmez**: alım zamanı kullanılır, metin `extra.device_time` içinde kalır. Alım zamanından
   **1 günden fazla** sapan (ayarlanabilir) ya da UTC'ye çevrilemeyen bir cihaz zamanı da
   kullanılmaz (bozuk saat); satır `<parser>.time` olarak sayılır.
+- **FortiGate DHCP sunucusu kayıtları** (ADR-0016): `ip`, `mac` ve `dhcp_msg` alanlarını
+  birlikte taşıyan bir `event` satırı, `ip` bir adrese ve `mac` bir MAC adresine
+  çevrilebiliyorsa `fg_dhcp` satırıdır; çevrilemiyorsa `fg_event` kalır ve `fortigate.dhcp`
+  olarak sayılır, hiçbir zaman sessizce sıradan bir olay olmaz. Yönlendirme yalnızca satırın
+  biçimine bakar, hiçbir ayara bakmaz: bir satırın ne anlama geldiğine (adres verildi ya da
+  bırakıldı) worker `dhcp.fortigate_logids` ayarıyla karar verir. `fg_dhcp.device_time`,
+  zamanın FortiGate'in olay zamanı mı yoksa alım zamanı mı olduğunu söyler. Oturum
+  kayıtlarındaki `srcmac` `fg_traffic.srcmac` sütunudur ve hiçbir zaman kira kanıtı değildir.
+  Biçim yalnızca FortiOS 7.6 alan listesinden ve bir topluluk örneğinden kuruldu: sahada
+  doğrulayın (§7).
 - MikroTik kablo biçimi (wire format) **henüz sahada yakalanmadı**; ayrıştırıcı toleranslıdır
   (zaman damgası, ana bilgisayar adı ve konu dizisi isteğe bağlı). İlk gerçek kayıt geldiğinde
   aşağıdaki "Sahada doğrulanacaklar" listesi gözden geçirilmelidir.
@@ -42,7 +52,7 @@ A pattern is set when a line was not (fully) understood. Rows that could be buil
 returned, so B2 loads them **and** counts the failure.
 
 One pattern per line, the most severe first (FortiGate: glued, unterminated, unparsed, type,
-value, time; MikroTik: glued, the family's own failure, time).
+dhcp, value, time; MikroTik: glued, the family's own failure, time).
 
 | Pattern | Meaning | Typed row? |
 |---|---|---|
@@ -51,6 +61,7 @@ value, time; MikroTik: glued, the family's own failure, time).
 | `fortigate.unterminated` | A quoted value has no closing quote (datagram cut short?) | yes |
 | `fortigate.unparsed` | Tokens that are not `key=value` (kept in `messages.extra.unparsed`) | yes |
 | `fortigate.type` | No `type=` field (all fields in `messages.extra.fields`) | no |
+| `fortigate.dhcp` | An `event` line with `ip`, `mac` and `dhcp_msg` (the shape of a FortiGate DHCP server record, ADR-0016) whose `ip` is no address or whose `mac` is no MAC: the row stays `fg_event`, never silently an ordinary event; the detail gives only the validity, never the value (`DHCP event without a usable ip/mac: ip=valid, mac=invalid`) | yes (`fg_event`) |
 | `fortigate.value` | A mapped value does not fit its column (kept in `extra`); also an `eventtime` that is not a timestamp, and `date`/`time` that are not a date and time although `tz` is valid (`invalid value: eventtime`, `invalid value: date/time`) | yes |
 | `fortigate.time` | Implausible device time (see "Device time"); detail `implausible device time: …` | yes |
 | `mikrotik.glued` | A second syslog header (`<PRI>` + ISO, BSD or RFC 5424 timestamp) inside the message: cut there, the rest is in `messages.extra.glued` | first message's |
@@ -119,7 +130,34 @@ and `date`/`time`/`tz` agree to within one second — they fail loudly if a samp
 | `utm` / `ips` | `fg_ips` | `utm` / `ips` |
 | `utm` / `virus` | `fg_virus` | `utm` / `virus` |
 | `event` / any (`system`, `user`, `vpn`, …) | `fg_event` | `event` / subtype |
+| `event` / any, with `ip`, `mac` and `dhcp_msg` that convert (FortiGate DHCP server, ADR-0016) | `fg_dhcp` (else `fg_event` and `fortigate.dhcp`) | `event` / subtype |
 | anything else (e.g. `utm`/`dlp`) | — (`messages.extra.fields` holds all fields) | type / subtype |
+
+**FortiGate DHCP server lines** (ADR-0016, decision D3). An `event` line becomes an `fg_dhcp`
+row instead of an `fg_event` row when it carries all three keys `ip`, `mac` and `dhcp_msg` and
+`ip` converts to an address (IPv4 or IPv6) and `mac` to a MAC (`values.to_mac`: `:` or `-`, either
+case). Of the documented FortiOS 26xxx messages only 26001 (DHCP ACK) and 26002 (DHCP RELEASE)
+carry the three together: 26003 statistics, 26007 blocked MAC (a `mac`, no `ip`), 26008–26010
+DDNS (an `ip`, no `mac`) and 26011/26012 DHCPv6 (no `mac`) stay ordinary `fg_event` rows without
+a failure. When the three keys are there but a value does not convert (`ip="n/a"`, `mac=""`), the
+row stays `fg_event` (its `logid`, `level`, `logdesc` and `msg` columns filled as for any event;
+`ip`, `mac`, `dhcp_msg` and the other DHCP keys kept in `extra` as sent) and the line is the
+failure `fortigate.dhcp`, whose detail gives only the validity of each value (a valid `ip` with
+`mac=""` gives `ip=valid, mac=empty`; `ip="n/a"` gives `ip=invalid`), never the value. An
+IPv6 `ip` with a MAC is an `fg_dhcp` row too (`INET` takes it; the lease timeline ignores it).
+
+The rule uses the shape of the line and constants only, never a setting: ingest runs the shipped
+parsers (§8), and the report cross-check re-parses each cited raw line with them, so a row always
+agrees with its raw line. **What a row means** — an address given (`assigned`) or given back
+(`deassigned`) — is decided by the worker on every lease run from `dhcp.fortigate_logids`
+(default `0100026001` ACK → `assigned`, `0100026002` RELEASE → `deassigned`); a changed map
+applies to past days when the leases are rebuilt, without re-ingesting anything. The worker also
+refuses rows the parser keeps (a `dhcp_msg` not allowed by `dhcp.fortigate_dhcp_msgs`, a zero,
+broadcast or multicast MAC, `device_time = false`, an unconfigured sender) and counts them;
+docs/CORRELATION.md describes the lease rules. FortiGate DHCP lines loaded before revision
+`0017_fortigate_dhcp` (or by an earlier version after a rollback) stay `fg_event` rows; they are
+not converted. The check costs one dictionary test per event line (`dhcp_msg` is looked up
+first), about 1 % of the volume.
 
 **SSL logs go to `fg_app`** (not `fg_web`): spec 10.2 ranks `fg_web.hostname` first (the web
 filter's verdict with category and the "blocked attempts" count) and puts the SSL
@@ -146,13 +184,17 @@ Keys not listed go to the row's `extra` under their own name. In every typed tab
 implied by the table and `devname` is `messages.host`.
 
 **`fg_traffic`** — `logid`, `subtype`, `action`, `policyid`*, `policyname`, `sessionid`*,
-`proto`*, `srcip`†, `srcport`*, `srcintf`, `dstip`†, `dstport`*, `dstintf`, `transip`†,
+`proto`*, `srcip`†, `srcport`*, `srcintf`, `srcmac`‡, `dstip`†, `dstport`*, `dstintf`, `transip`†,
 `transport`*, `trandisp`, `service`, `dstinetsvc`, `app`, `appid`*, `appcat`, `apprisk`,
 `dstcountry`, `duration`*, `sentbyte`*, `rcvdbyte`*, `sentpkt`*, `rcvdpkt`*, `sentdelta`*,
 `rcvddelta`*, `durationdelta`*, `utmaction`, `crscore`*; derived: `is_interim`. (Spec 7.3 list,
-complete.) Typical `extra`: `devid`, `vd`, `level`, `srcintfrole`, `dstintfrole`, `srccountry`,
-`dstregion`, `dstcity`, `dstreputation`, `policytype`, `poluuid`, `applist`, `appact`,
-`countapp`, `craction`, `crlevel`, `msg`, `sentpktdelta`, `rcvdpktdelta`.
+complete; `srcmac` since revision `0017_fortigate_dhcp`, never lease evidence, with
+`mastersrcmac` and `srcmacvendor` in `extra`.) Typical `extra`: `devid`, `vd`, `level`,
+`srcintfrole`, `dstintfrole`, `srccountry`, `dstregion`, `dstcity`, `dstreputation`,
+`policytype`, `poluuid`, `applist`, `appact`, `countapp`, `craction`, `crlevel`, `msg`,
+`sentpktdelta`, `rcvdpktdelta`; on an interface with device identification also `srcname`,
+`osname`, `devtype`, `srcfamily`, `srchwvendor`, `srchwversion`, `srcswversion`, `unauthuser`,
+`unauthusersource` (personal data, kept unchanged like every field).
 
 **`fg_web`** — `logid`, `sessionid`*, `srcip`†, `srcport`*, `dstip`†, `dstport`*, `hostname`,
 `url` (≤ 2,000), `cat`*, `catdesc`, `action`, `eventtype`, `profile`. (`subtype` implied.)
@@ -179,8 +221,24 @@ complete.) Typical `extra`: `devid`, `vd`, `level`, `srcintfrole`, `dstintfrole`
 `extra`. Detections (spec 11): R03/R04 use `logdesc`, `status`, `user_name`, `srcip`, `ui`;
 R16 `cfgpath`/`cfgobj`/`cfgattr`; R17 `extra.cpu`/`extra.mem` of `action="perf-stats"`.
 
+**`fg_dhcp`** (ADR-0016; synthetic, verify on site) — `logid`, `subtype`, `level`, `logdesc`,
+`dhcp_msg`, `interface`, `ip`† (NOT NULL), `mac`‡ (NOT NULL), `hostname`, `lease`* (as logged),
+`msg`; derived: `device_time` (`true` when `time` is the FortiGate's event time, `false` when the
+receive time was used). `devid`, `vd`, 8.0's `vendor` … in `extra`. The parser routes by the
+shape of the line only; what a row means is the worker's (`dhcp.fortigate_logids`).
+`lease` is the logged value unchanged (seconds; `0`, FortiOS's "unlimited", is kept as `0`; the
+lease timeline decides what it means), `NULL` when absent (RELEASE has no `lease`) and `NULL` with
+`fortigate.value` when it is no integer. An empty `hostname` (`hostname=""`) is `NULL` and stays
+in `extra` as `""`. `device_time` is `false` for a line without a usable device time: no time
+field, a `date`/`time` without `tz`, or a time beyond `max_clock_skew` (`fortigate.time`, §2.2);
+the parser is deterministic, so the cross-check's re-parse gives the same value, and the worker
+never uses such a row as lease evidence (a replayed or forwarded ACK would otherwise supersede the
+current holder at the wrong moment). Lines of an unknown sender (`unknown-<ip>`) are parsed by
+content in the same way; refusing their rows as lease evidence is the worker's job.
+
 \* integer column (range-checked: `proto` SMALLINT; ports, `cat`, `crscore` INTEGER; the rest
-BIGINT) · † `INET`.
+BIGINT) · † `INET` · ‡ `MACADDR`, normalised to lower case with colons (an empty value is
+`NULL`, a value that is no MAC stays in `extra` with `fortigate.value`).
 
 **`messages`** — `type`, `subtype` (FortiGate's), `severity`/`facility` (PRI; severity from
 `level` without PRI), `host` = `devname`, `program` = `NULL`, `text` = the line after the PRI.
@@ -318,6 +376,8 @@ below 3,000 lines/s, to catch a pathological regression without being flaky on C
 |---|---|
 | `tests/fixtures/format/` | **Synthetic format samples, modelled on FortiOS 7.6 / RouterOS 7 output; all values fictional**: 7 FortiGate lines (`fortigate-sample.log`), 11 MikroTik `/log print` lines (`mikrotik-log-print-sample.txt`); bytes pinned by `SHA256SUMS` |
 | `tests/fixtures/synthetic/fortigate-synthetic.log` | **synthetic, verify on site**: webfilter blocked/passthrough, DNS query/response/blocked, IPS, virus, admin login ok/failed, configuration change, VPN, user, `eventtime` in µs and s, no `eventtime`, no `tz`, relay prefix, an unmapped subtype |
+| `tests/fixtures/synthetic/fortigate-synthetic.log`, the 13 lines after the ADR-0016 comment | **synthetic, verify on site**, built from the FortiOS 7.6 field list and one community sample: DHCP ACK (upper- and lower-case MAC, a renewal 12 h later, no or an empty `hostname`, 8.0's `vendor`, `dhcp_msg="Nak"`, a zero MAC, a device time two days off), RELEASE (logid derived, `dhcp_msg`/`msg` placeholders), 26003 statistics and 26011 DHCPv6 (stay `fg_event`), forward traffic with and without `srcmac`. Appended, never inserted: tests index the file by position |
+| `tests/fixtures/format/fortigate-dhcp-sample.log` | **awaited**: the masked shape of the first device capture of FortiGate DHCP lines (format README); until it exists `test_real_fortigate_dhcp_sample` is skipped with "sahada doğrula: gerçek FortiGate DHCP satırı henüz yok" |
 | `tests/fixtures/synthetic/mikrotik-wire-synthetic.log` | **synthetic, verify on site**: the 11 sample messages in the approximate wire format, header variants (also topics with `:`, a tag or a single topic word before the message), and every message family |
 
 Tests: `ingest/tests/test_fortigate*.py`, `test_mikrotik*.py`, `test_parser_contract.py`
@@ -325,7 +385,16 @@ Tests: `ingest/tests/test_fortigate*.py`, `test_mikrotik*.py`, `test_parser_cont
 raises, one complete `messages` row, unknown keys preserved, tokenizer round trip and fast path =
 reference, every row loadable, uniform columns per table, any device time from year 1 to 9999
 with any offset in every parser, DHCP/ARP/firewall/configuration lines in every header layout
-with and without `host_names`).
+with and without `host_names`). `test_fortigate_dhcp.py` (ADR-0016): a golden row for every
+synthetic DHCP line, the `fortigate.dhcp` cases, the shapes that stay `fg_event`, `device_time`,
+`srcmac` in every MAC form, and the real-sample guard; property tests check that any order and
+quoting of a DHCP line's keys give the same row and that the bounded MAC cache never changes a
+result. Two of its tests are **pin tests** only
+(`test_fortigate_dhcp_logid_defaults_match_the_fixtures`,
+`test_routing_shape_is_the_documented_field_list`): they keep the default settings, the synthetic
+lines and the documented field list together and cannot detect a wrong assumption about a real
+FortiGate; at run time the `R20-lease` alerts and the "not verified on site" state of
+`dhcp.fortigate_format_verified` carry that.
 
 ## 7. Sahada doğrulanacaklar / Verify on site
 
@@ -372,16 +441,41 @@ with and without `host_names`).
     configuration target can be ambiguous (§3.1).
 15. **MikroTik topics token** variants: `dhcp,info:` (trailing colon) is accepted; a single
     word (`dhcp`, `script:`) is not taken as topics (evidence is still found, `extra.prefix`).
+16. **FortiGate DHCP ACK on the wire** (ADR-0016): the logid `0100026001`, the field names `ip`,
+    `mac`, `dhcp_msg`, `lease`, `interface`, `hostname`, their quoting (`ip` and `lease`
+    unquoted in the community sample), the MAC's case and separator, and whether `hostname` is
+    missing or `""` when a client sends none. Add the masked shape as
+    `tests/fixtures/format/fortigate-dhcp-sample.log` (format README) so the skipped real-sample
+    test runs; until then `R20-lease:fortigate-unconverted` and `fortigate.dhcp` failures show a
+    shape the rule does not match, and the setting `dhcp.fortigate_format_verified` stays off
+    until the check of docs/DEVICE-SETUP.md section 2.4 is done (repeat it after every FortiOS
+    upgrade: the field list changed between releases).
+17. **FortiGate DHCP RELEASE**: the logid `0100026002` is only derived from the documented
+    numbering; its `dhcp_msg` and `msg` are unknown, and whether clients' releases are logged at
+    all (`R20-lease:fortigate-refused` names other logids with the DHCP shape).
+18. **`lease`** is seconds and how "unlimited" is written (`0` expected); **`dhcp_msg`** values
+    per logid (`Ack` seen once; `dhcp.fortigate_dhcp_msgs`).
+19. **Device time of DHCP lines**: a usable `eventtime` or `date`/`time`/`tz` (`device_time`);
+    buffered or forwarded logs and a FortiGate clock that is minutes off (NTP,
+    `R20-lease:source-clock`).
+20. **`srcmac`**: filled only on interfaces with device identification; behind a layer-2 switch it
+    may be the switch's MAC, behind a router it is the router's (docs/DEVICE-SETUP.md section
+    2.5); `mastersrcmac`, `srcmacvendor` and the other device-identification fields stay in
+    `extra` unchanged.
 
 ## 8. Notes for the ingest service (B2) and later packages
 
-- Build the parsers from settings when the service starts and pass them to `parse_line`:
-  `parsers = build_parsers(interim_logids=…, config_patterns=…, server_vlan_regex=get_setting(
-  session, "dhcp.server_vlan_regex"), host_names=…, max_clock_skew=…)`, then
-  `parse_line(record, position, parsers)` (default: `PARSERS`, the shipped defaults). Settings
-  for all but the VLAN rule do not exist yet (proposed keys `fortigate.interim_logids`,
-  `mikrotik.config_patterns`, `mikrotik.host_names`, `ingest.max_clock_skew_seconds`; see the
-  B1 report).
+- **Ingest uses the shipped parser defaults; settings never change a parsed row.** The service
+  calls `parse_line(record, position)` without parsers (`prepare.py`), i.e. `PARSERS`, built by
+  `build_parsers()` with its defaults; `build_parsers(...)` takes other values (interim logids,
+  configuration patterns, the MikroTik server-name rule, host names, clock skew) for tests and has
+  only a contract test. The report cross-check re-parses every cited raw line with the same
+  shipped parsers, so a stored row always agrees with its raw line, also after a settings change.
+  What a setting decides is applied in the worker, on every run: the VLAN of a MikroTik lease
+  whose row has none (`dhcp.server_vlan_regex`; `mt_dhcp.vlan` is filled by the shipped rule),
+  the meaning of a FortiGate DHCP logid (`dhcp.fortigate_logids`) and the other
+  `dhcp.fortigate_*` rules. A future setting that should change parsing itself needs a re-parse
+  of the stored days (roadmap 2.2: re-load and re-parse from the archive), not a changed parser.
 - `fg_app` holds app-control **and** SSL rows: filter on `extra->>'subtype'` (§2.3).
 - Count every `outcome.error` in `parse_failures`, including the new patterns `*.time`,
   `*.glued` (§1); rows returned with an error are still loaded.

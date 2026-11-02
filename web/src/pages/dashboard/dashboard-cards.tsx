@@ -2,26 +2,35 @@ import {
   CircleCheck,
   CircleHelp,
   Coins,
+  FileText,
+  FileWarning,
   RadioTower,
+  Search,
   Stamp,
   Timer,
   TriangleAlert,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 
 import { Sparkline } from '@/components/charts/sparkline';
+import type { RawLineTarget } from '@/components/evidence/raw-line-sheet';
 import { Badge, StatusBadge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import type {
   DashboardClock,
   DashboardCredit,
   DashboardIngest,
+  DashboardParseFailures,
   SealYesterday,
 } from '@/lib/api-types';
 import { formatDay, visibleText } from '@/lib/display';
 import { formatDateTime, formatNumber, formatTime } from '@/lib/format';
+import { handoff } from '@/lib/handoff';
 import { currentLang } from '@/lib/i18n';
+import { failureSearch } from '@/pages/sources/sources-model';
 
-import { clockVerdict, creditDuration, sealStatus } from './dashboard-model';
+import { clockVerdict, creditDuration, failureLevel, sealStatus } from './dashboard-model';
 import { BigValue, DashCard } from './dashboard-parts';
 
 interface LinkProps {
@@ -232,6 +241,143 @@ export function ClockCard({ clock, to }: { clock: DashboardClock } & LinkProps) 
         <p className="text-xs text-muted">
           {t('dashboard.clock.checked', { time: formatDateTime(clock.checked_at) })}
         </p>
+      ) : null}
+    </DashCard>
+  );
+}
+
+/**
+ * "Ayrıştırma hataları" (contract 2.17): today's failures per 1,000 loaded lines, the counts and
+ * the most frequent patterns — counts only, never line content. A pattern's example line opens
+ * in the raw-line drawer (with `search.read` or `lookup.run`, audited `raw.view`); "Aramada
+ * göster" hands `source:… error:…` over to Arama (with `search.read`). A line not in the
+ * collector's format (`rawlog.invalid`) has no `messages` row: it offers only its example.
+ */
+export function ParseFailuresCard({
+  box,
+  to,
+  canRaw,
+  canSearch,
+  onRaw,
+}: {
+  box: DashboardParseFailures;
+  canRaw: boolean;
+  canSearch: boolean;
+  onRaw: (target: RawLineTarget) => void;
+} & LinkProps) {
+  const { t } = useTranslation();
+  const lang = currentLang();
+  const navigate = useNavigate();
+  const level = failureLevel(box);
+  const trend = box.last7.map((day) => day.failures);
+  return (
+    <DashCard
+      title={t('dashboard.parseFailures.title')}
+      icon={FileWarning}
+      to={to}
+      page={t('nav.sources')}
+      status={
+        level === 'high' ? (
+          <Badge tone="warning" icon={TriangleAlert}>
+            {t('dashboard.parseFailures.high')}
+          </Badge>
+        ) : level === 'none' && box.lines > 0 ? (
+          <Badge tone="success" icon={CircleCheck}>
+            {t('dashboard.parseFailures.none')}
+          </Badge>
+        ) : null
+      }
+      testId="card-parse-failures"
+    >
+      <BigValue
+        value={
+          box.permille === null
+            ? t('dashboard.parseFailures.noLines')
+            : t('dashboard.parseFailures.permille', {
+                value: formatNumber(box.permille, 1, lang),
+              })
+        }
+        hint={t('dashboard.parseFailures.counts', {
+          failures: formatNumber(box.failures, 0, lang),
+          lines: formatNumber(box.lines, 0, lang),
+        })}
+      />
+      {trend.some((value) => value > 0) ? (
+        <Sparkline
+          values={trend}
+          label={t('dashboard.parseFailures.trend')}
+          formatValue={(value) => formatNumber(value, 0, lang)}
+          className="h-8 w-full"
+        />
+      ) : null}
+      {box.top_patterns.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium text-muted-strong">
+            {t('dashboard.parseFailures.topPatterns')}
+          </p>
+          <ul className="flex flex-col gap-1.5 text-13" data-testid="parse-patterns">
+            {box.top_patterns.map((pattern) => {
+              const search = failureSearch(pattern.source, pattern.pattern, { preset: 'today' });
+              return (
+                <li
+                  key={`${pattern.source}-${pattern.pattern}`}
+                  className="flex flex-col gap-0.5"
+                  data-pattern={pattern.pattern}
+                >
+                  <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                    <span className="font-mono text-xs break-all text-foreground">
+                      {pattern.pattern}
+                    </span>
+                    <span className="text-xs text-muted">
+                      {t('dashboard.parseFailures.patternOf', {
+                        source: visibleText(pattern.source),
+                        count: pattern.count,
+                        formatted: formatNumber(pattern.count, 0, lang),
+                      })}
+                    </span>
+                  </span>
+                  {canRaw || (canSearch && search) ? (
+                    <span className="flex flex-wrap gap-1">
+                      {canRaw ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2"
+                          aria-label={t('dashboard.parseFailures.exampleFor', {
+                            pattern: pattern.pattern,
+                          })}
+                          onClick={() => {
+                            onRaw({ ref: pattern.example });
+                          }}
+                        >
+                          <FileText aria-hidden="true" />
+                          {t('dashboard.parseFailures.example')}
+                        </Button>
+                      ) : null}
+                      {canSearch && search ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2"
+                          aria-label={t('dashboard.parseFailures.searchFor', {
+                            pattern: pattern.pattern,
+                          })}
+                          onClick={() => {
+                            handoff.put('/search', search);
+                            void navigate('/search');
+                          }}
+                        >
+                          <Search aria-hidden="true" />
+                          {t('dashboard.parseFailures.search')}
+                        </Button>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       ) : null}
     </DashCard>
   );

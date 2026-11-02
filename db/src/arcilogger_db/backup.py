@@ -25,6 +25,10 @@
   both): the sidecar only detects accidental damage, ``--sha256`` checks the dump against a hash
   recorded off the server.
 
+A configured ``[backup] pg_dump`` / ``pg_restore`` runs only when the executable policy trusts
+it (ADR-0014: below ``admin\\policy.json`` ``executable_roots`` or recorded by the installer with
+its SHA-256, :func:`find_tool`); a refused one fails the run like a missing one.
+
 Passwords reach ``pg_dump`` and ``pg_restore`` only through a password file (``PGPASSFILE``)
 created with owner-only rights in a private temporary folder and deleted when the tool has
 finished — never on a command line, in the tool's environment or in a log. Error texts are short
@@ -53,7 +57,8 @@ from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from arcilogger_core.alerts import Severity, raise_alert
-from arcilogger_core.config import BackupConfig, Config
+from arcilogger_core.config import BackupConfig, Config, default_config_path
+from arcilogger_core.execpolicy import ExecutableRefusedError, TrustAnchors, check_executable
 from arcilogger_core.fsutil import atomic_write_text, fsync_dir, fsync_file
 from arcilogger_core.layout import Layout
 from arcilogger_core.secretstore import SecretStoreError
@@ -118,6 +123,12 @@ class Tool:
 
 def _exe(name: str) -> str:
     return f"{name}.exe" if sys.platform == "win32" else name
+
+
+def _tool_names(name: str) -> tuple[str, ...]:
+    """The file names a configured ``pg_dump`` / ``pg_restore`` may have (execpolicy
+    ``names``): no other program of a trusted folder, ``pwsh.exe`` say, runs in its place."""
+    return (_exe(name),)
 
 
 if sys.platform == "win32":
@@ -201,18 +212,36 @@ def find_tool(
     name: str,
     configured: str = "",
     *,
+    anchors: TrustAnchors | None = None,
     services: Mapping[str, str] | None = None,
     versions_root: Path | None = None,
     search_path: str | None = None,
 ) -> Tool:
     """``pg_dump`` / ``pg_restore``: ``[backup] <name>``, else the bin folder of the PostgreSQL
-    service, else the newest ``C:\\Program Files\\PostgreSQL\\<version>\\bin``, else ``PATH``."""
+    service, else the newest ``C:\\Program Files\\PostgreSQL\\<version>\\bin``, else ``PATH``.
+
+    A configured path runs only when it names the tool itself (``pg_dump.exe``) and the
+    executable policy trusts it (ADR-0014, contract 2.8.4: inside ``policy.executable_roots`` or
+    recorded by the installer with its SHA-256), checked against ``anchors`` — the folder of
+    the fixed ``--config`` path, by default :func:`~arcilogger_core.config.default_config_path`
+    — never against a folder the configuration names: the administration agent may write
+    ``arcilogger.toml``, and the Backup task runs the tool as LOCAL SERVICE, a restore with the
+    PostgreSQL superuser's password."""
     exe = _exe(name)
     if configured.strip():
         path = Path(configured.strip())
         if not path.is_file():
             raise BackupError(f"[backup] {name} = {configured.strip()!r}: file not found")
-        return Tool(path, "config")
+        try:
+            checked = check_executable(
+                str(path),
+                anchors or TrustAnchors.of(default_config_path()),
+                names=_tool_names(name),
+                what=f"backup.{name}",
+            )
+        except ExecutableRefusedError as exc:
+            raise BackupError(f"[backup] {name}: {exc.reason} ({exc.code})") from exc
+        return Tool(Path(checked), "config")
     for service, folder in service_bin_dirs(registry_services() if services is None else services):
         if (folder / exe).is_file():
             return Tool(folder / exe, f"service {service}")
@@ -680,17 +709,19 @@ def run_backup(
     probe: Probe = probe_server,
     services: Mapping[str, str] | None = None,
     disk_usage: Callable[[Path], Any] = shutil.disk_usage,
+    anchors: TrustAnchors | None = None,
 ) -> BackupOutcome:
     """One scheduled backup attempt: dump, check, rename, sidecar, ``last.json``, retention.
 
     Never raises for a failed attempt: it is recorded in ``last.json`` and as an
-    ``R20-backup`` alert, and returned with ``ok = False``.
+    ``R20-backup`` alert, and returned with ``ok = False``. ``anchors``: what a configured
+    ``pg_dump`` / ``pg_restore`` is checked against (:func:`find_tool`).
     """
     layout = Layout(config.data_dir)
     started = clock()
     attempt = _Attempt()
     try:
-        dumped = _dump(config, started, clock, probe, services, disk_usage, attempt)
+        dumped = _dump(config, started, clock, probe, services, disk_usage, attempt, anchors)
     except (BackupError, OSError, SQLAlchemyError, SecretStoreError) as exc:
         if isinstance(exc, SQLAlchemyError):
             error = _describe(exc)
@@ -786,6 +817,7 @@ def _dump(
     services: Mapping[str, str] | None,
     disk_usage: Callable[[Path], Any],
     attempt: _Attempt,
+    anchors: TrustAnchors | None,
 ) -> _Dumped:
     database = config.database
     folder = backup_dir(config)
@@ -793,8 +825,10 @@ def _dump(
     existing = list_backups(folder)
     newest = existing[0].size if existing else 0
     _check_free_space(folder, config.backup.min_free_gb, newest, disk_usage)
-    dump_tool = find_tool("pg_dump", config.backup.pg_dump, services=services)
-    restore_tool = find_tool("pg_restore", config.backup.pg_restore, services=services)
+    dump_tool = find_tool("pg_dump", config.backup.pg_dump, anchors=anchors, services=services)
+    restore_tool = find_tool(
+        "pg_restore", config.backup.pg_restore, anchors=anchors, services=services
+    )
     dump_version, dump_major = tool_version(dump_tool)
     attempt.password = database_password(config)
     server = probe(config, attempt.password)
@@ -1010,6 +1044,7 @@ def restore_backup(
     password: str | None,
     sha256: str | None = None,
     services: Mapping[str, str] | None = None,
+    anchors: TrustAnchors | None = None,
 ) -> RestoreOutcome:
     """Restore ``dump`` into the new database ``target`` (never into an existing one).
 
@@ -1035,7 +1070,7 @@ def restore_backup(
         raise RestoreRefusedError(
             f"{dump.name}: SHA-256 or size differs from its sidecar (damaged or incomplete)"
         )
-    tool = find_tool("pg_restore", config.backup.pg_restore, services=services)
+    tool = find_tool("pg_restore", config.backup.pg_restore, anchors=anchors, services=services)
     archive = check_archive(tool, dump)
     owner = config.database.user
     admin = _superuser_engine(config, superuser, password, "postgres")

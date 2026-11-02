@@ -23,6 +23,28 @@ yet; `tests/fixtures/synthetic/` approximates it (synthetic, verify on site). On
 seen on a device, a sample with fictional values is added here as `mikrotik-wire-sample.log`, and
 the parser tests then use it.
 
+**Awaited: `fortigate-dhcp-sample.log`** (FortiGate DHCP server lines, 26001 ACK and 26002
+RELEASE; ADR-0016). There is no device capture yet: the parser and its tests rest on the FortiOS
+7.6 field list and one community sample (`tests/fixtures/synthetic/`, sahada doğrula), and
+`ingest/tests/test_fortigate_dhcp.py::test_real_fortigate_dhcp_sample` is skipped until the file
+exists.
+
+- İlk cihaz kaydından **biçimi** alınarak eklenir: alan adları, sıraları, tırnaklama ve
+  ayırıcılar aynen korunur; her değer örnek dünyanın değeriyle değiştirilir (MAC
+  `00:00:5E:00:53:xx`, IP `172.20.x.x`, `devname="FIREWALL-01"`, `devid="FGT0000000000000"`, ana
+  bilgisayar adı ör. `PLN-PC14`). Gerçek bir MAC, IP, ana bilgisayar adı, seri numarası ya da
+  cihaz adı depoya girmez.
+- Added from the **shape** of the first device capture: field names, order, quoting and
+  separators are kept exactly; every value is replaced by the example world's (MAC
+  `00:00:5E:00:53:xx`, IP `172.20.x.x`, `devname="FIREWALL-01"`, `devid="FGT0000000000000"`, host
+  name e.g. `PLN-PC14`). No real MAC, IP, host name, serial number or device name enters the
+  repository.
+
+Its `SHA256SUMS` line is added with it. The test then checks that each ACK/RELEASE line becomes an
+`fg_dhcp` row with the device's own time, that its logid and `dhcp_msg` are accepted by the
+default settings (`dhcp.fortigate_logids`, `dhcp.fortigate_dhcp_msgs`) and that `lease` is an
+integer in the FortiOS range; it records the RELEASE `dhcp_msg` value it saw.
+
 `SHA256SUMS` pins the exact bytes. `tests/test_fixture_integrity.py` fails if a file changes, for
 example when a Windows Git client converts line endings (see `.gitattributes`). After an
 intentional change, regenerate it in this folder with `sha256sum *.log *.txt > SHA256SUMS`.

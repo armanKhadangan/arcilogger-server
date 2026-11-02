@@ -531,3 +531,90 @@ def test_a_non_critical_eku_is_accepted_only_when_the_site_says_so(
         sv.parse_certificate(r.public_bytes(serialization.Encoding.DER)) for r in roots
     ]
     assert not sv.verify_timestamp(token, manifest_bytes, standalone_roots).ok
+
+
+def test_a_disabled_source_is_no_longer_expected(world: Any, days: list[date]) -> None:
+    """``[[sources]] enabled = false`` (ADR-0014): no gap for it; its raw log is still sealed."""
+    sources = [
+        {**source.model_dump(), "enabled": source.name != "switch-1"}
+        for source in world.config.sources
+    ]
+    world.reconfigure(sources=sources)
+    assert [s.enabled for s in world.config.sources] == [True, True, False]
+    world.busy_day(days[0])
+    world.set_now(days[0] + timedelta(days=1))
+    assert [o.status for o in world.sealer().seal_due()] == ["sealed"]
+    manifest = _manifest(world, days[0])
+    assert {gap["source"] for gap in manifest["gaps"]} == {"core-r1"}
+    world.write_spool("switch-1", days[1], [(time(9, 0), b"<30>system,info still sending")])
+    world.set_now(days[1] + timedelta(days=1))
+    assert [o.status for o in world.sealer().seal_due()] == ["sealed"]
+    assert [f["source"] for f in _manifest(world, days[1])["files"]] == ["switch-1"]
+
+
+# -- seal requests of the browser administration ("Şimdi mühürle", ADR-0014) --------------------
+
+REQUEST = "5e" * 16
+
+
+def test_a_requested_day_does_not_wait_for_its_retry_time(world: Any, days: list[date]) -> None:
+    world.busy_day(days[0])
+    world.set_now(days[0] + timedelta(days=1), 0, 10)
+    world.tsa.failure = MockFailure.UNREACHABLE
+    sealer = world.sealer()
+    assert [o.status for o in sealer.seal_due()] == ["pending"]
+    world.tsa.failure = MockFailure.NONE
+    world.now += timedelta(minutes=1)
+    assert [o.status for o in sealer.seal_due()] == ["waiting"]  # retry in 4 more minutes
+    assert [o.status for o in sealer.seal_due(requested={days[0]: REQUEST})] == ["sealed"]
+    state = sealer.state(days[0])
+    assert state["attempts"] == 2
+    assert state["requested"] == REQUEST
+
+
+def test_a_request_keeps_the_quiet_window(world: Any, days: list[date]) -> None:
+    world.reconfigure(seal={"quiet_seconds": 600})
+    world.busy_day(days[0])
+    world.set_now(days[0] + timedelta(days=1), 0, 5)
+    outcomes = world.sealer().seal_due(requested={days[0]: REQUEST})
+    assert [(o.status, o.message) for o in outcomes] == [
+        ("waiting", f"{days[0]} ended less than 600 s ago")
+    ]
+    assert not world.layout.seal_state(days[0]).exists()  # no attempt
+
+
+def test_a_request_never_seals_out_of_order(world: Any, days: list[date]) -> None:
+    for day in days[:2]:
+        world.busy_day(day)
+    world.set_now(days[1] + timedelta(days=1), 0, 10)
+    world.tsa.failure = MockFailure.UNREACHABLE
+    assert [o.status for o in world.sealer().seal_due()] == ["pending"]
+    world.tsa.failure = MockFailure.NONE
+    outcomes = world.sealer().seal_due(requested={days[1]: REQUEST})
+    assert [(o.day, o.status) for o in outcomes] == [(days[0], "waiting")]
+    assert not world.layout.seal_state(days[1]).exists()
+
+
+def test_a_request_never_stamps_a_day_of_a_long_empty_run(world: Any) -> None:
+    world.reconfigure(seal={"quiet_seconds": 0, "gzip_level": 6, "max_consecutive_empty_days": 0})
+    first, empty = date(2026, 10, 1), date(2026, 10, 2)
+    world.busy_day(first)
+    world.set_now(empty + timedelta(days=1))
+    outcomes = world.sealer().seal_due(requested={empty: REQUEST})
+    assert [(o.day, o.status) for o in outcomes] == [(first, "sealed"), (empty, "skipped")]
+    assert "requested" not in world.sealer().state(empty)
+    assert world.sealer().seal_day(empty, requested=REQUEST).status == "skipped"
+    assert "requested" not in world.sealer().state(empty)
+
+
+def test_a_later_attempt_without_a_request_forgets_it(world: Any, days: list[date]) -> None:
+    world.busy_day(days[0])
+    world.set_now(days[0] + timedelta(days=1), 0, 10)
+    world.tsa.failure = MockFailure.UNREACHABLE
+    sealer = world.sealer()
+    assert sealer.seal_day(days[0], requested=REQUEST).status == "pending"
+    assert sealer.state(days[0])["requested"] == REQUEST
+    world.tsa.failure = MockFailure.NONE
+    world.now += timedelta(minutes=10)
+    assert [o.status for o in sealer.seal_due()] == ["sealed"]
+    assert "requested" not in sealer.state(days[0])

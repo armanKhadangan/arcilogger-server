@@ -302,8 +302,10 @@ def test_create_admin_option_is_parsed(monkeypatch: pytest.MonkeyPatch, api_conf
 
     monkeypatch.setattr(api_cli, "load_config", lambda path: api_config)
     monkeypatch.setattr(admin_cli, "create_admin", create)
-    assert api_cli.main(["create-admin", "--deactivate", "izleyici"]) == 0
-    assert api_cli.main(["create-admin"]) == 0
+    # The configuration's own folder (the secret store must be next to it, ADR-0014 D0-2).
+    config = ["--config", str(api_config.secrets_dir / "arcilogger.toml")]
+    assert api_cli.main([*config, "create-admin", "--deactivate", "izleyici"]) == 0
+    assert api_cli.main([*config, "create-admin"]) == 0
     assert seen == [{"deactivate": "izleyici"}, {}]
 
 

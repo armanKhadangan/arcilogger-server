@@ -6,6 +6,8 @@
  * enums, nested types). Times are ISO 8601 strings with offset (UTC from the server).
  */
 
+import type { RawRef } from './live-types';
+
 /** ISO 8601 date-time with offset, e.g. `2026-10-12T06:44:07.123456Z`. */
 export type DateTimeString = string;
 
@@ -674,6 +676,11 @@ export interface PersonOut {
   /** Persons are never deleted: a deactivated person keeps the assignment history. */
   active: boolean;
   notes: string | null;
+  /**
+   * Left out of every person-level usage view and report (the company and department totals
+   * still count the traffic); 5651 lookups never read it.
+   */
+  usage_excluded: boolean;
   device_count: number;
   created_at: DateTimeString;
   updated_at: DateTimeString;
@@ -700,11 +707,14 @@ export interface PersonCreate {
   /** Default `true`. */
   active?: boolean;
   notes?: string | null;
+  /** Default `false`. */
+  usage_excluded?: boolean;
 }
 
 /**
- * Only the fields sent are changed (`name` and `active` never `null`; `active: false`
- * deactivates — there is no delete, and the person's current devices stay assigned).
+ * Only the fields sent are changed (`name`, `active` and `usage_excluded` never `null`;
+ * `active: false` deactivates — there is no delete, and the person's current devices stay
+ * assigned).
  */
 export interface PersonUpdate {
   name?: string | null;
@@ -714,6 +724,7 @@ export interface PersonUpdate {
   employee_no?: string | null;
   active?: boolean | null;
   notes?: string | null;
+  usage_excluded?: boolean | null;
 }
 
 export interface DepartmentOut {
@@ -1045,6 +1056,47 @@ export interface DashboardAlerts {
   latest: AlertOut[];
 }
 
+/** A source with parse failures today. */
+export interface SourceFailures {
+  source: string;
+  /** Lines ingest loaded today from the source's file. */
+  lines: number;
+  failures: number;
+  /** Failures per 1,000 loaded lines, one decimal (`null` without lines). */
+  permille: Float | null;
+}
+
+export interface FailurePattern {
+  source: string;
+  pattern: string;
+  count: number;
+  /** One line of the pattern (the raw-line view opens it). */
+  example: RawRef;
+}
+
+export interface FailureDay {
+  day: DateString;
+  lines: number;
+  failures: number;
+}
+
+/**
+ * "Ayrıştırma hataları" (the permission of `ingest`): today's parse failures by source and
+ * pattern, and the totals of the last 7 days — counts and patterns only, never content.
+ */
+export interface DashboardParseFailures {
+  day: DateString;
+  lines: number;
+  failures: number;
+  permille: Float | null;
+  /** The sources with the most failures today (at most 5). */
+  by_source: SourceFailures[];
+  /** Today's most frequent patterns (at most 3). */
+  top_patterns: FailurePattern[];
+  /** Today and the 6 days before, oldest first. */
+  last7: FailureDay[];
+}
+
 /** `GET /dashboard/summary`: each block is `null` when the user lacks its permission. */
 export interface DashboardSummary {
   generated_at: DateTimeString;
@@ -1053,6 +1105,7 @@ export interface DashboardSummary {
   credit: DashboardCredit | null;
   clock: DashboardClock | null;
   alerts: DashboardAlerts | null;
+  parse_failures: DashboardParseFailures | null;
 }
 
 // -- usage, company totals (`GET /usage/company`, read by the Panel) -----------------------------
@@ -1687,4 +1740,62 @@ export interface LicenseOut {
   licensor: LicensorOut;
   checked_at: DateTimeString;
   details: LicenseDetailsOut | null;
+}
+
+// -- what the FortiGate's records show (`GET /settings/fortigate/observed`, contract 2.12) ------
+// The observed panel of the internet exits editor (Ayarlar → Uygulama ayarları, `nat.egresses`).
+
+/** One `(transip, dstintf, trandisp)` of trusted `fg_traffic` rows of the window. */
+export interface ObservedNatRow {
+  transip: string;
+  dstintf: string | null;
+  trandisp: string | null;
+  sessions: number;
+  first_seen: DateTimeString;
+  last_seen: DateTimeString;
+  /** The exit that claims the address (by the stored `nat.egresses`), `null` when none does. */
+  egress: string | null;
+  /** `trandisp` is one of `nat.snat_trandisp`. */
+  trandisp_known: boolean;
+}
+
+export interface ObservedNat {
+  hours: number;
+  /** More than 100 groups: the busiest are listed. */
+  truncated: boolean;
+  rows: ObservedNatRow[];
+  /** The listed addresses no exit claims, in the order of the rows. */
+  unmapped_transips: string[];
+  /** The listed `trandisp` values `nat.snat_trandisp` does not name. */
+  unknown_trandisp: string[];
+  /** The stored `nat.egresses` cannot be read: every row has `egress: null`. */
+  exits_invalid?: boolean;
+}
+
+/** srcmac per `srcintf` in the last hour: rows, distinct MACs and the most IPv4s of one MAC. */
+export interface ObservedSrcmacInterface {
+  srcintf: string;
+  rows: number;
+  macs: number;
+  max_ips_per_mac: number;
+  /** Listed in `lookup.srcmac_interfaces`. */
+  configured: boolean;
+}
+
+export interface ObservedSrcmac {
+  hours: number;
+  /** More than 50 interfaces: those with the most rows are listed. */
+  truncated: boolean;
+  interfaces: ObservedSrcmacInterface[];
+}
+
+/**
+ * `GET /settings/fortigate/observed?hours=24` (`settings.manage`; counts and the firewall's own
+ * addresses only, not audited). The counts are kept 5 minutes per `hours` (`generated_at` says
+ * when they were made); the exits' claims are read from the current setting on every request.
+ */
+export interface FortigateObserved {
+  generated_at: DateTimeString;
+  nat: ObservedNat;
+  srcmac: ObservedSrcmac;
 }

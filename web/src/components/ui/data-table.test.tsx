@@ -37,7 +37,7 @@ function bodyIps(): string[] {
 
 describe('DataTable', () => {
   // jsdom has no layout; give the scroll container a size so the virtualiser renders rows.
-  const sizes = { offsetHeight: 480, offsetWidth: 1024 };
+  const sizes = { clientHeight: 480, clientWidth: 1024, offsetHeight: 480, offsetWidth: 1024 };
   const originals = Object.fromEntries(
     Object.keys(sizes).map((key) => [
       key,
@@ -52,6 +52,7 @@ describe('DataTable', () => {
   afterAll(() => {
     for (const [key, descriptor] of Object.entries(originals)) {
       if (descriptor) Object.defineProperty(HTMLElement.prototype, key, descriptor);
+      else Reflect.deleteProperty(HTMLElement.prototype, key);
     }
   });
 

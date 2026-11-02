@@ -47,7 +47,31 @@ import type {
   VerifyResult,
   VlanOut,
 } from '../src/lib/api-types';
+import type { LiveStatus, LiveStreamOut } from '../src/lib/live-types';
+import type {
+  FieldCatalogue,
+  ParseResult,
+  SavedSearch,
+  SavedSearchList,
+  SearchEvent,
+  SearchPage,
+  SearchRefs,
+  SearchStats,
+} from '../src/lib/search-types';
 import type { SealDayDetail } from '../src/lib/seal-types';
+import type {
+  AdminAccepted,
+  AdminCheck,
+  AdminConfig,
+  AdminRequestOut,
+  AdminRequestPage,
+  AdminStatus,
+  ConfigVersion,
+  SettingsOut,
+  SettingsPatchResult,
+  UploadPreview,
+} from '../src/lib/settings-types';
+import type { SourceDetail, SourcesOverview, SourceTail } from '../src/lib/sources-types';
 import type { LicenseSamples } from '../src/test/license-samples';
 
 function load(name: string): unknown {
@@ -126,6 +150,10 @@ export const SEALS = load('seals') as {
   verify_quick: VerifyResult;
   manifest_file: FileSample & { text: string };
   token_file: FileSample & { base64: string };
+  /** "Şimdi mühürle": the 202 answer and the request queued and done. */
+  seal_now: AdminAccepted;
+  seal_now_queued: AdminRequestOut;
+  seal_now_done: AdminRequestOut;
   errors: Record<string, ErrorSample>;
 };
 
@@ -133,6 +161,102 @@ export const CREDITS = load('credits') as {
   mock: Credits;
   kamusm: Credits;
   kamusm_low: Credits;
+  /** "Kontör sorgula": the 202 answer, the request done, the second query within a minute. */
+  query: AdminAccepted;
+  query_done: AdminRequestOut;
+  query_limited: ErrorSample;
+};
+
+/**
+ * Browser administration (contract 2.11, captured with the real administration agent and its
+ * tasks on a throwaway installation, `FakeAgent(system=True)`): the configuration as installed,
+ * after the Kamu SM steps and after the other sections were changed, the status in each state of
+ * the agent, every answer of a change and the history.
+ */
+export const ADMIN = load('admin') as {
+  meta: SampleMeta;
+  config: AdminConfig;
+  status: AdminStatus;
+  status_after: AdminStatus;
+  status_agent_missing: AdminStatus;
+  status_disabled: AdminStatus;
+  check_general: AdminCheck;
+  check_clock: AdminCheck;
+  accepted: AdminAccepted;
+  request_queued: AdminRequestOut;
+  request_active: AdminRequestOut;
+  requests: AdminRequestPage;
+  kamusm: {
+    config: AdminConfig;
+    check_credentials: AdminCheck;
+    credentials_accepted: AdminAccepted;
+    credentials_active: AdminRequestOut;
+    upload_root: UploadPreview;
+    root_accepted: AdminAccepted;
+    root_active: AdminRequestOut;
+    upload_zamane: UploadPreview;
+    zamane_accepted: AdminAccepted;
+    zamane_pending: AdminRequestOut;
+    tsa_test_accepted: AdminAccepted;
+    tsa_test_done: AdminRequestOut;
+  };
+  sources: {
+    check_add: AdminCheck;
+    check_update: AdminCheck;
+    add_accepted: AdminAccepted;
+    add_applied: AdminRequestOut;
+    add_active: AdminRequestOut;
+    remove_accepted: AdminAccepted;
+    remove_active: AdminRequestOut;
+  };
+  sections: {
+    config: AdminConfig;
+    check_smtp: AdminCheck;
+    smtp_accepted: AdminAccepted;
+    smtp_done: AdminRequestOut;
+    upload_smtp_ca: UploadPreview;
+    smtp_ca_accepted: AdminAccepted;
+    smtp_ca_done: AdminRequestOut;
+    test_email_accepted: AdminAccepted;
+    test_email_done: AdminRequestOut;
+    check_replica: AdminCheck;
+    replica_accepted: AdminAccepted;
+    replica_done: AdminRequestOut;
+    replica_test_accepted: AdminAccepted;
+    replica_test_done: AdminRequestOut;
+    check_retention: AdminCheck;
+    retention_accepted: AdminAccepted;
+    retention_done: AdminRequestOut;
+    check_backup: AdminCheck;
+    backup_accepted: AdminAccepted;
+    backup_done: AdminRequestOut;
+    lease_rebuild_accepted: AdminAccepted;
+    lease_rebuild_done: AdminRequestOut;
+  };
+  history: {
+    held_accepted: AdminAccepted;
+    held_pending: AdminRequestOut;
+    cancel_held_accepted: AdminAccepted;
+    cancel_held_done: AdminRequestOut;
+    held_cancelled: AdminRequestOut;
+    cancel_queued: AdminAccepted;
+    cancelled_queued: AdminRequestOut;
+    revert_accepted: AdminAccepted;
+    revert_done: AdminRequestOut;
+    requests: AdminRequestPage;
+    versions: ConfigVersion[];
+  };
+  errors: Record<string, ErrorSample>;
+};
+
+/** The database settings (contract 2.13): every group, a change, a reset and the refusals. */
+export const SETTINGS = load('settings') as {
+  meta: SampleMeta;
+  list: SettingsOut;
+  list_changed: SettingsOut;
+  patch: SettingsPatchResult;
+  reset: SettingsPatchResult;
+  errors: Record<string, ErrorSample>;
 };
 
 /** A CSV file the API sent (export, template): headers and the text as received. */
@@ -305,6 +429,75 @@ export const REPORTS = load('reports') as {
  * refusals, `DELETE`, the locked modules' 403 answers and the users limit's 409.
  */
 export const LICENSE = load('license') as LicenseSamples;
+
+/**
+ * Arama (captured, Wave 2 contract 2.10, `samples_search.py`, the sealed day 2026-10-09 of the
+ * main site): runs (`typed`, `text`, `first_page` and its `next_page`, `empty`, `partial`, the
+ * auditor's), statistics in every mode, `POST /search/parse`, the field catalogue, records of
+ * three tables, references, the exports' headers, saved searches and the refusals. The search
+ * ids are `ornek-arama-NN`.
+ */
+export const SEARCH = load('search') as {
+  meta: SampleMeta;
+  search: Record<
+    'typed' | 'text' | 'first_page' | 'next_page' | 'empty' | 'partial' | 'auditor',
+    SearchPage
+  >;
+  stats: Record<'rollup' | 'hybrid' | 'direct' | 'partial' | 'auditor', SearchStats>;
+  parse: Record<'typed' | 'text' | 'refused' | 'unknown_field', ParseResult>;
+  fields: FieldCatalogue;
+  event: Record<'traffic' | 'dhcp' | 'message', SearchEvent>;
+  refs: SearchRefs;
+  export: Record<'csv' | 'xlsx' | 'truncated', FileSample>;
+  saved: {
+    list: SavedSearchList;
+    auditor_list: SavedSearchList;
+    created: SavedSearch;
+    created_preset: SavedSearch;
+    updated: SavedSearch;
+    run: SearchPage;
+    deleted_status: number;
+    list_after_delete: SavedSearchList;
+  };
+  errors: Record<string, ErrorSample>;
+};
+
+/** One server-sent event of a captured stream, as the page reads it. */
+export interface LiveEventSample {
+  event: string;
+  id: string | null;
+  data: unknown;
+}
+
+/**
+ * Canlı Akış (captured, Wave 2 contract 2.14.4, `samples_live_sources.py`): `POST /live/streams`
+ * of the administrator and the auditor, `GET /live/status`, the events of whole streams —
+ * `stream` (hello, backfill and new lines: the firewall's traffic, a line not in the spool format,
+ * an unknown sender's first line), `dropped` (the rate limit), `gap` (a resume the hub cannot
+ * serve), `end` (`time_limit`) — and the refusals.
+ */
+export const LIVE = load('live') as {
+  meta: SampleMeta;
+  open: { admin: LiveStreamOut; auditor: LiveStreamOut };
+  status: LiveStatus;
+  events: Record<'stream' | 'dropped' | 'gap' | 'end', LiveEventSample[]>;
+  errors: Record<string, ErrorSample>;
+};
+
+/**
+ * Kaynaklar (captured, Wave 2 contract 2.16 and 2.17): the overview (the core router, the firewall,
+ * a silent switch, an unknown sender), the detail of the firewall, the core router and the
+ * unknown sender, the core router's last lines and a source without a file today, the Panel's
+ * summary with today's parse failures, and the refusals.
+ */
+export const SOURCES = load('sources') as {
+  meta: SampleMeta;
+  overview: SourcesOverview;
+  detail: Record<string, SourceDetail>;
+  tail: { 'core-r1': SourceTail; no_file_today: SourceTail };
+  dashboard: DashboardSummary;
+  errors: Record<string, ErrorSample>;
+};
 
 /** "Today" of the captured samples (the E2E browser clock is set to it). */
 export const SAMPLE_TODAY = SEALS.meta.site_today;

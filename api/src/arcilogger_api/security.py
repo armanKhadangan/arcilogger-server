@@ -265,34 +265,63 @@ def _record_activity(db: Session, row: UserSession, now: datetime) -> None:
     db.commit()
 
 
-def _authenticate(request: Request, db: Session, *, allow_pending_mfa: bool) -> CurrentUser:
-    token = request.cookies.get(SESSION_COOKIE)
-    if not token:
-        raise ApiError(401, "not_authenticated")
+def _find_session(db: Session, token_hash: str) -> tuple[UserSession, User] | None:
     found = db.execute(
         select(UserSession, User)
         .join(User, User.id == UserSession.user_id)
-        .where(UserSession.token_hash == hash_token(token))
+        .where(UserSession.token_hash == token_hash)
     ).one_or_none()
-    if found is None:
-        raise ApiError(401, "session_invalid")
-    session_row, user = found
-    now = utc_now()
+    return None if found is None else (found[0], found[1])
+
+
+def _refusal(
+    db: Session, session_row: UserSession, user: User, now: datetime, *, allow_pending_mfa: bool
+) -> str | None:
+    """Why a found session may not make a request now (the 401 code), ``None`` when it may."""
     auth = get_settings(db, keys=["auth.idle_minutes", "auth.absolute_hours"])
     if session_row.revoked_at is not None:
-        raise ApiError(401, "session_revoked")
+        return "session_revoked"
     absolute_end = min(
         session_row.expires_absolute,
         session_row.created_at + timedelta(hours=int(auth["auth.absolute_hours"])),
     )
     if now >= absolute_end:
-        raise ApiError(401, "session_expired")
+        return "session_expired"
     if now - session_row.last_seen_at > timedelta(minutes=int(auth["auth.idle_minutes"])):
-        raise ApiError(401, "session_idle")
+        return "session_idle"
     if not user.active:
-        raise ApiError(401, "user_inactive")
+        return "user_inactive"
     if not session_row.mfa_passed and not allow_pending_mfa:
-        raise ApiError(401, "mfa_required")
+        return "mfa_required"
+    return None
+
+
+def session_problem(db: Session, token_hash: str, now: datetime) -> str | None:
+    """What :func:`get_current_user` would refuse this session for at ``now`` — ``None`` when
+    it is still valid, else the 401 code (``session_invalid``, ``session_revoked``,
+    ``session_expired``, ``session_idle``, ``user_inactive``, ``mfa_required``).
+
+    For a request that outlives its authentication: an open Canlı Akış stream checks its
+    session with it every 30 s (:mod:`arcilogger_api.live`) without counting as activity.
+    """
+    found = _find_session(db, token_hash)
+    if found is None:
+        return "session_invalid"
+    return _refusal(db, found[0], found[1], now, allow_pending_mfa=False)
+
+
+def _authenticate(request: Request, db: Session, *, allow_pending_mfa: bool) -> CurrentUser:
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise ApiError(401, "not_authenticated")
+    found = _find_session(db, hash_token(token))
+    if found is None:
+        raise ApiError(401, "session_invalid")
+    session_row, user = found
+    now = utc_now()
+    refusal = _refusal(db, session_row, user, now, allow_pending_mfa=allow_pending_mfa)
+    if refusal is not None:
+        raise ApiError(401, refusal)
     if request.method in UNSAFE_METHODS:
         header = request.headers.get(CSRF_HEADER, "")
         if not header or not tokens_equal(hash_token(header), session_row.csrf_token_hash):

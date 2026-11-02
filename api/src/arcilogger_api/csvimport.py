@@ -7,18 +7,20 @@ have changed). Each error names its file line (the header is line 1) in Turkish 
 at most :data:`MAX_ERRORS` are listed, then one line says how many more there are. ``preview``
 lists at most :data:`PREVIEW_ROWS` of the lines that change something.
 
-``persons`` — columns ``name;department;title;email;employee_no;active;notes`` (``name``
-required) and ``id``. A line with an ``id`` (the persons export writes it) updates the person
-with that id, which must exist — also a person without an employee number; a line without one
-but with an ``employee_no`` updates the person with that number, or creates one; a line with
+``persons`` — columns ``name;department;title;email;employee_no;active;notes;usage_excluded``
+(``name`` required) and ``id``. A line with an ``id`` (the persons export writes it) updates the
+person with that id, which must exist — also a person without an employee number; a line without
+one but with an ``employee_no`` updates the person with that number, or creates one; a line with
 neither creates a person (the preview flags a name that already exists: ``duplicate_name``). An
 update writes only the columns present in the file; an empty cell clears that field (an
 ``employee_no`` too, when the line has an ``id``). An ``id`` whose line names the employee
 number of another person, and a person on two lines, are line errors. ``department`` is a
 department name (Turkish letters folded) that must exist; ``active`` is evet/hayır (also
-true/false, 1/0; empty: unchanged, active for a new person). The other columns of the persons
-export (``device_count``, ``created_at``, ``updated_at``) are accepted and ignored, so an
-exported file imports unchanged.
+true/false, 1/0; empty: unchanged, active for a new person), and so is ``usage_excluded`` (left
+out of person-level usage views and reports; empty: unchanged, not excluded for a new person —
+a file without the column changes no one's). The other columns of the persons export
+(``device_count``, ``created_at``, ``updated_at``) are accepted and ignored, so an exported file
+imports unchanged.
 
 ``assignments`` — columns ``mac;employee_no;person_name;valid_from;note`` (``mac`` and one of
 ``employee_no`` / ``person_name`` required). The person is found by ``employee_no``, else by the
@@ -57,7 +59,16 @@ from arcilogger_worker.lookup import normalize_mac
 ImportKind = Literal["persons", "assignments"]
 MAX_ERRORS: Final = 200
 PREVIEW_ROWS: Final = 50
-PERSON_COLUMNS: Final = ("name", "department", "title", "email", "employee_no", "active", "notes")
+PERSON_COLUMNS: Final = (
+    "name",
+    "department",
+    "title",
+    "email",
+    "employee_no",
+    "active",
+    "notes",
+    "usage_excluded",
+)
 #: Written by the persons export: ``id`` identifies the person, the others are ignored.
 PERSON_EXPORT_ID: Final = "id"
 PERSON_EXPORT_ONLY: Final = ("device_count", "created_at", "updated_at")
@@ -74,6 +85,7 @@ TEMPLATES: Final[dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
             "1001",
             "evet",
             "",
+            "hayır",
         ),
     ),
     "assignments": (
@@ -99,9 +111,9 @@ LINE_MESSAGES: Final = {
         "{column} must not contain control characters.",
     ),
     "email": ("E-posta adresi geçersiz ({value}).", "The e-mail address is invalid ({value})."),
-    "active": (
-        "active değeri evet ya da hayır olmalıdır ({value}).",
-        "active must be evet or hayır, true or false ({value}).",
+    "boolean": (
+        "{column} değeri evet ya da hayır olmalıdır ({value}).",
+        "{column} must be evet or hayır, true or false ({value}).",
     ),
     "department": (
         "'{value}' adlı departman yok; önce Departmanlar listesine ekleyin.",
@@ -367,11 +379,12 @@ def import_persons(db: Session, data: bytes, *, apply: bool) -> Outcome:
             values["email"] = email
         if "notes" in present:
             values["notes"] = _text(row, "notes", multiline=True)
-        if "active" in present and row.get("active"):
-            active = parse_bool(row.get("active"))
-            if active is None:
-                raise LineProblemError("active", value=row.get("active"))
-            values["active"] = active
+        for column in ("active", "usage_excluded"):
+            if column in present and row.get(column):
+                flag = parse_bool(row.get(column))
+                if flag is None:
+                    raise LineProblemError("boolean", column=column, value=row.get(column))
+                values[column] = flag
         number = values.get("employee_no")
         if number is not None:
             first = seen_numbers.setdefault(number, row.line)

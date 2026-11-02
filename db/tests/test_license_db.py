@@ -40,7 +40,7 @@ from arcilogger_core.timeutil import day_window, utc_now
 from arcilogger_db import licensing
 from arcilogger_db.audit import append_entry, verify_audit_chain
 from arcilogger_db.engine import engine_from_url
-from arcilogger_db.migrate import alembic_config, upgrade
+from arcilogger_db.migrate import alembic_config, head_revisions, upgrade
 from arcilogger_db.models import (
     LICENSE_TABLES,
     AuditLog,
@@ -143,7 +143,7 @@ def _triggers(engine: Engine) -> set[str]:
 def test_migration_0014_up_and_down(empty_engine: Engine) -> None:
     upgrade(empty_engine, revision="0013_site_data")
     assert not set(LICENSE_TABLES) & set(inspect(empty_engine).get_table_names())
-    result = upgrade(empty_engine)
+    result = upgrade(empty_engine, revision="0014_license")
     assert result.after == ("0014_license",)
     assert set(LICENSE_TABLES) <= set(inspect(empty_engine).get_table_names())
     expected = {
@@ -165,7 +165,7 @@ def test_migration_0014_up_and_down(empty_engine: Engine) -> None:
             ).scalar_one()
             == 0
         )
-    assert upgrade(empty_engine).after == ("0014_license",)  # and up again
+    assert upgrade(empty_engine, revision="0014_license").after == ("0014_license",)  # and up
 
 
 # -- B-T2 append-only -----------------------------------------------------------------------------
@@ -297,7 +297,7 @@ def test_a_broken_licence_package_never_stops_the_upgrade(
     monkeypatch.delattr(arcilogger_db, "licensing", raising=False)
     with caplog.at_level(logging.WARNING, logger="arcilogger.db"):
         result = upgrade(empty_engine)
-    assert result.after == ("0014_license",)
+    assert result.after == head_revisions()
     assert result.seed.settings_inserted  # the rest of the seed ran
     assert result.seed.license_installation_created is False
     assert "license: installation row not created" in caplog.text

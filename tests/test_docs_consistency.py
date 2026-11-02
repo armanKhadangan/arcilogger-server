@@ -13,11 +13,14 @@ import argparse
 import ast
 import codecs
 import importlib
+import importlib.util
 import inspect
 import ipaddress
 import itertools
 import json
 import re
+import subprocess
+import sys
 import textwrap
 import tomllib
 import typing
@@ -42,6 +45,7 @@ from arcilogger_api.routers.usage import PERSON_PERMISSIONS
 from arcilogger_api.routers.vlans import router as vlans_router
 from arcilogger_api.security import ROLE_PERMISSIONS
 from arcilogger_collector.service import unknown_source_name
+from arcilogger_core.admin.contract import EVENT_SOURCE, Event
 from arcilogger_core.cli import _build_parser as core_parser
 from arcilogger_core.cli import main as core_main
 from arcilogger_core.config import BackupConfig, Config, IngestConfig, WorkerConfig
@@ -57,7 +61,14 @@ from arcilogger_db.cli import _build_parser as db_parser
 from arcilogger_db.models import LICENSE_MAX_BYTES, Base
 from arcilogger_db.settings import DEFAULT_SETTINGS
 from arcilogger_worker.alerts.mail import MAX_LISTED, MailItem, render_text, subject
-from arcilogger_worker.alerts.texts import DESCRIBERS, describe, source_name
+from arcilogger_worker.alerts.texts import (
+    DESCRIBERS,
+    LEASE_CAUSES,
+    NAT_CAUSES,
+    RULES,
+    describe,
+    source_name,
+)
 from arcilogger_worker.cli import _build_parser as worker_parser
 from arcilogger_worker.reports.runner import REPORT_RULE, UNLICENSED_NOTE
 from arcilogger_worker.service import default_jobs
@@ -88,6 +99,9 @@ OPERATOR_DOCS = (
 )
 #: The database backup runbooks (ADR-0009), read on the server like the operator documents.
 BACKUP_DOCS = ("YEDEKLEME.md", "BACKUP.md")
+#: The guide to the Settings pages (browser administration, ADR-0014), read like the operator
+#: documents.
+SETTINGS_DOCS = ("AYARLAR.md", "SETTINGS.md")
 LEGAL_DRAFTS = ("legal/aydinlatma-metni-taslak.md", "legal/saklama-imha-politikasi-taslak.md")
 DRAFT_MARKER = "**Taslak — hukuk müşaviri onayı gerekir**"
 
@@ -179,7 +193,7 @@ def test_security_doc_and_web_setup_page_show_the_same_command() -> None:
     assert 'code="arcilogger-api setup-token"' not in page
 
 
-@pytest.mark.parametrize("name", OPERATOR_DOCS + BACKUP_DOCS)
+@pytest.mark.parametrize("name", OPERATOR_DOCS + BACKUP_DOCS + SETTINGS_DOCS)
 def test_operator_code_blocks_never_call_a_program_by_its_bare_name(name: str) -> None:
     """The programs are not on PATH on the server: a bare command fails there."""
     bare = re.compile(r"^\s*arcilogger-(core|api|ingest|db|worker|collector)\b")
@@ -473,6 +487,11 @@ def _exists(name: str) -> bool:
     if kind == "attr":
         module, _, attribute = what.rpartition(".")
         return hasattr(importlib.import_module(module), attribute)
+    if kind == "admin":  # a console command of python -I -m arcilogger_core.admin
+        if importlib.util.find_spec("arcilogger_core.admin.__main__") is None:
+            return False
+        command = [sys.executable, "-I", "-m", "arcilogger_core.admin", *what.split(), "--help"]
+        return subprocess.run(command, capture_output=True, check=False).returncode == 0
     if what == "arcilogger-core config-check":
         return _subcommand(core_parser(), "config-check") is not None
     if what == "arcilogger-db settings":
@@ -1472,7 +1491,11 @@ def _api_areas() -> dict[str, str | None]:
         }
         assert len(modules) <= 1, router.prefix
         if router.routes:
-            areas[router.prefix] = next(iter(modules), None)
+            # One area per first path segment (``/admin`` holds ``/admin/requests``, …).
+            area = "/" + router.prefix.split("/")[1]
+            module = next(iter(modules), None)
+            assert areas.get(area, module) == module, router.prefix
+            areas[area] = module
     return areas
 
 
@@ -1851,6 +1874,23 @@ def test_adr_index_lists_every_decision() -> None:
     assert [name for name in files if f"| [{name[:4]}]({name}) |" not in index] == []
 
 
+def test_adr_0016_cites_fortios_by_major_and_minor_release() -> None:
+    """ADR-0016 (Wave 3 contract 3.9): the Fortinet documents are cited as "FortiOS 7.6 …" and
+    the community articles by title and number, never with a third release number; the evidence
+    summary it quotes keeps "FortiGate DHCP," between the device and the logid; every decision
+    D1-D33 and the specification deviations are recorded."""
+    text = _doc("adr/0016-fortigate-dhcp-and-internet-exits.md")
+    flat = _flat(text)
+    for source in ("FortiOS 7.6 log reference", "FortiOS 7.6 CLI reference"):
+        assert source in flat, source
+    assert re.findall(r"FortiOS \d+\.\d+\.\d+", text) == []
+    assert MODEL_OR_RELEASE.findall(text) == []
+    assert "(FortiGate DHCP, logid 0100026001, lease 604800)" in flat
+    assert [n for n in range(1, 34) if f"**D{n} " not in text] == []
+    assert flat.count("This departs from SPEC 9.1") == 2  # srcmac (D10), traffic (D26)
+    assert [f"O{n}" for n in range(1, 23) if f"| O{n} |" not in text] == []
+
+
 def test_assumptions_record_every_licensing_decision() -> None:
     """Rows L1-L8 (the owner's brief) and C-1-C-16 (the contract's decisions) with the owner's
     answers: C-1, C-6 and C-11 confirmed (C-11 with the users limit of the code), the others
@@ -1903,3 +1943,122 @@ def _fold(text: str) -> str:
 def test_no_text_claims_compliance_or_an_unbreakable_licence(path: Path) -> None:
     text = _fold(_read(path))
     assert [phrase for phrase in OVERSTATEMENTS if _fold(phrase) in text] == []
+
+
+# -- browser administration (ADR-0014) ------------------------------------------------------------
+
+#: The installer parameters that set the limits of the browser administration (admin\policy.json,
+#: contract 2.16): declared without a default, so a choice once given is remembered.
+ADMIN_POLICY_PARAMETERS: Final = (
+    "SourceNetwork",
+    "AdminChangeHoldHours",
+    "ZamaneHoldHours",
+    "DisableBrowserAdministration",
+)
+
+
+@pytest.mark.parametrize("name", SETTINGS_DOCS)
+def test_settings_guides_name_the_limits_and_the_console_path(name: str) -> None:
+    """AYARLAR.md / SETTINGS.md: the installer's limits exist as its parameters, the console
+    commands exist (or their branch is pending), every event of the source ARCILOGGER-Admin is
+    explained with its number, and the wording rule holds."""
+    text = _doc(name)
+    unquoted = re.sub(r"^> ?", "", text, flags=re.MULTILINE)
+    assert "5651 yükümlülüklerini desteklemek için tasarlanmıştır" in _flat(unquoted)
+    other = "SETTINGS.md" if name == "AYARLAR.md" else "AYARLAR.md"
+    assert f"]({other})" in text
+    for parameter in ADMIN_POLICY_PARAMETERS:
+        assert f"`-{parameter}`" in text, parameter
+        assert _exists(f"installer:Install-Arcilogger.ps1 -{parameter}"), parameter
+    for command in ("approve-jar", "status", "versions"):
+        assert f"arcilogger_core.admin {command}" in text, command
+        name_ = f"admin:{command}"
+        assert _exists(name_) or name_ in PENDING_FROM_PARALLEL_BRANCHES, name_
+    for needed in ("admin\\policy.json", "ApplySystem", "NT SERVICE\\ArciAdmin", EVENT_SOURCE):
+        assert needed in text, needed
+    for code in ("R20-admin", "R20-config-change", "firewall_not_managed"):
+        assert f"`{code}`" in text, code
+    explained = {int(number) for number in re.findall(r"\b(41\d\d)\b", text)}
+    assert {int(event) for event in Event} <= explained
+
+
+def test_installer_and_first_steps_point_to_the_settings_guide() -> None:
+    steps = _show_next_steps()
+    assert "docs\\AYARLAR.md" in steps
+    for name in ("ILK-ADIMLAR.md", "FIRST-STEPS.md", "KURULUM.md", "INSTALL.md"):
+        guide = "AYARLAR.md" if name in ("ILK-ADIMLAR.md", "KURULUM.md") else "SETTINGS.md"
+        assert f"]({guide})" in _doc(name), name
+
+
+#: Section 2's severity words, per document (the first word of the severity cell).
+SEVERITY_WORDS: Final[dict[str, set[str]]] = {
+    "UYARILAR.md": {"Kritik", "Yüksek", "Orta", "Düşük", "Bilgi"},
+    "ALERTS.md": {"Critical", "High", "Medium", "Low", "Info"},
+}
+
+
+@pytest.mark.parametrize("name", ["UYARILAR.md", "ALERTS.md"])
+def test_alert_documents_list_every_lease_and_nat_cause(name: str) -> None:
+    """Section 2 has a row for every ``R20-lease`` cause and the four ``R20-nat`` causes
+    (ADR-0016, contract 2.6.3), each with a severity and the cause's one-line action of
+    ``alerts/texts.py`` (the e-mail line); the rules' names are in the section's opening."""
+    language = 0 if name == "UYARILAR.md" else 1
+    section = _section(_doc(name), "## 2.", "## 3.")
+    rows = _table_rows(section, r"`(R20-(?:lease|nat):[a-z-]+)(?::<[^`>]+>)?`")
+    assert set(NAT_CAUSES) == {"conversion-failed", "invalid", "legacy-changed", "unmapped-transip"}
+    expected = {f"R20-lease:{cause}" for cause in LEASE_CAUSES}
+    expected |= {f"R20-nat:{cause}" for cause in NAT_CAUSES}
+    assert sorted(rows) == sorted(expected)
+    for key, cells in rows.items():
+        rule, _, cause = key.partition(":")
+        action = (LEASE_CAUSES if rule == "R20-lease" else NAT_CAUSES)[cause][language]
+        assert re.split(r"[\s(;,]", cells[2])[0] in SEVERITY_WORDS[name], key
+        assert cells[4].startswith(action), key
+    intro = _flat(section.split("\n| ", 1)[0])
+    for rule in ("R20-lease", "R20-nat"):
+        assert f"`{rule}`" in intro
+        assert (RULES[rule].name_tr, RULES[rule].name_en)[language] in intro, rule
+
+
+#: The header of the reading table (Wave 3 contract 2.15, deviation d-23): one bilingual table, in
+#: the report guide and in the auditor guide.
+READING_TABLE_HEADER: Final = (
+    "| PDF'te görülen / What the PDF shows | Kesin olan (kayıtta) / Exact (in the records) "
+    "| Ayarlara dayanan / Configured | Varsayılan / Assumed |"
+)
+
+
+def _reading_table(name: str) -> list[list[str]]:
+    """The cells of every row of ``name``'s reading table (the header and its rule left out)."""
+    lines = _doc(name).splitlines()
+    assert lines.count(READING_TABLE_HEADER) == 1, name
+    start = lines.index(READING_TABLE_HEADER) + 2
+    rows = list(itertools.takewhile(lambda line: line.startswith("| "), lines[start:]))
+    return [_cells(line) for line in rows]
+
+
+@pytest.mark.parametrize("name", ["RAPOR.md", "DENETCI-KILAVUZU.md"])
+def test_reading_tables_cover_every_key_and_exit_label(name: str) -> None:
+    """Wave 3 contract 3.9: the reading table of RAPOR.md and DENETCI-KILAVUZU.md names every
+    explanation key the PDF prints (``READING_TABLE_KEYS``) in backticks in a row's first column,
+    and no other key; and every Turkish exit label of the 2.12 label table is in a first
+    column, as a whole label."""
+    from arcilogger_api.reports.texts import EXIT_LABELS, READING_TABLE_KEYS
+
+    rows = _reading_table(name)
+    assert rows, name
+    assert [row for row in rows if len(row) != 4] == [], name
+    firsts = [row[0] for row in rows]
+    named = [key for first in firsts for key in re.findall(r"`([a-z0-9_]+)`", first)]
+    assert sorted(set(READING_TABLE_KEYS) - set(named)) == [], name
+    assert sorted(set(named) - set(READING_TABLE_KEYS)) == [], name
+    assert len(named) == len(set(named)), name
+    # A label counts only whole: quoted or in parentheses, not as part of a longer label ("NAT
+    # adresi" in "NAT adresi doğrulanamadı") or of a sentence.
+    labels = [tr for tr, _en in EXIT_LABELS.values()]
+    whole = [re.compile(rf'(?:^|["(]){re.escape(label)}(?:[")]| /|$)') for label in labels]
+    assert [
+        label
+        for label, pattern in zip(labels, whole, strict=True)
+        if not any(pattern.search(first) for first in firsts)
+    ] == [], name

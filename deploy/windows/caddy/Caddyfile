@@ -40,7 +40,11 @@
 		format json
 	}
 
-	encode zstd gzip
+	# Live tail (server-sent events) is not compressed: compression would hold events back.
+	# No flush_interval: reverse_proxy flushes text/event-stream at once, and -1 would keep the
+	# API's stream open after the browser went away (docs/ARCHITECTURE.md, "Canlı Akış").
+	@compress not path /api/v1/live/*
+	encode @compress zstd gzip
 
 	# Deferred (because of "-Server"), so these values also win over headers sent by the API.
 	header {

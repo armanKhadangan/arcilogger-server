@@ -98,6 +98,24 @@ def test_the_commented_example_sources_are_a_valid_configuration(tmp_path: Path)
     assert "sources" not in [problem.key for problem in setup_problems(config)]
 
 
+def test_a_source_switched_off_is_an_example_value(tmp_path: Path) -> None:
+    """The example explains [[sources]] enabled (ADR-0014, Ayarlar -> Kaynaklar): false switches a
+    source off without removing it; the default stays true."""
+    text = EXAMPLE.read_text(encoding="utf-8")
+    assert re.search(r"(?m)^#   enabled +false: switched off", text)
+    switched_off = with_example_sources(text).replace(
+        'name = "switch-1"', 'name = "switch-1"\nenabled = false'
+    )
+    path = tmp_path / "arcilogger.toml"
+    path.write_text(switched_off, encoding="utf-8")
+    config = load_config(path)
+    assert {source.name: source.enabled for source in config.sources} == {
+        "fortigate": True,
+        "core-r1": True,
+        "switch-1": False,
+    }
+
+
 def test_the_load_generator_sends_from_the_example_sources() -> None:
     """tools/loadgen simulates the example network: its senders are the commented example's
     sources, in the same order."""

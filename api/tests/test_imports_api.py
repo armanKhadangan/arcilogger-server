@@ -145,6 +145,7 @@ def test_persons_errors_per_line_and_nothing_applied(
     assert "Hayali" in result["errors"][2]["message_tr"]
     assert "2. satırında" in result["errors"][3]["message_tr"]
     assert "line 2" in result["errors"][3]["message_en"]
+    assert result["errors"][4]["message_tr"] == "active değeri evet ya da hayır olmalıdır (belki)."
     assert _persons(factory) == {}  # all or nothing
     assert _audit(factory, "import.persons") == []
 
@@ -208,6 +209,58 @@ def test_an_export_imports_as_updates_also_without_employee_numbers(
     # Without the id column a line without an employee number still adds a person.
     plain = _lines("name;title", "Numarasız Kişi;Şef")
     assert _upload(client, "persons", plain).json()["preview"][0]["duplicate_name"] is True
+
+
+def test_persons_usage_exclusion_column(
+    client: TestClient, admin: LoggedIn, factory: sessionmaker[Session]
+) -> None:
+    """``usage_excluded`` is optional and read like ``active``: an empty cell, or a file without
+    the column, changes nobody's; an export carries it and imports again unchanged."""
+    with factory() as session:
+        add_person(session, "Görünen", employee_no="8001")
+        add_person(session, "Gizli", employee_no="8002").usage_excluded = True
+        add_person(session, "Boş Hücre", employee_no="8003").usage_excluded = True
+        session.commit()
+    data = _lines(
+        "name;employee_no;usage_excluded",
+        "Görünen;8001;EVET",
+        "Gizli;8002;hayır",
+        "Boş Hücre;8003;",
+        "Yeni Gizli;8004;1",
+        "Yeni Görünen;8005;",
+    )
+    preview = _upload(client, "persons", data).json()
+    assert preview["errors"] == []
+    assert (preview["created"], preview["updated"], preview["unchanged"]) == (2, 2, 1)
+    assert {p["name"]: p["changes"] for p in preview["preview"]} == {
+        "Görünen": ["usage_excluded"],
+        "Gizli": ["usage_excluded"],
+        "Yeni Gizli": ["employee_no", "name", "usage_excluded"],
+        "Yeni Görünen": ["employee_no", "name"],
+    }
+    assert _upload(client, "persons", data, dry_run=False).json()["errors"] == []
+    assert {name: person.usage_excluded for name, person in _persons(factory).items()} == {
+        "Görünen": True,
+        "Gizli": False,
+        "Boş Hücre": True,
+        "Yeni Gizli": True,
+        "Yeni Görünen": False,
+    }
+    # A file without the column (an older template) leaves every flag as it is.
+    older = _lines("name;employee_no;title", "Görünen;8001;Uzman")
+    assert _upload(client, "persons", older, dry_run=False).json()["errors"] == []
+    assert _persons(factory)["Görünen"].usage_excluded is True
+    exported = client.get(f"{API}/persons/export.csv").content
+    again = _upload(client, "persons", exported).json()
+    assert (again["errors"], again["updated"], again["unchanged"]) == ([], 0, 5)
+    bad = _upload(client, "persons", _lines("name;usage_excluded", "Belirsiz;belki")).json()
+    assert [(e["line"], e["message_tr"], e["message_en"]) for e in bad["errors"]] == [
+        (
+            2,
+            "usage_excluded değeri evet ya da hayır olmalıdır (belki).",
+            "usage_excluded must be evet or hayır, true or false (belki).",
+        )
+    ]
 
 
 def test_person_id_errors_per_line(
@@ -550,7 +603,7 @@ def test_assignment_header_and_templates(
     assert missing.status_code == 422
     assert missing.json()["error"]["code"] == "csv_header"
     for kind, header in (
-        ("persons", "name;department;title;email;employee_no;active;notes"),
+        ("persons", "name;department;title;email;employee_no;active;notes;usage_excluded"),
         ("assignments", "mac;employee_no;person_name;valid_from;note"),
     ):
         response = client.get(f"{API}/imports/{kind}/template.csv")

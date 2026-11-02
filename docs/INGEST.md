@@ -12,6 +12,28 @@
 - Her (kaynak, gün) için **kaldığı yer** (`ingest_offsets`: bayt konumu + satır numarası)
   yüklenen satırlarla **aynı veritabanı işleminde** kaydedilir. Bu yüzden servis çökse, elektrik
   kesilse veya süreç öldürülse bile bir satır **ne iki kez yüklenir ne de atlanır**.
+- Arama'nın özet tablosu `search_counts` (saat, ham dosya, kayıt türü, tablo, eylem ve özel /24
+  ağı başına **kesin** satır sayıları) da satırlarla **aynı işlemde** yazılır: yüklenen her satır
+  tam bir kez sayılır. Bu sürüme yükseltmeden önce yüklenmiş dosyaları worker işi
+  `search.counts_backfill` gün bitince sayar; o zamana kadar o günlerin istatistikleri doğrudan
+  sayılır. Bu adımın kendi maliyeti tek süreçli yüklemenin işlemci süresinin yaklaşık %1,4'üdür;
+  `bench_throughput.py --repeat 3` ile Wave 1'e göre yavaşlama ölçülemedi (medyanlar +%0,2 ve
+  2 worker ile +%1,6). Bu ölçümde web filtresi satırı yoktur; %18'i web filtresi olan yük
+  üreteci gününde iki karşılaştırmalı ölçümün medyanı Wave 1'den %1,9 (tek süreç) ve %3,8
+  (2 worker) yavaştır: %5 sınırının içinde, ama sıfır değil (aşağıda "Measured throughput").
+- FortiGate DHCP satırları (`fg_dhcp`) ve oturum kayıtlarındaki `srcmac` (ADR-0016) yüklemeyi
+  %5 sınırının ötesinde yavaşlatmaz: aynı satırlar iki sürüme de yüklenip karşılaştırıldı
+  (`bench_throughput.py --repeat 3`, sırayla 12'şer çalıştırma). Varsayılan karışımda fark tek
+  süreçte +%0,8, 2 worker ile +%0,7'dir (yeni kod yolu çalışmaz). Yalnızca FortiGate'ten gelen
+  karışımda (%70 `srcmac`'li oturum, %30 DHCP) değişikliğin bir maliyeti vardır: tek süreçte
+  −%3,5 (işlemci süresi +%3,9), 2 worker ile +%1,7 (aşağıda "Measured throughput").
+  Gerçekçi yük üreteci günlerinde (varsayılan seçenekler ve `--dhcp-server fortigate --srcmac`;
+  her gün bir kez yazılıp iki sürüme de yüklendi, sırayla 16'şar çalıştırma) fark tek süreçte
+  −%3,1 / −%2,4, 2 worker ile −%2,8 / −%3,2'dir: %5 sınırının içinde, ama sıfır değil.
+- Kaynak saati örnekleri (`source_clock_samples`, #73) satırlarla aynı işlemde yazılır: aynı
+  satırlar iki sürüme de yüklendi (`bench_throughput.py --repeat 3`, sırayla 12'şer çalıştırma);
+  fark varsayılan karışımda tek süreçte +%2,4, 2 worker ile +%0,4, yalnızca FortiGate'ten gelen
+  karışımda −%0,9 / −%3,6'dır: %5 sınırının içinde (aşağıda "Measured throughput").
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -49,7 +71,8 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
     once the sealer deleted the spool file)             ▼
                                          one transaction: offsets (compare-and-set) → COPY rows
                                          → parse_failures upsert → sources (+ new_source alert)
-                                         → COMMIT → in-memory offsets move
+                                         → search_counts and source_clock_samples upserts → COMMIT
+                                         → in-memory offsets move
 ```
 
 | Module | Role |
@@ -57,7 +80,7 @@ spool/<source>/<day>.log ──► read complete lines ──► prepare (rawlog
 | `service.py` | the loop: discover streams, read, batch, load, finish, back off, status |
 | `files.py` | `read_complete` (spool, opened and closed per read), `VaultReader` (sealed `.log.gz`), `open_shared` (Windows delete sharing) |
 | `prepare.py` | one raw line → rows (pure function; runs in a worker process unchanged) |
-| `loader.py` | the load transaction, compare-and-set offsets, bisecting a batch `COPY` refuses |
+| `loader.py` | the load transaction (rows, failures, sources, search counts, clock samples), compare-and-set offsets, bisecting a batch `COPY` refuses |
 | `instance.py` | single-instance lock (PostgreSQL session-level advisory lock) |
 | `sealed.py` | which days the sealer finished (`state/seal/<day>.json` + manifest) |
 | `sources.py` | spool folder → configured type (`fortigate`, `ap-<ip>` → network entry, `unknown-<ip>` → content detection) |
@@ -121,13 +144,77 @@ worker that imports that file should use the same key.)
 3. In-memory offsets move only after `COMMIT`; after a restart they come only from the database.
 
 Tests: an interruption at every step of the transaction (`offsets`, `copy`, `failures`,
-`sources`, `commit`), a second instance moving the offsets mid-batch, two instances racing on
-the same files (lock switched off), the real process killed three times with
+`sources`, `counts`, `commit`), a second instance moving the offsets mid-batch, two instances
+racing on the same files (lock switched off), the real process killed three times with
 `SIGKILL`/`TerminateProcess` during loading, re-runs over the same files, and database outages
 (a TCP proxy that drops every connection): before the `COPY`, **while `COPY` is streaming rows**,
 **as `COMMIT` is sent**, and a `COMMIT` that **succeeded but whose answer was lost** (the retry
 finds the offsets already moved and continues from the database) — every time each line is in
-`messages` exactly once and rows and offsets agree.
+`messages` exactly once and rows and offsets agree; after the interruptions, the second instance,
+the race and the kills the search counts agree with them too (`searchcounts.verify` in the
+same snapshot), and so do the clock samples (their sum equals the rows with a device time of
+their own).
+
+## Search counts
+
+The step `counts` writes the summary table `search_counts` of Arama's statistics
+([ADR-0015](adr/0015-search-live-sources.md), `arcilogger_db.searchcounts`) in the load
+transaction, from exactly the lines whose rows loaded in it:
+
+- One key per hour of the device time (`messages.time`, UTC), spool file (`source`, `raw_day`),
+  kind of the `messages` row (`kinds.kind_of`), typed table (`''` for none), the typed row's
+  `action` (lower-cased) and the /24 of its client address when that is a private IPv4 address;
+  `count_key` is the one definition, also used by `rebuild_stream`, so what ingest counted equals
+  a recount of the rows (tested on every path below). The loader groups a batch's lines by what
+  `count_key` reads and makes each key once per group (about 1.8 µs a line instead of 5); until
+  the step it keeps the runs of lines `COPY` loaded, not one object per line.
+- A line whose typed row is not loaded — dropped by the row check (`rowcheck.<table>`) or refused
+  by `COPY` and salvaged with its `messages` row alone (`copy.<table>`) — counts with `tbl = ''`:
+  the search over the typed tables does not find it either. A line without a `messages` row
+  (`rawlog.invalid`, `copy.messages`, a `rowcheck.messages` without generic view) is not
+  counted: it is in neither search nor statistics, only in `parse_failures`.
+- One fixed statement per 500 keys, `INSERT … SELECT FROM unnest(:hours, :sources, …) ON
+  CONFLICT … DO UPDATE SET n = search_counts.n + EXCLUDED.n`, the keys as parallel arrays in
+  sorted order (a multi-row `INSERT` built and compiled per batch cost 7.2–7.3 ms of the service
+  process's CPU for 57 keys; the cached statement 1.0–1.1 ms, wall 8.7–8.9 → 2.0–2.5 ms). A batch of 5,000 lines has tens to a few hundred keys; the load-generator day
+  below (217,875 lines) has 800. No lock of its own: one ingest writes a file (instance lock and
+  compare-and-set), and a finished file is never written again.
+- **Files loaded before revision `0016_search`.** The migration sets
+  `ingest_offsets.counts_from_line = line_number + 1` on every file with loaded lines. Ingest
+  counts what it loads from then on and leaves the mark; the worker job `search.counts_backfill`
+  (every 10 minutes, no new file after 60 s, newest day first; [CORRELATION.md](CORRELATION.md))
+  recounts a file once it is finished and clears the mark. Until then the statistics of the days
+  around that file are counted directly (slower, same result). `arcilogger-db search-counts
+  status` lists the files still to count, `rebuild --source S --day YYYY-MM-DD` recounts one at
+  once (also one still being loaded: it locks the file's `ingest_offsets` row, so ingest's next
+  batch of that file waits until the recount commits), `verify --hours 2` recounts the recent
+  hours from the rows and exits 1 on a difference.
+
+Tests: `ingest/tests/test_loader_counts.py` (shared batches over three sources and two days, a
+damaged line, a dropped typed row, the `COPY` salvage, vault continuation, a file half loaded
+before the upgrade, a device clock almost a day behind) and the exactly-once matrix above.
+
+## Clock samples
+
+The same step `counts` writes `source_clock_samples` (`arcilogger_db.clocksamples`, ADR-0016 D28,
+issue #73) from the same lines: per source, received minute (`time_received`, UTC) and device
+clock offset `time - time_received` in whole seconds rounded away from zero (`0` under a minute
+either way), the number of lines whose `messages` row loaded with a device time of its own (a line
+stamped with its receive time, also one whose device time was beyond `max_clock_skew`, is not
+counted). `offset_of` and `minute_of` define a key; `clock_key` applies them to a row and
+`clocksamples.rebuild` uses it; the loader groups a batch's lines by source, minute and offset
+with the same two functions and makes each key once per group (a test pins it to `clock_key`
+line by line). A source on time has one key a minute, so a batch adds a few keys per
+source, written with one fixed `INSERT … SELECT FROM unnest(…) ON CONFLICT … DO UPDATE SET n =
+source_clock_samples.n + EXCLUDED.n` per 500 keys. `R20-lease:source-clock` and a lookup's clock
+check read it by receive time: a device clock set hours back writes rows whose device times lie
+hours before their arrival, which a sample of `messages` by device time does not reach (contract,
+"Deviations — clock (2026-11)"). The upgrade to revision `0019_source_clock_samples` counts the
+rows received in its last two hours; older lines have no samples. Like `search_counts`, the
+samples follow the log tables once database retention runs (`partitions.drop_before` deletes the
+minutes before the first kept month; no job calls it yet, [DATA-MODEL.md](DATA-MODEL.md)). Tests:
+`ingest/tests/test_loader_clocks.py`, `db/tests/test_clocksamples.py` and the exactly-once
+matrix above.
 
 ## One instance per database
 
@@ -231,6 +318,204 @@ were not faster than the single runs below: report the minimum and median of
 | realistic load-generator mix (`tools/loadgen`, 2 days, 431,000–441,000 lines: 35 % DNS, 27 % traffic, 18 % web filter, 17 % application control), workers 0 / 2 / 3 | **3,755–3,809 / 7,191–7,941 / 7,477–8,729 lines/s** |
 | live feed **10,000 lines/s for 30 s**, real parsers, `--workers 2` | **did not keep up**: backlog 52,285 lines (≈ 5.2 s) and growing; caught up 5.7 s after the feed stopped |
 
+**Wave 2: the `counts` step and the `fg_web` index (2026-10-26).** The gate of the Wave 2
+contract: `bench_throughput.py --repeat 3` before (Wave 1) and after, at most 5 % slower. The same
+VM, `--lines 200000 --batch-rows 5000 --workers 0 2 --repeat 3`, the two trees alternating
+(Wave 1, Wave 2, Wave 2, Wave 1, twice: 12 runs each; load average 1.3–2.8); min–max (median)
+lines/s:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Wave 1 (no `fg_web` index, no `counts` step) | 5,713–6,345 (6,156) | 9,668–12,368 (11,680) |
+| **Wave 2 (the index and the `counts` step)** | **5,657–6,407 (6,171)** | **11,513–12,346 (11,866)** |
+
+The medians differ by +0.2 % and +1.6 %: no slowdown is measurable, the gate as the contract
+sets it holds (ingest process CPU, median: 30.98 / 30.99 s in-process, 8.68 / 8.82 s with 2
+workers). This benchmark loads **no web filter line** (its FortiGate format samples have none,
+the rest is DHCP): it measures the `counts` step with few keys a batch and not the `fg_web`
+index at all; both are measured on the load-generator day below. The step's own
+cost, measured inside such a run: 1.8 µs a line to make the keys (5 µs before the lines were
+grouped by what `count_key` reads) and 0.1 s CPU for the 40 upserts (2–7 keys each), together
+0.45 s of the 31 s an in-process run takes (1.4 %); with 2 workers the service process, at about
+50 % of one core, has that time spare. A first version kept a tuple per loaded line until the
+step: the garbage collector then ran about 300 times more per 200,000 lines (0.3 s), and single
+runs alternating with Wave 1 on a busy machine were 3.5–4.6 % slower in-process; the loader now
+keeps the runs of lines `COPY` loaded.
+
+**The load-generator day (2026-10-27).** One site day of `tools/loadgen` (217,875 lines: 35 % DNS,
+27 % traffic, 18 % web filter, 17 % application control; 800 summary keys, about 57 a batch),
+loaded into a fresh database per run (`run(once=True)`, `batch_rows` 5,000), 2 runs per tree and
+worker count in each turn, the trees alternating in two campaigns: Wave 1, Wave 2, Wave 2, Wave 1,
+twice; then Wave 1, the `fg_web` index alone (the tree before the `counts` step), Wave 2, Wave 2,
+the index alone, Wave 1, twice. 8 runs per tree and campaign, load average 0.1–4.2 (another
+agent's work shared the machine); min–max (median) lines/s, the difference of the medians to
+Wave 1 of the same campaign:
+
+| Load-generator day | in-process | `--workers 2` |
+|---|---|---|
+| 1st campaign: Wave 1 | 5,095–5,711 (5,429) | 9,322–11,924 (10,921) |
+| 1st campaign: **Wave 2** | **4,919–5,415 (5,130), −5.5 %** | **8,516–11,062 (10,192), −6.7 %** |
+| 2nd campaign: Wave 1 | 5,303–5,760 (5,538) | 10,144–11,612 (10,770) |
+| 2nd campaign: the `fg_web` index alone | 5,312–5,783 (5,667), +2.3 % | 8,388–11,368 (10,542), −2.1 % |
+| 2nd campaign: **Wave 2** | **5,343–5,596 (5,462), −1.4 %** | **10,213–11,487 (10,746), −0.2 %** |
+| both campaigns, 16 runs each: Wave 1 / **Wave 2** | 5,471 / **5,366, −1.9 %** | 10,921 / **10,506, −3.8 %** |
+
+On the realistic mix Wave 2 is slower, but over both campaigns within the 5 % of the gate
+(−1.9 % in-process, −3.8 % with 2 workers); one campaign of 8 runs ranges from −0.2 % to
+−6.7 % and cannot tell 5 % apart on this machine. The index alone shows no cost beyond that noise
+(+2.3 %, −2.1 %). The step's own time in such a run, instrumented (2 runs per worker count):
+2.0–2.4 µs a line to make the keys and 0.42–0.71 s for the 44 upserts (2,529 keys; about 5 ms of
+each is SQLAlchemy building the multi-row `INSERT`), together 0.9 s, 2.2 % of an in-process run,
+and 1.1–1.2 s, 5–6 % of a run with 2 workers: there it runs in the service process, at about
+50–60 % of one core, so it is partly hidden. Re-measure on site with the real mix (below).
+
+**After the cached upsert (2026-10-27).** `upsert_counts` now sends one fixed `unnest`
+statement instead of building a multi-row `INSERT` per batch (above). The same load-generator
+day, ABBA twice, 8 runs per tree and worker count (load average 2.0–4.0, another agent's work
+sharing the machine); min–max (median) lines/s:
+
+| Load-generator day | in-process | `--workers 2` |
+|---|---|---|
+| Wave 2 before the change / after it | 5,220–5,742 (5,562) / 4,930–5,757 (5,548), −0.3 % | 9,635–10,674 (9,887) / 9,219–10,384 (9,886), −0.0 % |
+| Wave 1 / Wave 2 after the change | 5,026–5,520 (5,340) / 4,781–5,466 (5,132), −3.9 % | 9,043–10,428 (9,654) / 9,177–10,396 (9,622), −0.3 % |
+
+The change saves CPU in the service process but no throughput measurable on this machine.
+**The 5 % gate is met on average, but not shown with margin:** with 2 workers (the default) one
+8-run campaign ranged −0.2 % to −6.7 % before the change and −0.3 % after it, in-process −1.4 %
+to −5.5 % and now −3.9 %; this shared 4-vCPU VM cannot tell such differences apart. It stays an
+on-site acceptance item with the real mix (`bench_throughput.py --repeat 3` and a day of the
+site's own spool, Wave 1 against Wave 2).
+
+Earlier rounds, while the test runs of the other Wave 2 packages shared the machine (load average
+2–9, 30–100 % busy): one run per tree and round, and one load-generator day of 217,875 lines
+(18 % web filter lines, 800 summary keys) besides; min–max (median) lines/s:
+
+| Trees compared | `bench_throughput.py` in-process / `--workers 2` | load-generator day in-process / `--workers 2` |
+|---|---|---|
+| Wave 1 (no index, no counts), 3 rounds | 4,445–4,997 (4,993) / 6,416–8,670 (8,162) | 3,953–4,370 (4,348) / 5,226–8,348 (7,662) |
+| with the `fg_web` index, same rounds (6 / 3) | 4,400–5,091 (4,815) / 6,506–9,904 (8,204) | 4,008–4,535 (4,332) / 6,392–8,412 (7,153) |
+| with the index, 4 later rounds | 4,153–5,298 (4,856) / 5,225–7,136 (6,316) | 4,000–4,892 (4,544) / 6,216–7,917 (6,654) |
+| with the index and the first version of the `counts` step, the same 4 rounds | 4,486–5,614 (4,997) / 4,329–8,673 (7,278) | 4,090–4,718 (4,372) / 5,777–6,734 (6,142) |
+
+The index costs nothing measurable (the benchmark has no web filter lines; the load-generator day
+has 18 %). The differences of these rounds (−8 % to +15 %) lie inside a spread of up to 27 %
+between two runs of one round. The upsert of the load-generator day, with its 37–247 keys a
+batch, took 15 ms a batch measured alone with a commit of its own (3 µs a line; in the load
+transaction there is no commit of its own). Re-measure on site with the rest (below).
+
+**Wave 3: `fg_dhcp`, `fg_traffic.srcmac` and the `mac` field kind (2026-10-28, ADR-0016).** The
+gates 1–2 of the Wave 3 contract (3.8): `bench_throughput.py --repeat 3`, the Wave 2 tree
+(`c5f14a4`) against the Wave 3 branch, at most 5 % slower. Method: each mix was written **once**
+with the Wave 3 tool (`bench_throughput.py --write-spool DIR --lines 200000 --mix default`, and
+`--mix fortigate-only`: 70 % forward traffic lines with `srcmac`/`mastersrcmac`, 30 % synthetic
+FortiGate DHCP server lines, 9 in 10 ACKs and 1 in 10 RELEASEs), then loaded by both trees with
+`--spool DIR --batch-rows 5000 --workers 0 2 --repeat 3`. The same `bench_throughput.py` was
+copied unchanged into a worktree of the Wave 2 tree and run there with `PYTHONPATH` set to its
+`core/src`, `db/src` and `ingest/src` (each tree migrates its own throwaway database; the Wave 2
+tree stores the FortiGate DHCP lines in `fg_event` and `srcmac` in `extra`, the Wave 3 tree in
+`fg_dhcp` and the column; 400,000 rows a run in both). Both trees load exactly the same bytes.
+Order: Wave 2, Wave 3, Wave 3, Wave 2, twice per mix (ABBA ×2, 12 runs per tree and worker
+count), gate 1 first, then gate 2, nothing else running (load average 2.4–2.8, which is this
+benchmark itself: PostgreSQL and the ingest process). This 4-vCPU VM is about 45–50 % slower than
+the one of the Wave 2 rows above; only the comparison within one table counts. Min–max (median)
+lines/s, the difference of the medians to Wave 2:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Gate 1, the default mix: Wave 2 | 3,262–3,421 (3,324) | 5,333–6,265 (5,798) |
+| Gate 1, the default mix: **Wave 3** | **3,157–3,468 (3,351), +0.8 %** | **5,521–6,249 (5,839), +0.7 %** |
+| Gate 2, the FortiGate-only spool: Wave 2 | 2,911–3,123 (3,031) | 4,622–5,594 (5,134) |
+| Gate 2, the FortiGate-only spool: **Wave 3** | **2,841–3,075 (2,926), −3.5 %** | **4,652–5,654 (5,222), +1.7 %** |
+
+Both gates hold. Gate 1's lines reach only the routing rule's key check, as expected: its
+`event` lines (10 %) carry no `dhcp_msg`, and its traffic lines have no `srcmac` (ingest process
+CPU, median: 55.2 / 55.4 s in-process). Gate 2 is the case the change costs something in: every
+FortiGate DHCP line now converts a MAC and an address and is written to `fg_dhcp` instead of
+`fg_event`, and every traffic line converts `srcmac` (ingest process CPU, median: 60.4 / 62.8 s
+in-process, +3.9 %; with 2 workers the parsing runs in the workers and the medians show no cost).
+The per-campaign
+medians (one ABBA round each, 6 runs per tree): gate 1 −0.8 % / +1.8 % in-process and +6.3 % /
+−2.4 % with 2 workers; gate 2 −2.0 % / −3.3 % in-process and −1.2 % / −0.7 % with 2 workers. The
+machine got slower during gate 2's second campaign (both trees, about 3.5–5 % in-process and
+10 % with 2 workers), which the alternation evens out. An earlier, unrecorded measurement of the
+handed-over branch gave −5.5 % once under another job's load, and −2.2 % to −3.1 % (gate 1) and
+−0.5 % to −3.1 % (gate 2) in quiet runs, in line with these. Gate 3 (the load-generator days,
+`--dhcp-server fortigate --srcmac`) is measured by the integrator after WP-F1 and recorded below.
+
+**Wave 3, gate 3: the load-generator days (2026-10-29).** Gate 3 of the Wave 3 contract (3.8): the
+load-generator day with the default options and a `--dhcp-server fortigate --srcmac` day, each
+written once and loaded by both trees through the same harness, at least 16 runs per tree
+alternating, at most 5 % slower than Wave 2. Both days were written **once** with the Wave 3
+`tools/loadgen`: `--day 2026-09-23 spool --data-dir DIR` (the day of the Wave 2 rows above: 217,875
+lines, 138.7 MB, in `fortigate`, `core-r1` and `switch-1`) and `--day 2026-09-23 --dhcp-server
+fortigate --srcmac spool --data-dir DIR` (214,553 lines, 140.2 MB, all from the FortiGate: as many
+DNS, web filter, application control and traffic lines (58,973), the traffic lines now with
+`srcmac`, and 242 DHCP ACK and 2 RELEASE lines, no MikroTik line). Both trees loaded them with
+`bench_throughput.py --spool DIR/spool --batch-rows 5000 --workers 0 2`, one run per worker count
+and invocation. The Wave 2 tree is `c5f14a4` with the method of gates 1–2 (the same
+`bench_throughput.py` copied unchanged into its worktree, `PYTHONPATH` set to its `core/src`,
+`db/src` and `ingest/src`, the same Python environment); the Wave 3 tree is `wave-3` at `fcd2c1d`
+(with the branches then in review merged in, which change nothing under `core/src`, `db/src` or
+`ingest/src`). `switch-1` is not a source of the harness's configuration: both trees parse its lines
+by content. Both trees load exactly the same bytes and write the same number of rows (435,368 and
+429,106 a run). Order: Wave 2, Wave 3, Wave 3, Wave 2, eight times per day (ABBA ×8, run by run: 16
+runs per tree, day and worker count; two campaigns of ABBA ×4), the default day first. This
+4-vCPU VM (Xeon 2.10 GHz, 16 GB, PostgreSQL 16 without TimescaleDB) was shared at times with other
+work, including this integration's own browser tests and live smoke (about 16:44–16:48 UTC): load
+average at the start of an invocation 1.8–2.6, except 2.7–5.9 for 7 invocations (14 runs) in the
+middle of the default day (16:44–16:53 UTC, the end of its first campaign and the start of its
+second), among them each tree's lowest run with 2 workers (5,503 and 6,234 lines/s). Min–max
+(median) lines/s, the difference of the medians to Wave 2:
+
+| `bench_throughput.py --spool`, 16 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Gate 3, the load-generator day (default options): Wave 2 | 4,178–5,280 (4,997) | 5,503–9,551 (8,603) |
+| Gate 3, the load-generator day (default options): **Wave 3** | **4,471–5,055 (4,843), −3.1 %** | **6,234–9,031 (8,361), −2.8 %** |
+| Gate 3, `--dhcp-server fortigate --srcmac`: Wave 2 | 4,739–5,372 (5,053) | 7,787–10,118 (8,953) |
+| Gate 3, `--dhcp-server fortigate --srcmac`: **Wave 3** | **4,644–5,265 (4,932), −2.4 %** | **7,720–9,726 (8,664), −3.2 %** |
+
+The gate holds on both days: Wave 3 is 2.4–3.2 % slower in all four medians (ingest process CPU,
+median, in-process: 39.2 / 40.4 s on the default day, +3.2 %; 38.3 / 39.4 s on the FortiGate day,
++2.8 %). On the default day no line takes the new paths: each traffic line only looks for `srcmac`
+(`parsers/fortigate.py:133`, `:480`) and each event line for `dhcp_msg` (`:586`); this measurement
+does not show where the extra CPU goes. The per-campaign medians (ABBA ×4, 8 runs per tree):
+default day −3.0 % / −2.8 % in-process and −0.8 % / −3.9 % with 2 workers; FortiGate day −0.5 % /
++0.5 % in-process and −2.8 % / −6.8 % with 2 workers (in that last campaign both trees ran faster
+than in the first, Wave 2 by 12 %, Wave 3 by 7 %). As on the Wave 2 day, one 8-run campaign cannot
+tell 5 % apart on this VM; the 16-run medians are the measurement. The lowest runs with 2 workers on
+the default day (5,503 and 6,234 lines/s, one per tree) fell into that loaded time (machine CPU
+91–93 %). Re-measure on site with the site's own day (below).
+
+**Wave 3: the clock samples (2026-11-01, issue #73).** The gate of issue #73: the ingest
+throughput with `source_clock_samples` (the `counts` step's second upsert, above) at most 5 %
+slower than `wave-3` without it. Method of gates 1–2: each mix written **once**
+(`bench_throughput.py --write-spool DIR --lines 200000 --mix default`, and `--mix
+fortigate-only`), loaded by both trees with `--spool DIR --batch-rows 5000 --workers 0 2 --repeat
+3`; the `wave-3` tree (`1cd3588`) in a worktree with `PYTHONPATH` set to its `core/src`,
+`db/src` and `ingest/src`, each tree migrating its own throwaway database. Order: `wave-3`,
+branch, branch, `wave-3`, twice per mix (ABBA ×2, 12 runs per tree and worker count), the
+default mix first, nothing else running (load average 2.1–2.7, the benchmark itself; 4-vCPU Xeon
+2.10 GHz, 16 GB, PostgreSQL 16 without TimescaleDB). In both mixes every line has a device time
+of its own, fixed per sample line, while the receive times advance 7 ms a line, so the offset
+changes every second: tens of keys per batch and source, more than a source on time writes (one
+a minute). The first two branch invocations of the default mix ran the previous rounding of
+`offset_of` (half a second up instead of away from zero; the same cost). Min–max (median)
+lines/s, the difference of the medians to `wave-3`:
+
+| `bench_throughput.py --repeat 3`, 12 runs each | in-process | `--workers 2` |
+|---|---|---|
+| Default mix: `wave-3` | 4,184–5,388 (4,989) | 7,687–9,134 (8,404) |
+| Default mix: **the clock samples** | **4,690–5,345 (5,110), +2.4 %** | **7,339–8,746 (8,438), +0.4 %** |
+| FortiGate-only spool: `wave-3` | 4,656–4,911 (4,754) | 7,843–8,660 (8,389) |
+| FortiGate-only spool: **the clock samples** | **4,559–4,777 (4,712), −0.9 %** | **7,221–8,604 (8,088), −3.6 %** |
+
+The gate holds. Ingest process CPU, median: 36.3 / 35.7 s (default) and 38.6 / 39.1 s
+(FortiGate-only, +1.3 %) in-process; with 2 workers, where the service process does little more
+than load, 12.6 / 12.9 s and 12.5 / 13.2 s (+5.6 % of that process). The per-campaign medians
+(one ABBA round each, 6 runs per tree): default +5.1 % / +1.6 % in-process and −1.1 % / −0.1 %
+with 2 workers; FortiGate-only −0.4 % / −1.5 % in-process and −1.6 % / −3.0 % with 2 workers. As
+before, this VM cannot tell a few per cent apart; the 12-run medians are the measurement.
+
 Default `[ingest] workers = 2`: about 1.7× the in-process speed; a third worker adds 10–13 %
 on 4 vCPU but competes with PostgreSQL, the API and the collector on the same cores. **Spec 14
 (≥ 10,000 messages/s sustained on 4 vCPU) has not been shown with the real parsers**; it stays
@@ -266,6 +551,12 @@ its timeout): it watches the parent's process sentinel, so no orphaned worker st
   `messages` row, see the table above).
 - Throughput with the real parsers and the production database (TimescaleDB or partitions):
   `bench_throughput.py --repeat 3 --workers 0 2 3` and a live feed at 10,000 lines/s (spec 14
-  acceptance; not met on the development VM).
+  acceptance; not met on the development VM); the cost of Wave 2 (the `counts` step and
+  `ix_fg_web_rhost_time`) on the site's own mix, with its web filter lines, which
+  `bench_throughput.py` does not have (the load-generator day above: −1.9 % / −3.8 %).
+- The search counts after the first days: `arcilogger-db search-counts verify --hours 24` must
+  report no difference (rows and counts are written in one transaction), and its line on names
+  not stored in lower case should read 0 for `fg_dns.qname` and `fg_web.hostname` (`domain:`
+  assumes lower case, ADR-0015).
 - Readers of `ingest-status.json` (API) should open, read and close it quickly: on Windows an
   atomic replace fails while a reader holds the file; ingest logs that once and retries.

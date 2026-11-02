@@ -20,11 +20,18 @@ import tomllib
 import unicodedata
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 MIN_RETENTION_DAYS = 730  # two years: İnternet Toplu Kullanım Sağlayıcıları Yönetmeliği md. 4/1-b
 DEFAULT_RETENTION_DAYS = 760  # two years plus a margin
@@ -55,6 +62,12 @@ class SourceConfig(_Model):
     #: TCP 514, ``tcp`` makes the collector drop (count + alert) UDP datagrams claiming its
     #: address (docs/DEVICE-SETUP.md).
     transport: Literal["any", "udp", "tcp"] = "any"
+    #: ``false`` switches a source off without removing it (ADR-0014): the firewall no longer
+    #: lets the sender reach 514, ingest marks it disabled (R15 and the dashboard skip it) and
+    #: the sealer's gap check no longer expects it. A message that still arrives is recorded
+    #: under the source's name as before (raw logs are never dropped), and the source still
+    #: counts for the licence's log-source limit (ADR-0013).
+    enabled: bool = True
 
     @field_validator("address")
     @classmethod
@@ -162,9 +175,25 @@ class RetentionConfig(_Model):
     days: int = Field(default=DEFAULT_RETENTION_DAYS, ge=MIN_RETENTION_DAYS)
 
 
+def replica_target_text(target: Path | str) -> str:
+    """``replica.target`` as the configuration shows and compares it, the same text on every
+    platform. A UNC target (``\\\\host\\share[\\folder]``, also written ``//host/share``) is
+    given with backslashes and without a trailing separator: ``str()`` of a Windows path ends a
+    share root with one (``\\\\NAS-01\\worm\\``) while a POSIX path keeps the text as typed, so
+    the value read back from the file would no longer be the one the operator saved, and an op
+    whose ``expect`` is that value would conflict. Any other path is ``str(target)``."""
+    text = str(target)
+    path = PureWindowsPath(text)
+    host, _, share = path.drive[2:].partition("\\")
+    if not path.drive.startswith("\\\\") or host in ("", "?", ".") or not share:
+        return text
+    return str(path).rstrip("\\")
+
+
 class ReplicaConfig(_Model):
     enabled: bool = False
-    #: Mounted share or UNC path, e.g. "\\\\NAS-01\\arcilogger-worm".
+    #: Mounted share or UNC path, e.g. "\\\\NAS-01\\arcilogger-worm". As JSON (the settings
+    #: page, an op's ``expect``) it is :func:`replica_target_text`.
     target: Path | None = None
     #: User for an SMB (UNC) target, e.g. "NAS-01\\arcireplica"; its password is the stored
     #: secret ``replica.password``. The Replica task runs as LOCAL SERVICE, which reaches the
@@ -176,6 +205,15 @@ class ReplicaConfig(_Model):
         if self.enabled and self.target is None:
             raise ValueError("replica.target is required when replica.enabled = true")
         return self
+
+    @field_serializer("target", when_used="json-unless-none")
+    def _target_json(self, target: Path) -> str:
+        return replica_target_text(target)
+
+    @property
+    def target_text(self) -> str | None:
+        """``target`` as :func:`replica_target_text` gives it (None: not set)."""
+        return None if self.target is None else replica_target_text(self.target)
 
 
 class ClockConfig(_Model):
@@ -353,6 +391,17 @@ class Config(_Model):
         """Whether the organisation name is configured (:func:`setup_problems` reports it)."""
         return bool(self.site_name)
 
+    @property
+    def admin_dir(self) -> Path:
+        """The browser administration's folder (ADR-0014): ``admin`` next to the secret store,
+        ``C:\\ProgramData\\ARCILOGGER\\admin`` on the server. Not a key of its own (an older
+        version would refuse the key after a rollback), but it follows ``secrets_dir``, which
+        the administration agent can write. A reader that must not be pointed at other guard
+        rails (``policy.json``, the Zamane records of :mod:`arcilogger_core.execpolicy`) takes
+        them from the folder of its fixed ``--config`` path instead
+        (``execpolicy.TrustAnchors``)."""
+        return self.secrets_dir / "admin"
+
     @model_validator(mode="after")
     def _unique_sources(self) -> Config:
         names = [source.name for source in self.sources]
@@ -473,10 +522,121 @@ def default_config_path() -> Path:
     return path / "arcilogger.toml"
 
 
+# -- the installation's own folders (ADR-0014, Day 0 note D0-2) -----------------------------------
+
+#: The installer's record of the data root, next to the configuration file
+#: (``C:\\ProgramData\\ARCILOGGER\\data-root.txt``): one line, the absolute path of ``data_dir``.
+#: The installer writes it before the administration agent may create files in that folder;
+#: every service and task reads it.
+DATA_ROOT_RECORD = "data-root.txt"
+
+
+class ConfigLocationError(ValueError):
+    """``secrets_dir`` or ``data_dir`` is not the installation's own folder, or the record that
+    says which folder it is cannot be used: the configuration is not used
+    (:func:`check_fixed_location`). ``key`` is the key, ``configured`` its value, ``expected``
+    the installation's folder (None when the record cannot tell it; ``record_problem`` then
+    says why); ``data_root`` the data root known to be the installation's, where an alert about
+    it may go (None when none is known: the configured ``data_dir`` is not trusted for it)."""
+
+    def __init__(
+        self,
+        key: str,
+        configured: Path,
+        expected: Path | None,
+        *,
+        data_root: Path | None,
+        record_problem: str | None = None,
+    ) -> None:
+        if expected is None:
+            text = (
+                f"{key} ({configured}) denetlenemedi: kurulum kaydı {DATA_ROOT_RECORD} "
+                f"kullanılamıyor ({record_problem}); yapılandırma kullanılmadı [{key} "
+                f"({configured}) cannot be checked: the installation record {DATA_ROOT_RECORD} "
+                f"is unusable ({record_problem}); the configuration was not used]"
+            )
+        else:
+            text = (
+                f"{key} ({configured}) kurulumun klasörü ({expected}) değil; yapılandırma "
+                f"kullanılmadı [{key} ({configured}) is not the installation's folder "
+                f"({expected}); the configuration was not used]"
+            )
+        super().__init__(text)
+        self.key = key
+        self.configured = configured
+        self.expected = expected
+        self.data_root = data_root
+        self.record_problem = record_problem
+
+
+def _absolute(path: Path) -> Path:
+    """``path`` made absolute without following links: the configured text itself must name
+    the installation's folder."""
+    return Path(os.path.abspath(path))  # noqa: PTH100 - lexical on purpose
+
+
+def _same_folder(first: Path, second: Path) -> bool:
+    return os.path.normcase(_absolute(first)) == os.path.normcase(_absolute(second))
+
+
+def recorded_data_root(config_path: Path) -> Path | None:
+    """The data root the installer recorded next to ``config_path`` (:data:`DATA_ROOT_RECORD`),
+    or None without a record (an installation older than ADR-0014, a development machine):
+    then ``data_dir`` is not checked. A record that exists but cannot be read, is not UTF-8 or
+    is not one line with an absolute path raises ``OSError`` or ``ValueError``: it fails
+    closed, never as if it were missing."""
+    try:
+        text = (config_path.parent / DATA_ROOT_RECORD).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except UnicodeDecodeError as exc:  # saved as UTF-16 by Notepad, say
+        raise ValueError("not UTF-8") from exc
+    lines = text.lstrip("\ufeff").strip().splitlines()
+    if len(lines) != 1 or not Path(lines[0].strip()).is_absolute():
+        raise ValueError("not one line with an absolute path")
+    return Path(lines[0].strip())
+
+
+def check_fixed_location(config: Config, config_path: Path) -> None:
+    """Refuse a configuration that moves the installation's folders (Day 0 note D0-2).
+
+    The administration agent can write ``arcilogger.toml``, and ``secrets_dir`` chooses the
+    secret store, ``data_dir`` the spool, the vault and the task requests. The browser never
+    changes either key, so every runner (the evidence tasks, ApplySystem, the API, the worker)
+    calls this right after :func:`load_config` with its own fixed ``--config`` path (or
+    :func:`default_config_path`), never with a value read from the file:
+
+    * ``secrets_dir`` must be the folder of ``config_path`` (its default);
+    * ``data_dir`` must be the data root the installer recorded (:func:`recorded_data_root`),
+      when there is a record; a record that cannot be used refuses the configuration too.
+
+    Raises :class:`ConfigLocationError` (a ``ValueError``). Its ``data_root`` is the recorded
+    root, or None without a usable record: an unchecked ``data_dir`` never receives an alert."""
+    try:
+        root = recorded_data_root(config_path)
+    except (OSError, ValueError) as exc:
+        problem = (exc.strerror or type(exc).__name__) if isinstance(exc, OSError) else str(exc)
+        raise ConfigLocationError(
+            "data_dir", config.data_dir, None, data_root=None, record_problem=problem
+        ) from exc
+    if root is not None and not _same_folder(config.data_dir, root):
+        raise ConfigLocationError("data_dir", config.data_dir, root, data_root=root)
+    if not _same_folder(config.secrets_dir, config_path.parent):
+        raise ConfigLocationError(
+            "secrets_dir", config.secrets_dir, _absolute(config_path.parent), data_root=root
+        )
+
+
+def parse_config(data: bytes, path: Path) -> Config:
+    """Validate the bytes of the configuration file at ``path`` (``secrets_dir`` defaults to
+    its folder). :func:`load_config` and the live reload (:mod:`arcilogger_core.configwatch`)
+    share it, so a reloaded file means exactly what it means at start-up."""
+    raw = tomllib.loads(data.decode("utf-8"))
+    raw.setdefault("secrets_dir", str(path.parent))
+    return Config.model_validate(raw)
+
+
 def load_config(path: Path | None = None) -> Config:
     """Read and validate the configuration file."""
     config_path = path or default_config_path()
-    with config_path.open("rb") as handle:
-        raw = tomllib.load(handle)
-    raw.setdefault("secrets_dir", str(config_path.parent))
-    return Config.model_validate(raw)
+    return parse_config(config_path.read_bytes(), config_path)

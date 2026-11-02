@@ -20,6 +20,8 @@
 6. [Doğrulama neyi gösterir, neyi göstermez?](#6-doğrulama-neyi-gösterir-neyi-göstermez)
 7. [Doğrulayıcı çıktısını yorumlamak](#7-doğrulayıcı-çıktısını-yorumlamak)
 8. [Sahada netleşecek konular](#8-sahada-netleşecek-konular)
+9. [Arama, Canlı Akış ve Kaynaklar denetim kayıtları](#9-arama-canlı-akış-ve-kaynaklar-denetim-kayıtları)
+10. [5651 raporunu okumak (okuma tablosu)](#10-5651-raporunu-okumak-okuma-tablosu)
 
 ## 1. Delil zinciri nasıl çalışır?
 
@@ -90,6 +92,8 @@ Manifestin alanları:
 | ARCILOGGER denetim kaydı | PostgreSQL `audit_log` + günlük dosyası kasada (`audit.jsonl.gz`) | Veritabanındaki kayıt süresiz (silinmesi tetikleyiciyle engellenir); kasadaki günlük dosyası günüyle birlikte saklanır ve imha edilir |
 | Ayrıştırılmış kayıtlar (arama, sorgu) | PostgreSQL | Türetilmiş veridir; ham kayıtlardan yeniden üretilebilir. Hedef 400 gün (`db.retention_days`), ancak bu sürümde bu tabloların **imha işi yoktur**: ayrıştırılmış kayıtlardan hiçbir şey silinmez |
 | Kullanım özetleri (kişi, cihaz ve departman bazında, adlarla: siteler, URL'ler, engellenen denemeler, saatlik satırlar) | PostgreSQL `usage_*` tabloları, `domain_categories` | **400 gün** (`usage.retention_days`): worker işi `usage.retention` her gece 03:30'dan sonra daha eski günleri siler; biten yeniden hesaplama istekleri (`usage_rebuilds`) 90 gün sonra silinir. İmha tutanağı tutulmaz, silinen satır sayıları işin çalışma kaydına (`job_runs`) yazılır. Ayrıştırılmış kayıtlar veritabanında durdukça yeniden hesaplanabilir |
+| Kayıtlı aramalar (ad, sorgu, zaman aralığı; yalnızca sahibine görünür) | PostgreSQL `saved_searches` | Sahibi silene ya da kullanıcı silinene kadar |
+| Arama dışa aktarımları (CSV, Excel) ve canlı akış satırları | Sunucuda dosya olarak saklanmaz: dışa aktarma bellekte hazırlanıp indirilir, canlı akış son satırları yalnızca bellekte tutar | Dışa aktarmanın boyutu ve SHA-256 özeti denetim kaydındadır (`search.export`, bölüm 9) |
 | Kullanım raporları (HTML, PDF, Excel; kişi adlarıyla) | `D:\ARCILOGGER\exports\usage-reports\` | **400 gün** (`reports.keep_days`; worker her gece 03:20'den sonra siler). E-postayla gönderilen kopyalar alıcılarda kalır |
 
 Saklama ve imha kararları için hukuk müşavirine verilecek taslaklar:
@@ -185,7 +189,7 @@ Ayrıntı: [KANIT-PAKETI.md](KANIT-PAKETI.md).
   olmalıdır: ARCILOGGER'daki sorgu kaydı (`lookup_reports.sha256`), raporu indirirken gelen
   `X-Arci-Sha256` başlığı ve denetim kaydındaki `lookup.report`, `evidence.request` ve
   `evidence.create` girişleri (`details.report.sha256`). `verify.py` bu özeti `report-hash`
-  satırında yazar.
+  satırında yazar. Raporun nasıl okunacağı (okuma tablosu): bölüm 10.
 - Raporun zaman damgası (`….pdf.zd`) pakete yalnızca rapor saklanırken doğrulanmışsa **ve**
   paketteki köklerle hâlâ doğrulanıyorsa girer. Girmezse `paket.json`'daki `report_note` nedenini
   söyler ve doğrulayıcı `report-token-omitted` uyarısı verir (paket yine doğrulanır). Rapora damga
@@ -327,7 +331,8 @@ aynı olduğunu; her günün gün bitiminden ne kadar sonra damgalandığını.
   bir gün sonradan değiştirilip yeniden mühürlenirse geriye kalan tek iz geç damga zamanıdır);
 - satırlardaki alınma zamanlarının doğruluğunu (sunucu saatine dayanır; eşitleme bilgisi manifestin
   `clock` bölümündedir);
-- bir IP adresinin belirli bir kişiye ait olduğunu (bu bir analizdir; raporda yöntemiyle verilir);
+- bir IP adresinin belirli bir kişiye ait olduğunu (bu bir analizdir; raporda yöntemiyle verilir,
+  bölüm 10);
 - paketteki kök sertifikanın Kamu SM'ye ait olduğunu (parmak izi karşılaştırması gerekir);
 - paketin içindeki `verify.py`'nin değiştirilmediğini (özetini ayrı bir kanaldan doğrulayın ya da
   Yöntem C'yi kullanın);
@@ -431,6 +436,115 @@ alanı); ekrandaki her satır ayrıca Türkçe ve İngilizce açıklamasını ta
 - `verify.py` özetinin alıcıya paketten ayrı iletileceği kanal (teslim tutanağı, indirme sayfası,
   sürüm notları) ve `verify.py`'nin lisansı: işletme sahibinin kararı.
 
+## 9. Arama, Canlı Akış ve Kaynaklar denetim kayıtları
+
+Arama, Canlı Akış ve Kaynaklar sayfaları kişisel veri gösterir (istemci adresleri, MAC adresleri,
+alan adları, kullanıcı adları). Bu yüzden Arama ve Canlı Akış, Kaynaklar'da da bir kaynağın "Son
+satırlar" sekmesi ile ayrıştırma hatalarının ayrıntısı KVKK bilgilendirme metni onaylanmadan
+açılmaz (Kaynaklar listesi ve bir kaynağın sayıları metin beklemeden açılır). Aşağıdaki tablodaki
+işlemler, yanıt gönderilmeden önce ARCILOGGER denetim kaydına (`audit_log`, web arayüzünde
+Denetim Kaydı sayfası) yazılır; tablonun altındaki okumalar yazılmaz. Ayrıntılarda (`details`) girdiler, sayılar, satır
+aralıkları ve özetler bulunur; bulunan satırların içeriği yazılmaz. Aramanın sorgusu (`q`)
+normalleştirilmiş hâliyle yazılır: 5651 sorgusunda olduğu gibi bir IP, MAC adresi ya da metin
+içerebilir.
+
+| Eylem | Ne zaman yazılır | `details` |
+|---|---|---|
+| `search.run` | Her arama (zaman aşımına uğrayan da: `outcome: "timeout"`, `search_id: null`) | `search_id`, `q`, `from`, `to`, `kinds`, `driver`, `tables`, `rows` (ilk sayfadaki satır sayısı), `complete`, `outcome`, `elapsed_ms`, `saved_id` |
+| `search.event` | Bir kaydın bütün alanları açıldığında | `table`, `id`, `time`, `raw` (kaynak, gün, satır, bayt konumu) |
+| `search.refs` | "Kanıt paketine aktar" | `search_id`, `q`, `from`, `to`, `refs` (satır sayısı), `truncated`, `complete`, `sha256` (referans listesinin kanonik JSON'unun özeti) |
+| `search.export` | CSV ya da Excel indirme (yalnızca yönetici, parolayı yeniden girerek) | `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`, `sha256` (dosyanın) |
+| `search.saved_create`, `search.saved_update` | Kayıtlı arama eklenince ya da değişince | `saved_id`, `name`, `q` |
+| `search.saved_delete` | Kayıtlı arama silinince | `saved_id`, `name` |
+| `live.open` | Canlı akış açılınca | `stream_id`, `q`, `folders` (izlenen klasörler), `backfill` |
+| `live.close` | Akış kapanınca (`reason`: kullanıcı kapattı `closed`, duraklatılmış akışın süresi doldu `lingered`, sunucu durdu `server_stopping`, akışı bitiren durumun kodu, ör. `time_limit`, `session_idle`) | `stream_id`, `seconds`, `delivered` (gönderilen satır), `dropped` (nedenlerine göre gösterilemeyen satırlar), `reason`, `ranges` (klasör, gün, ilk ve son satır numarası) |
+| `raw.tail` | Kaynaklar → bir kaynağın "Son satırlar" sekmesi | `source`, `day`, `origin` (`spool`), `from_line`, `to_line`, `from_offset`, `to_offset`, `count`, `range_sha256` |
+
+Yazılmayanlar: bir aramanın sonraki sayfaları (`POST /search/page`) ve istatistikleri
+(`POST /search/stats`) — ikisi de yalnızca kaydı yazılmış bir `search_id` ile çalışır —, sorgu
+çözümleme (`POST /search/parse`), alan listesi (`GET /search/fields`), canlı akışın durumu
+(`GET /live/status`), Kaynaklar listesi ve bir kaynağın ayrıntısı (sayılar; bir hata kalıbının
+örnek değeri yalnızca `search.read` ya da `lookup.run` yetkisi ve onaylanmış KVKK metniyle
+gösterilir). Bir satırın tamamı üç sayfada da `GET /raw` ile açılır ve `raw.view` olarak yazılır.
+
+**Bir `raw.tail` girdisini yeniden hesaplamak.** `range_sha256`, kaynağın o günkü dosyasının
+`[from_offset, to_offset)` bayt aralığının (gösterilen satırlar, satır sonlarıyla birlikte) SHA-256
+özetidir. Gün mühürlenmeden önce bu baytlar `D:\ARCILOGGER\spool\<kaynak>\<gün>.log`
+dosyasında, mühürlendikten sonra kasadaki `vault\YYYY\MM\DD\<kaynak>.log.gz` dosyasının açılmış
+içeriğinde ve o günün o kaynağını içeren her kanıt paketindedir (dosyalar mühürlenirken
+değiştirilmez). Python ile (örnekte `from_offset` 0, `to_offset` 498):
+
+```powershell
+python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read(); print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" core-r1.log.gz 0 498
+```
+
+Çıkan değer girdideki `range_sha256` ile aynı olmalıdır; satır sayısı `to_line - from_line + 1`,
+yani `count` olmalıdır. Spool dosyası için `gzip.open` yerine `open(sys.argv[1], 'rb')` kullanın.
+
+**Dışa aktarma ve aramadan kanıt paketi.** `search.export` girdisindeki `sha256`, indirilen
+dosyanın özetidir (`Get-FileHash -Algorithm SHA256 <dosya>` aynı değeri verir; yanıt da
+`Repr-Digest` başlığıyla gönderilir). Dışa aktarılan dosya mühürlü değildir; dosyanın "Bilgi"
+sayfası da bunu söyler: bütünlük kanıtı kanıt paketidir. Arama'dan kanıt paketi oluşturulduğunda
+denetim kaydında sırayla `search.refs` (satır sayısı ve listenin özeti), ardından aynı kullanıcının
+`evidence.request` ve `evidence.create` girdileri görünür; paket her paket gibi bölüm 5'e göre
+doğrulanır.
+
+## 10. 5651 raporunu okumak (okuma tablosu)
+
+Bir 5651 sorgusunun resmi raporu (PDF; kanıt paketinde `rapor/` altında, bölüm 4.1) bir andaki
+IP adresinden oturuma, cihaza ve kişiye giden zinciri, dayandığı ham satırlarla verir. Raporun
+bölümleri ve metinleri [RAPOR.md](RAPOR.md) belgesindedir. Denetçinin bilmesi gerekenler:
+
+- **Kira kanıtı:** iç IP adresinden MAC adresine ve cihaza giden adım DHCP sunucusunun (MikroTik
+  ya da FortiGate) kira kayıtlarına, MikroTik `ARP-LOG` kayıtlarına (orta güven) ya da — kira
+  kaydı yoksa ve yalnızca ayarlarda listelenen arayüzlerde — FortiGate oturum kaydının srcmac
+  alanına dayanır. srcmac **kısmi kanıttır**: MAC adresinin oturumu gönderdiğini kanıtlamaz,
+  güven düzeyi düşüktür. FortiGate DHCP kayıtlarının biçimi sahada doğrulanana kadar rapor bunu
+  belirtir.
+- **Yöntem notları sorgu anından gelir:** yöntem bölümündeki notlar ve çıkış satırları sorgu
+  yapıldığında saklanan sonuçtan yazılır, raporun indirildiği günün ayarlarından değil; çıkış
+  (internet hattı) tanımlarının önceki hâlleri kurumun denetim kaydındadır (`settings.change`).
+- **Ham satırlar değiştirilmeden basılır:** FortiGate'in aygıt tanıması açık olan bir arayüzün
+  oturum satırları kaynak MAC adresini (`srcmac`), cihaz adını, işletim sistemini, donanım
+  üreticisini ve sürümünü, cihaz türünü ve FortiGate'in pasif olarak öğrendiği kullanıcı adlarını
+  taşır. Bu alanlar raporun alıntıladığı her oturum satırında, çift NAT raporunda başka kişilerin
+  aday oturumları dahil, görünür; aynı satırlar kanıt paketinin `extract/` klasöründe ve mühürlü
+  dosyalarında da vardır ([DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.5). ARCILOGGER sorguda
+  bunlardan yalnızca srcmac'i, yalnızca listelenen arayüzlerde ve kısmi kanıt olarak kullanır;
+  öteki alanlar sorguda kullanılmaz.
+
+**Okuma tablosu:** bu tablo, PDF'te görülen her çıkış etiketi ve yöntem bölümünde ya da bir
+zincirin yanında yazılan her açıklama için üç şeyi ayırır: kayıtta kesin olan, kurumun ayarlarına
+dayanan ve varsayılan. İlk sütun PDF'in kendi etiketlerini ve arkalarındaki açıklama anahtarlarını
+(`…`) kullanır. Her hücre önce Türkçe, eğik çizgiden sonra İngilizce yazılır. Aynı tablo
+[RAPOR.md](RAPOR.md) belgesinde de vardır.
+
+| PDF'te görülen / What the PDF shows | Kesin olan (kayıtta) / Exact (in the records) | Ayarlara dayanan / Configured | Varsayılan / Assumed |
+|---|---|---|---|
+| Çıkış "Genel IP", doğrudan, kesin eşleşme / exit "Public IP", direct, exact | FortiGate oturum kaydı: transip ve transport / the FortiGate session record: transip and transport | genel IP'nin bu hatta ait olduğu / that the public IP belongs to this line | — |
+| Çıkış "Genel IP" ya da "NAT adresi", servis sağlayıcı NAT'ı / ISP NAT | FortiGate oturumları ve NAT adresleri / the FortiGate sessions and NAT addresses | hattın ikinci NAT yaptığı, genel adresi / that the line does a second NAT, its public address | genel port → FortiGate portu eşlemesi yoktur; liste adaydır / no public port → FortiGate port mapping; the list is candidates |
+| "Genel adresi değişebilir" uyarısı / "public address may change" (`egress_public_dynamic`) | FortiGate oturumları ve NAT adresleri / the FortiGate sessions and NAT addresses | hattın genel adresi ve değişebilir işaretlendiği / the line's public address and that it is marked as changing | adresin o anda bu hatta ait olduğu; yalnızca servis sağlayıcı doğrulayabilir / that the address was this line's at that moment; only the ISP can confirm it |
+| "Doğrudan hat doğrulanamadı" (fallback) | o anın çevresinde istenen adresin kayıtta görünmediği ya da yalnızca bir kısmında göründüğü ve o hatta özel ya da paylaşılan başka bir NAT adresinin de göründüğü / that around the moment the requested address did not appear in the records, or only part of the time, and another, private or shared NAT address did on that line | hattın tanımı / the line's definition | o anda ikinci NAT yapılmış olabileceği; liste başka bir hattın kullanıcılarını içerebilir (paragraf söyler) / that a second NAT may have happened; the list may hold another line's users (the paragraph says so) |
+| "NAT adresi doğrulanamadı" (fallback of an ISP NAT address) | o anın çevresinde istenen NAT adresinin kayıtta görünmediği ya da yalnızca bir kısmında göründüğü / that around the moment the requested NAT address did not appear in the records, or only part of the time | hattın tanımı ve NAT adresi / the line's definition and NAT address | listenin bu hattın o anki oturumlarını içerdiği; başka adreslerle çıkan oturumlar da aday olabilir / that the list holds this line's sessions of that moment; sessions that left with other addresses may be candidates too |
+| "Kayıtlarda görülen adres" (observed) | FortiGate'in o adresi kaynak NAT adresi olarak kullandığı / that the FortiGate used the address as source NAT | — | adresin o tarihte kuruma ait olduğu (servis sağlayıcıdan doğrulanır) / that the address belonged to the organisation then (confirmed with the ISP) |
+| "Genel adresi bilinmeyen hatlar", "Çıkış tanımlı değil" | özel ya da paylaşılan NAT adresiyle çıkan FortiGate oturumları / the FortiGate sessions that left with a private or shared NAT address | — | ikinci NAT; liste ilgisiz kullanıcılar içerebilir / a second NAT; the list may hold unrelated users |
+| "Kısmi kanıt: srcmac" (`srcmac_only`) | FortiGate'in aygıt tanımasının kaynak IP'yi bu MAC ile ilişkilendirdiği / that the FortiGate's device identification associated the source IP with this MAC | arayüzün listelendiği / that the interface is listed | MAC'in oturumu gönderdiği kanıtlanmaz; güven düşük / not proof that the MAC sent the session; low confidence |
+| Düşük güvenli srcmac çakışması / low srcmac conflict (`srcmac_mismatch`) | iki farklı MAC kaydı / two different MAC records | — | o anda iki olası cihaz vardır; ikisi de gösterilir / there are two possible devices; both are shown |
+| "Kayıt biçimi sahada doğrulanmadı" / "verified by … on …" (`fortigate_format_unverified`, `fortigate_format_verified`) | FortiGate DHCP kaydı / the FortiGate DHCP record | biçimin doğru okunduğu (doğrulandıysa kim, ne zaman; sorgu anındaki durum) / that the format is read correctly (if verified, by whom and when; as at the time of the lookup) | doğrulanmadıysa biçim FortiOS belgelerine dayanır / if not verified, the format rests on the FortiOS documents |
+| "Kira zaman çizelgesine girmedi; zincir kurulmadı" (`fortigate_dhcp_not_converted`) | ham FortiGate DHCP kaydı ve mührü (iç IP sorgusu ve kesin eşleşme) / the raw FortiGate DHCP line and its seal (internal lookup and exact match) | — | zincir kurulmadı ve güven düzeyi verilmez; kayıt yalnızca o anı kapsayan bir kaydın var olduğunu gösterir, bir eşleştirme değildir / no chain was built and no confidence is given; the line only shows that a record covering the moment exists, it is not an attribution |
+| "Kira yenilemesi görülmedi" (güven düşük) / no renewal seen (low) (`lease_renewal_not_seen`) | FortiGate DHCP Ack kaydı ve zamanı (kiranın istenen andan önceki kendi son kaydı) / the FortiGate DHCP Ack and its time (the lease's own last record before the moment) | kira süresi (kayıttan ya da ayardan) / the lease time (logged or configured) | Ack sahibinin adresi istenen anda hâlâ kullandığı; kayıtlar bunu gösteremez, güven bu yüzden düşük / that the Ack's holder still used the address at the requested moment; the records cannot show it, hence low confidence |
+| "Kiradan sonra uygulanmamış DHCP kaydı" (güven düşük) / DHCP record after the lease not applied to it (low) (`fortigate_dhcp_not_converted_since_lease`) | DHCP kira kaydı (kiranın istenen andan önceki kendi son kaydı) ve ondan sonra o adres ya da kiranın MAC adresi için kira zaman çizelgesinin bu kiraya uygulamadığı bir FortiGate DHCP kaydının var olduğu (kayıt gösterilmez) / the DHCP lease record (the lease's own last record before the moment) and that a FortiGate DHCP record of that address or of the lease's MAC address after it was not applied to this lease by the lease timeline (the record is not shown) | kira süresi / the lease time | kira sahibinin adresi istenen anda hâlâ kullandığı; sonraki kayıt bir bırakma, başka bir cihaza verilme ya da MAC adresinin başka bir adres alması olabilir, güven bu yüzden düşük / that the holder still used the address at the moment; the later record may be a release, a hand-over to another device or the MAC taking another address, hence low confidence |
+| "Tanımlı bir ağda değil" (güven düşük) / not in a configured network (low) (`fortigate_dhcp_no_network`) | FortiGate DHCP kira kaydı / the FortiGate DHCP lease record | kurumun tanımlı ağları (adres hiçbirinde değil) / the organisation's configured networks (the address is in none) | kira sahibinin adresi o anda hâlâ kullandığı; adresin reddedilip başka bir istemciye geçtiği yalnızca tanımlı ağlarda anlaşılır, güven bu yüzden düşük / that the holder still used the address then; a declined address is only detected in configured networks, hence low confidence |
+| "Aynı ağda iki DHCP kaynağı" (güven düşük) / two DHCP sources on one network (low) (`dhcp_sources_overlap`) | o ağda o anın çevresinde iki DHCP kaynağının kayıtları / the records of two DHCP sources in that network around the moment | ağın (VLAN alt ağının) tanımı (tanımlı bir ağda olmayan adreste adresin kendisi) / the network's (VLAN subnet's) definition (for an address in no configured network, the address itself) | zincirin dayandığı kaydı yazan sunucunun o anda adresi gerçekten verdiği; kayıtlar iki sunucudan hangisinin geçerli olduğunu gösteremez / that the server whose record the chain rests on really gave the address then; the records cannot show which of the two applied |
+| "Gönderici sonradan yapılandırıldı" / sender configured later (`source_configured_later`) | kayıtların o göndericiden geldiği / that the records came from that sender | göndericinin adresinin sonradan bir FortiGate kaynağı olarak tanımlandığı / that the sender's address was configured as a FortiGate source later | kayıtların alındıkları sırada da kurumun FortiGate'inden geldiği / that the records came from the organisation's FortiGate when they arrived as well |
+| "Kaynak saati kayık" (güven düşük) / source clock off (low) (`source_clock_offset`) | kayıtlardaki zaman ile alma zamanı arasındaki ölçülen fark / the offset measured between the record times and the receive times | sınır: 120 saniye; yalnızca oturum araması için ölçülen bir kaynakta sorgu toleransı daha büyükse tolerans / the limit: 120 seconds; the lookup tolerance when larger, for a source measured only for the session search | doğru oturumun kaymış zaman aralığında olduğu; bulunan oturum başka biri olabilir / that the right session lies in the shifted window; the session found may be someone else's |
+| "Cihaz zamanları paylaşılmış" (güven düşük) / device times shared (low) (`source_clock_shared`) | o anın cihaz zamanlarını taşıyan, başka bir gerçek zamanda gönderilmiş kayıtların zaman farkı (cihazın saati sonradan değiştirilmiş) / the offset of records sent at another real time that carry the moment's device times (the device's clock was changed later) | sınır: `source_clock_offset` ile aynı / the limit: the same as `source_clock_offset` | bulunan oturumların hepsinin o anda yapıldığı; bazıları bu fark kadar sonra ya da önce yapılmış olabilir, gerçek zaman ham kayıttaki alma zamanından doğrulanır / that every session found was made at that moment; some may have been made that much later or earlier, the real time is checked against the receive time in the raw record |
+| "Oturum aranmadı" (Çıkış yok / no exit) | — | sorgu anındaki çıkış listesi (PDF'te yazılı) ve hatların türü / the exit list at the time of the lookup (printed in the PDF) and the lines' types | çıkış listesinin olay tarihinde de tam olduğu / that the exit list was complete on the date of the event too |
+| "Oturum aranmadı" (FortiGate'ten geçmeyen hat / line not passing the FortiGate) | — | hattın FortiGate'ten geçmediği / that the line does not pass the FortiGate | hattın olay tarihinde de FortiGate'ten geçmediği / that it did not pass it on the date of the event either |
+| "Oturum aranmadı" (internet çıkışı olmayan NAT adresi / not an internet exit) (`egress_internal`) | — | adresin FortiGate'in iç ağlara yaptığı NAT'ın adresi olarak tanımlandığı / that the address is defined as the FortiGate's NAT towards internal networks | adresin olay tarihinde de bir internet çıkışı olmadığı / that it was not an internet exit on the date of the event either |
+| "Tanımsız gönderici" uyarılı eşleşme / match with the unconfigured-sender warning (`session_from_unknown_source`) | yapılandırılmamış bir göndericinin oturum kaydı / a session record of an unconfigured sender | — | kaydın kurumun FortiGate'inden geldiği doğrulanmadı; kanıt olarak kullanılmamalıdır / not confirmed that the record came from the organisation's FortiGate; not to be used as evidence |
+| "Çıkış tanımı olaydan sonra değişti" / exit changed after the event (`egress_changed_after_event`) | — | bugünkü tanım (PDF'te yazılı); önceki tanımlar kurumun denetim kaydında / today's definition (printed in the PDF); earlier definitions in the organisation's audit log | o tarihteki tanımın aynı olduğu / that the definition was the same on that date |
+
 ---
 
 <a id="english"></a>
@@ -458,8 +572,11 @@ URLs, blocked attempts, hourly rows; `usage_*` tables, `domain_categories`): 400
 (`usage.retention_days`), deleted every night after 03:30 by the worker job `usage.retention`,
 finished rebuild requests (`usage_rebuilds`) after 90 days; no deletion record is kept, the job's
 run (`job_runs`) holds the deleted row counts. Usage report files (`exports\usage-reports\`, with
-names): 400 days (`reports.keep_days`); copies sent by e-mail stay with the recipients. Drafts for
-the lawyer: `docs/legal/`.
+names): 400 days (`reports.keep_days`); copies sent by e-mail stay with the recipients. Saved
+searches (`saved_searches`, visible to their owner only): until the owner deletes them or the user
+is deleted. Search exports and live tail lines are not kept as files on the server (the export is
+built in memory and downloaded; its size and SHA-256 are in the audit log). Drafts for the lawyer:
+`docs/legal/`.
 
 **Evidence package.** `arcilogger-core.exe evidence build --from D --to D [--source S] [--extract F]
 [--password] [--pdf F] [--include-audit-log]` (on the server, by its full path) creates a ZIP with
@@ -501,7 +618,7 @@ and the warning `report-token-omitted`). `paket.json` names them in `report` / `
 any other file under `rapor/` is an error. Check the token with `openssl ts -verify -in
 rapor/<x>.pdf.zd -data rapor/<x>.pdf -CAfile sertifikalar/kokler.pem`. ARCILOGGER's own audit
 log is not in a package by default (data minimisation). Section 7 lists every code the verifier
-prints. The licence never changes evidence ([LICENSING.md](LICENSING.md) section 12): no licence
+prints; section 10 explains how to read the report (below). The licence never changes evidence ([LICENSING.md](LICENSING.md) section 12): no licence
 mark in raw logs, sealed days, manifests, time stamps, packages, the verifier or the 5651 report,
 and lookups, reports and packages work in every licence state; the audit log's `license.*`
 entries are licence actions (trial start, installation, removal, refusal, limits, state changes)
@@ -530,5 +647,62 @@ log file is in the package, that consecutive days are chained (missing days are 
 the extract equals the sealed lines, and how long after the end of the day each day was stamped
 (more than 48 hours is a warning, whatever the manifest says: re-sealing a rewritten day leaves only
 this trace). It does not show who produced the logs, that nothing changed before sealing, that
-receive times were correct, that an IP belonged to a person, that the verify.py inside the package
-is genuine, or the online revocation status; test (mock) stamps have no legal validity.
+receive times were correct, that an IP belonged to a person (an analysis, given with its method
+in the report; section 10), that the verify.py inside the package is genuine, or the online revocation status; test (mock) stamps have no legal validity.
+
+**Search, live tail and sources in the audit log (section 9).** Arama, Canlı Akış and Kaynaklar
+show personal data, so Arama, Canlı Akış and, in Kaynaklar, a source's "Son satırlar" tab and the
+detail of its parse errors wait for the KVKK notice (the Kaynaklar list and a source's counts open
+without it). The calls listed here are written to ARCILOGGER's audit log (`audit_log`, the
+Denetim Kaydı page) before the answer is sent; the reads named as not audited are not. The
+details hold inputs, counts, line ranges and hashes, never the content of the lines found; the
+search query (`q`) is stored normalised and can hold an IP, a MAC address or text, as a 5651 lookup
+does. `search.run` (every run, a timed-out one too with `outcome: "timeout"`): `search_id`, `q`,
+`from`, `to`, `kinds`, `driver`, `tables`, `rows`, `complete`, `outcome`, `elapsed_ms`,
+`saved_id`; `search.event` (a record's fields opened): `table`, `id`, `time`, `raw`; `search.refs`
+("Kanıt paketine aktar"): `search_id`, `q`, `from`, `to`, `refs`, `truncated`, `complete`,
+`sha256` of the reference list as canonical JSON; `search.export` (administrators, with
+re-authentication): `search_id`, `q`, `from`, `to`, `format`, `rows`, `truncated`, `bytes`,
+`sha256` of the file; `search.saved_create` and `search.saved_update`: `saved_id`, `name`, `q`;
+`search.saved_delete`: `saved_id`, `name`; `live.open`: `stream_id`, `q`, `folders`, `backfill`;
+`live.close`: `stream_id`, `seconds`, `delivered`, `dropped` by reason, `reason` (`closed`,
+`lingered`, `server_stopping` or the code that ended the stream, e.g. `time_limit`,
+`session_idle`), `ranges` (folder, day, first and last line); `raw.tail` (Kaynaklar, "Son
+satırlar"): `source`, `day`, `origin`, `from_line`, `to_line`, `from_offset`, `to_offset`,
+`count`, `range_sha256`. Not audited: further pages and the statistics of an audited search, the
+parser, the field list, the live tail's status, the sources list and detail (counts). A whole line
+opens through `GET /raw` on all three pages and is audited as `raw.view`.
+
+`range_sha256` is the SHA-256 of the bytes `[from_offset, to_offset)` of the source's file of that
+day (the lines shown, with their line feeds): before sealing in `D:\ARCILOGGER\spool\<source>\<day>.log`,
+after sealing in the decompressed `vault\YYYY\MM\DD\<source>.log.gz` and in every evidence
+package holding that day of that source (sealing does not change the bytes). Recompute it with
+`python -I -c "import gzip,hashlib,sys; d=gzip.open(sys.argv[1]).read();
+print(hashlib.sha256(d[int(sys.argv[2]):int(sys.argv[3])]).hexdigest())" <source>.log.gz <from_offset>
+<to_offset>` (`open(path, 'rb')` for the spool file); `count` is `to_line - from_line + 1`. The
+`sha256` of `search.export` is the downloaded file's (`Get-FileHash -Algorithm SHA256`; the answer
+carries it as `Repr-Digest`); an export is not sealed, as its "Bilgi" sheet says: the evidence
+package is the integrity proof. A package built from a search shows `search.refs`, then the same
+user's `evidence.request` and `evidence.create`, and verifies like any package (section 5).
+
+**Reading the 5651 report (section 10).** The official report of a 5651 lookup (the PDF; under
+`rapor/` in a package, section 4.1) gives the chain from an IP address at a moment to the session,
+the device and the person, with the raw lines it rests on; [RAPOR.md](RAPOR.md) describes its
+parts and texts. Lease evidence, the step from the internal IP address to the MAC address and the
+device, comes from the leases of the DHCP server (MikroTik or FortiGate), from MikroTik `ARP-LOG`
+records (medium confidence) or, without a lease and only on interfaces listed in the settings,
+from the srcmac field of the FortiGate session record. srcmac is **partial evidence**: it does not
+prove that the MAC sent the session, and its confidence is low. Until the format of the FortiGate
+DHCP records is verified on site, the report says so. Method notes and exit rows come from the
+outcome stored when the lookup was made, not from the settings of the day the report is
+downloaded; earlier exit (internet line) definitions are in the organisation's audit log
+(`settings.change`). Raw lines are printed unchanged: the session lines of an interface with
+FortiGate device identification on carry the source MAC address (`srcmac`), the device name, the
+operating system, the hardware vendor and version, the device type and the user names the
+FortiGate learned passively. These fields appear in every session line the report cites, other
+people's candidate sessions of a double-NAT report included, and the same lines are in the
+package's `extract/` folder and its sealed files ([DEVICE-SETUP.md](DEVICE-SETUP.md) section 2.5).
+A lookup uses only srcmac of them, only on listed interfaces and as partial evidence; it uses none
+of the other fields. The reading table (exact in the records / configured / assumed, with the
+PDF's own labels and the explanation keys behind them) is bilingual and sits in the Turkish part,
+section 10; [RAPOR.md](RAPOR.md) has the same table.

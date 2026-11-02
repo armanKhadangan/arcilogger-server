@@ -45,8 +45,11 @@
     Print the planned rights (and write them as JSON to -PlanPath) without changing anything.
 
 .PARAMETER DataRoot
-    Default: data_dir of <ProgramDataDir>\arcilogger.toml, the folder the installer set up
-    (D:\ARCILOGGER, or C:\ARCILOGGER on a computer without a data disk).
+    Default: the data root the installer recorded in <ProgramDataDir>\data-root.txt (D:\ARCILOGGER,
+    or C:\ARCILOGGER on a computer without a data disk), as the installer resolves it
+    (Resolve-ArciDataRoot): ArciAdmin can write arcilogger.toml, so a data_dir that differs from
+    the record, or an unusable record, stops the script before any change. Without a record (an
+    installation from before the browser administration) data_dir of arcilogger.toml.
 
 .EXAMPLE
     .\Set-ArciVaultAcl.ps1
@@ -70,7 +73,12 @@ Initialize-ArciModulePath
 
 if (-not $DataRoot) {
     $configPath = Join-Path $ProgramDataDir 'arcilogger.toml'
-    $DataRoot = Get-ArciConfiguredDataDir -ConfigPath $configPath
+    $record = Read-ArciDataRootRecord -Path (Join-Path $ProgramDataDir 'data-root.txt')
+    $configured = Get-ArciConfiguredDataDir -ConfigPath $configPath
+    $adminInstalled = Test-Path -LiteralPath (Join-Path $ProgramDataDir 'admin') -PathType Container
+    $resolved = Resolve-ArciDataRoot -Record $record -Configured $configured -AdminInstalled:$adminInstalled
+    if ($resolved.Problem) { throw $resolved.Problem }
+    $DataRoot = $resolved.Path
     if (-not $DataRoot) { throw ("-DataRoot verin: {0} içinde data_dir yok [give -DataRoot: no data_dir in the configuration]" -f $configPath) }
 }
 

@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import utc_now
-from arcilogger_db.models import Message, MtArp, MtDhcp, Source
+from arcilogger_db.models import FgDhcp, Message, MtArp, MtDhcp, Source
 from arcilogger_db.settings import SYSTEM_AUTHOR, get_setting, set_setting
 
 WATERMARK_KEY: Final = "worker.leases_watermark"
@@ -94,8 +94,8 @@ def lag_seconds(session: Session) -> int:
 
 def feeding_sources(session: Session, now: datetime, since: datetime | None = None) -> set[str]:
     """Sources whose lines feed the lease timeline: enabled FortiGate sources (session traffic)
-    and every source that sent DHCP or ARP lines since ``since`` (default: ``now`` minus
-    :data:`FEED_LOOKBACK`)."""
+    and every source that sent DHCP (MikroTik or FortiGate, ADR-0016) or ARP lines since
+    ``since`` (default: ``now`` minus :data:`FEED_LOOKBACK`)."""
     since = now - FEED_LOOKBACK if since is None else since
     names = set(
         session.scalars(
@@ -104,7 +104,7 @@ def feeding_sources(session: Session, now: datetime, since: datetime | None = No
             )
         )
     )
-    for model in (MtDhcp, MtArp):
+    for model in (MtDhcp, FgDhcp, MtArp):
         names |= set(
             session.scalars(
                 select(model.source).where(model.time >= since, model.time <= now).distinct()

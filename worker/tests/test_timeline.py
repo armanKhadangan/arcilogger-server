@@ -26,7 +26,7 @@ from arcilogger_worker.correlation.timeline import (
     evidence_key,
 )
 from arcilogger_worker.lookup.types import EvidenceRef, LookupSettings
-from arcilogger_worker.testing import tr
+from arcilogger_worker.testing import TR, tr
 
 DAY = date(2026, 10, 12)
 # The example site's settings: the shipped defaults plus its guest DHCP server's 1 h leases.
@@ -344,3 +344,349 @@ def test_evidence_order_at_equal_times() -> None:
     events: list[Evidence] = [assigned(t), deassigned(t), arp(t), traffic(t)]
     ranks = [evidence_key(e)[1] for e in sorted(events, key=evidence_key)]
     assert ranks == [0, 1, 2, 3]
+
+
+# -- FortiGate DHCP (ADR-0016) --------------------------------------------------------------------
+
+NET42 = "172.20.42.0/24"
+NET61 = "172.20.61.0/24"
+ROOT = ("fg_dhcp", "root")
+PC57 = "00:00:5e:00:53:57"
+PC31 = "00:00:5e:00:53:31"
+FG_RULES = TimelineRules.from_settings(LookupSettings.from_settings(SETTINGS))
+EXTENDING = TimelineRules.from_settings(
+    LookupSettings.from_settings({**SETTINGS, "dhcp.fortigate_traffic_extends": True})
+)
+
+
+def fg_assigned(
+    time: datetime,
+    mac: str = PC57,
+    ip: str = "172.20.42.57",
+    *,
+    lease: int | None = 86400,
+    interface: str = "vlan42",
+    vd: str | None = "root",
+    network: str | None = NET42,
+    hostname: str | None = None,
+) -> DhcpEvent:
+    lease_text = "-" if lease is None else lease
+    return DhcpEvent(
+        time, "assigned", ip, mac, server=interface, vlan=None, hostname=hostname,
+        ref=ref("fg_dhcp", time, f"{interface} assigned {ip} for {mac} (FortiGate DHCP, logid "
+                f"0100026001, lease {lease_text})"),
+        table="fg_dhcp", lease_seconds=lease, origin=("fg_dhcp", vd), network=network,
+    )  # fmt: skip
+
+
+def fg_deassigned(time: datetime, mac: str = PC57, ip: str = "172.20.42.57") -> DhcpEvent:
+    return DhcpEvent(
+        time, "deassigned", ip, mac, server="vlan42",
+        ref=ref("fg_dhcp", time, f"vlan42 deassigned {ip} for {mac} (FortiGate DHCP, logid "
+                "0100026002, lease -)"),
+        table="fg_dhcp", origin=ROOT, network=NET42,
+    )  # fmt: skip
+
+
+def mt_assigned(
+    time: datetime, mac: str = PC57, ip: str = "172.20.42.57", *, vlan: int = 42
+) -> DhcpEvent:
+    return DhcpEvent(
+        time, "assigned", ip, mac, server="dhcp42", vlan=vlan,
+        ref=ref("mt_dhcp", time, f"dhcp42 assigned {ip} for {mac}"),
+        origin=("mt_dhcp", None), network=NET42,
+    )  # fmt: skip
+
+
+def every(start: datetime, end: datetime, step: timedelta, ip: str) -> list[TrafficSeen]:
+    found, moment = [], start
+    while moment < end:
+        found.append(traffic(moment, ip=ip))
+        moment += step
+    return found
+
+
+def run(
+    *events: Evidence, rules: TimelineRules = FG_RULES, horizon: datetime = HORIZON
+) -> tuple[list[LeaseInterval], LeaseTimeline]:
+    timeline = LeaseTimeline(rules)
+    timeline.feed(e for e in events if e.time < horizon)
+    return timeline.finish(horizon), timeline
+
+
+def test_a_fortigate_ack_opens_a_high_lease_on_its_interface() -> None:
+    ((lease,), _) = run(fg_assigned(tr(DAY, 9), hostname="PLN-PC14"), horizon=tr(DAY, 10))
+    assert (lease.source_table, lease.confidence, lease.server) == ("fg_dhcp", "high", "vlan42")
+    assert (lease.lease_seconds, lease.origin, lease.network) == (86400, ROOT, NET42)
+    assert (lease.hostname, lease.is_open, lease.vlan) == ("PLN-PC14", True, None)
+
+
+def test_a_renewal_is_a_continuation_with_the_new_lease_time() -> None:
+    ((lease,), timeline) = run(
+        fg_assigned(tr(DAY, 9)),
+        fg_assigned(tr(DAY, 21), lease=43200),
+        horizon=tr(DAY + timedelta(days=1), 8),
+    )
+    assert (lease.start, lease.is_open, lease.lease_seconds) == (tr(DAY, 9), True, 43200)
+    assert lease.last_evidence == tr(DAY, 21)
+    assert timeline.stats["continued"] == 1
+    # It ends 43200 s after the renewal, the lease the FortiGate gave last.
+    ((ended,), _) = run(fg_assigned(tr(DAY, 9)), fg_assigned(tr(DAY, 21), lease=43200))
+    assert (ended.end, ended.end_reason) == (tr(DAY + timedelta(days=1), 9), "timeout")
+    # A renewal that logs no usable lease keeps the one it had.
+    ((kept,), _) = run(fg_assigned(tr(DAY, 9)), fg_assigned(tr(DAY, 21), lease=None))
+    assert (kept.lease_seconds, kept.end) == (86400, tr(DAY + timedelta(days=1), 21))
+
+
+def test_a_release_closes_a_fortigate_lease_with_dhcp() -> None:
+    ((lease,), _) = run(fg_assigned(tr(DAY, 9)), fg_deassigned(tr(DAY, 17)))
+    assert (lease.end, lease.end_reason, lease.last_evidence) == (tr(DAY, 17), "dhcp", tr(DAY, 17))
+
+
+def test_a_logged_lease_ends_at_the_fortigates_own_end() -> None:
+    """D6: lease_seconds after the last DHCP evidence, no timeout_percent margin; a fallback
+    lease (``None``) keeps the server's or default time x timeout_percent."""
+    ((week,), _) = run(fg_assigned(tr(DAY, 9), lease=604800), horizon=tr(DAY + timedelta(8), 0))
+    assert (week.end, week.end_reason) == (tr(DAY + timedelta(days=7), 9), "timeout")
+    ((fallback,), _) = run(fg_assigned(tr(DAY, 9), lease=None))
+    assert fallback.end == tr(DAY + timedelta(days=1), 11, 24)  # 86400 x 1.1
+    ((guest,), _) = run(
+        fg_assigned(tr(DAY, 9), ip="172.20.61.20", interface="dhcp61", lease=None, network=NET61)
+    )
+    assert guest.end == tr(DAY, 10, 6)  # lease.server_seconds keys the interface name too
+    assert FG_RULES.alive_window("fg_dhcp", "vlan42", 604800) == 604800
+    assert FG_RULES.alive_window("fg_dhcp", "vlan42") == 95040
+    assert FG_RULES.alive_window("mt_arp", "vlan42", 604800) == FG_RULES.arp_grace
+    assert FG_RULES.longest_window_with([None, 604800, 3600]) == 604800
+    assert FG_RULES.longest_window_with([]) == FG_RULES.longest_window
+
+
+@pytest.mark.parametrize("lease", [None, 3600, 604800])
+@pytest.mark.parametrize("server", ["vlan42", "dhcp61", None])
+def test_the_timeline_and_the_lookup_compute_one_window(lease: int | None, server: str) -> None:
+    settings = LookupSettings.from_settings(SETTINGS)
+    assert FG_RULES.alive_window("fg_dhcp", server, lease) == settings.lease_timeout_seconds(
+        server, lease
+    )
+
+
+def test_traffic_never_extends_a_fortigate_lease_by_default() -> None:
+    """D26: a printer set statically to the address keeps sending traffic for two days after
+    the client's ACK; the lease still ends 86400 s after the ACK."""
+    flood = every(
+        tr(DAY, 9, 5), tr(DAY + timedelta(days=2), 9), timedelta(minutes=5), "172.20.42.57"
+    )
+    ((lease,), _) = run(fg_assigned(tr(DAY, 9)), *flood, horizon=tr(DAY + timedelta(days=3), 0))
+    assert (lease.end, lease.end_reason) == (tr(DAY + timedelta(days=1), 9), "timeout")
+    assert lease.last_evidence == tr(DAY, 9)
+    # The traffic stays evidence (its latest row before the end).
+    assert lease.last_traffic == tr(DAY + timedelta(days=1), 9)
+    assert [r.table for r in lease.evidence] == ["fg_dhcp", "fg_traffic"]
+    # So do ARP sightings of the pair: they move no FortiGate deadline either.
+    ((with_arp,), _) = run(
+        fg_assigned(tr(DAY, 9)), arp(tr(DAY, 20), mac=PC57, ip="172.20.42.57"),
+        horizon=tr(DAY + timedelta(days=3), 0),
+    )  # fmt: skip
+    assert (with_arp.end, with_arp.last_evidence) == (tr(DAY + timedelta(days=1), 9), tr(DAY, 9))
+    assert [r.table for r in with_arp.evidence] == ["fg_dhcp", "mt_arp"]
+    # With dhcp.fortigate_traffic_extends the same feed keeps it open (the RouterOS rule).
+    ((open_lease,), _) = run(
+        fg_assigned(tr(DAY, 9)), *flood, rules=EXTENDING, horizon=tr(DAY + timedelta(days=2), 9)
+    )
+    assert open_lease.is_open
+    # Traffic still extends MikroTik leases, and never an ARP interval.
+    ((mikrotik,), _) = run(mt_assigned(tr(DAY, 9)), *flood, horizon=tr(DAY + timedelta(days=2), 9))
+    assert mikrotik.is_open
+    ((arp_only,), _) = run(arp(tr(DAY, 9), mac=PC57, ip="172.20.42.57"), *flood)
+    assert (arp_only.end, arp_only.end_reason) == (tr(DAY, 10), "arp")
+
+
+def test_a_fortigate_ack_of_a_pair_open_as_mikrotik_starts_its_own_lease() -> None:
+    """D5, a migration: the FortiGate ACK of the pair supersedes the MikroTik lease; a printer
+    set statically to the address afterwards keeps nothing open."""
+    move = datetime(2026, 10, 1, 9, 20, tzinfo=TR)
+    flood = every(move + timedelta(minutes=5), move + timedelta(days=3), timedelta(minutes=5),
+                  "172.20.42.57")  # fmt: skip
+    (old, new), timeline = run(
+        mt_assigned(move - timedelta(days=1)), fg_assigned(move), *flood,
+        horizon=move + timedelta(days=4),
+    )  # fmt: skip
+    assert (old.source_table, old.end, old.end_reason) == ("mt_dhcp", move, "superseded")
+    assert timeline.stats["superseded_across_sources"] == 1
+    assert (new.source_table, new.start, new.lease_seconds) == ("fg_dhcp", move, 86400)
+    assert (new.end, new.end_reason) == (move + timedelta(seconds=86400), "timeout")
+    # The reverse opens a MikroTik lease without a logged lease time.
+    (fortigate, mikrotik), timeline = run(
+        fg_assigned(tr(DAY, 9)), mt_assigned(tr(DAY, 10)), horizon=tr(DAY, 11)
+    )
+    assert (fortigate.end, fortigate.end_reason) == (tr(DAY, 10), "superseded")
+    assert (mikrotik.source_table, mikrotik.lease_seconds, mikrotik.is_open) == (
+        "mt_dhcp", None, True,
+    )  # fmt: skip
+    assert timeline.stats["superseded_across_sources"] == 1
+
+
+def test_a_client_that_moves_to_another_address_ends_its_lease_there() -> None:
+    """D33: a DHCPDECLINE is not logged; the declining client's next ACK on the same
+    interface, origin and network ends its lease of the declined address."""
+    declined, taken = tr(DAY, 8, 41, 10), tr(DAY, 8, 41, 14)
+    (first, second), timeline = run(
+        fg_assigned(declined, PC31), fg_assigned(taken, PC31, "172.20.42.58"), horizon=tr(DAY, 12)
+    )
+    assert (first.ip, first.end, first.end_reason) == ("172.20.42.57", taken, "superseded")
+    assert first.evidence[-1].time == taken  # the ACK that moved it is cited
+    assert (second.ip, second.is_open) == ("172.20.42.58", True)
+    assert timeline.stats["fg_mac_moved"] == 1
+    # The printer's traffic on .57 afterwards opens nothing.
+    intervals, _ = run(
+        fg_assigned(declined, PC31), fg_assigned(taken, PC31, "172.20.42.58"),
+        traffic(tr(DAY, 10, 12), ip="172.20.42.57"), horizon=tr(DAY, 12),
+    )  # fmt: skip
+    assert [i.ip for i in intervals if i.is_open] == ["172.20.42.58"]
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        {"interface": "vlan43"},  # a laptop with one address on each of two interfaces
+        {"vd": "vdom-2"},  # one MAC on two VDOMs
+        {"ip": "172.20.43.58", "network": "172.20.43.0/24"},  # two relayed networks (F22)
+        {"ip": "10.10.0.5", "network": None},  # an address in no configured network
+    ],
+)
+def test_a_move_elsewhere_closes_nothing(second: dict[str, object]) -> None:
+    ip = str(second.pop("ip", "172.20.42.58"))
+    intervals, timeline = run(
+        fg_assigned(tr(DAY, 8), PC31),
+        fg_assigned(tr(DAY, 8, 1), PC31, ip, **second),  # type: ignore[arg-type]
+        horizon=tr(DAY, 12),
+    )
+    assert [i.is_open for i in intervals] == [True, True]
+    assert timeline.stats["fg_mac_moved"] == 0
+
+
+def test_a_move_closes_on_a_network_entered_without_a_vlan_number() -> None:
+    """Round 6: the network is the subnet (a flat LAN entered without a VLAN id included)."""
+    flat = "172.20.42.0/24"  # its vlans row has vlan_id NULL: the key is still the subnet
+    (first, second), timeline = run(
+        fg_assigned(tr(DAY, 8), PC31, network=flat),
+        fg_assigned(tr(DAY, 8, 1), PC31, "172.20.42.58", network=flat),
+        horizon=tr(DAY, 12),
+    )
+    assert (first.end_reason, second.is_open, timeline.stats["fg_mac_moved"]) == (
+        "superseded", True, 1,
+    )  # fmt: skip
+
+
+def test_a_mikrotik_assignment_never_moves_a_client() -> None:
+    intervals, _ = run(
+        mt_assigned(tr(DAY, 8), PC31), mt_assigned(tr(DAY, 8, 1), PC31, "172.20.42.58"),
+        horizon=tr(DAY, 12),
+    )  # fmt: skip
+    assert [i.is_open for i in intervals] == [True, True]
+    # Nor does it end the client's FortiGate lease on another address.
+    intervals, _ = run(
+        fg_assigned(tr(DAY, 8), PC31), mt_assigned(tr(DAY, 8, 1), PC31, "172.20.42.58"),
+        horizon=tr(DAY, 12),
+    )  # fmt: skip
+    assert [i.is_open for i in intervals] == [True, True]
+
+
+def test_a_fortigate_ack_ends_the_clients_mikrotik_lease_on_its_old_address() -> None:
+    """D33, the MikroTik variant (a migration): compared by the network on both sides, whatever
+    VLAN number the MikroTik row carries."""
+    move = datetime(2026, 10, 1, 9, 20, tzinfo=TR)
+    for vlan in (42, 142):  # 142: the number dhcp.server_vlan_regex gave, not the subnet's
+        (old, new), timeline = run(
+            mt_assigned(move - timedelta(hours=2), vlan=vlan),
+            fg_assigned(move, ip="172.20.42.120"),
+            traffic(move + timedelta(hours=1), ip="172.20.42.57"),  # a printer on .57 now
+            horizon=move + timedelta(hours=3),
+        )
+        assert (old.ip, old.end, old.end_reason) == ("172.20.42.57", move, "superseded")
+        assert (new.ip, new.is_open) == ("172.20.42.120", True)
+        assert timeline.stats["superseded_across_sources"] == 1
+    # An ACK for an address of another network closes nothing.
+    intervals, _ = run(
+        mt_assigned(move - timedelta(hours=2)),
+        fg_assigned(move, ip="172.20.43.120", interface="vlan43", network="172.20.43.0/24"),
+        horizon=move + timedelta(hours=3),
+    )
+    assert [i.is_open for i in intervals] == [True, True]
+
+
+@pytest.mark.parametrize("minute_by_minute", [False, True])
+def test_a_move_after_the_deadline_finds_the_lease_timed_out(minute_by_minute: bool) -> None:
+    """D33 applies the other address's deadline first: the lease of .20 ended at 10:00 (lease
+    3600), not at the ACK of .35 at 14:00 — fed at once or minute by minute alike."""
+    events = [
+        fg_assigned(tr(DAY, 9), "00:00:5e:00:53:21", "172.20.61.20", lease=3600,
+                    interface="vlan61", network=NET61),
+        fg_assigned(tr(DAY, 14), "00:00:5e:00:53:21", "172.20.61.35", lease=3600,
+                    interface="vlan61", network=NET61),
+    ]  # fmt: skip
+    timeline = LeaseTimeline(FG_RULES)
+    if minute_by_minute:
+        moment = tr(DAY, 8)
+        while moment < tr(DAY, 15):
+            timeline.feed(e for e in events if moment <= e.time < moment + timedelta(minutes=1))
+            moment += timedelta(minutes=1)
+            timeline.expire(moment)
+    else:
+        timeline.feed(events)
+    first, second = timeline.finish(tr(DAY, 15))
+    assert (first.end, first.end_reason) == (tr(DAY, 10), "timeout")
+    assert timeline.stats["fg_mac_moved"] == 0
+    # No lease of .20 covers 12:00 (a MAC-only lookup for :21 at that moment finds none).
+    assert first.end is not None
+    assert not first.start <= tr(DAY, 12) < first.end
+    assert second.is_open
+
+
+def test_an_arp_entry_right_after_a_fortigate_release_opens_nothing() -> None:
+    intervals, timeline = run(
+        fg_assigned(tr(DAY, 9)), fg_deassigned(tr(DAY, 10)),
+        arp(tr(DAY, 10, 2), mac=PC57, ip="172.20.42.57"), horizon=tr(DAY, 11),
+    )  # fmt: skip
+    assert [(i.source_table, i.end_reason) for i in intervals] == [("fg_dhcp", "dhcp")]
+    assert timeline.stats["ignored_arp_after_release"] == 1
+
+
+def test_rows_of_both_tables_at_one_instant_order_by_table() -> None:
+    """Rows of two tables may share an id: MikroTik first (``TABLE_RANK``), whatever the id."""
+    t = tr(DAY, 9)
+    mikrotik = DhcpEvent(t, "assigned", "172.20.42.57", PC57, ref=EvidenceRef(
+        table="mt_dhcp", row_id=7, time=t, raw=None, summary="dhcp42 assigned"))  # fmt: skip
+    fortigate = DhcpEvent(t, "assigned", "172.20.42.57", PC31, table="fg_dhcp", ref=EvidenceRef(
+        table="fg_dhcp", row_id=7, time=t, raw=None, summary="vlan42 assigned"))  # fmt: skip
+    assert sorted([fortigate, mikrotik], key=evidence_key) == [mikrotik, fortigate]
+    for order in ([fortigate, mikrotik], [mikrotik, fortigate]):
+        intervals = build_timeline(order, FG_RULES, horizon=tr(DAY, 10))
+        assert {(i.mac, i.source_table, i.end_reason) for i in intervals} == {
+            (PC57, "mt_dhcp", "superseded"),
+            (PC31, "fg_dhcp", "open"),
+        }
+
+
+def test_supersedes_across_dhcp_origins_are_counted() -> None:
+    _, timeline = run(mt_assigned(tr(DAY, 8)), fg_assigned(tr(DAY, 9), PC31), horizon=tr(DAY, 10))
+    assert timeline.stats["superseded_across_sources"] == 1
+    _, timeline = run(fg_assigned(tr(DAY, 8)), fg_assigned(tr(DAY, 9), PC31, vd="vdom-2"),
+                      horizon=tr(DAY, 10))  # fmt: skip
+    assert timeline.stats["superseded_across_sources"] == 1
+    # The same server giving the address to another client is no supersede across sources.
+    _, timeline = run(fg_assigned(tr(DAY, 8)), fg_assigned(tr(DAY, 9), PC31), horizon=tr(DAY, 10))
+    assert timeline.stats["superseded_across_sources"] == 0
+    _, timeline = run(mt_assigned(tr(DAY, 8)), mt_assigned(tr(DAY, 9), PC31), horizon=tr(DAY, 10))
+    assert timeline.stats["superseded_across_sources"] == 0
+
+
+def test_a_renewal_ack_is_counted_from_two_fifths_of_the_lease_on() -> None:
+    _, timeline = run(
+        fg_assigned(tr(DAY, 9)), fg_assigned(tr(DAY, 9, 1)), fg_assigned(tr(DAY, 18, 37)),
+        horizon=tr(DAY, 20),
+    )  # fmt: skip
+    # 09:01 is a repeat a minute later; 18:37 is 9 h 36 min after it (40 % of 24 h = 9.6 h).
+    assert (timeline.stats["continued"], timeline.stats["fg_renewal_ack"]) == (2, 1)
+    _, timeline = run(fg_assigned(tr(DAY, 9)), fg_assigned(tr(DAY, 18, 35)), horizon=tr(DAY, 20))
+    assert timeline.stats["fg_renewal_ack"] == 0  # 9 h 35 min < 9.6 h

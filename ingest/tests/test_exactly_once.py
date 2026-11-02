@@ -1,5 +1,8 @@
 """Exactly once: an interruption at any point never loads a line twice and never skips one.
 
+Rows, offsets, the search summary counts (``search_counts``) and the clock samples
+(``source_clock_samples``), both written in the same transaction, agree after every one of these:
+
 * every step of the load transaction is interrupted in turn (the hook raises, like a crash);
 * a second instance moves the offsets under a running one (compare-and-set refuses the batch);
 * two instances race on the same files (both with the single-instance lock switched off: the
@@ -14,14 +17,18 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import date
+from collections.abc import Callable
+from datetime import date, timedelta
 
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, text
 
 from arcilogger_core.rawlog import RawRecord
+from arcilogger_core.timeutil import day_window
 from arcilogger_db.engine import engine_from_url
+from arcilogger_db.searchcounts import verify
 from arcilogger_ingest import prepare
+from arcilogger_ingest.instance import InstanceLock
 from arcilogger_ingest.loader import STEPS
 from arcilogger_ingest.parsers import LinePosition, ParsedRow, ParseOutcome, get_parser
 from arcilogger_ingest.status import read_status
@@ -36,6 +43,11 @@ from arcilogger_ingest.testing import (
     write_config_file,
 )
 
+#: ``searchcounts.verify`` recounts the hours before this moment; every row of these tests (lines
+#: received on DAY - 1 or DAY, device times within a day of that) lies in them.
+VERIFY_NOW = day_window(DAY + timedelta(days=3))[0]
+VERIFY_HOURS = 24 * 7
+
 
 class SimulatedCrashError(Exception):
     """Stands for the process dying at that point."""
@@ -47,8 +59,28 @@ def fill(world: World) -> None:
     world.append("unknown-10.9.9.9", DAY, [b"<13>who am i"] * 30, sender="10.9.9.9")
 
 
+def counts_agree(connection: Connection) -> None:
+    """``search_counts`` holds exactly the loaded rows: equal to their recount, nothing else;
+    ``source_clock_samples`` counts exactly the rows with a device time of their own."""
+    report = verify(connection, VERIFY_HOURS, now=VERIFY_NOW)
+    assert report.differences == []
+    total = connection.execute(text("SELECT coalesce(sum(n), 0) FROM search_counts")).scalar()
+    assert report.lines == total == len(loaded(connection))
+    sampled = "SELECT coalesce(sum(n), 0) FROM source_clock_samples"
+    timed = "SELECT count(*) FROM messages WHERE time <> time_received"
+    assert connection.execute(text(sampled)).scalar() == connection.execute(text(timed)).scalar()
+
+
+def counts_consistent(engine: Engine) -> None:
+    with (
+        engine.connect().execution_options(isolation_level="REPEATABLE READ") as connection,
+        connection.begin(),
+    ):
+        counts_agree(connection)
+
+
 def consistent(engine: Engine, world: World) -> None:
-    """Rows and offsets always agree: exactly the lines up to each committed offset."""
+    """Rows, offsets and counts always agree: exactly the lines up to each committed offset."""
     # One snapshot: a COMMIT that a killed process sent just before it died can still land
     # between two separate reads, which then disagree although every commit was whole.
     with (
@@ -57,6 +89,7 @@ def consistent(engine: Engine, world: World) -> None:
     ):
         committed = offsets(connection)
         rows = loaded(connection)
+        counts_agree(connection)
     assert len(rows) == len(set(rows))
     expected = {
         (source, day, number, offset)
@@ -111,6 +144,7 @@ def test_interruption_at_every_step_of_the_load(
     restarted = world.service(db_engine)
     assert restarted.run(once=True) == 0
     assert check_exactly_once(db_engine, world) == []
+    consistent(db_engine, world)  # every line counted once, the first batch's not twice
     with db_engine.connect() as connection:
         failures = connection.execute(text("SELECT sum(count) FROM parse_failures")).scalar()
         alerts = connection.execute(text("SELECT count(*) FROM alerts")).scalar()
@@ -140,6 +174,7 @@ def test_a_second_instance_moving_the_offsets_makes_the_first_one_back_off(
     assert "moved by another instance" in caplog.text
     assert first.counters.lines == 100  # only its first batch
     assert check_exactly_once(db_engine, world) == []
+    counts_consistent(db_engine)  # the refused batch's counts went with its rows
 
 
 def test_two_instances_racing_on_the_same_files(
@@ -169,11 +204,20 @@ def test_two_instances_racing_on_the_same_files(
         engines[1].dispose()
     assert results == [0, 0]
     assert check_exactly_once(db_engine, world) == []
+    counts_consistent(db_engine)
 
 
 def _messages(engine: Engine) -> int:
     with engine.connect() as connection:
         return int(connection.execute(text("SELECT count(*) FROM messages")).scalar_one())
+
+
+def wait_for(condition: Callable[[], bool], timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not reached in time")
+        time.sleep(0.02)
 
 
 def test_killing_the_service_process_repeatedly(
@@ -196,6 +240,11 @@ def test_killing_the_service_process_repeatedly(
         finally:
             process.kill()
             process.wait(30)
+        # The killed process's session, which holds the ingest lock, can outlive wait() on a
+        # loaded Windows runner (so can a launcher's interpreter child); --once would exit 4.
+        probe = InstanceLock(db_engine)
+        wait_for(probe.acquire, timeout=60)
+        probe.release()
         kills += 1
         consistent(db_engine, world)
     total = _messages(db_engine)
@@ -204,3 +253,4 @@ def test_killing_the_service_process_repeatedly(
     final = subprocess.run([*command, "--once"], capture_output=True, timeout=120, check=False)
     assert final.returncode == 0, final.stderr.decode(errors="replace")
     assert check_exactly_once(db_engine, world) == []
+    counts_consistent(db_engine)

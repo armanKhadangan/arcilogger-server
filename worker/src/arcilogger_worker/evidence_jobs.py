@@ -15,7 +15,8 @@
     write (ADR-0007). This job copies every event into the audit log **once**:
 
     * ``state/seal/<day>.json`` — ``seal.run`` ``sealed`` for a sealed day, ``failed`` for the
-      failed attempt the file shows;
+      failed attempt the file shows, with ``requested`` (the task request's id) when the attempt
+      was one of "Şimdi mühürle" (ADR-0014);
     * ``vault/deletions/<date>-imha.json`` — ``retention.run`` ``deleted`` when the record is
       time-stamped (``.zd``) and every day it lists is really gone from the vault (and no state
       file names another record as the one that deleted it). A record that does not meet this
@@ -30,7 +31,9 @@
 
     * ``state/seal/secret-changes.jsonl`` — ``settings.secret_change`` for every change of a
       stored credential (Kamu SM, database, replica) made with ``arcilogger-core secret
-      set|delete`` (name, action, operator and time; never a value).
+      set|delete`` (name, action, operator and time; never a value);
+    * the browser administration's journals (``admin.*``, ``settings.secret_change`` with
+      ``operator: "web:<user>"``): :mod:`.admin_jobs`.
 
     ``audit_imports`` remembers the imported event keys in the same transaction as the entry,
     under the audit chain lock, so a second worker or a restart never imports twice.
@@ -85,6 +88,8 @@ SEAL_ACTION: Final = "seal.run"
 SECRET_ACTION: Final = "settings.secret_change"  # noqa: S105 - an action name
 SECRET_SOURCE: Final = "state/seal/secret-changes.jsonl"  # noqa: S105 - a file name
 SECRET_ID: Final = re.compile(r"^[0-9a-f]{32}$")
+#: A seal state's ``requested``: the id of the task request of "Şimdi mühürle".
+REQUEST_ID: Final = SECRET_ID
 RETENTION_ACTION: Final = "retention.run"
 SEAL_ALERT: Final = "R20-seal"
 RETENTION_ALERT: Final = "R20-retention"
@@ -265,6 +270,10 @@ def seal_events(layout: Layout, report: ImportReport) -> list[AuditEvent]:
             "day": day.isoformat(),
             "source": f"{SEAL_STATE_SOURCE}/{path.name}",
         }
+        # "Şimdi mühürle" (ADR-0014): the task request the attempt honoured, by its id.
+        requested = data.get("requested")
+        if isinstance(requested, str) and REQUEST_ID.match(requested):
+            base["requested"] = requested
         target = f"seal:{day.isoformat()}"
         if data.get("sealed_at"):  # sealed (also kept when retention later deleted the day)
             details: dict[str, Any] = {**base, "outcome": "sealed"}

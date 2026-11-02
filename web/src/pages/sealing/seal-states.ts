@@ -100,3 +100,10 @@ export function gapReason(reason: string): { key: string; minutes?: number } | n
   if (longer) return { key: 'sealing.gaps.reasons.longer', minutes: Number(longer[1]) };
   return null;
 }
+
+/**
+ * The refusals of "Şimdi mühürle" and "Kontör sorgula" that come from the administration service
+ * itself (switched off, or ArciAdmin not running): the page then names the console path, the
+ * task in Task Scheduler.
+ */
+export const AGENT_CODES = ['admin_disabled', 'admin_agent_unavailable'] as const;
