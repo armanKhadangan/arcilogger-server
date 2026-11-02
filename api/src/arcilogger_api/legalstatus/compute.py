@@ -2,7 +2,8 @@
 
 :func:`compute_legal_status` reads the configuration and the state files only: the sealing
 records and the vault's tokens (:class:`~arcilogger_core.seal.Sealer`), the re-stamping report,
-the revocation list index and the scheduled verifications, through the readers the R20 checks use
+the stored revocation lists against the newest sealed day's chain and the scheduled
+verifications, through the readers the R20 checks use
 (:mod:`arcilogger_worker.alerts.system`). Nothing about log subjects is read, so the answer is the
 same for every user.
 """
@@ -12,7 +13,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from urllib.parse import urlparse
 
 from arcilogger_api.legalstatus.models import (
@@ -28,14 +28,16 @@ from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import day_window, isoformat_site
-from arcilogger_core.tsa.base import StampResult, TsaError
 from arcilogger_worker.alerts.system import (
-    CrlIndexState,
-    crl_stale_issuers,
-    issuers_in_use,
-    read_crl_index,
+    CrlStatus,
+    NoStamps,
+    crl_status,
+    pinned_roots,
     read_stamp_renewals,
     revoked_certificates,
+    shifted,
+    stamp_in_use,
+    stored_lists,
 )
 
 log = logging.getLogger("arcilogger_api.legalstatus")
@@ -46,27 +48,14 @@ DANGER: frozenset[LegalReasonCode] = frozenset(
 )
 
 
-class _NoStamps:
-    """The sealer only answers which days are pending here; it never stamps."""
-
-    name = "none"
-    legal_grade = False
-
-    def stamp(self, file_path: Path) -> StampResult:  # pragma: no cover - never called
-        raise TsaError("the API does not stamp")
-
-    def credits(self) -> int | None:  # pragma: no cover - never called
-        return None
-
-
 def late_unstamped_days(layout: Layout, config: Config, now: datetime) -> list[date] | None:
     """The closed days without a time stamp longer than ``seal.late_after_hours`` after their
     end, oldest first: the Panel's blocking card and ``unstamped_days`` (D11). ``None``: unknown,
-    when the spool cannot be listed (ADR-0007)."""
-    sealer = Sealer(config, provider=_NoStamps(), roots=[], clock=lambda: now)
+    when the spool or the seal states cannot be read (ADR-0007)."""
+    sealer = Sealer(config, provider=NoStamps(), roots=[], clock=lambda: now)
     try:
         pending = sealer.closed_unsealed_days()
-    except OSError as exc:
+    except (OSError, RecursionError) as exc:  # RecursionError: a seal state nested too deeply
         log.info("unstamped days unknown (%s): %s", type(exc).__name__, exc)
         return None
     late = timedelta(hours=config.seal.late_after_hours)
@@ -120,7 +109,7 @@ def _renewal_reasons(layout: Layout, options: LegalOptions) -> list[LegalReason]
             _reason(
                 "renewal_due",
                 "sealing",
-                since=min(due) - before,
+                since=shifted(min(due), -before),
                 count=len(due),
                 days=options.renew_before_days,
             )
@@ -133,19 +122,12 @@ def _renewal_reasons(layout: Layout, options: LegalOptions) -> list[LegalReason]
     return reasons
 
 
-def _crl_reasons(index: CrlIndexState, now: datetime, options: LegalOptions) -> list[LegalReason]:
-    in_use = issuers_in_use(index)
-    stale = crl_stale_issuers(index, in_use, now, options.crl_max_age_days)
-    if not stale and (index.readable or not in_use):
+def _crl_reasons(status: CrlStatus, options: LegalOptions) -> list[LegalReason]:
+    """``crl_stale``: an issuer of the newest sealed day's chain without a stored list newer
+    than ``tsa.crl_max_age_days`` (all of them when ``state/crl`` cannot be read)."""
+    if not status.stale:
         return []
-    max_age = timedelta(days=options.crl_max_age_days)
-    newest = [
-        max(entry.this_update for entry in index.lists if entry.issuer_sha256 == issuer)
-        for issuer in stale
-        if any(entry.issuer_sha256 == issuer for entry in index.lists)
-    ]
-    since = min(newest) + max_age if newest else None
-    return [_reason("crl_stale", "settings-tsa", since=since, days=options.crl_max_age_days)]
+    return [_reason("crl_stale", "settings-tsa", since=status.since, days=options.crl_max_age_days)]
 
 
 def _sorted(reasons: Sequence[LegalReason]) -> list[LegalReason]:
@@ -169,7 +151,10 @@ def compute_legal_status(layout: Layout, config: Config, now: datetime) -> Legal
             )
         )
     reasons += _renewal_reasons(layout, options)
-    revoked = revoked_certificates(layout)
+    # the newest sealed day's chain and the stored lists, read once for both reasons
+    stamp = stamp_in_use(layout, pinned_roots(config, layout))
+    lists = stored_lists(layout)
+    revoked = revoked_certificates(layout, stamp, lists)
     if revoked:
         first = revoked[0]
         reasons.append(
@@ -180,7 +165,7 @@ def compute_legal_status(layout: Layout, config: Config, now: datetime) -> Legal
                 name=certificate_name(first.name),
             )
         )
-    reasons += _crl_reasons(read_crl_index(layout), now, options)
+    reasons += _crl_reasons(crl_status(lists, stamp, now, options.crl_max_age_days), options)
     ordered = _sorted(reasons)
     level: LegalLevel = ordered[0].level if ordered else "ok"
     return LegalStatus(

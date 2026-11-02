@@ -32,7 +32,6 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import date, datetime, timedelta
-from pathlib import Path as FsPath
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -59,8 +58,8 @@ from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import Sealer, sha256_file
 from arcilogger_core.timeutil import day_window, site_day, utc_now
-from arcilogger_core.tsa.base import StampResult, TsaError
 from arcilogger_db.models import SealVerification
+from arcilogger_worker.alerts.system import NoStamps
 
 log = logging.getLogger("arcilogger.api.seals")
 
@@ -333,19 +332,6 @@ def verify_day(
     )
 
 
-class _NoStamps:
-    """The sealer only answers which day is due here; it never stamps."""
-
-    name = "none"
-    legal_grade = False
-
-    def stamp(self, file_path: FsPath) -> StampResult:  # pragma: no cover - never called
-        raise TsaError("the API does not stamp")
-
-    def credits(self) -> int | None:  # pragma: no cover - never called
-        return None
-
-
 #: Calendar states of a day that is sealed (a failed verification still is).
 _SEALED_STATES: Final = ("verified", "sealed", "late")
 
@@ -361,7 +347,7 @@ def _check_seal_now(
         raise admin_error("seal_day_sealed")
     if status in ("skipped", "deleted") or shown in ("no_data", "deleted"):
         raise admin_error("seal_not_applicable")
-    due = Sealer(config, provider=_NoStamps(), roots=[]).closed_unsealed_days()
+    due = Sealer(config, provider=NoStamps(), roots=[]).closed_unsealed_days()
     quiet = timedelta(seconds=config.seal.quiet_seconds)
     if (
         not due

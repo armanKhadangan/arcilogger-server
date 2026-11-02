@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives.serialization import Encoding
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -27,14 +28,15 @@ from arcilogger_api.legalstatus import routes, texts
 from arcilogger_api.legalstatus.compute import compute_legal_status, late_unstamped_days
 from arcilogger_api.legalstatus.models import LegalReason, LegalStatus
 from arcilogger_api.legalstatus.options import legal_options
+from arcilogger_api.legalstatus.testing import root_list, store_lists
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.config import KAMUSM_PRODUCTION_HOST, KAMUSM_TEST_HOST, Config
 from arcilogger_core.layout import Layout
 from arcilogger_core.license.testing import base_only_status, override_status
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import isoformat_site
+from arcilogger_core.tsa.mock import MockTsa
 from arcilogger_db.models import AuditLog, Lease, Person
-from arcilogger_worker.alerts.system import CRL_INDEX_SCHEMA
 from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 Login = Callable[..., LoggedIn]
@@ -42,7 +44,6 @@ API = "/api/v1/legal-status"
 #: 2 November 2026, 09:00 site time.
 NOW = at_site(date(2026, 11, 2), 9, 0)
 FINGERPRINT = "ab" * 32
-ISSUER_SHA = "a1" * 32
 TSA_SUBJECT = "CN=Örnek Test TSA 1,O=Örnek A.Ş.,C=TR"
 CONTRACT = Path(__file__).resolve().parents[2] / "design" / "wave-5-contract.md"
 CLAIMS = re.compile(r"uyumlu|uyumu|garanti|complian|guarantee", re.IGNORECASE)
@@ -113,26 +114,48 @@ class Site:
             {"at": isoformat_site(NOW - timedelta(hours=6), "seconds"), "checks": [check]},
         )
 
-    def crl_index(self, this_update: datetime) -> None:
-        entry = {
-            "file": f"{ISSUER_SHA[:12]}-{this_update:%Y%m%dT%H%M%S}Z-89abcdef.crl",
-            "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
-            "issuer_sha256": ISSUER_SHA,
-            "this_update": this_update.astimezone(UTC).isoformat(),
-            "next_update": None,
-            "sha256": "c3" * 32,
-            "url": "http://192.0.2.10/crl/root.crl",
-            "fetched_at": isoformat_site(NOW - timedelta(hours=6), "seconds"),
-        }
-        failure = {
-            "url": "http://198.51.100.7/ca.crl",
-            "at": isoformat_site(NOW - timedelta(hours=6), "seconds"),
-            "error": "unreachable",
-        }
-        write(
-            self.layout.state / "crl" / "index.json",
-            {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": [failure]},
+    def sealed(self) -> SealedVault:
+        """29 and 30 October sealed: no closed day is late at ``NOW``. The newest stamp (30
+        October's) is the one in use."""
+        sealed = make_vault(self.config.data_dir, tsa_now=at_site(date(2026, 9, 29)))
+        self.vaults.append(sealed)
+        sealed.seal_days([date(2026, 10, 29), date(2026, 10, 30)])
+        return sealed
+
+    def pin_roots(self) -> None:
+        """The mock TSA's root as a pinned root of ``tsa.roots_dir``: the root a real provider's
+        stamps reach (a legal provider never trusts the mock root by itself)."""
+        folder = self.config.data_dir.parent / "pinned-roots"
+        folder.mkdir(exist_ok=True)
+        root = self.vaults[-1].tsa.root_certificate
+        (folder / "root.pem").write_bytes(root.public_bytes(Encoding.PEM))
+        self.use(tsa_config(self.config, roots_dir=folder))
+
+    def lists(
+        self,
+        *issued: datetime,
+        revoked_at: datetime | None = None,
+        failures: tuple[dict[str, str], ...] = (),
+    ) -> list[str]:
+        """Lists of the stamps' root issued at ``issued`` (the TSA certificate revoked at
+        ``revoked_at`` on each), stored as ``crl fetch`` stores them (2.2); a sealed vault and
+        its pinned root first, when there are none yet."""
+        if not self.vaults:
+            self.sealed()
+        self.pin_roots()
+        tsa = self.vaults[-1].tsa
+        made = [(tsa, root_list(tsa, moment, revoked_at=revoked_at)) for moment in issued]
+        return store_lists(
+            self.layout, made, fetched_at=NOW - timedelta(hours=6), failures=failures
         )
+
+
+#: A URL the latest ``crl fetch`` could not store a list from.
+FAILURE = {
+    "url": "http://198.51.100.7/ca.crl",
+    "at": isoformat_site(NOW - timedelta(hours=6), "seconds"),
+    "error": "unreachable",
+}
 
 
 def token(day: str, status: str, not_after: datetime) -> dict[str, Any]:
@@ -233,7 +256,7 @@ def _certificate_revoked(site: Site) -> None:
 
 def _crl_stale(site: Site) -> None:
     site.use(legal(site.config))
-    site.crl_index(NOW - timedelta(days=8))
+    site.lists(NOW - timedelta(days=8), failures=(FAILURE,))
 
 
 REASONS: dict[str, tuple[Callable[[Site], None], dict[str, Any]]] = {
@@ -358,7 +381,7 @@ def test_legal_status_each_reason(site: Site, admin: TestClient, code: str) -> N
 def test_legal_status_levels_are_the_worst_reason(site: Site, admin: TestClient) -> None:
     site.use(legal(site.config))
     site.renewals(token("2026-10-01", "due", datetime(2027, 3, 1, tzinfo=UTC)))
-    site.crl_index(NOW - timedelta(days=8))
+    site.lists(NOW - timedelta(days=8))
     body = get(admin)
     assert (body["level"], codes(body)) == ("warning", ["crl_stale", "renewal_due"])
 
@@ -381,7 +404,7 @@ def test_legal_status_reasons_sorted_danger_first_then_by_code(
         token("2026-04-01", "uncovered", datetime(2026, 10, 30, tzinfo=UTC)),
     )
     site.revoked()
-    site.crl_index(NOW - timedelta(days=30))
+    site.lists(NOW - timedelta(days=30))
     body = get(admin)
     assert body["level"] == "danger"
     assert codes(body) == [
@@ -460,7 +483,7 @@ def test_legal_options_read_the_wave_5_keys_with_their_defaults(api_config: Conf
 def test_legal_status_reads_the_configured_ages(site: Site, admin: TestClient) -> None:
     site.use(legal(site.config, renew_before_days=90, crl_max_age_days=30))
     site.renewals(token("2026-10-01", "due", datetime(2027, 1, 1, tzinfo=UTC)))
-    site.crl_index(NOW - timedelta(days=8))  # fresh for 30 days
+    site.lists(NOW - timedelta(days=8))  # fresh for 30 days
     (reason,) = get(admin)["reasons"]
     assert (
         reason["message_en"] == "1 stamp certificate(s) expire within 90 days; re-stamping is due."
@@ -473,6 +496,8 @@ def test_late_unstamped_days_only_after_late_after_hours(site: Site) -> None:
     config = site.config
     day_end = datetime(2026, 10, 31, tzinfo=UTC) - timedelta(hours=3)  # 31.10. 00:00 site
     assert late_unstamped_days(site.layout, config, day_end + timedelta(hours=47)) == []
+    # "longer than" 48 hours: exactly 48 hours after its end a day is not late yet
+    assert late_unstamped_days(site.layout, config, day_end + timedelta(hours=48)) == []
     assert late_unstamped_days(site.layout, config, day_end + timedelta(hours=49)) == [
         date(2026, 10, 30)
     ]
@@ -495,6 +520,198 @@ def test_legal_status_unknown_spool_gives_no_unstamped_reason(
     monkeypatch.setattr(Sealer, "closed_unsealed_days", denied)
     assert late_unstamped_days(site.layout, site.config, NOW) is None
     assert get(admin)["reasons"] == []
+
+
+def test_late_unstamped_days_follow_the_configured_hours(site: Site, admin: TestClient) -> None:
+    """``seal.late_after_hours`` decides, not a fixed 48 (D11): 30 October is late 24 hours
+    after its end, and the text names the configured hours."""
+    site.vault()
+    seal = site.config.seal.model_copy(update={"late_after_hours": 24})
+    config = site.use(legal(site.config).model_copy(update={"seal": seal}))
+    day_end = datetime(2026, 10, 31, tzinfo=UTC) - timedelta(hours=3)
+    assert late_unstamped_days(site.layout, config, day_end + timedelta(hours=24)) == []
+    assert late_unstamped_days(site.layout, config, day_end + timedelta(hours=25)) == [
+        date(2026, 10, 30)
+    ]
+    # at NOW (57 hours) 31 October is late as well with 24 hours, never with 48
+    (reason,) = get(admin)["reasons"]
+    assert (reason["code"], reason["count"]) == ("unstamped_days", 2)
+    assert reason["message_tr"] == "2 kapanmış gün 24 saatten uzun süredir damgalanmadı."
+    assert reason["since"] == "2026-11-01T00:00:00+03:00"
+
+
+# -- the revocation lists of the stamps in use (W5-B's stored lists) -----------------------------
+
+
+def crl_reasons(client: TestClient) -> list[dict[str, Any]]:
+    return [reason for reason in get(client)["reasons"] if reason["code"] == "crl_stale"]
+
+
+def test_crl_stale_for_an_issuer_in_use_without_any_list(site: Site, admin: TestClient) -> None:
+    """The worst case: the stamps' root has no stored list at all, before the first fetch or
+    when every URL fails (C12: the index's failures are no list)."""
+    site.use(legal(site.config))
+    site.sealed()
+    site.pin_roots()
+    (reason,) = crl_reasons(admin)
+    assert (reason["since"], reason["level"]) == (None, "warning")
+
+    site.app.state.arci_legal_status.invalidate()
+    site.lists(failures=(FAILURE, {**FAILURE, "error": "unknown_issuer"}))
+    (reason,) = crl_reasons(admin)
+    assert reason["since"] is None
+
+
+def test_crl_stale_needs_a_stamp_in_use(site: Site, admin: TestClient) -> None:
+    """Before the first sealed day, or when the newest token reaches no pinned root, no issuer
+    is in use: an old list alone raises nothing."""
+    site.use(legal(site.config))
+    site.sealed()
+    tsa = site.vaults[-1].tsa
+    store_lists(
+        site.layout,
+        [(tsa, root_list(tsa, NOW - timedelta(days=30)))],
+        fetched_at=NOW - timedelta(days=30),
+    )
+    assert crl_reasons(admin) == []  # the mock root is not pinned for a legal provider
+
+
+def test_crl_stale_counts_only_the_lists_that_match_their_index_entry(
+    site: Site, admin: TestClient
+) -> None:
+    """C14/C20: a newest list whose file was changed or deleted is no verified list; the
+    older one decides."""
+    site.use(legal(site.config))
+    older, newest = site.lists(NOW - timedelta(days=10), NOW - timedelta(days=1))
+    assert crl_reasons(admin) == []
+    path = site.layout.crl_dir / newest
+    path.write_bytes(path.read_bytes() + b"\x00")  # test: the stored file is changed
+    site.app.state.arci_legal_status.invalidate()
+    (reason,) = crl_reasons(admin)
+    assert reason["since"] == isoformat_site(NOW - timedelta(days=3), "seconds")
+    path.unlink()  # test: the stored file is gone
+    site.app.state.arci_legal_status.invalidate()
+    assert len(crl_reasons(admin)) == 1
+    assert (site.layout.crl_dir / older).is_file()
+
+
+def test_crl_stale_when_the_lists_cannot_be_read_while_in_use(
+    site: Site, admin: TestClient
+) -> None:
+    site.use(legal(site.config))
+    site.lists(NOW - timedelta(days=1))
+    (site.layout.crl_dir / "index.json").write_text("{not json", encoding="utf-8")
+    (reason,) = crl_reasons(admin)
+    assert reason["since"] is None
+
+
+def test_crl_stale_only_for_the_issuers_of_the_chain_in_use(
+    site: Site, admin: TestClient, tmp_path: Path
+) -> None:
+    """Lists are never deleted (D8): an old provider's root keeps its old lists, which no
+    longer matter once no stamp in use chains to it."""
+    site.use(legal(site.config))
+    site.sealed()
+    site.pin_roots()
+    tsa = site.vaults[-1].tsa
+    previous = MockTsa(tmp_path / "previous-tsa", key_type="ec", clock=lambda: NOW)
+    store_lists(
+        site.layout,
+        [
+            (previous, root_list(previous, NOW - timedelta(days=40))),
+            (tsa, root_list(tsa, NOW - timedelta(days=1))),
+        ],
+        fetched_at=NOW,
+    )
+    assert crl_reasons(admin) == []
+    store_lists(
+        site.layout,
+        [(previous, root_list(previous, NOW - timedelta(days=1)))],
+        fetched_at=NOW,
+    )
+    site.app.state.arci_legal_status.invalidate()
+    assert len(crl_reasons(admin)) == 1  # a fresh list of another root is no list of this one
+
+
+@pytest.mark.parametrize(
+    ("revoked_at", "revoked"),
+    [
+        (at_site(date(2026, 10, 30), 12, 0), True),  # before the newest stamp (31.10. 00:30)
+        (NOW - timedelta(hours=1), False),  # after it: crl-revoked-later, a warning of the day
+    ],
+)
+def test_certificate_revoked_from_the_stored_lists(
+    site: Site, admin: TestClient, revoked_at: datetime, revoked: bool
+) -> None:
+    """The newest sealed day's chain is checked against the stored lists too, so a revocation
+    shows before the next scheduled verification finds it."""
+    site.use(legal(site.config))
+    site.lists(NOW - timedelta(hours=2), revoked_at=revoked_at)
+    found = [r for r in get(admin)["reasons"] if r["code"] == "certificate_revoked"]
+    if not revoked:
+        assert found == []
+        return
+    (reason,) = found
+    assert reason["level"] == "danger"
+    assert reason["message_en"] == (
+        "A time-stamp certificate is on a revocation list: ARCILOGGER Mock TSA (TEST ONLY) tsa. "
+        "Contact the provider; legal review is recommended."
+    )
+    assert reason["since"] == isoformat_site(revoked_at, "seconds")
+
+
+NESTED = "[" * 100_000 + "]" * 100_000
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("verify/last-1.json", json.dumps({"at": NOW.isoformat(), "checks": 5})),
+        ("verify/last-1.json", json.dumps({"at": NOW.isoformat(), "checks": True})),
+        (
+            "verify/last-1.json",
+            json.dumps({"at": NOW.isoformat(), "checks": [{"day": "2026-10-29", "errors": 3}]}),
+        ),
+        ("verify/last-1.json", NESTED),
+        ("renewal.json", NESTED),
+        ("crl/index.json", NESTED),
+        ("seal/2026-10-31.json", NESTED),
+        *(
+            (
+                "renewal.json",
+                json.dumps(
+                    {
+                        "tokens": [
+                            {
+                                "path": "2026/10/29/manifest-2026-10-29.json.zd",
+                                "kind": "day",
+                                "cert_not_after": f"0001-01-01T00:00:00{offset}",
+                                "status": status,
+                                "covered_by": None,
+                            }
+                        ]
+                    }
+                ),
+            )
+            for offset in ("+00:00", "+03:00")
+            for status in ("due", "uncovered")
+        ),
+    ],
+    ids=lambda value: str(value)[:40],
+)
+def test_damaged_state_files_never_fail_the_status_or_the_day_page(
+    site: Site, admin: TestClient, name: str, content: str
+) -> None:
+    """The banner is on every page: a damaged state file is read as unknown, never a 500 (the
+    cache keeps no failed answer, so a 500 would repeat on every request)."""
+    site.use(legal(site.config))
+    site.sealed()
+    path = site.layout.state / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    assert admin.get(API).status_code == 200
+    response = admin.get("/api/v1/seals/2026-10-29")
+    assert response.status_code == 200, response.text
 
 
 def test_legal_status_corrupt_state_files_never_fail_the_request(
@@ -572,7 +789,7 @@ def test_legal_status_carries_no_subject_data(
     _renewal_due(site)
     site.use(tsa_config(site.config, provider="turktrust", url="http://198.51.100.20/"))
     site.revoked()
-    site.crl_index(NOW - timedelta(days=8))
+    site.lists(NOW - timedelta(days=8))
     response = admin.get(API)
     assert response.status_code == 200
     for value in ("172.20.1.23", "00:00:5e:00:53:01", "00:00:5E:00:53:01", "Deneme Kişi"):

@@ -10,31 +10,46 @@ report with the per-token fields of 2.1.2 only."""
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, load_pem_private_key
 
+from arcilogger_core.config import Config
+from arcilogger_core.crl import Crl, parse_crl
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site
+from arcilogger_core.tsa.mock import MockTsa
+from arcilogger_core.tsa.verify import fingerprint, inspect_token
 from arcilogger_worker.alerts.system import (
     CRL_INDEX_SCHEMA,
     CrlFailureEntry,
     CrlIndexState,
     CrlListEntry,
+    CrlStatus,
     RevokedCertificate,
     StampRenewal,
     crl_index_path,
     crl_stale_issuers,
+    crl_status,
     issuers_in_use,
+    pinned_roots,
     read_crl_index,
     read_stamp_renewals,
     revoked_certificates,
     scheduled_verifications,
+    stamp_in_use,
     stamp_renewal_path,
+    stored_lists,
 )
-from arcilogger_worker.vaulttesting import at_site
+from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 NOW = at_site(date(2026, 11, 2), 9, 0)
 ROOT_SHA = "a1" * 32
@@ -215,7 +230,6 @@ def test_crl_index_is_read_with_the_writers_shape(layout: Layout) -> None:
         ),
     )
     assert state.newest_fetched_at == NOW - timedelta(hours=6)
-    assert issuers_in_use(state) == {ROOT_SHA, SUB_SHA}
 
 
 def test_crl_index_missing_is_empty_and_bad_entries_are_left_out(layout: Layout) -> None:
@@ -253,26 +267,138 @@ def test_crl_index_wrong_schema_is_unreadable_not_an_error(layout: Layout, conte
     path = crl_index_path(layout)
     path.parent.mkdir(parents=True)
     path.write_text(content, encoding="utf-8")
-    state = read_crl_index(layout)
-    assert state == CrlIndexState(readable=False)
-    assert issuers_in_use(state) == frozenset()
+    assert read_crl_index(layout) == CrlIndexState(readable=False)
+    assert stored_lists(layout) is None  # W5-B's reader refuses it too: nothing counts
+
+
+def stored(issuer: str, days_ago: int) -> Crl:
+    """A stored list of ``issuer`` (a fingerprint) issued ``days_ago`` days before ``NOW``."""
+    this_update = NOW - timedelta(days=days_ago)
+    return Crl(b"", "CN=Örnek", x509.Name([]), this_update, None, {}, {}, issuer_sha256=issuer)
 
 
 def test_crl_stale_issuers_by_this_update() -> None:
-    def fresh(days: int, issuer: str = ROOT_SHA) -> CrlListEntry:
-        moment = NOW - timedelta(days=days)
-        return CrlListEntry("CN=Örnek", issuer, moment, None, "x.crl", NOW)
+    def stale(*lists: Crl, in_use: tuple[str, ...] = (ROOT_SHA,)) -> list[str]:
+        return crl_stale_issuers(lists, in_use, NOW, 7)
 
-    def stale(*lists: CrlListEntry, in_use: tuple[str, ...] = (ROOT_SHA,)) -> list[str]:
-        return crl_stale_issuers(CrlIndexState(lists=lists), in_use, NOW, 7)
+    assert stale(stored(ROOT_SHA, 6)) == []
+    assert stale(stored(ROOT_SHA, 7)) == [ROOT_SHA]  # "newer than" seven days
+    assert stale(stored(ROOT_SHA, 8)) == [ROOT_SHA]
+    assert stale(stored(ROOT_SHA, 8), stored(ROOT_SHA, 2)) == []  # the issuer's newest counts
+    assert stale(stored(SUB_SHA, 2)) == [ROOT_SHA]  # an issuer in use with no list at all
+    assert stale(stored(ROOT_SHA, 9), stored(SUB_SHA, 1), in_use=(SUB_SHA, ROOT_SHA)) == [ROOT_SHA]
+    assert stale(stored(ROOT_SHA, 9), in_use=()) == []  # nothing in use, nothing stale
+    assert stale(stored(ROOT_SHA.upper(), 1)) == []  # a fingerprint is matched in any case
 
-    assert stale(fresh(6)) == []
-    assert stale(fresh(7)) == [ROOT_SHA]  # "newer than" seven days
-    assert stale(fresh(8)) == [ROOT_SHA]
-    assert stale(fresh(8), fresh(2)) == []  # the newest list of the issuer counts
-    assert stale(fresh(2, SUB_SHA)) == [ROOT_SHA]  # an issuer in use with no list at all
-    assert stale(fresh(9), fresh(1, SUB_SHA), in_use=(SUB_SHA, ROOT_SHA, ROOT_SHA)) == [ROOT_SHA]
-    assert stale(fresh(9), in_use=()) == []  # nothing in use, nothing stale
+
+# -- the stamp in use and its lists ---------------------------------------------------------------
+
+
+@pytest.fixture
+def vault(layout: Layout) -> Iterator[SealedVault]:
+    sealed = make_vault(layout.root, tsa_now=at_site(date(2026, 9, 29)))
+    yield sealed
+    sealed.unlock_all()
+
+
+def root_list(tsa: MockTsa, this_update: datetime, revoked_at: datetime | None = None) -> bytes:
+    key = load_pem_private_key((tsa.state_dir / "root.key").read_bytes(), None)
+    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(tsa.root_certificate.subject)
+        .last_update(this_update)
+        .next_update(this_update + timedelta(days=7))
+    )
+    if revoked_at is not None:
+        builder = builder.add_revoked_certificate(
+            x509.RevokedCertificateBuilder()
+            .serial_number(tsa.tsa_certificate.serial_number)
+            .revocation_date(revoked_at)
+            .build()
+        )
+    return builder.sign(key, hashes.SHA256()).public_bytes(Encoding.DER)
+
+
+def store(layout: Layout, tsa: MockTsa, *lists: bytes) -> list[str]:
+    """The lists stored and indexed as ``crl fetch`` does (2.2); their stored names."""
+    layout.crl_dir.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for der in lists:
+        crl = replace(parse_crl(der), issuer_sha256=fingerprint(tsa.root_certificate))
+        (layout.crl_dir / crl.file_name).write_bytes(der)
+        entries.append(
+            crl_list(crl.issuer_sha256, crl.this_update, file=crl.file_name, sha256=crl.sha256)
+        )
+    write(crl_index_path(layout), index(*entries))
+    return [entry["file"] for entry in entries]
+
+
+def test_pinned_roots_read_only_and_the_mock_root_only_for_the_mock(
+    layout: Layout, vault: SealedVault, tmp_path: Path
+) -> None:
+    mock = Config(data_dir=layout.root, secrets_dir=layout.root)
+    root = vault.tsa.root_certificate
+    assert pinned_roots(mock, layout) == [root]
+    zamane = mock.model_copy(update={"tsa": mock.tsa.model_copy(update={"provider": "zamane"})})
+    assert pinned_roots(zamane, layout) == []
+    folder = tmp_path / "roots"
+    folder.mkdir()
+    (folder / "root.pem").write_bytes(root.public_bytes(Encoding.PEM))
+    pinned = zamane.model_copy(update={"tsa": zamane.tsa.model_copy(update={"roots_dir": folder})})
+    assert pinned_roots(pinned, layout) == [root]
+    (folder / "broken.pem").write_text("-----BEGIN CERTIFICATE-----\nx\n", encoding="utf-8")
+    assert pinned_roots(pinned, layout) == []  # unreadable: no root, and no failure
+
+
+def test_stamp_in_use_is_the_newest_sealed_day(layout: Layout, vault: SealedVault) -> None:
+    roots = [vault.tsa.root_certificate]
+    assert stamp_in_use(layout, roots) is None  # nothing sealed yet
+    assert issuers_in_use(None) == frozenset()
+    d1, d2, d3 = date(2026, 10, 29), date(2026, 10, 30), date(2026, 10, 31)
+    vault.seal_days([d1, d2])
+    vault.write_day(d3)
+    assert vault.fail_seal(d3).status == "pending"  # a failed attempt: no token
+    stamp = stamp_in_use(layout, roots)
+    assert stamp is not None
+    assert stamp.day == d2
+    assert stamp.chain == (vault.tsa.tsa_certificate, vault.tsa.root_certificate)
+    assert stamp.gen_time == inspect_token(layout.token(d2).read_bytes()).gen_time
+    # the root signs the TSA certificate: its lists must stay fresh, the TSA's are none
+    assert issuers_in_use(stamp) == {fingerprint(vault.tsa.root_certificate)}
+    assert stamp_in_use(layout, []) is None  # no pinned root: the day check says why
+    vault.tamper(layout.token(d2), b"\x00")
+    assert stamp_in_use(layout, roots) is None
+
+
+def test_crl_status_judges_the_lists_that_count(layout: Layout, vault: SealedVault) -> None:
+    vault.seal_days([date(2026, 10, 30)])
+    stamp = stamp_in_use(layout, [vault.tsa.root_certificate])
+    root = fingerprint(vault.tsa.root_certificate)
+    assert crl_status(stored_lists(layout), stamp, NOW, 7) == CrlStatus(
+        in_use=frozenset({root}), stale=(root,)
+    )  # no list at all
+    older, newest = store(
+        layout,
+        vault.tsa,
+        root_list(vault.tsa, NOW - timedelta(days=10)),
+        root_list(vault.tsa, NOW - timedelta(days=1)),
+    )
+    assert crl_status(stored_lists(layout), stamp, NOW, 7).stale == ()
+    path = layout.crl_dir / newest
+    path.write_bytes(path.read_bytes() + b"\x00")  # test: the stored file is changed
+    status = crl_status(stored_lists(layout), stamp, NOW, 7)
+    assert (status.stale, status.since, status.mismatched) == (
+        (root,),
+        NOW - timedelta(days=3),
+        (newest,),
+    )
+    assert crl_status(stored_lists(layout), None, NOW, 7) == CrlStatus(mismatched=(newest,))
+    write(crl_index_path(layout), {"schema": CRL_INDEX_SCHEMA, "lists": 3, "failures": []})
+    assert crl_status(stored_lists(layout), stamp, NOW, 7) == CrlStatus(
+        in_use=frozenset({root}), stale=(root,), readable=False
+    )
+    assert (layout.crl_dir / older).is_file()
 
 
 # -- revoked certificates -------------------------------------------------------------------------
@@ -329,3 +455,63 @@ def test_revoked_certificates_ignore_other_texts_and_unreadable_files(layout: La
     )
     (layout.state / "verify" / "last-2.json").write_text("{", encoding="utf-8")
     assert revoked_certificates(layout) == []
+
+
+def test_revoked_certificates_from_the_stored_lists(layout: Layout, vault: SealedVault) -> None:
+    """The newest sealed day's chain against the stored lists: ``crl-revoked`` only (a
+    revocation after the stamp, ``crl-revoked-later``, is a warning of the day)."""
+    vault.seal_days([date(2026, 10, 30)])
+    stamp = stamp_in_use(layout, [vault.tsa.root_certificate])
+    assert stamp is not None
+    subject = vault.tsa.tsa_certificate.subject.rfc4514_string()
+    before = at_site(date(2026, 10, 30), 12, 0)
+    store(layout, vault.tsa, root_list(vault.tsa, NOW, revoked_at=before))
+    assert revoked_certificates(layout, stamp, stored_lists(layout)) == [
+        RevokedCertificate(subject, before)
+    ]
+    assert revoked_certificates(layout) == []  # the scheduled verifications alone know nothing
+    store(layout, vault.tsa, root_list(vault.tsa, NOW, revoked_at=stamp.gen_time + timedelta(1)))
+    assert revoked_certificates(layout, stamp, stored_lists(layout)) == []
+    # found by both: once, with the date the lists give
+    verification(
+        layout,
+        "last-1",
+        NOW,
+        day_check(
+            date(2026, 10, 30), REVOKED.replace("CN=Örnek Test TSA 1,O=Örnek A.Ş.,C=TR", subject)
+        ),
+    )
+    store(layout, vault.tsa, root_list(vault.tsa, NOW, revoked_at=before))
+    assert revoked_certificates(layout, stamp, stored_lists(layout)) == [
+        RevokedCertificate(subject, before)
+    ]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"at": "2026-11-02T09:00:00+03:00", "checks": 5},
+        {"at": "2026-11-02T09:00:00+03:00", "checks": True},
+        "[" * 100_000 + "]" * 100_000,
+    ],
+    ids=["number", "boolean", "nested"],
+)
+def test_scheduled_verifications_skip_a_damaged_file(layout: Layout, content: Any) -> None:
+    path = layout.state / "verify" / "last-1.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(content if isinstance(content, str) else json.dumps(content), "utf-8")
+    verification(layout, "last-2", NOW, day_check(date(2026, 10, 30), REVOKED))
+    assert list(scheduled_verifications(layout)) == [date(2026, 10, 30)]
+
+
+def test_stamp_renewals_leave_out_a_time_at_the_edge_of_the_calendar(layout: Layout) -> None:
+    write(
+        stamp_renewal_path(layout),
+        report(
+            token("2026-10-01", "due", "0001-01-01T00:00:00+03:00"),
+            token("2026-10-02", "due", "2031-08-30T21:30:00Z"),
+        ),
+    )
+    assert [renewal.path for renewal in read_stamp_renewals(layout) or ()] == [
+        "2026/10/02/manifest-2026-10-02.json.zd"
+    ]

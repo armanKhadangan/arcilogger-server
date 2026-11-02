@@ -88,9 +88,9 @@ Key                              Problem (setting)
                                  stamp — critical; a token due for re-stamping whose certificate
                                  expires within 30 days — high (prepared, :data:`LEGAL_CHECKS`)
 ``R20-crl:none``                 no stored revocation list issued in the last
-                                 ``tsa.crl_max_age_days`` (7) days for an issuer in use, judged
-                                 from ``state/crl/index.json`` only — medium (prepared,
-                                 :data:`LEGAL_CHECKS`)
+                                 ``tsa.crl_max_age_days`` (7) days for an issuer of the newest
+                                 sealed day's chain, judged from ``state/crl`` only — medium
+                                 (prepared, :data:`LEGAL_CHECKS`)
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -106,13 +106,14 @@ import re
 import shutil
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from pathlib import Path
 from typing import Any, Final, Literal, get_args
 
+from cryptography import x509
 from sqlalchemy import (
     ColumnElement,
     Text,
@@ -129,6 +130,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CIDR, array
 from sqlalchemy.orm import Session, sessionmaker
 
+from arcilogger_core import crl
 from arcilogger_core.admin.contract import (
     AdminLayout,
     AdminPolicy,
@@ -137,12 +139,22 @@ from arcilogger_core.admin.contract import (
     heartbeat_state,
     parse_document,
 )
+from arcilogger_core.chain import sealed_days
 from arcilogger_core.config import Config
+from arcilogger_core.crl import Crl, CrlError, CrlOptions, StoredLists, crl_options, load_stored
 from arcilogger_core.fmt import format_date
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ, day_window, isoformat_site, site_day
 from arcilogger_core.tsa.base import StampResult, TsaError
+from arcilogger_core.tsa.verify import (
+    check_revocation,
+    fingerprint,
+    inspect_token,
+    load_certificates,
+    load_roots_dir,
+    token_chain,
+)
 from arcilogger_db import clocksamples
 from arcilogger_db.egress import (
     LEGACY_KEYS,
@@ -262,10 +274,14 @@ class SystemReport:
 
 
 def _read_json(path: Path) -> Any:
+    """The JSON of ``path``, ``None`` when it is missing. Raises ``OSError``, or ``ValueError``
+    also for a document nested too deeply to parse (a damaged file never fails a check)."""
     try:
         return json.loads(path.read_bytes())
     except FileNotFoundError:
         return None
+    except RecursionError as exc:
+        raise ValueError(f"{path.name} is nested too deeply") from exc
 
 
 def _time(value: Any) -> datetime | None:
@@ -288,7 +304,7 @@ def _seal_states(layout: Layout) -> dict[date, dict[str, Any]]:
         try:
             day = date.fromisoformat(path.stem)
             data = json.loads(path.read_bytes())
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             continue
         if isinstance(data, dict):
             states[day] = data
@@ -393,14 +409,15 @@ def check_disk(ctx: CheckContext) -> Outcome:
 # -- sealing --------------------------------------------------------------------------------------
 
 
-class _NoStamps:
-    """The sealer only answers which days are pending here; it never stamps."""
+class NoStamps:
+    """A provider for a :class:`~arcilogger_core.seal.Sealer` that only answers which days are
+    pending (the alert checks, the API); it never stamps."""
 
     name = "none"
     legal_grade = False
 
     def stamp(self, file_path: Path) -> StampResult:  # pragma: no cover - never called
-        raise TsaError("the alert check does not stamp")
+        raise TsaError("this reader does not stamp")
 
     def credits(self) -> int | None:  # pragma: no cover - never called
         return None
@@ -415,7 +432,7 @@ def _seal_day(key: str) -> date | None:
 
 def check_seal(ctx: CheckContext) -> Outcome:
     hour = ctx.setting("alerts.seal_overdue_hour", 9)
-    sealer = Sealer(ctx.config, provider=_NoStamps(), roots=[], clock=lambda: ctx.now)
+    sealer = Sealer(ctx.config, provider=NoStamps(), roots=[], clock=lambda: ctx.now)
     try:
         pending = set(sealer.closed_unsealed_days())
     except OSError as exc:
@@ -496,9 +513,10 @@ def scheduled_verifications(layout: Layout) -> dict[date, ScheduledCheck]:
         except (OSError, ValueError):
             continue
         at = _time(data.get("at")) if isinstance(data, dict) else None
-        if at is None:
+        checks = data.get("checks") if isinstance(data, dict) else None
+        if at is None or not isinstance(checks, list):
             continue
-        for check in data.get("checks") or []:
+        for check in checks:
             try:
                 day = date.fromisoformat(str(check["day"]))
             except (KeyError, TypeError, ValueError):
@@ -1868,7 +1886,7 @@ def check_filter(ctx: CheckContext) -> Outcome:
 #: What ``state/renewal.json`` says of a token (Wave 5 contract 2.1.2).
 StampRenewalStatus = Literal["not_due", "due", "covered", "late", "uncovered"]
 STAMP_RENEWAL_STATUSES: Final[frozenset[str]] = frozenset(get_args(StampRenewalStatus))
-CRL_INDEX_SCHEMA: Final = "arcilogger.crl-index/1"
+CRL_INDEX_SCHEMA: Final = crl.INDEX_SCHEMA
 #: The day-check error of a stamp whose certificate is revoked at or before the stamp (the
 #: English text of ``certificate_revoked``, Wave 5 contract 2.6).
 REVOKED_DAY_TEXT: Final = re.compile(
@@ -1932,13 +1950,17 @@ def _stamp_renewal(entry: Any) -> StampRenewal | None:
     )
     if not isinstance(path, str) or not path or status not in STAMP_RENEWAL_STATUSES:
         return None
+    try:
+        not_after = not_after.astimezone(UTC) if not_after is not None else None
+    except OverflowError:  # a time at the edge of the calendar: not a certificate's
+        not_after = None
     if not_after is None:
         return None
     covered_by = entry.get("covered_by")
     return StampRenewal(
         path=path,
         kind=str(entry.get("kind") or ""),
-        cert_not_after=not_after.astimezone(UTC),
+        cert_not_after=not_after,
         status=status,
         covered_by=covered_by if isinstance(covered_by, str) and covered_by else None,
         renewed_at=_time(entry.get("renewed_at")),
@@ -1980,13 +2002,14 @@ class CrlIndexState:
 
 
 def crl_index_path(layout: Layout) -> Path:
-    return layout.state / "crl" / "index.json"
+    return layout.crl_dir / crl.INDEX_NAME
 
 
 def read_crl_index(layout: Layout) -> CrlIndexState:
     """``state/crl/index.json`` as the CrlFetch task writes it (Wave 5 contract 2.2): an empty
-    index before the first fetch. The fetch is judged from this file only (its ``failures`` and
-    newest ``fetched_at``), never from the task's exit code (C12)."""
+    index before the first fetch. What the fetch did (its ``failures`` and newest
+    ``fetched_at``) is read from this file only, never from the task's exit code (C12); whether
+    a list counts is :func:`stored_lists`'s question."""
     path = crl_index_path(layout)
     try:
         data = _read_json(path)
@@ -2041,29 +2064,139 @@ def _crl_failure(item: Any) -> CrlFailureEntry | None:
     )
 
 
-def issuers_in_use(index: CrlIndexState) -> frozenset[str]:
-    """SHA-256 fingerprints of the list issuers whose lists must stay fresh.
+def pinned_roots(config: Config, layout: Layout) -> list[x509.Certificate]:
+    """The roots a day token may chain to, read only (the rule of
+    :func:`arcilogger_core.tsa.trusted_roots`): ``tsa.roots_dir``, and the mock TSA's test root
+    only while ``tsa.provider`` is ``mock``. Empty when none can be read."""
+    roots: list[x509.Certificate] = []
+    try:
+        if config.tsa.roots_dir is not None and config.tsa.roots_dir.is_dir():
+            roots += load_roots_dir(config.tsa.roots_dir)
+        mock_root = layout.state / "mock-tsa" / "root.pem"
+        if config.tsa.provider == "mock" and mock_root.is_file():
+            roots += load_certificates([mock_root])
+    except (OSError, ValueError) as exc:
+        log.info("pinned roots unreadable: %s", exc)
+    return roots
 
-    Until the revocation lists of W5-B are in this branch these are the issuers of the stored
-    lists; then they become the issuer certificates of the newest sealed day's chain."""
-    return frozenset(entry.issuer_sha256 for entry in index.lists)
+
+@dataclass(frozen=True)
+class StampInUse:
+    """The time stamp of the newest sealed day: the certificates in use now."""
+
+    day: date
+    #: Its TSA certificate first, the pinned root it reaches last (``token_chain``).
+    chain: tuple[x509.Certificate, ...]
+    gen_time: datetime
+
+
+def stamp_in_use(layout: Layout, roots: Sequence[x509.Certificate]) -> StampInUse | None:
+    """The newest sealed day's stamp and its verified chain; ``None`` before the first sealed
+    day, or when that day's token cannot be read or reaches no pinned root (the day check says
+    why)."""
+    for day in reversed(sealed_days(layout)):
+        try:
+            data = layout.token(day).read_bytes()
+        except FileNotFoundError:
+            continue  # a failed attempt leaves a manifest without a token: never sealed
+        except OSError as exc:
+            log.info("token of %s unreadable: %s", day, exc)
+            return None
+        try:
+            chain = token_chain(data, roots)
+            gen_time = inspect_token(data).gen_time
+        except (TsaError, ValueError, TypeError, KeyError) as exc:
+            log.info("token of %s unreadable: %s", day, exc)
+            return None
+        return StampInUse(day, tuple(chain), gen_time) if chain else None
+    return None
+
+
+def issuers_in_use(stamp: StampInUse | None) -> frozenset[str]:
+    """SHA-256 fingerprints of the issuers whose lists must stay fresh: the certificates of the
+    newest sealed day's chain that sign another one of it (its CA certificates and its root)."""
+    if stamp is None:
+        return frozenset()
+    return frozenset(fingerprint(certificate) for certificate in stamp.chain[1:])
+
+
+def stored_lists(layout: Layout) -> StoredLists | None:
+    """The stored lists that count (:func:`arcilogger_core.crl.load_stored`): a list whose file
+    is gone or changed is left out (C14, C20). ``None``: ``state/crl`` cannot be read."""
+    try:
+        return load_stored(layout)
+    except (CrlError, RecursionError) as exc:
+        log.info("stored revocation lists unreadable: %s", exc)
+        return None
 
 
 def crl_stale_issuers(
-    index: CrlIndexState, in_use: Iterable[str], now: datetime, max_age_days: int
+    lists: Sequence[Crl], in_use: Iterable[str], now: datetime, max_age_days: int
 ) -> list[str]:
     """The issuers in use without a stored list issued in the last ``max_age_days`` days (by
     its ``thisUpdate``), an issuer without any list included."""
     oldest = now - timedelta(days=max_age_days)
-    stale = []
-    for issuer in sorted(set(in_use)):
-        newest = max(
-            (entry.this_update for entry in index.lists if entry.issuer_sha256 == issuer),
-            default=None,
-        )
-        if newest is None or newest <= oldest:
-            stale.append(issuer)
-    return stale
+    newest = _newest_lists(lists)
+    return [
+        issuer for issuer in sorted(set(in_use)) if issuer not in newest or newest[issuer] <= oldest
+    ]
+
+
+def _newest_lists(lists: Sequence[Crl]) -> dict[str, datetime]:
+    """The newest ``thisUpdate`` of each issuer's stored lists, by the issuer's fingerprint."""
+    newest: dict[str, datetime] = {}
+    for found in lists:
+        issuer = found.issuer_sha256.lower()
+        if issuer not in newest or newest[issuer] < found.this_update:
+            newest[issuer] = found.this_update
+    return newest
+
+
+@dataclass(frozen=True)
+class CrlStatus:
+    """The revocation lists of the issuers in use (``crl_stale``, ``R20-crl``)."""
+
+    in_use: frozenset[str] = frozenset()
+    #: The issuers in use without a list newer than the maximum age: all of them when the
+    #: stored lists cannot be read.
+    stale: tuple[str, ...] = ()
+    #: When the first stale issuer that has a list went stale; ``None`` when none has one.
+    since: datetime | None = None
+    #: ``False``: ``state/crl`` cannot be read (nothing is resolved from it).
+    readable: bool = True
+    #: Index entries whose file is gone or changed (C14): the lists are evidence.
+    mismatched: tuple[str, ...] = ()
+
+
+def crl_status(
+    lists: StoredLists | None, stamp: StampInUse | None, now: datetime, max_age_days: int
+) -> CrlStatus:
+    """Whether the issuers of the stamp in use have a fresh verified list (Wave 5 contract
+    2.3.1): judged from the stored lists only, never from the CrlFetch task's exit code (C12)."""
+    in_use = issuers_in_use(stamp)
+    usable: Sequence[Crl] = lists if lists is not None else ()
+    stale = crl_stale_issuers(usable, in_use, now, max_age_days)
+    newest = _newest_lists(usable)
+    went_stale = [
+        shifted(newest[issuer], timedelta(days=max_age_days))
+        for issuer in stale
+        if issuer in newest
+    ]
+    return CrlStatus(
+        in_use=in_use,
+        stale=tuple(stale),
+        since=min((moment for moment in went_stale if moment is not None), default=None),
+        readable=lists is not None,
+        mismatched=lists.mismatched if lists is not None else (),
+    )
+
+
+def shifted(moment: datetime, delta: timedelta) -> datetime | None:
+    """``moment + delta``, ``None`` beyond the calendar (a time no reader should fail on)."""
+    try:
+        return moment + delta
+    except OverflowError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -2074,9 +2207,13 @@ class RevokedCertificate:
     since: datetime | None
 
 
-def revoked_certificates(layout: Layout) -> list[RevokedCertificate]:
-    """The time-stamp certificates found revoked at or before a stamp: by the newest scheduled
-    verification of each day that is not deleted, each certificate once, oldest day first."""
+def revoked_certificates(
+    layout: Layout, stamp: StampInUse | None = None, lists: Sequence[Crl] | None = None
+) -> list[RevokedCertificate]:
+    """The time-stamp certificates revoked at or before a stamp (``crl-revoked``), each once:
+    those of the newest scheduled verification of each day that is not deleted, oldest day
+    first, then those of the newest sealed day's chain against the stored lists (``stamp`` and
+    ``lists``), which also sees a revocation before the next verification runs."""
     states = _seal_states(layout)
     found: dict[str, RevokedCertificate] = {}
     for day, check in sorted(scheduled_verifications(layout).items()):
@@ -2086,13 +2223,24 @@ def revoked_certificates(layout: Layout) -> list[RevokedCertificate]:
             if (match := REVOKED_DAY_TEXT.match(error)) is not None:
                 name = match["name"]
                 found.setdefault(name, RevokedCertificate(name=name, since=None))
+    if stamp is not None and lists is not None:
+        for finding in check_revocation(list(stamp.chain), lists, stamp.gen_time):
+            if finding.code == "crl-revoked":
+                known = found.get(finding.subject)
+                if known is None or known.since is None:
+                    found[finding.subject] = RevokedCertificate(finding.subject, finding.at)
     return list(found.values())
 
 
 def crl_max_age_days(config: Config) -> int:
-    """``tsa.crl_max_age_days`` (Wave 5 contract 2.5, default 7). The key is added to the
-    configuration by W5-T; until then it is read with the contract's default, here only."""
-    return int(getattr(config.tsa, "crl_max_age_days", 7))
+    """``tsa.crl_max_age_days`` (Wave 5 contract 2.5, default 7), read where every CRL setting
+    is read (:func:`arcilogger_core.crl.crl_options`). A proxy setting the fetch refuses gives
+    the default here: the status is never a server error."""
+    try:
+        return crl_options(config).max_age_days
+    except CrlError as exc:
+        log.warning("CRL settings refused (%s); tsa.crl_max_age_days taken as its default", exc)
+        return CrlOptions.max_age_days
 
 
 # -- re-stamping, certificates and revocation lists (Wave 5 contract 2.3.1) ------------------------
@@ -2160,7 +2308,8 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
     (``critical``), or a token due for re-stamping, not covered yet, has a certificate that
     expires within :data:`CERT_EXPIRY_WARNING` (``high``). Resolved when neither holds and the
     re-stamping report can be read."""
-    revoked = revoked_certificates(ctx.layout)
+    stamp = stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout))
+    revoked = revoked_certificates(ctx.layout, stamp, stored_lists(ctx.layout))
     renewals = read_stamp_renewals(ctx.layout)
     expiring = sum(
         1
@@ -2214,16 +2363,17 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
 
 
 def check_stamp_crl(ctx: CheckContext) -> Outcome:
-    """``R20-crl:none``: an issuer in use has no stored revocation list issued in the last
-    ``tsa.crl_max_age_days`` days, or the index cannot be read while one is in use. Judged from
-    ``state/crl/index.json`` only, never from the CrlFetch task's exit code (C12); an unreadable
-    index resolves nothing."""
-    index = read_crl_index(ctx.layout)
-    in_use = issuers_in_use(index)
+    """``R20-crl:none``: an issuer of the newest sealed day's chain has no stored revocation
+    list issued in the last ``tsa.crl_max_age_days`` days that still matches its index entry,
+    or ``state/crl`` cannot be read while one is in use. Judged from the stored lists and
+    ``state/crl/index.json``, never from the CrlFetch task's exit code (C12); lists that cannot
+    be read resolve nothing."""
     max_age = crl_max_age_days(ctx.config)
-    stale = crl_stale_issuers(index, in_use, ctx.now, max_age)
+    stamp = stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout))
+    status = crl_status(stored_lists(ctx.layout), stamp, ctx.now, max_age)
+    index = read_crl_index(ctx.layout)
     findings = []
-    if stale or (in_use and not index.readable):
+    if status.stale:
         newest = index.newest_fetched_at
         findings.append(
             Finding(
@@ -2232,8 +2382,10 @@ def check_stamp_crl(ctx: CheckContext) -> Outcome:
                 severity="medium",
                 title=f"{max_age} günden yeni doğrulanmış bir iptal listesi (SİL) yok",
                 details={
-                    "stale_issuers": len(stale),
+                    "stale_issuers": len(status.stale),
                     "failures": len(index.failures),
+                    # C14: stored lists left out because their file is gone or changed
+                    "changed_files": len(status.mismatched),
                     "newest_fetched_at": isoformat_site(newest, "seconds") if newest else None,
                     "max_age_days": max_age,
                     "title_en": f"No verified revocation list newer than {max_age} days",
@@ -2242,7 +2394,7 @@ def check_stamp_crl(ctx: CheckContext) -> Outcome:
         )
 
     def clear(alert: Alert) -> str | None:
-        return "crl_fresh" if index.readable else None
+        return "crl_fresh" if status.readable else None
 
     return Outcome(findings, _owned(CRL_KEY), clear)
 

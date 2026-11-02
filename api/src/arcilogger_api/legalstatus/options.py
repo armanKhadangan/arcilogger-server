@@ -2,7 +2,8 @@
 
 The ``tsa`` keys of Wave 5 are added by the configuration package (W5-T); until they are in
 :class:`~arcilogger_core.config.TsaConfig` they are read here with the contract's defaults, in
-this one place (``crl_max_age_days`` in the worker's alert checks, which judge it too).
+this one place; ``tsa.crl_max_age_days`` through :func:`arcilogger_core.crl.crl_options`, the
+one reader of the CRL settings, as the worker's ``R20-crl`` check reads it.
 """
 
 from __future__ import annotations

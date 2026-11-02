@@ -10,17 +10,26 @@ from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, load_pem_private_key
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from arcilogger_core.config import Config
+from arcilogger_core.crl import parse_crl
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site
+from arcilogger_core.tsa.mock import MockTsa
+from arcilogger_core.tsa.verify import fingerprint
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import Alert
 from arcilogger_worker.alerts import system
@@ -35,11 +44,10 @@ from arcilogger_worker.alerts.system import (
     run_system_checks,
     stamp_renewal_path,
 )
-from arcilogger_worker.vaulttesting import at_site
+from arcilogger_worker.vaulttesting import SealedVault, at_site, make_vault
 
 ROOT = Path(__file__).resolve().parents[2]
 NOW = at_site(date(2026, 11, 2), 9, 0)
-ROOT_SHA = "a1" * 32
 CERT_NAME = "CN=Örnek Test TSA 1,O=Örnek A.Ş.,C=TR"
 REVOKED = (
     f"A time-stamp certificate is on a revocation list: {CERT_NAME}. Contact the provider; "
@@ -128,28 +136,72 @@ def revoked_day(layout: Layout, day: date = date(2026, 10, 30)) -> None:
     )
 
 
-def crl_index(
-    layout: Layout,
-    issued_days_ago: int,
+@pytest.fixture
+def sealed(layout: Layout) -> Iterator[SealedVault]:
+    """30 October sealed by the mock TSA (its root is pinned while ``tsa.provider`` is
+    ``mock``): the stamp in use, whose root's lists must stay fresh."""
+    vault = make_vault(layout.root, tsa_now=at_site(date(2026, 9, 29)))
+    vault.seal_days([date(2026, 10, 30)])
+    yield vault
+    vault.unlock_all()
+
+
+def root_list(tsa: MockTsa, this_update: datetime, revoked_at: datetime | None = None) -> bytes:
+    """A list of the mock root issued at ``this_update``, with the TSA certificate revoked at
+    ``revoked_at`` (none: no entry)."""
+    key = load_pem_private_key((tsa.state_dir / "root.key").read_bytes(), None)
+    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(tsa.root_certificate.subject)
+        .last_update(this_update)
+        .next_update(this_update + timedelta(days=7))
+    )
+    if revoked_at is not None:
+        builder = builder.add_revoked_certificate(
+            x509.RevokedCertificateBuilder()
+            .serial_number(tsa.tsa_certificate.serial_number)
+            .revocation_date(revoked_at)
+            .build()
+        )
+    return builder.sign(key, hashes.SHA256()).public_bytes(Encoding.DER)
+
+
+def crl_lists(
+    vault: SealedVault,
+    issued_days_ago: int | None,
     *,
     fetched_days_ago: int = 0,
     failures: tuple[dict[str, Any], ...] = (),
-) -> None:
-    this_update = NOW - timedelta(days=issued_days_ago)
-    entry = {
-        "file": f"{ROOT_SHA[:12]}-{this_update:%Y%m%dT%H%M%S}Z-89abcdef.crl",
-        "issuer": "CN=Örnek Test TSA Kök,O=Örnek A.Ş.,C=TR",
-        "issuer_sha256": ROOT_SHA,
-        "this_update": this_update.astimezone(UTC).isoformat(),
-        "next_update": None,
-        "sha256": "c3" * 32,
-        "url": "http://192.0.2.10/crl/root.crl",
-        "fetched_at": isoformat_site(NOW - timedelta(days=fetched_days_ago), "seconds"),
-    }
+    revoked_at: datetime | None = None,
+) -> str | None:
+    """``state/crl`` as ``crl fetch`` leaves it (Wave 5 contract 2.2): the root's list issued
+    ``issued_days_ago`` days before ``NOW`` (none: no list) and ``failures``; its stored name."""
+    layout, tsa = vault.layout, vault.tsa
+    layout.crl_dir.mkdir(parents=True, exist_ok=True)
+    entries, name = [], None
+    if issued_days_ago is not None:
+        der = root_list(tsa, NOW - timedelta(days=issued_days_ago), revoked_at)
+        crl = replace(parse_crl(der), issuer_sha256=fingerprint(tsa.root_certificate))
+        name = crl.file_name
+        (layout.crl_dir / name).write_bytes(der)
+        entries.append(
+            {
+                "file": name,
+                "issuer": crl.issuer,
+                "issuer_sha256": crl.issuer_sha256,
+                "this_update": crl.this_update.isoformat(),
+                "next_update": None,
+                "sha256": crl.sha256,
+                "url": "http://192.0.2.10/crl/root.crl",
+                "fetched_at": isoformat_site(NOW - timedelta(days=fetched_days_ago), "seconds"),
+            }
+        )
     write(
         crl_index_path(layout),
-        {"schema": CRL_INDEX_SCHEMA, "lists": [entry], "failures": list(failures)},
+        {"schema": CRL_INDEX_SCHEMA, "lists": entries, "failures": list(failures)},
     )
+    return name
 
 
 FAILURE: dict[str, Any] = {
@@ -259,25 +311,25 @@ def test_stamp_cert_cleared(check: Any, layout: Layout, db_session: Session) -> 
 
 
 def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
-    check: Any, layout: Layout, config: Config, db_session: Session
+    check: Any, layout: Layout, config: Config, db_session: Session, sealed: SealedVault
 ) -> None:
-    assert CRL_KEY not in check()  # no index before the first fetch: no issuer in use
-    crl_index(layout, 6)
+    crl_lists(sealed, 6)
     assert CRL_KEY not in check()
-    crl_index(layout, 7)  # exactly seven days old is not "newer than seven days"
+    crl_lists(sealed, 7)  # exactly seven days old is not "newer than seven days"
     alert = check()[CRL_KEY]
     assert (alert.rule, alert.severity) == ("R20-crl", "medium")
     assert alert.title == "7 günden yeni doğrulanmış bir iptal listesi (SİL) yok"
     assert alert.details == {
         "stale_issuers": 1,
         "failures": 0,
+        "changed_files": 0,
         "newest_fetched_at": isoformat_site(NOW, "seconds"),
         "max_age_days": 7,
         "title_en": "No verified revocation list newer than 7 days",
     }
     crl_index_path(layout).write_text("{", encoding="utf-8")
-    assert CRL_KEY in check()  # an unreadable index resolves nothing
-    crl_index(layout, 1)
+    assert CRL_KEY in check()  # unreadable lists resolve nothing
+    crl_lists(sealed, 1)
     assert CRL_KEY not in check()
     assert resolved(db_session, CRL_KEY).details["auto_resolved"]["reason"] == "crl_fresh"
 
@@ -289,25 +341,67 @@ def test_stamp_crl_raised_when_stale_and_cleared_after_a_fresh_list(
     assert active(db_session)[CRL_KEY].details["max_age_days"] == 1
 
 
-def test_stamp_crl_judged_from_the_index_not_an_exit_code(check: Any, layout: Layout) -> None:
-    """C12: the fetch is judged from ``state/crl/index.json``. Failed fetches and an old
-    ``fetched_at`` alone raise nothing while the stored list is recent; once the list is old the
-    alert counts them from the index."""
-    crl_index(layout, 4, fetched_days_ago=4, failures=(FAILURE, FAILURE))
+def test_stamp_crl_needs_an_issuer_in_use(check: Any, layout: Layout) -> None:
+    """Before the first sealed day no certificate is in use, and no list has to be fresh."""
+    write(crl_index_path(layout), {"schema": CRL_INDEX_SCHEMA, "lists": [], "failures": []})
     assert CRL_KEY not in check()
-    crl_index(layout, 9, fetched_days_ago=8, failures=(FAILURE,))
+
+
+def test_stamp_crl_raised_for_an_issuer_in_use_without_any_list(
+    check: Any, sealed: SealedVault
+) -> None:
+    """The worst case: no fetch has stored a list for the stamps' root yet, or every URL
+    fails (only ``failures`` in the index)."""
+    assert check()[CRL_KEY].details["stale_issuers"] == 1  # no index yet
+    crl_lists(sealed, None, failures=(FAILURE, {**FAILURE, "error": "unknown_issuer"}))
+    alert = check()[CRL_KEY]
+    assert (alert.details["stale_issuers"], alert.details["failures"]) == (1, 2)
+    assert alert.details["newest_fetched_at"] is None
+
+
+def test_stamp_crl_judged_from_the_index_not_an_exit_code(check: Any, sealed: SealedVault) -> None:
+    """C12: the fetch is judged from ``state/crl``. Failed fetches and an old ``fetched_at``
+    alone raise nothing while the stored list is recent; once the list is old the alert counts
+    them from the index."""
+    crl_lists(sealed, 4, fetched_days_ago=4, failures=(FAILURE, FAILURE))
+    assert CRL_KEY not in check()
+    crl_lists(sealed, 9, fetched_days_ago=8, failures=(FAILURE,))
     alert = check()[CRL_KEY]
     assert alert.details["failures"] == 1
     assert alert.details["newest_fetched_at"] == isoformat_site(NOW - timedelta(days=8), "seconds")
 
 
+def test_stamp_crl_a_changed_list_is_no_verified_list(check: Any, sealed: SealedVault) -> None:
+    """C14: a fresh list whose file no longer holds its bytes does not count."""
+    name = crl_lists(sealed, 1)
+    assert name is not None
+    assert CRL_KEY not in check()
+    path = sealed.layout.crl_dir / name
+    path.write_bytes(path.read_bytes() + b"\x00")  # test: the stored file is changed
+    alert = check()[CRL_KEY]
+    assert (alert.details["stale_issuers"], alert.details["changed_files"]) == (1, 1)
+
+
+def test_stamp_cert_critical_from_the_stored_lists(check: Any, sealed: SealedVault) -> None:
+    """The newest stamp's chain against the stored lists: a revocation before it is raised
+    before the next scheduled verification finds it; one after it is not ``crl-revoked``."""
+    crl_lists(sealed, 0, revoked_at=NOW - timedelta(hours=1))  # after the stamp of 31.10.
+    assert CERT_KEY not in check()
+    crl_lists(sealed, 0, revoked_at=at_site(date(2026, 10, 30), 12, 0))
+    alert = check()[CERT_KEY]
+    assert (alert.severity, alert.details["revoked"]) == ("critical", 1)
+    assert "Mock" not in alert.title + json.dumps(alert.details)
+
+
 # -- the e-mails ----------------------------------------------------------------------------------
 
 
-def test_legal_alert_mails_carry_no_names_and_no_log_lines(check: Any, layout: Layout) -> None:
+def test_legal_alert_mails_carry_no_names_and_no_log_lines(
+    check: Any, layout: Layout, sealed: SealedVault
+) -> None:
     renewals(layout, ("due", NOW + timedelta(days=10)), ("uncovered", NOW - timedelta(days=1)))
     revoked_day(layout)
-    crl_index(layout, 9, failures=(FAILURE,))
+    crl_lists(sealed, 9, failures=(FAILURE,))
     alerts = check()
     items = [
         MailItem(a.id, "new", a.rule, a.severity, a.state, a.time, None, a.details)
@@ -322,6 +416,7 @@ def test_legal_alert_mails_carry_no_names_and_no_log_lines(check: Any, layout: L
         for hidden in (
             "Örnek",
             "Test TSA",
+            "Mock TSA",
             "CN=",
             "revocation list:",  # the day check's error line
             "192.0.2.",
@@ -334,7 +429,7 @@ def test_legal_alert_mails_carry_no_names_and_no_log_lines(check: Any, layout: L
             assert hidden not in mail, hidden
     for alert in alerts.values():
         shown = alert.title + json.dumps(alert.details, ensure_ascii=False)
-        for hidden in ("Örnek", "192.0.2.", "manifest-"):
+        for hidden in ("Örnek", "Mock", "192.0.2.", "manifest-", ".crl"):
             assert hidden not in shown, hidden
 
 
