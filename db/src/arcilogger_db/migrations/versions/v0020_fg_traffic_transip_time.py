@@ -15,8 +15,9 @@ Issue #71 (follow-up of #40 item 13 and Q-C3-1):
   step reads the address's rows of the range only. Steps with a port keep the other index.
 
 The index is created on the parent: on native partitions PostgreSQL builds it on every partition,
-on TimescaleDB on every chunk (an upgrade runs with the services stopped; about 15 s per monthly
-partition of 28 M rows on 4 vCPU). Its size is about 31.5 MB per million rows (docs/INGEST.md).
+on TimescaleDB on every chunk (an upgrade runs with the services stopped; 18 s for a monthly
+partition of 28 M rows on 4 vCPU at the default ``maintenance_work_mem``). Its size is about
+31.5 MB per million rows, ``ix_fg_traffic_transip_transport_time``'s 40.6 MB (docs/INGEST.md).
 
 The downgrade drops the index.
 """

@@ -1634,6 +1634,40 @@ UYUM-DURUMU/COMPLIANCE-STATUS (W4-G merges last, §4.5).
   X-Arci-Sha256 beside its button", `web/e2e/compliance.spec.ts` "a report whose bytes differ
   from its X-Arci-Sha256: the mismatch beside the button". Fold into 2.8.1.
 
+## Deviations — transip index (#71, 2026-11-02)
+
+Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 1.2, 2.8.3, D15,
+3.8) recorded here because `wave-4` carries it.
+
+- **A sixth index on `fg_traffic`: `ix_fg_traffic_transip_time (transip, time)`** (revision
+  `0020_fg_traffic_transip_time`, on top of #79's `0019_source_clock_samples`; model `FgTraffic`).
+  The overlap probe (`_Probe.seen_overlap`, both steps) and the D15 check (`_Lookup._carried`,
+  its tail steps without a port and its spanning-sessions steps) now ask in the order
+  `transip, time`; the steps with a port keep `ix_fg_traffic_transip_transport_time`, and so does
+  the session search. Before, a port-less step walked every index entry of the address in the
+  partition (`time` was the third column). That cost about 1.1 s per step for a busy address
+  after its last row on day 28 of a monthly partition at 1 M rows a day: 2.3 s for the overlap
+  probe and 2.3 s for the D15 check of one lookup. Now it is under 1 ms. `busy_before`'s tail
+  (Q-C3-1) went from 1.4 s to 0.25 s; its guard keeps its bound of 1 s (0.30 s measured). The
+  ingest gate holds (−1.5 % to +1.9 %, inside the spread of the runs). The index takes 31.5 MB
+  per million rows and builds in 18 s on a 28 M-row partition. `INCLUDE (duration)` was measured
+  and not taken: it is 29 % larger and answers `busy_before` from the index only on all-visible
+  pages. The numbers are in docs/INGEST.md "Measured throughput". The guards now bound each
+  step's shared buffers to the rows of its range plus 100 (`STEP_BUFFERS`); a walk over the
+  address's other entries showed only there (7,982 buffers for a step with no row on the guard
+  site). There is a new overlap case, `busy_after` (the site's NAT address 30 minutes after its
+  last row). Tests: `db/tests/test_migration_0020.py` (native, and TimescaleDB with a
+  compressed chunk), `db/tests/test_migrations.py`,
+  `worker/tests/test_lookup_performance.py`
+  (`test_the_overlap_probe_of_an_unclaimed_address_is_fast[busy_after]` and
+  `test_the_d15_carried_check_is_fast[busy_after]` fail on the old statements by their buffers).
+  **W4-G folds:**
+  - DATA-MODEL's `fg_traffic` index list gains `(transip, time)`.
+  - MVP-CONTRACTS' c3 bullet ("asks for the first row in the order of
+    `ix_fg_traffic_transip_transport_time`") names `ix_fg_traffic_transip_time`.
+  - ASSUMPTIONS Q-C3-1's follow-up ("measure `INCLUDE (duration)` on the `transip` index") is
+    answered: measured, not taken, and `(transip, time)` was added.
+
 ---
 
 ## Owner questions
