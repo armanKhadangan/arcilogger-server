@@ -20,6 +20,7 @@ from arcilogger_db.clocksamples import (
     offset_of,
     rebuild,
     received_between,
+    shifted_into,
     upsert_samples,
 )
 from arcilogger_db.models import Message, SourceClockSample
@@ -162,6 +163,42 @@ def test_the_readers(db_session: Session) -> None:
     total = db_session.scalar(select(func.sum(SourceClockSample.n)))
     assert total == 390
     assert db_session.execute(text("SELECT count(*) FROM source_clock_samples")).scalar() == 6
+
+
+def test_the_minutes_that_shifted_their_device_times_into_a_range(db_session: Session) -> None:
+    """``shifted_into`` takes a minute's offset when it is beyond the limit, holds more than half
+    of the minute's rows and puts the minute's device times into the range; late lines among
+    rows on time and minutes whose device times fall elsewhere are left out (#82)."""
+    connection = db_session.connection()
+    base = AT.replace(second=0)
+    later = base + timedelta(hours=3)  # sent 3 hours later, stamped with the device times of base
+    upsert_samples(
+        connection,
+        {
+            ClockKey("fortigate", base, 0): 100,  # on time in the range itself
+            ClockKey("fortigate", base, -600): 10,  # late lines among them
+            ClockKey("fortigate", later, -10800): 40,
+            ClockKey("fortigate", later + timedelta(minutes=1), -10800): 30,
+            ClockKey("fortigate", later + timedelta(minutes=1), 0): 5,
+            ClockKey("fortigate", later + timedelta(minutes=2), -10799): 20,
+            ClockKey("fortigate", later + timedelta(hours=2), -10800): 50,  # device times later
+            ClockKey("fortigate", later, -60): 1000,  # not beyond the limit
+            ClockKey("fortigate", base + timedelta(minutes=5), 300): 3,  # ahead, a minute alone
+            ClockKey("core-r1", later, -10800): 7,  # another source
+        },
+    )
+    start, end = base - timedelta(minutes=30), base + timedelta(minutes=30)
+    # The minute of ``later`` holds 1,040 rows, 1,000 of them 60 s off: its -10800 is a minority.
+    assert sorted(shifted_into(connection, "fortigate", start, end, 120)) == [
+        (-10800, 30),
+        (-10799, 20),
+        (300, 3),
+    ]
+    assert sorted(shifted_into(connection, "fortigate", start, end, 300)) == [
+        (-10800, 30),
+        (-10799, 20),
+    ]
+    assert shifted_into(connection, "switch-1", start, end, 120) == []
 
 
 def test_the_rebuild_bound_is_ingests_clock_skew() -> None:

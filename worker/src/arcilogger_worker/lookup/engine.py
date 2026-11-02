@@ -1740,8 +1740,8 @@ class _Lookup:
 
     def _clock(self, source: str) -> tuple[float, int] | None:
         """``source``'s clock at the moment: the median of ``time - time_received`` (seconds),
-        and its number of rows, of two samples, the one whose median is further from 0 (a
-        session search must not trust the clock if either says it was off); ``None`` when neither
+        and its number of rows, of three samples, the one whose median is further from 0 (a
+        session search must not trust the clock if any says it was off); ``None`` when none
         has :data:`CLOCK_MIN_ROWS` rows. Cached per lookup.
 
         * By device time: its ``messages`` rows nearest the moment on each side within
@@ -1752,7 +1752,15 @@ class _Lookup:
           ``source_clock_samples`` (whole minutes, offsets in whole seconds, under a minute as
           0). A clock set hours back sent the rows of the real moment with device times hours
           earlier, outside the first sample, which then held rows sent on time before the
-          change, or none (#73)."""
+          change, or none (#73).
+        * Shared device times: its rows received at any time (within ``max_clock_skew``) in
+          minutes whose clock put their device times within :data:`CLOCK_SPAN` of the moment
+          from an offset beyond :data:`CLOCK_LIMIT_SECONDS` (``source_clock_samples``,
+          :func:`~arcilogger_db.clocksamples.shifted_into`). A clock set 3 hours back at J
+          stamps the rows it sends after J with the device times of the hours before J: a
+          lookup there finds the sessions of both real times, while its first sample holds
+          more rows sent on time (median 0) and its second only minutes received before J
+          (#82)."""
         if source not in self._clocks:
             at = self.request.at
 
@@ -1781,6 +1789,11 @@ class _Lookup:
             )
             if (sampled := clocksamples.median(received))[0] is not None:
                 samples.append((float(sampled[0]), sampled[1]))
+            shifted = clocksamples.shifted_into(
+                self.session, source, at - CLOCK_SPAN, at + CLOCK_SPAN, CLOCK_LIMIT_SECONDS
+            )
+            if (moved := clocksamples.median(shifted))[0] is not None:
+                samples.append((float(moved[0]), moved[1]))
             measured = [sample for sample in samples if sample[1] >= CLOCK_MIN_ROWS]
             self._clocks[source] = max(measured, key=lambda m: abs(m[0])) if measured else None
         return self._clocks[source]
