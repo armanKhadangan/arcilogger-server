@@ -80,6 +80,17 @@ Key                              Problem (setting)
                                  :mod:`~arcilogger_worker.compliance_filter`, card 7 of Uyum
                                  Durumu) — high; resolved once a record arrives or the window is
                                  no longer expected
+``R20-renewal:none``             ``state/renewal.json`` has a token due for re-stamping or one
+                                 whose certificate expired without it — high; resolved by a
+                                 readable report without such a token (Wave 5 contract 2.3.1;
+                                 prepared, :data:`LEGAL_CHECKS`)
+``R20-cert:none``                a time-stamp certificate on a revocation list at or before a
+                                 stamp — critical; a token due for re-stamping whose certificate
+                                 expires within 30 days — high (prepared, :data:`LEGAL_CHECKS`)
+``R20-crl:none``                 no stored revocation list issued in the last
+                                 ``tsa.crl_max_age_days`` (7) days for an issuer in use, judged
+                                 from ``state/crl/index.json`` only — medium (prepared,
+                                 :data:`LEGAL_CHECKS`)
 ===============================  ==============================================================
 
 A check that fails (an unreadable folder, a database error) is reported in the job's details and
@@ -2076,6 +2087,172 @@ def revoked_certificates(layout: Layout) -> list[RevokedCertificate]:
                 name = match["name"]
                 found.setdefault(name, RevokedCertificate(name=name, since=None))
     return list(found.values())
+
+
+def crl_max_age_days(config: Config) -> int:
+    """``tsa.crl_max_age_days`` (Wave 5 contract 2.5, default 7). The key is added to the
+    configuration by W5-T; until then it is read with the contract's default, here only."""
+    return int(getattr(config.tsa, "crl_max_age_days", 7))
+
+
+# -- re-stamping, certificates and revocation lists (Wave 5 contract 2.3.1) ------------------------
+#
+# Prepared for the switch-on package (W5-E), which appends LEGAL_CHECKS to CHECKS together with
+# the alerts' catalogue texts and their rows in the first-steps guide. Until then each code is
+# written only as part of its dedup key, and the rule is taken from the key (D14). The findings
+# carry counts only: no certificate name, no person, no log line.
+
+RENEWAL_KEY: Final = "R20-renewal:none"
+CERT_KEY: Final = "R20-cert:none"
+CRL_KEY: Final = "R20-crl:none"
+#: A token due for re-stamping is ``high`` for R20-cert when its certificate expires this soon.
+CERT_EXPIRY_WARNING: Final = timedelta(days=30)
+
+
+def _rule_of(key: str) -> str:
+    """The alert code of a dedup key ``<code>:<what>``."""
+    return key.partition(":")[0]
+
+
+def _owned(key: str) -> Callable[[str], bool]:
+    return lambda candidate: candidate == key
+
+
+def _keep(alert: Alert) -> str | None:
+    return None
+
+
+def check_stamp_renewal(ctx: CheckContext) -> Outcome:
+    """``R20-renewal:none``: a token of the re-stamping report is ``due``, or its certificate
+    expired ``uncovered``. Resolved by a readable report without such a token; an unreadable one
+    decides nothing."""
+    renewals = read_stamp_renewals(ctx.layout)
+    if renewals is None:
+        return Outcome([], _owned(RENEWAL_KEY), _keep)
+    counts = Counter(renewal.status for renewal in renewals)
+    due, uncovered = counts["due"], counts["uncovered"]
+    findings = []
+    if due or uncovered:
+        findings.append(
+            Finding(
+                key=RENEWAL_KEY,
+                rule=_rule_of(RENEWAL_KEY),
+                severity="high",
+                title=(
+                    f"Yeniden damgalama gerekiyor: {due} damganın zamanı geldi, {uncovered} damga "
+                    "yeniden damgalanmadan sona erdi"
+                ),
+                details={
+                    "due": due,
+                    "uncovered": uncovered,
+                    "title_en": (
+                        f"Re-stamping needed: {due} stamp(s) due, {uncovered} expired without "
+                        "re-stamping"
+                    ),
+                },
+            )
+        )
+    return Outcome(findings, _owned(RENEWAL_KEY), lambda alert: "renewal_ok")
+
+
+def check_stamp_cert(ctx: CheckContext) -> Outcome:
+    """``R20-cert:none``: a time-stamp certificate is on a revocation list at or before a stamp
+    (``critical``), or a token due for re-stamping, not covered yet, has a certificate that
+    expires within :data:`CERT_EXPIRY_WARNING` (``high``). Resolved when neither holds and the
+    re-stamping report can be read."""
+    revoked = revoked_certificates(ctx.layout)
+    renewals = read_stamp_renewals(ctx.layout)
+    expiring = sum(
+        1
+        for renewal in renewals or ()
+        if renewal.status == "due" and renewal.cert_not_after - ctx.now <= CERT_EXPIRY_WARNING
+    )
+    findings = []
+    if revoked:
+        findings.append(
+            Finding(
+                key=CERT_KEY,
+                rule=_rule_of(CERT_KEY),
+                severity="critical",
+                title=f"Zaman damgası sertifikası iptal listesinde: {len(revoked)} sertifika",
+                details={
+                    "revoked": len(revoked),
+                    "expiring": expiring,
+                    "title_en": (
+                        f"Time-stamp certificate on a revocation list: {len(revoked)} "
+                        "certificate(s)"
+                    ),
+                },
+            )
+        )
+    elif expiring:
+        days = CERT_EXPIRY_WARNING.days
+        findings.append(
+            Finding(
+                key=CERT_KEY,
+                rule=_rule_of(CERT_KEY),
+                severity="high",
+                title=(
+                    f"Zaman damgası sertifikası {days} gün içinde sona eriyor: {expiring} damga "
+                    "yeniden damgalanmadı"
+                ),
+                details={
+                    "revoked": 0,
+                    "expiring": expiring,
+                    "title_en": (
+                        f"Time-stamp certificate expires within {days} days: {expiring} stamp(s) "
+                        "not re-stamped"
+                    ),
+                },
+            )
+        )
+
+    def clear(alert: Alert) -> str | None:
+        return "certificate_ok" if renewals is not None else None
+
+    return Outcome(findings, _owned(CERT_KEY), clear)
+
+
+def check_stamp_crl(ctx: CheckContext) -> Outcome:
+    """``R20-crl:none``: an issuer in use has no stored revocation list issued in the last
+    ``tsa.crl_max_age_days`` days, or the index cannot be read while one is in use. Judged from
+    ``state/crl/index.json`` only, never from the CrlFetch task's exit code (C12); an unreadable
+    index resolves nothing."""
+    index = read_crl_index(ctx.layout)
+    in_use = issuers_in_use(index)
+    max_age = crl_max_age_days(ctx.config)
+    stale = crl_stale_issuers(index, in_use, ctx.now, max_age)
+    findings = []
+    if stale or (in_use and not index.readable):
+        newest = index.newest_fetched_at
+        findings.append(
+            Finding(
+                key=CRL_KEY,
+                rule=_rule_of(CRL_KEY),
+                severity="medium",
+                title=f"{max_age} günden yeni doğrulanmış bir iptal listesi (SİL) yok",
+                details={
+                    "stale_issuers": len(stale),
+                    "failures": len(index.failures),
+                    "newest_fetched_at": isoformat_site(newest, "seconds") if newest else None,
+                    "max_age_days": max_age,
+                    "title_en": f"No verified revocation list newer than {max_age} days",
+                },
+            )
+        )
+
+    def clear(alert: Alert) -> str | None:
+        return "crl_fresh" if index.readable else None
+
+    return Outcome(findings, _owned(CRL_KEY), clear)
+
+
+#: The checks of Wave 5 contract 2.3.1, for W5-E to append to :data:`CHECKS`.
+LEGAL_CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
+    ("stamp_renewal", check_stamp_renewal),
+    ("stamp_cert", check_stamp_cert),
+    ("stamp_crl", check_stamp_crl),
+)
 
 
 CHECKS: Final[tuple[tuple[str, Callable[[CheckContext], Outcome]], ...]] = (
