@@ -617,3 +617,34 @@ All Wave 5 questions are answered (2026-11-02).
   (`zd.turktrust.com.tr`) is a second legal-grade provider (D12).
   - The banner rule stays for mock, rfc3161 and test servers.
   - No site setting can add another legal provider.
+
+## Deviations — W5-B (2026-11-02)
+
+- **W5-B-1: a sixth index error word, `name_taken`** (§2.2 lists five). A verified list whose D8
+  name (issuer and `thisUpdate`) is already taken by other bytes is not stored, the earlier file
+  stays, the failure is recorded with `name_taken`, and the run exits 1. A delta list or a
+  re-issue within the same second causes it. Tests: `core/tests/test_crl.py`.
+- **W5-B-2: a lock file `state/crl/.fetch.lock`.** Two runs (the `CrlFetch` task and a manual
+  `crl fetch`) can overlap; the lock keeps the index from losing entries. The file stays, empty,
+  and is never deleted; the builder and `crl status` ignore it. A held lock exits 1 and is not
+  recorded in the index.
+- **W5-B-3: stricter trust than D7/D8's wording.** Only certificates that chain to a pinned root
+  give distribution points; a CRL issuer whose keyUsage lacks `cRLSign` is refused; a list
+  signed with an algorithm the standalone verifier cannot check is neither stored nor used
+  (rule 5); a URL with a user name or password is recorded as `unreachable` with the credentials
+  hidden, never logged or printed.
+- **W5-B-4: `tsa.timeout_seconds` bounds each URL's whole download**, not only each network
+  wait, so a server that trickles bytes cannot hold the task.
+- **W5-B-5: `crl fetch` exit codes beyond §2.2:** 2 also for an invalid `network.https_proxy`;
+  1 also for an unreadable index or a held lock. `crl status` prints JSON (`index`, `files`,
+  `bytes`, `size`) and has no `--json` flag.
+- **W5-B-6: day-check texts.** `crl-revoked` fails the day with the §2.6 `certificate_revoked`
+  English text (without the revocation date); `crl-revoked-later`, `crl-hold` and an unreadable
+  index give new English warnings in `chain.py`'s style. Their Turkish texts belong in
+  `api/src/arcilogger_api/issues.py` (not W5-B's file; listed in the pull request).
+- **W5-B-7: `NO_CRL_NOTE`'s text** (the constant stays): it said ARCILOGGER does not download
+  revocation lists yet. It now says, TR / EN, that no verified list is in `state/crl`, where the
+  URLs come from, and that Kamu SM's are to be confirmed on site (K10).
+- **W5-B-8: the config adapter.** `crl.crl_options` reads `tsa.crl_urls`,
+  `tsa.crl_max_age_days` and `network.https_proxy` with `getattr` and the §2.5 defaults until
+  W5-T's day-1 pull request lands; then it becomes plain attribute access.
