@@ -1687,13 +1687,16 @@ def test_the_d15_carried_check_is_fast(
         rows, _kept = _rows_of(
             traffic_site, first, last, start_bound, own, address=address, port=step_port
         )
+        # On ``(transip, time)`` a step with a port filters the port: the address's rows of the
+        # range on other ports are read too (a chunk holding only the range's last instant).
+        read, _kept = _rows_of(traffic_site, first, last, start_bound, condition, address=address)
         # No other index entry of the address than its rows of the step's range: on
         # ``ix_fg_traffic_transip_transport_time`` a port-less step walked them all (#71).
-        assert _buffers(plan) <= rows + STEP_BUFFERS, (case, index, _buffers(plan), rows)
+        assert _buffers(plan) <= read + STEP_BUFFERS, (case, index, _buffers(plan), read)
         if found:
-            assert removed <= max(rows // 10, 100), (case, index, removed, rows)
+            assert removed <= max(read // 10, 100), (case, index, removed, read)
         else:
-            assert removed == rows, (case, index, removed, rows)
+            assert rows <= removed <= read, (case, index, removed, rows, read)
     assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
     assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
 
