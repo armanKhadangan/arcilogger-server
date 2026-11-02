@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { PrivacyNoticeDialog } from '@/components/auth/privacy-notice-dialog';
+import { LegalBanner } from '@/components/legal/legal-banner';
 import { LicenseBanner } from '@/components/license/license-banner';
 import { ReauthProvider } from '@/lib/reauth';
 import { readPreference, writePreference } from '@/lib/storage';
@@ -19,9 +20,9 @@ function initialCollapsed(): boolean {
 }
 
 /**
- * Sidebar + top bar + licence banners + routed page, for signed-in users (inside `RequireAuth`).
- * Also hosts the re-authentication dialog (`useReauth`) and the KVKK notice, which stays open
- * until accepted.
+ * Sidebar + top bar + licence and legal-validity banners + routed page, for signed-in users
+ * (inside `RequireAuth`). Also hosts the re-authentication dialog (`useReauth`) and the KVKK
+ * notice, which stays open until accepted.
  */
 export function AppShell() {
   const { t } = useTranslation();
@@ -53,6 +54,7 @@ export function AppShell() {
             className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-6 outline-none md:px-6"
           >
             <LicenseBanner />
+            <LegalBanner />
             <Outlet />
           </main>
         </div>
