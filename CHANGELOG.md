@@ -5,6 +5,122 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Uyum Durumu, Sistem and the first-run wizard (Wave 4)
+
+The last two placeholder pages of the menu are real: **Uyum Durumu** (ten technical checks and the
+Uyum Durumu Raporu) and **Sistem** (the server's resources, services, scheduled tasks and clock),
+plus a disk card on the Panel and a first-run wizard in Ayarlar
+([ADR-0017](docs/adr/0017-compliance-and-system-pages.md); [UYUM-DURUMU](docs/UYUM-DURUMU.md) /
+[COMPLIANCE-STATUS](docs/COMPLIANCE-STATUS.md); MVP-CONTRACTS §19). Decided by the developer on the
+owner's delegation; the owner answered two questions on 2026-10-28 (who sees Uyum Durumu, Q1;
+card 7's expected days, Q10) and may change the others (the ADR lists the open points Q2–Q9 and
+Q11–Q21, [ASSUMPTIONS](docs/ASSUMPTIONS.md) the implemented defaults). "Uyum Durumu" is the page's
+name, not a verdict: the cards and the report are technical checks of log collection, sealing and
+backups by a product designed to support 5651 obligations ("5651 yükümlülüklerini desteklemek için
+tasarlanmıştır"), not a legal assessment, and no text says that a site conforms; have the report's
+texts reviewed by legal counsel (Q20). Both pages only read (files under `state\` and `admin\`, the
+vault, the database, the active alerts): they never ask a device or Kamu SM and never download or
+install anything.
+
+- **Uyum Durumu** (`/compliance`): ten cards, computed by one server function for the page and the
+  PDF and worded there in Turkish and English: log sources are sending; yesterday's records sealed
+  and verified; seal chain intact; retention period; Kamu SM credit and time-stamp certificate;
+  server clock; content filter records; DHCP and ARP records (the configured lease evidence of
+  Wave 3); second copy (replica); configuration and database backups. Each card has a state as icon
+  and text (**Tamam**, **Dikkat**, **Sorun**, **Bilgi yok**: the last always with its reason), the
+  reason, its facts, its open alerts, a link to the page that fixes it (hidden where the user may
+  not open it), its section of UYUM-DURUMU.md as text and, where the repository cannot confirm a
+  detail (the credit's format, the DNS filter profile), **Sahada doğrulayın**. A card that cannot be
+  computed reads "Bu denetim şu anda yapılamadı" with the error's class name; the others are
+  unaffected. The page refreshes every 30 s (one answer cached 30 s for everyone) and offers **İlk
+  kurulum sihirbazını aç** to an administrator while a card is not OK.
+- **Uyum Durumu Raporu (PDF):** made on request (`GET /compliance/report.pdf`) from a fresh
+  computation, A4, Turkish and English: the site, the time, the account that exported it (the only
+  name in it), the summary and every card with its state, reason, facts, verify-on-site note and
+  alerts, the neutral footer of the reports on every page. Not stored and not time-stamped (no
+  credit spent, Q14); its SHA-256 is in the response (`X-Arci-Sha256`, checked by the browser: a
+  mismatch is shown beside the button as `download_mismatch`) and in the audit entry. No schedule
+  and no Raporlar kind in this version. DENETCI-KILAVUZU section 11 says how to read it.
+- **Configuration backup confirmation:** on card 10, **Yapılandırma yedeğini aldım** records that
+  `arcilogger.toml`, `secret.key` and the Caddy CA folder were copied to encrypted offline media
+  kept apart from the backups (YEDEKLEME/BACKUP section 3), with the configuration's current
+  SHA-256; the card asks for a new copy once the configuration changes (Q13). A configuration file
+  that cannot be read refuses it with 409 `config_backup_unreadable`. A damaged
+  `state\backup\last.json` reads as a failed backup.
+- **Content-filter evidence** (card 7): the web and DNS filter records of the enabled FortiGate
+  sources, counted per day from the hourly summary table `search_counts`, the newest record, the web
+  filter profiles seen in 24 hours (no DNS profile is stored; sahada doğrula). Owner decision Q10:
+  records are expected on every day of the week except the days listed in `usage.holidays`, in a
+  rolling window of 24 hours, and a web or a DNS record is enough. Three new settings in **Ayarlar →
+  Uygulama ayarları → Uyarılar ve e-posta**: `alerts.filter_days` (ISO weekdays, default every day),
+  `alerts.filter_skip_holidays` (on) and `alerts.filter_quiet_hours` (24, 6–168). A site without a
+  FortiGate source expects no such records (**Bilgi yok**).
+- **Alert `R20-filter`** (docs/UYARILAR.md / ALERTS.md), high, one alert (`R20-filter:none`) in the
+  existing system job: no web or DNS filter record for `alerts.filter_quiet_hours` while every day
+  of that window is expected. It closes by itself when a record arrives or the window is no longer
+  expected; the e-mail carries only the hours, never an address or a name.
+- **Sistem** (`/system`): CPU, memory and uptime (read through the standard library, `ctypes` on
+  Windows and `/proc` on Linux, no `psutil`; CPU "ölçülüyor" until a second reading); each drive's
+  use with the warning mark (`alerts.disk_used_percent`, 80 %) and 95 % and a **disk forecast**; the
+  database's size and its ten largest tables (with TimescaleDB the hypertables' size; kept for
+  5 minutes); the collector and ingest statistics of the configured sources (an unknown sender is
+  only counted, its address shown on Kaynaklar only); the services ArciCollector, ArciIngest,
+  ArciWorker and ArciApi, the agent and ApplySystem; the **scheduled tasks** judged by the evidence
+  files they leave (Retention and Requests leave none ArciApi can read: shown as such; no Task
+  Scheduler or service manager query, Q19); every worker job with its schedule, last run, duration,
+  failures and a run in progress (`job_runs` read with two bounded probes per job, never a scan; no
+  purge of `job_runs`, Q21); the clock (time servers, the peers ApplySystem applied, the samples of
+  24 hours); the versions, the licence's maintenance and how to upgrade ("ARCILOGGER güncelleme
+  indirmez").
+- **Disk forecast:** the new worker job `system.sample` (daily after 00:30) writes one sample of the
+  data and the system drive to `state\system-history.json` (the newest 120 days). The forecast is a
+  straight line over the newest 30 samples, shown from 7 (Q17): the day the drive reaches the
+  warning mark (`alerts.disk_used_percent`) and the day it is full; "did not grow" when it did not;
+  no date when it grows so slowly that the date would be more than 100 years away.
+- **Panel:** a **Disk** card (each drive's use with its level as icon and text, the forecast in one
+  line, the link to Sistem) for the administrators (`GET /system/disk`). The clock card's link now
+  opens Sistem.
+- **First-run wizard** (**Ayarlar → İlk kurulum sihirbazı**, `/settings/setup`): a guided checklist
+  of administrator and two-step verification, site settings, log sources, Kamu SM test server,
+  Kamu SM production, replica, e-mail and a summary with the configuration problems. Each step says
+  what it is for, whether it is done and what is missing, and opens the existing Ayarlar page
+  (**Ayarlar'da aç**, whose way back reads **Kurulum sihirbazına dön**); **Bu adımı şimdilik atla**
+  goes on and leaves the step open. A step's state is read from the server's configuration and
+  history, nothing is stored and there is no automatic redirect after the first sign-in (Q18); the
+  e-mail step is done only when sending is switched on. The sources step says who opens port 514 and
+  refers to DEVICE-SETUP (no device commands in the web app, nothing pre-filled); the Kamu SM steps
+  repeat that test stamps have no legal validity and that the root fingerprints are to be compared
+  with Kamu SM's (sahada doğrula). The first-time account page `/setup` shows the wizard as its
+  third step, "Girişten sonra, Ayarlar'da".
+- **Who sees what** (docs/roles.md, SECURITY section 16): Uyum Durumu and its report administrators
+  and auditors (`compliance.read`; owner decision of 2026-10-28, Q1: the auditor now holds it, which
+  answers roles.md open question 5 for this page); the backup confirmation, the settings and the
+  wizard administrators only (`settings.manage`); Sistem and the Panel's disk card administrators
+  only (`system.read`, Q2). Neither page nor the PDF shows data about log subjects (no client
+  address or MAC, no person, no device host name, no sender address, no replica target), so there is
+  no KVKK notice and viewing is not audited; the report export (`compliance.report_export`, with its
+  SHA-256 and the count of each state) and the backup confirmation
+  (`compliance.config_backup_confirm`, with the configuration's SHA-256) are.
+- **5651 Temel:** both pages, the report, the wizard, `system.sample` and `R20-filter` are basic
+  functions; no licence state blocks them (LISANS/LICENSING).
+- **API:** `GET /compliance`, `GET /compliance/report.pdf`, `POST /compliance/config-backup`,
+  `GET /system`, `GET /system/disk`, `GET /system/health`; the error code `config_backup_unreadable`
+  (MVP-CONTRACTS §19). `GET /compliance`, `GET /system` and `GET /system/health` answer within 1 s
+  on the performance data (tests). The configuration problem about sources now comes in Turkish and
+  English like the others.
+- **Database:** no new table and no migration: the disk samples go to a state file, the backup
+  confirmation to the audit log, and the three `alerts.filter_*` keys belong to the existing group
+  "Uyarılar ve e-posta".
+- **Upgrade:** no step of its own. The disk forecast appears after 7 daily samples; until then
+  Sistem and the Panel say how many there are.
+- **Docs:** UYUM-DURUMU / COMPLIANCE-STATUS (new: each card, the report, Sistem, the wizard, what to
+  verify on site), KURULUM/INSTALL sections 9 (the wizard after the first sign-in), 12 (Uyum Durumu
+  and Sistem beside the console checks) and 13 (version and maintenance on Sistem),
+  AYARLAR/SETTINGS, ILK-ADIMLAR/FIRST-STEPS (the daily look at Uyum Durumu, `R20-filter`),
+  UYARILAR/ALERTS, YEDEKLEME/BACKUP section 3, SECURITY, roles.md, DENETCI-KILAVUZU section 11,
+  KABUL-TESTI-WINDOWS11, ARCHITECTURE, CORRELATION, LISANS/LICENSING, kamusm.md and
+  deploy/windows/README.md (`state\system-history.json`).
+
 ### FortiGate DHCP, srcmac and internet exits (Wave 3)
 
 A 5651 lookup now follows the lease on sites whose FortiGate is the clients' DHCP server, may use
