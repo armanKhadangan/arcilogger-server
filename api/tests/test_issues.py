@@ -195,6 +195,54 @@ def test_the_builders_new_messages_have_a_turkish_text(fragment: str, message: s
     assert not issue_tr(message).startswith(UNTRANSLATED), message
 
 
+#: The revocation texts of the day check and the package builder (Wave 5 D10, C11, C14), built
+#: exactly as W5-B's ``chain.py`` and ``evidence/builder.py`` build them. Once W5-B is in the
+#: integration branch they join DAY_MESSAGES and BUILD_MESSAGES, pinned to the core code.
+SUBJECT = "CN=Örnek Test TSA 1,O=Örnek A.Ş.,C=TR"
+REVOCATION_MESSAGES = [
+    (
+        f"A time-stamp certificate is on a revocation list: {SUBJECT}. Contact the provider; "
+        "legal review is recommended.",
+        f"Zaman damgası sertifikası iptal listesinde: {SUBJECT}. Zaman damgası sağlayıcısıyla "
+        "görüşün; hukuki inceleme önerilir.",
+    ),
+    (
+        "a certificate of the time stamp's chain was revoked after the stamp, on "
+        f"2026-10-02T00:30:00+03:00: {SUBJECT}; the reason for the revocation should be reviewed",
+        "zaman damgası zincirindeki bir sertifika damgadan sonra, 02.10.2026 00:30:00 tarihinde "
+        f"iptal edilmiş: {SUBJECT}; iptal nedeninin incelenmesi gerekir",
+    ),
+    (
+        "a certificate of the time stamp's chain is on hold on a revocation list since "
+        f"2026-09-05T11:00:00+03:00: {SUBJECT}; check whether the hold covers the stamp time",
+        "zaman damgası zincirindeki bir sertifika 05.09.2026 11:00:00 tarihinden beri iptal "
+        f"listesinde askıda: {SUBJECT}; askının damga anını kapsayıp kapsamadığı incelenmeli",
+    ),
+    (
+        "revocation not checked: state/crl/index.json is not an arcilogger.crl-index/1 index",
+        "iptal durumu denetlenemedi (teknik ayrıntı: state/crl/index.json is not an "
+        "arcilogger.crl-index/1 index)",
+    ),
+    (
+        "revocation list a1a1a1a1a1a1-20261101T000000Z-89abcdef.crl does not match its index entry",
+        "a1a1a1a1a1a1-20261101T000000Z-89abcdef.crl iptal listesi dizindeki kaydıyla eşleşmiyor "
+        "(dosya değişmiş olabilir; dosyayı silmeyin)",
+    ),
+    (
+        "CRL file a1a1a1a1a1a1-20261101T000000Z-89abcdef.crl changed while the package was built",
+        "a1a1a1a1a1a1-20261101T000000Z-89abcdef.crl iptal listesi dosyası paket oluşturulurken "
+        "değişti — paket oluşturulmadı",
+    ),
+]
+
+
+@pytest.mark.parametrize(("message", "turkish"), REVOCATION_MESSAGES)
+def test_the_revocation_day_texts_have_a_turkish_text(message: str, turkish: str) -> None:
+    assert issue_tr(message) == turkish
+    assert not issue_tr(message).startswith(UNTRANSLATED)
+    assert bilingual_error(message) == f"{turkish} / {message}"
+
+
 def test_the_day_pages_own_token_messages() -> None:
     assert token_issue_tr("no trusted root certificates") == (
         "güvenilen kök sertifika yok (tsa.roots_dir)"

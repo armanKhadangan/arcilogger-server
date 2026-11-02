@@ -26,7 +26,9 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Final
 
+from arcilogger_api.legalstatus.texts import REASONS
 from arcilogger_core.config import KAMUSM_PRODUCTION_HOST, Config
+from arcilogger_core.fmt import format_datetime
 
 _Rule = tuple[re.Pattern[str], Callable[[re.Match[str]], str]]
 
@@ -127,8 +129,51 @@ _TOKEN_RULES: Final[list[_Rule]] = [
     ),
 ]
 
+
+def _moment(text: str) -> str:
+    """A time of a day-check message (ISO 8601 with offset) as the web shows times."""
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return text
+    return format_datetime(moment) if moment.tzinfo is not None else text
+
+
 #: ``arcilogger_core.chain.verify_day`` / ``verify_range`` and ``arcilogger_api.sealcheck``.
 _RULES: Final[list[_Rule]] = [
+    # revocation of the time stamp's chain (Wave 5 D10; the certificate_revoked text of 2.6, C13),
+    # first: a list or file name in them may end like another rule's message
+    _rule(
+        r"^A time-stamp certificate is on a revocation list: (?P<name>.+)\. Contact the "
+        r"provider; legal review is recommended\.$",
+        REASONS["certificate_revoked"][0],
+    ),
+    _rule(
+        r"^a certificate of the time stamp's chain was revoked after the stamp, on "
+        r"(?P<when>\S+): (?P<name>.+); the reason for the revocation should be reviewed$",
+        lambda m: (
+            f"zaman damgası zincirindeki bir sertifika damgadan sonra, {_moment(m['when'])} "
+            f"tarihinde iptal edilmiş: {m['name']}; iptal nedeninin incelenmesi gerekir"
+        ),
+    ),
+    _rule(
+        r"^a certificate of the time stamp's chain is on hold on a revocation list since "
+        r"(?P<when>\S+): (?P<name>.+); check whether the hold covers the stamp time$",
+        lambda m: (
+            f"zaman damgası zincirindeki bir sertifika {_moment(m['when'])} tarihinden beri "
+            f"iptal listesinde askıda: {m['name']}; askının damga anını kapsayıp kapsamadığı "
+            "incelenmeli"
+        ),
+    ),
+    _rule(
+        r"^revocation not checked: (?P<why>.+)$",
+        "iptal durumu denetlenemedi (teknik ayrıntı: {why})",
+    ),
+    _rule(
+        r"^revocation list (?P<file>\S+) does not match its index entry$",
+        "{file} iptal listesi dizindeki kaydıyla eşleşmiyor (dosya değişmiş olabilir; dosyayı "
+        "silmeyin)",
+    ),
     _rule(r"^manifest missing$", "manifest yok"),
     _rule(
         r"^manifest is not canonical JSON \(modified\?\)$",
@@ -236,6 +281,10 @@ _RULES: Final[list[_Rule]] = [
     _rule(
         r"^(?P<day>\S+): the manifest's list of empty days: (?P<why>.+)$",
         "{day}: manifestin boş gün listesi geçersiz (teknik ayrıntı: {why})",
+    ),
+    _rule(
+        r"^CRL file (?P<file>\S+) changed while the package was built$",
+        "{file} iptal listesi dosyası paket oluşturulurken değişti — paket oluşturulmadı",
     ),
 ]
 
