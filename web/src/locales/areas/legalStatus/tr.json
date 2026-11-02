@@ -1,0 +1,26 @@
+{
+  "legalStatus": {
+    "docs": {
+      "provider_not_legal": "ZAMAN-DAMGASI.md bölüm 5.2",
+      "credentials_in_clear": "ZAMAN-DAMGASI.md bölüm 5.3",
+      "legal_root_missing": "ZAMAN-DAMGASI.md bölüm 5.4",
+      "unstamped_days": "ZAMAN-DAMGASI.md bölüm 5.5",
+      "renewal_due": "ZAMAN-DAMGASI.md bölüm 5.6",
+      "renewal_uncovered": "ZAMAN-DAMGASI.md bölüm 5.7",
+      "certificate_revoked": "ZAMAN-DAMGASI.md bölüm 5.8",
+      "crl_stale": "ZAMAN-DAMGASI.md bölüm 5.9"
+    },
+    "banner": {
+      "label": "Yasal geçerlilik",
+      "more_one": "ve {{formattedCount}} uyarı daha",
+      "more_other": "ve {{formattedCount}} uyarı daha",
+      "listLabel": "Diğer yasal geçerlilik uyarıları",
+      "hide": "24 saat gizle",
+      "hidden": "Uyarı bu tarayıcıda 24 saat gizlendi; yeni bir uyarı çıkarsa yeniden gösterilir."
+    },
+    "link": {
+      "sealing": "Mühürleme sayfası",
+      "settingsTsa": "Ayarlar → Zaman damgası"
+    }
+  }
+}

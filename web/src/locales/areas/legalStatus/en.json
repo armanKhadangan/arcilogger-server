@@ -1,0 +1,26 @@
+{
+  "legalStatus": {
+    "docs": {
+      "provider_not_legal": "TIME-STAMPING.md section 5.2",
+      "credentials_in_clear": "TIME-STAMPING.md section 5.3",
+      "legal_root_missing": "TIME-STAMPING.md section 5.4",
+      "unstamped_days": "TIME-STAMPING.md section 5.5",
+      "renewal_due": "TIME-STAMPING.md section 5.6",
+      "renewal_uncovered": "TIME-STAMPING.md section 5.7",
+      "certificate_revoked": "TIME-STAMPING.md section 5.8",
+      "crl_stale": "TIME-STAMPING.md section 5.9"
+    },
+    "banner": {
+      "label": "Legal validity",
+      "more_one": "and {{formattedCount}} more",
+      "more_other": "and {{formattedCount}} more",
+      "listLabel": "Other legal-validity warnings",
+      "hide": "Hide for 24 hours",
+      "hidden": "The warning is hidden in this browser for 24 hours; it shows again if a new warning appears."
+    },
+    "link": {
+      "sealing": "Sealing page",
+      "settingsTsa": "Settings → Time stamping"
+    }
+  }
+}
