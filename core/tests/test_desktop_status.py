@@ -594,16 +594,23 @@ def test_without_administrator_rights_the_rows_say_why(
     """The data folder is for administrators only (ArciInstall.psm1): a window started without
     elevation shows "unknown" with the reason, and still the services, the API and the disk."""
     real_open = Path.open
+    real_read = status.read_shared
 
     def denied(self: Path, *args: Any, **kwargs: Any) -> Any:
         if layout.state in self.parents:
             raise PermissionError(13, "Access is denied")
         return real_open(self, *args, **kwargs)
 
+    def denied_read(path: Path) -> bytes:
+        if layout.state in path.parents:
+            raise PermissionError(13, "Access is denied")
+        return real_read(path)
+
     def scandir(path: Any) -> Any:
         raise PermissionError(13, "Access is denied")
 
-    monkeypatch.setattr(Path, "read_bytes", lambda self: denied(self))
+    # The status files go through read_shared (CreateFileW on Windows), the alerts through open().
+    monkeypatch.setattr(status, "read_shared", denied_read)
     monkeypatch.setattr(Path, "open", denied)
     monkeypatch.setattr(os, "scandir", scandir)
     snapshot = look(layout)
@@ -615,6 +622,16 @@ def test_without_administrator_rights_the_rows_say_why(
     assert row(snapshot, "service:ArciCollector").level == "ok"  # the SCM's word stays
     assert row(snapshot, "disk").level == "ok"
     assert snapshot.level == "warn"
+
+
+def test_read_shared(tmp_path: Path) -> None:
+    """Windows: CreateFileW with delete sharing; elsewhere a plain read. Both map a missing
+    file to FileNotFoundError, which the rows read as "no information yet"."""
+    path = tmp_path / "worker-status.json"
+    path.write_bytes(b'{"updated_at": null}')
+    assert status.read_shared(path) == b'{"updated_at": null}'
+    with pytest.raises(FileNotFoundError):
+        status.read_shared(tmp_path / "missing.json")
 
 
 def test_damaged_files_are_unknown(layout: Layout) -> None:
