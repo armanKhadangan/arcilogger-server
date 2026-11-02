@@ -6782,23 +6782,38 @@ hours away from their arrival, so neither sample held them. The offset is now me
   `worker/tests/test_alerts_lease_performance.py`. Fold into D28, 2.6.3, 1.1 (line 303), 1.3
   V16 and 3.8.
 - **A lookup measures the clock by receive time too** (2.7 "Source clock at the requested
-  moment"; amends Deviations c2's per-lookup clock bullet). Each measured source has two
+  moment"; amends Deviations c2's per-lookup clock bullet). Each measured source has three
   samples: the device-time sample of c2 (its rows nearest T on each side, unchanged: the rows
-  the search and the lease timeline used) and its `source_clock_samples` minutes received in
-  [T − 1 h, T + 1 h]. Each counts with at least 10 rows; the median further from 0 is the
-  source's offset. The limits (120 s; max(120 s, tolerance) for a source measured only for the
+  the search and the lease timeline used), its `source_clock_samples` minutes received in
+  [T − 1 h, T + 1 h], and (#82) its minutes received at any time within `max_clock_skew` whose
+  clock put their device times into [T − 1 h, T + 1 h] from an offset beyond 120 s, where that
+  offset holds more than half of the minute's rows (`clocksamples.shifted_into`; a few late
+  lines among rows on time do not count). Each counts with at least 10 rows; the median further
+  from 0 is the source's offset. The limits (120 s; max(120 s, tolerance) for a source measured only for the
   session search), the printed rounding, the source choice (cited sources, or the searched
   sources of an empty search through `search_counts`) and the texts are unchanged. With a clock
   set hours back half an hour before T, the rows with a device time around T were sent on time
   (median 0) while the rows received around T are hours behind: an exact request at T now gives
   `none` with `source_clock_offset` (it cites no row, so no chain), an internal lookup's chain
-  is `low` with it; a lookup at the device moment of the jumped rows behaves as before. A burst
+  is `low` with it; a lookup at the device moment of the jumped rows behaves as before. With a
+  clock set 3 hours back two hours after T and lighter traffic after it, the rows with a device
+  time around T were mostly sent on time and the rows received around T all were (both medians
+  0), but the rows sent after the change carry device times around T: the search at T finds the
+  sessions of T and of T + 3 h (another client on the same NAT port) and the third sample
+  names −10800 s, every chain `low` (#82; before it, both chains `high`). The offset named is
+  the median of those shifted rows, so `source_clock_offset`'s text stays true ("another session
+  may have been found") and no new key is needed. A burst
   of a device's buffered late lines can make the receive-time sample look behind for its
   minutes; that errs on the safe side (a `low` chain with the offset stated, never a silent
-  `high`). Perf (3.8): one more primary-key query per measured source, inside the lookup clock
-  guard (0.2 s for two sources). Tests: `worker/tests/test_lookup_fortigate_only.py`
+  `high`). Perf (3.8): two more primary-key queries per measured source, inside the lookup
+  clock guard (0.2 s for two sources; the third reads about 3,300 keys of 26 h, 2.5 ms on the
+  guard site's 30 days of samples). Tests: `worker/tests/test_lookup_fortigate_only.py`
   (`test_a_clock_set_hours_back_is_named_at_the_real_moment`, fails on the device-time sample;
-  `test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before`),
+  `test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before`;
+  `test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times`, fails on #79;
+  `test_a_source_on_time_all_day_is_trusted_as_before`;
+  `test_a_clock_set_ahead_is_named_at_the_moments_whose_device_times_it_used`),
+  `db/tests/test_clocksamples.py` (`test_the_minutes_that_shifted_their_device_times_into_a_range`),
   `worker/tests/test_lookup_performance.py`
   (`test_the_source_clock_of_an_empty_search_is_fast`). Fold into 2.7, D28's "measures the
   offset at the requested moment" paragraph, CORRELATION §2 and §7 (done), and the two test
