@@ -1735,6 +1735,22 @@ Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 
   - ASSUMPTIONS Q-C3-1's follow-up ("measure `INCLUDE (duration)` on the `transip` index") is
     answered: measured, not taken, and `(transip, time)` was added.
 
+## Deviations — #89 (loadgen, 2026-11-02)
+
+- **A MikroTik DHCP address stays held until its lease ends in the load generator** (Wave 3
+  contract 2.14, "the default output stays byte-identical"; #40 item 1). The default plan handed
+  an address to a second device while the earlier holder's truth lease still ran, when that lease
+  had outlived its activity; the truth then named two devices for one address at one moment.
+  `Simulation._free_ip` now holds an address until its lease ends on every VLAN, as it already
+  did for FortiGate DHCP. Runs that met the case change their bytes (line count unchanged); the
+  pinned `DEFAULT_DIGEST` of `tests/test_loadgen.py` and the single days of `docs/INGEST.md`
+  (2026-09-23, 2026-10-27) are unchanged. The staff Wi-Fi now fills up at about 125 users with
+  MikroTik DHCP (was 160). Tests: `test_loadgen.py`
+  "test_the_default_plan_never_gives_one_address_two_leases_at_once",
+  "test_too_many_users_for_the_wifi_pool_is_a_clear_error". `tools/loadgen/README.md` carries a
+  dated note for users who compare outputs. Fold into the loadgen part of Wave 3 2.14 (W4-G has
+  merged before this entry).
+
 ---
 
 ## Owner questions
