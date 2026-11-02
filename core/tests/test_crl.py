@@ -36,6 +36,7 @@ from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import NameOID
 
 from arcilogger_core import crl as crl_module
+from arcilogger_core.chain import verify_day
 from arcilogger_core.cli import main
 from arcilogger_core.config import Config
 from arcilogger_core.crl import (
@@ -57,6 +58,7 @@ from arcilogger_core.crl import (
     token_certificates,
     trusted_issuers,
 )
+from arcilogger_core.evidence import builder as builder_module
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import SITE_TZ
 from arcilogger_core.tsa.verify import CRL_REASON_HOLD, fingerprint
@@ -655,6 +657,40 @@ def test_a_server_that_drips_is_stopped_at_the_timeout(root: Ca, layout: Layout)
     assert time.monotonic() - started < 3
 
 
+def test_a_server_that_drips_its_headers_is_stopped_at_the_timeout(
+    root: Ca, layout: Layout
+) -> None:
+    """The deadline covers the whole exchange: a server that sends its status line and headers
+    a byte at a time (each wait short) is cut too, not only one that drips its body."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    stop = threading.Event()
+
+    def drip() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            connection.recv(65536)
+            for byte in b"HTTP/1.1 200 OK\r\nX-Slow: " + b"a" * 10_000:
+                if stop.is_set():
+                    return
+                try:
+                    connection.sendall(bytes([byte]))
+                except OSError:
+                    return
+                stop.wait(0.1)
+
+    thread = threading.Thread(target=drip, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{listener.getsockname()[1]}/headers.crl"
+    started = time.monotonic()
+    try:
+        run = fetch(CrlOptions(urls=(url,), timeout_seconds=1), layout, [root.certificate], NOW)
+    finally:
+        stop.set()
+        listener.close()
+    assert [failure.error for failure in run.failures] == ["unreachable"]
+    assert time.monotonic() - started < 3
+
+
 # -- the proxy (D13) -----------------------------------------------------------------------------
 
 
@@ -789,6 +825,40 @@ def test_configured_urls_replace_the_distribution_points(
     run = fetch(options(url, url), layout, [pinned.certificate], NOW)
     assert run.urls == (url,)
     assert server.requests == ["/set.crl"]
+
+
+def test_the_lists_of_every_intermediate_seen_in_a_token_verify(
+    server: Server, root: Ca, layout: Layout
+) -> None:
+    """After the provider changed its intermediate CA, the old intermediate (only in older
+    tokens) still signs lists: each CA certificate of any token is an issuer, each loaded
+    once. The URLs still come from the newest token of each provider (D7)."""
+    old = make_ca("Örnek Ara SM 1 (TEST)", root, cdp=[server.url("/root.crl")])
+    new = make_ca("Örnek Ara SM 2 (TEST)", root, cdp=[server.url("/root.crl")])
+    tsa_old = make_ca("Örnek TSA 1", old, ca=False, cdp=[server.url("/ara-1.crl")])
+    tsa_new = make_ca("Örnek TSA 2", new, ca=False, cdp=[server.url("/ara-2.crl")])
+    for day in (28, 29):
+        seal_token(layout, date(2026, 10, day), "zamane", [tsa_old.certificate, old.certificate])
+    seal_token(layout, date(2026, 10, 31), "zamane", [tsa_new.certificate, new.certificate])
+    scanned = crl_module.scan_tokens(layout)
+    assert scanned.newest == (tsa_new.certificate, new.certificate)
+    assert scanned.every == (
+        tsa_new.certificate,
+        new.certificate,
+        tsa_old.certificate,
+        old.certificate,
+    )
+    this_update = datetime(2026, 11, 1, tzinfo=UTC)
+    server.routes["/ara-1.crl"] = Route(make_crl(old, this_update))
+    server.routes["/ara-2.crl"] = Route(make_crl(new, this_update))
+    server.routes["/root.crl"] = Route(make_crl(root, this_update))
+    run = fetch(options(), layout, [root.certificate], NOW)  # D7: the newest token's points
+    assert run.exit_code == 0, run.as_json()
+    assert "/ara-1.crl" not in server.requests
+    urls = (server.url("/ara-1.crl"), server.url("/ara-2.crl"))
+    run = fetch(options(*urls), layout, [root.certificate], NOW)
+    assert run.exit_code == 0, run.as_json()
+    assert [entry["issuer_sha256"] for entry in run.lists] == [old.fingerprint, new.fingerprint]
 
 
 def test_an_intermediate_that_does_not_chain_to_a_root_is_not_trusted(
@@ -972,12 +1042,12 @@ def test_a_delta_list_is_neither_stored_nor_used(
     assert f"stored CRL {name} is a delta list" in caplog.text
 
 
-def test_a_changed_stored_file_ends_the_run_with_an_error_and_stays(
+def test_a_changed_stored_file_is_recorded_and_stays(
     server: Server, root: Ca, layout: Layout
 ) -> None:
-    """The name holds the file's hash: other bytes under it were changed after storing. The
-    file is never overwritten (D8). The URLs after it still run and the index is written; the
-    run then ends with the error (exit 1)."""
+    """C14, the index lost the entry: the name holds the file's hash, so other bytes under it
+    were changed after storing. The file is never overwritten (D8); the URL's failure is
+    ``stored_file_changed`` and the run exits 1. The URLs after it still run."""
     data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
     server.routes["/root.crl"] = Route(data)
     url = server.url("/root.crl")
@@ -991,14 +1061,102 @@ def test_a_changed_stored_file_ends_the_run_with_an_error_and_stays(
     newer = make_crl(root, datetime(2026, 11, 2, tzinfo=UTC))
     server.routes["/newer.crl"] = Route(newer)
     second = server.url("/newer.crl")
-    with pytest.raises(CrlError, match=f"{name} does not hold the list its name says"):
-        fetch(options(url, second), layout, [root.certificate], NOW)
+    run = fetch(options(url, second), layout, [root.certificate], NOW)
+    assert run.exit_code == 1
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (url, "stored_file_changed")
+    ]
     assert (layout.crl_dir / name).read_bytes() == changed
     newer_name = stored_name(root, "20261102T000000Z", newer)
     assert (layout.crl_dir / newer_name).read_bytes() == newer
     index = read_index(layout)
     assert [(entry["file"], entry["url"]) for entry in index["lists"]] == [(newer_name, second)]
-    assert index["failures"] == []
+    assert [(f["url"], f["error"]) for f in index["failures"]] == [(url, "stored_file_changed")]
+
+
+def test_a_changed_stored_file_with_its_index_entry_is_recorded_and_stays(
+    server: Server, root: Ca, layout: Layout
+) -> None:
+    """C14, the index intact: a list revoking serial 77 is stored, then one byte of its file
+    changes. The next fetch hashes the stored file of the known entry: ``stored_file_changed``,
+    exit 1, the file and its entry stay; ``load_stored`` names it and ``verify_day`` warns
+    instead of dropping the revocation silently."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC), [(77, NOW - timedelta(days=9), None)])
+    server.routes["/root.crl"] = Route(data)
+    url = server.url("/root.crl")
+    assert fetch(options(url), layout, [root.certificate], NOW).exit_code == 0
+    name = stored_name(root, "20261101T000000Z", data)
+    assert [crl.revoked for crl in load_stored(layout)] == [{77: NOW - timedelta(days=9)}]
+    entries = read_index(layout)["lists"]
+    changed = bytearray(data)
+    changed[len(changed) // 2] ^= 1
+    (layout.crl_dir / name).write_bytes(bytes(changed))  # test: the stored file is changed
+
+    run = fetch(options(url), layout, [root.certificate], NOW)
+    assert run.exit_code == 1
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (url, "stored_file_changed")
+    ]
+    assert (layout.crl_dir / name).read_bytes() == bytes(changed)
+    index = read_index(layout)
+    assert index["lists"] == entries
+    assert [(f["url"], f["error"]) for f in index["failures"]] == [(url, "stored_file_changed")]
+    stored = load_stored(layout)
+    assert (list(stored), stored.mismatched) == ([], (name,))
+    check = verify_day(layout, date(2026, 10, 31), [root.certificate])
+    assert f"revocation list {name} does not match its index entry" in check.warnings
+
+
+def test_an_older_list_changed_after_its_url_moved_on_is_recorded(
+    server: Server, root: Ca, layout: Layout
+) -> None:
+    """C14, the usual case with daily lists: the list revoking serial 77 is stored, its URL
+    serves a newer list by now, and one byte of the older file changes. The fetch checks every
+    stored file, not only the ones served again: ``stored_file_changed`` with the older entry's
+    URL, exit 1; the newer list is stored, the older file and its entry stay. A stored file
+    that is gone is recorded the same way."""
+    old = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC), [(77, NOW - timedelta(days=9), None)])
+    server.routes["/root.crl"] = Route(old)
+    url = server.url("/root.crl")
+    assert fetch(options(url), layout, [root.certificate], NOW).exit_code == 0
+    old_name = stored_name(root, "20261101T000000Z", old)
+    old_entry = read_index(layout)["lists"][0]
+    newer = make_crl(root, datetime(2026, 11, 2, tzinfo=UTC), [(77, NOW - timedelta(days=9), None)])
+    server.routes["/root.crl"] = Route(newer)
+    assert fetch(options(url), layout, [root.certificate], NOW).exit_code == 0
+    changed = bytearray(old)
+    changed[len(changed) // 2] ^= 1
+    (layout.crl_dir / old_name).write_bytes(bytes(changed))  # test: the older file is changed
+    newest = make_crl(root, datetime(2026, 11, 3, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(newest)
+
+    run = fetch(options(url), layout, [root.certificate], NOW)
+    assert run.exit_code == 1
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (url, "stored_file_changed")
+    ]
+    newest_name = stored_name(root, "20261103T000000Z", newest)
+    assert [entry["file"] for entry in run.lists] == [newest_name]
+    assert (layout.crl_dir / old_name).read_bytes() == bytes(changed)
+    index = read_index(layout)
+    assert [entry["file"] for entry in index["lists"]] == sorted(
+        [old_name, stored_name(root, "20261102T000000Z", newer), newest_name]
+    )
+    assert old_entry in index["lists"]
+    assert [(f["url"], f["error"]) for f in index["failures"]] == [(url, "stored_file_changed")]
+    assert load_stored(layout).mismatched == (old_name,)
+    # The newest list again: the older file is still changed, the failure stays.
+    run = fetch(options(url), layout, [root.certificate], NOW)
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (url, "stored_file_changed")
+    ]
+    # Gone instead of changed: the same failure.
+    (layout.crl_dir / old_name).rename(layout.crl_dir / "kept-aside.bin")  # test: the file is gone
+    run = fetch(options(url), layout, [root.certificate], NOW)
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (url, "stored_file_changed")
+    ]
+    assert not (layout.crl_dir / old_name).exists()
 
 
 def test_a_known_list_whose_file_is_gone_is_stored_again(
@@ -1039,8 +1197,12 @@ def test_the_crl_module_has_no_way_to_delete() -> None:
     source = (CORE_SRC / "arcilogger_core" / "crl.py").read_text(encoding="utf-8")
     forbidden = re.compile(
         r"\b(unlink|remove|rmtree|rmdir|os\.replace|\.rename|truncate|O_TRUNC)\b"
+        # Path.replace (a rename over the target); dataclasses' replace makes a copy.
+        r"|(?<!\bdataclasses)\.replace\("
     )
     assert forbidden.findall(source) == [], "crl.py must never delete or rename a file"
+    assert forbidden.search("path.replace(target)")
+    assert not forbidden.search("dataclasses.replace(crl, url=url)")
 
 
 _URL = re.compile(r"""https?://[^\s"'`<>)\]]+""", re.IGNORECASE)
@@ -1227,8 +1389,48 @@ def test_load_stored_reads_the_lists_again_only_after_a_change(
         handle.write(b"\0")
     assert [crl.this_update.day for crl in load_stored(layout)] == [4]
     assert len(parsed) == 3
-    _store(layout, server, root, 5)  # a new list: the index changed
+    # A new list: the index changed. The changed file is that fetch's failure too (C14).
+    server.routes["/5.crl"] = Route(make_crl(root, datetime(2026, 10, 5, tzinfo=UTC)))
+    run = fetch(options(server.url("/5.crl")), layout, [root.certificate], NOW)
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (server.url("/3.crl"), "stored_file_changed")
+    ]
     assert [crl.this_update.day for crl in load_stored(layout)] == [4, 5]
+
+
+def test_each_stored_file_is_parsed_once_per_process(
+    server: Server, root: Ca, layout: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Performance guard: a stored list is parsed once per process (the name carries the file's
+    hash; the stored lists only grow, Q4). A fetch that changes nothing but the index
+    (``fetched_at``) parses only what it downloads; ``load_stored`` and the builder afterwards
+    parse nothing."""
+    days = list(range(1, 13))
+    _store(layout, server, root, *days)
+    parsed: list[bytes] = []
+    real = crl_module.parse_crl
+
+    def counting(data: bytes) -> Crl:
+        parsed.append(data)
+        return real(data)
+
+    monkeypatch.setattr(crl_module, "parse_crl", counting)
+    first = load_stored(layout)
+    assert len(first) == len(parsed) == len(days)
+    parsed.clear()
+    urls = [server.url(f"/{day}.crl") for day in days]
+    assert fetch(options(*urls), layout, [root.certificate], NOW + timedelta(days=1)).exit_code == 0
+    assert len(parsed) == len(days)  # the downloads
+    parsed.clear()
+    assert load_stored(layout) == first
+    assert parsed == []
+    assert [crl.path for crl in builder_module._stored_crls(layout.crl_dir)] == [
+        crl.path for crl in sorted(first, key=lambda crl: crl.file_name)
+    ]
+    assert parsed == []
+    # The parsed list holds the file's bytes once: they are its DER.
+    assert first[0].path is not None
+    assert first[0].der == first[0].path.read_bytes()
 
 
 def test_parse_crl_reads_the_entries_as_the_standalone_verifier_does(root: Ca) -> None:
@@ -1285,6 +1487,26 @@ def test_parse_crl_reads_der_and_pem_and_refuses_other_bytes(root: Ca) -> None:
             parse_crl(junk)
     leaf = make_ca("Örnek TSA", root, ca=False)
     assert not parse_crl(der).signed_by(leaf.certificate)  # another name
+
+
+def test_parse_crl_refuses_pem_data_without_exactly_one_list(
+    server: Server, root: Ca, layout: Layout
+) -> None:
+    """The standalone verifier reads every ``X509 CRL`` block of a file: a bundle of two lists
+    is refused here (``not_a_crl``), so both verifiers never see different revocations."""
+    first = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC), pem=True)
+    second = make_crl(
+        root, datetime(2026, 11, 2, tzinfo=UTC), [(77, NOW - timedelta(days=9), None)], pem=True
+    )
+    certificate = root.certificate.public_bytes(Encoding.PEM)
+    for data in (first + second, certificate, certificate + b"\x30\x03\x02\x01\x01"):
+        with pytest.raises(CrlError):
+            parse_crl(data)
+    # One list beside another kind of block, as the standalone verifier reads it.
+    assert parse_crl(certificate + first).der == parse_crl(first).der
+    server.routes["/bundle.crl"] = Route(first + second)
+    run = fetch(options(server.url("/bundle.crl")), layout, [root.certificate], NOW)
+    assert [failure.error for failure in run.failures] == ["not_a_crl"]
 
 
 # -- the configuration adapter --------------------------------------------------------------------
