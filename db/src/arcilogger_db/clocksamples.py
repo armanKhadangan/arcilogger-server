@@ -14,10 +14,13 @@ a row beyond a limit of whole seconds is stored beyond it), ``0`` under a minute
 * :func:`upsert_samples` adds a :class:`collections.Counter` of keys (``INSERT … ON CONFLICT …
   DO UPDATE SET n = n + EXCLUDED.n``, keys in sorted order so two writers never deadlock).
 * :func:`received_between` and :func:`newest` read one source's offsets of a received range as
-  ``(offset, rows)`` pairs; :func:`median` is their median, as ``percentile_cont(0.5)`` gives it.
+  ``(offset, rows)`` pairs, :func:`shifted_into` those of the minutes whose clock put their rows'
+  device times into a range from far outside it; :func:`median` is their median, as
+  ``percentile_cont(0.5)`` gives it.
 
 The readers are the ``R20-lease:source-clock`` alert (the newest received minutes) and a lookup's
-clock check (the minutes received around its moment). A clock set hours back writes rows whose
+clock check (the minutes received around its moment, and those received within a day of it whose
+clock put their device times around it). A clock set hours back writes rows whose
 device times lie hours before their arrival: a device-time sample of ``messages`` reaches them
 only after the offset itself, the minutes they were received at once.
 """
@@ -39,6 +42,10 @@ NEAR_SECONDS: Final = 60
 #: A row's device time lies within this of its receive time when it is used (ingest's
 #: ``DEFAULT_MAX_CLOCK_SKEW``; a time further off is replaced by the receive time and not counted).
 MAX_CLOCK_SKEW: Final = timedelta(days=1)
+#: :func:`shifted_into` decides a minute's clock over its keys within this many seconds of each
+#: other: the rows of one clock spread over neighbouring whole seconds (the receive time's
+#: fraction, the delivery's jitter), late lines spread over minutes.
+SHIFT_BAND_SECONDS: Final = 5
 #: Keys per statement of :func:`upsert_samples`.
 UPSERT_CHUNK: Final = 500
 #: :func:`upsert_samples`' one statement: the keys as parallel arrays, the same text for every
@@ -180,6 +187,53 @@ def newest(
         total += int(n)
         last = minute
     return list(taken.items())
+
+
+def shifted_into(
+    session: Session | Connection, source: str, start: datetime, end: datetime, beyond: int
+) -> list[tuple[int, int]]:
+    """``source``'s ``(offset, rows)`` of the received minutes whose device times fall into
+    ``[start, end]`` from an offset beyond ``beyond`` seconds either way, where that offset and
+    its neighbours within :data:`SHIFT_BAND_SECONDS` hold more than half of the minute's rows
+    (the device's clock in that minute, not a few late lines among rows on time). Those device
+    times are shared with rows of another real time: a clock set 3 hours back at J stamps the
+    rows it sends at J + 1 h with the device times of J - 2 h (#82). The minutes are read on the
+    table's key within :data:`MAX_CLOCK_SKEW` of the range (an offset further off is never
+    stored)."""
+    t = SourceClockSample
+    minutes = (
+        select(
+            t.minute,
+            t.seconds,
+            t.n,
+            func.sum(t.n).over(partition_by=t.minute).label("total"),
+            func.sum(t.n)
+            .over(
+                partition_by=t.minute,
+                order_by=t.seconds,
+                range_=(-SHIFT_BAND_SECONDS, SHIFT_BAND_SECONDS),
+            )
+            .label("band"),
+        )
+        .where(
+            t.source == source,
+            t.minute >= minute_of(start - MAX_CLOCK_SKEW),
+            t.minute <= end + MAX_CLOCK_SKEW,
+        )
+        .subquery("minutes")
+    )
+    device = minutes.c.minute + func.make_interval(0, 0, 0, 0, 0, 0, minutes.c.seconds)
+    query = (
+        select(minutes.c.seconds, func.sum(minutes.c.n))
+        .where(
+            2 * minutes.c.band > minutes.c.total,
+            func.abs(minutes.c.seconds) > beyond,
+            device > start - timedelta(minutes=1),
+            device <= end,
+        )
+        .group_by(minutes.c.seconds)
+    )
+    return [(int(offset), int(n)) for offset, n in session.execute(query)]
 
 
 def median(histogram: Sequence[tuple[int, int]]) -> tuple[float | None, int]:

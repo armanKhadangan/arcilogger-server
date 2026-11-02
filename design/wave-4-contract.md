@@ -1695,6 +1695,62 @@ each entry. Every `## Deviations — <package>` section above is folded as §4.4
   the srcmac interface list's labels as the web names them ("srcmac görülen arayüzler (son 1 saat)" /
   "Interfaces with srcmac (last hour)", the IPv4 rule without quotes).
 
+## Deviations — transip index (#71, 2026-11-02)
+
+Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 1.2, 2.8.3, D15,
+3.8) recorded here because `wave-4` carries it.
+
+- **A sixth index on `fg_traffic`: `ix_fg_traffic_transip_time (transip, time)`** (revision
+  `0020_fg_traffic_transip_time`, on top of #79's `0019_source_clock_samples`; model `FgTraffic`).
+  The overlap probe (`_Probe.seen_overlap`, both steps) and the D15 check (`_Lookup._carried`,
+  its tail steps without a port and its spanning-sessions steps) now ask in the order
+  `transip, time`, the address written `transip = ANY(inet[])` with one element
+  (`_address_is`): with `transip = :address` PostgreSQL drops the constant from the sort, and
+  with two lines taking turns the planner took the primary key `(time, id)` instead (0.3 s for a
+  day of a 10-day partition). The steps with a port and the exact search keep
+  `ix_fg_traffic_transip_transport_time`; a port-less search on one address may now take the new
+  index (the same rows, in the same order). Before, a port-less step walked every index entry of the address in the
+  partition (`time` was the third column). That cost about 1.1 s per step for a busy address
+  after its last row on day 28 of a monthly partition at 1 M rows a day: 2.3 s for the overlap
+  probe and 2.3 s for the D15 check of one lookup. Now it is under 1 ms. `busy_before`'s tail
+  (Q-C3-1) went from 1.4 s to 0.25 s; its guard keeps its bound of 1 s (0.30 s measured). The
+  ingest gate holds (−1.5 % to +1.9 %, inside the spread of the runs). The index takes 31.5 MB
+  per million rows and builds in 18 s on a 28 M-row partition. `INCLUDE (duration)` was measured
+  and not taken: it is 29 % larger and answers `busy_before` from the index only on all-visible
+  pages. The numbers are in docs/INGEST.md "Measured throughput". The guards now bound each
+  step's shared buffers to the rows of its range plus 100 (`STEP_BUFFERS`); a walk over the
+  address's other entries showed only there (7,982 buffers for a step with no row on the guard
+  site). There is a new overlap case, `busy_after` (the site's NAT address 30 minutes after its
+  last row), and a new guard site with two lines taking turns (`LINES_SITE`,
+  `test_the_probe_steps_of_a_line_that_took_turns_read_its_own_rows`, which fails with
+  `transip = :address`: the primary key read 968,750 and 534,028 rows). Tests: `db/tests/test_migration_0020.py` (native, and TimescaleDB with a
+  compressed chunk), `db/tests/test_migrations.py`,
+  `worker/tests/test_lookup_performance.py`
+  (`test_the_overlap_probe_of_an_unclaimed_address_is_fast[busy_after]` and
+  `test_the_d15_carried_check_is_fast[busy_after]` fail on the old statements by their buffers).
+  **W4-G folds:**
+  - DATA-MODEL's `fg_traffic` index list gains `(transip, time)`.
+  - MVP-CONTRACTS' c3 bullet ("asks for the first row in the order of
+    `ix_fg_traffic_transip_transport_time`") names `ix_fg_traffic_transip_time`.
+  - ASSUMPTIONS Q-C3-1's follow-up ("measure `INCLUDE (duration)` on the `transip` index") is
+    answered: measured, not taken, and `(transip, time)` was added.
+
+## Deviations — #89 (loadgen, 2026-11-02)
+
+- **A MikroTik DHCP address stays held until its lease ends in the load generator** (Wave 3
+  contract 2.14, "the default output stays byte-identical"; #40 item 1). The default plan handed
+  an address to a second device while the earlier holder's truth lease still ran, when that lease
+  had outlived its activity; the truth then named two devices for one address at one moment.
+  `Simulation._free_ip` now holds an address until its lease ends on every VLAN, as it already
+  did for FortiGate DHCP. Runs that met the case change their bytes (line count unchanged); the
+  pinned `DEFAULT_DIGEST` of `tests/test_loadgen.py` and the single days of `docs/INGEST.md`
+  (2026-09-23, 2026-10-27) are unchanged. The staff Wi-Fi now fills up at about 125 users with
+  MikroTik DHCP (was 160). Tests: `test_loadgen.py`
+  "test_the_default_plan_never_gives_one_address_two_leases_at_once",
+  "test_too_many_users_for_the_wifi_pool_is_a_clear_error". `tools/loadgen/README.md` carries a
+  dated note for users who compare outputs. Fold into the loadgen part of Wave 3 2.14 (W4-G has
+  merged before this entry).
+
 ## Deviations — #81 (2026-11-02)
 
 - **#81-1: the rollback's lease step runs only when the restored program may not read FortiGate

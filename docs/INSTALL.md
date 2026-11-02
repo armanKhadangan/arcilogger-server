@@ -1133,6 +1133,17 @@ previous version loaded a FortiGate DHCP record for that address or MAC address:
 have been released in between, given to another device, or the MAC address may have taken
 another address.
 
+**Upgrading to the version with the NAT address index (schema revision
+`0020_fg_traffic_transip_time`).** The migration builds one new index, `ix_fg_traffic_transip_time`
+on the FortiGate traffic table `fg_traffic` (the steps the 5651 lookup asks without a port on one
+NAT address). PostgreSQL builds it on every monthly partition (with TimescaleDB, on every chunk).
+On 4 vCPU at the default `maintenance_work_mem`, a monthly partition filled to day 28 at 1 million
+`fg_traffic` rows a day (28 million rows) took **about 18 seconds** (measured 2026-11-02); a large
+site with more rows or more months takes correspondingly longer. The index takes about 31.5 MB per
+million rows (about 0.9 GB for such a partition). Ingest, API and worker are stopped while the
+schema is migrated; the collector keeps writing the spool, so nothing is lost and ingest catches
+up afterwards ([INGEST.md](INGEST.md)).
+
 ## 14. Removal
 
 `Install-Arcilogger.ps1 -Uninstall` first pauses the scheduled tasks and waits for a running one

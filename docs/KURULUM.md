@@ -1264,6 +1264,17 @@ gösterir. Yeniden kurulan bu kiralar geri dönüş aralığında, kiranın son 
 güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`): adres o arada
 bırakılmış, başka bir cihaza verilmiş ya da MAC adresi başka bir adres almış olabilir.
 
+**NAT adresi indeksli sürüme yükseltme (şema revizyonu `0020_fg_traffic_transip_time`).** Şema
+yükseltmesi FortiGate trafik tablosu `fg_traffic` üzerinde yeni bir indeks oluşturur:
+`ix_fg_traffic_transip_time` (5651 sorgusunun bir NAT adresinde port olmadan sorduğu adımlar).
+PostgreSQL indeksi her aylık bölümde (TimescaleDB ile her parçada) oluşturur. 4 vCPU'lu bir
+makinede, varsayılan `maintenance_work_mem` ile, günde 1 milyon `fg_traffic` satırıyla 28. güne
+kadar dolmuş bir aylık bölümde (28 milyon satır) **yaklaşık 18 saniye** sürdü (2026-11-02 ölçümü);
+daha çok satırı ya da ayı olan büyük bir kurumda yükseltme buna göre uzar. İndeks milyon satır
+başına yaklaşık 31,5 MB yer tutar (böyle bir bölümde yaklaşık 0,9 GB). Şema yükseltilirken ingest,
+API ve worker hizmetleri durur; toplayıcı spool'a yazmayı sürdürür, hiçbir şey kaybolmaz ve ingest
+ardından yetişir ([INGEST.md](INGEST.md)).
+
 ## 14. Kaldırma
 
 ```powershell

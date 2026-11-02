@@ -2,8 +2,8 @@
 
 > Durum: MVP (sürüm 0.1.0). Kaynak: `db/src/arcilogger_db/models.py` ve
 > `db/src/arcilogger_db/migrations/versions/` (`v0001_baseline`, `v0006_lookup_reports` …
-> `v0017_fortigate_dhcp`). Bir test, modellerle migrasyonların birebir aynı olduğunu her
-> çalıştırmada doğrular.
+> `v0020_fg_traffic_transip_time`). Bir test, modellerle migrasyonların birebir aynı olduğunu
+> her çalıştırmada doğrular.
 
 ## Özet (TR)
 
@@ -55,6 +55,14 @@
   (sıfırdan uzağa yuvarlanmış tam saniye; bir dakikanın altındaki fark 0) ve satır sayısını
   tutar. Ingest bunu satırlarla aynı işlemde yazar; `R20-lease:source-clock` uyarısı ve 5651
   sorgusunun saat denetimi saatleri geri ya da ileri atlayan bir cihaz saatini buradan ölçer.
+- NAT adresi indeksi (revizyon `0020_fg_traffic_transip_time`): `fg_traffic` tablosunun yeni
+  indeksi `ix_fg_traffic_transip_time (transip, time)`, 5651 sorgusunun bir NAT adresi için port
+  olmadan sorduğu adımlara (kayıtlarda görülen adres denetimi; D15 denetiminin pencereden sonraki
+  kuyruk adımları ve T'yi kapsayan oturum adımları; port olmadan tek bir adresle yapılan oturum
+  araması da onu kullanabilir: aynı satırlar, aynı sırada) yalnızca o adresin aralıktaki
+  satırlarını okutur; `(transip, transport, time)` indeksinde `time` üçüncü sütun olduğundan
+  böyle bir adım adresin bölümdeki bütün indeks girdilerini yürüyordu. Milyon satır başına
+  yaklaşık 31,5 MB yer tutar.
 
 ## Summary (EN)
 
@@ -90,7 +98,13 @@ exit) and add three status rows that are never edited: `nat.egresses_migration`,
 **received** minute, the device clock's offset from the receive time (whole seconds rounded away
 from zero, 0 under a minute) and its rows, written by ingest in the transaction of the rows; the
 `R20-lease:source-clock` alert and a lookup's clock check measure a clock that jumped by hours
-there.
+there. The NAT address index (revision `0020_fg_traffic_transip_time`) is `fg_traffic`'s new
+index `ix_fg_traffic_transip_time (transip, time)`: a lookup's steps without a port on one NAT
+address (the overlap probe, and the D15 check's tail after its window and its steps for sessions
+spanning the moment; its window step stays in time order; a port-less session search on one
+address may take it too, the same rows in the same order) read that address's rows of their range
+only, where on `(transip, transport, time)` they walked every index entry of the address in the
+partition; it takes about 31.5 MB per million rows.
 
 ## Conventions
 
@@ -132,7 +146,7 @@ through the table itself (never into a partition), so the identity column is use
 | Table | Content | Indexes besides the primary key |
 |---|---|---|
 | `messages` | Every received message (lightweight): severity, facility, program/topics, host, type, subtype, short text, `parse_error` | (source, time), (type, time) |
-| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
+| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (transip, time) (`ix_fg_traffic_transip_time`, revision `0020_fg_traffic_transip_time`: the lookup's steps without a port on one NAT address, in the overlap probe `_Probe.seen_overlap` and the tail and spanning-sessions steps of the D15 check `_Lookup._carried`; a port-less search on one address may take it too (the same rows, in the same order); about 31.5 MB per million rows), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
 | `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time), `ix_fg_web_rhost_time` (reverse(lower(hostname)), time) — the search field `domain:` (revision `0016_search`) |
 | `fg_dns` | DNS: qname, qtype, answers `INET[]`, catdesc, action | (srcip, time), (qname, time) |
 | `fg_app` | Application control: app, appid, appcat, hostname, url | (sessionid), (srcip, time) |
@@ -192,7 +206,7 @@ but which are not in a table go to `extra`.
 | `alert_events` | id; index (alert_id, at), (at) | Every change of an alert's state (`from_state` → `to_state`) and every note (`text`, 1–2000 characters) with `actor` (user name, or `system` for the checks' automatic resolution and re-opening, the reason code then in `text`), `actor_id` (users, SET NULL) and `at` (revision `0012_alert_events`, ADR-0010 amendment). Written only by `arcilogger_worker.alerts.store`; the audit log gets `alert.state` / `alert.note` (the note's length only) |
 | `report_schedules` | id | Scheduled usage reports (revision `0011_reports`, ADR-0012): name, kind (end_of_day/full_day/weekly/monthly), `enabled`, `time` (HH:MM, site time), `weekday` (weekly) / `monthday` (monthly), `recipients`, `formats` (`email_html`, `pdf`, `xlsx`), `person_level` (default true: names), `pseudonymize`, `next_run_at`, `updated_by`. The four shipped schedules are inserted once by the migration, disabled |
 | `search_counts` | id; unique `uq_search_counts_key` (hour, source, raw_day, kind, tbl, action, net) `NULLS NOT DISTINCT`; index (source, hour), (raw_day, source) | Exact hourly line counts of the search statistics (revision `0016_search`, ADR-0015, `arcilogger_db.searchcounts`): `hour` (`date_trunc('hour', time)`, device time, UTC), the spool file (`source`, `raw_day`), `kind` (`arcilogger_db.kinds.kind_of` of the `messages` row), `tbl` (the line's typed table, `''` without one), `action` (the typed row's, lower-cased), `net` (the /24 of the typed row's client address when it is private IPv4: 10/8, 172.16/12, 192.168/16, 100.64/10), `n` (> 0). One row per key, about 450 keys an hour for 150 users. The ingest loader adds a batch's counts in the transaction that loads its rows; `searchcounts.rebuild_stream` recounts one file from its rows (`arcilogger-db search-counts rebuild`); derived, like every table |
-| `source_clock_samples` | (source, minute, seconds) | Device clock offsets by receive time (revision `0019_source_clock_samples`, ADR-0016 D28, `arcilogger_db.clocksamples`): `minute` (`date_trunc('minute', time_received)`, UTC), `seconds` (`time − time_received` in whole seconds rounded away from zero, `0` under a minute either way), `n` (> 0). Rows whose `time` is the receive time (no usable device time) are not counted. About one row a minute for a source on time. The ingest loader adds a batch's samples in the transaction that loads its rows; the `R20-lease:source-clock` alert reads a source's newest received minutes, a lookup the minutes received in [T − 1 h, T + 1 h]; `clocksamples.rebuild` counts a source's received range again from its rows; the upgrade counts the rows received in its last two hours, older lines have none; derived, like every table |
+| `source_clock_samples` | (source, minute, seconds) | Device clock offsets by receive time (revision `0019_source_clock_samples`, ADR-0016 D28, `arcilogger_db.clocksamples`): `minute` (`date_trunc('minute', time_received)`, UTC), `seconds` (`time − time_received` in whole seconds rounded away from zero, `0` under a minute either way), `n` (> 0). Rows whose `time` is the receive time (no usable device time) are not counted. About one row a minute for a source on time. The ingest loader adds a batch's samples in the transaction that loads its rows; the `R20-lease:source-clock` alert reads a source's newest received minutes, a lookup the minutes received in [T − 1 h, T + 1 h] and (#82, `clocksamples.shifted_into`) the minutes received within a day and an hour of T whose offset, held by most of the minute's rows and beyond 120 s, puts their device times into [T − 1 h, T + 1 h]; `clocksamples.rebuild` counts a source's received range again from its rows; the upgrade counts the rows received in its last two hours (0.2 s on 26 hours of `messages` at 1 M lines a day: 83,271 rows, 242 keys), older lines have none; no command calls `rebuild` yet; derived, like every table |
 | `saved_searches` | id; unique `uq_saved_searches_owner_name` (owner_id, lower(name)) | Personal saved searches (revision `0016_search`): `owner_id` (users, CASCADE), `name` (1–80 characters, unique per owner ignoring case), `query` (≤ 1,000 characters, parsed again on every run), the range as a preset `range_preset` (`15m`, `1h`, `24h`, `today`, `yesterday`, `7d`, `30d`) **or** a fixed `[range_from, range_to)`, never both (`ck_saved_searches_range`), created/updated, `last_run_at` |
 | `report_runs` | id; index (schedule_id, id), index (status) | Every report run (scheduled or "run now"): period, kind (+ `custom`), the schedule's settings then (formats, recipients, person level), status (queued/running/sent/partial/failed), `files` (name, format, size, SHA-256 of each file in `exports/usage-reports/<id>/`), `deliveries` (per recipient: status, attempts, error, sent), `expired_at` (files deleted after `reports.keep_days`). Kept when the schedule is deleted |
 
@@ -212,9 +226,9 @@ rollback without a database restore then runs the previous version with its own 
 new code never reads, lists or writes them, and the first revision after Wave 3 deletes them.
 
 Not created yet (later milestones):
-`nat_index` (the `fg_traffic` index `(transip, transport, time)` serves spec 9.3 for now; the
-matching rule and the bounded time scan, setting `lookup.max_session_seconds`, are in
-`docs/MVP-CONTRACTS.md` section 5).
+`nat_index` (the `fg_traffic` indexes `(transip, transport, time)` and `(transip, time)` serve
+spec 9.3 for now; the matching rule and the bounded time scan, setting
+`lookup.max_session_seconds`, are in `docs/MVP-CONTRACTS.md` section 5).
 
 ## Audit log (`audit_log`)
 

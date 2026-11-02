@@ -178,6 +178,7 @@ READING_TABLE_KEYS: Final[tuple[str, ...]] = (
     "dhcp_sources_overlap",
     "source_configured_later",
     "source_clock_offset",
+    "source_clock_shared",
     "egress_internal",
     "session_from_unknown_source",
     "egress_changed_after_event",

@@ -94,12 +94,46 @@ def test_the_same_seed_gives_the_same_bytes(outputs: Any) -> None:
 
 #: :func:`spool_digest` of the module's default days. The Wave 3 options (``--dhcp-server``,
 #: ``--srcmac``, ``--egress``) default to the earlier behaviour, so existing users of the
-#: generator get the same bytes (contract 2.14).
+#: generator get the same bytes (contract 2.14). #89 (a MikroTik address stays held until its
+#: lease ends) changes the runs that handed an address out early, not these two days: the value
+#: was checked again and kept.
 DEFAULT_DIGEST = "d7e1141b96f00644de78a857cf30f3302534e7e05b86d675bcc142229b2d22e9"
 
 
 def test_the_default_plan_keeps_its_bytes(outputs: Any) -> None:
     assert spool_digest(outputs) == DEFAULT_DIGEST
+
+
+def overlapping_leases(outputs: Any) -> list[tuple[Any, Any]]:
+    """Pairs of truth leases of two MACs that hold one address at one moment (an open lease runs
+    to the end of time)."""
+    far = datetime(9999, 1, 1, tzinfo=UTC)
+    by_ip: dict[str, list[Any]] = {}
+    for lease in (lease for output in outputs for lease in output.leases):
+        by_ip.setdefault(lease.ip, []).append(lease)
+    return [
+        (first, second)
+        for leases in by_ip.values()
+        for first, second in itertools.combinations(leases, 2)
+        if first.mac != second.mac
+        and first.start < (second.end or far)
+        and second.start < (first.end or far)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("seed", "users", "days"),
+    [(7, 10, (FRIDAY, SATURDAY)), (3, 60, (date(2026, 10, 5), FRIDAY, SATURDAY))],
+    ids=["default-days", "seed-3"],
+)
+def test_the_default_plan_never_gives_one_address_two_leases_at_once(
+    seed: int, users: int, days: tuple[date, ...]
+) -> None:
+    """A lease that outlives its device's activity still holds its address (#89): the truth of
+    the default plan (MikroTik DHCP) never names two devices for one address at one moment."""
+    site = simulate(seed=seed, users=users, days=days)
+    assert sum(len(output.leases) for output in site) > 10
+    assert overlapping_leases(site) == []
 
 
 def _expected_table(kind: str) -> str | None:
@@ -264,8 +298,8 @@ def test_too_many_users_for_the_wifi_pool_is_a_clear_error() -> None:
     assert done.returncode == 2
     assert "Traceback" not in done.stderr
     assert "HATA / ERROR: VLAN 60 DHCP havuzu" in done.stderr
-    assert "lower --users (the staff Wi-Fi fills up at about 160)" in done.stderr
-    # FortiGate DHCP holds an address until its lease ends: fewer users fit
+    assert "lower --users (the staff Wi-Fi fills up at about 125)" in done.stderr
+    # A FortiGate lease runs one lease time past its last renewal, not past the last activity
     done = _run_script(
         "--users", "300", "--day", FRIDAY.isoformat(), "--dhcp-server", "fortigate", "stats"
     )
