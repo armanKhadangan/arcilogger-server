@@ -447,6 +447,7 @@ describe('tones and labels', () => {
       'egress_public_dynamic',
       'egress_internal',
       'source_clock_offset',
+      'source_clock_shared',
       // retired keys keep their tones (stored lookups still render)
       'wan_transip_not_seen',
     ];
