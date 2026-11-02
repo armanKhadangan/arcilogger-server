@@ -13,7 +13,9 @@ import type {
   AlertSeverity,
   CategoryRow,
   CompanyUsage,
+  DashboardSeal,
   DashboardSummary,
+  DateString,
   HourPoint,
 } from '@/lib/api-types';
 import { isApiError } from '@/lib/api';
@@ -34,6 +36,7 @@ export const USAGE_PERMISSIONS: readonly string[] = [
 export const DISK_PERMISSIONS: readonly string[] = ['system.read'];
 
 export type DashboardBlock =
+  | 'blocking'
   | 'ingest'
   | 'parseFailures'
   | 'seal'
@@ -87,6 +90,7 @@ export function visibleBlocks(
     if (summary.seal) {
       blocks.add('seal');
       blocks.add('calendar');
+      if (blockingOf(summary.seal)) blocks.add('blocking');
     }
     if (summary.credit) blocks.add('credit');
     if (summary.clock) blocks.add('clock');
@@ -99,6 +103,26 @@ export function visibleBlocks(
     blocks.add('categories');
   }
   return blocks;
+}
+
+/**
+ * A closed day left unstamped for longer than `seal.late_after_hours` (48 h; Wave 5 contract
+ * 2.3.1 "Panel", decision 11): the oldest such day and how late it is. The Panel shows a blocking
+ * card at the top while there is one.
+ *
+ * Interim: declared here, exactly as 2.3.1 gives the JSON, and read through {@link blockingOf}
+ * until W5-C adds `blocking` to `DashboardSeal` (`lib/api-types.ts`). A server without the field
+ * shows no card.
+ */
+export interface SealBlocking {
+  oldest_unstamped_day: DateString;
+  hours_late: number;
+}
+
+/** The seal box's blocking day, or `null` when there is none (or the API does not send it). */
+export function blockingOf(seal: DashboardSeal | null | undefined): SealBlocking | null {
+  if (!seal) return null;
+  return (seal as { blocking?: SealBlocking | null }).blocking ?? null;
 }
 
 /** Severities from the most to the least urgent (chips, lists). */

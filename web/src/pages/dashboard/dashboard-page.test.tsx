@@ -31,9 +31,10 @@ import type { SystemDisk } from '@/lib/system-types';
 import { renderApp, testQueryClient } from '@/test/render';
 import { DASHBOARD, licenseSample, RAW, USAGE } from '@/test/samples';
 
+import { BlockingCard } from './dashboard-cards';
 import { diskRequested } from './dashboard-model';
 import { DashCard } from './dashboard-parts';
-import { PARSE_FAILURES, withParseFailures } from './test-data';
+import { BLOCKING, PARSE_FAILURES, withBlocking, withParseFailures } from './test-data';
 
 /** `GET /system/disk` as the real API answered it (`e2e/samples/system-disk.json`, a Windows host). */
 const SYSTEM_DISK = JSON.parse(
@@ -486,6 +487,162 @@ describe('Panel — parse failures (contract 2.17)', () => {
     renderApp('/');
     await screen.findByTestId('card-ingest');
     expect(screen.queryByTestId('card-parse-failures')).not.toBeInTheDocument();
+  });
+});
+
+describe('Panel — blocking card (Wave 5 contract 2.3.1)', () => {
+  /** The blocking card's sentence: the day, how late, the documentation reference. */
+  const BODY =
+    'En eski damgalanmamış gün 10.10.2026; damgası 49 saat gecikti. (ZAMAN-DAMGASI.md bölüm 5.5)';
+
+  it('administrator: red, at the top above the health cards, linking to that day', async () => {
+    serve('admin', (summary) => {
+      summary.seal = withBlocking(summary).seal;
+    });
+    renderApp('/');
+    const card = await screen.findByTestId('dashboard-blocking');
+    expect(card).toHaveTextContent('Kapanmış günler zaman damgası bekliyor');
+    expect(card).toHaveTextContent(BODY);
+    expect(card).not.toHaveTextContent(/uyumlu|uyumu|garanti|complian|guarantee/i);
+    // Polite: the banner above every page already announces `unstamped_days` at once.
+    expect(card).toHaveAttribute('role', 'status');
+    expect(card.className).toMatch(/\bbg-danger-soft\b/);
+    expect(card.querySelector('svg')).not.toBeNull();
+    expect(
+      within(card).getByRole('link', { name: 'Günü Mühürleme sayfasında aç' }),
+    ).toHaveAttribute('href', '/sealing?month=2026-10&day=2026-10-10');
+    // Above every card, and none of them: no `h3`, no `card-*` id, the grid unchanged.
+    await screen.findByTestId('card-disk');
+    expect(
+      card.compareDocumentPosition(screen.getByTestId('card-ingest')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(within(card).queryByRole('heading')).not.toBeInTheDocument();
+    expect(card.getAttribute('data-testid')).not.toMatch(/^card-/);
+    expect(await shownCards()).toEqual(CARDS);
+    expect(screen.getByTestId('card-ingest').parentElement?.className).toMatch(
+      /\b2xl:grid-cols-6\b/,
+    );
+    expect(screen.getByTestId('card-seal')).toHaveTextContent('Henüz mühürlenmedi');
+  });
+
+  it('auditor: the card and its link (seal.read)', async () => {
+    serve('auditor', (summary) => {
+      summary.seal = withBlocking(summary).seal;
+    });
+    renderApp('/');
+    const card = await screen.findByTestId('dashboard-blocking');
+    expect(card).toHaveTextContent(BODY);
+    expect(within(card).getByRole('link')).toHaveAttribute(
+      'href',
+      '/sealing?month=2026-10&day=2026-10-10',
+    );
+    expect(await shownCards()).toEqual(
+      CARDS.filter((id) => id !== 'card-alerts' && id !== 'card-disk'),
+    );
+  });
+
+  it('no card while `blocking` is null, nor from an API that does not send it', async () => {
+    serve('admin', (summary) => {
+      summary.seal = withBlocking(summary, null).seal;
+    });
+    const view = renderApp('/');
+    await screen.findByTestId('card-seal');
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    view.unmount();
+
+    // An API before Wave 5 sends no `blocking` at all.
+    serve('admin', (summary) => {
+      if (summary.seal) delete (summary.seal as { blocking?: unknown }).blocking;
+    });
+    renderApp('/');
+    await screen.findByTestId('card-seal');
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('report viewer and HR: no seal box, so no card', async () => {
+    const calls = serve('viewer', (summary) => {
+      summary.seal = withBlocking(summary).seal;
+    });
+    const view = renderApp('/');
+    await screen.findByTestId('card-ingest');
+    expect(await shownCards()).toEqual([
+      'card-ingest',
+      'card-parse-failures',
+      'card-usage',
+      'card-sites',
+      'card-categories',
+    ]);
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path === '/api/v1/dashboard/summary')).toBe(true);
+    view.unmount();
+
+    serve('hr');
+    renderApp('/');
+    await shownCards();
+    expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+  });
+
+  it('goes away with the next answer once the day is stamped', async () => {
+    let blocking: typeof BLOCKING | null = BLOCKING;
+    serve('admin', (summary) => {
+      summary.seal = withBlocking(summary, blocking).seal;
+    });
+    renderApp('/');
+    await screen.findByTestId('dashboard-blocking');
+    blocking = null;
+    await userEvent.click(screen.getByRole('button', { name: 'Yenile' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('dashboard-blocking')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('card-seal')).toBeInTheDocument();
+  });
+
+  it('English, whole hours (never rounded up), one hour in the singular', () => {
+    setLanguage('en');
+    try {
+      const { rerender } = render(
+        <MemoryRouter>
+          <BlockingCard
+            blocking={{ oldest_unstamped_day: '2026-10-10', hours_late: 1048.9 }}
+            to="/sealing?month=2026-10&day=2026-10-10"
+          />
+        </MemoryRouter>,
+      );
+      const card = screen.getByTestId('dashboard-blocking');
+      expect(card).toHaveTextContent('Closed days are waiting for a time stamp');
+      expect(card).toHaveTextContent(
+        'The oldest unstamped day is 10.10.2026; its time stamp is 1,048 hours late. (TIME-STAMPING.md section 5.5)',
+      );
+      expect(
+        within(card).getByRole('link', { name: 'Open the day on the sealing page' }),
+      ).toBeVisible();
+      rerender(
+        <MemoryRouter>
+          <BlockingCard
+            blocking={{ oldest_unstamped_day: '2026-10-10', hours_late: 1 }}
+            to={null}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.getByTestId('dashboard-blocking')).toHaveTextContent(
+        'its time stamp is 1 hour late.',
+      );
+    } finally {
+      setLanguage('tr');
+    }
+  });
+
+  it('without a page to open, the text alone', () => {
+    render(
+      <MemoryRouter>
+        <BlockingCard blocking={BLOCKING} to={null} />
+      </MemoryRouter>,
+    );
+    const card = screen.getByTestId('dashboard-blocking');
+    expect(card).toHaveTextContent(BODY);
+    expect(within(card).queryByRole('link')).not.toBeInTheDocument();
   });
 });
 

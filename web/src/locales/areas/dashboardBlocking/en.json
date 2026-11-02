@@ -1,0 +1,10 @@
+{
+  "dashboard": {
+    "blocking": {
+      "title": "Closed days are waiting for a time stamp",
+      "body_one": "The oldest unstamped day is {{day}}; its time stamp is {{hours}} hour late.",
+      "body_other": "The oldest unstamped day is {{day}}; its time stamp is {{hours}} hours late.",
+      "open": "Open the day on the sealing page"
+    }
+  }
+}
