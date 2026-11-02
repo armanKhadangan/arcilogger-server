@@ -2680,27 +2680,27 @@ def test_a_clock_set_hours_back_at_the_device_moment_is_named_as_before(
     assert offsets(outcome) == {"fortigate": -10800}
 
 
-#: #82: the clock is set 3 hours back two hours after T. The rows it sends from then on carry the
-#: device times of the hours around T; the second client's session of T + 3 h is stamped T and uses
-#: the PC's NAT port (port preservation, F15).
-LATER = AT + timedelta(hours=2)
-OTHER, OTHER_MAC = "172.20.42.58", "00:00:5e:00:53:58"
+#: #82: the clock is changed (set 3 hours back) two hours after T. The rows it sends from then on
+#: carry the device times of the hours around T; the second client's session of T + 3 h is stamped
+#: T and uses the PC's NAT port (port preservation, F15).
+CHANGED = AT + timedelta(hours=2)
+PC15, PC15_MAC = "172.20.42.58", "00:00:5e:00:53:58"
 
 
 def _jumps_later(session: Session, evidence: Evidence, jump: timedelta | None) -> None:
     """The PC's and the second client's morning ACKs and leases; the PC's session of T, sent on
-    time; heartbeat lines every two minutes, on time from T - 2 h to :data:`LATER`, then (a
-    ``jump``) every six minutes ``jump`` off until LATER + 4 h, fewer than the rows sent on time
+    time; heartbeat lines every two minutes, on time from T - 2 h to :data:`CHANGED`, then (a
+    ``jump``) every six minutes ``jump`` off until CHANGED + 4 h, fewer than the rows sent on time
     (an evening after a working day); with a jump back, the second client's session sent at
     T + 3 h with the device time T; the clock samples as ingest writes them."""
     evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
-    evidence.fortigate_dhcp(tr(DAY, 8, 5), OTHER, OTHER_MAC, hostname="PLN-PC15")
+    evidence.fortigate_dhcp(tr(DAY, 8, 5), PC15, PC15_MAC, hostname="PLN-PC15")
     evidence.traffic(AT, PC, 51001, transip=WAN)
     if jump is not None and jump < timedelta(0):
-        evidence.traffic(AT, OTHER, 51001, transip=WAN)
+        evidence.traffic(AT, PC15, 51001, transip=WAN)
     received = AT - timedelta(hours=2)
-    while received < LATER + timedelta(hours=4):
-        if received < LATER or jump is None:
+    while received < CHANGED + timedelta(hours=4):
+        if received < CHANGED or jump is None:
             evidence.heartbeat(
                 received - timedelta(milliseconds=300), source="fortigate", received=received
             )
@@ -2710,7 +2710,7 @@ def _jumps_later(session: Session, evidence: Evidence, jump: timedelta | None) -
             received += timedelta(minutes=6)
     as_loaded(session, timedelta(milliseconds=-300))  # the typed rows on time ...
     sent = AT + timedelta(hours=3)  # ... but the second client's, sent after the jump
-    lines = session.scalars(select(FgTraffic.raw_line).where(FgTraffic.srcip == OTHER)).all()
+    lines = session.scalars(select(FgTraffic.raw_line).where(FgTraffic.srcip == PC15)).all()
     for model in (FgTraffic, Message):
         session.execute(
             update(model)
@@ -2736,7 +2736,7 @@ def test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times(
     _jumps_later(db_session, evidence, JUMP)
     outcome = exact_request(db_session)
     assert outcome.mode == "exact"
-    assert sorted(match.traffic.srcip for match in outcome.matches) == [PC, OTHER]
+    assert sorted(match.traffic.srcip for match in outcome.matches) == [PC, PC15]
     assert offsets(outcome) == {"fortigate": -10800}
     assert all(match.chain is not None for match in outcome.matches)
     assert {match.chain.confidence for match in outcome.matches if match.chain} == {"low"}
@@ -2760,12 +2760,13 @@ def test_a_source_on_time_all_day_is_trusted_as_before(
 def test_a_clock_set_ahead_is_named_at_the_moments_whose_device_times_it_used(
     db_session: Session, evidence: Evidence
 ) -> None:
-    """A clock set 3 hours ahead at :data:`LATER` stamps the rows it sends with device times
-    from LATER + 3 h: a lookup at LATER + 4 h (device times of rows sent at LATER + 1 h) names
-    it (the rows received around it were sent after the jump, as #79's second sample sees), and
-    one at T, before the jump, does not (no device time of T was used again)."""
+    """A clock set 3 hours ahead at :data:`CHANGED` stamps the rows it sends with device times
+    from CHANGED + 3 h: a lookup at CHANGED + 4 h (the device times of rows sent at CHANGED +
+    1 h) names it (the rows received around it were sent after the change, as #79's second
+    sample sees), and one at T, before the change, does not (no device time of T was used
+    again)."""
     _jumps_later(db_session, evidence, -JUMP)
-    later = internal(db_session, PC, LATER + timedelta(hours=4))
+    later = internal(db_session, PC, CHANGED + timedelta(hours=4))
     assert offsets(later) == {"fortigate": 10800}
     before = internal(db_session, PC, AT)
     assert before.attribution is not None
