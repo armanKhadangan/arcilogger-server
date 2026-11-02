@@ -70,7 +70,7 @@
 | D7 | **CRL fetch:** `arcilogger-core crl fetch`, run daily by a new task `CrlFetch`. The URLs are `tsa.crl_urls` when set, otherwise the CRL distribution points (http/https only) of the certificates in the pinned roots folder and in the newest token of each provider. **No URL is built into the code** (Kamu SM's CRL URLs are unknown, K10). | `CLAUDE.md:35`; `docs/kamusm.md` K10. |
 | D8 | **CRL storage:** each downloaded CRL whose signature verifies with a pinned certificate is stored byte for byte as `state/crl/<issuer-sha256-12>-<thisUpdate as YYYYMMDDTHHMMSSZ>.crl`, and described in `state/crl/index.json`. A CRL that does not verify is not stored; its failure is recorded in the index. Files are never deleted by the job (owner question Q4). | The builder copies `state/crl` into packages (`builder.py:517-527`, `cli.py:803`, `api/src/arcilogger_api/evidence_jobs.py:453`). A CA may drop an expired certificate from later lists, so older lists keep their worth (`standalone/verify.py:1548-1559`). |
 | D9 | **Packages ship only the CRLs they need:** for each issuer, the newest stored CRL plus the first CRL with `thisUpdate` ≥ each packaged day's stamp time. | A long-running site would otherwise put years of lists into every package. |
-| D10 | **The core verifier checks revocation** with the same rules and codes as `check_revocation` (`standalone/verify.py:1548-1640`): `crl-revoked` is a failure; `crl-revoked-later` and `crl-hold` are warnings; `crl-none`, `crl-stale` and `crl-ok` are information. `verify_token` gains `crls=`; `details["crl"]` carries the code instead of `"not checked"` (`verify.py:408`). | Rule 5. |
+| D10 | **The core verifier checks revocation** with the same rules and codes as `check_revocation` (`standalone/verify.py:1548-1640`): `crl-revoked` is a failure (level `fail`); `crl-revoked-later` and `crl-hold` are warnings (`warn`); `crl-none` and `crl-stale` are information (`info`); `crl-ok` has the level `ok`. A revocation dated at or before the stamp time outranks an earlier hold of the same certificate (`crl-revoked`), in both verifiers (C6). `verify_token` gains `crls=`; `details["crl"]` carries the code instead of `"not checked"` (`verify.py:408`). | Rule 5. |
 | D11 | **Legal-validity status** is computed by one server function and served at `GET /legal-status` to **every signed-in user** (owner answer). A global banner shows it on every page. The Panel shows a blocking card when a closed day is unstamped for longer than `seal.late_after_hours` (48 h, `core/src/arcilogger_core/config.py:105`). | One source for the banner, the Panel, the Mühürleme page and the alerts. |
 | D12 | **TÜRKTRUST** is the new provider `turktrust` (§2.4).<br>• RFC 3161 with HTTP Basic authentication; the username and password live in the secret store, never in the TOML file.<br>• HTTPS by default; plain HTTP only when an administrator sets `tsa.allow_plain_http` (re-authentication), which raises the warning `credentials_in_clear`.<br>• The site's pinned roots are used. There is no credit query.<br>• **Its production stamps claim legal grade** (owner answer Q1, 2026-11-02), through the product constant `TURKTRUST_LEGAL_GRADE = True` and the host `zd.turktrust.com.tr`. The three-part test of rule 4 is unchanged: a day is shown as legal grade only when its token verifies and chains to a root the site listed (the TÜRKTRUST root, uploaded with the "legal" confirmation). | Owner decision; recorded under "Deviations — contract" because SPEC §21 named only Kamu SM. The claim is a product constant, so a site cannot make any other provider "legal". The docs recommend legal review and keeping TÜRKTRUST's written statement with the site's records. |
 | D13 | **Proxy:** `[network] https_proxy` (empty by default; `http://host:port`). The CRL fetch and the `rfc3161`/`turktrust` providers use it. The Zamane console client does not use it in Wave 5, because how it takes a proxy is unknown ("sahada doğrula"). The proxy takes no credentials in Wave 5. | Owner answer; no invented Zamane arguments. |
@@ -329,8 +329,8 @@ export interface LegalStatus {
   `blocking: {oldest_unstamped_day: string, hours_late: number} | null`. The Panel shows a
   blocking card at the top while it is not null.
 - **Day detail** (`GET /seals/{day}`, `api/src/arcilogger_api/routers/seals.py:176`) gains:
-  - `renewal: {status, cert_not_after, covered_by} | null`;
-  - `revocation: {code, level, message_tr, message_en} | null`.
+  - `renewal: {status, cert_not_after, covered_by, renewed_at} | null`. `covered_by` is the vault-relative path of the counting renewal record (`renewals/2031-05-04-1.json`). `renewed_at` is its token's genTime (ISO); null when nothing counts (C3).
+  - `revocation: {code, level, message_tr, message_en} | null`. `level` is the verifiers' own `fail` / `warn` / `info` / `ok` (C4).
 - **Alerts (W5-E switches them on):**
 
   | Alert | Raised when |
@@ -442,7 +442,7 @@ re-authentication).
 | `unstamped_days` | {count} kapanmış gün {hours} saatten uzun süredir damgalanmadı. | {count} closed day(s) have not been time-stamped for more than {hours} hours. |
 | `renewal_due` | {count} damganın sertifikası {days} gün içinde sona eriyor; yeniden damgalama bekleniyor. | {count} stamp certificate(s) expire within {days} days; re-stamping is due. |
 | `renewal_uncovered` | {count} damganın sertifikası yeniden damgalanmadan sona erdi; damgalar geçerliliğini korur, ancak uzun süreli kanıt için yeniden damgalama önerilir. | {count} stamp certificate(s) expired without re-stamping; the stamps stay valid, but re-stamping is recommended for long-term evidence. |
-| `certificate_revoked` | Zaman damgası sertifikası iptal listesinde: {name}. Kamu SM ile görüşün; hukuki inceleme önerilir. | A time-stamp certificate is on a revocation list: {name}. Contact the provider; legal review is recommended. |
+| `certificate_revoked` | Zaman damgası sertifikası iptal listesinde: {name}. Zaman damgası sağlayıcısıyla görüşün; hukuki inceleme önerilir. | A time-stamp certificate is on a revocation list: {name}. Contact the provider; legal review is recommended. |
 | `crl_stale` | {days} günden yeni doğrulanmış bir iptal listesi (SİL) yok. | No verified revocation list newer than {days} days. |
 | credit, no credit query | Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin. | This provider offers no credit query; watch the balance in the provider's portal. |
 | `renewal-covered` | Bu damga, sertifikası sona ermeden yeniden damgalanmış: {renewal}. | Re-stamped before its certificate expired: {renewal}. |
@@ -595,6 +595,61 @@ As in Wave 4 §4.1 (`design/wave-4-contract.md:1255-1273`):
 **Estimate:** about 2–2.5 weeks with the five sessions in parallel.
 
 ---
+
+## Manager clarifications (2026-11-02, answers on #101 and #106)
+
+These change the contract text above. Where a section says otherwise, the clarification wins.
+
+**Mounting and API shapes**
+
+- **C1 – Mounting moves to W5-C.**
+  - W5-C's main pull request mounts `/legal-status` itself: a two-line `api/src/arcilogger_api/routers/legal_status.py`, the regenerated contract and samples, and the LISANS/LICENSING row (5651 Temel, a granted exception in W5-F's docs).
+  - It also adds `legal-status-types.ts` to the `TYPES_FILES` lists of `web/src/lib/api-types.test.ts` and `api-samples.test.ts`.
+  - W5-E no longer mounts it (§4.2, §4.3).
+  - Reason: Wave 5 has no parallel wave to protect, and W5-D's `api-types.test.ts` needs the path in the contract.
+- **C2 – Each backend package updates the web mirror of the API shape it changes**, since the web tests compare those files with OpenAPI:
+  - W5-C: `web/src/lib/api-types.ts` (the named `DashboardSeal.blocking` interface) and `web/src/lib/seal-types.ts` (`renewal`, `revocation`);
+  - W5-T: `web/src/lib/settings-types.ts` (TÜRKTRUST server choices, body fields, secrets).
+
+  W5-D reads the new fields through small interim accessors in its own files until those land.
+- **C3 – `GET /credits` gains `supported: boolean`** (false for a provider without a credit query, today `turktrust`). W5-C owns it. The web shows the §2.6 credit text when `supported === false`; it never tests the provider name.
+- **C4 – The day detail's `renewal.renewed_at` and `revocation.level`** are as in §2.3.1 above. The web maps `fail` to danger and `warn` to warning, and `info`/`ok` to neutral/ok tones.
+
+**TÜRKTRUST settings**
+
+- **C5 – TSA section fields:**
+  - The body fields are `turktrust_username`, `turktrust_password` and `allow_plain_http` (W5-T).
+  - The plain-HTTP choice `turktrust-http` reuses the existing `confirm: true` of `tsa_confirm_required`.
+  - The form asks the administrator to type **`HTTP`** before the button is enabled.
+  - W5-T updates `web/e2e/mock-admin.ts` (`tsa()`, `REQUEST_BODIES`) with its schema; W5-D's TÜRKTRUST end-to-end tests follow it.
+  - The §2.5 keys are browser-editable:
+    - W5-T makes them editable in `admin/rules.py` (`tsa` section: `tsa.renew_before_days`, `tsa.crl_urls`, `tsa.crl_max_age_days`; `general` section: `network.https_proxy`; all with re-authentication);
+    - W5-D adds their form fields.
+
+**Revocation lists**
+
+- **C6 – Hold, then revocation.** A revocation at or before the stamp time outranks an earlier hold (`crl-revoked`, D10).
+  - W5-A changes the standalone `check_revocation`, and also fixes its `TypeError` when a hold and a revocation share a date (a missing reason sorts first, as in the core). W5-B changes the core.
+  - The shared case table gets both cases.
+- **C7 – CRL storage name** gets a content hash: `state/crl/<issuer-sha256-12>-<thisUpdate>-<sha256-8>.crl`, so two different lists with the same `thisUpdate` are both kept.
+  - A delta CRL (DeltaCRLIndicator) is not stored. It is recorded in `failures` with `delta_not_supported`, because neither verifier applies delta lists.
+- **C8 – Packages ship, besides the D9 subset, every stored list that has an entry for a packaged chain certificate.** A package and `verify_day` then see the same revocations.
+- **C9 – Unblocking W5-B.** W5-B may merge before W5-T, with its `crl_options` adapter (`getattr` with the §2.5 defaults). W5-T replaces the adapter with plain attributes when its config lands: a granted one-hunk exception in `crl.py`.
+- **C10 – `config.py` validation (W5-T):**
+  - `tsa.crl_urls` refuses URLs with user information;
+  - `network.https_proxy` requires `http://host:port` with a numeric port.
+
+**Other owners and texts**
+
+- **C11 – `api/src/arcilogger_api/issues.py`** belongs to W5-C for the Turkish patterns of the new day texts (the four patterns listed on #106).
+- **C12 – Monitors read the state files, not exit codes.** W5-C and W5-E judge `CrlFetch` from `state/crl/index.json` (`failures`, the newest `fetched_at`), never from its exit code alone.
+- **C13 – Texts and labels:**
+  - `certificate_revoked` says "Zaman damgası sağlayıcısıyla görüşün" (§2.6).
+  - The Ayarlar label "Kamu SM" becomes "Zaman damgası"; the route stays `/settings/kamusm`.
+  - Sealing texts that apply to both providers become provider-neutral; texts about the Zamane client or Kamu SM's credit stay Kamu SM-specific.
+  - The Panel blocking card is `role="status"`.
+  - The web appends the "ZAMAN-DAMGASI.md bölüm N" reference from #105's numbering.
+  - A banner hidden for 24 h comes back at once when a new reason appears.
 
 ## Owner questions
 
