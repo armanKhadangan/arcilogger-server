@@ -1542,13 +1542,15 @@ CARRIED_EXITS: dict[str, dict[str, Any]] = {
 }
 #: The orders in which ``_carried`` asks its steps after the window: with a port, that of
 #: ``ix_fg_traffic_transip_transport_time``; without one, that of ``ix_fg_traffic_transip_time``
-#: (#71), with the index each one reads.
+#: (#71); with the indexes each one may read. With a port and the address fixed either index of
+#: the address gives the order, and over a TimescaleDB chunk holding only the step's last
+#: instant (its range ends at a UTC midnight) the planner took ``(transip, time)``.
 CARRIED_ORDER = {
     True: (
         "ORDER BY fg_traffic.transip, fg_traffic.transport, fg_traffic.time",
-        "transip_transport_time",
+        ("transip_transport_time", "transip_time"),
     ),
-    False: ("ORDER BY fg_traffic.transip, fg_traffic.time", "transip_time"),
+    False: ("ORDER BY fg_traffic.transip, fg_traffic.time", ("transip_time",)),
 }
 
 
@@ -1678,9 +1680,9 @@ def test_the_d15_carried_check_is_fast(
             continue
         # The address's own rows of the step's day only, along its index entries: a step that
         # finds nothing reads and filters out every one of them, a step that answers stops early.
-        order, index_name = CARRIED_ORDER[step_port is not None]
+        order, index_names = CARRIED_ORDER[step_port is not None]
         assert order in sql, case
-        assert all(index_name in name or not n for name, n in scans), scans
+        assert all(any(i in name for i in index_names) or not n for name, n in scans), scans
         own = condition if step_port is None else f"{condition} AND transport = :port"
         rows, _kept = _rows_of(
             traffic_site, first, last, start_bound, own, address=address, port=step_port
