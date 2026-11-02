@@ -13,7 +13,7 @@
 
 import type { Page, Request, Route } from '@playwright/test';
 
-import type { LegalStatus } from '../src/components/legal/types';
+import type { LegalStatus } from '../src/lib/legal-status-types';
 import {
   LEGAL_MIXED,
   LEGAL_OK,

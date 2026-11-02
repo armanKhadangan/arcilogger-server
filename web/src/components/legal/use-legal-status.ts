@@ -11,7 +11,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 
-import type { LegalStatus } from './types';
+import type { LegalStatus } from '@/lib/legal-status-types';
 
 export const LEGAL_STATUS_KEY = ['legal-status'] as const;
 

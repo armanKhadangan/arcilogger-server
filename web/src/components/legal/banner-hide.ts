@@ -8,7 +8,7 @@
 
 import { readPreference, writePreference } from '@/lib/storage';
 
-import type { LegalStatus } from './types';
+import type { LegalStatus } from '@/lib/legal-status-types';
 
 export const LEGAL_BANNER_HIDE_KEY = 'arci.legalBanner.hidden';
 /** How long "24 saat gizle" hides a warning. */

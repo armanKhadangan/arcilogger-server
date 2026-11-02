@@ -1,7 +1,7 @@
 import { LEGAL_REASONS } from '@/test/w5-fixtures';
 
 import { docsReference, reasonText, reasonTone } from './reason-text';
-import type { LegalReasonCode } from './types';
+import type { LegalReasonCode } from '@/lib/legal-status-types';
 
 /*
  * The text of a reason (contract 2.6): the API's sentence in the language, ending with the

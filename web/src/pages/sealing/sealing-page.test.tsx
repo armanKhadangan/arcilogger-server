@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 
 import { LEGAL_STATUS_KEY } from '@/components/legal/use-legal-status';
-import type { LegalStatus } from '@/components/legal/types';
+import type { LegalStatus } from '@/lib/legal-status-types';
 import type { Credits, Role } from '@/lib/api-types';
 import { setLanguage } from '@/lib/i18n';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';

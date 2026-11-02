@@ -11,7 +11,7 @@
  * `@/` alias and reads no file. Copy a value before changing it.
  */
 
-import type { LegalReason, LegalReasonCode, LegalStatus } from '../components/legal/types';
+import type { LegalReason, LegalReasonCode, LegalStatus } from '../lib/legal-status-types';
 
 /** When the API computed the status (07:00 at the site, +03:00). */
 export const LEGAL_CHECKED_AT = '2026-10-13T04:00:00Z';

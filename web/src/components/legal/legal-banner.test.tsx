@@ -18,7 +18,7 @@ import {
 } from '@/test/w5-fixtures';
 
 import { LEGAL_BANNER_HIDE_KEY, LEGAL_BANNER_HIDE_MS } from './banner-hide';
-import type { LegalStatus } from './types';
+import type { LegalStatus } from '@/lib/legal-status-types';
 import { LEGAL_STATUS_KEY, LEGAL_STATUS_POLL_MS } from './use-legal-status';
 
 /*

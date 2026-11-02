@@ -11,7 +11,7 @@ import type { AlertTone } from '@/components/ui/alert';
 import type { Lang } from '@/lib/format';
 import i18n from '@/lib/i18n';
 
-import type { LegalReason } from './types';
+import type { LegalReason } from '@/lib/legal-status-types';
 
 /** The documentation section of a reason's code in `lang`, or `null` for a code it does not know. */
 export function docsReference(code: string, lang: Lang): string | null {

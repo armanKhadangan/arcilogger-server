@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { hideFor, isHidden, readHide, writeHide } from './banner-hide';
 import { linkFor } from './links';
 import { reasonText, reasonTone } from './reason-text';
-import type { LegalReason } from './types';
+import type { LegalReason } from '@/lib/legal-status-types';
 import { useLegalStatus } from './use-legal-status';
 
 const LINK_CLASS = 'font-medium whitespace-nowrap underline underline-offset-2';

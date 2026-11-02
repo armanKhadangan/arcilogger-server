@@ -6,7 +6,7 @@
  * auditor only the sealing page.
  */
 
-import type { LegalReason } from './types';
+import type { LegalReason } from '@/lib/legal-status-types';
 
 export type LegalLinkKey = NonNullable<LegalReason['link']>;
 
