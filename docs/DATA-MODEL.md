@@ -50,6 +50,11 @@
   `nat.egresses_migration` (dönüşümün kaydı), `nat.egresses_changes` (her çıkışın son içerik
   değişikliği: zaman ve yazan) ve `leases.rollback_lowered` (`-Rollback` sırasında düşük güvene
   indirilen FortiGate kiraları; yeniden yükseltmede okunup silinir).
+- Kaynak saatleri (revizyon `0019_source_clock_samples`, ADR-0016 D28): `source_clock_samples`
+  her kaynak için satırların **alındığı** dakikada cihaz saatinin alma zamanından farkını
+  (sıfırdan uzağa yuvarlanmış tam saniye; bir dakikanın altındaki fark 0) ve satır sayısını
+  tutar. Ingest bunu satırlarla aynı işlemde yazar; `R20-lease:source-clock` uyarısı ve 5651
+  sorgusunun saat denetimi saatleri geri ya da ileri atlayan bir cihaz saatini buradan ölçer.
 
 ## Summary (EN)
 
@@ -80,7 +85,12 @@ DHCP lines loaded before the upgrade stay `fg_event` rows; they are not converte
 (revision `0018_nat_egresses`, ADR-0016) replace the settings `nat.public_ips`, `nat.wan_transip`
 and `lookup.port_hint` with the one setting `nat.egresses` (default `{}`: one implicit double-NAT
 exit) and add three status rows that are never edited: `nat.egresses_migration`,
-`nat.egresses_changes` and `leases.rollback_lowered` ("Status rows" below).
+`nat.egresses_changes` and `leases.rollback_lowered` ("Status rows" below). Source clocks
+(revision `0019_source_clock_samples`, ADR-0016 D28) add `source_clock_samples`: per source and
+**received** minute, the device clock's offset from the receive time (whole seconds rounded away
+from zero, 0 under a minute) and its rows, written by ingest in the transaction of the rows; the
+`R20-lease:source-clock` alert and a lookup's clock check measure a clock that jumped by hours
+there.
 
 ## Conventions
 
@@ -182,6 +192,7 @@ but which are not in a table go to `extra`.
 | `alert_events` | id; index (alert_id, at), (at) | Every change of an alert's state (`from_state` → `to_state`) and every note (`text`, 1–2000 characters) with `actor` (user name, or `system` for the checks' automatic resolution and re-opening, the reason code then in `text`), `actor_id` (users, SET NULL) and `at` (revision `0012_alert_events`, ADR-0010 amendment). Written only by `arcilogger_worker.alerts.store`; the audit log gets `alert.state` / `alert.note` (the note's length only) |
 | `report_schedules` | id | Scheduled usage reports (revision `0011_reports`, ADR-0012): name, kind (end_of_day/full_day/weekly/monthly), `enabled`, `time` (HH:MM, site time), `weekday` (weekly) / `monthday` (monthly), `recipients`, `formats` (`email_html`, `pdf`, `xlsx`), `person_level` (default true: names), `pseudonymize`, `next_run_at`, `updated_by`. The four shipped schedules are inserted once by the migration, disabled |
 | `search_counts` | id; unique `uq_search_counts_key` (hour, source, raw_day, kind, tbl, action, net) `NULLS NOT DISTINCT`; index (source, hour), (raw_day, source) | Exact hourly line counts of the search statistics (revision `0016_search`, ADR-0015, `arcilogger_db.searchcounts`): `hour` (`date_trunc('hour', time)`, device time, UTC), the spool file (`source`, `raw_day`), `kind` (`arcilogger_db.kinds.kind_of` of the `messages` row), `tbl` (the line's typed table, `''` without one), `action` (the typed row's, lower-cased), `net` (the /24 of the typed row's client address when it is private IPv4: 10/8, 172.16/12, 192.168/16, 100.64/10), `n` (> 0). One row per key, about 450 keys an hour for 150 users. The ingest loader adds a batch's counts in the transaction that loads its rows; `searchcounts.rebuild_stream` recounts one file from its rows (`arcilogger-db search-counts rebuild`); derived, like every table |
+| `source_clock_samples` | (source, minute, seconds) | Device clock offsets by receive time (revision `0019_source_clock_samples`, ADR-0016 D28, `arcilogger_db.clocksamples`): `minute` (`date_trunc('minute', time_received)`, UTC), `seconds` (`time − time_received` in whole seconds rounded away from zero, `0` under a minute either way), `n` (> 0). Rows whose `time` is the receive time (no usable device time) are not counted. About one row a minute for a source on time. The ingest loader adds a batch's samples in the transaction that loads its rows; the `R20-lease:source-clock` alert reads a source's newest received minutes, a lookup the minutes received in [T − 1 h, T + 1 h]; `clocksamples.rebuild` counts a source's received range again from its rows; the upgrade counts the rows received in its last two hours, older lines have none; derived, like every table |
 | `saved_searches` | id; unique `uq_saved_searches_owner_name` (owner_id, lower(name)) | Personal saved searches (revision `0016_search`): `owner_id` (users, CASCADE), `name` (1–80 characters, unique per owner ignoring case), `query` (≤ 1,000 characters, parsed again on every run), the range as a preset `range_preset` (`15m`, `1h`, `24h`, `today`, `yesterday`, `7d`, `30d`) **or** a fixed `[range_from, range_to)`, never both (`ck_saved_searches_range`), created/updated, `last_run_at` |
 | `report_runs` | id; index (schedule_id, id), index (status) | Every report run (scheduled or "run now"): period, kind (+ `custom`), the schedule's settings then (formats, recipients, person level), status (queued/running/sent/partial/failed), `files` (name, format, size, SHA-256 of each file in `exports/usage-reports/<id>/`), `deliveries` (per recipient: status, attempts, error, sent), `expired_at` (files deleted after `reports.keep_days`). Kept when the schedule is deleted |
 
@@ -293,7 +304,9 @@ PostgreSQL 16.
   also deletes its rows with `hour` before the first day of the cutoff's month (the month
   `drop_before` keeps whole keeps its counts), so the counts and the rows stay in step once
   database retention runs; until then nothing is deleted (no job calls `drop_before`).
-  Saved searches (`saved_searches`) are deleted with their user.
+  The clock samples (`source_clock_samples`) go with them: `drop_before` deletes the minutes
+  received before the first day of the cutoff's month. Saved searches (`saved_searches`) are
+  deleted with their user.
 - `lookups`, `lookup_reports` (and the PDFs in `exports\reports\`), `audit_log`,
   `user_sessions`, the assignment history (`device_assignments`, `persons`) and the history of
   the browser administration (`admin_requests`) have no expiry yet; the open decisions are

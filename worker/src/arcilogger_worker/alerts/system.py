@@ -85,7 +85,6 @@ import logging
 import os
 import re
 import shutil
-import statistics
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
@@ -125,6 +124,7 @@ from arcilogger_core.layout import Layout
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ, day_window, isoformat_site, site_day
 from arcilogger_core.tsa.base import StampResult, TsaError
+from arcilogger_db import clocksamples
 from arcilogger_db.egress import (
     LEGACY_KEYS,
     MIGRATION_KEY,
@@ -945,14 +945,15 @@ SESSION_SLACK: Final = timedelta(minutes=15)
 DECLINE_SECONDS: Final = 300
 #: A MAC that got more distinct addresses than this in one origin, interface and network.
 DHCP_MAC_IPS: Final = 3
-#: ``source-clock`` (D28): the newest rows per source, of which this many must be recent, and
-#: the median offset beyond which the clock is off.
+#: ``source-clock`` (D28, #73): the newest rows per source by receive time, of which this many
+#: must have been received in the last hour, and the median offset beyond which the clock is off.
+#: A source with fewer rows in its recent minutes than :data:`CLOCK_ROWS` is judged on those
+#: minutes once they hold :data:`CLOCK_MIN_ROWS` (a quiet source's jump opens the cause within
+#: about two checks, not after half an hour of jumped rows).
 CLOCK_ROWS: Final = 200
 CLOCK_MIN_ROWS: Final = 10
 CLOCK_LIMIT_SECONDS: Final = 120
-#: Ingest accepts a device time this far from the receive time (``arcilogger_ingest.parsers.
-#: syslog.DEFAULT_MAX_CLOCK_SKEW``, which the worker cannot import; a test pins both equal).
-MAX_CLOCK_SKEW: Final = timedelta(days=1)
+CLOCK_RECENT: Final = timedelta(minutes=10)
 #: Tables lookups read: a source whose files hold none of them has its clock left alone.
 LOOKUP_TABLES: Final = ("fg_traffic", "fg_dhcp", "mt_dhcp", "mt_arp")
 #: ``R20-nat:unmapped-transip``: sessions an unclaimed NAT address carried in the last hour.
@@ -1557,7 +1558,14 @@ def _unverified(check: _LeaseCheck) -> None:
 def _source_clocks(check: _LeaseCheck) -> None:
     """``source-clock`` (D28): a configured source whose files of today or yesterday hold rows
     lookups read, and whose latest records' device times differ from their receive times by a
-    median beyond :data:`CLOCK_LIMIT_SECONDS`."""
+    median beyond :data:`CLOCK_LIMIT_SECONDS`.
+
+    The latest records are the newest received in the last hour, from ``source_clock_samples``
+    (whole received minutes, newest first, until :data:`CLOCK_ROWS` rows, or until
+    :data:`CLOCK_MIN_ROWS` rows once the minutes reach :data:`CLOCK_RECENT` back; #73): ranked
+    by device time, the records a source sent on time before its clock jumped back outranked
+    every record after it, and the alert opened only about as long after the jump as the jump
+    itself."""
     now, session = check.now, check.session
     today = site_day(now)
     checked = session.scalars(
@@ -1574,25 +1582,18 @@ def _source_clocks(check: _LeaseCheck) -> None:
     ).all()
     offsets: dict[str, int] = {}
     for source in checked:
-        rows = session.execute(
-            select(Message.time, Message.time_received)
-            .where(
-                Message.source == source,
-                Message.time >= now - TRAFFIC_WINDOW - MAX_CLOCK_SKEW,
-                Message.time <= now + TRAFFIC_WINDOW + MAX_CLOCK_SKEW,
-                Message.time != Message.time_received,  # receive-time rows say nothing
-            )
-            .order_by(Message.time.desc())
-            .limit(CLOCK_ROWS)
-        ).all()
-        counted = [
-            (time - received).total_seconds()
-            for time, received in rows
-            if now - TRAFFIC_WINDOW <= received <= now
-        ]
-        if len(counted) < CLOCK_MIN_ROWS:
+        latest = clocksamples.newest(
+            session,
+            source,
+            now - TRAFFIC_WINDOW,
+            now,
+            CLOCK_ROWS,
+            least=CLOCK_MIN_ROWS,
+            recent=now - CLOCK_RECENT,
+        )
+        offset, counted = clocksamples.median(latest)
+        if offset is None or counted < CLOCK_MIN_ROWS:
             continue
-        offset = statistics.median(counted)
         if abs(offset) > CLOCK_LIMIT_SECONDS:
             offsets[source] = int(offset)
     check.clears["source-clock"] = lambda alert: "clock_ok"

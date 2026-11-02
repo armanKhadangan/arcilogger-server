@@ -3,9 +3,11 @@
 A site day is written straight into the tables (``INSERT … SELECT generate_series``): 1 M
 FortiGate sessions and 1 M messages in the 24 hours before the check, 30 days of FortiGate DHCP
 rows of 400 clients, their leases, a quiet MikroTik feed, the lease runs of 7 days and an exit.
-Then ``R20-lease`` and ``R20-nat`` run as ``alerts.system`` runs them, twice, and every statement
-of the second run is timed: each under :data:`LIMIT_SECONDS`, the ``source-clock`` sample
-(``messages``) under :data:`CLOCK_SECONDS`, the unclaimed NAT address count (``transip``) under
+The FortiGate's clock samples of 30 days (``source_clock_samples``, a row a minute) and a second
+FortiGate whose clock is 3 hours ahead in the last hour. Then ``R20-lease`` and ``R20-nat`` run
+as ``alerts.system`` runs them, twice, and every statement of the second run is timed: each under
+:data:`LIMIT_SECONDS`, a ``messages`` statement under :data:`CLOCK_SECONDS`, the ``source-clock``
+sample (``source_clock_samples``) and the unclaimed NAT address count (``transip``) under
 :data:`TRANSIP_SECONDS`. ``ARCILOGGER_ALERT_PERF_ROWS`` sets the daily rows (``0`` skips); run with
 ``-s`` to see the slowest statements.
 """
@@ -135,8 +137,20 @@ SITE = (
     """,
     """
     INSERT INTO search_counts (hour, source, raw_day, kind, tbl, n)
-    SELECT :now - g * interval '1 hour', 'fortigate', :day, 'traffic', 'fg_traffic', :rows / 24
-    FROM generate_series(1, 24) AS g
+    SELECT :now - g * interval '1 hour', s.name, :day, 'traffic', 'fg_traffic',
+           greatest(:rows / 24, 1)
+    FROM generate_series(1, 24) AS g, (VALUES ('fortigate'), ('fortigate-2')) AS s(name)
+    """,
+    # The clock samples: the FortiGate on time for 30 days (a second behind: offset 0), the
+    # second one 3 hours ahead in the last hour.
+    """
+    INSERT INTO source_clock_samples (source, minute, seconds, n)
+    SELECT 'fortigate', date_trunc('minute', :now) - g * interval '1 minute', 0,
+           greatest(:rows / 1440, 1)
+    FROM generate_series(0, 30 * 1440) AS g
+    UNION ALL
+    SELECT 'fortigate-2', date_trunc('minute', :now) - g * interval '1 minute', 10800, 40
+    FROM generate_series(0, 59) AS g
     """,
 )
 
@@ -144,6 +158,7 @@ SITE = (
 @pytest.fixture
 def site(db_engine: Engine, db_session: Session) -> None:
     for name, kind, address in (("fortigate", "fortigate", "192.0.2.1"),
+                                ("fortigate-2", "fortigate", "192.0.2.3"),
                                 ("core-r1", "mikrotik", "192.0.2.2")):  # fmt: skip
         if db_session.get(Source, name) is None:
             db_session.add(Source(name=name, type=kind, address=address))
@@ -179,6 +194,8 @@ def timings(db_engine: Engine) -> Iterator[list[tuple[float, str]]]:
 
 
 def _limit(statement: str) -> float:
+    if "FROM source_clock_samples" in statement:
+        return TRANSIP_SECONDS
     if "FROM messages" in statement:
         return CLOCK_SECONDS
     if "fg_traffic.transip" in statement and "GROUP BY" in statement:
@@ -224,4 +241,10 @@ def test_the_lease_and_nat_checks_at_a_million_lines_a_day(
         "R20-lease:none:mt_arp",
         "R20-lease:fortigate-unverified",
         "R20-nat:unmapped-transip",
+        "R20-lease:source-clock",  # the second FortiGate, 3 hours ahead
     } <= found
+    with sessions() as session:
+        clock = session.scalars(
+            select(Alert.details).where(Alert.dedup_key == "R20-lease:source-clock")
+        ).one()
+    assert clock["offsets"] == {"fortigate-2": 10800}

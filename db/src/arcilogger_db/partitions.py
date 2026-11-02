@@ -43,7 +43,7 @@ from alembic.runtime.environment import NameFilterParentNames, NameFilterType
 from sqlalchemy import Connection, delete, text
 
 from arcilogger_core.timeutil import day_window, site_day, utc_now
-from arcilogger_db.models import TIME_SERIES_TABLES, SearchCount
+from arcilogger_db.models import TIME_SERIES_TABLES, SearchCount, SourceClockSample
 from arcilogger_db.settings import DEFAULT_SETTINGS
 
 #: Months created ahead of the current one (the worker runs daily; this is the safety margin).
@@ -187,6 +187,8 @@ class PartitionReport:
     purged: int = 0
     #: ``search_counts`` rows deleted with the months they count (:func:`drop_before`).
     counts_deleted: int = 0
+    #: ``source_clock_samples`` rows of the minutes received before the kept month.
+    clock_samples_deleted: int = 0
 
 
 def ensure_partitions(
@@ -269,7 +271,8 @@ def _create_partition(
 def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
     """Retention: drop every monthly partition that ends on or before ``cutoff`` (a site day)
     and delete older rows from the default partitions, and the search summary counts of the
-    months that went (``search_counts``, ADR-0015).
+    months that went (``search_counts``, ADR-0015) and the clock samples received before the kept
+    month (``source_clock_samples``, ADR-0016 D28).
 
     The month containing ``cutoff`` is kept whole, so the database holds up to one month more
     than the retention setting; the retention job may delete the remainder of that month. Its
@@ -300,6 +303,12 @@ def drop_before(connection: Connection, cutoff: date) -> PartitionReport:
         delete(SearchCount).where(SearchCount.hour < month_bounds(cutoff)[0])
     )
     report.counts_deleted = int(counted.rowcount or 0)
+    # The clock samples by receive time: a row is received within a day of its device time, so
+    # the minutes received before the kept month sample the rows that went (and a day more).
+    sampled = connection.execute(
+        delete(SourceClockSample).where(SourceClockSample.minute < month_bounds(cutoff)[0])
+    )
+    report.clock_samples_deleted = int(sampled.rowcount or 0)
     return report
 
 
