@@ -30,11 +30,26 @@ import type { Calendar, VerifyResult } from '@/lib/api-types';
 import { useAuth } from '@/lib/auth';
 import { formatDay, shortHash } from '@/lib/display';
 import { saveBlob } from '@/lib/download';
-import { formatBytes, formatDateTime, formatDuration, formatNumber } from '@/lib/format';
+import {
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatDuration,
+  formatNumber,
+} from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
-import type { SealDayDetail, SealVerification } from '@/lib/seal-types';
+import type { SealDayDetail, SealVerification, TokenInfo } from '@/lib/seal-types';
 import type { AdminRequestOut, SealActionResult } from '@/lib/settings-types';
 
+import {
+  RENEWAL_KEY,
+  RENEWAL_TONE,
+  renewalDay,
+  renewalOf,
+  revocationOf,
+  revocationTone,
+  type SealRenewal,
+} from './seal-renewal';
 import { AGENT_CODES, gapReason, legalGrade, toneOf } from './seal-states';
 
 const LEGAL_TONE = { legal: 'success', claimed: 'info', test: 'danger' } as const;
@@ -43,6 +58,14 @@ const LEGAL_LABEL = {
   claimed: 'sealing.token.claimed',
   test: 'sealing.token.notLegal',
 } as const;
+
+/** The token's badge: Kamu SM's words, TÜRKTRUST's for its own production stamps (decision 12). */
+function gradeLabel(token: TokenInfo): string {
+  const grade = legalGrade(token);
+  return token.provider === 'turktrust' && grade !== 'test'
+    ? `sealing.turktrust.${grade}`
+    : LEGAL_LABEL[grade];
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -80,6 +103,33 @@ const OUTCOME_TONE: Record<string, AlertTone> = {
   timeout: 'warning',
   error: 'warning',
 };
+
+/**
+ * The token's long-term status (Wave 5 contract 2.6 `renewal-*`, decision 6): re-stamped in time,
+ * late, due or expired without a renewal. A renewal's date is in its file name (decision 1).
+ */
+function RenewalFact({ renewal }: { renewal: SealRenewal }) {
+  const { t } = useTranslation();
+  const key = RENEWAL_KEY[renewal.status];
+  const renewed = renewalDay(renewal.covered_by);
+  const text = renewal.status === 'late' && !renewed ? 'lateNoDate' : key;
+  const date =
+    renewal.status === 'late'
+      ? formatDay(renewed ?? '')
+      : renewal.cert_not_after
+        ? formatDate(renewal.cert_not_after)
+        : '—';
+  return (
+    <span
+      className="flex flex-col items-start gap-1"
+      data-testid="seal-renewal"
+      data-status={renewal.status}
+    >
+      <Badge tone={RENEWAL_TONE[renewal.status]}>{t(`sealing.renewal.status.${key}`)}</Badge>
+      <span>{t(`sealing.renewal.text.${text}`, { date, renewal: renewal.covered_by ?? '—' })}</span>
+    </span>
+  );
+}
 
 function VerificationLine({ verification }: { verification: SealVerification }) {
   const { t } = useTranslation();
@@ -143,6 +193,8 @@ function ManifestTokenFacts({ detail }: { detail: SealDayDetail }) {
   const lang = currentLang();
   const manifest = detail.manifest;
   const token = detail.token;
+  const renewal = renewalOf(detail);
+  const revocation = revocationOf(detail);
   return (
     <>
       {manifest ? (
@@ -191,7 +243,7 @@ function ManifestTokenFacts({ detail }: { detail: SealDayDetail }) {
               <Badge tone="neutral">{t('sealing.token.checkUnknown')}</Badge>
             )}
             <Badge tone={LEGAL_TONE[legalGrade(token)]} icon={Stamp}>
-              {t(LEGAL_LABEL[legalGrade(token)])}
+              {t(gradeLabel(token))}
             </Badge>
           </div>
           <Facts
@@ -206,6 +258,14 @@ function ManifestTokenFacts({ detail }: { detail: SealDayDetail }) {
                 t('sealing.token.certificate'),
                 `${time(token.tsa_cert_not_before)} – ${time(token.tsa_cert_not_after)}`,
               ],
+              ...(renewal
+                ? [
+                    [t('sealing.renewal.label'), <RenewalFact renewal={renewal} />] as [
+                      string,
+                      ReactNode,
+                    ],
+                  ]
+                : []),
               [t('sealing.token.root'), mono(token.check.root ?? '—')],
               [t('sealing.token.size'), formatBytes(token.bytes, lang)],
             ]}
@@ -213,6 +273,16 @@ function ManifestTokenFacts({ detail }: { detail: SealDayDetail }) {
           {token.check.errors.length > 0 ? (
             <Alert tone={token.check.ok === false ? 'danger' : 'warning'} assertive={false}>
               {(lang === 'en' ? token.check.errors : token.check.errors_tr).join('; ')}
+            </Alert>
+          ) : null}
+          {revocation ? (
+            <Alert
+              tone={revocationTone(revocation.level)}
+              assertive={false}
+              title={t('sealing.revocation.title')}
+              data-testid="seal-revocation"
+            >
+              {lang === 'en' ? revocation.message_en : revocation.message_tr}
             </Alert>
           ) : null}
           <CodeBlock label={t('sealing.token.sha256')} code={token.sha256} wrap />
@@ -518,7 +588,12 @@ export function SealDayPanel({ day }: { day: string }) {
         ) : null}
         {data.token && legalGrade(data.token) === 'claimed' ? (
           <Alert tone="info" assertive={false} data-testid="legal-root-unconfirmed">
-            {t('sealing.day.rootUnconfirmed', { provider: data.token.provider ?? '—' })}
+            {t(
+              data.token.provider === 'turktrust'
+                ? 'sealing.turktrust.rootUnconfirmed'
+                : 'sealing.day.rootUnconfirmed',
+              { provider: data.token.provider ?? '—' },
+            )}
           </Alert>
         ) : null}
         {data.problems.length > 0 ? (

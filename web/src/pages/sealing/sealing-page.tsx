@@ -1,9 +1,12 @@
 import { CalendarDays } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { PageHeader } from '@/components/layout/page-header';
+import { linkFor } from '@/components/legal/links';
+import { reasonText } from '@/components/legal/reason-text';
+import { useLegalStatus } from '@/components/legal/use-legal-status';
 import { Alert } from '@/components/ui/alert';
 import { Badge, STATUS_STYLE } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +15,7 @@ import { SealCalendar, SEAL_STATUSES } from '@/components/ui/seal-calendar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/lib/api';
 import { useCredits, useSealCalendar } from '@/lib/api-hooks';
+import { useAuth } from '@/lib/auth';
 import { formatNumber } from '@/lib/format';
 import { currentLang } from '@/lib/i18n';
 
@@ -33,7 +37,9 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
  * Mühürleme (spec 12.3 page 9; `seal.read`): the month calendar of seal states (from the vault
  * and the scheduled tasks' state files, refreshed every minute in the background), the selected
  * day's details and actions, and the Kamu SM credit. `?month=2026-10&day=2026-10-09` keeps the
- * view across reloads.
+ * view across reloads. A time-stamp provider without legal validity is named in a red alert with
+ * the banner's own text (`GET /legal-status`, Wave 5 contract 2.3.2); it is not announced a second
+ * time, the banner above the page already is.
  */
 export function SealingPage() {
   const { t } = useTranslation();
@@ -44,6 +50,8 @@ export function SealingPage() {
   const dayParam = params.get('day');
   const calendar = useSealCalendar(month);
   const credits = useCredits();
+  const legal = useLegalStatus();
+  const { can } = useAuth();
   const data = calendar.data;
   const selected = dayParam && DAY.test(dayParam) ? dayParam : data ? defaultDay(data) : null;
 
@@ -77,13 +85,30 @@ export function SealingPage() {
     });
   }
 
-  const configured = credits.data;
+  const notLegal = legal.data?.reasons.find((reason) => reason.code === 'provider_not_legal');
+  const fix = notLegal ? linkFor(notLegal, can) : null;
   return (
     <div className="flex flex-col gap-4">
       <PageHeader title={t('nav.sealing')} description={t('sealing.description')} />
-      {configured && !configured.legal_grade ? (
-        <Alert tone="danger" title={t('legal.notLegalTitle')} data-testid="provider-not-legal">
-          {t('sealing.providerNotLegal', { provider: configured.provider })}
+      {notLegal ? (
+        <Alert
+          tone="danger"
+          assertive={false}
+          title={t('legal.notLegalTitle')}
+          data-testid="provider-not-legal"
+        >
+          {reasonText(notLegal, lang)}
+          {fix ? (
+            <>
+              {' '}
+              <Link
+                to={fix.to}
+                className="font-medium whitespace-nowrap underline underline-offset-2"
+              >
+                {t(fix.label)}
+              </Link>
+            </>
+          ) : null}
         </Alert>
       ) : null}
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">

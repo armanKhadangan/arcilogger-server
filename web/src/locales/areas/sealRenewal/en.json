@@ -1,0 +1,34 @@
+{
+  "sealing": {
+    "renewal": {
+      "label": "Re-stamping",
+      "status": {
+        "notDue": "Not due",
+        "due": "Due",
+        "covered": "Re-stamped",
+        "late": "Re-stamped late",
+        "uncovered": "Not re-stamped"
+      },
+      "text": {
+        "notDue": "Re-stamping is not due yet (certificate valid until {{date}}).",
+        "due": "The stamp certificate expires on {{date}}; re-stamping is due.",
+        "covered": "Re-stamped before its certificate expired: {{renewal}}.",
+        "late": "Re-stamped after the old certificate had expired ({{date}}).",
+        "lateNoDate": "Re-stamped after the old certificate had expired.",
+        "uncovered": "The stamp certificate expired on {{date}} with no re-stamping; the stamp is valid for the moment it was made."
+      }
+    },
+    "revocation": {
+      "title": "Revocation list check"
+    },
+    "credits": {
+      "noQuery": "This provider offers no credit query; watch the balance in the provider's portal."
+    },
+    "turktrust": {
+      "legal": "TÜRKTRUST production server",
+      "claimed": "TÜRKTRUST production (root not configured)",
+      "rootUnconfirmed": "This day's manifest says its time stamp comes from the TÜRKTRUST production server ({{provider}}). The day is not shown as legally valid because the root certificate's SHA-256 fingerprint is not listed in tsa.legal_root_fingerprints, or the stamp did not verify. Compare the root's fingerprint with the value TÜRKTRUST publishes.",
+      "creditsTitle": "Credit (TÜRKTRUST)"
+    }
+  }
+}

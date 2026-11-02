@@ -1,0 +1,34 @@
+{
+  "sealing": {
+    "renewal": {
+      "label": "Yeniden damgalama",
+      "status": {
+        "notDue": "Gerekmiyor",
+        "due": "Bekleniyor",
+        "covered": "Yeniden damgalandı",
+        "late": "Geç yeniden damgalandı",
+        "uncovered": "Yeniden damgalanmadı"
+      },
+      "text": {
+        "notDue": "Yeniden damgalama henüz gerekmiyor (sertifika {{date}} tarihine kadar geçerli).",
+        "due": "Damga sertifikası {{date}} tarihinde sona eriyor; yeniden damgalama bekleniyor.",
+        "covered": "Bu damga, sertifikası sona ermeden yeniden damgalanmış: {{renewal}}.",
+        "late": "Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış ({{date}}).",
+        "lateNoDate": "Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış.",
+        "uncovered": "Damga sertifikasının süresi {{date}} tarihinde doldu ve yeniden damgalama yok; damga, alındığı an için geçerlidir."
+      }
+    },
+    "revocation": {
+      "title": "İptal listesi (SİL) denetimi"
+    },
+    "credits": {
+      "noQuery": "Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin."
+    },
+    "turktrust": {
+      "legal": "TÜRKTRUST üretim sunucusu",
+      "claimed": "TÜRKTRUST üretim (kök tanımlı değil)",
+      "rootUnconfirmed": "Bu günün manifesti, zaman damgasının TÜRKTRUST üretim sunucusundan ({{provider}}) alındığını belirtiyor. Kök sertifikanın SHA-256 parmak izi tsa.legal_root_fingerprints ayarında tanımlı olmadığı ya da damga doğrulanamadığı için gün yasal geçerli olarak gösterilmiyor. Kökün parmak izini TÜRKTRUST'ın yayımladığı değerle karşılaştırın.",
+      "creditsTitle": "Kontör (TÜRKTRUST)"
+    }
+  }
+}

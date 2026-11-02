@@ -1,10 +1,12 @@
-import { act, screen } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 
 import { setLanguage } from '@/lib/i18n';
 import type { SealDayDetail } from '@/lib/seal-types';
 import { errorResponse, installFetch, jsonResponse, makeMe } from '@/test/api-mock';
 import { renderApp } from '@/test/render';
 import { SEALS, need } from '@/test/samples';
+
+import type { SealRenewal, SealRevocation } from './seal-renewal';
 
 const DAY = '2026-10-04';
 const SEALED = need(SEALS.days[DAY], `${DAY} sample`);
@@ -143,5 +145,164 @@ describe('"Şimdi mühürle" (contract 2.9)', () => {
     expect(await screen.findByRole('button', { name: 'Doğrula' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Şimdi mühürle' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Kontör sorgula' })).not.toBeInTheDocument();
+  });
+});
+
+/*
+ * Re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", 2.6): hand-built additions to
+ * the captured day until W5-C's samples carry them.
+ */
+describe('re-stamping and revocation on the day page (Wave 5)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    act(() => {
+      setLanguage('tr');
+    });
+  });
+
+  function withRenewal(
+    renewal: SealRenewal | null,
+    revocation: SealRevocation | null = null,
+  ): SealDayDetail {
+    return { ...SEALED, renewal, revocation } as SealDayDetail;
+  }
+
+  const REVOKED: SealRevocation = {
+    code: 'crl-revoked',
+    level: 'fail',
+    // Worded as the verifier's finding (`check_revocation`); the certificate name is made up.
+    message_tr:
+      'Deneme TSA Sertifikası 1: sertifika zaman damgasından ÖNCE iptal edilmiş (03.10.2026 09:00)',
+    message_en:
+      'Deneme TSA Sertifikası 1: revoked before the time stamp (2026-10-03T06:00:00+00:00)',
+  };
+
+  it('shows neither for an answer without them (the captured samples)', async () => {
+    serve(SEALED);
+    renderApp(`/sealing?day=${DAY}`);
+    expect(await screen.findByText('Zaman damgası')).toBeInTheDocument();
+    expect(screen.queryByTestId('seal-renewal')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('seal-revocation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Yeniden damgalama')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      'not_due',
+      { cert_not_after: '2031-09-30T21:00:00Z', covered_by: null },
+      'Gerekmiyor',
+      'Yeniden damgalama henüz gerekmiyor (sertifika 01.10.2031 tarihine kadar geçerli).',
+    ],
+    [
+      'due',
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: null },
+      'Bekleniyor',
+      'Damga sertifikası 01.04.2027 tarihinde sona eriyor; yeniden damgalama bekleniyor.',
+    ],
+    [
+      'covered',
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: 'renewals/2027-02-01-1.json.zd' },
+      'Yeniden damgalandı',
+      'Bu damga, sertifikası sona ermeden yeniden damgalanmış: renewals/2027-02-01-1.json.zd.',
+    ],
+    [
+      'late',
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: 'renewals/2027-04-03-1.json.zd' },
+      'Geç yeniden damgalandı',
+      'Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış (03.04.2027).',
+    ],
+    [
+      'late',
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: 'renewals/latest.json.zd' },
+      'Geç yeniden damgalandı',
+      'Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış.',
+    ],
+    [
+      'uncovered',
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: null },
+      'Yeniden damgalanmadı',
+      'Damga sertifikasının süresi 01.04.2027 tarihinde doldu ve yeniden damgalama yok; damga, alındığı an için geçerlidir.',
+    ],
+  ] as const)('%s: badge and the 2.6 sentence (%s)', async (status, fields, badge, sentence) => {
+    serve(withRenewal({ status, ...fields }));
+    renderApp(`/sealing?day=${DAY}`);
+    const renewal = await screen.findByTestId('seal-renewal');
+    expect(renewal).toHaveAttribute('data-status', status);
+    expect(within(renewal).getByText(badge)).toBeInTheDocument();
+    expect(within(renewal).getByText(sentence)).toBeInTheDocument();
+    // A fact of the time-stamp section, after the certificate's validity.
+    const token = screen.getByRole('heading', { name: 'Zaman damgası' }).closest('section');
+    expect(token).toContainElement(renewal);
+    expect(within(token as HTMLElement).getByText('Yeniden damgalama').tagName).toBe('DT');
+  });
+
+  it('a renewal in English', async () => {
+    serve(withRenewal({ status: 'due', cert_not_after: '2027-03-31T21:00:00Z', covered_by: null }));
+    act(() => {
+      setLanguage('en');
+    });
+    renderApp(`/sealing?day=${DAY}`);
+    const renewal = await screen.findByTestId('seal-renewal');
+    expect(renewal).toHaveTextContent('Due');
+    expect(renewal).toHaveTextContent(
+      'The stamp certificate expires on 01.04.2027; re-stamping is due.',
+    );
+  });
+
+  it.each([
+    ['fail', 'bg-danger-soft'],
+    ['danger', 'bg-danger-soft'],
+    ['warn', 'bg-warning-soft'],
+    ['warning', 'bg-warning-soft'],
+    ['info', 'bg-info-soft'],
+  ])('a revocation of level %s is shown with its message (%s)', async (level, tone) => {
+    serve(withRenewal(null, { ...REVOKED, level }));
+    renderApp(`/sealing?day=${DAY}`);
+    const alert = await screen.findByTestId('seal-revocation');
+    expect(alert).toHaveClass(tone);
+    // The banner above the page announces a revoked certificate; the day page does not again.
+    expect(alert).toHaveAttribute('role', 'status');
+    expect(alert).toHaveTextContent('İptal listesi (SİL) denetimi');
+    expect(alert).toHaveTextContent(REVOKED.message_tr);
+    expect(screen.queryByTestId('seal-renewal')).not.toBeInTheDocument();
+  });
+
+  it('a revocation in English', async () => {
+    serve(withRenewal(null, REVOKED));
+    act(() => {
+      setLanguage('en');
+    });
+    renderApp(`/sealing?day=${DAY}`);
+    const alert = await screen.findByTestId('seal-revocation');
+    expect(alert).toHaveTextContent('Revocation list check');
+    expect(alert).toHaveTextContent(REVOKED.message_en);
+    expect(alert).not.toHaveTextContent(REVOKED.message_tr);
+  });
+
+  it('names TÜRKTRUST, not Kamu SM, on a TÜRKTRUST stamp (decision 12)', async () => {
+    serve(
+      tampered({
+        provider: 'turktrust',
+        legal_grade: false,
+        legal_grade_claimed: true,
+        test_stamp: false,
+      }),
+    );
+    renderApp(`/sealing?day=${DAY}`);
+    const unconfirmed = await screen.findByTestId('legal-root-unconfirmed');
+    expect(unconfirmed).toHaveTextContent('TÜRKTRUST üretim sunucusundan (turktrust)');
+    expect(unconfirmed).not.toHaveTextContent('Kamu SM');
+    const token = screen.getByRole('heading', { name: 'Zaman damgası' }).closest('section');
+    expect(token).toHaveTextContent('TÜRKTRUST üretim (kök tanımlı değil)');
+    expect(token).not.toHaveTextContent('Kamu SM');
+    expect(screen.queryByTestId('not-legal-grade')).not.toBeInTheDocument();
+  });
+
+  it('calls a verified TÜRKTRUST stamp by its server', async () => {
+    serve({ ...SEALED, token: { ...TOKEN, provider: 'turktrust', legal_grade: true } });
+    renderApp(`/sealing?day=${DAY}`);
+    expect(await screen.findByText('TÜRKTRUST üretim sunucusu')).toBeInTheDocument();
+    expect(screen.queryByText('Kamu SM üretim sunucusu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('legal-root-unconfirmed')).not.toBeInTheDocument();
   });
 });

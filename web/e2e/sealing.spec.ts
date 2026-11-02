@@ -1,13 +1,41 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import type { Credits } from '../src/lib/api-types';
+import type { SealRenewal, SealRevocation } from '../src/pages/sealing/seal-renewal';
+
 import { expectNoA11yViolations, usePreferences, useSampleClock, type Theme } from './fixtures';
 import { CSRF_TOKEN, mockApi } from './mock-api';
-import { SAMPLE_TODAY, SEALS } from './samples';
+import { LEGAL_OK, LEGAL_PROVIDER_NOT_LEGAL, LEGAL_REASONS, mockLegal } from './mock-legal';
+import { SAMPLE_TODAY, SEALS, copy } from './samples';
 
 const DETAIL = SEALS.days['2026-10-04'];
 const FAILED = SEALS.calendars['2026-10']?.days.find((cell) => cell.day === '2026-10-11');
 if (!DETAIL?.token || !DETAIL.manifest || !FAILED?.message_tr)
   throw new Error('seal samples missing');
+
+/**
+ * The sealed day with re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail"), hand-built
+ * until W5-C's samples carry the fields: the renewal is late, a later revocation list names the
+ * certificate (the verifier's `crl-revoked-later`; the certificate name is made up).
+ */
+const RENEWAL: SealRenewal = {
+  status: 'late',
+  cert_not_after: '2031-08-30T21:30:00Z',
+  covered_by: 'renewals/2031-09-02-1.json.zd',
+};
+const REVOCATION: SealRevocation = {
+  code: 'crl-revoked-later',
+  level: 'warn',
+  message_tr:
+    'Deneme TSA Sertifikası 1: sertifika zaman damgasından sonra iptal edilmiş (12.10.2026 09:00); iptal nedeninin incelenmesi gerekir',
+  message_en: 'Deneme TSA Sertifikası 1: revoked after the time stamp (2026-10-12T06:00:00+00:00)',
+};
+
+async function withRenewal(page: Page) {
+  await page.route('**/api/v1/seals/2026-10-04', (route) =>
+    route.fulfill({ json: { ...copy(DETAIL), renewal: RENEWAL, revocation: REVOCATION } }),
+  );
+}
 
 function day(page: Page, name: RegExp) {
   return page.getByRole('table', { name: 'Mühür takvimi' }).getByRole('button', { name });
@@ -242,7 +270,8 @@ test.describe('Mühürleme', () => {
   });
 
   test('month navigation and the credit widget', async ({ page }) => {
-    await mockApi(page, { signedInAs: 'tolga' });
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await mockLegal(page, api, { status: LEGAL_OK });
     await page.goto('/sealing');
     await expect(page.getByText('9.612', { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/Sağlayıcı: zamane/)).toBeVisible();
@@ -257,15 +286,60 @@ test.describe('Mühürleme', () => {
   test('a test or mock time-stamp provider is reported with a red banner; low credit warns', async ({
     page,
   }) => {
-    await mockApi(page, { signedInAs: 'tolga', records: { credits: 'mock' } });
+    const api = await mockApi(page, { signedInAs: 'tolga', records: { credits: 'mock' } });
+    await mockLegal(page, api, { status: LEGAL_PROVIDER_NOT_LEGAL });
     await page.goto('/sealing');
-    await expect(page.getByTestId('provider-not-legal')).toContainText(
-      'Yapılandırılan zaman damgası sağlayıcısı (mock) Kamu SM üretim sunucusu değil',
+    // The banner's text (`GET /legal-status`, Wave 5 contract 2.3.2) with its reference.
+    const alert = page.getByTestId('provider-not-legal');
+    await expect(alert).toContainText('Yasal geçerliliği olmayan zaman damgası');
+    await expect(alert).toContainText(
+      `${LEGAL_REASONS.provider_not_legal.message_tr} (ZAMAN-DAMGASI.md bölüm 5.2)`,
     );
+    await alert.getByRole('link', { name: 'Ayarlar → Zaman damgası' }).click();
+    await expect(page).toHaveURL(/\/settings\/kamusm$/);
     await mockApi(page, { signedInAs: 'tolga', records: { credits: 'kamusm_low' } });
     await page.goto('/sealing');
     await expect(page.getByText('Eşiğin altında')).toBeVisible();
     await expect(page.getByText(/uyarı eşiğinin \(10\.000\) altında/)).toBeVisible();
+  });
+
+  test('the day page shows re-stamping and revocation', async ({ page }) => {
+    await mockApi(page, { signedInAs: 'ayse.yilmaz' });
+    await withRenewal(page);
+    await page.goto('/sealing?day=2026-10-04');
+    const renewal = page.getByTestId('seal-renewal');
+    await expect(renewal).toContainText('Geç yeniden damgalandı');
+    await expect(renewal).toContainText(
+      'Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış (02.09.2031).',
+    );
+    const revocation = page.getByTestId('seal-revocation');
+    await expect(revocation).toContainText('İptal listesi (SİL) denetimi');
+    await expect(revocation).toContainText(REVOCATION.message_tr);
+    await expect(revocation).toHaveAttribute('role', 'status');
+  });
+
+  test('a provider without a credit query gets the neutral sentence (TÜRKTRUST)', async ({
+    page,
+  }) => {
+    await mockApi(page, { signedInAs: 'tolga' });
+    // Hand-built until W5-C's samples carry a TÜRKTRUST credit status.
+    const credits: Credits = {
+      provider: 'turktrust',
+      legal_grade: true,
+      threshold: 10_000,
+      latest: null,
+      remaining: null,
+      below_threshold: false,
+      history: [],
+      unreadable_lines: 0,
+    };
+    await page.route('**/api/v1/credits', (route) => route.fulfill({ json: credits }));
+    await page.goto('/sealing');
+    await expect(page.getByRole('heading', { name: 'Kontör (TÜRKTRUST)' })).toBeVisible();
+    await expect(page.getByTestId('credits-no-query')).toHaveText(
+      'Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin.',
+    );
+    await expect(page.getByRole('button', { name: 'Kontör sorgula' })).toHaveCount(0);
   });
 
   test('refreshes in the background without counting as activity', async ({ page }) => {
@@ -295,6 +369,23 @@ for (const theme of ['light', 'dark'] as Theme[]) {
     await expect(page.getByTestId('seal-now-result')).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Kontör sorgula' }).click();
     await expect(page.getByTestId('credit-query-result')).toBeVisible({ timeout: 10_000 });
+    await expectNoA11yViolations(page);
+  });
+}
+
+for (const theme of ['light', 'dark'] as Theme[]) {
+  test(`the provider alert, re-stamping and revocation accessibility — ${theme}`, async ({
+    page,
+  }) => {
+    await useSampleClock(page, SAMPLE_TODAY);
+    await usePreferences(page, { theme });
+    const api = await mockApi(page, { signedInAs: 'tolga' });
+    await mockLegal(page, api, { status: LEGAL_PROVIDER_NOT_LEGAL });
+    await withRenewal(page);
+    await page.goto('/sealing?day=2026-10-04');
+    await expect(page.getByTestId('provider-not-legal')).toBeVisible();
+    await expect(page.getByTestId('seal-renewal')).toBeVisible();
+    await expect(page.getByTestId('seal-revocation')).toBeVisible();
     await expectNoA11yViolations(page);
   });
 }
