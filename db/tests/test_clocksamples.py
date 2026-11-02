@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from arcilogger_db.clocksamples import (
     NEAR_SECONDS,
+    SHIFT_BAND_SECONDS,
     ClockKey,
     clock_key,
     median,
@@ -199,6 +200,60 @@ def test_the_minutes_that_shifted_their_device_times_into_a_range(db_session: Se
         (-10799, 20),
     ]
     assert shifted_into(connection, "switch-1", start, end, 120) == []
+
+
+def test_a_clock_spread_over_neighbouring_seconds_is_one_clock(db_session: Session) -> None:
+    """The rows of one clock spread over neighbouring whole seconds (the receive time's fraction,
+    the delivery's jitter): a minute split 40/35/25 over three of them, with 30 rows on time,
+    is a minute of that clock (its keys within ``SHIFT_BAND_SECONDS`` hold 100 of 130 rows);
+    late lines 10 minutes apart are not."""
+    connection = db_session.connection()
+    base = AT.replace(second=0)
+    later = base + timedelta(hours=3)
+    upsert_samples(
+        connection,
+        {
+            ClockKey("fortigate", later, -10800): 40,
+            ClockKey("fortigate", later, -10801): 35,
+            ClockKey("fortigate", later, -10802): 25,
+            ClockKey("fortigate", later, 0): 30,
+            ClockKey("fortigate", base, 0): 100,
+            ClockKey("fortigate", base, -600): 30,
+            ClockKey("fortigate", base, -1200): 30,
+            ClockKey("fortigate", base, -1800): 30,
+        },
+    )
+    start, end = base - timedelta(minutes=30), base + timedelta(minutes=30)
+    assert sorted(shifted_into(connection, "fortigate", start, end, 120)) == [
+        (-10802, 25),
+        (-10801, 35),
+        (-10800, 40),
+    ]
+    assert SHIFT_BAND_SECONDS == 5
+
+
+@pytest.mark.parametrize(
+    ("device", "taken"),
+    [
+        (-timedelta(minutes=1), False),  # its rows' device times end at the range's start
+        (-timedelta(seconds=59), True),  # its last second lies in the range
+        (timedelta(0), True),
+        (timedelta(hours=1), True),  # the range's end itself
+        (timedelta(hours=1, seconds=1), False),
+    ],
+)
+def test_the_range_of_device_times_a_minute_falls_into(
+    db_session: Session, device: timedelta, taken: bool
+) -> None:
+    """A minute's rows have device times ``[minute + offset, minute + offset + 60 s)``: it is
+    taken when that range meets ``[start, end]``."""
+    connection = db_session.connection()
+    start = AT.replace(second=0)
+    minute = start + timedelta(hours=3)
+    offset = int((start + device - minute).total_seconds())
+    upsert_samples(connection, {ClockKey("fortigate", minute, offset): 12})
+    found = shifted_into(connection, "fortigate", start, start + timedelta(hours=1), 120)
+    assert found == ([(offset, 12)] if taken else [])
 
 
 def test_the_rebuild_bound_is_ingests_clock_skew() -> None:

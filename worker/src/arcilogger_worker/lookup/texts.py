@@ -596,6 +596,24 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
         "tolerance widened by the offset, for an internal IP or a MAC address at the requested "
         "moment shifted by the offset (later for a positive offset, earlier for a negative one).",
     ),
+    "source_clock_shared": (
+        "{at} çevresindeki cihaz zamanları şu kaynakların başka bir gerçek zamanda gönderdiği "
+        "kayıtlarda da kullanıldı (cihazın saati sonradan değiştirilmiş): o kayıtların zamanları "
+        "ARCILOGGER'ın alma zamanından ortanca olarak saniye cinsinden şu kadar farklıydı: "
+        "{offsets} (sınır {limit} saniye). Arama ve kira zaman çizelgesi cihazın zamanlarını "
+        "kullandı: bulunan oturumlar ve kayıtlar o anınkilerin yanında bu fark kadar sonra (fark "
+        "eksiyse) ya da önce (fark artıysa) yapılmış olanları da içerebilir. Bu sonuçta zincir "
+        "varsa düşük güvenle gösterildi. Bir oturumun gerçek zamanını ham kayıttaki alma "
+        "zamanından doğrulayın.",
+        "The device times around {at} were also used by records these sources sent at another "
+        "real time (the device's clock was changed later): the times of those records differed "
+        "from ARCILOGGER's receive time by a median of (in seconds): {offsets} (limit {limit} "
+        "seconds). The search and the lease timeline used the device's times: beside those of "
+        "that moment, the sessions and records found may include ones made that much later (for "
+        "a negative offset) or earlier (for a positive one). Any chain of this result is "
+        "therefore shown with low confidence. Check a session's real time against the receive "
+        "time in its raw record.",
+    ),
 }
 
 

@@ -426,6 +426,9 @@ a person resolved or dismissed are never changed. The incremental job only raise
     device times within an hour of the moment from beyond 120 s (`source_clock_samples`),
     whichever is further from 0, each with at least 10 rows; beyond 120 s, or beyond max(120 s, the lookup tolerance) for a source
     measured only for the session search; D28);
+  - `source_clock_shared` (#82): the device times around the moment were also used by records a
+    cited or searched source sent at another real time, its clock changed later (the third sample
+    above decided); the sessions found may include ones made that much later or earlier;
   - `srcmac_mismatch`: below.
 - **FortiGate notes on a chain** whose lease is `fg_dhcp` (info): `fortigate_format_unverified`
   while `dhcp.fortigate_format_verified` is off, `fortigate_format_verified` (who marked it and
@@ -953,10 +956,10 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   before a clock was set back is named too: the rows sent after the change carry the device times of
   those hours, so the search there also finds sessions of hours later, and the received minutes
   whose clock put their device times there (most of a minute's rows, not a few late lines) give the
-  offset. A clock more than a day off is stamped with the receive time and gives no sample
-  (`<parser>.time` parse failures, `R20-lease:fortigate-refused`). A burst of lines a device
-  delivers late can make its minutes look behind: the alert can open for them, and a lookup errs on
-  the safe side (a `low` chain with the offset stated). The upgrade to revision
+  offset, named as `source_clock_shared`. A clock more than a day off is stamped with the receive
+  time and gives no sample (`<parser>.time` parse failures, `R20-lease:fortigate-refused`). A burst
+  of lines a device delivers late can make its minutes look behind: the alert can open for them, and
+  a lookup errs on the safe side (a `low` chain with the offset stated). The upgrade to revision
   `0019_source_clock_samples` counts the rows received in its last two hours; older lines have no
   samples, and a lookup of such a moment is measured by device time alone.
 - **srcmac is only as good as the interface setting.** The shared-MAC guard, the other-lease

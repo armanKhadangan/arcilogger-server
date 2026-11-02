@@ -2234,6 +2234,7 @@ def test_a_healthy_mixed_site_keeps_its_chains(db_session: Session, evidence: Ev
 #: (an offset is the device time minus the receive time).
 BEHIND = -timedelta(minutes=8)
 CLOCK = "source_clock_offset"
+CLOCK_SHARED = "source_clock_shared"
 
 
 def clock_lines(
@@ -2276,9 +2277,9 @@ def as_loaded(session: Session, offset: timedelta) -> None:
     session.commit()
 
 
-def offsets(outcome: LookupOutcome) -> dict[str, int]:
-    """The sources ``source_clock_offset`` names, with their offsets in seconds."""
-    named = outcome_note(outcome, CLOCK)["offsets"]
+def offsets(outcome: LookupOutcome, key: str = CLOCK) -> dict[str, int]:
+    """The sources ``source_clock_offset`` (or ``key``) names, with their offsets in seconds."""
+    named = outcome_note(outcome, key)["offsets"]
     assert isinstance(named, str)
     pairs = (item.split(": ") for item in named.split(", "))
     return {name: int(value) for name, value in pairs}
@@ -2687,20 +2688,29 @@ CHANGED = AT + timedelta(hours=2)
 PC15, PC15_MAC = "172.20.42.58", "00:00:5e:00:53:58"
 
 
-def _jumps_later(session: Session, evidence: Evidence, jump: timedelta | None) -> None:
+def _jumps_later(
+    session: Session,
+    evidence: Evidence,
+    jump: timedelta | None,
+    corrected: timedelta | None = None,
+) -> None:
     """The PC's and the second client's morning ACKs and leases; the PC's session of T, sent on
     time; heartbeat lines every two minutes, on time from T - 2 h to :data:`CHANGED`, then (a
     ``jump``) every six minutes ``jump`` off until CHANGED + 4 h, fewer than the rows sent on time
-    (an evening after a working day); with a jump back, the second client's session sent at
-    T + 3 h with the device time T; the clock samples as ingest writes them."""
+    (an evening after a working day), or on time again (every two minutes) from CHANGED +
+    ``corrected``; with a jump back, the second client's session sent at T + 3 h with the device
+    time T; the clock samples as ingest writes them."""
     evidence.fortigate_dhcp(tr(DAY, 8), PC, PC_MAC, hostname=HOST)
     evidence.fortigate_dhcp(tr(DAY, 8, 5), PC15, PC15_MAC, hostname="PLN-PC15")
     evidence.traffic(AT, PC, 51001, transip=WAN)
     if jump is not None and jump < timedelta(0):
         evidence.traffic(AT, PC15, 51001, transip=WAN)
     received = AT - timedelta(hours=2)
-    while received < CHANGED + timedelta(hours=4):
-        if received < CHANGED or jump is None:
+    while received < CHANGED + timedelta(hours=4 if corrected is None else 6):
+        on_time = jump is None or received < CHANGED
+        if corrected is not None and received >= CHANGED + corrected:
+            on_time = True
+        if on_time or jump is None:
             evidence.heartbeat(
                 received - timedelta(milliseconds=300), source="fortigate", received=received
             )
@@ -2732,18 +2742,22 @@ def test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times(
     the exact request at T finds the PC's session and the second client's of T + 3 h, and names
     the clock with both chains ``low``; so does the internal lookup. The rows with a device time
     around T are mostly the ones sent on time (median 0), the rows received around T all are
-    (0): #79's two samples said nothing and both chains were ``high`` (#82)."""
+    (0): #79's two samples said nothing and both chains were ``high``. The offset is that of
+    the rows sent later, so the text says so (``source_clock_shared``), not that the clock was
+    off at T (#82)."""
     _jumps_later(db_session, evidence, JUMP)
     outcome = exact_request(db_session)
     assert outcome.mode == "exact"
     assert sorted(match.traffic.srcip for match in outcome.matches) == [PC, PC15]
-    assert offsets(outcome) == {"fortigate": -10800}
+    assert offsets(outcome, CLOCK_SHARED) == {"fortigate": -10800}
+    assert outcome_note(outcome, CLOCK_SHARED)["limit"] == 120
+    assert CLOCK not in {e.key for e in outcome.explanations}
     assert all(match.chain is not None for match in outcome.matches)
     assert {match.chain.confidence for match in outcome.matches if match.chain} == {"low"}
     inside = internal(db_session, PC, AT)
     assert inside.attribution is not None
     assert inside.attribution.confidence == "low"
-    assert offsets(inside) == {"fortigate": -10800}
+    assert offsets(inside, CLOCK_SHARED) == {"fortigate": -10800}
 
 
 def test_a_source_on_time_all_day_is_trusted_as_before(
@@ -2754,24 +2768,24 @@ def test_a_source_on_time_all_day_is_trusted_as_before(
     (match,) = outcome.matches
     assert match.chain is not None
     assert match.chain.confidence == "high"
-    assert CLOCK not in {e.key for e in outcome.explanations}
+    assert {CLOCK, CLOCK_SHARED}.isdisjoint(e.key for e in outcome.explanations)
 
 
-def test_a_clock_set_ahead_is_named_at_the_moments_whose_device_times_it_used(
+def test_a_clock_set_ahead_and_corrected_is_named_at_the_moments_whose_device_times_it_used(
     db_session: Session, evidence: Evidence
 ) -> None:
-    """A clock set 3 hours ahead at :data:`CHANGED` stamps the rows it sends with device times
-    from CHANGED + 3 h: a lookup at CHANGED + 4 h (the device times of rows sent at CHANGED +
-    1 h) names it (the rows received around it were sent after the change, as #79's second
-    sample sees), and one at T, before the change, does not (no device time of T was used
-    again)."""
-    _jumps_later(db_session, evidence, -JUMP)
-    later = internal(db_session, PC, CHANGED + timedelta(hours=4))
-    assert offsets(later) == {"fortigate": 10800}
+    """For symmetry: a clock set 3 hours ahead at :data:`CHANGED` and corrected an hour later
+    stamped the rows of that hour with device times from CHANGED + 3 h. A lookup at CHANGED +
+    3 h 30 min sees them among the rows sent on time (median 0) and receives only rows on time
+    around it (0); the minutes of that hour name +10800 s. One at T, before the change, says
+    nothing (no device time of T was used again)."""
+    _jumps_later(db_session, evidence, -JUMP, corrected=timedelta(hours=1))
+    later = internal(db_session, PC, CHANGED + timedelta(hours=3, minutes=30))
+    assert offsets(later, CLOCK_SHARED) == {"fortigate": 10800}
     before = internal(db_session, PC, AT)
     assert before.attribution is not None
     assert before.attribution.confidence == "high"
-    assert CLOCK not in {e.key for e in before.explanations}
+    assert {CLOCK, CLOCK_SHARED}.isdisjoint(e.key for e in before.explanations)
 
 
 def test_the_lookup_and_the_alert_share_the_clock_limits() -> None:
@@ -2959,6 +2973,10 @@ EMITTED_BY: dict[str, tuple[str, str]] = {
     "source_clock_offset": (
         "test_lookup_fortigate_only.py",
         "test_a_not_logged_exit_the_logs_saw_measures_the_search",
+    ),
+    "source_clock_shared": (
+        "test_lookup_fortigate_only.py",
+        "test_a_lookup_hours_before_a_clock_set_back_names_the_shared_device_times",
     ),
     "source_configured_later": (
         "test_lookup_fortigate_only.py",

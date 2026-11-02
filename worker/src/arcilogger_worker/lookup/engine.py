@@ -808,7 +808,7 @@ class _Lookup:
         #: ``("mac", mac, at)`` for a MAC-only request (the D8 probe, 2.8.3).
         self._unbuilt: tuple[str, str, datetime] | None = None
         #: The clock measurement per source (2.7): (median offset in seconds, rows) or ``None``.
-        self._clocks: dict[str, tuple[float, int] | None] = {}
+        self._clocks: dict[str, tuple[float, int, bool] | None] = {}
 
     # -- entry ------------------------------------------------------------------------------------
 
@@ -1647,32 +1647,40 @@ class _Lookup:
     ) -> tuple[AttributionChain | None, list[NatMatch]]:
         """2.7 "Source clock at the requested moment": the sources of :meth:`_clock_sources`
         whose median offset at the moment is beyond their limit are named
-        (``source_clock_offset``) and every chain of the outcome, alternatives included, is
-        ``low``, its lease step too; a match keeps its kind. The search and the lease timeline
-        used the device's times, so a session or lease found may not be the one the moment
-        means, and an empty search may have missed it."""
+        (``source_clock_offset``; ``source_clock_shared`` when the offset is that of other rows
+        stamped with the moment's device times, #82) and every chain of the outcome,
+        alternatives included, is ``low``, its lease step too; a match keeps its kind. The
+        search and the lease timeline used the device's times, so a session or lease found may
+        not be the one the moment means, and an empty search may have missed it."""
         sources = self._clock_sources(attribution, matches, plan)
         tolerance = max(CLOCK_LIMIT_SECONDS, self.tolerance)
-        offsets: dict[str, int] = {}
-        limits: list[int] = []
+        named: dict[str, tuple[dict[str, int], list[int]]] = {
+            "source_clock_offset": ({}, []),
+            "source_clock_shared": ({}, []),
+        }
         for name, lease in sources.items():
             limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
             measured = self._clock(name)
             # The unrounded median is compared, as R20-lease:source-clock compares it; the
             # offset printed is rounded up, so a named offset still exceeds its limit.
             if measured is not None and abs(measured[0]) > limit:
+                offsets, limits = named[
+                    "source_clock_shared" if measured[2] else "source_clock_offset"
+                ]
                 offsets[name] = _whole_seconds(measured[0])
                 limits.append(limit)
-        if not offsets:
+        if not any(offsets for offsets, _limits in named.values()):
             return attribution, matches
-        self.explanations.append(
-            explain(
-                "source_clock_offset",
-                at=self.request.at.isoformat(),
-                offsets=", ".join(f"{name}: {offset:+d}" for name, offset in offsets.items()),
-                limit=min(limits),
-            )
-        )
+        for key, (offsets, limits) in named.items():
+            if offsets:
+                self.explanations.append(
+                    explain(
+                        key,
+                        at=self.request.at.isoformat(),
+                        offsets=", ".join(f"{n}: {offset:+d}" for n, offset in offsets.items()),
+                        limit=min(limits),
+                    )
+                )
         matches = [m if m.chain is None else replace(m, chain=_lowered(m.chain)) for m in matches]
         return (None if attribution is None else _lowered(attribution)), matches
 
@@ -1738,11 +1746,12 @@ class _Lookup:
         )
         return list(self.session.scalars(query))
 
-    def _clock(self, source: str) -> tuple[float, int] | None:
+    def _clock(self, source: str) -> tuple[float, int, bool] | None:
         """``source``'s clock at the moment: the median of ``time - time_received`` (seconds),
-        and its number of rows, of three samples, the one whose median is further from 0 (a
-        session search must not trust the clock if any says it was off); ``None`` when none
-        has :data:`CLOCK_MIN_ROWS` rows. Cached per lookup.
+        its number of rows and whether it is the shared device times' (the third sample), of
+        three samples, the one whose median is further from 0 (a session search must not trust
+        the clock if any says it was off); ``None`` when none has :data:`CLOCK_MIN_ROWS` rows.
+        Cached per lookup.
 
         * By device time: its ``messages`` rows nearest the moment on each side within
           :data:`CLOCK_SPAN` whose device time is not the receive time (ingest's stand-in for a
@@ -1760,7 +1769,8 @@ class _Lookup:
           stamps the rows it sends after J with the device times of the hours before J: a
           lookup there finds the sessions of both real times, while its first sample holds
           more rows sent on time (median 0) and its second only minutes received before J
-          (#82)."""
+          (#82). One median for the offsets behind and one for those ahead: a small shift of
+          many rows must not hide a large one of fewer."""
         if source not in self._clocks:
             at = self.request.at
 
@@ -1789,12 +1799,19 @@ class _Lookup:
             )
             if (sampled := clocksamples.median(received))[0] is not None:
                 samples.append((float(sampled[0]), sampled[1]))
+            shared: list[tuple[float, int, bool]] = []
             shifted = clocksamples.shifted_into(
                 self.session, source, at - CLOCK_SPAN, at + CLOCK_SPAN, CLOCK_LIMIT_SECONDS
             )
-            if (moved := clocksamples.median(shifted))[0] is not None:
-                samples.append((float(moved[0]), moved[1]))
-            measured = [sample for sample in samples if sample[1] >= CLOCK_MIN_ROWS]
+            for half in ([p for p in shifted if p[0] < 0], [p for p in shifted if p[0] > 0]):
+                # One median a side: a small shift beside a large one must not hide it.
+                if (moved := clocksamples.median(half))[0] is not None:
+                    shared.append((float(moved[0]), moved[1], True))
+            measured = [
+                sample
+                for sample in [(median, count, False) for median, count in samples] + shared
+                if sample[1] >= CLOCK_MIN_ROWS
+            ]
             self._clocks[source] = max(measured, key=lambda m: abs(m[0])) if measured else None
         return self._clocks[source]
 
