@@ -1001,6 +1001,57 @@ Güvenlik duvarı (`Set-ArciFirewall.ps1`):
 - Kaldırma (`-Remove`, kaldırmada otomatik): ARCILOGGER kuralları silinir, kapatılan kurallar ve
   profil ayarları ilk çalıştırmadan önceki hâline döner.
 
+### 12.1 Durum penceresi (ARCILOGGER Durum)
+
+Sunucuda Administrators grubunun üyesi bir hesapla oturum açınca küçük bir **ARCILOGGER Durum**
+penceresi kendiliğinden açılır. Web arayüzünü açmadan ARCILOGGER'ın çalışıp çalışmadığını
+gösterir ve her 10 saniyede bir yenilenir.
+
+- **Servisler:** altı Windows servisinin durumu (ArciCollector, ArciIngest, ArciApi, ArciWorker,
+  ArciWeb, ArciAdmin) ve API'nin yanıt verip vermediği.
+- **Log akışı:**
+  - son kaydın saati;
+  - sessiz kaynaklar (`[seal] gap_minutes` süresinden uzun süredir kayıt göndermeyenler);
+  - ham kayıtlar diske yazılamıyorsa kırmızı uyarı.
+- **Veritabanına aktarım:** veritabanına yazılabiliyor mu, aktarım ne kadar geride.
+- **Mühürleme:**
+  - son mühürlenen gün ve sağlayıcı;
+  - dün saat 03:00'e kadar mühürlenmediyse turuncu;
+  - mühür `[seal] late_after_hours` (48 saat) süresinden fazla geciktiyse kırmızı.
+- **Uyarılar:** son 24 saatin kanıt yolu uyarıları (`state\alerts.jsonl`). Bütün uyarılar web
+  arayüzünün Uyarılar sayfasındadır.
+- **Veri diski:** veri klasörünün diskindeki boş yer. %15'in altında turuncu, %5'in altında
+  kırmızı olur.
+
+Renkler: yeşil "çalışıyor", turuncu "dikkat", kırmızı "sorun var", gri "okunamadı". Durum kırmızıya
+dönünce görev çubuğundaki düğme yanıp söner. Ses çıkmaz, pencere öne atlamaz.
+
+Pencere **yalnızca okur**:
+
+- hiçbir servisi başlatmaz ya da durdurmaz, hiçbir ayarı değiştirmez;
+- veritabanına bağlanmaz;
+- ağa çıkmaz: API sağlık denetimi yalnızca bu makinenin kendi adresine (`127.0.0.1`) gider;
+- telemetri göndermez.
+
+"Web arayüzünü aç" düğmesi `https://localhost/` adresini açar. Sunucuda kök sertifika kurulu
+değilse tarayıcı bir sertifika uyarısı gösterir (bölüm 8).
+
+- **Başlatma:**
+  - `\ARCILOGGER\Desktop\StatusWindow` zamanlanmış görevi, Administrators üyesi biri her oturum
+    açtığında pencereyi en yüksek yetkiyle açar. UAC sorusu çıkmaz. Bu yetki gereklidir, çünkü
+    veri klasörünün `state\` bölümünü yalnızca yöneticiler okuyabilir.
+  - Kapatılan pencere Başlat menüsünde **ARCILOGGER → ARCILOGGER Durum** ile yeniden açılır. Bu
+    kısayol UAC onayı ister.
+  - Onay verilmezse pencere yalnızca servisleri, API'yi ve diski gösterir. Diğer satırlar
+    "okunamadı" der.
+- Her oturumda tek pencere açılır. İkinci kez başlatmak açık olanı öne getirir.
+- Yükseltme ve kaldırma pencereyi kapatır. Yükseltmeden sonra pencere bir sonraki oturum
+  açılışında ya da kısayolla yeniden açılır.
+- Komut satırından tek bakış (yönetici PowerShell):
+  ```powershell
+  & "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core.desktop --print
+  ```
+
 ## 13. Yükseltme
 
 1. Yönetici PC'sinde yeni paketi indirin ya da oluşturun (bölüm 4), sunucuya kopyalayın ve parmak
