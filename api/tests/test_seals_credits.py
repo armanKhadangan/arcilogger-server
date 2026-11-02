@@ -144,3 +144,6 @@ def test_credits_unsupported_line_from_the_credit_task(
     assert client.get(API).json()["supported"] is True  # written before a provider change
     write_lines(layout, {"time": "2026-10-13T09:00:00+03:00", "provider": "mock", "credits": 12})
     assert client.get(API).json()["supported"] is True
+    # a line that names no provider is the configured provider's
+    write_lines(layout, {"time": "2026-10-14T09:00:00+03:00", "supported": False})
+    assert client.get(API).json()["supported"] is False

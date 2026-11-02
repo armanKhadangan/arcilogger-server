@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -431,6 +432,38 @@ def test_day_detail_renewal_from_the_renewal_report(
         assert datetime.fromisoformat(renewal["renewed_at"]) == gen_time
     else:
         assert (renewal["covered_by"], renewal["renewed_at"]) == (None, None)
+
+
+#: The web mirror of the day page (C2): the day detail is not in the OpenAPI contract, so the
+#: members of its Wave 5 interfaces are compared with the API's keys here.
+SEAL_TYPES = Path(__file__).resolve().parents[2] / "web" / "src" / "lib" / "seal-types.ts"
+
+
+def ts_members(interface: str) -> set[str]:
+    text = SEAL_TYPES.read_text(encoding="utf-8")
+    body = re.search(rf"^export interface {interface} \{{\n(.*?)^\}}", text, re.M | re.S)
+    assert body is not None, interface
+    return set(re.findall(r"^  (\w+)\??:", body[1], re.M))
+
+
+def test_day_detail_renewal_and_revocation_match_the_web_types(
+    client: TestClient, login_as: Login, vault: SealedVault, layout: Layout
+) -> None:
+    write_renewals(
+        layout,
+        {
+            "path": D11_TOKEN,
+            "kind": "day",
+            "cert_not_after": "2031-08-30T21:30:00Z",
+            "status": "covered",
+            "covered_by": "renewals/2031-05-04-1.json",
+        },
+    )
+    login_as(client, "auditor")
+    detail = client.get(f"{API}/{D11.isoformat()}").json()
+    assert set(detail["renewal"]) == ts_members("SealRenewal")
+    assert set(detail["revocation"]) == ts_members("SealRevocation")
+    assert {"renewal", "revocation"} <= ts_members("SealDayDetail")
 
 
 @pytest.mark.parametrize("prefix", ["", "vault/"])

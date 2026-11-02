@@ -1,8 +1,8 @@
 {
   "auditor_run": {
-    "created_at": "2026-10-13T04:00:04.139552Z",
-    "elapsed_ms": 123,
-    "finished_at": "2026-10-13T04:00:04.139138Z",
+    "created_at": "2026-10-13T04:00:01.965334Z",
+    "elapsed_ms": 40,
+    "finished_at": "2026-10-13T04:00:01.965163Z",
     "id": 8,
     "mode": "candidates",
     "outcome": {
@@ -76,7 +76,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:04.015884+00:00",
+      "generated_at": "2026-10-13T04:00:01.925348+00:00",
       "matches": [
         {
           "chain": {
@@ -459,9 +459,9 @@
     "username": "ayse.yilmaz"
   },
   "candidates": {
-    "created_at": "2026-10-13T04:00:02.916333Z",
-    "elapsed_ms": 113,
-    "finished_at": "2026-10-13T04:00:02.915958Z",
+    "created_at": "2026-10-13T04:00:01.497399Z",
+    "elapsed_ms": 43,
+    "finished_at": "2026-10-13T04:00:01.497246Z",
     "id": 2,
     "mode": "candidates",
     "outcome": {
@@ -535,7 +535,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.802945+00:00",
+      "generated_at": "2026-10-13T04:00:01.454268+00:00",
       "matches": [
         {
           "chain": {
@@ -918,9 +918,9 @@
     "username": "tolga"
   },
   "candidates_with_report": {
-    "created_at": "2026-10-13T04:00:02.916333Z",
+    "created_at": "2026-10-13T04:00:01.497399Z",
     "elapsed_ms": null,
-    "finished_at": "2026-10-13T04:00:02.915958Z",
+    "finished_at": "2026-10-13T04:00:01.497246Z",
     "id": 2,
     "mode": "candidates",
     "outcome": {
@@ -994,7 +994,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.802945+00:00",
+      "generated_at": "2026-10-13T04:00:01.454268+00:00",
       "matches": [
         {
           "chain": {
@@ -1366,19 +1366,19 @@
       "tolerance_seconds": 60
     },
     "report": {
-      "created_at": "2026-10-13T04:00:05.060506Z",
+      "created_at": "2026-10-13T04:00:02.455947Z",
       "download_count": 1,
       "pages": 8,
-      "sha256": "48a051c33726ee8b92cca32b6dec4f1afdb24767d10fba731f15a4a450ab8468",
-      "size": 91816,
+      "sha256": "fd093e21b2de02b6ce595ffa8e913c5bf016e77afb5b55a21e316ed6e4e6fe9f",
+      "size": 91814,
       "timestamp": {
         "errors": [],
-        "gen_time": "2026-10-13T04:00:04+00:00",
+        "gen_time": "2026-10-13T04:00:02+00:00",
         "legal_grade": false,
         "policy": "2.999.5651.1",
         "provider": "mock",
         "root": "CN=ARCILOGGER Mock Root CA (TEST ONLY),O=ARCILOGGER TEST - NOT VALID,C=TR",
-        "serial": "3F882032695B47FC",
+        "serial": "32DC80C989C49134",
         "server": "tzd.kamusm.gov.tr",
         "token_file": "reports/ARCILOGGER-5651-rapor-2.pdf.zd",
         "token_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
@@ -1400,9 +1400,9 @@
     "username": "tolga"
   },
   "changed_after_event": {
-    "created_at": "2026-10-13T04:01:52.796695Z",
-    "elapsed_ms": 80,
-    "finished_at": "2026-10-13T04:01:52.796331Z",
+    "created_at": "2026-10-13T04:01:12.348641Z",
+    "elapsed_ms": 42,
+    "finished_at": "2026-10-13T04:01:12.348473Z",
     "id": 121,
     "mode": "candidates",
     "outcome": {
@@ -1494,7 +1494,7 @@
           "text_tr": "29.09.2026 11:23:41 anından sonra şu internet çıkışlarının tanımı değişti: hat-2 (30.09.2026 09:00:00, yükseltme (eski NAT ayarlarından aktarıldı); şimdi: genel 198.51.100.77, 198.51.100.78, NAT 100.64.13.9). Sorgu bugünkü tanımlarla yapıldı; bu çıkışların o tarihteki adresleri farklıysa sonuç farklı olabilir. Önceki tanımlar kurumun denetim kaydındadır (settings.change) ve sistem yöneticisinden istenebilir."
         }
       ],
-      "generated_at": "2026-10-13T04:01:52.717288+00:00",
+      "generated_at": "2026-10-13T04:01:12.306187+00:00",
       "matches": [
         {
           "chain": {
@@ -1654,9 +1654,9 @@
     "username": "tolga"
   },
   "clock_offset": {
-    "created_at": "2026-10-13T04:01:52.146883Z",
-    "elapsed_ms": 97,
-    "finished_at": "2026-10-13T04:01:52.146455Z",
+    "created_at": "2026-10-13T04:01:12.082676Z",
+    "elapsed_ms": 38,
+    "finished_at": "2026-10-13T04:01:12.082492Z",
     "id": 118,
     "mode": "exact",
     "outcome": {
@@ -1735,7 +1735,7 @@
           "text_tr": "23.09.2026 11:23:41 çevresinde şu kaynakların kayıt zamanları ARCILOGGER'ın alma zamanından ortanca olarak saniye cinsinden şu kadar farklıydı: fortigate: -480 (sınır 120 saniye). Arama ve kira zaman çizelgesi cihazın zamanlarını kullandı: doğru oturum ya da kira bu fark kadar kaymış bir zaman aralığında olabilir; doğru oturum bulunmamış ve başka bir oturum bulunmuş olabilir, kira da o anı kapsamıyor olabilir. Bu sonuçta zincir varsa düşük güvenle gösterildi. Sonuç boşsa sorguyu yeniden çalıştırın: genel IP sorgusunda toleransı bu fark kadar genişleterek, iç IP ya da MAC adresi sorgusunda istenen anı bu fark kadar kaydırarak (fark artıysa ileri, eksiyse geri)."
         }
       ],
-      "generated_at": "2026-10-13T04:01:52.049381+00:00",
+      "generated_at": "2026-10-13T04:01:12.043873+00:00",
       "matches": [
         {
           "chain": {
@@ -1901,9 +1901,9 @@
     "username": "tolga"
   },
   "conflict": {
-    "created_at": "2026-10-13T04:00:03.098377Z",
-    "elapsed_ms": 85,
-    "finished_at": "2026-10-13T04:00:03.097947Z",
+    "created_at": "2026-10-13T04:00:01.568581Z",
+    "elapsed_ms": 29,
+    "finished_at": "2026-10-13T04:00:01.568438Z",
     "id": 3,
     "mode": "candidates",
     "outcome": {
@@ -1977,7 +1977,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:03.013080+00:00",
+      "generated_at": "2026-10-13T04:00:01.539448+00:00",
       "matches": [
         {
           "chain": {
@@ -2231,9 +2231,9 @@
     "username": "tolga"
   },
   "direct_quiet_none": {
-    "created_at": "2026-10-13T04:01:49.964776Z",
-    "elapsed_ms": 48,
-    "finished_at": "2026-10-13T04:01:49.964452Z",
+    "created_at": "2026-10-13T04:01:10.433443Z",
+    "elapsed_ms": 19,
+    "finished_at": "2026-10-13T04:01:10.433288Z",
     "id": 107,
     "mode": "none",
     "outcome": {
@@ -2301,7 +2301,7 @@
           "text_tr": "FortiGate bu zaman aralığında 203.0.113.200:51001 için oturum kaydetmemiş. Saati ve saat dilimini, protokolü ve toleransı kontrol edin; FortiGate politikalarında trafik kaydının (logtraffic all) açık olduğundan emin olun."
         }
       ],
-      "generated_at": "2026-10-13T04:01:49.916660+00:00",
+      "generated_at": "2026-10-13T04:01:10.413810+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -2527,9 +2527,9 @@
     }
   },
   "exact": {
-    "created_at": "2026-10-13T04:00:02.678337Z",
+    "created_at": "2026-10-13T04:00:01.404443Z",
     "elapsed_ms": 140,
-    "finished_at": "2026-10-13T04:00:02.677904Z",
+    "finished_at": "2026-10-13T04:00:01.404270Z",
     "id": 1,
     "mode": "exact",
     "outcome": {
@@ -2604,7 +2604,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.538955+00:00",
+      "generated_at": "2026-10-13T04:00:01.264808+00:00",
       "matches": [
         {
           "chain": {
@@ -2767,9 +2767,9 @@
     "username": "tolga"
   },
   "exact_with_report": {
-    "created_at": "2026-10-13T04:00:02.678337Z",
+    "created_at": "2026-10-13T04:00:01.404443Z",
     "elapsed_ms": null,
-    "finished_at": "2026-10-13T04:00:02.677904Z",
+    "finished_at": "2026-10-13T04:00:01.404270Z",
     "id": 1,
     "mode": "exact",
     "outcome": {
@@ -2844,7 +2844,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:02.538955+00:00",
+      "generated_at": "2026-10-13T04:00:01.264808+00:00",
       "matches": [
         {
           "chain": {
@@ -2996,11 +2996,11 @@
       "tolerance_seconds": 60
     },
     "report": {
-      "created_at": "2026-10-13T04:00:04.467856Z",
+      "created_at": "2026-10-13T04:00:02.175295Z",
       "download_count": 1,
       "pages": 6,
-      "sha256": "7629786466ab4ecdb2d1aa0bd4c94cf67bc4d45c1f200b9f1da5ee8382e19fec",
-      "size": 84096,
+      "sha256": "417cdadc7cbbdf8f96f10b502d15cba7325196894666d73d0c72f312a4928fda",
+      "size": 84097,
       "timestamp": null,
       "timestamp_status": "not_requested",
       "username": "tolga",
@@ -3017,9 +3017,9 @@
     "username": "tolga"
   },
   "fallback_direct": {
-    "created_at": "2026-10-13T04:01:50.181999Z",
-    "elapsed_ms": 93,
-    "finished_at": "2026-10-13T04:01:50.181631Z",
+    "created_at": "2026-10-13T04:01:10.525199Z",
+    "elapsed_ms": 41,
+    "finished_at": "2026-10-13T04:01:10.525013Z",
     "id": 108,
     "mode": "candidates",
     "outcome": {
@@ -3109,7 +3109,7 @@
           "text_tr": "11.09.2026 11:23:41 çevresinde hiçbir çıkışa tanımlı olmayan kaynak NAT adresleri de görüldü: 100.64.12.9. Çıkış tanımları eksik olabilir (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT))."
         }
       ],
-      "generated_at": "2026-10-13T04:01:50.088968+00:00",
+      "generated_at": "2026-10-13T04:01:10.484343+00:00",
       "matches": [
         {
           "chain": {
@@ -3269,9 +3269,9 @@
     "username": "tolga"
   },
   "fallback_transip": {
-    "created_at": "2026-10-13T04:01:50.407031Z",
-    "elapsed_ms": 100,
-    "finished_at": "2026-10-13T04:01:50.406652Z",
+    "created_at": "2026-10-13T04:01:10.631163Z",
+    "elapsed_ms": 44,
+    "finished_at": "2026-10-13T04:01:10.631000Z",
     "id": 109,
     "mode": "candidates",
     "outcome": {
@@ -3359,7 +3359,7 @@
           "text_tr": "13.09.2026 11:23:41 çevresinde hiçbir çıkışa tanımlı olmayan kaynak NAT adresleri de görüldü: 100.64.12.77. Çıkış tanımları eksik olabilir (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT))."
         }
       ],
-      "generated_at": "2026-10-13T04:01:50.308027+00:00",
+      "generated_at": "2026-10-13T04:01:10.586536+00:00",
       "matches": [
         {
           "chain": {
@@ -3519,9 +3519,9 @@
     "username": "tolga"
   },
   "fortigate_candidates": {
-    "created_at": "2026-10-13T04:01:48.944573Z",
-    "elapsed_ms": 114,
-    "finished_at": "2026-10-13T04:01:48.944254Z",
+    "created_at": "2026-10-13T04:01:10.032107Z",
+    "elapsed_ms": 43,
+    "finished_at": "2026-10-13T04:01:10.031954Z",
     "id": 102,
     "mode": "candidates",
     "outcome": {
@@ -3583,7 +3583,7 @@
           "text_tr": "Kişi ve departman, sorgunun yapıldığı andaki cihaz-kişi atamasını ve kişinin o andaki departmanını gösterir; cihazın olay anında kimde olduğunun kanıtı değildir (bu cihaz için atama geçmişi kaydı yoktur)."
         }
       ],
-      "generated_at": "2026-10-13T04:01:48.830301+00:00",
+      "generated_at": "2026-10-13T04:01:09.988471+00:00",
       "matches": [
         {
           "chain": {
@@ -3899,9 +3899,9 @@
     "username": "tolga"
   },
   "fortigate_internal": {
-    "created_at": "2026-10-13T04:01:48.712355Z",
-    "elapsed_ms": 122,
-    "finished_at": "2026-10-13T04:01:48.711999Z",
+    "created_at": "2026-10-13T04:01:09.943209Z",
+    "elapsed_ms": 46,
+    "finished_at": "2026-10-13T04:01:09.943025Z",
     "id": 101,
     "mode": "internal",
     "outcome": {
@@ -4018,7 +4018,7 @@
           "text_tr": "Kişi ve departman, sorgunun yapıldığı andaki cihaz-kişi atamasını ve kişinin o andaki departmanını gösterir; cihazın olay anında kimde olduğunun kanıtı değildir (bu cihaz için atama geçmişi kaydı yoktur)."
         }
       ],
-      "generated_at": "2026-10-13T04:01:48.590472+00:00",
+      "generated_at": "2026-10-13T04:01:09.897156+00:00",
       "matches": [],
       "mode": "internal",
       "request": {
@@ -4067,9 +4067,9 @@
     "username": "tolga"
   },
   "fortigate_renewal_low": {
-    "created_at": "2026-10-13T04:01:49.361582Z",
-    "elapsed_ms": 69,
-    "finished_at": "2026-10-13T04:01:49.361261Z",
+    "created_at": "2026-10-13T04:01:10.192184Z",
+    "elapsed_ms": 24,
+    "finished_at": "2026-10-13T04:01:10.192050Z",
     "id": 104,
     "mode": "internal",
     "outcome": {
@@ -4172,7 +4172,7 @@
       "double_nat": true,
       "egress": null,
       "explanations": [],
-      "generated_at": "2026-10-13T04:01:49.293419+00:00",
+      "generated_at": "2026-10-13T04:01:10.167620+00:00",
       "matches": [],
       "mode": "internal",
       "request": {
@@ -4221,9 +4221,9 @@
     "username": "tolga"
   },
   "hat2_candidates": {
-    "created_at": "2026-10-13T04:01:49.190212Z",
-    "elapsed_ms": 83,
-    "finished_at": "2026-10-13T04:01:49.189884Z",
+    "created_at": "2026-10-13T04:01:10.122763Z",
+    "elapsed_ms": 38,
+    "finished_at": "2026-10-13T04:01:10.122634Z",
     "id": 103,
     "mode": "candidates",
     "outcome": {
@@ -4304,7 +4304,7 @@
           "text_tr": "Arama hat-2 çıkışıyla sınırlandı: bu çıkış servis sağlayıcı NAT'ı olarak tanımlı (ayarlara göre servis sağlayıcının yönlendiricisi bu hatta ikinci bir NAT yapıyor). FortiGate'in bu hattaki NAT adresleri: 100.64.13.9; arayüzler: wan2."
         }
       ],
-      "generated_at": "2026-10-13T04:01:49.106602+00:00",
+      "generated_at": "2026-10-13T04:01:10.084466+00:00",
       "matches": [
         {
           "chain": {
@@ -4488,9 +4488,9 @@
     "username": "tolga"
   },
   "internal": {
-    "created_at": "2026-10-13T04:00:03.276356Z",
-    "elapsed_ms": 73,
-    "finished_at": "2026-10-13T04:00:03.276030Z",
+    "created_at": "2026-10-13T04:00:01.642190Z",
+    "elapsed_ms": 29,
+    "finished_at": "2026-10-13T04:00:01.642043Z",
     "id": 4,
     "mode": "internal",
     "outcome": {
@@ -4584,7 +4584,7 @@
       "double_nat": true,
       "egress": null,
       "explanations": [],
-      "generated_at": "2026-10-13T04:00:03.203618+00:00",
+      "generated_at": "2026-10-13T04:00:01.613541+00:00",
       "matches": [],
       "mode": "internal",
       "request": {
@@ -4633,9 +4633,9 @@
     "username": "tolga"
   },
   "internal_exit": {
-    "created_at": "2026-10-13T04:01:51.924189Z",
-    "elapsed_ms": 37,
-    "finished_at": "2026-10-13T04:01:51.923870Z",
+    "created_at": "2026-10-13T04:01:11.993227Z",
+    "elapsed_ms": 15,
+    "finished_at": "2026-10-13T04:01:11.993087Z",
     "id": 117,
     "mode": "none",
     "outcome": {
@@ -4697,7 +4697,7 @@
           "text_tr": "172.20.99.1, dmz tanımına göre FortiGate'in iç ağlara (DMZ, başka bir VLAN, VPN ya da şube) yaptığı kaynak NAT'ın adresidir, bir internet çıkışı değildir; oturum aranmadı ve kimse listelenmedi. Adres bir internet hattına aitse tanımı Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde düzeltin."
         }
       ],
-      "generated_at": "2026-10-13T04:01:51.887284+00:00",
+      "generated_at": "2026-10-13T04:01:11.977949+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -4750,7 +4750,7 @@
     "items": [
       {
         "authority": "Ankara Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:04.139552Z",
+        "created_at": "2026-10-13T04:00:01.965334Z",
         "file_no": "2026/9917",
         "id": 8,
         "mode": "candidates",
@@ -4762,7 +4762,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.879157Z",
+        "created_at": "2026-10-13T04:00:01.869762Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 7,
         "mode": "candidates",
@@ -4774,7 +4774,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.642395Z",
+        "created_at": "2026-10-13T04:00:01.770268Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 6,
         "mode": "none",
@@ -4786,7 +4786,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.461763Z",
+        "created_at": "2026-10-13T04:00:01.706265Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 5,
         "mode": "none",
@@ -4798,7 +4798,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.276356Z",
+        "created_at": "2026-10-13T04:00:01.642190Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 4,
         "mode": "internal",
@@ -4810,7 +4810,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.098377Z",
+        "created_at": "2026-10-13T04:00:01.568581Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 3,
         "mode": "candidates",
@@ -4822,11 +4822,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.916333Z",
+        "created_at": "2026-10-13T04:00:01.497399Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 2,
         "mode": "candidates",
-        "report_sha256": "48a051c33726ee8b92cca32b6dec4f1afdb24767d10fba731f15a4a450ab8468",
+        "report_sha256": "fd093e21b2de02b6ce595ffa8e913c5bf016e77afb5b55a21e316ed6e4e6fe9f",
         "request_date": "2026-10-10",
         "result_count": 3,
         "user_id": 1,
@@ -4834,11 +4834,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.678337Z",
+        "created_at": "2026-10-13T04:00:01.404443Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 1,
         "mode": "exact",
-        "report_sha256": "7629786466ab4ecdb2d1aa0bd4c94cf67bc4d45c1f200b9f1da5ee8382e19fec",
+        "report_sha256": "417cdadc7cbbdf8f96f10b502d15cba7325196894666d73d0c72f312a4928fda",
         "request_date": "2026-10-10",
         "result_count": 1,
         "user_id": 1,
@@ -4852,7 +4852,7 @@
     "items": [
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.879157Z",
+        "created_at": "2026-10-13T04:00:01.869762Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 7,
         "mode": "candidates",
@@ -4864,7 +4864,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.642395Z",
+        "created_at": "2026-10-13T04:00:01.770268Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 6,
         "mode": "none",
@@ -4876,7 +4876,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.461763Z",
+        "created_at": "2026-10-13T04:00:01.706265Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 5,
         "mode": "none",
@@ -4888,7 +4888,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.276356Z",
+        "created_at": "2026-10-13T04:00:01.642190Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 4,
         "mode": "internal",
@@ -4900,7 +4900,7 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:03.098377Z",
+        "created_at": "2026-10-13T04:00:01.568581Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 3,
         "mode": "candidates",
@@ -4912,11 +4912,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.916333Z",
+        "created_at": "2026-10-13T04:00:01.497399Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 2,
         "mode": "candidates",
-        "report_sha256": "48a051c33726ee8b92cca32b6dec4f1afdb24767d10fba731f15a4a450ab8468",
+        "report_sha256": "fd093e21b2de02b6ce595ffa8e913c5bf016e77afb5b55a21e316ed6e4e6fe9f",
         "request_date": "2026-10-10",
         "result_count": 3,
         "user_id": 1,
@@ -4924,11 +4924,11 @@
       },
       {
         "authority": "İzmir Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:02.678337Z",
+        "created_at": "2026-10-13T04:00:01.404443Z",
         "file_no": "2026/48213 Soruşturma",
         "id": 1,
         "mode": "exact",
-        "report_sha256": "7629786466ab4ecdb2d1aa0bd4c94cf67bc4d45c1f200b9f1da5ee8382e19fec",
+        "report_sha256": "417cdadc7cbbdf8f96f10b502d15cba7325196894666d73d0c72f312a4928fda",
         "request_date": "2026-10-10",
         "result_count": 1,
         "user_id": 1,
@@ -4942,7 +4942,7 @@
     "items": [
       {
         "authority": "Ankara Cumhuriyet Başsavcılığı",
-        "created_at": "2026-10-13T04:00:04.139552Z",
+        "created_at": "2026-10-13T04:00:01.965334Z",
         "file_no": "2026/9917",
         "id": 8,
         "mode": "candidates",
@@ -4956,7 +4956,7 @@
     "next_cursor": null
   },
   "meta": {
-    "captured_at": "2026-10-13T04:02:06.884373+00:00",
+    "captured_at": "2026-10-13T04:01:17.864635+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
@@ -4964,9 +4964,9 @@
     "tsa": "mock (never legally valid)"
   },
   "no_egress": {
-    "created_at": "2026-10-13T04:01:51.752472Z",
-    "elapsed_ms": 38,
-    "finished_at": "2026-10-13T04:01:51.752156Z",
+    "created_at": "2026-10-13T04:01:11.924920Z",
+    "elapsed_ms": 20,
+    "finished_at": "2026-10-13T04:01:11.924736Z",
     "id": 116,
     "mode": "none",
     "outcome": {
@@ -5057,7 +5057,7 @@
           "text_tr": "19.09.2026 11:23:41 çevresinde hiçbir çıkışa tanımlı olmayan kaynak NAT adresleri de görüldü: 100.64.12.9. Çıkış tanımları eksik olabilir (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT))."
         }
       ],
-      "generated_at": "2026-10-13T04:01:51.714739+00:00",
+      "generated_at": "2026-10-13T04:01:11.904433+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -5106,9 +5106,9 @@
     "username": "tolga"
   },
   "none": {
-    "created_at": "2026-10-13T04:00:03.461763Z",
-    "elapsed_ms": 70,
-    "finished_at": "2026-10-13T04:00:03.461384Z",
+    "created_at": "2026-10-13T04:00:01.706265Z",
+    "elapsed_ms": 19,
+    "finished_at": "2026-10-13T04:00:01.706132Z",
     "id": 5,
     "mode": "none",
     "outcome": {
@@ -5196,7 +5196,7 @@
           "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
         }
       ],
-      "generated_at": "2026-10-13T04:00:03.395197+00:00",
+      "generated_at": "2026-10-13T04:00:01.687032+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -5245,9 +5245,9 @@
     "username": "tolga"
   },
   "not_logged": {
-    "created_at": "2026-10-13T04:01:50.963591Z",
-    "elapsed_ms": 38,
-    "finished_at": "2026-10-13T04:01:50.963173Z",
+    "created_at": "2026-10-13T04:01:10.866522Z",
+    "elapsed_ms": 15,
+    "finished_at": "2026-10-13T04:01:10.866373Z",
     "id": 112,
     "mode": "none",
     "outcome": {
@@ -5307,7 +5307,7 @@
           "text_tr": "198.51.100.90, misafir çıkışına ait; bu çıkış FortiGate üzerinden geçmiyor. FortiGate'te bu hattın oturum kaydı yok ve kimse listelenmedi; bu hattın kaydı ancak hattı yöneten cihazdan alınabilir."
         }
       ],
-      "generated_at": "2026-10-13T04:01:50.925413+00:00",
+      "generated_at": "2026-10-13T04:01:10.851331+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -5356,9 +5356,9 @@
     "username": "tolga"
   },
   "not_logged_seen": {
-    "created_at": "2026-10-13T04:01:51.166436Z",
-    "elapsed_ms": 83,
-    "finished_at": "2026-10-13T04:01:51.166110Z",
+    "created_at": "2026-10-13T04:01:10.963268Z",
+    "elapsed_ms": 46,
+    "finished_at": "2026-10-13T04:01:10.963118Z",
     "id": 113,
     "mode": "exact",
     "outcome": {
@@ -5429,7 +5429,7 @@
           "text_tr": "198.51.100.90, misafir çıkışına FortiGate'ten geçmeyen bir hat olarak tanımlı, ancak 17.09.2026 11:23:41 çevresinde (±15 dakika) FortiGate kayıtlarında kaynak NAT adresi olarak görünüyor: hat FortiGate'e taşınmış ya da türü yanlış girilmiş olabilir. Eşleşme FortiGate kaydında yapıldı. Çıkışın türünü Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde düzeltin."
         }
       ],
-      "generated_at": "2026-10-13T04:01:51.083326+00:00",
+      "generated_at": "2026-10-13T04:01:10.917020+00:00",
       "matches": [
         {
           "chain": {
@@ -5577,9 +5577,9 @@
     "username": "tolga"
   },
   "observed": {
-    "created_at": "2026-10-13T04:01:50.578645Z",
-    "elapsed_ms": 77,
-    "finished_at": "2026-10-13T04:01:50.578337Z",
+    "created_at": "2026-10-13T04:01:10.712353Z",
+    "elapsed_ms": 35,
+    "finished_at": "2026-10-13T04:01:10.712185Z",
     "id": 110,
     "mode": "exact",
     "outcome": {
@@ -5628,7 +5628,7 @@
           "text_tr": "203.0.113.201 hiçbir internet çıkışında tanımlı değil, ancak 15.09.2026 11:23:41 çevresinde (±15 dakika) FortiGate kayıtlarında kaynak NAT adresi olarak görünüyor: FortiGate bu adresi o sırada kendisi kullanıyordu (ör. değişken genel IP'li bir hat). Eşleşme FortiGate kaydında yapıldı. Adresin o tarihte kuruma ait olduğunu servis sağlayıcıdan doğrulayın ve hattı Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlayın."
         }
       ],
-      "generated_at": "2026-10-13T04:01:50.501372+00:00",
+      "generated_at": "2026-10-13T04:01:10.677579+00:00",
       "matches": [
         {
           "chain": {
@@ -5788,9 +5788,9 @@
     "username": "tolga"
   },
   "observed_no_exits": {
-    "created_at": "2026-10-13T04:01:50.803932Z",
-    "elapsed_ms": 98,
-    "finished_at": "2026-10-13T04:01:50.803552Z",
+    "created_at": "2026-10-13T04:01:10.796401Z",
+    "elapsed_ms": 32,
+    "finished_at": "2026-10-13T04:01:10.796242Z",
     "id": 111,
     "mode": "exact",
     "outcome": {
@@ -5840,7 +5840,7 @@
           "text_tr": "203.0.113.201 hiçbir internet çıkışında tanımlı değil, ancak 15.09.2026 11:23:41 çevresinde (±15 dakika) FortiGate kayıtlarında kaynak NAT adresi olarak görünüyor: FortiGate bu adresi o sırada kendisi kullanıyordu (ör. değişken genel IP'li bir hat). Eşleşme FortiGate kaydında yapıldı. Adresin o tarihte kuruma ait olduğunu servis sağlayıcıdan doğrulayın ve hattı Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde tanımlayın."
         }
       ],
-      "generated_at": "2026-10-13T04:01:50.705703+00:00",
+      "generated_at": "2026-10-13T04:01:10.763674+00:00",
       "matches": [
         {
           "chain": {
@@ -6000,9 +6000,9 @@
     "username": "tolga"
   },
   "public_dynamic": {
-    "created_at": "2026-10-13T04:01:51.597067Z",
-    "elapsed_ms": 85,
-    "finished_at": "2026-10-13T04:01:51.596751Z",
+    "created_at": "2026-10-13T04:01:11.847144Z",
+    "elapsed_ms": 33,
+    "finished_at": "2026-10-13T04:01:11.846990Z",
     "id": 115,
     "mode": "candidates",
     "outcome": {
@@ -6100,7 +6100,7 @@
           "text_tr": "19.09.2026 11:23:41 çevresinde hiçbir çıkışa tanımlı olmayan kaynak NAT adresleri de görüldü: 100.64.12.9. Çıkış tanımları eksik olabilir (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT))."
         }
       ],
-      "generated_at": "2026-10-13T04:01:51.511842+00:00",
+      "generated_at": "2026-10-13T04:01:11.814208+00:00",
       "matches": [
         {
           "chain": {
@@ -6260,9 +6260,9 @@
     "username": "tolga"
   },
   "public_unknown": {
-    "created_at": "2026-10-13T04:01:51.387284Z",
-    "elapsed_ms": 79,
-    "finished_at": "2026-10-13T04:01:51.386972Z",
+    "created_at": "2026-10-13T04:01:11.758636Z",
+    "elapsed_ms": 45,
+    "finished_at": "2026-10-13T04:01:11.758458Z",
     "id": 114,
     "mode": "candidates",
     "outcome": {
@@ -6347,7 +6347,7 @@
           "text_tr": "19.09.2026 11:23:41 çevresinde hiçbir çıkışa tanımlı olmayan kaynak NAT adresleri de görüldü: 100.64.12.9. Çıkış tanımları eksik olabilir (Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT))."
         }
       ],
-      "generated_at": "2026-10-13T04:01:51.308749+00:00",
+      "generated_at": "2026-10-13T04:01:11.713617+00:00",
       "matches": [
         {
           "chain": {
@@ -6511,20 +6511,20 @@
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-1.pdf\"",
       "content-type": "application/pdf",
-      "x-arci-sha256": "7629786466ab4ecdb2d1aa0bd4c94cf67bc4d45c1f200b9f1da5ee8382e19fec"
+      "x-arci-sha256": "417cdadc7cbbdf8f96f10b502d15cba7325196894666d73d0c72f312a4928fda"
     },
-    "sha256": "7629786466ab4ecdb2d1aa0bd4c94cf67bc4d45c1f200b9f1da5ee8382e19fec",
-    "size": 84096
+    "sha256": "417cdadc7cbbdf8f96f10b502d15cba7325196894666d73d0c72f312a4928fda",
+    "size": 84097
   },
   "report_pdf_stamped": {
     "headers": {
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf\"",
       "content-type": "application/pdf",
-      "x-arci-sha256": "48a051c33726ee8b92cca32b6dec4f1afdb24767d10fba731f15a4a450ab8468"
+      "x-arci-sha256": "fd093e21b2de02b6ce595ffa8e913c5bf016e77afb5b55a21e316ed6e4e6fe9f"
     },
-    "sha256": "48a051c33726ee8b92cca32b6dec4f1afdb24767d10fba731f15a4a450ab8468",
-    "size": 91816
+    "sha256": "fd093e21b2de02b6ce595ffa8e913c5bf016e77afb5b55a21e316ed6e4e6fe9f",
+    "size": 91814
   },
   "report_token": {
     "headers": {
@@ -6532,13 +6532,13 @@
       "content-disposition": "attachment; filename=\"ARCILOGGER-5651-rapor-2.pdf.zd\"",
       "content-type": "application/timestamp-reply"
     },
-    "sha256": "a3923227c4fb5d355bf9061f7698c72e02b019a08609aca0e41a06927c650f8e",
-    "size": 1202
+    "sha256": "e12c2e870b46c318f7d8107e3b9d142f15df8088a95c204ebb3df045b8b764e6",
+    "size": 1203
   },
   "srcmac_conflict": {
-    "created_at": "2026-10-13T04:01:49.794123Z",
-    "elapsed_ms": 93,
-    "finished_at": "2026-10-13T04:01:49.793760Z",
+    "created_at": "2026-10-13T04:01:10.362715Z",
+    "elapsed_ms": 34,
+    "finished_at": "2026-10-13T04:01:10.362574Z",
     "id": 106,
     "mode": "candidates",
     "outcome": {
@@ -6605,7 +6605,7 @@
           "text_tr": "Kişi ve departman, sorgunun yapıldığı andaki cihaz-kişi atamasını ve kişinin o andaki departmanını gösterir; cihazın olay anında kimde olduğunun kanıtı değildir (bu cihaz için atama geçmişi kaydı yoktur)."
         }
       ],
-      "generated_at": "2026-10-13T04:01:49.701719+00:00",
+      "generated_at": "2026-10-13T04:01:10.327962+00:00",
       "matches": [
         {
           "chain": {
@@ -6849,9 +6849,9 @@
     "username": "tolga"
   },
   "srcmac_only": {
-    "created_at": "2026-10-13T04:01:49.570131Z",
-    "elapsed_ms": 90,
-    "finished_at": "2026-10-13T04:01:49.569769Z",
+    "created_at": "2026-10-13T04:01:10.278361Z",
+    "elapsed_ms": 38,
+    "finished_at": "2026-10-13T04:01:10.278230Z",
     "id": 105,
     "mode": "internal",
     "outcome": {
@@ -6943,7 +6943,7 @@
           "text_tr": "Kişi ve departman, sorgunun yapıldığı andaki cihaz-kişi atamasını ve kişinin o andaki departmanını gösterir; cihazın olay anında kimde olduğunun kanıtı değildir (bu cihaz için atama geçmişi kaydı yoktur)."
         }
       ],
-      "generated_at": "2026-10-13T04:01:49.480500+00:00",
+      "generated_at": "2026-10-13T04:01:10.239491+00:00",
       "matches": [],
       "mode": "internal",
       "request": {
@@ -6992,9 +6992,9 @@
     "username": "tolga"
   },
   "truncated": {
-    "created_at": "2026-10-13T04:00:03.879157Z",
-    "elapsed_ms": 100,
-    "finished_at": "2026-10-13T04:00:03.878775Z",
+    "created_at": "2026-10-13T04:00:01.869762Z",
+    "elapsed_ms": 47,
+    "finished_at": "2026-10-13T04:00:01.869613Z",
     "id": 7,
     "mode": "candidates",
     "outcome": {
@@ -7083,7 +7083,7 @@
           "text_tr": "Kişi, olay anında geçerli olan cihaz-kişi atamasıdır (atama geçmişi). Departman ise kişinin bugünkü departmanıdır; departman değişikliklerinin geçmişi tutulmaz."
         }
       ],
-      "generated_at": "2026-10-13T04:00:03.778531+00:00",
+      "generated_at": "2026-10-13T04:00:01.822665+00:00",
       "matches": [
         {
           "chain": {
@@ -7704,9 +7704,9 @@
     "username": "tolga"
   },
   "unconverted_dhcp": {
-    "created_at": "2026-10-13T04:01:52.308816Z",
-    "elapsed_ms": 58,
-    "finished_at": "2026-10-13T04:01:52.308413Z",
+    "created_at": "2026-10-13T04:01:12.147070Z",
+    "elapsed_ms": 24,
+    "finished_at": "2026-10-13T04:01:12.146939Z",
     "id": 119,
     "mode": "none",
     "outcome": {
@@ -7742,7 +7742,7 @@
           "text_tr": "172.20.42.67 için o anı kapsayan FortiGate DHCP kayıtları var, ancak kira kanıtına çevrilmediler, bu nedenle zincir kurulmadı. Olası nedenler: kayıtlar bu sürüme yükseltmeden önce yüklendi; ip ya da mac alanları okunamadı (ayrıştırma hatası fortigate.dhcp, uyarı R20-lease:fortigate-unconverted); ya da kayıtları bir geri almadan sonra önceki sürüm yükledi. İç IP sorgusunda ve kesin eşleşmede kayıt, kanıt bölümünde \"kira zaman çizelgesine girmedi; zincir kurulmadı, güven düzeyi verilmez\" notuyla gösterilir (aday eşleşmelerde gösterilmez); bir eşleştirme değildir. Ham kayıtlar saklanır ve gece mühürlenir; Arama'da type:event ile görülebilir."
         }
       ],
-      "generated_at": "2026-10-13T04:01:52.251006+00:00",
+      "generated_at": "2026-10-13T04:01:12.123021+00:00",
       "matches": [],
       "mode": "none",
       "request": {
@@ -7804,9 +7804,9 @@
     "username": "tolga"
   },
   "untrusted_match": {
-    "created_at": "2026-10-13T04:01:52.562483Z",
-    "elapsed_ms": 111,
-    "finished_at": "2026-10-13T04:01:52.562154Z",
+    "created_at": "2026-10-13T04:01:12.242121Z",
+    "elapsed_ms": 40,
+    "finished_at": "2026-10-13T04:01:12.241967Z",
     "id": 120,
     "mode": "candidates",
     "outcome": {
@@ -7900,7 +7900,7 @@
           "text_tr": "3 eşleşmede iç IP adresinden cihaza zincir kurulamadı: o anda bu adresler için kira kaydı yok. Bu eşleşmeler FortiGate oturumunda ve iç IP adresinde biter."
         }
       ],
-      "generated_at": "2026-10-13T04:01:52.451248+00:00",
+      "generated_at": "2026-10-13T04:01:12.201642+00:00",
       "matches": [
         {
           "chain": null,
@@ -8164,9 +8164,9 @@
     "username": "tolga"
   },
   "vault_only": {
-    "created_at": "2026-10-13T04:00:03.642395Z",
-    "elapsed_ms": 61,
-    "finished_at": "2026-10-13T04:00:03.642046Z",
+    "created_at": "2026-10-13T04:00:01.770268Z",
+    "elapsed_ms": 21,
+    "finished_at": "2026-10-13T04:00:01.770140Z",
     "id": 6,
     "mode": "none",
     "outcome": {
@@ -8262,7 +8262,7 @@
           "text_tr": "198.51.100.23 hiçbir çıkışın genel adresi olarak tanımlı değil; genel adresi tanımlanmamış ya da değişebilen çıkışlarda arandı: wan. Adres tanımlı bir hatta ait değilse liste yanlış hattın kullanıcılarını gösterebilir; adresin ait olduğu hattın genel adresini Ayarlar → Uygulama ayarları → 5651 sorgu ve kira zaman çizelgesi → İnternet çıkışları (NAT) bölümünde ekleyin."
         }
       ],
-      "generated_at": "2026-10-13T04:00:03.581446+00:00",
+      "generated_at": "2026-10-13T04:00:01.749508+00:00",
       "matches": [],
       "mode": "none",
       "request": {
