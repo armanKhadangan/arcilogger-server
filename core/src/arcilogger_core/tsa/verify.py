@@ -17,7 +17,8 @@ Verification never trusts the provider that produced the token. For a token and 
    :mod:`arcilogger_core.crl`): every certificate of the chain below the root against them, with
    the codes and levels of the standalone verifier's ``check_revocation`` (Wave 5 D10). The
    result is ``details["crl"]``; the caller decides what a ``crl-revoked`` means for a day
-   (:func:`arcilogger_core.chain.verify_day` fails it), as the standalone verifier does.
+   (:func:`arcilogger_core.chain.verify_day` fails it), as the standalone verifier does. A
+   ``crl-revoked`` stamp is not legal grade (:func:`confirmed_legal_grade`, C15).
 """
 
 from __future__ import annotations
@@ -75,11 +76,17 @@ def confirmed_legal_grade(
     """Whether a stamp counts as legal grade (shown so in the PDF, the calendar, packages).
 
     All of: the manifest (or the provider) says it came from the Kamu SM production server
-    (``claimed``), the token verified, and its chain ends at a root whose SHA-256 fingerprint
-    the site listed in ``tsa.legal_root_fingerprints``. A flag in a manifest alone never is.
+    (``claimed``), the token verified, its chain ends at a root whose SHA-256 fingerprint the
+    site listed in ``tsa.legal_root_fingerprints``, and no certificate of the chain was revoked
+    at or before the stamp (``details["crl"]`` is not ``crl-revoked``; Wave 5 C15). A flag in a
+    manifest alone never is. Only a result checked with revocation lists (``crls``) can say
+    revoked: without them the revocation is not known here.
     """
     root = result.details.get("root_sha256") or ""
-    return bool(claimed and result.ok and root and root in set(legal_root_fingerprints))
+    revoked = result.details.get("crl") == "crl-revoked"
+    return bool(
+        claimed and result.ok and root and root in set(legal_root_fingerprints) and not revoked
+    )
 
 
 def load_certificates(paths: Iterable[Path]) -> list[x509.Certificate]:
@@ -460,8 +467,9 @@ def verify_token(
     token that otherwise verifies gets the most severe code in ``details["crl"]``, its level in
     ``details["crl_level"]``, the certificate in ``details["crl_subject"]`` and the date in
     ``details["crl_at"]``; an empty sequence gives ``crl-none``. Revocation never changes
-    ``ok``, the errors or the root (legal grade stays the three-part test); with ``crls`` None,
-    or for a token that does not verify, ``details["crl"]`` is ``"not checked"``.
+    ``ok``, the errors or the root; a ``crl-revoked`` result is not legal grade
+    (:func:`confirmed_legal_grade`). With ``crls`` None, or for a token that does not verify,
+    ``details["crl"]`` is ``"not checked"``.
     """
     errors: list[str] = []
     warnings: list[str] = []

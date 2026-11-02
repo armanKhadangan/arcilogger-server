@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from arcilogger_core.chain import verify_day, verify_range
-from arcilogger_core.crl import INDEX_NAME, INDEX_SCHEMA, Crl, load_stored, parse_crl
+from arcilogger_core.crl import INDEX_NAME, INDEX_SCHEMA, StoredLists, load_stored, parse_crl
 from arcilogger_core.layout import Layout
 from arcilogger_core.timeutil import isoformat_site
 from arcilogger_core.tsa.asn1 import build_request
@@ -28,7 +28,9 @@ from arcilogger_core.tsa.mock import MockTsa
 from arcilogger_core.tsa.verify import (
     CRL_LEVELS,
     check_revocation,
+    confirmed_legal_grade,
     fingerprint,
+    inspect_token,
     token_chain,
     verify_token,
 )
@@ -45,6 +47,8 @@ from .revocation_cases import (
     make_lists,
     standalone_verdict,
 )
+from .test_legal_grade import SIMULATED_POLICY, ProductionLikeProvider
+from .test_legal_grade import _seal as seal_days
 
 DATA = b'{"day":"2026-10-12","schema":"arcilogger.manifest/1"}'
 #: The stamp time of every token here (whole seconds: a CRL date has no fractions).
@@ -482,11 +486,78 @@ def test_warnings_and_information_do_not_fail_the_day(
         assert revocation == [warning.format(when=when, name=name)]
 
 
+class LegalCa:
+    """A made-up CA whose stamps claim legal grade (a provider that reports itself like the
+    Zamane provider) and verify against its root: legal grade once the root is listed."""
+
+    def __init__(self, folder: Path) -> None:
+        self.root_key = ec.generate_private_key(ec.SECP256R1())
+        self.root = _certificate("Örnek Kök (TEST)", self.root_key, None)
+        self.tsa_key = ec.generate_private_key(ec.SECP256R1())
+        self.tsa_certificate = _certificate(
+            "Örnek TSA (TEST)", self.tsa_key, (self.root, self.root_key), ca=False
+        )
+        self.tsa = MockTsa(folder, key_type="ec")
+        self.tsa.signer = (self.tsa_certificate, self.tsa_key)
+        self.tsa.policy = SIMULATED_POLICY
+
+    @property
+    def fingerprint(self) -> str:
+        return fingerprint(self.root)
+
+    def seal(self, world: Any, day: date) -> datetime:
+        """Seal ``day`` with a legal-grade claim; its stamp time."""
+        world.reconfigure(tsa={"provider": "zamane", "legal_root_fingerprints": [self.fingerprint]})
+        seal_days(world, [day], ProductionLikeProvider(self.tsa), [self.root])
+        return inspect_token(world.layout.token(day).read_bytes()).gen_time
+
+    def revoke(self, world: Any, moment: datetime, code: str = "crl-revoked") -> None:
+        """Store the lists of the first case of ``code`` for the TSA certificate."""
+        lists = make_lists(
+            _case(code).lists, self.root, self.root_key, self.tsa_certificate, moment
+        )
+        _store(world.layout, lists, self.root)
+
+
+def test_a_revoked_day_is_not_legal_grade(world: Any, days: list[date], tmp_path: Path) -> None:
+    """C15: legal grade is claim, verified, root listed and not revoked at or before the stamp.
+    A revocation after the stamp, or a hold, leaves it legal grade (a warning)."""
+    ca = LegalCa(tmp_path / "legal")
+    moment = ca.seal(world, days[0])
+    legal = [ca.fingerprint]
+    check = verify_day(world.layout, days[0], [ca.root], legal_roots=legal)
+    assert (check.ok, check.legal_grade_claimed, check.legal_grade) == (True, True, True)
+    # Each step's own text: the lists added reach the finding they are meant for.
+    for code, legal_grade, text in (
+        ("crl-revoked-later", True, "was revoked after the stamp"),
+        ("crl-hold", True, "is on hold on a revocation list"),
+        ("crl-revoked", False, "A time-stamp certificate is on a revocation list"),
+    ):
+        ca.revoke(world, moment, code)
+        check = verify_day(world.layout, days[0], [ca.root], legal_roots=legal)
+        assert (check.ok, check.legal_grade) == (code != "crl-revoked", legal_grade), code
+        assert any(text in line for line in (*check.errors, *check.warnings)), (code, check)
+        # the root is listed: no "not confirmed" warning beside the revocation
+        assert not any("not confirmed" in warning for warning in check.warnings)
+    (ranged,) = verify_range(world.layout, [days[0]], [ca.root], legal_roots=legal)
+    assert (ranged.legal_grade, ranged.as_json()["legal_grade"]) == (False, False)
+    result = verify_token(
+        world.layout.token(days[0]).read_bytes(),
+        roots=[ca.root],
+        file_path=world.layout.manifest(days[0]),
+        crls=load_stored(world.layout),
+    )
+    assert result.details["crl"] == "crl-revoked"
+    assert not confirmed_legal_grade(True, result, [ca.fingerprint])
+
+
 def test_without_stored_lists_the_day_is_as_before(world: Any, days: list[date]) -> None:
     _seal(world, days[0])
     check = verify_day(world.layout, days[0], [world.tsa.root_certificate])
     assert check.ok
-    assert not any("iptal" in warning for warning in check.warnings)
+    assert not any(
+        "revocation" in warning or "time stamp's chain" in warning for warning in check.warnings
+    ), check.warnings
 
 
 def test_an_unreadable_index_is_a_warning(world: Any, days: list[date]) -> None:
@@ -505,6 +576,68 @@ def test_an_unreadable_index_is_a_warning(world: Any, days: list[date]) -> None:
         )
 
 
+def test_an_unreadable_crl_folder_is_a_warning(
+    world: Any, days: list[date], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``state/crl`` that cannot be searched or read (EACCES): ``Path.exists()`` raises then too.
+    The day is checked without revocation, with the warning, and nothing raises."""
+    _day_with_lists(world, days[0], _case("crl-revoked"))
+    folder = world.layout.crl_dir
+    stat, read_bytes = Path.stat, Path.read_bytes
+
+    def denied(path: Path) -> None:
+        if path == folder or folder in path.parents:
+            raise PermissionError(13, "Permission denied", str(path))
+
+    def guarded_stat(path: Path, **kwargs: Any) -> Any:
+        denied(path)
+        return stat(path, **kwargs)
+
+    def guarded_read(path: Path) -> bytes:
+        denied(path)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "stat", guarded_stat)
+    monkeypatch.setattr(Path, "read_bytes", guarded_read)
+    roots = [world.tsa.root_certificate]
+    for check in (
+        verify_day(world.layout, days[0], roots),
+        *verify_range(world.layout, [days[0]], roots),
+    ):
+        assert check.ok, check.errors
+        assert any(
+            warning.startswith("revocation not checked: ") and "Permission denied" in warning
+            for warning in check.warnings
+        ), check.warnings
+    # A stored list that cannot be read: not checked either, rather than checked without it.
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(
+        Path, "read_bytes", lambda path: denied(path) if path.suffix == ".crl" else read_bytes(path)
+    )
+    check = verify_day(world.layout, days[0], roots)
+    assert check.ok, check.errors
+    assert any(
+        warning.startswith("revocation not checked: stored CRL ") for warning in check.warnings
+    )
+
+
+def test_a_changed_stored_list_is_a_warning_on_the_day(world: Any, days: list[date]) -> None:
+    """C14: a list whose file no longer matches its index entry is not used, and the day check
+    says so instead of dropping its revocation silently."""
+    _day_with_lists(world, days[0], _case("crl-revoked"))
+    (name,) = [
+        entry["file"]
+        for entry in json.loads((world.layout.crl_dir / INDEX_NAME).read_text())["lists"]
+    ]
+    path = world.layout.crl_dir / name
+    data = bytearray(path.read_bytes())
+    data[len(data) // 2] ^= 1
+    path.write_bytes(bytes(data))  # test: the stored file is changed
+    check = verify_day(world.layout, days[0], [world.tsa.root_certificate])
+    assert check.ok, check.errors
+    assert f"revocation list {name} does not match its index entry" in check.warnings
+
+
 def test_the_range_reads_the_lists_once(
     world: Any, days: list[date], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -514,7 +647,7 @@ def test_the_range_reads_the_lists_once(
     assert all(o.status == "sealed" for o in world.sealer().seal_due())
     calls: list[Layout] = []
 
-    def counting(layout: Layout) -> list[Crl]:
+    def counting(layout: Layout) -> StoredLists:
         calls.append(layout)
         return load_stored(layout)
 
