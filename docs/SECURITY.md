@@ -447,7 +447,8 @@ Decision: [ADR-0013](adr/0013-offline-licensing.md); customer guide: [LISANS.md]
 [LICENSING.md](LICENSING.md).
 
 - **No secrets in the repository.** The code holds only the licensor's **public** keys
-  (`arcilogger_core/license/keys.py`, empty until the owner commits the first one) and the ids of
+  (`arcilogger_core/license/keys.py`; the owner's first key `arci-2026-01` was committed on
+  2026-11-02) and the ids of
   revoked licences (`revoked.py`). The private signing key is generated and kept by the licensor on
   an offline machine (the issuer tool is not part of the bundle) and never enters the repository,
   the build or a server. Tests generate their own key pairs. No environment variable, configuration
