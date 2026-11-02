@@ -1538,7 +1538,6 @@
       "title": "{{day}}",
       "overdue": "Overdue",
       "sealedOk": "{{day}} was sealed and verified.",
-      "notLegal": "This day's time stamp was issued by the provider {{provider}} and has no legal validity (test/mock). In production only stamps of the Kamu SM production server are valid.",
       "rootUnconfirmed": "This day's manifest says its time stamp comes from the Kamu SM production server ({{provider}}). The day is not shown as legally valid because the root certificate's SHA-256 fingerprint is not listed in tsa.legal_root_fingerprints, or the stamp did not verify. Compare the root's fingerprint with the value Kamu SM publishes."
     },
     "verify": {

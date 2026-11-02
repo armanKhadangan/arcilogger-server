@@ -22,13 +22,14 @@
       "title": "İptal listesi (SİL) denetimi"
     },
     "credits": {
+      "titleNoQuery": "Kontör",
       "noQuery": "Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin."
     },
     "turktrust": {
       "legal": "TÜRKTRUST üretim sunucusu",
       "claimed": "TÜRKTRUST üretim (kök tanımlı değil)",
-      "rootUnconfirmed": "Bu günün manifesti, zaman damgasının TÜRKTRUST üretim sunucusundan ({{provider}}) alındığını belirtiyor. Kök sertifikanın SHA-256 parmak izi tsa.legal_root_fingerprints ayarında tanımlı olmadığı ya da damga doğrulanamadığı için gün yasal geçerli olarak gösterilmiyor. Kökün parmak izini TÜRKTRUST'ın yayımladığı değerle karşılaştırın.",
-      "creditsTitle": "Kontör (TÜRKTRUST)"
-    }
+      "rootUnconfirmed": "Bu günün manifesti, zaman damgasının TÜRKTRUST üretim sunucusundan ({{provider}}) alındığını belirtiyor. Kök sertifikanın SHA-256 parmak izi tsa.legal_root_fingerprints ayarında tanımlı olmadığı ya da damga doğrulanamadığı için gün yasal geçerli olarak gösterilmiyor. Kökün parmak izini TÜRKTRUST'ın yayımladığı değerle karşılaştırın."
+    },
+    "dayNotLegal": "Bu günün zaman damgası {{provider}} sağlayıcısından alındı ve yasal geçerliliği yoktur (test/mock). Üretimde yalnızca Kamu SM ya da TÜRKTRUST üretim sunucusunun damgası yasal niteliklidir."
   }
 }

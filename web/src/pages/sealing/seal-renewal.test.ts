@@ -1,5 +1,6 @@
 import en from '@/locales/areas/sealRenewal/en.json';
 import tr from '@/locales/areas/sealRenewal/tr.json';
+import type { Credits } from '@/lib/api-types';
 import type { SealDayDetail } from '@/lib/seal-types';
 import { SEALS, need } from '@/test/samples';
 
@@ -8,14 +9,13 @@ import {
   RENEWAL_KEY,
   RENEWAL_STATUSES,
   RENEWAL_TONE,
-  renewalDay,
   renewalOf,
   revocationOf,
   revocationTone,
 } from './seal-renewal';
 
 /*
- * Re-stamping and revocation on the day page (Wave 5 contract 2.3.1 "Day detail", 2.6), read
+ * Re-stamping and revocation on the day page (Wave 5 contract 2.3.1 "Day detail", 2.6, C4), read
  * from the day detail until W5-C adds the fields to `SealDayDetail`; the texts of 2.6 verbatim.
  */
 
@@ -37,7 +37,8 @@ describe('the day detail’s re-stamping and revocation fields', () => {
     const renewal = {
       status: 'covered',
       cert_not_after: '2031-10-01T00:00:00Z',
-      covered_by: 'renewals/2031-05-04-1.json.zd',
+      covered_by: 'renewals/2031-05-04-1.json',
+      renewed_at: '2031-05-04T00:40:12Z',
     };
     const revocation = {
       code: 'crl-revoked',
@@ -50,25 +51,24 @@ describe('the day detail’s re-stamping and revocation fields', () => {
     expect(renewalOf(withFields({ renewal: { ...renewal, status: 'renewed' } }))).toBeNull();
   });
 
-  it('takes a renewal’s date from its file name (decision 1) and nothing else', () => {
-    expect(renewalDay('renewals/2031-05-04-1.json.zd')).toBe('2031-05-04');
-    expect(renewalDay('renewals/2031-05-04-12.json')).toBe('2031-05-04');
-    expect(renewalDay('2031-05-04-2.json.zd')).toBe('2031-05-04');
-    expect(renewalDay('renewals/latest.json.zd')).toBeNull();
-    expect(renewalDay('renewals/2031-05-04.json.zd')).toBeNull();
-    expect(renewalDay(null)).toBeNull();
+  it('reads a renewal without renewed_at (a server before C4) as null there', () => {
+    const renewal = { status: 'late', cert_not_after: '2031-08-30T21:30:00Z', covered_by: null };
+    expect(renewalOf(withFields({ renewal }))).toEqual({ ...renewal, renewed_at: null });
   });
 
   it.each([
     ['fail', 'danger'],
-    ['danger', 'danger'],
     ['warn', 'warning'],
-    ['warning', 'warning'],
     ['info', 'info'],
-    ['ok', 'info'],
+    ['ok', 'success'],
     ['unknown', 'info'],
-  ])('shows a revocation of level %s as %s', (level, tone) => {
+  ])('shows a revocation of level %s as %s (C4)', (level, tone) => {
     expect(revocationTone(level)).toBe(tone);
+  });
+
+  it('does not take the legal status’ words for a revocation level', () => {
+    expect(revocationTone('danger')).toBe('info');
+    expect(revocationTone('warning')).toBe('info');
   });
 
   it('marks due, late and uncovered as warnings (decision 6), covered as fine', () => {
@@ -131,13 +131,36 @@ describe('the re-stamping texts (contract 2.6)', () => {
   });
 });
 
-describe('a provider without a credit query (contract 2.4)', () => {
-  it('is TÜRKTRUST, or any credit status the task recorded as not supported', () => {
-    expect(noCreditQuery({ provider: 'turktrust' })).toBe(true);
-    expect(noCreditQuery({ provider: 'zamane', supported: false } as { provider: string })).toBe(
+describe('a provider without a credit query (contract 2.4, C3)', () => {
+  const credits: Credits = {
+    provider: 'zamane',
+    legal_grade: true,
+    threshold: 10_000,
+    latest: null,
+    remaining: null,
+    below_threshold: false,
+    history: [],
+    unreadable_lines: 0,
+  };
+
+  it('is a credit status the Credit task recorded as not supported', () => {
+    expect(noCreditQuery({ ...credits, provider: 'turktrust', supported: false } as Credits)).toBe(
       true,
     );
-    expect(noCreditQuery({ provider: 'zamane' })).toBe(false);
-    expect(noCreditQuery({ provider: 'mock' })).toBe(false);
+    expect(noCreditQuery({ ...credits, supported: false } as Credits)).toBe(true);
+    expect(noCreditQuery({ ...credits, supported: true } as Credits)).toBe(false);
+    expect(noCreditQuery(credits)).toBe(false);
+  });
+
+  it('is never decided by the provider name', () => {
+    expect(noCreditQuery({ ...credits, provider: 'turktrust' })).toBe(false);
+    expect(noCreditQuery({ ...credits, provider: 'turktrust', supported: true } as Credits)).toBe(
+      false,
+    );
+  });
+
+  it('has a plain title, without a provider name', () => {
+    expect(tr.sealing.credits.titleNoQuery).toBe('Kontör');
+    expect(en.sealing.credits.titleNoQuery).toBe('Credit');
   });
 });

@@ -149,8 +149,8 @@ describe('"Şimdi mühürle" (contract 2.9)', () => {
 });
 
 /*
- * Re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", 2.6): hand-built additions to
- * the captured day until W5-C's samples carry them.
+ * Re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", 2.6, C4): hand-built additions
+ * to the captured day until W5-C's samples carry them.
  */
 describe('re-stamping and revocation on the day page (Wave 5)', () => {
   afterEach(() => {
@@ -189,42 +189,52 @@ describe('re-stamping and revocation on the day page (Wave 5)', () => {
   it.each([
     [
       'not_due',
-      { cert_not_after: '2031-09-30T21:00:00Z', covered_by: null },
+      { cert_not_after: '2031-09-30T21:00:00Z', covered_by: null, renewed_at: null },
       'Gerekmiyor',
       'Yeniden damgalama henüz gerekmiyor (sertifika 01.10.2031 tarihine kadar geçerli).',
     ],
     [
       'due',
-      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: null },
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: null, renewed_at: null },
       'Bekleniyor',
       'Damga sertifikası 01.04.2027 tarihinde sona eriyor; yeniden damgalama bekleniyor.',
     ],
     [
       'covered',
-      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: 'renewals/2027-02-01-1.json.zd' },
+      {
+        cert_not_after: '2027-03-31T21:00:00Z',
+        covered_by: 'renewals/2027-02-01-1.json',
+        renewed_at: '2027-02-01T00:40:12Z',
+      },
       'Yeniden damgalandı',
-      'Bu damga, sertifikası sona ermeden yeniden damgalanmış: renewals/2027-02-01-1.json.zd.',
+      'Bu damga, sertifikası sona ermeden yeniden damgalanmış: renewals/2027-02-01-1.json.',
     ],
     [
       'late',
-      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: 'renewals/2027-04-03-1.json.zd' },
+      // The date is the counting renewal's stamp time (C4) in the site's zone, not its file name.
+      {
+        cert_not_after: '2027-03-31T21:00:00Z',
+        covered_by: 'renewals/2027-04-02-1.json',
+        renewed_at: '2027-04-02T22:15:07Z',
+      },
       'Geç yeniden damgalandı',
       'Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış (03.04.2027).',
     ],
     [
       'late',
-      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: 'renewals/latest.json.zd' },
+      // A server before C4 sends no stamp time: the parenthesis is left out.
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: 'renewals/2027-04-03-1.json' },
       'Geç yeniden damgalandı',
       'Yeniden damgalama, eski sertifikanın süresi dolduktan sonra yapılmış.',
     ],
     [
       'uncovered',
-      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: null },
+      { cert_not_after: '2027-03-31T21:00:00Z', covered_by: null, renewed_at: null },
       'Yeniden damgalanmadı',
       'Damga sertifikasının süresi 01.04.2027 tarihinde doldu ve yeniden damgalama yok; damga, alındığı an için geçerlidir.',
     ],
   ] as const)('%s: badge and the 2.6 sentence (%s)', async (status, fields, badge, sentence) => {
-    serve(withRenewal({ status, ...fields }));
+    serve(withRenewal({ status, ...fields } as SealRenewal));
     renderApp(`/sealing?day=${DAY}`);
     const renewal = await screen.findByTestId('seal-renewal');
     expect(renewal).toHaveAttribute('data-status', status);
@@ -237,7 +247,14 @@ describe('re-stamping and revocation on the day page (Wave 5)', () => {
   });
 
   it('a renewal in English', async () => {
-    serve(withRenewal({ status: 'due', cert_not_after: '2027-03-31T21:00:00Z', covered_by: null }));
+    serve(
+      withRenewal({
+        status: 'due',
+        cert_not_after: '2027-03-31T21:00:00Z',
+        covered_by: null,
+        renewed_at: null,
+      }),
+    );
     act(() => {
       setLanguage('en');
     });
@@ -251,21 +268,23 @@ describe('re-stamping and revocation on the day page (Wave 5)', () => {
 
   it.each([
     ['fail', 'bg-danger-soft'],
-    ['danger', 'bg-danger-soft'],
     ['warn', 'bg-warning-soft'],
-    ['warning', 'bg-warning-soft'],
     ['info', 'bg-info-soft'],
-  ])('a revocation of level %s is shown with its message (%s)', async (level, tone) => {
-    serve(withRenewal(null, { ...REVOKED, level }));
-    renderApp(`/sealing?day=${DAY}`);
-    const alert = await screen.findByTestId('seal-revocation');
-    expect(alert).toHaveClass(tone);
-    // The banner above the page announces a revoked certificate; the day page does not again.
-    expect(alert).toHaveAttribute('role', 'status');
-    expect(alert).toHaveTextContent('İptal listesi (SİL) denetimi');
-    expect(alert).toHaveTextContent(REVOKED.message_tr);
-    expect(screen.queryByTestId('seal-renewal')).not.toBeInTheDocument();
-  });
+    ['ok', 'bg-success-soft'],
+  ] as const)(
+    'a revocation of level %s is shown with its message (%s, C4)',
+    async (level, tone) => {
+      serve(withRenewal(null, { ...REVOKED, level }));
+      renderApp(`/sealing?day=${DAY}`);
+      const alert = await screen.findByTestId('seal-revocation');
+      expect(alert).toHaveClass(tone);
+      // The banner above the page announces a revoked certificate; the day page does not again.
+      expect(alert).toHaveAttribute('role', 'status');
+      expect(alert).toHaveTextContent('İptal listesi (SİL) denetimi');
+      expect(alert).toHaveTextContent(REVOKED.message_tr);
+      expect(screen.queryByTestId('seal-renewal')).not.toBeInTheDocument();
+    },
+  );
 
   it('a revocation in English', async () => {
     serve(withRenewal(null, REVOKED));

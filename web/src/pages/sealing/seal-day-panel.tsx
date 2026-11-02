@@ -44,7 +44,6 @@ import type { AdminRequestOut, SealActionResult } from '@/lib/settings-types';
 import {
   RENEWAL_KEY,
   RENEWAL_TONE,
-  renewalDay,
   renewalOf,
   revocationOf,
   revocationTone,
@@ -106,19 +105,15 @@ const OUTCOME_TONE: Record<string, AlertTone> = {
 
 /**
  * The token's long-term status (Wave 5 contract 2.6 `renewal-*`, decision 6): re-stamped in time,
- * late, due or expired without a renewal. A renewal's date is in its file name (decision 1).
+ * late, due or expired without a renewal. The renewal is named by its vault-relative record path;
+ * "late" gives the counting renewal's stamp time (`renewed_at`, C4).
  */
 function RenewalFact({ renewal }: { renewal: SealRenewal }) {
   const { t } = useTranslation();
   const key = RENEWAL_KEY[renewal.status];
-  const renewed = renewalDay(renewal.covered_by);
-  const text = renewal.status === 'late' && !renewed ? 'lateNoDate' : key;
-  const date =
-    renewal.status === 'late'
-      ? formatDay(renewed ?? '')
-      : renewal.cert_not_after
-        ? formatDate(renewal.cert_not_after)
-        : '—';
+  // A late renewal without its stamp time (a server before C4) leaves out the parenthesis.
+  const text = renewal.status === 'late' && !renewal.renewed_at ? 'lateNoDate' : key;
+  const shown = renewal.status === 'late' ? renewal.renewed_at : renewal.cert_not_after;
   return (
     <span
       className="flex flex-col items-start gap-1"
@@ -126,7 +121,12 @@ function RenewalFact({ renewal }: { renewal: SealRenewal }) {
       data-status={renewal.status}
     >
       <Badge tone={RENEWAL_TONE[renewal.status]}>{t(`sealing.renewal.status.${key}`)}</Badge>
-      <span>{t(`sealing.renewal.text.${text}`, { date, renewal: renewal.covered_by ?? '—' })}</span>
+      <span>
+        {t(`sealing.renewal.text.${text}`, {
+          date: shown ? formatDate(shown) : '—',
+          renewal: renewal.covered_by ?? '—',
+        })}
+      </span>
     </span>
   );
 }
@@ -583,7 +583,7 @@ export function SealDayPanel({ day }: { day: string }) {
         ) : null}
         {data.token && legalGrade(data.token) === 'test' ? (
           <Alert tone="danger" title={t('legal.notLegalTitle')} data-testid="not-legal-grade">
-            {t('sealing.day.notLegal', { provider: data.token.provider ?? '—' })}
+            {t('sealing.dayNotLegal', { provider: data.token.provider ?? '—' })}
           </Alert>
         ) : null}
         {data.token && legalGrade(data.token) === 'claimed' ? (

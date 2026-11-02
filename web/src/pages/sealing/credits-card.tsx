@@ -98,8 +98,9 @@ export function CreditQuery() {
  * "Kontör" (spec 6.1, 12.3 page 9): the Kamu SM credit history the scheduled Credit task records
  * once a day, the last known number, the alert threshold and a trend line, and "Kontör sorgula".
  * The web service never asks Kamu SM itself (it has no access to the credentials, ADR-0007): a
- * query runs as a task on the server. A provider without a credit query (TÜRKTRUST, Wave 5
- * contract 2.4) gets the neutral sentence of 2.6 instead of numbers, and no "Kontör sorgula".
+ * query runs as a task on the server. A provider without a credit query (`supported: false`,
+ * Wave 5 contract 2.4, C3; today TÜRKTRUST) gets a plain "Kontör" title and the neutral sentence
+ * of 2.6 instead of numbers, and no "Kontör sorgula": the Kamu SM texts stay Kamu SM's (C13).
  */
 export function CreditsCard({
   credits,
@@ -124,11 +125,7 @@ export function CreditsCard({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Coins aria-hidden="true" className="size-4 text-muted-strong" />
-          {t(
-            credits?.provider === 'turktrust'
-              ? 'sealing.turktrust.creditsTitle'
-              : 'sealing.credits.title',
-          )}
+          {t(noQuery ? 'sealing.credits.titleNoQuery' : 'sealing.credits.title')}
         </CardTitle>
         {credits?.below_threshold && !noQuery ? (
           <Badge tone="danger" icon={TriangleAlert}>

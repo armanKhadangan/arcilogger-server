@@ -7,9 +7,11 @@ import { renderApp } from '@/test/render';
 import { SEALS, need } from '@/test/samples';
 
 /*
- * The credit card for a provider without a credit query (Wave 5 contract 2.4, 2.6): TÜRKTRUST
- * has none, so the card says so in neutral words instead of numbers, offers no "Kontör sorgula"
- * and never warns about a threshold. Hand-built answers until W5-C's samples carry one.
+ * The credit card for a provider without a credit query (Wave 5 contract 2.4, 2.6, C3): the
+ * Credit task records `supported: false` (today for TÜRKTRUST), so the card says so in neutral
+ * words under a plain "Kontör" title instead of numbers, offers no "Kontör sorgula" and never
+ * warns about a threshold. Only the flag decides, never the provider name. Hand-built answers
+ * until W5-C's samples carry one; `supported` is cast in until W5-C adds it to `Credits` (C2).
  */
 
 const CALENDAR = need(SEALS.calendars['2026-10'], 'October calendar');
@@ -26,14 +28,15 @@ const KAMUSM: Credits = {
 };
 
 /** TÜRKTRUST: the Credit task records `{"supported": false}`; nothing is ever counted. */
-const TURKTRUST: Credits = {
+const TURKTRUST = {
   ...KAMUSM,
   provider: 'turktrust',
+  supported: false,
   latest: null,
   remaining: null,
   below_threshold: false,
   history: [],
-};
+} as Credits;
 
 function serve(role: Role, credits: Credits) {
   return installFetch((request) => {
@@ -59,10 +62,10 @@ afterEach(() => {
 });
 
 describe('the credit card without a credit query', () => {
-  it('TÜRKTRUST: the neutral sentence, its title, no number and no query button', async () => {
+  it('TÜRKTRUST: the neutral sentence, a plain title, no number and no query button', async () => {
     serve('admin', TURKTRUST);
     renderApp('/sealing');
-    const credits = await card('Kontör (TÜRKTRUST)');
+    const credits = await card('Kontör');
     expect(within(credits).getByTestId('credits-no-query')).toHaveTextContent(
       'Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin.',
     );
@@ -81,6 +84,17 @@ describe('the credit card without a credit query', () => {
     expect(screen.queryByRole('button', { name: 'Kontör sorgula' })).not.toBeInTheDocument();
   });
 
+  it('never decides by the provider name: without the flag the numbers stay (C3)', async () => {
+    serve('admin', { ...KAMUSM, provider: 'turktrust' });
+    renderApp('/sealing');
+    const credits = await card('Kontör (Kamu SM)');
+    await waitFor(() => {
+      expect(within(credits).getByText('kalan · uyarı eşiği 10.000')).toBeInTheDocument();
+    });
+    expect(within(credits).queryByTestId('credits-no-query')).not.toBeInTheDocument();
+    expect(within(credits).getByRole('button', { name: 'Kontör sorgula' })).toBeEnabled();
+  });
+
   it('in English', async () => {
     serve('auditor', TURKTRUST);
     act(() => {
@@ -90,11 +104,11 @@ describe('the credit card without a credit query', () => {
     expect(await screen.findByTestId('credits-no-query')).toHaveTextContent(
       "This provider offers no credit query; watch the balance in the provider's portal.",
     );
-    expect(screen.getByText('Credit (TÜRKTRUST)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Credit' })).toBeInTheDocument();
   });
 
-  it('Kamu SM keeps its numbers and "Kontör sorgula"', async () => {
-    serve('admin', KAMUSM);
+  it('Kamu SM keeps its numbers, its title and "Kontör sorgula" (supported: true)', async () => {
+    serve('admin', { ...KAMUSM, supported: true } as Credits);
     renderApp('/sealing');
     const credits = await card('Kontör (Kamu SM)');
     await waitFor(() => {

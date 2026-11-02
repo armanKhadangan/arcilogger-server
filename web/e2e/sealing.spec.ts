@@ -14,14 +14,18 @@ if (!DETAIL?.token || !DETAIL.manifest || !FAILED?.message_tr)
   throw new Error('seal samples missing');
 
 /**
- * The sealed day with re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail"), hand-built
- * until W5-C's samples carry the fields: the renewal is late, a later revocation list names the
- * certificate (the verifier's `crl-revoked-later`; the certificate name is made up).
+ * The sealed day with re-stamping and revocation (Wave 5 contract 2.3.1 "Day detail", C4),
+ * hand-built until W5-C's samples carry the fields. The renewal is late: the day token's TSA
+ * certificate (`tsa_cert_not_after` of the sample) expired on 31.08.2031 and the counting renewal
+ * was stamped three days later, so the answer is one of a server after that date, not of the
+ * samples' clock. A revocation list names the certificate after the day's stamp (04.10.2026
+ * 21:30Z): the verifier's `crl-revoked-later`, level `warn` (the certificate name is made up).
  */
 const RENEWAL: SealRenewal = {
   status: 'late',
-  cert_not_after: '2031-08-30T21:30:00Z',
-  covered_by: 'renewals/2031-09-02-1.json.zd',
+  cert_not_after: DETAIL.token.tsa_cert_not_after ?? '2031-08-30T21:30:00Z',
+  covered_by: 'renewals/2031-09-02-1.json',
+  renewed_at: '2031-09-02T09:12:07Z',
 };
 const REVOCATION: SealRevocation = {
   code: 'crl-revoked-later',
@@ -322,9 +326,11 @@ test.describe('Mühürleme', () => {
     page,
   }) => {
     await mockApi(page, { signedInAs: 'tolga' });
-    // Hand-built until W5-C's samples carry a TÜRKTRUST credit status.
-    const credits: Credits = {
+    // Hand-built until W5-C's samples carry a TÜRKTRUST credit status; `supported` is cast in
+    // until W5-C adds it to `Credits` (C2, C3).
+    const credits = {
       provider: 'turktrust',
+      supported: false,
       legal_grade: true,
       threshold: 10_000,
       latest: null,
@@ -332,10 +338,10 @@ test.describe('Mühürleme', () => {
       below_threshold: false,
       history: [],
       unreadable_lines: 0,
-    };
+    } as Credits;
     await page.route('**/api/v1/credits', (route) => route.fulfill({ json: credits }));
     await page.goto('/sealing');
-    await expect(page.getByRole('heading', { name: 'Kontör (TÜRKTRUST)' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Kontör', exact: true })).toBeVisible();
     await expect(page.getByTestId('credits-no-query')).toHaveText(
       'Bu sağlayıcı kontör sorgusu sunmuyor; bakiyeyi sağlayıcının portalından izleyin.',
     );

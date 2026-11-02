@@ -82,7 +82,7 @@ export const LEGAL_REASONS: Record<LegalReasonCode, LegalReason> = {
     code: 'certificate_revoked',
     level: 'danger',
     message_tr:
-      'Zaman damgası sertifikası iptal listesinde: Deneme TSA Sertifikası 1. Kamu SM ile görüşün; hukuki inceleme önerilir.',
+      'Zaman damgası sertifikası iptal listesinde: Deneme TSA Sertifikası 1. Zaman damgası sağlayıcısıyla görüşün; hukuki inceleme önerilir.',
     message_en:
       'A time-stamp certificate is on a revocation list: Deneme TSA Sertifikası 1. Contact the provider; legal review is recommended.',
     since: '2026-10-13T03:10:12Z',

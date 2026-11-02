@@ -1538,7 +1538,6 @@
       "title": "{{day}}",
       "overdue": "Gecikti",
       "sealedOk": "{{day}} günü mühürlendi ve doğrulandı.",
-      "notLegal": "Bu günün zaman damgası {{provider}} sağlayıcısından alındı ve yasal geçerliliği yoktur (test/mock). Üretimde yalnızca Kamu SM üretim sunucusunun damgası geçerlidir.",
       "rootUnconfirmed": "Bu günün manifesti, zaman damgasının Kamu SM üretim sunucusundan ({{provider}}) alındığını belirtiyor. Kök sertifikanın SHA-256 parmak izi tsa.legal_root_fingerprints ayarında tanımlı olmadığı ya da damga doğrulanamadığı için gün yasal geçerli olarak gösterilmiyor. Kökün parmak izini Kamu SM'nin yayımladığı değerle karşılaştırın."
     },
     "verify": {

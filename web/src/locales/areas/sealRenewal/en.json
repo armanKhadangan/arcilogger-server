@@ -22,13 +22,14 @@
       "title": "Revocation list check"
     },
     "credits": {
+      "titleNoQuery": "Credit",
       "noQuery": "This provider offers no credit query; watch the balance in the provider's portal."
     },
     "turktrust": {
       "legal": "TÜRKTRUST production server",
       "claimed": "TÜRKTRUST production (root not configured)",
-      "rootUnconfirmed": "This day's manifest says its time stamp comes from the TÜRKTRUST production server ({{provider}}). The day is not shown as legally valid because the root certificate's SHA-256 fingerprint is not listed in tsa.legal_root_fingerprints, or the stamp did not verify. Compare the root's fingerprint with the value TÜRKTRUST publishes.",
-      "creditsTitle": "Credit (TÜRKTRUST)"
-    }
+      "rootUnconfirmed": "This day's manifest says its time stamp comes from the TÜRKTRUST production server ({{provider}}). The day is not shown as legally valid because the root certificate's SHA-256 fingerprint is not listed in tsa.legal_root_fingerprints, or the stamp did not verify. Compare the root's fingerprint with the value TÜRKTRUST publishes."
+    },
+    "dayNotLegal": "This day's time stamp was issued by the provider {{provider}} and has no legal validity (test/mock). In production only stamps of the Kamu SM or TÜRKTRUST production server are legal grade."
   }
 }
