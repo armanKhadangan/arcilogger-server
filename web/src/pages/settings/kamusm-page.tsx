@@ -20,7 +20,7 @@ import { editable } from '@/lib/admin-requests';
 import { errorMessage } from '@/lib/api';
 import { useAdminRequests } from '@/lib/api-hooks';
 import { useAuth } from '@/lib/auth';
-import type { AdminRequestOut, TsaSection, TsaServer, TsaTestResult } from '@/lib/settings-types';
+import type { AdminRequestOut, TsaSection, TsaTestResult } from '@/lib/settings-types';
 import { cn } from '@/lib/utils';
 import { focusFirstError, hasErrors, type FieldErrors } from '@/lib/validation';
 
@@ -28,16 +28,26 @@ import { CreditQuery } from '../sealing/credits-card';
 
 import {
   STEPS,
+  TURKTRUST_KEPT,
+  TURKTRUST_TEXTS,
   causeKey,
+  choiceProvider,
+  firstOpen,
   isStep,
+  providerText,
   stepStatus,
   tsaBody,
   tsaForm,
+  turktrustChanged,
   unplacedCauses,
   validateCustomer,
   validateNumbers,
   validatePassword,
+  validateTurktrustPassword,
+  validateTurktrustUsername,
   type Credentials,
+  type ProviderText,
+  type ServerChoice,
   type StepId,
   type TsaForm,
 } from './kamusm-model';
@@ -54,17 +64,34 @@ import {
 import { RootsStep, ZamaneStep } from './kamusm-uploads';
 
 const EMPTY: TsaForm = { java: null, threshold: '500', timeout: '60' };
-const KEPT: Credentials = { customer: SECRET_KEPT, password: SECRET_KEPT, clear: false };
+const KEPT: Credentials = {
+  customer: SECRET_KEPT,
+  password: SECRET_KEPT,
+  clear: false,
+  turktrust: TURKTRUST_KEPT,
+};
 
-type TsaField = 'java' | 'threshold' | 'timeout' | 'customer' | 'password';
+type TsaField =
+  | 'java'
+  | 'threshold'
+  | 'timeout'
+  | 'customer'
+  | 'password'
+  | 'turktrustUsername'
+  | 'turktrustPassword';
 
-/** The body paths the API may name for a field (422 `details`). */
+/**
+ * The body paths the API may name for a field (422 `details`). TÜRKTRUST's body fields are
+ * interim until W5-T names them (`kamusm-model.ts` `TurktrustFields`).
+ */
 const PATHS: Record<TsaField, string[]> = {
   java: ['java', 'tsa.java'],
   threshold: ['credit_alert_threshold', 'tsa.credit_alert_threshold'],
   timeout: ['timeout_seconds', 'tsa.timeout_seconds'],
   customer: ['customer', 'kamusm.customer'],
   password: ['password', 'kamusm.password'],
+  turktrustUsername: ['turktrust_username', 'turktrust.username'],
+  turktrustPassword: ['turktrust_password', 'turktrust.password'],
 };
 const SHOWN = Object.values(PATHS).flat();
 const BOUNDS: Record<TsaField, Record<string, number>> = {
@@ -73,14 +100,19 @@ const BOUNDS: Record<TsaField, Record<string, number>> = {
   timeout: { min: 5, max: 600 },
   customer: {},
   password: {},
+  turktrustUsername: {},
+  turktrustPassword: {},
 };
 
 /** The steps whose values are saved with "Kaydet" (the others act on their own). */
 const FORM_STEPS: readonly StepId[] = ['java', 'credentials', 'production', 'credit'];
 
-/** What `send` adds to the form: the server to switch to, and the confirmation of a switch back. */
+/**
+ * What `send` adds to the form: the server to switch to, and the confirmation of a switch back
+ * to the test server or to plain HTTP.
+ */
 interface SendOptions {
-  server?: TsaServer;
+  server?: ServerChoice;
   confirm?: boolean;
 }
 
@@ -97,20 +129,18 @@ function useTested(): boolean {
   );
 }
 
-/** The first step still to do (an error before a missing item), else the first. */
-function firstOpen(tsa: TsaSection, tested: boolean): StepId {
-  return (
-    STEPS.find((step) => stepStatus(step, tsa, tested) === 'error') ??
-    STEPS.find((step) => stepStatus(step, tsa, tested) === 'missing') ??
-    'java'
-  );
-}
+type CredentialField = 'customer' | 'password' | 'turktrustUsername' | 'turktrustPassword';
 
-function credentialErrors(credentials: Credentials): FieldErrors<'customer' | 'password'> {
-  const errors: FieldErrors<'customer' | 'password'> = {};
-  if (credentials.clear) return errors;
+function credentialErrors(credentials: Credentials): FieldErrors<CredentialField> {
+  const errors: FieldErrors<CredentialField> = {};
   const check = (edit: SecretEdit, validate: (value: string) => string | undefined) =>
     edit.editing ? validate(edit.value) : undefined;
+  const turktrust = credentials.turktrust ?? TURKTRUST_KEPT;
+  const username = check(turktrust.username, validateTurktrustUsername);
+  if (username) errors.turktrustUsername = username;
+  const secret = check(turktrust.password, validateTurktrustPassword);
+  if (secret) errors.turktrustPassword = secret;
+  if (credentials.clear) return errors;
   const customer = check(credentials.customer, validateCustomer);
   if (customer) errors.customer = customer;
   const password = check(credentials.password, validatePassword);
@@ -118,11 +148,21 @@ function credentialErrors(credentials: Credentials): FieldErrors<'customer' | 'p
   return errors;
 }
 
+/** A step's description in the words of the provider in use. */
+function stepDescription(provider: string, step: StepId): string {
+  const key = `steps.${step}.description`;
+  return (TURKTRUST_TEXTS as readonly string[]).includes(key)
+    ? providerText(provider, key as ProviderText)
+    : `settings.kamusm.${key}`;
+}
+
 /**
- * Ayarlar → Kamu SM (contract 2.17, `settings.manage`): the wizard of the Zamane time stamp
- * service, step by step with the state of each from the configuration's `readiness` and
- * `seal_ready`: Java, the Zamane client, the root certificates, the customer credentials, a
- * test stamp, the switch to the production server and the credit alert threshold. The `[seal]`
+ * Ayarlar → Zaman damgası (contract 2.17, `settings.manage`; the route stays `/settings/kamusm`):
+ * the wizard of the time-stamp service, step by step with the state of each from the
+ * configuration's `readiness` and `seal_ready`: Java, the Zamane client, the root certificates,
+ * the credentials, a test stamp, the server (Kamu SM test or production, TÜRKTRUST; Wave 5
+ * contract 2.4) and the credit alert threshold. Java and the Zamane client are Kamu SM's only and
+ * read "Gerekmez" while TÜRKTRUST is in use. The `[seal]`
  * section is shown read-only. A change that would stop a sealer that works now is refused by
  * the server (`tsa_would_break`) with its causes. A cause no step shows (a moved secret store,
  * contract D0-2) is named above the steps, and so is a held change of the section (an unknown
@@ -145,14 +185,17 @@ export function KamusmPage() {
   const [started, setStarted] = useState<{ step: StepId; id: string } | null>(null);
   // "Yeniden dene" sends what the last attempt sent (a switch of the server included).
   const lastSend = useRef<SendOptions>({});
+  // The provider the last change went to (the server it switched to, else the one in use).
+  const [sentTo, setSentTo] = useState('');
   const tested = useTested();
-  const credentialsDirty =
+  const kamusmDirty =
     credentials.clear ||
     secretChanged(credentials.customer) ||
     secretChanged(credentials.password) ||
     credentials.customer.editing ||
     credentials.password.editing;
-  const dirty = form.dirty || credentialsDirty;
+  const turktrustDirty = turktrustChanged(credentials);
+  const dirty = form.dirty || kamusmDirty || turktrustDirty;
   const state = flowState(flow, {
     loading: config.isPending,
     canEdit: section.canEdit,
@@ -166,6 +209,11 @@ export function KamusmPage() {
   const step: StepId = isStep(requested) ? requested : tsa ? firstOpen(tsa, tested) : 'java';
   const values = form.values;
   const unplaced = tsa ? unplacedCauses(tsa) : [];
+  const provider = tsa?.provider ?? '';
+  const title =
+    provider === 'zamane' || provider === 'turktrust'
+      ? t(`settings.kamusm.titles.${provider}`)
+      : t('settings.kamusm.title');
 
   function change(next: Partial<TsaForm>) {
     form.setValues((current) => ({ ...current, ...next }));
@@ -182,6 +230,7 @@ export function KamusmPage() {
   function send(options: SendOptions) {
     if (!tsa) return;
     lastSend.current = options;
+    setSentTo(options.server ? choiceProvider(options.server) : tsa.provider);
     const found: FieldErrors<TsaField> = {
       ...validateNumbers(values),
       ...credentialErrors(credentials),
@@ -204,30 +253,43 @@ export function KamusmPage() {
 
   function body(tsaSection: TsaSection) {
     const policy = config.data?.policy;
+    // Java and the Zamane client are kept for a way back to Kamu SM; TÜRKTRUST needs neither.
+    const unused =
+      tsaSection.provider === 'turktrust' ? (
+        <Alert tone="info" assertive={false} className="mb-4" data-testid="tsa-step-unused">
+          {t('settings.kamusm.turktrust.unusedStep')}
+        </Alert>
+      ) : null;
     switch (step) {
       case 'java':
         return (
-          <JavaStep
-            tsa={tsaSection}
-            java={values.java}
-            disabled={locked}
-            onChange={(java) => {
-              change({ java });
-            }}
-          />
+          <>
+            {unused}
+            <JavaStep
+              tsa={tsaSection}
+              java={values.java}
+              disabled={locked}
+              onChange={(java) => {
+                change({ java });
+              }}
+            />
+          </>
         );
       case 'zamane':
         return policy ? (
-          <ZamaneStep
-            tsa={tsaSection}
-            etag={section.etag}
-            writable={section.writable}
-            policy={policy}
-            requestId={started?.step === 'zamane' ? started.id : null}
-            onStarted={(requestId) => {
-              setStarted({ step: 'zamane', id: requestId });
-            }}
-          />
+          <>
+            {unused}
+            <ZamaneStep
+              tsa={tsaSection}
+              etag={section.etag}
+              writable={section.writable}
+              policy={policy}
+              requestId={started?.step === 'zamane' ? started.id : null}
+              onStarted={(requestId) => {
+                setStarted({ step: 'zamane', id: requestId });
+              }}
+            />
+          </>
         ) : null;
       case 'roots':
         return (
@@ -247,7 +309,12 @@ export function KamusmPage() {
             tsa={tsaSection}
             credentials={credentials}
             disabled={locked}
-            errors={{ customer: message('customer'), password: message('password') }}
+            errors={{
+              customer: message('customer'),
+              password: message('password'),
+              turktrustUsername: message('turktrustUsername'),
+              turktrustPassword: message('turktrustPassword'),
+            }}
             probe={probe}
             onProbe={setProbe}
             onChange={(next) => {
@@ -270,10 +337,20 @@ export function KamusmPage() {
           <ProductionStep
             tsa={tsaSection}
             tested={tested}
-            disabled={locked || dirty}
-            blockedHint={dirty ? t('settings.kamusm.production.saveFirst') : undefined}
+            disabled={locked}
+            unsaved={form.dirty || kamusmDirty}
+            credentials={credentials}
+            onCredentials={(next) => {
+              setCredentials(next);
+              setErrors({});
+              flow.edit();
+            }}
+            errors={{
+              turktrustUsername: message('turktrustUsername'),
+              turktrustPassword: message('turktrustPassword'),
+            }}
             onSwitch={(target) => {
-              send({ server: target, confirm: target === 'test' });
+              send({ server: target, confirm: target === 'test' || target === 'turktrust-http' });
             }}
           />
         );
@@ -293,10 +370,7 @@ export function KamusmPage() {
   }
 
   return (
-    <SettingsFrame
-      title={t('settings.kamusm.title')}
-      description={t('settings.kamusm.description')}
-    >
+    <SettingsFrame title={title} description={t('settings.kamusm.description')}>
       <UnsavedChangesGuard when={dirty && editable(state)} />
       {config.isPending ? (
         <PageSkeleton />
@@ -304,7 +378,7 @@ export function KamusmPage() {
         <Alert tone="danger">{errorMessage(config.error)}</Alert>
       ) : tsa ? (
         <>
-          {tsa.provider !== 'zamane' ? (
+          {tsa.provider !== 'zamane' && tsa.provider !== 'turktrust' ? (
             <Alert tone="info" assertive={false} data-testid="tsa-provider">
               {t('settings.kamusm.provider', { provider: tsa.provider })}
             </Alert>
@@ -317,7 +391,7 @@ export function KamusmPage() {
             >
               <ul className="list-disc pl-5">
                 {unplaced.map((cause) => (
-                  <li key={cause}>{t(causeKey(cause), { defaultValue: cause })}</li>
+                  <li key={cause}>{t(causeKey(cause, provider), { defaultValue: cause })}</li>
                 ))}
               </ul>
               <p className="mt-1">{t('settings.kamusm.seal.unplacedBody')}</p>
@@ -362,7 +436,7 @@ export function KamusmPage() {
             <div className="flex min-w-0 flex-col gap-4">
               <SettingsCard
                 title={`${STEPS.indexOf(step) + 1}. ${t(`settings.kamusm.steps.${step}.title`)}`}
-                description={t(`settings.kamusm.steps.${step}.description`)}
+                description={t(stepDescription(provider, step))}
                 testId={`kamusm-step-${step}`}
                 actions={<StepBadge status={stepStatus(step, tsa, tested)} />}
               >
@@ -388,9 +462,9 @@ export function KamusmPage() {
                       setErrors({});
                     });
                   }}
-                  probingText={t('settings.kamusm.probing')}
+                  probingText={t(providerText(sentTo || provider, 'probing'))}
                   onTerminal={settled}
-                  failureDetails={<TsaRefusal error={flow.failure} />}
+                  failureDetails={<TsaRefusal error={flow.failure} provider={provider} />}
                 />
               ) : null}
               {dirty && !FORM_STEPS.includes(step) ? (

@@ -1,0 +1,110 @@
+{
+  "settings": {
+    "kamusm": {
+      "titles": {
+        "zamane": "Kamu SM time stamps",
+        "turktrust": "TÜRKTRUST time stamps"
+      },
+      "status": {
+        "unused": "Not needed"
+      },
+      "servers": {
+        "legend": "Server to switch to",
+        "inUse": "in use",
+        "test": "Kamu SM test server",
+        "testHint": "For trying the setup; its stamps have no legal validity.",
+        "production": "Kamu SM production server",
+        "productionHint": "Needs Java, the Zamane client and the Kamu SM customer credentials.",
+        "turktrustHttps": "TÜRKTRUST (HTTPS)",
+        "turktrustHttpsHint": "Needs the TÜRKTRUST username and password; no Java and no Zamane client.",
+        "turktrustHttp": "TÜRKTRUST (plain HTTP)",
+        "turktrustHttpHint": "Only if HTTPS cannot be used: the username and password travel unencrypted."
+      },
+      "test": {
+        "server": {
+          "turktrust": "The stamp comes from the TÜRKTRUST server."
+        }
+      },
+      "production": {
+        "current": {
+          "turktrust": "The TÜRKTRUST server is in use.",
+          "turktrustHttps": "The TÜRKTRUST server is in use over HTTPS.",
+          "turktrustHttp": "The TÜRKTRUST server is in use over plain HTTP."
+        },
+        "items": {
+          "turktrust": {
+            "username": "TÜRKTRUST username stored",
+            "password": "TÜRKTRUST password stored"
+          }
+        },
+        "to": {
+          "test": "Switch to the Kamu SM test server",
+          "turktrustHttps": "Switch to the TÜRKTRUST server",
+          "turktrustHttp": "Switch to the TÜRKTRUST server over plain HTTP"
+        },
+        "testOtherTitle": "Switch to the Kamu SM test server?",
+        "testOtherBody": "From now on sealing uses stamps of the Kamu SM test server; these stamps have no legal validity.",
+        "turktrustTitle": "Switch to the TÜRKTRUST server?",
+        "turktrustBody": "From now on sealing uses stamps of the TÜRKTRUST server, over HTTPS. A day is shown as legal grade when its stamp chains to a TÜRKTRUST root certificate marked as a legal root.",
+        "httpTitle": "Switch to the TÜRKTRUST server over plain HTTP?",
+        "httpType": "Type {{phrase}} to confirm",
+        "httpPhrase": "PLAIN HTTP"
+      },
+      "turktrust": {
+        "unusedStep": "This step is needed for Kamu SM Zamane only; it does not affect sealing while TÜRKTRUST is in use.",
+        "steps": {
+          "java": {
+            "description": "The Java 8 that runs Kamu SM's Zamane client. Not needed for TÜRKTRUST."
+          },
+          "zamane": {
+            "description": "The Zamane client Kamu SM publishes. Not needed for TÜRKTRUST."
+          },
+          "roots": {
+            "description": "The root certificates that verify the stamps; the TÜRKTRUST root certificate is installed here. Removing one is done on the server console only."
+          },
+          "credentials": {
+            "description": "The TÜRKTRUST username and password. Stored values are never sent to the browser."
+          }
+        },
+        "roots": {
+          "caption": "Installed root certificates",
+          "upload": "TÜRKTRUST root certificate file",
+          "compared": "I compared the fingerprint with the value TÜRKTRUST publishes",
+          "markBody": "This fingerprint is added to the legal root fingerprints; compare it with the value TÜRKTRUST publishes first. Removing it is done on the server console only."
+        },
+        "credentials": {
+          "title": "TÜRKTRUST credentials",
+          "username": "TÜRKTRUST username",
+          "usernameHint": "The username TÜRKTRUST gave you; 1–128 characters.",
+          "password": "TÜRKTRUST password",
+          "passwordHint": "1–256 characters.",
+          "probe": "Try the TÜRKTRUST connection with the new credentials before saving"
+        },
+        "probing": "Connecting to TÜRKTRUST…",
+        "plainHttp": "Over plain HTTP the TÜRKTRUST username and password cross the network unencrypted, in clear text. Choose it only if HTTPS cannot be used, and switch back to HTTPS as soon as you can.",
+        "note": {
+          "title": "Verify on site (sahada doğrula)",
+          "body": "Some of TÜRKTRUST's behaviour is not confirmed by this installation; check it with the first stamp test. The host is zd.turktrust.com.tr; the path of the address is unknown, by default /. If TÜRKTRUST gives another path, write it into [tsa] url in arcilogger.toml on the server console. The answer for an empty balance is unknown; a rejection whose status text contains a credit word counts as no credit. Plain HTTP uses port 80, HTTPS port 443. Details: turktrust.md section 2."
+        },
+        "causes": {
+          "credentials": "The TÜRKTRUST username or password is not stored."
+        }
+      },
+      "errors": {
+        "turktrustUsername": "The username must be 1–128 characters with no control characters.",
+        "turktrustPassword": "The password must be 1–256 characters with no control characters."
+      }
+    }
+  },
+  "admin": {
+    "paths": {
+      "turktrust": {
+        "username": "TÜRKTRUST username",
+        "password": "TÜRKTRUST password"
+      },
+      "tsa": {
+        "allow_plain_http": "Allow plain HTTP"
+      }
+    }
+  }
+}

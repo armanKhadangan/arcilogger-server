@@ -6,12 +6,12 @@ import { confirmReauth, expectNoA11yViolations, usePreferences, type Theme } fro
 import { mockApi } from './mock-api';
 
 /**
- * Ayarlar → Kamu SM (contract 2.17): the wizard with the state of each step, the write-only
- * credentials (never pre-filled) with the re-authentication, the Zamane client (a known release
- * and one held for the console's approval), the root certificates and the legal roots, the
- * stamp test, the switch to production and back, the credit threshold, the server's refusal of
- * a change that would stop a working sealer, a held client on a later visit, and a sealing cause
- * that no step shows. The API is `mock-admin.ts`.
+ * Ayarlar → Zaman damgası with Kamu SM in use (contract 2.17): the wizard with the state of each
+ * step, the write-only credentials (never pre-filled) with the re-authentication, the Zamane
+ * client (a known release and one held for the console's approval), the root certificates and
+ * the legal roots, the stamp test, the switch to production and back, the credit threshold, the
+ * server's refusal of a change that would stop a working sealer, a held client on a later visit,
+ * and a sealing cause that no step shows. The API is `mock-admin.ts`.
  */
 
 const PEM = [
@@ -50,7 +50,8 @@ test.describe('Ayarlar → Kamu SM', () => {
   test('the steps with their state, the sealing view read-only', async ({ page }) => {
     await mockApi(page, { signedInAs: 'tolga' });
     await page.goto('/settings');
-    await page.getByRole('link', { name: /^Kamu SM/ }).click();
+    // The section is "Zaman damgası" in Ayarlar (Wave 5); the page's title names Kamu SM in use.
+    await page.getByRole('link', { name: /^Zaman damgası/ }).click();
     await expect(page).toHaveURL(/\/settings\/kamusm$/);
     await expect(
       page.getByRole('heading', { level: 1, name: 'Kamu SM zaman damgası' }),
