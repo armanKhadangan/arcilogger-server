@@ -986,8 +986,8 @@ All Wave 5 questions are answered (2026-11-02).
   is written only inside its dedup key (`R20-renewal:none` and so on) and the rule is taken from
   the key (D14); `worker/tests/test_alerts_legal.py::test_no_whole_string_constant_for_the_wave5_alert_codes`
   fails on a whole-string constant, and W5-E deletes or inverts it. The findings carry counts
-  only. R20-cert's "expires within 30 days and is uncovered" is read as a `due` token whose
-  certificate expires within 30 days. "The `Renew` task failed twice in a row" is left to W5-E:
+  only. R20-cert's "expires within 30 days and is uncovered" is read as in W5-C-12. "The
+  `Renew` task failed twice in a row" is left to W5-E:
   no state file records Renew runs yet (C12). `R20-crl` is judged from `state/crl` only (the
   stored lists and `index.json`, never an exit code); its details give the stale issuers, the
   failures, the changed files and the newest `fetched_at`.
@@ -1008,3 +1008,10 @@ All Wave 5 questions are answered (2026-11-02).
   skipped. A re-stamping entry whose time is at the edge of the calendar is left out. JSON
   nested too deeply to parse counts as unreadable. A seal state that cannot be parsed makes the
   unstamped days unknown.
+- **W5-C-12: R20-cert "high"** (manager answer on #117, 2026-11-02 21:07Z, Q6) is a token of
+  `state/renewal.json` that is `uncovered` (its certificate expired with no renewal that counts),
+  or one that is `due` with at most 30 days left before its certificate's `cert_not_after`
+  (exactly 30 days is high, 30 days and a second is not). The 30 days are
+  `alerts.system.CERT_EXPIRY_WARNING` (`timedelta(days=30)`), not a setting. A revocation still
+  makes it `critical`. The findings count both (`expiring`, `uncovered`, beside `revoked`).
+  "The `Renew` task failed twice in a row" stays W5-E's (W5-C-7).

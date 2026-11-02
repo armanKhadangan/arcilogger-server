@@ -86,7 +86,9 @@ Key                              Problem (setting)
                                  prepared, :data:`LEGAL_CHECKS`)
 ``R20-cert:none``                a time-stamp certificate on a revocation list at or before a
                                  stamp — critical; a token due for re-stamping whose certificate
-                                 expires within 30 days — high (prepared, :data:`LEGAL_CHECKS`)
+                                 expires within 30 days (:data:`CERT_EXPIRY_WARNING`), or one
+                                 whose certificate expired uncovered — high (prepared,
+                                 :data:`LEGAL_CHECKS`)
 ``R20-crl:none``                 no stored revocation list issued in the last
                                  ``tsa.crl_max_age_days`` (7) days for an issuer of the newest
                                  sealed day's chain, judged from ``state/crl`` only — medium
@@ -2253,7 +2255,8 @@ def crl_max_age_days(config: Config) -> int:
 RENEWAL_KEY: Final = "R20-renewal:none"
 CERT_KEY: Final = "R20-cert:none"
 CRL_KEY: Final = "R20-crl:none"
-#: A token due for re-stamping is ``high`` for R20-cert when its certificate expires this soon.
+#: A token due for re-stamping is ``high`` for R20-cert when its certificate expires this soon
+#: (at most 30 days left; an ``uncovered`` one always is). Manager answer on #117, W5-C-12.
 CERT_EXPIRY_WARNING: Final = timedelta(days=30)
 
 
@@ -2305,9 +2308,10 @@ def check_stamp_renewal(ctx: CheckContext) -> Outcome:
 
 def check_stamp_cert(ctx: CheckContext) -> Outcome:
     """``R20-cert:none``: a time-stamp certificate is on a revocation list at or before a stamp
-    (``critical``), or a token due for re-stamping, not covered yet, has a certificate that
-    expires within :data:`CERT_EXPIRY_WARNING` (``high``). Resolved when neither holds and the
-    re-stamping report can be read."""
+    (``critical``); or a token due for re-stamping, not covered yet, has a certificate that
+    expires within :data:`CERT_EXPIRY_WARNING`, or a token's certificate expired with no renewal
+    that counts (``uncovered``) (``high``). Resolved when none holds and the re-stamping report
+    can be read."""
     stamp = stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout))
     revoked = revoked_certificates(ctx.layout, stamp, stored_lists(ctx.layout))
     renewals = read_stamp_renewals(ctx.layout)
@@ -2316,6 +2320,7 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
         for renewal in renewals or ()
         if renewal.status == "due" and renewal.cert_not_after - ctx.now <= CERT_EXPIRY_WARNING
     )
+    uncovered = sum(1 for renewal in renewals or () if renewal.status == "uncovered")
     findings = []
     if revoked:
         findings.append(
@@ -2327,6 +2332,7 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
                 details={
                     "revoked": len(revoked),
                     "expiring": expiring,
+                    "uncovered": uncovered,
                     "title_en": (
                         f"Time-stamp certificate on a revocation list: {len(revoked)} "
                         "certificate(s)"
@@ -2334,7 +2340,7 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
                 },
             )
         )
-    elif expiring:
+    elif expiring or uncovered:
         days = CERT_EXPIRY_WARNING.days
         findings.append(
             Finding(
@@ -2342,15 +2348,16 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
                 rule=_rule_of(CERT_KEY),
                 severity="high",
                 title=(
-                    f"Zaman damgası sertifikası {days} gün içinde sona eriyor: {expiring} damga "
-                    "yeniden damgalanmadı"
+                    f"Zaman damgası sertifikası: {expiring} damganın sertifikası {days} gün "
+                    f"içinde sona eriyor, {uncovered} damganınki yeniden damgalanmadan sona erdi"
                 ),
                 details={
                     "revoked": 0,
                     "expiring": expiring,
+                    "uncovered": uncovered,
                     "title_en": (
-                        f"Time-stamp certificate expires within {days} days: {expiring} stamp(s) "
-                        "not re-stamped"
+                        f"Time-stamp certificate: {expiring} stamp(s) expire within {days} "
+                        f"days, {uncovered} expired without re-stamping"
                     ),
                 },
             )

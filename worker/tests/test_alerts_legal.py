@@ -35,6 +35,7 @@ from arcilogger_db.models import Alert
 from arcilogger_worker.alerts import system
 from arcilogger_worker.alerts.mail import MailItem, render_html, render_text, subject
 from arcilogger_worker.alerts.system import (
+    CERT_EXPIRY_WARNING,
     CERT_KEY,
     CRL_INDEX_SCHEMA,
     CRL_KEY,
@@ -267,6 +268,7 @@ def test_stamp_cert_critical_when_revoked(check: Any, layout: Layout) -> None:
     assert alert.details == {
         "revoked": 1,
         "expiring": 1,
+        "uncovered": 0,
         "title_en": "Time-stamp certificate on a revocation list: 1 certificate(s)",
     }
     assert alert.title == "Zaman damgası sertifikası iptal listesinde: 1 sertifika"
@@ -274,8 +276,12 @@ def test_stamp_cert_critical_when_revoked(check: Any, layout: Layout) -> None:
 
 
 def test_stamp_cert_high_when_expiring_within_30_days_uncovered(check: Any, layout: Layout) -> None:
+    """``high`` for a ``due`` token with at most :data:`CERT_EXPIRY_WARNING` (30 days) left
+    (manager answer on #117, W5-C-12)."""
+    assert timedelta(days=30) == CERT_EXPIRY_WARNING
     renewals(
         layout,
+        ("due", NOW + timedelta(days=31)),
         ("due", NOW + timedelta(days=30, seconds=1)),  # just outside
         ("covered", NOW + timedelta(days=5)),  # re-stamped already
         ("late", NOW + timedelta(days=5)),
@@ -286,14 +292,39 @@ def test_stamp_cert_high_when_expiring_within_30_days_uncovered(check: Any, layo
     alert = check()[CERT_KEY]
     assert (alert.rule, alert.severity) == ("R20-cert", "high")
     assert (alert.details["revoked"], alert.details["expiring"]) == (0, 2)
+    assert alert.details["uncovered"] == 0
     assert alert.title == (
-        "Zaman damgası sertifikası 30 gün içinde sona eriyor: 2 damga yeniden damgalanmadı"
+        "Zaman damgası sertifikası: 2 damganın sertifikası 30 gün içinde sona eriyor, 0 "
+        "damganınki yeniden damgalanmadan sona erdi"
     )
     assert alert.details["title_en"] == (
-        "Time-stamp certificate expires within 30 days: 2 stamp(s) not re-stamped"
+        "Time-stamp certificate: 2 stamp(s) expire within 30 days, 0 expired without re-stamping"
     )
     revoked_day(layout)
     assert check()[CERT_KEY].severity == "critical"  # a revocation raises it
+
+
+def test_stamp_cert_high_when_a_certificate_expired_uncovered(check: Any, layout: Layout) -> None:
+    """An ``uncovered`` token (its certificate expired with no renewal that counts) is ``high``
+    however long ago it expired (manager answer on #117, W5-C-12)."""
+    renewals(layout, ("due", NOW + timedelta(days=31)), ("uncovered", NOW - timedelta(days=90)))
+    alert = check()[CERT_KEY]
+    assert (alert.rule, alert.severity) == ("R20-cert", "high")
+    assert alert.details == {
+        "revoked": 0,
+        "expiring": 0,
+        "uncovered": 1,
+        "title_en": (
+            "Time-stamp certificate: 0 stamp(s) expire within 30 days, 1 expired without "
+            "re-stamping"
+        ),
+    }
+    assert alert.title == (
+        "Zaman damgası sertifikası: 0 damganın sertifikası 30 gün içinde sona eriyor, 1 "
+        "damganınki yeniden damgalanmadan sona erdi"
+    )
+    renewals(layout, ("covered", NOW - timedelta(days=90)))  # a renewal that counts
+    assert CERT_KEY not in check()
 
 
 def test_stamp_cert_cleared(check: Any, layout: Layout, db_session: Session) -> None:
