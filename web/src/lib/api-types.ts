@@ -549,8 +549,8 @@ export interface Credits {
   provider: string;
   legal_grade: boolean;
   /**
-   * `false`: the provider offers no credit query (today `turktrust`; Wave 5 contract 2.4, C3).
-   * The card then shows the neutral text of 2.6 instead of a number.
+   * `false`: the provider offers no credit query (`rfc3161`, `turktrust`; Wave 5 contract 2.4,
+   * C3, C21). The card then shows the neutral text of 2.6 instead of a number.
    */
   supported: boolean;
   threshold: number;

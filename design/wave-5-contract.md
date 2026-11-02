@@ -998,8 +998,8 @@ All Wave 5 questions are answered (2026-11-02).
   W5-D asked and like `tsa_cert_not_after?`; the API always sends both keys (`null` when there
   is nothing). `Credits.supported` is required in `api-types.ts`, because the schema requires
   it and `api-types.test.ts` compares requiredness. It is false for a provider without a credit
-  query and also when the newest `state/credit.jsonl` line of the configured provider says
-  `"supported": false`.
+  query (`rfc3161` and `turktrust`, C21; `NO_CREDIT_PROVIDERS` of `routers/credits.py`) and also
+  when the newest `state/credit.jsonl` line of the configured provider says `"supported": false`.
 - **W5-C-10: day-check Turkish texts beyond #106's four** in `issues.py`: C14's "revocation
   list {file} does not match its index entry" and the builder's "CRL file {file} changed while
   the package was built". `{when}` is shown in site time (`format_datetime`).

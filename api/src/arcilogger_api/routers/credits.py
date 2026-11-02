@@ -12,8 +12,8 @@ which asks the provider with the stored Kamu SM credentials and appends the answ
 ``admin_rate_limited``); answer 202 with the request to follow, whose result is ``{credits,
 threshold, below_threshold}``.
 
-``supported`` is false for a provider without a credit query (Wave 5 contract 2.4, C3; today
-``turktrust``), or when the newest check of the configured provider says so
+``supported`` is false for a provider without a credit query (Wave 5 contract 2.4, C3, C21:
+``rfc3161`` and ``turktrust``), or when the newest check of the configured provider says so
 (``{"supported": false}``, written by the Credit task). The web app then shows the neutral text of
 2.6 instead of a number; it never tests the provider name.
 """
@@ -37,8 +37,9 @@ ReaderDep = Annotated[CurrentUser, Depends(require("seal.read"))]
 ManagerDep = Annotated[CurrentUser, Depends(require("seal.manage"))]
 #: "Kontör sorgula" at most this often (contract 2.5.1).
 QUERY_EVERY: Final = timedelta(minutes=1)
-#: Providers without a credit query (Wave 5 contract 2.4, D12).
-NO_CREDIT_PROVIDERS: Final[frozenset[str]] = frozenset({"turktrust"})
+#: Providers without a credit query (Wave 5 contract 2.4, D12, C21): ``Rfc3161Client.credits()``
+#: returns ``None``, TÜRKTRUST offers none. ``zamane`` and ``mock`` (simulated balance) have one.
+NO_CREDIT_PROVIDERS: Final[frozenset[str]] = frozenset({"rfc3161", "turktrust"})
 
 
 class CreditCheck(BaseModel):

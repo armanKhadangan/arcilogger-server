@@ -1,5 +1,5 @@
 """``GET /api/v1/credits``: the Kamu SM credit history written by the Credit task, and
-``supported`` for a provider without a credit query (Wave 5 contract 2.4, C3)."""
+``supported`` for a provider without a credit query (Wave 5 contract 2.4, C3, C21)."""
 
 from __future__ import annotations
 
@@ -123,6 +123,24 @@ def test_credits_for_turktrust_are_not_supported(
     assert body["supported"] is False
     assert body["remaining"] is None
     assert body["below_threshold"] is False
+
+
+def test_credits_for_rfc3161_are_not_supported(
+    app: FastAPI, api_config: Config, client: TestClient, login_as: Login, layout: Layout
+) -> None:
+    """C21: an RFC 3161 server has no credit query (``Rfc3161Client.credits()`` is ``None``), so
+    its card is the neutral one too, although the Credit task's line names no ``supported``."""
+    use_tsa(app, api_config, provider="rfc3161", url="https://198.51.100.30/tsa")
+    write_lines(
+        layout, {"time": "2026-10-10T09:00:00+03:00", "provider": "rfc3161", "credits": None}
+    )
+    login_as(client, "auditor")
+    body = client.get(API).json()
+    assert body["provider"] == "rfc3161"
+    assert body["supported"] is False
+    assert body["remaining"] is None
+    assert body["below_threshold"] is False
+    assert body["history"][-1]["credits"] is None
 
 
 def test_credits_unsupported_line_from_the_credit_task(
