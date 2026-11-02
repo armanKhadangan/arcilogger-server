@@ -3118,18 +3118,47 @@ function Invoke-DatabaseOnlyRestore {
     }
 }
 
+function Test-PreviousLeaseRollbackModule([string]$Module) {
+    <#
+    Whether the program a rollback returns to has arcilogger_db\lease_rollback.py (-Module, in
+    its venv where pip installed the wheel): the step and its restore came with FortiGate DHCP,
+    so a version with the module reads those lines itself. Throws when the check cannot decide:
+    the package's __init__.py must be seen first, else a missing or unreadable folder would pass
+    for a version from before FortiGate DHCP.
+    #>
+    $package = Split-Path -Parent $Module
+    if (-not (Test-Path -LiteralPath (Join-Path $package '__init__.py') -PathType Leaf)) {
+        throw ("arcilogger_db paketi bulunamadı ya da okunamadı [package not found or not readable]: {0}" -f $package)
+    }
+    Test-Path -LiteralPath $Module -PathType Leaf
+}
+
 function Invoke-LeaseRollbackStep {
     <#
     Contract 2.2.1: a previous version from before FortiGate DHCP cannot read those lines, so
     while this version's program is still in place and PostgreSQL runs, "arcilogger-db leases
     prepare-rollback" sets every FortiGate lease to low confidence (derived rows only) and prints
-    the count. It runs on every rollback without -RestoreDatabase (also between two versions that
-    read them: false lows only, which the next upgrade restores). A failure does not stop the
+    the count. A previous version that reads them too (its arcilogger_db has lease_rollback.py;
+    review note round 7 (a), issue #81) needs no step: it would only give false lows until the
+    next upgrade, so it is skipped. When the check cannot decide, the step runs (lowering is the
+    safe side), and the plan's detail keeps why (previous_check). A failure does not stop the
     rollback, nor does -SkipDatabase: either is a warning that says what it means for the lookups.
     #>
-    $detail = [pscustomobject]@{ command = 'arcilogger-db leases prepare-rollback'; lowered = $null }
+    $module = Join-Path $PreviousDir 'venv\Lib\site-packages\arcilogger_db\lease_rollback.py'
+    $found = $null
+    $unsure = $null
+    try { $found = Test-PreviousLeaseRollbackModule $module }
+    catch { $unsure = $_.Exception.Message }
+    $detail = [pscustomobject]@{ command = 'arcilogger-db leases prepare-rollback'; lowered = $null; previous_module = $module; previous_has_module = $found; previous_check = $unsure }
     $text = 'FortiGate kiraları düşük güvene indiriliyor [lowering FortiGate leases to low confidence] (arcilogger-db leases prepare-rollback)'
     $notLowered = 'FortiGate kiraları düşük güvene indirilemedi [FortiGate leases not lowered] ({0}). Geri alınan sürümdeki FortiGate zincirleri bir adresin önceki sahibini gösterebilir; geri alma sonrasındaki anlar için FortiGate-DHCP sorgularını yeniden yükseltmeden sonra yapın [FortiGate chains in the previous version may name a former holder of an address; make FortiGate-DHCP lookups of moments after the rollback after the re-upgrade].'
+    if ($found) {
+        # Also with -SkipDatabase: the restored version reads the FortiGate DHCP lines itself.
+        $notNeeded = 'FortiGate kiraları düşük güvene indirilmiyor: geri alınan sürüm FortiGate DHCP kayıtlarını zaten okuyor [FortiGate leases not lowered: the restored version already reads FortiGate DHCP] ({0})' -f $module
+        Add-PlanItem -Id 'leases.prepare-rollback' -Status 'skipped' -Text $notNeeded -Detail $detail
+        Write-ArciStep $notNeeded
+        return
+    }
     if ($SkipDatabase) {
         Add-PlanItem -Id 'leases.prepare-rollback' -Status 'skipped' -Text ($text + ' (-SkipDatabase)') -Detail $detail
         $message = $notLowered -f '-SkipDatabase'
@@ -3138,6 +3167,7 @@ function Invoke-LeaseRollbackStep {
         return
     }
     Invoke-Step 'leases.prepare-rollback' $text {
+        if ($unsure) { Write-ArciInfo ('Geri alınan sürümün FortiGate DHCP okuyup okumadığı anlaşılamadı, kiralar yine de indiriliyor [could not tell whether the restored version reads FortiGate DHCP: the leases are lowered anyway] ({0})' -f $unsure) }
         $result = $null
         $problem = $null
         # The command's own limits (lock 30 s, statement 10 min) end it first.
