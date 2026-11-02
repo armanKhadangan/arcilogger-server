@@ -393,7 +393,7 @@ def test_the_downgrade_gives_back_the_kept_rows(db_engine: Engine) -> None:
         key: kept[key] for key in ("nat.public_ips", "nat.wan_transip")
     }
     # Up again: the same conversion (the audit entry of the first upgrade stays the only one).
-    upgrade(db_engine)
+    upgrade(db_engine, revision=REVISION)
     assert (
         _rows(db_engine)["nat.egresses"][0]
         == legacy_egresses(["203.0.113.200"], "100.64.12.9", False)[0]

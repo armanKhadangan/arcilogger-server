@@ -1992,6 +1992,36 @@ class SearchCount(Base):
     n: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
+class SourceClockSample(Base):
+    """How far each source's device clock was from the receive time, per received minute
+    (``arcilogger_db.clocksamples``; revision 0019_source_clock_samples, ADR-0016 D28).
+
+    One row per ``(source, minute, seconds)`` with its number of ``messages`` rows ``n``: the
+    minute the lines were received (UTC) and ``time - time_received`` in whole seconds, ``0`` for
+    an offset under a minute (no clock limit is that small, so a source on time has one row a
+    minute). Rows whose ``time`` is the receive time are not counted. The ingest loader adds a
+    batch's samples in the transaction that loads its rows, like ``search_counts``; the
+    ``source-clock`` alert reads the newest received minutes and a lookup the minutes received
+    around its moment, so a clock that jumps by hours is measured where its rows arrived, not
+    where their device times put them. Derived data: ``clocksamples.rebuild`` counts a source's
+    received range again from its rows.
+    """
+
+    __tablename__ = "source_clock_samples"
+    __table_args__ = (
+        CheckConstraint("n > 0", name="n"),
+        {"comment": "Device clock offsets per source and received minute (whole seconds)."},
+    )
+
+    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    #: ``date_trunc('minute', messages.time_received)`` (UTC).
+    minute: Mapped[datetime] = mapped_column(TZ, primary_key=True)
+    #: The offset ``time - time_received`` rounded to whole seconds; ``0`` when under a minute
+    #: either way.
+    seconds: Mapped[int] = mapped_column(Integer, primary_key=True)
+    n: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
 class SavedSearch(Base):
     """A personal saved search (ADR-0015): a name, the query text and a time range.
 
