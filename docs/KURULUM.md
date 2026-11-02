@@ -1156,11 +1156,17 @@ belirtir: zincir kurulamayan bir anda, o anı kapsayan en yeni DHCP kaydı böyl
 kaydından sonra o adres ya da o kiranın MAC adresi için böyle bir kayıt varsa zincir düşük
 güvenle ve nedeniyle gösterilir (`fortigate_dhcp_not_converted_since_lease`).
 
-`-Rollback` FortiGate kiralarını, geri dönülen sürüm FortiGate DHCP kayıtlarını okusa da
-düşük güvene indirir: FortiGate DHCP okuyan iki sürüm arasındaki bir geri almadan sonra da
-FortiGate DHCP zincirleri bir sonraki `arcilogger-db upgrade` çalışmasına kadar düşük güvenle
-görünür. O yükseltme (ör. yeniden yükseltme) onları geri getirir (aşağıda). Bu düşük güven
-hiçbir zaman yanlış bir kişiyi göstermez; zinciri yalnızca gereğinden düşük gösterir.
+`-Rollback` önce geri dönülen sürümün program klasöründe (`ARCILOGGER.previous`)
+`venv\Lib\site-packages\arcilogger_db\lease_rollback.py` dosyasını arar. Dosya varsa (FortiGate
+DHCP okuyan iki sürüm arasındaki bir geri alma) o sürüm FortiGate DHCP kayıtlarını zaten okur:
+FortiGate kiraları düşük güvene indirilmez, adım atlanır; kurulum nedenini yazar ve kurulum
+günlüğüne kaydeder. Dosya yoksa ya da denetim karar veremezse (klasör yok ya da okunamıyor),
+kiralar yukarıdaki gibi düşük güvene indirilir; denetim karar veremediyse kurulum nedenini
+kiraları indirmeden önce yazar, plan da (`-PlanPath`) `previous_check` alanında tutar. Dönülen
+sürüm FortiGate DHCP okuyorsa FortiGate DHCP zincirleri o zaman bir sonraki
+`arcilogger-db upgrade` çalışmasına kadar düşük güvenle görünür; o yükseltme (ör. yeniden
+yükseltme) onları geri getirir (aşağıda). Bu düşük güven hiçbir zaman yanlış bir kişiyi
+göstermez; zinciri yalnızca gereğinden düşük gösterir.
 
 **Yeniden yükseltme:** veritabanı şeması geri alınmadığı için dönüşüm yeniden çalışmaz ve eski
 NAT ayarları yeniden çevrilmez. Geri dönüş sırasında önceki sürümde `nat.public_ips`,

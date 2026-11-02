@@ -1017,10 +1017,16 @@ such a record; in a chain that rests on a DHCP lease, when such a record exists 
 address or for the lease's MAC address after the lease's last DHCP record, the chain is shown
 with low confidence and the reason (`fortigate_dhcp_not_converted_since_lease`).
 
-`-Rollback` sets the FortiGate leases to low confidence even when the version it returns to
-reads FortiGate DHCP records: after a rollback between two versions that both read FortiGate
-DHCP, FortiGate DHCP chains are also shown with low confidence until the next
-`arcilogger-db upgrade`. That upgrade (e.g. the re-upgrade) restores them (below). This low
+`-Rollback` first looks in the program folder of the version it returns to
+(`ARCILOGGER.previous`) for `venv\Lib\site-packages\arcilogger_db\lease_rollback.py`. With the
+file (a rollback between two versions that both read FortiGate DHCP), that version already reads
+FortiGate DHCP records: the FortiGate leases are not lowered, the step is skipped, and the
+installer prints why and writes it to the installation log. Without the file, or when the check
+cannot decide (the folder is missing or cannot be read), the leases are set to low confidence as
+above; when the check could not decide, the installer prints why before it lowers the leases,
+and the plan (`-PlanPath`) keeps it in `previous_check`. If the version returned to does read
+FortiGate DHCP, FortiGate DHCP chains are then shown with low confidence until the next
+`arcilogger-db upgrade`; that upgrade (e.g. the re-upgrade) restores them (below). This low
 confidence never names a wrong person; it only shows the chain lower than needed.
 
 **Re-upgrade:** since the database schema is not rolled back, the conversion does not run again
