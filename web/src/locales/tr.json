@@ -1304,7 +1304,7 @@
       "timestamp": {
         "notRequested": "Rapora zaman damgası alınmadı (Ayarlar: lookup.report_timestamp kapalı).",
         "failedTitle": "Rapora zaman damgası alınamadı",
-        "notLegal": "Rapor özetinin zaman damgası {{provider}} sağlayıcısından alındı; bu Kamu SM üretim sunucusu olmadığı için yasal geçerliliği yoktur. Yalnızca deneme amaçlıdır.",
+        "notLegal": "Rapor özetinin zaman damgası {{provider}} sağlayıcısından alındı; bu Kamu SM ya da TÜRKTRUST üretim sunucusu olmadığı için yasal geçerliliği yoktur. Yalnızca deneme amaçlıdır.",
         "status": "Zaman damgası",
         "stampedVerified": "Damgalandı ve doğrulandı",
         "stampedUnverified": "Damgalandı, doğrulanamadı",

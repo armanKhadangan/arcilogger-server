@@ -1304,7 +1304,7 @@
       "timestamp": {
         "notRequested": "No time stamp was requested for the report (Settings: lookup.report_timestamp off).",
         "failedTitle": "The report could not be time-stamped",
-        "notLegal": "The report hash was stamped by the provider {{provider}}; it is not the Kamu SM production server, so the stamp has no legal validity. For trials only.",
+        "notLegal": "The report hash was stamped by the provider {{provider}}; it is neither the Kamu SM nor the TÜRKTRUST production server, so the stamp has no legal validity. For trials only.",
         "status": "Time stamp",
         "stampedVerified": "Stamped and verified",
         "stampedUnverified": "Stamped, not verified",
