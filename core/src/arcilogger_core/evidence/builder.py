@@ -8,9 +8,11 @@ A package is one ZIP file that lets someone outside the company check sealed day
   (``include_audit_log``; it holds other requests and staff data, KVKK) — otherwise it is listed
   in ``paket.json`` as excluded with its sealed SHA-256;
 * deletion records and the chain anchor when a day links to a deleted day or lists a deletion,
-  renewal stamps that cover the included days;
+  renewal stamps that cover the included days or the included report's time stamp;
 * the trusted root certificates the package's tokens actually chain to, the TSA certificates
-  taken from the tokens and the CRLs of a CRL folder when one exists;
+  taken from the tokens and, from the CRL folder (``state/crl``), the revocation lists the days
+  need: for each issuer of their chains the newest list and the first one issued at or after
+  each day's stamp time (Wave 5 D9);
 * optionally an *extract*: the raw lines a lookup is about, byte for byte, with their numbers;
 * the standalone verifier (``verify.py`` + ``verify.ps1`` + ``verify.sh``), the Turkish guide
   ``DOGRULAMA.txt`` (ASCII file name, Turkish content), the English ``VERIFY-EN.txt``, an
@@ -35,7 +37,7 @@ import logging
 import re
 import secrets
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -45,6 +47,7 @@ from cryptography.hazmat.primitives.serialization import Encoding
 
 from arcilogger_core import PRODUCT_NAME, __version__
 from arcilogger_core.canonical import canonical_json
+from arcilogger_core.crl import Crl, CrlError, crls_for, parse_crl, trusted_issuers
 from arcilogger_core.evidence.archive import ArchivePackage, ArchiveWriter
 from arcilogger_core.evidence.extract import format_extract, read_lines
 from arcilogger_core.evidence.instructions import (
@@ -74,6 +77,7 @@ from arcilogger_core.tsa.asn1 import READABLE_DIGESTS, parse_container
 from arcilogger_core.tsa.base import TokenInfo, TsaError
 from arcilogger_core.tsa.verify import (
     confirmed_legal_grade,
+    fingerprint,
     inspect_token,
     is_test_stamp,
     verify_token,
@@ -101,9 +105,14 @@ AUDIT_EXCLUDED_REASON = (
     "bilgilerini içerir (KVKK veri en aza indirme). / ARCILOGGER's audit log is left out by "
     "default: it holds other requests and staff data (KVKK data minimisation)."
 )
+#: Why a package has no CRL (paket.json ``crl_note``; the standalone verifier shows it).
 NO_CRL_NOTE = (
-    "ARCILOGGER henüz SİL indirmiyor; Kamu SM SİL adresleri kurulumda netleştirilecek "
-    "(docs/kamusm.md, K10)."
+    "Sunucuda bu günlerin damga sertifikalarını kapsayan doğrulanmış bir SİL yok (state/crl); "
+    "SİL adresleri tsa.crl_urls ayarından ya da sertifikaların dağıtım noktalarından alınır, "
+    "Kamu SM adresleri sahada doğrulanmalı (docs/kamusm.md, K10). / The server holds no "
+    "verified CRL for these days' time-stamp certificates (state/crl); CRL URLs come from "
+    "tsa.crl_urls or the certificates' distribution points, Kamu SM's are to be confirmed on "
+    "site (docs/kamusm.md, K10)."
 )
 
 
@@ -409,7 +418,7 @@ class _Records:
         elif token_sha256:
             raise EvidenceError(f"{relative}.zd: time stamp missing in the vault")
 
-    def collect(self, days: Sequence[_Day]) -> list[_Entry]:
+    def collect(self, days: Sequence[_Day], report_token: bytes | None = None) -> list[_Entry]:
         sealed = {day.day for day in days}
         for day in days:
             for record in day.manifest.get("deletions") or []:
@@ -420,7 +429,7 @@ class _Records:
                     str(record.get("token_sha256") or "") or None,
                 )
             self._anchor(day, sealed)
-        self._renewals(days)
+        self._renewals(days, report_token)
         return list(self.entries.values())
 
     def _anchor(self, day: _Day, sealed: set[date]) -> None:
@@ -448,14 +457,18 @@ class _Records:
         self.entries[VAULT + relative] = _Entry(VAULT + relative, "chain_anchor", data=data)
         self.add(f"deletions/{record}", "deletion")
 
-    def _renewals(self, days: Sequence[_Day]) -> None:
-        folder = self.layout.vault / "renewals"
+    def _renewals(self, days: Sequence[_Day], report_token: bytes | None) -> None:
+        """The renewal records whose text names a packaged day's manifest or token hash, or the
+        packaged report's token hash (Wave 5 D1-D3: a renewal of a renewal repeats them)."""
+        folder = self.layout.renewals_dir
         if not folder.is_dir():
             return
         hashes = set()
         for day in days:
             hashes.add(hashlib.sha256(day.manifest_bytes).hexdigest())
             hashes.add(hashlib.sha256(day.token_bytes).hexdigest())
+        if report_token is not None:
+            hashes.add(hashlib.sha256(report_token).hexdigest())
         for record in sorted(folder.glob("*.json")):
             text = record.read_bytes().decode("utf-8", "replace")
             if any(digest in text for digest in hashes):
@@ -514,17 +527,54 @@ def _tsa_certificates(
     return entries, index
 
 
-def _crls(crl_dir: Path | None) -> list[_Entry]:
+def _stored_crls(crl_dir: Path | None) -> list[tuple[Crl, bytes]]:
+    """The revocation lists of the CRL folder (``state/crl``, or one named on the command
+    line) with the bytes of their files, each list once. A file that is not a list is left out
+    with a warning."""
     if crl_dir is None or not crl_dir.is_dir():
         return []
-    entries = []
+    stored: dict[bytes, tuple[Crl, bytes]] = {}
     for path in sorted(crl_dir.iterdir()):
         if not path.is_file() or path.suffix.lower() not in CRL_SUFFIXES:
             continue
         if not SAFE_FILE_NAME.match(path.name):
             raise EvidenceError(f"unsupported CRL file name {path.name!r}")
-        entries.append(_Entry(CRL_FOLDER + path.name, "crl", data=path.read_bytes()))
-    return entries
+        data = path.read_bytes()
+        try:
+            crl = parse_crl(data)
+        except CrlError as exc:
+            log.warning("CRL file %s is not put into the package: %s", path.name, exc)
+            continue
+        stored.setdefault(crl.der, (replace(crl, path=path), data))
+    return list(stored.values())
+
+
+def _crls(
+    layout: Layout,
+    crl_dir: Path | None,
+    days: Sequence[_Day],
+    roots: Sequence[x509.Certificate],
+) -> list[_Entry]:
+    """The lists the package needs (D9): for each issuer — a root of the package or a CA
+    certificate of a day's token that chains to one — the newest list it signed, plus the first
+    one with ``thisUpdate`` at or after each packaged day's stamp time. The files go in byte for
+    byte, under their stored names."""
+    stored = _stored_crls(crl_dir)
+    if not stored:
+        return []
+    files = {crl.path: data for crl, data in stored}
+    lists = [crl for crl, _ in stored]
+    moments = [day.info.gen_time for day in days]
+    seen = [certificate for day in days for certificate in day.certificates]
+    paths = {
+        path
+        for issuer in trusted_issuers(roots, seen)
+        for path in crls_for(layout, issuer, moments, stored=lists)
+    }
+    return [
+        _Entry(CRL_FOLDER + path.name, "crl", data=files[path])
+        for path in sorted(paths, key=lambda path: path.name)
+    ]
 
 
 def _extracts(
@@ -754,7 +804,7 @@ def build_package(
     records = _Records(
         layout, roots, require_critical_eku=all(day.require_critical_eku for day in collected)
     )
-    entries += records.collect(collected)
+    entries += records.collect(collected, report_token)
     used_roots = {day.root_sha256 for day in collected} | records.used_roots
     if report_pdf is not None and report_token is not None:
         used_roots.add(_root_of(report_token, report_pdf, roots, records.require_critical_eku))
@@ -762,7 +812,8 @@ def build_package(
     root_entries, roots_index = _roots(roots, used_roots)
     tsa_entries, tsa_index = _tsa_certificates(collected, roots)
     extract_entries, extract_index = _extracts(layout, collected, refs)
-    crl_entries = _crls(crl_dir)
+    package_roots = [root for root in roots if fingerprint(root) in used_roots]
+    crl_entries = _crls(layout, crl_dir, collected, package_roots)
     entries += root_entries + tsa_entries + extract_entries + crl_entries
     report = f"{REPORT_FOLDER}{report_name}" if report_pdf is not None else None
     report_zd = f"{report}.zd" if report is not None and report_token is not None else None
