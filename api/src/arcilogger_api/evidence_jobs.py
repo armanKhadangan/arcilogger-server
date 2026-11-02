@@ -450,7 +450,7 @@ class EvidenceBuilder:
             lookup_id=order.lookup_ref,
             reference=order.reference,
             site_name=config.site_name,
-            crl_dir=layout.state / "crl",
+            crl_dir=layout.crl_dir,
             clock=self._clock,
             legal_root_fingerprints=config.tsa.legal_root_fingerprints,
         )
