@@ -145,9 +145,13 @@ def make_crl(
     signer: PrivateKey | None = None,
     pem: bool = False,
     digest: hashes.SHA256 | hashes.SHA3_256 | None = None,
+    delta_of: int | None = None,
 ) -> bytes:
+    """A list of ``ca``; ``delta_of``: a delta list (DeltaCRLIndicator) of that base list."""
     builder = x509.CertificateRevocationListBuilder().issuer_name(ca.certificate.subject)
     builder = builder.last_update(this_update).next_update(this_update + timedelta(days=7))
+    if delta_of is not None:
+        builder = builder.add_extension(x509.DeltaCRLIndicator(delta_of), critical=True)
     for serial, when, reason in revoked:
         entry = x509.RevokedCertificateBuilder().serial_number(serial).revocation_date(when)
         if reason is not None:
@@ -155,6 +159,11 @@ def make_crl(
         builder = builder.add_revoked_certificate(entry.build())
     signed = builder.sign(signer or ca.key, digest or hashes.SHA256())
     return signed.public_bytes(Encoding.PEM if pem else Encoding.DER)
+
+
+def stored_name(ca: Ca, this_update: str, data: bytes) -> str:
+    """The name ``crl fetch`` stores ``data`` under (D8, C7); ``this_update`` as in the name."""
+    return f"{ca.fingerprint[:12]}-{this_update}-{hashlib.sha256(data).hexdigest()[:8]}.crl"
 
 
 def token_with(certificates: Sequence[x509.Certificate]) -> bytes:
@@ -348,7 +357,7 @@ def test_good_list_is_stored_byte_for_byte_and_indexed(
     run = fetch(options(server.url("/root.crl")), layout, [root.certificate], NOW)
 
     assert run.exit_code == 0
-    name = f"{root.fingerprint[:12]}-20261101T063015Z.crl"
+    name = stored_name(root, "20261101T063015Z", data)
     stored = layout.crl_dir / name
     assert stored.read_bytes() == data
     index = json.loads((layout.crl_dir / "index.json").read_text(encoding="utf-8"))
@@ -384,6 +393,7 @@ def test_good_list_is_stored_byte_for_byte_and_indexed(
         ("bad_signature", "bad_signature"),
         ("unknown_issuer", "unknown_issuer"),
         ("not_a_crl", "not_a_crl"),
+        ("delta", "delta_not_supported"),
         ("http_404", "unreachable"),
         ("closed_port", "unreachable"),
         ("too_large_claimed", "too_large"),
@@ -399,6 +409,8 @@ def test_a_list_that_fails_is_recorded_and_not_stored(
         "bad_signature": make_crl(root, this_update, signer=stranger.key),
         "unknown_issuer": make_crl(stranger, this_update),
         "not_a_crl": b"<html>not a list</html>",
+        # C7: a delta list verifies, but neither verifier applies one.
+        "delta": make_crl(root, this_update, [(9, this_update, None)], delta_of=4),
     }
     url = server.url(f"/{case}.crl")
     if case in bodies:
@@ -862,9 +874,11 @@ def test_a_newer_list_is_added_and_the_older_one_stays(
     run = fetch(options(url), layout, [root.certificate], later)
     assert run.exit_code == 0
 
-    prefix = root.fingerprint[:12]
     files = sorted(path.name for path in layout.crl_dir.glob("*.crl"))
-    assert files == [f"{prefix}-20261025T000000Z.crl", f"{prefix}-20261101T000000Z.crl"]
+    assert files == [
+        stored_name(root, "20261025T000000Z", first),
+        stored_name(root, "20261101T000000Z", second),
+    ]
     assert (layout.crl_dir / files[0]).read_bytes() == first
     assert (layout.crl_dir / files[1]).read_bytes() == second
     index = read_index(layout)
@@ -875,39 +889,116 @@ def test_a_newer_list_is_added_and_the_older_one_stays(
     ]
 
 
-def test_an_existing_file_is_never_overwritten(
-    server: Server, root: Ca, layout: Layout, caplog: pytest.LogCaptureFixture
+def test_two_lists_with_the_same_this_update_are_both_kept(
+    server: Server, root: Ca, layout: Layout
 ) -> None:
-    """A second list with the same issuer and thisUpdate (a delta list, a re-issue) is not
-    stored: the first one stays, its entry is untouched and the run fails (``name_taken``)."""
+    """C7: the stored name carries the file's hash, so a re-issue with the same issuer and
+    thisUpdate is kept beside the first list; the same bytes again keep their file and entry."""
     this_update = datetime(2026, 11, 1, tzinfo=UTC)
     first = make_crl(root, this_update)
-    other = make_crl(root, this_update, [(9, this_update, None)])  # same name, other content
-    url = server.url("/root.crl")
+    other = make_crl(root, this_update, [(9, this_update, None)])  # the same second, re-issued
     server.routes["/root.crl"] = Route(first)
-    server.routes["/delta.crl"] = Route(other)
-    fetch(options(url), layout, [root.certificate], NOW)
-    stored = read_index(layout)["lists"]
+    server.routes["/reissued.crl"] = Route(other)
+    fetch(options(server.url("/root.crl")), layout, [root.certificate], NOW)
     later = NOW + timedelta(hours=1)
-    run = fetch(options(server.url("/delta.crl")), layout, [root.certificate], later)
-    name = f"{root.fingerprint[:12]}-20261101T000000Z.crl"
-    assert (layout.crl_dir / name).read_bytes() == first
-    assert run.exit_code == 1
-    assert run.lists == ()
-    assert [failure.as_json() for failure in run.failures] == [
-        {"url": server.url("/delta.crl"), "at": "2026-11-02T13:00:00+03:00", "error": "name_taken"}
-    ]
-    assert read_index(layout)["lists"] == stored  # url and fetched_at as they were
-    assert f"{name} is taken by another list" in caplog.text
-    # Also when the index lost the entry (e.g. a run stopped after storing the file).
+    run = fetch(options(server.url("/reissued.crl")), layout, [root.certificate], later)
+
+    assert run.exit_code == 0
+    names = [stored_name(root, "20261101T000000Z", data) for data in (first, other)]
+    assert names[0] != names[1]
+    assert (layout.crl_dir / names[0]).read_bytes() == first
+    assert (layout.crl_dir / names[1]).read_bytes() == other
+    index = read_index(layout)
+    assert sorted(entry["file"] for entry in index["lists"]) == sorted(names)
+    assert {entry["file"]: entry["url"] for entry in index["lists"]} == {
+        names[0]: server.url("/root.crl"),
+        names[1]: server.url("/reissued.crl"),
+    }
+    assert [crl.revoked for crl in load_stored(layout)] in (
+        [{}, {9: this_update}],
+        [{9: this_update}, {}],
+    )
+    # Both again, and once more after the index lost them (e.g. a run stopped after storing the
+    # files): the files are reused, no other file appears and none is gone.
+    urls = (server.url("/root.crl"), server.url("/reissued.crl"))
+    assert fetch(options(*urls), layout, [root.certificate], later).exit_code == 0
     (layout.crl_dir / "index.json").write_text(
         json.dumps({"schema": INDEX_SCHEMA, "lists": [], "failures": []}), encoding="utf-8"
     )
-    run = fetch(options(url), layout, [root.certificate], NOW)
-    assert (layout.crl_dir / name).read_bytes() == first
-    assert [entry["sha256"] for entry in read_index(layout)["lists"]] == [
-        hashlib.sha256(first).hexdigest()
+    run = fetch(options(*urls), layout, [root.certificate], later)
+    assert [entry["file"] for entry in run.lists] == names
+    assert sorted(path.name for path in layout.crl_dir.glob("*.crl")) == sorted(names)
+    assert (layout.crl_dir / names[0]).read_bytes() == first
+    assert (layout.crl_dir / names[1]).read_bytes() == other
+
+
+def test_a_delta_list_is_neither_stored_nor_used(
+    server: Server, root: Ca, layout: Layout, caplog: pytest.LogCaptureFixture
+) -> None:
+    """C7: a delta list (DeltaCRLIndicator) is recorded as ``delta_not_supported`` beside the
+    base list, which is stored; one put into the folder and the index by hand is not used."""
+    this_update = datetime(2026, 11, 1, tzinfo=UTC)
+    base = make_crl(root, this_update)
+    delta = make_crl(root, this_update, [(9, this_update, None)], delta_of=1)
+    assert parse_crl(delta).delta
+    assert not parse_crl(base).delta
+    server.routes["/base.crl"] = Route(base)
+    server.routes["/delta.crl"] = Route(delta)
+    urls = (server.url("/base.crl"), server.url("/delta.crl"))
+    run = fetch(options(*urls), layout, [root.certificate], NOW)
+
+    assert run.exit_code == 1
+    assert [entry["url"] for entry in run.lists] == [server.url("/base.crl")]
+    assert read_index(layout)["failures"] == [
+        {
+            "url": server.url("/delta.crl"),
+            "at": "2026-11-02T12:00:00+03:00",
+            "error": "delta_not_supported",
+        }
     ]
+    assert sorted(path.name for path in layout.crl_dir.glob("*.crl")) == [
+        stored_name(root, "20261101T000000Z", base)
+    ]
+    assert "a delta list is not stored" in caplog.text
+    # By hand: the file and its entry, as fetch would have written them.
+    name = stored_name(root, "20261101T000000Z", delta)
+    (layout.crl_dir / name).write_bytes(delta)
+    index = read_index(layout)
+    index["lists"].append(
+        {**index["lists"][0], "file": name, "sha256": hashlib.sha256(delta).hexdigest()}
+    )
+    (layout.crl_dir / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    assert [crl.sha256 for crl in load_stored(layout)] == [hashlib.sha256(base).hexdigest()]
+    assert f"stored CRL {name} is a delta list" in caplog.text
+
+
+def test_a_changed_stored_file_ends_the_run_with_an_error_and_stays(
+    server: Server, root: Ca, layout: Layout
+) -> None:
+    """The name holds the file's hash: other bytes under it were changed after storing. The
+    file is never overwritten (D8). The URLs after it still run and the index is written; the
+    run then ends with the error (exit 1)."""
+    data = make_crl(root, datetime(2026, 11, 1, tzinfo=UTC))
+    server.routes["/root.crl"] = Route(data)
+    url = server.url("/root.crl")
+    fetch(options(url), layout, [root.certificate], NOW)
+    name = stored_name(root, "20261101T000000Z", data)
+    changed = data[:-1] + bytes([data[-1] ^ 1])
+    (layout.crl_dir / name).write_bytes(changed)  # test: the stored file is changed
+    (layout.crl_dir / "index.json").write_text(
+        json.dumps({"schema": INDEX_SCHEMA, "lists": [], "failures": []}), encoding="utf-8"
+    )
+    newer = make_crl(root, datetime(2026, 11, 2, tzinfo=UTC))
+    server.routes["/newer.crl"] = Route(newer)
+    second = server.url("/newer.crl")
+    with pytest.raises(CrlError, match=f"{name} does not hold the list its name says"):
+        fetch(options(url, second), layout, [root.certificate], NOW)
+    assert (layout.crl_dir / name).read_bytes() == changed
+    newer_name = stored_name(root, "20261102T000000Z", newer)
+    assert (layout.crl_dir / newer_name).read_bytes() == newer
+    index = read_index(layout)
+    assert [(entry["file"], entry["url"]) for entry in index["lists"]] == [(newer_name, second)]
+    assert index["failures"] == []
 
 
 def test_a_known_list_whose_file_is_gone_is_stored_again(
@@ -936,7 +1027,7 @@ def test_an_index_entry_with_a_foreign_file_name_is_not_reused(
     (layout.crl_dir / "index.json").write_text(json.dumps(index), encoding="utf-8")
     server.routes["/root.crl"] = Route(data)
     run = fetch(options(server.url("/root.crl")), layout, [root.certificate], NOW)
-    name = f"{root.fingerprint[:12]}-20261101T000000Z.crl"
+    name = stored_name(root, "20261101T000000Z", data)
     assert [entry["file"] for entry in run.lists] == [name]
     assert (layout.crl_dir / name).read_bytes() == data
 
@@ -1038,26 +1129,23 @@ def test_crls_for_picks_the_newest_and_the_first_after_each_stamp(
     other = make_ca("Örnek Kök 3 (TEST)")
     _store(layout, server, root, 1, 8, 15, 22, 29)
     _store(layout, server, other, 2, 30)
-    prefix = root.fingerprint[:12]
+    stored = {crl.this_update.day: crl.path.name for crl in load_stored(layout) if crl.path}
+    assert stored[29].startswith(f"{root.fingerprint[:12]}-20261029T000000Z-")
 
     def names(moments: list[datetime]) -> list[str]:
         return [path.name for path in crls_for(layout, root.certificate, moments)]
 
-    assert names([]) == [f"{prefix}-20261029T000000Z.crl"]
+    assert names([]) == [stored[29]]
     stamps = [
         datetime(2026, 10, 8, tzinfo=UTC),  # a list of exactly that moment counts
         datetime(2026, 10, 9, 3, tzinfo=UTC),
         datetime(2026, 10, 10, 1, tzinfo=UTC),  # the same list as the stamp before
         datetime(2026, 11, 1, tzinfo=UTC),  # no list after it yet: only the newest
     ]
-    assert names(stamps) == [
-        f"{prefix}-20261008T000000Z.crl",
-        f"{prefix}-20261015T000000Z.crl",
-        f"{prefix}-20261029T000000Z.crl",
-    ]
+    assert names(stamps) == [stored[8], stored[15], stored[29]]
     # A moment in site time is compared in UTC; a naive one is refused.
     site = datetime(2026, 10, 15, 2, 0, tzinfo=SITE_TZ)  # 2026-10-14T23:00Z
-    assert names([site]) == [f"{prefix}-20261015T000000Z.crl", f"{prefix}-20261029T000000Z.crl"]
+    assert names([site]) == [stored[15], stored[29]]
     with pytest.raises(ValueError, match="naive"):
         crls_for(layout, root.certificate, [datetime(2026, 10, 9)])  # noqa: DTZ001
     assert [p.name[:12] for p in crls_for(layout, other.certificate, [])] == [
@@ -1065,8 +1153,8 @@ def test_crls_for_picks_the_newest_and_the_first_after_each_stamp(
     ]
     stranger = make_ca("Örnek Kök SM (TEST)")  # the same name, another key
     assert crls_for(layout, stranger.certificate, stamps) == []
-    stored = load_stored(layout)
-    assert crls_for(layout, root.certificate, [], stored=stored) == crls_for(
+    loaded = load_stored(layout)
+    assert crls_for(layout, root.certificate, [], stored=loaded) == crls_for(
         layout, root.certificate, []
     )
 
@@ -1098,11 +1186,17 @@ def test_load_stored_reads_the_index_and_skips_what_does_not_match(
     index_path = layout.crl_dir / "index.json"
     index = read_index(layout)
     files = [entry["file"] for entry in index["lists"]]
+    (day_1,) = [entry for entry in index["lists"] if entry["file"] == newest.path.name]
     with (layout.crl_dir / files[0]).open("ab") as handle:  # changed after it was stored
         handle.write(b"\0")
     (layout.crl_dir / files[1]).rename(layout.crl_dir / "elsewhere.bin")  # test: file gone
     index["lists"].append({"file": "../../vault/secret.crl", "sha256": "0" * 64})
     index["lists"].append("not an entry")
+    # The name before C7 (no hash of the file): W5-B was not released with it, none is read.
+    unhashed = f"{root.fingerprint[:12]}-20261101T000000Z.crl"
+    assert newest.path.name.startswith(unhashed.removesuffix(".crl") + "-")
+    (layout.crl_dir / unhashed).write_bytes(newest.path.read_bytes())
+    index["lists"].append({**day_1, "file": unhashed})
     index_path.write_text(json.dumps(index), encoding="utf-8")
     assert [crl.this_update.day for crl in load_stored(layout)] == [5, 1]
     assert "does not match its SHA-256" in caplog.text
@@ -1285,7 +1379,7 @@ def test_cli_fetch_and_status(
 
     assert main(["--config", config, "crl", "fetch"]) == 1
     out = capsys.readouterr().out
-    name = f"{pinned.fingerprint[:12]}-20261101T000000Z.crl"
+    name = stored_name(pinned, "20261101T000000Z", data)
     assert f"SİL doğrulandı, saklandı [CRL verified, stored]: {server.url('/root.crl')}" in out
     assert name in out
     assert f"SİL alınamadı [CRL failed]: {gone} (unreachable)" in out

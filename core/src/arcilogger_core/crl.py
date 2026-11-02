@@ -13,11 +13,13 @@ The ``CrlFetch`` task runs ``arcilogger-core crl fetch`` once a day:
   site's. One run at a time: a second ``crl fetch`` while one runs stops with an error.
 * **What is kept.** A list whose signature verifies with its issuer — a pinned root, or a CA
   certificate seen in a token that chains to one — is stored byte for byte as
-  ``state/crl/<issuer-sha256 first 12 hex>-<thisUpdate as YYYYMMDDTHHMMSSZ>.crl`` and described
-  in ``state/crl/index.json`` (:data:`INDEX_SCHEMA`). A list that does not verify is not stored;
-  the index records the failure. Nothing here is ever deleted or overwritten: a CA may drop an
-  expired certificate from later lists, so older lists keep their worth (owner question Q4). A
-  second list under a name already taken is not stored either (failure ``name_taken``).
+  ``state/crl/<issuer-sha256 first 12 hex>-<thisUpdate as YYYYMMDDTHHMMSSZ>-<SHA-256 of the
+  file, first 8 hex>.crl`` (C7: two lists with the same thisUpdate are both kept; the same bytes
+  again keep their file) and described in ``state/crl/index.json`` (:data:`INDEX_SCHEMA`). A
+  list that does not verify is not stored; the index records the failure. A delta list
+  (DeltaCRLIndicator) is not stored either (``delta_not_supported``): neither verifier applies
+  one. Nothing here is ever deleted or overwritten: a CA may drop an expired certificate from
+  later lists, so older lists keep their worth (owner question Q4).
 
 ``issuer_sha256`` is the SHA-256 fingerprint of the issuer certificate whose key verified the
 list. :func:`crls_for` picks the lists an evidence package needs (D9); :func:`load_stored` reads
@@ -76,17 +78,24 @@ CRL_SUFFIX = ".crl"
 #: A list larger than this is not read to the end (failure ``too_large``).
 MAX_CRL_BYTES = 20 * 1024 * 1024
 SCHEMES = ("http", "https")
-#: ``<issuer-sha256 first 12 hex>-<thisUpdate>.crl``: the only names the index may point at.
-STORED_NAME = re.compile(r"^[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z\.crl$")
+#: ``<issuer-sha256 first 12 hex>-<thisUpdate>-<file SHA-256 first 8 hex>.crl``: the only names
+#: the index may point at (C7; W5-B was not released with any other).
+STORED_NAME = re.compile(r"^[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.crl$")
 _CHUNK = 64 * 1024
 
-#: Why a URL gave no stored list (the ``error`` of an index failure). ``name_taken``: a verified
-#: list whose stored name (issuer and thisUpdate) another list already has; the first one stays.
+#: Why a URL gave no stored list (the ``error`` of an index failure). ``delta_not_supported``: a
+#: verified delta list (C7), which neither verifier applies.
 FailureCode = Literal[
-    "unreachable", "too_large", "not_a_crl", "bad_signature", "unknown_issuer", "name_taken"
+    "unreachable",
+    "too_large",
+    "not_a_crl",
+    "bad_signature",
+    "unknown_issuer",
+    "delta_not_supported",
 ]
 
 _CRL_REASON = "2.5.29.21"
+_DELTA_CRL_INDICATOR = "2.5.29.27"
 #: The signature algorithms the standalone verifier can check (RSA PKCS #1 v1.5, RSASSA-PSS and
 #: ECDSA with SHA-1 to SHA-512): a list signed otherwise counts in neither verifier (ADR-0006).
 _SIGNATURE_HASHES = frozenset({"sha1", "sha224", "sha256", "sha384", "sha512"})
@@ -197,6 +206,8 @@ class Crl:
     #: False when the list is signed with an algorithm the standalone verifier cannot check
     #: (:data:`_SIGNATURE_OIDS`): such a list is signed by no one, for both verifiers.
     known_algorithm: bool = field(default=True, compare=False)
+    #: A delta list (DeltaCRLIndicator): it is neither stored nor used (C7).
+    delta: bool = field(default=False, compare=False)
     #: The answers of :meth:`signed_by`, by the certificate's fingerprint: checking many days
     #: asks the same question for each, and a list can be large.
     _signed: dict[str, bool] = field(
@@ -223,8 +234,12 @@ class Crl:
 
     @property
     def file_name(self) -> str:
-        """The stored name: ``<issuer-sha256 first 12 hex>-<thisUpdate>.crl`` (D8)."""
-        return f"{self.issuer_sha256[:12]}-{self.this_update:%Y%m%dT%H%M%SZ}{CRL_SUFFIX}"
+        """The stored name: ``<issuer-sha256 first 12 hex>-<thisUpdate>-<sha256 first 8
+        hex>.crl`` (D8, C7)."""
+        return (
+            f"{self.issuer_sha256[:12]}-{self.this_update:%Y%m%dT%H%M%SZ}-{self.sha256[:8]}"
+            f"{CRL_SUFFIX}"
+        )
 
 
 def parse_crl(data: bytes) -> Crl:
@@ -241,7 +256,8 @@ def parse_crl(data: bytes) -> Crl:
             crl = x509.load_der_x509_crl(data)
         der = crl.public_bytes(Encoding.DER)
         listed = asn1_crl.CertificateList.load(der)
-        revoked, reasons = _entries(listed["tbs_cert_list"])
+        tbs = listed["tbs_cert_list"]
+        revoked, reasons = _entries(tbs)
         return Crl(
             der=der,
             issuer=crl.issuer.rfc4514_string(),
@@ -252,6 +268,10 @@ def parse_crl(data: bytes) -> Crl:
             reasons=reasons,
             sha256=hashlib.sha256(data).hexdigest(),
             known_algorithm=_known_algorithm(listed["signature_algorithm"]),
+            delta=any(
+                extension["extn_id"].dotted == _DELTA_CRL_INDICATOR
+                for extension in tbs["crl_extensions"]
+            ),
         )
     # Bytes from the network: the parsers raise ValueError, TypeError, but also exceptions of
     # their own (x509.InvalidVersion, x509.DuplicateExtension) or RecursionError.
@@ -391,6 +411,9 @@ def _load(layout: Layout, index: dict[str, Any]) -> list[Crl]:
             crl = parse_crl(data)
         except CrlError as exc:
             log.warning("stored CRL %s: %s", name, exc)
+            continue
+        if crl.delta:
+            log.warning("stored CRL %s is a delta list; it is not used", name)
             continue
         issuer_sha256 = str(entry.get("issuer_sha256") or "")
         url = str(entry.get("url") or "")
@@ -628,6 +651,10 @@ class _TooLargeError(Exception):
     pass
 
 
+class _ChangedFileError(CrlError):
+    """A stored file no longer holds the list its name says: it was changed after storing."""
+
+
 def _download(opener: urllib.request.OpenerDirector, url: str, options: CrlOptions) -> bytes:
     """The body of ``url``; :class:`_TooLargeError` beyond ``max_bytes`` (reading stops there).
 
@@ -678,8 +705,10 @@ def fetch(
 
     ``roots``: the pinned roots (:func:`arcilogger_core.tsa.trusted_roots`). Writes only under
     ``state/crl``, never overwrites or deletes a file there. With no URL nothing is written.
-    Raises :class:`CrlError` when another run holds the lock, or when the existing index cannot
-    be read (it is then left as it is).
+    Raises :class:`CrlError` when another run holds the lock, when the existing index cannot be
+    read (it is then left as it is), or when a stored file no longer holds the list its name
+    says: it was changed, and stays as it is. The other URLs are still fetched and the index
+    written; the error is raised after that.
     """
     seen = token_certificates(layout)
     urls = crl_urls(options, roots, seen)
@@ -696,13 +725,21 @@ def fetch(
         tried: list[str] = []
         got: list[dict[str, Any]] = []
         failures: list[CrlFailure] = []
+        changed: list[str] = []
         for url in urls:
             if _with_credentials(url):
                 url = _redacted(url)
                 log.warning("CRL %s: a URL with a user name or password is not fetched", url)
                 outcome: dict[str, Any] | FailureCode = "unreachable"
             else:
-                outcome = _fetch_one(opener, url, options, issuers, layout, lists)
+                try:
+                    outcome = _fetch_one(opener, url, options, issuers, layout, lists)
+                except _ChangedFileError as exc:
+                    # Not the URL's failure: a person has to look at the folder. The other URLs
+                    # still run, so the lists they store are indexed.
+                    log.error("CRL %s: %s", url, exc)
+                    changed.append(str(exc))
+                    continue
             tried.append(url)
             if isinstance(outcome, str):
                 failures.append(CrlFailure(url=url, at=at, error=outcome))
@@ -719,6 +756,8 @@ def fetch(
         atomic_write_text(
             layout.crl_dir / INDEX_NAME, json.dumps(document, ensure_ascii=False, indent=2) + "\n"
         )
+    if changed:
+        raise CrlError("; ".join(changed))
     return CrlRun(urls=tuple(tried), lists=tuple(got), failures=tuple(failures))
 
 
@@ -795,6 +834,9 @@ def _fetch_one(
     if signer is None:
         log.warning("CRL %s: signature does not verify with %r", url, crl.issuer)
         return "bad_signature"
+    if crl.delta:
+        log.warning("CRL %s: a delta list is not stored (neither verifier applies one)", url)
+        return "delta_not_supported"
     known = next(
         (
             entry
@@ -810,10 +852,9 @@ def _fetch_one(
     if _store_new(path, data):
         log.info("CRL %s stored as %s", url, path.name)
     elif hashlib.sha256(path.read_bytes()).hexdigest() != crl.sha256:
-        # Another list with the same issuer and thisUpdate: the one stored first stays and the
-        # new one is not stored (D8: a file is never overwritten); the run reports it.
-        log.error("CRL %s: %s is taken by another list; this one is not stored", url, path.name)
-        return "name_taken"
+        # The name carries the bytes' hash: other bytes under it were changed after they were
+        # stored. The file stays as it is (D8); the run ends with an error for a person to look.
+        raise _ChangedFileError(f"{path} does not hold the list its name says; it was changed")
     return _entry(crl)
 
 
