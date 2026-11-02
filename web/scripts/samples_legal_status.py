@@ -29,9 +29,10 @@ the one danger reason), ``warning_only`` (``renewal_due``, ``crl_stale``), ``mix
 (``legal_root_missing``, ``unstamped_days``, ``renewal_due``, ``crl_stale``), ``revoked``
 (``certificate_revoked``), each the auditor's answer (the administrator and the administrator who
 has not accepted the KVKK notice get the same: the banner is every signed-in user's, D11), and
-``errors``: ``not_authenticated`` (no session). ``credentials_in_clear`` (TÜRKTRUST over plain HTTP) and ``renewal_uncovered``
-(tokens older than their certificate) are not captured: the configuration knows no ``turktrust``
-before W5-T, and the capture's vault has no token of an earlier certificate.
+``errors``: ``not_authenticated`` (no session). ``credentials_in_clear`` (TÜRKTRUST over plain
+HTTP) and ``renewal_uncovered`` (tokens older than their certificate) are not captured: the
+configuration knows no ``turktrust`` before W5-T, and the capture's vault has no token of an
+earlier certificate.
 
 The 60-second answer cache is cleared before every case. Everything the module writes is put back
 afterwards: the configuration the app reads, ``state/renewal.json``, ``state/crl`` and the pinned
@@ -48,6 +49,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import samples_system
 from cryptography.hazmat.primitives.serialization import Encoding
 from fastapi.testclient import TestClient
 
@@ -63,8 +65,6 @@ from arcilogger_worker.alerts.system import (
     stamp_in_use,
     stamp_renewal_path,
 )
-
-import samples_system
 
 if TYPE_CHECKING:
     from capture_api_samples import Capture
