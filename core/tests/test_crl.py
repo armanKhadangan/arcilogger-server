@@ -337,8 +337,14 @@ def layout(tmp_path: Path) -> Layout:
     return Layout(tmp_path / "data")
 
 
+#: The tests' budget for one URL. It bounds the whole exchange (connect, a proxy's CONNECT, the
+#: TLS handshake, headers and body), so it is the default of ``tsa.timeout_seconds``, well above
+#: a loaded runner's worst case. The deadline tests set their own 1 s.
+FETCH_SECONDS = 60
+
+
 def options(*urls: str, **kwargs: Any) -> CrlOptions:
-    return CrlOptions(urls=urls, timeout_seconds=5, **kwargs)
+    return CrlOptions(urls=urls, timeout_seconds=FETCH_SECONDS, **kwargs)
 
 
 def closed_port_url() -> str:
@@ -1546,7 +1552,7 @@ def test_fetch_all_uses_the_configuration(server: Server, root: Ca, layout: Layo
     proxy = Proxy()
     stub = SimpleNamespace(
         tsa=SimpleNamespace(
-            crl_urls=[server.url("/root.crl")], crl_max_age_days=7, timeout_seconds=5
+            crl_urls=[server.url("/root.crl")], crl_max_age_days=7, timeout_seconds=FETCH_SECONDS
         ),
         network=SimpleNamespace(https_proxy=proxy.url),
     )
