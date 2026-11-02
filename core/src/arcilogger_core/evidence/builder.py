@@ -38,7 +38,7 @@ import logging
 import re
 import secrets
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -48,7 +48,7 @@ from cryptography.hazmat.primitives.serialization import Encoding
 
 from arcilogger_core import PRODUCT_NAME, __version__
 from arcilogger_core.canonical import canonical_json
-from arcilogger_core.crl import Crl, CrlError, crls_for, parse_crl, trusted_issuers
+from arcilogger_core.crl import Crl, CrlError, crls_for, read_crl_file, trusted_issuers
 from arcilogger_core.evidence.archive import ArchivePackage, ArchiveWriter
 from arcilogger_core.evidence.extract import format_extract, read_lines
 from arcilogger_core.evidence.instructions import (
@@ -109,10 +109,11 @@ AUDIT_EXCLUDED_REASON = (
 )
 #: Why a package has no CRL (paket.json ``crl_note``; the standalone verifier shows it).
 NO_CRL_NOTE = (
-    "Sunucuda bu günlerin damga sertifikalarını kapsayan doğrulanmış bir SİL yok (state/crl); "
-    "SİL adresleri tsa.crl_urls ayarından ya da sertifikaların dağıtım noktalarından alınır, "
-    "Kamu SM adresleri sahada doğrulanmalı (docs/kamusm.md, K10). / The server holds no "
-    "verified CRL for these days' time-stamp certificates (state/crl); CRL URLs come from "
+    "Paketin alındığı SİL klasöründe (öntanımlı olarak state/crl) bu günlerin damga "
+    "sertifikalarını kapsayan doğrulanmış bir SİL yok; SİL adresleri tsa.crl_urls ayarından ya "
+    "da sertifikaların dağıtım noktalarından alınır, Kamu SM adresleri sahada doğrulanmalı "
+    "(docs/kamusm.md, K10). / The CRL folder the package was built from (state/crl by default) "
+    "holds no verified CRL for these days' time-stamp certificates; CRL URLs come from "
     "tsa.crl_urls or the certificates' distribution points, Kamu SM's are to be confirmed on "
     "site (docs/kamusm.md, K10)."
 )
@@ -160,7 +161,8 @@ class _Day:
     excluded: list[dict[str, Any]]
     #: SHA-256 fingerprint of the trusted root the day's token chains to.
     root_sha256: str = ""
-    #: Claimed by the manifest, confirmed by the verified chain (tsa.legal_root_fingerprints).
+    #: Claimed by the manifest, confirmed by the verified chain (tsa.legal_root_fingerprints),
+    #: and not revoked at or before the stamp by a list of the CRL folder (C15).
     legal_grade: bool = False
     #: The day's ARCILOGGER audit log goes into the package (only when asked for).
     audit_included: bool = False
@@ -212,6 +214,7 @@ def _collect_day(
     roots: Sequence[x509.Certificate],
     sources: Sequence[str] | None,
     legal_roots: Collection[str] = (),
+    crls: Sequence[Crl] = (),
 ) -> _Day:
     manifest_path, token_path = layout.manifest(day), layout.token(day)
     if not manifest_path.is_file() or not token_path.is_file():
@@ -231,6 +234,8 @@ def _collect_day(
         roots=roots,
         file_path=manifest_path,
         require_critical_eku=tsa.get("require_critical_eku") is not False,
+        # The lists of the CRL folder: a day revoked at or before its stamp is not legal grade.
+        crls=crls,
     )
     if not result.ok or result.info is None:
         raise EvidenceError(f"{day}: the time stamp does not verify: {'; '.join(result.errors)}")
@@ -268,11 +273,12 @@ def _collect_days(
     roots: Sequence[x509.Certificate],
     sources: Sequence[str] | None,
     legal_roots: Collection[str] = (),
+    crls: Sequence[Crl] = (),
 ) -> tuple[list[_Day], list[date]]:
     """The sealed days of the request, and the requested days without a seal of their own that
     an included manifest lists as a run of empty days (anything else unsealed is refused)."""
     sealed = [day for day in days if layout.manifest(day).is_file() or layout.token(day).is_file()]
-    collected = [_collect_day(layout, day, roots, sources, legal_roots) for day in sealed]
+    collected = [_collect_day(layout, day, roots, sources, legal_roots, crls) for day in sealed]
     covered: set[date] = set()
     for collected_day in collected:
         try:
@@ -532,48 +538,45 @@ def _tsa_certificates(
     return entries, index
 
 
-def _stored_crls(crl_dir: Path | None) -> list[tuple[Crl, bytes]]:
+def _stored_crls(crl_dir: Path | None) -> list[Crl]:
     """The revocation lists of the CRL folder (``state/crl``, or one named on the command
-    line) with the bytes of their files, each list once. A file that is not a list is left out
-    with a warning."""
+    line), each list once, each file parsed once per process (:func:`read_crl_file`). A file
+    that is not a list, or a delta list, is left out with a warning."""
     if crl_dir is None or not crl_dir.is_dir():
         return []
-    stored: dict[bytes, tuple[Crl, bytes]] = {}
+    stored: dict[bytes, Crl] = {}
     for path in sorted(crl_dir.iterdir()):
         if not path.is_file() or path.suffix.lower() not in CRL_SUFFIXES:
             continue
         if not SAFE_FILE_NAME.match(path.name):
             raise EvidenceError(f"unsupported CRL file name {path.name!r}")
-        data = path.read_bytes()
         try:
-            crl = parse_crl(data)
+            crl = read_crl_file(path)
         except CrlError as exc:
             log.warning("CRL file %s is not put into the package: %s", path.name, exc)
             continue
         if crl.delta:  # neither verifier applies a delta list (C7)
             log.warning("CRL file %s is a delta list; it is not put into the package", path.name)
             continue
-        stored.setdefault(crl.der, (replace(crl, path=path), data))
+        stored.setdefault(crl.der, crl)
     return list(stored.values())
 
 
 def _crls(
     layout: Layout,
-    crl_dir: Path | None,
+    lists: Sequence[Crl],
     days: Sequence[_Day],
     roots: Sequence[x509.Certificate],
 ) -> list[_Entry]:
-    """The lists the package needs (D9): for each issuer — a root of the package or a CA
-    certificate of a day's token that chains to one — the newest list it signed, plus the first
-    one with ``thisUpdate`` at or after each packaged day's stamp time. Besides these, every
-    list with an entry for a certificate of a day's verified chain, signed by that
-    certificate's issuer (C8): the package then sees the revocations ``verify_day`` sees. The
-    files go in byte for byte, under their stored names."""
-    stored = _stored_crls(crl_dir)
-    if not stored:
+    """The lists of the CRL folder (``lists``, :func:`_stored_crls`) the package needs (D9): for
+    each issuer — a root of the package or a CA certificate of a day's token that chains to one
+    — the newest list it signed, plus the first one with ``thisUpdate`` at or after each
+    packaged day's stamp time. Besides these, every list with an entry for a certificate of a
+    day's verified chain, signed by that certificate's issuer (C8): the package then sees the
+    revocations ``verify_day`` sees. The files go in byte for byte, under their stored names;
+    only these are read into memory."""
+    if not lists:
         return []
-    files = {crl.path: data for crl, data in stored}
-    lists = [crl for crl, _ in stored]
     moments = [day.info.gen_time for day in days]
     seen = [certificate for day in days for certificate in day.certificates]
     paths = {
@@ -586,10 +589,19 @@ def _crls(
         for crl in lists
         if crl.path is not None and any(_has_chain_entry(crl, day) for day in days)
     }
+    by_path = {crl.path: crl for crl in lists}
     return [
-        _Entry(CRL_FOLDER + path.name, "crl", data=files[path])
+        _Entry(CRL_FOLDER + path.name, "crl", data=_crl_bytes(path, by_path[path].sha256))
         for path in sorted(paths, key=lambda path: path.name)
     ]
+
+
+def _crl_bytes(path: Path, sha256: str) -> bytes:
+    """The file of a chosen list, as it was when it was parsed (else the build stops)."""
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise EvidenceError(f"CRL file {path.name} changed while the package was built")
+    return data
 
 
 def _has_chain_entry(crl: Crl, day: _Day) -> bool:
@@ -787,8 +799,9 @@ def build_package(
     every other lookup of the day and staff data, so it is left out by default (KVKK data
     minimisation) and listed in ``paket.json`` as excluded with its sealed SHA-256.
     ``legal_root_fingerprints`` (``tsa.legal_root_fingerprints``) decides which days count as
-    legal grade: claimed by the manifest and chained to one of those roots. Only the roots the
-    package's tokens chain to are bundled.
+    legal grade: claimed by the manifest, chained to one of those roots and not revoked at or
+    before the stamp by a list of ``crl_dir`` (C15). Only the roots the package's tokens chain
+    to are bundled.
     """
     wanted_days = sorted(set(days))
     if not wanted_days:
@@ -813,8 +826,9 @@ def build_package(
     refs = sorted(set(extract))
     now = clock()
 
+    stored_crls = _stored_crls(crl_dir)
     collected, empty_days = _collect_days(
-        layout, wanted_days, roots, wanted_sources, legal_root_fingerprints
+        layout, wanted_days, roots, wanted_sources, legal_root_fingerprints, stored_crls
     )
     wanted_days = [day.day for day in collected]
     for day in collected:
@@ -839,7 +853,7 @@ def build_package(
     tsa_entries, tsa_index = _tsa_certificates(collected, roots)
     extract_entries, extract_index = _extracts(layout, collected, refs)
     package_roots = [root for root in roots if fingerprint(root) in used_roots]
-    crl_entries = _crls(layout, crl_dir, collected, package_roots)
+    crl_entries = _crls(layout, stored_crls, collected, package_roots)
     entries += root_entries + tsa_entries + extract_entries + crl_entries
     report = f"{REPORT_FOLDER}{report_name}" if report_pdf is not None else None
     report_zd = f"{report}.zd" if report is not None and report_token is not None else None

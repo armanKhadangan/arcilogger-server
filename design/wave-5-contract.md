@@ -684,11 +684,17 @@ All Wave 5 questions are answered (2026-11-02).
   SHA-256 (`<issuer-sha256-12>-<thisUpdate>-<sha256-8>.crl`), a delta list is recorded as
   `delta_not_supported`. `load_stored` reads only names of this form (no site has a list stored
   under the earlier one: W5-B was not released with it); a delta list found in `state/crl` is
-  neither used by `verify_day` nor shipped. A stored file whose bytes no longer match its name
-  (changed after it was stored) is never overwritten: `crl fetch` still fetches the other URLs
-  and writes the index with what they gave, then ends with an error (exit 1). The changed file
-  is not recorded in `failures` (no error word for it in §2.2; a question on the pull request).
-  Tests: `core/tests/test_crl.py`.
+  neither used by `verify_day` nor shipped. A stored file whose bytes no longer match its index
+  entry or its name (changed after it was stored), or that is gone, is never overwritten or
+  deleted: after the URLs, every `crl fetch` hashes the file of every index entry (not only the
+  lists served again, so also an older list whose URL serves a newer one by now), records the
+  entry's URL in `failures` with `stored_file_changed` (C14) and exits 1; the other URLs still
+  run, the changed file's index entry stays. A list served again whose name holds other bytes
+  gives the same failure, whether or not the index still has the entry. The files are hashed,
+  not parsed: in a fresh process (the `CrlFetch` task) each run reads every stored file once,
+  about 3 ms per MB here (warm disk cache), so a thousand 1 MB lists add about 3 s. An entry
+  whose unchanged bytes are no usable list (only an index edited by hand can name one) is not a
+  fetch failure; `verify_day` names it (W5-B-6). Tests: `core/tests/test_crl.py`.
 - **W5-B-2: a lock file `state/crl/.fetch.lock`.** Two runs (the `CrlFetch` task and a manual
   `crl fetch`) can overlap; the lock keeps the index from losing entries. The file stays, empty,
   and is never deleted; the builder and `crl status` ignore it. A held lock exits 1 and is not
@@ -698,19 +704,32 @@ All Wave 5 questions are answered (2026-11-02).
   signed with an algorithm the standalone verifier cannot check is neither stored nor used
   (rule 5); a URL with a user name or password is recorded as `unreachable` with the credentials
   hidden, never logged or printed.
-- **W5-B-4: `tsa.timeout_seconds` bounds each URL's whole download**, not only each network
-  wait, so a server that trickles bytes cannot hold the task.
+- **W5-B-4: `tsa.timeout_seconds` bounds each URL's whole exchange**, not only each network
+  wait: connection, status line and headers, redirects and body. Once the time is over, every
+  connection of the exchange is shut down at the socket and the URL fails as `unreachable`, so
+  a server that trickles bytes (headers or body) cannot hold the task. Only name resolution
+  (the system's own limit), a TCP connection attempt already under way (at most
+  `tsa.timeout_seconds` per address) and a TLS handshake already under way can take longer:
+  the handshake is not cut (its socket belongs to the TLS module until it ends) but bounded by
+  Python's own handshake timeout (one `tsa.timeout_seconds`), so one that starts just before
+  the deadline can end up to about twice `tsa.timeout_seconds` after the start.
 - **W5-B-5: `crl fetch` exit codes beyond §2.2:** 2 also for an invalid `network.https_proxy`;
-  1 also for an unreadable index, a held lock or a changed stored file (W5-B-1). `crl status`
+  1 also for an unreadable index or stored file, a held lock, or a stored file that is changed
+  or gone (`stored_file_changed`, C14; recorded like every other failure, also for a list no
+  URL serves any more, W5-B-1). `crl status`
   prints JSON (`index`, `files`,
   `bytes`, `size`) and has no `--json` flag.
 - **W5-B-6: day-check texts.** `crl-revoked` fails the day with the §2.6 `certificate_revoked`
   English text (without the revocation date); `crl-revoked-later`, `crl-hold` and an unreadable
-  index give new English warnings in `chain.py`'s style. Their Turkish texts belong in
+  index give new English warnings in `chain.py`'s style. Each certificate of the chain gives its
+  own text, as the standalone verifier lists each one (not only the most severe). C14's
+  "revocation list {file} does not match its index entry" is a warning on every day; it also
+  names an entry whose file is missing or holds no usable list. Their Turkish texts belong in
   `api/src/arcilogger_api/issues.py` (not W5-B's file; listed in the pull request).
 - **W5-B-7: `NO_CRL_NOTE`'s text** (the constant stays): it said ARCILOGGER does not download
-  revocation lists yet. It now says, TR / EN, that no verified list is in `state/crl`, where the
-  URLs come from, and that Kamu SM's are to be confirmed on site (K10).
+  revocation lists yet. It now says, TR / EN, that the CRL folder the package was built from
+  (`state/crl` by default, or `--crl-dir`) holds no verified list for these days, where the URLs
+  come from, and that Kamu SM's are to be confirmed on site (K10).
 - **W5-B-8: the config adapter.** `crl.crl_options` reads `tsa.crl_urls`,
   `tsa.crl_max_age_days` and `network.https_proxy` with `getattr` and the §2.5 defaults until
   W5-T's day-1 pull request lands; then it becomes plain attribute access.
@@ -736,3 +755,32 @@ All Wave 5 questions are answered (2026-11-02).
   `verify_day` from its index (`load_stored`), so they see the same revocations as long as the
   folder and the index agree, as `crl fetch` keeps them. Tests:
   `core/tests/test_evidence_crl.py` (two- and three-level chains).
+- **W5-B-11: issuers from every day token, URLs from the newest one of each provider.** Every
+  CA certificate of any day token that chains to a pinned root may sign a list (each distinct
+  certificate loaded once per run), so a list of an intermediate the provider no longer uses
+  still verifies instead of `unknown_issuer`. The distribution points stay those of D7 (pinned
+  roots and the newest token of each provider): an old CA's address that stops answering does
+  not fail every run. Tests: `core/tests/test_crl.py`.
+- **W5-B-12: one list per PEM file.** `parse_crl` refuses PEM data (any `-----BEGIN`) unless it
+  holds exactly one `X509 CRL` block (`not_a_crl` in a fetch; left out by the builder): the
+  standalone verifier reads every block of a file, the index describes one list per file.
+- **W5-B-13: each stored file is parsed once per process** (`crl.read_crl_file`, keyed by the
+  path and the file's size, mtime, ctime and inode), for `load_stored` and the builder alike.
+  The DER is kept once (a DER file's own bytes); the builder reads only the files it ships. A
+  stored file that cannot be read (permissions), like an unreadable `state/crl`, gives
+  "revocation not checked" (a `CrlError`), never a crash and never a check without that list.
+  Known limits, kept as a follow-up:
+  - Memory is not bounded: every list a process has read stays parsed for the life of the
+    process (the API and the worker too), its DER and its entries. Measured: a 1.06 MB list of
+    20,000 entries takes about 1.3 s to parse and keeps about 3.4 MB of entries beside its DER
+    (about 50 MB at the peak of the parse). Lazy entries would leave a list from `--crl-dir`
+    unchecked until a day check needs it, so they are not used.
+  - On Windows, `st_ctime` is the creation time: a rewrite in place that keeps the size and
+    sets the old mtime back (`os.utime`) is not seen by a long-running process, which keeps
+    the list as first read (the stored one, so no revocation is lost) and gives no C14 warning
+    until it restarts. `crl fetch` runs as a fresh process and hashes every file (W5-B-1), so
+    the change is still recorded in `failures` on its next run.
+- **W5-B-14: C15 in the core.** `tsa.verify.confirmed_legal_grade` adds "not `crl-revoked`"
+  (from `details["crl"]`, so only a result checked with lists can say revoked); `verify_day`
+  and the builder (which checks the days against its CRL folder) pass the lists. Callers that
+  verify without lists cannot see a revocation; they are listed on the pull request.

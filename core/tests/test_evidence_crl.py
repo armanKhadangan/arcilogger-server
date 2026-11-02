@@ -10,8 +10,9 @@ import json
 import shutil
 import zipfile
 from collections.abc import Sequence
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography import x509
@@ -21,7 +22,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from arcilogger_core.canonical import canonical_json
 from arcilogger_core.chain import verify_day
 from arcilogger_core.crl import INDEX_NAME, INDEX_SCHEMA, parse_crl
-from arcilogger_core.evidence import build_package
+from arcilogger_core.evidence import EvidenceError, build_package
+from arcilogger_core.evidence import builder as builder_module
 from arcilogger_core.evidence.builder import NO_CRL_NOTE
 from arcilogger_core.seal import Sealer
 from arcilogger_core.timeutil import SITE_TZ
@@ -41,7 +43,7 @@ from .test_evidence import (
     unlock_tree,
     unpack,
 )
-from .test_revocation import _certificate, _key_of, _with_certificate
+from .test_revocation import LegalCa, _certificate, _key_of, _with_certificate
 
 
 def _crl(
@@ -382,7 +384,42 @@ def test_a_list_with_an_entry_for_an_intermediate_is_shipped_too(
     _index(crls, [root[0], ca])
     check = verify_day(vault.layout, DAYS[1], vault.roots)
     assert check.ok, check.errors
-    assert any("on hold" in warning for warning in check.warnings), check.warnings
+    # Each certificate's finding, as the standalone verifier lists them.
+    on_hold = [warning for warning in check.warnings if "on hold" in warning]
+    assert sorted("Örnek TSA CA (TEST)" in warning for warning in on_hold) == [False, True]
+    unlock_tree(tmp_path)
+
+
+def test_a_day_revoked_before_its_stamp_is_not_legal_grade_in_the_package(
+    world: Any, days: list[date], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C15: the builder checks each day against the lists of its CRL folder, so a day whose TSA
+    certificate was revoked at or before the stamp is not legal grade in ``paket.json`` and the
+    package row. The standalone verifier then refuses the package (its self-check stops the
+    build); without that check, what the builder wrote says not legal grade."""
+    ca = LegalCa(tmp_path / "legal")
+    moment = ca.seal(world, days[0])
+
+    def build(out: str) -> Any:
+        return build_package(
+            world.layout,
+            days[:1],
+            roots=[ca.root],
+            legal_root_fingerprints=[ca.fingerprint],
+            crl_dir=world.layout.crl_dir,
+            out_dir=tmp_path / out,
+        )
+
+    before = build("before")
+    assert (before.legal_grade, before.legal_grade_claimed) == (True, True)
+    ca.revoke(world, moment)
+    with pytest.raises(EvidenceError, match="crl-revoked"):
+        build("refused")
+    monkeypatch.setattr(builder_module, "_self_check", lambda part, password: None)
+    info = build("written")
+    assert (info.legal_grade, info.legal_grade_claimed) == (False, True)
+    index = json.loads(zipfile.ZipFile(info.path).read("paket.json"))
+    assert [(d["legal_grade"], d["legal_grade_claimed"]) for d in index["days"]] == [(False, True)]
     unlock_tree(tmp_path)
 
 
