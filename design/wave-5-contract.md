@@ -617,3 +617,13 @@ All Wave 5 questions are answered (2026-11-02).
   (`zd.turktrust.com.tr`) is a second legal-grade provider (D12).
   - The banner rule stays for mock, rfc3161 and test servers.
   - No site setting can add another legal provider.
+
+## Deviations — W5-F (part 1, 2026-11-02)
+
+- **`crl-ok` is documented at level OK, not information** (D10 says "`crl-none`, `crl-stale` and
+  `crl-ok` are information"). The standalone verifier reports `crl-ok` at level `ok`
+  (`core/src/arcilogger_core/evidence/standalone/verify.py:1596`, `check_revocation`), and
+  `docs/DENETCI-KILAVUZU.md` §7 lists it among the OK codes. D10 also says the core verifier uses
+  "the same rules and codes" as `check_revocation`, so `docs/ZAMAN-DAMGASI.md` /
+  `docs/TIME-STAMPING.md` §4.2 give `crl-ok` as OK and `crl-none`, `crl-stale` as information.
+  Fold into D10 (W5-B decides the core verifier's level).
