@@ -86,13 +86,14 @@ def _reason(
     )
 
 
-def _provider_reasons(config: Config, options: LegalOptions) -> list[LegalReason]:
+def _provider_reasons(config: Config) -> list[LegalReason]:
     tsa = config.tsa
     reasons = []
     if not tsa.legal_grade:
         reasons.append(_reason("provider_not_legal", "settings-tsa"))
-    in_clear = urlparse(tsa.url).scheme == "http" or options.allow_plain_http
-    if str(tsa.provider) in PLAIN_HTTP_PROVIDERS and in_clear:
+    # The text states a fact: only a URL that is plain HTTP sends the password in clear text
+    # (tsa.allow_plain_http alone, with an https:// URL, does not).
+    if str(tsa.provider) in PLAIN_HTTP_PROVIDERS and urlparse(tsa.url).scheme == "http":
         reasons.append(_reason("credentials_in_clear", "settings-tsa"))
     if tsa.legal_grade and not tsa.legal_root_fingerprints:
         reasons.append(_reason("legal_root_missing", "settings-tsa"))
@@ -137,7 +138,7 @@ def _sorted(reasons: Sequence[LegalReason]) -> list[LegalReason]:
 def compute_legal_status(layout: Layout, config: Config, now: datetime) -> LegalStatus:
     """The legal-validity status at ``now``: every reason that holds, danger first."""
     options = legal_options(config)
-    reasons = _provider_reasons(config, options)
+    reasons = _provider_reasons(config)
     days = late_unstamped_days(layout, config, now)
     if days:
         late = timedelta(hours=options.late_after_hours)

@@ -452,7 +452,9 @@ def test_provider_label_of_a_legal_grade_turktrust_claim() -> None:
     [
         ("http://198.51.100.20/", False, True),
         ("https://198.51.100.20/", False, False),
-        ("https://198.51.100.20/", True, True),  # tsa.allow_plain_http (D12)
+        ("http://198.51.100.20/", True, True),  # tsa.allow_plain_http allows it (D12)
+        # the flag alone sends nothing in clear text: the text would not be true
+        ("https://198.51.100.20/", True, False),
     ],
 )
 def test_legal_status_credentials_in_clear_for_turktrust_over_http(
@@ -472,12 +474,9 @@ def test_credentials_in_clear_only_for_turktrust(site: Site, admin: TestClient) 
 def test_legal_options_read_the_wave_5_keys_with_their_defaults(api_config: Config) -> None:
     options = legal_options(api_config)
     assert (options.renew_before_days, options.crl_max_age_days) == (180, 7)
-    assert (options.allow_plain_http, options.late_after_hours) == (False, 48)
-    changed = legal_options(
-        tsa_config(api_config, renew_before_days=90, crl_max_age_days=3, allow_plain_http=True)
-    )
+    assert options.late_after_hours == 48
+    changed = legal_options(tsa_config(api_config, renew_before_days=90, crl_max_age_days=3))
     assert (changed.renew_before_days, changed.crl_max_age_days) == (90, 3)
-    assert changed.allow_plain_http is True
 
 
 def test_legal_status_reads_the_configured_ages(site: Site, admin: TestClient) -> None:
