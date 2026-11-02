@@ -91,6 +91,10 @@ def test_installer_closes_and_removes_the_window() -> None:
         "| Unregister-ScheduledTask -Confirm:$false"
     ) in register
     assert "Set-ArciStatusWindowShortcut -Root $Root" in register
+    # Without ProgramData (the installer's simulation on Linux pwsh) there is no Start menu, and
+    # Join-Path would refuse the missing drive C:.
+    folder = _function(install, "Get-StatusWindowFolder")
+    assert "if (-not $env:ProgramData) { return $null }" in folder
     shortcut = _function(install, "Set-ArciStatusWindowShortcut")
     assert "$link.Arguments = '-I -m arcilogger_core.desktop'" in shortcut
     assert "Remove-ArciStatusWindowShortcut" in shortcut

@@ -977,9 +977,10 @@ function Start-ArciServices([string[]]$Only = $ServiceNames) {
 # task in \ARCILOGGER\Desktop\, registered by Register-ArciTasks.ps1 from the program's desktop\
 # folder, and a Start-menu shortcut for every user.
 
-function Get-StatusWindowShortcut {
-    $base = if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }
-    Join-Path $base 'Microsoft\Windows\Start Menu\Programs\ARCILOGGER\ARCILOGGER Durum.lnk'
+function Get-StatusWindowFolder {
+    <# The all-users Start-menu folder of the shortcut; none without a ProgramData folder (not Windows). #>
+    if (-not $env:ProgramData) { return $null }
+    Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ARCILOGGER'
 }
 
 function Stop-ArciStatusWindow {
@@ -1003,7 +1004,9 @@ function Stop-ArciStatusWindow {
 
 function Set-ArciStatusWindowShortcut([string]$Root) {
     <# The Start-menu shortcut when the program in $Root has the status window; otherwise none. #>
-    $shortcut = Get-StatusWindowShortcut
+    $folder = Get-StatusWindowFolder
+    if (-not $folder) { return }
+    $shortcut = Join-Path $folder 'ARCILOGGER Durum.lnk'
     $pythonw = Join-Path $Root 'venv\Scripts\pythonw.exe'
     if (-not (Test-Path -LiteralPath (Join-Path $Root 'desktop')) -or -not (Test-Path -LiteralPath $pythonw)) {
         Remove-ArciStatusWindowShortcut
@@ -1012,7 +1015,7 @@ function Set-ArciStatusWindowShortcut([string]$Root) {
     # A convenience only: without it the window still opens at logon (Windows Script Host may be
     # switched off by policy), so a failure is a warning, never a failed installation.
     try {
-        [void](New-Item -ItemType Directory -Path (Split-Path -Parent $shortcut) -Force)
+        [void](New-Item -ItemType Directory -Path $folder -Force)
         $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
         $link.TargetPath = $pythonw
         $link.Arguments = '-I -m arcilogger_core.desktop'
@@ -1026,9 +1029,10 @@ function Set-ArciStatusWindowShortcut([string]$Root) {
 }
 
 function Remove-ArciStatusWindowShortcut {
-    $shortcut = Get-StatusWindowShortcut
+    $folder = Get-StatusWindowFolder
+    if (-not $folder) { return }
+    $shortcut = Join-Path $folder 'ARCILOGGER Durum.lnk'
     if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut -Force }
-    $folder = Split-Path -Parent $shortcut
     if ((Test-Path -LiteralPath $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) {
         Remove-Item -LiteralPath $folder -Force
     }
