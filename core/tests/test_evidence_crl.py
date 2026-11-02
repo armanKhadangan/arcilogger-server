@@ -390,13 +390,14 @@ def test_a_list_with_an_entry_for_an_intermediate_is_shipped_too(
     unlock_tree(tmp_path)
 
 
-def test_a_day_revoked_before_its_stamp_is_not_legal_grade_in_the_package(
+def test_a_day_revoked_before_its_stamp_is_refused_before_anything_is_written(
     world: Any, days: list[date], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """C15: the builder checks each day against the lists of its CRL folder, so a day whose TSA
-    certificate was revoked at or before the stamp is not legal grade in ``paket.json`` and the
-    package row. The standalone verifier then refuses the package (its self-check stops the
-    build); without that check, what the builder wrote says not legal grade."""
+    """C18: the builder checks each day against the lists of its CRL folder. A day whose TSA
+    certificate was revoked at or before the stamp is refused in ``_collect_day``, before any
+    part of the package is written (no self-check is reached), with a TR/EN message naming the
+    day and the certificate; the decision belongs to people. Before the revocation the same day
+    is packaged as legal grade (C15)."""
     ca = LegalCa(tmp_path / "legal")
     moment = ca.seal(world, days[0])
 
@@ -413,13 +414,20 @@ def test_a_day_revoked_before_its_stamp_is_not_legal_grade_in_the_package(
     before = build("before")
     assert (before.legal_grade, before.legal_grade_claimed) == (True, True)
     ca.revoke(world, moment)
-    with pytest.raises(EvidenceError, match="crl-revoked"):
+
+    def no_self_check(part: Path, password: str | None) -> None:
+        raise AssertionError("the package was written before the revoked day was refused")
+
+    monkeypatch.setattr(builder_module, "_self_check", no_self_check)
+    with pytest.raises(EvidenceError) as refused:
         build("refused")
-    monkeypatch.setattr(builder_module, "_self_check", lambda part, password: None)
-    info = build("written")
-    assert (info.legal_grade, info.legal_grade_claimed) == (False, True)
-    index = json.loads(zipfile.ZipFile(info.path).read("paket.json"))
-    assert [(d["legal_grade"], d["legal_grade_claimed"]) for d in index["days"]] == [(False, True)]
+    message = str(refused.value)
+    assert message.startswith(f"{days[0]}: zaman damgası sertifikası iptal listesinde (")
+    assert "Örnek TSA (TEST)" in message
+    assert "The time-stamp certificate is on a revocation list" in message
+    assert "legal review" in message
+    out = tmp_path / "refused"
+    assert not out.exists() or not any(out.rglob("*"))
     unlock_tree(tmp_path)
 
 

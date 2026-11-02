@@ -792,3 +792,9 @@ All Wave 5 questions are answered (2026-11-02).
   (from `details["crl"]`, so only a result checked with lists can say revoked); `verify_day`
   and the builder (which checks the days against its CRL folder) pass the lists. Callers that
   verify without lists cannot see a revocation; they are listed on the pull request.
+- **W5-B-15: C18–C20.** The builder refuses a `crl-revoked` day in `_collect_day`, before any
+  part of the package is written, with a TR / EN message naming the day and the certificate
+  (C18). `arcilogger-core tsa-test` (the only token check of the command line; there is no
+  separate `verify-token` command) verifies its stamp with the stored lists, and an unreadable
+  CRL folder leaves it unchecked with a warning (C19). A known list whose file is gone is stored
+  again and recorded as `stored_file_changed`, exit 1 (C20).

@@ -1168,8 +1168,14 @@ def test_a_known_list_whose_file_is_gone_is_stored_again(
     fetch(options(url), layout, [root.certificate], NOW)
     (name,) = [entry["file"] for entry in read_index(layout)["lists"]]
     (layout.crl_dir / name).rename(layout.crl_dir / "kept-aside.bin")  # test: the file is gone
-    assert fetch(options(url), layout, [root.certificate], NOW).exit_code == 0
+    run = fetch(options(url), layout, [root.certificate], NOW)  # C20: stored again, and recorded
+    assert run.exit_code == 1
+    assert [(failure.url, failure.error) for failure in run.failures] == [
+        (url, "stored_file_changed")
+    ]
+    assert read_index(layout)["failures"] == [failure.as_json() for failure in run.failures]
     assert (layout.crl_dir / name).read_bytes() == data
+    assert [entry["file"] for entry in read_index(layout)["lists"]] == [name]
 
 
 def test_an_index_entry_with_a_foreign_file_name_is_not_reused(

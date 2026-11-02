@@ -239,6 +239,15 @@ def _collect_day(
     )
     if not result.ok or result.info is None:
         raise EvidenceError(f"{day}: the time stamp does not verify: {'; '.join(result.errors)}")
+    if result.details.get("crl") == "crl-revoked":
+        # C18: refused before any part of the package is written, as a stamp that does not verify.
+        name = result.details.get("crl_subject") or ""
+        raise EvidenceError(
+            f"{day}: zaman damgası sertifikası iptal listesinde ({name}); bu gün kanıt paketine "
+            "alınmadı, karar kişilere aittir (hukuki inceleme önerilir). / The time-stamp "
+            f"certificate is on a revocation list ({name}); this day is not packaged, the "
+            "decision belongs to people (legal review is recommended)."
+        )
     claimed = tsa.get("legal_grade") is True
     if claimed and is_test_stamp(result.info.policy, result.details.get("root") or ""):
         raise EvidenceError(

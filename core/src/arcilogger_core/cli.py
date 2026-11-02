@@ -78,7 +78,15 @@ from arcilogger_core.config import (
     setup_problems,
 )
 from arcilogger_core.credit import check_credit
-from arcilogger_core.crl import CRL_SUFFIX, CrlError, crl_options, fetch, read_index
+from arcilogger_core.crl import (
+    CRL_SUFFIX,
+    Crl,
+    CrlError,
+    crl_options,
+    fetch,
+    load_stored,
+    read_index,
+)
 from arcilogger_core.evidence import (
     DEFAULT_KEEP_DAYS,
     EvidenceError,
@@ -489,11 +497,17 @@ def run_tsa_test(app: App) -> TsaTest:
         stamp = provider.stamp(sample)
     except TsaError as exc:
         return TsaTest(None, str(exc))
+    try:  # C19: a TSA certificate already on a stored list shows here as crl-revoked
+        crls: Sequence[Crl] | None = load_stored(app.layout)
+    except CrlError as exc:
+        log.warning("tsa-test: revocation not checked: %s", exc)
+        crls = None
     result = verify_token(
         stamp.token_path.read_bytes(),
         roots=app.roots(),
         file_path=sample,
         require_critical_eku=app.config.tsa.require_critical_eku,
+        crls=crls,
     )
     info = result.info
     return TsaTest(

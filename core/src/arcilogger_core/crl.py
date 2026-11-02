@@ -1066,6 +1066,11 @@ def _fetch_one(
             return {**known}  # the same bytes are stored already
         if digest is not None:
             return _changed(url, stored)
+        # C20: the file of a known list is gone. It is stored again, and the run says so: a
+        # deletion is something a person must see.
+        _store_new(stored, data)
+        log.error("CRL %s: the stored file %s was gone; stored again", url, stored)
+        return "stored_file_changed"
     crl = replace(crl, issuer_sha256=fingerprint(signer))
     path = layout.crl_dir / crl.file_name
     if _store_new(path, data):
