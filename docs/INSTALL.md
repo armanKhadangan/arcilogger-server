@@ -880,6 +880,63 @@ Firewall (`Set-ArciFirewall.ps1`):
 - `-Remove` (run by the uninstaller) deletes ARCILOGGER's rules and restores the disabled rules
   and the profile settings found before the first run.
 
+### 12.1 Status window (ARCILOGGER Durum)
+
+When a member of the Administrators group logs on to the server, a small **ARCILOGGER Durum**
+window opens by itself. It shows whether ARCILOGGER runs without opening the web interface, and
+it looks again every 10 seconds.
+
+- **Services:** the state of the six Windows services (ArciCollector, ArciIngest, ArciApi,
+  ArciWorker, ArciWeb, ArciAdmin), and whether the API answers.
+- **Log flow:**
+  - the time of the last message;
+  - silent sources: the enabled, expected `[[sources]]` entries with no message for longer
+    than `[seal] gap_minutes` (one that sent nothing since the collector restarted counts too);
+  - a red warning when raw logs cannot be written to disk.
+- **Database loading:** whether the database can be written, and how far loading is behind.
+- **Sealing:**
+  - the last sealed day and its provider;
+  - orange for a failed attempt, with its error;
+  - orange when yesterday is not sealed by 03:00;
+  - red when the seal is later than `[seal] late_after_hours` (48 hours).
+- **Alerts:** the evidence-path alerts of the last 24 hours (`state\alerts.jsonl`). Every alert
+  is on the web interface's Uyarılar page.
+- **Data drive:** the free space of the data folder's drive. It turns orange below 15 % and red
+  below 5 %.
+
+Colours: green "running", orange "attention", red "problem", grey "cannot be read". When the state
+turns red, the taskbar button flashes. There is no sound, and the window does not jump to the
+front.
+
+The window is **read-only**:
+
+- it starts or stops no service and changes no setting;
+- it does not connect to the database;
+- it does not use the network: the API health check goes only to the API on this machine
+  (`[api] host`, by default `127.0.0.1`);
+- it sends no telemetry.
+
+"Web arayüzünü aç" opens `https://localhost/`. Without the root certificate on the server, the
+browser shows a certificate warning (section 8).
+
+- **Start:**
+  - the scheduled task `\ARCILOGGER\Desktop\StatusWindow` opens the window at every logon of a
+    member of Administrators, with the highest rights. There is no UAC prompt. The rights are
+    needed because only administrators may read `state\` of the data folder.
+  - A closed window opens again from the Start menu: **ARCILOGGER → ARCILOGGER Durum**. That
+    shortcut asks for UAC consent.
+  - Without consent, the window shows only the services and the API (on the default port 8000).
+    The configuration and the data folder are open to administrators only, so the other rows
+    say "cannot be read".
+- One window per session. A second start brings the open one to the front (the shortcut asks
+  for UAC consent for that too).
+- An upgrade and the removal close the window. After an upgrade it opens again at the next logon,
+  or from the shortcut.
+- One look from the command line (elevated PowerShell):
+  ```powershell
+  & "C:\Program Files\ARCILOGGER\venv\Scripts\python.exe" -I -m arcilogger_core.desktop --print
+  ```
+
 ## 13. Upgrade and rollback
 
 Download or build and copy the new bundle, verify the fingerprint (`ARCILOGGER-Setup-<version>.exe`
