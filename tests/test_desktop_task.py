@@ -91,8 +91,10 @@ def test_installer_closes_and_removes_the_window() -> None:
     # failed change switches it on again.
     assert stop.index("Disable-ScheduledTask") < stop.index("Get-CimInstance")
     assert "Stop-ScheduledTask" in stop
-    assert "$_.TaskPath -eq '\\ARCILOGGER\\Desktop\\'" in _function(
-        install, "Get-ArciStatusWindowTask"
+    # StrictMode 2.0 refuses a missing property: the simulations' task stubs have no TaskPath.
+    assert (
+        "$_.PSObject.Properties['TaskPath'] -and $_.TaskPath -eq '\\ARCILOGGER\\Desktop\\'"
+        in _function(install, "Get-ArciStatusWindowTask")
     )
     assert "Get-ArciStatusWindowTask" in _function(install, "Enable-ArciTasks")
     assert "*arcilogger_core.desktop*" in stop
@@ -113,7 +115,7 @@ def test_installer_closes_and_removes_the_window() -> None:
     assert "Remove-ArciStatusWindowShortcut" in shortcut
     removal = install[install.index("Invoke-Step 'tasks.unregister'") :]
     removal = removal[: removal.index("Invoke-Step 'eventlog.remove'")]
-    assert "Where-Object { $_.TaskPath -eq '\\ARCILOGGER\\Desktop\\' }" in removal
+    assert "Get-ArciStatusWindowTask | Unregister-ScheduledTask -Confirm:$false" in removal
     assert "Remove-ArciStatusWindowShortcut" in removal
 
 

@@ -984,9 +984,12 @@ function Get-StatusWindowFolder {
 }
 
 function Get-ArciStatusWindowTask {
-    <# The logon task of the status window (the TaskPath test keeps any other task out). #>
+    <#
+    The logon task of the status window. The TaskPath test keeps any other task out; it reads the
+    property only where it exists (StrictMode 2.0 refuses a missing one).
+    #>
     @(Get-ScheduledTask -TaskPath '\ARCILOGGER\Desktop\' -ErrorAction SilentlyContinue |
-            Where-Object { $_ -and $_.TaskPath -eq '\ARCILOGGER\Desktop\' })
+            Where-Object { $_ -and $_.PSObject.Properties['TaskPath'] -and $_.TaskPath -eq '\ARCILOGGER\Desktop\' })
 }
 
 function Stop-ArciStatusWindow {
@@ -3398,8 +3401,7 @@ function Invoke-UninstallMode {
     Invoke-Step 'services.remove' 'Hizmetler kaldırılıyor [removing services]' { Remove-ArciServices } ($ServiceNames -join ', ')
     Invoke-Step 'tasks.unregister' 'Zamanlanmış görevler kaldırılıyor [removing scheduled tasks] \ARCILOGGER\' {
         Get-ScheduledTask -TaskPath '\ARCILOGGER\' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
-        Get-ScheduledTask -TaskPath '\ARCILOGGER\Desktop\' -ErrorAction SilentlyContinue |
-            Where-Object { $_.TaskPath -eq '\ARCILOGGER\Desktop\' } | Unregister-ScheduledTask -Confirm:$false
+        Get-ArciStatusWindowTask | Unregister-ScheduledTask -Confirm:$false
         Remove-ArciStatusWindowShortcut
     }
     # The events already written stay in the Application log.
