@@ -650,6 +650,11 @@ These change the contract text above. Where a section says otherwise, the clarif
   - The Panel blocking card is `role="status"`.
   - The web appends the "ZAMAN-DAMGASI.md bölüm N" reference from #105's numbering.
   - A banner hidden for 24 h comes back at once when a new reason appears.
+- **C14 – A stored list that no longer matches its index entry** is recorded in `index.json` `failures` with the error word **`stored_file_changed`**. `crl fetch` exits 1. `verify_day` gives the warning "revocation list {file} does not match its index entry" instead of dropping the list silently. The file is never deleted or overwritten: it is evidence of tampering.
+- **C15 – `crl-revoked` makes the day not legal grade.** A day whose chain is revoked at or before the stamp gets `legal_grade = false` everywhere: the day check, the API, reports and packages. The rule-4 test is "claim ∧ verified ∧ root listed ∧ not revoked".
+- **C16 – Retention and a revoked day.** Retention keeps stopping at a day that fails verification, now including `crl-revoked`. That is the safe side for evidence, and `R20-retention` names the day. Whether such a day is deleted is a decision for people (legal and KVKK review), never the job's.
+- **C17 – Scoped and indirect lists.** Neither verifier honours an issuing distribution point's scope or indirect-list (`certificateIssuer`) extensions in Wave 5. This is a known limit, listed in ASSUMPTIONS ("sahada doğrula") and kept as a follow-up in #40.
+
 
 ## Owner questions
 
