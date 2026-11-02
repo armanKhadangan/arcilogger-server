@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 import subprocess
 import sys
@@ -41,14 +42,20 @@ def _in_package(path: Path) -> bool:
 # -- A-T3 the production key set and the revocation list ------------------------------------------
 
 
-def test_the_production_key_set_is_empty_and_well_formed() -> None:
+def test_the_production_key_set_is_the_owners_and_well_formed() -> None:
     assert isinstance(keys.TRUSTED_KEYS, MappingProxyType)
     for key_id, value in keys.TRUSTED_KEYS.items():
         assert KEY_ID_PATTERN.fullmatch(key_id), key_id
         assert not key_id.startswith("test-"), key_id
         Ed25519PublicKey.from_public_bytes(b64url_decode_strict(value, 32))
-    # Empty until the owner commits the first public key (then this line lists it).
-    assert dict(keys.TRUSTED_KEYS) == {}
+    # Exactly the keys the owner committed: a key added or removed shows up here.
+    assert dict(keys.TRUSTED_KEYS) == {
+        "arci-2026-01": "UsIirhz0go9rf8QZVn0H0ZJvBrUf7Z6VxSj2V5MPu0A",
+    }
+    assert {
+        key_id: hashlib.sha256(b64url_decode_strict(value, 32)).hexdigest()
+        for key_id, value in keys.TRUSTED_KEYS.items()
+    } == {"arci-2026-01": "21a1889122f627855f81b0c5a622bbc470c7e76c7c1387e78d0cd746eacbb341"}
 
 
 def test_the_revocation_list_is_empty_and_well_formed() -> None:
