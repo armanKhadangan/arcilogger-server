@@ -552,8 +552,11 @@ As in Wave 4 §4.1 (`design/wave-4-contract.md:1255-1273`):
   - W5-E mounts it with a two-line module and adds the LISANS/LICENSING row.
 - **New tasks:** W5-E adds `Renew.xml` and `CrlFetch.xml` and every pin of the task list
   (tests, API `TaskName`, web types).
-- **`config.py`:** W5-T adds all four keys of §2.5 in its first commit and pushes it early.
-  W5-A and W5-B start from that commit.
+- **`config.py`:** W5-T opens a first small pull request on day 1 with the five keys of §2.5
+  (and their validation tests only). W5-A and W5-B start at once and merge `origin/wave-5` once
+  it has landed.
+- **`web/src/lib/legal-status-types.ts`:** W5-C opens a first small pull request on day 1. It
+  carries the file verbatim from §2.3.1 and the matching Pydantic models. W5-D imports it.
 
 ### 4.3 File ownership (main files; the issues list every file)
 
@@ -562,8 +565,8 @@ As in Wave 4 §4.1 (`design/wave-4-contract.md:1255-1273`):
 | W5-T | `core/src/arcilogger_core/config.py`, `tsa/__init__.py`, `tsa/turktrust.py` (new), `secretstore.py`, `cli.py` (`secret set` names only), `admin/rules.py`, `admin/contract.py`, `admin/probe.py`, `tsa/rfc3161.py` (proxy), `api/src/arcilogger_api/routers/admin_config.py` (TSA section fields), the credit task's provider check, `deploy/windows/scripts/Set-ArciFirewall.ps1`, `deploy/windows/installer/Install-Arcilogger.ps1` (TSA checks and next steps only; W5-E edits it after W5-T has merged), regenerated API contract and samples, their tests |
 | W5-A | `core/src/arcilogger_core/renewal.py` (new), `cli.py`, `evidence/standalone/verify.py`, `tests/fixtures/vault-w5/`, `tools/dev/make_vault_fixture.py`, their tests |
 | W5-B | `core/src/arcilogger_core/crl.py` (new), `tsa/verify.py`, `chain.py`, `evidence/builder.py` (D9 selection, and the report-token match of D3 in `_renewals`), `layout.py`, their tests. Exception: one hunk in `cli.py` for the `crl` subcommand, merged after W5-A. |
-| W5-C | `api/src/arcilogger_api/legalstatus/` (new), `routers/dashboard.py`, `sealinfo.py`, `routers/seals.py`, `routers/credits.py`, `worker/src/arcilogger_worker/alerts/system.py` (prefix-only until W5-E), their tests |
-| W5-D | `web/src/components/legal/` (new), `app-shell.tsx`, `pages/sealing/`, `pages/dashboard/`, the TSA settings form, `web/src/lib/legal-status-types.ts`, locale areas, their tests |
+| W5-C | `api/src/arcilogger_api/legalstatus/` (new), `web/src/lib/legal-status-types.ts` (day 1), `routers/dashboard.py`, `sealinfo.py`, `routers/seals.py`, `routers/credits.py`, `worker/src/arcilogger_worker/alerts/system.py` (prefix-only until W5-E), their tests |
+| W5-D | `web/src/components/legal/` (new), `app-shell.tsx`, `pages/sealing/`, `pages/dashboard/`, the TSA settings form, locale areas, their tests |
 | W5-E (late) | `deploy/windows/tasks/Renew.xml`, `CrlFetch.xml`, `tests/test_windows_tasks.py`, `ArciInstall.psm1` (ACL: `state\crl`, and LOCAL SERVICE read on `exports\reports` for the `Renew` task), `Install-Arcilogger.ps1` (next steps), `api/.../routers/legal_status.py` (mount), `system_health` task names, `web/src/lib/system-health-types.ts`, alert constants and `alerts/texts.py`, `web/scripts/capture_api_samples.py` |
 | W5-F (late) | every document of §2.7 |
 
@@ -572,10 +575,10 @@ As in Wave 4 §4.1 (`design/wave-4-contract.md:1255-1273`):
 | Package | Owner | Size | Depends on |
 |---|---|---|---|
 | W5-T TÜRKTRUST provider | Arman 1 | ~3 days | — (first, owner priority) |
-| W5-B Revocation lists | Tayfun | ~3.5 days | W5-T's config commit |
+| W5-B Revocation lists | Tayfun | ~3.5 days | W5-T's day-1 config pull request |
 | W5-C API/worker: legal status, Panel, alerts (prefix) | Arman 2 | ~3 days | — (reads files; uses fixtures until A/B land) |
-| W5-D Web: banner, Panel card, TÜRKTRUST form | Gülşah | ~3 days | W5-C's types file (pushed first) |
-| W5-A Re-stamping | Arman 1 (after W5-T) | ~4 days | W5-T's config commit |
+| W5-D Web: banner, Panel card, TÜRKTRUST form | Gülşah | ~3 days | W5-C's day-1 types pull request |
+| W5-A Re-stamping | Arman 1 (after W5-T) | ~4 days | W5-T's day-1 config pull request |
 | W5-E Switch-on: tasks, ACL, mount, alerts, samples | Tayfun (after W5-B) | ~2 days | A, B, C |
 | W5-F Docs | Saray | ~3 days; starts at once with `docs/turktrust.md` and ZAMAN-DAMGASI, the rest after W5-E | — |
 
