@@ -365,12 +365,17 @@ public-IP request carries:
   capped at 604,800 s for `mt_dhcp` chains, and converted rows of a MAC move the build missed,
   8,640,000 s); `fortigate_dhcp_no_network` (an `fg_dhcp` chain outside every configured
   network); `dhcp_sources_overlap` (two DHCP origins in one network, D27; outside configured
-  networks the address itself is `{network}`); `source_clock_offset` (of a source's two
-  samples, each counted from 10 rows, the median further from 0: its rows within 1 h of T by
-  device time nearest T, at most 2,500 on each side, and its `source_clock_samples` minutes
-  received in [T − 1 h, T + 1 h] (#73); rounded to whole seconds; limit 120 s for internal
-  lookups and lease tables, max(120 s, tolerance) for a source measured for the session search
-  alone).
+  networks the address itself is `{network}`); `source_clock_offset` (the clock at the moment,
+  the median further from 0 of a source's first two samples, each counted from 10 rows: its rows
+  within 1 h of T by device time nearest T, at most 2,500 on each side, and its
+  `source_clock_samples` minutes received in [T − 1 h, T + 1 h] (#73); rounded to whole seconds;
+  limit 120 s for internal lookups and lease tables, max(120 s, tolerance) for a source measured
+  for the session search alone; named whatever the third sample says); `source_clock_shared`
+  (#82: the clock at the moment is within its limit, but the third sample is beyond it: its
+  minutes received within T ± 25 h (`max_clock_skew`) whose offset beyond 120 s, with its
+  neighbours within 5 s held by more than half of the minute's rows, put their device times into
+  [T − 1 h, T + 1 h] (`clocksamples.shifted_into`; one median behind and one ahead, each counted
+  from 10 rows, the one further from 0); the same limits and rounding, no shift remedy).
 - **A RELEASE mapped after the build** (the newest kept `fg_dhcp` row of the pair in
   `[lease.start, at]` is `deassigned`) ends the lease in the lookup: no chain, no new key.
 - **srcmac** (`lookup.srcmac_interfaces`): a session without a lease on a listed interface gives a
@@ -2205,10 +2210,10 @@ ADR-0016).
   `fortigate_dhcp_no_network`, `egress_observed_not_configured`, `egress_changed_after_event`,
   `session_changed_exit`, `egress_not_logged_but_seen`, `dhcp_sources_overlap`,
   `session_from_unknown_source`, `source_configured_later`, `egress_public_dynamic`,
-  `egress_internal`, `source_clock_offset`; rewritten: `no_lease`, `no_lease_for_mac`,
-  `port_hint` (`{egresses}`), `public_ip_not_transip`. Retired, kept for stored lookups and never
-  emitted: `public_ip_not_configured`, `wan_transip_not_seen`. `srcmac_mismatch` is a conflict
-  key like `ip_conflict` (`types.CONFLICT_KEYS`).
+  `egress_internal`, `source_clock_offset`, `source_clock_shared` (#82); rewritten: `no_lease`,
+  `no_lease_for_mac`, `port_hint` (`{egresses}`), `public_ip_not_transip`. Retired, kept for
+  stored lookups and never emitted: `public_ip_not_configured`, `wan_transip_not_seen`.
+  `srcmac_mismatch` is a conflict key like `ip_conflict` (`types.CONFLICT_KEYS`).
 - **Report names** (`reports/texts.py`): `EXIT_LABELS` (keys `public`, `transip`,
   `fallback_direct`, `fallback_transip`, `observed`, `public_unknown`, `unconfigured`,
   `no_egress`), `EXIT_MODES`, `READING_TABLE_KEYS` (the keys of the reading table in
@@ -2529,12 +2534,15 @@ document (ADR-0016, CORRELATION, ASSUMPTIONS, the documents of contract 2.15) is
   `(time, id)` instead. The D15 check (`_Lookup._carried`) names the address the same way in
   every step and asks its steps without a port (the tail of a search without a port, the
   sessions spanning T on any port) in the same order; its steps with a port keep the order of
-  `ix_fg_traffic_transip_transport_time` (`ORDER BY transip, transport, time`), as does the
-  exact search. With the address and the port fixed, either index of the address gives that
-  order, and on a TimescaleDB chunk holding only the step's last instant the planner took
-  `(transip, time)`. The guards keep 0.2 s, except for a busy unclaimed address with no session
-  overlapping the window (`busy_before`, 1.4 s before the index and 0.25 s with it on that
-  partition, 0.30 s in the guard), which keeps a bound of its own, 1 s (`OVERLAP_SECONDS` in
+  `ix_fg_traffic_transip_transport_time` (`ORDER BY transip, transport, time`); the exact search
+  keeps that index too (in time order, `ORDER BY time, id`). The D15 tail and spanning-sessions
+  steps are asked one UTC day (one TimescaleDB chunk) at a time (`_by_chunk`), in pieces
+  half-open at the midnights (`time < midnight`, then `time >= midnight`; the last keeps `time <=
+  end`), so every row lies in exactly one piece and each kind of step reads one index:
+  `ix_fg_traffic_transip_time` without a port, `ix_fg_traffic_transip_transport_time` with one.
+  The guards keep 0.2 s, except for a busy unclaimed address with no session overlapping the
+  window (`busy_before`, 1.4 s before the index and 0.25 s with it on that partition, 0.30 s in
+  the guard), which keeps a bound of its own, 1 s (`OVERLAP_SECONDS` in
   `worker/tests/test_lookup_performance.py`; the manager's answer (a) to Q-C3-1 on #47;
   `INCLUDE (duration)` was measured in #71 and not taken, ASSUMPTIONS Q-C3-1). They bound the
   shared buffers of each probe step, and of each D15 step after the window, to the rows of its
@@ -2561,6 +2569,14 @@ document (ADR-0016, CORRELATION, ASSUMPTIONS, the documents of contract 2.15) is
   received in the last hour, whole, until they hold 200 rows, or 10 once they reach back 10
   minutes; the threshold, the texts and the resolution are unchanged. A clock set hours back
   after logging on time is so named at the real moment (contract, "Deviations — clock").
+- **clock (#82):** a third sample (`clocksamples.shifted_into`) holds the source's minutes
+  received within T ± 25 h (`max_clock_skew` beyond the hour) whose clock, beyond 120 s and held
+  with its neighbours within 5 s (`SHIFT_BAND_SECONDS`) by more than half of the minute's rows,
+  put their device times into [T − 1 h, T + 1 h]. It takes one median behind and one ahead,
+  keeps the one further from 0, and counts each from 10 rows. A clock off at the moment is still
+  named `source_clock_offset`, whatever the third sample says. Only when that is within its limit
+  and the third sample is beyond it is the source named with the new key `source_clock_shared`
+  (2.11 row; the reading table; no shift remedy), and the chains are `low`.
 
 ## 19. Uyum Durumu, Sistem and the first-run wizard (Wave 4, ADR-0017)
 

@@ -58,10 +58,11 @@
 - NAT adresi indeksi (revizyon `0020_fg_traffic_transip_time`): `fg_traffic` tablosunun yeni
   indeksi `ix_fg_traffic_transip_time (transip, time)`, 5651 sorgusunun bir NAT adresi için port
   olmadan sorduğu adımlara (kayıtlarda görülen adres denetimi; D15 denetiminin pencereden sonraki
-  kuyruk adımları ve T'yi kapsayan oturum adımları) yalnızca o adresin aralıktaki satırlarını
-  okutur; `(transip, transport, time)` indeksinde `time` üçüncü sütun olduğundan böyle bir adım
-  adresin bölümdeki bütün indeks girdilerini yürüyordu. Milyon satır başına yaklaşık 31,5 MB yer
-  tutar.
+  kuyruk adımları ve T'yi kapsayan oturum adımları; port olmadan tek bir adresle yapılan oturum
+  araması da onu kullanabilir: aynı satırlar, aynı sırada) yalnızca o adresin aralıktaki
+  satırlarını okutur; `(transip, transport, time)` indeksinde `time` üçüncü sütun olduğundan
+  böyle bir adım adresin bölümdeki bütün indeks girdilerini yürüyordu. Milyon satır başına
+  yaklaşık 31,5 MB yer tutar.
 
 ## Summary (EN)
 
@@ -100,7 +101,8 @@ from zero, 0 under a minute) and its rows, written by ingest in the transaction 
 there. The NAT address index (revision `0020_fg_traffic_transip_time`) is `fg_traffic`'s new
 index `ix_fg_traffic_transip_time (transip, time)`: a lookup's steps without a port on one NAT
 address (the overlap probe, and the D15 check's tail after its window and its steps for sessions
-spanning the moment; its window step stays in time order) read that address's rows of their range
+spanning the moment; its window step stays in time order; a port-less session search on one
+address may take it too, the same rows in the same order) read that address's rows of their range
 only, where on `(transip, transport, time)` they walked every index entry of the address in the
 partition; it takes about 31.5 MB per million rows.
 
@@ -144,7 +146,7 @@ through the table itself (never into a partition), so the identity column is use
 | Table | Content | Indexes besides the primary key |
 |---|---|---|
 | `messages` | Every received message (lightweight): severity, facility, program/topics, host, type, subtype, short text, `parse_error` | (source, time), (type, time) |
-| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (transip, time) (`ix_fg_traffic_transip_time`, revision `0020_fg_traffic_transip_time`: the lookup's steps without a port on one NAT address, in the overlap probe `_Probe.seen_overlap` and the tail and spanning-sessions steps of the D15 check `_Lookup._carried`; about 31.5 MB per million rows), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
+| `fg_traffic` | FortiGate traffic (incl. interim `0000000020`, `is_interim`), source NAT `transip:transport`; `srcmac` (`MACADDR`, revision `0017_fortigate_dhcp`): "MAC address associated with the Source IP", filled only where the FortiGate's device identification is on, NULL in older rows; never lease evidence (ADR-0016, D10) | (srcip, time), (transip, transport, time), (transip, time) (`ix_fg_traffic_transip_time`, revision `0020_fg_traffic_transip_time`: the lookup's steps without a port on one NAT address, in the overlap probe `_Probe.seen_overlap` and the tail and spanning-sessions steps of the D15 check `_Lookup._carried`; a port-less search on one address may take it too (the same rows, in the same order); about 31.5 MB per million rows), (sessionid), (dstip, dstport, time) — none on `srcmac` (the search field `srcmac:` scans) |
 | `fg_web` | Web filter: hostname, url (≤ 2,000 chars), cat, catdesc, action, eventtype, profile | (sessionid), (srcip, time), `ix_fg_web_rhost_time` (reverse(lower(hostname)), time) — the search field `domain:` (revision `0016_search`) |
 | `fg_dns` | DNS: qname, qtype, answers `INET[]`, catdesc, action | (srcip, time), (qname, time) |
 | `fg_app` | Application control: app, appid, appcat, hostname, url | (sessionid), (srcip, time) |
