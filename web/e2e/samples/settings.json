@@ -538,7 +538,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T16:32:18.080223Z",
+            "updated_at": "2026-11-02T18:07:22.503832Z",
             "updated_by": "capture",
             "value": 100
           },
@@ -572,7 +572,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T16:32:20.839664Z",
+            "updated_at": "2026-11-02T18:07:25.941599Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -606,7 +606,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-29T16:32:19.096144Z",
+            "updated_at": "2026-11-02T18:07:23.881338Z",
             "updated_by": "capture",
             "value": false
           },
@@ -674,7 +674,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-29T16:32:15.053629Z",
+            "updated_at": "2026-11-02T18:07:18.375286Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -1729,7 +1729,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T16:32:26.613766Z",
+            "updated_at": "2026-11-02T18:07:33.465172Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -2411,7 +2411,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T16:32:38.547351Z",
+            "updated_at": "2026-11-02T18:07:52.494537Z",
             "updated_by": "tolga",
             "value": 150
           },
@@ -2445,7 +2445,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T16:32:20.839664Z",
+            "updated_at": "2026-11-02T18:07:25.941599Z",
             "updated_by": "capture",
             "value": 5
           },
@@ -2479,7 +2479,7 @@
             "min": null,
             "reauth": false,
             "type": "boolean",
-            "updated_at": "2026-10-29T16:32:19.096144Z",
+            "updated_at": "2026-11-02T18:07:23.881338Z",
             "updated_by": "capture",
             "value": false
           },
@@ -2547,7 +2547,7 @@
             "min": null,
             "reauth": false,
             "type": "object",
-            "updated_at": "2026-10-29T16:32:15.053629Z",
+            "updated_at": "2026-11-02T18:07:18.375286Z",
             "updated_by": "example",
             "value": {
               "dhcp61": 3600
@@ -3602,7 +3602,7 @@
             "min": 1,
             "reauth": false,
             "type": "integer",
-            "updated_at": "2026-10-29T16:32:26.613766Z",
+            "updated_at": "2026-11-02T18:07:33.465172Z",
             "updated_by": "capture",
             "value": 2
           },
@@ -3852,7 +3852,7 @@
     ]
   },
   "meta": {
-    "captured_at": "2026-10-13T04:01:38.680163+00:00",
+    "captured_at": "2026-10-13T04:02:06.884373+00:00",
     "clock": "2026-10-13T07:00:00+03:00",
     "info": "captured by web/scripts/capture_api_samples.py; do not edit",
     "site_day": "2026-10-09",
