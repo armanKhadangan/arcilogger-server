@@ -275,7 +275,7 @@ def test_stamp_cert_critical_when_revoked(check: Any, layout: Layout) -> None:
     assert "Örnek" not in alert.title
 
 
-def test_stamp_cert_high_when_expiring_within_30_days_uncovered(check: Any, layout: Layout) -> None:
+def test_stamp_cert_high_when_due_within_30_days(check: Any, layout: Layout) -> None:
     """``high`` for a ``due`` token with at most :data:`CERT_EXPIRY_WARNING` (30 days) left
     (manager answer on #117, W5-C-12)."""
     assert timedelta(days=30) == CERT_EXPIRY_WARNING
