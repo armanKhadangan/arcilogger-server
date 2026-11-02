@@ -206,6 +206,7 @@ _SCRIPTS = str(Path(__file__).resolve().parent)
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 import samples_compliance  # noqa: E402
+import samples_legal_status  # noqa: E402
 import samples_live_sources  # noqa: E402
 import samples_lookups  # noqa: E402
 import samples_network  # noqa: E402
@@ -222,6 +223,7 @@ SAMPLE_MODULES = (
     samples_network,
     samples_compliance,
     samples_system,
+    samples_legal_status,
 )
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "e2e" / "samples"

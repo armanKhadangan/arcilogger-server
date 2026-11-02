@@ -702,6 +702,16 @@ const RULES: Record<string, Record<string, Rule>> = {
     health: 'SystemHealth',
     errors,
   },
+  // The legal-validity banner (Wave 5 contract 2.3.1): the cases of `samples_legal_status.py`.
+  'legal-status': {
+    ...Object.fromEntries(
+      ['ok', 'provider_not_legal', 'warning_only', 'mixed', 'revoked'].map((name) => [
+        name,
+        'LegalStatus',
+      ]),
+    ),
+    errors,
+  },
   // Every licence document is `GET /license` (also the answer of `POST /license`), every other
   // key an error answer (refusals, re-authentication, locked modules, users limit, 503).
   license: {
