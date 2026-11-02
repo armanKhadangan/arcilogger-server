@@ -97,7 +97,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from ipaddress import IPv4Network
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import (
     ColumnElement,
@@ -114,7 +114,7 @@ from sqlalchemy import (
     text,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, distinct_on
+from sqlalchemy.dialects.postgresql import ARRAY, INET, distinct_on
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
 
@@ -280,6 +280,21 @@ def _text_order(value: str) -> tuple[int, int, str]:
 
 def _joined(items: Sequence[str]) -> str:
     return ", ".join(items) if items else "-"
+
+
+class _Clock(NamedTuple):
+    """A source's clock in a lookup (:meth:`_Lookup._clock`): the median offset at the moment
+    and that of the device times other rows shared (seconds), ``None`` when not measured."""
+
+    moment: float | None
+    shared: float | None
+
+
+def _furthest(samples: Sequence[tuple[float, int]]) -> float | None:
+    """The median further from 0 of the ``(median, rows)`` samples with at least
+    :data:`CLOCK_MIN_ROWS` rows."""
+    measured = [median for median, rows in samples if rows >= CLOCK_MIN_ROWS]
+    return max(measured, key=abs) if measured else None
 
 
 def _whole_seconds(seconds: float) -> int:
@@ -484,30 +499,34 @@ class _Probe:
         """``address`` is the ``transip`` of a session overlapping the probe window, also one
         logged once, at its end, after it (bounded like the session search).
 
-        The first such row in the order of ``ix_fg_traffic_transip_transport_time``, not
-        ``EXISTS``: for a busy address the planner expects an early match and scanned the
-        partition sequentially, reading its rows before the window too (3.8 guard; 0.9 s on a
-        partition of 10 days at 1 M rows a day). In time order it read every address's rows of
-        the range when none of the address's own overlaps (0.29 s at 1 M a day for an address
-        with 1 % of them). In the index's order the scan reads the address's own rows only.
+        The first such row in the order of ``ix_fg_traffic_transip_time``, not ``EXISTS``: for a
+        busy address the planner expects an early match and scanned the partition sequentially,
+        reading its rows before the window too (3.8 guard; 0.9 s on a partition of 10 days at
+        1 M rows a day). In time order it read every address's rows of the range when none of
+        the address's own overlaps (0.29 s at 1 M a day for an address with 1 % of them). In the
+        order of ``ix_fg_traffic_transip_transport_time`` it walked every index entry of the
+        address in the partition, ``time`` being its third column (1.1 s per step for a busy
+        address after its last row, day 28 of a monthly partition at 1 M a day; #71). In the
+        index's order the scan reads the address's own rows of the range only (the address
+        named by :func:`_address_is`, so the primary key cannot give that order).
 
         Asked in two steps, the probe window first, then the tail after it: over daily chunks
         the ordered scan merges the chunks and reads each one to its first overlapping row or
         to its end, so a busy address had its whole next day read (0.18 s, 471,352 rows
         removed). An address with no overlapping session has all its rows of the tail read
-        (``duration`` is in no index)."""
+        (``duration`` is in no index; 0.25 s for a day of 800,000 rows)."""
 
         def first(*clauses: ColumnElement[bool]) -> bool:
             started = FgTraffic.time - func.make_interval(
                 0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
             )
-            where = [FgTraffic.transip == address, *clauses, started <= self.high]
+            where = [_address_is(address), *clauses, started <= self.high]
             if self.untrusted:
                 where.append(_not_in(FgTraffic.source, self.untrusted))
             query = (
                 select(FgTraffic.time)
                 .where(*where)
-                .order_by(FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+                .order_by(FgTraffic.transip, FgTraffic.time)
                 .limit(1)
             )
             return self.session.scalar(query) is not None
@@ -587,6 +606,20 @@ def _any_text(values: Sequence[str]) -> Any:
     return any_(cast(literal(list(values), ARRAY(Text)), ARRAY(Text)))
 
 
+def _address_is(address: str) -> ColumnElement[bool]:
+    """``transip`` is ``address``, written ``= ANY(inet[])`` with one element: the probe steps
+    order by ``transip, time``, and with ``transip = :address`` PostgreSQL drops the constant
+    column from the sort, leaving ``time``, which the primary key ``(time, id)`` also gives. With
+    two NAT addresses taking turns (load-balanced lines) the planner then chose the primary key
+    and read every address's rows of the range for one that had none (45 ms for a day at 1 M rows
+    a day, 0.3 s for a day of a 10-day partition; #71). ``= ANY`` keeps ``transip`` in the sort,
+    which only the address's index gives in order."""
+    clause: ColumnElement[bool] = FgTraffic.transip == any_(
+        cast(literal([address], ARRAY(INET)), ARRAY(INET))
+    )
+    return clause
+
+
 def _not_in(column: Any, values: frozenset[str]) -> ColumnElement[bool]:
     clause: ColumnElement[bool] = not_(column == _any_text(sorted(values)))
     return clause
@@ -620,17 +653,26 @@ def _by_chunk(
     start: datetime, end: datetime, *, open_start: bool
 ) -> list[list[ColumnElement[bool]]]:
     """``fg_traffic.time`` from ``start`` (exclusive when ``open_start``) to ``end``, cut at the
-    UTC midnights in between (:data:`CHUNK`): one range per TimescaleDB chunk, in time order."""
+    UTC midnights in between (:data:`CHUNK`): one range per TimescaleDB chunk, in time order.
+    The pieces are half-open at the midnights, as the chunks are (``time < midnight``, then
+    ``time >= midnight``): a piece closed at a midnight also covered that instant, which lies in
+    the next day's chunk, and the planner chose an index for that one-instant chunk alone (#71
+    review). Every row of the range lies in exactly one piece."""
     bounds = [start]
     midnight = datetime.combine(start.astimezone(UTC).date(), dt_time.min, UTC) + CHUNK
     while midnight < end:
         bounds.append(midnight)
         midnight += CHUNK
     bounds.append(end)
+    pairs = list(itertools.pairwise(bounds))
     pieces = []
-    for index, (low, high) in enumerate(itertools.pairwise(bounds)):
-        lower = FgTraffic.time > low if index or open_start else FgTraffic.time >= low
-        pieces.append([lower, FgTraffic.time <= high])
+    for index, (low, high) in enumerate(pairs):
+        if index:
+            lower = FgTraffic.time >= low
+        else:
+            lower = FgTraffic.time > low if open_start else FgTraffic.time >= low
+        upper = FgTraffic.time <= high if index == len(pairs) - 1 else FgTraffic.time < high
+        pieces.append([lower, upper])
     return pieces
 
 
@@ -832,7 +874,7 @@ class _Lookup:
         #: ``("mac", mac, at)`` for a MAC-only request (the D8 probe, 2.8.3).
         self._unbuilt: tuple[str, str, datetime] | None = None
         #: The clock measurement per source (2.7): (median offset in seconds, rows) or ``None``.
-        self._clocks: dict[str, tuple[float, int] | None] = {}
+        self._clocks: dict[str, _Clock] = {}
 
     # -- entry ------------------------------------------------------------------------------------
 
@@ -1247,8 +1289,11 @@ class _Lookup:
         Asked in steps, each for its first row: the rows logged in the window, in time order
         (the window's rows of every address at most, a busy address answers at once), then the
         scan's tail after it, then (with a port only) the sessions spanning the moment on any
-        port, these two in the order of ``ix_fg_traffic_transip_transport_time`` (the address's
-        own rows) and one day of TimescaleDB chunks at a time (:data:`CHUNK`): a statement over
+        port, these two in the order of an index on the address (its own rows: with a port
+        ``ix_fg_traffic_transip_transport_time``, without one ``ix_fg_traffic_transip_time``, as
+        the first walked every index entry of the address in the partition, 1.1 s per step for
+        a busy address after its last row on day 28 of a monthly partition; #71) and one day of
+        TimescaleDB chunks at a time (:data:`CHUNK`): a statement over
         two chunks merges their ordered scans and reads the second to its end even when the first
         answers (0.22 s for a busy address on CI's chunks). As one ``EXISTS`` the planner
         expected an early match for a busy address and scanned the partition sequentially,
@@ -1262,7 +1307,7 @@ class _Lookup:
         started = FgTraffic.time - func.make_interval(
             0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
         )
-        common = [FgTraffic.transip == address]
+        common = [_address_is(address)]
         if request.protocol is not None:
             common.append(FgTraffic.proto == request.protocol)
         if self.untrusted:
@@ -1273,18 +1318,19 @@ class _Lookup:
             query = select(FgTraffic.time).where(*common, *clauses).order_by(*order).limit(1)
             return self.session.scalar(query) is not None
 
-        by_address = (FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+        by_port = (FgTraffic.transip, FgTraffic.transport, FgTraffic.time)
+        by_time = (FgTraffic.transip, FgTraffic.time)
         in_window = [FgTraffic.time >= window.low, FgTraffic.time <= window.high]
         if first(*in_window, started <= window.high, *port, order=[FgTraffic.time]):
             return True
         for piece in _by_chunk(window.high, window.scan_end, open_start=True):
-            if first(*piece, started <= window.high, *port, order=by_address):
+            if first(*piece, started <= window.high, *port, order=by_port if port else by_time):
                 return True
         if request.public_port is None:
             return False
         spans_end = request.at + timedelta(seconds=self.settings.max_session_seconds)
         return any(
-            first(*piece, started <= request.at, order=by_address)
+            first(*piece, started <= request.at, order=by_time)
             for piece in _by_chunk(request.at, spans_end, open_start=False)
         )
 
@@ -1692,32 +1738,46 @@ class _Lookup:
     ) -> tuple[AttributionChain | None, list[NatMatch]]:
         """2.7 "Source clock at the requested moment": the sources of :meth:`_clock_sources`
         whose median offset at the moment is beyond their limit are named
-        (``source_clock_offset``) and every chain of the outcome, alternatives included, is
-        ``low``, its lease step too; a match keeps its kind. The search and the lease timeline
-        used the device's times, so a session or lease found may not be the one the moment
-        means, and an empty search may have missed it."""
+        (``source_clock_offset``; ``source_clock_shared`` when the offset is that of other rows
+        stamped with the moment's device times, #82) and every chain of the outcome,
+        alternatives included, is ``low``, its lease step too; a match keeps its kind. The
+        search and the lease timeline used the device's times, so a session or lease found may
+        not be the one the moment means, and an empty search may have missed it."""
         sources = self._clock_sources(attribution, matches, plan)
         tolerance = max(CLOCK_LIMIT_SECONDS, self.tolerance)
-        offsets: dict[str, int] = {}
-        limits: list[int] = []
+        named: dict[str, tuple[dict[str, int], list[int]]] = {
+            "source_clock_offset": ({}, []),
+            "source_clock_shared": ({}, []),
+        }
         for name, lease in sources.items():
             limit = CLOCK_LIMIT_SECONDS if lease or self.request.is_internal else tolerance
-            measured = self._clock(name)
-            # The unrounded median is compared, as R20-lease:source-clock compares it; the
-            # offset printed is rounded up, so a named offset still exceeds its limit.
-            if measured is not None and abs(measured[0]) > limit:
-                offsets[name] = _whole_seconds(measured[0])
-                limits.append(limit)
-        if not offsets:
+            clock = self._clock(name)
+            # The clock at the moment first: a clock off at the moment is named so, with its own
+            # median, whatever the shared device times say (a clock steadily off shifts its
+            # device times into the window too, rounded away from zero; #82 review). The
+            # unrounded median is compared, as R20-lease:source-clock compares it; the offset
+            # printed is rounded up, so a named offset still exceeds its limit.
+            if clock.moment is not None and abs(clock.moment) > limit:
+                key, offset = "source_clock_offset", clock.moment
+            elif clock.shared is not None and abs(clock.shared) > limit:
+                key, offset = "source_clock_shared", clock.shared
+            else:
+                continue
+            offsets, limits = named[key]
+            offsets[name] = _whole_seconds(offset)
+            limits.append(limit)
+        if not any(offsets for offsets, _limits in named.values()):
             return attribution, matches
-        self.explanations.append(
-            explain(
-                "source_clock_offset",
-                at=self.request.at.isoformat(),
-                offsets=", ".join(f"{name}: {offset:+d}" for name, offset in offsets.items()),
-                limit=min(limits),
-            )
-        )
+        for key, (offsets, limits) in named.items():
+            if offsets:
+                self.explanations.append(
+                    explain(
+                        key,
+                        at=self.request.at.isoformat(),
+                        offsets=", ".join(f"{n}: {offset:+d}" for n, offset in offsets.items()),
+                        limit=min(limits),
+                    )
+                )
         matches = [m if m.chain is None else replace(m, chain=_lowered(m.chain)) for m in matches]
         return (None if attribution is None else _lowered(attribution)), matches
 
@@ -1783,11 +1843,12 @@ class _Lookup:
         )
         return list(self.session.scalars(query))
 
-    def _clock(self, source: str) -> tuple[float, int] | None:
-        """``source``'s clock at the moment: the median of ``time - time_received`` (seconds),
-        and its number of rows, of two samples, the one whose median is further from 0 (a
-        session search must not trust the clock if either says it was off); ``None`` when neither
-        has :data:`CLOCK_MIN_ROWS` rows. Cached per lookup.
+    def _clock(self, source: str) -> _Clock:
+        """``source``'s clock: the median of ``time - time_received`` (seconds) at the moment,
+        that of the first two samples further from 0 (a session search must not trust the clock
+        if either says it was off), and that of the device times other rows shared, the third
+        sample's (its side further from 0); each ``None`` without :data:`CLOCK_MIN_ROWS` rows.
+        Cached per lookup.
 
         * By device time: its ``messages`` rows nearest the moment on each side within
           :data:`CLOCK_SPAN` whose device time is not the receive time (ingest's stand-in for a
@@ -1797,7 +1858,16 @@ class _Lookup:
           ``source_clock_samples`` (whole minutes, offsets in whole seconds, under a minute as
           0). A clock set hours back sent the rows of the real moment with device times hours
           earlier, outside the first sample, which then held rows sent on time before the
-          change, or none (#73)."""
+          change, or none (#73).
+        * Shared device times: its rows received at any time (within ``max_clock_skew``) in
+          minutes whose clock put their device times within :data:`CLOCK_SPAN` of the moment
+          from an offset beyond :data:`CLOCK_LIMIT_SECONDS` (``source_clock_samples``,
+          :func:`~arcilogger_db.clocksamples.shifted_into`). A clock set 3 hours back at J
+          stamps the rows it sends after J with the device times of the hours before J: a
+          lookup there finds the sessions of both real times, while its first sample holds
+          more rows sent on time (median 0) and its second only minutes received before J
+          (#82). One median for the offsets behind and one for those ahead: a small shift of
+          many rows must not hide a large one of fewer."""
         if source not in self._clocks:
             at = self.request.at
 
@@ -1826,8 +1896,15 @@ class _Lookup:
             )
             if (sampled := clocksamples.median(received))[0] is not None:
                 samples.append((float(sampled[0]), sampled[1]))
-            measured = [sample for sample in samples if sample[1] >= CLOCK_MIN_ROWS]
-            self._clocks[source] = max(measured, key=lambda m: abs(m[0])) if measured else None
+            shifted = clocksamples.shifted_into(
+                self.session, source, at - CLOCK_SPAN, at + CLOCK_SPAN, CLOCK_LIMIT_SECONDS
+            )
+            shared: list[tuple[float, int]] = []
+            for half in ([p for p in shifted if p[0] < 0], [p for p in shifted if p[0] > 0]):
+                # One median a side: a small shift beside a large one must not hide it.
+                if (moved := clocksamples.median(half))[0] is not None:
+                    shared.append((float(moved[0]), moved[1]))
+            self._clocks[source] = _Clock(_furthest(samples), _furthest(shared))
         return self._clocks[source]
 
     # -- exact ------------------------------------------------------------------------------------

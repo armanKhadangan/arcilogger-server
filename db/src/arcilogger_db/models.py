@@ -246,6 +246,7 @@ class FgTraffic(TimeSeries, Base):
         "fg_traffic",
         Index("ix_fg_traffic_srcip_time", "srcip", "time"),
         Index("ix_fg_traffic_transip_transport_time", "transip", "transport", "time"),
+        Index("ix_fg_traffic_transip_time", "transip", "time"),
         Index("ix_fg_traffic_sessionid", "sessionid"),
         Index("ix_fg_traffic_dstip_dstport_time", "dstip", "dstport", "time"),
         comment="FortiGate traffic logs (forward/local), incl. interim updates and source NAT.",
@@ -2002,7 +2003,8 @@ class SourceClockSample(Base):
     minute). Rows whose ``time`` is the receive time are not counted. The ingest loader adds a
     batch's samples in the transaction that loads its rows, like ``search_counts``; the
     ``source-clock`` alert reads the newest received minutes and a lookup the minutes received
-    around its moment, so a clock that jumps by hours is measured where its rows arrived, not
+    around its moment (and, #82, the minutes received within a day of it whose clock put their
+    device times around it), so a clock that jumps by hours is measured where its rows arrived, not
     where their device times put them. Derived data: ``clocksamples.rebuild`` counts a source's
     received range again from its rows.
     """

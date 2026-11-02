@@ -153,7 +153,7 @@ def test_the_exit_label_table_has_the_eight_labels() -> None:
 
 def test_every_reading_table_key_is_an_explanation() -> None:
     keys = texts.READING_TABLE_KEYS
-    assert len(keys) == len(set(keys)) == 15
+    assert len(keys) == len(set(keys)) == 16
     assert set(keys) <= set(ENGINE_EXPLANATIONS) | set(EXPLANATIONS)
 
 
