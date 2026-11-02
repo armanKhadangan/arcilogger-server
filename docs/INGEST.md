@@ -34,10 +34,11 @@
   satırlar iki sürüme de yüklendi (`bench_throughput.py --repeat 3`, sırayla 12'şer çalıştırma);
   fark varsayılan karışımda tek süreçte +%2,4, 2 worker ile +%0,4, yalnızca FortiGate'ten gelen
   karışımda −%0,9 / −%3,6'dır: %5 sınırının içinde (aşağıda "Measured throughput").
-- `fg_traffic (transip, time)` dizini (#71), 5651 sorgusunun portsuz adımlarını yaklaşık 1,1 sn'den
-  1 ms'nin altına indirir ve yüklemeyi yavaşlatmaz: aynı satırlar dizinli ve dizinsiz yüklendi,
-  fark −%1,5 ile +%1,9 arasındadır (aşağıda "Measured throughput"); dizin milyon satır başına
-  yaklaşık 31,5 MB yer tutar.
+- `fg_traffic (transip, time)` dizini (#71), 5651 sorgusunun yoğun bir adresin son satırından
+  sonraki portsuz adımlarını yaklaşık 1,1 sn'den 1 ms'nin altına, `busy_before` kuyruğunu 1,4
+  sn'den 0,25 sn'ye indirir. Aynı satırlar dizinli ve dizinsiz yüklendi: fark −%1,5 ile +%1,9
+  arasındadır, çalıştırmaların kendi dağılımı içinde ve %5 sınırının altında (aşağıda "Measured
+  throughput"). Dizin milyon satır başına yaklaşık 31,5 MB yer tutar.
 - Veritabanı kapalıysa servis bekler ve artan aralıklarla (en çok 30 sn) yeniden dener; ham
   dosyalar kuyruk olduğu için **hiçbir şey kaybolmaz**. Veritabanı dönünce kendiliğinden devam
   eder.
@@ -563,7 +564,13 @@ process CPU, median, in-process: 34.6 / 34.7 / 34.6 s and 38.0 / 37.8 / 38.0 s).
 goes to the right end of its address's range (time grows), so the index stays cheap on a full
 table too. **`(transip, time)` was added** (revision `0020_fg_traffic_transip_time`). Its port-less
 steps now read the address's rows of their range only, and the guards bound each step's buffers
-to its rows (`STEP_BUFFERS` in `worker/tests/test_lookup_performance.py`). `INCLUDE (duration)`
+to its rows (`STEP_BUFFERS` in `worker/tests/test_lookup_performance.py`). A step names its
+address as `transip = ANY(inet[])` with one element. With `transip = :address` PostgreSQL drops
+the constant column from `ORDER BY transip, time`, and the primary key `(time, id)` gives the
+order that is left. With two lines taking turns (`transip` far from the table's order) the
+planner took the primary key and read every row of the other line in the range: 45 ms for a day
+of a 2-day site, 292 ms for a day of a 10-day one, against 0.02–0.07 ms on the index. A guard
+site with two such lines (`LINES_SITE`) checks the plan. `INCLUDE (duration)`
 was not taken: it is 29 % larger, and it answers `busy_before` from the index only on all-visible
 pages. A month's partition is vacuumed for inserts at about every 20 % growth, so its newest
 days often are not all-visible, and the step then costs what it costs without the column.

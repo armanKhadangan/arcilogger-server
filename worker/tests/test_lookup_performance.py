@@ -721,6 +721,30 @@ EVENT_SITE = (
 )
 
 
+#: The second line of :data:`LINES_SITE`.
+SECOND_LINE = "100.64.13.9"
+#: Two load-balanced lines (#71): the site's NAT address and :data:`SECOND_LINE` take turns, a
+#: session each, at 1 M sessions a day for the two days before the guards' moment; the first line
+#: is down from then on and the second carries every session for a day. ``transip`` is then far
+#: from the table's order, unlike the traffic site's single line: a probe step on the first line
+#: after its last row, ordered by ``transip, time`` with ``transip = :address``, was planned on
+#: the primary key and read every row of the second line in its range.
+LINES_SITE = (
+    "INSERT INTO fg_traffic (time, time_received, source, sender, raw_day, raw_line, raw_offset, "
+    "logid, subtype, action, sessionid, proto, srcip, srcport, srcintf, dstip, dstport, dstintf, "
+    "transip, transport, trandisp, duration, is_interim) "
+    "SELECT t, t, 'fortigate', '172.31.255.1', :day, g, g::bigint * 900, '0000000013', "
+    "'forward', 'accept', 1000000 + g, 6, ('172.20.41.' || (100 + g % 100))::inet, "
+    "1024 + (g % 60000), 'vlan41', ('198.51.100.' || (g % 200 + 1))::inet, 443, "
+    "CASE WHEN t < :at AND g % 2 = 0 THEN 'wan1' ELSE 'wan2' END, "
+    "CASE WHEN t < :at AND g % 2 = 0 THEN CAST(:wan AS inet) ELSE CAST(:second AS inet) END, "
+    "1024 + (g % 60000), 'snat', g % 97, false "
+    "FROM generate_series(1, 3000000) AS g, "
+    "LATERAL (SELECT CAST(:at AS timestamptz) - interval '2 days' "
+    "+ g * interval '86.4 milliseconds' AS t) AS x",
+)
+
+
 def _site(server: TestServer, template: str, statements: Sequence[str]) -> Iterator[Engine]:
     """A database of the module with ``statements`` written into it (see the comment above)."""
     with server.database(template) as name:
@@ -743,6 +767,7 @@ def _site(server: TestServer, template: str, statements: Sequence[str]) -> Itera
                 "day": DAY,
                 "wan": WAN,
                 "line": LATER_LINE,
+                "second": SECOND_LINE,
                 "beside": BESIDE,
                 "beside_trandisp": BESIDE_TRANDISP,
                 "rows": 1_000_000 * 27 // 24,
@@ -778,6 +803,11 @@ def traffic_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
 @pytest.fixture(scope="module")
 def event_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
     yield from _site(pg_server, pg_template, EVENT_SITE)
+
+
+@pytest.fixture(scope="module")
+def lines_site(pg_server: TestServer, pg_template: str) -> Iterator[Engine]:
+    yield from _site(pg_server, pg_template, LINES_SITE)
 
 
 @dataclass
@@ -1369,11 +1399,19 @@ def _plan_reads(plan: Sequence[str]) -> tuple[list[tuple[str, int]], int]:
     return scans, removed
 
 
+def _binds(parameters: dict[str, Any], address: str) -> bool:
+    """``address`` is bound to the statement, alone or as a one-element array."""
+    return any(value in (address, [address]) for value in parameters.values())
+
+
 def _buffers(plan: Sequence[str]) -> int:
-    """The shared buffers an ``EXPLAIN (ANALYZE, BUFFERS)`` plan touched (its top node's, hit
-    and read): index entries a scan walks and filters by its index condition show here, not as
-    rows."""
+    """The shared buffers an ``EXPLAIN (ANALYZE, BUFFERS)`` plan's execution touched (its top
+    node's, hit and read; 0 when no node touched any, e.g. a plan answered by ``One-Time Filter:
+    false``, not the planning's that follow the tree): index entries a scan walks and filters by
+    its index condition show here, not as rows."""
     for line in plan:
+        if line.strip().startswith("Planning"):
+            break
         if line.strip().startswith("Buffers:"):
             return sum(int(n) for n in re.findall(r"(?:hit|read)=(\d+)", line))
     return 0
@@ -1415,7 +1453,7 @@ def test_the_overlap_probe_of_an_unclaimed_address_is_fast(
     statements = [
         (sql, parameters)
         for sql, parameters in executed.statements
-        if "make_interval" in sql and SEARCH not in sql and address in parameters.values()
+        if "make_interval" in sql and SEARCH not in sql and _binds(parameters, address)
     ]
     probe = timedelta(seconds=lookup_engine.TRANSIP_PROBE_SECONDS)
     low, high = at - probe, at + probe
@@ -1656,6 +1694,69 @@ def test_the_d15_carried_check_is_fast(
             assert removed == rows, (case, index, removed, rows)
     assert timed.seconds < 0.2, f"{case}: the D15 carried check took {timed.seconds:.3f} s"
     assert seconds < LIMIT_SECONDS, f"{case}: the lookup took {seconds:.3f} s"
+
+
+#: The probe steps on :data:`LINES_SITE`: the first line 30 minutes after its last row with no
+#: exit (the overlap probe, then ``unconfigured``), and 10 minutes after it as an ``isp_nat`` exit's
+#: address (seen, the second line beside it: the D15 check, then the fallback).
+LINES = {
+    "overlap": (timedelta(minutes=30), {}, "unconfigured"),
+    "carried": (
+        timedelta(minutes=10),
+        {"hat-1": {"mode": "isp_nat", "transips": [WAN]}},
+        "fallback",
+    ),
+}
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("case", sorted(LINES))
+def test_the_probe_steps_of_a_line_that_took_turns_read_its_own_rows(
+    lines_site: Engine, executed: _Executed, case: str
+) -> None:
+    """3.8 (#71): with two lines taking turns (:data:`LINES_SITE`), each step of the overlap probe
+    and of the D15 check ordered by the address (``ORDER BY transip, time``) is planned on
+    ``ix_fg_traffic_transip_time`` and touches no more buffers than its own rows of the range
+    (none: the first line is down) plus :data:`STEP_BUFFERS`. With ``transip = :address`` the
+    sort lost ``transip`` and the planner took the primary key, reading every row of the second
+    line in the range (``_address_is``)."""
+    after, exits, resolution = LINES[case]
+    request = LookupRequest(at=GUARD_AT + after, public_ip=WAN)
+    outcome = None
+    for warm in (True, False):
+        if not warm:
+            executed.record(lines_site)
+        with Session(lines_site) as session:
+            values = {**get_settings(session), "nat.egresses": exits}
+            settings = LookupSettings.from_settings(values)
+            outcome = run_lookup(session, request, settings, now=GUARD_AT + timedelta(days=2))
+            session.rollback()
+    executed.stop()
+    assert outcome is not None
+    assert outcome.egress is not None
+    assert outcome.egress.resolution == resolution, case
+    steps = [
+        (sql, parameters)
+        for sql, parameters in executed.statements
+        if "make_interval" in sql
+        and "ORDER BY fg_traffic.transip" in sql
+        and _binds(parameters, WAN)
+    ]
+    assert len(steps) >= 2, case  # the probe's window and tail; the check's tail, a day at a time
+    for sql, parameters in steps:
+        with lines_site.connect() as connection:
+            plan = (
+                connection.exec_driver_sql(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", parameters)
+                .scalars()
+                .all()
+            )
+        print("\n".join(plan))
+        assert not any("Seq Scan" in line for line in plan), case
+        scans, removed = _plan_reads(plan)
+        assert scans or any("One-Time Filter: false" in line for line in plan), case
+        assert all("transip_time" in name for name, _n in scans), (case, scans)
+        assert removed == 0, (case, removed)
+        assert _buffers(plan) <= STEP_BUFFERS, (case, _buffers(plan))
 
 
 # -- the event site -----------------------------------------------------------------------------

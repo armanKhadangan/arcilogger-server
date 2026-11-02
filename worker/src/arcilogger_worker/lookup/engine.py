@@ -114,7 +114,7 @@ from sqlalchemy import (
     text,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, distinct_on
+from sqlalchemy.dialects.postgresql import ARRAY, INET, distinct_on
 from sqlalchemy.orm import Session
 from sqlalchemy.types import Text
 
@@ -492,7 +492,8 @@ class _Probe:
         order of ``ix_fg_traffic_transip_transport_time`` it walked every index entry of the
         address in the partition, ``time`` being its third column (1.1 s per step for a busy
         address after its last row, day 28 of a monthly partition at 1 M a day; #71). In the
-        index's order the scan reads the address's own rows of the range only.
+        index's order the scan reads the address's own rows of the range only (the address
+        named by :func:`_address_is`, so the primary key cannot give that order).
 
         Asked in two steps, the probe window first, then the tail after it: over daily chunks
         the ordered scan merges the chunks and reads each one to its first overlapping row or
@@ -504,7 +505,7 @@ class _Probe:
             started = FgTraffic.time - func.make_interval(
                 0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
             )
-            where = [FgTraffic.transip == address, *clauses, started <= self.high]
+            where = [_address_is(address), *clauses, started <= self.high]
             if self.untrusted:
                 where.append(_not_in(FgTraffic.source, self.untrusted))
             query = (
@@ -588,6 +589,20 @@ class _Probe:
 
 def _any_text(values: Sequence[str]) -> Any:
     return any_(cast(literal(list(values), ARRAY(Text)), ARRAY(Text)))
+
+
+def _address_is(address: str) -> ColumnElement[bool]:
+    """``transip`` is ``address``, written ``= ANY(inet[])`` with one element: the probe steps
+    order by ``transip, time``, and with ``transip = :address`` PostgreSQL drops the constant
+    column from the sort, leaving ``time``, which the primary key ``(time, id)`` also gives. With
+    two NAT addresses taking turns (load-balanced lines) the planner then chose the primary key
+    and read every address's rows of the range for one that had none (45 ms for a day at 1 M rows
+    a day, 0.3 s for a day of a 10-day partition; #71). ``= ANY`` keeps ``transip`` in the sort,
+    which only the address's index gives in order."""
+    clause: ColumnElement[bool] = FgTraffic.transip == any_(
+        cast(literal([address], ARRAY(INET)), ARRAY(INET))
+    )
+    return clause
 
 
 def _not_in(column: Any, values: frozenset[str]) -> ColumnElement[bool]:
@@ -1268,7 +1283,7 @@ class _Lookup:
         started = FgTraffic.time - func.make_interval(
             0, 0, 0, 0, 0, 0, func.coalesce(FgTraffic.duration, 0)
         )
-        common = [FgTraffic.transip == address]
+        common = [_address_is(address)]
         if request.protocol is not None:
             common.append(FgTraffic.proto == request.protocol)
         if self.untrusted:

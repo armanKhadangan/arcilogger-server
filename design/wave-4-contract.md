@@ -1643,8 +1643,12 @@ Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 
   `0020_fg_traffic_transip_time`, on top of #79's `0019_source_clock_samples`; model `FgTraffic`).
   The overlap probe (`_Probe.seen_overlap`, both steps) and the D15 check (`_Lookup._carried`,
   its tail steps without a port and its spanning-sessions steps) now ask in the order
-  `transip, time`; the steps with a port keep `ix_fg_traffic_transip_transport_time`, and so does
-  the session search. Before, a port-less step walked every index entry of the address in the
+  `transip, time`, the address written `transip = ANY(inet[])` with one element
+  (`_address_is`): with `transip = :address` PostgreSQL drops the constant from the sort, and
+  with two lines taking turns the planner took the primary key `(time, id)` instead (0.3 s for a
+  day of a 10-day partition). The steps with a port and the exact search keep
+  `ix_fg_traffic_transip_transport_time`; a port-less search on one address may now take the new
+  index (the same rows, in the same order). Before, a port-less step walked every index entry of the address in the
   partition (`time` was the third column). That cost about 1.1 s per step for a busy address
   after its last row on day 28 of a monthly partition at 1 M rows a day: 2.3 s for the overlap
   probe and 2.3 s for the D15 check of one lookup. Now it is under 1 ms. `busy_before`'s tail
@@ -1656,7 +1660,9 @@ Issue #71, follow-up of #40 item 13 and Q-C3-1. It is a Wave 3 matter (contract 
   step's shared buffers to the rows of its range plus 100 (`STEP_BUFFERS`); a walk over the
   address's other entries showed only there (7,982 buffers for a step with no row on the guard
   site). There is a new overlap case, `busy_after` (the site's NAT address 30 minutes after its
-  last row). Tests: `db/tests/test_migration_0020.py` (native, and TimescaleDB with a
+  last row), and a new guard site with two lines taking turns (`LINES_SITE`,
+  `test_the_probe_steps_of_a_line_that_took_turns_read_its_own_rows`, which fails with
+  `transip = :address`: the primary key read 968,750 and 534,028 rows). Tests: `db/tests/test_migration_0020.py` (native, and TimescaleDB with a
   compressed chunk), `db/tests/test_migrations.py`,
   `worker/tests/test_lookup_performance.py`
   (`test_the_overlap_probe_of_an_unclaimed_address_is_fast[busy_after]` and

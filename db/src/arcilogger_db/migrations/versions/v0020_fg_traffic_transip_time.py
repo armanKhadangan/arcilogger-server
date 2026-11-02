@@ -11,8 +11,11 @@ Issue #71 (follow-up of #40 item 13 and Q-C3-1):
   first row of one address in a time range. On ``ix_fg_traffic_transip_transport_time`` such a
   step walked every index entry of the address in the partition (``time`` is its third column,
   PostgreSQL 16 has no skip scan): about 1.1 s per step for a busy address after its last row on
-  day 28 of a monthly partition at 1 M rows a day, three steps in one lookup. On this index the
-  step reads the address's rows of the range only. Steps with a port keep the other index.
+  day 28 of a monthly partition at 1 M rows a day, two such steps in one lookup (2.3 s). On this
+  index the step reads the address's rows of the range only; the steps name the address as
+  ``transip = ANY(inet[])`` so that ``transip`` stays in their sort and the planner cannot take
+  the primary key instead (``lookup/engine.py`` ``_address_is``). Steps with a port keep the other
+  index.
 
 The index is created on the parent: on native partitions PostgreSQL builds it on every partition,
 on TimescaleDB on every chunk (an upgrade runs with the services stopped; 18 s for a monthly
