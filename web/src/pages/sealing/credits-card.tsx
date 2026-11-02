@@ -99,8 +99,9 @@ export function CreditQuery() {
  * once a day, the last known number, the alert threshold and a trend line, and "Kontör sorgula".
  * The web service never asks Kamu SM itself (it has no access to the credentials, ADR-0007): a
  * query runs as a task on the server. A provider without a credit query (`supported: false`,
- * Wave 5 contract 2.4, C3; today TÜRKTRUST) gets a plain "Kontör" title and the neutral sentence
- * of 2.6 instead of numbers, and no "Kontör sorgula": the Kamu SM texts stay Kamu SM's (C13).
+ * Wave 5 contract 2.4, C3, C21; today `rfc3161` and TÜRKTRUST) gets a plain "Kontör" title and
+ * the neutral sentence of 2.6 instead of numbers, and no "Kontör sorgula": the Kamu SM texts stay
+ * Kamu SM's (C13).
  */
 export function CreditsCard({
   credits,

@@ -93,7 +93,8 @@ export function revocationTone(level: string): 'danger' | 'warning' | 'success' 
 
 /**
  * A credit status without a credit query (contract 2.4, C3: the Credit task records
- * `{"supported": false}`, today for TÜRKTRUST). Only the flag decides, never the provider name.
+ * `{"supported": false}`; C21: today `rfc3161` and TÜRKTRUST). Only the flag decides, never the
+ * provider name.
  * Interim (C2): read through a cast until W5-C adds `supported` to `Credits` (`lib/api-types.ts`).
  */
 export function noCreditQuery(credits: Credits): boolean {
