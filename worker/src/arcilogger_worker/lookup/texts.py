@@ -246,15 +246,15 @@ ENGINE_EXPLANATIONS: Final[Mapping[str, tuple[str, str]]] = {
     ),
     "lookback_clamped_to_window": (
         "Kira denetimlerinden biri (kiranın en yeni DHCP kaydı, kiradan sonraki DHCP kayıtları, "
-        "iki DHCP kaynağı ya da bırakmadan sonraki ARP kayıtları) bu sorgunun okuduğu günlerin "
-        "dışına bakardı; denetim yalnızca {day} ile {last} arasındaki günlerin kayıtlarını "
+        "iki DHCP kaynağı ya da bırakmadan sonraki ARP kayıtları) bu sorgunun okuduğu ilk günden "
+        "daha geriye bakardı; denetim yalnızca {day} ile {last} arasındaki günlerin kayıtlarını "
         "okuyabildi (sorgunun günleri; bir arşivden yeniden yükleme en çok 14 gün tutar). Güven "
-        "düzeyi ve notlar bu günlerin kayıtlarına dayanır; dışındaki kayıtlar denetime girmedi.",
+        "düzeyi ve notlar bu günlerin kayıtlarına dayanır; daha eski kayıtlar denetime girmedi.",
         "One of the lease checks (the lease's newest DHCP record, the DHCP records after the "
-        "lease, two DHCP origins or the ARP records after a release) would look beyond the days "
-        "this lookup reads; the check could only read the records of {day} to {last} (the "
-        "lookup's days; one archive reload holds at most 14 days). The confidence and the notes "
-        "rest on the records of those days; records outside them were not part of the check.",
+        "lease, two DHCP origins or the ARP records after a release) would look back before the "
+        "first day this lookup reads; the check could only read the records of {day} to {last} "
+        "(the lookup's days; one archive reload holds at most 14 days). The confidence and the "
+        "notes rest on the records of those days; older records were not part of the check.",
     ),
     "future_time": (
         "İstenen an ({at}) henüz gelmedi veya sunucu saatinin ilerisinde.",
