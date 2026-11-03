@@ -424,6 +424,32 @@ def test_stamp_cert_critical_from_the_stored_lists(check: Any, sealed: SealedVau
     assert "Mock" not in alert.title + json.dumps(alert.details)
 
 
+def test_stamp_cert_from_the_lists_stays_open_while_they_cannot_be_read(
+    check: Any, layout: Layout, sealed: SealedVault, db_session: Session
+) -> None:
+    """W5-C-7: an input that cannot be read decides nothing. A revocation found from the stored
+    lists (before a scheduled verification records it) is not resolved while the index, or the
+    newest sealed day's token it was checked against, cannot be read."""
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))  # a readable report
+    crl_lists(sealed, 0, revoked_at=at_site(date(2026, 10, 30), 12, 0))
+    assert check()[CERT_KEY].severity == "critical"
+    index = crl_index_path(layout)
+    saved_index = index.read_bytes()
+    index.write_text("{", encoding="utf-8")  # damaged: the lists cannot be read
+    assert check()[CERT_KEY].severity == "critical"
+    index.write_bytes(saved_index)
+    token = layout.token(date(2026, 10, 30))
+    saved_token = token.read_bytes()
+    sealed.tamper(token, b"\x00")  # test: the token in use cannot be read
+    assert check()[CERT_KEY].severity == "critical"
+    token.write_bytes(saved_token)
+    assert check()[CERT_KEY].severity == "critical"  # readable again: still revoked
+    crl_lists(sealed, 0)  # a list without the revocation
+    assert CERT_KEY not in check()
+    reason = resolved(db_session, CERT_KEY).details["auto_resolved"]["reason"]
+    assert reason == "certificate_ok"
+
+
 # -- the e-mails ----------------------------------------------------------------------------------
 
 

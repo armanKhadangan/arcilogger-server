@@ -2101,6 +2101,14 @@ def stamp_in_use(layout: Layout, roots: Sequence[x509.Certificate]) -> StampInUs
     """The newest sealed day's stamp and its verified chain; ``None`` before the first sealed
     day, or when that day's token cannot be read or reaches no pinned root (the day check says
     why)."""
+    return _newest_stamp(layout, roots)[0]
+
+
+def _newest_stamp(
+    layout: Layout, roots: Sequence[x509.Certificate]
+) -> tuple[StampInUse | None, bool]:
+    """:func:`stamp_in_use`, and whether it is known: ``False`` when the newest sealed day's
+    token cannot be read or reaches no pinned root (``True`` before the first sealed day)."""
     for day in reversed(sealed_days(layout)):
         try:
             data = layout.token(day).read_bytes()
@@ -2108,15 +2116,15 @@ def stamp_in_use(layout: Layout, roots: Sequence[x509.Certificate]) -> StampInUs
             continue  # a failed attempt leaves a manifest without a token: never sealed
         except OSError as exc:
             log.info("token of %s unreadable: %s", day, exc)
-            return None
+            return None, False
         try:
             chain = token_chain(data, roots)
             gen_time = inspect_token(data).gen_time
         except (TsaError, ValueError, TypeError, KeyError) as exc:
             log.info("token of %s unreadable: %s", day, exc)
-            return None
-        return StampInUse(day, tuple(chain), gen_time) if chain else None
-    return None
+            return None, False
+        return (StampInUse(day, tuple(chain), gen_time), True) if chain else (None, False)
+    return None, True
 
 
 def issuers_in_use(stamp: StampInUse | None) -> frozenset[str]:
@@ -2315,10 +2323,12 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
     """``R20-cert:none``: a time-stamp certificate is on a revocation list at or before a stamp
     (``critical``); or a token due for re-stamping, not covered yet, has a certificate that
     expires within :data:`CERT_EXPIRY_WARNING`, or a token's certificate expired with no renewal
-    that counts (``uncovered``) (``high``). Resolved when none holds and the re-stamping report
-    can be read."""
-    stamp = stamp_in_use(ctx.layout, pinned_roots(ctx.config, ctx.layout))
-    revoked = revoked_certificates(ctx.layout, stamp, stored_lists(ctx.layout))
+    that counts (``uncovered``) (``high``). Resolved when none holds and the re-stamping report,
+    the stored lists and the newest sealed day's stamp can be read: an unreadable one decides
+    nothing (a revocation found from the lists stays open)."""
+    stamp, stamp_known = _newest_stamp(ctx.layout, pinned_roots(ctx.config, ctx.layout))
+    lists = stored_lists(ctx.layout)
+    revoked = revoked_certificates(ctx.layout, stamp, lists)
     renewals = read_stamp_renewals(ctx.layout)
     expiring = sum(
         1
@@ -2368,8 +2378,11 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
             )
         )
 
+    # nothing sealed yet: no chain to check the lists against, and no list is needed
+    readable = renewals is not None and stamp_known and (stamp is None or lists is not None)
+
     def clear(alert: Alert) -> str | None:
-        return "certificate_ok" if renewals is not None else None
+        return "certificate_ok" if readable else None
 
     return Outcome(findings, _owned(CERT_KEY), clear)
 
