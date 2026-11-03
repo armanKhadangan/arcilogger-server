@@ -1856,9 +1856,10 @@ otherwise), `LOOP_FLOOR` and the cycles are unchanged.
   (ubuntu-latest, 7.88 µs) and 15.1 % (windows-latest, 9.13 µs; the 13.1 % on #125 was the
   figure for 5.7). Over all 26 readings unchanged code keeps at least 10.7 % (ubuntu-latest,
   median 21.1 %) and 11.8 % (windows-latest, median 19.6 %) headroom; 1.4× fails all 26, by at
-  least 5.1 % and 12.3 %; +400 µs by at least 348 % and 383 %. The Linux window is narrow: one
-  new ubuntu-latest reading above 6.18 or below 5.10 brought to the reference (today's extremes
-  6.14, run 41438160162, and 5.10, run 41455124190) empties it for 6.8.
+  least 5.1 % and 12.3 %; +400 µs by at least 348.8 % and 383.3 %. The Linux window is narrow:
+  one new ubuntu-latest reading above 6.182 or at or below 5.100 brought to the reference
+  (today's extremes 6.145, run 41438160162, and 5.103, run 41455124190, 0.06 % above that edge)
+  empties it for 6.8.
 
   The 26 readings (the throughput guards' `gauge:` and `event loop:` lines, the median of the
   busy cycles; recomputed with both sets of constants; the 4 new ones are from runs 41617780788,
