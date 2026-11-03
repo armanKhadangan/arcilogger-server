@@ -26,6 +26,7 @@ from arcilogger_core.tsa.verify import inspect_token, verify_token
 from .renewal_cases import (
     CASES,
     LEVELS,
+    Built,
     RenewalCase,
     core_status,
     core_verdict,
@@ -42,8 +43,12 @@ def rw(tmp_path: Path) -> RenewalWorld:
 
 @pytest.mark.parametrize("case", CASES, ids=[case.name for case in CASES])
 def test_both_verifiers_give_the_code_and_level_of_the_case(
-    rw: RenewalWorld, tmp_path: Path, case: RenewalCase
+    tmp_path: Path, case: RenewalCase
 ) -> None:
+    rw = make_world(tmp_path / "site", require_critical_eku=not case.relaxed)
+    if case.relaxed:
+        manifest = json.loads(rw.layout.manifest(DAY).read_bytes())
+        assert manifest["tsa"]["require_critical_eku"] is False
     built = case.build(rw)
     standalone = standalone_verdict(rw, built, tmp_path)
     core = core_verdict(rw, built)
@@ -164,3 +169,24 @@ def test_a_day_whose_token_does_not_verify_has_no_renewal(rw: RenewalWorld) -> N
     assert not check.ok
     assert check.renewal is None
     assert "renewal" not in check.as_json()
+
+
+def test_a_day_whose_files_fail_keeps_the_status_of_its_verified_token(
+    rw: RenewalWorld, tmp_path: Path
+) -> None:
+    """The status belongs to the token: a day whose token verifies but whose log file changed
+    has failed (an error of its own) and still gets its renewal status, in both verifiers."""
+    renew_day(rw, "2031-06-23-1", CNA - timedelta(days=100))
+    manifest = json.loads(rw.layout.manifest(DAY).read_bytes())
+    changed = rw.layout.vault / manifest["files"][0]["path"]
+    unlock(changed)
+    changed.write_bytes(changed.read_bytes() + b"\n")
+    now = CNA - timedelta(days=90)
+    check = verify_day(
+        rw.layout, DAY, rw.roots, legal_roots=[rw.legal.fingerprint], now=now, renewals=True
+    )
+    assert any("SHA-256 mismatch" in error for error in check.errors)
+    assert check.renewal is not None
+    assert (check.renewal.code, check.renewal.level) == ("renewal-covered", "ok")
+    standalone = standalone_verdict(rw, Built(now), tmp_path)
+    assert (standalone.code, standalone.level) == ("renewal-covered", "ok")

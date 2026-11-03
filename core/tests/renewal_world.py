@@ -83,8 +83,10 @@ def issue_tsa(
     not_before: datetime,
     not_after: datetime,
     common_name: str = "Örnek TSA (test)",
+    eku_critical: bool = True,
 ) -> tuple[x509.Certificate, PrivateKey]:
-    """A TSA certificate of ``issuer``, valid from ``not_before`` to ``not_after``."""
+    """A TSA certificate of ``issuer``, valid from ``not_before`` to ``not_after``; its
+    extended key usage critical (RFC 3161 2.3) unless ``eku_critical`` is false (K6)."""
     key = ec.generate_private_key(ec.SECP256R1())
     organization = issuer[0].subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value
     certificate = (
@@ -96,7 +98,9 @@ def issue_tsa(
         .not_valid_before(not_before)
         .not_valid_after(not_after)
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.TIME_STAMPING]), critical=True)
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.TIME_STAMPING]), critical=eku_critical
+        )
         .sign(issuer[1], hashes.SHA256())
     )
     return certificate, key
@@ -170,15 +174,22 @@ class RenewalWorld:
         return MockTsaProvider(self.tsa)
 
     def legal_provider(
-        self, cert_not_after: datetime, *, claim: bool = True, not_before: datetime | None = None
+        self,
+        cert_not_after: datetime,
+        *,
+        claim: bool = True,
+        not_before: datetime | None = None,
+        eku_critical: bool = True,
     ) -> MockTsaProvider:
         """A provider stamping with a new certificate of the legal CA (from ``not_before``, a
-        day before now by default, to ``cert_not_after``); ``claim`` false: the plain mock
-        provider's claim on that CA."""
+        day before now by default, to ``cert_not_after``; its EKU critical unless
+        ``eku_critical`` is false); ``claim`` false: the plain mock provider's claim on that
+        CA."""
         self.legal_tsa.signer = issue_tsa(
             (self.legal.root, self.legal.key),
             not_before=not_before or self.clock.now - timedelta(days=1),
             not_after=cert_not_after,
+            eku_critical=eku_critical,
         )
         if claim:
             return ProductionLikeProvider(self.legal_tsa)
@@ -270,15 +281,22 @@ def day_token_path(day: date = DAY) -> str:
     return f"{day:%Y/%m/%d}/manifest-{day.isoformat()}.json.zd"
 
 
-def make_world(tmp_path: Path, *, legal_listed: bool = True) -> RenewalWorld:
+def make_world(
+    tmp_path: Path, *, legal_listed: bool = True, require_critical_eku: bool = True
+) -> RenewalWorld:
     """A data directory with :data:`DAY` sealed (its certificate expiring at :data:`CNA`) and
     the legal CA's root listed in ``tsa.legal_root_fingerprints`` (unless ``legal_listed`` is
-    false)."""
+    false); ``require_critical_eku`` false: the site relaxed the EKU rule (K6), and the day's
+    manifest says so."""
     start = datetime.combine(DAY, time(12, 0), tzinfo=SITE_TZ).astimezone(UTC)
     clock = Clock(start)
     legal = LegalCa()
     config = make_config(
-        tmp_path, tsa={"legal_root_fingerprints": [legal.fingerprint] if legal_listed else []}
+        tmp_path,
+        tsa={
+            "legal_root_fingerprints": [legal.fingerprint] if legal_listed else [],
+            "require_critical_eku": require_critical_eku,
+        },
     )
     state = Layout(config.data_dir).state
     tsa = MockTsa(state / "mock-tsa", key_type="ec", clock=clock)

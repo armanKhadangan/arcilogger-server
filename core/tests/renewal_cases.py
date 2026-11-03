@@ -68,6 +68,9 @@ class RenewalCase:
     build: Callable[[RenewalWorld], Built]
     code: str
     level: str
+    #: The site relaxed the EKU rule before sealing the day (``tsa.require_critical_eku =
+    #: false``, K6): the world is made so (``make_world``), and the day's manifest says so.
+    relaxed: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,11 +93,13 @@ def renew_day(
     *,
     expires: datetime = FAR,
     not_before: datetime | None = None,
+    eku_critical: bool = True,
 ) -> str:
     """A legal renewal of the day stamped at ``at`` by a new certificate of the legal CA valid
-    until ``expires``; its record path."""
+    until ``expires`` (its EKU critical unless ``eku_critical`` is false); its record path."""
     rw.set_now(at)
-    rw.write_renewal(name, [rw.day_entry()], rw.legal_provider(expires, not_before=not_before))
+    provider = rw.legal_provider(expires, not_before=not_before, eku_critical=eku_critical)
+    rw.write_renewal(name, [rw.day_entry()], provider)
     return f"renewals/{name}.json"
 
 
@@ -240,6 +245,13 @@ def _chain_broken(rw: RenewalWorld) -> Built:
     return Built(CHAIN_NOW)
 
 
+def _eku_not_critical(rw: RenewalWorld) -> Built:
+    """The renewal's certificate marks its EKU non-critical; whether it counts is the rule the
+    day was sealed with (and, in a package of that one day, the standalone verifier's)."""
+    renew_day(rw, "2031-06-23-1", CNA - timedelta(days=100), eku_critical=False)
+    return Built(CNA - timedelta(days=90))
+
+
 def _mock(rw: RenewalWorld) -> Built:
     at = CNA - timedelta(days=100)
     rw.set_now(at)
@@ -350,7 +362,7 @@ CASES: tuple[RenewalCase, ...] = (
     # the chain of renewals
     RenewalCase("a chain three deep", _three_deep, "renewal-covered", "ok"),
     RenewalCase(
-        "a chain broken: the middle renewal's own certificate is due",
+        "a chain broken: the second renewal's own certificate is due, no third renewal",
         _chain_broken,
         "renewal-uncovered",
         "warn",
@@ -361,6 +373,20 @@ CASES: tuple[RenewalCase, ...] = (
     RenewalCase(
         "the renewal was stamped at its own certificate's notAfter (Q16)",
         _stamped_at_its_own_not_after,
+        "renewal-due",
+        "warn",
+    ),
+    # the EKU rule (K6): the day's sealed rule judges its renewals
+    RenewalCase(
+        "a renewal with a non-critical EKU, the day sealed relaxed",
+        _eku_not_critical,
+        "renewal-covered",
+        "ok",
+        relaxed=True,
+    ),
+    RenewalCase(
+        "a renewal with a non-critical EKU, the day sealed strict",
+        _eku_not_critical,
         "renewal-due",
         "warn",
     ),

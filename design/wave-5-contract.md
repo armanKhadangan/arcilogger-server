@@ -1368,13 +1368,23 @@ All Wave 5 questions are answered (2026-11-02).
   `as_json` adds the key `renewal`; it never adds an error or a warning (D6). With the default
   `renewals=False` nothing reads the renewals and the output of every caller is byte for byte
   what it was (`test_without_renewals_every_caller_sees_the_same_bytes`); no caller passes
-  `True` yet. As in the standalone verifier, only a day whose token verified gets a status, the
-  renewal tokens are checked with the day manifest's EKU rule, and the window is the §2.5
-  default of 180 days: `verify_day` has no configuration, and `day_renewal` takes the site's
-  `tsa.renew_before_days` from a caller that has one. The renewals are judged with the
-  `legal_roots` and the revocation lists `verify_day` already has. In the core too, a renewal
-  whose stamp is from ARCILOGGER's test TSA (policy under 2.999 or the test root,
-  `is_test_stamp`) never counts, even under a listed root (D5), as in the standalone verifier
-  (W5-A-5). The two verifiers agree on the shared case table `core/tests/renewal_cases.py`
-  (rule 5); its one exception, a production-like stamp under a root the site has not listed, is
-  W5-A-5's.
+  `True` yet. As in the standalone verifier, only a day whose token verified gets a status (a
+  day that fails for another reason, such as a changed log file, keeps the status of its
+  token), and the window is the §2.5 default of 180 days: `verify_day` has no configuration,
+  and `day_renewal` takes the site's `tsa.renew_before_days` from a caller that has one. The
+  renewal tokens are checked with an EKU rule (`tsa.require_critical_eku`, K6) that each side
+  takes from its own source: `verify_day` from that day's manifest, the standalone verifier
+  relaxed when any manifest of the package is (`_relaxed_eku`), `renewal_status` and `renew`
+  from the site's configuration. They agree for a package of one day sealed under the current
+  setting (the table's two EKU cases); a package of a relaxed and a strict day, or a site that
+  changed the setting after sealing, can split them for a renewal with a non-critical EKU
+  (a question in the pull request). The renewals are judged with the `legal_roots` and the
+  revocation lists `verify_day` already has; each call reads and verifies every renewal record
+  again, so a caller that checks many days with `renewals=True` pays days × records. In the
+  core too, a renewal whose stamp is from ARCILOGGER's test TSA (policy under 2.999 or the test
+  root, `is_test_stamp`) never counts, even under a listed root (D5), as in the standalone
+  verifier (W5-A-5); the core looks for the test organization in the root's name only, the
+  standalone verifier in every certificate of the chain, which differ only for a test
+  intermediate under a root that is not the test root. The two verifiers agree on the shared
+  case table `core/tests/renewal_cases.py` (rule 5); its one exception, a production-like stamp
+  under a root the site has not listed, is W5-A-5's.
