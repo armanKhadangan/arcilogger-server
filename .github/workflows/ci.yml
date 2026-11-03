@@ -1,9 +1,11 @@
 name: CI
 
+# #125's diagnostic dispatch (a draft pull request that is never merged; closed and its branch
+# deleted after the runs). Only the two perf jobs' setup and the live-tail guard, three times in a
+# row: I125_PROBE=none is today's code, plus40 spins 0.4 times run 1's loop CPU a delivered line
+# before each frame, plus400 spins #31's 400 us. Each run prints an "I125:" block; the summary
+# step names each run's result and fails the job if unchanged code failed or a probe passed.
 on:
-  # Work branches are tested through their pull request, not once more for every push.
-  push:
-    branches: [main, 'wave-*']
   pull_request:
   workflow_dispatch:
 
@@ -12,17 +14,12 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # A new push still cancels its pull request's run; runs on wave-* and main finish.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Actions are pinned by commit SHA (supply-chain hygiene); Dependabot keeps them current.
+# Actions are pinned by commit SHA, as on the integration branches.
 jobs:
-  # Database tests really run in every Python job: ARCILOGGER_REQUIRE_DB=1 turns a missing
-  # ARCILOGGER_TEST_PG into a failure instead of a skip (see docs/MVP-CONTRACTS.md).
-  # Each test runs once per operating system: the poe tasks of a platform together name every
-  # testpaths directory once (tests/test_ci_workflows.py checks it); "poe test" is for local use.
   python-linux:
-    name: Python (ubuntu-latest, PostgreSQL 16 + TimescaleDB)
+    name: Python (ubuntu-latest, PostgreSQL 16 + TimescaleDB) - I125 live-tail diagnostic
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -35,8 +32,6 @@ jobs:
           TIMESCALEDB_TELEMETRY: 'off'
         ports:
           - 5432:5432
-        # --shm-size: Docker's default 64 MB of /dev/shm is too small for the parallel workers of
-        # VACUUM ANALYZE and of the search performance test's queries on tier-1 data.
         options: >-
           --health-cmd "pg_isready -U arci_test -d postgres"
           --health-interval 5s
@@ -46,8 +41,10 @@ jobs:
     env:
       ARCILOGGER_TEST_PG: postgresql://arci_test:arci_test@127.0.0.1:5432/postgres
       ARCILOGGER_REQUIRE_DB: '1'
-      # The migration must actually create hypertables here (fails loudly otherwise).
       ARCILOGGER_EXPECT_TIMESCALE: '1'
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,11 +55,6 @@ jobs:
           enable-cache: true
       - name: Install workspace
         run: uv sync --locked --all-packages
-      - name: Lint (ruff) and types (mypy --strict, Linux and Windows)
-        run: uv run poe lint
-      # The service container's server log is printed after the last step and fills the end of
-      # the job log, where the test summary should be: keep it quiet (the tests provoke many
-      # database errors on purpose).
       - name: Quiet the database server log
         run: >-
           psql "$ARCILOGGER_TEST_PG" -v ON_ERROR_STOP=1
@@ -70,88 +62,66 @@ jobs:
           -c "ALTER SYSTEM SET log_min_messages = fatal"
           -c "ALTER SYSTEM SET log_min_error_statement = panic"
           -c "SELECT pg_reload_conf()"
-      - name: Web API types match the API (OpenAPI contract)
-        run: uv run python web/scripts/export_api_contract.py --check
-      # The mocked E2E tests answer with web/e2e/samples/*.json: keys, types and enum-like values
-      # (states, statuses, modes, tones, error codes) must still be what the real API sends.
-      - name: E2E samples match the real API
-        run: uv run python web/scripts/capture_api_samples.py --check
-      # The tests, incl. the database tests on TimescaleDB, with the spec 17 coverage gates (each
-      # package measured with its own tests); test-rest reports the other packages' coverage.
-      - name: Tests of core and tests/ with the core coverage gate (>= 90 %)
-        run: uv run poe test-core
-      - name: Tests of ingest with the ingest coverage gate (>= 85 %)
-        run: uv run poe test-ingest
-      - name: Tests of api with the API coverage gate (>= 80 %)
-        run: uv run poe test-api
-      - name: Tests of db, collector and worker (coverage report, no gate)
-        run: uv run poe test-rest
-      - name: Throughput guards (alone, no coverage tracing)
-        run: uv run poe test-perf
-
-  # Windows is the production platform. Three jobs in parallel, each test once: the core gate
-  # (with lint and the wheels), every other test directory, and the throughput guards alone on
-  # their runner.
-  python-windows-core:
-    name: Python (windows-latest, PostgreSQL) — lint, core gate, wheels
-    runs-on: windows-latest
-    env:
-      ARCILOGGER_REQUIRE_DB: '1'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          python-version: '3.12'
-          enable-cache: true
-      # Prints what the runner image has, fails with a clear message if PostgreSQL cannot be
-      # started and passes ARCILOGGER_TEST_PG to the later steps.
-      - name: Start the PostgreSQL preinstalled on the runner image
-        shell: pwsh
-        run: ./tools/ci/start-windows-postgres.ps1
-      - name: Install workspace
-        run: uv sync --locked --all-packages
-      - name: Lint (ruff) and types (mypy --strict, Linux and Windows)
-        run: uv run poe lint
-      - name: Tests of core and tests/ with the core coverage gate (>= 90 %)
-        run: uv run poe test-core
-      - name: Build wheels (packaging check)
-        run: uv build --all-packages --out-dir dist/wheels
-      - name: The db wheel ships its migrations
-        shell: pwsh
-        run: >
-          uv run python -c "import glob, zipfile;
-          names = zipfile.ZipFile(glob.glob('dist/wheels/arcilogger_db-*.whl')[0]).namelist();
-          assert any(n.endswith('migrations/versions/v0001_baseline.py') for n in names), names;
-          assert any(n.endswith('migrations/env.py') for n in names), names"
-
-  python-windows-tests:
-    name: Python (windows-latest, PostgreSQL) — other tests
-    runs-on: windows-latest
-    env:
-      ARCILOGGER_REQUIRE_DB: '1'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          python-version: '3.12'
-          enable-cache: true
-      - name: Start the PostgreSQL preinstalled on the runner image
-        shell: pwsh
-        run: ./tools/ci/start-windows-postgres.ps1
-      - name: Install workspace
-        run: uv sync --locked --all-packages
-      - name: Tests of db, collector, ingest, api, worker (database tests on plain PostgreSQL)
-        run: uv run poe test-others
+      - name: Calibration file for plus40 (written by run 1)
+        run: echo "I125_CALIBRATION=$RUNNER_TEMP/i125-calibration.json" >> "$GITHUB_ENV"
+      - name: "I125 run 1 of 3 - unchanged code (I125_PROBE=none)"
+        id: none
+        continue-on-error: true
+        env:
+          I125_PROBE: none
+        run: >-
+          uv run pytest -m perf --no-cov -p no:cacheprovider -s api/tests/test_live_perf.py
+          2>&1 | tee i125-none.log
+      - name: "I125 run 2 of 3 - +40 % of run 1's path (I125_PROBE=plus40)"
+        id: plus40
+        continue-on-error: true
+        env:
+          I125_PROBE: plus40
+        run: >-
+          uv run pytest -m perf --no-cov -p no:cacheprovider -s api/tests/test_live_perf.py
+          2>&1 | tee i125-plus40.log
+      - name: "I125 run 3 of 3 - #31's +400 us (I125_PROBE=plus400)"
+        id: plus400
+        continue-on-error: true
+        env:
+          I125_PROBE: plus400
+        run: >-
+          uv run pytest -m perf --no-cov -p no:cacheprovider -s api/tests/test_live_perf.py
+          2>&1 | tee i125-plus400.log
+      - name: I125 summary (expected - none passes, plus40 and plus400 fail)
+        if: always()
+        env:
+          NONE: ${{ steps.none.outcome }}
+          PLUS40: ${{ steps.plus40.outcome }}
+          PLUS400: ${{ steps.plus400.outcome }}
+        run: |
+          status=0
+          for run in none plus40 plus400; do
+            case $run in
+              none) outcome=$NONE want=success ;;
+              plus40) outcome=$PLUS40 want=failure ;;
+              plus400) outcome=$PLUS400 want=failure ;;
+            esac
+            verdict=EXPECTED
+            if [ "$outcome" != "$want" ]; then verdict=UNEXPECTED; status=1; fi
+            result=$(grep -a '^I125 RESULT' "i125-$run.log" 2>/dev/null | tail -n 1 | tr -d '\r')
+            echo "I125 SUMMARY $run: test $outcome (expected $want), $verdict; ${result:-no I125 RESULT line}"
+          done
+          {
+            echo '```'
+            grep -ah '^I125' i125-none.log i125-plus40.log i125-plus400.log | tr -d '\r'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
   python-windows-perf:
-    name: Python (windows-latest, PostgreSQL) — throughput guards
+    name: Python (windows-latest, PostgreSQL) - I125 live-tail diagnostic
     runs-on: windows-latest
     env:
       ARCILOGGER_REQUIRE_DB: '1'
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -160,83 +130,60 @@ jobs:
         with:
           python-version: '3.12'
           enable-cache: true
+      # Passes ARCILOGGER_TEST_PG to the later steps.
       - name: Start the PostgreSQL preinstalled on the runner image
         shell: pwsh
         run: ./tools/ci/start-windows-postgres.ps1
       - name: Install workspace
         run: uv sync --locked --all-packages
-      # Alone on this runner: the guards measure speed (serial, no coverage tracing).
-      - name: Throughput guards (alone, no coverage tracing)
-        run: uv run poe test-perf
-
-  web:
-    name: Web interface
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Use npm 11 (npm 10 cannot resolve Vitest 4's peer set)
-        run: npm install --global npm@11.21.0
-      - run: npm ci
-      - name: Lint
-        run: npm run lint
-      - name: Format
-        run: npm run format:check
-      - name: Types
-        run: npm run typecheck
-      - name: Unit tests
-        run: npm run test:coverage
-      - name: Build
-        run: npm run build
-      - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
-      - name: End-to-end + accessibility (axe, light and dark)
-        run: npm run e2e
-      # Artifacts only when something failed (keeps the account's artifact storage small).
-      # An upload problem (e.g. storage quota) must not hide or replace the real result.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
+      - name: Calibration file for plus40 (written by run 1)
+        run: echo "I125_CALIBRATION=$RUNNER_TEMP/i125-calibration.json" >> "$GITHUB_ENV"
+      - name: "I125 run 1 of 3 - unchanged code (I125_PROBE=none)"
+        id: none
         continue-on-error: true
-        with:
-          name: playwright-report
-          path: |
-            web/playwright-report
-            web/test-results
-          retention-days: 7
-          if-no-files-found: ignore
-
-  security:
-    name: Secrets, SBOM, vulnerabilities
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Secret scan (gitleaks)
-        run: >
-          docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.30.1
-          dir /repo --redact --no-banner --exit-code 1
-      - name: SBOM (syft, SPDX)
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          path: .
-          format: spdx-json
-          output-file: arcilogger-sbom.spdx.json
-          # Scanned below; release SBOMs are published with the installer (M7).
-          upload-artifact: false
-      - name: Vulnerability scan (grype) — fail on high and critical
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          sbom: arcilogger-sbom.spdx.json
-          fail-build: true
-          severity-cutoff: high
-          output-format: table
+        env:
+          I125_PROBE: none
+        run: >-
+          uv run pytest -m perf --no-cov -p no:cacheprovider -s api/tests/test_live_perf.py
+          2>&1 | tee i125-none.log
+      - name: "I125 run 2 of 3 - +40 % of run 1's path (I125_PROBE=plus40)"
+        id: plus40
+        continue-on-error: true
+        env:
+          I125_PROBE: plus40
+        run: >-
+          uv run pytest -m perf --no-cov -p no:cacheprovider -s api/tests/test_live_perf.py
+          2>&1 | tee i125-plus40.log
+      - name: "I125 run 3 of 3 - #31's +400 us (I125_PROBE=plus400)"
+        id: plus400
+        continue-on-error: true
+        env:
+          I125_PROBE: plus400
+        run: >-
+          uv run pytest -m perf --no-cov -p no:cacheprovider -s api/tests/test_live_perf.py
+          2>&1 | tee i125-plus400.log
+      - name: I125 summary (expected - none passes, plus40 and plus400 fail)
+        if: always()
+        env:
+          NONE: ${{ steps.none.outcome }}
+          PLUS40: ${{ steps.plus40.outcome }}
+          PLUS400: ${{ steps.plus400.outcome }}
+        run: |
+          status=0
+          for run in none plus40 plus400; do
+            case $run in
+              none) outcome=$NONE want=success ;;
+              plus40) outcome=$PLUS40 want=failure ;;
+              plus400) outcome=$PLUS400 want=failure ;;
+            esac
+            verdict=EXPECTED
+            if [ "$outcome" != "$want" ]; then verdict=UNEXPECTED; status=1; fi
+            result=$(grep -a '^I125 RESULT' "i125-$run.log" 2>/dev/null | tail -n 1 | tr -d '\r')
+            echo "I125 SUMMARY $run: test $outcome (expected $want), $verdict; ${result:-no I125 RESULT line}"
+          done
+          {
+            echo '```'
+            grep -ah '^I125' i125-none.log i125-plus40.log i125-plus400.log | tr -d '\r'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
