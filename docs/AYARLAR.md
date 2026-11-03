@@ -44,6 +44,36 @@ bozan değişikliği reddeder. Aralığı 300 saniyenin altına indirirken iki a
 değiştirin. Bu kuralın dışında (elle SQL ile) yazılmış bir süreyi kira işi varsayılan olarak
 (300 saniye, en çok aralık kadar) okur ve worker günlüğüne bir uyarı yazar.
 
+**Sorgunun okuduğu günler** (aynı grup): bir 5651 sorgusunun okuduğu günler (veritabanında
+yoksa arşivden yeniden yüklenen günler) en uzun oturumla, DNS geriye bakışıyla ve en uzun kira
+zaman aşımıyla büyür; bir yükleme en çok 14 gün alır. Bu yüzden şu ayarların üst sınırı vardır,
+böylece her sorgunun günleri tek bir yüklemeye sığar:
+
+| Ayar | Varsayılan | Sınırlar |
+|---|---|---|
+| `lookup.max_session_seconds` | 86400 (1 gün) | 60–172800 (2 gün) |
+| `lookup.dns_lookback_seconds` | 3600 | 0–604800 (7 gün) |
+| `lease.default_seconds` | 86400 (1 gün) | 60–604800 (7 gün, FortiOS'un varsayılan `lease-time` değeri, [DEVICE-SETUP.md](DEVICE-SETUP.md) bölüm 2.4) |
+| `lease.server_seconds` | `{}` | her sunucu 60–604800 (7 gün) |
+| `lease.timeout_percent` | 110 | 100–125 |
+| `arp.interval_seconds` | 3600 | 60–604800 (7 gün) |
+
+Tarayıcı da konsol da bu ayarlarda sınırın üstündeki değeri reddeder (ör. "60 ile 604800
+arasında olmalı."); `lease.server_seconds` içinde 604800 saniyeden uzun bir sunucu süresini
+kaydederken API reddeder ("Her DHCP sunucusu için 60 ile 604800 saniye (7 gün) arasında bir süre
+gerekir."). 7 günden uzun kira süresi kullanan bir sunucu için en çok 7 gün girilebilir; o
+sunucunun kirası ARCILOGGER'da son kanıttan 7 gün × `lease.timeout_percent` sonra kapanır.
+FortiGate kiralarında kayıttaki kira süresi (`dhcp.fortigate_use_logged_lease`) bu sınıra bağlı
+değildir. MikroTik'in kendi varsayılan kira süresi bu belgelerde yoktur (**sahada doğrula**):
+sınırlar ARCILOGGER'ın varsayılanlarının (1 günlük kira, saatlik ARP-LOG) üstündedir. 2 günlük
+`lookup.max_session_seconds` sınırı da FortiGate oturum süreleriyle sahada doğrulanmalıdır.
+
+Bu sınırlardan önce kaydedilmiş bir değer olduğu gibi okunur: sorgunun günleri veritabanındaysa
+sorgu yanıt verir, arşivden geri getirilmesi gereken günleri tek bir yüklemeye (14 gün) sığıyorsa
+409 `archive_reload_required` ile o günleri ister. Geri getirilmesi gereken günleri 14'ten fazla
+olan bir sorgu ise 503 `lookup_settings_invalid` ile reddedilir; metin sınırın üstündeki ayarı ve
+günleri söyler: değeri sınırların içine çekin.
+
 **İlk kurulum sihirbazı** (`/settings/setup`) kurulumdan sonra yapılacakları bir denetim listesi
 olarak gösterir: Yönetici ve iki adımlı doğrulama, Site ayarları, Log kaynakları, Kamu SM: test
 sunucusu, Kamu SM: üretim, Replika, E-posta ve Özet. Ayarlar ana sayfasındaki **İlk kurulum

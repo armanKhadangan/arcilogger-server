@@ -86,7 +86,10 @@
   adresin başka bir istemciye verilmesi) MikroTik kirası için en çok 100 gün (8.640.000 sn)
   geriye bakar. 7 günlük sınırın kalan riski: başka bir cihazın trafiğiyle açık kalan eski bir
   MikroTik kirası, istemcisini başka bir adrese taşıyan çevrilmemiş bir satırdan 7 günden fazla
-  sonra o istemciyi uyarısız gösterebilir.
+  sonra o istemciyi uyarısız gösterebilir. Bir 5651 sorgusu kendi günlerinin dışında log satırı
+  okumaz: ilk günden daha geriye bakan bir denetim o günden okur ve yanıt bunu söyler
+  (`lookback_clamped_to_window`); iki DHCP kaynağı denetimi (D27) **sorgunun son gününün sonuna
+  kadar okur**, bu bir yöntem kuralıdır ve yanıtta açıklama olarak yer almaz (bölüm 3).
 - Ölçüm: günde 3.000.000 trafik satırında (iki ardışık gün) ±60 sn aday araması **1,2–1,3 sn**,
   alan adıyla **1,1–1,5 sn**, hedef IP + port ile **0,04 sn** (hedef < 5 sn). Bu, sıkıştırılmamış
   veridir; TimescaleDB'nin sıkıştırdığı 7 günden eski bölümlerde (5651 taleplerinin çoğu bu
@@ -404,8 +407,9 @@ a person resolved or dismissed are never changed. The incremental job only raise
   - `dhcp_sources_overlap`: the chain's network has usable DHCP rows of two origins (`MikroTik
     DHCP`, `FortiGate DHCP (VDOM <vd>)`) within W of the moment on either side, W the covering
     lease's alive window and at least the longest configured DHCP window (D27, alert
-    `R20-lease:dhcp-sources-overlap`); for an address in no configured network the address
-    itself stands for its network;
+    `R20-lease:dhcp-sources-overlap`), in a lookup only within the lookup's days: D27 reads up
+    to the end of the lookup's last day (section 3, "Data window"); for an address in no
+    configured network the address itself stands for its network;
   - `fortigate_dhcp_not_converted_since_lease` (an `mt_dhcp` or `fg_dhcp` chain still `high` or
     `medium` after the steps above): after the lease's last DHCP record and before the moment
     there is a FortiGate DHCP record of the chain's IP or MAC that the lease timeline did not
@@ -628,9 +632,15 @@ has rows, whether its sealed manifest exists. Explanations: `not_in_database` /
 `future_time`, and `lease_timeline_behind` when the requested window is after the lease
 watermark. A day the database window dropped comes back from the vault on request ("arşivden
 yeniden yükle", 409 `archive_reload_required`; docs/DATA-MODEL.md "Retention"). A lookup reads no
-log row outside its days (`lookup.days.lookup_days`, the days that 409 checks): a lease check
-cut at them adds `lookback_clamped_to_window` (`day`, `last`; section 2, "Windows of the
-FortiGate DHCP checks").
+log row outside its days (`lookup.days.lookup_days`, the days that 409 checks): a look-back of a
+lease check cut at the first of them adds `lookback_clamped_to_window` (`day`, `last`; section 7,
+"Windows of the FortiGate DHCP checks"). **D27 reads up to the end of the lookup's last day**
+(`lookup.days.reads_until`): its read past the moment (`T + W`) ends there, a method rule with no
+explanation in the answer. It cuts nearly every FortiGate lookup (with FortiOS's default lease
+W is at least 7 days) and a MikroTik lookup after about 21:36 (W is 1.1 days with the defaults,
+past the end of the next day); the cut depends only on the request and the settings, so the
+answer is the same before a drop and after the reload and never changes silently (Wave 5
+contract W5-G deviations, #126).
 
 **FortiGate DHCP lines that did not become lease evidence** (D8). When no lease chain could be
 built (an internal lookup with `no_lease` or `no_lease_for_mac`; a match with `chain_missing`, or
@@ -715,11 +725,13 @@ traffic bucket), 3 database unreachable. A failed day is recorded as a `failed`
 
 ## 5. Settings used
 
-Shipped (`arcilogger_db.settings.DEFAULT_SETTINGS`): `lookup.tolerance_seconds` (`60`),
-`lookup.max_candidates` (`100`), `lookup.max_session_seconds` (`86400`),
-`lookup.dns_lookback_seconds` (`3600`), `lease.default_seconds` (`86400`),
-`lease.server_seconds` (`{}`), `lease.timeout_percent` (`110`), `dhcp.server_vlan_regex`,
-`arp.interval_seconds` (`3600`), `arp.ignore_after_release_seconds` (`300`; 0 switches the rule
+Shipped (`arcilogger_db.settings.DEFAULT_SETTINGS`): `lookup.tolerance_seconds` (`60`; at most
+3600), `lookup.max_candidates` (`100`), `lookup.max_session_seconds` (`86400`; at most 172800),
+`lookup.dns_lookback_seconds` (`3600`; at most 604800), `lease.default_seconds` (`86400`; at most
+604800), `lease.server_seconds` (`{}`; each server 60 to 604800), `lease.timeout_percent` (`110`;
+100 to 125), `dhcp.server_vlan_regex`, `arp.interval_seconds` (`3600`; at most 604800; the upper
+bounds of these keep every lookup's days within one archive reload, #126, [SETTINGS.md](SETTINGS.md)
+section 1), `arp.ignore_after_release_seconds` (`300`; 0 switches the rule
 off; at most `arp.interval_seconds`), `devices.infrastructure_macs`, `devices.oui_file` (`""`),
 `worker.leases_lag_seconds` (`120`), `db.retention_days` (`30`, the database window; at least
 7), `db.reload_keep_days` (`7`, how long an archive reload's days stay), and the keys of
@@ -928,8 +940,10 @@ WHERE duration >= 300` and split the scan into "logged within 5 minutes of the w
   - none of them, nor the lease's newest record read from its row or the two-origin check (D27,
     also its read past the moment), reads a log row outside the lookup's days
     (`lookup.days.reads_from` to `reads_until`; with the defaults `T`'s day − 12 to + 1, as many
-    days as one archive reload holds): a window cut there gives `lookback_clamped_to_window`, so
-    the answer is the same before the database window drops those days and after their reload
+    days as one archive reload holds): a look-back cut at the first day gives
+    `lookback_clamped_to_window`, and D27's read past the moment ends with the last day without
+    it (D27 reads up to the end of the lookup's last day, a method rule; section 3), so the
+    answer is the same before the database window drops those days and after their reload
     (Wave 5 contract G7, W5-G-17). With the defaults the converted-row check reads about 12 days
     back, not 100, and the post-lease check of a FortiGate lease starts no earlier than the
     first day.
