@@ -18,6 +18,8 @@ or the web application::
     arcilogger-core status                           summary for monitoring
     arcilogger-core config-check [--json]            what a production configuration still
                                                      lacks (organisation name, time source)
+    arcilogger-core crl fetch [--json] | crl status  revocation lists (SİL) of the time-stamp
+                                                     certificates: download, verify, store
     arcilogger-core evidence build --from D --to D [--source S …] [--extract FILE.json]
                     [--password] [--out DIR] [--pdf FILE] [--include-audit-log]
                                                      evidence package (Kanıt Paketi)
@@ -76,6 +78,15 @@ from arcilogger_core.config import (
     setup_problems,
 )
 from arcilogger_core.credit import check_credit
+from arcilogger_core.crl import (
+    CRL_SUFFIX,
+    Crl,
+    CrlError,
+    crl_options,
+    fetch,
+    load_stored,
+    read_index,
+)
 from arcilogger_core.evidence import (
     DEFAULT_KEEP_DAYS,
     EvidenceError,
@@ -486,11 +497,17 @@ def run_tsa_test(app: App) -> TsaTest:
         stamp = provider.stamp(sample)
     except TsaError as exc:
         return TsaTest(None, str(exc))
+    try:  # C19: a TSA certificate already on a stored list shows here as crl-revoked
+        crls: Sequence[Crl] | None = load_stored(app.layout)
+    except CrlError as exc:
+        log.warning("tsa-test: revocation not checked: %s", exc)
+        crls = None
     result = verify_token(
         stamp.token_path.read_bytes(),
         roots=app.roots(),
         file_path=sample,
         require_critical_eku=app.config.tsa.require_critical_eku,
+        crls=crls,
     )
     info = result.info
     return TsaTest(
@@ -769,6 +786,63 @@ def cmd_config_check(args: argparse.Namespace, app: App) -> int:
     return 1 if failed else 0
 
 
+def cmd_crl(args: argparse.Namespace, app: App) -> int:
+    """``crl fetch``: download, verify and store the revocation lists (the ``CrlFetch`` task;
+    exit 0 all stored, 1 some failed and are recorded in the index, 2 no URL known).
+    ``crl status``: the index and how many lists the folder holds (none is ever deleted)."""
+    if args.crl_command == "status":
+        return _crl_status(app)
+    try:
+        options = crl_options(app.config)
+    except CrlError as exc:
+        print(f"Yapılandırma hatası [configuration error]: {exc}", file=sys.stderr)
+        return 2
+    try:
+        roots = app.roots()
+    except TsaConfigurationError:  # no pinned root: no list can verify, the URLs are still tried
+        roots = []
+    try:
+        run = fetch(options, app.layout, roots, utc_now())
+    except CrlError as exc:
+        print(f"Hata [error]: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        _print_json(run.as_json())
+        return run.exit_code
+    if not run.urls:
+        print(
+            "Bilinen SİL adresi yok: tsa.crl_urls boş ve sertifikalarda http/https dağıtım "
+            "noktası yok [no CRL URL known: tsa.crl_urls is empty and no certificate names an "
+            "http/https distribution point]."
+        )
+    for entry in run.lists:
+        print(f"SİL doğrulandı, saklandı [CRL verified, stored]: {entry['url']} → {entry['file']}")
+    for failure in run.failures:
+        print(f"SİL alınamadı [CRL failed]: {failure.url} ({failure.error})")
+    return run.exit_code
+
+
+def _crl_status(app: App) -> int:
+    """The index of ``state/crl`` with the count and total size of the stored lists (Q4)."""
+    try:
+        index = read_index(app.layout)
+    except CrlError as exc:
+        print(f"Hata [error]: {exc}", file=sys.stderr)
+        return 1
+    folder = app.layout.crl_dir
+    files = sorted(folder.glob(f"*{CRL_SUFFIX}")) if folder.is_dir() else []
+    size = sum(path.stat().st_size for path in files)
+    _print_json(
+        {
+            "index": index,
+            "files": len(files),
+            "bytes": size,
+            "size": f"{format_bytes(size)} ({format_bytes(size, 'en')})",
+        }
+    )
+    return 0
+
+
 def _operator() -> str:
     try:
         return f"cli:{getpass.getuser()}"
@@ -800,7 +874,7 @@ def cmd_evidence(args: argparse.Namespace, app: App) -> int:
             lookup_id=args.lookup_id,
             reference=args.reference,
             site_name=app.config.site_name,
-            crl_dir=args.crl_dir or app.layout.state / "crl",
+            crl_dir=args.crl_dir or app.layout.crl_dir,
             include_audit_log=args.include_audit_log,
             legal_root_fingerprints=app.config.tsa.legal_root_fingerprints,
         )
@@ -920,6 +994,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "config-check", help="what a production configuration still lacks (exit 1: incomplete)"
     )
     config_check.add_argument("--json", action="store_true")
+    crl = commands.add_parser("crl", help="revocation lists (SİL/CRL) of the time stamps")
+    crl_commands = crl.add_subparsers(dest="crl_command", required=True)
+    crl_fetch = crl_commands.add_parser("fetch", help="download, verify and store the lists")
+    crl_fetch.add_argument("--json", action="store_true")
+    crl_commands.add_parser("status", help="the index, and the count and size of the lists")
 
     secret = commands.add_parser("secret", help="encrypted credentials")
     secret_commands = secret.add_subparsers(dest="secret_command", required=True)
@@ -986,6 +1065,7 @@ HANDLERS = {
     "secret": cmd_secret,
     "status": cmd_status,
     "config-check": cmd_config_check,
+    "crl": cmd_crl,
     "evidence": cmd_evidence,
 }
 

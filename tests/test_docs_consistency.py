@@ -221,8 +221,8 @@ def test_offline_bundle_ships_the_whole_docs_tree() -> None:
     # The installer copies the bundle's docs folder with its subfolders.
     install = _read(INSTALLER / "Install-Arcilogger.ps1")
     assert (
-        "foreach ($folder in @('installer', 'scripts', 'tasks', 'config', 'docs', 'licenses'))"
-        in install
+        "foreach ($folder in @('installer', 'scripts', 'tasks', 'desktop', 'config', 'docs', "
+        "'licenses'))" in install
     )
     assert "Copy-Item -LiteralPath $source -Destination $InstallDir -Recurse -Force" in install
 
@@ -1573,7 +1573,7 @@ def test_licence_guides_classify_every_api_area(name: str) -> None:
     assert areas["/imports"] == "bulk_import"
     assert areas["/lookup"] is None
     assert areas["/license"] is None
-    rows = _table_rows(_section(_doc(name), "### 2.2", "### 2.3"), r"`(/[a-z]+)`")
+    rows = _table_rows(_section(_doc(name), "### 2.2", "### 2.3"), r"`(/[a-z-]+)`")
     assert sorted(rows) == sorted(areas)
     for area, module_key in areas.items():
         assert rows[area][-1] == _module_name(module_key, language), area

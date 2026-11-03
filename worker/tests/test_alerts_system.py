@@ -326,6 +326,35 @@ def test_credit_below_the_threshold(
     assert resolved(db_session, "R20-credit").details["auto_resolved"]["reason"] == "credit_ok"
 
 
+@pytest.mark.parametrize(
+    ("provider", "answer"),
+    [("turktrust", {"supported": False}), ("rfc3161", {"credits": None})],
+    ids=["turktrust", "rfc3161"],
+)
+def test_credit_alert_never_raised_for_a_provider_without_credits(
+    sessions: sessionmaker[Session],
+    layout: Layout,
+    config: Config,
+    db_session: Session,
+    provider: str,
+    answer: dict[str, Any],
+) -> None:
+    """Wave 5 contract 2.4, C21: the Credit task writes ``"supported": false`` for TÜRKTRUST and
+    ``"credits": null`` for an RFC 3161 server (``Rfc3161Client.credits()`` is ``None``); neither
+    line has a credit count, so no R20-credit."""
+    without = config.model_copy(
+        update={"tsa": config.tsa.model_copy(update={"provider": provider})}
+    )
+    layout.credit_log.parent.mkdir(parents=True, exist_ok=True)
+    entry = {"time": isoformat_site(NOW, "seconds"), "provider": provider, **answer}
+    layout.credit_log.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    run(sessions, layout, without)
+    assert "R20-credit" not in active(db_session)
+    credit_line(layout, 0)  # positive control: a zero count from a provider with credits
+    run(sessions, layout, config)
+    assert "R20-credit" in active(db_session)
+
+
 # -- replica --------------------------------------------------------------------------------------
 
 

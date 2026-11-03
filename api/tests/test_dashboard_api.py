@@ -27,7 +27,8 @@ from arcilogger_api.routers.dashboard import (
 from arcilogger_api.testing import LoggedIn
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import SITE_TZ, isoformat_site, site_day, to_site
+from arcilogger_core.seal import Sealer
+from arcilogger_core.timeutil import SITE_TZ, day_window, isoformat_site, site_day, to_site
 from arcilogger_db.engine import session_factory
 from arcilogger_db.models import (
     Alert,
@@ -107,6 +108,7 @@ def test_empty_installation(client: TestClient, login_as: Login) -> None:
     assert {point["count"] for point in ingest["sparkline"]} == {0}
     assert body["seal"]["yesterday"]["status"] == "no_data"
     assert len(body["seal"]["calendar"]) == 30
+    assert body["seal"]["blocking"] is None
     assert body["credit"] == {"remaining": None, "estimated_days": None, "threshold": 500}
     assert body["clock"] == {
         "offset_ms": None,
@@ -280,6 +282,7 @@ def test_dashboard_numbers(
         "pending",
     ]
     assert calendar["2026-09-09"] == "no_data"
+    assert seal["blocking"] is None  # D13 failed 31 hours after its end: not late yet
 
     assert body["credit"] == {"remaining": 9634, "estimated_days": 9634, "threshold": 500}
     clock = body["clock"]
@@ -329,6 +332,77 @@ def test_yesterday_sealed_and_verified(
     )
     serial = state["serial"]
     assert yesterday["serial_short"] == (serial if len(serial) <= 8 else f"{serial[:8]}…")
+
+
+# -- the blocking card (D11: a closed day unstamped longer than seal.late_after_hours) ------------
+
+
+def blocking(
+    client: TestClient, login_as: Login, monkeypatch: pytest.MonkeyPatch, now: datetime
+) -> Any:
+    frozen(monkeypatch, now)
+    login_as(client, "auditor")
+    return get(client)["seal"]["blocking"]
+
+
+def test_seal_blocking_not_at_47_hours_after_the_day_end(
+    client: TestClient, login_as: Login, monkeypatch: pytest.MonkeyPatch, vault: SealedVault
+) -> None:
+    """D13's sealing failed and it has no time stamp; D14 is not sealed yet."""
+    after = day_window(D13)[1] + timedelta(hours=47)
+    assert blocking(client, login_as, monkeypatch, after) is None
+
+
+def test_seal_blocking_at_49_hours_after_the_day_end(
+    client: TestClient, login_as: Login, monkeypatch: pytest.MonkeyPatch, vault: SealedVault
+) -> None:
+    after = day_window(D13)[1] + timedelta(hours=49)
+    assert blocking(client, login_as, monkeypatch, after) == {
+        "oldest_unstamped_day": D13.isoformat(),
+        "hours_late": 49,
+    }
+
+
+def test_seal_blocking_names_the_oldest_unstamped_day(
+    client: TestClient, login_as: Login, monkeypatch: pytest.MonkeyPatch, vault: SealedVault
+) -> None:
+    """D13 and D14 are both late; the hours are whole hours since D13's end."""
+    after = day_window(D13)[1] + timedelta(hours=73, minutes=59)
+    assert blocking(client, login_as, monkeypatch, after) == {
+        "oldest_unstamped_day": D13.isoformat(),
+        "hours_late": 73,
+    }
+
+
+def test_seal_blocking_ignores_a_stamped_day(
+    client: TestClient,
+    login_as: Login,
+    monkeypatch: pytest.MonkeyPatch,
+    vault: SealedVault,
+    layout: Layout,
+) -> None:
+    """D13 has its time stamp, but the Seal task did not finish: stamped, so not blocking."""
+    token = layout.token(D13)
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_bytes(layout.token(D11).read_bytes())
+    after = day_window(D13)[1] + timedelta(hours=49)
+    assert blocking(client, login_as, monkeypatch, after) is None
+    later = day_window(D14)[1] + timedelta(hours=49)
+    assert blocking(client, login_as, monkeypatch, later) == {
+        "oldest_unstamped_day": D14.isoformat(),
+        "hours_late": 49,
+    }
+
+
+def test_seal_blocking_unknown_spool_is_null(
+    client: TestClient, login_as: Login, monkeypatch: pytest.MonkeyPatch, vault: SealedVault
+) -> None:
+    def denied(self: Sealer) -> list[date]:
+        raise PermissionError("spool: access denied")  # the API service's rights (ADR-0007)
+
+    monkeypatch.setattr(Sealer, "closed_unsealed_days", denied)
+    after = day_window(D13)[1] + timedelta(hours=49)
+    assert blocking(client, login_as, monkeypatch, after) is None
 
 
 def test_credit_estimate_measures_the_use(layout: Layout, api_config: Config) -> None:

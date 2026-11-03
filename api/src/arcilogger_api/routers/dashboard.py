@@ -11,7 +11,9 @@ Box         Permission                       Read from
                                              rule of :mod:`arcilogger_worker.alerts.r15`) and
                                              ``messages`` of the last 60 whole minutes
 ``seal``    ``seal.read``                    the sealing page's day states
-                                             (:class:`arcilogger_api.sealinfo.VaultView`)
+                                             (:class:`arcilogger_api.sealinfo.VaultView`);
+                                             ``blocking``: the rule of ``unstamped_days`` of
+                                             :mod:`arcilogger_api.legalstatus` (D11)
 ``credit``  ``seal.read``                    ``state/credit.jsonl``
                                              (:func:`arcilogger_api.sealinfo.credit_history`)
 ``clock``   ``system.read`` or ``seal.read``  ``state/clock/<day>.jsonl`` (the hourly probe)
@@ -50,13 +52,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from arcilogger_api.deps import ConfigDep, DbSession, LayoutDep
+from arcilogger_api.legalstatus.compute import late_unstamped_days
 from arcilogger_api.routers.alerts import AlertOut, OpenBySeverity, latest_active, open_by_severity
 from arcilogger_api.sealinfo import VaultView, credit_history, on_demand_verifications
 from arcilogger_api.search.schemas import RawRef
 from arcilogger_api.security import CurrentUser, require
 from arcilogger_core.config import Config
 from arcilogger_core.layout import Layout
-from arcilogger_core.timeutil import site_day, to_site, utc_now
+from arcilogger_core.timeutil import day_window, site_day, to_site, utc_now
 from arcilogger_db.models import IngestOffset, Message, ParseFailure
 from arcilogger_worker.alerts.r15 import newest_message, watched_sources
 from arcilogger_worker.correlation.watermark import collector_received
@@ -137,10 +140,22 @@ class SealCalendarDay(BaseModel):
     status: SealStatus
 
 
+class SealBlocking(BaseModel):
+    """A closed day without a time stamp longer than ``seal.late_after_hours`` after its end
+    (D11): the Panel's blocking card."""
+
+    #: The oldest such day (it can be older than the calendar's 30 days).
+    oldest_unstamped_day: date
+    #: Whole hours since the end of that day.
+    hours_late: int
+
+
 class DashboardSeal(BaseModel):
     yesterday: SealYesterday
     #: The 30 days ending yesterday, oldest first.
     calendar: list[SealCalendarDay]
+    #: ``null`` when no closed day is late, or when the spool cannot be listed (unknown).
+    blocking: SealBlocking | None
 
 
 class DashboardCredit(BaseModel):
@@ -361,6 +376,16 @@ def _serial_short(serial: Any) -> str | None:
     return serial if len(serial) <= 8 else f"{serial[:8]}…"
 
 
+def seal_blocking(layout: Layout, config: Config, now: datetime) -> SealBlocking | None:
+    """The oldest closed day stamped too late (the rule of ``unstamped_days``, D11)."""
+    days = late_unstamped_days(layout, config, now)
+    if not days:
+        return None
+    oldest = min(days)
+    late = now - day_window(oldest)[1]
+    return SealBlocking(oldest_unstamped_day=oldest, hours_late=int(late.total_seconds() // 3600))
+
+
 def seal_box(db: Session, layout: Layout, config: Config, now: datetime) -> DashboardSeal:
     view = VaultView(layout, config, now=now)
     yesterday = view.today - timedelta(days=1)
@@ -381,6 +406,7 @@ def seal_box(db: Session, layout: Layout, config: Config, now: datetime) -> Dash
             SealCalendarDay(day=day, status=SEAL_STATUS.get(str(cell["state"]), "no_data"))
             for day, cell in cells.items()
         ],
+        blocking=seal_blocking(layout, config, now),
     )
 
 

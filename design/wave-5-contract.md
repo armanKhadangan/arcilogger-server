@@ -596,6 +596,134 @@ As in Wave 4 §4.1 (`design/wave-4-contract.md:1255-1273`):
 
 ---
 
+## 5. Addendum A (2026-11-02): 30-day database window, xz sealing, desktop status window
+
+Owner decisions of 2026-11-02, after the storage review:
+
+- **"son 30 olsun"**: the database keeps the last 30 days of log rows. Older days come back from
+  the sealed vault on request ("arşivden yeniden yükle"). The vault itself still keeps at least
+  730 days (`retention`, unchanged).
+- **"xz sıkıştırması yapabilirsin"**: days sealed from now on are compressed with xz instead of
+  gzip. A day already sealed is never re-encoded (raw logs are evidence, `CLAUDE.md:40-41`).
+- **"o küçük masaüstü programı yap sen"**: a small status window on the server's desktop, so a
+  person at the server sees whether ARCILOGGER runs without opening the web interface. The owner
+  asked the manager to write it: W5-I is a manager package (recorded under "Deviations —
+  contract").
+
+Packages: **W5-G** (database window and archive reload, back end), **W5-J** (its web part),
+**W5-H** (xz sealing), **W5-I** (desktop status window). Rule 0.1 item 2 ("nothing in Wave 5
+deletes anything") does not apply to W5-G: dropping old **database** rows is its purpose.
+The vault, the spool and every sealed file stay untouched. D16 ("no migration") does not apply
+to W5-G either.
+
+### 5.1 Facts (read on `wave-5` at `babe0c8`)
+
+| Fact | Where |
+|---|---|
+| `db.retention_days` = 400 is today only the ingest's vault re-load horizon; no job deletes log rows | `db/src/arcilogger_db/settings.py:143`; `ingest/src/arcilogger_ingest/service.py:7`, `:570-590`; `docs/DATA-MODEL.md:302-308` |
+| 16 time-series tables (`TIME_SERIES_MODELS`); plain PostgreSQL: monthly partitions `<table>_pYYYYMM` plus `<table>_default`; TimescaleDB: 1-day chunks | `db/src/arcilogger_db/models.py:2164-2184`; `db/src/arcilogger_db/partitions.py:1-60` |
+| `drop_before` drops whole months and keeps the month of the cutoff; it also deletes `search_counts` and `source_clock_samples`; nothing calls it | `partitions.py:271-282` |
+| Exactly-once loading by `ingest_offsets (source, day)`; a day is finished when the offset equals the manifest's `bytes_uncompressed` | `models.py:700-718`; `ingest/service.py:19-20` |
+| Measured: 28.25 M `fg_traffic` rows filled 5.8 GB of rows (indexes extra) | `docs/INGEST.md:536-537` |
+| Sealing: gzip, `seal.gzip_level` 9, `compress_deterministic` (no name, mtime 0); the manifest entry keeps `path` (relative to the vault, e.g. `2026/11/01/fw.log.gz`), `bytes`, `bytes_uncompressed`, `sha256`, `sha256_uncompressed`, `lines` | `core/src/arcilogger_core/config.py:96-97`; `core/src/arcilogger_core/seal.py:256-271`, `:334-345`, `:1068-1073` |
+| Code that builds the `.log.gz` name itself or reads gzip | `seal.py:324`, `:1068`; `evidence/extract.py:23-32`; `evidence/standalone/verify.py:1926`, `:3213`, `:3258`; `evidence/instructions.py:141`, `:260`; `ingest/service.py:723`; `ingest/files.py:124-190`; `api/src/arcilogger_api/rawlines.py:200`, `:400` (gzip decompressor checkpoints); `routers/raw.py:6`; `routers/evidence.py:358`; `search/refs.py:103`; `reports/inputs.py:243`; `reports/texts.py:487-494`; `worker/src/arcilogger_worker/lookup/types.py:288-299`; `db/src/arcilogger_db/audit.py:361` (`audit.jsonl.gz`) |
+| Status files: `state/collector-status.json`, `ingest-status.json`, `worker-status.json`, `alerts.jsonl`, `seal/<day>.json` | `core/src/arcilogger_core/layout.py:79-128`; `core/src/arcilogger_core/alerts.py:1-60` |
+| The data folder is readable only by SYSTEM, Administrators and the service accounts; a non-elevated session cannot read `state\` | `deploy/windows/installer/ArciInstall.psm1:2053-2060` |
+| `GET /api/v1/health` needs no sign-in and no database; the API listens on `[api] host:port` (127.0.0.1:8000) | `api/src/arcilogger_api/app.py:75-85`; `config.py:266-274` |
+| The Sistem page judges services by the age of their status files (`SERVICE_FRESH`, 2 min) and tasks by the evidence they leave | `api/src/arcilogger_api/system_health/routes.py:1-20`, `:64`; `system_health/tasks.py:1-40` |
+| Before an upgrade the installer pauses every `\ARCILOGGER\` task and waits until none runs | `deploy/windows/installer/Install-Arcilogger.ps1:976-997` |
+| `https://localhost` is always one of the web server's site addresses | `Install-Arcilogger.ps1:1040-1043` |
+
+### 5.2 Decisions
+
+| # | Decision |
+|---|---|
+| G1 | **One window, the existing key.** `db.retention_days` becomes the database window. Its default changes to **30** (owner decision), with bounds **7** and up. The migration of W5-G changes a stored 400 (the untouched old default) to 30, raises a stored value below 7 to 7 and keeps every other value. `usage.retention_days` (rollups, 400) is unchanged. |
+| G2 | **Daily partitions** on plain PostgreSQL from the first day of the month after the migration: `<table>_pYYYYMMDD`, created for the window and 7 days ahead. Existing monthly partitions are not split; a monthly partition goes once it ends on or before the cutoff, so up to one extra month stays during the change-over (documented). TimescaleDB: `drop_chunks` older than the cutoff. |
+| G3 | **The job.** Worker job `db.window`, daily after 04:00. It drops everything older than the cutoff: the time-series partitions/chunks, older rows of the default partitions, `search_counts` and `source_clock_samples` (the existing `drop_before` rules). **Cutoff** = the earliest of (today − `db.retention_days`), the oldest day that is not sealed yet, and the oldest day of an active archive reload (G4). A day that could not come back from the vault is therefore never dropped. A day before the chain's first day (`seal.first_day`, `config.py:110`) counts as sealed. A failed run raises `R20-db-window` (medium, key `none`). |
+| G4 | **Archive reload** ("arşivden yeniden yükle"). A new table `archive_reloads` holds: `id`, `requested_by`, `requested_at`, `reason` (`lookup`/`search`), `first_day`, `last_day`, `status` (`queued`, `loading`, `ready`, `failed`, `expired`), `bytes_total`, `bytes_done`, `error_code`, `ready_at`, `expires_at`. **ArciIngest does the loading**, because it is the only writer of log rows. For each `(source, day)` of the request's sealed days, one transaction deletes that source's rows of that `raw_day` (all 16 tables, and their `search_counts`) and resets its `ingest_offsets` row; the normal sealed-file reader then loads the day. Live data still comes first. Progress is Σ committed offset / Σ `bytes_uncompressed`. `ready` is set when every stream has finished. `expires_at` = `ready_at` + `db.reload_keep_days` (new, default 7, bounds 1–30); G3 then drops the days again. One request loads at a time; the others wait in `queued`. |
+| G5 | **Limits and refusals** (HTTP 422, each with `code`, `message_tr`, `message_en`): `archive_reload_too_large` (more than 14 days in one request); `archive_day_not_in_vault` (a day with no sealed manifest: not sealed, or removed by retention); `archive_reload_disk_low` (the newest disk sample of the PostgreSQL data drive, `state/system-history.json`, minus the estimated load would leave less than 15 % free; no sample, no refusal). The estimate is Σ `bytes_uncompressed` × a database-bytes-per-raw-byte factor that W5-G measures and documents. |
+| G6 | **Who, and the audit.** Starting a reload needs the permission of the function that asks: the 5651 lookup's permission for `lookup`, the search page's for `search`. Every request is written to the audit log (`archive.reload`: who, days, reason, the lookup id when there is one) **before** it is queued. A reload brings personal data back into the database for `db.reload_keep_days` days (KVKK). It is 5651 Temel: no licence gate. |
+| G7 | **The lookup.** The lookup engine names the raw days it reads in one function in `worker/src/arcilogger_worker/lookup/`: the day of the asked time ± 1, plus the lease look-back of the DHCP rules it applies. When any of those days is outside the window and not loaded, the lookup API answers **409 `archive_reload_required`** with `first_day`, `last_day`, `bytes_total` and the estimate; it never answers "not found" for a day it could not see. **Equality test:** a lookup over dropped and reloaded days gives the same answer and the same raw-line references as the same lookup before the drop. |
+| G8 | **The search.** A search whose range starts before the window answers with the rows inside the window plus `archived: {first_day, last_day} \| null`. When the whole range is outside the window, it answers 409 `archive_reload_required`. Evidence packages and official reports are unchanged: they read the vault. |
+| G9 | **API** (new area `api/src/arcilogger_api/archive/`): `POST /archive-reloads` with `{reason, first_day, last_day, lookup_id?}` returns 202 and the reload; `GET /archive-reloads/{id}`; `GET /archive-reloads` (the active and recent ones). W5-G opens a day-1 pull request with `web/src/lib/archive-reload-types.ts` and the matching Pydantic models, as W5-C did. |
+| G10 | **Web (W5-J).** The lookup and search pages show the `archive_reload_required` / `archived` card. The confirm dialog says the days come back for `db.reload_keep_days` days and that the request is audited. A progress bar polls every 2 s. When the reload is `ready`, the page runs the lookup or search again by itself. |
+| H1 | **`seal.compression`** (TOML, `"xz"` default, or `"gzip"`). It applies to every file sealed for a day from then on: `<source>.log.xz` and `audit.jsonl.xz`. A sealed day is never re-encoded, so old `.gz` days stay as they are, forever. `seal.gzip_level` stays for gzip. |
+| H2 | **Format: seekable xz.** The file is a concatenation of independent `.xz` streams. Each stream holds exactly 16 MiB (16,777,216 bytes) of uncompressed input, the last one less. Each uses `FORMAT_XZ`, `CHECK_CRC64` and preset `seal.xz_preset` (default 6, 0–9), with no stream padding. Streams are compressed on `seal.xz_threads` threads (default 2, 1–8) and written in order. The bytes do not depend on the thread count, and the same input, preset and liblzma give the same bytes. Readers find the stream of an uncompressed offset from the xz index in the stream footers; there is no sidecar file. Any xz tool decompresses the concatenation. |
+| H3 | **One reader for both formats.** A new `core/src/arcilogger_core/sealedfile.py` provides: the sealed path of `(day, source)` from the manifest's `path` (both a `.gz` and an `.xz` for one source is the error `sealed_file_ambiguous`); a sequential reader; and a seekable reader (xz: by stream; gzip: the existing checkpoint approach). Every place in 5.1 uses it. A test fails if a `.log.gz` or `.log.xz` literal appears outside `sealedfile.py`, tests and docs. The manifest schema stays `arcilogger.manifest/1`: the `path` suffix tells the format. |
+| H4 | **Standalone verifier:** it reads both formats with the standard library (`lzma`). `VERIFIER_VERSION` goes up by one from the value W5-H finds on `wave-5`; W5-A does the same, so after both have merged it is two higher than today. The package instructions (`evidence/instructions.py`) name 7-Zip and `xz -d`. |
+| H5 | **Measure before choosing the defaults.** On load-generator data (1 M and 5 M lines), measure gzip -9 against xz presets 6 and 9 with 1 and 2 threads: ratio, sealing time, peak memory, and the time to show one line from the middle of a day. Report it in the pull request and in `docs/DATA-MODEL.md`. If a 5 GB day takes more than half of the Seal task's limit (PT2H), lower the default preset or raise the default threads, and say why with the numbers. |
+| H6 | **"Sahada doğrula" X1:** 7-Zip decompresses a multi-stream file to the same SHA-256. The Windows CI test uses `7z.exe` when the runner has it and skips with the reason otherwise. |
+| I1 | **`arcilogger_core.desktop`**, run as `pythonw.exe -I -m arcilogger_core.desktop` (`--self-test` as in the Lisans Yöneticisi). tkinter + ttk only. It is **read-only**: it has no button that changes anything (no service start or stop), only "Web arayüzünü aç" (`https://localhost/`) and "Yenile". |
+| I2 | **It reads:** <ul><li>the state of the six Windows services (query only);</li><li>`GET /api/v1/health` on the loopback address (2 s timeout);</li><li>the status files, judged by the Sistem page's rules (`SERVICE_FRESH`);</li><li>the newest `state/seal/<day>.json`;</li><li>the evidence-path alerts of the last 24 hours (`state/alerts.jsonl`, last 1 MiB);</li><li>the free space of the data drive.</li></ul>It uses no database, no network beyond loopback and no telemetry, and it writes nothing. Every 10 s; a file it cannot read shows "bilinmiyor / unknown". |
+| I3 | **Start.** A logon task `\ARCILOGGER\Desktop\StatusWindow` (`deploy/windows/desktop/StatusWindow.xml`) runs for members of Administrators: group principal S-1-5-32-544, highest run level, no time limit, one instance per session. The highest run level lets it read `state\` with no UAC prompt. `Register-ArciTasks.ps1` registers it. A Start-menu shortcut "ARCILOGGER Durum" starts it by hand; started without administrator rights, it starts itself again elevated (UAC). |
+| I4 | **The installer** stops the window before an upgrade or uninstall: `Stop-ScheduledTask`, then ends the processes that run `arcilogger_core.desktop` from the program folder. On uninstall it removes `\ARCILOGGER\Desktop\` and the shortcut. |
+| I5 | **Levels:** `ok`, `warn` and `critical`, shown in the window's title and icon. On a rise to `critical` the taskbar button flashes; there is no pop-up that takes the focus and no sound. TR first, EN beside. |
+
+### 5.3 New and changed keys
+
+| Key | Where | Default | Bounds |
+|---|---|---|---|
+| `db.retention_days` (changed) | database setting | **30** (was 400) | 7 – |
+| `db.reload_keep_days` | database setting | 7 | 1–30 |
+| `seal.compression` | TOML `[seal]` | `"xz"` | `gzip`, `xz` |
+| `seal.xz_preset` | TOML `[seal]` | 6 | 0–9 |
+| `seal.xz_threads` | TOML `[seal]` | 2 | 1–8 |
+
+### 5.4 Tests (the minimum)
+
+- **W5-G:**
+  - Daily partitions, and the change-over from monthly partitions.
+  - The cutoff (G3): an unsealed day and an active reload are never dropped.
+  - TimescaleDB, in the Linux TimescaleDB job.
+  - The G7 equality test.
+  - A reload run twice gives the same rows and the same `search_counts`.
+  - The three refusals of G5.
+  - The audit entry is written before the request is queued.
+  - Expiry after `db.reload_keep_days`.
+  - After a database loss, ingest reloads only the window.
+  - The G1 migration (400 → 30, < 7 → 7, other values kept).
+  - The 409 of the lookup and the search's `archived`.
+  - Captured samples.
+- **W5-J:** the card and the confirm dialog; progress; the automatic re-run on `ready`; each refusal text; axe; e2e with mocks from the samples.
+- **W5-H:**
+  - An xz round trip keeps `sha256_uncompressed` equal to the spool's.
+  - The bytes are the same for 1 and 4 threads.
+  - The stream boundaries.
+  - Showing one line decompresses one stream.
+  - A chain of gzip and xz days verifies in both verifiers (shared table).
+  - Sealing with xz leaves old `.gz` days untouched (same SHA-256, same mtime).
+  - The literal test of H3.
+  - `sealed_file_ambiguous`.
+  - A damaged xz gives `raw_unreadable` in the API and a failure in the verifiers.
+  - 7-Zip (H6).
+- **W5-I:**
+  - Levels from snapshot fixtures.
+  - An unreadable file gives "bilinmiyor".
+  - The non-Windows service-query stub.
+  - `--self-test` under `xvfb-run`.
+  - The task XML is pinned: principal, run level, trigger, command and time limit.
+  - `Register-ArciTasks.ps1` registers the desktop folder.
+  - The installer stops the window before it waits for the tasks.
+
+### 5.5 Ownership, owners, order
+
+| Package | Owner | Owns | Depends on |
+|---|---|---|---|
+| W5-G | Tayfun (before W5-E, which waits on A and C) | `db/src/arcilogger_db/partitions.py`, `settings.py` (the two keys), a new migration, `models.py` (`ArchiveReload`), the job module and its line in `worker/src/arcilogger_worker/service.py`, `ingest/src/arcilogger_ingest/service.py` (reload streams, horizon), `api/src/arcilogger_api/archive/` (new), the 409/`archived` hunks of `routers/lookup.py` and `routers/search.py`, the lookup-days function (G7), `web/src/lib/archive-reload-types.ts` (day 1), regenerated contract and samples, `docs/DATA-MODEL.md` (retention), `docs/legal/saklama-imha-politikasi-taslak.md`, the AYARLAR/SETTINGS rows of its keys, tests | — |
+| W5-J | Gülşah (after W5-D) | `web/src/components/archive/` (new), the hunks of `web/src/pages/lookup/` and `web/src/pages/search/`, locale keys, e2e mocks, tests | W5-G's day-1 types |
+| W5-H | Saray (W5-F waits on the other packages) | `core/src/arcilogger_core/sealedfile.py` (new), `seal.py`, `config.py` (`[seal]` keys), `evidence/extract.py`, `evidence/instructions.py`, the decompression and path hunks of `evidence/standalone/verify.py`, `ingest/src/arcilogger_ingest/files.py` and the vault-path line of `ingest/service.py`, `api/src/arcilogger_api/rawlines.py`, `routers/raw.py`, `routers/evidence.py`, `search/refs.py`, `reports/inputs.py`, `reports/texts.py`, `worker/src/arcilogger_worker/lookup/types.py`, `db/src/arcilogger_db/audit.py`, `tests/fixtures/vault-xz/` (new), DENETCI/AUDITOR (decompressing xz), the vault lines of `docs/DATA-MODEL.md`, tests | — |
+| W5-I | Manager (owner exception) | `core/src/arcilogger_core/desktop/` (new), `core/tests/test_desktop_*.py`, `deploy/windows/desktop/` (new), `tests/test_desktop_task.py` (new), the desktop hunk of `Register-ArciTasks.ps1`, the copy line of `Build-ArciBundle.ps1`, the stop/remove/shortcut hunks of `Install-Arcilogger.ps1`, the KURULUM/INSTALL section "Durum penceresi / Status window" | — |
+
+Shared files: W5-G and W5-H both touch `ingest/service.py` (W5-H only its vault-path line). W5-H
+and W5-A both touch `standalone/verify.py` (W5-H only decompression and paths). The later pull
+request merges `origin/wave-5` and keeps both sides.
+
+**Merge order:** W5-I at any time; W5-H at any time (before or after W5-A); W5-G at any time;
+W5-J after W5-G and W5-D. All before W5-F's last part, so the docs describe the final state.
+
+---
+
 ## Manager clarifications (2026-11-02, answers on #101 and #106)
 
 These change the contract text above. Where a section says otherwise, the clarification wins.
@@ -663,6 +791,18 @@ These change the contract text above. Where a section says otherwise, the clarif
   - `api/src/arcilogger_api/sealinfo.py` passes them too (W5-C).
   - The legal grade written at seal time (`seal.py`) stays without lists: no list issued after a fresh stamp exists yet, and the day check later re-judges it with lists.
 - **C20 – A stored list whose file is gone** counts like a changed one (C14). The run records `stored_file_changed` for that URL and exits 1, even when it stores the same bytes again. A deletion is something a person must see.
+- **C21 – `supported` follows the provider's credit query, not its name** (answer on #117).
+  - `false` for every provider without a credit query: `rfc3161` (`Rfc3161Client.credits()` returns `None`, `core/src/arcilogger_core/tsa/client.py:58-59`) and `turktrust`.
+  - `true` for `zamane` and `mock` (its simulated balance).
+  - C3's "today `turktrust`" missed `rfc3161`.
+- **C22 – What makes an issuer's revocation list fresh** (`crl_stale`, `R20-crl`; review of #117). It replaces W5-C-3's measure on `this_update`: a root CA may publish its list only every few months, so that measure would never clear.
+  - An issuer in use is fresh when it has an accepted stored list (C14/C20) that meets both conditions:
+    - its index `fetched_at` (the last successful fetch and verification of that list) is newer than `tsa.crl_max_age_days`;
+    - its `next_update`, when present, has not passed.
+  - A list past its `next_update` is stale, however recently it was fetched.
+  - A fetch exactly `tsa.crl_max_age_days` old is stale.
+  - An issuer in use without an accepted list stays stale.
+  - Kamu SM's and TÜRKTRUST's real publication intervals are still to be confirmed (K10/T4, sahada doğrula).
 
 ## Owner questions
 
@@ -685,3 +825,229 @@ All Wave 5 questions are answered (2026-11-02).
   (`zd.turktrust.com.tr`) is a second legal-grade provider (D12).
   - The banner rule stays for mock, rfc3161 and test servers.
   - No site setting can add another legal provider.
+
+- **W5-I is written by the manager** (owner decision 2026-11-02, "o küçük masaüstü programı yap sen"). It is the one Wave 5 package the manager implements; it is reviewed like any other pull request and touches only the files of §5.5.
+- **D16 and rule 0.1 item 2 do not bind W5-G** (owner decision "son 30 olsun"): it adds a migration and drops database rows older than the window. The vault is untouched.
+
+## Deviations — W5-B (2026-11-02)
+
+- **W5-B-1: superseded by C7.** `name_taken` is gone: the stored name carries the file's
+  SHA-256 (`<issuer-sha256-12>-<thisUpdate>-<sha256-8>.crl`), a delta list is recorded as
+  `delta_not_supported`. `load_stored` reads only names of this form (no site has a list stored
+  under the earlier one: W5-B was not released with it); a delta list found in `state/crl` is
+  neither used by `verify_day` nor shipped. A stored file whose bytes no longer match its index
+  entry or its name (changed after it was stored), or that is gone, is never overwritten or
+  deleted: after the URLs, every `crl fetch` hashes the file of every index entry (not only the
+  lists served again, so also an older list whose URL serves a newer one by now), records the
+  entry's URL in `failures` with `stored_file_changed` (C14) and exits 1; the other URLs still
+  run, the changed file's index entry stays. A list served again whose name holds other bytes
+  gives the same failure, whether or not the index still has the entry. The files are hashed,
+  not parsed: in a fresh process (the `CrlFetch` task) each run reads every stored file once,
+  about 3 ms per MB here (warm disk cache), so a thousand 1 MB lists add about 3 s. An entry
+  whose unchanged bytes are no usable list (only an index edited by hand can name one) is not a
+  fetch failure; `verify_day` names it (W5-B-6). Tests: `core/tests/test_crl.py`.
+- **W5-B-2: a lock file `state/crl/.fetch.lock`.** Two runs (the `CrlFetch` task and a manual
+  `crl fetch`) can overlap; the lock keeps the index from losing entries. The file stays, empty,
+  and is never deleted; the builder and `crl status` ignore it. A held lock exits 1 and is not
+  recorded in the index.
+- **W5-B-3: stricter trust than D7/D8's wording.** Only certificates that chain to a pinned root
+  give distribution points; a CRL issuer whose keyUsage lacks `cRLSign` is refused; a list
+  signed with an algorithm the standalone verifier cannot check is neither stored nor used
+  (rule 5); a URL with a user name or password is recorded as `unreachable` with the credentials
+  hidden, never logged or printed.
+- **W5-B-4: `tsa.timeout_seconds` bounds each URL's whole exchange**, not only each network
+  wait: connection, status line and headers, redirects and body. Once the time is over, every
+  connection of the exchange is shut down at the socket and the URL fails as `unreachable`, so
+  a server that trickles bytes (headers or body) cannot hold the task. Only name resolution
+  (the system's own limit), a TCP connection attempt already under way (at most
+  `tsa.timeout_seconds` per address) and a TLS handshake already under way can take longer:
+  the handshake is not cut (its socket belongs to the TLS module until it ends) but bounded by
+  Python's own handshake timeout (one `tsa.timeout_seconds`), so one that starts just before
+  the deadline can end up to about twice `tsa.timeout_seconds` after the start.
+- **W5-B-5: `crl fetch` exit codes beyond §2.2:** 2 also for an invalid `network.https_proxy`;
+  1 also for an unreadable index or stored file, a held lock, or a stored file that is changed
+  or gone (`stored_file_changed`, C14; recorded like every other failure, also for a list no
+  URL serves any more, W5-B-1). `crl status`
+  prints JSON (`index`, `files`,
+  `bytes`, `size`) and has no `--json` flag.
+- **W5-B-6: day-check texts.** `crl-revoked` fails the day with the §2.6 `certificate_revoked`
+  English text (without the revocation date); `crl-revoked-later`, `crl-hold` and an unreadable
+  index give new English warnings in `chain.py`'s style. Each certificate of the chain gives its
+  own text, as the standalone verifier lists each one (not only the most severe). C14's
+  "revocation list {file} does not match its index entry" is a warning on every day; it also
+  names an entry whose file is missing or holds no usable list. Their Turkish texts belong in
+  `api/src/arcilogger_api/issues.py` (not W5-B's file; listed in the pull request).
+- **W5-B-7: `NO_CRL_NOTE`'s text** (the constant stays): it said ARCILOGGER does not download
+  revocation lists yet. It now says, TR / EN, that the CRL folder the package was built from
+  (`state/crl` by default, or `--crl-dir`) holds no verified list for these days, where the URLs
+  come from, and that Kamu SM's are to be confirmed on site (K10).
+- **W5-B-8: the config adapter.** `crl.crl_options` reads `tsa.crl_urls`,
+  `tsa.crl_max_age_days` and `network.https_proxy` with `getattr` and the §2.5 defaults until
+  W5-T's day-1 pull request lands; then it becomes plain attribute access.
+- **W5-B-9: an interim field of the shared revocation table (C6), for W5-A to clear.** The core
+  applies C6 now; the standalone verifier follows with W5-A (merge order W5-B, then W5-A). The
+  C6 cases are already in `core/tests/revocation_cases.py` (W5-A does not add them again). Five
+  cases expect `crl-revoked` and carry `standalone_before_c6`, what the standalone verifier
+  gives today:
+  - `crl-hold`: a hold, then a revocation before the stamp; the same at the stamp time; a hold
+    and a privilegeWithdrawn revocation of the same date;
+  - `TypeError`: a hold and a revocation without a reason of the same date; two revocations of
+    the same date, one without a reason and one for key compromise.
+
+  `test_revocation.py` asserts exactly that, so it fails once W5-A changes `check_revocation`.
+  W5-A then removes the value from each case and, with the last one, the dataclass field, the
+  module-docstring paragraph and the interim branch of `test_revocation.py`, and this entry:
+  both verifiers must agree on every case.
+- **W5-B-10: C8's "packaged chain certificate"** is a certificate of a packaged day token's
+  verified chain below its root (the TSA certificate and its intermediates; the chain
+  `verify_token` checks, `tsa.verify.token_chain`). "Has an entry" means any entry for its
+  serial, removeFromCRL too (which the revocation check then ignores), on a list signed by
+  that certificate's issuer. The builder reads the lists from the folder `state/crl`,
+  `verify_day` from its index (`load_stored`), so they see the same revocations as long as the
+  folder and the index agree, as `crl fetch` keeps them. Tests:
+  `core/tests/test_evidence_crl.py` (two- and three-level chains).
+- **W5-B-11: issuers from every day token, URLs from the newest one of each provider.** Every
+  CA certificate of any day token that chains to a pinned root may sign a list (each distinct
+  certificate loaded once per run), so a list of an intermediate the provider no longer uses
+  still verifies instead of `unknown_issuer`. The distribution points stay those of D7 (pinned
+  roots and the newest token of each provider): an old CA's address that stops answering does
+  not fail every run. Tests: `core/tests/test_crl.py`.
+- **W5-B-12: one list per PEM file.** `parse_crl` refuses PEM data (any `-----BEGIN`) unless it
+  holds exactly one `X509 CRL` block (`not_a_crl` in a fetch; left out by the builder): the
+  standalone verifier reads every block of a file, the index describes one list per file.
+- **W5-B-13: each stored file is parsed once per process** (`crl.read_crl_file`, keyed by the
+  path and the file's size, mtime, ctime and inode), for `load_stored` and the builder alike.
+  The DER is kept once (a DER file's own bytes); the builder reads only the files it ships. A
+  stored file that cannot be read (permissions), like an unreadable `state/crl`, gives
+  "revocation not checked" (a `CrlError`), never a crash and never a check without that list.
+  Known limits, kept as a follow-up:
+  - Memory is not bounded: every list a process has read stays parsed for the life of the
+    process (the API and the worker too), its DER and its entries. Measured: a 1.06 MB list of
+    20,000 entries takes about 1.3 s to parse and keeps about 3.4 MB of entries beside its DER
+    (about 50 MB at the peak of the parse). Lazy entries would leave a list from `--crl-dir`
+    unchecked until a day check needs it, so they are not used.
+  - On Windows, `st_ctime` is the creation time: a rewrite in place that keeps the size and
+    sets the old mtime back (`os.utime`) is not seen by a long-running process, which keeps
+    the list as first read (the stored one, so no revocation is lost) and gives no C14 warning
+    until it restarts. `crl fetch` runs as a fresh process and hashes every file (W5-B-1), so
+    the change is still recorded in `failures` on its next run.
+- **W5-B-14: C15 in the core.** `tsa.verify.confirmed_legal_grade` adds "not `crl-revoked`"
+  (from `details["crl"]`, so only a result checked with lists can say revoked); `verify_day`
+  and the builder (which checks the days against its CRL folder) pass the lists. Callers that
+  verify without lists cannot see a revocation; they are listed on the pull request.
+- **W5-B-15: C18–C20.** The builder refuses a `crl-revoked` day in `_collect_day`, before any
+  part of the package is written, with a TR / EN message naming the day and the certificate
+  (C18). `arcilogger-core tsa-test` (the only token check of the command line; there is no
+  separate `verify-token` command) verifies its stamp with the stored lists, and an unreadable
+  CRL folder leaves it unchecked with a warning (C19). A known list whose file is gone is stored
+  again and recorded as `stored_file_changed`, exit 1 (C20).
+
+## Deviations — W5-C (2026-11-02)
+
+- **W5-C-1: the reader of `state/renewal.json`.** §2.1.2 fixes the per-token fields, not the
+  top level. The reader (`alerts.system.read_stamp_renewals`, shared by `/legal-status`, the
+  day page and the alerts) takes `tokens` of an object or a plain list, ignores unknown keys,
+  leaves out an entry with an unknown `status` (a list or an object included) or an unreadable
+  `cert_not_after`, and counts from each token's `status`, never from a totals object. A
+  missing file is "no report yet"; an unreadable one is unknown and decides nothing (no reason,
+  no alert raised or resolved, `renewal: null` and a page problem on the day page). An entry's
+  `renewed_at` is taken when the writer gives one; otherwise the day page reads the genTime of
+  the renewal token beside the `covered_by` record (`<record>.zd`). A record with a drive, a
+  root (a UNC path included) or a `..` step is refused as written, before anything on the disk
+  is opened; the token itself, a link followed, must resolve inside `vault/renewals`. Else
+  `renewed_at` is `null`. `path` is vault-relative; a leading `vault/` and a `.zd` suffix of
+  `covered_by` are tolerated.
+- **W5-C-2: the day page's `revocation` texts** for the codes that §2.6 does not word
+  (`crl-revoked-later`, `crl-hold`, `crl-none`, `crl-stale`, `crl-ok`) are W5-C's, after the
+  standalone verifier's (`legalstatus/texts.py` `REVOCATION`); `crl-revoked` uses
+  `certificate_revoked`. `level` is the verifier's own `crl_level`, else the D10 level of the
+  code. The day page checks the token with the stored lists (`crl.load_stored`, read once
+  per request, C19), so `revocation` is `crl-none` before the first `crl fetch`. It is `null`
+  only when `state/crl` cannot be read, and the page's `problems` then say "revocation not
+  checked"; a list whose file no longer matches its index entry is named there too (C14).
+- **W5-C-3: `crl_stale`** follows C22 (review of #117; it replaces the first measure on
+  `this_update`). An issuer in use is fresh while it has an accepted stored list whose index
+  `fetched_at` is newer than `tsa.crl_max_age_days` and whose own `nextUpdate`, when it has one,
+  is later than now. A fetch exactly `tsa.crl_max_age_days` old is stale, and so is a list at
+  or past its `nextUpdate`, however recently it was fetched; an issuer without an accepted list
+  stays stale. A list's fetch time is its index entry's (the entry of its stored name), and its
+  `nextUpdate` is the list's own; an accepted list whose entry gives no readable `fetched_at`
+  counts for nothing, and so does one whose `fetched_at` is later than now: a skewed clock never
+  keeps a list fresh, and the clock check reports the skew (manager's re-review of #117). The
+  issuer's best list counts. "Issuer in use" is a CA certificate of the
+  newest sealed day's verified chain (`token_chain` against the pinned roots, the TSA
+  certificate left out), by its SHA-256 fingerprint. So an old provider's lists stop mattering,
+  and before the first sealed day, or when the newest token reaches no pinned root, nothing is
+  in use. Only the lists that `crl.load_stored` accepts count: a list whose file was changed or
+  deleted is no verified list (C14, C20). When `state/crl` cannot be read, every issuer in use
+  is stale; that is never a server error. `since` is the earliest moment a stale issuer that has
+  a list stopped being fresh (its best list's `fetched_at + max_age`, or its `nextUpdate` when
+  that comes first), else `null`; `link` is `settings-tsa` (C5). `R20-crl` uses the same rule
+  (`alerts.system.crl_status`, D11); its details add `changed_files` (the lists left out under
+  C14). Kamu SM's and TÜRKTRUST's real publication intervals are still to be confirmed (K10/T4,
+  sahada doğrula). `certificate_revoked` and `R20-cert` also check the newest sealed day's chain
+  against the stored lists at its genTime (`crl-revoked` only; `since` is the revocation date),
+  beside the scheduled verifications' day errors.
+- **W5-C-4: `credentials_in_clear`** holds for `turktrust` when the `tsa.url` scheme is `http`
+  (§2.4 "with plain HTTP"). `tsa.allow_plain_http` with an `https://` URL raises nothing: the
+  §2.6 text states that the connection is unencrypted. Until W5-T's configuration lands,
+  `turktrust` is never a legal-grade claim, so it also gives `provider_not_legal` and the label
+  "Test sunucusu".
+- **W5-C-5: `DashboardSeal.blocking`** names the oldest closed day without a token more than
+  `seal.late_after_hours` after its end; `hours_late` is the whole hours since that day's end
+  (49 at 49 h 30 min). It uses the same rule as `unstamped_days` (D11); a spool that cannot be
+  listed gives `null`, and a stamped day whose Seal task has not finished does not block.
+- **W5-C-6: the API texts carry no ZAMAN-DAMGASI reference.** C13 has the web append "ZAMAN-
+  DAMGASI.md bölüm N"; the `message_tr`/`message_en` of `/legal-status` are the §2.6 texts
+  alone. `certificate_revoked`'s `{name}` is the certificate subject's CN, else its whole
+  RFC 4514 text.
+- **W5-C-7: the three alerts are prepared, not switched on.** `check_stamp_renewal`,
+  `check_stamp_cert` and `check_stamp_crl` are in `alerts.system.LEGAL_CHECKS`, not in
+  `CHECKS`: W5-E appends them with their texts and first-steps guide rows (§2.3.1). Each code
+  is written only inside its dedup key (`R20-renewal:none` and so on) and the rule is taken from
+  the key (D14); `worker/tests/test_alerts_legal.py::test_no_whole_string_constant_for_the_wave5_alert_codes`
+  fails on a whole-string constant, and W5-E deletes or inverts it. The findings carry counts
+  only. R20-cert's "expires within 30 days and is uncovered" is read as in W5-C-12. R20-cert
+  is resolved only when every input can be read: the re-stamping report, every scheduled
+  verification (`state/verify/last-*.json`; one that cannot be read or holds no verification
+  counts as unreadable), the newest sealed day's token, reaching a pinned root, and `state/crl`
+  (before the first sealed day no list is needed). A stored list that was changed or deleted
+  (C14/C20) keeps its index entry for good, so it holds open only an alert that carries a
+  revocation (its `revoked` count, or the critical severity the store keeps): an expiry alert
+  resolves once `state/renewal.json` says the tokens are covered (manager's re-review of #117).
+  The damaged list is reported where C14/C20 put it, CrlFetch's `stored_file_changed` and the
+  day page's problems. A revocation stays open while the input that found it cannot be read. The
+  rule is one for both severities: a "high" raised from `state/renewal.json` alone also stays
+  open while the newest token reaches no pinned root (for example a provider whose roots are
+  not pinned yet), the safe side. "The `Renew` task failed twice
+  in a row" is left to W5-E: no state file records Renew runs yet (C12). `R20-crl` is judged
+  from `state/crl` only (the stored lists and `index.json`, never an exit code; C22, W5-C-3);
+  its details give the stale issuers, the failures, the changed files and the newest
+  `fetched_at`.
+- **W5-C-8: `Exclude<A, B>` in the web type tests.** `LegalReason.level` is
+  `Exclude<LegalLevel, 'ok'>` (§2.3.1, verbatim), so `tsType()` of `api-types.test.ts` and
+  `check()` of `api-samples.test.ts` learned that form.
+- **W5-C-9: `SealDayDetail.renewal` and `revocation` are optional** in `seal-types.ts`, as
+  W5-D asked and like `tsa_cert_not_after?`; the API always sends both keys (`null` when there
+  is nothing). `Credits.supported` is required in `api-types.ts`, because the schema requires
+  it and `api-types.test.ts` compares requiredness. It is false for a provider without a credit
+  query (`rfc3161` and `turktrust`, C21; `NO_CREDIT_PROVIDERS` of `routers/credits.py`) and also
+  when the newest `state/credit.jsonl` line of the configured provider says `"supported": false`.
+- **W5-C-10: day-check Turkish texts beyond #106's four** in `issues.py`: C14's "revocation
+  list {file} does not match its index entry" and the builder's "CRL file {file} changed while
+  the package was built". `{when}` is shown in site time (`format_datetime`).
+- **W5-C-11: damaged state files are read as unknown**, never a server error of the banner (the
+  60 s cache keeps no failed answer). A scheduled verification whose `checks` is not a list is
+  skipped. A re-stamping entry whose time is at the edge of the calendar (one that UTC or site
+  time cannot show, at either end) is left out; so is such an index `fetched_at` or failure
+  `at`, and a moment shifted past the edge is unknown. The high edge is 9999-12-31T21:00Z, so a
+  certificate with RFC 5280's "no well-defined expiration" (`99991231235959Z`) has its entry
+  left out: its day page shows `renewal: null`. JSON nested too deeply to parse counts as
+  unreadable. A seal state that cannot be parsed makes the unstamped days unknown.
+- **W5-C-12: R20-cert "high"** (manager answer on #117, 2026-11-02 21:07Z, Q6) is a token of
+  `state/renewal.json` that is `uncovered` (its certificate expired with no renewal that counts),
+  or one that is `due` with at most 30 days left before its certificate's `cert_not_after`
+  (exactly 30 days is high, 30 days and a second is not). The 30 days are
+  `alerts.system.CERT_EXPIRY_WARNING` (`timedelta(days=30)`), not a setting. A revocation still
+  makes it `critical`. The findings count both (`expiring`, `uncovered`, beside `revoked`).
+  "The `Renew` task failed twice in a row" stays W5-E's (W5-C-7).

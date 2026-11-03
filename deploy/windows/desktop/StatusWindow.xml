@@ -1,0 +1,48 @@
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>ARCILOGGER</Author>
+    <Description>ARCILOGGER Durum: sunucunun masaüstünde salt okunur durum penceresi (yönetici oturumları).</Description>
+    <URI>\ARCILOGGER\Desktop\StatusWindow</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <!-- Every logon; the principal below limits it to members of Administrators. -->
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <!-- BUILTIN\Administrators, in the session of the person who logs on, with the full
+         (elevated) token: the window reads state\ of the data folder, which only administrators
+         may read, without a UAC prompt. It changes nothing (Wave 5 contract §5, I1-I3). -->
+    <Principal id="Author">
+      <GroupId>S-1-5-32-544</GroupId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <!-- One window per person: each logon starts its own (the window allows one per session). -->
+    <MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <!-- Open as long as the person keeps it open. -->
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{{PYTHONW}}</Command>
+      <Arguments>-I -m arcilogger_core.desktop --no-elevate</Arguments>
+    </Exec>
+  </Actions>
+</Task>

@@ -56,6 +56,8 @@ EXPECTED_ROUTERS = {
     "/compliance": "compliance",
     "/system": "system",
     "/system/health": "system",
+    # The legal-validity status, the banner on every page (Wave 5 contract 2.3.1; C1).
+    "/legal-status": "legal-status",
 }
 
 

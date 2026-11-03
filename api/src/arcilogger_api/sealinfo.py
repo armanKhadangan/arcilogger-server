@@ -9,7 +9,10 @@ The facts about sealed days come from the vault and the job state that the sched
 * ``state/replica/<day>.json`` — the second copy;
 * ``vault/deletions/*-imha.json`` + ``.zd`` — days deleted by retention (a record without its
   time stamp is the leftover of a retention run that failed and deleted nothing);
-* ``state/credit.jsonl`` — Kamu SM credit checks.
+* ``state/credit.jsonl`` — Kamu SM credit checks;
+* ``state/renewal.json`` — the re-stamping report of the Renew task (a day's ``renewal``, Wave 5
+  contract 2.3.1), read through :func:`arcilogger_worker.alerts.system.read_stamp_renewals`, the
+  reader the legal-validity status uses.
 
 The one database fact is the result of "Doğrula" (``seal_verifications``): the API may not
 write ``state/verify`` (ADR-0007). The page shows the newer of the two verifications.
@@ -42,7 +45,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Final
 
 from cryptography import x509
@@ -57,8 +60,10 @@ from arcilogger_api.issues import (
     seal_failure,
     token_issues_tr,
 )
+from arcilogger_api.legalstatus.texts import REVOCATION, REVOCATION_LEVELS, certificate_name
 from arcilogger_core.config import Config
-from arcilogger_core.fmt import format_datetime
+from arcilogger_core.crl import StoredLists
+from arcilogger_core.fmt import format_date, format_datetime
 from arcilogger_core.layout import Layout
 from arcilogger_core.seal import sha256_file
 from arcilogger_core.timeutil import day_window, site_day, utc_now
@@ -71,6 +76,12 @@ from arcilogger_core.tsa.verify import (
     verify_token,
 )
 from arcilogger_db.models import SealVerification
+from arcilogger_worker.alerts.system import (
+    StampRenewal,
+    read_stamp_renewals,
+    stamp_renewal_path,
+    stored_lists,
+)
 
 log = logging.getLogger("arcilogger.api.seals")
 
@@ -108,7 +119,7 @@ def _read_json(path: Path) -> tuple[Any, str | None]:
         return json.loads(path.read_bytes()), None
     except FileNotFoundError:
         return None, None
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         log.warning("cannot read %s: %s", path, exc)
         return None, f"{path.name}: {type(exc).__name__}"
 
@@ -282,22 +293,23 @@ class VaultView:
                 self.problems.append(problem)
             if not isinstance(data, dict):
                 continue
-            at = _parse_time(data.get("at"))
-            if at is None:
+            at, checks = _parse_time(data.get("at")), data.get("checks")
+            if at is None or not isinstance(checks, list):
                 continue
-            for check in data.get("checks") or []:
+            for check in checks:
                 try:
                     day = date.fromisoformat(str(check["day"]))
                 except (KeyError, TypeError, ValueError):
                     continue
+                errors, warnings = check.get("errors"), check.get("warnings")
                 current = Verification(
                     at=at,
                     ok=bool(check.get("ok")),
                     deep=bool(data.get("deep")),
                     source="scheduled",
                     by=path.stem,
-                    errors=tuple(str(e) for e in check.get("errors") or []),
-                    warnings=tuple(str(w) for w in check.get("warnings") or []),
+                    errors=tuple(str(e) for e in errors) if isinstance(errors, list) else (),
+                    warnings=tuple(str(w) for w in warnings) if isinstance(warnings, list) else (),
                 )
                 if day not in found or found[day].at < at:
                     found[day] = current
@@ -581,6 +593,8 @@ class VaultView:
         result["replica"] = self.replica(day) if sealed else None
         result.update(manifest=None, files=[], audit_log=None, gaps=[], clock=None)
         result.update(previous=None, deletions=[], chain_check=None, token=None, totals=None)
+        # Wave 5 contract 2.3.1: always present, ``null`` when unknown
+        result.update(renewal=self.renewal(day), revocation=None)
         if manifest is None:
             return result
         manifest_path = self.layout.manifest(day)
@@ -628,7 +642,81 @@ class VaultView:
         result["chain_check"] = manifest.get("chain_check")
         result["previous"] = self._previous(manifest.get("previous"))
         result["token"] = self._token(day, manifest, roots)
+        result["revocation"] = (result["token"] or {}).pop("revocation", None)  # see _token
         return result
+
+    @cached_property
+    def stored_lists(self) -> StoredLists | None:
+        """The stored revocation lists that count (W5-B's :func:`~arcilogger_core.crl.
+        load_stored`), read once per request (each file is parsed once per process). ``None``:
+        ``state/crl`` cannot be read; the day's revocation is then not checked, and the page says
+        so (C19). A list whose file no longer matches its index entry is named too (C14)."""
+        lists = stored_lists(self.layout)
+        if lists is None:
+            self.problems.append("revocation not checked: state/crl cannot be read")
+            return None
+        self.problems += [
+            f"revocation list {name} does not match its index entry" for name in lists.mismatched
+        ]
+        return lists
+
+    @cached_property
+    def stamp_renewals(self) -> dict[str, StampRenewal] | None:
+        """The re-stamping report by vault-relative token path; ``None`` when it is unreadable
+        (reported as a problem), empty before the Renew task first wrote it."""
+        renewals = read_stamp_renewals(self.layout)
+        if renewals is None:
+            self.problems.append(f"{stamp_renewal_path(self.layout).name}: unreadable")
+            return None
+        return {renewal.path.removeprefix("vault/"): renewal for renewal in renewals}
+
+    def renewal(self, day: date) -> dict[str, Any] | None:
+        """The day token's re-stamping state (contract 2.3.1), ``None`` when the report does not
+        list it. ``covered_by`` is the vault-relative renewal record, ``renewed_at`` the genTime
+        of its token (from the report when it carries it)."""
+        key = self.layout.token(day).relative_to(self.layout.vault).as_posix()
+        entry = (self.stamp_renewals or {}).get(key)
+        if entry is None:
+            return None
+        covered_by = entry.covered_by.removeprefix("vault/") if entry.covered_by else None
+        if covered_by is not None:
+            covered_by = covered_by.removesuffix(".zd")
+        renewed_at = entry.renewed_at
+        if renewed_at is None and covered_by is not None:
+            renewed_at = self._renewal_time(covered_by)
+        return {
+            "status": entry.status,
+            "cert_not_after": entry.cert_not_after,
+            "covered_by": covered_by,
+            "renewed_at": renewed_at,
+        }
+
+    def _renewal_time(self, record: str) -> datetime | None:
+        """The genTime of a renewal record's token (``<record>.zd`` beside it). Only a token in
+        ``vault/renewals`` is read: the path comes from a state file, not from the vault. A path
+        with a drive, a root or ``..`` is refused before anything on the disk is opened (on
+        Windows a UNC path would reach the network); the token itself, a link followed, must
+        then lie in that folder."""
+        if any(
+            path.anchor or ".." in path.parts
+            for path in (PurePosixPath(record), PureWindowsPath(record))
+        ):
+            log.info("renewal record %s is not a path in the vault: its token is not read", record)
+            return None
+        try:
+            token = (self.layout.vault / (record + ".zd")).resolve()
+            folder = self.layout.renewals_dir.resolve()
+        except (OSError, RuntimeError, ValueError) as exc:  # a link loop, a NUL character
+            log.info("renewal token of %s unreadable: %s", record, exc)
+            return None
+        if folder not in token.parents:
+            log.info("renewal token of %s is not in %s: it is not read", record, folder)
+            return None
+        try:
+            return inspect_token(token.read_bytes()).gen_time
+        except (OSError, TsaError, ValueError, TypeError, KeyError) as exc:
+            log.info("renewal token of %s unreadable: %s", record, exc)
+            return None
 
     def _previous(self, previous: Any) -> dict[str, Any] | None:
         """The link to the day before, and whether it still matches what is in the vault."""
@@ -707,15 +795,39 @@ class VaultView:
             roots=roots,
             file_path=self.layout.manifest(day),
             require_critical_eku=tsa.get("require_critical_eku") is not False,
+            # C19: with the stored lists, a day revoked at or before its stamp is not legal
+            # grade (C15) and ``revocation`` says why
+            crls=self.stored_lists,
         )
         root = check.details.get("root") or None
         result["check"] = _token_check(check.ok, list(check.errors), root)
+        # the day's ``revocation``, moved out of the token by :meth:`detail`
+        result["revocation"] = revocation_json(check.details)
         if is_test_stamp(info.policy, root or ""):
             result["test_stamp"] = True
         result["legal_grade"] = confirmed_legal_grade(
             tsa.get("legal_grade") is True, check, self.config.tsa.legal_root_fingerprints
         )
         return result
+
+
+def revocation_json(details: dict[str, Any]) -> dict[str, Any] | None:
+    """A day's ``revocation`` (contract 2.3.1) from a token check's ``details``: the verifiers'
+    code and level (D10, C4) and the message; ``None`` when revocation was not checked."""
+    code = details.get("crl")
+    if not isinstance(code, str) or code not in REVOCATION:
+        return None
+    level = details.get("crl_level")
+    if level not in ("fail", "warn", "info", "ok"):
+        level = REVOCATION_LEVELS[code]
+    subject = details.get("crl_subject")
+    at = _parse_time(details.get("crl_at"))
+    values = {
+        "name": certificate_name(subject) if isinstance(subject, str) and subject else "",
+        "date": format_date(at) if at is not None else "",
+    }
+    message_tr, message_en = (text.format(**values) for text in REVOCATION[code])
+    return {"code": code, "level": level, "message_tr": message_tr, "message_en": message_en}
 
 
 def _token_check(ok: bool | None, errors: list[str], root: str | None) -> dict[str, Any]:
@@ -769,12 +881,15 @@ def credit_history(layout: Layout, limit: int = CREDIT_HISTORY) -> tuple[list[di
             bad += 1
             continue
         credits = data.get("credits")
+        supported = data.get("supported")
         entries.append(
             {
                 "time": at,
                 "provider": data.get("provider"),
                 "credits": credits if isinstance(credits, int) else None,
                 "error": data.get("error"),
+                # false: the Credit task found no credit query for the provider (2.4)
+                "supported": supported if isinstance(supported, bool) else None,
             }
         )
     return entries, bad
