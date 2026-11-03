@@ -1573,7 +1573,7 @@ def test_licence_guides_classify_every_api_area(name: str) -> None:
     assert areas["/imports"] == "bulk_import"
     assert areas["/lookup"] is None
     assert areas["/license"] is None
-    rows = _table_rows(_section(_doc(name), "### 2.2", "### 2.3"), r"`(/[a-z]+)`")
+    rows = _table_rows(_section(_doc(name), "### 2.2", "### 2.3"), r"`(/[a-z-]+)`")
     assert sorted(rows) == sorted(areas)
     for area, module_key in areas.items():
         assert rows[area][-1] == _module_name(module_key, language), area

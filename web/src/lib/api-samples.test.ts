@@ -4,8 +4,9 @@
  * (`web/scripts/capture_api_samples.py`, whose `--check` compares them with the API again); here
  * every sample is checked field by field against the interfaces of `api-types.ts`,
  * `lookup-types.ts`, `seal-types.ts`, `settings-types.ts`, `search-types.ts`, `live-types.ts`,
- * `sources-types.ts`, `compliance-types.ts`, `system-types.ts` and `system-health-types.ts` —
- * required fields present, no unknown fields, value types and string literal unions as declared.
+ * `sources-types.ts`, `compliance-types.ts`, `system-types.ts`, `system-health-types.ts` and
+ * `legal-status-types.ts` — required fields present, no unknown fields, value types and string
+ * literal unions as declared.
  * The untyped parts of the OpenAPI document (`outcome`, `query`, the seal day detail, the
  * `result` of an administration request, the events of a live stream) are covered only here.
  */
@@ -38,6 +39,7 @@ for (const file of [
   'compliance-types.ts',
   'system-types.ts',
   'system-health-types.ts',
+  'legal-status-types.ts',
 ]) {
   const path = join(LIB, file);
   const source = ts.createSourceFile(
@@ -163,9 +165,15 @@ function check(value: unknown, type: ts.TypeNode, source: ts.SourceFile, path: s
       ]);
     }
     // `Partial<Record<…>>`: the same map, not every key present.
-    const [argument] = type.typeArguments ?? [];
+    const [argument, removed] = type.typeArguments ?? [];
     if (name === 'Partial' && argument && ts.isTypeReferenceNode(argument))
       return check(value, argument, source, path);
+    // `Exclude<LegalLevel, 'ok'>`: a value of the first type that the second does not hold.
+    if (name === 'Exclude' && argument && removed) {
+      if (check(value, removed, source, path).length === 0)
+        return [`${path}: ${describe_(value)} is excluded by ${type.getText(source)}`];
+      return check(value, argument, source, path);
+    }
     const alias = aliases.get(name);
     if (alias) return check(value, alias.node, alias.source, path);
     if (interfaces.has(name)) return checkMembers(value, interfaceMembers(name), path);
@@ -692,6 +700,16 @@ const RULES: Record<string, Record<string, Rule>> = {
   },
   'system-health': {
     health: 'SystemHealth',
+    errors,
+  },
+  // The legal-validity banner (Wave 5 contract 2.3.1): the cases of `samples_legal_status.py`.
+  'legal-status': {
+    ...Object.fromEntries(
+      ['ok', 'provider_not_legal', 'warning_only', 'mixed', 'revoked'].map((name) => [
+        name,
+        'LegalStatus',
+      ]),
+    ),
     errors,
   },
   // Every licence document is `GET /license` (also the answer of `POST /license`), every other
