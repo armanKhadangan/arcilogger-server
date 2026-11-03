@@ -588,15 +588,26 @@ def _find_in_xz(
 
     With ``offset``: decompress from the stream that holds it, take the line that starts there
     and check its number against the line feeds before that stream (counted on the first view).
-    Without: count from the first stream, noting the line feeds before each stream on the way."""
+    Without, or when that check fails: count from the first stream, noting the line feeds before
+    each stream on the way (:func:`read_line` then names the mismatch as for gzip)."""
     stat = path.stat()
     entry = VAULT_INDEX.entry(path, (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns))
     with VAULT_INDEX.scans, entry.lock, open_shared(path) as handle:
         try:
             streams = sealedfile.xz_streams(path, handle)
-            if offset is None:
-                return _scan_xz(handle, streams, entry, line), None
-            return _line_at(path, handle, streams, entry, line, offset), None
+            if offset is not None:
+                try:
+                    found = _line_at(path, handle, streams, entry, line, offset)
+                except RawReferenceError as exc:
+                    if exc.code != "raw_reference_mismatch":
+                        raise
+                    found = None
+                if found is not None:
+                    return found, None
+            # No offset, or one that does not hold the line: find the line by its number, so a
+            # wrong reference gets the answer it gets on a .gz day (the line is at another
+            # offset, or the file has fewer lines). Only a wrong reference pays this read.
+            return _scan_xz(handle, streams, entry, line), None
         except (sealedfile.SealedFileError, lzma.LZMAError, EOFError) as exc:
             return None, _xz_damage(path, exc)
 

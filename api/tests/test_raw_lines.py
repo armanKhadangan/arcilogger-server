@@ -561,6 +561,42 @@ def test_xz_damage_before_the_line_in_its_own_stream_is_found(
     assert raised.value.code == "raw_unreadable"
 
 
+def test_a_wrong_reference_gets_the_same_answer_from_gzip_and_xz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The manager's rule on #111: an xz mismatch raises what a .gz mismatch raises. The same
+    lines sealed in both formats, the same wrong references: the same code and message."""
+    monkeypatch.setattr(sealedfile, "STREAM_BYTES", 100)
+    monkeypatch.setattr(rawlines, "VAULT_INDEX", rawlines.VaultIndex())
+    lines = [b"line %03d" % n for n in range(1, 101)]
+    expected = _expected(lines, list(range(1, 101)))
+    size = sum(len(line) + 1 for line in lines)
+    answers: dict[str, list[tuple[str, str]]] = {}
+    for kind in ("gzip", "xz"):
+        layout = Layout(tmp_path / kind)
+        if kind == "gzip":
+            _vault(layout, lines)
+        else:
+            _xz_vault(layout, lines)
+        answers[kind] = []
+        for line, offset in (
+            (50, size + 10),  # past the end of the file
+            (50, size),  # the end of the file
+            (50, expected[50][0] + 3),  # inside the line
+            (50, expected[60][0]),  # another line's start
+            (150, expected[60][0]),  # a line the file does not have
+            (150, size + 10),
+        ):
+            rawlines.VAULT_INDEX.clear()
+            with pytest.raises(RawReferenceError) as raised:
+                read_line(layout, "fortigate", DAY, line, offset)
+            answers[kind].append((raised.value.code, str(raised.value)))
+    assert answers["xz"] == [
+        (code, message.replace(".log.gz", ".log.xz")) for code, message in answers["gzip"]
+    ]
+    assert {code for code, _ in answers["xz"]} == {"raw_reference_mismatch", "raw_not_found"}
+
+
 # -- files that exist but cannot be read ----------------------------------------------------------
 
 
