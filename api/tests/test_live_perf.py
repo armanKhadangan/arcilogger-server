@@ -76,7 +76,8 @@ REFERENCE_GAUGE = 17.76e-6 if sys.platform == "win32" else 15.90e-6
 #: loosens it by more than its excess over the tolerance.
 TOLERANCE = 1.2
 #: The per-line bound is CI's (``LOOP_GAUGE_LINES``, tighter on a faster core) on GitHub's
-#: runners or with ``ARCILOGGER_PERF_STRICT=1``, else the flat ``OFF_CI_GAUGE_LINES``.
+#: runners (``GITHUB_ACTIONS=true``) or with ``ARCILOGGER_PERF_STRICT=1``, those values exactly,
+#: else the flat ``OFF_CI_GAUGE_LINES``.
 STRICT = (
     os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("ARCILOGGER_PERF_STRICT") == "1"
 )
@@ -91,12 +92,14 @@ LOOP_GAUGE_LINES = 5.6 if sys.platform == "win32" else 6.8
 #: A faster core gets a tighter limit, in gauge lines: the limit goes with the gauge, relative to
 #: the reference, to this power. On those runs the loop's CPU a line went with the gauge to the
 #: power 1.25 on ubuntu-latest and 1.20 on windows-latest (log-log slopes); their mean less 1 is
-#: 0.22 (0.23 on the 22 without the last two runs), taken to 0.20, not 0.25: at 0.25 the rule
-#: above leaves ubuntu-latest 6.904 to 6.909, at 0.3 nothing since 41477960420 (8.65 us, 5.39).
+#: 0.22 (0.23 on #88's 22 readings), taken to 0.20, not 0.25: at 0.25 the rule above leaves
+#: ubuntu-latest 6.904 to 6.909, at 0.3 nothing since 41477960420 (8.65 us, 5.39).
 LOOP_EXPONENT = 0.20
 #: The per-line bound off CI, in gauge lines, the same on every core: 1.10 times the costliest
-#: cloud-session reading (8.52, gauge 11.90 us; that class read 7.04 to 8.52 at 11.27 to 12.60
-#: us, #88's slow class 5.74 to 6.41 at 21.47 to 23.42 us).
+#: cloud-session reading (8.52, gauge 11.90 us; that class read 7.01 to 8.52, at 11.27 to 12.60
+#: us where the gauge was shown, #88's slow class 5.74 to 6.41 at 21.47 to 23.42 us). Taken on
+#: Linux cloud sessions only: on a Windows machine off CI it is loose by far (windows-latest read
+#: 4.03 to 4.98).
 OFF_CI_GAUGE_LINES = 9.4
 #: Below this fraction of the reference the limit no longer falls, in gauge lines. CI's gauges ran
 #: from about 0.5 to 1 times the reference (the fastest at the floor); the bound is shown to hold
@@ -240,8 +243,8 @@ def test_three_streams_under_ten_thousand_lines_a_second(
         scale = max(1.0, gauge.seconds / (TOLERANCE * REFERENCE_GAUGE))
         # a core faster than the reference gets a tighter limit a line, in gauge lines
         speed = min(max(gauge.seconds / REFERENCE_GAUGE, LOOP_FLOOR), 1.0)
-        strict = LOOP_GAUGE_LINES * speed**LOOP_EXPONENT
-        limit = strict if STRICT else OFF_CI_GAUGE_LINES
+        ci_limit = LOOP_GAUGE_LINES * speed**LOOP_EXPONENT
+        limit = ci_limit if STRICT else OFF_CI_GAUGE_LINES
         # In gauge lines, the median of the busy cycles: a pause in one of them (a garbage
         # collection, a neighbour) does not move it. A run that delivered nothing fails below,
         # after the first assertions.
@@ -270,11 +273,11 @@ def test_three_streams_under_ten_thousand_lines_a_second(
                 f"cycles; {whole:.2f} over the whole span), about {line * gauge.seconds * 1e6:.1f} "
                 f"us (limit {limit:.2f}, speed factor {speed:.2f})"
             )
-            margin = f"margin {(strict / line - 1) * 100:+.1f} %"
+            margin = f"margin {(ci_limit / line - 1) * 100:+.1f} %"
             print(
-                f"  per-line check: strict (CI's bound), limit {strict:.2f}, {margin}"
+                f"  per-line check: strict (CI's bound), limit {ci_limit:.2f}, {margin}"
                 if STRICT
-                else f"  per-line check: off CI, limit {limit:.2f}; strict limit {strict:.2f}, "
+                else f"  per-line check: off CI, limit {limit:.2f}; strict limit {ci_limit:.2f}, "
                 f"{margin} (not asserted)"
             )
         for stream_id in streams:
