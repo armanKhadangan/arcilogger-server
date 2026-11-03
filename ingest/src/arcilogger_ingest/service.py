@@ -35,17 +35,26 @@ come from the raw days ``first_day - 2`` … ``last_day + 2``
 (:data:`~arcilogger_db.partitions.RAW_DAY_MARGIN`: a line received after midnight with a device
 time before it, a device clock behind), so those files are loaded again: every day of the
 request must be sealed (or skipped as empty), a day of the margin is loaded when it is sealed.
-For each such ``(source, day)`` it first checks the sealed file against the manifest (size and
+A file whose rows in the request's days are in the database already counts as loaded and is
+left alone (no reset, no second load): its offset is finished and no drop has reached those
+rows since — the window job never dropped from the request's first day or the file's margin
+day on (``db.window_dropped_before``), or another ``ready`` reload whose files it is holds them
+(the job keeps every day from an active reload's first day on). So another user's request of
+days already loaded becomes ``ready`` with its own record (and audit entry) and no load.
+For each other ``(source, day)`` it first checks the sealed file against the manifest (size and
 SHA-256, the manifest read afresh): a file that is missing or changed fails the request before
 anything of it is deleted. Then it deletes in one transaction that file's rows (all
-:data:`~arcilogger_db.models.TIME_SERIES_MODELS`), its parse failures, search counts and clock
+:data:`~arcilogger_db.models.TIME_SERIES_MODELS`, by ``(source, raw_day)``, wherever their
+device times lie: :meth:`IngestService._reset_file`), its parse failures, search counts and clock
 samples, and resets its ``ingest_offsets`` row to 0 — in the loader's step order (offsets, rows,
 failures, counts), one file per round so live data is not held up. The file is then an ordinary
 stream: it is read from the sealed file by the reader above, after every newer day (live data
 first), and loaded exactly once like any other. ``bytes_done`` is Σ committed offset; the
 request is ``ready`` when every file has finished (``expires_at`` = ``ready_at`` +
 ``db.reload_keep_days``) and ``failed`` with an ``error_code`` when a day is no longer sealed in
-the vault or a file stays unreadable.
+the vault or a file stays unreadable. A file that becomes unreadable while it loads (changed in
+place, a failing disk) stays short of its ``bytes_uncompressed``, so its day never counts as
+loaded: the API answers 409 for the days its rows lie in until a later load finishes it.
 
 If the database is unavailable the same batch is retried with capped exponential backoff
 (0.5 s … 30 s); nothing more is read meanwhile, offsets do not move, and the spool files keep
@@ -70,19 +79,23 @@ one waits — and writes no status file — until the first stops (``--once``: e
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
-from collections.abc import Callable
+import zlib
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from sqlalchemy import Connection, Engine, delete, func, select, text, update
+from sqlalchemy import Connection, Engine, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -90,12 +103,15 @@ from sqlalchemy.orm import Session
 from arcilogger_core.config import Config
 from arcilogger_core.configwatch import INGEST_HOT, INGEST_RESTART, ConfigWatch, ConfigWatcher
 from arcilogger_core.layout import AUDIT_SOURCE, SPOOL_SUFFIX, Layout
+from arcilogger_core.rawlog import RawLineError, received_at
 from arcilogger_core.timeutil import day_window, site_day, utc_now
+from arcilogger_db.clocksamples import ClockKey, clock_key, minute_of
 from arcilogger_db.models import (
     TIME_SERIES_TABLES,
     ArchiveReload,
     Base,
     IngestOffset,
+    Message,
     ParseFailure,
     SearchCount,
     Source,
@@ -105,12 +121,13 @@ from arcilogger_db.partitions import (
     PARTITION_LOCK_KEY,
     RAW_DAY_MARGIN,
     default_partition_name,
+    dropped_before,
     ensure_days,
     partitioned_tables,
 )
-from arcilogger_db.searchcounts import stream_window
+from arcilogger_db.searchcounts import COUNTS_TIME_MARGIN, stream_window
 from arcilogger_db.settings import DEFAULT_SETTINGS, get_setting
-from arcilogger_ingest.files import VaultReader, VaultReadError, read_complete
+from arcilogger_ingest.files import VaultReader, VaultReadError, open_shared, read_complete
 from arcilogger_ingest.instance import InstanceLock
 from arcilogger_ingest.loader import (
     Batch,
@@ -171,6 +188,12 @@ LOCK_NOT_AVAILABLE: Final = "55P03"
 RELOAD_MARGIN: Final = timedelta(days=RAW_DAY_MARGIN)
 #: Bytes read at a time when a sealed file is checked against its manifest's SHA-256.
 HASH_CHUNK: Final = 1 << 20
+#: The bytes of a spool line that name the minute it was received in, when its receive time is
+#: as the collector writes it (``2026-09-23T09:38:26.380000+03:00 ``): ``line[:17] +
+#: line[19:20] + line[26:33]``, the minute, the decimal point and the UTC offset.
+STAMP_KEY: Final = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\.[+-]\d\d:\d\d ")
+#: The unit of a ``source_clock_samples`` key.
+MINUTE: Final = timedelta(minutes=1)
 
 
 def _lock_not_available(exc: DBAPIError) -> bool:
@@ -195,6 +218,85 @@ def first_lines(data: bytes, limit: int) -> int:
         if end < 0:
             return len(data)
     return end + 1
+
+
+def _received_minute(line: bytes) -> datetime | None:
+    """The UTC minute a spool line was received in; ``None`` when it has no usable receive time
+    (it has no row either, :mod:`arcilogger_ingest.prepare`)."""
+    try:
+        return minute_of(received_at(line))
+    except (RawLineError, ValueError, OverflowError):
+        return None
+
+
+def received_outside(path: Path, day: date) -> list[datetime]:
+    """The minutes (UTC, oldest first) in which lines of the sealed file ``path`` of the site day
+    ``day`` were received outside that day: a damaged or hand-restored spool line can carry a
+    receive time of any other day, and its rows then lie within
+    :data:`~arcilogger_db.searchcounts.COUNTS_TIME_MARGIN` of it instead of in
+    ``stream_window`` (:meth:`IngestService._reset_file`). The file is read whole (decompressed;
+    a receive time as the collector writes it is parsed once a minute, by :data:`STAMP_KEY`, any
+    other line on its own); a line without a usable receive time has no row and is left out.
+    Raises :class:`VaultReadError` or ``OSError`` when it cannot be read."""
+    start, end = day_window(day)
+    known: dict[bytes, datetime | None] = {}
+    odd: set[bytes] = set()
+    minutes: set[datetime | None] = set()
+
+    def take(lines: list[bytes]) -> None:
+        keys = {line[:17] + line[19:20] + line[26:33] for line in lines}
+        for key in keys - known.keys() - odd:
+            if STAMP_KEY.fullmatch(key):
+                known[key] = _received_minute(key[:16] + b":00" + key[18:])
+            else:
+                odd.add(key)
+        minutes.update(known[key] for key in keys if key in known)
+        if not keys.isdisjoint(odd):
+            minutes.update(
+                _received_minute(line)
+                for line in lines
+                if line[:17] + line[19:20] + line[26:33] in odd
+            )
+
+    try:
+        with open_shared(path) as raw, gzip.GzipFile(fileobj=raw, mode="rb") as data:
+            rest = b""
+            while chunk := data.read(HASH_CHUNK):
+                block = rest + chunk
+                cut = block.rfind(b"\n")
+                if cut >= 0:
+                    take(block[:cut].split(b"\n"))
+                rest = block[cut + 1 :]
+            if rest:
+                take([rest])
+    except (EOFError, zlib.error, gzip.BadGzipFile) as exc:
+        raise VaultReadError(f"{path.name}: damaged gzip data ({exc})") from exc
+    return sorted(m for m in minutes if m is not None and not start <= m < end)
+
+
+def _reach(minutes: Iterable[datetime]) -> list[tuple[datetime, datetime]]:
+    """The device times the rows of lines received in ``minutes`` can have (within
+    :data:`~arcilogger_db.searchcounts.COUNTS_TIME_MARGIN`), overlapping ranges joined."""
+    ranges: list[tuple[datetime, datetime]] = []
+    for minute in sorted(minutes):
+        start, end = minute - COUNTS_TIME_MARGIN, minute + MINUTE + COUNTS_TIME_MARGIN
+        if ranges and start <= ranges[-1][1]:
+            ranges[-1] = (ranges[-1][0], end)
+        else:
+            ranges.append((start, end))
+    return ranges
+
+
+def _outside(
+    ranges: Iterable[tuple[datetime, datetime]], lo: datetime, hi: datetime
+) -> list[tuple[datetime, datetime]]:
+    """The parts of ``ranges`` outside ``[lo, hi)``."""
+    parts = []
+    for start, end in ranges:
+        parts += [
+            part for part in ((start, min(end, lo)), (max(start, hi), end)) if part[0] < part[1]
+        ]
+    return parts
 
 
 @dataclass
@@ -263,6 +365,8 @@ class ArchiveJob:
     files: dict[Key, int]
     #: Files not reset yet, in order (one per round).
     pending: list[Key]
+    #: Files that counted as loaded when the request was claimed (never reset).
+    done: frozenset[Key] = frozenset()
     #: Set when a file changed after the claim checked it: no further file is reset, the
     #: request ends ``failed`` with it once the files already reset have loaded.
     error_code: str | None = None
@@ -767,17 +871,20 @@ class IngestService:
         return True
 
     def _claim_archive(self) -> ArchiveJob | None:
-        """The ``loading`` request (this service stopped while loading it: every file is reset
-        again, which loads the same rows) or else the oldest ``queued`` one, now ``loading``.
+        """The ``loading`` request (this service stopped while loading it: every file not
+        loaded already is reset again, which loads the same rows) or else the oldest ``queued``
+        one, now ``loading``.
 
-        Every file it would load is checked against its manifest first
+        The files that count as loaded already (:meth:`_loaded_files`) are left alone; every
+        other file it would load is checked against its manifest first
         (:meth:`_sealed_file_intact`, outside any transaction: it reads them whole): a day of the
         request that is not sealed (``archive_day_not_in_vault``) or a file missing or changed
         (``archive_file_unreadable``) fails the request before anything is deleted. Then one
         transaction under the partition maintenance lock (the window job holds it while it reads
         the reloads and drops: it either saw this request as active, or its drop is done before
-        a file is reset) moves it on. ``None`` when there is none, when it failed, when it
-        changed meanwhile, or when the lock is busy (tried again at the next poll)."""
+        a file is reset) finds the same files loaded and moves it on. ``None`` when there is
+        none, when it failed, when it or its loaded files changed meanwhile, or when the lock is
+        busy (tried again at the next poll)."""
         r = ArchiveReload
         with self.engine.connect() as connection:
             row = connection.execute(
@@ -795,10 +902,14 @@ class IngestService:
         reload_id, first_day, last_day, status = row
         files = self._request_files(reload_id, first_day, last_day)
         error = None
+        done: frozenset[Key] = frozenset()
         if files is None:
             error = ARCHIVE_NOT_IN_VAULT
-        elif not all(self._sealed_file_intact(source, day) for source, day in sorted(files)):
-            error = ARCHIVE_UNREADABLE
+        else:
+            with self.engine.connect() as connection:
+                done = self._loaded_files(connection, reload_id, first_day, files)
+            if not all(self._sealed_file_intact(*key) for key in sorted(files.keys() - done)):
+                error = ARCHIVE_UNREADABLE
         try:
             with self.engine.begin() as connection:
                 connection.execute(text(f"SET LOCAL lock_timeout = '{PARTITION_LOCK_TIMEOUT}'"))
@@ -818,11 +929,21 @@ class IngestService:
                         values["bytes_total"] = sum(files.values())
                     connection.execute(update(r).where(r.id == reload_id).values(**values))
                     return None
-                job = ArchiveJob(reload_id, first_day, last_day, files, pending=sorted(files))
+                if self._loaded_files(connection, reload_id, first_day, files) != done:
+                    return None  # a drop or a load since the check: looked at again next poll
+                job = ArchiveJob(
+                    reload_id,
+                    first_day,
+                    last_day,
+                    files,
+                    pending=sorted(files.keys() - done),
+                    done=done,
+                    written=sum(files[key] for key in done),
+                )
                 connection.execute(
                     update(r)
                     .where(r.id == reload_id)
-                    .values(status="loading", bytes_total=job.bytes_total, bytes_done=0)
+                    .values(status="loading", bytes_total=job.bytes_total, bytes_done=job.written)
                 )
         except DBAPIError as exc:
             if not _lock_not_available(exc):
@@ -835,14 +956,62 @@ class IngestService:
             first + timedelta(days=n) for n in range((last - first).days + 1)
         )
         log.info(
-            "archive reload %d: %s … %s, %d file(s), %d bytes",
+            "archive reload %d: %s … %s, %d file(s) (%d loaded already), %d bytes",
             job.id,
             job.first_day,
             job.last_day,
             len(job.files),
+            len(job.done),
             job.bytes_total,
         )
         return job
+
+    @staticmethod
+    def _loaded_files(
+        connection: Connection, reload_id: int, first_day: date, files: dict[Key, int]
+    ) -> frozenset[Key]:
+        """The files of a request (``reload_id``, from ``first_day``) that count as loaded:
+        a second load would bring back no row of the request's days (W5-G answer 6).
+
+        A file is loaded when its offset is finished at its ``bytes_uncompressed`` (a file a
+        failed reload left short is not) and no drop has reached its rows of the request's days
+        since: they lie from the site day ``max(day - RAW_DAY_MARGIN, first_day)`` on (its own
+        rows of earlier days are not the request's to keep: the window job may drop them, as it
+        may those of a file loaded for it). That holds when the newest cutoff ever applied
+        (``db.window_dropped_before``) is not after that day — nothing from it on was ever
+        dropped; without that record (nothing dropped yet, or a database restored without it)
+        this is not known — or when another ``ready`` reload starts on or before it and the file
+        is one of its raw days: that reload loaded it (or found it loaded) and kept every day
+        from its first day on since, as the window job keeps the days of an active reload
+        (``expired`` is set by the job before it drops). A row of the file far outside its days
+        (a spool line with a stray receive time) is not looked at here."""
+        r, o = ArchiveReload, IngestOffset
+        days = sorted({day for _, day in files})
+        finished = [
+            (source, day)
+            for source, day, offset in connection.execute(
+                select(o.source, o.day, o.byte_offset).where(
+                    o.day.in_(days), o.finished_at.is_not(None)
+                )
+            )
+            if files.get((source, day)) == offset
+        ]
+        if not finished:
+            return frozenset()
+        cutoff = dropped_before(connection)
+        holders = connection.execute(
+            select(r.first_day, r.last_day).where(r.status == "ready", r.id != reload_id)
+        ).all()
+        loaded = set()
+        for source, day in finished:
+            kept_from = max(day - RELOAD_MARGIN, first_day)
+            never_dropped = cutoff is not None and cutoff <= kept_from
+            if never_dropped or any(
+                held <= kept_from and held - RELOAD_MARGIN <= day <= last + RELOAD_MARGIN
+                for held, last in holders
+            ):
+                loaded.add((source, day))
+        return frozenset(loaded)
 
     def _request_files(
         self, reload_id: int, first_day: date, last_day: date
@@ -904,12 +1073,20 @@ class IngestService:
 
     def _reset_next(self, job: ArchiveJob) -> None:
         """Reset the request's next file so that it is loaded again from the vault: its sealed
-        file still there (the claim checked it whole), the partitions its rows can land in
-        first, then one transaction, then a fresh stream at offset 0. A file gone or changed
-        since stops the resets: the request stays ``loading`` until the files already reset
-        have loaded, then fails (:meth:`_archive_progress`)."""
+        file still there (the claim checked it whole) and read for the minutes its lines were
+        received in outside its day (:func:`received_outside`, before any transaction), the
+        partitions its rows can land in first, then one transaction, then a fresh stream at
+        offset 0. A file gone or changed since stops the resets: the request stays ``loading``
+        until the files already reset have loaded, then fails (:meth:`_archive_progress`)."""
         source, day = key = job.pending[0]
-        if not self._sealed_file_intact(source, day, digest=False):
+        entry = self.seals.entry(day, source)
+        strays: list[datetime] | None = None
+        if entry is not None and self._sealed_file_intact(source, day, digest=False):
+            try:
+                strays = received_outside(entry.path, day)
+            except (VaultReadError, OSError) as exc:
+                log.warning("archive reload %d: %s %s: %s", job.id, source, day, exc)
+        if strays is None:
             log.warning(
                 "archive reload %d: %s %s: sealed file missing or changed", job.id, source, day
             )
@@ -925,7 +1102,9 @@ class IngestService:
         if any(key in building.batch.offsets for building in self._queue):
             self._discard_batches()  # read from what is being replaced: read again afterwards
         with self.engine.begin() as connection:
-            self._reset_file(connection, source, day, defaults=self._defaults(connection))
+            self._reset_file(
+                connection, source, day, strays=strays, defaults=self._defaults(connection)
+            )
         job.pending.pop(0)
         old = self.streams.pop(key, None)
         if old is not None:
@@ -943,16 +1122,40 @@ class IngestService:
 
     @staticmethod
     def _reset_file(
-        connection: Connection, source: str, day: date, *, defaults: list[str] | None = None
+        connection: Connection,
+        source: str,
+        day: date,
+        *,
+        strays: Iterable[datetime] = (),
+        defaults: list[str] | None = None,
     ) -> None:
         """Delete everything the file ``(source, day)`` loaded and set its offset back to 0, in
-        the loader's step order: offset, rows (``messages`` first), failures, counts. Its rows
-        lie within ``stream_window`` (partition pruning), its receive times within its site
-        day — so its clock samples are the source's minutes of that day. A row outside that
-        window (a damaged or hand-restored spool line with a receive time of another day) can
-        only be in a default partition (``defaults``, plain PostgreSQL): those are deleted too.
-        On TimescaleDB such a row is not looked for (it would mean reading every chunk); a
-        reload run twice before ``db.window`` drops it then leaves it twice (a known limit)."""
+        the loader's step order: offset, rows (``messages`` first), failures, counts, clock
+        samples.
+
+        Its rows are those of ``(source, raw_day)``, wherever their device times lie (W5-G
+        answer 10: a reload run twice leaves every row once, on both back ends). They are
+        deleted in the device times they can have, so that partitions and chunks are pruned
+        (no index leads with ``raw_day``):
+
+        * ``stream_window``: every line received on the file's day (a device time further than
+          a day from the receive time is not used, ``ingest.parsers.syslog``);
+        * around the minutes ``strays`` (:func:`received_outside`, read from the sealed file
+          that the claim checked against its manifest: the bytes that were loaded) in which a
+          line of the file was received outside its day — a damaged or hand-restored spool line
+          can carry a receive time of any other day, and its rows lie within
+          :data:`~arcilogger_db.searchcounts.COUNTS_TIME_MARGIN` of it;
+        * on plain PostgreSQL the default partitions (``defaults``) outside the window too, a
+          cheap sweep.
+
+        Its clock samples are the source's minutes of its site day, and what the lines received
+        outside it added to the minutes they were received in (those keys are shared with that
+        day's own lines: the file's part is taken off). A sample of another file's line received
+        in this file's day goes with the day's minutes (derived data; ``clocksamples.rebuild``
+        recounts it)."""
+        lo, hi = stream_window(day)
+        reach = _reach(strays)
+        received = IngestService._stray_samples(connection, source, day, reach)
         connection.execute(
             insert(IngestOffset)
             .values(source=source, day=day, byte_offset=0, line_number=0)
@@ -967,17 +1170,13 @@ class IngestService:
                 },
             )
         )
-        lo, hi = stream_window(day)
         for name in sorted(TIME_SERIES_TABLES, key=lambda table: (table != "messages", table)):
             table = Base.metadata.tables[name]
-            connection.execute(
-                delete(table).where(
-                    table.c.source == source,
-                    table.c.raw_day == day,
-                    table.c.time >= lo,
-                    table.c.time < hi,
+            in_file = (table.c.source == source, table.c.raw_day == day)
+            for start, end in [(lo, hi), *_outside(reach, lo, hi)]:
+                connection.execute(
+                    delete(table).where(*in_file, table.c.time >= start, table.c.time < end)
                 )
-            )
         outside = {"source": source, "day": day, "lo": lo, "hi": hi}
         for default in sorted(defaults or [], key=lambda name: (name != "messages_default", name)):
             connection.execute(
@@ -994,25 +1193,50 @@ class IngestService:
             delete(SearchCount).where(SearchCount.source == source, SearchCount.raw_day == day)
         )
         start, end = day_window(day)
-        connection.execute(
-            delete(SourceClockSample).where(
-                SourceClockSample.source == source,
-                SourceClockSample.minute >= start,
-                SourceClockSample.minute < end,
+        c = SourceClockSample
+        connection.execute(delete(c).where(c.source == source, c.minute >= start, c.minute < end))
+        for key, n in sorted(received.items()):
+            same = (c.source == key.source, c.minute == key.minute, c.seconds == key.seconds)
+            connection.execute(delete(c).where(*same, c.n <= n))
+            connection.execute(update(c).where(*same).values(n=c.n - n))
+
+    @staticmethod
+    def _stray_samples(
+        connection: Connection, source: str, day: date, reach: list[tuple[datetime, datetime]]
+    ) -> Counter[ClockKey]:
+        """The ``source_clock_samples`` keys the file's rows received outside its site day added
+        (:func:`~arcilogger_db.clocksamples.clock_key`), read before they are deleted; they lie
+        in ``reach``."""
+        start, end = day_window(day)
+        m = Message.__table__
+        samples: Counter[ClockKey] = Counter()
+        for low, high in reach:
+            rows = connection.execute(
+                select(m.c.time, m.c.time_received).where(
+                    m.c.source == source,
+                    m.c.raw_day == day,
+                    m.c.time >= low,
+                    m.c.time < high,
+                    or_(m.c.time_received < start, m.c.time_received >= end),
+                )
             )
-        )
+            for time_, received in rows:
+                key = clock_key({"source": source, "time": time_, "time_received": received})
+                if key is not None:
+                    samples[key] += 1
+        return samples
 
     def _archive_progress(self, job: ArchiveJob) -> None:
-        """``bytes_done`` (Σ committed offset; a finished file counts whole), at most every
-        :data:`ARCHIVE_PROGRESS_SECONDS`; ``ready`` once every file has finished, ``failed``
-        once one has not been readable for :attr:`_archive_error_seconds`."""
+        """``bytes_done`` (Σ committed offset; a finished file and one loaded already count
+        whole), at most every :data:`ARCHIVE_PROGRESS_SECONDS`; ``ready`` once every file has
+        finished, ``failed`` once one has not been readable for :attr:`_archive_error_seconds`."""
         now = time.monotonic()
         pending = set(job.pending)
         done, loading = 0, bool(pending)
         for key, size in job.files.items():
             if key in pending:
                 continue
-            if key in self.finished:
+            if key in job.done or key in self.finished:
                 done += size
                 continue
             loading = True

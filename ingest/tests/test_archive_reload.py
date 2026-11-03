@@ -5,12 +5,17 @@ window comes back from the vault, exactly once.
   raw-line references, the same ``search_counts``, clock samples and parse failures — also the
   rows of the next raw day's file that lie in it (a line received after midnight with a device
   time before it): a request's days load the raw days two days either side again.
-* A reload of a day that is still loaded (a reload run twice) gives the same rows and counts.
+* A reload of a day that is still loaded (a reload run twice) gives the same rows and counts —
+  also a row of the file far outside its days (a stray receive time, found from the sealed
+  file's lines whether or not the file's counts name it) and its clock sample, on both back
+  ends; the rows of the source's other raw days in the same device times stay untouched.
+* Two users, two records, one load: a request whose files are loaded already (another user's
+  ``ready`` reload holds them) becomes ``ready`` without a delete or an offset reset.
 * Status ``queued`` → ``loading`` → ``ready`` with ``bytes_done`` = ``bytes_total`` and
   ``expires_at`` = ``ready_at`` + ``db.reload_keep_days``; one request loads at a time.
 * ``failed`` with an ``error_code`` when a day is not sealed in the vault or a sealed file cannot
   be read; a sealed file that does not match its manifest fails the request before anything of
-  it is deleted.
+  it is deleted; one that becomes unreadable while it loads stays short of its size.
 * A request starts loading only when the window job does not hold the partition lock.
 
 On TimescaleDB the compression policies are paused (``DAY`` is a fixed past day: a policy would
@@ -19,30 +24,40 @@ compress chunks under a reload or a drop at a moment no test chose).
 
 from __future__ import annotations
 
+import gzip
 import json
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session
 
 from arcilogger_core.immutability import unlock
 from arcilogger_core.rawlog import format_line
 from arcilogger_core.timeutil import SITE_TZ, day_window
 from arcilogger_db.models import TIME_SERIES_TABLES, Base
-from arcilogger_db.partitions import PARTITION_LOCK_KEY, drop_before, partitioned_tables
-from arcilogger_db.searchcounts import verify
+from arcilogger_db.partitions import PARTITION_LOCK_KEY, drop_before, ensure_days
+from arcilogger_db.searchcounts import rebuild_stream, stream_window, verify
 from arcilogger_db.settings import set_setting
 from arcilogger_db.testing import pause_compression_jobs
 from arcilogger_ingest import service as service_module
-from arcilogger_ingest.service import ARCHIVE_NOT_IN_VAULT, ARCHIVE_UNREADABLE, IngestService
+from arcilogger_ingest.files import VaultReader, VaultReadError
+from arcilogger_ingest.service import (
+    ARCHIVE_NOT_IN_VAULT,
+    ARCHIVE_UNREADABLE,
+    IngestService,
+    received_outside,
+)
 from arcilogger_ingest.testing import DAY, World, dhcp_message, fortigate_message, offsets
 
 #: The reloads run on this day: :data:`DAY` is 40 days old, outside the 30-day window.
 TODAY = DAY + timedelta(days=40)
 #: A spool line damaged on disk (no valid sender): a parse failure (``rawlog.invalid``), no row.
 DAMAGED = b"2026-09-23T09:44:57.123456+03:00 \xff\xfe <13>damaged sender\n"
+#: A device clock this far behind the receive time (its time is used: within a day).
+HALF_HOUR = timedelta(minutes=30)
 
 
 @pytest.fixture(autouse=True)
@@ -104,18 +119,109 @@ def counts_agree(engine: Engine) -> None:
     assert report.differences == []
 
 
-def queue(engine: Engine, first_day: date, last_day: date | None = None) -> int:
+def of_source(found: dict[str, list[Any]], source: str) -> dict[str, list[Any]]:
+    """The time-series rows of :func:`snapshot` from ``source``'s files (tables without one
+    left out)."""
+    rows: dict[str, list[Any]] = {}
+    for name in TIME_SERIES_TABLES:
+        at = [c.name for c in Base.metadata.tables[name].c if c.name != "id"].index("source")
+        mine = [row for row in found[name] if row[at] == source]
+        if mine:
+            rows[name] = mine
+    return rows
+
+
+def row_ids(engine: Engine) -> dict[str, list[tuple[Any, ...]]]:
+    """Every row's id with its raw-line reference (a reset and a new load renumber them)."""
+    with engine.connect() as connection:
+        return {
+            name: [
+                tuple(row)
+                for row in connection.execute(
+                    text(f"SELECT id, source, raw_day, raw_line FROM {name} ORDER BY id")  # noqa: S608 - fixed names
+                )
+            ]
+            for name in TIME_SERIES_TABLES
+        }
+
+
+def stored_offsets(engine: Engine) -> list[tuple[Any, ...]]:
+    """``ingest_offsets`` as stored, ``updated_at`` included (a reset writes it)."""
+    with engine.connect() as connection:
+        return [
+            tuple(row)
+            for row in connection.execute(
+                text(
+                    "SELECT source, day, byte_offset, line_number, finished_at, updated_at "
+                    "FROM ingest_offsets ORDER BY source, day"
+                )
+            )
+        ]
+
+
+def queue(
+    engine: Engine, first_day: date, last_day: date | None = None, *, by: str = "ornek.denetci"
+) -> int:
     """A request as the API queues it (after its audit entry)."""
     with engine.begin() as connection:
         return int(
             connection.execute(
                 text(
                     "INSERT INTO archive_reloads (requested_by, reason, first_day, last_day) "
-                    "VALUES ('ornek.denetci', 'search', :first, :last) RETURNING id"
+                    "VALUES (:by, 'search', :first, :last) RETURNING id"
                 ),
-                {"first": first_day, "last": last_day or first_day},
+                {"by": by, "first": first_day, "last": last_day or first_day},
             ).scalar_one()
         )
+
+
+def skipped(world: World, day: date) -> None:
+    """The sealer skipped ``day`` (no line): a request may name it, nothing to load."""
+    state = world.layout.seal_state(day)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"day": day.isoformat(), "status": "skipped"}), encoding="utf-8")
+
+
+def expire(engine: Engine) -> None:
+    """What the window job does to a ``ready`` reload once its ``expires_at`` has passed."""
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE archive_reloads SET status = 'expired' WHERE status = 'ready'")
+        )
+
+
+def sealed_file(world: World, day: date, source: str) -> tuple[Path, int]:
+    """The sealed file of ``(source, day)`` and its ``bytes_uncompressed`` (the manifest)."""
+    manifest = json.loads(world.layout.manifest(day).read_bytes())
+    entry = next(entry for entry in manifest["files"] if entry["source"] == source)
+    return world.layout.vault / str(entry["path"]), int(entry["bytes_uncompressed"])
+
+
+def unreadable_mid_load(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    """``path`` becomes unreadable while it is loaded: at the second read of it the file is
+    damaged in place, and that read and every later one fail. (A reader meets such damage where
+    its buffer ends; a test file fits in the buffer, so the reader is told.)"""
+    reads = 0
+
+    class Damaged(VaultReader):
+        def read(self, max_bytes: int) -> bytes:
+            nonlocal reads
+            if self.path.name == path.name:
+                reads += 1
+                if reads == 2:
+                    unlock(path)
+                    path.write_bytes(path.read_bytes()[:64])
+                if reads >= 2:
+                    raise VaultReadError(f"{path.name}: damaged gzip data")
+            return super().read(max_bytes)
+
+    monkeypatch.setattr(service_module, "VaultReader", Damaged)
+
+
+def with_device_time(message: bytes, device: datetime) -> bytes:
+    """A :func:`dhcp_message` with its device time set to ``device``."""
+    stamp = device.astimezone(SITE_TZ).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    return message.replace(b"2026-09-23T09:38:26.380", stamp.encode())
 
 
 def reload_row(engine: Engine, reload_id: int) -> dict[str, Any]:
@@ -169,16 +275,107 @@ def test_a_dropped_day_comes_back_identically(world: World, db_engine: Engine) -
 
 
 def test_a_reload_run_twice_gives_the_same_rows_and_counts(world: World, db_engine: Engine) -> None:
+    """The second request starts a day earlier (a day the sealer skipped): the first one holds
+    only the rows of the file from ``DAY`` on, so the file is reset over rows that are still
+    there — replaced, not added."""
     load_day(world, db_engine)
     before = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
     first = queue(db_engine, DAY)
     run_once(world, db_engine)
-    assert snapshot(db_engine) == before  # over rows that are still there: replaced, not added
-    second = queue(db_engine, DAY)
+    assert snapshot(db_engine) == before
+    loaded = row_ids(db_engine)
+    skipped(world, DAY - timedelta(days=1))
+    second = queue(db_engine, DAY - timedelta(days=1), DAY)
     run_once(world, db_engine)
+    assert row_ids(db_engine) != loaded  # loaded again
     assert snapshot(db_engine) == before
     counts_agree(db_engine)
     assert [reload_row(db_engine, i)["status"] for i in (first, second)] == ["ready", "ready"]
+
+
+def test_another_users_request_of_loaded_days_is_ready_without_a_second_load(
+    world: World, db_engine: Engine
+) -> None:
+    """Two users, two records, one load (W5-G answer 6): the second request of the same days
+    finds every file loaded (its offset finished, the first request holding its rows since)
+    and becomes ``ready`` with its own record — no delete, no offset reset, no row loaded
+    again."""
+    load_day(world, db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    first = queue(db_engine, DAY, by="ornek.denetci")
+    run_once(world, db_engine)
+    loaded, ids, stored = snapshot(db_engine), row_ids(db_engine), stored_offsets(db_engine)
+    assert loaded["messages"]
+    second = queue(db_engine, DAY, by="ornek.analist")
+    writes: list[str] = []
+
+    def seen(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        if statement.lstrip().upper().startswith(("DELETE", "INSERT INTO INGEST_OFFSETS")):
+            writes.append(statement)
+
+    event.listen(db_engine, "before_cursor_execute", seen)
+    try:
+        run_once(world, db_engine)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", seen)
+    assert writes == []
+    assert row_ids(db_engine) == ids
+    assert stored_offsets(db_engine) == stored
+    assert snapshot(db_engine) == loaded
+    rows = [reload_row(db_engine, reload_id) for reload_id in (first, second)]
+    assert [(row["requested_by"], row["status"]) for row in rows] == [
+        ("ornek.denetci", "ready"),
+        ("ornek.analist", "ready"),
+    ]
+    assert rows[1]["bytes_total"] == rows[1]["bytes_done"] == sealed_bytes(world, DAY)
+    assert rows[1]["expires_at"] == world.now + timedelta(days=7)
+
+
+def test_a_file_the_window_job_never_reached_counts_as_loaded(
+    world: World, db_engine: Engine
+) -> None:
+    """The newest cutoff the window job applied lies before the file's days: its rows were never
+    dropped, so the request is ``ready`` without a load. Without that record (nothing dropped
+    yet, or a database restored without it) the same request loads the file again."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    drop(db_engine, DAY - timedelta(days=2))
+    ids, stored = row_ids(db_engine), stored_offsets(db_engine)
+    first = queue(db_engine, DAY)
+    run_once(world, db_engine)
+    assert reload_row(db_engine, first)["status"] == "ready"
+    assert (row_ids(db_engine), stored_offsets(db_engine)) == (ids, stored)
+    with db_engine.begin() as connection:
+        connection.execute(text("DELETE FROM settings WHERE key = 'db.window_dropped_before'"))
+    expire(db_engine)
+    second = queue(db_engine, DAY)
+    run_once(world, db_engine)
+    assert reload_row(db_engine, second)["status"] == "ready"
+    assert row_ids(db_engine) != ids  # loaded again
+    assert snapshot(db_engine) == before
+
+
+def test_a_file_reloaded_is_loaded_again_when_its_rows_may_have_gone(
+    world: World, db_engine: Engine
+) -> None:
+    """A finished file counts as loaded only while its rows of the request's days are known to
+    be there: after the first request expired and the window job dropped the day again, the next
+    request loads it again."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    queue(db_engine, DAY)
+    run_once(world, db_engine)
+    expire(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    assert snapshot(db_engine)["messages"] == []
+    finished = offsets(db_engine)
+    again = queue(db_engine, DAY)
+    run_once(world, db_engine)
+    assert reload_row(db_engine, again)["status"] == "ready"
+    assert snapshot(db_engine) == before
+    assert offsets(db_engine) == finished
 
 
 def test_live_data_still_loads_beside_a_reload(world: World, db_engine: Engine) -> None:
@@ -200,7 +397,10 @@ def test_one_request_loads_at_a_time(world: World, db_engine: Engine) -> None:
     load_day(world, db_engine)
     before = snapshot(db_engine)
     drop(db_engine, DAY + timedelta(days=2))
-    ids = [queue(db_engine, DAY), queue(db_engine, DAY)]
+    # The second one from the (skipped) day before: the file is not the first one's to hold, so
+    # it is loaded again.
+    skipped(world, DAY - timedelta(days=1))
+    ids = [queue(db_engine, DAY), queue(db_engine, DAY - timedelta(days=1), DAY)]
     seen: list[tuple[str, ...]] = []
 
     def statuses(step: str) -> None:
@@ -270,11 +470,12 @@ def test_a_day_not_sealed_in_the_vault_fails_the_request_untouched(
 
 def test_an_unreadable_sealed_file_fails_the_request(world: World, db_engine: Engine) -> None:
     load_day(world, db_engine)
-    vault_file = world.layout.vault_day(DAY) / "fortigate.log.gz"
+    drop(db_engine, DAY + timedelta(days=2))
+    vault_file, _ = sealed_file(world, DAY, "fortigate")
     good = vault_file.read_bytes()
     unlock(vault_file)
     vault_file.write_bytes(good[: len(good) // 2])
-    before = snapshot(db_engine)
+    before, finished = snapshot(db_engine), offsets(db_engine)
     reload_id = queue(db_engine, DAY)
     later = queue(db_engine, DAY)
     run_once(world, db_engine, archive_error_seconds=0.0)
@@ -282,15 +483,61 @@ def test_an_unreadable_sealed_file_fails_the_request(world: World, db_engine: En
     assert (row["status"], row["error_code"]) == ("failed", ARCHIVE_UNREADABLE)
     assert row["bytes_done"] < row["bytes_total"]
     assert reload_row(db_engine, later)["status"] == "failed"  # the next one meets it as well
-    # Checked against the manifest before its rows were deleted: the fortigate rows are still
-    # there (the core-r1 file, reset before it, came back whole).
+    # Checked against the manifest before anything was deleted or reset: no file of the day was
+    # touched.
     assert snapshot(db_engine) == before
+    assert offsets(db_engine) == finished
 
     vault_file.write_bytes(good)  # restored from the replica: asked again, it loads
     again = queue(db_engine, DAY)
     run_once(world, db_engine)
     assert reload_row(db_engine, again)["status"] == "ready"
     assert len(snapshot(db_engine)["messages"]) == 40 + 30 + 5
+    counts_agree(db_engine)
+
+
+def test_a_file_unreadable_mid_load_fails_the_request_and_stays_short(
+    world: World, db_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W5-G answer 9: a sealed file that becomes unreadable while it loads (changed in place, a
+    failing disk) fails the request with ``archive_file_unreadable``; its offset stays short of
+    the manifest's ``bytes_uncompressed``, so the day never counts as loaded — the next request
+    loads the file again (once it is whole again), it is not taken as loaded, although another
+    user's ``ready`` reload of the day holds it."""
+    load_day(world, db_engine)
+    before = snapshot(db_engine)
+    world.reconfigure(ingest={"batch_rows": 10})
+    drop(db_engine, DAY + timedelta(days=2))
+    holder = queue(db_engine, DAY, by="ornek.yonetici")
+    run_once(world, db_engine)
+    assert reload_row(db_engine, holder)["status"] == "ready"
+    vault_file, size = sealed_file(world, DAY, "fortigate")
+    good = vault_file.read_bytes()
+    unreadable_mid_load(monkeypatch, vault_file)
+    # From the (skipped) day before: the files are not the holder's to keep, so they are reset.
+    skipped(world, DAY - timedelta(days=1))
+    reload_id = queue(db_engine, DAY - timedelta(days=1), DAY)
+    run_once(world, db_engine, archive_error_seconds=0.0)
+    row = reload_row(db_engine, reload_id)
+    assert (row["status"], row["error_code"]) == ("failed", ARCHIVE_UNREADABLE)
+    assert row["ready_at"] is None
+    offset, _, finished = offsets(db_engine)[("fortigate", DAY)]
+    assert (0 < offset < size, finished) == (True, False)
+    loaded = [row for row in snapshot(db_engine)["fg_traffic"] if row in before["fg_traffic"]]
+    assert 0 < len(loaded) < len(before["fg_traffic"])
+    # The holder's day alone: its other files are loaded, the short one is not.
+    still = queue(db_engine, DAY)
+    run_once(world, db_engine, archive_error_seconds=0.0)
+    row = reload_row(db_engine, still)
+    assert (row["status"], row["error_code"]) == ("failed", ARCHIVE_UNREADABLE)
+    assert offsets(db_engine)[("fortigate", DAY)][2] is False
+
+    monkeypatch.setattr(service_module, "VaultReader", VaultReader)
+    vault_file.write_bytes(good)  # restored from the replica: asked again, it loads
+    again = queue(db_engine, DAY)
+    run_once(world, db_engine)
+    assert reload_row(db_engine, again)["status"] == "ready"
+    assert snapshot(db_engine) == before
     counts_agree(db_engine)
 
 
@@ -301,7 +548,9 @@ def test_a_file_changed_after_the_claim_stops_the_resets(
     no longer matches) is not reset: the files reset before it load back, the request stays
     ``loading`` until they have, then fails — its rows are left as they were."""
     load_day(world, db_engine)
-    before = snapshot(db_engine)
+    loaded = snapshot(db_engine)
+    drop(db_engine, DAY + timedelta(days=2))
+    before, finished = snapshot(db_engine), offsets(db_engine)
     real = IngestService._sealed_file_intact
 
     def changed(self: IngestService, source: str, day: date, *, digest: bool = True) -> bool:
@@ -321,7 +570,10 @@ def test_a_file_changed_after_the_claim_stops_the_resets(
     row = reload_row(db_engine, reload_id)
     assert (row["status"], row["error_code"]) == ("failed", ARCHIVE_UNREADABLE)
     assert "loading" in seen  # while the core-r1 file loaded back
-    assert snapshot(db_engine) == before
+    after = snapshot(db_engine)
+    assert of_source(after, "core-r1") == of_source(loaded, "core-r1")
+    assert of_source(after, "fortigate") == of_source(before, "fortigate") == {}
+    assert offsets(db_engine)[("fortigate", DAY)] == finished[("fortigate", DAY)]  # not reset
     counts_agree(db_engine)
 
 
@@ -417,26 +669,148 @@ def test_a_request_waits_while_the_window_job_holds_the_partitions(
     assert snapshot(db_engine) == before
 
 
+@pytest.mark.parametrize("counts", ["loaded", "recounted", "uncounted"])
 def test_a_row_outside_its_days_window_is_replaced_not_doubled(
-    world: World, db_engine: Engine
+    world: World, db_engine: Engine, counts: str
 ) -> None:
     """A spool line whose receive time is of another day (damaged, restored by hand) gives a row
-    outside the file's ``stream_window``: in the default partition on plain PostgreSQL, where
-    the reset finds it, so a reload run twice leaves it once. (On TimescaleDB it is not looked
-    for: every chunk would have to be read; a known limit.)"""
-    stray = format_line(datetime(2001, 1, 1, 9, tzinfo=SITE_TZ), "172.20.10.1", dhcp_message(3))
+    of the file far outside its ``stream_window`` and its two days' margin: one in 2001 (the
+    default partition on plain PostgreSQL, a chunk of its own on TimescaleDB), two three days
+    ago (a daily partition or chunk the window job keeps), one of them from a device clock half
+    an hour behind, whose clock sample shares its key with a line of that day's own file. The
+    reset finds them by ``(source, raw_day)`` around the minutes the sealed file's lines were
+    received in, and takes the file's part off the shared sample, so a reload run twice leaves
+    each row once and every sample as it was, on both back ends (W5-G answer 10) — also when
+    the file's ``search_counts`` were counted again from its rows (``search-counts rebuild``,
+    which counts the rows within ``stream_window``) or the file was loaded before the counts
+    existed (``counts_from_line`` set)."""
+    ahead = datetime.combine(TODAY - timedelta(days=3), time(10), tzinfo=SITE_TZ)
+    behind = ahead + timedelta(hours=2)
+    # Each stray's receive time and its row's time (a device time within a day of it is used).
+    strays = {datetime(2001, 1, 1, 9, tzinfo=SITE_TZ): None, ahead: None, behind: HALF_HOUR}
     world.append("core-r1", DAY, (dhcp_message(i) for i in range(4)))
-    world.append_raw("core-r1", DAY, stray)
+    for number, (received, offset) in enumerate(strays.items()):
+        message = dhcp_message(5 + number)
+        if offset is not None:
+            message = with_device_time(message, received - offset)
+        world.append_raw("core-r1", DAY, format_line(received, "172.20.10.1", message))
     world.seal(DAY)
+    # That day's own file: a line in the same received minute, the same clock offset.
+    shared = behind + timedelta(seconds=1)
+    world.append(
+        "core-r1",
+        behind.date(),
+        [with_device_time(dhcp_message(9), shared - HALF_HOUR)],
+        start=shared.time(),
+    )
+    with (
+        db_engine.begin() as connection
+    ):  # plain PostgreSQL: the day's partitions (TimescaleDB: none)
+        ensure_days(connection, ahead.date(), ahead.date())
     world.set_today(DAY + timedelta(days=1))
     run_once(world, db_engine)
     world.set_today(TODAY)
-    with db_engine.connect() as connection:
-        if not partitioned_tables(connection):
-            pytest.skip("TimescaleDB hypertables: a row outside its window is not looked for")
     before = snapshot(db_engine)
-    assert [row for row in before["messages"] if row[0].year == 2001]
+    times = [
+        received if offset is None else received - offset for received, offset in strays.items()
+    ]
+    assert sorted(row[0] for row in before["messages"] if row[0] in times) == times
+    minute = behind.astimezone(UTC).replace(second=0)
+    assert ("core-r1", minute, -1800, 2) in before["source_clock_samples"]
+    with db_engine.connect() as connection:
+        holder = connection.execute(
+            text("SELECT CAST(tableoid AS regclass)::text FROM messages WHERE time = :t"),
+            {"t": ahead},
+        ).scalar_one()
+    assert holder != "messages_default"  # a partition or chunk of its day, not the default one
+    with db_engine.begin() as connection:
+        if counts == "recounted":
+            rebuild_stream(connection, "core-r1", DAY)
+        elif counts == "uncounted":
+            connection.execute(
+                text(
+                    "UPDATE ingest_offsets SET counts_from_line = 1 "
+                    "WHERE source = 'core-r1' AND day = :day"
+                ),
+                {"day": DAY},
+            )
+            connection.execute(
+                text("DELETE FROM search_counts WHERE source = 'core-r1' AND raw_day = :day"),
+                {"day": DAY},
+            )
     for _ in range(2):
+        expire(db_engine)
+        drop(db_engine, DAY + timedelta(days=2))
+        kept = [row for row in snapshot(db_engine)["messages"] if row[0] in times]
+        assert [row[0] for row in kept] == times[1:]  # their day is in the window
         queue(db_engine, DAY)
         run_once(world, db_engine)
-    assert snapshot(db_engine) == before
+        assert snapshot(db_engine) == before
+    counts_agree(db_engine)
+
+
+def test_the_minutes_received_outside_the_day_are_read_from_the_sealed_file(
+    tmp_path: Path,
+) -> None:
+    """:func:`received_outside`: the minutes of the lines received on another day, also of a
+    receive time not written as the collector writes it and of a last line without ``\\n``;
+    lines without a usable receive time (damaged, empty) are left out; a damaged gzip file
+    raises."""
+    in_day = datetime.combine(DAY, time(9), tzinfo=SITE_TZ)
+    lines = [
+        format_line(in_day, "172.20.10.1", b"<13>in its day"),
+        format_line(datetime(2001, 1, 1, 9, 0, 30, tzinfo=SITE_TZ), "172.20.10.1", b"<13>2001"),
+        b"2001-02-03T04:05:06+01:00 172.20.10.1 <13>no fraction\n",
+        DAMAGED,
+        b"\n",
+        b"not a time 172.20.10.1 <13>damaged\n",
+        format_line(in_day + timedelta(days=2), "172.20.10.1", b"<13>ahead").rstrip(b"\n"),
+    ]
+    path = tmp_path / "core-r1.log.gz"
+    path.write_bytes(gzip.compress(b"".join(lines)))
+    assert received_outside(path, DAY) == [
+        datetime(2001, 1, 1, 9, 0, tzinfo=SITE_TZ).astimezone(UTC),
+        datetime(2001, 2, 3, 3, 5, tzinfo=UTC),
+        (in_day + timedelta(days=2)).astimezone(UTC),
+    ]
+    path.write_bytes(gzip.compress(b"".join(lines))[:40])
+    with pytest.raises(VaultReadError):
+        received_outside(path, DAY)
+
+
+def test_a_reload_leaves_the_raw_days_beyond_its_margin_alone(
+    world: World, db_engine: Engine
+) -> None:
+    """The reset deletes by ``(source, raw_day)``: a line of the same source's raw day
+    ``DAY + 3`` (beyond the margin a request of ``DAY`` reloads), received just after its
+    midnight from a clock almost a day behind, has its row in ``stream_window`` of ``DAY`` —
+    it stays as it is, with its id and its file's offset."""
+    after = DAY + timedelta(days=3)
+    received = datetime.combine(after, time(0, 0, 10), tzinfo=SITE_TZ)
+    device = received - timedelta(hours=23, minutes=30)
+    load_day(world, db_engine)
+    world.append(
+        "core-r1", after, [with_device_time(dhcp_message(3), device)], start=time(0, 0, 10)
+    )
+    world.set_today(after + timedelta(days=1))
+    run_once(world, db_engine)
+    world.set_today(TODAY)
+    lo, hi = stream_window(DAY)
+    assert lo <= device < hi
+    drop(db_engine, DAY + timedelta(days=2))
+
+    def beyond() -> tuple[dict[str, list[tuple[Any, ...]]], list[Any], Any]:
+        """The rows of raw day ``after`` with their ids, its messages as stored, its offset."""
+        ids = {
+            name: [row for row in rows if row[2] == after]
+            for name, rows in row_ids(db_engine).items()
+        }
+        stored = [row for row in snapshot(db_engine)["messages"] if row[-3] == after]
+        return ids, stored, offsets(db_engine)[("core-r1", after)]
+
+    kept = beyond()
+    assert [row[0] for row in kept[1]] == [device]
+    reload_id = queue(db_engine, DAY)
+    run_once(world, db_engine)
+    assert reload_row(db_engine, reload_id)["status"] == "ready"
+    assert beyond() == kept

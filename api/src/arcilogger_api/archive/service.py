@@ -17,7 +17,12 @@ over it would miss rows — when
   (:func:`window_start`: today - ``db.retention_days``) with no row at all (a database restored or
   lost: ingest loads only the window back), unless a ``ready`` reload holds it;
 * or a ``loading`` reload is replacing the files it has rows of (``F - 4`` … ``L + 4``), even
-  inside the window and even when a ``ready`` reload holds it too.
+  inside the window and even when a ``ready`` reload holds it too;
+* or a sealed file whose rows lie in it (its raw day within two days) was reset by a ``failed``
+  reload and has not finished loading since: it became unreadable or changed while it loaded
+  (W5-G answer 9), so its offset is short of the manifest's ``bytes_uncompressed`` — inside the
+  window and under a ``ready`` reload too, until a later load finishes it. Never a partial
+  answer.
 
 A day before the window that still has rows and is not before the applied cutoff has not been
 dropped yet (the job's run of today is to come, the day is unsealed, a monthly partition of the
@@ -74,6 +79,7 @@ from arcilogger_db.models import (
     ArchiveReload,
     FgDhcp,
     FgTraffic,
+    IngestOffset,
     Message,
     MtArp,
     MtDhcp,
@@ -205,6 +211,34 @@ def _spans(reloads: Iterable[tuple[date, date]], margin: timedelta) -> set[date]
     return {day for first, last in reloads for day in days_of(first - margin, last + margin)}
 
 
+def _left_short(db: Session, seals: SealIndex, first_day: date, last_day: date) -> set[date]:
+    """The days of ``first_day`` … ``last_day`` with rows of a sealed file a ``failed`` reload
+    reset and that has not finished loading since (module text): its raw day is one of the
+    failed reload's (its days and :data:`MARGIN` either side), its offset is not finished."""
+    low, high = first_day - MARGIN, last_day + MARGIN  # the raw days with rows in the range
+    failed = db.execute(
+        select(ArchiveReload.first_day, ArchiveReload.last_day).where(
+            ArchiveReload.status == "failed",
+            ArchiveReload.first_day <= high + MARGIN,
+            ArchiveReload.last_day >= low - MARGIN,
+        )
+    )
+    spans = _spans(((first, last) for first, last in failed), MARGIN)
+    raw_days = sorted(day for day in spans if low <= day <= high)
+    if not raw_days:
+        return set()
+    short = db.execute(
+        select(IngestOffset.source, IngestOffset.day).where(
+            IngestOffset.day.in_(raw_days), IngestOffset.finished_at.is_(None)
+        )
+    )
+    days: set[date] = set()
+    for source, raw_day in short:
+        if source in (seals.files(raw_day) or {}):
+            days.update(days_of(raw_day - MARGIN, raw_day + MARGIN))
+    return days
+
+
 def _has_rows(db: Session, day: date) -> bool:
     """Any row of the day in ``messages`` or a table the lookup reads (as the lookup's data
     window, :func:`arcilogger_worker.lookup.window.data_window`, asks)."""
@@ -288,13 +322,15 @@ def check_window(db: Session, layout: Layout, first_day: date, last_day: date) -
     coming = _spans(_reloads(db, ("queued", "loading")), timedelta(0))
     replacing = _spans(_reloads(db, ("loading",)), 2 * MARGIN)
     seals = SealIndex(layout)
+    short = _left_short(db, seals, first_day, last_day)
     days = days_of(first_day, last_day)
     gone: list[date] = []
     missing: list[date] = []
     waiting: list[date] = []
     for day in days:
-        dropped = day not in ready and (
-            (cutoff is not None and day < cutoff) or (day < start and not _has_rows(db, day))
+        dropped = day in short or (
+            day not in ready
+            and ((cutoff is not None and day < cutoff) or (day < start and not _has_rows(db, day)))
         )
         if not dropped and day not in replacing:
             continue
