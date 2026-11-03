@@ -2184,21 +2184,23 @@ def crl_stale_issuers(
 ) -> list[str]:
     """The issuers in use without a fresh stored list (C22), an issuer without any list
     included. ``fetched`` holds the lists' fetch times by stored name (:func:`crl_fetch_times`)."""
-    fresh = _fresh_until(lists, fetched, max_age_days)
+    fresh = _fresh_until(lists, fetched, now, max_age_days)
     return [issuer for issuer in sorted(set(in_use)) if issuer not in fresh or fresh[issuer] <= now]
 
 
 def _fresh_until(
-    lists: Sequence[Crl], fetched: Mapping[str, datetime], max_age_days: int
+    lists: Sequence[Crl], fetched: Mapping[str, datetime], now: datetime, max_age_days: int
 ) -> dict[str, datetime]:
     """Until when each issuer's stored lists keep it fresh, by the issuer's fingerprint (C22): a
     list until its last fetch is ``max_age_days`` old or its own ``nextUpdate``, whichever comes
     first, and the issuer's best list counts. ``thisUpdate`` is not a measure: a root CA may
-    publish only every few months. A list the index gives no fetch time counts for nothing."""
+    publish only every few months. A list the index gives no fetch time counts for nothing, and
+    so does one fetched later than ``now``: a skewed clock must not keep a list fresh (the clock
+    check reports the skew itself)."""
     until: dict[str, datetime] = {}
     for found in lists:
         fetched_at = fetched.get(found.path.name if found.path is not None else found.file_name)
-        if fetched_at is None:
+        if fetched_at is None or fetched_at > now:
             continue
         fresh = shifted(fetched_at, timedelta(days=max_age_days))
         if fresh is None:
@@ -2241,7 +2243,7 @@ def crl_status(
     usable: Sequence[Crl] = lists if lists is not None else ()
     fetched = crl_fetch_times(index)
     stale = crl_stale_issuers(usable, fetched, in_use, now, max_age_days)
-    until = _fresh_until(usable, fetched, max_age_days)
+    until = _fresh_until(usable, fetched, now, max_age_days)
     return CrlStatus(
         in_use=in_use,
         stale=tuple(stale),
@@ -2434,13 +2436,29 @@ def check_stamp_cert(ctx: CheckContext) -> Outcome:
         )
 
     # nothing sealed yet: no chain to check the lists against, and no list is needed
-    lists_known = stamp is None or (lists is not None and not lists.mismatched)
+    lists_known = stamp is None or lists is not None
+    lists_intact = stamp is None or (lists is not None and not lists.mismatched)
     readable = renewals is not None and verifications_known and stamp_known and lists_known
 
     def clear(alert: Alert) -> str | None:
-        return "certificate_ok" if readable else None
+        if not readable:
+            return None
+        # A changed or deleted list (C14/C20) keeps its index entry for good, so it holds open
+        # only an alert that carries a revocation; an expiry alert resolves on renewal.json
+        # (the damage itself is reported by CrlFetch's stored_file_changed and the day page).
+        if not lists_intact and _carries_revocation(alert):
+            return None
+        return "certificate_ok"
 
     return Outcome(findings, _owned(CERT_KEY), clear)
+
+
+def _carries_revocation(alert: Alert) -> bool:
+    """Whether an open ``R20-cert`` alert was raised for a revocation: its ``revoked`` count,
+    or its severity (the store keeps the highest severity an alert reached, while a later
+    expiry-only finding writes ``revoked`` 0 into its details)."""
+    revoked = (alert.details or {}).get("revoked")
+    return alert.severity == "critical" or (isinstance(revoked, int) and revoked > 0)
 
 
 def check_stamp_crl(ctx: CheckContext) -> Outcome:

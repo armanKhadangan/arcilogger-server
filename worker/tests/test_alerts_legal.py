@@ -474,6 +474,47 @@ def test_stamp_cert_from_the_lists_stays_open_while_they_cannot_be_read(
     assert reason == "certificate_ok"
 
 
+def test_stamp_cert_expiry_resolves_although_a_list_was_changed(
+    check: Any, layout: Layout, sealed: SealedVault, db_session: Session
+) -> None:
+    """A changed or deleted list (C14/C20) keeps its index entry for good, so it holds open only
+    an alert that carries a revocation (manager's re-review of #117): an expiry alert resolves
+    once ``renewal.json`` says the token is covered, a revocation alert does not, even after a
+    later expiry finding wrote ``revoked`` 0 into its details."""
+    renewals(layout, ("due", NOW + timedelta(days=12)))
+    name = crl_lists(sealed, 0)
+    alert = check()[CERT_KEY]
+    assert (alert.severity, alert.details["revoked"]) == ("high", 0)
+    stored = layout.crl_dir / str(name)
+    saved_list = stored.read_bytes()
+    stored.write_bytes(saved_list + b"\x00")  # test: changed, its index entry stays
+    assert check()[CERT_KEY].severity == "high"
+    renewals(layout, ("covered", NOW + timedelta(days=12)))
+    assert CERT_KEY not in check()
+    reason = resolved(db_session, CERT_KEY).details["auto_resolved"]["reason"]
+    assert reason == "certificate_ok"
+    stored.unlink()  # gone: no hold on a new expiry alert either
+    renewals(layout, ("due", NOW + timedelta(days=12)))
+    assert CERT_KEY in check()
+    renewals(layout, ("covered", NOW + timedelta(days=12)))
+    assert CERT_KEY not in check()
+
+    # a revocation from the stored lists stays open once its list is changed
+    stored.write_bytes(saved_list)
+    crl_lists(sealed, 0, revoked_at=at_site(date(2026, 10, 30), 12, 0))
+    renewals(layout, ("not_due", NOW + timedelta(days=400)))
+    assert check()[CERT_KEY].details["revoked"] == 1
+    revoking = layout.crl_dir / str(
+        crl_lists(sealed, 0, revoked_at=at_site(date(2026, 10, 30), 12, 0))
+    )
+    revoking.write_bytes(revoking.read_bytes() + b"\x00")  # the revocation is no longer seen
+    renewals(layout, ("due", NOW + timedelta(days=12)))
+    alert = check()[CERT_KEY]
+    assert (alert.severity, alert.details["revoked"]) == ("critical", 0)  # the store keeps it
+    renewals(layout, ("covered", NOW + timedelta(days=12)))
+    assert check()[CERT_KEY].severity == "critical"  # still held: it carries a revocation
+
+
 def test_stamp_cert_from_a_verification_stays_open_while_it_cannot_be_read(
     check: Any, layout: Layout, sealed: SealedVault, db_session: Session
 ) -> None:

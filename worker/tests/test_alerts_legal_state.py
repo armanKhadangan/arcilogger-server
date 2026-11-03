@@ -326,6 +326,11 @@ def test_crl_stale_issuers_by_the_last_fetch_and_the_next_update() -> None:
     assert stale(stored(ROOT_SHA, 0, issued_days_ago=7, next_in_days=0)) == [ROOT_SHA]
     assert stale(stored(ROOT_SHA, 0, issued_days_ago=6, next_in_days=1)) == []
     assert stale(stored(ROOT_SHA, None, issued_days_ago=1)) == [ROOT_SHA]  # no fetch indexed
+    # a fetch later than now (a skewed clock) counts for nothing; one exactly now counts
+    assert stale(stored(ROOT_SHA, -365)) == [ROOT_SHA]
+    assert stale(stored(ROOT_SHA, -0.0001, next_in_days=30)) == [ROOT_SHA]
+    assert stale(stored(ROOT_SHA, 0, next_in_days=30)) == []
+    assert stale(stored(ROOT_SHA, -1), stored(ROOT_SHA, 2, issued_days_ago=2)) == []
     # the issuer's best list counts
     assert stale(stored(ROOT_SHA, 8), stored(ROOT_SHA, 2, issued_days_ago=2)) == []
     assert stale(stored(SUB_SHA, 2)) == [ROOT_SHA]  # an issuer in use with no list at all
