@@ -972,7 +972,9 @@ All Wave 5 questions are answered (2026-11-02).
   or past its `nextUpdate`, however recently it was fetched; an issuer without an accepted list
   stays stale. A list's fetch time is its index entry's (the entry of its stored name), and its
   `nextUpdate` is the list's own; an accepted list whose entry gives no readable `fetched_at`
-  counts for nothing. The issuer's best list counts. "Issuer in use" is a CA certificate of the
+  counts for nothing, and so does one whose `fetched_at` is later than now: a skewed clock never
+  keeps a list fresh, and the clock check reports the skew (manager's re-review of #117). The
+  issuer's best list counts. "Issuer in use" is a CA certificate of the
   newest sealed day's verified chain (`token_chain` against the pinned roots, the TSA
   certificate left out), by its SHA-256 fingerprint. So an old provider's lists stop mattering,
   and before the first sealed day, or when the newest token reaches no pinned root, nothing is
@@ -1008,9 +1010,13 @@ All Wave 5 questions are answered (2026-11-02).
   only. R20-cert's "expires within 30 days and is uncovered" is read as in W5-C-12. R20-cert
   is resolved only when every input can be read: the re-stamping report, every scheduled
   verification (`state/verify/last-*.json`; one that cannot be read or holds no verification
-  counts as unreadable), the newest sealed day's token, reaching a pinned root, and every stored
-  list (`state/crl` readable and no list changed or gone, C14; before the first sealed day no
-  list is needed). A revocation stays open while the input that found it cannot be read. The
+  counts as unreadable), the newest sealed day's token, reaching a pinned root, and `state/crl`
+  (before the first sealed day no list is needed). A stored list that was changed or deleted
+  (C14/C20) keeps its index entry for good, so it holds open only an alert that carries a
+  revocation (its `revoked` count, or the critical severity the store keeps): an expiry alert
+  resolves once `state/renewal.json` says the tokens are covered (manager's re-review of #117).
+  The damaged list is reported where C14/C20 put it, CrlFetch's `stored_file_changed` and the
+  day page's problems. A revocation stays open while the input that found it cannot be read. The
   rule is one for both severities: a "high" raised from `state/renewal.json` alone also stays
   open while the newest token reaches no pinned root (for example a provider whose roots are
   not pinned yet), the safe side. "The `Renew` task failed twice
